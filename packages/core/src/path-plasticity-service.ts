@@ -152,6 +152,14 @@ export interface PathPlasticityComputeResult {
  * the negative family is intentionally not implemented here: this service
  * mutates only strength/lifecycle, never recall_bias, so family membership
  * stays stable across plasticity passes.
+ *
+ * Governance asymmetry: for negative paths (recall_bias < 0) this service
+ * never mutates governance_class either — only strength/lifecycle/stability
+ * evolve. Positive paths (recall_bias >= 0) still promote governance via the
+ * support_events ladder (planPromotion → evolveGovernanceClass). This blocks
+ * an agent from pumping a negative path's governance up through co-usage
+ * receipts to clear the suppression governance gate. see also:
+ * path-manifestation-policy.ts planPromotion (sign-guarded governance ladder).
  */
 export class PathPlasticityService {
   private readonly now: () => string;

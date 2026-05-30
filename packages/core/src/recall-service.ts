@@ -8,12 +8,12 @@ import {
   SoulRecallCompletedPayloadSchema,
   SoulRecallWeightTransferPayloadSchema,
   StorageTier,
+  isPathActiveForRecall,
+  isPathGovernedForSuppression,
   isPathRecallEligible,
   type FineAssessmentConfig,
   type ActivationWeights,
   type MemoryDimension as MemoryDimensionType,
-  type MemoryGraphEdge,
-  type MemoryGraphEdgeTypeValue,
   type MemoryEntry,
   type PathAnchorRef,
   type PathRelation,
@@ -103,7 +103,6 @@ export type {
   RecallServiceDependencies,
   RecallServiceEmbeddingRecallPort,
   RecallServiceEventLogRepoPort,
-  RecallServiceGraphExpansionPort,
   RecallServiceGraphSupportPort,
   RecallServiceMemoryRepoPort,
   RecallServicePathExpansionPort,
@@ -171,6 +170,84 @@ const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdgeType, 
     })
   ) as Record<RecallGraphExpansionTrackedEdgeType, number>
 );
+// invariant: path-graph traversal reads PathRelation rows (the single
+// associative plane) instead of memory_graph_edges. A path's
+// constitution.relation_kind is a free string, so traversal scoring maps it
+// back onto the EDGE_TYPE_RECALL_MODEL contribution_weight / hop_decay basis
+// when the kind names a transitive edge type (supports / derives_from /
+// recalls). Path-only associative kinds (co_recalled / shares_entity /
+// signal_graph_ref) have no edge-type row; they are treated as recalls-tier
+// associations (contribution 0.3, hop_decay 0.3) — the weakest positive
+// associative band — so they propagate at most one extra hop without
+// over-amplifying. Negative / neutral kinds never reach this map because the
+// traversal only follows isPathRecallEligible (recall_bias > 0) paths.
+// see also: packages/protocol/src/soul/memory-graph.ts EDGE_TYPE_RECALL_MODEL
+// see also: packages/core/src/path-relation-proposal-service.ts seed catalog
+const PATH_ASSOCIATIVE_RELATION_KIND_FALLBACK: RecallGraphExpansionTrackedEdgeType = "recalls";
+// Maps a path's free-string relation_kind onto the tracked transitive
+// edge-type set used for graph-traversal scoring and the per-edge-type
+// diagnostic. Unmapped associative kinds fold onto the recalls tier so the
+// {derives_from, recalls, supports} diagnostic key set (consumed by the
+// bench-runner zod schema) is preserved without inventing a new key.
+function pathRelationKindToTrackedEdgeType(
+  relationKind: string
+): RecallGraphExpansionTrackedEdgeType {
+  return GRAPH_EXPANSION_TRACKED_EDGE_TYPES.includes(relationKind as RecallGraphExpansionTrackedEdgeType)
+    ? (relationKind as RecallGraphExpansionTrackedEdgeType)
+    : PATH_ASSOCIATIVE_RELATION_KIND_FALLBACK;
+}
+// Active sign-aware suppression scale. A negative path (recall_bias < 0)
+// demotes its target's fused recall score by
+//   delta = |recall_bias| * f(strength) * PATH_SUPPRESSION_SCALE
+// where f(strength) is the path's plasticity strength in [0, 1] (an
+// attention_only co-occurrence sits near 0.5; a plasticity-reinforced
+// contradiction climbs toward 0.9-1.0). PATH_SUPPRESSION_SCALE is the only
+// magnitude tuned by intent here, and it is set so the gate is strength-aware
+// rather than benchmark-fitted (no-benchmark-specific-patch):
+//   - fused_score contributions are RRF terms ~weight/(k+rank), so a single
+//     mid-table stream contributes on the order of 0.01-0.05 and a strong
+//     multi-stream memory totals ~0.1-0.3.
+//   - a weak attention_only negative (|bias|~0.4, strength~0.5) yields
+//     delta ~ 0.4 * 0.5 * 0.5 = 0.10 ... too aggressive, so the strength gate
+//     below floors weak/forming paths out of suppression entirely and only
+//     stable/pinned high-strength negatives apply the full delta.
+// The strength gate (PATH_SUPPRESSION_STRENGTH_FLOOR) makes "weak attention_only
+// barely suppresses" literal: below the floor delta collapses to 0; at/above it
+// scales linearly so a reinforced contradiction (strength ~0.9) lands
+// delta ~ 0.4 * 0.9 * 0.6 = 0.216, enough to push a target out of a tight
+// top-K, while a freshly-seeded weak negative does not move rankings.
+const PATH_SUPPRESSION_SCALE = 0.6;
+// invariant: strength below this floor contributes no suppression. Matches the
+// attention_only seed band (initial strength 0.3-0.5 for co-occurrence-class
+// paths) so a barely-formed negative association cannot demote a memory until
+// plasticity has reinforced it past the floor. see also:
+// path-relation-proposal-service.ts seed catalog (initialStrength per family).
+const PATH_SUPPRESSION_STRENGTH_FLOOR = 0.6;
+// invariant: hard ceiling on the total suppression delta any single target may
+// accumulate, across all converging negative paths. Sized to one supersedes-class
+// negative at full reinforcement: |recall_bias 0.5| * strength 0.9 *
+// PATH_SUPPRESSION_SCALE 0.6 = 0.27, so a lone reinforced supersession can
+// demote a target out of a tight top-K but stacked negatives can never exceed
+// the worst single legitimate suppression. This bounds the accumulated delta
+// (rank loss). The per-target cap limits the DELTA, not the residual score: a
+// single full-strength negative whose target had a low base fused_score
+// (< 0.27) could still drive that target's fused_score to 0 via one subtraction
+// and drop it out of the candidate set. PATH_SUPPRESSION_RESIDUAL_FLOOR (below)
+// is the residual-side guard that demotes, never erases.
+// see also: collectNegativePathSuppressions, PATH_SUPPRESSION_SCALE rationale,
+// PATH_SUPPRESSION_RESIDUAL_FLOOR.
+const PATH_SUPPRESSION_MAX_PER_TARGET = 0.27;
+// invariant: suppression demotes, never erases. A suppressed candidate whose
+// pre-suppression fused_score > 0 retains at least this floor residual so it
+// stays a tail candidate (ranked last) rather than being driven to 0 and
+// dropped from the candidate set. The floor is far below any live fused score
+// (RRF fusion contributions are >= ~0.01), so it never reorders live
+// candidates upward — it only keeps a fully-suppressed memory present at the
+// bottom of the ranked list. A candidate already at fused_score 0 is not
+// lifted by this floor. Matches the "lower the recall score" semantics of
+// suppression without weaponising it into deletion.
+// see also: applyPathSuppressionToFusionScores.
+const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
@@ -775,6 +852,9 @@ export class RecallService {
     // see also: collectEntityDerivedSeeds — entity_seed plane score by memory id.
     readonly entitySeedScores: Readonly<Record<string, number>>;
     readonly pathExpansionScores: Readonly<Record<string, number>>;
+    // Negative-path active suppression deltas keyed by target memory id.
+    // see also: collectNegativePathSuppressions, applyPathSuppressionToFusionScores.
+    readonly pathSuppressionScores: Readonly<Record<string, number>>;
     readonly degradation_reason: RecallResult["degradation_reason"];
   }> {
     const tier = options.tier ?? StorageTier.HOT;
@@ -815,6 +895,11 @@ export class RecallService {
       new Map();
     const entitySeedScores = new Map<string, number>();
     const pathExpansionScores = new Map<string, number>();
+    // Active sign-aware suppression: target memory id -> accumulated demotion
+    // delta sourced from negative (recall_bias < 0) paths anchored on the
+    // expansion seeds. Applied to the fused score before sort.
+    // see also: collectNegativePathSuppressions, applyPathSuppressionToFusionScores.
+    const pathSuppressionScores = new Map<string, number>();
     const addCandidate = (
       entry: Readonly<MemoryEntry>,
       plane: RecallAdmissionPlane,
@@ -1096,21 +1181,50 @@ export class RecallService {
     const graphExpansionSeedIds = entityDerivedSeeds
       .filter((seed) => seed.entityConfidence >= ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR)
       .map((seed) => seed.memoryId);
-    const graphExpansionResult = await this.addGraphExpansionCandidates({
-      workspaceId,
-      byId,
-      drafts,
-      addCandidate,
-      extraSeedMemoryIds: graphExpansionSeedIds
-    });
-    graphExpansionDiagnostics = graphExpansionResult.diagnostics;
-    graphExpansionCandidateSources = graphExpansionResult.candidateSources;
+    // invariant: path_expansion (direct hop-1 associations) runs before
+    // graph_expansion (multi-hop path traversal) because both planes now read
+    // the same PathRelation rows. A direct association admitted on
+    // path_expansion must not be re-admitted on graph_expansion — that would
+    // give one target two RRF stream slots (double-count). graph_expansion
+    // therefore skips any draft already carrying the path_expansion plane and
+    // keeps only the propagation reach (hop-2 neighbors, plus hop-1 neighbors
+    // of entity-derived seeds that path_expansion's draft-seed pass never
+    // visited). see also: addGraphExpansionCandidates skip-path-admitted guard.
+    // Snapshot the Pool A draft seeds before path_expansion runs. Once
+    // path_expansion admits a direct hop-1 neighbor, that neighbor becomes a
+    // draft carrying the path_expansion plane and would otherwise qualify as a
+    // graph BFS seed — collapsing genuine hop-2 reach into hop-1 and rooting
+    // traversal at path-reached nodes rather than query anchors. Pinning the
+    // seed set to the pre-path drafts keeps hop semantics stable across the
+    // ordering change. see also: addGraphExpansionCandidates draftSeedIds.
+    const prePathGraphSeedIds = selectExpansionSeedDrafts(drafts).map((draft) => draft.entry.object_id);
     await this.addPathExpansionCandidates({
       workspaceId,
       byId,
       drafts,
       queryProbes,
       addCandidate
+    });
+    const graphExpansionResult = await this.addGraphExpansionCandidates({
+      workspaceId,
+      byId,
+      drafts,
+      addCandidate,
+      extraSeedMemoryIds: graphExpansionSeedIds,
+      draftSeedIds: prePathGraphSeedIds
+    });
+    graphExpansionDiagnostics = graphExpansionResult.diagnostics;
+    graphExpansionCandidateSources = graphExpansionResult.candidateSources;
+    // Active sign-aware suppression runs off the same expansion seeds. Negative
+    // paths are excluded from the positive expansion lanes above (the
+    // isPathRecallEligible / direction filters never add their targets); here
+    // they are collected separately so a reinforced negative actually demotes
+    // its target's fused score instead of merely failing to amplify it.
+    await this.collectNegativePathSuppressions({
+      workspaceId,
+      byId,
+      drafts,
+      suppressionScores: pathSuppressionScores
     });
 
     const anchorMap = new Map(projectMappings.map((mapping) => [mapping.global_object_id, mapping]));
@@ -1163,6 +1277,7 @@ export class RecallService {
       graphExpansionCandidateSources,
       entitySeedScores: Object.freeze(Object.fromEntries(entitySeedScores.entries())),
       pathExpansionScores: Object.freeze(Object.fromEntries(pathExpansionScores.entries())),
+      pathSuppressionScores: Object.freeze(Object.fromEntries(pathSuppressionScores.entries())),
       degradation_reason: null
     });
   }
@@ -1449,11 +1564,20 @@ export class RecallService {
     // into graph_expansion as additional seeds so the graph plane is reachable
     // even when the query never hits a prior expansion seed.
     readonly extraSeedMemoryIds?: readonly string[];
+    // Pool A draft-seed object ids snapshotted before path_expansion mutated
+    // drafts. When provided, only these ids are eligible as content/structural
+    // BFS roots so path-reached neighbors do not become traversal seeds. When
+    // omitted the helper falls back to the live draft-seed selection.
+    readonly draftSeedIds?: readonly string[];
   }>): Promise<Readonly<GraphExpansionCandidatesResult>> {
     const diagnostics = createMutableGraphExpansionDiagnostics();
     const candidateSources = new Map<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>();
-    const graphExpansionPort = this.dependencies.graphExpansionPort;
-    if (graphExpansionPort === undefined) {
+    // invariant: graph_expansion is the multi-hop traversal of the unified
+    // PathRelation plane. It reads the same pathExpansionPort the direct
+    // path_expansion plane uses; the retired graphExpansionPort (memory_graph_edges)
+    // is no longer consulted. When no path port is wired the plane is empty.
+    const pathExpansionPort = this.dependencies.pathExpansionPort;
+    if (pathExpansionPort === undefined) {
       return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
     }
 
@@ -1479,9 +1603,12 @@ export class RecallService {
         break;
       }
     }
+    const draftSeedIdAllowList = params.draftSeedIds === undefined ? null : new Set(params.draftSeedIds);
     const draftSeedsAll = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
     const draftSeeds = draftSeedsAll.filter(
-      (seed) => !entitySeedIdSet.has(seed.entry.object_id)
+      (seed) =>
+        !entitySeedIdSet.has(seed.entry.object_id) &&
+        (draftSeedIdAllowList === null || draftSeedIdAllowList.has(seed.entry.object_id))
     );
 
     if (draftSeeds.length === 0 && entitySeedEntries.length === 0) {
@@ -1499,7 +1626,7 @@ export class RecallService {
       await this.expandGraphFrontier({
         workspaceId: params.workspaceId,
         byId: params.byId,
-        graphExpansionPort,
+        pathExpansionPort,
         seedEntries: draftSeedEntries,
         onCandidate: (candidate) => {
           const current = bestCandidates.get(candidate.entry.object_id);
@@ -1523,7 +1650,7 @@ export class RecallService {
         await this.expandGraphFrontier({
           workspaceId: params.workspaceId,
           byId: params.byId,
-          graphExpansionPort,
+          pathExpansionPort,
           seedEntries: [seedEntry],
           onCandidate: (candidate) => {
             const current = seedMap.get(candidate.entry.object_id);
@@ -1558,6 +1685,15 @@ export class RecallService {
       .sort(compareGraphExpansionCandidateDrafts)
       .slice(0, MULTI_SEED_GRAPH_FAN_OUT_CAP);
     for (const candidate of admitted) {
+      // double-count guard: path_expansion already runs (earlier in
+      // coarseFilter) and admits direct associations off the same PathRelation
+      // rows. A target it admitted must not also enter the graph_expansion
+      // plane — both planes feed independent RRF streams, so re-admitting here
+      // would hand one memory two stream slots. The graph plane keeps only the
+      // multi-hop reach path_expansion's direct pass never produced.
+      if (params.drafts.get(candidate.entry.object_id)?.admissionPlanes.includes("path_expansion") === true) {
+        continue;
+      }
       const admittedByGraphExpansion = params.addCandidate(
         candidate.entry,
         "graph_expansion",
@@ -1586,7 +1722,7 @@ export class RecallService {
   private async expandGraphFrontier(params: Readonly<{
     readonly workspaceId: string;
     readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
-    readonly graphExpansionPort: NonNullable<RecallServiceDependencies["graphExpansionPort"]>;
+    readonly pathExpansionPort: NonNullable<RecallServiceDependencies["pathExpansionPort"]>;
     readonly seedEntries: readonly Readonly<MemoryEntry>[];
     readonly onCandidate: (candidate: Readonly<GraphExpansionCandidateDraft>) => void;
   }>): Promise<void> {
@@ -1601,49 +1737,51 @@ export class RecallService {
 
     for (let hop = 1; hop <= MAX_GRAPH_HOPS && frontier.length > 0; hop += 1) {
       const nextFrontier = new Map<string, GraphExpansionFrontierNode>();
+      // Resolve the still-unexpanded frontier nodes into a single batched
+      // findByAnchors lookup so multi-hop traversal does not issue one query
+      // per node. The path repo returns every active path anchored on any of
+      // the requested object ids; the per-node direction filter below re-binds
+      // each path to the frontier node it actually leaves from.
+      const frontierIds = frontier
+        .map((node) => node.memoryId)
+        .filter((memoryId) => !expandedIds.has(memoryId));
+      if (frontierIds.length === 0) {
+        break;
+      }
+      const anchorRefs: PathAnchorRef[] = frontierIds.map((memoryId) => ({
+        kind: "object",
+        object_id: memoryId
+      }));
+      let paths: readonly Readonly<PathRelation>[];
+      try {
+        paths = await params.pathExpansionPort.findByAnchors(params.workspaceId, anchorRefs);
+      } catch (error) {
+        this.warn("graph expansion path lookup failed", {
+          workspace_id: params.workspaceId,
+          seed_count: frontierIds.length,
+          error: toErrorMessage(error)
+        });
+        break;
+      }
+      // invariant: only recall-eligible (active + recall_bias > 0) paths
+      // propagate. Negative / neutral paths are handled by active suppression
+      // (collectNegativePathSuppressions), never by traversal — admitting them
+      // as positive neighbors would amplify a suppressed memory.
+      const eligiblePaths = paths.filter((path) => isPathRecallEligible(path));
+      const frontierIdSet = new Set(frontierIds);
       for (const node of frontier) {
         if (expandedIds.has(node.memoryId)) {
           continue;
         }
         expandedIds.add(node.memoryId);
-        let edges: readonly Readonly<MemoryGraphEdge>[];
-        try {
-          edges = await params.graphExpansionPort.findByMemoryId(
-            node.memoryId,
-            params.workspaceId,
-            GRAPH_EXPANSION_TRACKED_EDGE_TYPES
-          );
-        } catch (error) {
-          this.warn("graph expansion lookup failed", {
-            workspace_id: params.workspaceId,
-            seed_memory_id: node.memoryId,
-            error: toErrorMessage(error)
-          });
-          continue;
-        }
-        const trackedEdges = edges
-          .map((edge) => Object.freeze({
-            edge,
-            edgeType: toTrackedGraphExpansionEdgeType(edge.edge_type)
-          }))
-          .filter((item): item is Readonly<{
-            readonly edge: Readonly<MemoryGraphEdge>;
-            readonly edgeType: RecallGraphExpansionTrackedEdgeType;
-          }> => item.edgeType !== null)
+        const nodeNeighbors = collectPathGraphNeighbors(eligiblePaths, node.memoryId)
           .slice(0, DYNAMIC_RECALL_EDGE_FANOUT);
-        for (const { edge, edgeType } of trackedEdges) {
-          const edgeScore = scoreGraphExpansionEdge(edge);
+        for (const neighbor of nodeNeighbors) {
+          const edgeScore = graphTraversalScoreFromPath(neighbor.edgeType);
           if (edgeScore <= 0) {
             continue;
           }
-          const neighborId = edge.source_memory_id === node.memoryId
-            ? edge.target_memory_id
-            : edge.target_memory_id === node.memoryId
-              ? edge.source_memory_id
-              : null;
-          if (neighborId === null) {
-            continue;
-          }
+          const neighborId = neighbor.neighborId;
           if (expandedIds.has(neighborId)) {
             continue;
           }
@@ -1653,7 +1791,7 @@ export class RecallService {
           }
           const candidateScore = hop === 1
             ? edgeScore
-            : clamp01(node.pathScore * EDGE_TYPE_HOP_DECAY[edgeType] * edgeScore);
+            : clamp01(node.pathScore * EDGE_TYPE_HOP_DECAY[neighbor.edgeType] * edgeScore);
           if (candidateScore <= 0) {
             continue;
           }
@@ -1661,9 +1799,9 @@ export class RecallService {
             entry,
             score: candidateScore,
             hop: hop as 1 | 2,
-            edgeType
+            edgeType: neighbor.edgeType
           });
-          if (hop < MAX_GRAPH_HOPS && !expandedIds.has(neighborId)) {
+          if (hop < MAX_GRAPH_HOPS && !expandedIds.has(neighborId) && !frontierIdSet.has(neighborId)) {
             const queued = nextFrontier.get(neighborId);
             if (queued === undefined || candidateScore > queued.pathScore) {
               nextFrontier.set(neighborId, {
@@ -1943,6 +2081,84 @@ export class RecallService {
     return added;
   }
 
+  // anchor: active sign-aware suppression collector. Reuses the same expansion
+  // seeds and pathExpansionPort.findByAnchors lookup as path_expansion, but
+  // selects the negative (recall_bias < 0) active paths that the positive
+  // lanes deliberately exclude. Each such path demotes its direction-eligible
+  // target by a strength-gated delta (scorePathRelationSuppression). Deltas
+  // accumulate per target so multiple converging negatives compound. The
+  // collected map is applied to the fused score before sort. Fail-soft: a
+  // missing port or lookup failure leaves suppression empty and recall
+  // degrades to the no-suppression behavior.
+  // see also: applyPathSuppressionToFusionScores, scorePathRelationSuppression.
+  private async collectNegativePathSuppressions(params: Readonly<{
+    readonly workspaceId: string;
+    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+    readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
+    readonly suppressionScores: Map<string, number>;
+  }>): Promise<void> {
+    const pathExpansionPort = this.dependencies.pathExpansionPort;
+    if (pathExpansionPort === undefined || params.drafts.size === 0) {
+      return;
+    }
+    const seeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
+    if (seeds.length === 0) {
+      return;
+    }
+    const seedIds = new Set(seeds.map((seed) => seed.entry.object_id));
+    const anchors: PathAnchorRef[] = seeds.map((seed) => ({
+      kind: "object",
+      object_id: seed.entry.object_id
+    }));
+    let paths: readonly Readonly<PathRelation>[];
+    try {
+      paths = await pathExpansionPort.findByAnchors(params.workspaceId, anchors);
+    } catch (error) {
+      this.warn("path suppression lookup failed", {
+        workspace_id: params.workspaceId,
+        seed_count: seeds.length,
+        error: toErrorMessage(error)
+      });
+      return;
+    }
+    for (const path of paths) {
+      // invariant: only active, strictly-negative, governance-trusted paths
+      // suppress. Active lifecycle reuses isPathActiveForRecall (dormant/retired
+      // never suppress). isPathGovernedForSuppression is the governance gate:
+      // attention_only / hint_only negatives are agent-reachable through
+      // co-occurrence seeding + strength reinforcement, so they may exclude (via
+      // isPathRecallEligible) but never actively demote — strength alone cannot
+      // license suppression. Only recall_allowed / strictly_governed negatives
+      // reach the strength-scaled delta below.
+      // see also: path-relation.ts isPathGovernedForSuppression.
+      if (
+        !isPathActiveForRecall(path.lifecycle.status) ||
+        path.effect_vector.recall_bias >= 0 ||
+        !isPathGovernedForSuppression(path)
+      ) {
+        continue;
+      }
+      const delta = scorePathRelationSuppression(path);
+      if (delta <= 0) {
+        continue;
+      }
+      for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
+        if (!params.byId.has(target.targetId)) {
+          continue;
+        }
+        // invariant: per-target accumulation is capped at
+        // PATH_SUPPRESSION_MAX_PER_TARGET so converging negatives compound up to
+        // one reinforced-supersession delta but never gang into erasure.
+        const accumulated =
+          (params.suppressionScores.get(target.targetId) ?? 0) + delta;
+        params.suppressionScores.set(
+          target.targetId,
+          Math.min(accumulated, PATH_SUPPRESSION_MAX_PER_TARGET)
+        );
+      }
+    }
+  }
+
   private async expandTierCascade(params: {
     readonly workspaceId: string;
     readonly runId: string | null;
@@ -2029,7 +2245,8 @@ export class RecallService {
       coarseStructuralScores: params.coarseFilter.structuralScores,
       coarseGraphExpansionScores: params.coarseFilter.graphExpansionScores,
       coarseEntitySeedScores: params.coarseFilter.entitySeedScores,
-      coarsePathExpansionScores: params.coarseFilter.pathExpansionScores
+      coarsePathExpansionScores: params.coarseFilter.pathExpansionScores,
+      coarsePathSuppressionScores: params.coarseFilter.pathSuppressionScores
     });
     const assessment = this.fineAssess(
       params.coarseFilter.candidates,
@@ -2121,6 +2338,10 @@ export class RecallService {
         ...current.pathExpansionScores,
         ...next.pathExpansionScores
       }),
+      pathSuppressionScores: Object.freeze({
+        ...current.pathSuppressionScores,
+        ...next.pathSuppressionScores
+      }),
       degradation_reason: degradationReason
     });
   }
@@ -2143,6 +2364,7 @@ export class RecallService {
     readonly coarseGraphExpansionScores: Readonly<Record<string, number>>;
     readonly coarseEntitySeedScores: Readonly<Record<string, number>>;
     readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
+    readonly coarsePathSuppressionScores: Readonly<Record<string, number>>;
   }): Promise<RecallSupplementaryData> {
     // graph_support is a weighted inbound aggregate across edge types; the
     // storage repo owns the concrete edge_type weight map.
@@ -2253,6 +2475,7 @@ export class RecallService {
       graphExpansionScores: params.coarseGraphExpansionScores,
       entitySeedScores: params.coarseEntitySeedScores,
       pathExpansionScores: params.coarsePathExpansionScores,
+      pathSuppressionScores: params.coarsePathSuppressionScores,
       embeddingSimilarityScores: Object.freeze({}),
       graphSupportCounts: Object.freeze(graphSupportCounts),
       budgetPenaltyFactor,
@@ -2804,12 +3027,20 @@ export class RecallService {
         effectiveFactors: scored.factors
       });
     });
-    const fusionByCandidateKey = buildRecallFusionDetails({
+    const fusedDetails = buildRecallFusionDetails({
       candidates: additiveScoredCandidates,
       policy,
       supplementaryData,
       nowIso: this.now()
     });
+    // Active sign-aware suppression: subtract the negative-path demotion delta
+    // from the fused score and re-rank, before delivery sort. Runs after the
+    // positive fusion so suppression demotes a target that positive streams
+    // would otherwise rank highly. No-op when no suppression was collected.
+    const fusionByCandidateKey = applyPathSuppressionToFusionScores(
+      fusedDetails,
+      supplementaryData.pathSuppressionScores
+    );
     const scoredCandidates = additiveScoredCandidates.map((candidate) => Object.freeze({
       ...candidate,
       fusion: fusionByCandidateKey.get(buildRecallCandidateDedupeKey(candidate)) ?? buildEmptyRecallFusionBreakdown(candidate.entry.object_id)
@@ -3280,6 +3511,70 @@ function buildRecallFusionDetails(params: Readonly<{
           fused_rank: fusedRankByCandidateKey.get(candidate.candidateKey) ?? Number.MAX_SAFE_INTEGER,
           fused_score: candidate.fusedScore,
           fused_rank_contribution_per_stream: candidate.contributions
+        })
+      ] as const)
+    )
+  );
+}
+
+// Applies active sign-aware suppression to a built fusion breakdown map. For
+// each candidate, the negative-path suppression delta keyed on its object_id
+// is subtracted from fused_score; the map is then re-ranked so fused_rank
+// reflects the demotion. invariant: demotes, never erases — a suppressed
+// candidate retains a PATH_SUPPRESSION_RESIDUAL_FLOOR residual so it stays a
+// tail candidate (ranked last) rather than dropping out of the candidate set.
+// Returns the input map unchanged when no suppression delta applies (the
+// common case), so the no-suppression path is allocation-free. The per-stream
+// contribution breakdown is preserved as-is — suppression is an aggregate
+// demotion on the fused score, not a per-stream rank change.
+// see also: collectNegativePathSuppressions, scorePathRelationSuppression,
+// PATH_SUPPRESSION_RESIDUAL_FLOOR.
+//
+// invariant: no `suppression_score` key is added to RecallFusionBreakdown /
+// RecallCandidateDiagnostic — the suppression effect is carried by the reduced
+// fused_score + demoted fused_rank only. A new key would break the strict()
+// parse in apps/bench-runner/src/harness/recall-diagnostics-schema.ts.
+// see also: apps/bench-runner/src/harness/recall-diagnostics-schema.ts (fusion_breakdown strict)
+function applyPathSuppressionToFusionScores(
+  fusionByCandidateKey: ReadonlyMap<string, RecallFusionBreakdown>,
+  suppressionScores: Readonly<Record<string, number>>
+): ReadonlyMap<string, RecallFusionBreakdown> {
+  const hasAnySuppression = Object.values(suppressionScores).some((delta) => delta > 0);
+  if (!hasAnySuppression) {
+    return fusionByCandidateKey;
+  }
+  const adjusted = [...fusionByCandidateKey.values()].map((breakdown) => {
+    const delta = suppressionScores[breakdown.object_id] ?? 0;
+    // invariant: demote, never erase. Floor the residual at
+    // PATH_SUPPRESSION_RESIDUAL_FLOOR only for candidates whose pre-suppression
+    // fused_score was already positive, so a fully-suppressed memory stays a
+    // tail candidate. Candidates already at 0 are not lifted.
+    const fusedScore =
+      delta > 0 && breakdown.fused_score > 0
+        ? Math.max(PATH_SUPPRESSION_RESIDUAL_FLOOR, breakdown.fused_score - delta)
+        : breakdown.fused_score;
+    return { breakdown, fusedScore };
+  });
+  // Re-rank by the suppressed fused score; ties keep the original fused_rank
+  // ordering so suppression only ever demotes, never reshuffles equal scores.
+  const ranked = [...adjusted].sort((left, right) => {
+    const delta = right.fusedScore - left.fusedScore;
+    if (delta !== 0) {
+      return delta;
+    }
+    return left.breakdown.fused_rank - right.breakdown.fused_rank;
+  });
+  const suppressedRankByKey = new Map(
+    ranked.map((entry, index) => [entry.breakdown.candidate_key, index + 1] as const)
+  );
+  return Object.freeze(
+    new Map(
+      adjusted.map((entry) => [
+        entry.breakdown.candidate_key,
+        Object.freeze({
+          ...entry.breakdown,
+          fused_rank: suppressedRankByKey.get(entry.breakdown.candidate_key) ?? entry.breakdown.fused_rank,
+          fused_score: entry.fusedScore
         })
       ] as const)
     )
@@ -4377,19 +4672,31 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   return 1;
 }
 
-function scoreGraphExpansionEdge(edge: Readonly<MemoryGraphEdge>): number {
-  // single-edge admission score = EDGE_TYPE_RECALL_MODEL.contribution_weight,
-  // floored at 0 so negative-signal edges never propagate in traversal (the
-  // inbound aggregate keeps the sign; see normalizeGraphSupport).
-  return clamp01(Math.max(0, EDGE_TYPE_RECALL_MODEL[edge.edge_type]?.contribution_weight ?? 0));
-}
-
-function toTrackedGraphExpansionEdgeType(
-  edgeType: MemoryGraphEdgeTypeValue
-): RecallGraphExpansionTrackedEdgeType | null {
-  return GRAPH_EXPANSION_TRACKED_EDGE_TYPES.includes(edgeType as RecallGraphExpansionTrackedEdgeType)
-    ? (edgeType as RecallGraphExpansionTrackedEdgeType)
-    : null;
+// Graph-traversal admission score MAGNITUDE for a PathRelation hop. The
+// contribution basis is EDGE_TYPE_RECALL_MODEL[trackedEdgeType].contribution_weight
+// (supports 1.0 / derives_from 0.5 / recalls 0.3); path-only relation kinds
+// fold onto the recalls tier via pathRelationKindToTrackedEdgeType. Floored at
+// 0 because only recall-eligible (recall_bias > 0) paths reach traversal.
+// Strength deliberately does NOT scale the basis here: the caller routes hop-1
+// (direct) associations through scorePathRelationExpansion (which already folds
+// strength), and this traversal score carries only the static contribution
+// magnitude.
+// note: the score MAGNITUDE matches the static edge-era contribution_weight,
+// but the traversal is NOT edge-equivalent in TOPOLOGY — collectPathGraphNeighbors
+// follows path direction_bias (a source_to_target path is followed forward
+// only), whereas retired memory_graph_edges propagated undirected. This is
+// intentional and aligned with the hop-1 path_expansion direction filter
+// (directionEligiblePathExpansionTargets), so the two planes agree on which way
+// a path may be followed; it is not a zero-drift reproduction of the undirected
+// edge plane. Producer-seeded paths are minted bidirectional_asymmetric (see
+// path-relation-proposal-service.ts submitCandidate), so hop-2 reach narrows
+// only after plasticity redirects a path to an asymmetric direction.
+// see also: collectPathGraphNeighbors, directionEligiblePathExpansionTargets.
+function graphTraversalScoreFromPath(
+  trackedEdgeType: RecallGraphExpansionTrackedEdgeType
+): number {
+  const weight = EDGE_TYPE_RECALL_MODEL[trackedEdgeType].contribution_weight;
+  return clamp01(Math.max(0, weight));
 }
 
 function createMutableGraphExpansionDiagnostics(): MutableGraphExpansionDiagnostics {
@@ -4604,6 +4911,27 @@ function scorePathRelationExpansion(path: Readonly<PathRelation>): number {
   );
 }
 
+// Strength-gated active suppression delta for one negative path. recall_bias
+// is negative for the suppressing families (contradicts / supersedes /
+// incompatible_with), so |recall_bias| is the suppression magnitude. The
+// plasticity strength gate keeps weak / forming negatives inert: below
+// PATH_SUPPRESSION_STRENGTH_FLOOR the delta is exactly 0, so an attention_only
+// co-occurrence cannot demote a memory. At or above the floor the strength
+// scales the delta linearly, so a plasticity-reinforced contradiction applies
+// real demotion. Returns 0 for non-negative paths defensively (callers pass
+// only recall_bias < 0 paths). see also: PATH_SUPPRESSION_SCALE rationale.
+function scorePathRelationSuppression(path: Readonly<PathRelation>): number {
+  const recallBias = path.effect_vector.recall_bias;
+  if (recallBias >= 0) {
+    return 0;
+  }
+  const strength = clamp01(path.plasticity_state.strength);
+  if (strength < PATH_SUPPRESSION_STRENGTH_FLOOR) {
+    return 0;
+  }
+  return Math.abs(recallBias) * strength * PATH_SUPPRESSION_SCALE;
+}
+
 function directionEligiblePathExpansionTargets(
   path: Readonly<PathRelation>,
   seedIds: ReadonlySet<string>
@@ -4635,6 +4963,57 @@ function directionEligiblePathExpansionTargets(
 interface DirectionEligiblePathExpansionTarget {
   readonly seedId: string;
   readonly targetId: string;
+}
+
+interface PathGraphNeighbor {
+  readonly neighborId: string;
+  readonly edgeType: RecallGraphExpansionTrackedEdgeType;
+}
+
+// anchor: path-graph traversal neighbor extraction shared by expandGraphFrontier.
+// Given a frontier node id, returns the direction-eligible object neighbors
+// reachable through the supplied recall-eligible paths, each tagged with the
+// tracked edge type its relation_kind maps onto. Reuses the same
+// direction_bias semantics as directionEligiblePathExpansionTargets so the
+// graph-traversal plane and the direct path_expansion plane agree on which
+// way a path may be followed. Self-loops and non-object anchors yield nothing.
+function collectPathGraphNeighbors(
+  paths: readonly Readonly<PathRelation>[],
+  nodeId: string
+): readonly PathGraphNeighbor[] {
+  const neighbors: PathGraphNeighbor[] = [];
+  const seen = new Set<string>();
+  for (const path of paths) {
+    const sourceId = anchorMemoryId(path.anchors.source_anchor);
+    const targetId = anchorMemoryId(path.anchors.target_anchor);
+    if (sourceId === undefined || targetId === undefined || sourceId === targetId) {
+      continue;
+    }
+    const edgeType = pathRelationKindToTrackedEdgeType(path.constitution.relation_kind);
+    if (
+      sourceId === nodeId &&
+      (path.plasticity_state.direction_bias === "source_to_target" ||
+        path.plasticity_state.direction_bias === "bidirectional_asymmetric")
+    ) {
+      const key = `${targetId}:${edgeType}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        neighbors.push({ neighborId: targetId, edgeType });
+      }
+    }
+    if (
+      targetId === nodeId &&
+      (path.plasticity_state.direction_bias === "target_to_source" ||
+        path.plasticity_state.direction_bias === "bidirectional_asymmetric")
+    ) {
+      const key = `${sourceId}:${edgeType}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        neighbors.push({ neighborId: sourceId, edgeType });
+      }
+    }
+  }
+  return neighbors;
 }
 
 function pathRelationMemoryIds(path: Readonly<PathRelation>): readonly string[] {

@@ -375,4 +375,93 @@ describe("planPromotion", () => {
     expect(planStrict.stability).not.toBeNull();
     expect(planStrict.stability?.next).toBe(StabilityClass.PINNED);
   });
+
+  it("withholds governance promotion for a negative path (recall_bias < 0) even at the attention_to_recall threshold with zero contradictions", () => {
+    const plan = planPromotion({
+      path: createSeedPath({
+        constitution: {
+          relation_kind: "supersedes",
+          why_this_relation_exists: ["seed"]
+        },
+        effect_vector: {
+          salience: 0.5,
+          recall_bias: -0.5,
+          verification_bias: 0,
+          unfinishedness_bias: 0,
+          default_manifestation_preference: "stance_bias"
+        },
+        plasticity_state: {
+          strength: 0.9,
+          direction_bias: "source_to_target",
+          stability_class: StabilityClass.VOLATILE,
+          support_events_count: 0,
+          contradiction_events_count: 0
+        },
+        legitimacy: {
+          evidence_basis: ["evidence-1"],
+          governance_class: PathGovernanceClass.ATTENTION_ONLY
+        }
+      }),
+      nextSupportEventsCount: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
+      nextContradictionEventsCount: 0
+    });
+    expect(plan.governance).toBeNull();
+  });
+
+  it("still evolves stability for a negative path while withholding governance promotion", () => {
+    const plan = planPromotion({
+      path: createSeedPath({
+        constitution: {
+          relation_kind: "supersedes",
+          why_this_relation_exists: ["seed"]
+        },
+        effect_vector: {
+          salience: 0.5,
+          recall_bias: -0.5,
+          verification_bias: 0,
+          unfinishedness_bias: 0,
+          default_manifestation_preference: "stance_bias"
+        },
+        plasticity_state: {
+          strength: 0.9,
+          direction_bias: "source_to_target",
+          stability_class: StabilityClass.VOLATILE,
+          support_events_count: 0,
+          contradiction_events_count: 0
+        },
+        legitimacy: {
+          evidence_basis: ["evidence-1"],
+          governance_class: PathGovernanceClass.ATTENTION_ONLY
+        }
+      }),
+      nextSupportEventsCount: STABILITY_PROMOTION_THRESHOLDS.volatile_to_normal_support_count,
+      nextContradictionEventsCount: 0
+    });
+    expect(plan.governance).toBeNull();
+    expect(plan.stability).not.toBeNull();
+    expect(plan.stability?.next).toBe(StabilityClass.NORMAL);
+  });
+
+  it("still promotes governance for a positive path (recall_bias > 0) at the same threshold", () => {
+    const plan = planPromotion({
+      path: createSeedPath({
+        effect_vector: {
+          salience: 0.5,
+          recall_bias: 0.5,
+          verification_bias: 0,
+          unfinishedness_bias: 0,
+          default_manifestation_preference: "stance_bias"
+        },
+        legitimacy: {
+          evidence_basis: ["evidence-1"],
+          governance_class: PathGovernanceClass.ATTENTION_ONLY
+        }
+      }),
+      nextSupportEventsCount: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
+      nextContradictionEventsCount: 0
+    });
+    expect(plan.governance).not.toBeNull();
+    expect(plan.governance?.previous).toBe(PathGovernanceClass.ATTENTION_ONLY);
+    expect(plan.governance?.next).toBe(PathGovernanceClass.RECALL_ALLOWED);
+  });
 });

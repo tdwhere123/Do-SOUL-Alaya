@@ -21,6 +21,7 @@ interface KarmaEventRow {
   readonly amount: number;
   readonly created_at: string;
   readonly workspace_id: string;
+  readonly run_id: string | null;
 }
 
 interface KarmaEventSumRow {
@@ -42,8 +43,9 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
         object_id,
         amount,
         created_at,
-        workspace_id
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        workspace_id,
+        run_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.findByObjectIdStatement = db.connection.prepare(`
@@ -53,7 +55,8 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
         object_id,
         amount,
         created_at,
-        workspace_id
+        workspace_id,
+        run_id
       FROM karma_events
       WHERE object_id = ?
       ORDER BY created_at ASC, event_id ASC
@@ -66,7 +69,8 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
         object_id,
         amount,
         created_at,
-        workspace_id
+        workspace_id,
+        run_id
       FROM karma_events
       WHERE workspace_id = ?
       ORDER BY created_at ASC, event_id ASC
@@ -89,7 +93,8 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
         parsed.object_id,
         parsed.amount,
         parsed.created_at,
-        parsed.workspace_id
+        parsed.workspace_id,
+        parsed.run_id ?? null
       );
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to create karma event ${parsed.event_id}.`, error);
@@ -216,6 +221,7 @@ function parseKarmaEventRow(row: KarmaEventRow): Readonly<KarmaEvent> {
     object_id: row.object_id,
     amount: row.amount,
     created_at: row.created_at,
-    workspace_id: row.workspace_id
+    workspace_id: row.workspace_id,
+    run_id: row.run_id
   });
 }

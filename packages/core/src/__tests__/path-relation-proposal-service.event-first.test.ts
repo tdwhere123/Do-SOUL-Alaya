@@ -84,6 +84,9 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
     expect(eventInputs[0].event_type).toBe("path.relation_created");
     expect(eventInputs[0].entity_type).toBe("path_relation");
     expect(eventInputs[0].entity_id).toBe("path-fixed-1");
+    // Counter-gated co-recall accrues across runs; no single run owns the
+    // mint, so the audit row's run attribution stays null.
+    expect(eventInputs[0].run_id).toBeNull();
     expect(eventInputs[0].payload_json).toMatchObject({
       path_id: "path-fixed-1",
       workspace_id: "workspace-1",
@@ -92,6 +95,103 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
       source_anchor_kind: "object",
       target_anchor_kind: "object"
     });
+  });
+
+  it("threads submitCandidate runId into the path.relation_created audit row", async () => {
+    const capturedRunIds: (string | null)[] = [];
+    const appendManyWithMutation = vi.fn(
+      async <T,>(
+        eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+        mutate: (entries: readonly EventLogEntry[]) => T
+      ): Promise<T> => {
+        for (const event of eventInputs) {
+          capturedRunIds.push(event.run_id);
+        }
+        const persisted = eventInputs.map((entry, idx) => ({
+          event_id: `evt_${idx}`,
+          created_at: "2026-05-16T00:00:00.000Z",
+          revision: 0,
+          ...entry
+        })) as EventLogEntry[];
+        return mutate(persisted);
+      }
+    );
+
+    const service = new PathRelationProposalService({
+      repo: {
+        create: vi.fn((relation: any) => relation),
+        findByAnchorMemoryId: vi.fn(async () => [])
+      },
+      counterStore: inMemoryCounterStore(),
+      eventPublisher: {
+        appendManyWithMutation
+      } as unknown as PathRelationProposalEventPublisherPort,
+      generateId: () => "path-attributed-1"
+    });
+
+    const minted = await service.submitCandidate({
+      workspaceId: "workspace-1",
+      sourceAnchor: { kind: "object", object_id: "mem-A" },
+      targetAnchor: { kind: "object", object_id: "mem-B" },
+      relationKind: "supports",
+      initialStrength: 0.5,
+      governanceClass: "attention_only",
+      evidenceBasis: ["llm_supports_verdict"],
+      recallBiasSign: 1,
+      recallBiasMagnitude: 0.5,
+      runId: "run-7f3c"
+    });
+
+    expect(minted).toBe(true);
+    expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
+    const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
+    expect(eventInputs[0].event_type).toBe("path.relation_created");
+    expect(eventInputs[0].run_id).toBe("run-7f3c");
+    expect(capturedRunIds).toEqual(["run-7f3c"]);
+  });
+
+  it("leaves the audit run_id null when submitCandidate omits runId", async () => {
+    let capturedRunId: string | null = "unset";
+    const appendManyWithMutation = vi.fn(
+      async <T,>(
+        eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+        mutate: (entries: readonly EventLogEntry[]) => T
+      ): Promise<T> => {
+        capturedRunId = eventInputs[0]!.run_id;
+        const persisted = eventInputs.map((entry, idx) => ({
+          event_id: `evt_${idx}`,
+          created_at: "2026-05-16T00:00:00.000Z",
+          revision: 0,
+          ...entry
+        })) as EventLogEntry[];
+        return mutate(persisted);
+      }
+    );
+
+    const service = new PathRelationProposalService({
+      repo: {
+        create: vi.fn((relation: any) => relation),
+        findByAnchorMemoryId: vi.fn(async () => [])
+      },
+      counterStore: inMemoryCounterStore(),
+      eventPublisher: {
+        appendManyWithMutation
+      } as unknown as PathRelationProposalEventPublisherPort,
+      generateId: () => "path-unattributed-1"
+    });
+
+    await service.submitCandidate({
+      workspaceId: "workspace-1",
+      sourceAnchor: { kind: "object", object_id: "mem-A" },
+      targetAnchor: { kind: "object", object_id: "mem-B" },
+      relationKind: "supports",
+      initialStrength: 0.5,
+      governanceClass: "attention_only",
+      evidenceBasis: ["llm_supports_verdict"],
+      recallBiasSign: 1
+    });
+
+    expect(capturedRunId).toBeNull();
   });
 
   it("rolls back the staged path.relation_created event when repo.create throws inside the tx callback", async () => {

@@ -206,11 +206,27 @@ export function planPromotion(input: PlanPromotionInput): PromotionPlan {
   const currentStability = path.plasticity_state.stability_class;
   const currentGovernance = path.legitimacy.governance_class;
 
-  const nextGovernance = evolveGovernanceClass({
-    current: currentGovernance,
-    support_events_count: input.nextSupportEventsCount,
-    contradiction_events_count: input.nextContradictionEventsCount
-  });
+  // invariant: negative paths (effect_vector.recall_bias < 0) never gain
+  // governance_class through plasticity. The support-events ladder is
+  // agent-pumpable (report_context_usage co-usage receipts drive
+  // support_events_count with no sign filter), so without this guard an agent
+  // could seed an attention_only negative, pump support >= 8, auto-promote it
+  // to recall_allowed, and clear the suppression governance gate
+  // (recall-service.ts isPathGovernedForSuppression). A negative path's
+  // recall_allowed must come only from its birth seed (a conflict llm-verdict),
+  // never from reinforcement. Positive paths still promote via support_events
+  // (Hebbian intent preserved). Stability/strength/lifecycle still evolve for
+  // negative paths; only governance promotion is suppressed.
+  // see also: path-plasticity-service.ts (PromotionPlan consumer),
+  // recall-service.ts collectNegativePathSuppressions (suppression governance gate).
+  const governanceLadderAllowed = path.effect_vector.recall_bias >= 0;
+  const nextGovernance = governanceLadderAllowed
+    ? evolveGovernanceClass({
+        current: currentGovernance,
+        support_events_count: input.nextSupportEventsCount,
+        contradiction_events_count: input.nextContradictionEventsCount
+      })
+    : currentGovernance;
 
   const nextStability = evolveStabilityClass({
     current: currentStability,

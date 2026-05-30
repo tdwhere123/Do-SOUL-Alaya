@@ -1084,7 +1084,10 @@ function createDeliveryRecord(overrides: Partial<ContextDeliveryRecord> = {}): C
     agent_target: "codex",
     workspace_id: "workspace-1",
     run_id: "run-1",
-    delivered_object_ids: ["memory-a"],
+    // Both memory-a and memory-b are served by this delivery so a usage report
+    // that cites either id stays a subset of the server-side delivered set.
+    // see also: mcp-memory-tool-handler.ts validateReportedRecallHits.
+    delivered_object_ids: ["memory-a", "memory-b"],
     delivered_at: "2026-05-07T00:00:00.000Z",
     audit_event_id: "event-delivery",
     ...overrides

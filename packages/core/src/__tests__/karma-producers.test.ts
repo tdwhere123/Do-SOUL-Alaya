@@ -296,6 +296,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
         readonly kind: string;
         readonly objectId: string;
         readonly workspaceId: string;
+        readonly runId?: string | null;
       };
       const emitKarmaEvent = vi.fn(async (_input: KarmaInput) => {});
       // tag overlap {database, alpha} vs {database, beta} = 1/3 ≈ 0.333:
@@ -337,7 +338,8 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
       expect(contradictsCalls[0]?.[0]).toEqual({
         kind: "supersede_penalty",
         objectId: "memory-existing",
-        workspaceId: "workspace-1"
+        workspaceId: "workspace-1",
+        runId: "run-1"
       });
     });
 

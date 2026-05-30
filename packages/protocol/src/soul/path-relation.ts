@@ -85,6 +85,28 @@ export function isPathRecallEligible(path: PathRelation): boolean {
   return isPathActiveForRecall(path.lifecycle.status) && path.effect_vector.recall_bias > 0;
 }
 
+// invariant: a negative path may actively demote (suppress) a recall target
+// only when its governance band is recall_allowed or strictly_governed. The
+// two lower bands (attention_only / hint_only) are reachable through
+// agent-controllable co-occurrence seeding and plasticity reinforcement, where
+// the only mutable signal is strength — strength can be inflated by replayed
+// co-usage, so strength alone must never license suppression. Governance is the
+// trust signal that is NOT agent-pumpable from recall traffic, so it gates the
+// weaponizable suppression lane: a low-band negative still excludes its target
+// from positive expansion (isPathRecallEligible already rejects recall_bias < 0)
+// but cannot push a victim's fused score down. This mirrors the llm-only gate on
+// the supersede_penalty karma path. The predicate is governance-only and does
+// NOT re-check sign/lifecycle; suppression callers pass active negative paths
+// and apply this as the additional governance condition.
+// see also: recall-service.ts collectNegativePathSuppressions.
+// see also: conflict-detection-service.ts supersede_penalty llm-only karma gate.
+export function isPathGovernedForSuppression(path: PathRelation): boolean {
+  return (
+    path.legitimacy.governance_class === "recall_allowed" ||
+    path.legitimacy.governance_class === "strictly_governed"
+  );
+}
+
 const ObjectPathAnchorRefSchema = z
   .object({
     kind: z.literal("object"),

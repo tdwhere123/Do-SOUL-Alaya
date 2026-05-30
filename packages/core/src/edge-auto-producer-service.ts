@@ -213,7 +213,8 @@ export class EdgeAutoProducerService {
         why: [
           `${decision.triggerSource}: ${decision.reason}`,
           `source_signal=${input.sourceSignalId} run=${input.runId}`
-        ]
+        ],
+        runId: input.runId
       });
       proposalCount += 1;
     }

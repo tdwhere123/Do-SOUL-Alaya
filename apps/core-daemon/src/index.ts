@@ -342,7 +342,14 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // questionable -> verified does not require reordering. see also:
   // EvidenceService.emitEvidenceGainIfPromoted.
   const dynamicsServiceRef: {
-    current: { emitKarmaEvent(input: { kind: "evidence_gain"; objectId: string; workspaceId: string }): Promise<void> } | null;
+    current: {
+      emitKarmaEvent(input: {
+        kind: "evidence_gain";
+        objectId: string;
+        workspaceId: string;
+        runId?: string | null;
+      }): Promise<void>;
+    } | null;
   } = { current: null };
   const evidenceService = new EvidenceService({
     evidenceCapsuleRepo,

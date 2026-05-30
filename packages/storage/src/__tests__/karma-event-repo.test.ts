@@ -14,6 +14,9 @@ afterEach(() => {
 });
 
 function createKarmaEvent(overrides: Partial<KarmaEvent> = {}): KarmaEvent {
+  // run_id defaults to null so the stored shape matches what the read path
+  // materializes (the column is always selected and never undefined on
+  // read-back), keeping round-trip equality exact.
   return {
     event_id: "87f18e36-06bc-4a0e-b149-27bcfb6a5bbd",
     kind: "accept_gain",
@@ -21,6 +24,7 @@ function createKarmaEvent(overrides: Partial<KarmaEvent> = {}): KarmaEvent {
     amount: 0.15,
     created_at: "2026-03-23T00:00:00.000Z",
     workspace_id: "workspace-1",
+    run_id: null,
     ...overrides
   };
 }
@@ -36,12 +40,52 @@ describe("SqliteKarmaEventRepo", () => {
     expect(migration?.version).toBe(14);
   });
 
+  it("applies migration 084 (run_id column)", async () => {
+    const { database } = await createRepo();
+
+    const migration = database.connection
+      .prepare("SELECT version FROM schema_version WHERE version = 84 LIMIT 1")
+      .get() as { readonly version: number } | undefined;
+
+    expect(migration?.version).toBe(84);
+
+    const columns = database.connection
+      .prepare("PRAGMA table_info(karma_events)")
+      .all() as ReadonlyArray<{ readonly name: string }>;
+    expect(columns.some((column) => column.name === "run_id")).toBe(true);
+  });
+
   it("creates and lists events by object id", async () => {
     const { repo } = await createRepo();
     const event = createKarmaEvent();
 
     await expect(repo.create(event)).resolves.toEqual(event);
     await expect(repo.findByObjectId(event.object_id)).resolves.toEqual([event]);
+  });
+
+  it("round-trips run_id attribution", async () => {
+    const { repo } = await createRepo();
+    const attributed = createKarmaEvent({
+      event_id: "event-run-1",
+      run_id: "run-7f3c"
+    });
+
+    await expect(repo.create(attributed)).resolves.toEqual(attributed);
+
+    const byObject = await repo.findByObjectId(attributed.object_id);
+    expect(byObject).toHaveLength(1);
+    expect(byObject[0].run_id).toBe("run-7f3c");
+
+    const byWorkspace = await repo.findByWorkspaceId(attributed.workspace_id);
+    expect(byWorkspace[0].run_id).toBe("run-7f3c");
+  });
+
+  it("read-back materializes a null run_id when none was recorded", async () => {
+    const { repo } = await createRepo();
+    await repo.create(createKarmaEvent({ event_id: "event-null-run" }));
+
+    const events = await repo.findByObjectId("memory-1");
+    expect(events[0].run_id).toBeNull();
   });
 
   it("returns zero sum when no events exist", async () => {

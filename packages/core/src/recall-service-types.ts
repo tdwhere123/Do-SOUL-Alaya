@@ -571,6 +571,13 @@ export interface RecallSupplementaryData {
   // produced from the FTS rank of the strongest entity surface that hit.
   readonly entitySeedScores: Readonly<Record<string, number>>;
   readonly pathExpansionScores: Readonly<Record<string, number>>;
+  // Active sign-aware suppression deltas keyed by target memory id. A positive
+  // value is subtracted from that memory's fused recall score before final
+  // ranking, demoting targets that a reinforced negative path (recall_bias < 0)
+  // suppresses. Empty when no negative path anchored on an expansion seed.
+  // see also: recall-service.ts collectNegativePathSuppressions /
+  // applyPathSuppressionToFusionScores.
+  readonly pathSuppressionScores: Readonly<Record<string, number>>;
   readonly embeddingSimilarityScores: Readonly<Record<string, number>>;
   readonly graphSupportCounts: Readonly<Record<string, number>>;
   readonly budgetPenaltyFactor: number;

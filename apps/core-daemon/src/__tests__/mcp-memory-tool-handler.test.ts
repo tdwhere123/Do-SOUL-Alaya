@@ -560,6 +560,55 @@ describe("mcp memory tool handler", () => {
     expect(recordedUsage.trust_mode).toBe("automatic");
   });
 
+  it("feeds co-usage path reinforcement only when the report has a resolvable delivery", async () => {
+    // SECURITY: co-usage reinforcement (onCoUsage) requires a server-side
+    // delivery witness. A report whose delivery cannot be resolved skips the
+    // delivered_object_ids subset gate, so feeding its used ids into onCoUsage
+    // would let a caller pump path support/strength between arbitrary memories.
+    // A legitimate report (delivery resolves, used ids subset the delivery)
+    // still reinforces. see also: mcp-memory-tool-handler.ts reportContextUsage.
+    const onCoUsage = vi.fn(async () => undefined);
+    const baseDeps = createDeps();
+    const deps: McpMemoryToolHandlerDependencies = {
+      ...baseDeps,
+      pathRelationProposalService: { onCoUsage }
+    };
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) => ({
+      ...createDeliveryRecord(deliveryId),
+      delivered_object_ids: ["mem1", "mem2"]
+    }));
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const legitimate = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        used_object_ids: ["mem1", "mem2"],
+        reason: "both cited"
+      },
+      context
+    });
+    expect(legitimate.ok).toBe(true);
+    expect(onCoUsage).toHaveBeenCalledTimes(1);
+    expect(onCoUsage).toHaveBeenCalledWith(["mem1", "mem2"], context.workspaceId);
+
+    onCoUsage.mockClear();
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async () => null);
+    const unresolved = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_unknown",
+        usage_state: "used",
+        used_object_ids: ["mem1", "mem2"],
+        reason: "no resolvable delivery"
+      },
+      context
+    });
+    expect(unresolved.ok).toBe(true);
+    expect(onCoUsage).not.toHaveBeenCalled();
+  });
+
   it("uses delivered_objects as the canonical used object list", async () => {
     const deps = createDeps();
     const handler = createMcpMemoryToolHandler(deps);
@@ -672,6 +721,37 @@ describe("mcp memory tool handler", () => {
           { object_id: "mem1", usage_status: "used" }
         ],
         reason: "contradictory ids"
+      },
+      context
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION" }
+    });
+    expect(deps.trustStateRecorder.recordUsage).not.toHaveBeenCalled();
+    expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
+  });
+
+  it("rejects report_context_usage when a used id was not part of the linked delivery", async () => {
+    // SECURITY: the linked delivery carries only mem1; a caller reporting mem2
+    // (never delivered) would fabricate co-usage between mem1 and a memory it
+    // was never served. The server-side delivered_object_ids gate rejects it
+    // even when no spoofable delivered_objects array is supplied.
+    const deps = createDeps();
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) => ({
+      ...createDeliveryRecord(deliveryId),
+      delivered_object_ids: ["mem1"]
+    }));
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        used_object_ids: ["mem1", "mem2"],
+        reason: "fabricated co-usage"
       },
       context
     });

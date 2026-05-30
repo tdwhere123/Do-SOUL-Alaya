@@ -78,6 +78,7 @@ export interface ConflictDetectionKarmaEmitterPort {
     readonly kind: "supersede_penalty";
     readonly objectId: string;
     readonly workspaceId: string;
+    readonly runId?: string | null;
   }): Promise<void>;
 }
 
@@ -316,7 +317,8 @@ export class ConflictDetectionService {
         await this.deps.karmaEmitter.emitKarmaEvent({
           kind: "supersede_penalty",
           objectId: targetMemoryId,
-          workspaceId
+          workspaceId,
+          runId
         });
       } catch (err) {
         this.warn("supersede_penalty karma emit failed", {

@@ -208,6 +208,7 @@ export interface PathCandidateSinkPort {
     readonly recallBiasSign: 1 | 0 | -1;
     readonly recallBiasMagnitude?: number;
     readonly why?: readonly string[];
+    readonly runId?: string | null;
   }): Promise<boolean>;
 }
 
@@ -1118,7 +1119,8 @@ export class MaterializationRouter {
           why: [
             `${spec.signalRefsKey} on candidate signal ${signal.signal_id}`,
             `run=${signal.run_id}`
-          ]
+          ],
+          runId: signal.run_id
         });
       } catch (err) {
         console.warn("materialization-router: path candidate submission failed", {

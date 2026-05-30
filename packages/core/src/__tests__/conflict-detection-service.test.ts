@@ -163,7 +163,8 @@ describe("ConflictDetectionService", () => {
     expect(emitKarmaEvent).toHaveBeenCalledWith({
       kind: "supersede_penalty",
       objectId: "mem-A",
-      workspaceId: "workspace-1"
+      workspaceId: "workspace-1",
+      runId: "run-1"
     });
   });
 

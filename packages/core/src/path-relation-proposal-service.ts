@@ -256,6 +256,11 @@ export interface SubmitCandidateInput {
   readonly recallBiasSign: 1 | 0 | -1;
   readonly recallBiasMagnitude?: number;
   readonly why?: readonly string[];
+  // Run attribution for the PATH_RELATION_CREATED audit row. Producers
+  // that hold a run id (auto-producer, signal-ref router, conflict
+  // detection) pass it so a minted path is programmatically traceable to
+  // its triggering run; counter-gated co-recall has none and leaves it null.
+  readonly runId?: string | null;
 }
 
 export class PathRelationProposalService {
@@ -319,7 +324,8 @@ export class PathRelationProposalService {
         supportEventsCount: 0,
         why: input.why ?? [
           `${input.relationKind} candidate submitted by producer`
-        ]
+        ],
+        runId: input.runId ?? null
       });
     } catch (err) {
       this.warn("PathRelation submitCandidate failed", {
@@ -399,7 +405,10 @@ export class PathRelationProposalService {
       evidenceBasis: profile.evidenceBasis,
       recallBias: profile.recallBiasSign * profile.recallBiasMagnitude,
       supportEventsCount: this.threshold,
-      why: [`co-recalled-used >= ${this.threshold} times`]
+      why: [`co-recalled-used >= ${this.threshold} times`],
+      // Counter-gated co-recall accrues across many runs; no single run
+      // owns the mint, so attribution stays null.
+      runId: null
     });
   }
 
@@ -417,6 +426,7 @@ export class PathRelationProposalService {
     readonly recallBias: number;
     readonly supportEventsCount: number;
     readonly why: readonly string[];
+    readonly runId: string | null;
   }): Promise<boolean> {
     const sourceId = anchorObjectId(params.sourceAnchor);
     const targetId = anchorObjectId(params.targetAnchor);
@@ -494,7 +504,7 @@ export class PathRelationProposalService {
       entity_type: "path_relation",
       entity_id: relation.path_id,
       workspace_id: relation.workspace_id,
-      run_id: null,
+      run_id: params.runId,
       caused_by: "system",
       payload_json: payload as unknown as Record<string, unknown>
     };

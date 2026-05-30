@@ -196,6 +196,7 @@ export interface McpMemoryToolHandlerDependencies {
       readonly kind: "reuse_gain";
       readonly objectId: string;
       readonly workspaceId: string;
+      readonly runId?: string | null;
     }): Promise<void>;
   };
   // Evidence resolver used by soul.open_pointer to dereference
@@ -1088,7 +1089,14 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   ) {
     const reportedAt = now();
     validateUsageStateConsistency(request);
-    await validateReportedRecallHits(request, context.workspaceId);
+    // INVARIANT: stats attribution follows the linked delivery, not the
+    // reporter's MCP context — a delayed retry / CLI fallback report
+    // would otherwise count usage under the wrong run/agent and skew
+    // used_ratio vs the trust-state proof. Fetched once here so the same
+    // record gates recall-hit validation (used ids must subset the delivery)
+    // and the downstream attribution below.
+    const linkedDelivery = await deps.trustStateRecorder.findDeliveryById(request.delivery_id);
+    await validateReportedRecallHits(request, context.workspaceId, linkedDelivery);
     const usageState = resolveUsageState(request);
     const usedObjectIds = resolveUsedObjectIds(request);
     await deps.trustStateRecorder.recordUsage(
@@ -1114,22 +1122,30 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       },
       { expectedWorkspaceId: context.workspaceId }
     );
-    // INVARIANT: stats attribution follows the linked delivery, not the
-    // reporter's MCP context — a delayed retry / CLI fallback report
-    // would otherwise count usage under the wrong run/agent and skew
-    // used_ratio vs the trust-state proof.
-    const linkedDelivery = await deps.trustStateRecorder.findDeliveryById(request.delivery_id);
     await promoteRecallHitMemories(request, context, linkedDelivery, reportedAt);
     await crossLinkRecalledMemories(
       usedObjectIds,
       linkedDelivery?.workspace_id ?? context.workspaceId,
       linkedDelivery?.run_id ?? context.runId ?? null
     );
-    if (deps.pathRelationProposalService !== undefined && usedObjectIds.length >= 2) {
+    // SECURITY (invariants §29; agents propose, Alaya decides): co-usage path
+    // reinforcement requires a resolvable delivery. A report with no linked
+    // delivery cannot be subset-checked against delivered_object_ids
+    // (validateReportedRecallHits skips the subset gate when linkedDelivery is
+    // null), so feeding its used ids into onCoUsage would let a caller pump
+    // path support / strength between arbitrary memories with no server-side
+    // delivery witness. Legitimate reports always carry a persisted delivery.
+    // see also: validateReportedRecallHits, recall-service.ts
+    // collectNegativePathSuppressions (governance gate).
+    if (
+      deps.pathRelationProposalService !== undefined &&
+      linkedDelivery !== null &&
+      usedObjectIds.length >= 2
+    ) {
       try {
         await deps.pathRelationProposalService.onCoUsage(
           usedObjectIds,
-          linkedDelivery?.workspace_id ?? context.workspaceId
+          linkedDelivery.workspace_id ?? context.workspaceId
         );
       } catch (err) {
         warn("path relation propose failed", {
@@ -1210,11 +1226,33 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
 
   async function validateReportedRecallHits(
     request: SoulReportContextUsageRequest,
-    workspaceId: string
+    workspaceId: string,
+    linkedDelivery: Readonly<ContextDeliveryRecord> | null
   ): Promise<void> {
     const usedObjectIds = resolveUsedObjectIds(request);
     if (usedObjectIds.length === 0) {
       return;
+    }
+
+    // SECURITY (invariants §29; agents propose, Alaya decides): a reported used
+    // id must belong to the linked delivery's server-side delivered_object_ids.
+    // report_context_usage is an unverified agent self-report and it drives
+    // co-usage reinforcement (onCoUsage) + recall-hit promotion, so an id the
+    // delivery never actually carried would let a caller fabricate co-usage
+    // between arbitrary memories and pump path plasticity for a target it was
+    // never served. The request-supplied delivered_objects are spoofable; only
+    // the persisted delivery record is authoritative. A delivery that cannot be
+    // found leaves attribution null downstream and is not gated here.
+    // see also: recall-service.ts collectNegativePathSuppressions (governance gate).
+    if (linkedDelivery !== null) {
+      const deliveredIds = new Set(linkedDelivery.delivered_object_ids);
+      for (const objectId of usedObjectIds) {
+        if (!deliveredIds.has(objectId)) {
+          throw new ToolValidationError(
+            `used_object_ids include ${objectId}, which was not part of delivery ${request.delivery_id}.`
+          );
+        }
+      }
     }
 
     await Promise.all(
@@ -1479,7 +1517,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
           attribution.workspaceId,
           reportedAt
         );
-        await maybeEmitReuseGainKarma(isReuseHit, objectId, attribution.workspaceId);
+        await maybeEmitReuseGainKarma(isReuseHit, objectId, attribution.workspaceId, attribution.runId);
         continue;
       }
 
@@ -1528,14 +1566,15 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         }
         throw error;
       }
-      await maybeEmitReuseGainKarma(isReuseHit, objectId, attribution.workspaceId);
+      await maybeEmitReuseGainKarma(isReuseHit, objectId, attribution.workspaceId, attribution.runId);
     }
   }
 
   async function maybeEmitReuseGainKarma(
     isReuseHit: boolean,
     objectId: string,
-    workspaceId: string
+    workspaceId: string,
+    runId: string | null
   ): Promise<void> {
     if (!isReuseHit || deps.dynamicsService === undefined) {
       return;
@@ -1544,7 +1583,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       await deps.dynamicsService.emitKarmaEvent({
         kind: "reuse_gain",
         objectId,
-        workspaceId
+        workspaceId,
+        runId
       });
     } catch (error) {
       warn("reuse_gain karma emit failed", {

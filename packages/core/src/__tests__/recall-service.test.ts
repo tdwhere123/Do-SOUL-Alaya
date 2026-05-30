@@ -11,7 +11,7 @@ import {
   SynthesisStatus,
   type EventLogEntry,
   type MemoryEntry,
-  type MemoryGraphEdge,
+  type PathAnchorRef,
   type PathRelation,
   type ProjectMappingAnchor,
   type RecallPolicy,
@@ -28,7 +28,6 @@ import {
 } from "../recall-service.js";
 import type {
   RecallServiceEmbeddingRecallPort,
-  RecallServiceGraphExpansionPort,
   RecallServiceMemoryRepoPort,
   RecallServicePathExpansionPort
 } from "../recall-service-types.js";
@@ -98,21 +97,63 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   };
 }
 
-// Typed graph-edge fixture factory. Returns the exact strict MemoryGraphEdge
-// shape (6 fields) so tsc validates edge fixtures field-for-field instead of
-// accepting a structurally-asserted port. The recall path reads only
-// edge_type / source_memory_id / target_memory_id; the persistent envelope
-// fields (object_kind / schema_version / confidence / ...) are not part of
-// MemoryGraphEdge and are deliberately absent.
-function createGraphEdge(overrides: Partial<MemoryGraphEdge> = {}): MemoryGraphEdge {
+// Typed PathRelation fixture factory. graph_expansion now traverses the
+// unified PathRelation plane (pathExpansionPort.findByAnchors) instead of
+// memory_graph_edges, so graph-traversal fixtures are expressed as paths whose
+// constitution.relation_kind names the equivalent edge type. A positive
+// recall_bias keeps the path recall-eligible; direction_bias source_to_target
+// makes the target reachable from the source anchor, matching the directed
+// edge it replaces. strength 1 + the supports/derives_from/recalls relation
+// kinds reproduce the static contribution_weight basis so the merged plane is
+// zero-drift on the first pass.
+// see also: packages/core/src/recall-service.ts graphTraversalScoreFromPath
+function createPathRelation(overrides: {
+  readonly path_id?: string;
+  readonly sourceId?: string;
+  readonly targetId?: string;
+  readonly relationKind?: string;
+  readonly recallBias?: number;
+  readonly strength?: number;
+  readonly directionBias?: "source_to_target" | "target_to_source" | "bidirectional_asymmetric";
+  readonly governanceClass?: "hint_only" | "attention_only" | "recall_allowed" | "strictly_governed";
+  readonly stabilityClass?: "stable" | "pinned" | "volatile" | "normal";
+  readonly status?: "active" | "dormant" | "retired";
+} = {}): PathRelation {
   return {
-    edge_id: "edge-fixture",
-    source_memory_id: "memory-a",
-    target_memory_id: "memory-b",
-    edge_type: "supports",
+    path_id: overrides.path_id ?? "path-fixture",
     workspace_id: "workspace-1",
+    anchors: {
+      source_anchor: { kind: "object", object_id: overrides.sourceId ?? "memory-a" },
+      target_anchor: { kind: "object", object_id: overrides.targetId ?? "memory-b" }
+    },
+    constitution: {
+      relation_kind: overrides.relationKind ?? "supports",
+      why_this_relation_exists: ["test relation"]
+    },
+    effect_vector: {
+      salience: 1,
+      recall_bias: overrides.recallBias ?? 1,
+      verification_bias: 0,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "lens_entry"
+    },
+    plasticity_state: {
+      strength: overrides.strength ?? 1,
+      direction_bias: overrides.directionBias ?? "source_to_target",
+      stability_class: overrides.stabilityClass ?? "stable",
+      support_events_count: 1,
+      contradiction_events_count: 0
+    },
+    lifecycle: {
+      status: overrides.status ?? "active",
+      retirement_rule: "manual"
+    },
+    legitimacy: {
+      evidence_basis: ["test"],
+      governance_class: overrides.governanceClass ?? "recall_allowed"
+    },
     created_at: "2026-03-20T00:00:00.000Z",
-    ...overrides
+    updated_at: "2026-03-20T00:00:00.000Z"
   };
 }
 
@@ -1519,7 +1560,11 @@ describe("RecallService", () => {
     expect(result.diagnostics).toBeDefined();
   });
 
-  it("uses graph and path expansion as read-side candidate generators before scoring", async () => {
+  it("uses the unified path plane for direct (path_expansion) and multi-hop (graph_expansion) candidate generation", async () => {
+    // graph_expansion and path_expansion now traverse the same PathRelation
+    // plane. A direct hop-1 association is admitted on path_expansion; a hop-2
+    // neighbor reached only by traversal is admitted on graph_expansion. The
+    // double-count guard keeps a target on exactly one plane.
     const memories = [
       createMemoryEntry({
         object_id: "seed-memory",
@@ -1540,66 +1585,40 @@ describe("RecallService", () => {
       })
     ];
     const { dependencies } = createDependencies(memories);
-    const graphExpansionPort: RecallServiceGraphExpansionPort = {
-      findByMemoryId: vi.fn(async (memoryId: string) =>
-        memoryId === "seed-memory"
-          ? [
-              createGraphEdge({
-                edge_id: "edge-1",
-                source_memory_id: "seed-memory",
-                target_memory_id: "graph-target",
-                edge_type: "supports"
-              })
-            ]
-          : []
-      )
-    };
-    // The PathRelation fixture is structurally exact; annotating the element
-    // type forces tsc to validate the discriminated-union literals
-    // (anchor kind / relation_kind / direction_bias / manifestation preference)
-    // instead of letting vi.fn widen them to string.
-    const pathRelation: PathRelation = {
-      path_id: "path-1",
-      workspace_id: "workspace-1",
-      anchors: {
-        source_anchor: { kind: "object", object_id: "seed-memory" },
-        target_anchor: { kind: "object", object_id: "path-target" }
-      },
-      constitution: {
-        relation_kind: "co_recalled",
-        why_this_relation_exists: ["test relation"]
-      },
-      effect_vector: {
-        salience: 1,
-        recall_bias: 1,
-        verification_bias: 0,
-        unfinishedness_bias: 0,
-        default_manifestation_preference: "lens_entry"
-      },
-      plasticity_state: {
-        strength: 1,
-        direction_bias: "source_to_target",
-        stability_class: "stable",
-        support_events_count: 1,
-        contradiction_events_count: 0
-      },
-      lifecycle: {
-        status: "active",
-        retirement_rule: "manual"
-      },
-      legitimacy: {
-        evidence_basis: ["test"],
-        governance_class: "recall_allowed"
-      },
-      created_at: "2026-03-20T00:00:00.000Z",
-      updated_at: "2026-03-20T00:00:00.000Z"
-    };
-    const pathExpansionPort: RecallServicePathExpansionPort = {
-      findByAnchors: vi.fn(async () => [pathRelation])
-    };
+    // seed -> path-target (direct, path_expansion); seed -> graph-target
+    // (direct path that the multi-hop traversal would also see, but the guard
+    // keeps it on path_expansion). To prove graph_expansion still produces a
+    // hop-2-only neighbor we route graph-target one hop beyond path-target.
+    const seedToPathTarget = createPathRelation({
+      path_id: "path-direct",
+      sourceId: "seed-memory",
+      targetId: "path-target",
+      relationKind: "co_recalled",
+      strength: 1
+    });
+    const pathTargetToGraphTarget = createPathRelation({
+      path_id: "path-hop2",
+      sourceId: "path-target",
+      targetId: "graph-target",
+      relationKind: "supports",
+      strength: 1
+    });
+    const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+      const ids = new Set(
+        anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+      );
+      const out: PathRelation[] = [];
+      if (ids.has("seed-memory")) {
+        out.push(seedToPathTarget);
+      }
+      if (ids.has("path-target")) {
+        out.push(pathTargetToGraphTarget);
+      }
+      return out;
+    });
+    const pathExpansionPort: RecallServicePathExpansionPort = { findByAnchors };
     const service = new RecallService({
       ...dependencies,
-      graphExpansionPort,
       pathExpansionPort
     });
     const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
@@ -1635,20 +1654,17 @@ describe("RecallService", () => {
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(
       expect.arrayContaining(["seed-memory", "graph-target", "path-target"])
     );
-    expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "graph-target")).toMatchObject({
-      structural_score: 1
-    });
-    expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "graph-target")?.admission_planes)
-      .toContain("graph_expansion");
-    expect(
-      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "graph-target")
-        ?.fused_rank_contribution_per_stream.graph_expansion
-    ).toBeGreaterThan(0.04);
-    expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "path-target")).toMatchObject({
-      object_id: "path-target"
-    });
+    // path-target is a direct hop-1 association off the seed -> path_expansion.
     expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "path-target")?.admission_planes)
       .toContain("path_expansion");
+    // graph-target is reachable only via a second hop -> graph_expansion, and
+    // the double-count guard keeps it off path_expansion.
+    const graphTargetDiag = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "graph-target"
+    );
+    expect(graphTargetDiag?.admission_planes).toContain("graph_expansion");
+    expect(graphTargetDiag?.admission_planes).not.toContain("path_expansion");
+    expect(graphTargetDiag?.fused_rank_contribution_per_stream.graph_expansion).toBeGreaterThan(0.04);
   });
 
   it("excludes negative-bias paths from path_expansion positive candidates", async () => {
@@ -1859,7 +1875,415 @@ describe("RecallService", () => {
     expect(pathTarget?.admission_planes ?? []).not.toContain("path_expansion");
   });
 
-  it("expands graph candidates across two hops with cycle-safe edge-type decay diagnostics", async () => {
+  it("actively suppresses a target via a reinforced (high-strength) negative path", async () => {
+    // A plasticity-reinforced contradiction (recall_bias < 0, strength near 1)
+    // demotes its target's fused score below an otherwise-equivalent peer that
+    // carries no negative path. Both targets are lexical hits, so the only
+    // ranking difference is the active suppression delta.
+    const memories = [
+      createMemoryEntry({
+        object_id: "seed-memory",
+        content: "deployment rollback procedure overview",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "suppressed-target",
+        content: "deployment rollback procedure detail one",
+        activation_score: 0.5
+      }),
+      createMemoryEntry({
+        object_id: "control-target",
+        content: "deployment rollback procedure detail two",
+        activation_score: 0.5
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const negativePath = createPathRelation({
+      path_id: "path-neg-strong",
+      sourceId: "seed-memory",
+      targetId: "suppressed-target",
+      relationKind: "contradicts",
+      recallBias: -0.5,
+      strength: 0.95
+    });
+    const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+      const ids = new Set(
+        anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+      );
+      return ids.has("seed-memory") ? [negativePath] : [];
+    });
+    const service = new RecallService({
+      ...dependencies,
+      pathExpansionPort: { findByAnchors }
+    });
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        semantic_supplement: { enabled: false, max_supplement: 0 }
+      },
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: { max_total_tokens: 4000, max_entries: 5, per_dimension_limits: null }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail" },
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    const suppressed = result.diagnostics?.candidates.find((c) => c.object_id === "suppressed-target");
+    const control = result.diagnostics?.candidates.find((c) => c.object_id === "control-target");
+    // The suppressed target must still be present (suppression demotes, it does
+    // not remove), but it must rank strictly below the equivalent control.
+    expect(suppressed).toBeDefined();
+    expect(control).toBeDefined();
+    expect(suppressed?.fused_score ?? 1).toBeLessThan(control?.fused_score ?? 0);
+    expect(suppressed?.fused_rank ?? 0).toBeGreaterThan(control?.fused_rank ?? Number.MAX_SAFE_INTEGER);
+  });
+
+  it("does not let an attention_only negative path suppress even at high strength", async () => {
+    // invariant: the governance gate (isPathGovernedForSuppression) blocks the
+    // weaponizable suppression lane. strength is agent-pumpable through replayed
+    // co-usage, so an attention_only negative seeded by agent-controllable
+    // content must NOT demote a victim no matter how high strength climbs — only
+    // recall_allowed / strictly_governed negatives reach the delta. Isolate by
+    // recalling the same corpus twice (path wired vs not) and asserting the
+    // target's fused score is identical.
+    // see also: path-relation.ts isPathGovernedForSuppression.
+    const memories = [
+      createMemoryEntry({
+        object_id: "seed-memory",
+        content: "deployment rollback procedure overview",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "victim-target",
+        content: "deployment rollback procedure detail one",
+        activation_score: 0.5
+      })
+    ];
+    const weaponizedNegativePath = createPathRelation({
+      path_id: "path-neg-attention-pumped",
+      sourceId: "seed-memory",
+      targetId: "victim-target",
+      relationKind: "contradicts",
+      recallBias: -0.5,
+      // Far above PATH_SUPPRESSION_STRENGTH_FLOOR: strength alone would license a
+      // full delta if governance were not the gate.
+      strength: 0.95,
+      stabilityClass: "stable",
+      // Agent-reachable band: must never actively suppress.
+      governanceClass: "attention_only"
+    });
+
+    const runRecall = async (wirePath: boolean): Promise<number> => {
+      const { dependencies } = createDependencies(memories);
+      const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+        const ids = new Set(
+          anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+        );
+        return wirePath && ids.has("seed-memory") ? [weaponizedNegativePath] : [];
+      });
+      const service = new RecallService({
+        ...dependencies,
+        pathExpansionPort: { findByAnchors }
+      });
+      const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+      const policy = overridePolicy(basePolicy, {
+        coarse_filter: {
+          ...basePolicy.coarse_filter,
+          semantic_supplement: { enabled: false, max_supplement: 0 }
+        },
+        fine_assessment: {
+          ...basePolicy.fine_assessment,
+          budgets: { max_total_tokens: 4000, max_entries: 5, per_dimension_limits: null }
+        }
+      });
+      const result = await service.recall({
+        taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail" },
+        workspaceId: "workspace-1",
+        strategy: "analyze",
+        policyOverride: policy
+      });
+      const target = result.diagnostics?.candidates.find((c) => c.object_id === "victim-target");
+      expect(target).toBeDefined();
+      return target?.fused_score ?? -1;
+    };
+
+    const withAttentionNegative = await runRecall(true);
+    const withoutPath = await runRecall(false);
+    // Governance gate rejects the attention_only negative: identical fused score.
+    expect(withAttentionNegative).toBeCloseTo(withoutPath, 10);
+  });
+
+  it("caps stacked recall_allowed negatives so ganging cannot deepen the demotion", async () => {
+    // invariant: PATH_SUPPRESSION_MAX_PER_TARGET. Multiple converging governed
+    // negatives compound only up to one reinforced-supersession delta (0.27), so
+    // ganging extra negatives onto the same victim cannot push its fused score
+    // any lower than a single negative already does. Isolate the cap by running
+    // the same corpus with three converging negatives vs one negative: the
+    // victim's fused score must be identical (the cap clamps the stack), and the
+    // victim must remain delivered (suppression demotes, never removes from the
+    // ranked set).
+    const buildMemories = () => [
+      createMemoryEntry({
+        object_id: "seed-one",
+        content: "deployment rollback procedure overview alpha",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "seed-two",
+        content: "deployment rollback procedure overview beta",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "seed-three",
+        content: "deployment rollback procedure overview gamma",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "victim-target",
+        content: "deployment rollback procedure detail one",
+        activation_score: 0.5
+      })
+    ];
+    const allNegatives = ["seed-one", "seed-two", "seed-three"].map((seedId, index) =>
+      createPathRelation({
+        path_id: `path-neg-gang-${index}`,
+        sourceId: seedId,
+        targetId: "victim-target",
+        relationKind: "supersedes",
+        recallBias: -0.5,
+        strength: 0.95,
+        governanceClass: "recall_allowed"
+      })
+    );
+
+    const runRecall = async (negatives: readonly PathRelation[]): Promise<{
+      readonly delivered: boolean;
+      readonly fusedScore: number;
+    }> => {
+      const { dependencies } = createDependencies(buildMemories());
+      const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+        const ids = new Set(
+          anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+        );
+        return negatives.filter((path) => {
+          const source = path.anchors.source_anchor;
+          return source.kind === "object" && ids.has(source.object_id);
+        });
+      });
+      const service = new RecallService({
+        ...dependencies,
+        pathExpansionPort: { findByAnchors }
+      });
+      const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+      const policy = overridePolicy(basePolicy, {
+        coarse_filter: {
+          ...basePolicy.coarse_filter,
+          semantic_supplement: { enabled: false, max_supplement: 0 }
+        },
+        fine_assessment: {
+          ...basePolicy.fine_assessment,
+          budgets: { max_total_tokens: 4000, max_entries: 5, per_dimension_limits: null }
+        }
+      });
+      const result = await service.recall({
+        taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail" },
+        workspaceId: "workspace-1",
+        strategy: "analyze",
+        policyOverride: policy
+      });
+      const victim = result.diagnostics?.candidates.find((c) => c.object_id === "victim-target");
+      expect(victim).toBeDefined();
+      return {
+        delivered: result.candidates.some((candidate) => candidate.object_id === "victim-target"),
+        fusedScore: victim?.fused_score ?? -1
+      };
+    };
+
+    const single = await runRecall([allNegatives[0]!]);
+    const ganged = await runRecall(allNegatives);
+    // The cap clamps the stack to one delta: three converging negatives demote
+    // the victim no more than one does.
+    expect(ganged.fusedScore).toBeCloseTo(single.fusedScore, 10);
+    // Suppression demotes, never removes: the victim is still delivered.
+    expect(single.delivered).toBe(true);
+    expect(ganged.delivered).toBe(true);
+  });
+
+  it("demotes a low-base victim to a floor residual without erasing it from the candidate set", async () => {
+    // invariant: PATH_SUPPRESSION_RESIDUAL_FLOOR. A single full-strength
+    // recall_allowed negative produces a delta (~0.27) that exceeds a low-base
+    // victim's fused_score. Without the residual floor the subtraction would
+    // drive the victim to 0 and drop it out of the candidate set (erasure).
+    // The floor keeps a positive pre-suppression candidate present as a tail
+    // candidate: still ranked, fused_score > 0, but strictly demoted below its
+    // no-path baseline. see also: recall-service.ts applyPathSuppressionToFusionScores.
+    const memories = [
+      createMemoryEntry({
+        object_id: "seed-memory",
+        content: "deployment rollback procedure overview alpha beta gamma",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "low-base-victim",
+        // Minimal lexical overlap with the query so its fused_score lands below
+        // the single-negative cap delta.
+        content: "rollback note",
+        activation_score: 0.1
+      })
+    ];
+    const negativePath = createPathRelation({
+      path_id: "path-neg-low-base",
+      sourceId: "seed-memory",
+      targetId: "low-base-victim",
+      relationKind: "supersedes",
+      recallBias: -0.5,
+      strength: 0.95,
+      governanceClass: "recall_allowed"
+    });
+
+    const runRecall = async (wirePath: boolean): Promise<{
+      readonly fusedScore: number;
+      readonly present: boolean;
+    }> => {
+      const { dependencies } = createDependencies(memories);
+      const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+        const ids = new Set(
+          anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+        );
+        return wirePath && ids.has("seed-memory") ? [negativePath] : [];
+      });
+      const service = new RecallService({
+        ...dependencies,
+        pathExpansionPort: { findByAnchors }
+      });
+      const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+      const policy = overridePolicy(basePolicy, {
+        coarse_filter: {
+          ...basePolicy.coarse_filter,
+          semantic_supplement: { enabled: false, max_supplement: 0 }
+        },
+        fine_assessment: {
+          ...basePolicy.fine_assessment,
+          budgets: { max_total_tokens: 4000, max_entries: 5, per_dimension_limits: null }
+        }
+      });
+      const result = await service.recall({
+        taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure overview" },
+        workspaceId: "workspace-1",
+        strategy: "analyze",
+        policyOverride: policy
+      });
+      const victim = result.diagnostics?.candidates.find((c) => c.object_id === "low-base-victim");
+      return {
+        fusedScore: victim?.fused_score ?? -1,
+        present: victim !== undefined
+      };
+    };
+
+    const baseline = await runRecall(false);
+    const suppressed = await runRecall(true);
+    // Baseline below the cap delta: the subtraction alone would reach 0.
+    expect(baseline.fusedScore).toBeGreaterThan(0);
+    expect(baseline.fusedScore).toBeLessThan(0.27);
+    // Suppressed: still a candidate, demoted below baseline, but floored above 0.
+    expect(suppressed.present).toBe(true);
+    expect(suppressed.fusedScore).toBeGreaterThan(0);
+    expect(suppressed.fusedScore).toBeLessThan(baseline.fusedScore);
+  });
+
+  it("does not let a weak attention_only negative path move rankings", async () => {
+    // A barely-formed negative association (strength below the suppression
+    // floor) contributes zero delta. Isolate the effect by recalling the same
+    // corpus twice — once with the weak negative path wired and once without —
+    // and asserting the target's fused score is identical. invariant:
+    // PATH_SUPPRESSION_STRENGTH_FLOOR. Comparing two runs of the same memory
+    // (rather than two sibling memories) removes object-id-ordering noise.
+    const memories = [
+      createMemoryEntry({
+        object_id: "seed-memory",
+        content: "deployment rollback procedure overview",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "weak-target",
+        content: "deployment rollback procedure detail one",
+        activation_score: 0.5
+      })
+    ];
+    const weakNegativePath = createPathRelation({
+      path_id: "path-neg-weak",
+      sourceId: "seed-memory",
+      targetId: "weak-target",
+      relationKind: "contradicts",
+      recallBias: -0.4,
+      // attention_only co-occurrence band: below PATH_SUPPRESSION_STRENGTH_FLOOR.
+      strength: 0.5,
+      stabilityClass: "volatile",
+      governanceClass: "attention_only"
+    });
+    const basePolicyPatch = {
+      coarse_filter_semantic: { enabled: false, max_supplement: 0 }
+    } as const;
+
+    const runRecall = async (wirePath: boolean): Promise<number> => {
+      const { dependencies } = createDependencies(memories);
+      const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+        const ids = new Set(
+          anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+        );
+        return wirePath && ids.has("seed-memory") ? [weakNegativePath] : [];
+      });
+      const service = new RecallService({
+        ...dependencies,
+        pathExpansionPort: { findByAnchors }
+      });
+      const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+      const policy = overridePolicy(basePolicy, {
+        coarse_filter: {
+          ...basePolicy.coarse_filter,
+          semantic_supplement: basePolicyPatch.coarse_filter_semantic
+        },
+        fine_assessment: {
+          ...basePolicy.fine_assessment,
+          budgets: { max_total_tokens: 4000, max_entries: 5, per_dimension_limits: null }
+        }
+      });
+      const result = await service.recall({
+        taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail" },
+        workspaceId: "workspace-1",
+        strategy: "analyze",
+        policyOverride: policy
+      });
+      const target = result.diagnostics?.candidates.find((c) => c.object_id === "weak-target");
+      expect(target).toBeDefined();
+      return target?.fused_score ?? -1;
+    };
+
+    const withWeakPath = await runRecall(true);
+    const withoutPath = await runRecall(false);
+    // The weak negative path is below the strength floor, so it applies no
+    // suppression: the target's fused score is unchanged versus the no-path run.
+    expect(withWeakPath).toBeCloseTo(withoutPath, 10);
+  });
+
+  it("expands path-graph candidates across two hops with cycle-safe edge-type decay diagnostics", async () => {
+    // The hop-2 traversal score MAGNITUDES (0.25 / 0.045) equal the static
+    // EDGE_TYPE_RECALL_MODEL.contribution_weight basis because
+    // graphTraversalScoreFromPath returns that basis and the hop_decay constants
+    // are unchanged; traversal TOPOLOGY follows path direction_bias, not the
+    // undirected edge plane (paths here are bidirectional_asymmetric so reach is
+    // full). The merge moves the hop-1 direct association (seed -> hop1-derived)
+    // onto the path_expansion plane, so it no longer counts in graph_expansion's
+    // per_hop[0] / per_edge_type — the graph plane carries only the multi-hop
+    // reach now.
+    // see also: recall-service.ts graphTraversalScoreFromPath.
     const memories = [
       createMemoryEntry({
         object_id: "seed-memory",
@@ -1892,54 +2316,60 @@ describe("RecallService", () => {
       })
     ];
     const { dependencies } = createDependencies(memories);
-    const graphExpansionPort = {
-      findByMemoryId: vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(async (memoryId: string) => {
-        if (memoryId === "seed-memory") {
-          return [
-            ...Array.from({ length: 12 }, (_, index) =>
-              createGraphEdge({
-                edge_id: `edge-supersedes-${index}`,
-                edge_type: "supersedes",
-                source_memory_id: "seed-memory",
-                target_memory_id: "superseded-target"
-              })
-            ),
-            createGraphEdge({
-              edge_id: "edge-1",
-              edge_type: "derives_from",
-              source_memory_id: "seed-memory",
-              target_memory_id: "hop1-derived"
-            })
-          ];
-        }
-        if (memoryId === "hop1-derived") {
-          return [
-            createGraphEdge({
-              edge_id: "edge-cycle",
-              edge_type: "supports",
-              source_memory_id: "hop1-derived",
-              target_memory_id: "seed-memory"
-            }),
-            createGraphEdge({
-              edge_id: "edge-2",
-              edge_type: "supports",
-              source_memory_id: "hop1-derived",
-              target_memory_id: "hop2-supported"
-            }),
-            createGraphEdge({
-              edge_id: "edge-3",
-              edge_type: "recalls",
-              source_memory_id: "hop1-derived",
-              target_memory_id: "hop2-recalled"
-            })
-          ];
-        }
-        return [];
-      })
-    };
+    const seedToHop1 = createPathRelation({
+      path_id: "path-derives",
+      sourceId: "seed-memory",
+      targetId: "hop1-derived",
+      relationKind: "derives_from",
+      strength: 1
+    });
+    // Negative-bias path off the seed: recall_bias < 0 makes it ineligible, so
+    // the traversal must never follow it (mirrors the floored supersedes edge).
+    const seedToSuperseded = createPathRelation({
+      path_id: "path-supersedes",
+      sourceId: "seed-memory",
+      targetId: "superseded-target",
+      relationKind: "supersedes",
+      recallBias: -0.5,
+      strength: 0.9
+    });
+    const hop1ToCycle = createPathRelation({
+      path_id: "path-cycle",
+      sourceId: "hop1-derived",
+      targetId: "seed-memory",
+      relationKind: "supports",
+      strength: 1
+    });
+    const hop1ToSupported = createPathRelation({
+      path_id: "path-supports",
+      sourceId: "hop1-derived",
+      targetId: "hop2-supported",
+      relationKind: "supports",
+      strength: 1
+    });
+    const hop1ToRecalled = createPathRelation({
+      path_id: "path-recalls",
+      sourceId: "hop1-derived",
+      targetId: "hop2-recalled",
+      relationKind: "recalls",
+      strength: 1
+    });
+    const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+      const ids = new Set(
+        anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+      );
+      const out: PathRelation[] = [];
+      if (ids.has("seed-memory")) {
+        out.push(seedToHop1, seedToSuperseded);
+      }
+      if (ids.has("hop1-derived")) {
+        out.push(hop1ToCycle, hop1ToSupported, hop1ToRecalled);
+      }
+      return out;
+    });
     const service = new RecallService({
       ...dependencies,
-      graphExpansionPort
+      pathExpansionPort: { findByAnchors }
     });
     const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
     const policy = overridePolicy(basePolicy, {
@@ -1974,31 +2404,43 @@ describe("RecallService", () => {
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(
       expect.arrayContaining(["seed-memory", "hop1-derived", "hop2-supported", "hop2-recalled"])
     );
+    // hop1-derived is a direct association -> path_expansion plane.
+    expect(
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "hop1-derived")?.admission_planes
+    ).toContain("path_expansion");
+    // Negative-bias path is never followed, so its target stays out of both
+    // associative planes.
     expect(
       result.diagnostics?.candidates.find((candidate) => candidate.object_id === "superseded-target")
         ?.admission_planes ?? []
     ).not.toContain("graph_expansion");
-    expect(result.diagnostics?.graph_expansion_plane_count_per_hop).toEqual([1, 2]);
+    // graph_expansion carries only the two hop-2 neighbors now.
+    expect(result.diagnostics?.graph_expansion_plane_count_per_hop).toEqual([0, 2]);
     expect(result.diagnostics?.graph_expansion_plane_count_per_edge_type).toEqual({
-      derives_from: 1,
+      derives_from: 0,
       recalls: 1,
       supports: 1
     });
+    // score magnitude equals the static contribution_weight basis (0.25).
     expect(
       result.diagnostics?.candidates.find((candidate) => candidate.object_id === "hop2-supported")?.structural_score
     ).toBeCloseTo(0.25);
     expect(
       result.diagnostics?.candidates.find((candidate) => candidate.object_id === "hop2-recalled")?.structural_score
     ).toBeCloseTo(0.045);
-    expect(graphExpansionPort.findByMemoryId).toHaveBeenCalledWith(
-      "seed-memory",
-      "workspace-1",
-      ["derives_from", "recalls", "supports"]
+    // The negative path's target is never used as a BFS anchor.
+    const anchoredIds = findByAnchors.mock.calls.flatMap((call) =>
+      call[1].flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
     );
-    expect(graphExpansionPort.findByMemoryId.mock.calls.map((call) => call[0])).not.toContain("superseded-target");
+    expect(anchoredIds).not.toContain("superseded-target");
   });
 
   it("does not count graph diagnostics for neighbors rejected by deterministic filters", async () => {
+    // invariant: a path-backed neighbor whose dimension fails the deterministic
+    // filter is never admitted to byId, so expandGraphFrontier (which only
+    // traverses into admitted candidates) cannot fan it onto graph_expansion.
+    // Wiring the unified pathExpansionPort exercises the real path-backed plane;
+    // the retired graphExpansionPort no longer participates.
     const memories = [
       createMemoryEntry({
         object_id: "seed-memory",
@@ -2018,24 +2460,27 @@ describe("RecallService", () => {
       })
     ];
     const { dependencies } = createDependencies(memories);
-    const graphExpansionPort: RecallServiceGraphExpansionPort = {
-      findByMemoryId: vi.fn(async (memoryId: string) => {
-        if (memoryId !== "seed-memory") {
-          return [];
-        }
-        return [
-          createGraphEdge({
-            edge_id: "edge-filtered-neighbor",
-            edge_type: "derives_from",
-            source_memory_id: "seed-memory",
-            target_memory_id: "filtered-neighbor"
-          })
-        ];
+    const seedToFilteredNeighbor = createPathRelation({
+      path_id: "path-filtered-neighbor",
+      sourceId: "seed-memory",
+      targetId: "filtered-neighbor",
+      relationKind: "derives_from",
+      directionBias: "bidirectional_asymmetric",
+      strength: 1
+    });
+    const pathExpansionPort: RecallServicePathExpansionPort = {
+      findByAnchors: vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+        const ids = new Set(
+          anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+        );
+        return ids.has("seed-memory") || ids.has("filtered-neighbor")
+          ? [seedToFilteredNeighbor]
+          : [];
       })
     };
     const service = new RecallService({
       ...dependencies,
-      graphExpansionPort
+      pathExpansionPort
     });
     const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
     const policy = overridePolicy(basePolicy, {
@@ -3620,21 +4065,27 @@ describe("RecallService", () => {
         }
         return [];
       });
-      const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
-        async (memoryId: string) => {
-          if (memoryId === "memory-anchor") {
-            return [
-              createGraphEdge({
-                edge_id: "edge-1",
-                edge_type: "derives_from",
-                source_memory_id: "memory-anchor",
-                target_memory_id: "memory-neighbor"
+      // graph_expansion now traverses PathRelation rows. The entity anchor is
+      // also a draft expansion seed, so its direct hop-1 neighbor is admitted
+      // on path_expansion (the unified plane's direct lane); the double-count
+      // guard keeps it off graph_expansion. The entity seed still fans into the
+      // graph BFS (Pool B) — that reach drives the multi_seed_graph_fan_in
+      // diagnostic — but the neighbor's winning plane is path_expansion.
+      const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+        const ids = new Set(
+          anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+        );
+        return ids.has("memory-anchor")
+          ? [
+              createPathRelation({
+                path_id: "path-1",
+                sourceId: "memory-anchor",
+                targetId: "memory-neighbor",
+                relationKind: "derives_from"
               })
-            ];
-          }
-          return [];
-        }
-      );
+            ]
+          : [];
+      });
 
       const service = new RecallService({
         ...dependencies,
@@ -3642,8 +4093,8 @@ describe("RecallService", () => {
           ...dependencies.memoryRepo,
           searchByKeywordWithinObjectIds
         },
-        graphExpansionPort: {
-          findByMemoryId
+        pathExpansionPort: {
+          findByAnchors
         },
         entityExtractionPort: {
           extract: async () => [
@@ -3684,12 +4135,11 @@ describe("RecallService", () => {
       const neighborDiag = result.diagnostics?.candidates.find(
         (c) => c.object_id === "memory-neighbor"
       );
-      expect(neighborDiag?.admission_planes).toContain("graph_expansion");
+      expect(neighborDiag?.admission_planes).toContain("path_expansion");
 
-      expect(findByMemoryId).toHaveBeenCalledWith(
-        "memory-anchor",
+      expect(findByAnchors).toHaveBeenCalledWith(
         "workspace-1",
-        ["derives_from", "recalls", "supports"]
+        expect.arrayContaining([{ kind: "object", object_id: "memory-anchor" }])
       );
     });
 
@@ -3999,19 +4449,29 @@ describe("RecallService", () => {
           return [];
         }
       );
-      const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
-        async (memoryId: string) => {
-          if (memoryId === "memory-anchor") {
-            return [
-              createGraphEdge({
-                edge_id: "edge-1",
-                edge_type: "derives_from",
-                source_memory_id: "memory-anchor",
-                target_memory_id: "memory-neighbor"
-              })
-            ];
-          }
-          return [];
+      // Path-backed plane: a directed path memory-anchor -> memory-neighbor so
+      // that IF the weak entity-only draft were (wrongly) selected as a graph
+      // BFS seed, the traversal would fan forward into memory-neighbor on
+      // graph_expansion. source_to_target keeps memory-neighbor from pulling
+      // memory-anchor backward onto path_expansion, so the only way the neighbor
+      // reaches graph_expansion is memory-anchor seeding the traversal — which
+      // the weak-entity-only gate must prevent.
+      const anchorToNeighbor = createPathRelation({
+        path_id: "path-anchor-neighbor",
+        sourceId: "memory-anchor",
+        targetId: "memory-neighbor",
+        relationKind: "derives_from",
+        directionBias: "source_to_target",
+        strength: 1
+      });
+      const findByAnchors = vi.fn(
+        async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+          const ids = new Set(
+            anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+          );
+          return ids.has("memory-anchor") || ids.has("memory-neighbor")
+            ? [anchorToNeighbor]
+            : [];
         }
       );
 
@@ -4021,7 +4481,7 @@ describe("RecallService", () => {
           ...dependencies.memoryRepo,
           searchByKeywordWithinObjectIds
         },
-        graphExpansionPort: { findByMemoryId },
+        pathExpansionPort: { findByAnchors },
         entityExtractionPort: {
           extract: async () => [
             Object.freeze({
@@ -4053,15 +4513,20 @@ describe("RecallService", () => {
       // The anchor still admits on the entity_seed plane (diagnostics
       // distinguish the entity-seed-only case).
       expect(anchorDiag?.admission_planes).toContain("entity_seed");
-      // invariant: the weak entity-only anchor must NEVER be asked to fan
-      // into graph_expansion. Other unrelated tier memories may still be
-      // ranked as seeds by selectExpansionSeedDrafts via their own non-
-      // entity admission planes (activation / lexical), so the assertion
-      // is targeted at this specific seed memory, not at the port at all.
-      const anchorFanCalls = findByMemoryId.mock.calls.filter(
-        (call) => call[0] === "memory-anchor"
+      // invariant: the weak entity-only anchor must NEVER seed the path-backed
+      // graph traversal, so its neighbor never reaches the graph_expansion plane.
+      const neighborDiag = result.diagnostics?.candidates.find(
+        (c) => c.object_id === "memory-neighbor"
       );
-      expect(anchorFanCalls).toEqual([]);
+      expect(neighborDiag?.admission_planes ?? []).not.toContain("graph_expansion");
+      // invariant: the weak entity-only anchor is excluded from
+      // selectExpansionSeedDrafts, so it is never used as a findByAnchors
+      // frontier anchor. Other tier memories may still seed the traversal via
+      // their own non-entity planes, so the assertion targets this anchor id.
+      const anchorFrontierCalls = findByAnchors.mock.calls.filter((call) =>
+        call[1].some((ref) => ref.kind === "object" && ref.object_id === "memory-anchor")
+      );
+      expect(anchorFrontierCalls).toEqual([]);
     });
 
     it("admits a weak entity into graph_expansion when a co-admitting plane carries it (Fix-5b)", async () => {
@@ -4097,21 +4562,21 @@ describe("RecallService", () => {
       const searchByKeywordWithinObjectIds = vi.fn(async () => [
         { object_id: "memory-anchor", normalized_rank: 0.9 }
       ]);
-      const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
-        async (memoryId: string) => {
-          if (memoryId === "memory-anchor") {
-            return [
-              createGraphEdge({
-                edge_id: "edge-1",
-                edge_type: "derives_from",
-                source_memory_id: "memory-anchor",
-                target_memory_id: "memory-neighbor"
+      const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+        const ids = new Set(
+          anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+        );
+        return ids.has("memory-anchor")
+          ? [
+              createPathRelation({
+                path_id: "path-1",
+                sourceId: "memory-anchor",
+                targetId: "memory-neighbor",
+                relationKind: "derives_from"
               })
-            ];
-          }
-          return [];
-        }
-      );
+            ]
+          : [];
+      });
 
       const service = new RecallService({
         ...dependencies,
@@ -4119,7 +4584,7 @@ describe("RecallService", () => {
           ...dependencies.memoryRepo,
           searchByKeywordWithinObjectIds
         },
-        graphExpansionPort: { findByMemoryId },
+        pathExpansionPort: { findByAnchors },
         entityExtractionPort: {
           extract: async () => [
             Object.freeze({
@@ -4151,16 +4616,17 @@ describe("RecallService", () => {
       // co-admitting-plane survival branch to apply.
       expect(anchorDiag?.admission_planes).toContain("entity_seed");
       expect(anchorDiag?.admission_planes).toContain("lexical");
-      // With co-admission present, the weak entity confidence does not
-      // block graph_expansion fan-in.
+      // With co-admission present, the weak entity confidence does not block
+      // expansion. The neighbor is a direct hop-1 association off the anchor,
+      // so the unified plane admits it on path_expansion (the double-count
+      // guard keeps it off graph_expansion).
       const neighborDiag = result.diagnostics?.candidates.find(
         (c) => c.object_id === "memory-neighbor"
       );
-      expect(neighborDiag?.admission_planes).toContain("graph_expansion");
-      expect(findByMemoryId).toHaveBeenCalledWith(
-        "memory-anchor",
+      expect(neighborDiag?.admission_planes).toContain("path_expansion");
+      expect(findByAnchors).toHaveBeenCalledWith(
         "workspace-1",
-        ["derives_from", "recalls", "supports"]
+        expect.arrayContaining([{ kind: "object", object_id: "memory-anchor" }])
       );
     });
 
@@ -4281,18 +4747,34 @@ describe("RecallService", () => {
 
     describe("multi-seed graph fan-in", () => {
       // see also: packages/core/src/recall-service.ts addGraphExpansionCandidates
-      // Pool B branch and RecallMultiSeedGraphFanInDiagnostics
-      const edgeStub = (
+      // Pool B branch and RecallMultiSeedGraphFanInDiagnostics. The per-seed
+      // BFS now traverses PathRelation rows, so a fan-in neighbor is a path
+      // source -> target whose relation_kind names the equivalent edge type.
+      const pathStub = (
         id: string,
         source: string,
         target: string,
-        edgeType: MemoryGraphEdge["edge_type"] = "derives_from"
-      ): MemoryGraphEdge =>
-        createGraphEdge({
-          edge_id: id,
-          edge_type: edgeType,
-          source_memory_id: source,
-          target_memory_id: target
+        relationKind = "derives_from"
+      ): PathRelation =>
+        createPathRelation({
+          path_id: id,
+          sourceId: source,
+          targetId: target,
+          relationKind
+        });
+      // Builds a findByAnchors mock from a source-id -> outgoing-paths map. The
+      // mock returns every path anchored on any requested object id so the
+      // batched multi-hop lookups resolve the right neighbors.
+      const findByAnchorsFrom = (
+        bySource: Readonly<Record<string, readonly PathRelation[]>>
+      ) =>
+        vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+          const ids = new Set(
+            anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+          );
+          return Object.entries(bySource).flatMap(([sourceId, paths]) =>
+            ids.has(sourceId) ? paths : []
+          );
         });
 
       it("with zero entity-derived seeds emits no multi_seed_graph_fan_in diagnostic", async () => {
@@ -4373,17 +4855,10 @@ describe("RecallService", () => {
             return [];
           }
         );
-        const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
-          async (memoryId: string) => {
-            if (memoryId === "anchor-alpha") {
-              return [edgeStub("edge-a", "anchor-alpha", "neighbor-alpha")];
-            }
-            if (memoryId === "anchor-beta") {
-              return [edgeStub("edge-b", "anchor-beta", "neighbor-beta")];
-            }
-            return [];
-          }
-        );
+        const findByAnchors = findByAnchorsFrom({
+          "anchor-alpha": [pathStub("edge-a", "anchor-alpha", "neighbor-alpha")],
+          "anchor-beta": [pathStub("edge-b", "anchor-beta", "neighbor-beta")]
+        });
 
         const service = new RecallService({
           ...dependencies,
@@ -4391,7 +4866,7 @@ describe("RecallService", () => {
             ...dependencies.memoryRepo,
             searchByKeywordWithinObjectIds
           },
-          graphExpansionPort: { findByMemoryId },
+          pathExpansionPort: { findByAnchors },
           entityExtractionPort: {
             extract: async () => [
               Object.freeze({
@@ -4468,17 +4943,10 @@ describe("RecallService", () => {
             return [];
           }
         );
-        const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
-          async (memoryId: string) => {
-            if (memoryId === "anchor-alpha") {
-              return [edgeStub("edge-a-shared", "anchor-alpha", "shared-neighbor")];
-            }
-            if (memoryId === "anchor-beta") {
-              return [edgeStub("edge-b-shared", "anchor-beta", "shared-neighbor")];
-            }
-            return [];
-          }
-        );
+        const findByAnchors = findByAnchorsFrom({
+          "anchor-alpha": [pathStub("edge-a-shared", "anchor-alpha", "shared-neighbor")],
+          "anchor-beta": [pathStub("edge-b-shared", "anchor-beta", "shared-neighbor")]
+        });
 
         const service = new RecallService({
           ...dependencies,
@@ -4486,7 +4954,7 @@ describe("RecallService", () => {
             ...dependencies.memoryRepo,
             searchByKeywordWithinObjectIds
           },
-          graphExpansionPort: { findByMemoryId },
+          pathExpansionPort: { findByAnchors },
           entityExtractionPort: {
             extract: async () => [
               Object.freeze({
@@ -4514,21 +4982,26 @@ describe("RecallService", () => {
           strategy: "chat"
         });
 
+        // The per-seed BFS still runs independently for each entity seed, so
+        // the shared neighbor is reached twice and the merge records the
+        // dedup_collision — this diagnostic is driven by Pool B traversal, not
+        // by the final admit plane.
         const fanIn = result.diagnostics?.multi_seed_graph_fan_in;
         expect(fanIn).toBeDefined();
         expect(fanIn?.distinct_seeds).toBe(2);
         expect(fanIn?.dedup_collisions).toBeGreaterThanOrEqual(1);
 
-        // The shared neighbor is admitted exactly once on graph_expansion
-        // — max-score reduction kept one row, not two.
+        // The shared neighbor is a direct hop-1 association off both entity
+        // anchors (which are themselves draft seeds), so the unified plane
+        // admits it once on path_expansion; the double-count guard keeps it
+        // off graph_expansion. Admission planes are a set, so it appears once.
         const sharedDiag = result.diagnostics?.candidates.find(
           (c) => c.object_id === "shared-neighbor"
         );
-        expect(sharedDiag?.admission_planes).toContain("graph_expansion");
-        // Plane admission diagnostic is a set, so this also rules out
-        // duplicate admissions surfacing as multiple plane entries.
+        expect(sharedDiag?.admission_planes).toContain("path_expansion");
+        expect(sharedDiag?.admission_planes).not.toContain("graph_expansion");
         const planeOccurrences = (sharedDiag?.admission_planes ?? []).filter(
-          (plane) => plane === "graph_expansion"
+          (plane) => plane === "path_expansion"
         ).length;
         expect(planeOccurrences).toBe(1);
       });
@@ -4568,16 +5041,11 @@ describe("RecallService", () => {
             return [];
           }
         );
-        const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
-          async (memoryId: string) => {
-            if (memoryId === "fan-anchor") {
-              return neighborMemories.map((neighbor, i) =>
-                edgeStub(`edge-${i}`, "fan-anchor", neighbor.object_id)
-              );
-            }
-            return [];
-          }
-        );
+        const findByAnchors = findByAnchorsFrom({
+          "fan-anchor": neighborMemories.map((neighbor, i) =>
+            pathStub(`edge-${i}`, "fan-anchor", neighbor.object_id)
+          )
+        });
 
         const service = new RecallService({
           ...dependencies,
@@ -4585,7 +5053,7 @@ describe("RecallService", () => {
             ...dependencies.memoryRepo,
             searchByKeywordWithinObjectIds
           },
-          graphExpansionPort: { findByMemoryId },
+          pathExpansionPort: { findByAnchors },
           entityExtractionPort: {
             extract: async () => [
               Object.freeze({
@@ -4607,12 +5075,20 @@ describe("RecallService", () => {
           strategy: "chat"
         });
 
+        // The 260 neighbors are direct hop-1 associations off the entity-seed
+        // anchor, so the unified plane admits them on path_expansion under the
+        // same DYNAMIC_RECALL_PLANE_CAP. graph_expansion stays empty (its hop-1
+        // would double-count), and neither associative plane exceeds the cap.
+        const pathExpansionCount = (result.diagnostics?.candidates ?? []).filter(
+          (c) => c.admission_planes.includes("path_expansion")
+        ).length;
         const graphExpansionCount = (result.diagnostics?.candidates ?? []).filter(
           (c) => c.admission_planes.includes("graph_expansion")
         ).length;
+        expect(pathExpansionCount).toBeLessThanOrEqual(PLANE_CAP);
         expect(graphExpansionCount).toBeLessThanOrEqual(PLANE_CAP);
-        // Sanity: we are not silently dropping below the cap due to other
-        // gates — the diagnostic surface confirms fan-in actually ran.
+        // Sanity: the per-seed BFS still ran (the diagnostic surface confirms
+        // fan-in is active even though admission routed to path_expansion).
         expect(result.diagnostics?.multi_seed_graph_fan_in?.distinct_seeds).toBe(1);
       });
 
@@ -4645,14 +5121,9 @@ describe("RecallService", () => {
             return [];
           }
         );
-        const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
-          async (memoryId: string) => {
-            if (memoryId === "solo-anchor") {
-              return [edgeStub("edge-solo", "solo-anchor", "solo-neighbor")];
-            }
-            return [];
-          }
-        );
+        const findByAnchors = findByAnchorsFrom({
+          "solo-anchor": [pathStub("edge-solo", "solo-anchor", "solo-neighbor")]
+        });
 
         const service = new RecallService({
           ...dependencies,
@@ -4660,7 +5131,7 @@ describe("RecallService", () => {
             ...dependencies.memoryRepo,
             searchByKeywordWithinObjectIds
           },
-          graphExpansionPort: { findByMemoryId },
+          pathExpansionPort: { findByAnchors },
           entityExtractionPort: {
             extract: async () => [
               Object.freeze({

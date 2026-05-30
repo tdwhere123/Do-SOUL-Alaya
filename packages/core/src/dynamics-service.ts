@@ -106,6 +106,7 @@ export class DynamicsService {
     readonly objectId: string;
     readonly workspaceId: string;
     readonly amount?: number;
+    readonly runId?: string | null;
   }): Promise<void> {
     const amount = input.amount ?? DYNAMICS_CONSTANTS.karma[input.kind];
     await this.processKarmaEvent({
@@ -114,7 +115,8 @@ export class DynamicsService {
       object_id: input.objectId,
       amount,
       created_at: this.now(),
-      workspace_id: input.workspaceId
+      workspace_id: input.workspaceId,
+      run_id: input.runId ?? null
     });
   }
 
