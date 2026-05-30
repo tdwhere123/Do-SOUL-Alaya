@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   ActivationCandidateSchema,
-  PathLifecycleStatus,
+  isPathActiveForRecall,
   type ActivationCandidate,
   type PathAnchorRef,
   type PathRelation
@@ -15,10 +15,11 @@ import {
 // see also: path-relation-proposal-service.ts (PathRelation producer).
 
 export interface PathActivationCandidateProducerPathReaderPort {
-  // Returns active (non-retired) PathRelation rows whose source_anchor or
+  // Returns recall-active PathRelation rows whose source_anchor or
   // target_anchor references one of the supplied memory object_ids. The
-  // reader is responsible for filtering retired rows; the producer also
-  // re-asserts non-retired status in case the port emits a wider set.
+  // reader is responsible for filtering non-active (retired/dormant) rows;
+  // the producer also re-asserts active status in case the port emits a
+  // wider set.
   findActiveByAnchorObjectIds(
     workspaceId: string,
     memoryObjectIds: readonly string[]
@@ -66,7 +67,7 @@ export class PathActivationCandidateProducer {
     const candidates: Readonly<ActivationCandidate>[] = [];
     const seen = new Set<string>();
     for (const path of paths) {
-      if (isRetiredPathRelation(path)) {
+      if (!isPathActiveForRecall(path.lifecycle.status)) {
         continue;
       }
       if (seen.has(path.path_id)) {
@@ -135,10 +136,6 @@ function clonePathAnchorRef(anchor: PathAnchorRef): PathAnchorRef {
         window_digest: anchor.window_digest
       });
   }
-}
-
-function isRetiredPathRelation(path: Readonly<PathRelation>): boolean {
-  return path.lifecycle.status === PathLifecycleStatus.RETIRED;
 }
 
 function clamp01(value: number): number {

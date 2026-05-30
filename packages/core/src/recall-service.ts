@@ -8,6 +8,7 @@ import {
   SoulRecallCompletedPayloadSchema,
   SoulRecallWeightTransferPayloadSchema,
   StorageTier,
+  isPathActiveForRecall,
   type FineAssessmentConfig,
   type ActivationWeights,
   type MemoryDimension as MemoryDimensionType,
@@ -1841,7 +1842,7 @@ export class RecallService {
       if (added >= DYNAMIC_RECALL_PLANE_CAP) {
         return;
       }
-      if (isRetiredPathRelation(path)) {
+      if (isPathExcludedFromRecall(path)) {
         continue;
       }
       for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
@@ -1912,7 +1913,7 @@ export class RecallService {
       if (added >= DYNAMIC_RECALL_PLANE_CAP) {
         return added;
       }
-      if (isRetiredPathRelation(path) || !pathMatchesTimeConcernWindowDigest(path, windowDigests)) {
+      if (isPathExcludedFromRecall(path) || !pathMatchesTimeConcernWindowDigest(path, windowDigests)) {
         continue;
       }
       for (const targetId of pathRelationMemoryIds(path)) {
@@ -4690,8 +4691,11 @@ function anchorMemoryId(anchor: PathAnchorRef): string | undefined {
   }
 }
 
-function isRetiredPathRelation(path: Readonly<PathRelation>): boolean {
-  return (path.lifecycle as { readonly status?: string }).status === "retired";
+// invariant: recall path_expansion only consumes recall-active paths. Both
+// retired (terminal) and dormant (reversible cold storage) are excluded so a
+// dormant path never leaks back into recall scoring.
+function isPathExcludedFromRecall(path: Readonly<PathRelation>): boolean {
+  return !isPathActiveForRecall(path.lifecycle.status);
 }
 
 function uniqueStrings(values: readonly string[]): readonly string[] {
@@ -4744,10 +4748,6 @@ function selectRecallAdmissionAttributionPlane(
     }
   }
   return fallback ?? admissionPlanes[0] ?? "activation";
-}
-
-function isWorkspaceLocalRecallCandidate(candidate: Readonly<RecallCandidate>): boolean {
-  return (candidate.origin_plane ?? "workspace_local") === "workspace_local";
 }
 
 function resolveDynamicActivationWeights(

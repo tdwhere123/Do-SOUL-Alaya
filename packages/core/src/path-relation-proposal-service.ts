@@ -5,42 +5,193 @@ import {
   RuntimeGovernanceEventType,
   parseRuntimeGovernanceEventPayload,
   type EventLogEntry,
+  type PathAnchorRef,
+  type PathGovernanceClass,
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 
-// invariant: PathRelationProposalService is the producer of PathRelation
-// entities. When K co-usage events arrive for the same memory pair, this
-// service writes a new PathRelation with default plasticity. The plasticity
-// strength is later evolved by PathPlasticityService. invariant: counter
-// state is durable via CoUsageCounterPort; counts toward the threshold are
-// persisted, not held in process memory.
-// invariant: a co-usage path is born at governance_class=attention_only,
-// not recall_allowed. attention_only authorises only the lens_entry
-// manifestation level and earns no recall-expansion governance boost — the
-// path is auditable but cannot silently bias agent dialogue. Agents
-// propose; Alaya decides durable recall topology. A co-usage path reaches
-// recall_allowed only by accruing support_events_count >= 8 through the
-// legitimate path-manifestation-policy ladder, which PathPlasticityService
-// drives from anchor-matched usage receipts independently of this
-// service's co-usage counter.
+// invariant: PathRelationProposalService is the single producer of
+// PathRelation entities. It accepts seeding signals from many producers
+// (co-usage, co-recall, LLM supports/derives, shared-entity, signal
+// graph-ref) and mints a PathRelation through one shared materialize path.
+// Each signal differs only in its seed profile (relation_kind / initial
+// strength / governance_class / evidence_basis / recall_bias sign); the
+// propose/materialize machinery is identical. invariant: counter-gated
+// seeders (co-usage, co-recall) accrue to a threshold before minting;
+// candidate-driven seeders (LLM/entity/signal via submitCandidate) mint
+// once on submission. invariant: counter state is durable via
+// CoUsageCounterPort; counts toward the threshold are persisted, not held
+// in process memory.
+// invariant: agents and producers only propose; Alaya decides durable
+// recall topology. auto-build governance has a hard ceiling of
+// recall_allowed — strictly_governed is reserved for user/operator action
+// and submitCandidate clamps any caller that asks for it down to
+// recall_allowed. A counter-seeded path is born at attention_only and
+// reaches recall_allowed only by accruing support_events_count >= 8
+// through the legitimate path-manifestation-policy ladder, which
+// PathPlasticityService drives from anchor-matched usage receipts
+// independently of this service's counters.
+// invariant: positive and negative relation families share one plasticity
+// model. The family is expressed only by the sign of effect_vector
+// .recall_bias (supports +, contradicts/supersedes -). Negative families
+// carry harder initial seed parameters (evidence_basis >= 1, higher
+// initial strength, governance >= recall_allowed) but run the same
+// decay/reinforcement/lifecycle dynamics — there is no second mechanism.
 // invariant: counter rows carry updated_at timestamps so the daemon can
 // periodically call evictExpired(now, ttlMs) to discard stale pairs that
 // never reached the threshold. A pair that reaches the threshold has its
-// counter row dropped once its PathRelation is written; durable double-propose
-// protection comes from findByAnchorMemoryId against persisted PathRelations.
+// counter row dropped once its PathRelation is written; durable
+// double-propose protection comes from findByAnchorMemoryId against
+// persisted PathRelations.
 // invariant: row insert and `path.relation_created` EventLog row are
 // emitted in one SQLite transaction via EventPublisher.appendManyWithMutation,
 // matching the PathPlasticityService pattern. Crash-mid-write cannot leave
 // a path_relations row without its audit event or vice versa.
-// see also: crossLinkRecalledMemories — caller hook
+// see also: crossLinkRecalledMemories — co-usage caller hook
 // see also: PathPlasticityService — strength evolution
 // see also: PathRelationRepo — durable write side
 // see also: SqliteCoUsageCounterRepo — durable counter backing
+// see also: spine-activation-design.md §E2 — seed-profile table source
 
 export const PATH_RELATION_PROPOSE_THRESHOLD =
   DYNAMICS_CONSTANTS.path_plasticity.co_usage_threshold;
 export const PATH_RELATION_COUNTER_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
+
+// Seed-profile catalog. Each named seeder maps to the differentiated
+// initial parameters from spine-activation-design.md §E2. submitCandidate
+// callers may pass an explicit profile, or reference one of these by
+// passing the matching fields. The recall_bias sign decides family:
+// positive = associative (supports recall), negative = lifecycle
+// (suppresses recall but never drops graph_support below baseline),
+// zero = neutral marker (exception_to) that records topology without
+// biasing recall in either direction.
+//
+// see also: spine-activation-design.md §E2 — authoritative seeding table
+// anti-patterns-lint-allow: forward intake catalog for Wave-2 edge folding;
+// exported as the stable producer contract before its callers exist.
+export interface PathSeedProfile {
+  readonly relationKind: string;
+  readonly initialStrength: number;
+  readonly governanceClass: PathGovernanceClass;
+  readonly recallBiasSign: 1 | 0 | -1;
+  readonly recallBiasMagnitude: number;
+  readonly evidenceBasis: readonly string[];
+}
+
+// Positive associative families. recall_bias positive; born below the
+// recall-eligible band (auto-build ceiling honored downstream).
+export const CO_RECALLED_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "co_recalled",
+  initialStrength: 0.3,
+  governanceClass: "attention_only",
+  recallBiasSign: 1,
+  recallBiasMagnitude: 0.5,
+  evidenceBasis: Object.freeze(["recalls_edge_co_usage"]) as readonly string[]
+});
+
+export const SUPPORTS_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "supports",
+  initialStrength: 0.5,
+  governanceClass: "attention_only",
+  recallBiasSign: 1,
+  recallBiasMagnitude: 0.5,
+  evidenceBasis: Object.freeze(["llm_supports_inference"]) as readonly string[]
+});
+
+export const DERIVES_FROM_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "derives_from",
+  initialStrength: 0.5,
+  governanceClass: "attention_only",
+  recallBiasSign: 1,
+  recallBiasMagnitude: 0.5,
+  evidenceBasis: Object.freeze(["llm_derives_inference"]) as readonly string[]
+});
+
+export const SHARES_ENTITY_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "shares_entity",
+  initialStrength: 0.2,
+  governanceClass: "hint_only",
+  recallBiasSign: 1,
+  recallBiasMagnitude: 0.5,
+  evidenceBasis: Object.freeze(["shared_entity_overlap"]) as readonly string[]
+});
+
+export const SIGNAL_GRAPH_REF_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "signal_graph_ref",
+  initialStrength: 0.6,
+  governanceClass: "recall_allowed",
+  recallBiasSign: 1,
+  recallBiasMagnitude: 0.5,
+  evidenceBasis: Object.freeze(["signal_graph_reference"]) as readonly string[]
+});
+
+// Neutral marker family. recall_bias is exactly 0: exception_to records a
+// scoped-exception edge in the topology without biasing recall up or down.
+// Carries evidence_basis >= 1 and governance recall_allowed like the
+// negative families, and runs the same unified plasticity model.
+// see also: memory-graph.ts exception_to (contribution_weight 0) — the
+// edge-type whose recall-neutral semantics this profile mirrors.
+export const EXCEPTION_TO_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "exception_to",
+  initialStrength: 0.9,
+  governanceClass: "recall_allowed",
+  recallBiasSign: 0,
+  recallBiasMagnitude: 0,
+  evidenceBasis: Object.freeze(["exception_evidence"]) as readonly string[]
+});
+
+// Negative lifecycle families. Harder seed: evidence_basis >= 1, initial
+// strength 0.9, governance >= recall_allowed, recall_bias negative. These
+// still run the unified plasticity model — only the seed differs.
+export const SUPERSEDES_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "supersedes",
+  initialStrength: 0.9,
+  governanceClass: "recall_allowed",
+  recallBiasSign: -1,
+  recallBiasMagnitude: 0.5,
+  evidenceBasis: Object.freeze(["supersession_evidence"]) as readonly string[]
+});
+
+export const CONTRADICTS_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "contradicts",
+  initialStrength: 0.9,
+  governanceClass: "recall_allowed",
+  recallBiasSign: -1,
+  recallBiasMagnitude: 0.4,
+  evidenceBasis: Object.freeze(["contradiction_evidence"]) as readonly string[]
+});
+
+export const INCOMPATIBLE_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "incompatible_with",
+  initialStrength: 0.9,
+  governanceClass: "recall_allowed",
+  recallBiasSign: -1,
+  recallBiasMagnitude: 0.3,
+  evidenceBasis: Object.freeze(["incompatibility_evidence"]) as readonly string[]
+});
+
+// invariant: auto-build governance hard ceiling. No producer-driven seed
+// may be born at strictly_governed; that band is reserved for explicit
+// user/operator governance. submitCandidate clamps requests down to this
+// ceiling rather than rejecting, so a mis-tuned producer cannot silently
+// gain a higher band than it is entitled to.
+export const AUTO_BUILD_GOVERNANCE_CEILING: PathGovernanceClass = "recall_allowed";
+
+const GOVERNANCE_RANK: Readonly<Record<PathGovernanceClass, number>> = Object.freeze({
+  hint_only: 0,
+  attention_only: 1,
+  recall_allowed: 2,
+  strictly_governed: 3
+});
+
+function clampGovernanceToAutoBuildCeiling(
+  requested: PathGovernanceClass
+): PathGovernanceClass {
+  return GOVERNANCE_RANK[requested] > GOVERNANCE_RANK[AUTO_BUILD_GOVERNANCE_CEILING]
+    ? AUTO_BUILD_GOVERNANCE_CEILING
+    : requested;
+}
 
 export interface PathRelationProposalRepoPort {
   create(relation: PathRelation): Readonly<PathRelation>;
@@ -53,6 +204,9 @@ export interface PathRelationProposalRepoPort {
 // invariant: durable counter backing. The daemon wires this to the SQLite
 // co-usage counter repo; tests may supply an in-memory fake. Memory ids are
 // already ordered low <= high by the service before reaching this port.
+// Co-usage and co-recall share this counter space: a pair that is recalled
+// together and used together is the same relation, so both signals
+// reinforce one count toward the same threshold.
 export interface CoUsageCounterPort {
   increment(input: {
     readonly workspaceId: string;
@@ -82,6 +236,28 @@ export interface PathRelationProposalServiceDeps {
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
+// Stable intake contract for non-counter producers (Wave-2 edge folding,
+// future entity/signal seeders). source/target anchors are PathAnchorRef so
+// object_facet / obligation / risk_concern / time_concern anchors are
+// expressible, not just plain object pairs. recallBiasSign decides family
+// (positive associative / negative lifecycle / 0 neutral marker such as
+// exception_to); governanceClass is clamped to the auto-build ceiling. why
+// is optional provenance appended to constitution.why_this_relation_exists.
+//
+// see also: spine-activation-design.md §E2 — seed-profile table
+export interface SubmitCandidateInput {
+  readonly workspaceId: string;
+  readonly sourceAnchor: PathAnchorRef;
+  readonly targetAnchor: PathAnchorRef;
+  readonly relationKind: string;
+  readonly initialStrength: number;
+  readonly governanceClass: PathGovernanceClass;
+  readonly evidenceBasis: readonly string[];
+  readonly recallBiasSign: 1 | 0 | -1;
+  readonly recallBiasMagnitude?: number;
+  readonly why?: readonly string[];
+}
+
 export class PathRelationProposalService {
   private readonly counterStore: CoUsageCounterPort;
   private readonly threshold: number;
@@ -99,14 +275,83 @@ export class PathRelationProposalService {
     this.generateId = deps.generateId ?? (() => randomUUID());
   }
 
+  // Co-usage seeder: memories reported used together. Counter-gated; on
+  // reaching the threshold it mints a co_recalled-family path. Co-usage and
+  // co-recall share one counter space and one seed profile.
   public async onCoUsage(
     usedObjectIds: readonly string[],
     workspaceId: string
   ): Promise<void> {
-    if (usedObjectIds.length < 2) {
+    await this.accrueCoOccurrence(usedObjectIds, workspaceId);
+  }
+
+  // invariant: co-recall seeder. Counts a pair when delivered together in
+  // one recall; does not require a used-report. This is the receiving API —
+  // the recall-side hook that calls it is owned by the recall delivery path,
+  // not this file. Shares one counter space and the co_recalled seed profile
+  // with onCoUsage, so both signals reinforce one count toward the threshold.
+  // see also: recall-service co-recall delivery hook (caller, owned elsewhere)
+  public async onCoRecall(
+    recalledObjectIds: readonly string[],
+    workspaceId: string
+  ): Promise<void> {
+    await this.accrueCoOccurrence(recalledObjectIds, workspaceId);
+  }
+
+  // Generalized candidate intake. Non-counter producers submit a fully
+  // differentiated candidate; it mints once (subject to durable dedup and
+  // governance clamp). This is the stable signature Wave-2 edge folding
+  // calls. Returns true when a path now exists for the pair (either freshly
+  // minted or already present), false on a swallowed materialize failure.
+  public async submitCandidate(input: SubmitCandidateInput): Promise<boolean> {
+    const recallBias = input.recallBiasSign * (input.recallBiasMagnitude ?? 0.5);
+    const governanceClass = clampGovernanceToAutoBuildCeiling(input.governanceClass);
+    try {
+      return await this.materialize({
+        workspaceId: input.workspaceId,
+        sourceAnchor: input.sourceAnchor,
+        targetAnchor: input.targetAnchor,
+        relationKind: input.relationKind,
+        initialStrength: input.initialStrength,
+        governanceClass,
+        evidenceBasis: input.evidenceBasis,
+        recallBias,
+        supportEventsCount: 0,
+        why: input.why ?? [
+          `${input.relationKind} candidate submitted by producer`
+        ]
+      });
+    } catch (err) {
+      this.warn("PathRelation submitCandidate failed", {
+        workspace_id: input.workspaceId,
+        relation_kind: input.relationKind,
+        error: errorMessage(err)
+      });
+      return false;
+    }
+  }
+
+  public async evictExpired(nowMs?: number, ttlMs?: number): Promise<number> {
+    const cutoffMs = (nowMs ?? this.nowMs()) - (ttlMs ?? this.counterTtlMs);
+    return await this.counterStore.evictExpired(new Date(cutoffMs).toISOString());
+  }
+
+  public async counterSize(): Promise<number> {
+    return await this.counterStore.size();
+  }
+
+  // Shared counter-gated accrual for co-usage and co-recall. Each unordered
+  // pair increments the durable counter; on reaching the threshold it mints
+  // a co_recalled-family path via the same materialize path submitCandidate
+  // uses.
+  private async accrueCoOccurrence(
+    objectIds: readonly string[],
+    workspaceId: string
+  ): Promise<void> {
+    if (objectIds.length < 2) {
       return;
     }
-    const unique = [...new Set(usedObjectIds)].sort();
+    const unique = [...new Set(objectIds)].sort();
     const seenAt = this.now();
     for (let i = 0; i < unique.length; i += 1) {
       for (let j = i + 1; j < unique.length; j += 1) {
@@ -122,7 +367,7 @@ export class PathRelationProposalService {
           continue;
         }
         try {
-          const proposed = await this.propose(workspaceId, low, high);
+          const proposed = await this.proposeCoRecalled(workspaceId, low, high);
           if (proposed) {
             await this.counterStore.delete(workspaceId, low, high);
           }
@@ -138,28 +383,55 @@ export class PathRelationProposalService {
     }
   }
 
-  public async evictExpired(nowMs?: number, ttlMs?: number): Promise<number> {
-    const cutoffMs = (nowMs ?? this.nowMs()) - (ttlMs ?? this.counterTtlMs);
-    return await this.counterStore.evictExpired(new Date(cutoffMs).toISOString());
-  }
-
-  public async counterSize(): Promise<number> {
-    return await this.counterStore.size();
-  }
-
-  private async propose(
+  private async proposeCoRecalled(
     workspaceId: string,
     sourceMemoryId: string,
     targetMemoryId: string
   ): Promise<boolean> {
-    if (this.deps.repo.findByAnchorMemoryId !== undefined) {
-      const existing = await this.deps.repo.findByAnchorMemoryId(sourceMemoryId, workspaceId);
+    const profile = CO_RECALLED_SEED_PROFILE;
+    return await this.materialize({
+      workspaceId,
+      sourceAnchor: { kind: "object", object_id: sourceMemoryId },
+      targetAnchor: { kind: "object", object_id: targetMemoryId },
+      relationKind: profile.relationKind,
+      initialStrength: profile.initialStrength,
+      governanceClass: clampGovernanceToAutoBuildCeiling(profile.governanceClass),
+      evidenceBasis: profile.evidenceBasis,
+      recallBias: profile.recallBiasSign * profile.recallBiasMagnitude,
+      supportEventsCount: this.threshold,
+      why: [`co-recalled-used >= ${this.threshold} times`]
+    });
+  }
+
+  // Single materialize path for every seeder. Differentiated parameters
+  // arrive resolved (governance already clamped, recall_bias already
+  // signed). Durable dedup + event-first transactional write live here.
+  private async materialize(params: {
+    readonly workspaceId: string;
+    readonly sourceAnchor: PathAnchorRef;
+    readonly targetAnchor: PathAnchorRef;
+    readonly relationKind: string;
+    readonly initialStrength: number;
+    readonly governanceClass: PathGovernanceClass;
+    readonly evidenceBasis: readonly string[];
+    readonly recallBias: number;
+    readonly supportEventsCount: number;
+    readonly why: readonly string[];
+  }): Promise<boolean> {
+    const sourceId = anchorObjectId(params.sourceAnchor);
+    const targetId = anchorObjectId(params.targetAnchor);
+    if (
+      this.deps.repo.findByAnchorMemoryId !== undefined &&
+      sourceId !== undefined &&
+      targetId !== undefined
+    ) {
+      const existing = await this.deps.repo.findByAnchorMemoryId(sourceId, params.workspaceId);
       const alreadyLinked = existing.some((relation) =>
-        anchorPointsAt(relation, sourceMemoryId, targetMemoryId)
+        anchorPointsAt(relation, sourceId, targetId)
       );
       if (alreadyLinked) {
-        // Counter row is stale once a durable path exists; drop it so the
-        // pair stops re-querying on every future co-usage.
+        // Counter row is stale once a durable path exists; caller drops it
+        // so the pair stops re-querying on every future co-occurrence.
         return true;
       }
     }
@@ -167,29 +439,27 @@ export class PathRelationProposalService {
     const occurredAt = this.now();
     const relation: PathRelation = PathRelationSchema.parse({
       path_id: this.generateId(),
-      workspace_id: workspaceId,
+      workspace_id: params.workspaceId,
       anchors: {
-        source_anchor: { kind: "object", object_id: sourceMemoryId },
-        target_anchor: { kind: "object", object_id: targetMemoryId }
+        source_anchor: params.sourceAnchor,
+        target_anchor: params.targetAnchor
       },
       constitution: {
-        relation_kind: "supports_recall",
-        why_this_relation_exists: [
-          `co-recalled-used >= ${this.threshold} times`
-        ]
+        relation_kind: params.relationKind,
+        why_this_relation_exists: params.why
       },
       effect_vector: {
         salience: 0.5,
-        recall_bias: 0.5,
+        recall_bias: params.recallBias,
         verification_bias: 0,
         unfinishedness_bias: 0,
         default_manifestation_preference: "lens_entry"
       },
       plasticity_state: {
-        strength: 0.3,
+        strength: params.initialStrength,
         direction_bias: "bidirectional_asymmetric",
         stability_class: "stable",
-        support_events_count: this.threshold,
+        support_events_count: params.supportEventsCount,
         contradiction_events_count: 0
       },
       lifecycle: {
@@ -197,9 +467,9 @@ export class PathRelationProposalService {
         retirement_rule: "manual"
       },
       legitimacy: {
-        evidence_basis: ["recalls_edge_co_usage"],
+        evidence_basis: params.evidenceBasis,
         // see also: path-manifestation-policy.ts GOVERNANCE_PROMOTION_THRESHOLDS
-        governance_class: "attention_only"
+        governance_class: params.governanceClass
       },
       created_at: occurredAt,
       updated_at: occurredAt

@@ -67,7 +67,12 @@ export const DYNAMICS_CONSTANTS = Object.freeze({
     strength_floor: 0,
     strength_ceiling: 1,
     retirement_strength_threshold: 0.05,
-    retirement_inactivity_ms: 30 * 24 * 3600 * 1000
+    retirement_inactivity_ms: 30 * 24 * 3600 * 1000,
+    // Positive-associative-family paths that hit retirement_strength_threshold
+    // while inactive go dormant (reversible) instead of retired (terminal).
+    // A dormant path is restored to this strength when a revive trigger
+    // fires (usage receipt or explicit override).
+    revive_strength: 0.2
   })
 } as const);
 

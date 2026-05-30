@@ -240,7 +240,8 @@ describe("Phase C shared-contract foundation", () => {
       strength_floor: 0,
       strength_ceiling: 1,
       retirement_strength_threshold: 0.05,
-      retirement_inactivity_ms: 30 * 24 * 3600 * 1000
+      retirement_inactivity_ms: 30 * 24 * 3600 * 1000,
+      revive_strength: 0.2
     });
     expect(Object.isFrozen(DYNAMICS_CONSTANTS.path_plasticity)).toBe(true);
   });

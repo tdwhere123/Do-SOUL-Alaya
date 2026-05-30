@@ -106,7 +106,16 @@ const hoisted = vi.hoisted(() => {
 
   const database = {
     filename: ":memory:",
-    connection: {},
+    // anchor: SqliteCoUsageCounterRepo (and the path-relation findByAnchors
+    // ad-hoc lookup) prepare statements at construction time, so the wiring
+    // fixture must expose a prepare() that returns inert statement handles.
+    connection: {
+      prepare: vi.fn(() => ({
+        run: vi.fn(() => ({ changes: 0 })),
+        get: vi.fn(() => undefined),
+        all: vi.fn(() => [])
+      }))
+    },
     close: vi.fn()
   };
 
@@ -868,6 +877,17 @@ vi.mock("@do-soul/alaya-core", () => {
     ConflictDetectionService: makeClass({
       detectAndLinkConflicts: vi.fn(async () => undefined)
     }),
+    ConsolidationExecutor: makeClass({
+      runCycle: vi.fn(async () => ({
+        workspace_id: "workspace-1",
+        committed_at: "2026-04-12T10:00:00.000Z",
+        promotions_committed: 0,
+        retirements_committed: 0,
+        governance_changes_committed: 0,
+        direction_changes_committed: 0,
+        fuse_outcome: "ok"
+      }))
+    }),
     PathRelationProposalService: makeClass({
       onCoUsage: vi.fn(async () => undefined),
       evictExpired: vi.fn(async () => 0),
@@ -897,7 +917,11 @@ vi.mock("@do-soul/alaya-core", () => {
       return {};
     }),
     createGlobalMemoryRecallPort: vi.fn().mockImplementation(() => ({
-      recall: vi.fn(async () => [])
+      recall: vi.fn(async () => []),
+      // anchor: index.ts createAlayaDaemonRuntime subscribes the recall port
+      // to invalidations and keeps the returned disposable; the wiring
+      // fixture exposes an inert subscription so bootstrap does not throw.
+      subscribeToInvalidations: vi.fn(() => ({ dispose: vi.fn() }))
     })),
     rebuildCountersFromEventLog: hoisted.rebuildCountersFromEventLog,
     // anchor: jieba warm-up call site lives in apps/core-daemon/src/index.ts

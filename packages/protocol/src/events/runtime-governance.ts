@@ -43,6 +43,8 @@ const runtimeGovernanceEventTypeValues = [
   "path.relation_weakened",
   "path.relation_redirected",
   "path.relation_retired",
+  "path.relation_dormant",
+  "path.relation_revived",
   "path.consolidation_completed",
   "path.consolidation_fused",
   "surface.drift_detected",
@@ -78,6 +80,10 @@ export const RuntimeGovernanceEventType = {
   PATH_RELATION_WEAKENED: "path.relation_weakened",
   PATH_RELATION_REDIRECTED: "path.relation_redirected",
   PATH_RELATION_RETIRED: "path.relation_retired",
+  // invariant: dormant is the positive-associative-family decay landing
+  // point (reversible), distinct from terminal retired. revived reverses it.
+  PATH_RELATION_DORMANT: "path.relation_dormant",
+  PATH_RELATION_REVIVED: "path.relation_revived",
   PATH_CONSOLIDATION_COMPLETED: "path.consolidation_completed",
   PATH_CONSOLIDATION_FUSED: "path.consolidation_fused",
   SURFACE_DRIFT_DETECTED: "surface.drift_detected",
@@ -251,6 +257,33 @@ export const PathRelationRetiredPayloadSchema = z
     retirement_reason: NonEmptyStringSchema,
     final_strength: z.number(),
     retired_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+// invariant: dormant clears effect_vector.salience to 0 and drops the path
+// out of recall while leaving the row in the DB; strength is preserved so a
+// revive can restore the path. active <-> dormant is reversible.
+export const PathRelationDormantPayloadSchema = z
+  .object({
+    path_id: NonEmptyStringSchema,
+    dormancy_reason: NonEmptyStringSchema,
+    dormant_strength: z.number(),
+    dormant_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+// invariant: revive resets strength to the configured revive floor and
+// returns the path to active. The trigger is recorded so an audit replayer
+// can distinguish a usage-driven revive from an explicit override.
+export const PathRelationRevivedPayloadSchema = z
+  .object({
+    path_id: NonEmptyStringSchema,
+    revive_trigger: NonEmptyStringSchema,
+    previous_strength: z.number(),
+    new_strength: z.number(),
+    revived_at: IsoDatetimeStringSchema
   })
   .strict()
   .readonly();
@@ -510,6 +543,8 @@ const runtimeGovernancePayloadSchemas = {
   [RuntimeGovernanceEventType.PATH_RELATION_WEAKENED]: PathRelationWeakenedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED]: PathRelationRedirectedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_RETIRED]: PathRelationRetiredPayloadSchema,
+  [RuntimeGovernanceEventType.PATH_RELATION_DORMANT]: PathRelationDormantPayloadSchema,
+  [RuntimeGovernanceEventType.PATH_RELATION_REVIVED]: PathRelationRevivedPayloadSchema,
   [RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED]: SurfaceDriftDetectedPayloadSchema,
   [RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_ACQUIRED]: SurfaceDriftLeaseAcquiredPayloadSchema,
   [RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASED]: SurfaceDriftLeaseReleasedPayloadSchema,
@@ -599,6 +634,14 @@ const PathRelationRedirectedEventObjectSchema = createRuntimeGovernanceEventObje
 const PathRelationRetiredEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
   PathRelationRetiredPayloadSchema
+);
+const PathRelationDormantEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
+  RuntimeGovernanceEventType.PATH_RELATION_DORMANT,
+  PathRelationDormantPayloadSchema
+);
+const PathRelationRevivedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
+  RuntimeGovernanceEventType.PATH_RELATION_REVIVED,
+  PathRelationRevivedPayloadSchema
 );
 const SurfaceDriftDetectedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED,
@@ -696,6 +739,8 @@ export const PathRelationReinforcedEventSchema = PathRelationReinforcedEventObje
 export const PathRelationWeakenedEventSchema = PathRelationWeakenedEventObjectSchema.readonly();
 export const PathRelationRedirectedEventSchema = PathRelationRedirectedEventObjectSchema.readonly();
 export const PathRelationRetiredEventSchema = PathRelationRetiredEventObjectSchema.readonly();
+export const PathRelationDormantEventSchema = PathRelationDormantEventObjectSchema.readonly();
+export const PathRelationRevivedEventSchema = PathRelationRevivedEventObjectSchema.readonly();
 export const SurfaceDriftDetectedEventSchema = SurfaceDriftDetectedEventObjectSchema.readonly();
 export const SurfaceDriftLeaseAcquiredEventSchema =
   SurfaceDriftLeaseAcquiredEventObjectSchema.readonly();
@@ -745,6 +790,8 @@ export const RuntimeGovernanceEventUnionSchema = z
     PathRelationWeakenedEventObjectSchema,
     PathRelationRedirectedEventObjectSchema,
     PathRelationRetiredEventObjectSchema,
+    PathRelationDormantEventObjectSchema,
+    PathRelationRevivedEventObjectSchema,
     SurfaceDriftDetectedEventObjectSchema,
     SurfaceDriftLeaseAcquiredEventObjectSchema,
     SurfaceDriftLeaseReleasedEventObjectSchema,
@@ -804,6 +851,8 @@ export type PathRelationReinforcedPayload = z.infer<typeof PathRelationReinforce
 export type PathRelationWeakenedPayload = z.infer<typeof PathRelationWeakenedPayloadSchema>;
 export type PathRelationRedirectedPayload = z.infer<typeof PathRelationRedirectedPayloadSchema>;
 export type PathRelationRetiredPayload = z.infer<typeof PathRelationRetiredPayloadSchema>;
+export type PathRelationDormantPayload = z.infer<typeof PathRelationDormantPayloadSchema>;
+export type PathRelationRevivedPayload = z.infer<typeof PathRelationRevivedPayloadSchema>;
 export type SurfaceDriftDetectedPayload = z.infer<typeof SurfaceDriftDetectedPayloadSchema>;
 export type SurfaceDriftLeaseAcquiredPayload = z.infer<typeof SurfaceDriftLeaseAcquiredPayloadSchema>;
 export type SurfaceDriftLeaseReleasedPayload = z.infer<typeof SurfaceDriftLeaseReleasedPayloadSchema>;

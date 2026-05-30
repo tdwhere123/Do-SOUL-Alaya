@@ -87,7 +87,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
     expect(eventInputs[0].payload_json).toMatchObject({
       path_id: "path-fixed-1",
       workspace_id: "workspace-1",
-      relation_kind: "supports_recall",
+      relation_kind: "co_recalled",
       governance_class: "attention_only",
       source_anchor_kind: "object",
       target_anchor_kind: "object"

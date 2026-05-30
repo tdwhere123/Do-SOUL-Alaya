@@ -9,6 +9,7 @@ import {
   GardenTier,
   HealthEventKind,
   RuntimeGovernanceEventType,
+  isPathActiveForRecall,
   parseGardenEventPayload,
   parseRuntimeGovernanceEventPayload,
   type AuditorEventLogPort,
@@ -440,7 +441,7 @@ export function createGardenRuntime(input: {
           object_id: objectId
         }));
         const paths = await input.pathRelationRepo.findByAnchors(workspaceId, anchors);
-        return paths.filter((path) => path.lifecycle.status !== "retired");
+        return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
       }
     })
   });

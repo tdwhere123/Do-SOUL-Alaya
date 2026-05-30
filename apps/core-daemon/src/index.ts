@@ -13,6 +13,7 @@ import {
   RetentionPolicy,
   SoulActiveConstraintSchema,
   SoulProposalCreatedPayloadSchema,
+  isPathActiveForRecall,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import {
@@ -549,7 +550,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // invariant: PathActivationCandidateProducer reads PathRelation rows
   // anchored on the recall candidate memory ids. The reader port adapter
   // expands each memory id to an `object` PathAnchorRef, queries
-  // pathRelationRepo.findByAnchors, and filters retired rows.
+  // pathRelationRepo.findByAnchors, and filters out non-active rows
+  // (retired and dormant) so only recall-active paths reach activation.
   const pathActivationReaderPort: PathActivationCandidateProducerPathReaderPort = {
     async findActiveByAnchorObjectIds(workspaceId, memoryObjectIds) {
       if (memoryObjectIds.length === 0) {
@@ -560,7 +562,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         object_id: objectId
       }));
       const paths = await pathRelationRepo.findByAnchors(workspaceId, anchors);
-      return paths.filter((path) => path.lifecycle.status !== "retired");
+      return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
     }
   };
   const pathActivationCandidateProducer = new PathActivationCandidateProducer({
@@ -651,7 +653,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       const normalized = new Set(windowDigests.map(normalizeRecallTimeConcernWindowDigest));
       const paths = await pathRelationRepo.findByWorkspace(workspaceId);
       return paths.filter((path) =>
-        path.lifecycle.status !== "retired" &&
+        isPathActiveForRecall(path.lifecycle.status) &&
         [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
           anchor.kind === "time_concern" &&
           normalized.has(normalizeRecallTimeConcernWindowDigest(anchor.window_digest))

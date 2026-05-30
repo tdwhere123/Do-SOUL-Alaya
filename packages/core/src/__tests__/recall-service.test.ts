@@ -1566,7 +1566,7 @@ describe("RecallService", () => {
         target_anchor: { kind: "object", object_id: "path-target" }
       },
       constitution: {
-        relation_kind: "supports_recall",
+        relation_kind: "co_recalled",
         why_this_relation_exists: ["test relation"]
       },
       effect_vector: {

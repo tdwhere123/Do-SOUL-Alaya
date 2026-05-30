@@ -59,6 +59,8 @@ describe("Phase C event registry", () => {
       "path.relation_weakened",
       "path.relation_redirected",
       "path.relation_retired",
+      "path.relation_dormant",
+      "path.relation_revived",
       "path.consolidation_completed",
       "path.consolidation_fused",
       "surface.drift_detected",

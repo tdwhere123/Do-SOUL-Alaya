@@ -1,5 +1,6 @@
 import {
   TrustStateEventType,
+  isPathActiveForRecall,
   type EventLogEntry,
   type PathRelation,
   type SoulContextObjectIdentity,
@@ -400,7 +401,10 @@ export function createRecallPathPlasticityPort(deps: {
       }
 
       for (const path of paths) {
-        if (isRetiredPath(path)) {
+        // invariant: recall path_plasticity strength only counts recall-active
+        // paths. Retired (terminal) and dormant (cold storage) are excluded so
+        // a dormant path's strength never re-enters recall scoring.
+        if (!isPathActiveForRecall(path.lifecycle.status)) {
           continue;
         }
         for (const memoryId of getDirectionEligibleObjectAnchorMemoryIds(path, requestedMemoryIds)) {
@@ -413,10 +417,6 @@ export function createRecallPathPlasticityPort(deps: {
       return result;
     }
   };
-}
-
-function isRetiredPath(path: Readonly<PathRelation>): boolean {
-  return (path.lifecycle as PathLifecycleWithStatus).status === "retired";
 }
 
 function getDirectionEligibleObjectAnchorMemoryIds(
@@ -444,7 +444,3 @@ function getDirectionEligibleObjectAnchorMemoryIds(
   }
   return [...memoryIds];
 }
-
-type PathLifecycleWithStatus = PathRelation["lifecycle"] & {
-  readonly status?: "active" | "retired";
-};

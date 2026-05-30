@@ -61,6 +61,17 @@ export const PathGovernanceClassSchema = z.enum(pathGovernanceClassValues);
 export const PathLifecycleStatusSchema = z.enum(pathLifecycleStatusValues);
 export const ManifestationPreferenceSchema = z.enum(manifestationPreferenceValues);
 
+// invariant: only "active" paths participate in recall and activation. Both
+// "retired" (terminal) and "dormant" (reversible cold storage) are excluded.
+// A path whose status is unset is treated as active for backward
+// compatibility with rows persisted before lifecycle.status was populated.
+// see also: path-plasticity-service.ts (active <-> dormant transitions).
+export function isPathActiveForRecall(
+  status: PathLifecycleStatus | undefined
+): boolean {
+  return status === undefined || status === "active";
+}
+
 const ObjectPathAnchorRefSchema = z
   .object({
     kind: z.literal("object"),

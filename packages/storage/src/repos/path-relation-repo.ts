@@ -3,6 +3,7 @@ import {
   PathRelationSchema,
   serializePathAnchorRef,
   type PathAnchorRef,
+  type PathLifecycleStatus,
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import type { SqliteConnection, StorageDatabase } from "../db.js";
@@ -83,7 +84,7 @@ interface PathRelationRow {
 }
 
 type PathLifecycleWithStatus = PathRelation["lifecycle"] & {
-  readonly status?: "active" | "retired";
+  readonly status?: PathLifecycleStatus;
 };
 
 export class SqlitePathRelationRepo implements PathRelationRepo {
