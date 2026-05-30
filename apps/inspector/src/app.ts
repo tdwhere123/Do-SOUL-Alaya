@@ -5,6 +5,7 @@ import { createInspectorAuthMiddleware } from "./auth.js";
 import { registerInspectorBenchSummaryRoutes } from "./routes/bench-summary.js";
 import { registerInspectorConfigRoutes } from "./routes/config.js";
 import { registerInspectorGraphRoutes } from "./routes/graph.js";
+import { registerInspectorHealthInboxRoutes } from "./routes/health-inbox.js";
 import { registerInspectorMemoryEntryRoutes } from "./routes/memory-entries.js";
 import { registerInspectorProposalRoutes } from "./routes/proposals.js";
 import { registerInspectorRecallStatsRoutes } from "./routes/recall-stats.js";
@@ -29,6 +30,7 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "GET /api/bench-trend",
   "GET /api/embedding-status/:workspaceId",
   "GET /api/graph/:workspaceId",
+  "GET /api/workspaces/:workspaceId/health-inbox",
   "GET /api/memory-entries/:workspaceId",
   "GET /api/pointers/:workspaceId/:objectId",
   "GET /api/recall-stats/:workspaceId",
@@ -41,6 +43,7 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "POST /api/proposals/:workspaceId/memory/:memoryId/rewrite",
   "POST /api/proposals/:workspaceId/memory/:memoryId/downgrade",
   "POST /api/proposals/:workspaceId/memory/:memoryId/retire",
+  "POST /api/workspaces/:workspaceId/soul/memory/:memoryId/proposals/promote-strictly-governed",
   "POST /api/soul/search/:workspaceId"
 ] as const);
 
@@ -78,6 +81,7 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
   };
   registerInspectorConfigRoutes(app, proxyOptions);
   registerInspectorGraphRoutes(app, proxyOptions);
+  registerInspectorHealthInboxRoutes(app, proxyOptions);
   registerInspectorMemoryEntryRoutes(app, proxyOptions);
   registerInspectorStatusRoutes(app, proxyOptions);
   registerInspectorProposalRoutes(app, proxyOptions);

@@ -48,6 +48,12 @@ describe("OverviewPage", () => {
           data: { proposals: [], total_count: 5 }
         });
       }
+      if (url.includes("/recall-stats/ws1")) {
+        return jsonResponse({
+          success: true,
+          data: { recall: { total: 42 }, usage: { used_ratio: 0.5 } }
+        });
+      }
       if (url.includes("/status")) {
         return jsonResponse({ success: true, data: VALID_STATUS });
       }
@@ -73,12 +79,20 @@ describe("OverviewPage", () => {
     setWorkspaceId(null);
   });
 
-  it("renders the four summary cards", async () => {
+  it("renders the three summary cards", async () => {
     renderOverview();
     expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
     expect(screen.getByTestId("overview-card-proposals")).toBeTruthy();
     expect(screen.getByTestId("overview-card-recall")).toBeTruthy();
-    expect(screen.getByTestId("overview-card-tier")).toBeTruthy();
+    expect(screen.queryByTestId("overview-card-tier")).toBeNull();
+  });
+
+  it("wires the recall card to the live recall-stats used-ratio", async () => {
+    renderOverview();
+    await waitFor(() =>
+      expect(screen.getByTestId("overview-card-recall").textContent).toContain("50.0%")
+    );
+    expect(screen.getByTestId("overview-card-recall").textContent).toContain("42");
   });
 
   it("shows OPERATIONAL when daemon.ready=true", async () => {

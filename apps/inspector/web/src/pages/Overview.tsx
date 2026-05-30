@@ -5,7 +5,6 @@ import {
   CheckSquare,
   FlaskConical,
   Globe2,
-  Layers,
   Repeat2,
   RefreshCcw,
   ShieldCheck,
@@ -47,10 +46,24 @@ interface BenchSummaryEnvelope {
   };
 }
 
+interface RecallStatsEnvelope {
+  readonly success: boolean;
+  readonly data: {
+    readonly recall: { readonly total: number };
+    readonly usage: { readonly used_ratio: number };
+  };
+}
+
+const OVERVIEW_RECALL_WINDOW_HOURS = 24 * 7;
+
 export default function OverviewPage() {
   const { t } = useI18n();
   const { state, indicator, refresh, refreshing } = useDaemonHealth();
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [recallStats, setRecallStats] = useState<{
+    readonly total: number;
+    readonly usedRatio: number;
+  } | null>(null);
   const [benchSelf, setBenchSelf] = useState<BenchSummaryShape | null>(null);
   const [benchPublic, setBenchPublic] = useState<BenchSummaryShape | null>(null);
   const [benchPublicMultiturn, setBenchPublicMultiturn] =
@@ -73,6 +86,33 @@ export default function OverviewPage() {
         if (cancelled) return;
         if ((err as ApiError).status === 401) return;
         setPendingCount(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (workspaceId === null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const since = new Date(
+          Date.now() - OVERVIEW_RECALL_WINDOW_HOURS * 60 * 60 * 1000
+        ).toISOString();
+        const envelope = await apiFetch<RecallStatsEnvelope>(
+          `/recall-stats/${workspaceId}?since=${encodeURIComponent(since)}`
+        );
+        if (cancelled) return;
+        setRecallStats({
+          total: envelope.data.recall.total,
+          usedRatio: envelope.data.usage.used_ratio
+        });
+      } catch (err) {
+        if (cancelled) return;
+        if ((err as ApiError).status === 401) return;
+        setRecallStats(null);
       }
     })();
     return () => {
@@ -154,13 +194,13 @@ export default function OverviewPage() {
           </div>
         </header>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <SummaryCard
             icon={<Zap className="w-4 h-4" />}
             label={t("overview:card.daemon.label")}
             value={t(daemonValue)}
             subtitle={t("overview:card.daemon.subtitle")}
-            link={{ to: "/status", text: t("overview:linkStatus") }}
+            link={{ to: "/system?tab=status", text: t("overview:linkStatus") }}
             testId="overview-card-daemon"
           />
           <SummaryCard
@@ -172,23 +212,20 @@ export default function OverviewPage() {
                 ? t("overview:card.proposals.empty")
                 : t("overview:card.proposals.subtitle")
             }
-            link={{ to: "/proposals", text: t("overview:linkProposals") }}
+            link={{ to: "/governance?tab=proposals", text: t("overview:linkProposals") }}
             testId="overview-card-proposals"
           />
           <SummaryCard
             icon={<Activity className="w-4 h-4" />}
             label={t("overview:card.recall.label")}
-            value={t("overview:card.recall.placeholder")}
-            subtitle={t("overview:card.recall.subtitle")}
+            value={recallStats === null ? "—" : formatRatio(recallStats.usedRatio)}
+            subtitle={
+              recallStats === null
+                ? t("overview:card.recall.subtitle")
+                : t("overview:card.recall.usage", { total: recallStats.total })
+            }
             link={{ to: "/recall", text: t("overview:linkRecall") }}
             testId="overview-card-recall"
-          />
-          <SummaryCard
-            icon={<Layers className="w-4 h-4" />}
-            label={t("overview:card.tier.label")}
-            value={t("overview:card.tier.placeholder")}
-            subtitle={t("overview:card.tier.subtitle")}
-            testId="overview-card-tier"
           />
         </div>
 

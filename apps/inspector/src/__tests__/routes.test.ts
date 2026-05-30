@@ -23,6 +23,7 @@ describe("inspector routes", () => {
       "GET /api/bench-trend",
       "GET /api/embedding-status/:workspaceId",
       "GET /api/graph/:workspaceId",
+      "GET /api/workspaces/:workspaceId/health-inbox",
       "GET /api/memory-entries/:workspaceId",
       "GET /api/pointers/:workspaceId/:objectId",
       "GET /api/recall-stats/:workspaceId",
@@ -35,6 +36,7 @@ describe("inspector routes", () => {
       "POST /api/proposals/:workspaceId/memory/:memoryId/rewrite",
       "POST /api/proposals/:workspaceId/memory/:memoryId/downgrade",
       "POST /api/proposals/:workspaceId/memory/:memoryId/retire",
+      "POST /api/workspaces/:workspaceId/soul/memory/:memoryId/proposals/promote-strictly-governed",
       "POST /api/soul/search/:workspaceId"
     ]);
   });
@@ -369,6 +371,85 @@ describe("inspector routes", () => {
         desktop: "1"
       }
     ]);
+  });
+
+  // Inspector forwards the Health Inbox projection GET and the
+  // promote-to-strictly_governed proposal POST to the daemon's
+  // workspace-scoped HTTP endpoints without importing daemon code.
+  it("proxies health-inbox and promote-strictly-governed through to the daemon", async () => {
+    const calls: {
+      url: string;
+      method: string;
+      body: string | null;
+      requestToken: string | null;
+    }[] = [];
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      env: { ALAYA_REQUEST_TOKEN: "daemon-request-token" },
+      fetchImpl: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        calls.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: init?.body === undefined ? null : String(init.body),
+          requestToken: headers.get("x-request-token")
+        });
+        return Response.json({ success: true, data: { ok: true } });
+      }
+    });
+
+    await app.request("/api/workspaces/ws1/health-inbox?token=token&state=pending");
+    await app.request(
+      "/api/workspaces/ws1/soul/memory/mem-1/proposals/promote-strictly-governed?token=token",
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json" }
+      }
+    );
+
+    expect(calls).toEqual([
+      {
+        url: "http://daemon.local/workspaces/ws1/health-inbox?state=pending",
+        method: "GET",
+        body: null,
+        requestToken: null
+      },
+      {
+        url: "http://daemon.local/workspaces/ws1/soul/memory/mem-1/proposals/promote-strictly-governed",
+        method: "POST",
+        body: "{}",
+        requestToken: "daemon-request-token"
+      }
+    ]);
+  });
+
+  it("rejects health-inbox and promote paths that do not match the launch workspace", async () => {
+    const calls: string[] = [];
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async (input) => {
+        calls.push(String(input));
+        return Response.json({ success: true, data: { ok: true } });
+      }
+    });
+
+    const healthInbox = await app.request("/api/workspaces/ws2/health-inbox?token=token");
+    const promote = await app.request(
+      "/api/workspaces/ws2/soul/memory/mem-1/proposals/promote-strictly-governed?token=token",
+      { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }
+    );
+
+    expect(healthInbox.status).toBe(403);
+    expect(promote.status).toBe(403);
+    await expect(healthInbox.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    await expect(promote.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    expect(calls).toEqual([]);
   });
 
   it("rejects workspace-scoped API paths that do not match the launch workspace", async () => {
