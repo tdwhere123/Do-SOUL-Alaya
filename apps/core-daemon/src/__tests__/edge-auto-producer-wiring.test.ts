@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   CandidateMemorySignalSchema,
   MemoryDimension,
-  MemoryGraphEdgeType,
   RunMode,
   RunState,
   ScopeClass,
@@ -29,7 +28,6 @@ import {
   SqliteEventLogRepo,
   SqliteEvidenceCapsuleRepo,
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
   SqlitePathRelationRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo,
@@ -41,11 +39,9 @@ const NEW_MEMORY_ID = "22222222-2222-4222-8222-222222222222";
 const EVIDENCE_ID = "33333333-3333-4333-8333-333333333333";
 
 // invariant: the edge auto-producer folds into the governed path
-// candidate intake. A supports verdict no longer becomes an edge proposal
-// that can auto-accept into a durable memory_graph_edges row; it becomes a
-// weak attention_only path_relations row that only earns recall
-// eligibility through plasticity reinforcement. This wiring test pins both
-// halves: a path_relations row is written and no memory_graph_edges row is.
+// candidate intake. A supports verdict becomes a weak attention_only
+// path_relations row that only earns recall eligibility through plasticity
+// reinforcement. This wiring test pins that a path_relations row is written.
 describe("edge auto producer daemon wiring", () => {
   it("folds a supports verdict into a weak SUPPORTS path candidate, not a durable edge", async () => {
     const database = initDatabase({ filename: ":memory:" });
@@ -55,7 +51,6 @@ describe("edge auto producer daemon wiring", () => {
       const eventLogRepo = new SqliteEventLogRepo(database);
       const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
       const memoryRepo = new SqliteMemoryEntryRepo(database);
-      const memoryGraphEdgeRepo = new SqliteMemoryGraphEdgeRepo(database);
       const pathRelationRepo = new SqlitePathRelationRepo(database);
       const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
       const runtimeNotifier = {
@@ -149,17 +144,6 @@ describe("edge auto producer daemon wiring", () => {
       expect(supports!.legitimacy.governance_class).toBe("attention_only");
       expect(supports!.effect_vector.recall_bias).toBeGreaterThan(0);
       expect(supports!.plasticity_state.strength).toBeCloseTo(0.5, 5);
-
-      // No durable memory_graph_edges row is written — the B1 auto-accept
-      // injection surface is gone.
-      await expect(
-        memoryGraphEdgeRepo.findBySourceAndTarget(
-          NEW_MEMORY_ID,
-          OLD_MEMORY_ID,
-          MemoryGraphEdgeType.SUPPORTS,
-          "workspace-1"
-        )
-      ).resolves.toBeNull();
     } finally {
       database.close();
     }

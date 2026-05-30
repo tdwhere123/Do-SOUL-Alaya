@@ -87,7 +87,6 @@ import {
   SqliteHandoffGapRepo,
   SqliteKarmaEventRepo,
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
   SqliteOrphanRadarRepo,
   SqliteCoUsageCounterRepo,
   SqlitePathGraphSnapshotRepo,
@@ -256,7 +255,6 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
   const globalMemoryRepo = createOptionalGlobalMemoryRepo(database);
   const globalMemoryRecallCacheRepo = createOptionalGlobalMemoryRecallCacheRepo(database);
-  const memoryGraphEdgeRepo = new SqliteMemoryGraphEdgeRepo(database);
   const orphanDetectionEnabled = process.env.ORPHAN_DETECTION_ENABLED !== "false";
   const orphanRadarRepo = orphanDetectionEnabled ? new SqliteOrphanRadarRepo(database) : null;
   const projectMappingAnchorRepo = new SqliteProjectMappingAnchorRepo(database);
@@ -403,10 +401,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const graphExploreService = new GraphExploreService({
     // soul.explore_graph and recall graph_support counts both read the unified
-    // path plane via pathRelationRepo; only edge delete still routes through
-    // memoryGraphEdgeRepo.
+    // path plane via pathRelationRepo; this service is path-only.
     pathRepo: pathRelationRepo,
-    edgeRepo: memoryGraphEdgeRepo,
     eventLogRepo
   });
   const edgeProposalService = new EdgeProposalService({
@@ -713,7 +709,6 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     slotRepo,
     eventLogRepo,
     graphSupportPort: graphExploreService,
-    graphExpansionPort: memoryGraphEdgeRepo,
     projectMappingPort: projectMappingService,
     pathPlasticityPort: recallPathPlasticityPort,
     pathExpansionPort: recallPathExpansionPort,

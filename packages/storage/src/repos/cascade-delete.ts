@@ -51,7 +51,7 @@ export function cascadeDeleteRun(connection: SqliteConnection, runId: string): v
  *   2. runs deleted by workspace_id (triggers signals cascade).
  *   3. workspaces deleted last (triggers FK CASCADE on engine_bindings, slots,
  *      conflict_matrix_edges, surface_*, cross_cutting_permissions,
- *      memory_graph_edges, orphan_radar, project_mapping_anchors,
+ *      orphan_radar, project_mapping_anchors,
  *      path_relations, path_graph_snapshots, bootstrapping_records,
  *      drift_leases).
  *
@@ -88,7 +88,7 @@ export function cascadeDeleteWorkspace(connection: SqliteConnection, workspaceId
       deleteRuns.run(workspaceId);
       // Delete workspace last — FK CASCADE handles engine_bindings, slots,
       // conflict_matrix_edges, surface_*, cross_cutting_permissions,
-      // memory_graph_edges, orphan_radar, project_mapping_anchors,
+      // orphan_radar, project_mapping_anchors,
       // path_relations, path_graph_snapshots, bootstrapping_records,
       // drift_leases.
       deleteWorkspace.run(workspaceId);

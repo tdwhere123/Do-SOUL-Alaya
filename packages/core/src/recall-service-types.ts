@@ -4,8 +4,6 @@ import type {
   EvidenceCapsule,
   MemoryDimension as MemoryDimensionType,
   MemoryEntry,
-  MemoryGraphEdge,
-  MemoryGraphEdgeTypeValue,
   PathAnchorRef,
   PathRelation,
   ProjectMappingAnchor,
@@ -160,14 +158,6 @@ export interface RecallServicePathPlasticityPort {
   ): Promise<ReadonlyMap<string, number>>;
 }
 
-export interface RecallServiceGraphExpansionPort {
-  findByMemoryId(
-    memoryId: string,
-    workspaceId: string,
-    edgeTypes?: readonly MemoryGraphEdgeTypeValue[]
-  ): Promise<readonly Readonly<MemoryGraphEdge>[]>;
-}
-
 export interface RecallServicePathExpansionPort {
   findByAnchors(
     workspaceId: string,
@@ -306,7 +296,6 @@ export interface RecallServiceDependencies {
   readonly claimResolverPort?: RecallServiceClaimResolverPort;
   readonly embeddingRecallService?: RecallServiceEmbeddingRecallPort;
   readonly pathPlasticityPort?: RecallServicePathPlasticityPort;
-  readonly graphExpansionPort?: RecallServiceGraphExpansionPort;
   readonly pathExpansionPort?: RecallServicePathExpansionPort;
   readonly activeConstraintsPort?: RecallServiceActiveConstraintsPort;
   readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;

@@ -4791,10 +4791,8 @@ describe("RecallService", () => {
           })
         ];
         const { dependencies } = createDependencies(memories);
-        const findByMemoryId = vi.fn(async () => []);
         const service = new RecallService({
-          ...dependencies,
-          graphExpansionPort: { findByMemoryId }
+          ...dependencies
           // entityExtractionPort intentionally unwired
         });
 

@@ -3,7 +3,6 @@ import {
   ControlPlaneObjectKind,
   FormationKind,
   MemoryDimension,
-  MemoryGraphEdgeType,
   RetentionPolicy,
   ScopeClass,
   SourceKind,
@@ -15,7 +14,6 @@ import {
 import {
   initDatabase,
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
   SqlitePathRelationRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo,
@@ -31,8 +29,8 @@ import {
 import { GraphExploreService } from "../graph-explore-service.js";
 import { RecallService, type RecallServiceDependencies } from "../recall-service.js";
 
-// Recall scoring must read per-memory inbound graph edges from SQLite, not
-// from a constant or process-local cache.
+// Recall scoring must read per-memory inbound graph support from SQLite (the
+// unified path plane), not from a constant or process-local cache.
 
 const databases = new Set<StorageDatabase>();
 
@@ -47,140 +45,6 @@ const MEM_TARGET = "00000000-0000-4000-8000-000000000001";
 const MEM_SRC_A = "00000000-0000-4000-8000-000000000002";
 const MEM_SRC_B = "00000000-0000-4000-8000-000000000003";
 const MEM_ISOLATED = "00000000-0000-4000-8000-000000000004";
-
-describe("RecallService end-to-end with real memory_graph_edges", () => {
-  it("lifts score_factors.graph_support above 0 when inbound RECALLS edges exist", async () => {
-    const { database, memoryEntryRepo, graphEdgeRepo } = await createRealStorage();
-
-    // Seed: 2 memories that the recall keyword should pick up.
-    await memoryEntryRepo.create(
-      createMemoryEntry({
-        object_id: MEM_TARGET,
-        content: "Use rtk pnpm for repo commands.",
-        domain_tags: ["repo"]
-      })
-    );
-    await memoryEntryRepo.create(
-      createMemoryEntry({
-        object_id: MEM_ISOLATED,
-        content: "Use rtk pnpm for repo commands.",
-        domain_tags: ["repo"]
-      })
-    );
-    // Edge sources (don't need to be in recall candidates themselves).
-    await memoryEntryRepo.create(
-      createMemoryEntry({
-        object_id: MEM_SRC_A,
-        content: "Earlier recall hit anchor",
-        domain_tags: ["history"]
-      })
-    );
-    await memoryEntryRepo.create(
-      createMemoryEntry({
-        object_id: MEM_SRC_B,
-        content: "Earlier recall hit anchor",
-        domain_tags: ["history"]
-      })
-    );
-
-    // 2 inbound RECALLS edges to MEM_TARGET → weighted sum = 0.6;
-    // normalize at /3 → graph_support factor 0.2.
-    await graphEdgeRepo.create({
-      edge_id: "edge-recalls-1",
-      source_memory_id: MEM_SRC_A,
-      target_memory_id: MEM_TARGET,
-      edge_type: MemoryGraphEdgeType.RECALLS,
-      workspace_id: "workspace-1",
-      created_at: "2026-05-13T00:00:00.000Z"
-    });
-    await graphEdgeRepo.create({
-      edge_id: "edge-recalls-2",
-      source_memory_id: MEM_SRC_B,
-      target_memory_id: MEM_TARGET,
-      edge_type: MemoryGraphEdgeType.RECALLS,
-      workspace_id: "workspace-1",
-      created_at: "2026-05-13T00:00:01.000Z"
-    });
-    // MEM_ISOLATED has 0 inbound edges → its graph_support stays 0.
-
-    const service = createServiceWithRealGraphSupport({
-      memories: await memoryEntryRepo.findByWorkspaceId("workspace-1", StorageTier.HOT),
-      graphEdgeRepo
-    });
-
-    const result = await service.recall({
-      taskSurface: createTaskSurface("rtk pnpm commands"),
-      workspaceId: "workspace-1",
-      runId: "run-1",
-      strategy: "build"
-    });
-
-    const targetCandidate = result.candidates.find((c) => c.object_id === MEM_TARGET);
-    const isolatedCandidate = result.candidates.find((c) => c.object_id === MEM_ISOLATED);
-
-    expect(targetCandidate, "target memory should be among recall candidates").toBeDefined();
-    expect(isolatedCandidate, "isolated memory should also be among recall candidates").toBeDefined();
-
-    // The headline acceptance: graph_support is non-zero for the memory
-    // that has inbound RECALLS edges in the real storage path.
-    expect(targetCandidate?.score_factors?.graph_support).toBeGreaterThan(0);
-
-    // And remains 0 for a sibling memory with no inbound edges — proving
-    // the value came through the per-memory query, not a constant.
-    expect(isolatedCandidate?.score_factors?.graph_support ?? 0).toBe(0);
-
-    database.close();
-    databases.delete(database);
-  });
-
-  it("supersedes inbound edges count as negative weight but clamp to 0 (documented limitation)", async () => {
-    const { database, memoryEntryRepo, graphEdgeRepo } = await createRealStorage();
-
-    await memoryEntryRepo.create(
-      createMemoryEntry({
-        object_id: MEM_TARGET,
-        content: "Old preference superseded.",
-        domain_tags: ["repo"]
-      })
-    );
-    await memoryEntryRepo.create(
-      createMemoryEntry({
-        object_id: MEM_SRC_A,
-        content: "Newer preference",
-        domain_tags: ["repo"]
-      })
-    );
-
-    // One supersedes edge: weight = -0.5; normalizeGraphSupport clamps to 0
-    // (the documented floor-at-zero limitation).
-    await graphEdgeRepo.create({
-      edge_id: "edge-sup-1",
-      source_memory_id: MEM_SRC_A,
-      target_memory_id: MEM_TARGET,
-      edge_type: MemoryGraphEdgeType.SUPERSEDES,
-      workspace_id: "workspace-1",
-      created_at: "2026-05-13T00:00:00.000Z"
-    });
-
-    const service = createServiceWithRealGraphSupport({
-      memories: await memoryEntryRepo.findByWorkspaceId("workspace-1", StorageTier.HOT),
-      graphEdgeRepo
-    });
-
-    const result = await service.recall({
-      taskSurface: createTaskSurface("preference"),
-      workspaceId: "workspace-1",
-      runId: "run-1",
-      strategy: "build"
-    });
-
-    const targetCandidate = result.candidates.find((c) => c.object_id === MEM_TARGET);
-    expect(targetCandidate?.score_factors?.graph_support ?? -1).toBe(0);
-
-    database.close();
-    databases.delete(database);
-  });
-});
 
 // graph_support is fed by GraphExploreService.countInbound* which now read the
 // unified path plane (path_relations), not memory_graph_edges. This proves the
@@ -276,10 +140,9 @@ async function createRealStorage() {
   const workspaceRepo = new SqliteWorkspaceRepo(database);
   const runRepo = new SqliteRunRepo(database);
   const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
-  const graphEdgeRepo = new SqliteMemoryGraphEdgeRepo(database);
   const pathRelationRepo = new SqlitePathRelationRepo(database);
 
-  // FK seed: memory_graph_edges references workspaces; memories reference runs.
+  // FK seed: path_relations references workspaces; memories reference runs.
   await workspaceRepo.create({
     workspace_id: "workspace-1",
     name: "workspace one",
@@ -300,7 +163,7 @@ async function createRealStorage() {
     current_surface_id: null
   });
 
-  return { database, memoryEntryRepo, graphEdgeRepo, pathRelationRepo };
+  return { database, memoryEntryRepo, pathRelationRepo };
 }
 
 function createServiceWithPathGraphSupport(input: {
@@ -318,11 +181,10 @@ function createServiceWithPathGraphSupport(input: {
   );
 
   // The real wiring under test: graphSupportPort -> GraphExploreService ->
-  // SqlitePathRelationRepo.findByTargetAnchor (the path plane), not the edge
-  // repo. The edge repo is delete-only here.
+  // SqlitePathRelationRepo.findByTargetAnchor (the path plane). The service is
+  // path-only.
   const graphExploreService = new GraphExploreService({
     pathRepo: pathRelationRepo,
-    edgeRepo: { delete: vi.fn(async () => undefined) },
     eventLogRepo: { append }
   });
 
@@ -397,49 +259,6 @@ function createPathFixture(overrides: {
     created_at: "2026-05-13T00:00:00.000Z",
     updated_at: "2026-05-13T00:00:00.000Z"
   };
-}
-
-function createServiceWithRealGraphSupport(input: {
-  readonly memories: readonly Readonly<MemoryEntry>[];
-  readonly graphEdgeRepo: SqliteMemoryGraphEdgeRepo;
-}): RecallService {
-  const { memories, graphEdgeRepo } = input;
-  const append = vi.fn(
-    async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): Promise<EventLogEntry> => ({
-      event_id: `event-${entry.event_type}`,
-      created_at: "2026-05-13T00:00:00.000Z",
-      revision: 0,
-      ...entry
-    })
-  );
-
-  const deps: RecallServiceDependencies = {
-    now: () => "2026-05-13T00:00:00.000Z",
-    generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
-    memoryRepo: {
-      findByWorkspaceId: vi.fn(async () => memories),
-      findByDimension: vi.fn(async () => memories),
-      findByScopeClass: vi.fn(async () => memories),
-      searchByKeyword: vi.fn(async () =>
-        memories.map((m) => ({ object_id: m.object_id, normalized_rank: 1 }))
-      )
-    } as RecallServiceDependencies["memoryRepo"],
-    slotRepo: {
-      findByWorkspace: vi.fn(async () => [])
-    },
-    eventLogRepo: {
-      append,
-      queryByEntity: vi.fn(async () => [])
-    },
-    // The real wiring under test: countInboundEdgesWeighted goes through
-    // the actual SqliteMemoryGraphEdgeRepo SQL aggregation, not a mock.
-    graphSupportPort: {
-      countInboundSupports: graphEdgeRepo.countInboundSupports.bind(graphEdgeRepo),
-      countInboundEdgesWeighted: graphEdgeRepo.countInboundEdgesWeighted.bind(graphEdgeRepo)
-    }
-  };
-
-  return new RecallService(deps);
 }
 
 function createTaskSurface(displayName: string): TaskObjectSurface {

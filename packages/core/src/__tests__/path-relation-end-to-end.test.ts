@@ -6,7 +6,6 @@ import {
   ControlPlaneObjectKind,
   FormationKind,
   MemoryDimension,
-  MemoryGraphEdgeType,
   RetentionPolicy,
   RunMode,
   RunState,
@@ -23,7 +22,6 @@ import {
   initDatabase,
   SqliteCoUsageCounterRepo,
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
   SqlitePathRelationRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo,
@@ -43,12 +41,11 @@ afterEach(() => {
 
 const MEM_QUERY_HIT = "00000000-0000-4000-8000-000000000001";
 const MEM_LINKED = "00000000-0000-4000-8000-000000000002";
-const MEM_RECALLS_SRC = "00000000-0000-4000-8000-000000000003";
 const WS = "workspace-1";
 
 describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () => {
   it("writes PathRelation after 3 onCoUsage events and surfaces a path_expansion candidate", async () => {
-    const { database, memoryEntryRepo, graphEdgeRepo, pathRelationRepo, coUsageCounterRepo } =
+    const { database, memoryEntryRepo, pathRelationRepo, coUsageCounterRepo } =
       await createRealStorage();
 
     await memoryEntryRepo.create(createMemoryEntry({
@@ -61,20 +58,6 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
       content: "distinct topic not lexically related",
       domain_tags: ["other"]
     }));
-    await memoryEntryRepo.create(createMemoryEntry({
-      object_id: MEM_RECALLS_SRC,
-      content: "earlier history anchor",
-      domain_tags: ["history"]
-    }));
-
-    await graphEdgeRepo.create({
-      edge_id: "edge-recalls-1",
-      source_memory_id: MEM_RECALLS_SRC,
-      target_memory_id: MEM_QUERY_HIT,
-      edge_type: MemoryGraphEdgeType.RECALLS,
-      workspace_id: WS,
-      created_at: "2026-05-13T00:00:00.000Z"
-    });
 
     const eventPublisher = {
       appendManyWithMutation: vi.fn(
@@ -144,9 +127,6 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
       eventLogRepo: {
         append,
         queryByEntity: vi.fn(async () => [])
-      },
-      graphExpansionPort: {
-        findByMemoryId: graphEdgeRepo.findByMemoryId.bind(graphEdgeRepo)
       },
       pathExpansionPort: {
         findByAnchors: pathRelationRepo.findByAnchors.bind(pathRelationRepo)
@@ -366,7 +346,6 @@ async function createRealStorage() {
   const workspaceRepo = new SqliteWorkspaceRepo(database);
   const runRepo = new SqliteRunRepo(database);
   const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
-  const graphEdgeRepo = new SqliteMemoryGraphEdgeRepo(database);
   const pathRelationRepo = new SqlitePathRelationRepo(database);
   const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
 
@@ -390,7 +369,7 @@ async function createRealStorage() {
     current_surface_id: null
   });
 
-  return { database, memoryEntryRepo, graphEdgeRepo, pathRelationRepo, coUsageCounterRepo };
+  return { database, memoryEntryRepo, pathRelationRepo, coUsageCounterRepo };
 }
 
 function createTaskSurface(displayName: string): TaskObjectSurface {

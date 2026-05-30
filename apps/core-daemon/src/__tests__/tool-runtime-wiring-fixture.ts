@@ -758,7 +758,6 @@ vi.mock("@do-soul/alaya-storage", async () => {
     SqliteEdgeProposalRepo: makeRepo(),
     SqliteEvidenceCapsuleRepo: makeRepo(),
     SqliteMemoryEntryRepo: makeRepo(),
-    SqliteMemoryGraphEdgeRepo: makeRepo(),
     SqliteOrphanRadarRepo: makeRepo(),
     SqliteProjectMappingAnchorRepo: makeRepo(),
     SqliteSynthesisCapsuleRepo: makeRepo(),

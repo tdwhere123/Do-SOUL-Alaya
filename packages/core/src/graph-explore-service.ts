@@ -26,9 +26,8 @@ import { parseObjectId } from "./shared/validators.js";
 // candidate memory and feed recall graph_support scoring
 // (RecallServiceGraphSupportPort). The result is positive-only: negative
 // paths (recall_bias < 0) never contribute here — active suppression is the
-// governance-gated recall-plane channel, not graph_support. Only `delete`
-// still routes through the edge repo (the legacy edge table is read-dead for
-// recall and retires with its repo).
+// governance-gated recall-plane channel, not graph_support. This service is
+// path-only: it has no edge repo and exposes no edge-write surface.
 export interface GraphExploreServicePathRepoPort {
   findByAnchors(
     workspaceId: string,
@@ -40,21 +39,12 @@ export interface GraphExploreServicePathRepoPort {
   ): Promise<readonly Readonly<PathRelation>[]>;
 }
 
-export interface GraphExploreServiceEdgeRepoPort {
-  // invariant: edge writes do not enter through GraphExploreService, and
-  // recall graph_support counts no longer read the edge repo (they read the
-  // path plane via pathRepo). `delete` is the only remaining edge-repo touch
-  // on this service and retires with the edge subsystem.
-  delete(edgeId: string): Promise<void>;
-}
-
 export interface GraphExploreServiceEventLogRepoPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
 }
 
 export interface GraphExploreServiceDependencies {
   readonly pathRepo: GraphExploreServicePathRepoPort;
-  readonly edgeRepo: GraphExploreServiceEdgeRepoPort;
   readonly eventLogRepo: GraphExploreServiceEventLogRepoPort;
   readonly now?: () => string;
 }
@@ -210,10 +200,6 @@ export class GraphExploreService {
       object_id: parseObjectId(memoryId)
     });
     return paths.filter((path) => isPathRecallEligible(path));
-  }
-
-  public async deleteEdge(edgeId: string): Promise<void> {
-    await this.dependencies.edgeRepo.delete(parseObjectId(edgeId));
   }
 }
 

@@ -112,9 +112,9 @@ type GardenCompletionCandidateSignal = NonNullable<
 
 const RECALL_HIT_ACTIVATION_BUMP = 0.05;
 // Bounds the fan-out per `report_context_usage(used)` call. With N=8 the
-// ordered pairs cap at 56 edge writes; UNIQUE(src, tgt, edge_type) on
-// `memory_graph_edges` deduplicates on retries, so repeated reports of the
-// same set are idempotent at storage level.
+// ordered pairs cap at 56 cross-link proposals; the edge-proposal/path
+// candidate intake deduplicates on (source, target, edge_type), so repeated
+// reports of the same set are idempotent.
 const MAX_CROSS_LINK_FANOUT = 8;
 const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 // Auto-extract from a recall turn only when there is enough text for the

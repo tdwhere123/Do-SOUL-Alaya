@@ -1574,8 +1574,7 @@ export class RecallService {
     const candidateSources = new Map<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>();
     // invariant: graph_expansion is the multi-hop traversal of the unified
     // PathRelation plane. It reads the same pathExpansionPort the direct
-    // path_expansion plane uses; the retired graphExpansionPort (memory_graph_edges)
-    // is no longer consulted. When no path port is wired the plane is empty.
+    // path_expansion plane uses. When no path port is wired the plane is empty.
     const pathExpansionPort = this.dependencies.pathExpansionPort;
     if (pathExpansionPort === undefined) {
       return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);

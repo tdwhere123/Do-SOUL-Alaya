@@ -62,12 +62,6 @@ function createPath(overrides: {
   };
 }
 
-function createEdgeRepo() {
-  return {
-    delete: vi.fn(async () => undefined)
-  };
-}
-
 function createPathRepo(paths: readonly PathRelation[] = []) {
   return {
     findByAnchors: vi.fn(async () => paths),
@@ -85,8 +79,8 @@ function createPathRepo(paths: readonly PathRelation[] = []) {
 }
 
 // invariant: GraphExploreService reads the unified path plane (PathRelation),
-// not memory_graph_edges. It exposes no edge-creation surface — the edge repo
-// is delete-only; recall graph_support counts read the path plane.
+// not memory_graph_edges. It is path-only — no edge repo, no edge-write
+// surface; recall graph_support counts read the path plane.
 describe("GraphExploreService", () => {
   it("explores one-hop path neighbors in both directions by default and emits an explore event", async () => {
     const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
@@ -97,7 +91,6 @@ describe("GraphExploreService", () => {
         createPath({ pathId: "path-out", sourceMemoryId: "memory-a", targetMemoryId: "memory-b" }),
         createPath({ pathId: "path-in", sourceMemoryId: "memory-c", targetMemoryId: "memory-a" })
       ]),
-      edgeRepo: createEdgeRepo(),
       eventLogRepo: { append },
       now: () => "2026-03-28T10:00:00.000Z"
     });
@@ -144,7 +137,6 @@ describe("GraphExploreService", () => {
           relationKind: "co_recalled"
         })
       ]),
-      edgeRepo: createEdgeRepo(),
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) }
     });
 
@@ -161,7 +153,6 @@ describe("GraphExploreService", () => {
         createPath({ pathId: "path-supersedes", sourceMemoryId: "memory-a", targetMemoryId: "memory-c", relationKind: "supersedes" }),
         createPath({ pathId: "path-retired", sourceMemoryId: "memory-a", targetMemoryId: "memory-d", status: "retired" })
       ]),
-      edgeRepo: createEdgeRepo(),
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) }
     });
 
@@ -179,7 +170,6 @@ describe("GraphExploreService", () => {
     );
     const service = new GraphExploreService({
       pathRepo: createPathRepo(),
-      edgeRepo: createEdgeRepo(),
       eventLogRepo: { append }
     });
 
@@ -191,7 +181,6 @@ describe("GraphExploreService", () => {
     const pathRepo = createPathRepo();
     const service = new GraphExploreService({
       pathRepo,
-      edgeRepo: createEdgeRepo(),
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) }
     });
 
@@ -217,7 +206,6 @@ describe("GraphExploreService countInbound* on the path plane", () => {
   function createServiceWithInboundPaths(paths: readonly PathRelation[]): GraphExploreService {
     return new GraphExploreService({
       pathRepo: createPathRepo(paths),
-      edgeRepo: createEdgeRepo(),
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) }
     });
   }

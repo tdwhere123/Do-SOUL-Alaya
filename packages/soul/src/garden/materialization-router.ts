@@ -641,12 +641,11 @@ export class MaterializationRouter {
       );
       createdObjects.push({ object_kind: synthesis.object_kind, object_id: synthesis.object_id });
 
-      // No graph edge here: memory_graph_edges constrains both source and target
-      // to memory_entries(object_id) (migration 025). A synthesis_capsule id
-      // cannot be an edge endpoint. The synthesis↔memory relation is carried by
-      // synthesis.evidence_refs (which point at evidence ids) and by claim
-      // resolution downstream. If a synthesis-to-memory provenance edge is
-      // wanted later, it needs a schema change to widen the FK domain.
+      // No graph relation here: the path plane anchors on memory_entries, and a
+      // synthesis_capsule id is not a memory endpoint. The synthesis↔memory
+      // relation is carried by synthesis.evidence_refs (which point at evidence
+      // ids) and by claim resolution downstream. A synthesis-to-memory
+      // provenance relation would need a deliberate anchor-domain change.
 
       return {
         signal_id: signal.signal_id,

@@ -24,7 +24,6 @@ import {
   SqliteEdgeProposalRepo,
   SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
   SqlitePathRelationRepo,
   SqliteRunRepo,
   SqliteTrustStateRepo,
@@ -124,8 +123,7 @@ describe("recall cross-link: report_context_usage(used) proposes RECALLS edges",
 
     await reportUsed(harness, [MEM_A, MEM_B]);
 
-    // Proposals are pending; no path minted yet and no memory_graph_edges row.
-    expect(await harness.graphEdgeRepo.findByWorkspace("workspace-1")).toEqual([]);
+    // Proposals are pending; no path minted yet.
     expect(await harness.pathRelationRepo.findByWorkspace("workspace-1")).toEqual([]);
     expect(harness.edgeProposalRepo.listPending("workspace-1").map((proposal) => ({
       source: proposal.source_memory_id,
@@ -156,9 +154,8 @@ describe("recall cross-link: report_context_usage(used) proposes RECALLS edges",
     });
     expect(reviewResult).toMatchObject({ ok: true });
 
-    // invariant (accept->path, DB-level): accept mints governed path relations,
-    // never a memory_graph_edges row. A->B and B->A dedup to one undirected path.
-    expect(await harness.graphEdgeRepo.findByWorkspace("workspace-1")).toEqual([]);
+    // invariant (accept->path, DB-level): accept mints governed path relations.
+    // A->B and B->A dedup to one undirected path.
     const paths = await harness.pathRelationRepo.findByWorkspace("workspace-1");
     expect(paths.length).toBeGreaterThanOrEqual(1);
     for (const path of paths) {
@@ -203,7 +200,6 @@ async function createHarness(
   const eventLogRepo = new SqliteEventLogRepo(database);
   const edgeProposalRepo = new SqliteEdgeProposalRepo(database);
   const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
-  const graphEdgeRepo = new SqliteMemoryGraphEdgeRepo(database);
   const pathRelationRepo = new SqlitePathRelationRepo(database);
   const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
   const runRepo = new SqliteRunRepo(database);
@@ -336,7 +332,6 @@ async function createHarness(
     edgeProposalRepo,
     eventLogRepo,
     graphEdgePort,
-    graphEdgeRepo,
     pathRelationRepo,
     handler,
     memoryEntryRepo

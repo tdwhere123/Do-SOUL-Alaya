@@ -59,10 +59,6 @@ export {
   type SynthesisCapsuleKeywordHit
 } from "./repos/synthesis-capsule-repo.js";
 export {
-  SqliteMemoryGraphEdgeRepo,
-  type MemoryGraphEdgeRepo
-} from "./repos/memory-graph-edge-repo.js";
-export {
   SqliteEdgeProposalRepo,
   type EdgeProposalCreateInput,
   type EdgeProposalRepo,
