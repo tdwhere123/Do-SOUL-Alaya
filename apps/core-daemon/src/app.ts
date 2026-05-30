@@ -46,6 +46,7 @@ import { registerRunRoutes, type RunRouteServices } from "./routes/runs.js";
 import { registerSecurityStatusRoutes, type SecurityStatusRouteServices } from "./routes/security-status.js";
 import { registerSignalRoutes, type SignalRouteServices } from "./routes/signals.js";
 import { registerSlotRoutes, type SlotRouteServices } from "./routes/slots.js";
+import { registerPathGraphRoutes, type PathGraphRouteServices } from "./routes/path-graph.js";
 import { registerSoulGraphRoutes, type SoulGraphRouteServices } from "./routes/soul-graph.js";
 import { registerSoulRoutes, type SoulRouteServices } from "./routes/soul.js";
 import { registerSoulSearchRoutes, type SoulSearchRouteServices } from "./routes/soul-search.js";
@@ -84,6 +85,7 @@ export interface CoreDaemonRouteServices {
   readonly healthJournal?: HealthJournalRouteServices;
   readonly memories?: MemoryRouteServices;
   readonly overrides?: OverrideRouteServices;
+  readonly pathGraph?: PathGraphRouteServices;
   readonly projectMapping?: ProjectMappingRouteServices;
   readonly proposals?: ProposalRouteServices;
   readonly recall?: RecallRouteServices;
@@ -295,6 +297,7 @@ function registerConfiguredRoutes(app: Hono, routes: CoreDaemonRouteServices | u
   if (routes.files !== undefined) registerFileRoutes(app, routes.files);
   if (routes.soul !== undefined) registerSoulRoutes(app, routes.soul);
   if (routes.soulGraph !== undefined) registerSoulGraphRoutes(app, routes.soulGraph);
+  if (routes.pathGraph !== undefined) registerPathGraphRoutes(app, routes.pathGraph);
   if (routes.soulSearch !== undefined) registerSoulSearchRoutes(app, routes.soulSearch);
   if (routes.status !== undefined) registerStatusRoutes(app, routes.status);
   if (routes.projectMapping !== undefined) registerProjectMappingRoutes(app, routes.projectMapping);

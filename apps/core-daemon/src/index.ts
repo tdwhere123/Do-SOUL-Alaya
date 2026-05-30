@@ -33,6 +33,7 @@ import {
   type PathActivationCandidateProducerPathReaderPort,
   GardenBacklogTelemetryService,
   GovernanceLeaseService,
+  GraphContractService,
   GraphExploreService,
   GreenService,
   HealthJournalService,
@@ -435,6 +436,11 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const graphHealthService = createGraphHealthService({
     pathRelationRepo,
     eventLogRepo
+  });
+  // Read-only path_relations projection for the Inspector Graph surface;
+  // pathRelationRepo.findActive supplies the unified path plane directly.
+  const graphContractService = new GraphContractService({
+    pathRelationRepo
   });
   const synthesisService = new SynthesisService({
     synthesisCapsuleRepo,
@@ -1453,6 +1459,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     topologyService,
     soulApprovalService,
     soulGraphService,
+    graphContractService,
     projectMappingService,
     globalMemoryService,
     mcp: mcpTooling.daemonMcpCatalog,

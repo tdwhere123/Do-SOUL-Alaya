@@ -7,6 +7,13 @@ export interface GraphNode {
   id: string;
   kind: string;
   label: string;
+  // Underlying memory object id for path-plane anchors of kind object /
+  // object_facet. The node `id` is the serialized PathAnchorRef (used for
+  // edge source/target matching), which is NOT a memory object id; the
+  // proposal + open_pointer flows need the bare object id, so it is carried
+  // separately here. Undefined for non-object anchors (obligation / concern).
+  // see also: apps/inspector/web/src/pages/Graph.tsx mapPathGraphNode
+  object_id?: string;
   summary?: string;
   scope_id?: string;
   workspace_id?: string;

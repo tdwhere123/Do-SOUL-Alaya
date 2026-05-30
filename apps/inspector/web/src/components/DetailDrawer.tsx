@@ -38,8 +38,12 @@ export function DetailDrawer({
   const { t } = useI18n();
   const [rewriteContent, setRewriteContent] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  // On the path plane node.id is a serialized PathAnchorRef; the memory object
+  // id (node.object_id) is what open_pointer and the proposal flow address.
+  // Fall back to node.id for any node without an object anchor.
+  const targetId = node ? node.object_id ?? node.id : "";
   const cliCommand = node
-    ? `alaya tools call --json soul.open_pointer '{"pointer_id":"${node.id}"}'`
+    ? `alaya tools call --json soul.open_pointer '{"pointer_id":"${targetId}"}'`
     : "";
   const kindColor = node ? NODE_COLOR[node.kind] ?? "#586E75" : "#586E75";
   const hasRemembered = Boolean(node?.summary || node?.rationale);
@@ -63,7 +67,7 @@ export function DetailDrawer({
     if (!node || busyAction !== null) return;
     setBusyAction(action);
     try {
-      await onCreateProposal(action, node.id, newContent);
+      await onCreateProposal(action, targetId, newContent);
     } finally {
       setBusyAction(null);
     }

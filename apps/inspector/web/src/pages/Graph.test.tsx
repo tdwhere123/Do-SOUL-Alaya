@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { forwardRef, useEffect, useImperativeHandle, type ReactElement } from "react";
@@ -207,57 +207,243 @@ function stubWebgl(supported: boolean): void {
   });
 }
 
+// The Graph page now consumes the path_relations plane projection
+// (SoulPathGraphContract / BuiltPathGraph). The fixture mirrors that shape:
+// nodes carry {id, anchor, label, out_degree, in_degree} and edges carry the
+// full PathRelation in `relation` plus the projected edge fields. node ids are
+// authored as n1/n2/n3 so the existing fg-node-* / fg-link-* selectors hold.
+// see also: apps/core-daemon/src/routes/path-graph.ts
+//           packages/protocol/src/soul/graph.ts SoulPathGraphContract
+function makeFixtureRelation(input: {
+  readonly pathId: string;
+  readonly sourceObjectId: string;
+  readonly targetObjectId: string;
+  readonly strength: number;
+  readonly stabilityClass: "volatile" | "normal" | "stable" | "pinned";
+  readonly lastReinforcedAt?: string;
+}) {
+  return {
+    path_id: input.pathId,
+    workspace_id: "ws-1",
+    anchors: {
+      source_anchor: { kind: "object", object_id: input.sourceObjectId },
+      target_anchor: { kind: "object", object_id: input.targetObjectId }
+    },
+    constitution: { relation_kind: "supports", why_this_relation_exists: ["fixture"] },
+    effect_vector: {
+      salience: 0.5,
+      recall_bias: 0.5,
+      verification_bias: 0,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "stance_bias"
+    },
+    plasticity_state: {
+      strength: input.strength,
+      direction_bias: "source_to_target",
+      stability_class: input.stabilityClass,
+      support_events_count: 1,
+      contradiction_events_count: 0,
+      ...(input.lastReinforcedAt === undefined
+        ? {}
+        : { last_reinforced_at: input.lastReinforcedAt })
+    },
+    lifecycle: { status: "active", retirement_rule: "default" },
+    legitimacy: { evidence_basis: ["evidence-1"], governance_class: "recall_allowed" },
+    created_at: "2026-05-05T01:00:00.000Z",
+    updated_at: "2026-05-05T02:00:00.000Z"
+  };
+}
+
 const SAMPLE_GRAPH = {
+  contract_version: 1,
   workspace_id: "ws-1",
+  generated_at: "2026-05-05T03:00:00.000Z",
   nodes: [
-    {
-      id: "n1",
-      kind: "memory",
-      label: "mem-alpha",
-      summary: "first",
-      origin_kind: "user_memory",
-      last_used_at: new Date().toISOString(),
-      influence_count: 3
-    },
-    {
-      id: "n2",
-      kind: "memory",
-      label: "mem-beta",
-      summary: "second",
-      origin_kind: "engineering_chunk",
-      last_used_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 60).toISOString()
-    },
-    {
-      id: "n3",
-      kind: "scope",
-      label: "scope-gamma",
-      summary: "third",
-      origin_kind: "system"
-    }
+    // n1 has total degree 3 (out 2 + in 1) so the influence-size assertion that
+    // pins nodeInfluenceSize(influence_count: 3) still holds.
+    { id: "n1", anchor: { kind: "object", object_id: "n1" }, label: "mem-alpha", out_degree: 2, in_degree: 1 },
+    { id: "n2", anchor: { kind: "object", object_id: "n2" }, label: "mem-beta", out_degree: 1, in_degree: 1 },
+    { id: "n3", anchor: { kind: "object", object_id: "n3" }, label: "scope-gamma", out_degree: 0, in_degree: 1 }
   ],
   edges: [
     {
       id: "e1",
-      kind: "references",
       source_id: "n1",
       target_id: "n2",
-      strength_normalized: 0.85,
+      source_anchor: { kind: "object", object_id: "n1" },
+      target_anchor: { kind: "object", object_id: "n2" },
+      relation_kind: "supports",
+      strength: 0.85,
+      direction_bias: "source_to_target",
       stability_class: "stable",
-      last_reinforced_at: new Date().toISOString()
+      governance_class: "recall_allowed",
+      effect_vector: {
+        salience: 0.5,
+        recall_bias: 0.5,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "stance_bias"
+      },
+      relation: makeFixtureRelation({
+        pathId: "e1",
+        sourceObjectId: "n1",
+        targetObjectId: "n2",
+        strength: 0.85,
+        stabilityClass: "stable",
+        lastReinforcedAt: new Date().toISOString()
+      }),
+      created_at: "2026-05-05T01:00:00.000Z",
+      updated_at: "2026-05-05T02:00:00.000Z"
     },
     {
       id: "e2",
-      kind: "belongs_to",
       source_id: "n2",
       target_id: "n3",
-      strength_normalized: 0.2,
-      stability_class: "volatile"
+      source_anchor: { kind: "object", object_id: "n2" },
+      target_anchor: { kind: "object", object_id: "n3" },
+      relation_kind: "supports",
+      strength: 0.2,
+      direction_bias: "source_to_target",
+      stability_class: "volatile",
+      governance_class: "recall_allowed",
+      effect_vector: {
+        salience: 0.5,
+        recall_bias: 0.5,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "stance_bias"
+      },
+      relation: makeFixtureRelation({
+        pathId: "e2",
+        sourceObjectId: "n2",
+        targetObjectId: "n3",
+        strength: 0.2,
+        stabilityClass: "volatile"
+      }),
+      created_at: "2026-05-05T01:00:00.000Z",
+      updated_at: "2026-05-05T02:00:00.000Z"
     }
   ],
-  truncated: false,
-  node_total: 3,
-  edge_total: 2
+  topology: {
+    total_nodes: 3,
+    total_edges: 2,
+    max_out_degree: 2,
+    max_in_degree: 1,
+    avg_degree: 2,
+    strongly_connected_components: 3
+  }
 };
+
+// Drives the large-graph 3D performance gate (>500 nodes) with a single
+// recently-reinforced edge, in the path-graph contract shape.
+function makeLargePathGraph() {
+  const nodes = Array.from({ length: 501 }, (_, index) => ({
+    id: `n${index}`,
+    anchor: { kind: "object", object_id: `n${index}` },
+    label: `node-${index}`,
+    out_degree: index === 0 ? 1 : 0,
+    in_degree: index === 1 ? 1 : 0
+  }));
+  return {
+    ...SAMPLE_GRAPH,
+    nodes,
+    edges: [
+      {
+        id: "large-link",
+        source_id: "n0",
+        target_id: "n1",
+        source_anchor: { kind: "object", object_id: "n0" },
+        target_anchor: { kind: "object", object_id: "n1" },
+        relation_kind: "supports",
+        strength: 0.9,
+        direction_bias: "source_to_target",
+        stability_class: "stable",
+        governance_class: "recall_allowed",
+        effect_vector: {
+          salience: 0.5,
+          recall_bias: 0.5,
+          verification_bias: 0,
+          unfinishedness_bias: 0,
+          default_manifestation_preference: "stance_bias"
+        },
+        relation: makeFixtureRelation({
+          pathId: "large-link",
+          sourceObjectId: "n0",
+          targetObjectId: "n1",
+          strength: 0.9,
+          stabilityClass: "stable",
+          lastReinforcedAt: new Date().toISOString()
+        }),
+        created_at: "2026-05-05T01:00:00.000Z",
+        updated_at: "2026-05-05T02:00:00.000Z"
+      }
+    ],
+    topology: {
+      total_nodes: nodes.length,
+      total_edges: 1,
+      max_out_degree: 1,
+      max_in_degree: 1,
+      avg_degree: 0.004,
+      strongly_connected_components: nodes.length
+    }
+  };
+}
+
+// Three nodes joined by edges of distinct relation_kind families so the
+// per-family edge palette can be asserted: supports (positive structural),
+// contradicts (negative), recalls (positive associative). mapPathGraphEdge
+// reads the projected top-level `relation_kind`, so only that field varies.
+function makeRelationKindGraph() {
+  const buildEdge = (
+    id: string,
+    sourceId: string,
+    targetId: string,
+    relationKind: string
+  ) => ({
+    id,
+    source_id: sourceId,
+    target_id: targetId,
+    source_anchor: { kind: "object", object_id: sourceId },
+    target_anchor: { kind: "object", object_id: targetId },
+    relation_kind: relationKind,
+    strength: 0.6,
+    direction_bias: "source_to_target",
+    stability_class: "stable",
+    governance_class: "recall_allowed",
+    effect_vector: {
+      salience: 0.5,
+      recall_bias: 0.5,
+      verification_bias: 0,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "stance_bias"
+    },
+    relation: makeFixtureRelation({
+      pathId: id,
+      sourceObjectId: sourceId,
+      targetObjectId: targetId,
+      strength: 0.6,
+      stabilityClass: "stable"
+    }),
+    created_at: "2026-05-05T01:00:00.000Z",
+    updated_at: "2026-05-05T02:00:00.000Z"
+  });
+  return {
+    ...SAMPLE_GRAPH,
+    edges: [
+      buildEdge("e-supports", "n1", "n2", "supports"),
+      buildEdge("e-contradicts", "n2", "n3", "contradicts"),
+      buildEdge("e-recalls", "n1", "n3", "recalls")
+    ],
+    topology: {
+      total_nodes: 3,
+      total_edges: 3,
+      max_out_degree: 2,
+      max_in_degree: 2,
+      avg_degree: 2,
+      strongly_connected_components: 1
+    }
+  };
+}
 
 function renderGraphWithEnv() {
   return render(
@@ -350,30 +536,62 @@ describe("GraphPage (react-force-graph driven)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("surfaces returned-vs-total counts and the sampled badge", async () => {
-    const sampled = {
-      ...SAMPLE_GRAPH,
-      truncated: true,
-      node_total: 25,
-      edge_total: 40
-    };
+  // The path-graph projection returns the full active path plane (never
+  // sampled), so the meta footer shows rendered == topology totals and the
+  // "complete" badge rather than a sampled badge.
+  it("surfaces topology totals and the complete badge", async () => {
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+    expect(await screen.findByText(/3\/3 nodes/i)).toBeTruthy();
+    expect(await screen.findByText(/2\/2 edges/i)).toBeTruthy();
+    expect(await screen.findByText(/complete/i)).toBeTruthy();
+  });
+
+  // The path plane carries no origin_kind, so the legend now decodes the
+  // colours actually rendered: node hue by anchor-derived kind (memory/scope)
+  // and edge hue by relation_kind family. No legend entry may decode a colour
+  // no node/edge uses (the retired origin-kind palette is gone from the graph).
+  it("mounts the node-kind + relation-family legend reflecting the rendered colours", async () => {
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+
+    const nodeLegend = screen.getByTestId("graph-legend-nodes");
+    expect(within(nodeLegend).getByText(/^memory$/i)).toBeTruthy();
+    expect(within(nodeLegend).getByText(/^scope$/i)).toBeTruthy();
+
+    const edgeLegend = screen.getByTestId("graph-legend-edges");
+    expect(within(edgeLegend).getByText(/^supports$/i)).toBeTruthy();
+    expect(within(edgeLegend).getByText(/derives from/i)).toBeTruthy();
+    expect(within(edgeLegend).getByText(/associative/i)).toBeTruthy();
+    expect(within(edgeLegend).getByText(/^negative$/i)).toBeTruthy();
+    expect(within(edgeLegend).getByText(/^exception$/i)).toBeTruthy();
+
+    // The retired origin-kind palette must no longer appear as a legend entry.
+    expect(screen.queryByText(/engineering chunk/i)).toBeNull();
+    expect(screen.queryByText(/proposal pending/i)).toBeNull();
+  });
+
+  // invariant: edge hue is keyed by relation_kind family — a positive
+  // `supports` edge and a negative `contradicts` edge must NOT share a colour
+  // (the monochrome regression these fixtures guard against). Sampled from the
+  // stub's data-color attribute, which echoes the live linkColor() closure.
+  it("colours edges by relation_kind family (positive vs negative differ)", async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify(sampled), { status: 200 })
+      new Response(JSON.stringify(makeRelationKindGraph()), { status: 200 })
     );
     renderGraphWithEnv();
     await screen.findByTestId("force-graph-2d");
-    expect(await screen.findByText(/3\/25 nodes/i)).toBeTruthy();
-    expect(await screen.findByText(/2\/40 edges/i)).toBeTruthy();
-    expect(await screen.findByText(/sampled/i)).toBeTruthy();
-  });
-
-  it("mounts the origin-kind legend so users can decode node colours", async () => {
-    renderGraphWithEnv();
-    await screen.findByTestId("force-graph-2d");
-    expect(screen.getByText(/user memory/i)).toBeTruthy();
-    expect(screen.getByText(/engineering chunk/i)).toBeTruthy();
-    expect(screen.getByText(/reviewed engineering/i)).toBeTruthy();
-    expect(screen.getByText(/proposal pending/i)).toBeTruthy();
+    const supportsColor =
+      screen.getByTestId("fg-link-e-supports").getAttribute("data-color") ?? "";
+    const contradictsColor =
+      screen.getByTestId("fg-link-e-contradicts").getAttribute("data-color") ?? "";
+    const recallsColor =
+      screen.getByTestId("fg-link-e-recalls").getAttribute("data-color") ?? "";
+    // rgba prefixes differ → the per-family base hue is actually applied.
+    const rgbPrefix = (c: string) => c.replace(/,\s*[\d.]+\)$/, "");
+    expect(rgbPrefix(supportsColor)).not.toBe(rgbPrefix(contradictsColor));
+    expect(rgbPrefix(supportsColor)).not.toBe(rgbPrefix(recallsColor));
+    expect(rgbPrefix(contradictsColor)).not.toBe(rgbPrefix(recallsColor));
   });
 
   it("opens the detail drawer on node click", async () => {
@@ -446,13 +664,14 @@ describe("GraphPage (react-force-graph driven)", () => {
     expect(linkStrength(undefined, undefined)).toBe(0.3);
   });
 
-  it("includes influence and last-used metadata in node hover labels", async () => {
+  // The path plane carries degree-derived influence but no last_used_at, so the
+  // hover label pins the label + influence count from the path-graph node.
+  it("includes degree-derived influence in node hover labels", async () => {
     renderGraphWithEnv();
     await screen.findByTestId("force-graph-2d");
     const label = screen.getByTestId("fg-node-n1").getAttribute("data-label-text") ?? "";
     expect(label).toContain("mem-alpha");
     expect(label).toContain("influence: 3");
-    expect(label).toContain("last used:");
   });
 
   it("focuses the one-hop subgraph shortcut on double click", async () => {
@@ -464,32 +683,8 @@ describe("GraphPage (react-force-graph driven)", () => {
   });
 
   it("uses the large-graph 3D performance gate", async () => {
-    const nodes = Array.from({ length: 501 }, (_, index) => ({
-      id: `n${index}`,
-      kind: "memory",
-      label: `node-${index}`,
-      origin_kind: "system"
-    }));
     fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          ...SAMPLE_GRAPH,
-          nodes,
-          edges: [
-            {
-              id: "large-link",
-              kind: "references",
-              source_id: "n0",
-              target_id: "n1",
-              strength_normalized: 0.9,
-              last_reinforced_at: new Date().toISOString()
-            }
-          ],
-          node_total: nodes.length,
-          edge_total: 1
-        }),
-        { status: 200 }
-      )
+      new Response(JSON.stringify(makeLargePathGraph()), { status: 200 })
     );
     const user = userEvent.setup();
     renderGraphWithEnv();
@@ -504,32 +699,8 @@ describe("GraphPage (react-force-graph driven)", () => {
 
   it("clears the low-FPS warning after sustained recovered frame cadence", async () => {
     const raf = createAnimationFrameDriver();
-    const nodes = Array.from({ length: 501 }, (_, index) => ({
-      id: `n${index}`,
-      kind: "memory",
-      label: `node-${index}`,
-      origin_kind: "system"
-    }));
     fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          ...SAMPLE_GRAPH,
-          nodes,
-          edges: [
-            {
-              id: "large-link",
-              kind: "references",
-              source_id: "n0",
-              target_id: "n1",
-              strength_normalized: 0.9,
-              last_reinforced_at: new Date().toISOString()
-            }
-          ],
-          node_total: nodes.length,
-          edge_total: 1
-        }),
-        { status: 200 }
-      )
+      new Response(JSON.stringify(makeLargePathGraph()), { status: 200 })
     );
     const user = userEvent.setup();
     renderGraphWithEnv();

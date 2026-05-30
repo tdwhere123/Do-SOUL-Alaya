@@ -57,6 +57,7 @@ type CreateCoreDaemonAppInput = Readonly<{
   topologyService: unknown;
   soulApprovalService: unknown;
   soulGraphService: unknown;
+  graphContractService: unknown;
   projectMappingService: unknown;
   globalMemoryService: unknown;
   mcp: unknown;
@@ -210,6 +211,10 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
       soulGraph: {
         workspaceService: input.workspaceService,
         soulGraphService: input.soulGraphService
+      },
+      pathGraph: {
+        workspaceService: input.workspaceService,
+        graphContractService: input.graphContractService
       },
       soulSearch: {
         workspaceService: input.workspaceService,

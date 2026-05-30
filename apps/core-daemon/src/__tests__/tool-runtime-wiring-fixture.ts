@@ -997,6 +997,7 @@ vi.mock("@do-soul/alaya-core", () => {
     GovernanceLeaseService: makeClass(),
     SurfaceDriftService: makeClass(),
     GraphExploreService: makeClass(),
+    GraphContractService: makeClass({ derive: vi.fn(async () => ({})) }),
     GardenBacklogTelemetryService: vi.fn().mockImplementation(function GardenBacklogTelemetryService() {
       const instance = {
         start: vi.fn(() => undefined),

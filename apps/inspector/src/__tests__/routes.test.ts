@@ -124,7 +124,7 @@ describe("inspector routes", () => {
         method: "PATCH",
         body: "{\"auto_approve_readonly\":true}"
       },
-      { url: "http://daemon.local/workspaces/ws1/soul/graph", method: "GET", body: null },
+      { url: "http://daemon.local/workspaces/ws1/path-graph", method: "GET", body: null },
       {
         url: "http://daemon.local/workspaces/ws1/recall-stats?since=2026-05-01T00%3A00%3A00Z&until=2026-05-08T00%3A00%3A00Z&excludeAgentTargets=inspector%2Ccli",
         method: "GET",
