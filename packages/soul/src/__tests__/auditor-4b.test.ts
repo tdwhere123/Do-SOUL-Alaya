@@ -9,7 +9,17 @@ import {
   type OrphanRadar,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
-import { AUDITOR_CONSTANTS, Auditor } from "../garden/auditor.js";
+import { AUDITOR_CONSTANTS, Auditor, type AuditorDependencies } from "../garden/auditor.js";
+
+type AuditorEventLogPort = NonNullable<AuditorDependencies["eventLogRepo"]>;
+type AuditorPointerHealPort = NonNullable<AuditorDependencies["pointerHealPort"]>;
+type HealablePointerRecord = Awaited<
+  ReturnType<AuditorPointerHealPort["findHealablePointers"]>
+>[number];
+type AuditorOrphanDetectionPort = NonNullable<AuditorDependencies["orphanDetectionPort"]>;
+type EventLogOrphanRecord = Awaited<
+  ReturnType<NonNullable<AuditorOrphanDetectionPort["findEventLogOrphans"]>>
+>[number];
 
 const randomUuidMock = vi.hoisted(() => vi.fn());
 
@@ -20,26 +30,28 @@ vi.mock("node:crypto", () => ({
 describe("Auditor 4B", () => {
   it("dispatches pointer_healing and clears each supported ref kind", async () => {
     const pointerHealPort = {
-      findHealablePointers: vi.fn(async () => [
-        {
-          source_object_id: "memory-1",
-          source_object_kind: "memory_entry",
-          broken_ref: "evidence-missing",
-          ref_kind: "evidence_ref"
-        },
-        {
-          source_object_id: "synthesis-1",
-          source_object_kind: "synthesis_capsule",
-          broken_ref: "memory-missing",
-          ref_kind: "memory_ref"
-        },
-        {
-          source_object_id: "claim-1",
-          source_object_kind: "claim_form",
-          broken_ref: "synthesis-missing",
-          ref_kind: "synthesis_ref"
-        }
-      ]),
+      findHealablePointers: vi.fn(
+        async (): Promise<readonly HealablePointerRecord[]> => [
+          {
+            source_object_id: "memory-1",
+            source_object_kind: "memory_entry",
+            broken_ref: "evidence-missing",
+            ref_kind: "evidence_ref"
+          },
+          {
+            source_object_id: "synthesis-1",
+            source_object_kind: "synthesis_capsule",
+            broken_ref: "memory-missing",
+            ref_kind: "memory_ref"
+          },
+          {
+            source_object_id: "claim-1",
+            source_object_kind: "claim_form",
+            broken_ref: "synthesis-missing",
+            ref_kind: "synthesis_ref"
+          }
+        ]
+      ),
       clearEvidenceRef: vi.fn(() => undefined),
       clearMemoryRef: vi.fn(() => undefined),
       clearSynthesisRef: vi.fn(() => undefined)
@@ -395,7 +407,7 @@ describe("Auditor 4B", () => {
     const orphanDetectionPort = {
       findOrphanedMemories: vi.fn(async () => []),
       createOrphanRadarRecord: vi.fn(() => undefined),
-      findEventLogOrphans: vi.fn(async () => [
+      findEventLogOrphans: vi.fn(async (): Promise<readonly EventLogOrphanRecord[]> => [
         {
           audit_event_id: "audit-delivery-1",
           event_type: "memory.delivered",
@@ -502,7 +514,7 @@ describe("Auditor 4B", () => {
     const orphanDetectionPort = {
       findOrphanedMemories: vi.fn(async () => []),
       createOrphanRadarRecord: vi.fn(async () => undefined),
-      findEventLogOrphans: vi.fn(async () => [
+      findEventLogOrphans: vi.fn(async (): Promise<readonly EventLogOrphanRecord[]> => [
         {
           audit_event_id: "audit-delivery-rollback",
           event_type: "memory.delivered",
@@ -569,7 +581,7 @@ function createTask(overrides: Partial<GardenTaskDescriptor> = {}): GardenTaskDe
 function createTransactionalEventLogRepo(
   appendedEvents: unknown[] = [],
   createdAt = "2026-03-28T10:00:00.000Z"
-) {
+): AuditorEventLogPort {
   const append = vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry => {
     const persisted = {
       event_id: `event-${entry.entity_id}`,
@@ -581,13 +593,11 @@ function createTransactionalEventLogRepo(
     return persisted;
   });
 
-  return {
-    append,
-    appendManyWithMutation: vi.fn(
-      async <T>(
-        entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
-        mutate: (entries: readonly EventLogEntry[]) => T
-      ): Promise<T> => {
+  const appendManyWithMutation: AuditorEventLogPort["appendManyWithMutation"] = vi.fn(
+    async <T>(
+      entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => T
+    ): Promise<T> => {
         const startLength = appendedEvents.length;
         const persisted = entries.map((entry) => append(entry));
         try {
@@ -601,6 +611,10 @@ function createTransactionalEventLogRepo(
           throw error;
         }
       }
-    )
+    ) as AuditorEventLogPort["appendManyWithMutation"];
+
+  return {
+    append,
+    appendManyWithMutation
   };
 }

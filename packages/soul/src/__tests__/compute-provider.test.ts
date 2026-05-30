@@ -10,7 +10,11 @@ import {
   OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider
 } from "../garden/compute-provider.js";
-import { SignalExtractorError, type SignalExtractor } from "../garden/pi-mono-extractor.js";
+import {
+  SignalExtractorError,
+  type SignalExtractor,
+  type SignalExtractorMeta
+} from "../garden/pi-mono-extractor.js";
 import { DISTILLED_FACT_MAX_CHARS } from "../garden/materialization-router.js";
 
 describe("OfficialApiGardenProvider", () => {
@@ -655,7 +659,7 @@ describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () 
     const extractor: SignalExtractor = {
       extract: vi.fn(async () => ({
         rawJson: '{"not_signals":[]}',
-        extractorMeta: { recoveryKind: "markdown_strip", retryCount: 1 }
+        extractorMeta: { recoveryKind: "markdown_strip", retryCount: 1 } as SignalExtractorMeta
       }))
     };
     const provider = new OfficialApiGardenProvider({
@@ -740,9 +744,9 @@ describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () 
   // see also: packages/soul/src/garden/wall-clock-timeout.ts
   it("aborts a hanging extractor via the outer wall-clock guard and classifies as network", async () => {
     const hangingExtractor: SignalExtractor = {
-      extract: vi.fn(
+      extract: vi.fn<SignalExtractor["extract"]>(
         (input) =>
-          new Promise((_, reject) => {
+          new Promise<Awaited<ReturnType<SignalExtractor["extract"]>>>((_, reject) => {
             if (input.abortSignal?.aborted === true) {
               reject(new Error("aborted-by-wall-clock"));
               return;

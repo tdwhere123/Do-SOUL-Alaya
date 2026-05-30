@@ -5,7 +5,10 @@ import {
   type EventLogEntry,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
-import { Auditor, GreenRevokeNoopError } from "../garden/auditor.js";
+import { Auditor, GreenRevokeNoopError, type AuditorDependencies } from "../garden/auditor.js";
+
+type AuditorEventLogPort = NonNullable<AuditorDependencies["eventLogRepo"]>;
+type AuditorHealthJournalPort = NonNullable<AuditorDependencies["healthJournal"]>;
 
 // invariant: when revokeGreen affects zero rows the SOUL_GREEN_REVOKED
 // EventLog row MUST roll back inside the same SQLite transaction so audit
@@ -27,10 +30,7 @@ function createTask(overrides: Partial<GardenTaskDescriptor> = {}): GardenTaskDe
 }
 
 interface TransactionalEventLogRepoHarness {
-  readonly repo: {
-    append: (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => EventLogEntry;
-    appendManyWithMutation: ReturnType<typeof vi.fn>;
-  };
+  readonly repo: AuditorEventLogPort;
   readonly persistedEvents: EventLogEntry[];
 }
 
@@ -67,7 +67,7 @@ function createTransactionalEventLogRepo(): TransactionalEventLogRepoHarness {
         }
         return result;
       }
-    )
+    ) as AuditorEventLogPort["appendManyWithMutation"]
   };
   return { repo, persistedEvents };
 }
@@ -75,7 +75,7 @@ function createTransactionalEventLogRepo(): TransactionalEventLogRepoHarness {
 describe("Auditor evidence check — GreenStatus revoke guard", () => {
   it("commits SOUL_GREEN_REVOKED EventLog AND records evidence_failure when revokeGreen affects rows", async () => {
     const { repo: eventLogRepo, persistedEvents } = createTransactionalEventLogRepo();
-    const healthJournal = { record: vi.fn(async () => undefined) };
+    const healthJournal = { record: vi.fn<AuditorHealthJournalPort["record"]>(async () => undefined) };
     const scheduler = { reportCompletion: vi.fn(async () => undefined) };
     const revokeGreen = vi.fn((_id, _reason, _taskId, _workspaceId) => ({ affected: 1 }));
     const auditor = new Auditor({
@@ -119,7 +119,7 @@ describe("Auditor evidence check — GreenStatus revoke guard", () => {
 
   it("rolls back SOUL_GREEN_REVOKED AND records green_revoke_noop when revokeGreen affects zero rows", async () => {
     const { repo: eventLogRepo, persistedEvents } = createTransactionalEventLogRepo();
-    const healthJournal = { record: vi.fn(async () => undefined) };
+    const healthJournal = { record: vi.fn<AuditorHealthJournalPort["record"]>(async () => undefined) };
     const scheduler = { reportCompletion: vi.fn(async () => undefined) };
     const revokeGreen = vi.fn((_id, _reason, _taskId, _workspaceId) => ({ affected: 0 }));
     const auditor = new Auditor({

@@ -248,7 +248,9 @@ function createCandidate(input: {
   } as const;
 }
 
-function createProvider(providerKind = GardenProviderKind.LOCAL_HEURISTICS): GardenComputeProvider {
+function createProvider(
+  providerKind: GardenProviderKind = GardenProviderKind.LOCAL_HEURISTICS
+): GardenComputeProvider {
   return {
     provider_kind: providerKind,
     async compile(_turnContent: string, _context: GardenCompileContext) {

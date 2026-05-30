@@ -6,7 +6,12 @@ import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "@earendil-works/pi-ai";
-import { createPiMonoExtractor } from "../garden/pi-mono-extractor.js";
+import {
+  createPiMonoExtractor,
+  type PiMonoExtractorDependencies
+} from "../garden/pi-mono-extractor.js";
+
+type PiMonoComplete = NonNullable<PiMonoExtractorDependencies["complete"]>;
 
 const fixturesDir = fileURLToPath(new URL("./fixtures/garden-extraction-golden/", import.meta.url));
 const fixturesUrl = new URL("./fixtures/garden-extraction-golden/", import.meta.url);
@@ -23,7 +28,7 @@ describe("garden-extraction-golden", () => {
   it("returns the raw JSON emitted by the pi-mono complete stub for every fixture", async () => {
     for (const fixture of await loadFixtures()) {
       const rawJson = toProviderJson(fixture.expected);
-      const completeImpl = vi.fn(async () => createAssistantMessage(rawJson));
+      const completeImpl = vi.fn<PiMonoComplete>(async () => createAssistantMessage(rawJson));
       const getModelImpl = vi.fn(() => createModel());
       const extractor = createPiMonoExtractor({
         apiKey: "sk-test",

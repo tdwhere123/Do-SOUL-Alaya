@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider,
@@ -85,7 +86,7 @@ function createContext(turn: string): GardenCompileContext {
         content: turn,
         message_id: "message-1",
         created_at: "2026-05-11T06:00:00.000Z"
-      }
+      } as ConversationMessage
     ]
   };
 }

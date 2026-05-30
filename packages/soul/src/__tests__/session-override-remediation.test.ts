@@ -1,6 +1,21 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import { MemoryDimension, GreenGovernanceEventType, RetentionPolicy, type EventLogEntry, type SessionOverride } from "@do-soul/alaya-protocol";
-import { SessionOverrideRemediation } from "../garden/session-override-remediation.js";
+import {
+  SessionOverrideRemediation,
+  type SessionOverrideRemediationDependencies
+} from "../garden/session-override-remediation.js";
+
+type RemediationMemoryCreate = SessionOverrideRemediationDependencies["memoryService"]["create"];
+type RemediationClaimCreate = SessionOverrideRemediationDependencies["claimService"]["create"];
+type RemediationEventLogAppend = SessionOverrideRemediationDependencies["eventLogRepo"]["append"];
+type RemediationEventLogQueryByEntity =
+  SessionOverrideRemediationDependencies["eventLogRepo"]["queryByEntity"];
+type RemediationEventLogQueryByWorkspace =
+  SessionOverrideRemediationDependencies["eventLogRepo"]["queryByWorkspace"];
+type RemediationResolveDimension = NonNullable<
+  SessionOverrideRemediationDependencies["targetObjectResolver"]
+>["resolveDimension"];
+type RemediationWarn = NonNullable<SessionOverrideRemediationDependencies["warn"]>;
 
 describe("SessionOverrideRemediation", () => {
   it("promotes preference overrides to durable memory when base and trigger conditions pass", async () => {
@@ -154,7 +169,7 @@ describe("SessionOverrideRemediation", () => {
 
   it("prefers the resolved target-object dimension over text heuristics", async () => {
     const deps = createDeps({
-      resolveDimension: vi.fn(async () => MemoryDimension.FACT)
+      resolveDimension: vi.fn<RemediationResolveDimension>(async () => MemoryDimension.FACT)
     });
     const remediation = new SessionOverrideRemediation(deps);
 
@@ -201,7 +216,7 @@ describe("SessionOverrideRemediation", () => {
 
   it("still prefers an explicit dimension over the resolved target-object dimension", async () => {
     const deps = createDeps({
-      resolveDimension: vi.fn(async () => MemoryDimension.FACT)
+      resolveDimension: vi.fn<RemediationResolveDimension>(async () => MemoryDimension.FACT)
     });
     const remediation = new SessionOverrideRemediation(deps);
 
@@ -224,7 +239,7 @@ describe("SessionOverrideRemediation", () => {
   it("evaluates only pending overrides during run-level promotion", async () => {
     const deps = createDeps({
       queryByEntity: vi
-        .fn(async (entityType: string, entityId: string) =>
+        .fn<RemediationEventLogQueryByEntity>(async (entityType, entityId) =>
           entityType === "session_override" && entityId === "override-complete"
             ? [
                 {
@@ -299,7 +314,7 @@ describe("SessionOverrideRemediation", () => {
 
   it("promotes repeated overrides across distinct runs", async () => {
     const deps = createDeps({
-      queryByWorkspace: vi.fn(async () => [
+      queryByWorkspace: vi.fn<RemediationEventLogQueryByWorkspace>(async () => [
         {
           event_id: "event-repeat-1",
           created_at: "2026-03-24T00:00:00.000Z",
@@ -369,7 +384,7 @@ describe("SessionOverrideRemediation", () => {
 
   it("ignores malformed applied-event payloads when checking recurring overrides", async () => {
     const deps = createDeps({
-      queryByWorkspace: vi.fn(async () => [
+      queryByWorkspace: vi.fn<RemediationEventLogQueryByWorkspace>(async () => [
         {
           event_id: "event-repeat-1",
           created_at: "2026-03-24T00:00:00.000Z",
@@ -462,7 +477,7 @@ describe("SessionOverrideRemediation", () => {
 
   it("warns once when the resolver returns no dimension and heuristics are used", async () => {
     const deps = createDeps({
-      resolveDimension: vi.fn(async () => null)
+      resolveDimension: vi.fn<RemediationResolveDimension>(async () => null)
     });
     const remediation = new SessionOverrideRemediation(deps);
 
@@ -496,27 +511,34 @@ describe("SessionOverrideRemediation", () => {
 
 function createDeps(
   overrides: Partial<{
-    queryByEntity: ReturnType<typeof vi.fn>;
-    queryByWorkspace: ReturnType<typeof vi.fn>;
-    resolveDimension: ReturnType<typeof vi.fn>;
+    queryByEntity: Mock<RemediationEventLogQueryByEntity>;
+    queryByWorkspace: Mock<RemediationEventLogQueryByWorkspace>;
+    resolveDimension: Mock<RemediationResolveDimension>;
     includeResolver: boolean;
   }> = {}
 ) {
   const storedEvents: EventLogEntry[] = [];
-  const warn = vi.fn();
+  const warn = vi.fn<RemediationWarn>();
 
   const deps = {
     memoryService: {
-      create: vi.fn(async () => ({ object_kind: "memory_entry", object_id: "memory-1" }))
+      create: vi.fn<RemediationMemoryCreate>(async () => ({
+        object_kind: "memory_entry",
+        object_id: "memory-1"
+      }))
     },
     claimService: {
-      create: vi.fn(async () => ({ object_kind: "claim_form", object_id: "claim-1" }))
+      create: vi.fn<RemediationClaimCreate>(async () => ({
+        object_kind: "claim_form",
+        object_id: "claim-1"
+      }))
     },
     eventLogRepo: {
-      append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+      append: vi.fn<RemediationEventLogAppend>(async (event) => {
         const stored: EventLogEntry = {
           event_id: `event-${storedEvents.length + 1}`,
           created_at: "2026-03-24T00:00:00.000Z",
+          revision: 0,
           ...event
         };
         storedEvents.push(stored);
@@ -524,12 +546,12 @@ function createDeps(
       }),
       queryByEntity:
         overrides.queryByEntity ??
-        vi.fn(async (entityType: string, entityId: string) =>
+        vi.fn<RemediationEventLogQueryByEntity>(async (entityType, entityId) =>
           storedEvents.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
         ),
       queryByWorkspace:
         overrides.queryByWorkspace ??
-        vi.fn(async (workspaceId: string) =>
+        vi.fn<RemediationEventLogQueryByWorkspace>(async (workspaceId) =>
           storedEvents.filter((event) => event.workspace_id === workspaceId)
         )
     },
@@ -542,7 +564,8 @@ function createDeps(
       ? {}
       : {
           targetObjectResolver: {
-            resolveDimension: overrides.resolveDimension ?? vi.fn(async () => null)
+            resolveDimension:
+              overrides.resolveDimension ?? vi.fn<RemediationResolveDimension>(async () => null)
           }
         })
   };

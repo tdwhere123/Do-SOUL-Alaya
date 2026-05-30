@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { GardenTaskKind, GardenTier, type GardenTaskDescriptor } from "@do-soul/alaya-protocol";
+import {
+  GardenTaskKind,
+  GardenTier,
+  type GardenTaskDescriptor,
+  type GardenTaskKindValue
+} from "@do-soul/alaya-protocol";
 import { JANITOR_CONSTANTS, Janitor } from "../garden/janitor.js";
 
 describe("Janitor GC task kinds", () => {
@@ -106,10 +111,10 @@ describe("Janitor GC task kinds", () => {
   });
 });
 
-function createTask(taskKind: GardenTaskKind | "tombstone_gc"): GardenTaskDescriptor {
+function createTask(taskKind: GardenTaskKindValue | "tombstone_gc"): GardenTaskDescriptor {
   return {
     task_id: "task-1",
-    task_kind: taskKind as GardenTaskKind,
+    task_kind: taskKind as GardenTaskKindValue,
     required_tier: GardenTier.TIER_0,
     workspace_id: "workspace-1",
     run_id: null,

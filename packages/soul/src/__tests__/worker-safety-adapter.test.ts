@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { WorkerBaselineLockSchema } from "@do-soul/alaya-protocol";
+import { WorkerBaselineLockSchema, type ToolCategory } from "@do-soul/alaya-protocol";
 import { SoulWorkerSafetyAdapter } from "../worker-safety-adapter.js";
 import { SoulWorkerSafetyReader } from "../worker-safety-reader.js";
 
@@ -13,7 +13,9 @@ describe("SoulWorkerSafetyAdapter", () => {
         listActiveHazardObjectRefs: vi.fn(async () => ["hazard-1"])
       },
       policyProjectionReader: {
-        listGlobalDeniedToolCategories: vi.fn(async () => ["network", "governance"]),
+        listGlobalDeniedToolCategories: vi.fn(
+          async (): Promise<readonly ToolCategory[]> => ["network", "governance"]
+        ),
         listWorkspaceHardStopRefs: vi.fn(async () => ["hard-stop-1"])
       }
     };
@@ -73,7 +75,9 @@ describe("SoulWorkerSafetyAdapter", () => {
         })
       },
       policyProjectionReader: {
-        listGlobalDeniedToolCategories: vi.fn(async () => ["network"]),
+        listGlobalDeniedToolCategories: vi.fn(
+          async (): Promise<readonly ToolCategory[]> => ["network"]
+        ),
         listWorkspaceHardStopRefs: vi.fn(async () => ["hard-stop-1"])
       }
     });
