@@ -891,8 +891,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         memoryRepo: {
           findByDimension: async (workspaceId, dimension) =>
             await memoryEntryRepo.findByDimension(workspaceId, dimension),
-          findByWorkspaceId: async (workspaceId) =>
-            await memoryEntryRepo.findByWorkspaceId(workspaceId)
+          findBySharedDomainTags: async (workspaceId, tags) =>
+            await memoryEntryRepo.findBySharedDomainTags(workspaceId, tags)
         },
         pathCandidatePort,
         ...(conflictDetectionLlmPort === null ? {} : { llmPort: conflictDetectionLlmPort }),

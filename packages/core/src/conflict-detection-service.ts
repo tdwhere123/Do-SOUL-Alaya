@@ -43,8 +43,17 @@ export interface ConflictDetectionMemoryRepoPort {
     workspaceId: string,
     dimension: MemoryEntry["dimension"]
   ): Promise<readonly Readonly<MemoryEntry>[]>;
-  findByWorkspaceId(
-    workspaceId: string
+  // invariant: the INCOMPATIBLE_WITH scan candidate source. The gate
+  // requires jaccard(domain_tags) >= TAG_OVERLAP_CONTRADICTS_THRESHOLD,
+  // which implies the candidate shares >=1 of the new memory's
+  // domain_tags. So the shared-tag set is a strict SUPERSET of every
+  // gate-passing peer: scanning it instead of the full workspace yields
+  // byte-identical INCOMPATIBLE_WITH edges with a sub-linear candidate
+  // set. A new memory with zero tags has no shared-tag candidates, which
+  // also matches the full scan (jaccard with an empty set is 0 < 0.35).
+  findBySharedDomainTags(
+    workspaceId: string,
+    tags: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
@@ -129,8 +138,8 @@ export class ConflictDetectionService {
     readonly runId: string;
   }): Promise<void> {
     // invariant: short-circuit when neither writer can fire. With
-    // ruleEnabled=false and no LLM port, both the O(workspace_size)
-    // findByDimension + findByWorkspaceId fetches would be pure waste.
+    // ruleEnabled=false and no LLM port, both the findByDimension +
+    // findBySharedDomainTags fetches would be pure waste.
     if (!this.ruleEnabled && this.deps.llmPort === undefined) {
       return;
     }
@@ -143,15 +152,23 @@ export class ConflictDetectionService {
         });
         return [] as readonly Readonly<MemoryEntry>[];
       });
-    const allWorkspace = await this.deps.memoryRepo
-      .findByWorkspaceId(params.workspaceId)
-      .catch((err) => {
-        this.warn("memoryRepo.findByWorkspaceId failed", {
-          workspace_id: params.workspaceId,
-          error: errorMessage(err)
-        });
-        return [] as readonly Readonly<MemoryEntry>[];
-      });
+    // INCOMPATIBLE_WITH candidate narrowing: the gate keeps a peer only if
+    // jaccard(domain_tags) >= TAG_OVERLAP_CONTRADICTS_THRESHOLD, which
+    // requires >=1 shared tag, so the shared-tag set is a superset of every
+    // gate-passing peer. Fetching it instead of the full workspace yields
+    // identical edges with a sub-linear candidate set. Only the rule path
+    // reads it; skip the fetch entirely when the rule path is disabled.
+    const sharedTagCandidates = this.ruleEnabled
+      ? await this.deps.memoryRepo
+          .findBySharedDomainTags(params.workspaceId, params.newMemoryDomainTags)
+          .catch((err) => {
+            this.warn("memoryRepo.findBySharedDomainTags failed", {
+              workspace_id: params.workspaceId,
+              error: errorMessage(err)
+            });
+            return [] as readonly Readonly<MemoryEntry>[];
+          })
+      : ([] as readonly Readonly<MemoryEntry>[]);
 
     const newTokens = tokenize(params.newMemoryContent);
     const newTagSet = new Set(params.newMemoryDomainTags);
@@ -190,7 +207,7 @@ export class ConflictDetectionService {
         );
       }
 
-      for (const existing of allWorkspace) {
+      for (const existing of sharedTagCandidates) {
         if (existing.object_id === params.newMemoryId) {
           continue;
         }

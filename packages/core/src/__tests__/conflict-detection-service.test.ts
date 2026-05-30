@@ -49,7 +49,7 @@ describe("ConflictDetectionService", () => {
     });
     const memoryRepo = {
       findByDimension: vi.fn(async () => [existing]),
-      findByWorkspaceId: vi.fn(async () => [existing])
+      findBySharedDomainTags: vi.fn(async () => [existing])
     };
     const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
@@ -88,7 +88,7 @@ describe("ConflictDetectionService", () => {
     });
     const memoryRepo = {
       findByDimension: vi.fn(async () => [existing]),
-      findByWorkspaceId: vi.fn(async () => [existing])
+      findBySharedDomainTags: vi.fn(async () => [existing])
     };
     const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const emitKarmaEvent = vi.fn(async () => {});
@@ -129,7 +129,7 @@ describe("ConflictDetectionService", () => {
     });
     const memoryRepo = {
       findByDimension: vi.fn(async () => [ambiguous]),
-      findByWorkspaceId: vi.fn(async () => [])
+      findBySharedDomainTags: vi.fn(async () => [])
     };
     const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const emitKarmaEvent = vi.fn(async () => {});
@@ -172,7 +172,7 @@ describe("ConflictDetectionService", () => {
     const existing = createMemoryEntry({ object_id: "mem-A" });
     const memoryRepo = {
       findByDimension: vi.fn(async () => [existing]),
-      findByWorkspaceId: vi.fn(async () => [existing])
+      findBySharedDomainTags: vi.fn(async () => [existing])
     };
     const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
@@ -202,7 +202,7 @@ describe("ConflictDetectionService", () => {
     });
     const memoryRepo = {
       findByDimension: vi.fn(async () => []),
-      findByWorkspaceId: vi.fn(async () => [existing])
+      findBySharedDomainTags: vi.fn(async () => [existing])
     };
     const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
@@ -239,7 +239,7 @@ describe("ConflictDetectionService", () => {
     });
     const memoryRepo = {
       findByDimension: vi.fn(async () => [ambiguous]),
-      findByWorkspaceId: vi.fn(async () => [])
+      findBySharedDomainTags: vi.fn(async () => [])
     };
     const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const llmPort = {
@@ -275,7 +275,7 @@ describe("ConflictDetectionService", () => {
     });
     const memoryRepo = {
       findByDimension: vi.fn(async () => [ruleHit]),
-      findByWorkspaceId: vi.fn(async () => [])
+      findBySharedDomainTags: vi.fn(async () => [])
     };
     const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const llmPort = {
@@ -309,7 +309,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => {
         throw new Error("repo down");
       }),
-      findByWorkspaceId: vi.fn(async () => [])
+      findBySharedDomainTags: vi.fn(async () => [])
     };
     const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
@@ -334,7 +334,7 @@ describe("ConflictDetectionService", () => {
     });
     const memoryRepo = {
       findByDimension: vi.fn(async () => [existing]),
-      findByWorkspaceId: vi.fn(async () => [existing])
+      findBySharedDomainTags: vi.fn(async () => [existing])
     };
     const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const llmPort = {
@@ -381,7 +381,7 @@ describe("ConflictDetectionService", () => {
     });
     const memoryRepo = {
       findByDimension: vi.fn(async () => [existing]),
-      findByWorkspaceId: vi.fn(async () => [existing])
+      findBySharedDomainTags: vi.fn(async () => [existing])
     };
     const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
@@ -402,6 +402,126 @@ describe("ConflictDetectionService", () => {
     expect(contradictsCalls).toHaveLength(1);
   });
 
+  it("shared-tag candidate narrowing yields the SAME INCOMPATIBLE_WITH edges as a full-workspace scan", async () => {
+    // Recall-equivalence proof. The INCOMPATIBLE_WITH gate keeps a peer
+    // only when jaccard(domain_tags) >= 0.35 AND (dim or scope mismatch).
+    // jaccard >= 0.35 implies >=1 shared tag, so the shared-tag set is a
+    // strict superset of every gate-passing peer. The fixture spans the
+    // four discriminating cases:
+    //   (a) cross-dimension, shares >=0.35 tags  -> MUST be linked
+    //   (b) cross-dimension, shares 1 tag <0.35  -> NOT linked (gate fails)
+    //   (c) cross-dimension, ZERO shared tags    -> NOT even a candidate
+    //   (d) same-dimension + same-scope          -> not an INCOMPATIBLE peer
+    const newMemoryDomainTags = ["coffee", "beans", "prep"];
+
+    // (a) jaccard({coffee,beans,prep},{coffee,beans}) = 2/3 ~= 0.67 >= 0.35
+    const crossDimSharesEnough = createMemoryEntry({
+      object_id: "mem-a",
+      dimension: MemoryDimension.CONSTRAINT,
+      content: "Hard rule about beans and coffee.",
+      domain_tags: ["coffee", "beans"]
+    });
+    // (b) jaccard({coffee,beans,prep},{coffee,x,y,z}) = 1/6 ~= 0.167 < 0.35
+    const crossDimShares1TagBelowGate = createMemoryEntry({
+      object_id: "mem-b",
+      dimension: MemoryDimension.CONSTRAINT,
+      content: "Unrelated rule mentioning coffee once.",
+      domain_tags: ["coffee", "x", "y", "z"]
+    });
+    // (c) zero shared tags -- the storage query would never return it.
+    const crossDimZeroShared = createMemoryEntry({
+      object_id: "mem-c",
+      dimension: MemoryDimension.CONSTRAINT,
+      content: "Totally unrelated rule.",
+      domain_tags: ["tea", "kettle"]
+    });
+    // (d) same dimension + same scope: excluded by the !dimMismatch &&
+    // !scopeMismatch guard regardless of tag overlap.
+    const sameDimSameScope = createMemoryEntry({
+      object_id: "mem-d",
+      dimension: MemoryDimension.PREFERENCE,
+      scope_class: ScopeClass.PROJECT,
+      content: "A same-dimension coffee preference.",
+      domain_tags: ["coffee", "beans"]
+    });
+
+    const fullWorkspace = [
+      crossDimSharesEnough,
+      crossDimShares1TagBelowGate,
+      crossDimZeroShared,
+      sameDimSameScope
+    ];
+
+    // Reference: what the OLD full-scan gate would link. Replays the exact
+    // gate predicate the service applies over every workspace memory.
+    const newTagSet = new Set(newMemoryDomainTags);
+    const jaccard = (a: ReadonlySet<string>, b: ReadonlySet<string>): number => {
+      if (a.size === 0 && b.size === 0) {
+        return 0;
+      }
+      let intersection = 0;
+      for (const v of a) {
+        if (b.has(v)) {
+          intersection += 1;
+        }
+      }
+      const union = a.size + b.size - intersection;
+      return union === 0 ? 0 : intersection / union;
+    };
+    const fullScanExpectedTargets = fullWorkspace
+      .filter((m) => {
+        const dimMismatch = m.dimension !== MemoryDimension.PREFERENCE;
+        const scopeMismatch = m.scope_class !== ScopeClass.PROJECT;
+        if (!dimMismatch && !scopeMismatch) {
+          return false;
+        }
+        return jaccard(newTagSet, new Set(m.domain_tags)) >= 0.35;
+      })
+      .map((m) => m.object_id)
+      .sort();
+    // sanity: only (a) survives the full-scan gate.
+    expect(fullScanExpectedTargets).toEqual(["mem-a"]);
+
+    // The shared-tag query faithfully returns only memories sharing >=1 of
+    // the new memory's tags -- (a),(b),(d) share, (c) does not, so (c) is
+    // never handed to the service as a candidate.
+    const findBySharedDomainTags = vi.fn(async (_workspaceId: string, tags: readonly string[]) => {
+      const queryTagSet = new Set(tags);
+      return fullWorkspace.filter((m) => m.domain_tags.some((t) => queryTagSet.has(t)));
+    });
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => []),
+      findBySharedDomainTags
+    };
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
+
+    await service.detectAndLinkConflicts({
+      newMemoryId: "mem-new",
+      newMemoryDimension: MemoryDimension.PREFERENCE,
+      newMemoryScopeClass: ScopeClass.PROJECT,
+      newMemoryContent: "I prefer instant coffee with fewer beans.",
+      newMemoryDomainTags: newMemoryDomainTags,
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+
+    // (c) the zero-shared-tag memory was never fetched as a candidate:
+    // the query was asked only for the new memory's tags, and mem-c shares
+    // none, so it cannot appear in any result row.
+    const queriedTags = findBySharedDomainTags.mock.calls.map((call) => call[1]);
+    expect(queriedTags).toEqual([newMemoryDomainTags]);
+
+    const incompatibleTargets = pathCandidatePort.submitCandidate.mock.calls
+      .filter((call: any[]) => call[0].relationKind === "incompatible_with")
+      .map((call: any[]) => call[0].targetAnchor.object_id)
+      .sort();
+
+    // The narrowed-candidate edges equal the full-scan edges exactly.
+    expect(incompatibleTargets).toEqual(fullScanExpectedTargets);
+    expect(incompatibleTargets).toEqual(["mem-a"]);
+  });
+
   it("ruleEnabled=false with no llmPort produces no edges", async () => {
     const existing = createMemoryEntry({
       object_id: "mem-A",
@@ -409,7 +529,7 @@ describe("ConflictDetectionService", () => {
     });
     const memoryRepo = {
       findByDimension: vi.fn(async () => [existing]),
-      findByWorkspaceId: vi.fn(async () => [existing])
+      findBySharedDomainTags: vi.fn(async () => [existing])
     };
     const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const service = new ConflictDetectionService({

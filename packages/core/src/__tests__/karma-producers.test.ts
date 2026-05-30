@@ -311,7 +311,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
       const service = new ConflictDetectionService({
         memoryRepo: {
           findByDimension: async () => [Object.freeze({ ...existing })],
-          findByWorkspaceId: async () => []
+          findBySharedDomainTags: async () => []
         },
         pathCandidatePort: {
           submitCandidate: vi.fn(async () => true)
@@ -362,7 +362,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
       const service = new ConflictDetectionService({
         memoryRepo: {
           findByDimension: async () => [Object.freeze({ ...existing })],
-          findByWorkspaceId: async () => [Object.freeze({ ...existing })]
+          findBySharedDomainTags: async () => [Object.freeze({ ...existing })]
         },
         pathCandidatePort: { submitCandidate },
         karmaEmitter: { emitKarmaEvent }
@@ -401,7 +401,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
       const service = new ConflictDetectionService({
         memoryRepo: {
           findByDimension: async () => [],
-          findByWorkspaceId: async () => [Object.freeze({ ...existing })]
+          findBySharedDomainTags: async () => [Object.freeze({ ...existing })]
         },
         pathCandidatePort: { submitCandidate },
         karmaEmitter: { emitKarmaEvent }

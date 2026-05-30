@@ -88,6 +88,18 @@ export interface MemoryEntryRepo {
     workspaceId: string,
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  // Hot-tier, non-tombstoned memories in the workspace whose domain_tags
+  // JSON array shares >=1 value with `tags`. Each match returned once.
+  // invariant: this is the candidate-narrowing source for the
+  // INCOMPATIBLE_WITH conflict scan: jaccard(domain_tags) >= the rule
+  // gate (0.35) implies >=1 shared tag, so the shared-tag set is a
+  // superset of every gate-passing candidate -- the narrowed result is
+  // edge-identical to a full findByWorkspaceId scan. Tier/tombstone/order
+  // scope MUST match findByWorkspaceId(hot) for that equivalence to hold.
+  findBySharedDomainTags(
+    workspaceId: string,
+    tags: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   searchByKeyword(
     workspaceId: string,
     queryText: string,
@@ -451,6 +463,50 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list memory entries for workspace ${workspaceId} and scope class ${parsedScopeClass}.`,
+        error
+      );
+    }
+  }
+
+  public async findBySharedDomainTags(
+    workspaceId: string,
+    tags: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const uniqueTags = Array.from(
+      new Set(tags.filter((tag) => typeof tag === "string" && tag.length > 0))
+    );
+    // A new memory with no tags can never reach jaccard(domain_tags) >= the
+    // rule gate, so it has no shared-tag candidates; mirror the full-scan
+    // outcome (zero INCOMPATIBLE_WITH edges) by returning empty.
+    if (uniqueTags.length === 0) {
+      return Object.freeze([]);
+    }
+
+    // json_each expands the domain_tags JSON array per row; a row with an
+    // empty array yields no json_each rows and is therefore excluded
+    // (it cannot pass the >=0.35 gate). DISTINCT collapses rows that share
+    // more than one tag to a single result. Tier + tombstone + ORDER BY
+    // match findByWorkspaceId(hot) so the candidate set is a strict
+    // superset of the full-scan candidates with identical iteration order.
+    const placeholders = uniqueTags.map(() => "?").join(", ");
+    const statement = this.db.connection.prepare(`
+      SELECT DISTINCT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      JOIN json_each(memory_entries.domain_tags) AS tag
+        ON tag.value IN (${placeholders})
+      WHERE memory_entries.workspace_id = ?
+        AND memory_entries.storage_tier = 'hot'
+        AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
+      ORDER BY memory_entries.created_at ASC, memory_entries.object_id ASC
+    `);
+
+    try {
+      const rows = statement.all(...uniqueTags, workspaceId) as MemoryEntryRow[];
+      return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to find memory entries by shared domain tags in workspace ${workspaceId}.`,
         error
       );
     }

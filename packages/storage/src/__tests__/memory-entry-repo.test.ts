@@ -1017,6 +1017,92 @@ describe("SqliteMemoryEntryRepo", () => {
       .run("b9999999-2222-4222-8222-222222222222");
     expect(porterMatch("cach")).toEqual([]);
   });
+
+  it("findBySharedDomainTags returns memories sharing >=1 tag, excludes zero-shared, is workspace-scoped, and dedupes", async () => {
+    const { repo } = await createRepo();
+
+    // shares one tag ("coffee") with the query.
+    const sharesOne = createMemoryEntry({
+      object_id: "11111111-1111-4111-8111-111111111111",
+      domain_tags: ["coffee", "beans"]
+    });
+    // shares two tags -- must still appear exactly once (dedupe across the
+    // json_each expansion).
+    const sharesTwo = createMemoryEntry({
+      object_id: "22222222-2222-4222-8222-222222222222",
+      run_id: "run-2",
+      domain_tags: ["coffee", "tea"]
+    });
+    // shares zero tags -- excluded.
+    const sharesNone = createMemoryEntry({
+      object_id: "33333333-3333-4333-8333-333333333333",
+      run_id: "run-2",
+      domain_tags: ["kettle", "mug"]
+    });
+    // empty tag array -- json_each yields no rows, so excluded.
+    const noTags = createMemoryEntry({
+      object_id: "44444444-4444-4444-8444-444444444444",
+      run_id: "run-1",
+      domain_tags: []
+    });
+    // matching tag but a DIFFERENT workspace -- must not leak across scope.
+    const otherWorkspace = createMemoryEntry({
+      object_id: "55555555-5555-4555-8555-555555555555",
+      workspace_id: "workspace-2",
+      run_id: "run-3",
+      domain_tags: ["coffee"]
+    });
+
+    await repo.create(sharesOne);
+    await repo.create(sharesTwo);
+    await repo.create(sharesNone);
+    await repo.create(noTags);
+    await repo.create(otherWorkspace);
+
+    const rows = await repo.findBySharedDomainTags("workspace-1", ["coffee", "tea"]);
+    const ids = rows.map((row) => row.object_id);
+
+    // sharesOne + sharesTwo only; each once; no zero-shared, no empty-tag,
+    // no cross-workspace leak.
+    expect(ids).toEqual([sharesOne.object_id, sharesTwo.object_id]);
+  });
+
+  it("findBySharedDomainTags returns empty for an empty tag query", async () => {
+    const { repo } = await createRepo();
+    await repo.create(createMemoryEntry({ domain_tags: ["coffee"] }));
+
+    await expect(repo.findBySharedDomainTags("workspace-1", [])).resolves.toEqual([]);
+  });
+
+  it("findBySharedDomainTags excludes cold-tier and tombstoned rows (matches findByWorkspaceId hot scope)", async () => {
+    const { repo } = await createRepo();
+
+    const hot = createMemoryEntry({
+      object_id: "1a111111-1111-4111-8111-111111111111",
+      storage_tier: StorageTier.HOT,
+      domain_tags: ["coffee"]
+    });
+    const cold = createMemoryEntry({
+      object_id: "2a222222-2222-4222-8222-222222222222",
+      run_id: "run-2",
+      storage_tier: StorageTier.COLD,
+      domain_tags: ["coffee"]
+    });
+    const tombstoned = createMemoryEntry({
+      object_id: "3a333333-3333-4333-8333-333333333333",
+      run_id: "run-2",
+      storage_tier: StorageTier.HOT,
+      retention_state: "tombstoned",
+      domain_tags: ["coffee"]
+    });
+
+    await repo.create(hot);
+    await repo.create(cold);
+    await repo.create(tombstoned);
+
+    const rows = await repo.findBySharedDomainTags("workspace-1", ["coffee"]);
+    expect(rows.map((row) => row.object_id)).toEqual([hot.object_id]);
+  });
 });
 
 async function createRepo(): Promise<{
