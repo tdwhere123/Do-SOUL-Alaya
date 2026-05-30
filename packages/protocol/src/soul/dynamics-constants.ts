@@ -45,6 +45,10 @@ export const DYNAMICS_CONSTANTS = Object.freeze({
     default_lens_min_confidence: 0.7
   }),
   path_plasticity: Object.freeze({
+    // Co-usage events for the same memory pair must accrue to this count
+    // before PathRelationProposalService mints a PathRelation. Override-capable
+    // via dynamics-constants-override (bench lowers it to surface paths early).
+    co_usage_threshold: 3,
     reinforcement_increment: 0.1,
     weakening_decrement: -0.05,
     salience_boost_on_hit: 0.15,

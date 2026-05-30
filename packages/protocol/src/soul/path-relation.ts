@@ -17,7 +17,7 @@ const pathGovernanceClassValues = [
   "recall_allowed",
   "strictly_governed"
 ] as const;
-const pathLifecycleStatusValues = ["active", "retired"] as const;
+const pathLifecycleStatusValues = ["active", "retired", "dormant"] as const;
 const manifestationPreferenceValues = ["stance_bias", "dialogue_nudge", "lens_entry"] as const;
 
 export const StabilityClass = {
@@ -42,7 +42,11 @@ export const PathGovernanceClass = {
 
 export const PathLifecycleStatus = {
   ACTIVE: "active",
-  RETIRED: "retired"
+  RETIRED: "retired",
+  // invariant: dormant leaves a path in DB with salience cleared and out of
+  // recall, distinct from retired. active <-> dormant is reversible via
+  // override; retired is terminal.
+  DORMANT: "dormant"
 } as const;
 
 export const ManifestationPreference = {

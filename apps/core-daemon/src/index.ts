@@ -87,6 +87,7 @@ import {
   SqliteMemoryEntryRepo,
   SqliteMemoryGraphEdgeRepo,
   SqliteOrphanRadarRepo,
+  SqliteCoUsageCounterRepo,
   SqlitePathGraphSnapshotRepo,
   SqlitePathPlasticityWatermarkRepo,
   SqlitePathRelationRepo,
@@ -276,6 +277,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const trustStateRepo = new SqliteTrustStateRepo(database);
   const strongRefRepo = new SqliteStrongRefRepo(database);
   const pathRelationRepo = new SqlitePathRelationRepo(database);
+  const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
   const pathPlasticityWatermarkRepo = new SqlitePathPlasticityWatermarkRepo(database);
   const pathGraphSnapshotRepo = new SqlitePathGraphSnapshotRepo(database);
   const deferredObligationRepo = new SqliteDeferredObligationRepo(database);
@@ -986,6 +988,17 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     const parsed = Number(raw);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
   })();
+  // Override-capable co-usage threshold. Default (undefined) falls through to
+  // DYNAMICS_CONSTANTS.path_plasticity.co_usage_threshold inside the service;
+  // bench lowers it to surface paths early.
+  const pathRelationCoUsageThreshold = (() => {
+    const raw = process.env.ALAYA_PATHREL_CO_USAGE_THRESHOLD;
+    if (raw === undefined || raw === "") {
+      return undefined;
+    }
+    const parsed = Number(raw);
+    return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
+  })();
   const pathRelationProposalService = new PathRelationProposalService({
     repo: {
       create: (relation) => pathRelationRepo.create(relation),
@@ -994,13 +1007,15 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
           { kind: "object", object_id: memoryId }
         ])
     },
+    counterStore: coUsageCounterRepo,
     eventPublisher,
     ...(pathRelationCounterTtlMs === undefined ? {} : { counterTtlMs: pathRelationCounterTtlMs }),
+    ...(pathRelationCoUsageThreshold === undefined ? {} : { threshold: pathRelationCoUsageThreshold }),
     warn: warnLogger.warn
   });
-  // invariant: counter Map is bounded by periodic eviction. The daemon
-  // sweeps once per TTL interval; sub-threshold pairs older than the TTL
-  // are discarded so long no-promote tails do not grow without bound.
+  // invariant: durable counter rows are bounded by periodic eviction. The
+  // daemon sweeps once per TTL interval; sub-threshold pairs whose updated_at
+  // is older than the TTL are DELETEd so long no-promote tails do not grow.
   // invariant: DeferredObligationService is the producer for path-anchor
   // `obligation` refs and the destination of soul.resolve `defer`
   // resolutions. Wired into the daemon so its create/fulfill/expire ports
@@ -1025,7 +1040,11 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const pathRelationEvictionIntervalMs = pathRelationCounterTtlMs ?? PATH_RELATION_COUNTER_DEFAULT_TTL_MS;
   const pathRelationEvictionTimer = setInterval(() => {
-    pathRelationProposalService.evictExpired();
+    void pathRelationProposalService.evictExpired().catch((error: unknown) => {
+      warnLogger.warn("PathRelation counter eviction failed", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
   }, pathRelationEvictionIntervalMs);
   pathRelationEvictionTimer.unref?.();
   const pathRelationProposalPort: PathRelationProposalPort = {

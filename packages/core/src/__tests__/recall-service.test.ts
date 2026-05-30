@@ -11,6 +11,8 @@ import {
   SynthesisStatus,
   type EventLogEntry,
   type MemoryEntry,
+  type MemoryGraphEdge,
+  type PathRelation,
   type ProjectMappingAnchor,
   type RecallPolicy,
   type SoulActiveConstraint,
@@ -24,6 +26,12 @@ import {
   computeRecallTokenEconomy,
   type RecallServiceDependencies
 } from "../recall-service.js";
+import type {
+  RecallServiceEmbeddingRecallPort,
+  RecallServiceGraphExpansionPort,
+  RecallServiceMemoryRepoPort,
+  RecallServicePathExpansionPort
+} from "../recall-service-types.js";
 import type { EmbeddingVectorRecord } from "../embedding-recall-service.js";
 
 function createTaskSurface(): TaskObjectSurface {
@@ -86,6 +94,24 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     reinforcement_count: null,
     contradiction_count: null,
     superseded_by: null,
+    ...overrides
+  };
+}
+
+// Typed graph-edge fixture factory. Returns the exact strict MemoryGraphEdge
+// shape (6 fields) so tsc validates edge fixtures field-for-field instead of
+// accepting a structurally-asserted port. The recall path reads only
+// edge_type / source_memory_id / target_memory_id; the persistent envelope
+// fields (object_kind / schema_version / confidence / ...) are not part of
+// MemoryGraphEdge and are deliberately absent.
+function createGraphEdge(overrides: Partial<MemoryGraphEdge> = {}): MemoryGraphEdge {
+  return {
+    edge_id: "edge-fixture",
+    source_memory_id: "memory-a",
+    target_memory_id: "memory-b",
+    edge_type: "supports",
+    workspace_id: "workspace-1",
+    created_at: "2026-03-20T00:00:00.000Z",
     ...overrides
   };
 }
@@ -1514,61 +1540,62 @@ describe("RecallService", () => {
       })
     ];
     const { dependencies } = createDependencies(memories);
-    const graphExpansionPort = {
+    const graphExpansionPort: RecallServiceGraphExpansionPort = {
       findByMemoryId: vi.fn(async (memoryId: string) =>
         memoryId === "seed-memory"
           ? [
-              {
+              createGraphEdge({
                 edge_id: "edge-1",
                 source_memory_id: "seed-memory",
                 target_memory_id: "graph-target",
-                edge_type: "supports" as const,
-                workspace_id: "workspace-1",
-                created_at: "2026-03-20T00:00:00.000Z"
-              }
+                edge_type: "supports"
+              })
             ]
           : []
       )
     };
-    const pathExpansionPort = {
-      findByAnchors: vi.fn(async () => [
-        {
-          path_id: "path-1",
-          workspace_id: "workspace-1",
-          anchors: {
-            source_anchor: { kind: "object", object_id: "seed-memory" },
-            target_anchor: { kind: "object", object_id: "path-target" }
-          },
-          constitution: {
-            relation_kind: "supports_recall",
-            why_this_relation_exists: ["test relation"]
-          },
-          effect_vector: {
-            salience: 1,
-            recall_bias: 1,
-            verification_bias: 0,
-            unfinishedness_bias: 0,
-            default_manifestation_preference: "lens_entry"
-          },
-          plasticity_state: {
-            strength: 1,
-            direction_bias: "source_to_target",
-            stability_class: "stable",
-            support_events_count: 1,
-            contradiction_events_count: 0
-          },
-          lifecycle: {
-            status: "active",
-            retirement_rule: "manual"
-          },
-          legitimacy: {
-            evidence_basis: ["test"],
-            governance_class: "recall_allowed"
-          },
-          created_at: "2026-03-20T00:00:00.000Z",
-          updated_at: "2026-03-20T00:00:00.000Z"
-        }
-      ])
+    // The PathRelation fixture is structurally exact; annotating the element
+    // type forces tsc to validate the discriminated-union literals
+    // (anchor kind / relation_kind / direction_bias / manifestation preference)
+    // instead of letting vi.fn widen them to string.
+    const pathRelation: PathRelation = {
+      path_id: "path-1",
+      workspace_id: "workspace-1",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "seed-memory" },
+        target_anchor: { kind: "object", object_id: "path-target" }
+      },
+      constitution: {
+        relation_kind: "supports_recall",
+        why_this_relation_exists: ["test relation"]
+      },
+      effect_vector: {
+        salience: 1,
+        recall_bias: 1,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "lens_entry"
+      },
+      plasticity_state: {
+        strength: 1,
+        direction_bias: "source_to_target",
+        stability_class: "stable",
+        support_events_count: 1,
+        contradiction_events_count: 0
+      },
+      lifecycle: {
+        status: "active",
+        retirement_rule: "manual"
+      },
+      legitimacy: {
+        evidence_basis: ["test"],
+        governance_class: "recall_allowed"
+      },
+      created_at: "2026-03-20T00:00:00.000Z",
+      updated_at: "2026-03-20T00:00:00.000Z"
+    };
+    const pathExpansionPort: RecallServicePathExpansionPort = {
+      findByAnchors: vi.fn(async () => [pathRelation])
     };
     const service = new RecallService({
       ...dependencies,
@@ -1657,59 +1684,46 @@ describe("RecallService", () => {
       })
     ];
     const { dependencies } = createDependencies(memories);
-    const edgeBase = {
-      object_kind: "memory_graph_edge" as const,
-      schema_version: 1,
-      lifecycle_state: "active" as const,
-      created_at: "2026-03-20T00:00:00.000Z",
-      updated_at: "2026-03-20T00:00:00.000Z",
-      created_by: "system",
-      workspace_id: "workspace-1",
-      confidence: 0.9
-    };
     const graphExpansionPort = {
-      findByMemoryId: vi.fn(async (memoryId: string) => {
+      findByMemoryId: vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(async (memoryId: string) => {
         if (memoryId === "seed-memory") {
           return [
-            ...Array.from({ length: 12 }, (_, index) => ({
-              ...edgeBase,
-              object_id: `edge-supersedes-${index}`,
-              edge_type: "supersedes" as const,
-              source_memory_id: "seed-memory",
-              target_memory_id: "superseded-target"
-            })),
-            {
-              ...edgeBase,
-              object_id: "edge-1",
-              edge_type: "derives_from" as const,
+            ...Array.from({ length: 12 }, (_, index) =>
+              createGraphEdge({
+                edge_id: `edge-supersedes-${index}`,
+                edge_type: "supersedes",
+                source_memory_id: "seed-memory",
+                target_memory_id: "superseded-target"
+              })
+            ),
+            createGraphEdge({
+              edge_id: "edge-1",
+              edge_type: "derives_from",
               source_memory_id: "seed-memory",
               target_memory_id: "hop1-derived"
-            }
+            })
           ];
         }
         if (memoryId === "hop1-derived") {
           return [
-            {
-              ...edgeBase,
-              object_id: "edge-cycle",
-              edge_type: "supports" as const,
+            createGraphEdge({
+              edge_id: "edge-cycle",
+              edge_type: "supports",
               source_memory_id: "hop1-derived",
               target_memory_id: "seed-memory"
-            },
-            {
-              ...edgeBase,
-              object_id: "edge-2",
-              edge_type: "supports" as const,
+            }),
+            createGraphEdge({
+              edge_id: "edge-2",
+              edge_type: "supports",
               source_memory_id: "hop1-derived",
               target_memory_id: "hop2-supported"
-            },
-            {
-              ...edgeBase,
-              object_id: "edge-3",
-              edge_type: "recalls" as const,
+            }),
+            createGraphEdge({
+              edge_id: "edge-3",
+              edge_type: "recalls",
               source_memory_id: "hop1-derived",
               target_memory_id: "hop2-recalled"
-            }
+            })
           ];
         }
         return [];
@@ -1796,29 +1810,18 @@ describe("RecallService", () => {
       })
     ];
     const { dependencies } = createDependencies(memories);
-    const edgeBase = {
-      object_kind: "memory_graph_edge" as const,
-      schema_version: 1,
-      lifecycle_state: "active" as const,
-      created_at: "2026-03-20T00:00:00.000Z",
-      updated_at: "2026-03-20T00:00:00.000Z",
-      created_by: "system",
-      workspace_id: "workspace-1",
-      confidence: 0.9
-    };
-    const graphExpansionPort = {
+    const graphExpansionPort: RecallServiceGraphExpansionPort = {
       findByMemoryId: vi.fn(async (memoryId: string) => {
         if (memoryId !== "seed-memory") {
           return [];
         }
         return [
-          {
-            ...edgeBase,
-            object_id: "edge-filtered-neighbor",
-            edge_type: "derives_from" as const,
+          createGraphEdge({
+            edge_id: "edge-filtered-neighbor",
+            edge_type: "derives_from",
             source_memory_id: "seed-memory",
             target_memory_id: "filtered-neighbor"
-          }
+          })
         ];
       })
     };
@@ -2406,6 +2409,9 @@ describe("RecallService", () => {
     const service = new RecallService({
       ...dependencies,
       graphSupportPort: {
+        countInboundSupports: vi.fn(async () => {
+          throw new Error("graph support unavailable");
+        }),
         countInboundEdgesWeighted: vi.fn(async () => {
           throw new Error("graph support unavailable");
         })
@@ -3406,27 +3412,21 @@ describe("RecallService", () => {
         }
         return [];
       });
-      const findByMemoryId = vi.fn(async (memoryId: string) => {
-        if (memoryId === "memory-anchor") {
-          return [
-            {
-              object_id: "edge-1",
-              object_kind: "memory_graph_edge" as const,
-              schema_version: 1,
-              lifecycle_state: "active" as const,
-              created_at: "2026-03-23T00:00:00.000Z",
-              updated_at: "2026-03-23T00:00:00.000Z",
-              created_by: "system",
-              workspace_id: "workspace-1",
-              edge_type: "derives_from" as const,
-              source_memory_id: "memory-anchor",
-              target_memory_id: "memory-neighbor",
-              confidence: 0.8
-            }
-          ];
+      const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
+        async (memoryId: string) => {
+          if (memoryId === "memory-anchor") {
+            return [
+              createGraphEdge({
+                edge_id: "edge-1",
+                edge_type: "derives_from",
+                source_memory_id: "memory-anchor",
+                target_memory_id: "memory-neighbor"
+              })
+            ];
+          }
+          return [];
         }
-        return [];
-      });
+      );
 
       const service = new RecallService({
         ...dependencies,
@@ -3791,27 +3791,21 @@ describe("RecallService", () => {
           return [];
         }
       );
-      const findByMemoryId = vi.fn(async (memoryId: string) => {
-        if (memoryId === "memory-anchor") {
-          return [
-            {
-              object_id: "edge-1",
-              object_kind: "memory_graph_edge" as const,
-              schema_version: 1,
-              lifecycle_state: "active" as const,
-              created_at: "2026-03-23T00:00:00.000Z",
-              updated_at: "2026-03-23T00:00:00.000Z",
-              created_by: "system",
-              workspace_id: "workspace-1",
-              edge_type: "derives_from" as const,
-              source_memory_id: "memory-anchor",
-              target_memory_id: "memory-neighbor",
-              confidence: 0.8
-            }
-          ];
+      const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
+        async (memoryId: string) => {
+          if (memoryId === "memory-anchor") {
+            return [
+              createGraphEdge({
+                edge_id: "edge-1",
+                edge_type: "derives_from",
+                source_memory_id: "memory-anchor",
+                target_memory_id: "memory-neighbor"
+              })
+            ];
+          }
+          return [];
         }
-        return [];
-      });
+      );
 
       const service = new RecallService({
         ...dependencies,
@@ -3895,27 +3889,21 @@ describe("RecallService", () => {
       const searchByKeywordWithinObjectIds = vi.fn(async () => [
         { object_id: "memory-anchor", normalized_rank: 0.9 }
       ]);
-      const findByMemoryId = vi.fn(async (memoryId: string) => {
-        if (memoryId === "memory-anchor") {
-          return [
-            {
-              object_id: "edge-1",
-              object_kind: "memory_graph_edge" as const,
-              schema_version: 1,
-              lifecycle_state: "active" as const,
-              created_at: "2026-03-23T00:00:00.000Z",
-              updated_at: "2026-03-23T00:00:00.000Z",
-              created_by: "system",
-              workspace_id: "workspace-1",
-              edge_type: "derives_from" as const,
-              source_memory_id: "memory-anchor",
-              target_memory_id: "memory-neighbor",
-              confidence: 0.8
-            }
-          ];
+      const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
+        async (memoryId: string) => {
+          if (memoryId === "memory-anchor") {
+            return [
+              createGraphEdge({
+                edge_id: "edge-1",
+                edge_type: "derives_from",
+                source_memory_id: "memory-anchor",
+                target_memory_id: "memory-neighbor"
+              })
+            ];
+          }
+          return [];
         }
-        return [];
-      });
+      );
 
       const service = new RecallService({
         ...dependencies,
@@ -4086,39 +4074,18 @@ describe("RecallService", () => {
     describe("multi-seed graph fan-in", () => {
       // see also: packages/core/src/recall-service.ts addGraphExpansionCandidates
       // Pool B branch and RecallMultiSeedGraphFanInDiagnostics
-      type GraphEdgeStub = {
-        readonly object_id: string;
-        readonly object_kind: "memory_graph_edge";
-        readonly schema_version: 1;
-        readonly lifecycle_state: "active";
-        readonly created_at: string;
-        readonly updated_at: string;
-        readonly created_by: string;
-        readonly workspace_id: string;
-        readonly edge_type: "derives_from" | "recalls" | "supports";
-        readonly source_memory_id: string;
-        readonly target_memory_id: string;
-        readonly confidence: number;
-      };
       const edgeStub = (
         id: string,
         source: string,
         target: string,
-        edgeType: GraphEdgeStub["edge_type"] = "derives_from"
-      ): GraphEdgeStub => ({
-        object_id: id,
-        object_kind: "memory_graph_edge",
-        schema_version: 1,
-        lifecycle_state: "active",
-        created_at: "2026-03-23T00:00:00.000Z",
-        updated_at: "2026-03-23T00:00:00.000Z",
-        created_by: "system",
-        workspace_id: "workspace-1",
-        edge_type: edgeType,
-        source_memory_id: source,
-        target_memory_id: target,
-        confidence: 0.8
-      });
+        edgeType: MemoryGraphEdge["edge_type"] = "derives_from"
+      ): MemoryGraphEdge =>
+        createGraphEdge({
+          edge_id: id,
+          edge_type: edgeType,
+          source_memory_id: source,
+          target_memory_id: target
+        });
 
       it("with zero entity-derived seeds emits no multi_seed_graph_fan_in diagnostic", async () => {
         // invariant: when no entity is extracted from the query, the pooled
@@ -4198,15 +4165,17 @@ describe("RecallService", () => {
             return [];
           }
         );
-        const findByMemoryId = vi.fn(async (memoryId: string) => {
-          if (memoryId === "anchor-alpha") {
-            return [edgeStub("edge-a", "anchor-alpha", "neighbor-alpha")];
+        const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
+          async (memoryId: string) => {
+            if (memoryId === "anchor-alpha") {
+              return [edgeStub("edge-a", "anchor-alpha", "neighbor-alpha")];
+            }
+            if (memoryId === "anchor-beta") {
+              return [edgeStub("edge-b", "anchor-beta", "neighbor-beta")];
+            }
+            return [];
           }
-          if (memoryId === "anchor-beta") {
-            return [edgeStub("edge-b", "anchor-beta", "neighbor-beta")];
-          }
-          return [];
-        });
+        );
 
         const service = new RecallService({
           ...dependencies,
@@ -4291,25 +4260,17 @@ describe("RecallService", () => {
             return [];
           }
         );
-        const findByMemoryId = vi.fn(async (memoryId: string) => {
-          if (memoryId === "anchor-alpha") {
-            return [
-              {
-                ...edgeStub("edge-a-shared", "anchor-alpha", "shared-neighbor"),
-                confidence: 0.5
-              }
-            ];
+        const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
+          async (memoryId: string) => {
+            if (memoryId === "anchor-alpha") {
+              return [edgeStub("edge-a-shared", "anchor-alpha", "shared-neighbor")];
+            }
+            if (memoryId === "anchor-beta") {
+              return [edgeStub("edge-b-shared", "anchor-beta", "shared-neighbor")];
+            }
+            return [];
           }
-          if (memoryId === "anchor-beta") {
-            return [
-              {
-                ...edgeStub("edge-b-shared", "anchor-beta", "shared-neighbor"),
-                confidence: 0.9
-              }
-            ];
-          }
-          return [];
-        });
+        );
 
         const service = new RecallService({
           ...dependencies,
@@ -4399,14 +4360,16 @@ describe("RecallService", () => {
             return [];
           }
         );
-        const findByMemoryId = vi.fn(async (memoryId: string) => {
-          if (memoryId === "fan-anchor") {
-            return neighborMemories.map((neighbor, i) =>
-              edgeStub(`edge-${i}`, "fan-anchor", neighbor.object_id)
-            );
+        const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
+          async (memoryId: string) => {
+            if (memoryId === "fan-anchor") {
+              return neighborMemories.map((neighbor, i) =>
+                edgeStub(`edge-${i}`, "fan-anchor", neighbor.object_id)
+              );
+            }
+            return [];
           }
-          return [];
-        });
+        );
 
         const service = new RecallService({
           ...dependencies,
@@ -4474,12 +4437,14 @@ describe("RecallService", () => {
             return [];
           }
         );
-        const findByMemoryId = vi.fn(async (memoryId: string) => {
-          if (memoryId === "solo-anchor") {
-            return [edgeStub("edge-solo", "solo-anchor", "solo-neighbor")];
+        const findByMemoryId = vi.fn<RecallServiceGraphExpansionPort["findByMemoryId"]>(
+          async (memoryId: string) => {
+            if (memoryId === "solo-anchor") {
+              return [edgeStub("edge-solo", "solo-anchor", "solo-neighbor")];
+            }
+            return [];
           }
-          return [];
-        });
+        );
 
         const service = new RecallService({
           ...dependencies,
@@ -4531,38 +4496,45 @@ describe("RecallService embedding-on coarse injection", () => {
   });
 
   function buildEmbeddingScopedService(input: {
-    readonly collectWorkspaceNeighbors?: ReturnType<typeof vi.fn>;
-    readonly collectWorkspaceNeighborsWithMetadata?: ReturnType<typeof vi.fn>;
-    readonly findByIds?: ReturnType<typeof vi.fn>;
+    readonly collectWorkspaceNeighbors?: NonNullable<RecallServiceEmbeddingRecallPort["collectWorkspaceNeighbors"]>;
+    readonly collectWorkspaceNeighborsWithMetadata?: NonNullable<
+      RecallServiceEmbeddingRecallPort["collectWorkspaceNeighborsWithMetadata"]
+    >;
+    readonly findByIds?: NonNullable<RecallServiceMemoryRepoPort["findByIds"]>;
   }) {
     const { dependencies } = createDependencies([lexicallyAbsentMemory]);
+    // `satisfies` validates the assembled ports against their precise shape
+    // without widening, so missing / mistyped methods fail the typecheck gate
+    // instead of being erased by an `as unknown as` cast.
+    const memoryRepo = {
+      ...dependencies.memoryRepo,
+      ...(input.findByIds === undefined ? {} : { findByIds: input.findByIds })
+    } satisfies RecallServiceMemoryRepoPort;
+    const embeddingRecallService = {
+      hasStoredVectors: vi.fn(async () => true),
+      prepareQueryEmbedding: vi.fn(() => createPreparedQueryHandle("prepared-embedding-injection")),
+      querySupplementIfReady: vi.fn(async () => ({
+        supplementaryEntries: Object.freeze([]),
+        similarityHintsByObjectId: Object.freeze({})
+      })),
+      querySupplement: vi.fn(async () => ({
+        supplementaryEntries: Object.freeze([]),
+        similarityHintsByObjectId: Object.freeze({})
+      })),
+      ...(input.collectWorkspaceNeighbors === undefined
+        ? {}
+        : { collectWorkspaceNeighbors: input.collectWorkspaceNeighbors }),
+      ...(input.collectWorkspaceNeighborsWithMetadata === undefined
+        ? {}
+        : {
+            collectWorkspaceNeighborsWithMetadata:
+              input.collectWorkspaceNeighborsWithMetadata
+          })
+    } satisfies RecallServiceEmbeddingRecallPort;
     return new RecallService({
       ...dependencies,
-      memoryRepo: {
-        ...dependencies.memoryRepo,
-        ...(input.findByIds === undefined ? {} : { findByIds: input.findByIds })
-      },
-      embeddingRecallService: {
-        hasStoredVectors: vi.fn(async () => true),
-        prepareQueryEmbedding: vi.fn(() => createPreparedQueryHandle("prepared-embedding-injection")),
-        querySupplementIfReady: vi.fn(async () => ({
-          supplementaryEntries: Object.freeze([]),
-          similarityHintsByObjectId: Object.freeze({})
-        })),
-        querySupplement: vi.fn(async () => ({
-          supplementaryEntries: Object.freeze([]),
-          similarityHintsByObjectId: Object.freeze({})
-        })),
-        ...(input.collectWorkspaceNeighbors === undefined
-          ? {}
-          : { collectWorkspaceNeighbors: input.collectWorkspaceNeighbors }),
-        ...(input.collectWorkspaceNeighborsWithMetadata === undefined
-          ? {}
-          : {
-              collectWorkspaceNeighborsWithMetadata:
-                input.collectWorkspaceNeighborsWithMetadata
-            })
-      }
+      memoryRepo,
+      embeddingRecallService
     });
   }
 

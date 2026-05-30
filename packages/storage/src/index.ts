@@ -114,6 +114,11 @@ export {
   type PathRelationRepo
 } from "./repos/path-relation-repo.js";
 export {
+  SqliteCoUsageCounterRepo,
+  type CoUsageCounterIncrementInput,
+  type CoUsageCounterRepo
+} from "./repos/co-usage-counter-repo.js";
+export {
   SqlitePathPlasticityWatermarkRepo,
   type PathPlasticityWatermarkRecord,
   type PathPlasticityWatermarkRepo

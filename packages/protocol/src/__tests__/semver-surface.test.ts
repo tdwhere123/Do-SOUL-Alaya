@@ -160,7 +160,9 @@ function collectMcpRootSchemas(): readonly Readonly<{ readonly name: string; rea
   return Object.freeze(
     Object.entries(McpTypes)
       .filter(([name, value]) => /^(Soul|Garden|MemorySearch).*Schema$/.test(name) && isZodSchema(value))
-      .map(([name, schema]) => Object.freeze({ name, schema }))
+      // isZodSchema narrows in the filter predicate but the guard does not flow
+      // through tuple destructuring into the mapped element type.
+      .map(([name, schema]) => Object.freeze({ name, schema: schema as z.ZodTypeAny }))
       .sort((left, right) => left.name.localeCompare(right.name))
   );
 }
@@ -173,7 +175,9 @@ function collectPayloadSchemaKeys(
       .flatMap(({ module, exports }) =>
         Object.entries(exports)
           .filter(([name, value]) => name.endsWith("PayloadSchema") && isZodSchema(value))
-          .map(([schema, value]) => Object.freeze({ module, schema, ...describeSchema(value) }))
+          // isZodSchema narrows in the filter predicate but the guard does not flow
+          // through tuple destructuring into the mapped element type.
+          .map(([schema, value]) => Object.freeze({ module, schema, ...describeSchema(value as z.ZodTypeAny) }))
       )
       .sort(compareByModuleThenSchema)
   );
@@ -183,7 +187,9 @@ function collectRuntimeConfigKeys(): readonly Readonly<{ readonly schema: string
   return Object.freeze(
     Object.entries(AppConfig)
       .filter(([name, value]) => name.endsWith("ConfigSchema") && isZodSchema(value))
-      .map(([schema, value]) => Object.freeze({ schema, ...describeSchema(value) }))
+      // isZodSchema narrows in the filter predicate but the guard does not flow
+      // through tuple destructuring into the mapped element type.
+      .map(([schema, value]) => Object.freeze({ schema, ...describeSchema(value as z.ZodTypeAny) }))
       .sort((left, right) => left.schema.localeCompare(right.schema))
   );
 }

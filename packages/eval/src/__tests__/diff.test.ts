@@ -11,6 +11,8 @@ function buildPayload(overrides: Partial<KpiPayload["kpi"]>): KpiPayload {
     alaya_version: "0.3.6",
     embedding_provider: "yunwu:text-embedding-3-small",
     chat_provider: "yunwu:gpt-5.4-mini",
+    policy_shape: "stress",
+    simulate_report: "none",
     dataset: { name: "host-autonomy-fixtures", size: 6, source: "internal" },
     sample_size: 10,
     evaluated_count: 10,
@@ -21,12 +23,19 @@ function buildPayload(overrides: Partial<KpiPayload["kpi"]>): KpiPayload {
       r_at_10: 0.97,
       latency_ms_p50: 80,
       latency_ms_p95: 120,
+      latency_source: "exact",
       token_saved_ratio_vs_full_prompt: 0.9,
       tier_distribution: { hot: 60, warm: 30, cold: 10 },
       degradation_reasons: {
         none: 90,
         warm_cascade_engaged: 8,
-        cold_cascade_engaged: 2
+        cold_cascade_engaged: 2,
+        recall_explainability_partial: 0
+      },
+      seed_truncation: {
+        seed_turns_truncated: 0,
+        answer_turns_truncated: 0,
+        seed_chars_clipped: 0
       },
       per_scenario: [
         { id: "f1", version: 1, hit_at_5: true, tier: "hot" },

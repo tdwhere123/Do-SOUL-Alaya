@@ -38,12 +38,19 @@ function buildPayload(commit: string): KpiPayload {
       r_at_10: 0.9,
       latency_ms_p50: 60,
       latency_ms_p95: 110,
+      latency_source: "exact",
       token_saved_ratio_vs_full_prompt: 0.88,
       tier_distribution: { hot: 50, warm: 30, cold: 20 },
       degradation_reasons: {
         none: 80,
         warm_cascade_engaged: 12,
-        cold_cascade_engaged: 8
+        cold_cascade_engaged: 8,
+        recall_explainability_partial: 0
+      },
+      seed_truncation: {
+        seed_turns_truncated: 0,
+        answer_turns_truncated: 0,
+        seed_chars_clipped: 0
       },
       per_scenario: []
     }
@@ -76,6 +83,7 @@ function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics
     path_stream_top10_rate: 0.12,
     path_stream_top10_count: 12,
     path_stream_top10_denominator: 100,
+    per_plane_recall_coverage: {},
     miss_distribution: {}
   };
 }

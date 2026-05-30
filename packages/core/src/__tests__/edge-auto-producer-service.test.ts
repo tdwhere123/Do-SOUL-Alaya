@@ -171,7 +171,8 @@ describe("EdgeAutoProducerService", () => {
         triggerSource: EdgeProposalTriggerSource.LOCAL_SUPERSEDES
       })
     );
-    const confidence = graphEdgePort.createEdge.mock.calls[0][0].confidence;
+    const [edge] = graphEdgePort.createEdge.mock.calls[0]! as unknown as [{ confidence: number }];
+    const confidence = edge.confidence;
     expect(confidence).toBeGreaterThanOrEqual(0.55);
     expect(confidence).toBeLessThanOrEqual(0.85);
   });
@@ -244,7 +245,8 @@ describe("EdgeAutoProducerService", () => {
         confidence: 0.92
       })
     );
-    const reason = graphEdgePort.createEdge.mock.calls[0][0].reason as string;
+    const [edge] = graphEdgePort.createEdge.mock.calls[0]! as unknown as [{ reason: string }];
+    const reason = edge.reason;
     expect(reason).toContain("B-2 llm pair classifier");
   });
 
@@ -425,7 +427,7 @@ describe("EdgeAutoProducerService", () => {
 
     // Both neighbors still produce proposals through the local heuristic.
     expect(graphEdgePort.createEdge).toHaveBeenCalledTimes(2);
-    for (const call of graphEdgePort.createEdge.mock.calls) {
+    for (const call of graphEdgePort.createEdge.mock.calls as unknown as [{ triggerSource: string }][]) {
       expect(call[0].triggerSource).toBe(EdgeProposalTriggerSource.LOCAL_SUPPORTS);
     }
     expect(warn).toHaveBeenCalled();

@@ -127,7 +127,7 @@ describe("ConflictDetectionService", () => {
 
     const incompatibleCalls = graphEdgePort.createEdge.mock.calls.filter(
       (call: any[]) => call[0].edgeType === "incompatible_with"
-    );
+    ) as unknown[][];
     expect(incompatibleCalls).toHaveLength(1);
     expect(incompatibleCalls[0][0]).toMatchObject({
       sourceMemoryId: "mem-B",

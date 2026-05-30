@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  DYNAMICS_CONSTANTS,
   PathRelationSchema,
   RuntimeGovernanceEventType,
   parseRuntimeGovernanceEventPayload,
@@ -11,8 +12,9 @@ import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 // invariant: PathRelationProposalService is the producer of PathRelation
 // entities. When K co-usage events arrive for the same memory pair, this
 // service writes a new PathRelation with default plasticity. The plasticity
-// strength is later evolved by PathPlasticityService. Counter state is
-// in-memory per daemon process (suitable for K small, e.g. 3).
+// strength is later evolved by PathPlasticityService. invariant: counter
+// state is durable via CoUsageCounterPort; counts toward the threshold are
+// persisted, not held in process memory.
 // invariant: a co-usage path is born at governance_class=attention_only,
 // not recall_allowed. attention_only authorises only the lens_entry
 // manifestation level and earns no recall-expansion governance boost — the
@@ -21,11 +23,12 @@ import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 // recall_allowed only by accruing support_events_count >= 8 through the
 // legitimate path-manifestation-policy ladder, which PathPlasticityService
 // drives from anchor-matched usage receipts independently of this
-// service's in-memory co-usage counter.
-// invariant: counter entries carry firstSeenAt timestamps so the daemon
-// can periodically call evictExpired(now, ttlMs) to discard stale pairs
-// that never reached the threshold. Pairs that reach the threshold are
-// already dropped when their PathRelation is written.
+// service's co-usage counter.
+// invariant: counter rows carry updated_at timestamps so the daemon can
+// periodically call evictExpired(now, ttlMs) to discard stale pairs that
+// never reached the threshold. A pair that reaches the threshold has its
+// counter row dropped once its PathRelation is written; durable double-propose
+// protection comes from findByAnchorMemoryId against persisted PathRelations.
 // invariant: row insert and `path.relation_created` EventLog row are
 // emitted in one SQLite transaction via EventPublisher.appendManyWithMutation,
 // matching the PathPlasticityService pattern. Crash-mid-write cannot leave
@@ -33,8 +36,10 @@ import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 // see also: crossLinkRecalledMemories — caller hook
 // see also: PathPlasticityService — strength evolution
 // see also: PathRelationRepo — durable write side
+// see also: SqliteCoUsageCounterRepo — durable counter backing
 
-export const PATH_RELATION_PROPOSE_THRESHOLD = 3;
+export const PATH_RELATION_PROPOSE_THRESHOLD =
+  DYNAMICS_CONSTANTS.path_plasticity.co_usage_threshold;
 export const PATH_RELATION_COUNTER_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface PathRelationProposalRepoPort {
@@ -45,6 +50,21 @@ export interface PathRelationProposalRepoPort {
   ): Promise<readonly Readonly<PathRelation>[]>;
 }
 
+// invariant: durable counter backing. The daemon wires this to the SQLite
+// co-usage counter repo; tests may supply an in-memory fake. Memory ids are
+// already ordered low <= high by the service before reaching this port.
+export interface CoUsageCounterPort {
+  increment(input: {
+    readonly workspaceId: string;
+    readonly lowMemoryId: string;
+    readonly highMemoryId: string;
+    readonly seenAt: string;
+  }): number | Promise<number>;
+  delete(workspaceId: string, lowMemoryId: string, highMemoryId: string): void | Promise<void>;
+  evictExpired(cutoff: string): number | Promise<number>;
+  size(): number | Promise<number>;
+}
+
 export type PathRelationProposalEventPublisherPort = Pick<
   EventPublisher,
   "appendManyWithMutation"
@@ -52,6 +72,7 @@ export type PathRelationProposalEventPublisherPort = Pick<
 
 export interface PathRelationProposalServiceDeps {
   readonly repo: PathRelationProposalRepoPort;
+  readonly counterStore: CoUsageCounterPort;
   readonly eventPublisher: PathRelationProposalEventPublisherPort;
   readonly threshold?: number;
   readonly now?: () => string;
@@ -61,20 +82,8 @@ export interface PathRelationProposalServiceDeps {
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
-interface PairCounterKey {
-  readonly workspaceId: string;
-  readonly low: string;
-  readonly high: string;
-}
-
-interface CounterEntry {
-  readonly count: number;
-  readonly firstSeenAtMs: number;
-}
-
 export class PathRelationProposalService {
-  private readonly counters = new Map<string, CounterEntry>();
-  private readonly proposed = new Set<string>();
+  private readonly counterStore: CoUsageCounterPort;
   private readonly threshold: number;
   private readonly now: () => string;
   private readonly nowMs: () => number;
@@ -82,6 +91,7 @@ export class PathRelationProposalService {
   private readonly generateId: () => string;
 
   public constructor(private readonly deps: PathRelationProposalServiceDeps) {
+    this.counterStore = deps.counterStore;
     this.threshold = deps.threshold ?? PATH_RELATION_PROPOSE_THRESHOLD;
     this.now = deps.now ?? (() => new Date().toISOString());
     this.nowMs = deps.nowMs ?? (() => Date.now());
@@ -97,32 +107,30 @@ export class PathRelationProposalService {
       return;
     }
     const unique = [...new Set(usedObjectIds)].sort();
-    const seenAtMs = this.nowMs();
+    const seenAt = this.now();
     for (let i = 0; i < unique.length; i += 1) {
       for (let j = i + 1; j < unique.length; j += 1) {
-        const left = unique[i]!;
-        const right = unique[j]!;
-        const key = this.keyFor({ workspaceId, low: left, high: right });
-        if (this.proposed.has(key)) {
-          continue;
-        }
-        const previous = this.counters.get(key);
-        const next: CounterEntry = previous === undefined
-          ? { count: 1, firstSeenAtMs: seenAtMs }
-          : { count: previous.count + 1, firstSeenAtMs: previous.firstSeenAtMs };
-        this.counters.set(key, next);
-        if (next.count < this.threshold) {
+        const low = unique[i]!;
+        const high = unique[j]!;
+        const count = await this.counterStore.increment({
+          workspaceId,
+          lowMemoryId: low,
+          highMemoryId: high,
+          seenAt
+        });
+        if (count < this.threshold) {
           continue;
         }
         try {
-          await this.propose(workspaceId, left, right);
-          this.proposed.add(key);
-          this.counters.delete(key);
+          const proposed = await this.propose(workspaceId, low, high);
+          if (proposed) {
+            await this.counterStore.delete(workspaceId, low, high);
+          }
         } catch (err) {
           this.warn("PathRelation propose failed", {
             workspace_id: workspaceId,
-            source_object_id: left,
-            target_object_id: right,
+            source_object_id: low,
+            target_object_id: high,
             error: errorMessage(err)
           });
         }
@@ -130,39 +138,29 @@ export class PathRelationProposalService {
     }
   }
 
-  public evictExpired(nowMs?: number, ttlMs?: number): number {
-    const cutoffMs = nowMs ?? this.nowMs();
-    const ttl = ttlMs ?? this.counterTtlMs;
-    let removed = 0;
-    for (const [key, entry] of this.counters) {
-      if (cutoffMs - entry.firstSeenAtMs > ttl) {
-        this.counters.delete(key);
-        removed += 1;
-      }
-    }
-    return removed;
+  public async evictExpired(nowMs?: number, ttlMs?: number): Promise<number> {
+    const cutoffMs = (nowMs ?? this.nowMs()) - (ttlMs ?? this.counterTtlMs);
+    return await this.counterStore.evictExpired(new Date(cutoffMs).toISOString());
   }
 
-  public counterSize(): number {
-    return this.counters.size;
-  }
-
-  private keyFor(key: PairCounterKey): string {
-    return `${key.workspaceId}|${key.low}|${key.high}`;
+  public async counterSize(): Promise<number> {
+    return await this.counterStore.size();
   }
 
   private async propose(
     workspaceId: string,
     sourceMemoryId: string,
     targetMemoryId: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (this.deps.repo.findByAnchorMemoryId !== undefined) {
       const existing = await this.deps.repo.findByAnchorMemoryId(sourceMemoryId, workspaceId);
       const alreadyLinked = existing.some((relation) =>
         anchorPointsAt(relation, sourceMemoryId, targetMemoryId)
       );
       if (alreadyLinked) {
-        return;
+        // Counter row is stale once a durable path exists; drop it so the
+        // pair stops re-querying on every future co-usage.
+        return true;
       }
     }
 
@@ -237,6 +235,7 @@ export class PathRelationProposalService {
         this.deps.repo.create(relation);
       }
     );
+    return true;
   }
 
   private warn(message: string, meta: Record<string, unknown>): void {

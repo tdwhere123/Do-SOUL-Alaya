@@ -870,8 +870,8 @@ vi.mock("@do-soul/alaya-core", () => {
     }),
     PathRelationProposalService: makeClass({
       onCoUsage: vi.fn(async () => undefined),
-      evictExpired: vi.fn(() => 0),
-      counterSize: vi.fn(() => 0)
+      evictExpired: vi.fn(async () => 0),
+      counterSize: vi.fn(async () => 0)
     }),
     PathActivationCandidateProducer: vi.fn().mockImplementation(function PathActivationCandidateProducer() {
       return {

@@ -6,8 +6,10 @@ import {
   MemoryDimension,
   RecallContextEventType,
   RetentionPolicy,
+  RuntimeMode,
   ScopeClass,
   type ActivationWeights,
+  type BudgetSnapshot,
   type EventLogEntry,
   type MemoryEntry,
   type RecallPolicy,
@@ -128,15 +130,18 @@ function createDependencies(
       })
     )
   );
-  const getSnapshot = vi.fn(async () => ({
-    snapshot_at: "2026-03-23T00:00:00.000Z",
-    run_id: "run-1",
-    current_mode: "lean",
-    bankruptcy_kind: BankruptcyKind.SOFT,
-    trigger_summary: "over budget",
-    active_dossier: null,
-    pending_proposal: null
-  }));
+  const getSnapshot = vi.fn(
+    async (): Promise<Readonly<BudgetSnapshot>> => ({
+      snapshot_at: "2026-03-23T00:00:00.000Z",
+      run_id: "run-1",
+      current_mode: RuntimeMode.LEAN,
+      bankruptcy_kind: BankruptcyKind.SOFT,
+      pressure_ratio: 0,
+      trigger_summary: "over budget",
+      active_dossier: null,
+      pending_proposal: null
+    })
+  );
   const append = vi.fn(
     async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): Promise<EventLogEntry> => ({
       event_id: `event-${entry.event_type}`,
@@ -146,46 +151,48 @@ function createDependencies(
     })
   );
 
+  const dependencies: RecallServiceDependencies = {
+    now: () => "2026-03-23T00:00:00.000Z",
+    generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+    memoryRepo: {
+      findByWorkspaceId: vi.fn(async () => memories),
+      findByDimension: vi.fn(async () => memories),
+      findByScopeClass: vi.fn(async () => memories),
+      searchByKeyword
+    },
+    slotRepo: {
+      findByWorkspace: vi.fn(async () => slots)
+    },
+    eventLogRepo: {
+      append,
+      queryByEntity: vi.fn(async () => [])
+    },
+    graphSupportPort: {
+      countInboundSupports,
+      countInboundEdgesWeighted: countInboundSupports,
+      countInboundRecalls
+    },
+    budgetPenaltyPort: {
+      getSnapshot
+    },
+    ...(supportOptions.pathPlasticityByMemoryId === undefined
+      ? {}
+      : {
+          pathPlasticityPort: {
+            getStrengthByMemoryId
+          }
+        }),
+    claimResolverPort: {
+      findByIds: vi.fn(async (ids: readonly string[]) =>
+        ids
+          .filter((id) => claimSourceRefs[id] !== undefined)
+          .map((id) => ({ object_id: id, source_object_refs: claimSourceRefs[id] ?? [] }))
+      )
+    }
+  };
+
   return {
-    dependencies: {
-      now: () => "2026-03-23T00:00:00.000Z",
-      generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
-      memoryRepo: {
-        findByWorkspaceId: vi.fn(async () => memories),
-        findByDimension: vi.fn(async () => memories),
-        findByScopeClass: vi.fn(async () => memories),
-        searchByKeyword
-      } as RecallServiceDependencies["memoryRepo"],
-      slotRepo: {
-        findByWorkspace: vi.fn(async () => slots)
-      },
-      eventLogRepo: {
-        append,
-        queryByEntity: vi.fn(async () => [])
-      },
-      graphSupportPort: {
-        countInboundSupports,
-        countInboundEdgesWeighted: countInboundSupports,
-        countInboundRecalls
-      },
-      budgetPenaltyPort: {
-        getSnapshot
-      },
-      ...(supportOptions.pathPlasticityByMemoryId === undefined
-        ? {}
-        : {
-            pathPlasticityPort: {
-              getStrengthByMemoryId
-            }
-          }),
-      claimResolverPort: {
-        findByIds: vi.fn(async (ids: readonly string[]) =>
-          ids
-            .filter((id) => claimSourceRefs[id] !== undefined)
-            .map((id) => ({ object_id: id, source_object_refs: claimSourceRefs[id] ?? [] }))
-        )
-      }
-    } as RecallServiceDependencies,
+    dependencies,
     searchByKeyword,
     countInboundSupports,
     countInboundEdgesWeighted: countInboundSupports,

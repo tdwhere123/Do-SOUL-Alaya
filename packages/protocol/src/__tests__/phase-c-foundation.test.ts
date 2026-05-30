@@ -226,6 +226,7 @@ describe("Phase C shared-contract foundation", () => {
 
   it("freezes the path plasticity constants", () => {
     expect(DYNAMICS_CONSTANTS.path_plasticity).toEqual({
+      co_usage_threshold: 3,
       reinforcement_increment: 0.1,
       weakening_decrement: -0.05,
       salience_boost_on_hit: 0.15,

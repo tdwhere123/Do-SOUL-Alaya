@@ -3,6 +3,7 @@ import type { EventLogEntry } from "@do-soul/alaya-protocol";
 import {
   PathRelationProposalService,
   PATH_RELATION_PROPOSE_THRESHOLD,
+  type CoUsageCounterPort,
   type PathRelationProposalEventPublisherPort
 } from "../path-relation-proposal-service.js";
 
@@ -10,6 +11,25 @@ import {
 // MUST land in a single SQLite transaction. This locks the contract from the
 // service side; the SQLite transaction wrapper itself is exercised in the
 // EventPublisher atomicity tests.
+
+function inMemoryCounterStore(): CoUsageCounterPort {
+  const rows = new Map<string, number>();
+  const keyOf = (workspaceId: string, low: string, high: string): string =>
+    `${workspaceId}|${low}|${high}`;
+  return {
+    increment: (input) => {
+      const key = keyOf(input.workspaceId, input.lowMemoryId, input.highMemoryId);
+      const next = (rows.get(key) ?? 0) + 1;
+      rows.set(key, next);
+      return next;
+    },
+    delete: (workspaceId, low, high) => {
+      rows.delete(keyOf(workspaceId, low, high));
+    },
+    evictExpired: () => 0,
+    size: () => rows.size
+  };
+}
 
 describe("PathRelationProposalService — EventLog-first contract", () => {
   it("invokes appendManyWithMutation once per propose, with the path.relation_created event before the row insert", async () => {
@@ -41,6 +61,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
         create: repoCreate,
         findByAnchorMemoryId: vi.fn(async () => [])
       },
+      counterStore: inMemoryCounterStore(),
       eventPublisher: {
         appendManyWithMutation
       } as unknown as PathRelationProposalEventPublisherPort,
@@ -106,6 +127,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
         create: repoCreate,
         findByAnchorMemoryId: vi.fn(async () => [])
       },
+      counterStore: inMemoryCounterStore(),
       eventPublisher: {
         appendManyWithMutation
       } as unknown as PathRelationProposalEventPublisherPort,

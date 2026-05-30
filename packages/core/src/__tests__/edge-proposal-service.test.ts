@@ -573,8 +573,12 @@ function createGraphPort() {
 function createEventPublisher() {
   const appendManyWithMutationImpl: Pick<EventPublisher, "appendManyWithMutation">["appendManyWithMutation"] =
     async (_events, mutate) => mutate([]);
+  // appendManyWithMutation is generic over the mutate result; vi.fn cannot carry a
+  // generic call signature, so the spy is re-asserted onto the structural port type.
+  const appendManyWithMutation = vi.fn(appendManyWithMutationImpl);
   return {
-    appendManyWithMutation: vi.fn(appendManyWithMutationImpl)
+    appendManyWithMutation: appendManyWithMutation as unknown as EventPublisher["appendManyWithMutation"] &
+      typeof appendManyWithMutation
   };
 }
 
