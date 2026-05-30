@@ -1256,7 +1256,7 @@ async function createGardenMcpHarness(options: GardenMcpHarnessOptions = {}): Pr
       }
       const result = await client.callTool({ name: toolName, arguments: args });
       if (result.isError === true) {
-        const errorText = result.content
+        const errorText = (result.content as readonly { readonly text?: unknown }[] | undefined)
           ?.map((item) => ("text" in item && typeof item.text === "string" ? item.text : ""))
           .join("\n");
         throw new Error(`Tool call failed for ${toolName}: ${errorText}`);

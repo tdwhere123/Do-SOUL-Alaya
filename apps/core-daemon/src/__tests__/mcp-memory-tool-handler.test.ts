@@ -102,12 +102,17 @@ describe("mcp memory tool handler", () => {
     expect(deps.recallService.recall).toHaveBeenCalledWith(expect.objectContaining({
       activeConstraintsCap: 5
     }));
-    expect(result.output.results.map((entry) => entry.object_id)).toEqual(["mem2"]);
-    expect(result.output.active_constraints.map((entry) => entry.object_id)).toEqual([
+    const output = result.output as {
+      readonly results: ReadonlyArray<{ readonly object_id: string }>;
+      readonly active_constraints: ReadonlyArray<{ readonly object_id: string }>;
+      readonly active_constraints_count: number;
+    };
+    expect(output.results.map((entry) => entry.object_id)).toEqual(["mem2"]);
+    expect(output.active_constraints.map((entry) => entry.object_id)).toEqual([
       "mem1",
       "constraint-2"
     ]);
-    expect(result.output.active_constraints_count).toBe(2);
+    expect(output.active_constraints_count).toBe(2);
     expect(deps.trustStateRecorder.recordDelivery).toHaveBeenCalledWith(expect.objectContaining({
       delivered_object_ids: ["mem2", "mem1", "constraint-2"],
       delivered_objects: [
@@ -411,7 +416,7 @@ describe("mcp memory tool handler", () => {
       coarse_filter_count: 1,
       fine_assessment_count: 1,
       degradation_reason: "cold_cascade_engaged"
-    }));
+    })) as typeof deps.recallService.recall;
     const handler = createMcpMemoryToolHandler(deps);
 
     const result = await handler.call({
@@ -556,7 +561,7 @@ describe("mcp memory tool handler", () => {
     });
 
     expect(result.ok).toBe(true);
-    const [recordedUsage] = deps.trustStateRecorder.recordUsage.mock.calls[0]!;
+    const [recordedUsage] = (deps.trustStateRecorder.recordUsage as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(recordedUsage.trust_mode).toBe("automatic");
   });
 
@@ -887,7 +892,7 @@ describe("mcp memory tool handler", () => {
     const proposalWorkflow: NonNullable<McpMemoryToolHandlerDependencies["proposalWorkflow"]> = {
       proposeMemoryUpdate: vi.fn(async () => ({
         proposal_id: "proposal-1",
-        status: "created"
+        status: "created" as const
       })),
       reviewMemoryProposal: vi.fn(async () => ({
         proposal_id: "proposal-1",
@@ -1352,7 +1357,7 @@ function createDeps(): McpMemoryToolHandlerDependencies {
         total_scanned: 1,
         coarse_filter_count: 1,
         fine_assessment_count: 1
-      }))
+      })) as McpMemoryToolHandlerDependencies["recallService"]["recall"]
     },
     memoryService: {
       findById: vi.fn(async () => createMemory()),
@@ -1391,7 +1396,7 @@ function createDeps(): McpMemoryToolHandlerDependencies {
           }
         ],
         total_count: 1
-      })),
+      })) as NonNullable<McpMemoryToolHandlerDependencies["edgeProposalService"]>["listPending"],
       batchReview: vi.fn(async () => ({
         accepted_count: 1,
         rejected_count: 0,

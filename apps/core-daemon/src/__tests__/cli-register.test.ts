@@ -1,5 +1,6 @@
 import { PassThrough } from "node:stream";
 import { CoreError } from "@do-soul/alaya-core";
+import type { ContextDeliveryRecord, UsageProofRecord } from "@do-soul/alaya-protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAlayaCliBridge } from "../cli/bridge.js";
 import { registerAlayaCliCommands } from "../cli/register.js";
@@ -115,7 +116,9 @@ describe("cli registration", () => {
       startBackgroundServices,
       services: {
         ...baseRuntime.services,
-        workspaceService: { ensureLocalWorkspace }
+        workspaceService: {
+          ensureLocalWorkspace
+        } as unknown as AlayaDaemonRuntime["services"]["workspaceService"]
       }
     });
     const bridge = createAlayaCliBridge(runtime, {
@@ -501,7 +504,7 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
         })
       },
       embeddingStatusService: {
-        getStatus: async (workspaceId) => ({
+        getStatus: async (workspaceId: string) => ({
           workspace_id: workspaceId,
           embedding_enabled: false,
           provider_configured: true,
@@ -513,7 +516,7 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
         })
       },
       graphHealthService: {
-        getStatus: async (workspaceId) => ({
+        getStatus: async (workspaceId: string) => ({
           workspace_id: workspaceId,
           status: "healthy",
           path_relations_total: 1,
@@ -554,8 +557,14 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
         }),
         recordInstalled: async () => {},
         recordConfigured: async () => {},
-        recordDelivery: async (input) => ({ ...input, audit_event_id: "event1" }),
-        recordUsage: async (input) => ({ ...input, audit_event_id: "event2" }),
+        recordDelivery: async (input: Omit<ContextDeliveryRecord, "audit_event_id">) => ({
+          ...input,
+          audit_event_id: "event1"
+        }),
+        recordUsage: async (input: Omit<UsageProofRecord, "audit_event_id">) => ({
+          ...input,
+          audit_event_id: "event2"
+        }),
         findDeliveryById: async () => null
       },
       workspaceService: {
@@ -568,7 +577,7 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
         })
       },
       principalCodingEngineAvailable: true
-    },
+    } as unknown as AlayaDaemonRuntime["services"],
     startBackgroundServices: () => {},
     runGardenBackgroundPass: async () => {},
     startHttpServer: async () => ({

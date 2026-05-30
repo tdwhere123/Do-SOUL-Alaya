@@ -189,7 +189,8 @@ function createDeps(options: CreateDepsOptions = {}): McpMemoryToolHandlerDepend
       recordUsage: vi.fn(async (input: Omit<UsageProofRecord, "audit_event_id">) => ({
         ...input,
         audit_event_id: "event2"
-      }))
+      })),
+      findDeliveryById: vi.fn(async () => null)
     },
     ...(proposalWorkflow ? { proposalWorkflow } : {})
   };

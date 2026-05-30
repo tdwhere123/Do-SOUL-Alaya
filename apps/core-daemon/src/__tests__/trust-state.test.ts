@@ -8,6 +8,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   TrustStateRecorder,
+  type TrustStateRecorderDependencies,
   TrustStateInvalidUsageProofError,
   TrustStateRecorderNotReady,
   TrustStateUnknownDeliveryError,
@@ -337,7 +338,9 @@ describe("trust state recorder", () => {
       throw new Error("audit append failed");
     });
     const recorder = new TrustStateRecorder({
-      eventPublisher: { appendManyWithMutation },
+      eventPublisher: {
+        appendManyWithMutation
+      } as unknown as TrustStateRecorderDependencies["eventPublisher"],
       ready: true
     });
 
@@ -351,7 +354,9 @@ describe("trust state recorder", () => {
   it("rebuilds process-local counters from EventLog without publishing new audit rows", async () => {
     const appendManyWithMutation = vi.fn(async () => undefined);
     const recorder = new TrustStateRecorder({
-      eventPublisher: { appendManyWithMutation },
+      eventPublisher: {
+        appendManyWithMutation
+      } as unknown as TrustStateRecorderDependencies["eventPublisher"],
       ready: true
     });
     const eventLogReader = {
@@ -527,7 +532,9 @@ function createRecorder(options: {
     );
 
   const recorder = new TrustStateRecorder({
-    eventPublisher: { appendManyWithMutation },
+    eventPublisher: {
+      appendManyWithMutation
+    } as unknown as TrustStateRecorderDependencies["eventPublisher"],
     ready: options.ready,
     clock: options.clock
   });

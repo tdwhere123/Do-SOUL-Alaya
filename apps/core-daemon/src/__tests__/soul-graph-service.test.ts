@@ -8,9 +8,12 @@ import { MemoryGovernanceEventType, type EventLogEntry, type PathRelation } from
 import type {
   SqliteMemoryEntryRepo,
   ProposalRepo,
-  PathRelationRepo,
-  MemoryEntryRecord
+  PathRelationRepo
 } from "@do-soul/alaya-storage";
+
+// Mirrors the non-exported MemoryEntryRecord alias in
+// daemon-runtime-support.ts (the row shape findByWorkspaceId returns).
+type MemoryEntryRecord = Awaited<ReturnType<SqliteMemoryEntryRepo["findByWorkspaceId"]>>[number];
 
 type SoulGraphProposalRepo = Pick<
   ProposalRepo,

@@ -610,7 +610,9 @@ vi.mock("../daemon-runtime-support.js", async () => {
     envPath: string
   ) => Promise<ReadonlyMap<string, string>>;
   hoisted.loadConfigEnvDefault = loadConfigEnvDefault;
-  hoisted.loadConfigEnv.mockImplementation(loadConfigEnvDefault);
+  hoisted.loadConfigEnv.mockImplementation(
+    loadConfigEnvDefault as unknown as () => Promise<Map<string, string>>
+  );
   return {
     ...actual,
     loadConfigEnv: hoisted.loadConfigEnv
@@ -660,9 +662,12 @@ vi.mock("../services/config-service.js", () => ({
       const secretRefCandidate = secretRefCandidates.find(([, value]) => value !== null);
       const secretRef = secretRefCandidate?.[1] ?? null;
       if (
+        // secretRefCandidate !== undefined implies its matched value is
+        // non-null (selected via value !== null), so secretRef is a string
+        // in this branch.
         secretRefCandidate !== undefined &&
-        !/^env:[A-Za-z_][A-Za-z0-9_]*$/u.test(secretRef) &&
-        !/^file:\/.+/u.test(secretRef)
+        !/^env:[A-Za-z_][A-Za-z0-9_]*$/u.test(secretRef!) &&
+        !/^file:\/.+/u.test(secretRef!)
       ) {
         throw new Error(`${secretRefCandidate[0]} secret_ref must use "env:NAME" or "file:/path".`);
       }
@@ -1037,7 +1042,9 @@ vi.mock("@do-soul/alaya-core", () => {
     }) {
       return {
         discoverAndRegister: vi.fn(async (servers: readonly { readonly server_name: string }[]) => {
-          await hoisted.mcpDiscoverAndRegister(servers);
+          await (hoisted.mcpDiscoverAndRegister as (servers: readonly { readonly server_name: string }[]) => Promise<unknown>)(
+            servers
+          );
           for (const server of servers) {
             const tools = await deps.mcpToolCatalog.listServerTools(server);
             if (tools.length === 0) {
@@ -1322,7 +1329,9 @@ export function resetToolRuntimeWiringState(): void {
   hoisted.storageWarmCjkSegmentation.mockImplementation(async () => false);
   hoisted.loadConfigEnv.mockReset();
   if (hoisted.loadConfigEnvDefault !== null) {
-    hoisted.loadConfigEnv.mockImplementation(hoisted.loadConfigEnvDefault);
+    hoisted.loadConfigEnv.mockImplementation(
+      hoisted.loadConfigEnvDefault as unknown as () => Promise<Map<string, string>>
+    );
   }
   hoisted.rebuildCountersFromEventLog.mockReset();
   hoisted.rebuildCountersFromEventLog.mockImplementation(async () => undefined);

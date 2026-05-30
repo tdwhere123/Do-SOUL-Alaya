@@ -344,12 +344,15 @@ describe("garden runtime path plasticity queue", () => {
           { memory_entry_id: "memory-high", stale_evidence_refs: ["evidence-2"] }
         ])
       },
+      // Only revokeGreen is exercised here; createGardenDataPorts spreads
+      // this over full greenMaintenancePort defaults, so the partial
+      // override is completed at runtime.
       greenMaintenancePort: {
         revokeGreen: vi.fn((memoryId: string) => {
           revokeOrder.push(memoryId);
           return { affected: 1 };
         })
-      }
+      } as unknown as GardenRuntimeInput["gardenDataPorts"]["greenMaintenancePort"]
     });
     const runtime = createGardenRuntime(
       createRuntimeInput({
@@ -383,9 +386,19 @@ describe("garden runtime path plasticity queue", () => {
 });
 
 function createRuntimeInput(options: {
-  readonly computeAndApplyPlasticity: NonNullable<
-    GardenRuntimeInput["pathPlasticityService"]
-  >["computeAndApplyPlasticity"];
+  // Test mocks return only the result fields the garden runtime reads
+  // (reinforced/weakened/retired/affectedPathIds); the full
+  // PathPlasticityComputeResult shape is cast on at the assignment below.
+  readonly computeAndApplyPlasticity: (
+    params: Parameters<
+      NonNullable<GardenRuntimeInput["pathPlasticityService"]>["computeAndApplyPlasticity"]
+    >[0]
+  ) => Promise<{
+    readonly reinforced: number;
+    readonly weakened: number;
+    readonly retired: number;
+    readonly affectedPathIds: readonly string[];
+  }>;
   readonly gardenDataPorts?: GardenRuntimeInput["gardenDataPorts"];
   readonly healthJournalRepo?: GardenRuntimeInput["healthJournalRepo"];
   readonly embeddingBackfillHandler?: GardenRuntimeInput["embeddingBackfillHandler"];
@@ -405,7 +418,11 @@ function createRuntimeInput(options: {
     databaseConnection: {} as GardenRuntimeInput["databaseConnection"],
     backlogThresholds: {
       warning_queue_depth: 100,
-      warning_rearm_depth: 50
+      warning_rearm_depth: 50,
+      // Not consumed by createGardenRuntime (only warning_queue_depth /
+      // warning_rearm_depth are read); present to satisfy
+      // GardenBacklogThresholds.
+      snapshot_interval_ms: 1000
     },
     eventLogRepo: {} as GardenRuntimeInput["eventLogRepo"],
     eventPublisher: {
@@ -455,7 +472,10 @@ function createRuntimeInput(options: {
       ? {}
       : { pathPlasticityWatermarkRepo: options.pathPlasticityWatermarkRepo }),
     pathPlasticityService: {
-      computeAndApplyPlasticity: options.computeAndApplyPlasticity
+      computeAndApplyPlasticity:
+        options.computeAndApplyPlasticity as NonNullable<
+          GardenRuntimeInput["pathPlasticityService"]
+        >["computeAndApplyPlasticity"]
     },
     ...(options.embeddingBackfillHandler === undefined
       ? {}

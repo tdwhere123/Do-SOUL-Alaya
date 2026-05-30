@@ -15,6 +15,7 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import { createApp } from "../app.js";
+import type { ProposalRouteServices } from "../routes/proposals.js";
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../cli/bridge.js";
 import { createReviewCommand } from "../cli/review.js";
 import { callAlayaMcpMemoryTool } from "../mcp-server.js";
@@ -61,7 +62,7 @@ describe("proposal review inspector cli parity", () => {
             findPending: vi.fn(async () => [])
           } as any,
           mcpMemoryToolHandler: createReviewHandler()
-        }
+        } as unknown as ProposalRouteServices
       }
     });
 
@@ -185,7 +186,7 @@ async function runReviewParityScenario(
           findPending: vi.fn(async () => [])
         } as any,
         mcpMemoryToolHandler: buildHandler()
-      }
+      } as unknown as ProposalRouteServices
     }
   });
   const inspectorApp = createInspectorApp({
@@ -577,7 +578,10 @@ function createParityMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEn
     domain_tags: [],
     evidence_refs: [],
     workspace_id: "ws1",
-    run_id: null,
+    // MemoryEntry.run_id is a non-empty string in the schema; this fixture
+    // intentionally exercises a run-detached entry, so preserve the null
+    // value and bridge the type only.
+    run_id: null as unknown as string,
     surface_id: null,
     storage_tier: "hot",
     activation_score: 0.9,

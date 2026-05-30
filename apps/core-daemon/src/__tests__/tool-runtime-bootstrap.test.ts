@@ -311,14 +311,15 @@ describe("daemon tool runtime bootstrap", () => {
 
     const runtime = await bootDaemonRuntime();
 
+    const mcpDiscoverCalls = hoisted.mcpDiscoverAndRegister.mock.calls as readonly (readonly unknown[])[];
     expect(
-      (hoisted.mcpDiscoverAndRegister.mock.calls[0]?.[0] as readonly { readonly server_name: string }[]).map(
+      (mcpDiscoverCalls[0]?.[0] as readonly { readonly server_name: string }[]).map(
         (server) => server.server_name
       )
     ).toEqual(["filesystem"]);
 
     expect(
-      (hoisted.mcpDiscoverAndRegister.mock.calls.at(-1)?.[0] as readonly { readonly server_name: string }[]).map(
+      (mcpDiscoverCalls.at(-1)?.[0] as readonly { readonly server_name: string }[]).map(
         (server) => server.server_name
       )
     ).toEqual(["filesystem"]);
@@ -664,7 +665,7 @@ describe("daemon tool runtime bootstrap", () => {
   it("wires the worker-dispatch static alias into the live server hard-constraint allowlist", async () => {
     await bootDaemonRuntime();
 
-    const appDeps = hoisted.createApp.mock.calls[0]?.[0] as
+    const appDeps = (hoisted.createApp.mock.calls as readonly (readonly unknown[])[])[0]?.[0] as
       | { listServerHardConstraints?: (workspaceId: string) => Promise<readonly { ref: string; content: string }[]> }
       | undefined;
     expect(typeof appDeps?.listServerHardConstraints).toBe("function");
@@ -708,7 +709,7 @@ describe("daemon tool runtime bootstrap", () => {
     expect(wrappedAssembler).toBeDefined();
 
     const order: string[] = [];
-    hoisted.contextLensAssemble.mockImplementationOnce(async (params) => {
+    (hoisted.contextLensAssemble as ReturnType<typeof vi.fn>).mockImplementationOnce(async (params: unknown) => {
       order.push("assemble");
       expect(params).toEqual({
         run: {
@@ -874,7 +875,8 @@ function createEventLogEntry(
   return {
     ...entry,
     event_id: crypto.randomUUID(),
-    created_at: "2026-04-23T08:05:00.000Z"
+    created_at: "2026-04-23T08:05:00.000Z",
+    revision: 0
   };
 }
 
@@ -936,7 +938,9 @@ async function expectBootstrapWaitsForBothCjkWarmups(
 
   hoisted.coreWarmCjkSegmentation.mockImplementationOnce(async () => coreGate.promise);
   hoisted.storageWarmCjkSegmentation.mockImplementationOnce(async () => storageGate.promise);
-  hoisted.loadConfigEnv.mockImplementationOnce(async () => configGate.promise);
+  hoisted.loadConfigEnv.mockImplementationOnce(
+    async () => configGate.promise as unknown as Map<string, string>
+  );
 
   let completed = false;
   const runtimePromise = bootDaemonRuntime().then((runtime) => {

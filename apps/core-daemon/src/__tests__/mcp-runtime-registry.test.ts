@@ -52,7 +52,7 @@ describe("daemon MCP runtime registry", () => {
         createStdioTransport: vi.fn(),
         createStreamableHttpTransport: vi.fn(),
         now: () => "2026-04-21T00:00:00Z"
-      } as Parameters<typeof createDaemonMcpRuntimeRegistry>[0])
+      } as unknown as Parameters<typeof createDaemonMcpRuntimeRegistry>[0])
     ).toThrow("requires an explicit warn handler");
   });
 
@@ -69,7 +69,7 @@ describe("daemon MCP runtime registry", () => {
       createStreamableHttpTransport: vi.fn(),
       now: () => "2026-04-21T00:00:00Z",
       warn: vi.fn()
-    });
+    } as unknown as Parameters<typeof createDaemonMcpRuntimeRegistry>[0]);
 
     expect(registry.listServerInfos()).toEqual([
       {
@@ -106,7 +106,7 @@ describe("daemon MCP runtime registry", () => {
       createStdioTransport,
       createStreamableHttpTransport: vi.fn(),
       warn: vi.fn()
-    });
+    } as unknown as Parameters<typeof createDaemonMcpRuntimeRegistry>[0]);
 
     const result = await registry.callTool({
       serverName: "filesystem",
@@ -156,7 +156,7 @@ describe("daemon MCP runtime registry", () => {
       createStdioTransport: vi.fn(),
       createStreamableHttpTransport: vi.fn(() => ({ kind: "http" })),
       warn: vi.fn()
-    });
+    } as unknown as Parameters<typeof createDaemonMcpRuntimeRegistry>[0]);
 
     const result = await registry.callTool({
       serverName: "filesystem",
@@ -209,7 +209,7 @@ describe("daemon MCP runtime registry", () => {
       createStdioTransport: vi.fn(() => ({ kind: "stdio" })),
       createStreamableHttpTransport: vi.fn(),
       warn: vi.fn()
-    });
+    } as unknown as Parameters<typeof createDaemonMcpRuntimeRegistry>[0]);
 
     expect(registry.listServerInfos()).toEqual([
       {
@@ -314,7 +314,7 @@ describe("daemon MCP runtime registry", () => {
         close: closeGithubTransport
       })),
       warn: vi.fn()
-    });
+    } as unknown as Parameters<typeof createDaemonMcpRuntimeRegistry>[0]);
 
     await registry.callTool({
       serverName: "filesystem",
@@ -358,7 +358,7 @@ describe("daemon MCP runtime registry", () => {
       })),
       createStreamableHttpTransport: vi.fn(),
       warn
-    });
+    } as unknown as Parameters<typeof createDaemonMcpRuntimeRegistry>[0]);
 
     try {
       await registry.refresh();
@@ -477,7 +477,7 @@ describe("daemon conversation tool catalog", () => {
 
       const catalog = createDaemonMcpCatalogFromEnv({
         now: () => "2026-04-21T00:00:00.000Z",
-        runtimeRegistry: runtimeRegistry as Parameters<typeof createDaemonMcpCatalogFromEnv>[0]["runtimeRegistry"]
+        runtimeRegistry: runtimeRegistry as unknown as Parameters<typeof createDaemonMcpCatalogFromEnv>[0]["runtimeRegistry"]
       });
 
       process.env.ALAYA_MCP_TOOL_CATALOG_JSON = "{not valid json";

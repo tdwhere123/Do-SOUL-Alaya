@@ -76,7 +76,7 @@ describe("GraphHealthService", () => {
 function createEvent(eventType: string, createdAt: string): EventLogEntry {
   return {
     event_id: `event-${createdAt}`,
-    event_type: eventType,
+    event_type: eventType as EventLogEntry["event_type"],
     entity_type: "path_relation",
     entity_id: "path-1",
     workspace_id: "workspace-1",

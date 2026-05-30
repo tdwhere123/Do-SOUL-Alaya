@@ -4,7 +4,13 @@ import {
   WorkspaceKind,
   WorkspaceState
 } from "@do-soul/alaya-protocol";
-import { initDatabase, SqliteEventLogRepo, SqliteOrphanRadarRepo, SqliteWorkspaceRepo } from "@do-soul/alaya-storage";
+import {
+  initDatabase,
+  SqliteEventLogRepo,
+  SqliteOrphanRadarRepo,
+  SqliteWorkspaceRepo,
+  type EventLogAppendInput
+} from "@do-soul/alaya-storage";
 import { findEventLogOrphansForWorkspace } from "../orphan-query.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
@@ -43,7 +49,7 @@ describe("orphan query", () => {
       caused_by: "codex",
       revision: 0,
       payload_json: {}
-    });
+    } as EventLogAppendInput);
     const usageEvent = await eventLogRepo.append({
       event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
       entity_type: "trust_usage_proof",
@@ -53,7 +59,7 @@ describe("orphan query", () => {
       caused_by: "codex",
       revision: 0,
       payload_json: {}
-    });
+    } as EventLogAppendInput);
     await eventLogRepo.append({
       event_type: TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED,
       entity_type: "trust_state_counter",
@@ -63,7 +69,7 @@ describe("orphan query", () => {
       caused_by: "codex",
       revision: 0,
       payload_json: { agent_target: "codex", counter_name: "installed" }
-    });
+    } as EventLogAppendInput);
 
     database.connection
       .prepare("UPDATE event_log SET created_at = ? WHERE event_id IN (?, ?)")

@@ -59,7 +59,7 @@ describe("mcp memory proposal workflow — event_log audit replay", () => {
         proposed_changes: { content: "corrected" },
         reason: "operator correction"
       },
-      { workspaceId: "ws-replay", runId: "run-1", agentTarget: "codex" }
+      { workspaceId: "ws-replay", runId: "run-1", agentTarget: "codex", sessionId: "session-1" }
     );
 
     const reviewerIdentity = "user:alice";
@@ -70,7 +70,7 @@ describe("mcp memory proposal workflow — event_log audit replay", () => {
         reason: "looks right",
         reviewer_identity: reviewerIdentity
       },
-      { workspaceId: "ws-replay", runId: "run-1", agentTarget: "cli" }
+      { workspaceId: "ws-replay", runId: "run-1", agentTarget: "cli", sessionId: "session-1" }
     );
     expect(reviewed.resolution_state).toBe(ProposalResolutionState.REJECTED);
 
@@ -121,7 +121,7 @@ describe("mcp memory proposal workflow — event_log audit replay", () => {
         reason: "delivery-anchored proposal",
         source_delivery_ids: sourceDeliveryIds
       },
-      { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "codex" }
+      { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "codex", sessionId: "session-1" }
     );
 
     await expect(proposalRepo.findScopedById(created.proposal_id)).resolves.toMatchObject({
@@ -140,7 +140,7 @@ describe("mcp memory proposal workflow — event_log audit replay", () => {
         reason: "trace proof only",
         reviewer_identity: "user:trace-reviewer"
       },
-      { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "cli" }
+      { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "cli", sessionId: "session-1" }
     );
 
     const replayed = await eventLogRepo.queryByEntity("proposal", created.proposal_id);
@@ -172,7 +172,7 @@ describe("mcp memory proposal workflow — event_log audit replay", () => {
           reason: "direct workflow forged anchor",
           source_delivery_ids: ["delivery-forged"]
         },
-        { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "codex" }
+        { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "codex", sessionId: "session-1" }
       )
     ).rejects.toBeInstanceOf(SourceDeliveryAnchorValidationError);
     await expect(eventLogRepo.queryByEntity("proposal", "77777777-8888-4888-8888-999999999999")).resolves.toEqual([]);
@@ -198,7 +198,7 @@ describe("mcp memory proposal workflow — event_log audit replay", () => {
         proposed_changes: { content: "fix encoding" },
         reason: "utf-8 audit"
       },
-      { workspaceId: "ws-utf8", runId: "run-utf8", agentTarget: "codex" }
+      { workspaceId: "ws-utf8", runId: "run-utf8", agentTarget: "codex", sessionId: "session-1" }
     );
 
     // Mix of CJK + Latin extended + an internal quote. better-sqlite3
@@ -216,7 +216,7 @@ describe("mcp memory proposal workflow — event_log audit replay", () => {
       },
       // Human-reviewer surface (runId: null) — exercises the loosened
       // context check on a real repo (Inspector / `alaya review`).
-      { workspaceId: "ws-utf8", runId: null, agentTarget: "inspector" }
+      { workspaceId: "ws-utf8", runId: null, agentTarget: "inspector", sessionId: "session-1" }
     );
 
     const replayed = await eventLogRepo.queryByEntity("proposal", created.proposal_id);

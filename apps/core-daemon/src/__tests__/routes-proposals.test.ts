@@ -245,7 +245,15 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = await response.json();
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        status: string;
+        target_object_kind: string;
+        requested_governance_class: string;
+        target_object_id: string;
+      };
+    };
     expect(body.success).toBe(true);
     expect(body.data.status).toBe("created");
     expect(body.data.target_object_kind).toBe("path_relation");
@@ -253,7 +261,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     expect(body.data.target_object_id).toBe("mem-1");
 
     expect(createProposalWithEvents).toHaveBeenCalledTimes(1);
-    const callInput = createProposalWithEvents.mock.calls[0][0] as {
+    const callInput = createProposalWithEvents.mock.calls[0][0] as unknown as {
       target_object_kind: string;
       proposed_change_summary: string;
       proposal: { derived_from: string; resolution_state: string };
@@ -308,7 +316,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       { method: "POST" }
     );
     expect(createdResponse.status).toBe(200);
-    const createdBody = await createdResponse.json();
+    const createdBody = (await createdResponse.json()) as { data: { proposal_id: string } };
     const proposalId = createdBody.data.proposal_id as string;
 
     const workflow = createMcpMemoryProposalWorkflow({
@@ -357,7 +365,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       { method: "POST" }
     );
     expect(secondCreatedResponse.status).toBe(200);
-    const secondCreatedBody = await secondCreatedResponse.json();
+    const secondCreatedBody = (await secondCreatedResponse.json()) as { data: { proposal_id: string } };
     const secondProposalId = secondCreatedBody.data.proposal_id as string;
 
     await expect(

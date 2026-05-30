@@ -746,7 +746,8 @@ async function createRoutingHarness(options: {
     databaseConnection: base.database.connection,
     backlogThresholds: {
       warning_queue_depth: 100,
-      warning_rearm_depth: 50
+      warning_rearm_depth: 50,
+      snapshot_interval_ms: 1000
     },
     eventLogRepo: base.eventLogRepo,
     eventPublisher: base.eventPublisher,
@@ -1046,7 +1047,9 @@ function createMemoryEntry(overrides: Partial<ReturnType<typeof createMemoryEntr
 
 function createMemoryEntryBase() {
   return {
-    object_id: "memory-a",
+    // Widened from the "memory-a" literal so callers can override with a
+    // dynamic object_id (e.g. findByIdScoped echoing its argument).
+    object_id: "memory-a" as string,
     object_kind: "memory_entry",
     schema_version: 1,
     lifecycle_state: "active",
