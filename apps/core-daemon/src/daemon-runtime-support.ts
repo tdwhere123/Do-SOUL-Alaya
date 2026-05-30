@@ -37,7 +37,6 @@ import {
   SqliteGlobalMemoryRepo,
   SqliteKarmaEventRepo,
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
   type ProposalRepo,
   SqliteToolExecutionRecordRepo,
   type GlobalMemoryRecallCacheRepo,
@@ -246,7 +245,6 @@ export function createGlobalMemoryRecallCachePort(params: {
 
 export function createSoulGraphService(input: {
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
-  readonly memoryGraphEdgeRepo: SqliteMemoryGraphEdgeRepo;
   readonly pathRelationRepo: Pick<PathRelationRepo, "findActive">;
   readonly proposalRepo: Pick<
     ProposalRepo,
@@ -266,14 +264,12 @@ export function createSoulGraphService(input: {
     }): Promise<SoulGraph> => {
       const [
         memories,
-        edges,
         pathRelations,
         pendingProposals,
         pendingProposalsTotal,
         memoryUpdateEvents
       ] = await Promise.all([
         input.memoryEntryRepo.findByWorkspaceId(workspaceId),
-        input.memoryGraphEdgeRepo.findByWorkspace(workspaceId),
         input.pathRelationRepo.findActive(workspaceId),
         input.proposalRepo.findPendingSummaries(workspaceId, {
           limit,
@@ -291,20 +287,11 @@ export function createSoulGraphService(input: {
         await input.proposalRepo.countPendingMemoryTargetEdges(workspaceId, allMemoryIds);
       const limitedMemories = memories.slice(0, limit);
       const memoryIds = new Set(limitedMemories.map((memory: MemoryEntryRecord) => memory.object_id));
-      // Edge limit precedence under pressure: PathRelation edges (the new
-      // dynamics-driven view, with strength + stability + last_reinforced_at
-      // metadata that Phase 3 visual encoding depends on) claim limit slots
-      // first; legacy memoryGraphEdge rows fill the remainder. This means a
-      // workspace with >limit PathRelation edges will visually drop the
-      // legacy edges entirely until the limit is raised. The precedence is
-      // intentional — path-plasticity edges carry richer semantics — but it
-      // is pinned by `prefers PathRelation edges over legacy edges under
-      // limit pressure` in soul-graph-service.test.ts so any future re-order
-      // surfaces in the test diff.
+      // invariant: the Inspector graph view shows only PathRelation edges —
+      // the unified plane carries strength + stability + last_reinforced_at
+      // metadata the visual encoding depends on. memory_graph_edges is no
+      // longer read here (no producer writes it; accept mints paths).
       const pathRelationEdges = buildPathRelationEdges(pathRelations, memoryIds).slice(0, limit);
-      const limitedEdges = edges
-        .filter((edge) => memoryIds.has(edge.source_memory_id) && memoryIds.has(edge.target_memory_id))
-        .slice(0, Math.max(0, limit - pathRelationEdges.length));
       const tagProjection = buildDomainTagProjection(limitedMemories);
       const influenceCounts = buildInfluenceCounts(pathRelations);
       const proposalProjection = buildPendingProposalProjection(pendingProposals, memoryIds);
@@ -343,19 +330,11 @@ export function createSoulGraphService(input: {
         ],
         edges: [
           ...pathRelationEdges,
-          ...limitedEdges.map((edge) => ({
-            id: edge.edge_id,
-            kind: "references" as const,
-            source_id: edge.source_memory_id,
-            target_id: edge.target_memory_id,
-            created_at: edge.created_at
-          })),
           ...proposalProjection.edges,
           ...tagProjection.edges
         ],
         truncated:
           memories.length > limitedMemories.length ||
-          edges.length > limitedEdges.length ||
           pathRelations.length > pathRelationEdges.length ||
           pendingProposalsTotal > pendingProposals.length,
         // Use the cheap COUNT(*) over pending proposals, NOT pendingProposals.length:
@@ -364,7 +343,6 @@ export function createSoulGraphService(input: {
         // pending — the inspector "sampled vs complete" chip would silently lie.
         node_total: memories.length + pendingProposalsTotal + countUniqueDomainTags(memories),
         edge_total:
-          edges.length +
           countPathRelationEdges(pathRelations, allMemoryIdSet) +
           pendingProposalEdgesTotal +
           countDomainTagEdges(memories)

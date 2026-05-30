@@ -402,13 +402,24 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     greenService
   });
   const graphExploreService = new GraphExploreService({
+    // soul.explore_graph and recall graph_support counts both read the unified
+    // path plane via pathRelationRepo; only edge delete still routes through
+    // memoryGraphEdgeRepo.
+    pathRepo: pathRelationRepo,
     edgeRepo: memoryGraphEdgeRepo,
     eventLogRepo
   });
   const edgeProposalService = new EdgeProposalService({
     memoryRepo: memoryEntryRepo,
     proposalRepo: edgeProposalRepo,
-    graphPort: memoryGraphEdgeRepo,
+    // invariant: accept mints a governed PathRelation, not a
+    // memory_graph_edges row. The closure forward-references
+    // pathRelationProposalService (declared below); it is only invoked at
+    // accept time, long after init, so there is no use-before-assignment.
+    // see also: packages/core/src/edge-proposal-service.ts acceptProposal.
+    pathCandidatePort: {
+      submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
+    },
     eventPublisher
   });
   const topologyService = new TopologyService({
@@ -419,13 +430,11 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const soulGraphService = createSoulGraphService({
     memoryEntryRepo,
-    memoryGraphEdgeRepo,
     pathRelationRepo,
     proposalRepo,
     eventLogRepo
   });
   const graphHealthService = createGraphHealthService({
-    memoryGraphEdgeRepo,
     pathRelationRepo,
     eventLogRepo
   });

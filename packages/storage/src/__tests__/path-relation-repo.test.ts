@@ -278,6 +278,71 @@ describe("SqlitePathRelationRepo", () => {
     ]);
   });
 
+  it("findByTargetAnchor returns only target-anchored rows, excluding source-anchored-only rows", async () => {
+    const { repo } = createRepo();
+    const inboundRelation = createPathRelationFixture({
+      path_id: "path-inbound",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-source" },
+        target_anchor: { kind: "object", object_id: "object-pivot" }
+      }
+    });
+    const outboundRelation = createPathRelationFixture({
+      path_id: "path-outbound",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-pivot" },
+        target_anchor: { kind: "object", object_id: "object-other" }
+      },
+      created_at: "2026-04-17T00:01:00.000Z",
+      updated_at: "2026-04-17T00:01:00.000Z"
+    });
+
+    repo.create(inboundRelation);
+    repo.create(outboundRelation);
+
+    // Target-anchored only: the inbound row (object-pivot is its target) is
+    // returned; the outbound row (object-pivot is its source) is excluded.
+    // findByAnchor would return both — findByTargetAnchor is the inbound half.
+    await expect(
+      repo.findByTargetAnchor("workspace-1", { kind: "object", object_id: "object-pivot" })
+    ).resolves.toEqual([withActiveLifecycle(inboundRelation)]);
+    await expect(
+      repo.findByAnchor("workspace-1", { kind: "object", object_id: "object-pivot" })
+    ).resolves.toEqual([
+      withActiveLifecycle(inboundRelation),
+      withActiveLifecycle(outboundRelation)
+    ]);
+  });
+
+  it("findByTargetAnchor scopes to a single workspace", async () => {
+    const { repo, database } = createRepo();
+    seedWorkspace(database, "workspace-2");
+    const workspaceOneRelation = createPathRelationFixture({
+      path_id: "path-ws1",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-source" },
+        target_anchor: { kind: "object", object_id: "object-pivot" }
+      }
+    });
+    const workspaceTwoRelation = createPathRelationFixture({
+      path_id: "path-ws2",
+      workspace_id: "workspace-2",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-source" },
+        target_anchor: { kind: "object", object_id: "object-pivot" }
+      },
+      created_at: "2026-04-17T00:01:00.000Z",
+      updated_at: "2026-04-17T00:01:00.000Z"
+    });
+
+    repo.create(workspaceOneRelation);
+    repo.create(workspaceTwoRelation);
+
+    await expect(
+      repo.findByTargetAnchor("workspace-1", { kind: "object", object_id: "object-pivot" })
+    ).resolves.toEqual([withActiveLifecycle(workspaceOneRelation)]);
+  });
+
   it("reuses the shared protocol anchor serializer on both the SQL and caller lookup paths", async () => {
     const repoSource = await readFile(new URL("../repos/path-relation-repo.ts", import.meta.url), "utf8");
 

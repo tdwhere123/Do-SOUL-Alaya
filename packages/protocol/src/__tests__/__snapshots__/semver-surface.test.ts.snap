@@ -128,6 +128,7 @@ evt:garden.ts#SoulHealthJournalRecordedPayloadSchema(change_summary,entry_id,eve
 evt:graph-auditor.ts#SoulAuditorPointerHealedPayloadSchema(cleared_ref,occurred_at,ref_kind,source_object_id,source_object_kind,task_id,workspace_id)#6f971b5
 evt:graph-auditor.ts#SoulGraphEdgeCreatedPayloadSchema(edge_id,edge_type,occurred_at,source_memory_id,target_memory_id,workspace_id)#fcd8411
 evt:graph-auditor.ts#SoulGraphEdgeProposalCreatedPayloadSchema(confidence,edge_type,occurred_at,proposal_id,reason,source_memory_id,source_signal_id,target_memory_id,trigger_source,workspace_id)#1a54850
+evt:graph-auditor.ts#SoulGraphEdgeProposalPathMintFailedPayloadSchema(edge_type,failure_detail,failure_kind,occurred_at,proposal_id,reviewer_identity,source_memory_id,target_memory_id,workspace_id)#11a8eea
 evt:graph-auditor.ts#SoulGraphEdgeProposalReviewedPayloadSchema(occurred_at,proposal_id,review_reason,reviewer_identity,status,workspace_id)#69fdb0e
 evt:graph-auditor.ts#SoulGraphExploreCompletedPayloadSchema()#5a6fcd8
 evt:graph-auditor.ts#SoulGraphNeighborExploreCompletedPayloadSchema(direction,exploration_kind,neighbor_count,occurred_at,source_memory_id,workspace_id)#027f093

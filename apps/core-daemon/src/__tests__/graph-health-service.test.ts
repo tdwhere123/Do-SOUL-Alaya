@@ -1,14 +1,12 @@
 import {
-  MemoryGraphEdgeType,
   RuntimeGovernanceEventType,
-  type EventLogEntry,
-  type MemoryGraphEdge
+  type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { createGraphHealthService } from "../services/graph-health-service.js";
 
 describe("GraphHealthService", () => {
-  it("counts graph edges by type, path relations, and latest path event", async () => {
+  it("counts path relations by kind and reports the latest path event", async () => {
     const eventLogRepo = {
       queryByWorkspaceAndType: vi.fn(async (_workspaceId: string, eventType: string) => {
         if (eventType === RuntimeGovernanceEventType.PATH_RELATION_CREATED) {
@@ -21,15 +19,12 @@ describe("GraphHealthService", () => {
       })
     };
     const service = createGraphHealthService({
-      memoryGraphEdgeRepo: {
-        findByWorkspace: vi.fn(async () => [
-          createEdge(MemoryGraphEdgeType.SUPPORTS, "1"),
-          createEdge(MemoryGraphEdgeType.RECALLS, "2"),
-          createEdge(MemoryGraphEdgeType.RECALLS, "3")
-        ])
-      },
       pathRelationRepo: {
-        findByWorkspace: vi.fn(async () => [{ path_id: "path-1" }, { path_id: "path-2" }] as never)
+        findByWorkspace: vi.fn(async () => [
+          { constitution: { relation_kind: "supports" } },
+          { constitution: { relation_kind: "recalls" } },
+          { constitution: { relation_kind: "recalls" } }
+        ] as never)
       },
       eventLogRepo
     });
@@ -39,13 +34,11 @@ describe("GraphHealthService", () => {
     expect(snapshot).toMatchObject({
       workspace_id: "workspace-1",
       status: "healthy",
-      memory_graph_edges_total: 3,
-      memory_graph_edges_by_type: {
+      path_relations_total: 3,
+      path_relations_by_kind: {
         supports: 1,
-        recalls: 2,
-        supersedes: 0
+        recalls: 2
       },
-      path_relations_total: 2,
       latest_path_event_at: "2026-05-12T00:00:00.000Z",
       warnings: [],
       hint: null
@@ -56,11 +49,8 @@ describe("GraphHealthService", () => {
     );
   });
 
-  it("marks sparse graph/path workspaces degraded with an operator hint", async () => {
+  it("marks sparse path workspaces degraded with an operator hint", async () => {
     const service = createGraphHealthService({
-      memoryGraphEdgeRepo: {
-        findByWorkspace: vi.fn(async () => [])
-      },
       pathRelationRepo: {
         findByWorkspace: vi.fn(async () => [])
       },
@@ -74,25 +64,14 @@ describe("GraphHealthService", () => {
     expect(snapshot).toMatchObject({
       workspace_id: "workspace-empty",
       status: "degraded",
-      memory_graph_edges_total: 0,
       path_relations_total: 0,
+      path_relations_by_kind: {},
       latest_path_event_at: null,
-      warnings: ["memory_graph_edges_empty", "path_relations_empty"]
+      warnings: ["path_relations_empty"]
     });
     expect(snapshot.hint).toContain("new install");
   });
 });
-
-function createEdge(edgeType: MemoryGraphEdge["edge_type"], suffix: string): MemoryGraphEdge {
-  return {
-    edge_id: `edge-${edgeType}-${suffix}`,
-    source_memory_id: "memory-source",
-    target_memory_id: "memory-target",
-    edge_type: edgeType,
-    workspace_id: "workspace-1",
-    created_at: "2026-05-12T00:00:00.000Z"
-  };
-}
 
 function createEvent(eventType: string, createdAt: string): EventLogEntry {
   return {

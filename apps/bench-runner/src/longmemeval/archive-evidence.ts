@@ -165,7 +165,9 @@ function aggregateReportSideEffects(
       item.workspaces_observed,
       "workspaces_observed"
     );
-    memoryGraphEdgesTotal += requiredFiniteNumber(
+    // memory_graph_edges_* are retained for historical archive delta compat;
+    // read optionally because post-cutover archives may zero/omit them.
+    memoryGraphEdgesTotal += optionalFiniteNumber(
       item.memory_graph_edges_total,
       "memory_graph_edges_total"
     );
@@ -178,7 +180,7 @@ function aggregateReportSideEffects(
       "path_relations_total"
     );
     for (const [edgeType, count] of Object.entries(
-      requiredNumberRecord(
+      optionalNumberRecord(
         item.memory_graph_edges_by_type,
         "memory_graph_edges_by_type"
       )
@@ -214,6 +216,26 @@ function requiredFiniteNumber(value: unknown, fieldName: string): number {
     );
   }
   return value;
+}
+
+// Retained for historical archive delta compat: legacy edge-plane fields are
+// optional post-cutover, so absent/null reads collapse to zero instead of
+// throwing on the required path.
+function optionalFiniteNumber(value: unknown, fieldName: string): number {
+  if (value === undefined || value === null) {
+    return 0;
+  }
+  return requiredFiniteNumber(value, fieldName);
+}
+
+function optionalNumberRecord(
+  value: unknown,
+  fieldName: string
+): Record<string, number> {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  return requiredNumberRecord(value, fieldName);
 }
 
 function requiredNonNegativeInteger(value: unknown, fieldName: string): number {

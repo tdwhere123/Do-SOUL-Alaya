@@ -3,7 +3,7 @@ import {
   EdgeProposalStatus,
   EdgeProposalTriggerSource,
   type EdgeProposal,
-  type MemoryGraphEdge
+  type EdgeProposalTriggerSourceValue
 } from "@do-soul/alaya-protocol";
 import {
   AUTO_ACCEPT_FLOOR_BY_TRIGGER,
@@ -12,16 +12,17 @@ import {
   type EdgeProposalRepoPort
 } from "../edge-proposal-service.js";
 import type { EventPublisher } from "../event-publisher.js";
+import type { PathCandidateSink } from "../path-candidate-sink.js";
 
 describe("EdgeProposalService", () => {
   it("creates a pending proposal without writing a durable graph edge", async () => {
     const repo = createProposalRepo();
-    const graphPort = createGraphPort();
+    const pathCandidatePort = createPathCandidatePort();
     const eventPublisher = createEventPublisher();
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo(),
       proposalRepo: repo,
-      graphPort,
+      pathCandidatePort,
       eventPublisher,
       generateId: () => "proposal-1",
       now: () => "2026-05-24T00:00:00.000Z"
@@ -46,7 +47,7 @@ describe("EdgeProposalService", () => {
       trigger_source: "recall_cross_link",
       status: "pending"
     });
-    expect(graphPort.create).not.toHaveBeenCalled();
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
     expect(eventPublisher.appendManyWithMutation).toHaveBeenCalledWith(
       [
         expect.objectContaining({
@@ -58,14 +59,14 @@ describe("EdgeProposalService", () => {
     );
   });
 
-  it("accept creates a graph edge and reject does not", async () => {
+  it("accept mints a governed path relation and reject does not", async () => {
     const repo = createProposalRepo();
-    const graphPort = createGraphPort();
+    const pathCandidatePort = createPathCandidatePort();
     const eventPublisher = createEventPublisher();
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo(),
       proposalRepo: repo,
-      graphPort,
+      pathCandidatePort,
       eventPublisher,
       generateId: createIdGenerator(),
       now: () => "2026-05-24T00:00:00.000Z"
@@ -103,40 +104,293 @@ describe("EdgeProposalService", () => {
       })
     ).resolves.toMatchObject({ accepted_count: 0, rejected_count: 1 });
 
-    expect(graphPort.create).toHaveBeenCalledTimes(1);
-    expect(graphPort.create).toHaveBeenCalledWith(expect.objectContaining({
-      source_memory_id: "memory-a",
-      target_memory_id: "memory-b",
-      edge_type: "recalls",
-      workspace_id: "workspace-1"
+    // invariant: accept mints exactly one governed path (recall_allowed),
+    // relation_kind == edge_type, recall_bias positive for `recalls`.
+    // recallBiasMagnitude/initialStrength are pinned to the recalls seed
+    // profile (|contribution_weight| 0.3, clamped to the 0.3 strength floor)
+    // so a drift in EDGE_TYPE_RECALL_MODEL is caught here.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace-1",
+      sourceAnchor: { kind: "object", object_id: "memory-a" },
+      targetAnchor: { kind: "object", object_id: "memory-b" },
+      relationKind: "recalls",
+      governanceClass: "recall_allowed",
+      recallBiasSign: 1,
+      recallBiasMagnitude: 0.3,
+      initialStrength: 0.3
     }));
+    // The accepted reviewed event commits before the path is minted; there is
+    // no soul.graph.edge_created event any more.
     const reviewEventBatches = eventPublisher.appendManyWithMutation.mock.calls
       .map((call) => call[0])
       .filter((events) => events.some((event) => event.event_type === "soul.graph.edge_proposal_reviewed"));
     expect(reviewEventBatches).toEqual([
-      [
-        expect.objectContaining({ event_type: "soul.graph.edge_proposal_reviewed" }),
-        expect.objectContaining({ event_type: "soul.graph.edge_created" })
-      ],
-      [
-        expect.objectContaining({ event_type: "soul.graph.edge_proposal_reviewed" })
-      ]
+      [expect.objectContaining({ event_type: "soul.graph.edge_proposal_reviewed" })],
+      [expect.objectContaining({ event_type: "soul.graph.edge_proposal_reviewed" })]
     ]);
+    const emittedTypes = eventPublisher.appendManyWithMutation.mock.calls
+      .flatMap((call) => call[0])
+      .map((event) => event.event_type);
+    expect(emittedTypes).not.toContain("soul.graph.edge_created");
     expect(repo.findById(accepted.proposal_id)?.status).toBe(EdgeProposalStatus.ACCEPTED);
     expect(repo.findById(rejected.proposal_id)?.status).toBe(EdgeProposalStatus.REJECTED);
   });
 
-  it("does not create a graph edge when the pending review CAS loses the race", async () => {
+  // invariant (Wave-1): a negative edge_type AUTO_ACCEPTED by system floor
+  // policy is NOT a trust verdict — it must mint an attention_only path that
+  // cannot suppress (suppression gate requires recall_allowed; negative
+  // governance promotion is sign-guarded off). recall_allowed for a negative
+  // path is reachable only via a trusted llm-verdict birth seed or a human
+  // governance decision.
+  it("AUTO_ACCEPTED negative edge_type mints an attention_only path (cannot suppress)", async () => {
+    const negativeCases: ReadonlyArray<{
+      readonly trigger: EdgeProposalTriggerSourceValue;
+      readonly edgeType: "contradicts" | "supersedes";
+    }> = [
+      { trigger: EdgeProposalTriggerSource.CONFLICT_DETECTION, edgeType: "contradicts" },
+      { trigger: EdgeProposalTriggerSource.LOCAL_SUPERSEDES, edgeType: "supersedes" }
+    ];
+    for (const { trigger, edgeType } of negativeCases) {
+      const { service, repo, pathCandidatePort } = createAutoAcceptHarness();
+      const proposal = await service.proposeEdge({
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType,
+        workspaceId: "workspace-1",
+        triggerSource: trigger,
+        confidence: 1
+      });
+      expect(proposal.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
+      expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+      const mintArgs = pathCandidatePort.submitCandidate.mock.calls[0][0];
+      expect(mintArgs.relationKind).toBe(edgeType);
+      expect(mintArgs.recallBiasSign).toBe(-1);
+      expect(mintArgs.governanceClass).toBe("attention_only");
+      expect(mintArgs.governanceClass).not.toBe("recall_allowed");
+    }
+  });
+
+  // invariant: a negative edge_type accepted by a HUMAN reviewer is a trust
+  // verdict — human-vetted suppression — so the minted path keeps
+  // recall_allowed (legitimate suppression authority preserved).
+  it("human ACCEPTED negative edge_type mints a recall_allowed path (human-vetted suppression preserved)", async () => {
+    const repo = createProposalRepo();
+    const pathCandidatePort = createPathCandidatePort();
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort,
+      eventPublisher: createEventPublisher(),
+      generateId: () => "proposal-1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    const proposal = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "contradicts",
+      workspaceId: "workspace-1"
+    });
+    await service.batchReview({
+      workspaceId: "workspace-1",
+      verdict: "accept",
+      filter: { proposal_ids: [proposal.proposal_id] },
+      reason: "human-vetted suppression",
+      reviewerIdentity: "user:reviewer"
+    });
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    const mintArgs = pathCandidatePort.submitCandidate.mock.calls[0][0];
+    expect(mintArgs.relationKind).toBe("contradicts");
+    expect(mintArgs.recallBiasSign).toBe(-1);
+    expect(mintArgs.governanceClass).toBe("recall_allowed");
+  });
+
+  // invariant: positive (sign >= 0) edge_types keep recall_allowed for both
+  // auto and human accept — positive recall_allowed only nudges recall and
+  // never suppresses, so no auto/human downgrade is required.
+  it("AUTO_ACCEPTED positive edge_type keeps recall_allowed (no regression)", async () => {
+    const { service, pathCandidatePort } = createAutoAcceptHarness();
+    await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "supports",
+      workspaceId: "workspace-1",
+      triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS,
+      confidence: 1
+    });
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    const mintArgs = pathCandidatePort.submitCandidate.mock.calls[0][0];
+    expect(mintArgs.relationKind).toBe("supports");
+    expect(mintArgs.recallBiasSign).toBe(1);
+    expect(mintArgs.governanceClass).toBe("recall_allowed");
+  });
+
+  // invariant (I-1): the minted path is the only durable landing for an
+  // accepted proposal. submitCandidate catches its own materialize errors and
+  // returns false; acceptProposal must surface that loudly (CoreError) so an
+  // accepted-without-path loss is never silent. The review row already
+  // committed, so the proposal stays ACCEPTED — but the failure is observable
+  // and a retry is idempotent (materialize dedups via findByAnchorMemoryId).
+  it("throws an observable failure when submitCandidate returns false (no silent lost mint)", async () => {
+    const repo = createProposalRepo();
+    const pathCandidatePort = createPathCandidatePort();
+    pathCandidatePort.submitCandidate.mockImplementation(async () => false);
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort,
+      eventPublisher: createEventPublisher(),
+      generateId: () => "proposal-1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    const proposal = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1"
+    });
+    await expect(
+      service.batchReview({
+        workspaceId: "workspace-1",
+        verdict: "accept",
+        filter: { proposal_ids: [proposal.proposal_id] },
+        reason: "reviewed",
+        reviewerIdentity: "user:reviewer"
+      })
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "OBLIGATION_VIOLATION",
+      message: `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`
+    });
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+  });
+
+  // invariant (auditability): the reviewed row commits BEFORE submitCandidate
+  // runs, so on mint failure an accepted-owes-a-path obligation exists with no
+  // PATH_RELATION_CREATED. The throw alone reaches a different session (the
+  // propose_edge caller for auto-accept) and leaves no durable trace. A durable
+  // SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED event keyed on proposal_id must be
+  // emitted so an operator can reconcile the obligation without a forensic
+  // cross-join. The OBLIGATION_VIOLATION throw stays (loud at call time).
+  it("emits a durable path-mint-failed record AND throws when submitCandidate returns false", async () => {
+    const repo = createProposalRepo();
+    const pathCandidatePort = createPathCandidatePort();
+    pathCandidatePort.submitCandidate.mockImplementation(async () => false);
+    const eventPublisher = createEventPublisher();
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort,
+      eventPublisher,
+      generateId: () => "proposal-1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    const proposal = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1"
+    });
+
+    await expect(
+      service.batchReview({
+        workspaceId: "workspace-1",
+        verdict: "accept",
+        filter: { proposal_ids: [proposal.proposal_id] },
+        reason: "reviewed",
+        reviewerIdentity: "user:reviewer"
+      })
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "OBLIGATION_VIOLATION",
+      message: `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`
+    });
+
+    const mintFailedEvents = eventPublisher.appendManyWithMutation.mock.calls
+      .flatMap((call) => call[0])
+      .filter((event) => event.event_type === "soul.graph.edge_proposal_path_mint_failed");
+    expect(mintFailedEvents).toHaveLength(1);
+    expect(mintFailedEvents[0]).toMatchObject({
+      entity_type: "edge_proposal",
+      entity_id: proposal.proposal_id,
+      caused_by: "user:reviewer"
+    });
+    expect(mintFailedEvents[0].payload_json).toMatchObject({
+      proposal_id: proposal.proposal_id,
+      source_memory_id: "memory-a",
+      target_memory_id: "memory-b",
+      edge_type: "recalls",
+      reviewer_identity: "user:reviewer",
+      failure_kind: "submit_returned_false",
+      failure_detail: null,
+      workspace_id: "workspace-1"
+    });
+  });
+
+  // invariant: submitCandidate is contracted to catch its own materialize
+  // errors and return false, but a thrown error must still produce the durable
+  // obligation record before propagating — auditability cannot depend on the
+  // failure-arrival shape.
+  it("emits a durable path-mint-failed record AND throws when submitCandidate throws", async () => {
+    const repo = createProposalRepo();
+    const pathCandidatePort = createPathCandidatePort();
+    pathCandidatePort.submitCandidate.mockImplementation(async () => {
+      throw new Error("materialize blew up");
+    });
+    const eventPublisher = createEventPublisher();
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort,
+      eventPublisher,
+      generateId: () => "proposal-1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    const proposal = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1"
+    });
+
+    await expect(
+      service.batchReview({
+        workspaceId: "workspace-1",
+        verdict: "accept",
+        filter: { proposal_ids: [proposal.proposal_id] },
+        reason: "reviewed",
+        reviewerIdentity: "user:reviewer"
+      })
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "OBLIGATION_VIOLATION",
+      message: `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`
+    });
+
+    const mintFailedEvents = eventPublisher.appendManyWithMutation.mock.calls
+      .flatMap((call) => call[0])
+      .filter((event) => event.event_type === "soul.graph.edge_proposal_path_mint_failed");
+    expect(mintFailedEvents).toHaveLength(1);
+    expect(mintFailedEvents[0].payload_json).toMatchObject({
+      proposal_id: proposal.proposal_id,
+      failure_kind: "submit_threw",
+      failure_detail: "materialize blew up",
+      workspace_id: "workspace-1"
+    });
+  });
+
+  it("does not mint a path when the pending review CAS loses the race", async () => {
     const repo = createProposalRepo({
       beforeUpdateReview: (proposalId) => {
         repo.forceStatus(proposalId, EdgeProposalStatus.REJECTED);
       }
     });
-    const graphPort = createGraphPort();
+    const pathCandidatePort = createPathCandidatePort();
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo(),
       proposalRepo: repo,
-      graphPort,
+      pathCandidatePort,
       eventPublisher: createEventPublisher(),
       generateId: () => "proposal-1",
       now: () => "2026-05-24T00:00:00.000Z"
@@ -157,7 +411,7 @@ describe("EdgeProposalService", () => {
         reviewerIdentity: "user:reviewer"
       })
     ).rejects.toThrow("Edge proposal is not pending");
-    expect(graphPort.create).not.toHaveBeenCalled();
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
   });
 
   it("fails closed when explicit proposal ids are no longer pending", async () => {
@@ -165,7 +419,7 @@ describe("EdgeProposalService", () => {
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo(),
       proposalRepo: repo,
-      graphPort: createGraphPort(),
+      pathCandidatePort: createPathCandidatePort(),
       eventPublisher: createEventPublisher(),
       generateId: () => "proposal-1",
       now: () => "2026-05-24T00:00:00.000Z"
@@ -204,7 +458,7 @@ describe("EdgeProposalService", () => {
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo(),
       proposalRepo: repo,
-      graphPort: createGraphPort(),
+      pathCandidatePort: createPathCandidatePort(),
       eventPublisher: createEventPublisher(),
       generateId: () => "proposal-1",
       now: () => "2026-05-24T00:00:00.000Z"
@@ -232,7 +486,7 @@ describe("EdgeProposalService", () => {
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo(),
       proposalRepo: repo,
-      graphPort: createGraphPort(),
+      pathCandidatePort: createPathCandidatePort(),
       eventPublisher: createEventPublisher(),
       generateId: () => "proposal-1",
       now: () => "2026-05-24T00:00:00.000Z"
@@ -261,7 +515,7 @@ describe("EdgeProposalService", () => {
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo(),
       proposalRepo: repo,
-      graphPort: createGraphPort(),
+      pathCandidatePort: createPathCandidatePort(),
       eventPublisher: createEventPublisher(),
       generateId: () => "proposal-1",
       now: () => "2026-05-24T00:00:00.000Z"
@@ -305,7 +559,7 @@ describe("EdgeProposalService", () => {
       }
 
       it(`auto-accepts ${trigger} when confidence == floor (${floor})`, async () => {
-        const { service, repo, graphPort } = createAutoAcceptHarness();
+        const { service, repo, pathCandidatePort } = createAutoAcceptHarness();
         const proposal = await service.proposeEdge({
           sourceMemoryId: "memory-a",
           targetMemoryId: "memory-b",
@@ -318,7 +572,7 @@ describe("EdgeProposalService", () => {
         const stored = repo.findById(proposal.proposal_id);
         expect(stored?.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
         expect(stored?.reviewer_identity).toBe(AUTO_ACCEPT_REVIEWER_IDENTITY);
-        expect(graphPort.create).toHaveBeenCalledTimes(1);
+        expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
       });
 
       it(`auto-accepts ${trigger} at the upper bound (confidence = 1.0)`, async () => {
@@ -336,7 +590,7 @@ describe("EdgeProposalService", () => {
       });
 
       it(`leaves ${trigger} pending when confidence < floor`, async () => {
-        const { service, repo, graphPort } = createAutoAcceptHarness();
+        const { service, repo, pathCandidatePort } = createAutoAcceptHarness();
         const proposal = await service.proposeEdge({
           sourceMemoryId: "memory-a",
           targetMemoryId: "memory-b",
@@ -347,12 +601,12 @@ describe("EdgeProposalService", () => {
         });
         expect(proposal.status).toBe(EdgeProposalStatus.PENDING);
         expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.PENDING);
-        expect(graphPort.create).not.toHaveBeenCalled();
+        expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
       });
     }
 
     it("never auto-accepts EXPLICIT trigger even at confidence = 1.0 (agent self-report ceiling clamps to 0.5)", async () => {
-      const { service, repo, graphPort } = createAutoAcceptHarness();
+      const { service, repo, pathCandidatePort } = createAutoAcceptHarness();
       const proposal = await service.proposeEdge({
         sourceMemoryId: "memory-a",
         targetMemoryId: "memory-b",
@@ -364,7 +618,7 @@ describe("EdgeProposalService", () => {
       expect(proposal.status).toBe(EdgeProposalStatus.PENDING);
       expect(proposal.confidence).toBe(0.5);
       expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.PENDING);
-      expect(graphPort.create).not.toHaveBeenCalled();
+      expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
     });
 
     it("never auto-accepts SYSTEM / CANDIDATE_SIGNAL_REF / BENCH_SEED at any confidence", async () => {
@@ -414,8 +668,8 @@ describe("EdgeProposalService", () => {
       expect(reviewedEvent?.caused_by).toBe(AUTO_ACCEPT_REVIEWER_IDENTITY);
     });
 
-    it("idempotent: a duplicate proposeEdge call returns the already-auto-accepted proposal without re-reviewing", async () => {
-      const { service, repo, graphPort, eventPublisher } = createAutoAcceptHarness();
+    it("idempotent: a duplicate proposeEdge call returns the already-auto-accepted proposal and mints one path per accept", async () => {
+      const { service, repo, pathCandidatePort, eventPublisher } = createAutoAcceptHarness();
       const first = await service.proposeEdge({
         sourceMemoryId: "memory-a",
         targetMemoryId: "memory-b",
@@ -425,16 +679,16 @@ describe("EdgeProposalService", () => {
         confidence: 0.9
       });
       expect(first.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
-      const createCallsAfterFirst = graphPort.create.mock.calls.length;
+      const submitCallsAfterFirst = pathCandidatePort.submitCandidate.mock.calls.length;
       const reviewedEventsAfterFirst = eventPublisher.appendManyWithMutation.mock.calls
         .map((call) => call[0])
         .filter((events) =>
           events.some((event) => event.event_type === "soul.graph.edge_proposal_reviewed")
         ).length;
       // findPendingDuplicate only matches status=pending; an auto-accepted
-      // proposal does NOT block a fresh proposeEdge — but the
-      // findBySourceAndTarget guard in acceptProposal prevents a second
-      // durable edge. We assert the no-op path stays clean.
+      // proposal does NOT block a fresh proposeEdge. The unit emits one
+      // submitCandidate per accept; durable path dedup is the path service's
+      // job (findByAnchorMemoryId), not this service's.
       const second = await service.proposeEdge({
         sourceMemoryId: "memory-a",
         targetMemoryId: "memory-b",
@@ -443,20 +697,16 @@ describe("EdgeProposalService", () => {
         triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
         confidence: 0.9
       });
-      // Second call's stored proposal must still resolve to auto_accepted.
       expect(second.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
-      // The durable edge must not duplicate because the existing edge guard
-      // suppresses a second create.
-      const graphCreateCallsAfterSecond = graphPort.create.mock.calls.length;
-      expect(graphCreateCallsAfterSecond).toBeLessThanOrEqual(createCallsAfterFirst + 1);
-      // Auto-accepted proposals are not re-reviewed by accident.
+      const submitCallsAfterSecond = pathCandidatePort.submitCandidate.mock.calls.length;
+      expect(submitCallsAfterSecond).toBe(submitCallsAfterFirst + 1);
+      // Each accept commits exactly one reviewed event.
       const reviewedEventsAfterSecond = eventPublisher.appendManyWithMutation.mock.calls
         .map((call) => call[0])
         .filter((events) =>
           events.some((event) => event.event_type === "soul.graph.edge_proposal_reviewed")
         ).length;
-      expect(reviewedEventsAfterSecond - reviewedEventsAfterFirst).toBeLessThanOrEqual(1);
-      // Stored repo retains an auto_accepted record for the source-target-edge_type.
+      expect(reviewedEventsAfterSecond - reviewedEventsAfterFirst).toBe(1);
       const stored = repo.findById(first.proposal_id);
       expect(stored?.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
     });
@@ -466,7 +716,7 @@ describe("EdgeProposalService", () => {
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo({ "memory-b": "workspace-2" }),
       proposalRepo: createProposalRepo(),
-      graphPort: createGraphPort(),
+      pathCandidatePort: createPathCandidatePort(),
       eventPublisher: createEventPublisher()
     });
 
@@ -563,10 +813,11 @@ function createProposalRepo(options: {
   };
 }
 
-function createGraphPort() {
+function createPathCandidatePort(): PathCandidateSink & {
+  submitCandidate: ReturnType<typeof vi.fn>;
+} {
   return {
-    findBySourceAndTarget: vi.fn(async () => null as MemoryGraphEdge | null),
-    create: vi.fn((edge: Readonly<MemoryGraphEdge>) => edge)
+    submitCandidate: vi.fn(async () => true)
   };
 }
 
@@ -604,15 +855,15 @@ function createIdGenerator(): () => string {
 
 function createAutoAcceptHarness() {
   const repo = createProposalRepo();
-  const graphPort = createGraphPort();
+  const pathCandidatePort = createPathCandidatePort();
   const eventPublisher = createEventPublisher();
   const service = new EdgeProposalService({
     memoryRepo: createMemoryRepo(),
     proposalRepo: repo,
-    graphPort,
+    pathCandidatePort,
     eventPublisher,
     generateId: createIdGenerator(),
     now: () => "2026-05-24T00:00:00.000Z"
   });
-  return { service, repo, graphPort, eventPublisher };
+  return { service, repo, pathCandidatePort, eventPublisher };
 }

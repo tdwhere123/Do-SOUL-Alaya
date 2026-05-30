@@ -54,15 +54,15 @@ const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string
   "soul.list_pending_proposals":
     "WHEN: you need to present the pending governance queue to the reviewer (read-only) before calling soul.review_memory_proposal. List proposals in the pending state for a workspace.",
   "soul.propose_edge":
-    "WHEN: a human or attached agent wants to propose a memory graph edge for review. This creates a pending edge proposal only; it does not write durable memory_graph_edges.",
+    "WHEN: a human or attached agent wants to propose a memory graph relation for review. This creates a pending edge proposal only; it does not write durable memory. Accepted proposals mint a governed path relation.",
   "soul.list_pending_edge_proposals":
-    "WHEN: you need to inspect pending memory graph edge proposals before review. Read-only; filters by edge_type, confidence, trigger source, and time.",
+    "WHEN: you need to inspect pending memory graph relation proposals before review. Read-only; filters by edge_type, confidence, trigger source, and time.",
   "soul.batch_review_edge_proposals":
-    "WHEN: a reviewer has explicitly accepted or rejected pending edge proposals. Accepting applies the durable memory_graph_edges write through the governed graph service.",
+    "WHEN: a reviewer has explicitly accepted or rejected pending edge proposals. Accepting mints a governed path relation through the path-relation service.",
   "soul.apply_override":
     "WHEN: the user explicitly says the current assumption, tool, or behavior is wrong and must be replaced for this run. Apply an immediate session-only correction.",
   "soul.explore_graph":
-    "WHEN: you need 1-hop graph neighbors of an existing memory entry to ground related context. Inspect memory graph neighbors. Read-only; does not create or mutate edges.",
+    "WHEN: you need 1-hop graph neighbors of an existing memory entry to ground related context. Inspect memory path-relation neighbors. Read-only; does not create or mutate relations.",
   "soul.report_context_usage":
     "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state. Usage trust weight is server-derived: a self-reported usage is always treated as automatic attribution and carries the lower path-plasticity weight. Include `turn_index` and `turn_digest.last_messages` (the turn's verbatim messages) so Alaya extracts durable candidates from this turn even when nothing was recalled.",
   "soul.resolve":
@@ -91,9 +91,9 @@ const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.f
   "soul.propose_edge":
     "Pending edge proposals are governance queue items only; durable graph edges are written only after review.",
   "soul.list_pending_edge_proposals":
-    "Read-only inspection aid for graph governance; pending items are not durable memory_graph_edges.",
+    "Read-only inspection aid for graph governance; pending items are not durable path relations.",
   "soul.batch_review_edge_proposals":
-    "Use only after explicit reviewer approval; accept writes durable graph edges through the graph service, reject preserves graph state.",
+    "Use only after explicit reviewer approval; accept mints a durable path relation, reject preserves graph state.",
   "soul.apply_override":
     "Session-only correction for the current run; it does not promote durable memory by itself.",
   "soul.explore_graph":

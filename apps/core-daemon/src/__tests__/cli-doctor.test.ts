@@ -78,20 +78,11 @@ describe("doctor CLI", () => {
       getGraphHealth: async (workspaceId) => ({
         workspace_id: workspaceId,
         status: "degraded",
-        memory_graph_edges_total: 0,
-        memory_graph_edges_by_type: {
-          supports: 0,
-          derives_from: 0,
-          contradicts: 0,
-          supersedes: 0,
-          recalls: 0,
-          exception_to: 0,
-          incompatible_with: 0
-        },
         path_relations_total: 0,
+        path_relations_by_kind: {},
         latest_path_event_at: null,
-        warnings: ["memory_graph_edges_empty", "path_relations_empty"],
-        hint: "Graph/path evidence is sparse; this is expected for a new install or workspace before recall/report and Garden path activity."
+        warnings: ["path_relations_empty"],
+        hint: "Path evidence is sparse; this is expected for a new install or workspace before recall/report and Garden path activity."
       })
     });
 
@@ -102,18 +93,17 @@ describe("doctor CLI", () => {
       graph_health: {
         workspace_id: "workspace-1",
         status: "degraded",
-        memory_graph_edges_total: 0,
         path_relations_total: 0,
         latest_path_event_at: null,
-        warnings: ["memory_graph_edges_empty", "path_relations_empty"]
+        warnings: ["path_relations_empty"]
       }
     });
     expect(humanResult.exitCode).toBe(75);
     expect(harness.stdoutText()).toContain(
-      "graph health: degraded memory_edges=0 path_relations=0 latest_path_event=none"
+      "graph health: degraded path_relations=0 latest_path_event=none"
     );
     expect(harness.stdoutText()).toContain(
-      "graph health warnings: memory_graph_edges_empty,path_relations_empty"
+      "graph health warnings: path_relations_empty"
     );
   });
 
@@ -122,17 +112,12 @@ describe("doctor CLI", () => {
       getGraphHealth: async (workspaceId) => ({
         workspace_id: workspaceId,
         status: "healthy",
-        memory_graph_edges_total: 3,
-        memory_graph_edges_by_type: {
-          supports: 1,
-          derives_from: 0,
-          contradicts: 0,
-          supersedes: 0,
-          recalls: 2,
-          exception_to: 0,
-          incompatible_with: 0
-        },
         path_relations_total: 4,
+        path_relations_by_kind: {
+          supports: 1,
+          recalls: 2,
+          co_recalled: 1
+        },
         latest_path_event_at: "2026-05-12T00:00:00.000Z",
         warnings: [],
         hint: null
@@ -146,19 +131,18 @@ describe("doctor CLI", () => {
       graph_health: {
         workspace_id: "workspace-1",
         status: "healthy",
-        memory_graph_edges_total: 3,
-        memory_graph_edges_by_type: {
+        path_relations_total: 4,
+        path_relations_by_kind: {
           supports: 1,
           recalls: 2
         },
-        path_relations_total: 4,
         latest_path_event_at: "2026-05-12T00:00:00.000Z",
         warnings: []
       }
     });
     expect(humanResult.exitCode).toBe(75);
     expect(harness.stdoutText()).toContain(
-      "graph health: healthy memory_edges=3 path_relations=4 latest_path_event=2026-05-12T00:00:00.000Z"
+      "graph health: healthy path_relations=4 latest_path_event=2026-05-12T00:00:00.000Z"
     );
     expect(harness.stdoutText()).not.toContain("graph health warnings:");
   });

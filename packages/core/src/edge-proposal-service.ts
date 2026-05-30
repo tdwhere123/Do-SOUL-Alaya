@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
+  EDGE_TYPE_RECALL_MODEL,
   EdgeProposalStatus,
   EdgeProposalTriggerSource,
   GraphAuditorEventType,
-  MemoryGraphEdgeSchema,
-  SoulGraphEdgeCreatedPayloadSchema,
   SoulGraphEdgeProposalCreatedPayloadSchema,
+  SoulGraphEdgeProposalPathMintFailedPayloadSchema,
   SoulGraphEdgeProposalReviewedPayloadSchema,
   SoulBatchReviewEdgeProposalsResponseSchema,
   SoulListPendingEdgeProposalsResponseSchema,
@@ -13,7 +13,6 @@ import {
   type EdgeProposal,
   type EdgeProposalFilter,
   type EdgeProposalTriggerSourceValue,
-  type MemoryGraphEdge,
   type MemoryGraphEdgeTypeValue,
   type SoulBatchReviewEdgeProposalsResponse,
   type SoulListPendingEdgeProposalsResponse,
@@ -21,6 +20,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
 import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
+import type { PathCandidateSink } from "./path-candidate-sink.js";
 import { parseObjectId } from "./shared/validators.js";
 
 export interface EdgeProposalMemoryRepoPort {
@@ -58,23 +58,44 @@ export interface EdgeProposalRepoPort {
   }): EdgeProposal;
 }
 
-export interface EdgeProposalGraphPort {
-  findBySourceAndTarget(
-    sourceMemoryId: string,
-    targetMemoryId: string,
-    edgeType: MemoryGraphEdgeTypeValue,
-    workspaceId: string
-  ): Promise<Readonly<MemoryGraphEdge> | null>;
-  create(edge: Readonly<MemoryGraphEdge>): Readonly<MemoryGraphEdge>;
-}
-
 export interface EdgeProposalServiceDependencies {
   readonly memoryRepo: EdgeProposalMemoryRepoPort;
   readonly proposalRepo: EdgeProposalRepoPort;
-  readonly graphPort: EdgeProposalGraphPort;
+  // invariant: edge-proposal accept mints a governed PathRelation on the
+  // unified path plane; it never creates a memory_graph_edges row. The
+  // review gate is independent of the landing target: proposals stay
+  // pending -> accept/reject. submitCandidate applies the path governance
+  // clamp, durable dedup, and the PATH_RELATION_CREATED audit row.
+  // see also: path-candidate-sink.ts PathCandidateSink.
+  readonly pathCandidatePort: PathCandidateSink;
   readonly eventPublisher: Pick<EventPublisher, "appendManyWithMutation">;
   readonly generateId?: () => string;
   readonly now?: () => string;
+}
+
+// invariant: edge_type -> path seed mapping for accept-minted relations.
+// relation_kind == edge_type so soul.explore_graph projects it back without
+// loss; recall_bias = sign x magnitude is anchored to
+// EDGE_TYPE_RECALL_MODEL.contribution_weight so an accept-minted path's
+// graph_support contribution is zero-drift vs a same-mapped-edge-type
+// auto-producer path (graph_support weights by mapped edge_type, not by
+// recall_bias). The paths are NOT otherwise numerically identical: auto-producer
+// seed profiles differ on recall_bias magnitude, strength, governance_class,
+// and relation_kind.
+// initial strength = |contribution_weight| clamped to a non-zero floor so a
+// neutral marker (exception_to, weight 0) is still a live, dedup-able path
+// row rather than a dead zero-strength relation.
+const ACCEPT_PATH_STRENGTH_FLOOR = 0.3;
+
+function edgeTypeToRecallBiasSign(edgeType: MemoryGraphEdgeTypeValue): 1 | 0 | -1 {
+  const weight = EDGE_TYPE_RECALL_MODEL[edgeType].contribution_weight;
+  if (weight > 0) {
+    return 1;
+  }
+  if (weight < 0) {
+    return -1;
+  }
+  return 0;
 }
 
 // invariant: auto-accept floor table by trigger_source. This file is
@@ -327,42 +348,114 @@ export class EdgeProposalService {
   ): Promise<EdgeProposal> {
     await this.requireMemoryInWorkspace(proposal.source_memory_id, "Source", proposal.workspace_id);
     await this.requireMemoryInWorkspace(proposal.target_memory_id, "Target", proposal.workspace_id);
-    const existingEdge = await this.dependencies.graphPort.findBySourceAndTarget(
-      proposal.source_memory_id,
-      proposal.target_memory_id,
-      proposal.edge_type,
-      proposal.workspace_id
-    );
-    const edge =
-      existingEdge === null
-        ? MemoryGraphEdgeSchema.parse({
-            edge_id: `edge_${this.generateId()}`,
-            source_memory_id: proposal.source_memory_id,
-            target_memory_id: proposal.target_memory_id,
-            edge_type: proposal.edge_type,
-            workspace_id: proposal.workspace_id,
-            created_at: reviewedAt
-          })
-        : null;
-    const events = [
-      buildProposalReviewedEvent(proposal, acceptedStatus, reviewerIdentity, reviewReason, reviewedAt),
-      ...(edge === null ? [] : [buildGraphEdgeCreatedEvent(edge, proposal.run_id)])
-    ];
 
     let reviewed: EdgeProposal = proposal;
-    await this.dependencies.eventPublisher.appendManyWithMutation(events, () => {
-      reviewed = this.dependencies.proposalRepo.updateReview({
-        proposalId: proposal.proposal_id,
-        status: acceptedStatus,
-        reviewerIdentity,
-        reviewReason,
-        reviewedAt
-      });
-      if (edge !== null) {
-        this.dependencies.graphPort.create(edge);
+    await this.dependencies.eventPublisher.appendManyWithMutation(
+      [buildProposalReviewedEvent(proposal, acceptedStatus, reviewerIdentity, reviewReason, reviewedAt)],
+      () => {
+        reviewed = this.dependencies.proposalRepo.updateReview({
+          proposalId: proposal.proposal_id,
+          status: acceptedStatus,
+          reviewerIdentity,
+          reviewReason,
+          reviewedAt
+        });
       }
-    });
+    );
+
+    // invariant: governance ruling on the minted path's birth band.
+    //   - A human ACCEPTED accept is a trust verdict: the minted path is born
+    //     recall_allowed for either sign. For a negative-family edge that is
+    //     human-vetted suppression (a legitimate trusted-verdict origin).
+    //   - A system-policy AUTO_ACCEPTED accept is NOT a trust verdict — it is
+    //     a confidence-floor rule firing. A rule/floor-detected NEGATIVE must
+    //     therefore be born attention_only, not recall_allowed: it cannot
+    //     suppress (isPathGovernedForSuppression requires recall_allowed) and
+    //     cannot climb to recall_allowed later (negative governance promotion
+    //     is sign-guarded off in path-manifestation-policy.evolveGovernanceClass).
+    //     This keeps the Wave-1 invariant intact: a negative path reaches
+    //     recall_allowed ONLY via a trusted llm-verdict birth seed (the
+    //     conflict-detection-service.ts submitCandidate path, a different code
+    //     path this does not touch) or an explicit human governance decision.
+    //   - Positive (sign >= 0) auto-accepts stay recall_allowed; positive
+    //     recall_allowed only nudges recall and never suppresses.
+    // submitCandidate emits its own PATH_RELATION_CREATED audit row + durable
+    // dedup; it is invoked after the review row commits so the accepted state
+    // always has its reviewed ancestor.
+    // see also: path-relation-proposal-service.ts (isPathGovernedForSuppression),
+    //   path-manifestation-policy.ts evolveGovernanceClass (negative sign guard),
+    //   conflict-detection-service.ts (the llm-verdict negative recall_allowed path).
+    const sign = edgeTypeToRecallBiasSign(proposal.edge_type);
+    const magnitude = Math.abs(EDGE_TYPE_RECALL_MODEL[proposal.edge_type].contribution_weight);
+    const governanceClass =
+      sign < 0 && acceptedStatus === EdgeProposalStatus.AUTO_ACCEPTED
+        ? "attention_only"
+        : "recall_allowed";
+    let minted: boolean;
+    try {
+      minted = await this.dependencies.pathCandidatePort.submitCandidate({
+        workspaceId: proposal.workspace_id,
+        sourceAnchor: { kind: "object", object_id: proposal.source_memory_id },
+        targetAnchor: { kind: "object", object_id: proposal.target_memory_id },
+        relationKind: proposal.edge_type,
+        initialStrength: Math.max(ACCEPT_PATH_STRENGTH_FLOOR, magnitude),
+        governanceClass,
+        evidenceBasis: [`edge_proposal_accept:${proposal.proposal_id}`],
+        recallBiasSign: sign,
+        recallBiasMagnitude: magnitude,
+        why: [`edge proposal ${proposal.proposal_id} accepted by ${reviewerIdentity}`],
+        runId: proposal.run_id
+      });
+    } catch (mintError) {
+      // defensive: submitCandidate is contracted to catch its own materialize
+      // errors and return false, but a thrown error must still produce the
+      // durable obligation record before propagating, so the auditability path
+      // is identical regardless of how the mint failure arrives.
+      await this.recordPathMintFailure(proposal, reviewerIdentity, "submit_threw", mintError);
+      throw new CoreError(
+        "OBLIGATION_VIOLATION",
+        `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`,
+        { cause: mintError }
+      );
+    }
+    // invariant: under the single-plane model the minted path is the ONLY
+    // durable landing for an accepted proposal. submitCandidate catches its
+    // own materialize errors and returns false; if it does, the review row is
+    // already durably ACCEPTED/AUTO_ACCEPTED but no path exists. That loss must
+    // never be silent — emit a durable, queryable SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED
+    // record keyed on proposal_id (so an operator can reconcile the owed-path
+    // obligation without a forensic cross-join) and throw so the immediate caller
+    // also observes it. The review row already committed with its reviewed
+    // ancestor, so this is the loud-failure outcome, not silent. A retry is
+    // safe: materialize dedups via findByAnchorMemoryId, so re-minting the same
+    // pair is idempotent.
+    if (!minted) {
+      await this.recordPathMintFailure(proposal, reviewerIdentity, "submit_returned_false", null);
+      throw new CoreError(
+        "OBLIGATION_VIOLATION",
+        `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`
+      );
+    }
     return reviewed;
+  }
+
+  // invariant: emit the durable owed-path obligation BEFORE the caller's
+  // OBLIGATION_VIOLATION throw propagates. The reviewed row is already durable
+  // (committed above), so an EventLog event keyed on proposal_id is the only
+  // queryable trace an operator can reconcile against PATH_RELATION_CREATED;
+  // the throw alone reaches a different session (auto-accept = the propose_edge
+  // caller) and leaves no durable record. Uses the same eventPublisher the
+  // service already holds (no new dependency) with a no-op synchronous mutation.
+  private async recordPathMintFailure(
+    proposal: EdgeProposal,
+    reviewerIdentity: string,
+    failureKind: "submit_returned_false" | "submit_threw",
+    cause: unknown
+  ): Promise<void> {
+    await this.dependencies.eventPublisher.appendManyWithMutation(
+      [buildPathMintFailedEvent(proposal, reviewerIdentity, failureKind, cause, this.now())],
+      () => undefined
+    );
   }
 
   private async rejectProposal(
@@ -439,21 +532,47 @@ function buildProposalReviewedEvent(
   };
 }
 
-function buildGraphEdgeCreatedEvent(edge: MemoryGraphEdge, runId: string | null): EventPublisherInput {
+// invariant: BoundedReasonSchema bounds review-reason-class strings; keep the
+// failure detail within the same bound so the payload parse never rejects a
+// long underlying error message at the durable-emission boundary.
+const PATH_MINT_FAILURE_DETAIL_MAX = 500;
+
+function describeMintFailureCause(cause: unknown): string | null {
+  if (cause === null || cause === undefined) {
+    return null;
+  }
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  const trimmed = detail.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  return trimmed.slice(0, PATH_MINT_FAILURE_DETAIL_MAX);
+}
+
+function buildPathMintFailedEvent(
+  proposal: EdgeProposal,
+  reviewerIdentity: string,
+  failureKind: "submit_returned_false" | "submit_threw",
+  cause: unknown,
+  occurredAt: string
+): EventPublisherInput {
   return {
-    event_type: GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
-    entity_type: "memory_graph_edge",
-    entity_id: edge.edge_id,
-    workspace_id: edge.workspace_id,
-    run_id: runId,
-    caused_by: "edge_proposal_accept",
-    payload_json: SoulGraphEdgeCreatedPayloadSchema.parse({
-      edge_id: edge.edge_id,
-      source_memory_id: edge.source_memory_id,
-      target_memory_id: edge.target_memory_id,
-      edge_type: edge.edge_type,
-      workspace_id: edge.workspace_id,
-      occurred_at: edge.created_at
+    event_type: GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED,
+    entity_type: "edge_proposal",
+    entity_id: proposal.proposal_id,
+    workspace_id: proposal.workspace_id,
+    run_id: proposal.run_id,
+    caused_by: reviewerIdentity,
+    payload_json: SoulGraphEdgeProposalPathMintFailedPayloadSchema.parse({
+      proposal_id: proposal.proposal_id,
+      source_memory_id: proposal.source_memory_id,
+      target_memory_id: proposal.target_memory_id,
+      edge_type: proposal.edge_type,
+      reviewer_identity: reviewerIdentity,
+      failure_kind: failureKind,
+      failure_detail: describeMintFailureCause(cause),
+      workspace_id: proposal.workspace_id,
+      occurred_at: occurredAt
     })
   };
 }

@@ -1123,35 +1123,34 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       { expectedWorkspaceId: context.workspaceId }
     );
     await promoteRecallHitMemories(request, context, linkedDelivery, reportedAt);
-    await crossLinkRecalledMemories(
-      usedObjectIds,
-      linkedDelivery?.workspace_id ?? context.workspaceId,
-      linkedDelivery?.run_id ?? context.runId ?? null
-    );
-    // SECURITY (invariants §29; agents propose, Alaya decides): co-usage path
-    // reinforcement requires a resolvable delivery. A report with no linked
-    // delivery cannot be subset-checked against delivered_object_ids
-    // (validateReportedRecallHits skips the subset gate when linkedDelivery is
-    // null), so feeding its used ids into onCoUsage would let a caller pump
-    // path support / strength between arbitrary memories with no server-side
-    // delivery witness. Legitimate reports always carry a persisted delivery.
+    // SECURITY (invariants §29; agents propose, Alaya decides): both co-usage
+    // path reinforcement (onCoUsage) and the recalls cross-link edge proposal
+    // require a resolvable delivery. A report with no linked delivery cannot be
+    // subset-checked against delivered_object_ids (validateReportedRecallHits
+    // skips the subset gate when linkedDelivery is null), so feeding its used
+    // ids into either side would let a caller pump path/edge support between
+    // arbitrary memories with no server-side delivery witness. Legitimate
+    // reports always carry a persisted delivery.
     // see also: validateReportedRecallHits, recall-service.ts
     // collectNegativePathSuppressions (governance gate).
-    if (
-      deps.pathRelationProposalService !== undefined &&
-      linkedDelivery !== null &&
-      usedObjectIds.length >= 2
-    ) {
-      try {
-        await deps.pathRelationProposalService.onCoUsage(
-          usedObjectIds,
-          linkedDelivery.workspace_id ?? context.workspaceId
-        );
-      } catch (err) {
-        warn("path relation propose failed", {
-          workspace_id: linkedDelivery?.workspace_id ?? context.workspaceId,
-          error: err instanceof Error ? err.message : String(err)
-        });
+    if (linkedDelivery !== null) {
+      await crossLinkRecalledMemories(
+        usedObjectIds,
+        linkedDelivery.workspace_id ?? context.workspaceId,
+        linkedDelivery.run_id ?? context.runId ?? null
+      );
+      if (deps.pathRelationProposalService !== undefined && usedObjectIds.length >= 2) {
+        try {
+          await deps.pathRelationProposalService.onCoUsage(
+            usedObjectIds,
+            linkedDelivery.workspace_id ?? context.workspaceId
+          );
+        } catch (err) {
+          warn("path relation propose failed", {
+            workspace_id: linkedDelivery.workspace_id ?? context.workspaceId,
+            error: err instanceof Error ? err.message : String(err)
+          });
+        }
       }
     }
     enqueuePostTurnExtractTask(request, context, linkedDelivery);

@@ -1092,13 +1092,17 @@ async function readLongMemEvalReportSideEffectSnapshot(
   const status = await daemon.runtime.services.graphHealthService.getStatus(
     workspaceId
   );
-  const byType = { ...status.memory_graph_edges_by_type };
+  // Post-cutover the graph-health source reports the unified path plane only.
+  // The snapshot keeps its memory_graph_edges_* field names for historical
+  // archive delta compat but now sources them from path_relations_by_kind /
+  // _total; recalls_edge_count tracks the 'recalls' relation_kind bucket.
+  const byKind = { ...status.path_relations_by_kind };
   return {
     question_id: questionId,
     workspace_id: status.workspace_id,
-    memory_graph_edges_total: status.memory_graph_edges_total,
-    memory_graph_edges_by_type: byType,
-    recalls_edge_count: byType.recalls ?? 0,
+    memory_graph_edges_total: status.path_relations_total,
+    memory_graph_edges_by_type: byKind,
+    recalls_edge_count: byKind.recalls ?? 0,
     path_relations_total: status.path_relations_total,
     latest_path_event_at: status.latest_path_event_at,
     warnings: status.warnings

@@ -445,17 +445,17 @@ describe("garden background data ports", () => {
       dimension: "fact"
     });
 
-    seedGraphEdge(database, {
-      edgeId: "edge-1",
+    seedRecallsPath(database, {
+      pathId: "path-1",
       workspaceId: "workspace-1",
-      sourceMemoryId: "memory-a",
-      targetMemoryId: "memory-b"
+      sourceObjectId: "memory-a",
+      targetObjectId: "memory-b"
     });
-    seedGraphEdge(database, {
-      edgeId: "edge-2",
+    seedRecallsPath(database, {
+      pathId: "path-2",
       workspaceId: "workspace-1",
-      sourceMemoryId: "memory-b",
-      targetMemoryId: "memory-c"
+      sourceObjectId: "memory-b",
+      targetObjectId: "memory-c"
     });
 
     seedEvidenceCapsule(database, {
@@ -933,32 +933,64 @@ function seedGreenStatus(
     );
 }
 
-function seedGraphEdge(
+function seedRecallsPath(
   database: StorageDatabase,
   params: {
-    readonly edgeId: string;
+    readonly pathId: string;
     readonly workspaceId: string;
-    readonly sourceMemoryId: string;
-    readonly targetMemoryId: string;
+    readonly sourceObjectId: string;
+    readonly targetObjectId: string;
   }
 ): void {
   database.connection
     .prepare(
-      `INSERT INTO memory_graph_edges (
-        edge_id,
-        source_memory_id,
-        target_memory_id,
-        edge_type,
+      `INSERT INTO path_relations (
+        path_id,
         workspace_id,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)`
+        anchors_json,
+        constitution_json,
+        effect_vector_json,
+        plasticity_state_json,
+        lifecycle_json,
+        legitimacy_json,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
-      params.edgeId,
-      params.sourceMemoryId,
-      params.targetMemoryId,
-      "recalls",
+      params.pathId,
       params.workspaceId,
+      JSON.stringify({
+        source_anchor: { kind: "object", object_id: params.sourceObjectId },
+        target_anchor: { kind: "object", object_id: params.targetObjectId }
+      }),
+      JSON.stringify({
+        relation_kind: "recalls",
+        why_this_relation_exists: ["co_recall"]
+      }),
+      JSON.stringify({
+        salience: 0.3,
+        recall_bias: 0.3,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "stance_bias"
+      }),
+      JSON.stringify({
+        strength: 0.3,
+        direction_bias: "source_to_target",
+        stability_class: "volatile",
+        support_events_count: 1,
+        contradiction_events_count: 0
+      }),
+      JSON.stringify({
+        status: "active",
+        retirement_rule: "retire_after_cooldown"
+      }),
+      JSON.stringify({
+        evidence_basis: ["evidence-1"],
+        governance_class: "hint_only"
+      }),
+      "2026-04-15T00:00:00.000Z",
       "2026-04-15T00:00:00.000Z"
     );
 }

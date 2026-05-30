@@ -550,7 +550,6 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
   );
   stream.write(
     `graph health: ${report.graph_health.status}` +
-      ` memory_edges=${report.graph_health.memory_graph_edges_total}` +
       ` path_relations=${report.graph_health.path_relations_total}` +
       ` latest_path_event=${report.graph_health.latest_path_event_at ?? "none"}\n`
   );

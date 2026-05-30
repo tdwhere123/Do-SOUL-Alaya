@@ -43,15 +43,17 @@ export const MemoryGraphEdgeTypeSchema = z.enum(memoryGraphEdgeTypeValues);
 //   transitive — whether the type propagates in multi-hop expansion. The
 //     graph-expansion tracked-edge-type set is exactly the transitive rows.
 //
-// invariant: the weighted sum of `contribution_weight` over inbound edges
-// is floor-clamped to [0, 3] by `normalizeGraphSupport`. Inbound
-// negative-signal edges (supersedes / contradicts / incompatible_with)
-// therefore *suppress* graph_support they otherwise would have accumulated
-// from positive edges on the same memory, but cannot drop graph_support
-// below the zero baseline. Lifting the floor to allow negative-only
-// memories to read below baseline is a recall-weight rebalance that needs
-// a co-evaluated bench sweep; the current clamp matches the rest of the
-// score range.
+// invariant: graph_support counts inbound POSITIVE paths only. The inbound
+// aggregate (`countInboundEdgesWeighted`) filters to recall-eligible paths
+// (active lifecycle AND recall_bias > 0) BEFORE summing `contribution_weight`,
+// so the negative-signal kinds (supersedes / contradicts / incompatible_with,
+// recall_bias < 0) never enter this sum at all — they do NOT offset positive
+// graph_support. Negative-path suppression lives solely in the
+// governance-gated active-suppression channel in recall-service.ts, not in
+// this aggregate. The resulting positive-only sum is clamped to [0, 3] by
+// `normalizeGraphSupport`; the upper clamp matches the rest of the score range.
+// see also: packages/core/src/graph-explore-service.ts
+//   (countInbound* positive-only filter via isPathRecallEligible).
 //
 // invariant: RECALLS edge accumulation can saturate graph_support once
 // inbound RECALLS count × weight crosses the upper clamp. A high-traffic
@@ -59,14 +61,21 @@ export const MemoryGraphEdgeTypeSchema = z.enum(memoryGraphEdgeTypeValues);
 // preferred memories to max graph_support; per-run / per-window decay
 // would be the principled fix.
 //
-// invariant: `EdgeProposalService.acceptProposal` wraps the
-// `SOUL_GRAPH_EDGE_CREATED` audit row and the `memory_graph_edges` row
-// insert in a single SQLite transaction via
-// `EventPublisher.appendManyWithMutation`. A row insert failure rolls back
-// the audit row in the same tx; concurrent writers serialize on the
-// SQLite write lock so no orphan audit can leak. Durable edge writes flow
-// only through proposal accept; no other code path may create a
+// invariant: `EDGE_TYPE_RECALL_MODEL` is the single contribution-weight
+// source even though durable writes no longer land in `memory_graph_edges`.
+// Recall graph_support scoring (`countInboundEdgesWeighted`) reads this table
+// over the inbound positive-path aggregate. No code path creates a
 // `memory_graph_edges` row.
+//
+// invariant (graph_support zero-drift, narrowly): graph_support is zero-drift
+// across an accept-minted path (`EdgeProposalService.acceptProposal`) and an
+// auto-producer path of the SAME mapped edge_type, because
+// `countInboundEdgesWeighted` weights each inbound path by its mapped
+// edge_type's `contribution_weight` here — NOT by recall_bias. The minted and
+// auto-producer paths are NOT otherwise numerically identical: auto-producer
+// seed profiles differ on recall_bias magnitude, strength, governance_class,
+// and relation_kind. Only the graph_support contribution coincides, and only
+// when the two map to the same edge_type.
 export interface EdgeTypeRecallModelEntry {
   // Static per-edge contribution; negative for suppressing edge types.
   readonly contribution_weight: number;
@@ -132,6 +141,34 @@ export const GraphNeighborSchema = z
   })
   .strict()
   .readonly();
+
+// invariant: the single relation_kind -> MemoryGraphEdgeType projection.
+// soul.explore_graph reads PathRelation (relation_kind is a free string)
+// but its GraphNeighbor response field `edge_type` is a strict enum kept
+// stable for existing consumers (HTTP graph-neighbors route + MCP). Path
+// relation_kinds that equal an edge_type enum member (supports / derives_from
+// / recalls / supersedes / contradicts / incompatible_with / exception_to,
+// minted by edge-proposal accept and conflict detection) project to
+// themselves; auto-build associative kinds (co_recalled / shares_entity /
+// signal_graph_ref) project to `recalls`, the associative default. This is
+// a display projection only — it never feeds recall scoring.
+// see also: path-relation-proposal-service.ts seed-profile catalog.
+const RELATION_KIND_TO_GRAPH_EDGE_TYPE: Readonly<Record<string, MemoryGraphEdgeTypeValue>> = Object.freeze({
+  supports: "supports",
+  derives_from: "derives_from",
+  recalls: "recalls",
+  supersedes: "supersedes",
+  contradicts: "contradicts",
+  incompatible_with: "incompatible_with",
+  exception_to: "exception_to",
+  co_recalled: "recalls",
+  shares_entity: "recalls",
+  signal_graph_ref: "recalls"
+});
+
+export function mapRelationKindToGraphEdgeType(relationKind: string): MemoryGraphEdgeTypeValue {
+  return RELATION_KIND_TO_GRAPH_EDGE_TYPE[relationKind] ?? "recalls";
+}
 
 export type MemoryGraphEdgeTypeValue = z.infer<typeof MemoryGraphEdgeTypeSchema>;
 export type GraphExploreDir = z.infer<typeof GraphExploreDirSchema>;

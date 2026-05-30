@@ -25,6 +25,10 @@ export interface PathRelationRepo {
     workspaceId: string,
     anchorRef: PathAnchorRef
   ): Promise<readonly Readonly<PathRelation>[]>;
+  findByTargetAnchor(
+    workspaceId: string,
+    anchorRef: PathAnchorRef
+  ): Promise<readonly Readonly<PathRelation>[]>;
   findByAnchors(
     workspaceId: string,
     anchorRefs: readonly PathAnchorRef[]
@@ -346,6 +350,31 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       }
 
       throw new StorageError("QUERY_FAILED", "Failed to list path relations by anchor.", error);
+    }
+  }
+
+  // Inbound-only lookup: rows whose TARGET anchor equals the given ref. Unlike
+  // `findByAnchor` (source+target union) this scopes to the inbound half, which
+  // recall graph_support needs to count paths arriving at a candidate memory.
+  // No lifecycle filter is applied here; callers apply isPathRecallEligible.
+  // see also: packages/core/src/graph-explore-service.ts countInbound*.
+  public async findByTargetAnchor(
+    workspaceId: string,
+    anchorRef: PathAnchorRef
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+    const parsedAnchor = parsePathAnchorRef(anchorRef);
+    const anchorKey = serializePathAnchorRef(parsedAnchor);
+
+    try {
+      const rows = this.findByTargetAnchorStatement.all(parsedWorkspaceId, anchorKey) as PathRelationRow[];
+      return parsePathRelationRows(rows);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError("QUERY_FAILED", "Failed to list path relations by target anchor.", error);
     }
   }
 
