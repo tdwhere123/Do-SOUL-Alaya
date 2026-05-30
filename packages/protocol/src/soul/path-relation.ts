@@ -72,6 +72,19 @@ export function isPathActiveForRecall(
   return status === undefined || status === "active";
 }
 
+// invariant: recall-eligible = active lifecycle AND recall_bias > 0. The
+// strict-positive gate admits the whole positive associative family and
+// excludes both the negative families (recall_bias < 0: suppression, not
+// positive amplification) and the recall-neutral exception_to marker
+// (recall_bias == 0: topology marker, never a positive expansion
+// candidate). Shared by every positive-expansion call site so the
+// sign boundary cannot drift between producer and recall consumer.
+// see also: recall-service.ts isPathExcludedFromRecall.
+// see also: path-activation-candidate-producer.ts produce().
+export function isPathRecallEligible(path: PathRelation): boolean {
+  return isPathActiveForRecall(path.lifecycle.status) && path.effect_vector.recall_bias > 0;
+}
+
 const ObjectPathAnchorRefSchema = z
   .object({
     kind: z.literal("object"),

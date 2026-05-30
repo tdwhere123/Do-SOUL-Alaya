@@ -723,7 +723,7 @@ describe("MaterializationRouter", () => {
     expect(memoryInput.content).toBe(fact);
   });
 
-  it("creates supersedes / exception_to / contradicts / incompatible_with edge proposals from first-class refs", async () => {
+  it("submits supersedes / exception_to / contradicts / incompatible_with path candidates from first-class refs", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter(deps);
 
@@ -739,22 +739,69 @@ describe("MaterializationRouter", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    const edgeTypes = calls.map((edge) => edge.edgeType);
-    expect(edgeTypes).toEqual(
+    // Signal refs submit governed path candidates with family-correct
+    // recall_bias signs.
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    const relationKinds = calls.map((candidate) => candidate.relationKind);
+    expect(relationKinds).toEqual(
       expect.arrayContaining(["supersedes", "exception_to", "contradicts", "incompatible_with"])
     );
-    const supersedesEdge = calls.find((edge) => edge.edgeType === "supersedes");
-    expect(supersedesEdge).toMatchObject({
-      sourceMemoryId: "memory-1",
-      targetMemoryId: "mem-old-1",
-      triggerSource: "candidate_signal_ref",
-      confidence: 0.5,
-      sourceSignalId: "signal-1"
+    const supersedes = calls.find((candidate) => candidate.relationKind === "supersedes");
+    expect(supersedes).toMatchObject({
+      sourceAnchor: { kind: "object", object_id: "memory-1" },
+      targetAnchor: { kind: "object", object_id: "mem-old-1" },
+      recallBiasSign: -1
     });
+    const exception = calls.find((candidate) => candidate.relationKind === "exception_to");
+    expect(exception?.recallBiasSign).toBe(0);
   });
 
-  it("creates derives_from edge proposals from first-class source_memory_refs on the memory_and_claim branch", async () => {
+  it("seeds agent-asserted negative refs WEAK (attention_only), never recall_allowed", async () => {
+    // invariant (governance): an agent-asserted negative ref is a weak
+    // claim, not a system conflict ruling. One injected contradicts_ref
+    // yields exactly one attention_only / strength-0.5 path that must earn
+    // recall eligibility through plasticity — it never mints a
+    // recall_allowed/0.9 negative path. Defeats the prompt-injection
+    // amplification surface: a single ref = a single decaying weak path.
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    await router.materializeSignal(
+      createSignal({
+        supersedes_refs: ["mem-old-1"],
+        contradicts_refs: ["victim-mem"],
+        incompatible_with_refs: ["mem-incompat-4"],
+        raw_payload: {
+          excerpt: "Agent claims this contradicts the victim memory."
+        }
+      })
+    );
+
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+
+    const contradicts = calls.filter((candidate) => candidate.relationKind === "contradicts");
+    // one ref -> at most one path
+    expect(contradicts).toHaveLength(1);
+    expect(contradicts[0]).toMatchObject({
+      targetAnchor: { kind: "object", object_id: "victim-mem" },
+      recallBiasSign: -1,
+      governanceClass: "attention_only",
+      initialStrength: 0.5
+    });
+
+    for (const relationKind of ["supersedes", "contradicts", "incompatible_with"]) {
+      const negative = calls.filter((candidate) => candidate.relationKind === relationKind);
+      expect(negative).toHaveLength(1);
+      for (const candidate of negative) {
+        expect(candidate.recallBiasSign).toBe(-1);
+        expect(candidate.governanceClass).toBe("attention_only");
+        expect(candidate.governanceClass).not.toBe("recall_allowed");
+        expect(candidate.initialStrength).toBe(0.5);
+      }
+    }
+  });
+
+  it("submits derives_from path candidates from first-class source_memory_refs on the memory_and_claim branch", async () => {
     // invariant: source_memory_refs honored on memory_and_claim branch.
     // see also: createAllMemoryRefEdges
     const deps = createDeps();
@@ -769,14 +816,17 @@ describe("MaterializationRouter", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    const derivesFromEdges = calls.filter((edge) => edge.edgeType === "derives_from");
-    expect(derivesFromEdges).toHaveLength(2);
-    expect(derivesFromEdges.map((edge) => edge.targetMemoryId).sort()).toEqual([
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    const derivesFrom = calls.filter((candidate) => candidate.relationKind === "derives_from");
+    expect(derivesFrom).toHaveLength(2);
+    expect(derivesFrom.map((candidate) => candidate.targetAnchor.object_id).sort()).toEqual([
       "mem-prior-a",
       "mem-prior-b"
     ]);
-    expect(derivesFromEdges.every((edge) => edge.sourceMemoryId === "memory-1")).toBe(true);
+    expect(derivesFrom.every((candidate) => candidate.recallBiasSign === 1)).toBe(true);
+    expect(
+      derivesFrom.every((candidate) => candidate.sourceAnchor.object_id === "memory-1")
+    ).toBe(true);
   });
 
   it("invokes conflictDetectionPort with the new memory facts when wired", async () => {
@@ -927,17 +977,19 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    const derivesFromEdges = calls.filter((edge) => edge.edgeType === "derives_from");
-    expect(derivesFromEdges).toHaveLength(2);
-    expect(derivesFromEdges.map((edge) => edge.targetMemoryId).sort()).toEqual([
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    const derivesFrom = calls.filter((candidate) => candidate.relationKind === "derives_from");
+    expect(derivesFrom).toHaveLength(2);
+    expect(derivesFrom.map((candidate) => candidate.targetAnchor.object_id).sort()).toEqual([
       "mem-prior-1",
       "mem-prior-2"
     ]);
-    expect(derivesFromEdges.every((edge) => edge.sourceMemoryId === "memory-1")).toBe(true);
+    expect(
+      derivesFrom.every((candidate) => candidate.sourceAnchor.object_id === "memory-1")
+    ).toBe(true);
   });
 
-  it("memory_entry_only append branch proposes every first-class memory ref edge", async () => {
+  it("memory_entry_only append branch submits every first-class memory ref path candidate", async () => {
     // invariant: first-class *_refs are candidate signal graph-proposal
     // hints, not claim-only fields. Every memory-creating branch must
     // preserve them so auto proposals survive triage/materialization.
@@ -958,8 +1010,10 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    expect(calls.map((edge) => [edge.edgeType, edge.targetMemoryId])).toEqual([
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    expect(
+      calls.map((candidate) => [candidate.relationKind, candidate.targetAnchor.object_id])
+    ).toEqual([
       ["derives_from", "mem-prior-1"],
       ["supersedes", "mem-old-1"],
       ["exception_to", "mem-rule-2"],
@@ -987,12 +1041,12 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    const derivesFromEdges = calls.filter((edge) => edge.edgeType === "derives_from");
-    expect(derivesFromEdges).toHaveLength(1);
-    expect(derivesFromEdges[0]).toMatchObject({
-      sourceMemoryId: "memory-1",
-      targetMemoryId: "mem-prior-r1"
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    const derivesFrom = calls.filter((candidate) => candidate.relationKind === "derives_from");
+    expect(derivesFrom).toHaveLength(1);
+    expect(derivesFrom[0]).toMatchObject({
+      sourceAnchor: { kind: "object", object_id: "memory-1" },
+      targetAnchor: { kind: "object", object_id: "mem-prior-r1" }
     });
   });
 
@@ -1039,8 +1093,8 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    expect(calls.filter((edge) => edge.edgeType === "derives_from")).toEqual([]);
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    expect(calls.filter((candidate) => candidate.relationKind === "derives_from")).toEqual([]);
   });
 
   it("UPDATE verdict (reconciled path) does not call the edge auto producer", async () => {
@@ -1083,8 +1137,8 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    expect(calls.filter((edge) => edge.edgeType === "derives_from")).toEqual([]);
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    expect(calls.filter((candidate) => candidate.relationKind === "derives_from")).toEqual([]);
   });
 
   it("NOOP verdict (reconciled path) does not call the edge auto producer", async () => {
@@ -1259,10 +1313,14 @@ interface MockCreatedObject {
   readonly object_id: string;
 }
 type MockServiceInput = Record<string, unknown>;
-type MockEdgeInput = {
-  readonly sourceMemoryId: string;
-  readonly targetMemoryId: string;
-  readonly edgeType: string;
+type MockPathCandidateInput = {
+  readonly workspaceId: string;
+  readonly sourceAnchor: { readonly kind: "object"; readonly object_id: string };
+  readonly targetAnchor: { readonly kind: "object"; readonly object_id: string };
+  readonly relationKind: string;
+  readonly recallBiasSign: 1 | 0 | -1;
+  readonly governanceClass: string;
+  readonly initialStrength: number;
 };
 
 function createDeps() {
@@ -1296,8 +1354,8 @@ function createDeps() {
         object_id: "claim-1"
       }))
     },
-    graphEdgePort: {
-      createEdge: vi.fn<(input: MockEdgeInput) => Promise<void>>(async () => undefined)
+    pathCandidateSinkPort: {
+      submitCandidate: vi.fn<(input: MockPathCandidateInput) => Promise<boolean>>(async () => true)
     },
     handoffGapHandler: new InMemoryHandoffGapHandler()
   };

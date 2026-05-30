@@ -14,9 +14,10 @@ import type {
  * compute config to ask an OpenAI-compatible chat model whether a
  * freshly materialized memory supports / is derived from a candidate
  * neighbor. The verdict (or null) flows back through
- * EdgeAutoProducerService.classifyPair so the proposal queue and the
+ * EdgeAutoProducerService.classifyPair, which submits an accepted verdict
+ * as a weak attention_only PathRelation candidate via submitCandidate; the
  * confidence floor (LLM_CONFIDENCE_FLOOR in edge-auto-producer-service.ts)
- * remain the final gate.
+ * gates entry and PathPlasticityService reinforcement gates recall.
  *
  * The transport mirrors apps/core-daemon/src/reconciliation-llm-decision.ts:
  * - garden compute local path only (invariant: no new cloud dependency
@@ -75,7 +76,7 @@ interface CachedVerdict {
   readonly decided_at: string;
 }
 
-interface PairInput {
+export interface PairInput {
   readonly newContent: string;
   readonly newTags: readonly string[];
   readonly neighborContent: string;
@@ -177,10 +178,17 @@ function buildPrompt(pair: PairInput): string {
   ].join("\n");
 }
 
-function computeRequestKey(model: string, pair: PairInput): string {
-  // Field-separator hashing so disjoint splits cannot collide. Tags are
-  // sorted so FTS row ordering does not change the key.
-  const FIELD_SEPARATOR = "";
+// exported for the field-boundary collision regression test; production
+// callers reach it only through createEdgeAutoProducerLlmPort.
+export function computeRequestKey(model: string, pair: PairInput): string {
+  // invariant: FIELD_SEPARATOR must be a byte absent from every field so a
+  // field-boundary shift cannot collide two distinct pairs. Written as an
+  // explicit U+0000 escape so the separator is greppable in source rather
+  // than an invisible control byte; a NUL cannot appear in model ids,
+  // dimensions, scope classes, distilled content, or tags.
+  // Tags are sorted so FTS row ordering does not change the key.
+  // see also: edge-auto-producer-llm-adapter.computeRequestKey collision test.
+  const FIELD_SEPARATOR = "\u0000";
   const hash = createHash("sha256");
   hash.update(model, "utf8");
   hash.update(FIELD_SEPARATOR, "utf8");

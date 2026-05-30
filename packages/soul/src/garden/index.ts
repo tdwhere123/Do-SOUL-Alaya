@@ -109,13 +109,16 @@ export {
 export {
   MaterializationRouter,
   DISTILLED_FACT_MAX_CHARS,
+  SIGNAL_REF_SEED_SPECS,
   type MaterializationResult,
   type MaterializationRouterDeps,
   type MaterializationTarget,
   type PathRelationProposalPayload,
   type PathRelationProposalPort,
+  type PathCandidateSinkPort,
   type RouteTarget,
-  type GraphEdgeCreationPort
+  type GraphEdgeCreationPort,
+  type SignalRefSeedSpec
 } from "./materialization-router.js";
 export {
   buildSchemaGroundedRawPayload,

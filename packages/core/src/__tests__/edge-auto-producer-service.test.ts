@@ -1,12 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  EdgeProposalTriggerSource,
   MemoryDimension,
-  MemoryGraphEdgeType,
   ScopeClass,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { EdgeAutoProducerService } from "../edge-auto-producer-service.js";
+
+// Structural shape the assertions read off the submitCandidate fake; the
+// full SubmitCandidateInput is wider but these are the fields under test.
+interface SubmittedCandidate {
+  readonly relationKind: string;
+  readonly recallBiasSign: 1 | 0 | -1;
+  readonly governanceClass?: string;
+  readonly initialStrength?: number;
+  readonly why?: readonly string[];
+}
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
@@ -60,18 +68,18 @@ function createDeps(memories: readonly MemoryEntry[]) {
     })
   );
   const findById = vi.fn(async (objectId: string) => byId.get(objectId) ?? null);
-  const graphEdgePort = {
-    createEdge: vi.fn(async () => undefined)
+  const pathCandidatePort = {
+    submitCandidate: vi.fn(async (_input: SubmittedCandidate) => true)
   };
   return {
     deps: {
       memoryRepo: { findById, searchByKeyword, findByIds },
-      graphEdgePort
+      pathCandidatePort
     },
     findById,
     searchByKeyword,
     findByIds,
-    graphEdgePort
+    pathCandidatePort
   };
 }
 
@@ -85,7 +93,7 @@ describe("EdgeAutoProducerService", () => {
       content: "Repository shell commands must use the RTK wrapper.",
       domain_tags: ["rtk", "workflow"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const service = new EdgeAutoProducerService(deps);
 
     await service.produceForNewMemory({
@@ -95,17 +103,22 @@ describe("EdgeAutoProducerService", () => {
       sourceSignalId: "signal-1"
     });
 
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+    // The producer no longer writes memory_graph_edges; it submits a
+    // governed SUPPORTS-profile path candidate (recall_bias +).
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceMemoryId: "memory-new",
-        targetMemoryId: "memory-existing",
-        edgeType: MemoryGraphEdgeType.SUPPORTS,
         workspaceId: "workspace-1",
-        runId: "run-1",
-        sourceSignalId: "signal-1",
-        triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS
+        sourceAnchor: { kind: "object", object_id: "memory-new" },
+        targetAnchor: { kind: "object", object_id: "memory-existing" },
+        relationKind: "supports",
+        governanceClass: "attention_only",
+        recallBiasSign: 1,
+        initialStrength: 0.5
       })
     );
+    const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+    expect(submitArgs.why?.some((line) => line.includes("source_signal=signal-1"))).toBe(true);
   });
 
   it("B-2 proposes derives_from for deterministic derivation cues", async () => {
@@ -119,7 +132,7 @@ describe("EdgeAutoProducerService", () => {
       content: "The repository workflow requires rtk for shell commands.",
       domain_tags: ["rtk", "workflow"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const service = new EdgeAutoProducerService(deps);
 
     await service.produceForNewMemory({
@@ -129,13 +142,12 @@ describe("EdgeAutoProducerService", () => {
       sourceSignalId: "signal-1"
     });
 
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceMemoryId: "memory-new",
-        targetMemoryId: "memory-source",
-        edgeType: MemoryGraphEdgeType.DERIVES_FROM,
-        confidence: expect.any(Number),
-        triggerSource: EdgeProposalTriggerSource.LOCAL_DERIVES_FROM
+        sourceAnchor: { kind: "object", object_id: "memory-new" },
+        targetAnchor: { kind: "object", object_id: "memory-source" },
+        relationKind: "derives_from",
+        recallBiasSign: 1
       })
     );
   });
@@ -152,7 +164,7 @@ describe("EdgeAutoProducerService", () => {
       domain_tags: ["package-manager", "workflow"],
       created_at: "2026-05-23T12:00:00.000Z"
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, oldMemory]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, oldMemory]);
     const service = new EdgeAutoProducerService(deps);
 
     await service.produceForNewMemory({
@@ -162,19 +174,20 @@ describe("EdgeAutoProducerService", () => {
       sourceSignalId: "signal-1"
     });
 
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+    // A local supersedes verdict is a weak claim: it folds into a weak
+    // negative path (recall_bias -, attention_only), not a recall_allowed
+    // negative edge. The recall_allowed/0.9 band is reserved for
+    // SYSTEM-derived negatives from ConflictDetectionService.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceMemoryId: "memory-new",
-        targetMemoryId: "memory-old",
-        edgeType: MemoryGraphEdgeType.SUPERSEDES,
-        confidence: expect.any(Number),
-        triggerSource: EdgeProposalTriggerSource.LOCAL_SUPERSEDES
+        sourceAnchor: { kind: "object", object_id: "memory-new" },
+        targetAnchor: { kind: "object", object_id: "memory-old" },
+        relationKind: "supersedes",
+        recallBiasSign: -1,
+        governanceClass: "attention_only",
+        initialStrength: 0.5
       })
     );
-    const [edge] = graphEdgePort.createEdge.mock.calls[0]! as unknown as [{ confidence: number }];
-    const confidence = edge.confidence;
-    expect(confidence).toBeGreaterThanOrEqual(0.55);
-    expect(confidence).toBeLessThanOrEqual(0.85);
   });
 
   it("does not propose edges for weak, cross-scope, or cross-dimension neighbors", async () => {
@@ -197,7 +210,7 @@ describe("EdgeAutoProducerService", () => {
       content: newMemory.content,
       domain_tags: newMemory.domain_tags
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, weak, crossDimension, crossScope]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, weak, crossDimension, crossScope]);
     const service = new EdgeAutoProducerService(deps);
 
     await service.produceForNewMemory({
@@ -207,17 +220,17 @@ describe("EdgeAutoProducerService", () => {
       sourceSignalId: "signal-1"
     });
 
-    expect(graphEdgePort.createEdge).not.toHaveBeenCalled();
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
   });
 
-  it("B-2 LLM path emits llm_supports trigger when verdict clears the 0.85 floor", async () => {
+  it("B-2 LLM supports verdict above floor folds into the SUPPORTS path profile", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
       content: "Repository shell commands must use the RTK wrapper.",
       domain_tags: ["rtk", "workflow"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const llmPort = {
       classifyPair: vi.fn(async () => ({
         edgeType: "supports" as const,
@@ -235,29 +248,28 @@ describe("EdgeAutoProducerService", () => {
     });
 
     expect(llmPort.classifyPair).toHaveBeenCalledWith({ newMemory, neighbor });
-    expect(graphEdgePort.createEdge).toHaveBeenCalledTimes(1);
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceMemoryId: "memory-new",
-        targetMemoryId: "memory-existing",
-        edgeType: MemoryGraphEdgeType.SUPPORTS,
-        triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS,
-        confidence: 0.92
+        sourceAnchor: { kind: "object", object_id: "memory-new" },
+        targetAnchor: { kind: "object", object_id: "memory-existing" },
+        relationKind: "supports",
+        recallBiasSign: 1
       })
     );
-    const [edge] = graphEdgePort.createEdge.mock.calls[0]! as unknown as [{ reason: string }];
-    const reason = edge.reason;
-    expect(reason).toContain("B-2 llm pair classifier");
+    // The LLM trigger + rationale provenance survives in why_this_relation_exists.
+    const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+    expect(submitArgs.why?.some((line) => line.includes("llm pair classifier"))).toBe(true);
   });
 
-  it("B-2 LLM path emits llm_supports for derives_from verdicts too (one KPI bucket per port)", async () => {
+  it("B-2 LLM derives_from verdict folds into the DERIVES_FROM path profile", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-source",
       content: "Repository shell commands must use the RTK wrapper.",
       domain_tags: ["rtk", "workflow"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const llmPort = {
       classifyPair: vi.fn(async () => ({
         edgeType: "derives_from" as const,
@@ -274,22 +286,22 @@ describe("EdgeAutoProducerService", () => {
       sourceSignalId: "signal-1"
     });
 
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        edgeType: MemoryGraphEdgeType.DERIVES_FROM,
-        triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS
+        relationKind: "derives_from",
+        recallBiasSign: 1
       })
     );
   });
 
-  it("B-2 LLM below 0.85 floor falls back to local heuristic without crashing", async () => {
+  it("B-2 LLM below 0.85 floor falls back to the local supports profile", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
       content: "Repository shell commands must use the RTK wrapper.",
       domain_tags: ["rtk", "workflow"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const llmPort = {
       classifyPair: vi.fn(async () => ({
         edgeType: "supports" as const,
@@ -306,25 +318,24 @@ describe("EdgeAutoProducerService", () => {
       sourceSignalId: "signal-1"
     });
 
-    // Falls back to the local supports heuristic — same edge_type, but
-    // trigger_source is the local_supports rule-heuristic bucket.
-    expect(graphEdgePort.createEdge).toHaveBeenCalledTimes(1);
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
-      expect.objectContaining({
-        edgeType: MemoryGraphEdgeType.SUPPORTS,
-        triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS
-      })
+    // Falls back to the local supports heuristic — same supports profile,
+    // but the why provenance names the local rule bucket.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ relationKind: "supports", recallBiasSign: 1 })
     );
+    const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+    expect(submitArgs.why?.some((line) => line.includes("local_supports"))).toBe(true);
   });
 
-  it("B-2 LLM null verdict falls back to local heuristic", async () => {
+  it("B-2 LLM null verdict falls back to the local supports profile", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
       content: "Repository shell commands must use the RTK wrapper.",
       domain_tags: ["rtk", "workflow"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const llmPort = {
       classifyPair: vi.fn(async () => null)
     };
@@ -338,11 +349,9 @@ describe("EdgeAutoProducerService", () => {
     });
 
     expect(llmPort.classifyPair).toHaveBeenCalled();
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
-      expect.objectContaining({
-        triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS
-      })
-    );
+    const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+    expect(submitArgs.relationKind).toBe("supports");
+    expect(submitArgs.why?.some((line) => line.includes("local_supports"))).toBe(true);
   });
 
   // invariant: the LLM port can return `null` either because the model
@@ -359,7 +368,7 @@ describe("EdgeAutoProducerService", () => {
       content: "Repository shell commands must use the RTK wrapper.",
       domain_tags: ["rtk", "workflow"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const llmPort = {
       // Simulates the model explicitly judging "no relationship" — the
       // adapter parsed a well-formed verdict whose edge_type was "none",
@@ -379,15 +388,12 @@ describe("EdgeAutoProducerService", () => {
     });
 
     // The local heuristic still gets to fire on the same neighbor and
-    // emits a local_supports proposal. The LLM rejection is silent: it
-    // is not an adapter error, so no warn fires.
+    // submits a local supports-profile candidate. The LLM rejection is
+    // silent: it is not an adapter error, so no warn fires.
     expect(llmPort.classifyPair).toHaveBeenCalledTimes(1);
-    expect(graphEdgePort.createEdge).toHaveBeenCalledTimes(1);
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
-      expect.objectContaining({
-        edgeType: MemoryGraphEdgeType.SUPPORTS,
-        triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS
-      })
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ relationKind: "supports", recallBiasSign: 1 })
     );
     // Verdict-null must NOT emit a warn — only adapter exceptions do.
     // see also: B-2 LLM throwing port test above (warns + falls back).
@@ -409,7 +415,7 @@ describe("EdgeAutoProducerService", () => {
       content: "RTK is required for shell commands in repository scripts.",
       domain_tags: ["rtk", "workflow"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, neighborA, neighborB]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighborA, neighborB]);
     const llmPort = {
       classifyPair: vi.fn(async () => {
         throw new Error("garden timed out");
@@ -425,10 +431,10 @@ describe("EdgeAutoProducerService", () => {
       sourceSignalId: "signal-1"
     });
 
-    // Both neighbors still produce proposals through the local heuristic.
-    expect(graphEdgePort.createEdge).toHaveBeenCalledTimes(2);
-    for (const call of graphEdgePort.createEdge.mock.calls as unknown as [{ triggerSource: string }][]) {
-      expect(call[0].triggerSource).toBe(EdgeProposalTriggerSource.LOCAL_SUPPORTS);
+    // Both neighbors still submit local supports-profile candidates.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(2);
+    for (const call of pathCandidatePort.submitCandidate.mock.calls) {
+      expect(call[0].relationKind).toBe("supports");
     }
     expect(warn).toHaveBeenCalled();
     const warnArgs = warn.mock.calls[0]!;
@@ -453,7 +459,7 @@ describe("EdgeAutoProducerService", () => {
       content: "Friday afternoon deployment window starts at 1500 UTC.",
       domain_tags: ["release", "operations"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, unrelatedNeighbor]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, unrelatedNeighbor]);
     const llmPort = {
       classifyPair: vi.fn(async () => ({
         edgeType: "supports" as const,
@@ -475,9 +481,9 @@ describe("EdgeAutoProducerService", () => {
     // NEIGHBOR_SEARCH_LIMIT garden round-trips per new memory).
     expect(llmPort.classifyPair).not.toHaveBeenCalled();
     // The local heuristic also rejects this pair (no strong tag overlap),
-    // so no edge is proposed — the pregate's only job is to skip the LLM,
-    // not to short-circuit the heuristic fallback.
-    expect(graphEdgePort.createEdge).not.toHaveBeenCalled();
+    // so no candidate is submitted — the pregate's only job is to skip the
+    // LLM, not to short-circuit the heuristic fallback.
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
   });
 
   it("B-2 pregate routes related pairs to the LLM port as before", async () => {
@@ -491,7 +497,7 @@ describe("EdgeAutoProducerService", () => {
       content: "Repository shell commands must use the RTK wrapper.",
       domain_tags: ["rtk", "workflow"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, relatedNeighbor]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, relatedNeighbor]);
     const llmPort = {
       classifyPair: vi.fn(async () => ({
         edgeType: "supports" as const,
@@ -509,11 +515,8 @@ describe("EdgeAutoProducerService", () => {
     });
 
     expect(llmPort.classifyPair).toHaveBeenCalledTimes(1);
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
-      expect.objectContaining({
-        edgeType: MemoryGraphEdgeType.SUPPORTS,
-        triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS
-      })
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ relationKind: "supports", recallBiasSign: 1 })
     );
   });
 

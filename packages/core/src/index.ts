@@ -12,6 +12,7 @@ export * from "./conflict-detection-service.js";
 export * from "./consolidation-executor.js";
 export * from "./deferred-obligation-service.js";
 export * from "./path-relation-proposal-service.js";
+export * from "./path-candidate-sink.js";
 export * from "./dirty-state-panic-service.js";
 export * from "./dynamics-constants-runtime.js";
 export * from "./dynamics-service.js";

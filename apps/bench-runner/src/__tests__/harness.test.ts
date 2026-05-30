@@ -27,6 +27,53 @@ import {
 const handles: BenchDaemonHandle[] = [];
 const tmpRoots: string[] = [];
 
+type BenchDatabase = ReturnType<typeof initDatabase>;
+
+interface DerivesFromPathRow {
+  readonly relation_kind: string;
+  readonly source_object_id: string;
+  readonly target_object_id: string;
+  readonly recall_bias: number;
+}
+
+// invariant: signal-ref edges fold into governed path_relations rows.
+// These helpers read the path-candidate side (derives_from for
+// source_memory_refs) and confirm the old edge_proposals sink stays empty.
+function readDerivesFromPathRelation(
+  db: BenchDatabase,
+  sourceObjectId: string,
+  targetObjectId: string
+): DerivesFromPathRow | undefined {
+  return db.connection
+    .prepare(
+      `SELECT json_extract(constitution_json, '$.relation_kind')        AS relation_kind,
+              json_extract(anchors_json, '$.source_anchor.object_id')   AS source_object_id,
+              json_extract(anchors_json, '$.target_anchor.object_id')   AS target_object_id,
+              json_extract(effect_vector_json, '$.recall_bias')         AS recall_bias
+         FROM path_relations
+        WHERE json_extract(anchors_json, '$.source_anchor.object_id') = ?
+          AND json_extract(anchors_json, '$.target_anchor.object_id') = ?
+          AND json_extract(constitution_json, '$.relation_kind') = 'derives_from'`
+    )
+    .get(sourceObjectId, targetObjectId) as DerivesFromPathRow | undefined;
+}
+
+function edgeProposalCount(
+  db: BenchDatabase,
+  sourceMemoryId: string,
+  targetMemoryId: string
+): number {
+  const row = db.connection
+    .prepare(
+      `SELECT COUNT(*) AS n
+         FROM edge_proposals
+        WHERE source_memory_id = ?
+          AND target_memory_id = ?`
+    )
+    .get(sourceMemoryId, targetMemoryId) as { readonly n: number };
+  return row.n;
+}
+
 const MANAGED_ENV_KEYS = [
   "DATA_DIR",
   "OPENAI_API_KEY",
@@ -370,7 +417,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   );
 
   it(
-    "bench seed sourceMemoryRefs are first-class signal refs and create edge proposals",
+    "bench seed sourceMemoryRefs are first-class signal refs and submit derives_from path candidates",
     async () => {
       const daemon = await startBenchDaemon({
         workspaceId: "harness-first-class-ref-ws",
@@ -399,37 +446,22 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
       expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
 
-      const edgeProposal = db.connection
-        .prepare(
-          `SELECT source_memory_id, target_memory_id, edge_type, status, trigger_source
-             FROM edge_proposals
-            WHERE source_memory_id = ?
-              AND target_memory_id = ?
-              AND edge_type = 'derives_from'`
-        )
-        .get(child.memoryId, parent.memoryId) as
-        | {
-            readonly source_memory_id: string;
-            readonly target_memory_id: string;
-            readonly edge_type: string;
-            readonly status: string;
-            readonly trigger_source: string;
-          }
-        | undefined;
-
-      expect(edgeProposal).toEqual({
-        source_memory_id: child.memoryId,
-        target_memory_id: parent.memoryId,
-        edge_type: "derives_from",
-        status: "pending",
-        trigger_source: "candidate_signal_ref"
+      // sourceMemoryRefs fold into a governed derives_from path
+      // candidate (recall_bias +), not an edge_proposals row.
+      const pathRow = readDerivesFromPathRelation(db, child.memoryId, parent.memoryId);
+      expect(pathRow).toMatchObject({
+        relation_kind: "derives_from",
+        source_object_id: child.memoryId,
+        target_object_id: parent.memoryId
       });
+      expect(pathRow!.recall_bias).toBeGreaterThan(0);
+      expect(edgeProposalCount(db, child.memoryId, parent.memoryId)).toBe(0);
     },
     60_000
   );
 
   it(
-    "compile seed sourceMemoryRefs are first-class signal refs and create edge proposals",
+    "compile seed sourceMemoryRefs are first-class signal refs and submit derives_from path candidates",
     async () => {
       const daemon = await startBenchDaemon({
         workspaceId: "harness-compile-first-class-ref-ws",
@@ -471,31 +503,16 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
       expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
 
-      const edgeProposal = db.connection
-        .prepare(
-          `SELECT source_memory_id, target_memory_id, edge_type, status, trigger_source
-             FROM edge_proposals
-            WHERE source_memory_id = ?
-              AND target_memory_id = ?
-              AND edge_type = 'derives_from'`
-        )
-        .get(child.memoryId, parent.memoryId) as
-        | {
-            readonly source_memory_id: string;
-            readonly target_memory_id: string;
-            readonly edge_type: string;
-            readonly status: string;
-            readonly trigger_source: string;
-          }
-        | undefined;
-
-      expect(edgeProposal).toEqual({
-        source_memory_id: child.memoryId,
-        target_memory_id: parent.memoryId,
-        edge_type: "derives_from",
-        status: "pending",
-        trigger_source: "candidate_signal_ref"
+      // sourceMemoryRefs fold into a governed derives_from path
+      // candidate (recall_bias +), not an edge_proposals row.
+      const pathRow = readDerivesFromPathRelation(db, child.memoryId, parent.memoryId);
+      expect(pathRow).toMatchObject({
+        relation_kind: "derives_from",
+        source_object_id: child.memoryId,
+        target_object_id: parent.memoryId
       });
+      expect(pathRow!.recall_bias).toBeGreaterThan(0);
+      expect(edgeProposalCount(db, child.memoryId, parent.memoryId)).toBe(0);
     },
     60_000
   );

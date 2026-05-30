@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   ActivationCandidateSchema,
-  isPathActiveForRecall,
+  isPathRecallEligible,
   type ActivationCandidate,
   type PathAnchorRef,
   type PathRelation
@@ -67,7 +67,13 @@ export class PathActivationCandidateProducer {
     const candidates: Readonly<ActivationCandidate>[] = [];
     const seen = new Set<string>();
     for (const path of paths) {
-      if (!isPathActiveForRecall(path.lifecycle.status)) {
+      // invariant: recall-eligible only (active lifecycle AND recall_bias
+      // > 0). The reader may emit a wider set; this re-asserts both the
+      // lifecycle gate and the sign gate so negative families and the
+      // recall-neutral exception_to marker never surface as positive
+      // activation candidates.
+      // see also: path-relation.ts isPathRecallEligible.
+      if (!isPathRecallEligible(path)) {
         continue;
       }
       if (seen.has(path.path_id)) {

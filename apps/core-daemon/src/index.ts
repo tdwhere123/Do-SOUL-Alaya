@@ -40,6 +40,7 @@ import {
   ConflictDetectionService,
   DeferredObligationService,
   PathRelationProposalService,
+  type PathCandidateSink,
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   ProjectMappingService,
   ProposalService,
@@ -784,6 +785,17 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       await edgeProposalService.proposeEdge(params);
     }
   };
+  // invariant: the folded edge producers (EdgeAutoProducer,
+  // ConflictDetectionService, signal-ref router) submit governed path
+  // candidates here instead of writing memory_graph_edges. The closure
+  // forward-references pathRelationProposalService (declared below); it is
+  // only invoked at materialization time, long after init, so there is no
+  // use-before-assignment. governance is clamped to recall_allowed and
+  // plasticity decides promotion downstream.
+  // see also: packages/core/src/path-candidate-sink.ts PathCandidateSink.
+  const pathCandidatePort: PathCandidateSink = {
+    submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
+  };
   // invariant: pair-classifier port enabled by default
   // (ALAYA_EDGE_PRODUCER_LLM_ENABLED!=0/false) so the LLM gets a chance
   // at every same-dimension same-scope candidate neighbor before the
@@ -832,15 +844,15 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     : null;
   const edgeAutoProducerService = new EdgeAutoProducerService({
     memoryRepo: memoryEntryRepo,
-    graphEdgePort,
+    pathCandidatePort,
     ...(edgeAutoProducerLlmPort === null ? {} : { llmPort: edgeAutoProducerLlmPort }),
     warn: warnLogger.warn
   });
   // invariant: ConflictDetectionService rule path is ON by default per
-  // v0.3.11 §C C3. Rule-path edges go through edgeProposalService.proposeEdge
-  // (graphEdgePort wraps it above), so a rule-path "contradicts" finding
-  // becomes a PENDING proposal — durable truth is never mutated by this
-  // service alone. The cost of findByDimension + findByWorkspaceId is
+  // v0.3.11 §C C3. Rule-path findings submit governed negative-family path
+  // candidates through pathCandidatePort (recall_bias -); durable truth is
+  // never mutated by this service alone, and no permanent edge is
+  // auto-accepted. The cost of findByDimension + findByWorkspaceId is
   // paid per materialization; high-frequency seeding paths (bench
   // harness, bulk import) opt OUT with ALAYA_CONFLICT_DETECTION_ENABLED=0.
   // The LLM ambiguous-band path stays disabled by default (it would
@@ -871,7 +883,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
           findByWorkspaceId: async (workspaceId) =>
             await memoryEntryRepo.findByWorkspaceId(workspaceId)
         },
-        graphEdgePort,
+        pathCandidatePort,
         ...(conflictDetectionLlmPort === null ? {} : { llmPort: conflictDetectionLlmPort }),
         karmaEmitter: {
           emitKarmaEvent: (input) => dynamicsService.emitKarmaEvent(input)
@@ -1118,7 +1130,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     synthesisService,
     claimService,
     pathRelationProposalPort,
-    graphEdgePort,
+    pathCandidateSinkPort: pathCandidatePort,
     edgeAutoProducerPort: edgeAutoProducerService,
     ...(conflictDetectionService === null
       ? {}

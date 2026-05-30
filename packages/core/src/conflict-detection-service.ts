@@ -1,13 +1,24 @@
 import {
-  EdgeProposalTriggerSource,
   MemoryGraphEdgeType,
-  type EdgeProposalTriggerSourceValue,
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue
 } from "@do-soul/alaya-protocol";
+import {
+  CONTRADICTS_SEED_PROFILE,
+  INCOMPATIBLE_SEED_PROFILE,
+  type PathSeedProfile
+} from "./path-relation-proposal-service.js";
+import type { PathCandidateSink } from "./path-candidate-sink.js";
 
-// invariant: ConflictDetectionService is the producer of the staged
-// MemoryGraphEdge types contradicts / incompatible_with (the supersedes
+// invariant: the trust tier of a conflict verdict. "rule" is the
+// agent-controllable Jaccard heuristic (weak, attention_only, no karma);
+// "llm" is the system-computed classifier verdict (recall_allowed/0.9,
+// fires supersede_penalty karma). writeEdge takes this so a single writer
+// cannot silently grant the rule path the LLM path's trust.
+type ConflictVerdictSource = "rule" | "llm";
+
+// invariant: ConflictDetectionService is the producer of the negative
+// lifecycle path families contradicts / incompatible_with (the supersedes
 // and exception_to writers live in materialization-router via
 // first-class candidate signal refs). Runs at memory materialization
 // time. Detection
@@ -37,18 +48,15 @@ export interface ConflictDetectionMemoryRepoPort {
   ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
-export interface ConflictDetectionGraphPort {
-  createEdge(params: {
-    readonly sourceMemoryId: string;
-    readonly targetMemoryId: string;
-    readonly edgeType: MemoryGraphEdgeTypeValue;
-    readonly workspaceId: string;
-    readonly runId?: string | null;
-    readonly triggerSource?: EdgeProposalTriggerSourceValue;
-    readonly confidence?: number;
-    readonly reason?: string | null;
-  }): Promise<void>;
-}
+// invariant: conflict-detection sink is the governed negative-family path
+// candidate intake (PathCandidateSink), not memory_graph_edges. A
+// contradicts/incompatible_with candidate is born with recall_bias -
+// (suppresses recall, never drops graph_support below baseline) and runs
+// the unified plasticity model. Trust is tiered by verdict source: the
+// LLM verdict seeds recall_allowed/0.9 and fires the karma supersede
+// signal alongside; the agent-controllable rule heuristic seeds
+// attention_only/0.5 and fires NO karma.
+// see also: path-candidate-sink.ts PathCandidateSink — the shared port.
 
 export interface ConflictDetectionLlmPort {
   classifyPair(input: {
@@ -60,10 +68,11 @@ export interface ConflictDetectionLlmPort {
 }
 
 // invariant: see also: DynamicsService.emitKarmaEvent — the
-// supersede_penalty karma kind fires from this service whenever a new
-// memory is linked to an existing peer via the CONTRADICTS edge. The
+// supersede_penalty karma kind fires from this service only on an
+// LLM-verdict CONTRADICTS link, never on a rule-heuristic hit. The
 // target_memory_id (the older peer) takes the penalty because the new
-// memory is the supersede candidate.
+// memory is the supersede candidate. The rule path is omitted because its
+// hit conditions are agent-controllable content.
 export interface ConflictDetectionKarmaEmitterPort {
   emitKarmaEvent(input: {
     readonly kind: "supersede_penalty";
@@ -74,7 +83,7 @@ export interface ConflictDetectionKarmaEmitterPort {
 
 export interface ConflictDetectionServiceDeps {
   readonly memoryRepo: ConflictDetectionMemoryRepoPort;
-  readonly graphEdgePort: ConflictDetectionGraphPort;
+  readonly pathCandidatePort: PathCandidateSink;
   readonly llmPort?: ConflictDetectionLlmPort;
   readonly karmaEmitter?: ConflictDetectionKarmaEmitterPort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
@@ -175,7 +184,8 @@ export class ConflictDetectionService {
           existing.object_id,
           MemoryGraphEdgeType.CONTRADICTS,
           params.workspaceId,
-          params.runId
+          params.runId,
+          "rule"
         );
       }
 
@@ -198,7 +208,8 @@ export class ConflictDetectionService {
           existing.object_id,
           MemoryGraphEdgeType.INCOMPATIBLE_WITH,
           params.workspaceId,
-          params.runId
+          params.runId,
+          "rule"
         );
       }
     }
@@ -228,7 +239,8 @@ export class ConflictDetectionService {
               candidate.object_id,
               MemoryGraphEdgeType.CONTRADICTS,
               params.workspaceId,
-              params.runId
+              params.runId,
+              "llm"
             );
           } else if (verdict === "incompatible_with") {
             await this.writeEdge(
@@ -236,7 +248,8 @@ export class ConflictDetectionService {
               candidate.object_id,
               MemoryGraphEdgeType.INCOMPATIBLE_WITH,
               params.workspaceId,
-              params.runId
+              params.runId,
+              "llm"
             );
           }
         } catch (err) {
@@ -255,31 +268,50 @@ export class ConflictDetectionService {
     targetMemoryId: string,
     edgeType: MemoryGraphEdgeTypeValue,
     workspaceId: string,
-    runId: string
+    runId: string,
+    verdictSource: ConflictVerdictSource
   ): Promise<void> {
+    const profile = negativeProfileForEdgeType(edgeType, verdictSource);
     try {
-      await this.deps.graphEdgePort.createEdge({
-        sourceMemoryId,
-        targetMemoryId,
-        edgeType,
+      await this.deps.pathCandidatePort.submitCandidate({
         workspaceId,
-        runId,
-        triggerSource: EdgeProposalTriggerSource.CONFLICT_DETECTION,
-        confidence: 0.5,
-        reason: "conflict detection derived edge proposal"
+        sourceAnchor: { kind: "object", object_id: sourceMemoryId },
+        targetAnchor: { kind: "object", object_id: targetMemoryId },
+        relationKind: profile.relationKind,
+        initialStrength: profile.initialStrength,
+        governanceClass: profile.governanceClass,
+        evidenceBasis: profile.evidenceBasis,
+        recallBiasSign: profile.recallBiasSign,
+        recallBiasMagnitude: profile.recallBiasMagnitude,
+        why: [
+          `conflict detection ${profile.relationKind} candidate`,
+          `verdict=${verdictSource}`,
+          `run=${runId}`
+        ]
       });
     } catch (err) {
       this.warn("conflict detection edge create failed", {
         source_memory_id: sourceMemoryId,
         target_memory_id: targetMemoryId,
         edge_type: edgeType,
+        verdict_source: verdictSource,
         workspace_id: workspaceId,
         error: errorMessage(err)
       });
       return;
     }
 
-    if (edgeType === MemoryGraphEdgeType.CONTRADICTS && this.deps.karmaEmitter !== undefined) {
+    // invariant: supersede_penalty karma is strength-gated to the LLM
+    // verdict only. The rule path is an agent-controllable Jaccard
+    // heuristic; firing durable -0.2 karma against the victim on a
+    // rule hit would let an agent program a contradicts match to demote a
+    // peer's retention/activation score. Only the system-computed LLM
+    // verdict carries enough trust to write the karma penalty.
+    if (
+      verdictSource === "llm" &&
+      edgeType === MemoryGraphEdgeType.CONTRADICTS &&
+      this.deps.karmaEmitter !== undefined
+    ) {
       try {
         await this.deps.karmaEmitter.emitKarmaEvent({
           kind: "supersede_penalty",
@@ -301,6 +333,56 @@ export class ConflictDetectionService {
       this.deps.warn(message, meta);
     }
   }
+}
+
+// invariant: the rule path is a pure same-dimension Jaccard heuristic
+// whose hit conditions (tag overlap + low token overlap) are entirely
+// agent-controllable content. A rule verdict is therefore a WEAK claim,
+// not a system-derived ruling: it seeds attention_only at low strength
+// (recall_bias - preserved so plasticity still classifies it negative) and
+// must earn recall eligibility through PathPlasticityService — it never
+// mints a recall_allowed negative path and never fires supersede_penalty
+// karma. This mirrors edge-auto-producer's LOCAL_SUPERSEDES_SEED_PROFILE.
+// The recall_allowed/0.9 band is reserved for the LLM-verdict path, which
+// the system computed itself.
+// see also: edge-auto-producer-service.ts LOCAL_SUPERSEDES_SEED_PROFILE.
+const RULE_CONTRADICTS_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "contradicts",
+  initialStrength: 0.5,
+  governanceClass: "attention_only",
+  recallBiasSign: -1,
+  recallBiasMagnitude: 0.4,
+  evidenceBasis: Object.freeze(["contradiction_evidence"]) as readonly string[]
+});
+
+const RULE_INCOMPATIBLE_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "incompatible_with",
+  initialStrength: 0.5,
+  governanceClass: "attention_only",
+  recallBiasSign: -1,
+  recallBiasMagnitude: 0.3,
+  evidenceBasis: Object.freeze(["incompatibility_evidence"]) as readonly string[]
+});
+
+// invariant: maps the edge-type + verdict source to its negative
+// lifecycle seed profile (recall_bias -). contradicts and
+// incompatible_with are the only two this service mints; an unexpected
+// type defaults to contradicts so a mis-tuned caller still gets a
+// governed negative path, never a silent drop. verdictSource selects the
+// trust tier: "llm" → the shared recall_allowed/0.9 core profile; "rule"
+// → the weak attention_only/0.5 local profile.
+function negativeProfileForEdgeType(
+  edgeType: MemoryGraphEdgeTypeValue,
+  verdictSource: ConflictVerdictSource
+): PathSeedProfile {
+  if (verdictSource === "rule") {
+    return edgeType === MemoryGraphEdgeType.INCOMPATIBLE_WITH
+      ? RULE_INCOMPATIBLE_SEED_PROFILE
+      : RULE_CONTRADICTS_SEED_PROFILE;
+  }
+  return edgeType === MemoryGraphEdgeType.INCOMPATIBLE_WITH
+    ? INCOMPATIBLE_SEED_PROFILE
+    : CONTRADICTS_SEED_PROFILE;
 }
 
 function tokenize(text: string): Set<string> {

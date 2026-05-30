@@ -1651,6 +1651,214 @@ describe("RecallService", () => {
       .toContain("path_expansion");
   });
 
+  it("excludes negative-bias paths from path_expansion positive candidates", async () => {
+    // invariant: a negative path (recall_bias < 0) records suppression, so
+    // its target is excluded from positive path_expansion candidates —
+    // admitting it would amplify the suppressed memory.
+    // see also: recall-service.ts isPathExcludedFromRecall.
+    const memories = [
+      createMemoryEntry({
+        object_id: "seed-memory",
+        content: "Deployment recall seed.",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "path-target",
+        content: "Path neighbor that the seed contradicts.",
+        activation_score: 0.1,
+        domain_tags: ["path"]
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    // anti-patterns-lint-allow: structurally-exact PathRelation fixture +
+    // policy override mirror the sibling path_expansion test on purpose so
+    // tsc validates the discriminated-union literals per case.
+    const negativePathRelation: PathRelation = {
+      path_id: "path-neg-1",
+      workspace_id: "workspace-1",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "seed-memory" },
+        target_anchor: { kind: "object", object_id: "path-target" }
+      },
+      constitution: {
+        relation_kind: "contradicts",
+        why_this_relation_exists: ["test negative relation"]
+      },
+      effect_vector: {
+        salience: 1,
+        // negative recall_bias = recallBiasSign(-1) * magnitude(0.4)
+        recall_bias: -0.4,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "lens_entry"
+      },
+      plasticity_state: {
+        strength: 1,
+        direction_bias: "source_to_target",
+        stability_class: "stable",
+        support_events_count: 1,
+        contradiction_events_count: 0
+      },
+      lifecycle: {
+        status: "active",
+        retirement_rule: "manual"
+      },
+      legitimacy: {
+        evidence_basis: ["test"],
+        governance_class: "recall_allowed"
+      },
+      created_at: "2026-03-20T00:00:00.000Z",
+      updated_at: "2026-03-20T00:00:00.000Z"
+    };
+    const pathExpansionPort: RecallServicePathExpansionPort = {
+      findByAnchors: vi.fn(async () => [negativePathRelation])
+    };
+    const service = new RecallService({
+      ...dependencies,
+      pathExpansionPort
+    });
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        precomputed_rank: {
+          ...basePolicy.coarse_filter.precomputed_rank,
+          max_candidates: 1
+        },
+        semantic_supplement: {
+          enabled: false,
+          max_supplement: 0
+        }
+      },
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          max_total_tokens: 1000,
+          max_entries: 3,
+          per_dimension_limits: null
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    // path-target must NOT be admitted through path_expansion off the
+    // negative path. If it appears at all (e.g. via another plane), its
+    // admission_planes must not include path_expansion.
+    const pathTarget = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "path-target"
+    );
+    expect(pathTarget?.admission_planes ?? []).not.toContain("path_expansion");
+  });
+
+  it("excludes recall-neutral exception_to paths (recall_bias == 0) from path_expansion positive candidates", async () => {
+    // invariant: the exception_to marker carries recall_bias exactly 0. It
+    // is a topology marker, not a positive association — the strict-positive
+    // isPathRecallEligible gate must keep it out of positive path_expansion
+    // just like the negative families. Pre-fix the `< 0` test admitted it.
+    // see also: recall-service.ts isPathExcludedFromRecall.
+    const memories = [
+      createMemoryEntry({
+        object_id: "seed-memory",
+        content: "Deployment recall seed.",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "path-target",
+        content: "Path neighbor reached via an exception_to marker.",
+        activation_score: 0.1,
+        domain_tags: ["path"]
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    // anti-patterns-lint-allow: structurally-exact PathRelation fixture +
+    // policy override mirror the sibling path_expansion tests on purpose so
+    // tsc validates the discriminated-union literals per case.
+    const neutralPathRelation: PathRelation = {
+      path_id: "path-neutral-1",
+      workspace_id: "workspace-1",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "seed-memory" },
+        target_anchor: { kind: "object", object_id: "path-target" }
+      },
+      constitution: {
+        relation_kind: "exception_to",
+        why_this_relation_exists: ["test neutral relation"]
+      },
+      effect_vector: {
+        salience: 1,
+        // recall-neutral marker: recallBiasSign(0) * magnitude(0) = 0
+        recall_bias: 0,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "lens_entry"
+      },
+      plasticity_state: {
+        strength: 1,
+        direction_bias: "source_to_target",
+        stability_class: "stable",
+        support_events_count: 1,
+        contradiction_events_count: 0
+      },
+      lifecycle: {
+        status: "active",
+        retirement_rule: "manual"
+      },
+      legitimacy: {
+        evidence_basis: ["test"],
+        governance_class: "recall_allowed"
+      },
+      created_at: "2026-03-20T00:00:00.000Z",
+      updated_at: "2026-03-20T00:00:00.000Z"
+    };
+    const pathExpansionPort: RecallServicePathExpansionPort = {
+      findByAnchors: vi.fn(async () => [neutralPathRelation])
+    };
+    const service = new RecallService({
+      ...dependencies,
+      pathExpansionPort
+    });
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        precomputed_rank: {
+          ...basePolicy.coarse_filter.precomputed_rank,
+          max_candidates: 1
+        },
+        semantic_supplement: {
+          enabled: false,
+          max_supplement: 0
+        }
+      },
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          max_total_tokens: 1000,
+          max_entries: 3,
+          per_dimension_limits: null
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    const pathTarget = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "path-target"
+    );
+    expect(pathTarget?.admission_planes ?? []).not.toContain("path_expansion");
+  });
+
   it("expands graph candidates across two hops with cycle-safe edge-type decay diagnostics", async () => {
     const memories = [
       createMemoryEntry({

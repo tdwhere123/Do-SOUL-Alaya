@@ -42,7 +42,7 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
 }
 
 describe("ConflictDetectionService", () => {
-  it("writes a contradicts edge when same-dimension peer has tag overlap and low token overlap", async () => {
+  it("rule-path contradicts seeds a WEAK attention_only path (agent-controllable verdict, not recall_allowed)", async () => {
     const existing = createMemoryEntry({
       object_id: "mem-A",
       content: "I prefer dark roast coffee."
@@ -51,8 +51,8 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [existing]),
       findByWorkspaceId: vi.fn(async () => [existing])
     };
-    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
-    const service = new ConflictDetectionService({ memoryRepo, graphEdgePort });
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
       newMemoryId: "mem-B",
@@ -64,16 +64,107 @@ describe("ConflictDetectionService", () => {
       runId: "run-1"
     });
 
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+    // rule path = agent-controllable Jaccard heuristic → weak seed:
+    // attention_only / 0.5, NOT the recall_allowed/0.9 band reserved for
+    // the LLM verdict. recall_bias sign preserved so plasticity still
+    // classifies it negative.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceMemoryId: "mem-B",
-        targetMemoryId: "mem-A",
-        edgeType: "contradicts",
+        sourceAnchor: { kind: "object", object_id: "mem-B" },
+        targetAnchor: { kind: "object", object_id: "mem-A" },
+        relationKind: "contradicts",
         workspaceId: "workspace-1",
-        triggerSource: "conflict_detection",
-        confidence: 0.5
+        recallBiasSign: -1,
+        governanceClass: "attention_only",
+        initialStrength: 0.5
       })
     );
+  });
+
+  it("rule-path contradicts does NOT fire supersede_penalty karma (strength-gated to the LLM verdict)", async () => {
+    const existing = createMemoryEntry({
+      object_id: "mem-A",
+      content: "I prefer dark roast coffee."
+    });
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => [existing]),
+      findByWorkspaceId: vi.fn(async () => [existing])
+    };
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const emitKarmaEvent = vi.fn(async () => {});
+    const service = new ConflictDetectionService({
+      memoryRepo,
+      pathCandidatePort,
+      karmaEmitter: { emitKarmaEvent }
+    });
+
+    await service.detectAndLinkConflicts({
+      newMemoryId: "mem-B",
+      newMemoryDimension: MemoryDimension.PREFERENCE,
+      newMemoryScopeClass: ScopeClass.PROJECT,
+      newMemoryContent: "I prefer light roast tea instead.",
+      newMemoryDomainTags: ["coffee", "preference"],
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+
+    // the rule path produced a contradicts candidate (path written) but the
+    // karma penalty must be withheld — an agent-controllable Jaccard hit
+    // cannot program a durable retention/activation demotion of the peer.
+    const contradictsCalls = pathCandidatePort.submitCandidate.mock.calls.filter(
+      (call: any[]) => call[0].relationKind === "contradicts"
+    );
+    expect(contradictsCalls.length).toBeGreaterThan(0);
+    expect(emitKarmaEvent).not.toHaveBeenCalled();
+  });
+
+  it("llm-path contradicts seeds recall_allowed/0.9 and fires supersede_penalty karma", async () => {
+    // tag overlap of {coffee, alpha} vs {coffee, beta} is 1/3 ≈ 0.333:
+    // below the rule threshold (0.35) but above the LLM gate, so only the
+    // LLM verdict fires.
+    const ambiguous = createMemoryEntry({
+      object_id: "mem-A",
+      content: "Generic coffee preference text.",
+      domain_tags: ["coffee", "alpha"]
+    });
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => [ambiguous]),
+      findByWorkspaceId: vi.fn(async () => [])
+    };
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const emitKarmaEvent = vi.fn(async () => {});
+    const llmPort = { classifyPair: vi.fn(async () => "contradicts" as const) };
+    const service = new ConflictDetectionService({
+      memoryRepo,
+      pathCandidatePort,
+      llmPort,
+      karmaEmitter: { emitKarmaEvent },
+      llmMaxPairsPerNewMemory: 4
+    });
+
+    await service.detectAndLinkConflicts({
+      newMemoryId: "mem-B",
+      newMemoryDimension: MemoryDimension.PREFERENCE,
+      newMemoryScopeClass: ScopeClass.PROJECT,
+      newMemoryContent: "Different but related coffee fact.",
+      newMemoryDomainTags: ["coffee", "beta"],
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        relationKind: "contradicts",
+        recallBiasSign: -1,
+        governanceClass: "recall_allowed",
+        initialStrength: 0.9
+      })
+    );
+    expect(emitKarmaEvent).toHaveBeenCalledWith({
+      kind: "supersede_penalty",
+      objectId: "mem-A",
+      workspaceId: "workspace-1"
+    });
   });
 
   it("skips contradicts when content is nearly identical (high token overlap)", async () => {
@@ -82,8 +173,8 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [existing]),
       findByWorkspaceId: vi.fn(async () => [existing])
     };
-    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
-    const service = new ConflictDetectionService({ memoryRepo, graphEdgePort });
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
       newMemoryId: "mem-B",
@@ -95,8 +186,8 @@ describe("ConflictDetectionService", () => {
       runId: "run-1"
     });
 
-    const contradictsCalls = graphEdgePort.createEdge.mock.calls.filter(
-      (call: any[]) => call[0].edgeType === "contradicts"
+    const contradictsCalls = pathCandidatePort.submitCandidate.mock.calls.filter(
+      (call: any[]) => call[0].relationKind === "contradicts"
     );
     expect(contradictsCalls).toHaveLength(0);
   });
@@ -112,8 +203,8 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => []),
       findByWorkspaceId: vi.fn(async () => [existing])
     };
-    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
-    const service = new ConflictDetectionService({ memoryRepo, graphEdgePort });
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
       newMemoryId: "mem-B",
@@ -125,13 +216,14 @@ describe("ConflictDetectionService", () => {
       runId: "run-1"
     });
 
-    const incompatibleCalls = graphEdgePort.createEdge.mock.calls.filter(
-      (call: any[]) => call[0].edgeType === "incompatible_with"
+    const incompatibleCalls = pathCandidatePort.submitCandidate.mock.calls.filter(
+      (call: any[]) => call[0].relationKind === "incompatible_with"
     ) as unknown[][];
     expect(incompatibleCalls).toHaveLength(1);
     expect(incompatibleCalls[0][0]).toMatchObject({
-      sourceMemoryId: "mem-B",
-      targetMemoryId: "mem-A"
+      sourceAnchor: { kind: "object", object_id: "mem-B" },
+      targetAnchor: { kind: "object", object_id: "mem-A" },
+      recallBiasSign: -1
     });
   });
 
@@ -148,13 +240,13 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [ambiguous]),
       findByWorkspaceId: vi.fn(async () => [])
     };
-    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const llmPort = {
       classifyPair: vi.fn(async () => "contradicts" as const)
     };
     const service = new ConflictDetectionService({
       memoryRepo,
-      graphEdgePort,
+      pathCandidatePort,
       llmPort,
       llmMaxPairsPerNewMemory: 4
     });
@@ -184,13 +276,13 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [ruleHit]),
       findByWorkspaceId: vi.fn(async () => [])
     };
-    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const llmPort = {
       classifyPair: vi.fn(async () => "contradicts" as const)
     };
     const service = new ConflictDetectionService({
       memoryRepo,
-      graphEdgePort,
+      pathCandidatePort,
       llmPort
     });
 
@@ -205,8 +297,8 @@ describe("ConflictDetectionService", () => {
     });
 
     expect(llmPort.classifyPair).not.toHaveBeenCalled();
-    const contradictsCalls = graphEdgePort.createEdge.mock.calls.filter(
-      (call: any[]) => call[0].edgeType === "contradicts"
+    const contradictsCalls = pathCandidatePort.submitCandidate.mock.calls.filter(
+      (call: any[]) => call[0].relationKind === "contradicts"
     );
     expect(contradictsCalls).toHaveLength(1);
   });
@@ -218,8 +310,8 @@ describe("ConflictDetectionService", () => {
       }),
       findByWorkspaceId: vi.fn(async () => [])
     };
-    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
-    const service = new ConflictDetectionService({ memoryRepo, graphEdgePort });
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await expect(
       service.detectAndLinkConflicts({
@@ -243,13 +335,13 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [existing]),
       findByWorkspaceId: vi.fn(async () => [existing])
     };
-    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const llmPort = {
       classifyPair: vi.fn(async () => "contradicts" as const)
     };
     const service = new ConflictDetectionService({
       memoryRepo,
-      graphEdgePort,
+      pathCandidatePort,
       llmPort,
       ruleEnabled: false
     });
@@ -265,12 +357,13 @@ describe("ConflictDetectionService", () => {
     });
 
     expect(llmPort.classifyPair).toHaveBeenCalled();
-    expect(graphEdgePort.createEdge).toHaveBeenCalledTimes(1);
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceMemoryId: "mem-B",
-        targetMemoryId: "mem-A",
-        edgeType: "contradicts"
+        sourceAnchor: { kind: "object", object_id: "mem-B" },
+        targetAnchor: { kind: "object", object_id: "mem-A" },
+        relationKind: "contradicts",
+        recallBiasSign: -1
       })
     );
   });
@@ -289,8 +382,8 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [existing]),
       findByWorkspaceId: vi.fn(async () => [existing])
     };
-    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
-    const service = new ConflictDetectionService({ memoryRepo, graphEdgePort });
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
       newMemoryId: "mem-B",
@@ -302,8 +395,8 @@ describe("ConflictDetectionService", () => {
       runId: "run-1"
     });
 
-    const contradictsCalls = graphEdgePort.createEdge.mock.calls.filter(
-      (call: any[]) => call[0].edgeType === "contradicts"
+    const contradictsCalls = pathCandidatePort.submitCandidate.mock.calls.filter(
+      (call: any[]) => call[0].relationKind === "contradicts"
     );
     expect(contradictsCalls).toHaveLength(1);
   });
@@ -317,10 +410,10 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [existing]),
       findByWorkspaceId: vi.fn(async () => [existing])
     };
-    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
     const service = new ConflictDetectionService({
       memoryRepo,
-      graphEdgePort,
+      pathCandidatePort,
       ruleEnabled: false
     });
 
@@ -334,6 +427,6 @@ describe("ConflictDetectionService", () => {
       runId: "run-1"
     });
 
-    expect(graphEdgePort.createEdge).not.toHaveBeenCalled();
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
   });
 });

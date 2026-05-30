@@ -1,9 +1,8 @@
 import {
-  EdgeProposalTriggerSource,
   EvidenceHealthState,
   MemoryDimension,
-  MemoryGraphEdgeType,
   PathGovernanceClass,
+  type PathGovernanceClass as PathGovernanceClassValue,
   ScopeClass,
   SourceKind,
   StorageTier,
@@ -183,6 +182,133 @@ export interface GraphEdgeCreationPort {
   }): Promise<void>;
 }
 
+// invariant: signal-ref sink. The router no longer writes
+// memory_graph_edges for a signal's first-class *_refs; it submits a
+// governed path candidate through PathRelationProposalService.submitCandidate
+// (the daemon wires this port to it). source_memory_refs seed a positive
+// derives_from path; supersedes/contradicts/incompatible_with seed weak
+// negative lifecycle paths (recallBiasSign -1, attention_only) that must
+// earn recall eligibility through plasticity reinforcement — an
+// agent-asserted ref never mints a recall_allowed negative path;
+// exception_to seeds a neutral marker (recallBiasSign 0). @do-soul/alaya-soul
+// cannot import @do-soul/alaya-core (invariants §6), so the seed shape
+// crosses the port boundary structurally. governanceClass is clamped to the
+// auto-build ceiling by submitCandidate downstream.
+// see also: packages/core/src/path-candidate-sink.ts PathCandidateSink.
+// see also: packages/core/src/path-relation-proposal-service.ts seed profiles.
+export interface PathCandidateSinkPort {
+  submitCandidate(input: {
+    readonly workspaceId: string;
+    readonly sourceAnchor: { readonly kind: "object"; readonly object_id: string };
+    readonly targetAnchor: { readonly kind: "object"; readonly object_id: string };
+    readonly relationKind: string;
+    readonly initialStrength: number;
+    readonly governanceClass: PathGovernanceClassValue;
+    readonly evidenceBasis: readonly string[];
+    readonly recallBiasSign: 1 | 0 | -1;
+    readonly recallBiasMagnitude?: number;
+    readonly why?: readonly string[];
+  }): Promise<boolean>;
+}
+
+export interface SignalRefSeedSpec {
+  readonly signalRefsKey:
+    | "source_memory_refs"
+    | "supersedes_refs"
+    | "exception_to_refs"
+    | "contradicts_refs"
+    | "incompatible_with_refs";
+  readonly relationKind: string;
+  readonly initialStrength: number;
+  readonly governanceClass: PathGovernanceClassValue;
+  readonly recallBiasSign: 1 | 0 | -1;
+  readonly recallBiasMagnitude: number;
+  readonly evidenceBasis: readonly string[];
+}
+
+// invariant: the signal-ref seed table, keyed by producer trust. These
+// are agent-asserted refs on a candidate signal — the agent (or a local
+// heuristic) claims the relation, so every family seeds attention_only.
+// Recall eligibility is decided by recall_bias SIGN, not by
+// governance_class:
+//   - positive families (derives_from, recall_bias > 0) are recall-eligible
+//     at birth even at attention_only — governance_class only adds the
+//     +0.15 boost in scorePathRelationExpansion, it is NOT a binary recall
+//     gate;
+//   - negative families (supersedes / contradicts / incompatible_with,
+//     recall_bias < 0) are excluded from positive expansion by their sign,
+//     not by plasticity — they record suppression and only contribute once
+//     a sign-aware recall pass exists;
+//   - the recall-neutral exception_to marker (recall_bias == 0) is excluded
+//     from positive expansion by isPathRecallEligible's strict-positive
+//     gate.
+// attention_only here is the trust floor: it withholds the recall_allowed
+// expansion boost and the higher 0.9 strength reserved for the core seed
+// profiles. recall_allowed/0.9 negatives are produced ONLY by
+// ConflictDetectionService's LLM-verdict path (the system computed the
+// verdict); its Jaccard rule path now also seeds attention_only because
+// rule-hit conditions are agent-controllable content.
+// governanceClass is further clamped to the auto-build ceiling by
+// submitCandidate downstream.
+// see also: packages/core/src/path-relation-proposal-service.ts seed profiles.
+// see also: packages/core/src/conflict-detection-service.ts — LLM-verdict negatives.
+// see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible.
+// see also: signal-ref-seed-parity.test.ts — pins this live table.
+const AGENT_ASSERTED_NEGATIVE_SEED_STRENGTH = 0.5;
+
+export const SIGNAL_REF_SEED_SPECS: readonly SignalRefSeedSpec[] = [
+  {
+    signalRefsKey: "source_memory_refs",
+    relationKind: "derives_from",
+    initialStrength: 0.5,
+    governanceClass: PathGovernanceClass.ATTENTION_ONLY,
+    recallBiasSign: 1,
+    recallBiasMagnitude: 0.5,
+    evidenceBasis: ["llm_derives_inference"]
+  },
+  {
+    signalRefsKey: "supersedes_refs",
+    relationKind: "supersedes",
+    initialStrength: AGENT_ASSERTED_NEGATIVE_SEED_STRENGTH,
+    governanceClass: PathGovernanceClass.ATTENTION_ONLY,
+    recallBiasSign: -1,
+    recallBiasMagnitude: 0.5,
+    evidenceBasis: ["supersession_evidence"]
+  },
+  {
+    signalRefsKey: "exception_to_refs",
+    relationKind: "exception_to",
+    initialStrength: 0.9,
+    // invariant: agent-asserted exception_to refs seed attention_only, not
+    // recall_allowed. The ref is attacker-controllable, so it must not be
+    // born recall-eligible-governance; it earns governance through
+    // plasticity like the other agent-asserted families. recallBiasSign 0 /
+    // magnitude 0 keep the recall-neutral marker semantics.
+    governanceClass: PathGovernanceClass.ATTENTION_ONLY,
+    recallBiasSign: 0,
+    recallBiasMagnitude: 0,
+    evidenceBasis: ["exception_evidence"]
+  },
+  {
+    signalRefsKey: "contradicts_refs",
+    relationKind: "contradicts",
+    initialStrength: AGENT_ASSERTED_NEGATIVE_SEED_STRENGTH,
+    governanceClass: PathGovernanceClass.ATTENTION_ONLY,
+    recallBiasSign: -1,
+    recallBiasMagnitude: 0.4,
+    evidenceBasis: ["contradiction_evidence"]
+  },
+  {
+    signalRefsKey: "incompatible_with_refs",
+    relationKind: "incompatible_with",
+    initialStrength: AGENT_ASSERTED_NEGATIVE_SEED_STRENGTH,
+    governanceClass: PathGovernanceClass.ATTENTION_ONLY,
+    recallBiasSign: -1,
+    recallBiasMagnitude: 0.3,
+    evidenceBasis: ["incompatibility_evidence"]
+  }
+];
+
 export interface EdgeAutoProducerPort {
   produceForNewMemory(params: {
     readonly newMemoryId: string;
@@ -273,8 +399,8 @@ export interface MaterializationRouterDeps {
   readonly synthesisService: SynthesisMaterializationPort;
   readonly claimService: ClaimMaterializationPort;
   readonly pathRelationProposalPort?: PathRelationProposalPort;
+  readonly pathCandidateSinkPort?: PathCandidateSinkPort;
   readonly handoffGapHandler: HandoffGapHandler;
-  readonly graphEdgePort?: GraphEdgeCreationPort;
   readonly edgeAutoProducerPort?: EdgeAutoProducerPort;
   readonly conflictDetectionPort?: ConflictDetectionPort;
   readonly reconciliationPort?: ReconciliationPort;
@@ -940,60 +1066,35 @@ export class MaterializationRouter {
   }
 
   /**
-   * Creates graph proposals for every first-class memory ref carried by
-   * a memory-creating signal. Errors are swallowed per edge: proposal
-   * creation must never block materialization of the memory itself.
+   * Submits a governed path candidate for every first-class memory ref
+   * carried by a memory-creating signal. Errors are swallowed per ref:
+   * candidate submission must never block materialization of the memory
+   * itself. This also activates the historically dormant signal-ref edge
+   * source — the refs now flow through PathRelationProposalService.
    */
   private async createAllMemoryRefEdges(
     newObjectId: string,
     signal: CandidateMemorySignal
   ): Promise<void> {
-    await this.createEdgesFromSignalRefs(
-      newObjectId,
-      signal,
-      "source_memory_refs",
-      MemoryGraphEdgeType.DERIVES_FROM
-    );
-    await this.createEdgesFromSignalRefs(
-      newObjectId,
-      signal,
-      "supersedes_refs",
-      MemoryGraphEdgeType.SUPERSEDES
-    );
-    await this.createEdgesFromSignalRefs(
-      newObjectId,
-      signal,
-      "exception_to_refs",
-      MemoryGraphEdgeType.EXCEPTION_TO
-    );
-    await this.createEdgesFromSignalRefs(
-      newObjectId,
-      signal,
-      "contradicts_refs",
-      MemoryGraphEdgeType.CONTRADICTS
-    );
-    await this.createEdgesFromSignalRefs(
-      newObjectId,
-      signal,
-      "incompatible_with_refs",
-      MemoryGraphEdgeType.INCOMPATIBLE_WITH
-    );
+    for (const spec of SIGNAL_REF_SEED_SPECS) {
+      await this.submitCandidatesFromSignalRefs(newObjectId, signal, spec);
+    }
   }
 
-  // see also: createAllMemoryRefEdges — same shape for each signal key
-  // and edge type. First-class *_refs are proposal inputs, not raw_payload
+  // see also: createAllMemoryRefEdges — drives one spec per signal key.
+  // First-class *_refs are governed path candidates, not raw_payload
   // conventions.
-  private async createEdgesFromSignalRefs(
+  private async submitCandidatesFromSignalRefs(
     newObjectId: string,
     signal: CandidateMemorySignal,
-    signalRefsKey: "source_memory_refs" | "supersedes_refs" | "exception_to_refs" | "contradicts_refs" | "incompatible_with_refs",
-    edgeType: MemoryGraphEdgeTypeValue
+    spec: SignalRefSeedSpec
   ): Promise<void> {
-    if (this.dependencies.graphEdgePort === undefined) {
+    const port = this.dependencies.pathCandidateSinkPort;
+    if (port === undefined) {
       return;
     }
 
-    const refs = signal[signalRefsKey];
+    const refs = signal[spec.signalRefsKey];
     if (refs.length === 0) {
       return;
     }
@@ -1004,22 +1105,26 @@ export class MaterializationRouter {
       }
 
       try {
-        await this.dependencies.graphEdgePort.createEdge({
-          sourceMemoryId: newObjectId,
-          targetMemoryId: ref,
-          edgeType,
+        await port.submitCandidate({
           workspaceId: signal.workspace_id,
-          runId: signal.run_id,
-          triggerSource: EdgeProposalTriggerSource.CANDIDATE_SIGNAL_REF,
-          confidence: Math.min(signal.confidence, 0.5),
-          reason: `${signalRefsKey} on candidate signal ${signal.signal_id}`,
-          sourceSignalId: signal.signal_id
+          sourceAnchor: { kind: "object", object_id: newObjectId },
+          targetAnchor: { kind: "object", object_id: ref },
+          relationKind: spec.relationKind,
+          initialStrength: spec.initialStrength,
+          governanceClass: spec.governanceClass,
+          evidenceBasis: spec.evidenceBasis,
+          recallBiasSign: spec.recallBiasSign,
+          recallBiasMagnitude: spec.recallBiasMagnitude,
+          why: [
+            `${spec.signalRefsKey} on candidate signal ${signal.signal_id}`,
+            `run=${signal.run_id}`
+          ]
         });
       } catch (err) {
-        console.warn("materialization-router: graph edge creation failed", {
+        console.warn("materialization-router: path candidate submission failed", {
           sourceMemoryId: newObjectId,
           targetMemoryId: ref,
-          edgeType,
+          relationKind: spec.relationKind,
           signalId: signal.signal_id,
           error: err instanceof Error ? err.message : String(err)
         });

@@ -9,6 +9,12 @@ import type {
   EdgeAutoProducerLlmDecision,
   EdgeAutoProducerLlmPort
 } from "./edge-auto-producer-llm-port.js";
+import {
+  DERIVES_FROM_SEED_PROFILE,
+  SUPPORTS_SEED_PROFILE,
+  type PathSeedProfile
+} from "./path-relation-proposal-service.js";
+import type { PathCandidateSink } from "./path-candidate-sink.js";
 import { CoreError } from "./errors.js";
 import { parseObjectId } from "./shared/validators.js";
 
@@ -110,23 +116,15 @@ export interface EdgeAutoProducerMemoryRepoPort {
   findByIds(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
-export interface EdgeAutoProducerGraphEdgePort {
-  createEdge(params: {
-    readonly sourceMemoryId: string;
-    readonly targetMemoryId: string;
-    readonly edgeType: MemoryGraphEdgeTypeValue;
-    readonly workspaceId: string;
-    readonly runId?: string | null;
-    readonly triggerSource?: EdgeProposalTriggerSourceValue;
-    readonly confidence?: number;
-    readonly reason?: string | null;
-    readonly sourceSignalId?: string | null;
-  }): Promise<void>;
-}
-
+// invariant: edge auto-producer sink is the governed path candidate
+// intake (PathCandidateSink), not memory_graph_edges. A supports/
+// derives_from candidate is born a weak attention_only path (recall_bias
+// +) that earns recall eligibility only through PathPlasticityService
+// reinforcement; it is never auto-accepted into a permanent edge.
+// see also: path-candidate-sink.ts PathCandidateSink — the shared port.
 export interface EdgeAutoProducerServiceDependencies {
   readonly memoryRepo: EdgeAutoProducerMemoryRepoPort;
-  readonly graphEdgePort: EdgeAutoProducerGraphEdgePort;
+  readonly pathCandidatePort: PathCandidateSink;
   /**
    * Optional pair classifier port. When present the service asks the
    * port for a supports / derives_from verdict before running the
@@ -201,16 +199,21 @@ export class EdgeAutoProducerService {
       if (decision === null) {
         continue;
       }
-      await this.deps.graphEdgePort.createEdge({
-        sourceMemoryId: newMemory.object_id,
-        targetMemoryId: neighbor.object_id,
-        edgeType: decision.edgeType,
+      const profile = seedProfileForEdgeType(decision.edgeType);
+      await this.deps.pathCandidatePort.submitCandidate({
         workspaceId,
-        runId: input.runId,
-        triggerSource: decision.triggerSource,
-        confidence: decision.confidence,
-        reason: decision.reason,
-        sourceSignalId: input.sourceSignalId
+        sourceAnchor: { kind: "object", object_id: newMemory.object_id },
+        targetAnchor: { kind: "object", object_id: neighbor.object_id },
+        relationKind: profile.relationKind,
+        initialStrength: profile.initialStrength,
+        governanceClass: profile.governanceClass,
+        evidenceBasis: profile.evidenceBasis,
+        recallBiasSign: profile.recallBiasSign,
+        recallBiasMagnitude: profile.recallBiasMagnitude,
+        why: [
+          `${decision.triggerSource}: ${decision.reason}`,
+          `source_signal=${input.sourceSignalId} run=${input.runId}`
+        ]
       });
       proposalCount += 1;
     }
@@ -320,6 +323,41 @@ export class EdgeAutoProducerService {
       }
     }
     return ids;
+  }
+}
+
+// invariant: a local heuristic / LLM supersedes verdict is a weak claim,
+// not a system-derived conflict ruling. It seeds attention_only at a low
+// strength (recall_bias - kept so plasticity classifies it as a negative
+// lifecycle path) and must earn recall eligibility through
+// PathPlasticityService reinforcement — it never mints a recall_allowed
+// negative path. This deliberately diverges from the shared
+// SUPERSEDES_SEED_PROFILE (recall_allowed/0.9), which is reserved for
+// SYSTEM-derived negatives produced by ConflictDetectionService.
+// see also: packages/core/src/conflict-detection-service.ts — SYSTEM negatives.
+const LOCAL_SUPERSEDES_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "supersedes",
+  initialStrength: 0.5,
+  governanceClass: "attention_only",
+  recallBiasSign: -1,
+  recallBiasMagnitude: 0.5,
+  evidenceBasis: Object.freeze(["supersession_evidence"]) as readonly string[]
+});
+
+// invariant: maps the producer's edge-type verdict to the path seed
+// profile that carries its initial strength / governance / recall_bias
+// sign. supports + derives_from are positive associative profiles; the
+// local supersedes heuristic is a weak negative lifecycle profile
+// (recall_bias -, attention_only). The producer never mints exception_to.
+function seedProfileForEdgeType(edgeType: MemoryGraphEdgeTypeValue): PathSeedProfile {
+  switch (edgeType) {
+    case MemoryGraphEdgeType.DERIVES_FROM:
+      return DERIVES_FROM_SEED_PROFILE;
+    case MemoryGraphEdgeType.SUPERSEDES:
+      return LOCAL_SUPERSEDES_SEED_PROFILE;
+    case MemoryGraphEdgeType.SUPPORTS:
+    default:
+      return SUPPORTS_SEED_PROFILE;
   }
 }
 

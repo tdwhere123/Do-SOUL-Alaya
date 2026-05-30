@@ -3,7 +3,6 @@ import {
   DYNAMICS_CONSTANTS,
   FormationKind,
   MemoryDimension,
-  MemoryGraphEdgeType,
   ScopeClass,
   SourceKind,
   StorageTier,
@@ -292,27 +291,31 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
   });
 
   describe("supersede_penalty", () => {
-    it("ConflictDetectionService fires supersede_penalty on target memory of contradicts edge", async () => {
+    it("ConflictDetectionService fires supersede_penalty on the LLM-verdict contradicts edge", async () => {
       type KarmaInput = {
         readonly kind: string;
         readonly objectId: string;
         readonly workspaceId: string;
       };
       const emitKarmaEvent = vi.fn(async (_input: KarmaInput) => {});
+      // tag overlap {database, alpha} vs {database, beta} = 1/3 ≈ 0.333:
+      // below the rule threshold (0.35) so only the system-computed LLM
+      // verdict fires — the trust tier that carries the karma penalty.
       const existing = createMemoryEntry({
         object_id: "memory-existing",
         content: "Use PostgreSQL for primary durable storage.",
-        domain_tags: ["database", "stack-choice"]
+        domain_tags: ["database", "alpha"]
       });
 
       const service = new ConflictDetectionService({
         memoryRepo: {
           findByDimension: async () => [Object.freeze({ ...existing })],
-          findByWorkspaceId: async () => [Object.freeze({ ...existing })]
+          findByWorkspaceId: async () => []
         },
-        graphEdgePort: {
-          createEdge: vi.fn(async () => {})
+        pathCandidatePort: {
+          submitCandidate: vi.fn(async () => true)
         },
+        llmPort: { classifyPair: vi.fn(async () => "contradicts" as const) },
         karmaEmitter: { emitKarmaEvent }
       });
 
@@ -321,7 +324,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
         newMemoryDimension: MemoryDimension.FACT,
         newMemoryScopeClass: ScopeClass.PROJECT,
         newMemoryContent: "Adopt MongoDB across the cluster.",
-        newMemoryDomainTags: ["database", "stack-choice"],
+        newMemoryDomainTags: ["database", "beta"],
         workspaceId: "workspace-1",
         runId: "run-1"
       });
@@ -338,10 +341,53 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
       });
     });
 
+    it("ConflictDetectionService does NOT fire supersede_penalty on a rule-path contradicts hit", async () => {
+      type KarmaInput = {
+        readonly kind: string;
+        readonly objectId: string;
+        readonly workspaceId: string;
+      };
+      const emitKarmaEvent = vi.fn(async (_input: KarmaInput) => {});
+      const submitCandidate = vi.fn(async () => true);
+      // high tag overlap + low token overlap → rule path fires contradicts,
+      // but the rule verdict is agent-controllable, so no karma penalty.
+      const existing = createMemoryEntry({
+        object_id: "memory-existing",
+        content: "Use PostgreSQL for primary durable storage.",
+        domain_tags: ["database", "stack-choice"]
+      });
+
+      const service = new ConflictDetectionService({
+        memoryRepo: {
+          findByDimension: async () => [Object.freeze({ ...existing })],
+          findByWorkspaceId: async () => [Object.freeze({ ...existing })]
+        },
+        pathCandidatePort: { submitCandidate },
+        karmaEmitter: { emitKarmaEvent }
+      });
+
+      await service.detectAndLinkConflicts({
+        newMemoryId: "memory-new",
+        newMemoryDimension: MemoryDimension.FACT,
+        newMemoryScopeClass: ScopeClass.PROJECT,
+        newMemoryContent: "Adopt MongoDB across the cluster.",
+        newMemoryDomainTags: ["database", "stack-choice"],
+        workspaceId: "workspace-1",
+        runId: "run-1"
+      });
+
+      const ruleContradicts = submitCandidate.mock.calls.filter(
+        (call: any[]) => call[0].relationKind === "contradicts"
+      );
+      expect(ruleContradicts.length).toBeGreaterThan(0);
+      expect(emitKarmaEvent).not.toHaveBeenCalled();
+    });
+
     it("ConflictDetectionService does not emit supersede_penalty for incompatible_with edges", async () => {
       const emitKarmaEvent = vi.fn(async () => {});
-      const createEdge = vi.fn(async (input: { readonly edgeType: string }) => {
-        expect(input.edgeType).toBe(MemoryGraphEdgeType.INCOMPATIBLE_WITH);
+      const submitCandidate = vi.fn(async (input: { readonly relationKind: string }) => {
+        expect(input.relationKind).toBe("incompatible_with");
+        return true;
       });
       const existing = createMemoryEntry({
         object_id: "memory-existing",
@@ -355,7 +401,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
           findByDimension: async () => [],
           findByWorkspaceId: async () => [Object.freeze({ ...existing })]
         },
-        graphEdgePort: { createEdge },
+        pathCandidatePort: { submitCandidate },
         karmaEmitter: { emitKarmaEvent }
       });
 

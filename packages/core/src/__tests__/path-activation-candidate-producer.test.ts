@@ -91,6 +91,73 @@ describe("PathActivationCandidateProducer", () => {
     expect(candidates[0]?.source_path_id).toBe("path-active");
   });
 
+  it("emits no candidates for negative-bias paths (recall_bias < 0 is suppression, not activation)", async () => {
+    const activePath = createPathRelation({
+      path_id: "path-active",
+      sourceMemoryId: "mem-source",
+      targetMemoryId: "mem-target"
+    });
+    const negativePath = createPathRelation({
+      path_id: "path-negative",
+      sourceMemoryId: "mem-source",
+      targetMemoryId: "mem-other",
+      // recall_bias = recallBiasSign(-1) * magnitude(0.4): a negative path
+      // records suppression and must never surface as a positive activation
+      // candidate, even when its lifecycle is active.
+      effectVectorOverrides: { recall_bias: -0.4 }
+    });
+    const reader: PathActivationCandidateProducerPathReaderPort = {
+      findActiveByAnchorObjectIds: vi.fn(async () => [activePath, negativePath])
+    };
+    const producer = new PathActivationCandidateProducer({
+      pathReader: reader,
+      generateCandidateId: stableIdGenerator("cand"),
+      now: () => NOW
+    });
+
+    const candidates = await producer.produce({
+      workspaceId: WORKSPACE,
+      runId: RUN,
+      anchorMemoryObjectIds: ["mem-source"]
+    });
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.source_path_id).toBe("path-active");
+  });
+
+  it("emits no candidates for recall-neutral exception_to paths (recall_bias == 0)", async () => {
+    const activePath = createPathRelation({
+      path_id: "path-active",
+      sourceMemoryId: "mem-source",
+      targetMemoryId: "mem-target"
+    });
+    const neutralPath = createPathRelation({
+      path_id: "path-neutral",
+      sourceMemoryId: "mem-source",
+      targetMemoryId: "mem-other",
+      // recall_bias exactly 0: a topology marker excluded by the
+      // strict-positive isPathRecallEligible gate.
+      effectVectorOverrides: { recall_bias: 0 }
+    });
+    const reader: PathActivationCandidateProducerPathReaderPort = {
+      findActiveByAnchorObjectIds: vi.fn(async () => [activePath, neutralPath])
+    };
+    const producer = new PathActivationCandidateProducer({
+      pathReader: reader,
+      generateCandidateId: stableIdGenerator("cand"),
+      now: () => NOW
+    });
+
+    const candidates = await producer.produce({
+      workspaceId: WORKSPACE,
+      runId: RUN,
+      anchorMemoryObjectIds: ["mem-source"]
+    });
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.source_path_id).toBe("path-active");
+  });
+
   it("snapshots effect_vector immutably (source mutation does not leak)", async () => {
     const sourceEffectVector = {
       salience: 0.42,

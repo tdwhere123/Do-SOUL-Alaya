@@ -8,7 +8,7 @@ import {
   SoulRecallCompletedPayloadSchema,
   SoulRecallWeightTransferPayloadSchema,
   StorageTier,
-  isPathActiveForRecall,
+  isPathRecallEligible,
   type FineAssessmentConfig,
   type ActivationWeights,
   type MemoryDimension as MemoryDimensionType,
@@ -4691,11 +4691,30 @@ function anchorMemoryId(anchor: PathAnchorRef): string | undefined {
   }
 }
 
-// invariant: recall path_expansion only consumes recall-active paths. Both
-// retired (terminal) and dormant (reversible cold storage) are excluded so a
-// dormant path never leaks back into recall scoring.
+// invariant: recall path_expansion only consumes recall-eligible paths —
+// active lifecycle AND recall_bias > 0 (the shared isPathRecallEligible
+// predicate). This is the negation of recall-eligible, so it excludes in
+// one gate:
+//   - lifecycle: retired (terminal) and dormant (reversible cold storage)
+//     never leak back into recall scoring;
+//   - negative families (contradicts / supersedes / incompatible_with,
+//     recall_bias < 0): suppression, not association — adding the target as
+//     a positive path_expansion candidate would AMPLIFY the suppressed
+//     memory instead of demoting it;
+//   - the recall-neutral exception_to marker (recall_bias == 0): a topology
+//     marker that must not enter positive expansion either.
+// Using the shared predicate keeps the < 0 / <= 0 family boundary aligned
+// with PathPlasticityService (which retires the negative + neutral family)
+// rather than re-deriving the sign test here.
+// Active sign-aware suppression that scores negatives as a demotion rather
+// than a non-add is a separate recall pass, not yet implemented; this guard
+// only stops the amplification.
+// see also: path-relation-proposal-service.ts — recall_bias is
+// recallBiasSign * recallBiasMagnitude, so a negative family is < 0 and the
+// exception_to marker is exactly 0.
+// see also: path-relation.ts isPathRecallEligible — the shared predicate.
 function isPathExcludedFromRecall(path: Readonly<PathRelation>): boolean {
-  return !isPathActiveForRecall(path.lifecycle.status);
+  return !isPathRecallEligible(path);
 }
 
 function uniqueStrings(values: readonly string[]): readonly string[] {

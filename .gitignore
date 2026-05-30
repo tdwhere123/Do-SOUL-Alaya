@@ -15,6 +15,8 @@ data/
 apps/bench-runner/data/
 # Regenerated bench extraction cache (hash-keyed; not source truth)
 docs/bench-history/datasets/longmemeval-extraction-cache/
+# Regenerated edge-auto-producer decision cache (content-keyed; not source truth)
+docs/bench-history/datasets/edge-auto-producer-decisions/
 # External full bench diagnostics; tracked archives keep compact sidecars only.
 .bench-artifacts/
 *.db

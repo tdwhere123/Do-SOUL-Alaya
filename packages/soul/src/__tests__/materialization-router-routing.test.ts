@@ -586,7 +586,6 @@ interface TestDeps {
   readonly memoryService: { create: ReturnType<typeof vi.fn> };
   readonly synthesisService: { create: ReturnType<typeof vi.fn> };
   readonly claimService: { create: ReturnType<typeof vi.fn> };
-  readonly graphEdgePort: { createEdge: ReturnType<typeof vi.fn> };
   readonly handoffGapHandler: InMemoryHandoffGapHandler;
   claimServiceLastStatus(): string | undefined;
 }
@@ -632,16 +631,11 @@ function createDeps(): TestDeps {
       } as never;
     })
   };
-  const graphEdgePort = {
-    createEdge: vi.fn(async () => undefined)
-  };
-
   return {
     evidenceService,
     memoryService,
     synthesisService,
     claimService,
-    graphEdgePort,
     handoffGapHandler: new InMemoryHandoffGapHandler(),
     claimServiceLastStatus: () => lastClaimStatus
   };
