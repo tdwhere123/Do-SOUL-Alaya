@@ -173,6 +173,7 @@ describe("Phase C shared-contract foundation", () => {
       retirements_committed: 1,
       governance_changes_committed: 1,
       direction_changes_committed: 1,
+      merges_committed: 0,
       fuse_outcome: "ok"
     } as const;
 
@@ -236,6 +237,9 @@ describe("Phase C shared-contract foundation", () => {
       retirement_cooldown_ms: 7 * 24 * 3600 * 1000,
       consolidation_fuse_max_retries: 3,
       consolidation_fuse_cooldown_ms: 60_000,
+      consolidation_dormant_age_ms: 90 * 24 * 3600 * 1000,
+      consolidation_merge_min_cluster_size: 2,
+      consolidation_merge_why_max_entries: 16,
       // Feedback-loop-specific tuning (see DYNAMICS_CONSTANTS comment).
       strength_floor: 0,
       strength_ceiling: 1,

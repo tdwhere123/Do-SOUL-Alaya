@@ -448,6 +448,80 @@ describe("SqlitePathRelationRepo", () => {
     await expect(repo.findActive("workspace-1")).resolves.toEqual([withActiveLifecycle(relation)]);
   });
 
+  it("findDormant returns only dormant rows whose updated_at is older than the threshold", async () => {
+    const { repo, database } = createRepo();
+
+    // Active rows are never dormant candidates.
+    repo.create(createPathRelationFixture({ path_id: "path-active" }));
+
+    // A dormant row last touched well before the threshold: a candidate.
+    insertRawPathRelationRow(database, {
+      pathId: "path-dormant-old",
+      lifecycleJson: JSON.stringify({
+        status: "dormant",
+        retirement_rule: "retire_after_cooldown",
+        cooldown_rule: "7d_without_support"
+      }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-10T00:00:00.000Z"
+    });
+
+    // A dormant row touched after the threshold: too fresh, excluded.
+    insertRawPathRelationRow(database, {
+      pathId: "path-dormant-fresh",
+      lifecycleJson: JSON.stringify({
+        status: "dormant",
+        retirement_rule: "retire_after_cooldown",
+        cooldown_rule: "7d_without_support"
+      }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z"
+    });
+
+    // A retired row is terminal, never a dormant candidate even if old.
+    insertRawPathRelationRow(database, {
+      pathId: "path-retired-old",
+      lifecycleJson: JSON.stringify({
+        status: "retired",
+        retirement_rule: "retire_after_cooldown"
+      }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-10T00:00:00.000Z"
+    });
+
+    const dormant = await repo.findDormant("workspace-1", "2026-02-01T00:00:00.000Z");
+    expect(dormant.map((relation) => relation.path_id)).toEqual(["path-dormant-old"]);
+  });
+
+  it("findDormant scopes to a single workspace", async () => {
+    const { repo, database } = createRepo();
+    seedWorkspace(database, "workspace-2");
+
+    insertRawPathRelationRow(database, {
+      pathId: "path-ws1-dormant",
+      workspaceId: "workspace-1",
+      lifecycleJson: JSON.stringify({
+        status: "dormant",
+        retirement_rule: "retire_after_cooldown"
+      }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-10T00:00:00.000Z"
+    });
+    insertRawPathRelationRow(database, {
+      pathId: "path-ws2-dormant",
+      workspaceId: "workspace-2",
+      lifecycleJson: JSON.stringify({
+        status: "dormant",
+        retirement_rule: "retire_after_cooldown"
+      }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-10T00:00:00.000Z"
+    });
+
+    const dormant = await repo.findDormant("workspace-1", "2026-02-01T00:00:00.000Z");
+    expect(dormant.map((relation) => relation.path_id)).toEqual(["path-ws1-dormant"]);
+  });
+
   it("deletes path relations", async () => {
     const { repo } = createRepo();
     const relation = createPathRelationFixture();

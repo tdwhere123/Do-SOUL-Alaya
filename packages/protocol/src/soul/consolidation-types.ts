@@ -61,6 +61,27 @@ export const ConsolidationCyclePlanSchema = z
           .readonly()
       )
       .readonly(),
+    // invariant: a merge folds the evidence of merged_path_ids (the losers)
+    // into survivor_path_id, then deletes the losers. The executor performs
+    // the why_this_relation_exists concat (deduped + bounded) and the loser
+    // deletion transactionally. merged_path_ids MUST exclude the survivor.
+    // Optional (no default) so plans persisted or built before the merge
+    // mutation existed still parse (backward compatibility); an absent field
+    // means no merges.
+    // see also: packages/core/src/consolidation-executor.ts prepareMerges.
+    // see also: packages/core/src/consolidation-planner.ts (producer).
+    merges: z
+      .array(
+        z
+          .object({
+            survivor_path_id: NonEmptyStringSchema,
+            merged_path_ids: z.array(NonEmptyStringSchema).readonly()
+          })
+          .strict()
+          .readonly()
+      )
+      .readonly()
+      .optional(),
     fuse_state: z
       .object({
         blown: z.boolean(),
@@ -81,6 +102,7 @@ export const ConsolidationCycleResultSchema = z
     retirements_committed: NonNegativeIntSchema,
     governance_changes_committed: NonNegativeIntSchema,
     direction_changes_committed: NonNegativeIntSchema,
+    merges_committed: NonNegativeIntSchema,
     fuse_outcome: z.enum(["ok", "tripped", "cooldown_active"])
   })
   .strict()

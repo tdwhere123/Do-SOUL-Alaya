@@ -61,6 +61,7 @@ describe("Phase C event registry", () => {
       "path.relation_retired",
       "path.relation_dormant",
       "path.relation_revived",
+      "path.relation_merged",
       "path.consolidation_completed",
       "path.consolidation_fused",
       "surface.drift_detected",
@@ -154,6 +155,13 @@ describe("Phase C event registry", () => {
       retirement_reason: "cooldown_expired",
       final_strength: 0.05,
       retired_at: validTimestamp
+    } as const;
+    const mergedPayload = {
+      survivor_path_id: "path-survivor",
+      merged_path_ids: ["path-loser-a", "path-loser-b"],
+      relation_kind: "supports",
+      survivor_why_entry_count: 3,
+      merged_at: validTimestamp
     } as const;
     const redirectedPayload = {
       path_id: "path-1",
@@ -450,6 +458,9 @@ describe("Phase C event registry", () => {
     );
     expect(parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_RETIRED, retiredPayload)).toEqual(
       retiredPayload
+    );
+    expect(parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_MERGED, mergedPayload)).toEqual(
+      mergedPayload
     );
     expect(
       parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED, driftDetectedPayload)

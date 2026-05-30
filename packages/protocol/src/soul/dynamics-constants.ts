@@ -58,6 +58,18 @@ export const DYNAMICS_CONSTANTS = Object.freeze({
     retirement_cooldown_ms: 7 * 24 * 3600 * 1000,
     consolidation_fuse_max_retries: 3,
     consolidation_fuse_cooldown_ms: 60_000,
+    // Consolidation planner thresholds (S3a). A dormant path is a merge/retire
+    // candidate only once it has stayed dormant at least this long; this mirrors
+    // the 30-day inactivity window the plasticity decay path already uses to
+    // demote a path to dormant, so a path is never consolidated in the same
+    // window it went dormant. A mergeable cluster needs at least this many
+    // surviving members for a merge to be worthwhile (one survivor + >=1 loser).
+    // The merge why-concat is bounded to this many provenance entries so an
+    // unbounded chain of merges cannot grow why_this_relation_exists without
+    // limit; the executor dedupes then truncates to this cap.
+    consolidation_dormant_age_ms: 90 * 24 * 3600 * 1000,
+    consolidation_merge_min_cluster_size: 2,
+    consolidation_merge_why_max_entries: 16,
     // Feedback-loop-specific tuning. The reinforcement_increment /
     // weakening_decrement above stay authoritative for delta math; these
     // additional constants only cover clamping and retirement preconditions.

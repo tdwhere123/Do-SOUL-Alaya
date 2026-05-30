@@ -10,6 +10,8 @@ export * from "./conversation-service.js";
 export * from "./cross-cutting-permission-service.js";
 export * from "./conflict-detection-service.js";
 export * from "./consolidation-executor.js";
+export * from "./consolidation-planner.js";
+export * from "./importance-gate.js";
 export * from "./deferred-obligation-service.js";
 export * from "./path-relation-proposal-service.js";
 export * from "./path-candidate-sink.js";

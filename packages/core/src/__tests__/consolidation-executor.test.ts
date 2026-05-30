@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  DYNAMICS_CONSTANTS,
   RuntimeGovernanceEventType,
   type ConsolidationCyclePlan,
   type ConsolidationTriggerBudget,
@@ -14,6 +15,8 @@ import {
 import { EventPublisher, type RuntimeNotifier } from "../event-publisher.js";
 
 const NOW_ISO = "2026-05-20T12:00:00.000Z";
+const MERGE_WHY_MAX_ENTRIES =
+  DYNAMICS_CONSTANTS.path_plasticity.consolidation_merge_why_max_entries;
 
 function createPath(overrides: Partial<PathRelation> = {}): PathRelation {
   return {
@@ -54,6 +57,17 @@ function createPath(overrides: Partial<PathRelation> = {}): PathRelation {
   } as PathRelation;
 }
 
+// A merge loser must be dormant-at-apply and deletable (mergeable disposition).
+// The executor re-enforces the importance gate + the dormant predicate at the
+// delete site, so a loser fixture must carry lifecycle.status === "dormant".
+function createDormantLoser(overrides: Partial<PathRelation> = {}): PathRelation {
+  const base = createPath(overrides);
+  return {
+    ...base,
+    lifecycle: { ...base.lifecycle, status: "dormant" }
+  } as PathRelation;
+}
+
 function emptyPlan(overrides: Partial<ConsolidationCyclePlan> = {}): ConsolidationCyclePlan {
   return {
     workspace_id: "workspace-1",
@@ -74,6 +88,8 @@ interface Harness {
     pathId: string;
     updates: Partial<PathRelation>;
   }[];
+  readonly repoDeletes: string[];
+  readonly pathStateById: Map<string, PathRelation>;
   readonly budgetUpserts: ConsolidationTriggerBudget[];
 }
 
@@ -83,6 +99,7 @@ function buildHarness(params: {
 }): Harness {
   const publishedEvents: EventLogEntry[] = [];
   const repoUpdates: { pathId: string; updates: Partial<PathRelation> }[] = [];
+  const repoDeletes: string[] = [];
   const budgetUpserts: ConsolidationTriggerBudget[] = [];
   const pathStateById = new Map<string, PathRelation>();
   for (const path of params.paths ?? []) {
@@ -135,6 +152,10 @@ function buildHarness(params: {
       } as PathRelation;
       pathStateById.set(pathId, updated);
       return updated;
+    }),
+    delete: vi.fn((pathId: string) => {
+      repoDeletes.push(pathId);
+      pathStateById.delete(pathId);
     })
   };
 
@@ -154,7 +175,7 @@ function buildHarness(params: {
     now: () => NOW_ISO
   });
 
-  return { executor, publishedEvents, repoUpdates, budgetUpserts };
+  return { executor, publishedEvents, repoUpdates, repoDeletes, pathStateById, budgetUpserts };
 }
 
 describe("ConsolidationExecutor", () => {
@@ -411,5 +432,469 @@ describe("ConsolidationExecutor", () => {
 
     expect(result.fuse_outcome).toBe("tripped");
     expect(harness.repoUpdates).toHaveLength(0);
+  });
+
+  it("applies a merge: concats survivor why (deduped), deletes losers, emits PATH_RELATION_MERGED", async () => {
+    const survivor = createPath({
+      path_id: "path-survivor",
+      constitution: {
+        relation_kind: "supports",
+        why_this_relation_exists: ["survivor-why", "shared-why"]
+      },
+      legitimacy: { evidence_basis: ["ev-survivor"], governance_class: "recall_allowed" }
+    });
+    const loserA = createDormantLoser({
+      path_id: "path-loser-a",
+      constitution: {
+        relation_kind: "supports",
+        // "shared-why" duplicates the survivor's; "loser-a-why" is new.
+        why_this_relation_exists: ["shared-why", "loser-a-why"]
+      },
+      legitimacy: { evidence_basis: ["ev-loser-a"], governance_class: "recall_allowed" }
+    });
+    const loserB = createDormantLoser({
+      path_id: "path-loser-b",
+      constitution: {
+        relation_kind: "supports",
+        why_this_relation_exists: ["loser-b-why"]
+      },
+      // evidence_basis length 1 keeps this loser "mergeable" (deletable); a
+      // second source from the survivor still lands in the survivor's absorbed
+      // evidence list.
+      legitimacy: { evidence_basis: ["ev-loser-b"], governance_class: "recall_allowed" }
+    });
+    const harness = buildHarness({ paths: [survivor, loserA, loserB] });
+
+    const result = await harness.executor.runCycle({
+      triggerSource: "native_surface_drift",
+      plan: emptyPlan({
+        merges: [
+          {
+            survivor_path_id: "path-survivor",
+            merged_path_ids: ["path-loser-a", "path-loser-b"]
+          }
+        ]
+      })
+    });
+
+    expect(result.fuse_outcome).toBe("ok");
+    expect(result.merges_committed).toBe(1);
+
+    // Survivor's why_this_relation_exists is survivor-first, deduped union.
+    const survivorUpdate = harness.repoUpdates.find((row) => row.pathId === "path-survivor");
+    expect(survivorUpdate?.updates.constitution?.why_this_relation_exists).toEqual([
+      "survivor-why",
+      "shared-why",
+      "loser-a-why",
+      "loser-b-why"
+    ]);
+    // Survivor absorbs losers' evidence too (survivor-first, deduped union).
+    expect(survivorUpdate?.updates.legitimacy?.evidence_basis).toEqual([
+      "ev-survivor",
+      "ev-loser-a",
+      "ev-loser-b"
+    ]);
+
+    // Losers are deleted; survivor is not.
+    expect(harness.repoDeletes.sort()).toEqual(["path-loser-a", "path-loser-b"]);
+    expect(harness.pathStateById.has("path-survivor")).toBe(true);
+    expect(harness.pathStateById.has("path-loser-a")).toBe(false);
+    expect(harness.pathStateById.has("path-loser-b")).toBe(false);
+
+    // One merged audit event carries the losers and the survivor relation kind.
+    const mergedEvents = harness.publishedEvents.filter(
+      (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_MERGED
+    );
+    expect(mergedEvents).toHaveLength(1);
+    const mergedPayload = mergedEvents[0]?.payload_json as Record<string, unknown>;
+    expect(mergedPayload.survivor_path_id).toBe("path-survivor");
+    expect(mergedPayload.merged_path_ids).toEqual(["path-loser-a", "path-loser-b"]);
+    expect(mergedPayload.relation_kind).toBe("supports");
+
+    // The completed event counts the deleted losers toward paths_retired.
+    const completed = harness.publishedEvents.find(
+      (event) => event.event_type === RuntimeGovernanceEventType.PATH_CONSOLIDATION_COMPLETED
+    );
+    expect((completed?.payload_json as Record<string, unknown>).paths_retired).toBe(2);
+  });
+
+  it("merges in the same transaction as other mutations and charges one attempt", async () => {
+    const survivor = createPath({ path_id: "path-survivor" });
+    const loser = createDormantLoser({ path_id: "path-loser" });
+    const promote = createPath({ path_id: "path-promote" });
+    const harness = buildHarness({ paths: [survivor, loser, promote] });
+
+    const result = await harness.executor.runCycle({
+      triggerSource: "native_surface_drift",
+      plan: emptyPlan({
+        promotions: [{ path_id: "path-promote", from_stability: "normal", to_stability: "stable" }],
+        merges: [{ survivor_path_id: "path-survivor", merged_path_ids: ["path-loser"] }]
+      })
+    });
+
+    expect(result.fuse_outcome).toBe("ok");
+    expect(result.promotions_committed).toBe(1);
+    expect(result.merges_committed).toBe(1);
+    expect(harness.repoDeletes).toEqual(["path-loser"]);
+    // A single budget charge for the whole cycle.
+    expect(harness.budgetUpserts).toHaveLength(1);
+  });
+
+  it("bounds the concatenated survivor why to the configured max entries", async () => {
+    // Build a survivor + loser whose combined unique why entries exceed the
+    // DYNAMICS_CONSTANTS bound; the survivor's own entries are always kept.
+    const survivorWhy = Array.from({ length: 4 }, (_, index) => `survivor-why-${index}`);
+    const loserWhy = Array.from({ length: 40 }, (_, index) => `loser-why-${index}`);
+    const survivor = createPath({
+      path_id: "path-survivor",
+      constitution: { relation_kind: "supports", why_this_relation_exists: survivorWhy }
+    });
+    const loser = createDormantLoser({
+      path_id: "path-loser",
+      constitution: { relation_kind: "supports", why_this_relation_exists: loserWhy }
+    });
+    const harness = buildHarness({ paths: [survivor, loser] });
+
+    await harness.executor.runCycle({
+      triggerSource: "native_surface_drift",
+      plan: emptyPlan({
+        merges: [{ survivor_path_id: "path-survivor", merged_path_ids: ["path-loser"] }]
+      })
+    });
+
+    const survivorUpdate = harness.repoUpdates.find((row) => row.pathId === "path-survivor");
+    const mergedWhy = survivorUpdate?.updates.constitution?.why_this_relation_exists ?? [];
+    expect(mergedWhy.length).toBe(MERGE_WHY_MAX_ENTRIES);
+    // Survivor's own entries lead and are never trimmed.
+    expect(mergedWhy.slice(0, survivorWhy.length)).toEqual(survivorWhy);
+  });
+
+  it("rejects a merge whose survivor lists itself as a loser, burning no budget", async () => {
+    // Survivor-also-loser is an id overlap (path-survivor in both lanes), caught
+    // by the overlap guard before any path is loaded.
+    const survivor = createPath({ path_id: "path-survivor" });
+    const harness = buildHarness({
+      paths: [survivor],
+      budget: {
+        trigger_id: "consolidation-native_surface_drift",
+        trigger_source: "native_surface_drift",
+        max_attempts_within_window: 3,
+        attempts_used: 1,
+        cooldown_until: "1970-01-01T00:00:00.000Z"
+      }
+    });
+
+    await expect(
+      harness.executor.runCycle({
+        triggerSource: "native_surface_drift",
+        plan: emptyPlan({
+          merges: [
+            { survivor_path_id: "path-survivor", merged_path_ids: ["path-survivor"] }
+          ]
+        })
+      })
+    ).rejects.toThrow(/appears in more than one mutation/);
+
+    expect(harness.budgetUpserts).toHaveLength(0);
+    expect(harness.repoDeletes).toHaveLength(0);
+  });
+
+  it("keeps the full survivor why/evidence when the survivor alone exceeds the bound", async () => {
+    // C2 regression guard: the bound caps only ABSORBED loser entries. A
+    // survivor whose own why/evidence already holds more than the bound must
+    // emerge untrimmed — the survivor never loses its own provenance.
+    const overBound = MERGE_WHY_MAX_ENTRIES + 4;
+    const survivorWhy = Array.from({ length: overBound }, (_, index) => `survivor-why-${index}`);
+    const survivorEvidence = Array.from(
+      { length: overBound },
+      (_, index) => `survivor-ev-${index}`
+    );
+    const survivor = createPath({
+      path_id: "path-survivor",
+      constitution: { relation_kind: "supports", why_this_relation_exists: survivorWhy },
+      legitimacy: { evidence_basis: survivorEvidence, governance_class: "recall_allowed" }
+    });
+    const loser = createDormantLoser({
+      path_id: "path-loser",
+      constitution: { relation_kind: "supports", why_this_relation_exists: ["loser-why"] }
+    });
+    const harness = buildHarness({ paths: [survivor, loser] });
+
+    await harness.executor.runCycle({
+      triggerSource: "native_surface_drift",
+      plan: emptyPlan({
+        merges: [{ survivor_path_id: "path-survivor", merged_path_ids: ["path-loser"] }]
+      })
+    });
+
+    const survivorUpdate = harness.repoUpdates.find((row) => row.pathId === "path-survivor");
+    // The survivor's own oversized list is preserved in full (length === overBound,
+    // strictly greater than the bound), proving the cap never trims the survivor.
+    expect(survivorUpdate?.updates.constitution?.why_this_relation_exists).toEqual(survivorWhy);
+    expect(survivorUpdate?.updates.constitution?.why_this_relation_exists?.length).toBe(overBound);
+    expect(overBound).toBeGreaterThan(MERGE_WHY_MAX_ENTRIES);
+    expect(survivorUpdate?.updates.legitimacy?.evidence_basis).toEqual(survivorEvidence);
+  });
+
+  it("throws when a plan names a protected (evidence-rich) path as a merge loser, burning no budget", async () => {
+    // The plan is externally constructable; a buggy/future caller could name a
+    // protected path as a loser. The executor re-runs the importance gate at the
+    // delete site and refuses — the protected path is never deleted.
+    const survivor = createPath({ path_id: "path-survivor" });
+    const protectedLoser = createDormantLoser({
+      path_id: "path-protected",
+      // evidence_basis length 2 => "keep" disposition => not deletable.
+      legitimacy: { evidence_basis: ["ev-1", "ev-2"], governance_class: "recall_allowed" }
+    });
+    const harness = buildHarness({
+      paths: [survivor, protectedLoser],
+      budget: {
+        trigger_id: "consolidation-native_surface_drift",
+        trigger_source: "native_surface_drift",
+        max_attempts_within_window: 3,
+        attempts_used: 1,
+        cooldown_until: "1970-01-01T00:00:00.000Z"
+      }
+    });
+
+    await expect(
+      harness.executor.runCycle({
+        triggerSource: "native_surface_drift",
+        plan: emptyPlan({
+          merges: [{ survivor_path_id: "path-survivor", merged_path_ids: ["path-protected"] }]
+        })
+      })
+    ).rejects.toThrow(/protected from deletion/);
+
+    expect(harness.budgetUpserts).toHaveLength(0);
+    expect(harness.repoDeletes).toHaveLength(0);
+  });
+
+  it("throws when a plan names a strictly_governed path as a merge loser", async () => {
+    const survivor = createPath({ path_id: "path-survivor" });
+    const governedLoser = createDormantLoser({
+      path_id: "path-governed",
+      legitimacy: { evidence_basis: ["ev-1"], governance_class: "strictly_governed" }
+    });
+    const harness = buildHarness({ paths: [survivor, governedLoser] });
+
+    await expect(
+      harness.executor.runCycle({
+        triggerSource: "native_surface_drift",
+        plan: emptyPlan({
+          merges: [{ survivor_path_id: "path-survivor", merged_path_ids: ["path-governed"] }]
+        })
+      })
+    ).rejects.toThrow(/protected from deletion/);
+
+    expect(harness.repoDeletes).toHaveLength(0);
+  });
+
+  it("throws when a plan names a pinned path as a merge loser", async () => {
+    const survivor = createPath({ path_id: "path-survivor" });
+    const pinnedLoser = createDormantLoser({
+      path_id: "path-pinned",
+      plasticity_state: {
+        strength: 0.5,
+        direction_bias: "source_to_target",
+        stability_class: "pinned",
+        support_events_count: 0,
+        contradiction_events_count: 0
+      }
+    });
+    const harness = buildHarness({ paths: [survivor, pinnedLoser] });
+
+    await expect(
+      harness.executor.runCycle({
+        triggerSource: "native_surface_drift",
+        plan: emptyPlan({
+          merges: [{ survivor_path_id: "path-survivor", merged_path_ids: ["path-pinned"] }]
+        })
+      })
+    ).rejects.toThrow(/protected from deletion/);
+
+    expect(harness.repoDeletes).toHaveLength(0);
+  });
+
+  it("throws when a merge loser is no longer dormant at apply time (TOCTOU guard)", async () => {
+    // The loser is deletable by the gate (mergeable) but its lifecycle.status is
+    // active, not dormant — it revived between plan emission and commit. The
+    // dormant-at-apply re-check refuses the delete.
+    const survivor = createPath({ path_id: "path-survivor" });
+    const revivedLoser = createPath({
+      path_id: "path-revived",
+      lifecycle: { retirement_rule: "default", status: "active" }
+    });
+    const harness = buildHarness({ paths: [survivor, revivedLoser] });
+
+    await expect(
+      harness.executor.runCycle({
+        triggerSource: "native_surface_drift",
+        plan: emptyPlan({
+          merges: [{ survivor_path_id: "path-survivor", merged_path_ids: ["path-revived"] }]
+        })
+      })
+    ).rejects.toThrow(/no longer dormant/);
+
+    expect(harness.repoDeletes).toHaveLength(0);
+  });
+
+  it("throws when a survivor is itself protected (not survivor-eligible)", async () => {
+    const protectedSurvivor = createPath({
+      path_id: "path-survivor",
+      legitimacy: { evidence_basis: ["ev-1"], governance_class: "strictly_governed" }
+    });
+    const loser = createDormantLoser({ path_id: "path-loser" });
+    const harness = buildHarness({ paths: [protectedSurvivor, loser] });
+
+    await expect(
+      harness.executor.runCycle({
+        triggerSource: "native_surface_drift",
+        plan: emptyPlan({
+          merges: [{ survivor_path_id: "path-survivor", merged_path_ids: ["path-loser"] }]
+        })
+      })
+    ).rejects.toThrow(/not survivor-eligible/);
+
+    expect(harness.repoDeletes).toHaveLength(0);
+  });
+
+  it("throws when a path is both a merge survivor and a loser in another merge, burning no budget", async () => {
+    const shared = createPath({ path_id: "path-shared" });
+    const loser = createDormantLoser({ path_id: "path-loser" });
+    const otherSurvivor = createPath({ path_id: "path-other" });
+    const harness = buildHarness({
+      paths: [shared, loser, otherSurvivor],
+      budget: {
+        trigger_id: "consolidation-native_surface_drift",
+        trigger_source: "native_surface_drift",
+        max_attempts_within_window: 3,
+        attempts_used: 1,
+        cooldown_until: "1970-01-01T00:00:00.000Z"
+      }
+    });
+
+    await expect(
+      harness.executor.runCycle({
+        triggerSource: "native_surface_drift",
+        plan: emptyPlan({
+          merges: [
+            { survivor_path_id: "path-shared", merged_path_ids: ["path-loser"] },
+            { survivor_path_id: "path-other", merged_path_ids: ["path-shared"] }
+          ]
+        })
+      })
+    ).rejects.toThrow(/appears in more than one mutation/);
+
+    expect(harness.budgetUpserts).toHaveLength(0);
+    expect(harness.repoDeletes).toHaveLength(0);
+  });
+
+  it("throws when the same loser appears in two merges", async () => {
+    const survivorA = createPath({ path_id: "path-survivor-a" });
+    const survivorB = createPath({ path_id: "path-survivor-b" });
+    const sharedLoser = createDormantLoser({ path_id: "path-loser" });
+    const harness = buildHarness({ paths: [survivorA, survivorB, sharedLoser] });
+
+    await expect(
+      harness.executor.runCycle({
+        triggerSource: "native_surface_drift",
+        plan: emptyPlan({
+          merges: [
+            { survivor_path_id: "path-survivor-a", merged_path_ids: ["path-loser"] },
+            { survivor_path_id: "path-survivor-b", merged_path_ids: ["path-loser"] }
+          ]
+        })
+      })
+    ).rejects.toThrow(/appears in more than one mutation/);
+
+    expect(harness.repoDeletes).toHaveLength(0);
+  });
+
+  it("throws when a path appears in both a merge and the retirements list", async () => {
+    const survivor = createPath({ path_id: "path-survivor" });
+    const loser = createDormantLoser({ path_id: "path-loser" });
+    const harness = buildHarness({ paths: [survivor, loser] });
+
+    await expect(
+      harness.executor.runCycle({
+        triggerSource: "native_surface_drift",
+        plan: emptyPlan({
+          retirements: [{ path_id: "path-loser", reason: "stale" }],
+          merges: [{ survivor_path_id: "path-survivor", merged_path_ids: ["path-loser"] }]
+        })
+      })
+    ).rejects.toThrow(/appears in more than one mutation/);
+
+    expect(harness.repoDeletes).toHaveLength(0);
+  });
+
+  it("captures each deleted loser's full why/evidence/effect in PATH_RELATION_MERGED beyond the survivor bound", async () => {
+    // R2/R3 regression guard: the survivor row is bounded, but the event is the
+    // ONLY durable record of the destroyed losers, so it must carry each loser's
+    // FULL why + evidence (even the entries dropped past the survivor bound) plus
+    // an effect summary that distinguishes a negative-family (suppressing) loser.
+    const survivorWhy = Array.from({ length: 12 }, (_, index) => `survivor-why-${index}`);
+    const survivor = createPath({
+      path_id: "path-survivor",
+      constitution: { relation_kind: "supports", why_this_relation_exists: survivorWhy }
+    });
+    const loserWhy = Array.from({ length: 20 }, (_, index) => `loser-why-${index}`);
+    // A single evidence source keeps the loser "mergeable" (deletable); the
+    // event still records the loser's full evidence_basis regardless of length.
+    const loserEvidence = ["loser-ev-0"];
+    const negativeLoser = createDormantLoser({
+      path_id: "path-loser",
+      constitution: { relation_kind: "supports", why_this_relation_exists: loserWhy },
+      legitimacy: { evidence_basis: loserEvidence, governance_class: "recall_allowed" },
+      effect_vector: {
+        salience: 0.2,
+        recall_bias: -0.8,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "stance_bias"
+      },
+      plasticity_state: {
+        strength: 0.5,
+        direction_bias: "target_to_source",
+        stability_class: "normal",
+        support_events_count: 0,
+        contradiction_events_count: 0
+      }
+    });
+    const harness = buildHarness({ paths: [survivor, negativeLoser] });
+
+    await harness.executor.runCycle({
+      triggerSource: "native_surface_drift",
+      plan: emptyPlan({
+        merges: [{ survivor_path_id: "path-survivor", merged_path_ids: ["path-loser"] }]
+      })
+    });
+
+    // The survivor row is bounded — its absorbed loser entries were trimmed.
+    const survivorUpdate = harness.repoUpdates.find((row) => row.pathId === "path-survivor");
+    const survivorMergedWhy =
+      survivorUpdate?.updates.constitution?.why_this_relation_exists ?? [];
+    expect(survivorMergedWhy.length).toBe(MERGE_WHY_MAX_ENTRIES);
+    // Some loser why entries did NOT fit into the bounded survivor row.
+    const absorbedLoserWhy = survivorMergedWhy.filter((entry) => entry.startsWith("loser-why-"));
+    expect(absorbedLoserWhy.length).toBeLessThan(loserWhy.length);
+
+    // The event is the durable record: it carries the loser's FULL why/evidence,
+    // including the entries the survivor row could not absorb.
+    const mergedEvents = harness.publishedEvents.filter(
+      (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_MERGED
+    );
+    expect(mergedEvents).toHaveLength(1);
+    const mergedPayload = mergedEvents[0]?.payload_json as Record<string, unknown>;
+    const mergedLosers = mergedPayload.merged_losers as readonly Record<string, unknown>[];
+    expect(mergedLosers).toHaveLength(1);
+    const recorded = mergedLosers[0]!;
+    expect(recorded.path_id).toBe("path-loser");
+    expect(recorded.why_this_relation_exists).toEqual(loserWhy);
+    expect(recorded.evidence_basis).toEqual(loserEvidence);
+    expect(recorded.recall_bias_sign).toBe("negative");
+    expect(recorded.recall_bias_magnitude).toBeCloseTo(0.8);
+    expect(recorded.direction_bias).toBe("target_to_source");
   });
 });

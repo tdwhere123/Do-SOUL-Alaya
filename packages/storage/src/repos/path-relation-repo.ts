@@ -16,7 +16,10 @@ export interface PathRelationRepo {
   update(
     pathId: string,
     updates: Partial<
-      Pick<PathRelation, "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at">
+      Pick<
+        PathRelation,
+        "constitution" | "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at"
+      >
     >
   ): Readonly<PathRelation>;
   findById(pathId: string): Promise<Readonly<PathRelation> | null>;
@@ -34,6 +37,17 @@ export interface PathRelationRepo {
     anchorRefs: readonly PathAnchorRef[]
   ): Promise<readonly Readonly<PathRelation>[]>;
   findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
+  /**
+   * Dormant paths whose last mutation (`updated_at`) is strictly older than
+   * `olderThanIso`. The consolidation planner uses this to find merge/retire
+   * candidates that have stayed dormant past the consolidation age window —
+   * a path is never consolidated in the same window it went dormant.
+   * see also: packages/core/src/consolidation-planner.ts planCycle.
+   */
+  findDormant(
+    workspaceId: string,
+    olderThanIso: string
+  ): Promise<readonly Readonly<PathRelation>[]>;
   delete(pathId: string): Promise<void>;
 }
 
@@ -74,6 +88,28 @@ const WAVE_1_ACTIVE_LIFECYCLE_SQL = `CASE
       ELSE 1
     END`;
 
+// Mirrors WAVE_1_ACTIVE_LIFECYCLE_SQL but matches the dormant landing state:
+// a well-formed lifecycle whose status is exactly "dormant". Unlike active,
+// dormant must be set explicitly (no unset-defaults-to-dormant fallback).
+const WAVE_1_DORMANT_LIFECYCLE_SQL = `CASE
+      WHEN json_valid(lifecycle_json) = 0 THEN 0
+      WHEN json_type(lifecycle_json, '$.retirement_rule') IS NULL
+        OR json_type(lifecycle_json, '$.retirement_rule') != 'text' THEN 0
+      WHEN json_type(lifecycle_json, '$.cooldown_rule') IS NOT NULL
+        AND json_type(lifecycle_json, '$.cooldown_rule') != 'text' THEN 0
+      WHEN json_type(lifecycle_json, '$.override_rule') IS NOT NULL
+        AND json_type(lifecycle_json, '$.override_rule') != 'text' THEN 0
+      WHEN json_type(lifecycle_json, '$.status') IS NULL
+        OR json_type(lifecycle_json, '$.status') != 'text' THEN 0
+      WHEN json_extract(lifecycle_json, '$.status') != 'dormant' THEN 0
+      WHEN EXISTS (
+        SELECT 1
+        FROM json_each(lifecycle_json)
+        WHERE key NOT IN ('status', 'retirement_rule', 'cooldown_rule', 'override_rule')
+      ) THEN 0
+      ELSE 1
+    END`;
+
 interface PathRelationRow {
   readonly path_id: string;
   readonly workspace_id: string;
@@ -99,6 +135,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
   private readonly findBySourceAnchorStatement;
   private readonly findByTargetAnchorStatement;
   private readonly findActiveStatement;
+  private readonly findDormantStatement;
   private readonly deleteStatement;
 
   public constructor(private readonly db: StorageDatabase) {
@@ -120,7 +157,8 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
 
     this.updateStatement = db.connection.prepare(`
       UPDATE path_relations
-      SET effect_vector_json = ?,
+      SET constitution_json = ?,
+          effect_vector_json = ?,
           plasticity_state_json = ?,
           lifecycle_json = ?,
           legitimacy_json = ?,
@@ -163,6 +201,15 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       FROM path_relations
       WHERE workspace_id = ?
         AND ${WAVE_1_ACTIVE_LIFECYCLE_SQL} = 1
+      ORDER BY created_at ASC, path_id ASC
+    `);
+
+    this.findDormantStatement = db.connection.prepare(`
+      SELECT${PATH_RELATION_SELECT_COLUMNS}
+      FROM path_relations
+      WHERE workspace_id = ?
+        AND ${WAVE_1_DORMANT_LIFECYCLE_SQL} = 1
+        AND updated_at < ?
       ORDER BY created_at ASC, path_id ASC
     `);
 
@@ -225,7 +272,10 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
   public update(
     pathId: string,
     updates: Partial<
-      Pick<PathRelation, "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at">
+      Pick<
+        PathRelation,
+        "constitution" | "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at"
+      >
     >
   ): Readonly<PathRelation> {
     const parsedPathId = parseNonEmptyString(pathId, "path id");
@@ -245,6 +295,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
 
     const nextRelation = parsePathRelation({
       ...existing,
+      constitution: updates.constitution ?? existing.constitution,
       effect_vector: updates.effect_vector ?? existing.effect_vector,
       plasticity_state: updates.plasticity_state ?? existing.plasticity_state,
       lifecycle: updates.lifecycle ?? existing.lifecycle,
@@ -254,6 +305,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
 
     try {
       const changes = this.updateStatement.run(
+        JSON.stringify(nextRelation.constitution),
         JSON.stringify(nextRelation.effect_vector),
         JSON.stringify(nextRelation.plasticity_state),
         JSON.stringify(nextRelation.lifecycle),
@@ -431,6 +483,32 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list active path relations for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async findDormant(
+    workspaceId: string,
+    olderThanIso: string
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+    const parsedOlderThanIso = parseNonEmptyString(olderThanIso, "older-than timestamp");
+
+    try {
+      const rows = this.findDormantStatement.all(
+        parsedWorkspaceId,
+        parsedOlderThanIso
+      ) as PathRelationRow[];
+      return parsePathRelationRows(rows);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list dormant path relations for workspace ${parsedWorkspaceId}.`,
         error
       );
     }
