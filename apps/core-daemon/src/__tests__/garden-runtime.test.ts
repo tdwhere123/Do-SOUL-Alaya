@@ -1,14 +1,18 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
   HealthEventKind,
+  type ConsolidationCyclePlan,
+  type ConsolidationCycleResult,
   type GardenTaskDescriptor,
   type GardenTaskResult,
   type GardenTierValue,
-  type PathGraphSnapshot
+  type PathGraphSnapshot,
+  type PathRelation
 } from "@do-soul/alaya-protocol";
+import { ConsolidationExecutor, ConsolidationPlanner } from "@do-soul/alaya-core";
 import type { BackgroundServiceConfig } from "../background/bootstrap.js";
 
 const hoisted = vi.hoisted(() => {
@@ -385,6 +389,154 @@ describe("garden runtime path plasticity queue", () => {
   });
 });
 
+describe("garden runtime consolidation cycle", () => {
+  beforeEach(() => {
+    hoisted.schedulers.splice(0, hoisted.schedulers.length);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("runs the ConsolidationPlanner and feeds its non-empty plan into the executor", async () => {
+    // A dormant cluster that survives the importance gate: two recall_allowed
+    // dormant paths over the same relation_kind + anchors. The richer one is the
+    // survivor, the bare one a deletable loser -> planCycle emits one merge.
+    const survivor = createDormantPath({
+      path_id: "path-survivor",
+      legitimacy: { evidence_basis: ["ev-1", "ev-2"], governance_class: "recall_allowed" }
+    });
+    const loser = createDormantPath({
+      path_id: "path-loser",
+      legitimacy: { evidence_basis: ["ev-3"], governance_class: "recall_allowed" }
+    });
+
+    const findDormant = vi.fn(
+      async (): Promise<readonly Readonly<PathRelation>[]> => [survivor, loser]
+    );
+
+    // Let the REAL planner run so the captured plan is genuinely the planner's
+    // output (non-empty merges), not the retired empty literal. The executor is
+    // spied so the test asserts the wiring without a live DB / mutation path.
+    const planCycleSpy = vi.spyOn(ConsolidationPlanner.prototype, "planCycle");
+    const runCycleSpy = vi
+      .spyOn(ConsolidationExecutor.prototype, "runCycle")
+      .mockImplementation(async (input): Promise<ConsolidationCycleResult> => {
+        const mergesCommitted = input.plan.merges?.length ?? 0;
+        return {
+          workspace_id: input.plan.workspace_id,
+          committed_at: "2026-05-20T12:00:00.000Z",
+          promotions_committed: 0,
+          retirements_committed: 0,
+          governance_changes_committed: 0,
+          direction_changes_committed: 0,
+          merges_committed: mergesCommitted,
+          fuse_outcome: "ok"
+        };
+      });
+
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        databaseConnection: createConsolidationCapableConnection(),
+        pathRelationRepo: {
+          findActive: vi.fn(async () => []),
+          findByAnchors: vi.fn(async () => []),
+          findDormant
+        } as unknown as GardenRuntimeInput["pathRelationRepo"]
+      })
+    );
+    const scheduler = currentScheduler();
+
+    // Librarian enqueues the CONSOLIDATION_CYCLE task; the scheduler pass
+    // dispatches and runs it through runConsolidationCycleTask.
+    await getService(runtime, "Librarian").task();
+    await drainScheduler(runtime);
+
+    // The planner was constructed and asked to plan the workspace.
+    expect(planCycleSpy).toHaveBeenCalledWith("workspace-1");
+    expect(findDormant).toHaveBeenCalledWith("workspace-1", expect.any(String));
+
+    // The executor received the planner's plan, not an empty literal.
+    expect(runCycleSpy).toHaveBeenCalledTimes(1);
+    const [{ triggerSource, plan }] = runCycleSpy.mock.calls[0]!;
+    expect(triggerSource).toBe("native_surface_drift");
+    const planned: ConsolidationCyclePlan = await planCycleSpy.mock.results[0]!.value;
+    expect(plan).toBe(planned);
+    expect(plan.merges).toHaveLength(1);
+    expect(plan.merges?.[0]?.survivor_path_id).toBe("path-survivor");
+    expect(plan.merges?.[0]?.merged_path_ids).toEqual(["path-loser"]);
+
+    // The cycle ran a real plan: merges committed > 0, reported success.
+    const result = await runCycleSpy.mock.results[0]!.value;
+    expect(result.merges_committed).toBe(1);
+    expect(scheduler.completions).toContainEqual(
+      expect.objectContaining({
+        task_kind: GardenTaskKind.CONSOLIDATION_CYCLE,
+        role: GardenRole.LIBRARIAN,
+        success: true,
+        audit_entries: ["consolidation_cycle:fuse_ok"]
+      })
+    );
+  });
+});
+
+function createConsolidationCapableConnection(): GardenRuntimeInput["databaseConnection"] {
+  // A prepare()-bearing connection also makes createGardenRuntime construct a
+  // SqliteGardenTaskRepo (its abandoned-claim reclaim calls statement.all), so
+  // every fake statement answers get/all/run with empty results: an empty
+  // budget table (get -> undefined) means no cooldown, so the cycle proceeds.
+  const statement = { get: () => undefined, all: () => [], run: () => undefined };
+  return {
+    prepare: () => statement
+  } as unknown as GardenRuntimeInput["databaseConnection"];
+}
+
+function createDormantPath(overrides: Partial<PathRelation> = {}): PathRelation {
+  return {
+    path_id: "path-1",
+    workspace_id: "workspace-1",
+    anchors: {
+      source_anchor: { kind: "object", object_id: "obj-a" },
+      target_anchor: { kind: "object", object_id: "obj-b" }
+    },
+    constitution: {
+      relation_kind: "supports",
+      why_this_relation_exists: ["seed-why"]
+    },
+    effect_vector: {
+      salience: 0,
+      recall_bias: 0.5,
+      verification_bias: 0,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "stance_bias"
+    },
+    plasticity_state: {
+      strength: 0.05,
+      direction_bias: "source_to_target",
+      stability_class: "volatile",
+      support_events_count: 0,
+      contradiction_events_count: 0
+    },
+    lifecycle: {
+      status: "dormant",
+      retirement_rule: "retire_after_cooldown"
+    },
+    legitimacy: {
+      evidence_basis: ["evidence-1"],
+      governance_class: "recall_allowed"
+    },
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-10T00:00:00.000Z",
+    ...overrides
+  } as PathRelation;
+}
+
 function createRuntimeInput(options: {
   // Test mocks return only the result fields the garden runtime reads
   // (reinforced/weakened/retired/affectedPathIds); the full
@@ -405,6 +557,10 @@ function createRuntimeInput(options: {
   readonly pathRelationRepo?: GardenRuntimeInput["pathRelationRepo"];
   readonly pathPlasticityWatermarkRepo?: GardenRuntimeInput["pathPlasticityWatermarkRepo"];
   readonly workspaceRepo?: GardenRuntimeInput["workspaceRepo"];
+  // A prepare()-bearing connection makes createGardenRuntime construct the
+  // ConsolidationExecutor (else it is null and the consolidation cycle is
+  // skipped). Default {} keeps the existing tests on the null-executor path.
+  readonly databaseConnection?: GardenRuntimeInput["databaseConnection"];
 }): GardenRuntimeInput {
   let latestSnapshot: PathGraphSnapshot | null = null;
   const publish = vi.fn(async (entry: Record<string, unknown>) => ({
@@ -415,7 +571,8 @@ function createRuntimeInput(options: {
   }));
 
   return {
-    databaseConnection: {} as GardenRuntimeInput["databaseConnection"],
+    databaseConnection:
+      options.databaseConnection ?? ({} as GardenRuntimeInput["databaseConnection"]),
     backlogThresholds: {
       warning_queue_depth: 100,
       warning_rearm_depth: 50,

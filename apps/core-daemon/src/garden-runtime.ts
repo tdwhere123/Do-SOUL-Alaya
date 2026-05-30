@@ -26,7 +26,6 @@ import {
   type PathGraphSnapshot,
   type RuntimeGardenComputeConfig,
   type CandidateMemorySignal,
-  type ConsolidationCyclePlan,
   type ConsolidationTriggerBudget,
   type ConsolidationTriggerSource,
   ConsolidationTriggerBudgetSchema,
@@ -44,6 +43,7 @@ import type {
 import {
   AuditorSchedulingAdvisor as CoreAuditorSchedulingAdvisor,
   ConsolidationExecutor,
+  ConsolidationPlanner,
   createVerificationBiasReaderFromPathLookup
 } from "@do-soul/alaya-core";
 import {
@@ -820,9 +820,10 @@ export function createGardenRuntime(input: {
 
   // invariant: memory_consolidation_enabled (SoulConfig, default true) gates
   // the executor. When false the task is reported complete as a no-op so the
-  // queue drains. The plan is empty here: no planner produces structural
-  // PathRelation mutations yet, so each cycle is a budget-charged no-op that
-  // exercises the executor + budget + fuse path end-to-end.
+  // queue drains. The plan comes from the ConsolidationPlanner, which scans
+  // dormant PathRelation rows and emits MERGE entries through the shared
+  // importance gate; the executor re-enforces that gate at the delete site.
+  // Consolidation is a SYSTEM Garden decision — no agent input drives a merge.
   const runConsolidationCycleTask = async (
     task: Readonly<GardenTaskDescriptor>
   ): Promise<void> => {
@@ -843,15 +844,14 @@ export function createGardenRuntime(input: {
         return;
       }
 
-      const plan: ConsolidationCyclePlan = {
-        workspace_id: task.workspace_id,
-        planned_at: completedAt,
-        promotions: [],
-        retirements: [],
-        governance_changes: [],
-        direction_changes: [],
-        fuse_state: { blown: false, retry_count: 0 }
-      };
+      // Reuse the same SqlitePathRelationRepo wired into the executor; its
+      // findDormant satisfies ConsolidationPlannerPathRelationPort. Pin the
+      // planner clock to completedAt so planned_at matches the cycle timestamp.
+      const planner = new ConsolidationPlanner({
+        pathRelationRepo: input.pathRelationRepo,
+        now: () => completedAt
+      });
+      const plan = await planner.planCycle(task.workspace_id);
       const result = await consolidationExecutor.runCycle({
         triggerSource: "native_surface_drift",
         plan
