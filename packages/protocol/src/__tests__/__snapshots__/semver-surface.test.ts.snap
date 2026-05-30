@@ -120,10 +120,10 @@ evt:file-approval.ts#SoulApprovalResolvedPayloadSchema(approval_id,description,m
 evt:file-approval.ts#SoulCorrectionIssuedPayloadSchema(correction,message_id,original,source_kind)#c62fb62
 evt:file-approval.ts#SoulExplanationProvidedPayloadSchema(explanation,message_id,source_kind,title)#e299a92
 evt:file-approval.ts#SoulHintEmittedPayloadSchema(hint,message_id,source_kind)#ae3ed73
-evt:garden.ts#SoulGardenTaskClaimReclaimedPayloadSchema(claimed_at,occurred_at,previous_claimed_by,role,run_id,stale_after_ms,task_id,task_kind,tier,workspace_id)#b05894f
-evt:garden.ts#SoulGardenTaskCompletedPayloadSchema(candidate_signals_count,objects_affected,occurred_at,role,success,task_id,task_kind,tier,workspace_id)#b46a4db
-evt:garden.ts#SoulGardenTaskDispatchedPayloadSchema(occurred_at,role,run_id,task_id,task_kind,tier,workspace_id)#a65abe2
-evt:garden.ts#SoulGardenTierViolationRejectedPayloadSchema(occurred_at,required_tier,role_tier,task_id,task_kind,workspace_id)#c7cc397
+evt:garden.ts#SoulGardenTaskClaimReclaimedPayloadSchema(claimed_at,occurred_at,previous_claimed_by,role,run_id,stale_after_ms,task_id,task_kind,tier,workspace_id)#022470e
+evt:garden.ts#SoulGardenTaskCompletedPayloadSchema(candidate_signals_count,objects_affected,occurred_at,role,success,task_id,task_kind,tier,workspace_id)#ac0e75b
+evt:garden.ts#SoulGardenTaskDispatchedPayloadSchema(occurred_at,role,run_id,task_id,task_kind,tier,workspace_id)#2f80f28
+evt:garden.ts#SoulGardenTierViolationRejectedPayloadSchema(occurred_at,required_tier,role_tier,task_id,task_kind,workspace_id)#a327196
 evt:garden.ts#SoulHealthJournalRecordedPayloadSchema(change_summary,entry_id,event_kind,occurred_at,workspace_id)#8a72d54
 evt:graph-auditor.ts#SoulAuditorPointerHealedPayloadSchema(cleared_ref,occurred_at,ref_kind,source_object_id,source_object_kind,task_id,workspace_id)#6f971b5
 evt:graph-auditor.ts#SoulGraphEdgeCreatedPayloadSchema(edge_id,edge_type,occurred_at,source_memory_id,target_memory_id,workspace_id)#fcd8411

@@ -25,6 +25,7 @@ import {
 } from "@do-soul/alaya-soul";
 import {
   SqliteCoUsageCounterRepo,
+  SqliteEnrichPendingRepo,
   SqliteEventLogRepo,
   SqliteEvidenceCapsuleRepo,
   SqliteMemoryEntryRepo,
@@ -38,12 +39,16 @@ const OLD_MEMORY_ID = "11111111-1111-4111-8111-111111111111";
 const NEW_MEMORY_ID = "22222222-2222-4222-8222-222222222222";
 const EVIDENCE_ID = "33333333-3333-4333-8333-333333333333";
 
-// invariant: the edge auto-producer folds into the governed path
-// candidate intake. A supports verdict becomes a weak attention_only
-// path_relations row that only earns recall eligibility through plasticity
-// reinforcement. This wiring test pins that a path_relations row is written.
+// invariant: the edge auto-producer folds into the governed path candidate
+// intake. A supports verdict becomes a weak attention_only path_relations row
+// that only earns recall eligibility through plasticity reinforcement. Post
+// S3c decouple this runs in the BULK_ENRICH worker, not inline: the router
+// enqueues an enrich_pending marker and the worker (here driven directly, as
+// the daemon dispatch branch does) runs produceForNewMemory off-path. This
+// wiring test pins the full decoupled chain: materialize enqueues, drain mints
+// the path_relations row.
 describe("edge auto producer daemon wiring", () => {
-  it("folds a supports verdict into a weak SUPPORTS path candidate, not a durable edge", async () => {
+  it("enqueues then folds a supports verdict into a weak SUPPORTS path candidate, not a durable edge", async () => {
     const database = initDatabase({ filename: ":memory:" });
     try {
       const workspaceRepo = new SqliteWorkspaceRepo(database);
@@ -53,6 +58,7 @@ describe("edge auto producer daemon wiring", () => {
       const memoryRepo = new SqliteMemoryEntryRepo(database);
       const pathRelationRepo = new SqlitePathRelationRepo(database);
       const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
+      const enrichPendingRepo = new SqliteEnrichPendingRepo(database);
       const runtimeNotifier = {
         notify: async () => undefined,
         notifyEntry: async (_entry: EventLogEntry) => undefined
@@ -125,13 +131,48 @@ describe("edge auto producer daemon wiring", () => {
           create: async () => ({ object_kind: "claim_form", object_id: "claim-1" })
         },
         pathCandidateSinkPort: pathCandidatePort,
-        edgeAutoProducerPort: edgeAutoProducerService,
+        enrichPendingPort: {
+          enqueue: (params) =>
+            enrichPendingRepo.enqueue({
+              workspaceId: params.workspaceId,
+              memoryId: params.memoryId,
+              runId: params.runId,
+              sourceSignalId: params.sourceSignalId,
+              enqueuedAt: "2026-05-25T00:00:01.000Z"
+            })
+        },
         handoffGapHandler: new InMemoryHandoffGapHandler()
       });
 
       const result = await router.materializeSignal(createFactSignal());
 
       expect(result.success).toBe(true);
+
+      // The write-path enqueued a durable enrich_pending marker and ran NO
+      // edge production inline — the path row does not exist yet.
+      expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
+      expect(
+        (await pathRelationRepo.findByAnchors("workspace-1", [
+          { kind: "object", object_id: NEW_MEMORY_ID }
+        ])).find((relation) => relation.constitution.relation_kind === "supports")
+      ).toBeUndefined();
+
+      // The BULK_ENRICH worker drains the marker and runs produceForNewMemory
+      // off-path (driven directly here as the daemon dispatch branch does).
+      const claimed = enrichPendingRepo.claimBatch("workspace-1", 50, "2026-05-25T00:01:00.000Z");
+      expect(claimed.map((entry) => entry.memoryId)).toEqual([NEW_MEMORY_ID]);
+      for (const entry of claimed) {
+        const memory = await memoryRepo.findById(entry.memoryId);
+        expect(memory).not.toBeNull();
+        await edgeAutoProducerService.produceForNewMemory({
+          newMemoryId: memory!.object_id,
+          workspaceId: memory!.workspace_id,
+          runId: memory!.run_id,
+          sourceSignalId: entry.sourceSignalId ?? memory!.object_id
+        });
+        enrichPendingRepo.markProcessed(entry.workspaceId, entry.memoryId, "2026-05-25T00:01:01.000Z");
+      }
+      expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
 
       // A weak supports path_relations row exists, born attention_only.
       const relations = await pathRelationRepo.findByAnchors("workspace-1", [

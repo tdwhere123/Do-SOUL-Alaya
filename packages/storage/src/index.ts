@@ -115,6 +115,12 @@ export {
   type CoUsageCounterRepo
 } from "./repos/co-usage-counter-repo.js";
 export {
+  SqliteEnrichPendingRepo,
+  type EnrichPendingClaim,
+  type EnrichPendingEnqueueInput,
+  type EnrichPendingRepo
+} from "./repos/enrich-pending-repo.js";
+export {
   SqlitePathPlasticityWatermarkRepo,
   type PathPlasticityWatermarkRecord,
   type PathPlasticityWatermarkRepo

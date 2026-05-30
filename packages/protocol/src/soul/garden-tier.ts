@@ -25,7 +25,8 @@ const gardenTaskKindValues = [
   "embedding_backfill",
   "path_plasticity_update",
   "post_turn_extract",
-  "consolidation_cycle"
+  "consolidation_cycle",
+  "bulk_enrich"
 ] as const;
 
 export const GardenRole = {
@@ -62,7 +63,8 @@ export const GardenTaskKind = {
   EMBEDDING_BACKFILL: "embedding_backfill",
   PATH_PLASTICITY_UPDATE: "path_plasticity_update",
   POST_TURN_EXTRACT: "post_turn_extract",
-  CONSOLIDATION_CYCLE: "consolidation_cycle"
+  CONSOLIDATION_CYCLE: "consolidation_cycle",
+  BULK_ENRICH: "bulk_enrich"
 } as const;
 
 export const GardenRoleSchema = z.enum(gardenRoleValues);
@@ -117,7 +119,8 @@ const librarianTaskKinds = Object.freeze([
   GardenTaskKind.SYNTHESIS_REVIEW,
   GardenTaskKind.EMBEDDING_BACKFILL,
   GardenTaskKind.PATH_PLASTICITY_UPDATE,
-  GardenTaskKind.CONSOLIDATION_CYCLE
+  GardenTaskKind.CONSOLIDATION_CYCLE,
+  GardenTaskKind.BULK_ENRICH
 ] as const);
 
 export const GARDEN_ROLE_PERMISSIONS = Object.freeze({

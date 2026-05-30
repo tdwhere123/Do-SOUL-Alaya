@@ -109,12 +109,19 @@ const hoisted = vi.hoisted(() => {
     // anchor: SqliteCoUsageCounterRepo (and the path-relation findByAnchors
     // ad-hoc lookup) prepare statements at construction time, so the wiring
     // fixture must expose a prepare() that returns inert statement handles.
+    // SqliteEnrichPendingRepo also wraps its claim batch in a
+    // connection.transaction() at construction, so transaction() must return a
+    // callable that runs the supplied function with its args (matching
+    // better-sqlite3's transaction wrapper contract).
     connection: {
       prepare: vi.fn(() => ({
         run: vi.fn(() => ({ changes: 0 })),
         get: vi.fn(() => undefined),
         all: vi.fn(() => [])
-      }))
+      })),
+      transaction: vi.fn(<Args extends readonly unknown[], Result>(fn: (...args: Args) => Result) => {
+        return (...args: Args): Result => fn(...args);
+      })
     },
     close: vi.fn()
   };

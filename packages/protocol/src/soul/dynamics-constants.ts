@@ -85,6 +85,33 @@ export const DYNAMICS_CONSTANTS = Object.freeze({
     // A dormant path is restored to this strength when a revive trigger
     // fires (usage receipt or explicit override).
     revive_strength: 0.2
+  }),
+  // Asynchronous memory enrichment (conflict detection + edge auto-production)
+  // is decoupled from the synchronous write-path: materialization enqueues an
+  // enrich_pending marker and acks; the Garden BULK_ENRICH Librarian task
+  // drains the markers in batches and runs the governed enrichment services.
+  // These are design-justified thresholds, not bench-tuned literals.
+  // - batch_trigger_count: an accumulated pending count of this size triggers a
+  //   BULK_ENRICH cycle between the periodic Librarian passes, so enrichment
+  //   never lags an unbounded number of writes behind. Mirrors the S3c design's
+  //   "accumulate N=50" trigger.
+  // - claim_batch_size: the maximum number of pending markers one BULK_ENRICH
+  //   cycle claims and processes, bounding per-cycle work so a large backlog
+  //   drains across several cycles instead of one unbounded pass.
+  // - claim_stale_after_ms: a claimed-but-unprocessed marker older than this is
+  //   presumed crashed (the daemon died between claimBatch and markProcessed)
+  //   and is reclaimed back to claimable so a later cycle re-drains it — the
+  //   same TTL-reclaim safety net garden_task has (GARDEN_CLAIM_STALE_AFTER_MS).
+  //   Sized generously above a normal in-process drain duration so a live,
+  //   still-running cycle is never reclaimed out from under itself; the only
+  //   claimant is the single in-process Garden worker, so this is purely the
+  //   crash-recovery upper bound, not a contention knob. 10 min mirrors the
+  //   garden_task rationale ("long enough for a real round-trip, short enough
+  //   that a restart re-drains promptly").
+  enrich: Object.freeze({
+    batch_trigger_count: 50,
+    claim_batch_size: 50,
+    claim_stale_after_ms: 10 * 60 * 1000
   })
 } as const);
 

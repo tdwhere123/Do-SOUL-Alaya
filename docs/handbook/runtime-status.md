@@ -487,6 +487,19 @@ New / changed runtime-visible surfaces:
   `ALAYA_CONFLICT_DETECTION_ENABLED` and `ALAYA_CONFLICT_RULE_ENABLED`).
   Proposal accept does not write edges (in-place update, no
   new/old memory pair forms).
+- **Conflict suppression is best-effort-eventual, not synchronous** (S3c
+  enrich-decouple). Materialization enqueues an `enrich_pending` marker
+  and acks; the Garden BULK_ENRICH worker drains it and runs
+  `ConflictDetectionService` + edge auto-production off-path. The
+  unconditional per-workspace drain runs on the ~60s GardenScheduler
+  cadence, so the upper bound between a memory becoming recallable and
+  its contradiction/supersession edges forming is ~1 min (surfaced !=
+  conflict-checked within that window). A claim stranded by a daemon
+  crash between claim and processed is re-armed after a TTL
+  (`DYNAMICS_CONSTANTS.enrich.claim_stale_after_ms`, 10 min) by the same
+  scheduler pass that reclaims abandoned `garden_task` claims, so no
+  enrichment is silently lost on restart. Durable truth is still decided
+  by the governed services; only *when* the edges form is deferred.
 - **PathRelation propose** is `live-event-ready` via
   `PathRelationProposalService`: 3 co-usage events on the same memory
   pair write a PathRelation; TTL eviction (`ALAYA_PATHREL_COUNTER_TTL_MS`,

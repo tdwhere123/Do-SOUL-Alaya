@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
+  DYNAMICS_CONSTANTS,
   GARDEN_ROLE_TIER_MAP,
   GardenEventType,
   GardenRole,
@@ -131,7 +132,8 @@ const LIBRARIAN_RUNTIME_TASK_KINDS = [
   GardenTaskKind.SYNTHESIS_REVIEW,
   GardenTaskKind.EMBEDDING_BACKFILL,
   GardenTaskKind.PATH_PLASTICITY_UPDATE,
-  GardenTaskKind.CONSOLIDATION_CYCLE
+  GardenTaskKind.CONSOLIDATION_CYCLE,
+  GardenTaskKind.BULK_ENRICH
 ] as const satisfies readonly GardenTaskKindValue[];
 
 // invariant: the executor charges every consolidation cycle against the
@@ -243,6 +245,68 @@ interface PostTurnExtractTaskPayload {
   };
 }
 
+// invariant: BULK_ENRICH drain-worker ports (S3c). The worker claims rows from
+// enrich_pending, reconstructs the conflict-scan params from each persisted
+// memory row (content/dimension/scope/domain_tags match buildMemoryInput), and
+// runs the two governed enrichment services that materialization used to run
+// inline. These narrow shapes keep the wiring decoupled from the concrete
+// storage repo / core service types.
+// see also: packages/storage/src/repos/enrich-pending-repo.ts
+// see also: packages/soul/src/garden/materialization-router.ts EnrichPendingPort
+interface BulkEnrichPendingPort {
+  claimBatch(
+    workspaceId: string,
+    limit: number,
+    claimedAt: string
+  ): readonly {
+    readonly workspaceId: string;
+    readonly memoryId: string;
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  }[];
+  markProcessed(workspaceId: string, memoryId: string, processedAt: string): void;
+  releaseClaim(workspaceId: string, memoryId: string): void;
+  delete(workspaceId: string, memoryId: string): void;
+  countPending(workspaceId: string): number;
+  reclaimStale(now: string, staleAfterMs: number): number;
+}
+
+interface BulkEnrichMemoryLookupPort {
+  findById(memoryId: string): Promise<
+    | Readonly<{
+        readonly object_id: string;
+        readonly dimension: string;
+        readonly scope_class: string;
+        readonly content: string;
+        readonly domain_tags: readonly string[];
+        readonly workspace_id: string;
+        readonly run_id: string;
+      }>
+    | null
+  >;
+}
+
+interface BulkEnrichConflictDetectionPort {
+  detectAndLinkConflicts(params: {
+    readonly newMemoryId: string;
+    readonly newMemoryDimension: string;
+    readonly newMemoryScopeClass: string;
+    readonly newMemoryContent: string;
+    readonly newMemoryDomainTags: readonly string[];
+    readonly workspaceId: string;
+    readonly runId: string;
+  }): Promise<void>;
+}
+
+interface BulkEnrichEdgeProducerPort {
+  produceForNewMemory(params: {
+    readonly newMemoryId: string;
+    readonly workspaceId: string;
+    readonly runId: string;
+    readonly sourceSignalId: string;
+  }): Promise<void>;
+}
+
 export function createGardenRuntime(input: {
   readonly databaseConnection: StorageDatabase["connection"];
   readonly backlogThresholds: GardenBacklogThresholds;
@@ -282,6 +346,14 @@ export function createGardenRuntime(input: {
   };
   readonly strongRefService: StrongRefService;
   readonly workspaceRepo: SqliteWorkspaceRepo;
+  // invariant: BULK_ENRICH wiring (S3c). When enrichPendingRepo + edgeProducer
+  // are wired the Garden drains enrich_pending off the write-path; when absent
+  // the task is a no-op (enrichment disabled, same as no service). The conflict
+  // detection port is independently optional (it has its own enable flag).
+  readonly enrichPendingRepo?: BulkEnrichPendingPort;
+  readonly enrichMemoryLookup?: BulkEnrichMemoryLookupPort;
+  readonly enrichConflictDetectionPort?: BulkEnrichConflictDetectionPort;
+  readonly enrichEdgeProducerPort?: BulkEnrichEdgeProducerPort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }): Readonly<{
   readonly backgroundManager: BackgroundServiceManager;
@@ -655,6 +727,85 @@ export function createGardenRuntime(input: {
     }
   };
 
+  // invariant: BULK_ENRICH is wired only when there is somewhere to drain to.
+  // enrichPendingRepo + enrichMemoryLookup are mandatory; at least one of the
+  // two enrichment services must be present, mirroring the inline gate the
+  // write-path used (a missing service meant that half of enrichment was off).
+  const bulkEnrichWired =
+    input.enrichPendingRepo !== undefined &&
+    input.enrichMemoryLookup !== undefined &&
+    (input.enrichEdgeProducerPort !== undefined ||
+      input.enrichConflictDetectionPort !== undefined);
+
+  const enqueueBulkEnrichForWorkspace = (workspaceId: string, nowIso: string): void => {
+    gardenScheduler.enqueue({
+      task_id: randomUUID(),
+      task_kind: GardenTaskKind.BULK_ENRICH,
+      required_tier: GardenTier.TIER_2,
+      workspace_id: workspaceId,
+      run_id: null,
+      target_object_refs: [workspaceId],
+      priority: 10,
+      created_at: nowIso
+    });
+    requestBacklogTelemetryCapture(`enqueue:${GardenTaskKind.BULK_ENRICH}`);
+  };
+
+  const hasBulkEnrichQueued = (workspaceId: string): boolean =>
+    gardenTaskRepo
+      ?.peekPending(GardenRole.LIBRARIAN, workspaceId, 50)
+      .some((candidate) => candidate.kind === GardenTaskKind.BULK_ENRICH) ?? false;
+
+  // invariant: unconditional per-workspace drain, run on the ~60s GardenScheduler
+  // pass so a freshly materialized memory's conflict-suppression edges form
+  // within a ~1-min best-effort-eventual bound. Guarded by countPending>0 (an
+  // empty workspace enqueues nothing — a 60s all-workspace check is near-free)
+  // AND no-BULK_ENRICH-already-queued (a backlog cannot stack duplicate tasks
+  // faster than the worker drains them).
+  const enqueueBulkEnrichForAllWorkspaces = async (): Promise<void> => {
+    const enrichPendingRepo = input.enrichPendingRepo;
+    if (!bulkEnrichWired || enrichPendingRepo === undefined) {
+      return;
+    }
+    const workspaces = await input.workspaceRepo.list();
+    const nowIso = new Date().toISOString();
+    for (const workspace of workspaces) {
+      if (enrichPendingRepo.countPending(workspace.workspace_id) === 0) {
+        continue;
+      }
+      if (hasBulkEnrichQueued(workspace.workspace_id)) {
+        continue;
+      }
+      enqueueBulkEnrichForWorkspace(workspace.workspace_id, nowIso);
+    }
+  };
+
+  // OQ5 = both triggers. enqueueBulkEnrichForAllWorkspaces covers the slow-drip
+  // case (any pending row, drained within the ~1-min bound); this count-threshold
+  // trigger covers a burst (bulk import / heavy turn) so enrichment never lags
+  // batch_trigger_count writes behind a draining cycle. Only enqueues for a
+  // workspace whose pending count crossed the threshold and that has no
+  // BULK_ENRICH already queued, so a backlog cannot stack duplicate tasks faster
+  // than the worker drains them.
+  const enqueueBulkEnrichForCountThreshold = async (): Promise<void> => {
+    const enrichPendingRepo = input.enrichPendingRepo;
+    if (!bulkEnrichWired || enrichPendingRepo === undefined) {
+      return;
+    }
+    const workspaces = await input.workspaceRepo.list();
+    const nowIso = new Date().toISOString();
+    for (const workspace of workspaces) {
+      const pending = enrichPendingRepo.countPending(workspace.workspace_id);
+      if (pending < DYNAMICS_CONSTANTS.enrich.batch_trigger_count) {
+        continue;
+      }
+      if (hasBulkEnrichQueued(workspace.workspace_id)) {
+        continue;
+      }
+      enqueueBulkEnrichForWorkspace(workspace.workspace_id, nowIso);
+    }
+  };
+
   const persistPathGraphSnapshotForWorkspace = async (
     workspaceId: string,
     previousSnapshot: PathGraphSnapshotRecord | null
@@ -869,6 +1020,127 @@ export function createGardenRuntime(input: {
   };
 
   const reportConsolidationCycleCompletion = async (
+    task: Readonly<GardenTaskDescriptor>,
+    completedAt: string,
+    success: boolean,
+    auditEntries: readonly string[],
+    error?: unknown
+  ): Promise<void> => {
+    await gardenScheduler.reportCompletion({
+      task_id: task.task_id,
+      task_kind: task.task_kind,
+      role: GardenRole.LIBRARIAN,
+      tier: GardenTier.TIER_2,
+      workspace_id: task.workspace_id,
+      success,
+      objects_affected: [],
+      audit_entries: [...auditEntries],
+      error_message: success ? null : error instanceof Error ? error.message : String(error),
+      completed_at: completedAt
+    });
+  };
+
+  // invariant: BULK_ENRICH drain worker (S3c). Claims a batch from
+  // enrich_pending and, for each claimed memory, reconstructs the conflict-scan
+  // params from the persisted memory row and runs the SAME governed services
+  // materialization used to run inline (detectAndLinkConflicts +
+  // produceForNewMemory). Enrichment is a SYSTEM Garden decision — no agent
+  // input drives it; the services own the truth boundary, this worker only
+  // moves WHEN they run. Idempotent: detectAndLinkConflicts / produceForNewMemory
+  // dedupe their path candidates, and markProcessed + the UNIQUE(workspace,memory)
+  // constraint prevent a re-drain from duplicating work. A per-memory failure
+  // releases the claim so a later cycle retries — no enrichment is dropped. When
+  // the enrichment ports are unwired the task is a no-op so the queue is inert.
+  // see also: packages/storage/src/repos/enrich-pending-repo.ts
+  // see also: packages/soul/src/garden/materialization-router.ts enqueueEnrichment
+  const runBulkEnrichTask = async (task: Readonly<GardenTaskDescriptor>): Promise<void> => {
+    const completedAt = new Date().toISOString();
+    const enrichPendingRepo = input.enrichPendingRepo;
+    const memoryLookup = input.enrichMemoryLookup;
+    const edgeProducer = input.enrichEdgeProducerPort;
+    const conflictDetection = input.enrichConflictDetectionPort;
+    if (enrichPendingRepo === undefined || memoryLookup === undefined) {
+      await reportBulkEnrichCompletion(task, completedAt, true, [
+        "bulk_enrich_skipped:no_enrich_pending_table"
+      ]);
+      return;
+    }
+    if (edgeProducer === undefined && conflictDetection === undefined) {
+      await reportBulkEnrichCompletion(task, completedAt, true, [
+        "bulk_enrich_skipped:enrichment_disabled"
+      ]);
+      return;
+    }
+
+    try {
+      const claimed = enrichPendingRepo.claimBatch(
+        task.workspace_id,
+        DYNAMICS_CONSTANTS.enrich.claim_batch_size,
+        completedAt
+      );
+      let processedCount = 0;
+      let missingCount = 0;
+      let failedCount = 0;
+      for (const pending of claimed) {
+        try {
+          const memory = await memoryLookup.findById(pending.memoryId);
+          if (memory === null) {
+            // The memory was deleted (tombstone GC / cascade) before its
+            // enrichment ran; there is nothing to enrich. Drop the stale row.
+            enrichPendingRepo.delete(pending.workspaceId, pending.memoryId);
+            missingCount += 1;
+            continue;
+          }
+          if (edgeProducer !== undefined) {
+            await edgeProducer.produceForNewMemory({
+              newMemoryId: memory.object_id,
+              workspaceId: memory.workspace_id,
+              runId: memory.run_id,
+              // The object_id fallback is provenance-only (feeds an audit
+              // annotation), never a dedup / identity key.
+              sourceSignalId: pending.sourceSignalId ?? memory.object_id
+            });
+          }
+          if (conflictDetection !== undefined) {
+            await conflictDetection.detectAndLinkConflicts({
+              newMemoryId: memory.object_id,
+              newMemoryDimension: memory.dimension,
+              newMemoryScopeClass: memory.scope_class,
+              newMemoryContent: memory.content,
+              newMemoryDomainTags: memory.domain_tags,
+              workspaceId: memory.workspace_id,
+              runId: memory.run_id
+            });
+          }
+          enrichPendingRepo.markProcessed(pending.workspaceId, pending.memoryId, completedAt);
+          processedCount += 1;
+        } catch (memoryError) {
+          // Isolate a per-memory failure: release the claim so a later cycle
+          // retries it, never drop the marker.
+          enrichPendingRepo.releaseClaim(pending.workspaceId, pending.memoryId);
+          failedCount += 1;
+          warn("bulk enrich memory failed; released claim for retry", {
+            workspace_id: pending.workspaceId,
+            memory_id: pending.memoryId,
+            error: memoryError instanceof Error ? memoryError.message : String(memoryError)
+          });
+        }
+      }
+      await reportBulkEnrichCompletion(task, completedAt, true, [
+        `bulk_enrich:processed_${processedCount}`,
+        `bulk_enrich:missing_${missingCount}`,
+        `bulk_enrich:failed_${failedCount}`
+      ]);
+    } catch (error) {
+      await reportBulkEnrichCompletion(task, completedAt, false, [], error);
+      warn("bulk enrich task failed; continuing Garden background pass", {
+        workspace_id: task.workspace_id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  };
+
+  const reportBulkEnrichCompletion = async (
     task: Readonly<GardenTaskDescriptor>,
     completedAt: string,
     success: boolean,
@@ -1127,6 +1399,23 @@ export function createGardenRuntime(input: {
     await repo.gcAbandonedClaims(reclaims);
   };
 
+  // invariant: enrich_pending crash-recovery sweep. A row claimed by a
+  // BULK_ENRICH cycle that died before markProcessed is stranded (claimable
+  // requires claimed_at IS NULL); after the TTL it is re-armed so a later cycle
+  // re-drains it — no enrichment is silently lost on a daemon restart. Runs on
+  // the same ~60s GardenScheduler pass as reclaimAbandonedGardenClaims.
+  // see also: packages/storage/src/repos/enrich-pending-repo.ts reclaimStale
+  const reclaimStaleEnrichClaims = (): void => {
+    const enrichPendingRepo = input.enrichPendingRepo;
+    if (enrichPendingRepo === undefined) {
+      return;
+    }
+    enrichPendingRepo.reclaimStale(
+      new Date().toISOString(),
+      DYNAMICS_CONSTANTS.enrich.claim_stale_after_ms
+    );
+  };
+
   const backgroundServices = [
     {
       name: "Janitor",
@@ -1169,6 +1458,10 @@ export function createGardenRuntime(input: {
             (workspaceId) => [workspaceId]
           );
         }
+        // invariant: the unconditional per-workspace BULK_ENRICH drain runs on
+        // the ~60s GardenScheduler pass, not here, so conflict-suppression edges
+        // form within a ~1-min best-effort-eventual bound.
+        // see also: enqueueBulkEnrichForAllWorkspaces.
         markBackgroundPassCompleted();
       }
     },
@@ -1179,7 +1472,15 @@ export function createGardenRuntime(input: {
         if (gardenTaskRepo !== undefined) {
           await reclaimAbandonedGardenClaims(gardenTaskRepo);
         }
+        reclaimStaleEnrichClaims();
         await processPostTurnExtractTask();
+        // invariant: drain enrich_pending on the ~60s cadence (not the 15-min
+        // Librarian pass) so conflict-suppression edges form within a ~1-min
+        // best-effort-eventual bound. The unconditional drain covers slow drip;
+        // the threshold trigger below covers bursts. Both enqueue only when
+        // there is something to drain, so a 60s all-workspace check is near-free.
+        await enqueueBulkEnrichForAllWorkspaces();
+        await enqueueBulkEnrichForCountThreshold();
         for (const [role, handler, runtimeTaskKinds] of [
           [GardenRole.JANITOR, janitor, JANITOR_RUNTIME_TASK_KINDS],
           [GardenRole.AUDITOR, auditor, AUDITOR_RUNTIME_TASK_KINDS],
@@ -1206,6 +1507,11 @@ export function createGardenRuntime(input: {
 
           if (task.task_kind === GardenTaskKind.CONSOLIDATION_CYCLE) {
             await runConsolidationCycleTask(task);
+            continue;
+          }
+
+          if (task.task_kind === GardenTaskKind.BULK_ENRICH) {
+            await runBulkEnrichTask(task);
             continue;
           }
 

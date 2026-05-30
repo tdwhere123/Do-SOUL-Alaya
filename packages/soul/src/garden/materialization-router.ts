@@ -310,13 +310,22 @@ export const SIGNAL_REF_SEED_SPECS: readonly SignalRefSeedSpec[] = [
   }
 ];
 
-export interface EdgeAutoProducerPort {
-  produceForNewMemory(params: {
-    readonly newMemoryId: string;
+// invariant: write-path/enrich-path decouple (S3c). Conflict detection +
+// edge auto-production are O(enrichment) and must NOT run inline on the
+// synchronous write-path. The router enqueues one durable enrich_pending
+// marker per freshly materialized memory and acks; the Garden BULK_ENRICH
+// Librarian task drains the markers and runs the governed enrichment
+// services off-path. enqueue is an idempotent upsert downstream, so a
+// re-materialize of the same memory never duplicates enrichment.
+// see also: packages/storage/src/repos/enrich-pending-repo.ts
+// see also: apps/core-daemon/src/garden-runtime.ts — BULK_ENRICH drain worker.
+export interface EnrichPendingPort {
+  enqueue(params: {
     readonly workspaceId: string;
-    readonly runId: string;
-    readonly sourceSignalId: string;
-  }): Promise<void>;
+    readonly memoryId: string;
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  }): void;
 }
 
 // invariant: detectAndLinkConflicts runs at memory materialization time
@@ -402,7 +411,16 @@ export interface MaterializationRouterDeps {
   readonly pathRelationProposalPort?: PathRelationProposalPort;
   readonly pathCandidateSinkPort?: PathCandidateSinkPort;
   readonly handoffGapHandler: HandoffGapHandler;
-  readonly edgeAutoProducerPort?: EdgeAutoProducerPort;
+  // invariant: post-materialization enrichment (edge auto-production +
+  // conflict detection's detectAndLinkConflicts) no longer runs inline.
+  // When enrichPendingPort is wired the write-path enqueues a durable marker
+  // per new memory; the Garden BULK_ENRICH worker runs the governed
+  // enrichment services off-path. When it is absent no enrichment is
+  // enqueued — the same "enrichment disabled" behavior as an absent service.
+  readonly enrichPendingPort?: EnrichPendingPort;
+  // conflictDetectionPort is retained for the potential_conflict `evaluate`
+  // route (a raw signal with no memory yet); detectAndLinkConflicts has moved
+  // to the BULK_ENRICH worker. see also: materializeConflictEvaluation.
   readonly conflictDetectionPort?: ConflictDetectionPort;
   readonly reconciliationPort?: ReconciliationPort;
 }
@@ -582,7 +600,6 @@ export class MaterializationRouter {
       createdObjects.push({ object_kind: claim.object_kind, object_id: claim.object_id });
 
       await this.createAllMemoryRefEdges(memory.object_id, signal);
-      await this.runEdgeAutoProducer(memory.object_id, signal);
       const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
         memory.object_id,
         signal
@@ -590,9 +607,9 @@ export class MaterializationRouter {
       if (timeConcernProposal !== null) {
         createdObjects.push(timeConcernProposal);
       }
-      // Edges created by the conflict scan complement the caller-explicit
-      // hints above. see also: runConflictScan.
-      await this.runConflictScan(memory.object_id, signal);
+      // invariant: enqueue-not-inline. Edge auto-production + conflict
+      // detection run off-path in the BULK_ENRICH worker. see enqueueEnrichment.
+      this.enqueueEnrichment(memory.object_id, signal);
 
       return {
         signal_id: signal.signal_id,
@@ -754,7 +771,6 @@ export class MaterializationRouter {
       createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
 
       await this.createAllMemoryRefEdges(memory.object_id, signal);
-      await this.runEdgeAutoProducer(memory.object_id, signal);
 
       const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
         memory.object_id,
@@ -763,6 +779,8 @@ export class MaterializationRouter {
       if (timeConcernProposal !== null) {
         createdObjects.push(timeConcernProposal);
       }
+      // invariant: enqueue-not-inline. see enqueueEnrichment.
+      this.enqueueEnrichment(memory.object_id, signal);
 
       return {
         signal_id: signal.signal_id,
@@ -809,7 +827,6 @@ export class MaterializationRouter {
     const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
     let evidenceId: string | undefined;
     let appendedMemoryId: string | undefined;
-    let conflictScanMemoryId: string | undefined;
 
     const ensureEvidence = async (): Promise<string> => {
       if (evidenceId === undefined) {
@@ -847,16 +864,16 @@ export class MaterializationRouter {
           );
           appendedMemoryId = memory.object_id;
           createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
-          if (verdict.runConflictScan) {
-            conflictScanMemoryId = memory.object_id;
-          }
           return { incomingEvidenceRef: evidenceRef };
         }
       );
 
+      // invariant: DELETE / supersede is the ConflictDetectionService's job —
+      // its detectAndLinkConflicts now runs in the BULK_ENRICH worker, not
+      // inline. Only an ADD mints a new memory_entry endpoint; UPDATE / NOOP
+      // reuse an existing row and enqueue nothing (no fresh enrichment target).
       if (appendedMemoryId !== undefined) {
         await this.createAllMemoryRefEdges(appendedMemoryId, signal);
-        await this.runEdgeAutoProducer(appendedMemoryId, signal);
         const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
           appendedMemoryId,
           signal
@@ -864,14 +881,8 @@ export class MaterializationRouter {
         if (timeConcernProposal !== null) {
           createdObjects.push(timeConcernProposal);
         }
-      }
-
-      // invariant: DELETE / supersede is the ConflictDetectionService's
-      // job. Reconciliation only flags that the new fact has a same-topic
-      // divergent neighbor; the contradicts / superseded_by edge + karma
-      // are produced by the existing conflict scan, not a new path.
-      if (conflictScanMemoryId !== undefined) {
-        await this.runConflictScan(conflictScanMemoryId, signal);
+        // invariant: enqueue-not-inline. see enqueueEnrichment.
+        this.enqueueEnrichment(appendedMemoryId, signal);
       }
 
       const reconciledObjects =
@@ -907,54 +918,36 @@ export class MaterializationRouter {
     }
   }
 
-  // ConflictDetectionService: rule-based + optional LLM scan for memories
-  // in the same workspace that contradict / are incompatible with the
-  // freshly materialized one. Detection failure must not break a
-  // successful memory creation.
-  private async runConflictScan(
-    memoryId: string,
-    signal: CandidateMemorySignal
-  ): Promise<void> {
-    const port = this.dependencies.conflictDetectionPort;
+  // invariant: write-path/enrich-path decouple (S3c). Enqueues a durable
+  // enrich_pending marker for a freshly materialized memory instead of running
+  // ConflictDetectionService.detectAndLinkConflicts + EdgeAutoProducer inline.
+  // The Garden BULK_ENRICH worker reconstructs the conflict-scan params from
+  // the persisted memory row (content/dimension/scope/domain_tags match
+  // buildMemoryInput exactly) and runs both governed services off-path. The
+  // enqueue must never break a successful memory creation, so a failure is
+  // swallowed with a warning. With no enrichPendingPort wired, enrichment is
+  // disabled (same as an absent enrichment service before the decouple).
+  // invariant: conflict suppression (contradicts/supersedes edges) is now
+  // best-effort-eventual, not synchronous-at-materialize. A freshly materialized
+  // memory is recallable before its not-yet-detected contradiction/supersession
+  // edges form — surfaced != conflict-checked within that window. The Garden
+  // drains on the ~60s GardenScheduler cadence, so the upper bound is ~1 min.
+  // see also: packages/storage/src/repos/enrich-pending-repo.ts
+  // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask.
+  private enqueueEnrichment(memoryId: string, signal: CandidateMemorySignal): void {
+    const port = this.dependencies.enrichPendingPort;
     if (port === undefined) {
       return;
     }
     try {
-      await port.detectAndLinkConflicts({
-        newMemoryId: memoryId,
-        newMemoryDimension: toMemoryDimension(signal.object_kind),
-        newMemoryScopeClass: toScopeClass(signal.scope_hint),
-        newMemoryContent: buildDistilledFact(signal),
-        newMemoryDomainTags: signal.domain_tags,
+      port.enqueue({
         workspaceId: signal.workspace_id,
-        runId: signal.run_id
-      });
-    } catch (err) {
-      console.warn("materialization-router: conflict detection failed", {
         memoryId,
-        signalId: signal.signal_id,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
-  }
-
-  private async runEdgeAutoProducer(
-    memoryId: string,
-    signal: CandidateMemorySignal
-  ): Promise<void> {
-    const port = this.dependencies.edgeAutoProducerPort;
-    if (port === undefined) {
-      return;
-    }
-    try {
-      await port.produceForNewMemory({
-        newMemoryId: memoryId,
-        workspaceId: signal.workspace_id,
         runId: signal.run_id,
         sourceSignalId: signal.signal_id
       });
     } catch (err) {
-      console.warn("materialization-router: edge auto-producer failed", {
+      console.warn("materialization-router: enrich enqueue failed", {
         memoryId,
         signalId: signal.signal_id,
         error: err instanceof Error ? err.message : String(err)

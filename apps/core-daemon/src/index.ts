@@ -89,6 +89,7 @@ import {
   SqliteMemoryEntryRepo,
   SqliteOrphanRadarRepo,
   SqliteCoUsageCounterRepo,
+  SqliteEnrichPendingRepo,
   SqlitePathGraphSnapshotRepo,
   SqlitePathPlasticityWatermarkRepo,
   SqlitePathRelationRepo,
@@ -278,6 +279,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const strongRefRepo = new SqliteStrongRefRepo(database);
   const pathRelationRepo = new SqlitePathRelationRepo(database);
   const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
+  const enrichPendingRepo = new SqliteEnrichPendingRepo(database);
   const pathPlasticityWatermarkRepo = new SqlitePathPlasticityWatermarkRepo(database);
   const pathGraphSnapshotRepo = new SqlitePathGraphSnapshotRepo(database);
   const deferredObligationRepo = new SqliteDeferredObligationRepo(database);
@@ -1135,6 +1137,27 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       };
     }
   };
+  // invariant: write-path/enrich-path decouple (S3c). The router no longer runs
+  // edge auto-production / conflict detection inline; it enqueues an
+  // enrich_pending marker per new memory and the Garden BULK_ENRICH worker runs
+  // the governed services off-path. The conflictDetectionPort is still wired for
+  // the potential_conflict `evaluate` route (a raw signal with no memory yet).
+  // see also: garden-runtime.ts runBulkEnrichTask.
+  const enrichPendingPort = {
+    enqueue: (params: {
+      readonly workspaceId: string;
+      readonly memoryId: string;
+      readonly runId: string | null;
+      readonly sourceSignalId: string | null;
+    }) =>
+      enrichPendingRepo.enqueue({
+        workspaceId: params.workspaceId,
+        memoryId: params.memoryId,
+        runId: params.runId,
+        sourceSignalId: params.sourceSignalId,
+        enqueuedAt: new Date().toISOString()
+      })
+  };
   const materializationRouter = new MaterializationRouter({
     evidenceService,
     memoryService,
@@ -1142,7 +1165,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     claimService,
     pathRelationProposalPort,
     pathCandidateSinkPort: pathCandidatePort,
-    edgeAutoProducerPort: edgeAutoProducerService,
+    enrichPendingPort,
     ...(conflictDetectionService === null
       ? {}
       : { conflictDetectionPort: conflictDetectionService }),
@@ -1265,6 +1288,32 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     signalReceiver: signalService,
     strongRefService,
     workspaceRepo,
+    // invariant: BULK_ENRICH drain wiring (S3c). The same governed services
+    // materialization used to run inline now run in the Garden worker, against
+    // memory rows fetched by id. enrichConflictDetectionPort is only wired when
+    // conflict detection is enabled (it has its own env gate).
+    enrichPendingRepo,
+    enrichMemoryLookup: {
+      findById: async (memoryId: string) => {
+        const memory = await memoryEntryRepo.findById(memoryId);
+        if (memory === null) {
+          return null;
+        }
+        return {
+          object_id: memory.object_id,
+          dimension: memory.dimension,
+          scope_class: memory.scope_class,
+          content: memory.content,
+          domain_tags: memory.domain_tags,
+          workspace_id: memory.workspace_id,
+          run_id: memory.run_id
+        };
+      }
+    },
+    enrichEdgeProducerPort: edgeAutoProducerService,
+    ...(conflictDetectionService === null
+      ? {}
+      : { enrichConflictDetectionPort: conflictDetectionService }),
     warn: warnLogger.warn
   });
   const gardenTaskRepo =

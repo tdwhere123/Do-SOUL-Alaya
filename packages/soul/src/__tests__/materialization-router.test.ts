@@ -294,17 +294,16 @@ describe("MaterializationRouter", () => {
     expect(claimInput.proposition_digest).toBe("Never print secrets.");
   });
 
-  it("calls the edge auto producer after memory_and_claim creates a memory entry", async () => {
+  it("enqueues enrichment after memory_and_claim creates a memory entry (no inline enrichment)", async () => {
     const deps = createDeps();
-    const edgeAutoProducerPort = {
-      produceForNewMemory: vi.fn(async () => undefined)
-    };
-    const router = new MaterializationRouter({ ...deps, edgeAutoProducerPort });
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
 
     await router.materializeSignal(createSignal());
 
-    expect(edgeAutoProducerPort.produceForNewMemory).toHaveBeenCalledWith({
-      newMemoryId: "memory-1",
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledWith({
+      memoryId: "memory-1",
       workspaceId: "workspace-1",
       runId: "run-1",
       sourceSignalId: "signal-1"
@@ -829,23 +828,27 @@ describe("MaterializationRouter", () => {
     ).toBe(true);
   });
 
-  it("invokes conflictDetectionPort with the new memory facts when wired", async () => {
+  it("does NOT run conflict detection inline on the write-path (enqueues instead)", async () => {
+    // invariant: detectAndLinkConflicts moved to the BULK_ENRICH worker. The
+    // write-path must stay synchronous-ack: it enqueues an enrich_pending
+    // marker and never calls the conflict scan inline.
     const deps = createDeps();
     const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
     const router = new MaterializationRouter({
       ...deps,
-      conflictDetectionPort: { detectAndLinkConflicts }
+      conflictDetectionPort: { detectAndLinkConflicts },
+      enrichPendingPort
     });
 
     await router.materializeSignal(createSignal());
 
-    expect(detectAndLinkConflicts).toHaveBeenCalledTimes(1);
-    const call = detectAndLinkConflicts.mock.calls[0][0];
-    expect(call.newMemoryId).toBe("memory-1");
-    expect(call.workspaceId).toBe("workspace-1");
+    expect(detectAndLinkConflicts).not.toHaveBeenCalled();
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
   });
 
-  it("does not call conflictDetectionPort when port is absent", async () => {
+  it("does not enqueue enrichment when enrichPendingPort is absent", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter(deps);
 
@@ -870,6 +873,9 @@ type RunWithDecisionFn = NonNullable<
 type DetectFn = NonNullable<
   ConstructorParameters<typeof MaterializationRouter>[0]["conflictDetectionPort"]
 >["detectAndLinkConflicts"];
+type EnqueueFn = NonNullable<
+  ConstructorParameters<typeof MaterializationRouter>[0]["enrichPendingPort"]
+>["enqueue"];
 
 // invariant: a fake reconciliation port that runs the router's
 // applyVerdict callback exactly as the core service would — emit the
@@ -940,17 +946,16 @@ describe("MaterializationRouter ingest reconciliation", () => {
     });
   });
 
-  it("memory_entry_only append branch calls the edge auto producer after creating a memory", async () => {
+  it("memory_entry_only append branch enqueues enrichment after creating a memory", async () => {
     const deps = createDeps();
-    const edgeAutoProducerPort = {
-      produceForNewMemory: vi.fn(async () => undefined)
-    };
-    const router = new MaterializationRouter({ ...deps, edgeAutoProducerPort });
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
 
     await router.materializeSignal(factSignal());
 
-    expect(edgeAutoProducerPort.produceForNewMemory).toHaveBeenCalledWith({
-      newMemoryId: "memory-1",
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledWith({
+      memoryId: "memory-1",
       workspaceId: "workspace-1",
       runId: "run-1",
       sourceSignalId: "signal-1"
@@ -1050,22 +1055,21 @@ describe("MaterializationRouter ingest reconciliation", () => {
     });
   });
 
-  it("ADD verdict (reconciled path) calls the edge auto producer for the appended memory", async () => {
+  it("ADD verdict (reconciled path) enqueues enrichment for the appended memory", async () => {
     const deps = createDeps();
     const { reconciliationPort } = fakeReconciliationPort({ kind: "add" });
-    const edgeAutoProducerPort = {
-      produceForNewMemory: vi.fn(async () => undefined)
-    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
     const router = new MaterializationRouter({
       ...deps,
       reconciliationPort,
-      edgeAutoProducerPort
+      enrichPendingPort
     });
 
     await router.materializeSignal(factSignal());
 
-    expect(edgeAutoProducerPort.produceForNewMemory).toHaveBeenCalledWith({
-      newMemoryId: "memory-1",
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledWith({
+      memoryId: "memory-1",
       workspaceId: "workspace-1",
       runId: "run-1",
       sourceSignalId: "signal-1"
@@ -1097,24 +1101,22 @@ describe("MaterializationRouter ingest reconciliation", () => {
     expect(calls.filter((candidate) => candidate.relationKind === "derives_from")).toEqual([]);
   });
 
-  it("UPDATE verdict (reconciled path) does not call the edge auto producer", async () => {
+  it("UPDATE verdict (reconciled path) does not enqueue enrichment", async () => {
     const deps = createDeps();
     const { reconciliationPort } = fakeReconciliationPort({
       kind: "update",
       survivingObjectId: "memory-existing"
     });
-    const edgeAutoProducerPort = {
-      produceForNewMemory: vi.fn(async () => undefined)
-    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
     const router = new MaterializationRouter({
       ...deps,
       reconciliationPort,
-      edgeAutoProducerPort
+      enrichPendingPort
     });
 
     await router.materializeSignal(factSignal());
 
-    expect(edgeAutoProducerPort.produceForNewMemory).not.toHaveBeenCalled();
+    expect(enrichPendingPort.enqueue).not.toHaveBeenCalled();
   });
 
   it("NOOP verdict (reconciled path) does not create derives_from edges", async () => {
@@ -1141,24 +1143,22 @@ describe("MaterializationRouter ingest reconciliation", () => {
     expect(calls.filter((candidate) => candidate.relationKind === "derives_from")).toEqual([]);
   });
 
-  it("NOOP verdict (reconciled path) does not call the edge auto producer", async () => {
+  it("NOOP verdict (reconciled path) does not enqueue enrichment", async () => {
     const deps = createDeps();
     const { reconciliationPort } = fakeReconciliationPort({
       kind: "noop",
       survivingObjectId: "memory-existing"
     });
-    const edgeAutoProducerPort = {
-      produceForNewMemory: vi.fn(async () => undefined)
-    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
     const router = new MaterializationRouter({
       ...deps,
       reconciliationPort,
-      edgeAutoProducerPort
+      enrichPendingPort
     });
 
     await router.materializeSignal(factSignal());
 
-    expect(edgeAutoProducerPort.produceForNewMemory).not.toHaveBeenCalled();
+    expect(enrichPendingPort.enqueue).not.toHaveBeenCalled();
   });
 
   it("ADD verdict creates the evidence capsule then the memory entry", async () => {
@@ -1182,37 +1182,31 @@ describe("MaterializationRouter ingest reconciliation", () => {
     ]);
   });
 
-  it("ADD verdict runs the conflict scan when flagged", async () => {
-    const deps = createDeps();
-    const { reconciliationPort } = fakeReconciliationPort({ kind: "add", runConflictScan: true });
-    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
-    const router = new MaterializationRouter({
-      ...deps,
-      reconciliationPort,
-      conflictDetectionPort: { detectAndLinkConflicts }
-    });
+  it("ADD verdict enqueues enrichment and never runs conflict detection inline (regardless of the old runConflictScan flag)", async () => {
+    // invariant: the reconciliation runConflictScan flag no longer gates inline
+    // work — every ADD-minted memory is enqueued and the BULK_ENRICH worker
+    // runs both governed services. The write-path must not call
+    // detectAndLinkConflicts inline for either flag value.
+    for (const runConflictScan of [true, false]) {
+      const deps = createDeps();
+      const { reconciliationPort } = fakeReconciliationPort({ kind: "add", runConflictScan });
+      const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+      const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+      const router = new MaterializationRouter({
+        ...deps,
+        reconciliationPort,
+        conflictDetectionPort: { detectAndLinkConflicts },
+        enrichPendingPort
+      });
 
-    const result = await router.materializeSignal(factSignal());
+      const result = await router.materializeSignal(factSignal());
 
-    expect(result.success).toBe(true);
-    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
-    expect(detectAndLinkConflicts).toHaveBeenCalledTimes(1);
-    expect(detectAndLinkConflicts.mock.calls[0][0].newMemoryId).toBe("memory-1");
-  });
-
-  it("ADD verdict without the conflict-scan flag does not run the scan", async () => {
-    const deps = createDeps();
-    const { reconciliationPort } = fakeReconciliationPort({ kind: "add", runConflictScan: false });
-    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
-    const router = new MaterializationRouter({
-      ...deps,
-      reconciliationPort,
-      conflictDetectionPort: { detectAndLinkConflicts }
-    });
-
-    await router.materializeSignal(factSignal());
-
-    expect(detectAndLinkConflicts).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
+      expect(detectAndLinkConflicts).not.toHaveBeenCalled();
+      expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+      expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    }
   });
 
   it("NOOP verdict creates nothing — no evidence capsule, no memory entry", async () => {
