@@ -190,4 +190,77 @@ describe("extraction window-containment preflight", () => {
       await rm(pinnedMetaRoot, { recursive: true, force: true });
     }
   }, 60_000);
+
+  // @anchor offline-coverage-gap-exemption — the no-credentials offline seed
+  // path (apiKey null) can never live-extract: a missing fixture is served by
+  // the deterministic full-turn fallback, not an LLM call. So the
+  // "uncovered window" guard is a category error there and must NOT fire,
+  // while a credentialled run with the SAME uncovered window MUST still throw
+  // (it would silently burn ~466h live-extracting the gap).
+  // cross-file: compile-seed.ts createCompileSeedRunner (threads
+  //   liveExtractionPossible = credentialled)
+  it("skips the uncovered-window guard for an offline (no-credentials) run but keeps it for a credentialled run", async () => {
+    const windowA = [buildLongMemEvalFixtureQuestion("q001", "s-001")];
+    const windowAB = [
+      buildLongMemEvalFixtureQuestion("q001", "s-001"),
+      buildLongMemEvalFixtureQuestion("q002", "s-002")
+    ];
+    const turnsAB = collectDistinctTurnContents(windowAB);
+    // Fill only window A so window B's turns are an uncovered gap.
+    await fillTurns(cacheRoot, collectDistinctTurnContents(windowA));
+
+    const offlineConfig: CompileSeedExtractionConfig = {
+      providerUrl: CONFIG.providerUrl,
+      model: CONFIG.model,
+      apiKey: null
+    };
+
+    // Offline run: apiKey null => liveExtractionPossible defaults false =>
+    // the gap is handled by the offline fallback, so preflight is a no-op.
+    expect(() =>
+      preflightExtractionCache({
+        cacheRoot,
+        config: offlineConfig,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        requiredTurnContents: turnsAB
+      })
+    ).not.toThrow();
+
+    // An explicit liveExtractionPossible:false on a credentialled config is
+    // also exempt (the flag, not just apiKey, gates the guard).
+    expect(() =>
+      preflightExtractionCache({
+        cacheRoot,
+        config: CONFIG,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        requiredTurnContents: turnsAB,
+        liveExtractionPossible: false
+      })
+    ).not.toThrow();
+
+    // Load-bearing: a credentialled run (apiKey present => liveExtractionPossible
+    // defaults true) with the SAME uncovered window MUST still throw. This is
+    // the deliberate release-blocker behavior; relaxing offline mode must not
+    // gut the guard for real runs.
+    expect(() =>
+      preflightExtractionCache({
+        cacheRoot,
+        config: CONFIG,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        requiredTurnContents: turnsAB
+      })
+    ).toThrow(/covers only part of this run's question window/su);
+
+    // And the same credentialled run with an explicit liveExtractionPossible:true
+    // throws too — the flag does not silently disable the guard for online runs.
+    expect(() =>
+      preflightExtractionCache({
+        cacheRoot,
+        config: CONFIG,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        requiredTurnContents: turnsAB,
+        liveExtractionPossible: true
+      })
+    ).toThrow(/covers only part of this run's question window/su);
+  });
 });

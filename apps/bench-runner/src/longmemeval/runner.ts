@@ -66,6 +66,7 @@ import {
   type LongMemEvalReportSideEffectSnapshot
 } from "./diagnostics.js";
 import { writeExternalDiagnosticsArtifact } from "./diagnostics-artifacts.js";
+import { MemoryGraphEdgeType } from "@do-soul/alaya-protocol";
 import {
   buildLongMemEvalColdWarmComparisonSidecar,
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
@@ -1092,11 +1093,17 @@ async function readLongMemEvalReportSideEffectSnapshot(
   const status = await daemon.runtime.services.graphHealthService.getStatus(
     workspaceId
   );
-  // Post-cutover the graph-health source reports the unified path plane only.
-  // The snapshot keeps its memory_graph_edges_* field names for historical
-  // archive delta compat but now sources them from path_relations_by_kind /
-  // _total; recalls_edge_count tracks the 'recalls' relation_kind bucket.
-  const byKind = { ...status.path_relations_by_kind };
+  // invariant: memory_graph_edges_by_type aliases the unified path plane
+  // (path_relations_by_kind / _total) and must carry every canonical
+  // edge_type key (defaulting to 0) so historical-archive deltas keep a stable
+  // key set; path_relations_by_kind itself stays group-by-present.
+  // canonical key set: @do-soul/alaya-protocol MemoryGraphEdgeType.
+  const byKind: Record<string, number> = Object.fromEntries(
+    Object.values(MemoryGraphEdgeType).map((edgeType) => [edgeType, 0])
+  );
+  for (const [kind, count] of Object.entries(status.path_relations_by_kind)) {
+    byKind[kind] = count;
+  }
   return {
     question_id: questionId,
     workspace_id: status.workspace_id,

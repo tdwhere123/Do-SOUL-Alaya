@@ -914,6 +914,19 @@ export function preflightExtractionCache(input: {
   readonly config: CompileSeedExtractionConfig;
   readonly systemPrompt: string;
   readonly allowLiveExtraction?: boolean;
+  // Whether THIS run can live-extract at all. The "uncovered window / coverage
+  // gap" guards below exist to stop a credentialled run from silently spending
+  // ~466h live-extracting an unfilled cache window. The no-credentials offline
+  // fallback (createCompileSeedRunner provider === null -> seedOfflineFallback)
+  // never makes an LLM call: a missing fixture is served by the deterministic
+  // full-turn fallback, not by live extraction. So when live extraction is
+  // impossible the coverage gap is a category error, not a silent-cost hole,
+  // and the guard must NOT fire. Defaults to `config.apiKey !== null` — the
+  // single source createCompileSeedRunner reads for its `credentialled` flag —
+  // so a direct caller that passes a credentialled config keeps the guard.
+  // invariant: this only relaxes the live-extraction-gap guards; the
+  // model/prompt-drift guards above always fire (cheap config-drift detection).
+  readonly liveExtractionPossible?: boolean;
   readonly manifest?: ExtractionCacheManifest | undefined;
   // The distinct turn contents THIS run will extract (its --limit/--offset
   // question window flattened to rounds + dedup). When present, the gate is
@@ -933,6 +946,12 @@ export function preflightExtractionCache(input: {
     input.manifest ?? readExtractionCacheManifest(input.cacheRoot);
   const warn =
     input.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
+  // Single source for "could this run live-extract?": explicit caller flag, else
+  // the credentials presence the runner derives `credentialled` from. Offline
+  // (apiKey null) -> no LLM call possible -> the coverage-gap guards are a
+  // category error and must be skipped (the offline fallback covers misses).
+  const liveExtractionPossible =
+    input.liveExtractionPossible ?? input.config.apiKey !== null;
   if (manifest === undefined) {
     warn(
       "[longmemeval preflight] no extraction-cache manifest at " +
@@ -981,7 +1000,11 @@ export function preflightExtractionCache(input: {
       input.systemPrompt,
       input.requiredTurnContents
     );
-    if (missing > 0 && input.allowLiveExtraction !== true) {
+    if (
+      missing > 0 &&
+      input.allowLiveExtraction !== true &&
+      liveExtractionPossible
+    ) {
       const total = input.requiredTurnContents.length;
       throw new Error(
         "[longmemeval preflight] extraction cache covers only part of this " +
@@ -1006,7 +1029,7 @@ export function preflightExtractionCache(input: {
   // single source for the denominator: resolveCompileSeedExtractionConfig +
   // ExtractionCacheManifest.coverage (extraction-fill.ts writes it).
   if (coverage === undefined) {
-    if (input.allowLiveExtraction !== true) {
+    if (input.allowLiveExtraction !== true && liveExtractionPossible) {
       throw new Error(
         "[longmemeval preflight] extraction cache manifest has no coverage " +
           "field; the cache was never filled against a known dataset " +
@@ -1019,7 +1042,8 @@ export function preflightExtractionCache(input: {
   }
   if (
     coverage < EXTRACTION_CACHE_COVERAGE_THRESHOLD &&
-    input.allowLiveExtraction !== true
+    input.allowLiveExtraction !== true &&
+    liveExtractionPossible
   ) {
     const coveragePct = (coverage * 100).toFixed(1);
     throw new Error(
@@ -1118,13 +1142,22 @@ export function createCompileSeedRunner(options?: {
     : readExtractionCacheManifest(cacheRoot);
   const config =
     options?.config ?? resolveCompileSeedExtractionConfig(process.env, manifest);
+  // Single source for online-vs-offline: credentials presence. The offline
+  // (credentialled === false) path's provider is null, so a missing fixture is
+  // served by the deterministic full-turn fallback, never a live LLM call.
+  const credentialled = config.apiKey !== null;
   // Run-start fail-loud guard. Skipped only for unit tests that hand-build the
   // config + a manifest-less temp cacheRoot; production entrypoints never skip.
+  // liveExtractionPossible threads `credentialled` so the coverage-gap guards
+  // fire only for credentialled runs (which CAN silently burn ~466h live);
+  // the offline path has nothing to live-extract, so the gap is a no-op.
+  // cross-file: preflightExtractionCache (consumes liveExtractionPossible)
   if (options?.skipPreflight !== true) {
     preflightExtractionCache({
       cacheRoot,
       config,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      liveExtractionPossible: credentialled,
       ...(options?.allowLiveExtraction === undefined
         ? {}
         : { allowLiveExtraction: options.allowLiveExtraction }),
@@ -1134,7 +1167,6 @@ export function createCompileSeedRunner(options?: {
       ...(manifest === undefined ? {} : { manifest })
     });
   }
-  const credentialled = config.apiKey !== null;
   const stats: CompileSeedExtractionStats = {
     path: credentialled ? "official_api_compile" : "no_credentials_fallback",
     cacheHits: 0,
