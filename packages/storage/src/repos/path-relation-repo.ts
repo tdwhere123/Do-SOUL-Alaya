@@ -98,8 +98,15 @@ function anchorKeySql(anchorPath: "source_anchor" | "target_anchor"): string {
     END`;
 }
 
-const SOURCE_ANCHOR_KEY_SQL = anchorKeySql("source_anchor");
-const TARGET_ANCHOR_KEY_SQL = anchorKeySql("target_anchor");
+// invariant: exported so a foreign repo that must match the mint's
+// findByAnchorMemoryId/anchorPointsAt dedup against the SAME indexed expression
+// reuses this byte-identical text rather than re-spelling the CASE/json_array
+// (which would silently drift from migration 048 and lose the expression index).
+// see also: edge-proposal-repo.ts listAcceptedAwaitingPath (await-path NOT EXISTS).
+export const PATH_RELATION_SOURCE_ANCHOR_KEY_SQL = anchorKeySql("source_anchor");
+export const PATH_RELATION_TARGET_ANCHOR_KEY_SQL = anchorKeySql("target_anchor");
+const SOURCE_ANCHOR_KEY_SQL = PATH_RELATION_SOURCE_ANCHOR_KEY_SQL;
+const TARGET_ANCHOR_KEY_SQL = PATH_RELATION_TARGET_ANCHOR_KEY_SQL;
 
 // invariant: SQL mirror of anchorObjectId() — object/object_facet anchors back
 // on object_id; obligation/risk_concern/time_concern anchors back on

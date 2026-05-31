@@ -11,6 +11,10 @@ import {
 import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
+import {
+  PATH_RELATION_SOURCE_ANCHOR_KEY_SQL,
+  PATH_RELATION_TARGET_ANCHOR_KEY_SQL
+} from "./path-relation-repo.js";
 import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
 
 export interface EdgeProposalCreateInput {
@@ -77,13 +81,16 @@ export interface EdgeProposalRepo {
     readonly edgeType: EdgeProposal["edge_type"];
   }): EdgeProposal | null;
   listPending(workspaceId: string, filter?: EdgeProposalFilter): readonly EdgeProposal[];
-  // invariant: accepted / auto_accepted proposals owe a minted path. A crash
-  // after the accept review row commits but before the mint (or before
-  // handleMintFailure commits) strands the row in this state with no path and
-  // invisible to listPending (which filters status='pending'). The daemon
-  // reconcile sweep reads these, oldest first, to re-drive the owed mint
-  // idempotently. Bounded by `limit` so one pass cannot scan an unbounded set.
-  // see also: core/src/edge-proposal-service.ts reconcileStuckAccepts.
+  // invariant: returns ONLY accepted / auto_accepted proposals that still owe a
+  // path — a crash after the accept review row committed but before the mint
+  // landed strands such a row with no path and invisible to listPending (which
+  // filters status='pending'). Rows whose owed path already landed are excluded
+  // (NOT EXISTS against the mint's own anchor dedup), so a backlog of healthy
+  // accepts can never exhaust `limit` and starve a genuine orphan behind them.
+  // The daemon reconcile sweep reads these, oldest first, to re-drive the owed
+  // mint idempotently. Bounded by `limit` so one pass cannot scan unbounded.
+  // see also: core/src/edge-proposal-service.ts reconcileStuckAccepts;
+  //   path-relation-repo.ts PATH_RELATION_*_ANCHOR_KEY_SQL (the await-path match).
   listAcceptedAwaitingPath(workspaceId: string, limit: number): readonly EdgeProposal[];
   updateReview(input: EdgeProposalReviewInput): EdgeProposal;
   reconcileAfterMintFailure(input: EdgeProposalMintFailureReconcileInput): EdgeProposal;
@@ -153,15 +160,62 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
         AND status = 'pending'
       LIMIT 1
     `);
+    // invariant: returns only accepted / auto_accepted rows that STILL owe a
+    // path — the NOT EXISTS excludes any whose owed path already landed. Without
+    // it the sweep selected every accepted row oldest-first, so > limit healthy
+    // accepts (each already minted) permanently hid a real crash-window orphan
+    // behind them: the per-pass cap was exhausted re-minting healthy rows to
+    // already_present and the orphan was never reached.
+    // The await-path predicate MIRRORS the accept mint's dedup exactly
+    // (path-relation-proposal-service.materialize -> findByAnchorMemoryId ->
+    // anchorPointsAt): a path "satisfies" the proposal iff some path_relations
+    // row in the same workspace links the proposal's source/target memory ids in
+    // EITHER direction. Like that dedup it ignores relation_kind and lifecycle
+    // status (findByAnchors applies neither), so a row this query excludes is
+    // exactly a row the re-mint would resolve to already_present.
+    // The proposal anchors the mint writes are always object anchors
+    // ({kind:'object', object_id: <memory_id>}); json_array('object', col)
+    // renders the same text serializePathAnchorRef(...) produces, and matching
+    // it against PATH_RELATION_*_ANCHOR_KEY_SQL (byte-identical to the
+    // idx_path_relations_*_anchor_key expression indexes, migration 048) lets
+    // SQLite probe those indexes instead of scanning path_relations.
+    // invariant: the match is asymmetric-safe. A genuine orphan owns NO path, so
+    // NO row matches and it is always included (never starved). A healthy accept
+    // that some non-object-anchor producer happens to satisfy would re-appear
+    // here, but the re-mint resolves it to already_present — a harmless no-op,
+    // never a lost orphan.
     // invariant: oldest-first so a backlog of stranded accepts drains FIFO
     // across passes; idx_edge_proposals_workspace_status(workspace_id, status,
-    // created_at) covers this predicate + ordering without a SCAN.
+    // created_at) covers the accepted-row predicate + ordering.
+    // see also: core/src/edge-proposal-service.ts reconcileStuckAccepts,
+    //   mintAcceptedPath (object-anchor mint + idempotent dedup).
+    // invariant: the anchor-key SQL is spliced VERBATIM (unqualified
+    // anchors_json) so its parse tree stays byte-identical to the migration-048
+    // expression indexes and SQLite probes them. `path_relations` is the only
+    // table in this subquery carrying an anchors_json column, so the unqualified
+    // reference binds unambiguously to pr.anchors_json; edge_proposals is
+    // referenced only through its `ep.` alias.
     this.listAcceptedAwaitingPathStatement = db.connection.prepare(`
-      SELECT *
-      FROM edge_proposals
-      WHERE workspace_id = ?
-        AND status IN ('accepted', 'auto_accepted')
-      ORDER BY created_at ASC, proposal_id ASC
+      SELECT ep.*
+      FROM edge_proposals AS ep
+      WHERE ep.workspace_id = ?
+        AND ep.status IN ('accepted', 'auto_accepted')
+        AND NOT EXISTS (
+          SELECT 1
+          FROM path_relations AS pr
+          WHERE pr.workspace_id = ep.workspace_id
+            AND (
+              (
+                ${PATH_RELATION_SOURCE_ANCHOR_KEY_SQL} = json_array('object', ep.source_memory_id)
+                AND ${PATH_RELATION_TARGET_ANCHOR_KEY_SQL} = json_array('object', ep.target_memory_id)
+              )
+              OR (
+                ${PATH_RELATION_SOURCE_ANCHOR_KEY_SQL} = json_array('object', ep.target_memory_id)
+                AND ${PATH_RELATION_TARGET_ANCHOR_KEY_SQL} = json_array('object', ep.source_memory_id)
+              )
+            )
+        )
+      ORDER BY ep.created_at ASC, ep.proposal_id ASC
       LIMIT ?
     `);
     this.updateReviewStatement = db.connection.prepare(`

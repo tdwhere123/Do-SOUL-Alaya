@@ -9,11 +9,13 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
-  type MemoryEntry
+  type MemoryEntry,
+  type PathRelation
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../db.js";
 import { SqliteEdgeProposalRepo } from "../repos/edge-proposal-repo.js";
 import { SqliteMemoryEntryRepo } from "../repos/memory-entry-repo.js";
+import { SqlitePathRelationRepo } from "../repos/path-relation-repo.js";
 import { SqliteRunRepo } from "../repos/run-repo.js";
 import { SqliteWorkspaceRepo } from "../repos/workspace-repo.js";
 
@@ -240,6 +242,93 @@ describe("SqliteEdgeProposalRepo", () => {
     ]);
   });
 
+  // invariant: a healthy accepted row whose owed path already landed is EXCLUDED
+  // (the await-path predicate), so re-driving the sweep does not re-mint it.
+  // The match mirrors the mint dedup: it is direction-insensitive and ignores
+  // relation_kind, so a path minted source->target OR target->source, under a
+  // different relation_kind, still excludes the proposal.
+  it("excludes accepted proposals whose owed path already landed (either direction, any relation_kind)", async () => {
+    const { repo, pathRepo } = await createRepo();
+    repo.create(createProposalInput("proposal-1", MEMORY_1, MEMORY_2, "recalls"));
+    repo.create(createProposalInput("proposal-2", MEMORY_2, MEMORY_3, "recalls"));
+    repo.updateReview({
+      proposalId: "proposal-1",
+      status: "accepted",
+      reviewerIdentity: "user:reviewer",
+      reviewReason: "accepted",
+      reviewedAt: "2026-05-24T00:05:00.000Z"
+    });
+    repo.updateReview({
+      proposalId: "proposal-2",
+      status: "auto_accepted",
+      reviewerIdentity: "system:auto_accept_policy",
+      reviewReason: "auto-accepted",
+      reviewedAt: "2026-05-24T00:05:01.000Z"
+    });
+    // proposal-1's path landed in source->target order; proposal-2's landed in
+    // REVERSE order under a different relation_kind. Both must drop out.
+    mintObjectPath(pathRepo, 1, MEMORY_1, MEMORY_2);
+    mintObjectPath(pathRepo, 2, MEMORY_3, MEMORY_2, {
+      constitution: { relation_kind: "contradicts", why_this_relation_exists: ["x"] }
+    });
+
+    expect(repo.listAcceptedAwaitingPath("workspace-1", 32)).toEqual([]);
+  });
+
+  // invariant (regression for the cap-starvation hazard): a backlog of healthy
+  // accepted rows (each already owning its path) MUST NOT consume the per-pass
+  // cap and permanently hide a genuine crash-window orphan ordered after them.
+  // Before the await-path filter, listAcceptedAwaitingPath returned EVERY
+  // accepted row oldest-first, so a workspace with > cap healthy accepts plus a
+  // later orphan re-selected the same healthy rows every pass (all minting
+  // already_present) and never reached the orphan. With the filter the healthy
+  // rows drop out, so even a tiny cap reaches the orphan in one pass.
+  it("does not starve a genuine orphan behind more-than-cap healthy accepted rows", async () => {
+    const CAP = 3;
+    const HEALTHY = 5; // strictly greater than CAP
+    const extraMemoryIds = Array.from({ length: HEALTHY * 2 + 2 }, (_, index) => objectId(index + 10));
+    const { repo, pathRepo } = await createRepo(extraMemoryIds);
+
+    // HEALTHY accepted rows, each on a distinct memory pair, ordered FIRST, each
+    // already owning its minted path.
+    for (let index = 0; index < HEALTHY; index += 1) {
+      const proposalId = `healthy-${String(index).padStart(2, "0")}`;
+      const source = extraMemoryIds[index * 2];
+      const target = extraMemoryIds[index * 2 + 1];
+      repo.create(
+        createProposalInput(proposalId, source, target, "recalls", `2026-05-24T00:0${index}:00.000Z`)
+      );
+      repo.updateReview({
+        proposalId,
+        status: "accepted",
+        reviewerIdentity: "user:reviewer",
+        reviewReason: "accepted",
+        reviewedAt: "2026-05-24T01:00:00.000Z"
+      });
+      mintObjectPath(pathRepo, index + 1, source, target);
+    }
+
+    // The genuine orphan: accepted-without-path, ordered AFTER every healthy row
+    // (later created_at). No path is minted for it.
+    const orphanSource = extraMemoryIds[HEALTHY * 2];
+    const orphanTarget = extraMemoryIds[HEALTHY * 2 + 1];
+    repo.create(
+      createProposalInput("orphan-zz", orphanSource, orphanTarget, "recalls", "2026-05-24T09:00:00.000Z")
+    );
+    repo.updateReview({
+      proposalId: "orphan-zz",
+      status: "accepted",
+      reviewerIdentity: "user:reviewer",
+      reviewReason: "accepted then crashed before mint",
+      reviewedAt: "2026-05-24T09:00:01.000Z"
+    });
+
+    // With the healthy rows excluded the orphan is the ONLY row owing a path, so
+    // it is reached even though the cap is smaller than the healthy backlog.
+    const awaiting = repo.listAcceptedAwaitingPath("workspace-1", CAP);
+    expect(awaiting.map((row) => row.proposal_id)).toEqual(["orphan-zz"]);
+  });
+
   // invariant (I1): reconcile is CAS-gated on fromStatus, so a concurrent
   // decision cannot be clobbered. A reconcile against a row that is no longer in
   // fromStatus fails closed.
@@ -267,8 +356,9 @@ describe("SqliteEdgeProposalRepo", () => {
   });
 });
 
-async function createRepo(): Promise<{
+async function createRepo(extraMemoryIds: readonly string[] = []): Promise<{
   readonly repo: SqliteEdgeProposalRepo;
+  readonly pathRepo: SqlitePathRelationRepo;
 }> {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
@@ -298,17 +388,77 @@ async function createRepo(): Promise<{
   await memoryRepo.create(createMemoryEntry(MEMORY_1));
   await memoryRepo.create(createMemoryEntry(MEMORY_2));
   await memoryRepo.create(createMemoryEntry(MEMORY_3));
+  for (const memoryId of extraMemoryIds) {
+    await memoryRepo.create(createMemoryEntry(memoryId));
+  }
 
   return {
-    repo: new SqliteEdgeProposalRepo(database)
+    repo: new SqliteEdgeProposalRepo(database),
+    pathRepo: new SqlitePathRelationRepo(database)
   };
+}
+
+// Mirrors the accept mint's landing topology: a path_relations row whose
+// source/target are object anchors on the two memory ids. The await-path query
+// must treat a proposal owning such a path as no-longer-orphaned regardless of
+// relation_kind / lifecycle. `index` keeps path_id unique per fixture.
+function mintObjectPath(
+  pathRepo: SqlitePathRelationRepo,
+  index: number,
+  sourceMemoryId: string,
+  targetMemoryId: string,
+  overrides: Partial<PathRelation> = {}
+): void {
+  const relation: PathRelation = {
+    path_id: `path-${index}`,
+    workspace_id: "workspace-1",
+    anchors: {
+      source_anchor: { kind: "object", object_id: sourceMemoryId },
+      target_anchor: { kind: "object", object_id: targetMemoryId }
+    },
+    constitution: {
+      relation_kind: "recalls",
+      why_this_relation_exists: ["edge proposal accepted"]
+    },
+    effect_vector: {
+      salience: 0.5,
+      recall_bias: 0.5,
+      verification_bias: 0,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "lens_entry"
+    },
+    plasticity_state: {
+      strength: 0.5,
+      direction_bias: "bidirectional_asymmetric",
+      stability_class: "stable",
+      support_events_count: 1,
+      contradiction_events_count: 0
+    },
+    lifecycle: {
+      status: "active",
+      retirement_rule: "manual"
+    },
+    legitimacy: {
+      evidence_basis: ["evidence-1"],
+      governance_class: "recall_allowed"
+    },
+    created_at: "2026-05-24T00:00:00.000Z",
+    updated_at: "2026-05-24T00:00:00.000Z",
+    ...overrides
+  };
+  pathRepo.create(relation);
+}
+
+function objectId(index: number): string {
+  return `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
 }
 
 function createProposalInput(
   proposalId: string,
   sourceMemoryId: string,
   targetMemoryId: string,
-  edgeType: "recalls" | "contradicts"
+  edgeType: "recalls" | "contradicts",
+  createdAt = "2026-05-24T00:00:00.000Z"
 ) {
   return {
     proposal_id: proposalId,
@@ -321,7 +471,7 @@ function createProposalInput(
     reason: "test proposal",
     source_signal_id: null,
     run_id: "run-1",
-    created_at: "2026-05-24T00:00:00.000Z",
+    created_at: createdAt,
     expires_at: null
   };
 }
