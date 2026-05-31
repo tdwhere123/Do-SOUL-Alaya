@@ -57,6 +57,22 @@ export interface EdgeProposalRepoPort {
     readonly reviewReason: string | null;
     readonly reviewedAt: string;
   }): EdgeProposal;
+  // invariant: compensating transition out of the just-committed accepted
+  // state when the owed path never minted. CAS-gated on `fromStatus` (the
+  // accepted/auto_accepted the accept just wrote) so a concurrent decision
+  // cannot be clobbered. A transient mint failure reverts the row to
+  // `pending` (retryable through the existing pending review surface); a
+  // permanent anchor rejection reverts it to terminal `rejected` so it leaves
+  // the pending list and cannot become a retry poison pill.
+  // see also: edge-proposal-repo.ts SqliteEdgeProposalRepo.reconcileAfterMintFailure.
+  reconcileAfterMintFailure(input: {
+    readonly proposalId: string;
+    readonly fromStatus: "accepted" | "auto_accepted";
+    readonly toStatus: "pending" | "rejected";
+    readonly reviewerIdentity: string | null;
+    readonly reviewReason: string | null;
+    readonly reviewedAt: string;
+  }): EdgeProposal;
 }
 
 export interface EdgeProposalServiceDependencies {
@@ -131,6 +147,12 @@ export const AUTO_ACCEPT_FLOOR_BY_TRIGGER: Readonly<
 // the decision and so audit-trail consumers can distinguish auto vs human.
 export const AUTO_ACCEPT_REVIEWER_IDENTITY = "system:auto_accept_policy";
 const AUTO_ACCEPT_REVIEW_REASON = "auto-accepted by trigger floor policy";
+
+// invariant: review_reason stamped on a proposal auto-rejected because its owed
+// path mint was permanently refused (a missing / foreign source or target
+// memory anchor). Distinguishes a mint-failure terminal rejection from an
+// operator/auto verdict rejection in the durable review_reason column.
+const PATH_MINT_FAILED_REVIEW_REASON = "permanent path-anchor refusal on accept";
 
 export interface EdgeProposalCreateParams {
   readonly sourceMemoryId: string;
@@ -408,11 +430,11 @@ export class EdgeProposalService {
         runId: proposal.run_id
       });
     } catch (mintError) {
-      // defensive: submitCandidate is contracted to catch its own materialize
-      // errors and return a discriminated outcome, but a thrown error must still
-      // produce the durable obligation record before propagating, so the
-      // auditability path is identical regardless of how the mint failure arrives.
-      await this.recordPathMintFailure(proposal, reviewerIdentity, "submit_threw", mintError);
+      // invariant: submitCandidate is contracted to catch its own materialize
+      // errors and return a discriminated outcome; a thrown error is classed
+      // transient ("failed", never a DECIDED rejection) and so reconciles to
+      // pending for operator retry.
+      await this.handleMintFailure(proposal, acceptedStatus, reviewerIdentity, "submit_threw", "failed", mintError);
       throw new CoreError(
         "OBLIGATION_VIOLATION",
         `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`,
@@ -421,19 +443,22 @@ export class EdgeProposalService {
     }
     // invariant: under the single-plane model the minted path is the ONLY
     // durable landing for an accepted proposal. applied / already_present mean
-    // the owed path exists. Any other outcome means the review row is already
-    // durably ACCEPTED/AUTO_ACCEPTED but no path exists, which must never be
-    // silent — emit a durable, queryable SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED
-    // record keyed on proposal_id (so an operator can reconcile the owed-path
-    // obligation without a forensic cross-join) and throw so the immediate caller
-    // also observes it. "failed" is transient (a retry may succeed; materialize
-    // dedups via findByAnchorMemoryId, so re-minting the same pair is idempotent);
-    // "rejected" is a permanent anchor refusal (a missing / foreign source or
-    // target memory) that retry cannot fix — both are loud here because an
-    // accepted proposal with no landing path is an obligation violation either way.
-    // The path service emits its own path.relation_rejected audit on rejection.
+    // the owed path exists, so the accepted review row stands. A "failed" or
+    // "rejected" outcome means the review row committed ACCEPTED/AUTO_ACCEPTED
+    // with no path, which must never be silent: handleMintFailure emits a
+    // durable SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED record keyed on
+    // proposal_id AND compensates the review row OUT of the
+    // accepted-without-path state, and the OBLIGATION_VIOLATION throw stays
+    // loud at call time.
+    //   - "failed": transient (materialize threw / event-publisher throw;
+    //     materialize dedups via findByAnchorMemoryId so re-mint is idempotent).
+    //     reconciles to pending -> retryable through the existing pending list.
+    //   - "rejected": permanent anchor refusal (missing / foreign source or
+    //     target memory) that retry can never fix. reconciles to terminal
+    //     rejected -> leaves the pending list, never a retry poison pill. The
+    //     path service emits its own path.relation_rejected audit on rejection.
     if (outcome === "failed" || outcome === "rejected") {
-      await this.recordPathMintFailure(proposal, reviewerIdentity, "submit_returned_false", null);
+      await this.handleMintFailure(proposal, acceptedStatus, reviewerIdentity, "submit_returned_false", outcome);
       throw new CoreError(
         "OBLIGATION_VIOLATION",
         `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`
@@ -442,22 +467,49 @@ export class EdgeProposalService {
     return reviewed;
   }
 
-  // invariant: emit the durable owed-path obligation BEFORE the caller's
-  // OBLIGATION_VIOLATION throw propagates. The reviewed row is already durable
-  // (committed above), so an EventLog event keyed on proposal_id is the only
-  // queryable trace an operator can reconcile against PATH_RELATION_CREATED;
-  // the throw alone reaches a different session (auto-accept = the propose_edge
-  // caller) and leaves no durable record. Uses the same eventPublisher the
-  // service already holds (no new dependency) with a no-op synchronous mutation.
-  private async recordPathMintFailure(
+  // invariant: emit the durable owed-path obligation AND compensate the review
+  // row in ONE transaction before the caller's OBLIGATION_VIOLATION throw
+  // propagates. The accept just committed ACCEPTED/AUTO_ACCEPTED, so the
+  // SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED event keyed on proposal_id is the
+  // queryable trace an operator can reconcile against PATH_RELATION_CREATED; the
+  // throw alone reaches a different session (auto-accept = the propose_edge
+  // caller) and leaves no durable record. reconcileAfterMintFailure runs as this
+  // event's mutation so audit + row transition land atomically (crash-mid-write
+  // cannot leave an audit without its reconciliation or vice versa).
+  // invariant: mintOutcome decides the reconcile target.
+  //   - "failed" (transient) -> back to pending: re-selectable through the
+  //     existing pending review surface, no new verb. A re-accept re-mints; the
+  //     path service dedups via findByAnchorMemoryId so at most one path lands.
+  //   - "rejected" (permanent anchor refusal) -> terminal rejected: leaves the
+  //     pending list, carries the mint-failure review_reason, never a poison
+  //     pill. A re-list does not resurface it for futile retry.
+  // see also: edge-proposal-repo.ts reconcileAfterMintFailure (CAS-gated write).
+  private async handleMintFailure(
     proposal: EdgeProposal,
+    acceptedStatus: typeof EdgeProposalStatus.ACCEPTED | typeof EdgeProposalStatus.AUTO_ACCEPTED,
     reviewerIdentity: string,
     failureKind: "submit_returned_false" | "submit_threw",
-    cause: unknown
+    mintOutcome: "failed" | "rejected",
+    cause: unknown = null
   ): Promise<void> {
+    const reviewedAt = this.now();
+    const toStatus = mintOutcome === "rejected" ? EdgeProposalStatus.REJECTED : EdgeProposalStatus.PENDING;
+    const reviewReason =
+      mintOutcome === "rejected"
+        ? `auto-rejected: owed path mint permanently refused (${PATH_MINT_FAILED_REVIEW_REASON})`
+        : null;
     await this.dependencies.eventPublisher.appendManyWithMutation(
-      [buildPathMintFailedEvent(proposal, reviewerIdentity, failureKind, cause, this.now())],
-      () => undefined
+      [buildPathMintFailedEvent(proposal, reviewerIdentity, failureKind, cause, reviewedAt)],
+      () => {
+        this.dependencies.proposalRepo.reconcileAfterMintFailure({
+          proposalId: proposal.proposal_id,
+          fromStatus: acceptedStatus,
+          toStatus,
+          reviewerIdentity: mintOutcome === "rejected" ? reviewerIdentity : null,
+          reviewReason,
+          reviewedAt
+        });
+      }
     );
   }
 

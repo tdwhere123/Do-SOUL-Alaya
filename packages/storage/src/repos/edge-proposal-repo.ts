@@ -36,6 +36,21 @@ export interface EdgeProposalReviewInput {
   readonly reviewedAt: string;
 }
 
+// invariant: compensating transition out of the accepted-without-path state.
+// fromStatus is CAS-gated so a concurrent decision is never clobbered: only a
+// row still in the accept-just-committed status moves. toStatus is `pending`
+// for a transient mint failure (retryable through the pending review surface)
+// or `rejected` for a permanent anchor refusal (terminal, leaves the list).
+// see also: core/src/edge-proposal-service.ts handleMintFailure.
+export interface EdgeProposalMintFailureReconcileInput {
+  readonly proposalId: string;
+  readonly fromStatus: Extract<EdgeProposalStatusValue, "accepted" | "auto_accepted">;
+  readonly toStatus: Extract<EdgeProposalStatusValue, "pending" | "rejected">;
+  readonly reviewerIdentity: string | null;
+  readonly reviewReason: string | null;
+  readonly reviewedAt: string;
+}
+
 export interface EdgeProposalRepo {
   create(input: EdgeProposalCreateInput): EdgeProposal;
   findById(proposalId: string): EdgeProposal | null;
@@ -47,6 +62,7 @@ export interface EdgeProposalRepo {
   }): EdgeProposal | null;
   listPending(workspaceId: string, filter?: EdgeProposalFilter): readonly EdgeProposal[];
   updateReview(input: EdgeProposalReviewInput): EdgeProposal;
+  reconcileAfterMintFailure(input: EdgeProposalMintFailureReconcileInput): EdgeProposal;
 }
 
 interface EdgeProposalRow {
@@ -73,6 +89,7 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
   private readonly findByIdStatement;
   private readonly findPendingDuplicateStatement;
   private readonly updateReviewStatement;
+  private readonly reconcileAfterMintFailureStatement;
 
   public constructor(private readonly db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
@@ -119,6 +136,18 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
           updated_at = ?
       WHERE proposal_id = ?
         AND status = 'pending'
+    `);
+    // invariant: CAS-gated on the accept-just-committed status so a concurrent
+    // decision is never clobbered; moves an accepted-without-path row to
+    // pending (transient retry) or rejected (permanent terminal).
+    this.reconcileAfterMintFailureStatement = db.connection.prepare(`
+      UPDATE edge_proposals
+      SET status = ?,
+          reviewer_identity = ?,
+          review_reason = ?,
+          updated_at = ?
+      WHERE proposal_id = ?
+        AND status = ?
     `);
   }
 
@@ -250,6 +279,46 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
         throw error;
       }
       throw new StorageError("QUERY_FAILED", `Failed to review edge proposal ${proposalId}.`, error);
+    }
+  }
+
+  public reconcileAfterMintFailure(input: EdgeProposalMintFailureReconcileInput): EdgeProposal {
+    const proposalId = parseNonEmptyString(input.proposalId, "proposal id");
+    const fromStatus = EdgeProposalStatusSchema.parse(input.fromStatus);
+    const toStatus = EdgeProposalStatusSchema.parse(input.toStatus);
+    const reviewerIdentity =
+      input.reviewerIdentity === null ? null : parseNonEmptyString(input.reviewerIdentity, "reviewer identity");
+    const reviewReason = input.reviewReason === null ? null : parseNonEmptyString(input.reviewReason, "review reason");
+    const reviewedAt = parseTimestamp(input.reviewedAt);
+
+    try {
+      const result = this.reconcileAfterMintFailureStatement.run(
+        toStatus,
+        reviewerIdentity,
+        reviewReason,
+        reviewedAt,
+        proposalId,
+        fromStatus
+      );
+      if (result.changes === 0) {
+        const existing = this.findById(proposalId);
+        if (existing === null) {
+          throw new StorageError("NOT_FOUND", `Edge proposal not found: ${proposalId}`);
+        }
+        // invariant: CAS lost. The row is no longer in `fromStatus` (a
+        // concurrent decision moved it), so the compensating transition must
+        // not overwrite that foreign state.
+        throw new StorageError(
+          "CONFLICT",
+          `Edge proposal is not in ${fromStatus}: ${proposalId} (${existing.status})`
+        );
+      }
+      return this.findRequired(proposalId);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      throw new StorageError("QUERY_FAILED", `Failed to reconcile edge proposal ${proposalId}.`, error);
     }
   }
 

@@ -99,6 +99,97 @@ describe("SqliteEdgeProposalRepo", () => {
       })
     ).toThrow("Edge proposal is not pending: proposal-1 (rejected)");
   });
+
+  // invariant (I1): a transient mint failure reconciles an accepted row back to
+  // pending so it re-surfaces in listPending for operator retry. The partial
+  // unique index on (workspace, source, target, type) WHERE status='pending'
+  // must permit the revert because no other pending row holds the same tuple.
+  it("reconciles a transient-failed accepted proposal back to pending (re-selectable)", async () => {
+    const { repo } = await createRepo();
+    repo.create(createProposalInput("proposal-1", MEMORY_1, MEMORY_2, "recalls"));
+    repo.updateReview({
+      proposalId: "proposal-1",
+      status: "accepted",
+      reviewerIdentity: "user:reviewer",
+      reviewReason: "accepted then mint failed",
+      reviewedAt: "2026-05-24T00:05:00.000Z"
+    });
+    expect(repo.listPending("workspace-1").map((row) => row.proposal_id)).toEqual([]);
+
+    const reverted = repo.reconcileAfterMintFailure({
+      proposalId: "proposal-1",
+      fromStatus: "accepted",
+      toStatus: "pending",
+      reviewerIdentity: null,
+      reviewReason: null,
+      reviewedAt: "2026-05-24T00:06:00.000Z"
+    });
+    expect(reverted).toMatchObject({
+      proposal_id: "proposal-1",
+      status: "pending",
+      reviewer_identity: null,
+      review_reason: null,
+      updated_at: "2026-05-24T00:06:00.000Z"
+    });
+    expect(repo.listPending("workspace-1").map((row) => row.proposal_id)).toEqual(["proposal-1"]);
+  });
+
+  // invariant (I1): a permanent anchor rejection reconciles an accepted row to
+  // terminal rejected with the mint-failure review_reason; it leaves the
+  // pending list so it can never become a retry poison pill.
+  it("reconciles a permanent-rejected accepted proposal to terminal rejected (leaves pending list)", async () => {
+    const { repo } = await createRepo();
+    repo.create(createProposalInput("proposal-1", MEMORY_1, MEMORY_2, "recalls"));
+    repo.updateReview({
+      proposalId: "proposal-1",
+      status: "auto_accepted",
+      reviewerIdentity: "system:auto_accept_policy",
+      reviewReason: "auto-accepted by trigger floor policy",
+      reviewedAt: "2026-05-24T00:05:00.000Z"
+    });
+
+    const rejected = repo.reconcileAfterMintFailure({
+      proposalId: "proposal-1",
+      fromStatus: "auto_accepted",
+      toStatus: "rejected",
+      reviewerIdentity: "system:auto_accept_policy",
+      reviewReason: "auto-rejected: owed path mint permanently refused",
+      reviewedAt: "2026-05-24T00:06:00.000Z"
+    });
+    expect(rejected).toMatchObject({
+      proposal_id: "proposal-1",
+      status: "rejected",
+      reviewer_identity: "system:auto_accept_policy",
+      review_reason: "auto-rejected: owed path mint permanently refused"
+    });
+    expect(repo.listPending("workspace-1").map((row) => row.proposal_id)).toEqual([]);
+  });
+
+  // invariant (I1): reconcile is CAS-gated on fromStatus, so a concurrent
+  // decision cannot be clobbered. A reconcile against a row that is no longer in
+  // fromStatus fails closed.
+  it("fails closed when reconciling a proposal not in fromStatus", async () => {
+    const { repo } = await createRepo();
+    repo.create(createProposalInput("proposal-1", MEMORY_1, MEMORY_2, "recalls"));
+    repo.updateReview({
+      proposalId: "proposal-1",
+      status: "rejected",
+      reviewerIdentity: "user:reviewer",
+      reviewReason: "human rejected first",
+      reviewedAt: "2026-05-24T00:05:00.000Z"
+    });
+
+    expect(() =>
+      repo.reconcileAfterMintFailure({
+        proposalId: "proposal-1",
+        fromStatus: "accepted",
+        toStatus: "pending",
+        reviewerIdentity: null,
+        reviewReason: null,
+        reviewedAt: "2026-05-24T00:06:00.000Z"
+      })
+    ).toThrow("Edge proposal is not in accepted: proposal-1 (rejected)");
+  });
 });
 
 async function createRepo(): Promise<{

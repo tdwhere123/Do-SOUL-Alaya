@@ -227,14 +227,12 @@ describe("EdgeProposalService", () => {
     expect(mintArgs.governanceClass).toBe("recall_allowed");
   });
 
-  // invariant (I-1): the minted path is the only durable landing for an
-  // accepted proposal. submitCandidate catches its own materialize errors and
-  // returns the transient "failed" outcome; acceptProposal must surface that
-  // loudly (CoreError) so an accepted-without-path loss is never silent. The
-  // review row already committed, so the proposal stays ACCEPTED — but the
-  // failure is observable and a retry is idempotent (materialize dedups via
-  // findByAnchorMemoryId).
-  it("throws an observable failure when submitCandidate returns a transient failed (no silent lost mint)", async () => {
+  // invariant (I1): the minted path is the only durable landing for an accepted
+  // proposal. submitCandidate catches its own materialize errors and returns the
+  // transient "failed" outcome; acceptProposal must surface that loudly
+  // (CoreError) AND reconcile the review row back to pending so the
+  // accepted-without-path obligation is operator-recoverable, never silent.
+  it("throws an observable failure and reverts a transient-failed accept to pending (no silent lost mint)", async () => {
     const repo = createProposalRepo();
     const pathCandidatePort = createPathCandidatePort();
     pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "failed");
@@ -266,6 +264,69 @@ describe("EdgeProposalService", () => {
       message: `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`
     });
     expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    // A transient failure leaves the proposal selectable through the existing
+    // pending review surface, not stuck terminal-accepted-without-path.
+    expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.PENDING);
+  });
+
+  // invariant (I1): a transient mint failure is operator-retryable through the
+  // EXISTING pending review surface and a successful retry lands EXACTLY ONE
+  // path (no duplicate, no stuck terminal-accepted-without-path). The path
+  // service dedups via findByAnchorMemoryId, but this service must not double
+  // the accept review row either: the first accept reverted to pending, the
+  // retry accepts it cleanly.
+  it("operator can retry a transient-failed proposal and land exactly one path", async () => {
+    const repo = createProposalRepo();
+    const pathCandidatePort = createPathCandidatePort();
+    pathCandidatePort.submitCandidate.mockImplementationOnce(async (): Promise<PathMintOutcome> => "failed");
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort,
+      eventPublisher: createEventPublisher(),
+      generateId: () => "proposal-1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    const proposal = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1"
+    });
+
+    await expect(
+      service.batchReview({
+        workspaceId: "workspace-1",
+        verdict: "accept",
+        filter: { proposal_ids: [proposal.proposal_id] },
+        reason: "first accept",
+        reviewerIdentity: "user:reviewer"
+      })
+    ).rejects.toMatchObject({ code: "OBLIGATION_VIOLATION" });
+    expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.PENDING);
+    // The same proposal is still pending, so it re-surfaces in the pending list
+    // (the existing review surface) for retry — no new verb required.
+    expect(service.listPending("workspace-1").proposals.map((p) => p.proposal_id)).toContain(
+      proposal.proposal_id
+    );
+
+    // Retry: submitCandidate now applies (default mock). Exactly one further
+    // mint call, and the proposal lands ACCEPTED.
+    await expect(
+      service.batchReview({
+        workspaceId: "workspace-1",
+        verdict: "accept",
+        filter: { proposal_ids: [proposal.proposal_id] },
+        reason: "retry accept",
+        reviewerIdentity: "user:reviewer"
+      })
+    ).resolves.toMatchObject({ accepted_count: 1, rejected_count: 0 });
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(2);
+    expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.ACCEPTED);
+    // No longer pending after the successful retry, so it leaves the pending list.
+    expect(service.listPending("workspace-1").proposals.map((p) => p.proposal_id)).not.toContain(
+      proposal.proposal_id
+    );
   });
 
   // invariant (auditability): the reviewed row commits BEFORE submitCandidate
@@ -330,13 +391,13 @@ describe("EdgeProposalService", () => {
     });
   });
 
-  // invariant: a permanent "rejected" outcome (bad anchor — a missing /
-  // foreign source or target memory) on an ACCEPTED proposal still has no
-  // landing path, so it is an obligation violation: it must record the same
-  // durable mint-failed audit event and throw, exactly like a transient
-  // "failed". The distinction matters for retry-driven consumers (the
-  // bulk-enrich worker), not for the accept→mint path, which is always loud.
-  it("emits a durable path-mint-failed record AND throws when submitCandidate returns a permanent rejected", async () => {
+  // invariant (I1): a permanent "rejected" outcome (bad anchor — a missing /
+  // foreign source or target memory) on an ACCEPTED proposal can NEVER mint a
+  // path, so retry is futile. It records the durable mint-failed audit and
+  // throws (loud), AND it reconciles the review row to terminal REJECTED so the
+  // proposal leaves the pending list — never a retry poison pill. A re-list
+  // must not resurface it.
+  it("auto-rejects a permanent-rejected accept to terminal rejected (no futile retry) and records the mint-failed audit", async () => {
     const repo = createProposalRepo();
     const pathCandidatePort = createPathCandidatePort();
     pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "rejected");
@@ -379,6 +440,27 @@ describe("EdgeProposalService", () => {
       failure_kind: "submit_returned_false",
       workspace_id: "workspace-1"
     });
+    // Terminal rejected with the mint-failure review_reason, not pending, not
+    // accepted-without-path. It leaves the pending list -> no futile re-accept.
+    const reconciled = repo.findById(proposal.proposal_id);
+    expect(reconciled?.status).toBe(EdgeProposalStatus.REJECTED);
+    expect(reconciled?.review_reason).toContain("permanent path-anchor refusal");
+    expect(service.listPending("workspace-1").proposals.map((p) => p.proposal_id)).not.toContain(
+      proposal.proposal_id
+    );
+    // A second batchReview accept against the now-rejected proposal fails closed
+    // (it is no longer pending), so it cannot become a retry poison pill.
+    await expect(
+      service.batchReview({
+        workspaceId: "workspace-1",
+        verdict: "accept",
+        filter: { proposal_ids: [proposal.proposal_id] },
+        reason: "futile retry",
+        reviewerIdentity: "user:reviewer"
+      })
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    // No further mint attempt for a proposal that can never mint.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
   });
 
   // invariant: submitCandidate is contracted to catch its own materialize
@@ -857,6 +939,24 @@ function createProposalRepo(options: {
       proposals[index] = {
         ...proposals[index],
         status: input.status,
+        reviewer_identity: input.reviewerIdentity,
+        review_reason: input.reviewReason,
+        updated_at: input.reviewedAt
+      };
+      return proposals[index];
+    },
+    // CAS-gated on fromStatus, mirroring the SQLite WHERE status = ? guard.
+    reconcileAfterMintFailure(input) {
+      const index = proposals.findIndex((proposal) => proposal.proposal_id === input.proposalId);
+      if (index === -1) {
+        throw new Error(`missing proposal ${input.proposalId}`);
+      }
+      if (proposals[index].status !== input.fromStatus) {
+        throw new Error(`Edge proposal is not in ${input.fromStatus}: ${input.proposalId}`);
+      }
+      proposals[index] = {
+        ...proposals[index],
+        status: input.toStatus,
         reviewer_identity: input.reviewerIdentity,
         review_reason: input.reviewReason,
         updated_at: input.reviewedAt
