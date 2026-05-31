@@ -50,6 +50,13 @@ export interface EdgeProposalRepoPort {
     readonly edgeType: MemoryGraphEdgeTypeValue;
   }): EdgeProposal | null;
   listPending(workspaceId: string, filter?: EdgeProposalFilter): readonly EdgeProposal[];
+  // invariant: accepted / auto_accepted proposals owe a minted path. The
+  // daemon reconcile sweep reads these (oldest first, bounded) to recover a
+  // crash-window orphan — an accept whose review row committed but whose mint
+  // never landed (and so is invisible to listPending). re-driving the mint is
+  // idempotent (path dedup -> already_present).
+  // see also: edge-proposal-repo.ts listAcceptedAwaitingPath, reconcileStuckAccepts.
+  listAcceptedAwaitingPath(workspaceId: string, limit: number): readonly EdgeProposal[];
   updateReview(input: {
     readonly proposalId: string;
     readonly status: "accepted" | "rejected" | "expired" | "auto_accepted";
@@ -72,6 +79,13 @@ export interface EdgeProposalRepoPort {
     readonly reviewerIdentity: string | null;
     readonly reviewReason: string | null;
     readonly reviewedAt: string;
+    // invariant: terminal fallback stamped when a revert-to-pending would
+    // collide with a duplicate pending re-proposal (the pending-unique index).
+    // The repo moves the row to terminal `rejected` with these instead of
+    // letting the SQLITE_CONSTRAINT roll back the caller's audit transaction.
+    // see also: edge-proposal-repo.ts reconcileAfterMintFailure (collision fallback).
+    readonly supersededReviewerIdentity?: string | null;
+    readonly supersededReviewReason?: string | null;
   }): EdgeProposal;
 }
 
@@ -153,6 +167,32 @@ const AUTO_ACCEPT_REVIEW_REASON = "auto-accepted by trigger floor policy";
 // memory anchor). Distinguishes a mint-failure terminal rejection from an
 // operator/auto verdict rejection in the durable review_reason column.
 const PATH_MINT_FAILED_REVIEW_REASON = "permanent path-anchor refusal on accept";
+
+// invariant: review_reason stamped when a transient-mint-failed proposal cannot
+// revert to pending because a duplicate pending re-proposal already holds its
+// tuple (the pending-unique index). The re-proposal carries the retry, so this
+// row is reconciled to terminal rejected instead of being left stuck
+// accepted-without-path. see also: edge-proposal-repo.ts reconcileAfterMintFailure.
+const PATH_MINT_SUPERSEDED_REVIEW_REASON =
+  "auto-rejected: owed path mint failed transiently and a duplicate pending re-proposal supersedes the retry";
+// reviewer_identity stamped on the superseded terminal fallback so the
+// rejection is attributable to the mint-reconcile policy rather than an
+// operator verdict.
+const PATH_MINT_SUPERSEDED_REVIEWER_IDENTITY = "system:edge_proposal_mint_reconcile";
+
+// invariant: per-outcome tally the crash-window reconcile sweep returns so the
+// daemon can LOG what it reconciled (no silent cap). `reminted` paths that
+// genuinely landed this pass; `already_present` healthy accepts whose path
+// already existed (the steady-state no-op); `rejected` permanent anchor
+// refusals moved terminal; `transient_failed` reverted to pending for a later
+// retry. see also: reconcileStuckAccepts.
+export interface EdgeProposalReconcileSweepResult {
+  readonly scanned: number;
+  readonly reminted: number;
+  readonly already_present: number;
+  readonly rejected: number;
+  readonly transient_failed: number;
+}
 
 export interface EdgeProposalCreateParams {
   readonly sourceMemoryId: string;
@@ -386,28 +426,65 @@ export class EdgeProposalService {
       }
     );
 
-    // invariant: governance ruling on the minted path's birth band.
-    //   - A human ACCEPTED accept is a trust verdict: the minted path is born
-    //     recall_allowed for either sign. For a negative-family edge that is
-    //     human-vetted suppression (a legitimate trusted-verdict origin).
-    //   - A system-policy AUTO_ACCEPTED accept is NOT a trust verdict — it is
-    //     a confidence-floor rule firing. A rule/floor-detected NEGATIVE must
-    //     therefore be born attention_only, not recall_allowed: it cannot
-    //     suppress (isPathGovernedForSuppression requires recall_allowed) and
-    //     cannot climb to recall_allowed later (negative governance promotion
-    //     is sign-guarded off in path-manifestation-policy.evolveGovernanceClass).
-    //     This keeps the Wave-1 invariant intact: a negative path reaches
-    //     recall_allowed ONLY via a trusted llm-verdict birth seed (the
-    //     conflict-detection-service.ts submitCandidate path, a different code
-    //     path this does not touch) or an explicit human governance decision.
-    //   - Positive (sign >= 0) auto-accepts stay recall_allowed; positive
-    //     recall_allowed only nudges recall and never suppresses.
-    // submitCandidate emits its own PATH_RELATION_CREATED audit row + durable
-    // dedup; it is invoked after the review row commits so the accepted state
-    // always has its reviewed ancestor.
-    // see also: path-relation-proposal-service.ts (isPathGovernedForSuppression),
-    //   path-manifestation-policy.ts evolveGovernanceClass (negative sign guard),
-    //   conflict-detection-service.ts (the llm-verdict negative recall_allowed path).
+    // invariant: under the single-plane model the minted path is the ONLY
+    // durable landing for an accepted proposal. applied / already_present mean
+    // the owed path exists, so the accepted review row stands. A "failed" or
+    // "rejected" outcome means the review row committed ACCEPTED/AUTO_ACCEPTED
+    // with no path, which must never be silent: handleMintFailure emits a
+    // durable SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED record keyed on
+    // proposal_id AND compensates the review row OUT of the
+    // accepted-without-path state, and the OBLIGATION_VIOLATION throw stays
+    // loud at call time.
+    const outcome = await this.mintAcceptedPath(proposal, reviewerIdentity, acceptedStatus);
+    if (outcome === "failed" || outcome === "rejected") {
+      throw new CoreError(
+        "OBLIGATION_VIOLATION",
+        `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`
+      );
+    }
+    return reviewed;
+  }
+
+  // invariant: the shared accept->mint step. Computes the minted path's birth
+  // band, submits the candidate, and on a non-success outcome emits the durable
+  // mint-failed audit AND compensates the review row OUT of the
+  // accepted-without-path state (handleMintFailure), then returns the outcome so
+  // the caller decides whether to throw. Used by acceptProposal (throws on
+  // failure) and reconcileStuckAccepts (logs, idempotent re-drive).
+  //   governance ruling on the minted path's birth band:
+  //   - A human ACCEPTED accept is a trust verdict: the minted path is born
+  //     recall_allowed for either sign. For a negative-family edge that is
+  //     human-vetted suppression (a legitimate trusted-verdict origin).
+  //   - A system-policy AUTO_ACCEPTED accept is NOT a trust verdict — it is
+  //     a confidence-floor rule firing. A rule/floor-detected NEGATIVE must
+  //     therefore be born attention_only, not recall_allowed: it cannot
+  //     suppress (isPathGovernedForSuppression requires recall_allowed) and
+  //     cannot climb to recall_allowed later (negative governance promotion
+  //     is sign-guarded off in path-manifestation-policy.evolveGovernanceClass).
+  //     This keeps the Wave-1 invariant intact: a negative path reaches
+  //     recall_allowed ONLY via a trusted llm-verdict birth seed (the
+  //     conflict-detection-service.ts submitCandidate path, a different code
+  //     path this does not touch) or an explicit human governance decision.
+  //   - Positive (sign >= 0) auto-accepts stay recall_allowed; positive
+  //     recall_allowed only nudges recall and never suppresses.
+  // submitCandidate emits its own PATH_RELATION_CREATED audit row + durable
+  // dedup; it is invoked after the review row commits so the accepted state
+  // always has its reviewed ancestor. Outcome contract:
+  //   - "failed": transient (materialize threw / event-publisher throw;
+  //     materialize dedups via findByAnchorMemoryId so re-mint is idempotent).
+  //     reconciles to pending -> retryable through the existing pending list.
+  //   - "rejected": permanent anchor refusal (missing / foreign source or
+  //     target memory) that retry can never fix. reconciles to terminal
+  //     rejected -> leaves the pending list, never a retry poison pill. The
+  //     path service emits its own path.relation_rejected audit on rejection.
+  // see also: path-relation-proposal-service.ts (isPathGovernedForSuppression),
+  //   path-manifestation-policy.ts evolveGovernanceClass (negative sign guard),
+  //   conflict-detection-service.ts (the llm-verdict negative recall_allowed path).
+  private async mintAcceptedPath(
+    proposal: EdgeProposal,
+    reviewerIdentity: string,
+    acceptedStatus: typeof EdgeProposalStatus.ACCEPTED | typeof EdgeProposalStatus.AUTO_ACCEPTED
+  ): Promise<PathMintOutcome> {
     const sign = edgeTypeToRecallBiasSign(proposal.edge_type);
     const magnitude = Math.abs(EDGE_TYPE_RECALL_MODEL[proposal.edge_type].contribution_weight);
     const governanceClass =
@@ -435,36 +512,67 @@ export class EdgeProposalService {
       // transient ("failed", never a DECIDED rejection) and so reconciles to
       // pending for operator retry.
       await this.handleMintFailure(proposal, acceptedStatus, reviewerIdentity, "submit_threw", "failed", mintError);
-      throw new CoreError(
-        "OBLIGATION_VIOLATION",
-        `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`,
-        { cause: mintError }
-      );
+      return "failed";
     }
-    // invariant: under the single-plane model the minted path is the ONLY
-    // durable landing for an accepted proposal. applied / already_present mean
-    // the owed path exists, so the accepted review row stands. A "failed" or
-    // "rejected" outcome means the review row committed ACCEPTED/AUTO_ACCEPTED
-    // with no path, which must never be silent: handleMintFailure emits a
-    // durable SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED record keyed on
-    // proposal_id AND compensates the review row OUT of the
-    // accepted-without-path state, and the OBLIGATION_VIOLATION throw stays
-    // loud at call time.
-    //   - "failed": transient (materialize threw / event-publisher throw;
-    //     materialize dedups via findByAnchorMemoryId so re-mint is idempotent).
-    //     reconciles to pending -> retryable through the existing pending list.
-    //   - "rejected": permanent anchor refusal (missing / foreign source or
-    //     target memory) that retry can never fix. reconciles to terminal
-    //     rejected -> leaves the pending list, never a retry poison pill. The
-    //     path service emits its own path.relation_rejected audit on rejection.
     if (outcome === "failed" || outcome === "rejected") {
       await this.handleMintFailure(proposal, acceptedStatus, reviewerIdentity, "submit_returned_false", outcome);
-      throw new CoreError(
-        "OBLIGATION_VIOLATION",
-        `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`
-      );
     }
-    return reviewed;
+    return outcome;
+  }
+
+  // invariant: accept->mint is a two-step non-atomic handoff (review row commits
+  // in txn1, then mintAcceptedPath mints separately). A crash between them
+  // strands the proposal accepted/auto_accepted with no path, invisible to
+  // listPending (status='pending' filter). This bounded sweep re-drives the
+  // owed mint for up to `limit` such rows (oldest-first) and is the recovery
+  // route for that crash-window orphan; the daemon GardenScheduler tick drives
+  // it next to the other reclaim passes.
+  // invariant: re-drive is idempotent. The path service dedups via
+  // findByAnchorMemoryId, so a healthy accept whose path exists -> already_present
+  // (no duplicate); permanent rejection -> terminal rejected; transient failure
+  // -> pending (mintAcceptedPath/handleMintFailure). A repeat pass once every
+  // owed path has landed is a no-op (all already_present).
+  // invariant: returns a per-outcome tally so the caller LOGs what it reconciled
+  // (no silent cap).
+  // see also: edge-proposal-repo.ts listAcceptedAwaitingPath; apps/core-daemon
+  //   garden-runtime.ts (reclaim passes); handleMintFailure (the compensating write).
+  public async reconcileStuckAccepts(input: {
+    readonly workspaceId: string;
+    readonly limit: number;
+  }): Promise<EdgeProposalReconcileSweepResult> {
+    const workspaceId = parseObjectId(input.workspaceId);
+    const stranded = this.dependencies.proposalRepo.listAcceptedAwaitingPath(workspaceId, input.limit);
+    let alreadyPresent = 0;
+    let reminted = 0;
+    let rejected = 0;
+    let transientFailed = 0;
+    for (const proposal of stranded) {
+      const acceptedStatus =
+        proposal.status === EdgeProposalStatus.AUTO_ACCEPTED
+          ? EdgeProposalStatus.AUTO_ACCEPTED
+          : EdgeProposalStatus.ACCEPTED;
+      // The original reviewer is preserved on the durable row; the re-drive is
+      // attributed to its recorded identity (or the auto-accept policy identity
+      // when the row carries none).
+      const reviewerIdentity = proposal.reviewer_identity ?? AUTO_ACCEPT_REVIEWER_IDENTITY;
+      const outcome = await this.mintAcceptedPath(proposal, reviewerIdentity, acceptedStatus);
+      if (outcome === "applied") {
+        reminted += 1;
+      } else if (outcome === "already_present") {
+        alreadyPresent += 1;
+      } else if (outcome === "rejected") {
+        rejected += 1;
+      } else {
+        transientFailed += 1;
+      }
+    }
+    return {
+      scanned: stranded.length,
+      reminted,
+      already_present: alreadyPresent,
+      rejected,
+      transient_failed: transientFailed
+    };
   }
 
   // invariant: emit the durable owed-path obligation AND compensate the review
@@ -507,7 +615,12 @@ export class EdgeProposalService {
           toStatus,
           reviewerIdentity: mintOutcome === "rejected" ? reviewerIdentity : null,
           reviewReason,
-          reviewedAt
+          reviewedAt,
+          // invariant: only the revert-to-pending path can collide with the
+          // pending-unique index; the repo uses these to move the row to
+          // terminal rejected instead of rolling back this audit transaction.
+          supersededReviewerIdentity: PATH_MINT_SUPERSEDED_REVIEWER_IDENTITY,
+          supersededReviewReason: PATH_MINT_SUPERSEDED_REVIEW_REASON
         });
       }
     );

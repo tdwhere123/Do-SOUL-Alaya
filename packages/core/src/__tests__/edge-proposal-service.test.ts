@@ -847,6 +847,139 @@ describe("EdgeProposalService", () => {
     });
   });
 
+  // invariant (FIX-1): a transient-failed accept whose revert-to-pending would
+  // collide with a duplicate pending re-proposal (the pending-unique index) must
+  // still land the mint-failed audit AND not leave the proposal stuck
+  // accepted-without-path. The repo's collision fallback moves it to terminal
+  // rejected (superseded); the audit commits because the constraint never
+  // escapes to roll back the transaction.
+  it("keeps the mint-failed audit and reconciles to terminal rejected when revert-to-pending collides with a duplicate pending re-proposal", async () => {
+    const repo = createProposalRepo();
+    const pathCandidatePort = createPathCandidatePort();
+    pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "failed");
+    const eventPublisher = createEventPublisher();
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort,
+      eventPublisher,
+      generateId: createIdGenerator(),
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    // P1 accepted (will fail to mint), then a duplicate pending P2 for the same
+    // tuple is created while P1 sits accepted (its pending slot is free).
+    const p1 = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1"
+    });
+    repo.forceStatus(p1.proposal_id, EdgeProposalStatus.ACCEPTED);
+    const p2 = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1"
+    });
+    expect(p2.proposal_id).not.toBe(p1.proposal_id);
+    repo.forceStatus(p1.proposal_id, EdgeProposalStatus.PENDING);
+    // Re-accept P1 so it goes accepted -> mint fails -> reconcile collides.
+    await expect(
+      service.batchReview({
+        workspaceId: "workspace-1",
+        verdict: "accept",
+        filter: { proposal_ids: [p1.proposal_id] },
+        reason: "reviewed",
+        reviewerIdentity: "user:reviewer"
+      })
+    ).rejects.toMatchObject({ code: "OBLIGATION_VIOLATION" });
+
+    // The mint-failed audit STILL landed (constraint did not roll it back).
+    const mintFailedEvents = eventPublisher.appendManyWithMutation.mock.calls
+      .flatMap((call) => call[0])
+      .filter((event) => event.event_type === "soul.graph.edge_proposal_path_mint_failed");
+    expect(mintFailedEvents.some((event) => event.entity_id === p1.proposal_id)).toBe(true);
+
+    // P1 is NOT left silently accepted-without-path: it is terminal rejected
+    // (superseded), and P2 carries the live pending retry.
+    const reconciledP1 = repo.findById(p1.proposal_id);
+    expect(reconciledP1?.status).toBe(EdgeProposalStatus.REJECTED);
+    expect(reconciledP1?.review_reason).toContain("supersede");
+    expect(service.listPending("workspace-1").proposals.map((p) => p.proposal_id)).toContain(p2.proposal_id);
+    expect(service.listPending("workspace-1").proposals.map((p) => p.proposal_id)).not.toContain(p1.proposal_id);
+  });
+
+  // invariant (FIX-2): a crash-window orphan — accepted/auto_accepted with no
+  // path — is recovered by the bounded reconcile sweep. After the pass exactly
+  // one path exists (re-driven mint applied), and re-running the pass is a
+  // no-op (already_present, no second mint applied).
+  it("reconcileStuckAccepts re-drives a crash-window accepted-without-path orphan to exactly one path and is idempotent", async () => {
+    const repo = createProposalRepo();
+    const pathCandidatePort = createPathCandidatePort();
+    // First re-drive applies; subsequent ones report the path already exists.
+    pathCandidatePort.submitCandidate
+      .mockImplementationOnce(async (): Promise<PathMintOutcome> => "applied")
+      .mockImplementation(async (): Promise<PathMintOutcome> => "already_present");
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort,
+      eventPublisher: createEventPublisher(),
+      generateId: () => "proposal-1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    const proposal = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1"
+    });
+    // Simulate the crash-window state: accepted committed, mint never ran.
+    repo.forceStatus(proposal.proposal_id, EdgeProposalStatus.ACCEPTED);
+
+    const first = await service.reconcileStuckAccepts({ workspaceId: "workspace-1", limit: 32 });
+    expect(first).toMatchObject({ scanned: 1, reminted: 1, already_present: 0, rejected: 0, transient_failed: 0 });
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    // The proposal stays accepted (the owed path now exists).
+    expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.ACCEPTED);
+
+    // Re-running the pass is a no-op: the path already exists, no new mint lands.
+    const second = await service.reconcileStuckAccepts({ workspaceId: "workspace-1", limit: 32 });
+    expect(second).toMatchObject({ scanned: 1, reminted: 0, already_present: 1 });
+    expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.ACCEPTED);
+  });
+
+  // invariant (FIX-2): a crash-window orphan whose owed path can never mint (a
+  // permanent anchor rejection) is moved to terminal rejected by the sweep, so
+  // it leaves the accepted-awaiting-path set and the next pass does not re-scan it.
+  it("reconcileStuckAccepts moves a permanently-rejected crash-window orphan to terminal rejected", async () => {
+    const repo = createProposalRepo();
+    const pathCandidatePort = createPathCandidatePort();
+    pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "rejected");
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort,
+      eventPublisher: createEventPublisher(),
+      generateId: () => "proposal-1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    const proposal = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1"
+    });
+    repo.forceStatus(proposal.proposal_id, EdgeProposalStatus.AUTO_ACCEPTED);
+
+    const result = await service.reconcileStuckAccepts({ workspaceId: "workspace-1", limit: 32 });
+    expect(result).toMatchObject({ scanned: 1, rejected: 1, reminted: 0 });
+    expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.REJECTED);
+    // Leaves the accepted-awaiting-path set, so the next pass scans nothing.
+    const second = await service.reconcileStuckAccepts({ workspaceId: "workspace-1", limit: 32 });
+    expect(second).toMatchObject({ scanned: 0 });
+  });
+
   it("rejects cross-workspace endpoints before proposing", async () => {
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo({ "memory-b": "workspace-2" }),
@@ -907,6 +1040,16 @@ function createProposalRepo(options: {
         proposal.status === EdgeProposalStatus.PENDING
       ) ?? null;
     },
+    listAcceptedAwaitingPath(workspaceId, limit) {
+      return proposals
+        .filter(
+          (proposal) =>
+            proposal.workspace_id === workspaceId &&
+            (proposal.status === EdgeProposalStatus.ACCEPTED ||
+              proposal.status === EdgeProposalStatus.AUTO_ACCEPTED)
+        )
+        .slice(0, limit);
+    },
     listPending(workspaceId, filter = {}) {
       return proposals.filter((proposal) => {
         if (proposal.workspace_id !== workspaceId || proposal.status !== EdgeProposalStatus.PENDING) {
@@ -946,6 +1089,10 @@ function createProposalRepo(options: {
       return proposals[index];
     },
     // CAS-gated on fromStatus, mirroring the SQLite WHERE status = ? guard.
+    // Mirrors the repo's pending-unique collision fallback: when a revert to
+    // pending would duplicate an existing pending row for the same tuple, the
+    // row is moved to terminal rejected (superseded) instead, so the audit
+    // transaction still commits. see also: edge-proposal-repo.ts.
     reconcileAfterMintFailure(input) {
       const index = proposals.findIndex((proposal) => proposal.proposal_id === input.proposalId);
       if (index === -1) {
@@ -954,13 +1101,33 @@ function createProposalRepo(options: {
       if (proposals[index].status !== input.fromStatus) {
         throw new Error(`Edge proposal is not in ${input.fromStatus}: ${input.proposalId}`);
       }
-      proposals[index] = {
-        ...proposals[index],
-        status: input.toStatus,
-        reviewer_identity: input.reviewerIdentity,
-        review_reason: input.reviewReason,
-        updated_at: input.reviewedAt
-      };
+      const subject = proposals[index];
+      const collidesWithPendingDuplicate =
+        input.toStatus === EdgeProposalStatus.PENDING &&
+        proposals.some(
+          (proposal) =>
+            proposal.proposal_id !== subject.proposal_id &&
+            proposal.workspace_id === subject.workspace_id &&
+            proposal.source_memory_id === subject.source_memory_id &&
+            proposal.target_memory_id === subject.target_memory_id &&
+            proposal.edge_type === subject.edge_type &&
+            proposal.status === EdgeProposalStatus.PENDING
+        );
+      proposals[index] = collidesWithPendingDuplicate
+        ? {
+            ...subject,
+            status: EdgeProposalStatus.REJECTED,
+            reviewer_identity: input.supersededReviewerIdentity ?? null,
+            review_reason: input.supersededReviewReason ?? null,
+            updated_at: input.reviewedAt
+          }
+        : {
+            ...subject,
+            status: input.toStatus,
+            reviewer_identity: input.reviewerIdentity,
+            review_reason: input.reviewReason,
+            updated_at: input.reviewedAt
+          };
       return proposals[index];
     }
   };

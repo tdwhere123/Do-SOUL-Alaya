@@ -165,6 +165,81 @@ describe("SqliteEdgeProposalRepo", () => {
     expect(repo.listPending("workspace-1").map((row) => row.proposal_id)).toEqual([]);
   });
 
+  // invariant (FIX-1): reverting an accepted row to pending collides with
+  // idx_edge_proposals_pending_unique when a duplicate pending re-proposal (P2)
+  // already holds the same (workspace, source, target, type) tuple. The repo
+  // catches the SQLITE_CONSTRAINT and falls back to terminal rejected
+  // (superseded) rather than letting it escape and roll back the caller's
+  // transaction. The reconcile still returns the moved row.
+  it("reconciles to terminal rejected (superseded) when revert-to-pending collides with a duplicate pending row", async () => {
+    const { repo } = await createRepo();
+    // P1 accepted, P2 freshly pending for the same tuple (P1's pending slot was
+    // free while it sat accepted, so create did not dedupe against it).
+    repo.create(createProposalInput("proposal-1", MEMORY_1, MEMORY_2, "recalls"));
+    repo.updateReview({
+      proposalId: "proposal-1",
+      status: "accepted",
+      reviewerIdentity: "user:reviewer",
+      reviewReason: "accepted then mint failed",
+      reviewedAt: "2026-05-24T00:05:00.000Z"
+    });
+    repo.create(createProposalInput("proposal-2", MEMORY_1, MEMORY_2, "recalls"));
+
+    const reconciled = repo.reconcileAfterMintFailure({
+      proposalId: "proposal-1",
+      fromStatus: "accepted",
+      toStatus: "pending",
+      reviewerIdentity: null,
+      reviewReason: null,
+      reviewedAt: "2026-05-24T00:06:00.000Z",
+      supersededReviewerIdentity: "system:edge_proposal_mint_reconcile",
+      supersededReviewReason: "auto-rejected: superseded by duplicate pending re-proposal"
+    });
+    // P1 is terminal rejected (superseded), NOT stuck accepted and NOT a second
+    // pending row that would itself violate the unique index.
+    expect(reconciled).toMatchObject({
+      proposal_id: "proposal-1",
+      status: "rejected",
+      reviewer_identity: "system:edge_proposal_mint_reconcile",
+      review_reason: "auto-rejected: superseded by duplicate pending re-proposal"
+    });
+    expect(repo.findById("proposal-1")?.status).toBe("rejected");
+    // P2 remains the single live pending row for the tuple.
+    expect(repo.listPending("workspace-1").map((row) => row.proposal_id)).toEqual(["proposal-2"]);
+  });
+
+  // invariant (FIX-2): listAcceptedAwaitingPath returns accepted + auto_accepted
+  // rows (crash-window orphans owing a path) oldest-first, bounded by limit, and
+  // excludes pending / terminal rows.
+  it("lists accepted and auto_accepted proposals awaiting a path, oldest first, bounded", async () => {
+    const { repo } = await createRepo();
+    repo.create(createProposalInput("proposal-1", MEMORY_1, MEMORY_2, "recalls"));
+    repo.create(createProposalInput("proposal-2", MEMORY_2, MEMORY_3, "recalls"));
+    repo.create(createProposalInput("proposal-3", MEMORY_1, MEMORY_3, "recalls"));
+    repo.updateReview({
+      proposalId: "proposal-1",
+      status: "accepted",
+      reviewerIdentity: "user:reviewer",
+      reviewReason: "accepted",
+      reviewedAt: "2026-05-24T00:05:00.000Z"
+    });
+    repo.updateReview({
+      proposalId: "proposal-2",
+      status: "auto_accepted",
+      reviewerIdentity: "system:auto_accept_policy",
+      reviewReason: "auto-accepted",
+      reviewedAt: "2026-05-24T00:05:01.000Z"
+    });
+    // proposal-3 stays pending -> must be excluded.
+    expect(repo.listAcceptedAwaitingPath("workspace-1", 32).map((row) => row.proposal_id)).toEqual([
+      "proposal-1",
+      "proposal-2"
+    ]);
+    expect(repo.listAcceptedAwaitingPath("workspace-1", 1).map((row) => row.proposal_id)).toEqual([
+      "proposal-1"
+    ]);
+  });
+
   // invariant (I1): reconcile is CAS-gated on fromStatus, so a concurrent
   // decision cannot be clobbered. A reconcile against a row that is no longer in
   // fromStatus fails closed.

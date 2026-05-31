@@ -41,6 +41,14 @@ export interface EdgeProposalReviewInput {
 // row still in the accept-just-committed status moves. toStatus is `pending`
 // for a transient mint failure (retryable through the pending review surface)
 // or `rejected` for a permanent anchor refusal (terminal, leaves the list).
+// invariant: when toStatus is `pending` and a DUPLICATE pending row already
+// holds this tuple (an auto-producer / soul.propose_edge re-proposal P2 minted
+// while P1 sat accepted, because create dedups only vs status='pending'),
+// reverting P1 to pending collides with idx_edge_proposals_pending_unique
+// (migration 081). Rather than letting that SQLITE_CONSTRAINT roll back the
+// caller's audit+reconcile transaction, the repo falls back to a TERMINAL
+// `rejected` carrying supersededReviewReason — P2 carries the retry, so P1 has
+// no owed-path obligation and the mint-failed audit still commits.
 // see also: core/src/edge-proposal-service.ts handleMintFailure.
 export interface EdgeProposalMintFailureReconcileInput {
   readonly proposalId: string;
@@ -49,6 +57,14 @@ export interface EdgeProposalMintFailureReconcileInput {
   readonly reviewerIdentity: string | null;
   readonly reviewReason: string | null;
   readonly reviewedAt: string;
+  // review_reason stamped on the terminal `rejected` fallback when a
+  // revert-to-pending would collide with an existing pending duplicate.
+  // Required only when toStatus is `pending`; ignored otherwise.
+  readonly supersededReviewReason?: string | null;
+  // reviewer_identity stamped on the superseded terminal fallback. A
+  // revert-to-pending normally clears the reviewer (null); the superseded
+  // fallback re-stamps it so the terminal rejection is attributable.
+  readonly supersededReviewerIdentity?: string | null;
 }
 
 export interface EdgeProposalRepo {
@@ -61,6 +77,14 @@ export interface EdgeProposalRepo {
     readonly edgeType: EdgeProposal["edge_type"];
   }): EdgeProposal | null;
   listPending(workspaceId: string, filter?: EdgeProposalFilter): readonly EdgeProposal[];
+  // invariant: accepted / auto_accepted proposals owe a minted path. A crash
+  // after the accept review row commits but before the mint (or before
+  // handleMintFailure commits) strands the row in this state with no path and
+  // invisible to listPending (which filters status='pending'). The daemon
+  // reconcile sweep reads these, oldest first, to re-drive the owed mint
+  // idempotently. Bounded by `limit` so one pass cannot scan an unbounded set.
+  // see also: core/src/edge-proposal-service.ts reconcileStuckAccepts.
+  listAcceptedAwaitingPath(workspaceId: string, limit: number): readonly EdgeProposal[];
   updateReview(input: EdgeProposalReviewInput): EdgeProposal;
   reconcileAfterMintFailure(input: EdgeProposalMintFailureReconcileInput): EdgeProposal;
 }
@@ -88,6 +112,7 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
   private readonly createStatement;
   private readonly findByIdStatement;
   private readonly findPendingDuplicateStatement;
+  private readonly listAcceptedAwaitingPathStatement;
   private readonly updateReviewStatement;
   private readonly reconcileAfterMintFailureStatement;
 
@@ -127,6 +152,17 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
         AND edge_type = ?
         AND status = 'pending'
       LIMIT 1
+    `);
+    // invariant: oldest-first so a backlog of stranded accepts drains FIFO
+    // across passes; idx_edge_proposals_workspace_status(workspace_id, status,
+    // created_at) covers this predicate + ordering without a SCAN.
+    this.listAcceptedAwaitingPathStatement = db.connection.prepare(`
+      SELECT *
+      FROM edge_proposals
+      WHERE workspace_id = ?
+        AND status IN ('accepted', 'auto_accepted')
+      ORDER BY created_at ASC, proposal_id ASC
+      LIMIT ?
     `);
     this.updateReviewStatement = db.connection.prepare(`
       UPDATE edge_proposals
@@ -253,6 +289,26 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
     }
   }
 
+  public listAcceptedAwaitingPath(workspaceId: string, limit: number): readonly EdgeProposal[] {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new StorageError("VALIDATION_FAILED", `listAcceptedAwaitingPath limit must be a positive integer: ${limit}`);
+    }
+    try {
+      const rows = this.listAcceptedAwaitingPathStatement.all(parsedWorkspaceId, limit) as EdgeProposalRow[];
+      return Object.freeze(rows.map((row) => parseRow(row)));
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list accepted edge proposals awaiting path for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
   public updateReview(input: EdgeProposalReviewInput): EdgeProposal {
     const proposalId = parseNonEmptyString(input.proposalId, "proposal id");
     const status = EdgeProposalStatusSchema.parse(input.status);
@@ -292,14 +348,40 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
     const reviewedAt = parseTimestamp(input.reviewedAt);
 
     try {
-      const result = this.reconcileAfterMintFailureStatement.run(
-        toStatus,
-        reviewerIdentity,
-        reviewReason,
-        reviewedAt,
-        proposalId,
-        fromStatus
-      );
+      let result: { readonly changes: number };
+      try {
+        result = this.reconcileAfterMintFailureStatement.run(
+          toStatus,
+          reviewerIdentity,
+          reviewReason,
+          reviewedAt,
+          proposalId,
+          fromStatus
+        );
+      } catch (runError) {
+        // invariant: a revert-to-pending collides with idx_edge_proposals_pending_unique
+        // when a duplicate pending row (a re-proposal P2) already holds this tuple
+        // — create dedups only against status='pending', so while P1 sat accepted
+        // its pending slot was free for P2 to fill. Letting the SQLITE_CONSTRAINT
+        // escape would roll back the caller's audit+reconcile transaction, leaving
+        // P1 terminal accepted-without-path AND no mint-failed audit. better-sqlite3
+        // aborts only the failed STATEMENT (not the enclosing transaction), so we
+        // recover in-transaction: P2 carries the retry, so P1 has no owed path —
+        // move it to terminal `rejected` (superseded) and let the audit commit.
+        if (
+          toStatus === EdgeProposalStatus.PENDING &&
+          isUniqueConstraintError(runError)
+        ) {
+          return this.reconcileToSupersededRejected(
+            proposalId,
+            fromStatus,
+            input.supersededReviewerIdentity ?? null,
+            input.supersededReviewReason ?? null,
+            reviewedAt
+          );
+        }
+        throw runError;
+      }
       if (result.changes === 0) {
         const existing = this.findById(proposalId);
         if (existing === null) {
@@ -322,6 +404,43 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
     }
   }
 
+  // invariant: terminal fallback for a revert-to-pending that hit the
+  // pending-unique collision. `rejected` is not under the partial index
+  // (predicate is status='pending'), so this UPDATE never collides. CAS-gated on
+  // fromStatus exactly like the primary reconcile so a concurrent decision is
+  // still never clobbered.
+  private reconcileToSupersededRejected(
+    proposalId: string,
+    fromStatus: EdgeProposalStatusValue,
+    reviewerIdentity: string | null,
+    reviewReason: string | null,
+    reviewedAt: string
+  ): EdgeProposal {
+    const parsedReviewerIdentity =
+      reviewerIdentity === null ? null : parseNonEmptyString(reviewerIdentity, "reviewer identity");
+    const parsedReviewReason =
+      reviewReason === null ? null : parseNonEmptyString(reviewReason, "review reason");
+    const result = this.reconcileAfterMintFailureStatement.run(
+      EdgeProposalStatus.REJECTED,
+      parsedReviewerIdentity,
+      parsedReviewReason,
+      reviewedAt,
+      proposalId,
+      fromStatus
+    );
+    if (result.changes === 0) {
+      const existing = this.findById(proposalId);
+      if (existing === null) {
+        throw new StorageError("NOT_FOUND", `Edge proposal not found: ${proposalId}`);
+      }
+      throw new StorageError(
+        "CONFLICT",
+        `Edge proposal is not in ${fromStatus}: ${proposalId} (${existing.status})`
+      );
+    }
+    return this.findRequired(proposalId);
+  }
+
   private findRequired(proposalId: string): EdgeProposal {
     const proposal = this.findById(proposalId);
     if (proposal === null) {
@@ -329,6 +448,34 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
     }
     return proposal;
   }
+}
+
+// better-sqlite3 surfaces a partial-unique-index collision as a code that
+// starts with SQLITE_CONSTRAINT (e.g. SQLITE_CONSTRAINT_UNIQUE / _PRIMARYKEY);
+// the cause walk handles later error-wrapping by upstream layers.
+// see also: workspace-repo.ts / garden-task-repo.ts isUniqueConstraintError —
+// those variants additionally match a qualified column to map a PK collision to
+// DUPLICATE_KEY; here only the index-collision shape matters, so this is the
+// column-agnostic form, kept local rather than exporting from a foreign repo.
+// anti-patterns-lint-allow: column-agnostic variant; the qualified-column forms
+// are not reusable for a partial-index-predicate collision check.
+function isUniqueConstraintError(error: unknown): boolean {
+  // anti-patterns-lint-allow: column-agnostic cause-walk; the qualified-column
+  // forms in workspace-repo.ts / garden-task-repo.ts are not reusable for a
+  // partial-index-predicate collision check that has no column to match.
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
+    const codeValue = (current as { readonly code?: unknown }).code;
+    if (typeof codeValue === "string" && codeValue.startsWith("SQLITE_CONSTRAINT")) {
+      return true;
+    }
+    const messageValue = (current as { readonly message?: unknown }).message;
+    if (typeof messageValue === "string" && messageValue.includes("UNIQUE constraint failed")) {
+      return true;
+    }
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return false;
 }
 
 function parseCreateInput(input: EdgeProposalCreateInput): EdgeProposalCreateInput {

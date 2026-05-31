@@ -682,6 +682,65 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(produceForNewMemory).toHaveBeenCalledTimes(1);
     expect(detectAndLinkConflicts).toHaveBeenCalledTimes(1);
   });
+
+  // invariant (FIX-2): the 60s GardenScheduler pass re-drives owed path mints
+  // for accept->mint crash-window orphans, once per workspace, bounded. LOGs a
+  // tally only when it acted on a row (scanned > 0). When the port is unwired the
+  // pass is inert.
+  it("the 60s pass re-drives the edge-proposal accept->mint reconcile sweep per workspace, bounded", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    const reconcileStuckAccepts = vi.fn(async (input: { readonly workspaceId: string; readonly limit: number }) => ({
+      scanned: input.workspaceId === "workspace-1" ? 1 : 0,
+      reminted: input.workspaceId === "workspace-1" ? 1 : 0,
+      already_present: 0,
+      rejected: 0,
+      transient_failed: 0
+    }));
+    const warn = vi.fn();
+    const runtime = createGardenRuntime({
+      ...createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        produceForNewMemory: vi.fn(async () => undefined),
+        workspaceIds: ["workspace-1", "workspace-2"],
+        edgeProposalReconcile: { reconcileStuckAccepts }
+      }),
+      warn
+    });
+
+    await getService(runtime, "GardenScheduler").task();
+
+    // Once per workspace, with the bounded per-pass limit.
+    expect(reconcileStuckAccepts).toHaveBeenCalledTimes(2);
+    for (const call of reconcileStuckAccepts.mock.calls) {
+      expect(call[0].limit).toBe(32);
+    }
+    expect(reconcileStuckAccepts.mock.calls.map((call) => call[0].workspaceId).sort()).toEqual([
+      "workspace-1",
+      "workspace-2"
+    ]);
+    // The acted-on workspace logs a tally; the no-op workspace does not.
+    const reconcileLogs = warn.mock.calls.filter(
+      ([message]) =>
+        typeof message === "string" &&
+        message.includes("edge proposal accept->mint reconcile pass acted on stranded accepts")
+    );
+    expect(reconcileLogs).toHaveLength(1);
+    expect(reconcileLogs[0]![1]).toMatchObject({ workspace_id: "workspace-1", scanned: 1, reminted: 1 });
+  });
+
+  it("the 60s pass is inert for the edge-proposal reconcile sweep when the port is unwired", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        produceForNewMemory: vi.fn(async () => undefined)
+      })
+    );
+    // No edgeProposalReconcile wired -> the pass must not throw.
+    await expect(getService(runtime, "GardenScheduler").task()).resolves.toBeUndefined();
+  });
 });
 
 function buildMemory(
@@ -751,6 +810,7 @@ function createRuntimeInput(options: {
   readonly detectAndLinkConflicts?: DetectFn;
   readonly omitEnrichmentServices?: boolean;
   readonly workspaceIds?: readonly string[];
+  readonly edgeProposalReconcile?: NonNullable<GardenRuntimeInput["edgeProposalReconcile"]>;
 }): GardenRuntimeInput {
   const publish = vi.fn(async (entry: Record<string, unknown>) => ({
     event_id: `event-${publish.mock.calls.length + 1}`,
@@ -802,6 +862,9 @@ function createRuntimeInput(options: {
       GardenRuntimeInput["enrichPendingRepo"]
     >,
     enrichMemoryLookup: { findById: options.findById },
+    ...(options.edgeProposalReconcile === undefined
+      ? {}
+      : { edgeProposalReconcile: options.edgeProposalReconcile }),
     ...(options.omitEnrichmentServices === true
       ? {}
       : {

@@ -114,6 +114,12 @@ const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 // starve the other scheduler work that shares this pass; beyond the cap the
 // bound degrades to O(workspaces / cap) * scheduler interval.
 const BULK_ENRICH_DRAIN_CAP_PER_PASS = 32;
+// invariant: per ~60s pass, re-drive at most this many accept->mint crash-window
+// orphans per workspace so a backlog of stranded accepts drains without starving
+// the other reclaim work that shares this pass. Beyond the cap the bound degrades
+// to O(stranded / cap) passes; oldest-first ordering keeps it FIFO-fair.
+// see also: packages/core/src/edge-proposal-service.ts reconcileStuckAccepts.
+const EDGE_PROPOSAL_RECONCILE_CAP_PER_PASS = 32;
 const JANITOR_RUNTIME_TASK_KINDS = [
   GardenTaskKind.TTL_CLEANUP,
   GardenTaskKind.HOT_INDEX_DEMOTION,
@@ -319,6 +325,26 @@ interface BulkEnrichEdgeProducerPort {
   }): Promise<void>;
 }
 
+// invariant: crash-window reconcile for the accept->mint handoff. acceptProposal
+// commits the accept review row then mints the owed path separately; a crash
+// between them strands a proposal accepted/auto_accepted with no path,
+// invisible to the pending list. This sweep re-drives the owed mint
+// idempotently (path dedup -> already_present). Bounded per pass and per
+// workspace; returns the per-outcome tally the tick LOGs.
+// see also: packages/core/src/edge-proposal-service.ts reconcileStuckAccepts.
+interface EdgeProposalReconcilePort {
+  reconcileStuckAccepts(input: {
+    readonly workspaceId: string;
+    readonly limit: number;
+  }): Promise<{
+    readonly scanned: number;
+    readonly reminted: number;
+    readonly already_present: number;
+    readonly rejected: number;
+    readonly transient_failed: number;
+  }>;
+}
+
 export function createGardenRuntime(input: {
   readonly databaseConnection: StorageDatabase["connection"];
   readonly backlogThresholds: GardenBacklogThresholds;
@@ -366,6 +392,11 @@ export function createGardenRuntime(input: {
   readonly enrichMemoryLookup?: BulkEnrichMemoryLookupPort;
   readonly enrichConflictDetectionPort?: BulkEnrichConflictDetectionPort;
   readonly enrichEdgeProducerPort?: BulkEnrichEdgeProducerPort;
+  // invariant: when wired, the ~60s GardenScheduler pass re-drives owed path
+  // mints for accept->mint crash-window orphans (accepted/auto_accepted with no
+  // path). Optional so unit tests and reduced wirings can omit it.
+  // see also: edgeProposalReconcilePort, reconcileStuckEdgeProposalAccepts.
+  readonly edgeProposalReconcile?: EdgeProposalReconcilePort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }): Readonly<{
   readonly backgroundManager: BackgroundServiceManager;
@@ -1459,6 +1490,44 @@ export function createGardenRuntime(input: {
     );
   };
 
+  // invariant: accept->mint crash-window reconcile sweep. Re-drives owed path
+  // mints (bounded, oldest-first) for accepted/auto_accepted proposals stranded
+  // without a path by a crash between the accept commit and the mint. Idempotent
+  // via path dedup. Runs on the same ~60s pass as reclaimStaleEnrichClaims and
+  // reclaimAbandonedGardenClaims. LOGs a per-workspace tally whenever it acted on
+  // any row (no silent cap).
+  // see also: packages/core/src/edge-proposal-service.ts reconcileStuckAccepts.
+  const reconcileStuckEdgeProposalAccepts = async (): Promise<void> => {
+    const edgeProposalReconcile = input.edgeProposalReconcile;
+    if (edgeProposalReconcile === undefined) {
+      return;
+    }
+    const workspaces = await input.workspaceRepo.list();
+    for (const workspace of workspaces) {
+      try {
+        const result = await edgeProposalReconcile.reconcileStuckAccepts({
+          workspaceId: workspace.workspace_id,
+          limit: EDGE_PROPOSAL_RECONCILE_CAP_PER_PASS
+        });
+        if (result.scanned > 0) {
+          warn("edge proposal accept->mint reconcile pass acted on stranded accepts", {
+            workspace_id: workspace.workspace_id,
+            scanned: result.scanned,
+            reminted: result.reminted,
+            already_present: result.already_present,
+            rejected: result.rejected,
+            transient_failed: result.transient_failed
+          });
+        }
+      } catch (error) {
+        warn("edge proposal accept->mint reconcile pass failed; continuing", {
+          workspace_id: workspace.workspace_id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  };
+
   const backgroundServices = [
     {
       name: "Janitor",
@@ -1518,6 +1587,7 @@ export function createGardenRuntime(input: {
           await reclaimAbandonedGardenClaims(gardenTaskRepo);
         }
         reclaimStaleEnrichClaims();
+        await reconcileStuckEdgeProposalAccepts();
         await processPostTurnExtractTask();
         // invariant: drain enrich_pending on the ~60s cadence (not the 15-min
         // Librarian pass) so conflict-suppression edges form within a ~1-min

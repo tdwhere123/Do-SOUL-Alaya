@@ -1344,6 +1344,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     ...(conflictDetectionService === null
       ? {}
       : { enrichConflictDetectionPort: conflictDetectionService }),
+    // invariant: the ~60s GardenScheduler pass re-drives owed path mints for
+    // accept->mint crash-window orphans. see also: garden-runtime.ts
+    // reconcileStuckEdgeProposalAccepts; edge-proposal-service.ts reconcileStuckAccepts.
+    edgeProposalReconcile: edgeProposalService,
     warn: warnLogger.warn
   });
   const gardenTaskRepo =
