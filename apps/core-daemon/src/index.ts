@@ -1181,7 +1181,20 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     synthesisService,
     claimService,
     pathRelationProposalPort,
-    pathCandidateSinkPort: pathCandidatePort,
+    // invariant: the soul router's PathCandidateSinkPort predates the
+    // discriminated PathMintOutcome and structurally expects Promise<boolean>
+    // (@do-soul/alaya-soul cannot import @do-soul/alaya-core, invariants §6).
+    // Map outcome -> boolean here at the wiring seam so soul stays untouched:
+    // a path now exists for applied / already_present (true); rejected (bad
+    // anchor) and failed (transient) report false, matching the router's
+    // existing warn-and-continue handling of a non-mint.
+    // see also: packages/core/src/path-relation-proposal-service.ts PathMintOutcome.
+    pathCandidateSinkPort: {
+      submitCandidate: async (input) => {
+        const outcome = await pathRelationProposalService.submitCandidate(input);
+        return outcome === "applied" || outcome === "already_present";
+      }
+    },
     enrichPendingPort,
     ...(conflictDetectionService === null
       ? {}

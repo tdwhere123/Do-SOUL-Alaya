@@ -555,6 +555,101 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
       enrichPendingRepo.claimBatch("workspace-1", 50, new Date().toISOString())
     ).toHaveLength(0);
   });
+
+  // invariant (codex spine-review B5): a TRANSIENT path-mint failure must not
+  // become a processed enrich row. The governed services surface a transient
+  // failure by throwing (produceForNewMemory throws when any submitCandidate
+  // returns "failed"; detectAndLinkConflicts with strictNoDrop throws when a
+  // candidate query throws or a mint fails transiently). The worker's
+  // per-memory catch must releaseClaim — never markProcessed — so the owed
+  // path is retried, and emit NO processed telemetry for the dropped row.
+  it("B5: a transient path-mint failure + a conflict-repo throw releases the claim, keeps the row pending, and emits no processed telemetry", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-1", "memory-owed");
+
+    const releaseClaim = vi.spyOn(enrichPendingRepo, "releaseClaim");
+    const markProcessed = vi.spyOn(enrichPendingRepo, "markProcessed");
+    // produceForNewMemory throws as the real EdgeAutoProducerService does when
+    // a submitCandidate returns the transient "failed" outcome.
+    const produceForNewMemory = vi.fn<ProduceFn>(async () => {
+      throw new Error("transient path-mint failure");
+    });
+    // detectAndLinkConflicts(strictNoDrop) throws as the real
+    // ConflictDetectionService does when a candidate query throws.
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => {
+      throw new Error("conflict repo lookup failed");
+    });
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        produceForNewMemory,
+        detectAndLinkConflicts
+      })
+    );
+
+    await dispatchBulkEnrich(runtime);
+
+    // The claim was released for retry; the row is NOT processed and remains
+    // pending so stale-claim recovery re-drains it.
+    expect(releaseClaim).toHaveBeenCalledWith("workspace-1", "memory-owed");
+    expect(markProcessed).not.toHaveBeenCalled();
+    expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
+
+    // No success/processed telemetry was emitted for the dropped path; the
+    // completion audit records the failure, not a processed row.
+    const completion = currentScheduler().completions.find(
+      (result) => result.task_kind === GardenTaskKind.BULK_ENRICH
+    );
+    expect(completion?.audit_entries).toContain("bulk_enrich:processed_0");
+    expect(completion?.audit_entries).toContain("bulk_enrich:failed_1");
+    expect(
+      completion?.audit_entries.some((entry) => entry === "bulk_enrich:processed_1")
+    ).toBe(false);
+  });
+
+  // invariant (codex spine-review B5 x B3 interaction): a PERMANENT rejection
+  // (B3 invalid-anchor refusal) settles silently inside the governed services
+  // (submitCandidate returns "rejected", the service does NOT throw), so the
+  // worker MUST markProcessed it. Retrying a permanently-rejected candidate can
+  // never succeed; treating it like a transient failure would create an
+  // infinite poison-pill retry loop. This pins that a rejection is terminal.
+  it("B5xB3: a permanently rejected candidate is marked processed (NOT retried as a poison pill)", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-1", "memory-rejected");
+
+    const releaseClaim = vi.spyOn(enrichPendingRepo, "releaseClaim");
+    const markProcessed = vi.spyOn(enrichPendingRepo, "markProcessed");
+    // The governed services swallow a permanent "rejected" outcome as settled
+    // (audited via path.relation_rejected) and resolve without throwing.
+    const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        produceForNewMemory,
+        detectAndLinkConflicts
+      })
+    );
+
+    await dispatchBulkEnrich(runtime);
+
+    // A decided "no" settles the row: processed, not released for retry.
+    expect(markProcessed).toHaveBeenCalledWith(
+      "workspace-1",
+      "memory-rejected",
+      expect.any(String)
+    );
+    expect(releaseClaim).not.toHaveBeenCalled();
+    expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
+
+    // A re-drain claims nothing and re-invokes no service — no poison-pill loop.
+    currentScheduler().enqueue(bulkEnrichTask());
+    await dispatchBulkEnrich(runtime);
+    expect(produceForNewMemory).toHaveBeenCalledTimes(1);
+    expect(detectAndLinkConflicts).toHaveBeenCalledTimes(1);
+  });
 });
 
 function buildMemory(memoryId: string): Readonly<{

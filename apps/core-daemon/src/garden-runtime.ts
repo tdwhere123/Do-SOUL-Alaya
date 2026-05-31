@@ -295,6 +295,11 @@ interface BulkEnrichConflictDetectionPort {
     readonly newMemoryDomainTags: readonly string[];
     readonly workspaceId: string;
     readonly runId: string;
+    // invariant: the worker always passes strictNoDrop=true so a transient
+    // candidate-query or path-mint failure throws (the per-memory catch
+    // releases the claim for retry) instead of degrading to an empty
+    // candidate set or a swallowed warn that markProcessed would lose.
+    readonly strictNoDrop?: boolean;
   }): Promise<void>;
 }
 
@@ -1109,14 +1114,27 @@ export function createGardenRuntime(input: {
               newMemoryContent: memory.content,
               newMemoryDomainTags: memory.domain_tags,
               workspaceId: memory.workspace_id,
-              runId: memory.run_id
+              runId: memory.run_id,
+              // No-drop: a transient candidate-query or path-mint failure must
+              // throw here so the catch below releases the claim (a later cycle
+              // retries), never markProcessed an owed path away. A permanent
+              // anchor rejection settles silently (no throw) — it is audited by
+              // the path service and retrying it cannot help, so it does NOT
+              // block markProcessed (no poison-pill retry loop).
+              strictNoDrop: true
             });
           }
+          // markProcessed runs only when every intended write settled
+          // (applied / already_present / permanently rejected). Any transient
+          // "failed" threw above and skipped this line, leaving the row claimed
+          // for reclaimStale to release and a later cycle to retry.
           enrichPendingRepo.markProcessed(pending.workspaceId, pending.memoryId, completedAt);
           processedCount += 1;
         } catch (memoryError) {
           // Isolate a per-memory failure: release the claim so a later cycle
-          // retries it, never drop the marker.
+          // retries it, never drop the marker. produceForNewMemory and
+          // detectAndLinkConflicts (strictNoDrop) throw on transient path-mint
+          // failure, so this path is the no-drop retry seam.
           enrichPendingRepo.releaseClaim(pending.workspaceId, pending.memoryId);
           failedCount += 1;
           warn("bulk enrich memory failed; released claim for retry", {

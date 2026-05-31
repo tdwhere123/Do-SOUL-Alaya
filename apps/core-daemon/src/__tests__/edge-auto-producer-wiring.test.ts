@@ -130,7 +130,12 @@ describe("edge auto producer daemon wiring", () => {
         claimService: {
           create: async () => ({ object_kind: "claim_form", object_id: "claim-1" })
         },
-        pathCandidateSinkPort: pathCandidatePort,
+        pathCandidateSinkPort: {
+          submitCandidate: async (input) => {
+            const outcome = await pathCandidatePort.submitCandidate(input);
+            return outcome === "applied" || outcome === "already_present";
+          }
+        },
         enrichPendingPort: {
           enqueue: (params) =>
             enrichPendingRepo.enqueue({
