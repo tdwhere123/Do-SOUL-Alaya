@@ -14,10 +14,12 @@ const tmpRoots: string[] = [];
 
 beforeEach(() => {
   delete process.env.ALAYA_BENCH_FAST_PRAGMA;
+  delete process.env.ALAYA_BENCH_TEMP_STORE;
 });
 
 afterEach(async () => {
   delete process.env.ALAYA_BENCH_FAST_PRAGMA;
+  delete process.env.ALAYA_BENCH_TEMP_STORE;
   for (const root of tmpRoots.splice(0)) {
     await rm(root, { recursive: true, force: true });
   }
@@ -34,21 +36,34 @@ async function newDataDir(): Promise<string> {
 }
 
 describe("applyBenchFastPragmaIfRequested", () => {
-  it("applies bench-fast pragmas when env is unset (default ON)", async () => {
+  it("applies bench-fast pragmas with temp_store=FILE default when env is unset", async () => {
     const dataDir = await newDataDir();
     const result = applyBenchFastPragmaIfRequested(dataDir);
     expect(result.applied).toBe(true);
-    expect(result.pragmas).toContain("temp_store=MEMORY");
+    expect(result.pragmas).toContain("temp_store=FILE");
     expect(result.pragmas).toContain("cache_size=-65536");
 
     // Verify the bench-only pragmas actually took effect on the cached
-    // connection. SQLite returns ints: temp_store MEMORY == 2,
+    // connection. SQLite returns ints: temp_store FILE == 1,
     // cache_size negative -65536 stored verbatim.
     const db = initDatabase({ filename: join(dataDir, "alaya.db") });
     const tempStore = db.connection.pragma("temp_store", { simple: true });
     const cacheSize = db.connection.pragma("cache_size", { simple: true });
-    expect(Number(tempStore)).toBe(2);
+    expect(Number(tempStore)).toBe(1);
     expect(Number(cacheSize)).toBe(-65536);
+  });
+
+  it("opts back into temp_store=MEMORY when ALAYA_BENCH_TEMP_STORE=memory", async () => {
+    process.env.ALAYA_BENCH_TEMP_STORE = "memory";
+    const dataDir = await newDataDir();
+    const result = applyBenchFastPragmaIfRequested(dataDir);
+    expect(result.applied).toBe(true);
+    expect(result.pragmas).toContain("temp_store=MEMORY");
+
+    // SQLite returns temp_store MEMORY == 2.
+    const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+    const tempStore = db.connection.pragma("temp_store", { simple: true });
+    expect(Number(tempStore)).toBe(2);
   });
 
   it("applies when env is explicitly truthy", async () => {

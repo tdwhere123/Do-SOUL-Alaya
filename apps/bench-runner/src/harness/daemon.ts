@@ -2075,11 +2075,16 @@ async function queryEdgeProposalKpiRows(
 // bench harness adds two pragmas that production deliberately leaves at
 // default because they change the durability vs throughput tradeoff:
 //
-//   temp_store=MEMORY       — temp tables live in RAM, not on disk. Bench
-//                             writes 18k+ rows/Q so spilling temp tables to
-//                             disk doubles fsync cost; bench runs are
-//                             reproducible from fixtures so the data loss
-//                             window is acceptable.
+//   temp_store=FILE         — FTS/sort/GROUP BY temp B-trees spill to disk.
+//                             temp_store=MEMORY forces them into RAM that is
+//                             off the Node heap and so invisible to
+//                             --max-old-space-size; over a long single-process
+//                             500-question run that RAM climbs monotonically
+//                             and feeds the OS OOM-killer (a silent SIGKILL,
+//                             not a recoverable Node OOM). FILE trades latency
+//                             for headroom and is the safe default for full
+//                             runs. Override with ALAYA_BENCH_TEMP_STORE=memory
+//                             for short throughput-bound runs that fit in RAM.
 //   cache_size=-65536       — 64 MiB page cache (negative = KiB). Default is
 //                             ~2 MiB which is too small for the bench
 //                             hot-set; production leaves it small for
@@ -2095,12 +2100,21 @@ async function queryEdgeProposalKpiRows(
 // system-crash recovery on the WAL frame boundary (only power-loss within
 // the last few ms of WAL flush is at risk, which bench fixtures can replay).
 const BENCH_FAST_PRAGMA_ENV = "ALAYA_BENCH_FAST_PRAGMA";
+const BENCH_TEMP_STORE_ENV = "ALAYA_BENCH_TEMP_STORE";
 
 function isBenchFastPragmaEnabled(): boolean {
   const raw = process.env[BENCH_FAST_PRAGMA_ENV];
   if (raw === undefined) return true;
   const normalized = raw.trim().toLowerCase();
   return normalized !== "0" && normalized !== "false" && normalized !== "off" && normalized !== "no";
+}
+
+// FILE by default so temp B-trees spill to disk and do not feed RSS toward the
+// OS OOM-killer on long single-process runs. ALAYA_BENCH_TEMP_STORE=memory opts
+// back into the throughput-favoring RAM temp store for short runs.
+function resolveBenchTempStore(): "FILE" | "MEMORY" {
+  const raw = process.env[BENCH_TEMP_STORE_ENV];
+  return raw !== undefined && raw.trim().toLowerCase() === "memory" ? "MEMORY" : "FILE";
 }
 
 export interface BenchFastPragmaResult {
@@ -2122,14 +2136,15 @@ export function applyBenchFastPragmaIfRequested(dataDir: string): BenchFastPragm
   conn.pragma("journal_mode = WAL");
   conn.pragma("synchronous = NORMAL");
   // Bench-only adds.
-  conn.pragma("temp_store = MEMORY");
+  const tempStore = resolveBenchTempStore();
+  conn.pragma(`temp_store = ${tempStore}`);
   conn.pragma("cache_size = -65536");
   return Object.freeze({
     applied: true,
     pragmas: Object.freeze([
       "journal_mode=WAL",
       "synchronous=NORMAL",
-      "temp_store=MEMORY",
+      `temp_store=${tempStore}`,
       "cache_size=-65536"
     ])
   });

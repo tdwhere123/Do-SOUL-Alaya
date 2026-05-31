@@ -326,12 +326,19 @@ async function runStep(step, ctx, args) {
   const logFd = openSync(logPath, "a");
   let child;
   try {
-    child = spawn(process.execPath, [BENCH_RUNNER, ...stepArgv], {
-      cwd: REPO_ROOT,
-      env: process.env,
-      detached: true,
-      stdio: ["ignore", logFd, logFd]
-    });
+    // Cap the runner's V8 old space so Node GCs hard before the OS OOM-killer
+    // SIGKILLs the long single-process run. ~5000 MiB leaves headroom under the
+    // 7.6 GiB WSL2 box for native better-sqlite3 RSS + OS.
+    child = spawn(
+      process.execPath,
+      ["--max-old-space-size=5000", BENCH_RUNNER, ...stepArgv],
+      {
+        cwd: REPO_ROOT,
+        env: process.env,
+        detached: true,
+        stdio: ["ignore", logFd, logFd]
+      }
+    );
     // Let parent exit cleanly without waiting on the child if we crash —
     // operator can still tail the log.
     child.unref();
