@@ -6,8 +6,9 @@
 // step shards is implicitly 1; across steps the orchestrator runs strictly
 // sequentially so the two daemons never coexist (WSL2 7.6 GiB cap).
 //
-// Each step spawns the bench-runner detached and waits for it before launching
-// the next. stdout/stderr per step land under var/bench-logs/v0.3.11/.
+// Each step spawns the bench-runner as an attached child and awaits its exit
+// before launching the next. stdout/stderr per step land under
+// var/bench-logs/v0.3.11/.
 //
 // Ship-gate matrix (docs/handbook/release/v0.3.11/kpi-targets.md, Tier-1):
 //   K1.1  longmemeval-s   embedding=disabled         policy=chat  -> R@5 >= 90%
@@ -329,19 +330,20 @@ async function runStep(step, ctx, args) {
     // Cap the runner's V8 old space so Node GCs hard before the OS OOM-killer
     // SIGKILLs the long single-process run. ~5000 MiB leaves headroom under the
     // 7.6 GiB WSL2 box for native better-sqlite3 RSS + OS.
+    // Stay attached: the orchestrator must hold its event loop open on
+    // `await child.once("exit")` so step N+1 launches only after step N's
+    // runner exits. A detached unref'd child releases the parent loop and the
+    // orchestrator exits 0 immediately, launching every step's runner at once
+    // and starving them on the 7.6 GiB box.
     child = spawn(
       process.execPath,
       ["--max-old-space-size=5000", BENCH_RUNNER, ...stepArgv],
       {
         cwd: REPO_ROOT,
         env: process.env,
-        detached: true,
         stdio: ["ignore", logFd, logFd]
       }
     );
-    // Let parent exit cleanly without waiting on the child if we crash —
-    // operator can still tail the log.
-    child.unref();
   } catch (err) {
     closeSync(logFd);
     throw err;
