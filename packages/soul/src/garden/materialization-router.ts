@@ -219,6 +219,19 @@ export interface GraphEdgeCreationPort {
 // auto-build ceiling by submitCandidate downstream.
 // see also: packages/core/src/path-candidate-sink.ts PathCandidateSink.
 // see also: packages/core/src/path-relation-proposal-service.ts seed profiles.
+
+// invariant: structural mirror of core's PathMintOutcome (@do-soul/alaya-soul
+// cannot import @do-soul/alaya-core, invariants §6, so the four-state crosses
+// the port boundary as a literal union, like the seed shape above). The router
+// MUST preserve the rejected/failed distinction the sink decides: "rejected" is
+// a PERMANENT B3 anchor refusal (clean silent drop, already audited downstream),
+// "failed" is a TRANSIENT mint error that is NOT re-derived by the BULK_ENRICH
+// pass (enrich derives neighbors from memory content, never from a signal's
+// *_memory_refs), so a swallowed "failed" silently and permanently loses the
+// owed associative edge. The router makes "failed" observable (loud) instead.
+// see also: packages/core/src/path-relation-proposal-service.ts PathMintOutcome.
+export type PathCandidateMintOutcome = "applied" | "already_present" | "rejected" | "failed";
+
 export interface PathCandidateSinkPort {
   submitCandidate(input: {
     readonly workspaceId: string;
@@ -232,7 +245,7 @@ export interface PathCandidateSinkPort {
     readonly recallBiasMagnitude?: number;
     readonly why?: readonly string[];
     readonly runId?: string | null;
-  }): Promise<boolean>;
+  }): Promise<PathCandidateMintOutcome>;
 }
 
 export interface SignalRefSeedSpec {
@@ -1145,10 +1158,11 @@ export class MaterializationRouter {
 
   /**
    * Submits a governed path candidate for every first-class memory ref
-   * carried by a memory-creating signal. Errors are swallowed per ref:
-   * candidate submission must never block materialization of the memory
-   * itself. This also activates the historically dormant signal-ref edge
-   * source — the refs now flow through PathRelationProposalService.
+   * carried by a memory-creating signal. A submission throw / a permanent
+   * "rejected" never blocks materialization of the memory itself. This also
+   * activates the historically dormant signal-ref edge source — the refs now
+   * flow through PathRelationProposalService. A TRANSIENT "failed" is the one
+   * outcome that must not be silently lost (see submitCandidatesFromSignalRefs).
    */
   private async createAllMemoryRefEdges(
     newObjectId: string,
@@ -1182,8 +1196,9 @@ export class MaterializationRouter {
         continue;
       }
 
+      let outcome: PathCandidateMintOutcome;
       try {
-        await port.submitCandidate({
+        outcome = await port.submitCandidate({
           workspaceId: signal.workspace_id,
           sourceAnchor: { kind: "object", object_id: newObjectId },
           targetAnchor: { kind: "object", object_id: ref },
@@ -1200,12 +1215,38 @@ export class MaterializationRouter {
           runId: signal.run_id
         });
       } catch (err) {
-        console.warn("materialization-router: path candidate submission failed", {
+        // A thrown sink (port wiring fault, not a decided outcome) is treated
+        // as a transient failure: loud, never silent. It must not block the
+        // memory's materialization, so we warn-and-continue rather than rethrow.
+        outcome = "failed";
+        console.warn("materialization-router: path candidate submission threw", {
           sourceMemoryId: newObjectId,
           targetMemoryId: ref,
           relationKind: spec.relationKind,
           signalId: signal.signal_id,
           error: err instanceof Error ? err.message : String(err)
+        });
+      }
+
+      // invariant: only "failed" gets the non-silent treatment. The signal-ref
+      // edge is derived ONLY here (BULK_ENRICH never re-derives a signal's
+      // *_memory_refs), so a transient "failed" would otherwise drop the owed
+      // edge with no retry and no audit. We make it observable (loud warn) so a
+      // dropped associative edge is at least visible; the plastic path plane can
+      // still re-form the association via co-usage. A permanent "rejected" stays
+      // a CLEAN, quiet drop — the sink already audited the B3 refusal and retry
+      // cannot help, so loud noise here would be wrong. applied / already_present
+      // settle silently (the owed path exists).
+      // see also: packages/core/src/path-relation-proposal-service.ts PathMintOutcome.
+      // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask (no re-derive).
+      if (outcome === "failed") {
+        console.warn("materialization-router: signal-ref path candidate failed transiently (edge dropped, not retried)", {
+          sourceMemoryId: newObjectId,
+          targetMemoryId: ref,
+          relationKind: spec.relationKind,
+          signalRefsKey: spec.signalRefsKey,
+          signalId: signal.signal_id,
+          runId: signal.run_id
         });
       }
     }

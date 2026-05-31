@@ -158,10 +158,9 @@ describe("edge auto producer daemon wiring", () => {
           create: async () => ({ object_kind: "claim_form", object_id: "claim-1" })
         },
         pathCandidateSinkPort: {
-          submitCandidate: async (input) => {
-            const outcome = await pathCandidatePort.submitCandidate(input);
-            return outcome === "applied" || outcome === "already_present";
-          }
+          // Mirrors the daemon wiring seam: forward core's PathMintOutcome
+          // untouched so the rejected/failed distinction survives the boundary.
+          submitCandidate: async (input) => await pathCandidatePort.submitCandidate(input)
         },
         enrichPendingPort: { enqueue: enqueueEnrichPending },
         handoffGapHandler: new InMemoryHandoffGapHandler()

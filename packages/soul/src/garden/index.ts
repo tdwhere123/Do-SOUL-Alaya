@@ -116,6 +116,7 @@ export {
   type PathRelationProposalPayload,
   type PathRelationProposalPort,
   type PathCandidateSinkPort,
+  type PathCandidateMintOutcome,
   type RouteTarget,
   type GraphEdgeCreationPort,
   type SignalRefSeedSpec

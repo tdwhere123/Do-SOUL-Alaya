@@ -1207,19 +1207,18 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     synthesisService,
     claimService,
     pathRelationProposalPort,
-    // invariant: the soul router's PathCandidateSinkPort predates the
-    // discriminated PathMintOutcome and structurally expects Promise<boolean>
-    // (@do-soul/alaya-soul cannot import @do-soul/alaya-core, invariants §6).
-    // Map outcome -> boolean here at the wiring seam so soul stays untouched:
-    // a path now exists for applied / already_present (true); rejected (bad
-    // anchor) and failed (transient) report false, matching the router's
-    // existing warn-and-continue handling of a non-mint.
-    // see also: packages/core/src/path-relation-proposal-service.ts PathMintOutcome.
+    // invariant: the soul router's PathCandidateSinkPort mirrors core's
+    // PathMintOutcome as a literal union (PathCandidateMintOutcome) so the
+    // rejected/failed distinction survives this seam (@do-soul/alaya-soul cannot
+    // import @do-soul/alaya-core, invariants §6 — the four-state crosses
+    // structurally). core's submitCandidate already returns exactly that union,
+    // so we forward it untouched: applied / already_present mean the owed path
+    // exists; rejected is a decided B3 refusal (router drops it cleanly); failed
+    // is transient (router makes it loud so a dropped signal-ref edge is not
+    // silently lost — BULK_ENRICH does not re-derive a signal's *_memory_refs).
+    // see also: packages/soul/src/garden/materialization-router.ts PathCandidateMintOutcome.
     pathCandidateSinkPort: {
-      submitCandidate: async (input) => {
-        const outcome = await pathRelationProposalService.submitCandidate(input);
-        return outcome === "applied" || outcome === "already_present";
-      }
+      submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
     },
     enrichPendingPort,
     ...(conflictDetectionService === null

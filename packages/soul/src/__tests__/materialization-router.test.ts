@@ -5,6 +5,7 @@ import {
   MaterializationRouter,
   normalizeSchemaGroundedSignal
 } from "@do-soul/alaya-soul";
+import type { PathCandidateMintOutcome } from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 
 function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
@@ -1137,10 +1138,11 @@ describe("MaterializationRouter ingest reconciliation", () => {
     // see also: packages/core path-relation-proposal-service.anchor-gate.test.ts
     const deps = createDeps();
     // Model the durable gate: only "mem-prior-1" is a real object in this
-    // workspace; the other refs are missing or foreign and are refused.
+    // workspace; the other refs are missing or foreign and are permanently
+    // rejected (a decided B3 refusal, not a transient failure).
     const validRefs = new Set(["mem-prior-1"]);
-    deps.pathCandidateSinkPort.submitCandidate.mockImplementation(
-      async (input) => validRefs.has(input.targetAnchor.object_id)
+    deps.pathCandidateSinkPort.submitCandidate.mockImplementation(async (input) =>
+      validRefs.has(input.targetAnchor.object_id) ? "applied" : "rejected"
     );
     const router = new MaterializationRouter(deps);
 
@@ -1173,12 +1175,98 @@ describe("MaterializationRouter ingest reconciliation", () => {
       accepted[idx]
     ]);
     expect(decisions).toEqual([
-      ["mem-prior-1", true],
-      ["mem-old-1", false],
-      ["mem-rule-2", false],
-      ["mem-conflict-3", false],
-      ["mem-incompat-4", false]
+      ["mem-prior-1", "applied"],
+      ["mem-old-1", "rejected"],
+      ["mem-rule-2", "rejected"],
+      ["mem-conflict-3", "rejected"],
+      ["mem-incompat-4", "rejected"]
     ]);
+  });
+
+  it("emits a LOUD signal when a signal-ref path candidate fails transiently so the dropped edge is not silently lost", async () => {
+    // invariant (codex spine-review B5): a TRANSIENT "failed" signal-ref mint
+    // must NOT be silently settled. BULK_ENRICH does not re-derive a signal's
+    // *_memory_refs (its produceForNewMemory derives neighbors from memory
+    // content via searchByKeyword, never from the original signal refs), so
+    // the inline mint is the ONLY producer for this edge — a swallowed "failed"
+    // permanently drops it with no retry and no audit. The router therefore
+    // makes "failed" observable (loud warn naming the dropped ref) instead of
+    // collapsing it into the same silent path as a decided "rejected".
+    // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask.
+    const deps = createDeps();
+    deps.pathCandidateSinkPort.submitCandidate.mockImplementation(async (input) =>
+      input.targetAnchor.object_id === "mem-transient" ? "failed" : "applied"
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const router = new MaterializationRouter(deps);
+
+    try {
+      const result = await router.materializeSignal(
+        factSignal({
+          source_memory_refs: ["mem-transient"],
+          raw_payload: {
+            excerpt: "Fact whose derives_from edge mint fails transiently.",
+            distilled_fact: "Fact whose derives_from edge mint fails transiently."
+          }
+        })
+      );
+
+      // The memory itself still materializes — a best-effort edge never blocks it.
+      expect(result.success).toBe(true);
+
+      const loud = warnSpy.mock.calls.filter(
+        (args) =>
+          typeof args[0] === "string" &&
+          args[0].includes("signal-ref path candidate failed transiently")
+      );
+      expect(loud).toHaveLength(1);
+      expect(loud[0]?.[1]).toMatchObject({
+        sourceMemoryId: "memory-1",
+        targetMemoryId: "mem-transient",
+        relationKind: "derives_from",
+        signalRefsKey: "source_memory_refs"
+      });
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("keeps a permanently-rejected signal-ref a CLEAN silent drop (no loud failure noise)", async () => {
+    // invariant (codex spine-review B5): only "failed" gets the non-silent
+    // treatment. A "rejected" is a DECIDED B3 anchor refusal — already audited
+    // by the path service, and retry cannot help — so the router must drop it
+    // quietly. It must NOT emit the transient-failure loud warn (that is
+    // reserved for "failed"); doing so would turn every legitimate stray-ref
+    // refusal into false alarm noise.
+    const deps = createDeps();
+    deps.pathCandidateSinkPort.submitCandidate.mockResolvedValue("rejected");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const router = new MaterializationRouter(deps);
+
+    try {
+      const result = await router.materializeSignal(
+        factSignal({
+          source_memory_refs: ["mem-foreign"],
+          raw_payload: {
+            excerpt: "Fact referencing a foreign/missing memory.",
+            distilled_fact: "Fact referencing a foreign/missing memory."
+          }
+        })
+      );
+
+      expect(result.success).toBe(true);
+      // The sink was consulted (the gate decides), but the rejection produces
+      // no transient-failure loud warn.
+      expect(deps.pathCandidateSinkPort.submitCandidate).toHaveBeenCalledTimes(1);
+      const loud = warnSpy.mock.calls.filter(
+        (args) =>
+          typeof args[0] === "string" &&
+          args[0].includes("signal-ref path candidate failed transiently")
+      );
+      expect(loud).toHaveLength(0);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("ADD verdict (reconciled path) also creates derives_from edges from source_memory_refs", async () => {
@@ -1545,7 +1633,9 @@ function createDeps() {
       }))
     },
     pathCandidateSinkPort: {
-      submitCandidate: vi.fn<(input: MockPathCandidateInput) => Promise<boolean>>(async () => true)
+      submitCandidate: vi.fn<(input: MockPathCandidateInput) => Promise<PathCandidateMintOutcome>>(
+        async () => "applied"
+      )
     },
     handoffGapHandler: new InMemoryHandoffGapHandler()
   };
