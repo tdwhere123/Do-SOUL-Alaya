@@ -14,6 +14,7 @@ import {
 import { DynamicsService, type DynamicsServiceDependencies } from "../dynamics-service.js";
 import { EvidenceService } from "../evidence-service.js";
 import { ConflictDetectionService } from "../conflict-detection-service.js";
+import type { PathMintOutcome } from "../path-relation-proposal-service.js";
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
@@ -314,7 +315,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
           findBySharedDomainTags: async () => []
         },
         pathCandidatePort: {
-          submitCandidate: vi.fn(async () => true)
+          submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied")
         },
         llmPort: { classifyPair: vi.fn(async () => "contradicts" as const) },
         karmaEmitter: { emitKarmaEvent }
@@ -350,7 +351,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
         readonly workspaceId: string;
       };
       const emitKarmaEvent = vi.fn(async (_input: KarmaInput) => {});
-      const submitCandidate = vi.fn(async () => true);
+      const submitCandidate = vi.fn(async (): Promise<PathMintOutcome> => "applied");
       // high tag overlap + low token overlap → rule path fires contradicts,
       // but the rule verdict is agent-controllable, so no karma penalty.
       const existing = createMemoryEntry({
@@ -387,10 +388,12 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
 
     it("ConflictDetectionService does not emit supersede_penalty for incompatible_with edges", async () => {
       const emitKarmaEvent = vi.fn(async () => {});
-      const submitCandidate = vi.fn(async (input: { readonly relationKind: string }) => {
-        expect(input.relationKind).toBe("incompatible_with");
-        return true;
-      });
+      const submitCandidate = vi.fn(
+        async (input: { readonly relationKind: string }): Promise<PathMintOutcome> => {
+          expect(input.relationKind).toBe("incompatible_with");
+          return "applied";
+        }
+      );
       const existing = createMemoryEntry({
         object_id: "memory-existing",
         scope_class: ScopeClass.GLOBAL_CORE,

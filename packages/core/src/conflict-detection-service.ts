@@ -6,9 +6,11 @@ import {
 import {
   CONTRADICTS_SEED_PROFILE,
   INCOMPATIBLE_SEED_PROFILE,
+  type PathMintOutcome,
   type PathSeedProfile
 } from "./path-relation-proposal-service.js";
 import type { PathCandidateSink } from "./path-candidate-sink.js";
+import { CoreError } from "./errors.js";
 
 // invariant: the trust tier of a conflict verdict. "rule" is the
 // agent-controllable Jaccard heuristic (weak, attention_only, no karma);
@@ -136,22 +138,31 @@ export class ConflictDetectionService {
     readonly newMemoryDomainTags: readonly string[];
     readonly workspaceId: string;
     readonly runId: string;
+    // invariant: strict no-drop mode for the bulk-enrich worker. When true,
+    // a candidate-query failure and a transient path-mint "failed" both throw
+    // instead of degrading to an empty candidate set / swallowed warn, so the
+    // worker releases the enrich claim and a later cycle retries. Default
+    // false preserves the best-effort inline-materialization contract (a
+    // detection failure must never break a successful memory creation).
+    readonly strictNoDrop?: boolean;
   }): Promise<void> {
+    const strictNoDrop = params.strictNoDrop ?? false;
     // invariant: short-circuit when neither writer can fire. With
     // ruleEnabled=false and no LLM port, both the findByDimension +
     // findBySharedDomainTags fetches would be pure waste.
     if (!this.ruleEnabled && this.deps.llmPort === undefined) {
       return;
     }
-    const sameDimension = await this.deps.memoryRepo
-      .findByDimension(params.workspaceId, params.newMemoryDimension as MemoryEntry["dimension"])
-      .catch((err) => {
-        this.warn("memoryRepo.findByDimension failed", {
-          workspace_id: params.workspaceId,
-          error: errorMessage(err)
-        });
-        return [] as readonly Readonly<MemoryEntry>[];
-      });
+    const sameDimension = await this.fetchCandidates(
+      () =>
+        this.deps.memoryRepo.findByDimension(
+          params.workspaceId,
+          params.newMemoryDimension as MemoryEntry["dimension"]
+        ),
+      "memoryRepo.findByDimension failed",
+      params.workspaceId,
+      strictNoDrop
+    );
     // INCOMPATIBLE_WITH candidate narrowing: the gate keeps a peer only if
     // jaccard(domain_tags) >= TAG_OVERLAP_CONTRADICTS_THRESHOLD, which
     // requires >=1 shared tag, so the shared-tag set is a superset of every
@@ -159,15 +170,16 @@ export class ConflictDetectionService {
     // identical edges with a sub-linear candidate set. Only the rule path
     // reads it; skip the fetch entirely when the rule path is disabled.
     const sharedTagCandidates = this.ruleEnabled
-      ? await this.deps.memoryRepo
-          .findBySharedDomainTags(params.workspaceId, params.newMemoryDomainTags)
-          .catch((err) => {
-            this.warn("memoryRepo.findBySharedDomainTags failed", {
-              workspace_id: params.workspaceId,
-              error: errorMessage(err)
-            });
-            return [] as readonly Readonly<MemoryEntry>[];
-          })
+      ? await this.fetchCandidates(
+          () =>
+            this.deps.memoryRepo.findBySharedDomainTags(
+              params.workspaceId,
+              params.newMemoryDomainTags
+            ),
+          "memoryRepo.findBySharedDomainTags failed",
+          params.workspaceId,
+          strictNoDrop
+        )
       : ([] as readonly Readonly<MemoryEntry>[]);
 
     const newTokens = tokenize(params.newMemoryContent);
@@ -203,7 +215,8 @@ export class ConflictDetectionService {
           MemoryGraphEdgeType.CONTRADICTS,
           params.workspaceId,
           params.runId,
-          "rule"
+          "rule",
+          strictNoDrop
         );
       }
 
@@ -227,7 +240,8 @@ export class ConflictDetectionService {
           MemoryGraphEdgeType.INCOMPATIBLE_WITH,
           params.workspaceId,
           params.runId,
-          "rule"
+          "rule",
+          strictNoDrop
         );
       }
     }
@@ -258,7 +272,8 @@ export class ConflictDetectionService {
               MemoryGraphEdgeType.CONTRADICTS,
               params.workspaceId,
               params.runId,
-              "llm"
+              "llm",
+              strictNoDrop
             );
           } else if (verdict === "incompatible_with") {
             await this.writeEdge(
@@ -267,10 +282,19 @@ export class ConflictDetectionService {
               MemoryGraphEdgeType.INCOMPATIBLE_WITH,
               params.workspaceId,
               params.runId,
-              "llm"
+              "llm",
+              strictNoDrop
             );
           }
         } catch (err) {
+          // invariant: in strict no-drop mode a transient path-mint failure
+          // rethrown by writeEdge must propagate so the worker releases the
+          // claim — it is NOT a per-pair classify failure to swallow. An LLM
+          // classify throw is still warn-and-continue in both modes (the
+          // verdict is best-effort; a missing verdict drops no owed path).
+          if (strictNoDrop && err instanceof CoreError && err.code === "OBLIGATION_VIOLATION") {
+            throw err;
+          }
           this.warn("conflict detection llm pair classify failed", {
             new_memory_id: params.newMemoryId,
             existing_memory_id: candidate.object_id,
@@ -281,17 +305,45 @@ export class ConflictDetectionService {
     }
   }
 
+  // invariant: candidate-query fetch with mode-dependent failure handling.
+  // In strict no-drop mode a repository throw rethrows so the bulk-enrich
+  // worker releases the claim (a query failure must NOT silently become an
+  // empty candidate set, dropping every owed conflict edge for this memory).
+  // In best-effort inline mode it warns and degrades to an empty set, keeping
+  // a detection failure from breaking a successful memory creation.
+  private async fetchCandidates(
+    fetch: () => Promise<readonly Readonly<MemoryEntry>[]>,
+    warnMessage: string,
+    workspaceId: string,
+    strictNoDrop: boolean
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    try {
+      return await fetch();
+    } catch (err) {
+      if (strictNoDrop) {
+        throw err;
+      }
+      this.warn(warnMessage, {
+        workspace_id: workspaceId,
+        error: errorMessage(err)
+      });
+      return [] as readonly Readonly<MemoryEntry>[];
+    }
+  }
+
   private async writeEdge(
     sourceMemoryId: string,
     targetMemoryId: string,
     edgeType: MemoryGraphEdgeTypeValue,
     workspaceId: string,
     runId: string,
-    verdictSource: ConflictVerdictSource
+    verdictSource: ConflictVerdictSource,
+    strictNoDrop: boolean
   ): Promise<void> {
     const profile = negativeProfileForEdgeType(edgeType, verdictSource);
+    let outcome: PathMintOutcome;
     try {
-      await this.deps.pathCandidatePort.submitCandidate({
+      outcome = await this.deps.pathCandidatePort.submitCandidate({
         workspaceId,
         sourceAnchor: { kind: "object", object_id: sourceMemoryId },
         targetAnchor: { kind: "object", object_id: targetMemoryId },
@@ -308,6 +360,15 @@ export class ConflictDetectionService {
         ]
       });
     } catch (err) {
+      // submitCandidate is contracted to catch its own materialize errors and
+      // return "failed"; a thrown error is treated as the same transient class.
+      if (strictNoDrop) {
+        throw new CoreError(
+          "OBLIGATION_VIOLATION",
+          `Conflict detection path candidate failed transiently: ${sourceMemoryId}->${targetMemoryId}`,
+          { cause: err }
+        );
+      }
       this.warn("conflict detection edge create failed", {
         source_memory_id: sourceMemoryId,
         target_memory_id: targetMemoryId,
@@ -316,6 +377,34 @@ export class ConflictDetectionService {
         workspace_id: workspaceId,
         error: errorMessage(err)
       });
+      return;
+    }
+
+    // invariant: a transient "failed" outcome owes a path. In strict no-drop
+    // mode it must surface so the bulk-enrich worker releases the claim; in
+    // best-effort inline mode it is warn-and-continue. A permanent "rejected"
+    // (bad anchor) and the success outcomes never block — retrying a rejected
+    // candidate cannot help, and applied / already_present settle the owed path.
+    if (outcome === "failed") {
+      if (strictNoDrop) {
+        throw new CoreError(
+          "OBLIGATION_VIOLATION",
+          `Conflict detection path candidate failed transiently: ${sourceMemoryId}->${targetMemoryId}`
+        );
+      }
+      this.warn("conflict detection edge create failed", {
+        source_memory_id: sourceMemoryId,
+        target_memory_id: targetMemoryId,
+        edge_type: edgeType,
+        verdict_source: verdictSource,
+        workspace_id: workspaceId,
+        error: "submitCandidate returned failed"
+      });
+      return;
+    }
+    if (outcome === "rejected") {
+      // Permanent anchor refusal: no path, no karma. Audited by the path
+      // service's path.relation_rejected event; nothing is owed here.
       return;
     }
 

@@ -1,4 +1,4 @@
-import type { SubmitCandidateInput } from "./path-relation-proposal-service.js";
+import type { PathMintOutcome, SubmitCandidateInput } from "./path-relation-proposal-service.js";
 
 // invariant: the single submitCandidate sink contract every folded edge
 // producer (EdgeAutoProducer, ConflictDetectionService, and the
@@ -12,5 +12,10 @@ import type { SubmitCandidateInput } from "./path-relation-proposal-service.js";
 // see also: path-relation-proposal-service.ts SubmitCandidateInput — call shape.
 // see also: path-relation-proposal-service.ts submitCandidate — the one implementor.
 export interface PathCandidateSink {
-  submitCandidate(input: SubmitCandidateInput): Promise<boolean>;
+  // invariant: returns the discriminated PathMintOutcome so a no-drop
+  // consumer can keep work pending on "failed" (transient) and settle it
+  // on applied / already_present / rejected (permanent). A producer that
+  // does not need the distinction may ignore the value.
+  // see also: path-relation-proposal-service.ts PathMintOutcome.
+  submitCandidate(input: SubmitCandidateInput): Promise<PathMintOutcome>;
 }

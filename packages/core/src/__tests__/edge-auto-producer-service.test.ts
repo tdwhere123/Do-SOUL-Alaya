@@ -5,6 +5,7 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { EdgeAutoProducerService } from "../edge-auto-producer-service.js";
+import type { PathMintOutcome } from "../path-relation-proposal-service.js";
 
 // Structural shape the assertions read off the submitCandidate fake; the
 // full SubmitCandidateInput is wider but these are the fields under test.
@@ -69,7 +70,7 @@ function createDeps(memories: readonly MemoryEntry[]) {
   );
   const findById = vi.fn(async (objectId: string) => byId.get(objectId) ?? null);
   const pathCandidatePort = {
-    submitCandidate: vi.fn(async (_input: SubmittedCandidate) => true)
+    submitCandidate: vi.fn(async (_input: SubmittedCandidate): Promise<PathMintOutcome> => "applied")
   };
   return {
     deps: {
@@ -119,6 +120,60 @@ describe("EdgeAutoProducerService", () => {
     );
     const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
     expect(submitArgs.why?.some((line) => line.includes("source_signal=signal-1"))).toBe(true);
+  });
+
+  // invariant (codex spine-review B5): a TRANSIENT "failed" outcome on any
+  // candidate must surface as a throw so the bulk-enrich worker keeps the row
+  // pending and a later cycle retries. Swallowing it would let the worker
+  // markProcessed an owed path away.
+  it("B5: throws when a path candidate returns the transient failed outcome", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      created_at: "2026-05-24T10:00:00.000Z",
+      updated_at: "2026-05-24T10:00:00.000Z",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "failed");
+    const service = new EdgeAutoProducerService(deps);
+
+    await expect(
+      service.produceForNewMemory({
+        newMemoryId: newMemory.object_id,
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1"
+      })
+    ).rejects.toMatchObject({ name: "CoreError", code: "OBLIGATION_VIOLATION" });
+  });
+
+  // invariant (codex spine-review B5 x B3): a PERMANENT "rejected" outcome is a
+  // decided no (bad anchor) — retrying cannot help — so it must NOT throw. The
+  // worker then markProcessed the row instead of looping on a poison pill.
+  it("B5xB3: does NOT throw when a path candidate is permanently rejected", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      created_at: "2026-05-24T10:00:00.000Z",
+      updated_at: "2026-05-24T10:00:00.000Z",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "rejected");
+    const service = new EdgeAutoProducerService(deps);
+
+    await expect(
+      service.produceForNewMemory({
+        newMemoryId: newMemory.object_id,
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1"
+      })
+    ).resolves.toBeUndefined();
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
   });
 
   it("B-2 proposes derives_from for deterministic derivation cues", async () => {

@@ -524,7 +524,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
       })
     );
 
-    expect(result).toBe(true);
+    expect(result).toBe("applied");
     expect(repo.create).toHaveBeenCalledTimes(1);
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
     const written = repo.create.mock.calls[0][0];
@@ -649,7 +649,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
       })
     );
 
-    expect(result).toBe(true);
+    expect(result).toBe("applied");
     const written = repo.create.mock.calls[0][0];
     expect(written.constitution.relation_kind).toBe("exception_to");
     expect(written.effect_vector.recall_bias).toBe(0);
@@ -728,11 +728,11 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
     const result = await service.submitCandidate(baseInput({}));
 
-    expect(result).toBe(true);
+    expect(result).toBe("already_present");
     expect(repo.create).not.toHaveBeenCalled();
   });
 
-  it("submitCandidate swallows a materialize failure and returns false with a warn", async () => {
+  it("submitCandidate swallows a materialize failure and returns failed with a warn", async () => {
     const repo = {
       create: vi.fn(() => {
         throw new Error("simulated row-insert failure");
@@ -750,7 +750,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
     const result = await service.submitCandidate(baseInput({}));
 
-    expect(result).toBe(false);
+    expect(result).toBe("failed");
     expect(warn).toHaveBeenCalledWith(
       "PathRelation submitCandidate failed",
       expect.objectContaining({ workspace_id: "workspace-1", relation_kind: "supports" })

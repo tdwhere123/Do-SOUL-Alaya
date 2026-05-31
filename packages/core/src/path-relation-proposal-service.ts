@@ -171,6 +171,26 @@ export const INCOMPATIBLE_SEED_PROFILE: PathSeedProfile = Object.freeze({
   evidenceBasis: Object.freeze(["incompatibility_evidence"]) as readonly string[]
 });
 
+// invariant: discriminated mint outcome. submitCandidate (and the shared
+// materialize path) report one of four decided results so a no-drop
+// consumer can tell a DECIDED "no" apart from a TRANSIENT failure:
+//   - "applied": a fresh PathRelation row + audit event were written.
+//   - "already_present": durable dedup found the pair already linked; no
+//     write, but the owed path exists, so nothing is owed.
+//   - "rejected": a permanent refusal (object anchor missing / owned by a
+//     foreign workspace). A path.relation_rejected audit event is emitted;
+//     retrying with the same anchors can never succeed.
+//   - "failed": a transient error (repo throw, event-publisher throw). The
+//     owed path is NOT written; a retry MAY succeed, so a no-drop consumer
+//     must keep the work pending instead of marking it processed.
+// invariant: only "failed" is retry-worthy. applied / already_present are
+// successes; rejected is a decided no that retry cannot fix. A consumer
+// that retries a "rejected" candidate creates an infinite poison loop, so
+// it MUST treat rejected as terminal (no retry) — distinct from "failed".
+// see also: edge-auto-producer-service.ts / conflict-detection-service.ts —
+//   no-drop consumers; garden-runtime.ts BULK_ENRICH worker — claim release.
+export type PathMintOutcome = "applied" | "already_present" | "rejected" | "failed";
+
 // invariant: auto-build governance hard ceiling. No producer-driven seed
 // may be born at strictly_governed; that band is reserved for explicit
 // user/operator governance. submitCandidate clamps requests down to this
@@ -331,9 +351,10 @@ export class PathRelationProposalService {
   // Generalized candidate intake. Non-counter producers submit a fully
   // differentiated candidate; it mints once (subject to durable dedup and
   // governance clamp). This is the stable signature Wave-2 edge folding
-  // calls. Returns true when a path now exists for the pair (either freshly
-  // minted or already present), false on a swallowed materialize failure.
-  public async submitCandidate(input: SubmitCandidateInput): Promise<boolean> {
+  // calls. Returns a discriminated PathMintOutcome: applied / already_present
+  // on success, rejected on a permanent anchor refusal, failed on a
+  // transient (caught) error so a no-drop consumer can keep the work pending.
+  public async submitCandidate(input: SubmitCandidateInput): Promise<PathMintOutcome> {
     const recallBias = input.recallBiasSign * (input.recallBiasMagnitude ?? 0.5);
     const governanceClass = clampGovernanceToAutoBuildCeiling(input.governanceClass);
     try {
@@ -358,7 +379,7 @@ export class PathRelationProposalService {
         relation_kind: input.relationKind,
         error: errorMessage(err)
       });
-      return false;
+      return "failed";
     }
   }
 
@@ -399,7 +420,12 @@ export class PathRelationProposalService {
         }
         try {
           const proposed = await this.proposeCoRecalled(workspaceId, low, high);
-          if (proposed) {
+          // applied / already_present / rejected all settle the pair: a
+          // permanent rejection (bad anchor) can never mint, so keeping the
+          // counter would re-query it on every future co-occurrence. Only a
+          // transient "failed" leaves the counter so a later threshold hit
+          // retries the mint.
+          if (proposed !== "failed") {
             await this.counterStore.delete(workspaceId, low, high);
           }
         } catch (err) {
@@ -418,7 +444,7 @@ export class PathRelationProposalService {
     workspaceId: string,
     sourceMemoryId: string,
     targetMemoryId: string
-  ): Promise<boolean> {
+  ): Promise<PathMintOutcome> {
     const profile = CO_RECALLED_SEED_PROFILE;
     return await this.materialize({
       workspaceId,
@@ -452,7 +478,7 @@ export class PathRelationProposalService {
     readonly supportEventsCount: number;
     readonly why: readonly string[];
     readonly runId: string | null;
-  }): Promise<boolean> {
+  }): Promise<PathMintOutcome> {
     const sourceId = anchorObjectId(params.sourceAnchor);
     const targetId = anchorObjectId(params.targetAnchor);
     if (
@@ -466,8 +492,9 @@ export class PathRelationProposalService {
       );
       if (alreadyLinked) {
         // Counter row is stale once a durable path exists; caller drops it
-        // so the pair stops re-querying on every future co-occurrence.
-        return true;
+        // so the pair stops re-querying on every future co-occurrence. The
+        // owed path already exists, so this is a settled success.
+        return "already_present";
       }
     }
 
@@ -476,7 +503,9 @@ export class PathRelationProposalService {
     // workspace. The check runs BEFORE the EventLog append + DB insert so an
     // untrusted agent/Garden ref cannot become durable governed topology.
     // A refusal emits an auditable path.relation_rejected event and returns
-    // false — no path_relations row, no audit "created" row, no graph neighbor.
+    // "rejected" — no path_relations row, no audit "created" row, no graph
+    // neighbor. This is a DECIDED no, distinct from a transient "failed": a
+    // no-drop consumer must NOT retry it (the same anchors can never pass).
     const validationFailure = await this.validateObjectAnchors(
       params.workspaceId,
       params.sourceAnchor,
@@ -484,7 +513,7 @@ export class PathRelationProposalService {
     );
     if (validationFailure !== undefined) {
       await this.emitRejection(params.workspaceId, params.relationKind, validationFailure);
-      return false;
+      return "rejected";
     }
 
     const occurredAt = this.now();
@@ -556,7 +585,7 @@ export class PathRelationProposalService {
         this.deps.repo.create(relation);
       }
     );
-    return true;
+    return "applied";
   }
 
   // invariant: only kind:"object" anchors carry an agent/Garden-supplied

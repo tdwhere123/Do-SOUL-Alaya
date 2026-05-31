@@ -13,6 +13,7 @@ import {
 } from "../edge-proposal-service.js";
 import type { EventPublisher } from "../event-publisher.js";
 import type { PathCandidateSink } from "../path-candidate-sink.js";
+import type { PathMintOutcome } from "../path-relation-proposal-service.js";
 
 describe("EdgeProposalService", () => {
   it("creates a pending proposal without writing a durable graph edge", async () => {
@@ -228,14 +229,15 @@ describe("EdgeProposalService", () => {
 
   // invariant (I-1): the minted path is the only durable landing for an
   // accepted proposal. submitCandidate catches its own materialize errors and
-  // returns false; acceptProposal must surface that loudly (CoreError) so an
-  // accepted-without-path loss is never silent. The review row already
-  // committed, so the proposal stays ACCEPTED — but the failure is observable
-  // and a retry is idempotent (materialize dedups via findByAnchorMemoryId).
-  it("throws an observable failure when submitCandidate returns false (no silent lost mint)", async () => {
+  // returns the transient "failed" outcome; acceptProposal must surface that
+  // loudly (CoreError) so an accepted-without-path loss is never silent. The
+  // review row already committed, so the proposal stays ACCEPTED — but the
+  // failure is observable and a retry is idempotent (materialize dedups via
+  // findByAnchorMemoryId).
+  it("throws an observable failure when submitCandidate returns a transient failed (no silent lost mint)", async () => {
     const repo = createProposalRepo();
     const pathCandidatePort = createPathCandidatePort();
-    pathCandidatePort.submitCandidate.mockImplementation(async () => false);
+    pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "failed");
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo(),
       proposalRepo: repo,
@@ -273,10 +275,10 @@ describe("EdgeProposalService", () => {
   // SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED event keyed on proposal_id must be
   // emitted so an operator can reconcile the obligation without a forensic
   // cross-join. The OBLIGATION_VIOLATION throw stays (loud at call time).
-  it("emits a durable path-mint-failed record AND throws when submitCandidate returns false", async () => {
+  it("emits a durable path-mint-failed record AND throws when submitCandidate returns a transient failed", async () => {
     const repo = createProposalRepo();
     const pathCandidatePort = createPathCandidatePort();
-    pathCandidatePort.submitCandidate.mockImplementation(async () => false);
+    pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "failed");
     const eventPublisher = createEventPublisher();
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo(),
@@ -328,8 +330,59 @@ describe("EdgeProposalService", () => {
     });
   });
 
+  // invariant: a permanent "rejected" outcome (bad anchor — a missing /
+  // foreign source or target memory) on an ACCEPTED proposal still has no
+  // landing path, so it is an obligation violation: it must record the same
+  // durable mint-failed audit event and throw, exactly like a transient
+  // "failed". The distinction matters for retry-driven consumers (the
+  // bulk-enrich worker), not for the accept→mint path, which is always loud.
+  it("emits a durable path-mint-failed record AND throws when submitCandidate returns a permanent rejected", async () => {
+    const repo = createProposalRepo();
+    const pathCandidatePort = createPathCandidatePort();
+    pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "rejected");
+    const eventPublisher = createEventPublisher();
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort,
+      eventPublisher,
+      generateId: () => "proposal-1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    const proposal = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1"
+    });
+
+    await expect(
+      service.batchReview({
+        workspaceId: "workspace-1",
+        verdict: "accept",
+        filter: { proposal_ids: [proposal.proposal_id] },
+        reason: "reviewed",
+        reviewerIdentity: "user:reviewer"
+      })
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "OBLIGATION_VIOLATION",
+      message: `Edge proposal accepted but path mint failed: ${proposal.proposal_id}`
+    });
+
+    const mintFailedEvents = eventPublisher.appendManyWithMutation.mock.calls
+      .flatMap((call) => call[0])
+      .filter((event) => event.event_type === "soul.graph.edge_proposal_path_mint_failed");
+    expect(mintFailedEvents).toHaveLength(1);
+    expect(mintFailedEvents[0].payload_json).toMatchObject({
+      proposal_id: proposal.proposal_id,
+      failure_kind: "submit_returned_false",
+      workspace_id: "workspace-1"
+    });
+  });
+
   // invariant: submitCandidate is contracted to catch its own materialize
-  // errors and return false, but a thrown error must still produce the durable
+  // errors and return a discriminated outcome, but a thrown error must still produce the durable
   // obligation record before propagating — auditability cannot depend on the
   // failure-arrival shape.
   it("emits a durable path-mint-failed record AND throws when submitCandidate throws", async () => {
@@ -817,7 +870,7 @@ function createPathCandidatePort(): PathCandidateSink & {
   submitCandidate: ReturnType<typeof vi.fn>;
 } {
   return {
-    submitCandidate: vi.fn(async () => true)
+    submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied")
   };
 }
 

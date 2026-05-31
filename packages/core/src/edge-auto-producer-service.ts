@@ -191,6 +191,14 @@ export class EdgeAutoProducerService {
     );
 
     let proposalCount = 0;
+    // invariant: a transient submitCandidate failure ("failed") on ANY
+    // candidate must not be swallowed — the bulk-enrich worker treats this
+    // method resolving as success and would markProcessed the owed path away.
+    // We collect transient failures and throw after the loop so the worker's
+    // per-memory catch releases the claim for stale-claim retry. A permanent
+    // "rejected" (bad anchor) is NOT a transient failure: retrying cannot help,
+    // so it does not block markProcessed. applied / already_present settle.
+    let transientFailures = 0;
     for (const neighbor of orderedNeighbors) {
       if (proposalCount >= MAX_EDGE_PROPOSALS_PER_MEMORY) {
         break;
@@ -200,7 +208,7 @@ export class EdgeAutoProducerService {
         continue;
       }
       const profile = seedProfileForEdgeType(decision.edgeType);
-      await this.deps.pathCandidatePort.submitCandidate({
+      const outcome = await this.deps.pathCandidatePort.submitCandidate({
         workspaceId,
         sourceAnchor: { kind: "object", object_id: newMemory.object_id },
         targetAnchor: { kind: "object", object_id: neighbor.object_id },
@@ -216,7 +224,16 @@ export class EdgeAutoProducerService {
         ],
         runId: input.runId
       });
+      if (outcome === "failed") {
+        transientFailures += 1;
+      }
       proposalCount += 1;
+    }
+    if (transientFailures > 0) {
+      throw new CoreError(
+        "OBLIGATION_VIOLATION",
+        `Edge auto-producer: ${transientFailures} path candidate(s) failed transiently for ${newMemory.object_id}`
+      );
     }
   }
 

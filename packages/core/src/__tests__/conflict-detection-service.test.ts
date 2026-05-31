@@ -5,6 +5,7 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { ConflictDetectionService } from "../conflict-detection-service.js";
+import type { PathMintOutcome } from "../path-relation-proposal-service.js";
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   const base: MemoryEntry = {
@@ -51,7 +52,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [existing]),
       findBySharedDomainTags: vi.fn(async () => [existing])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
@@ -90,7 +91,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [existing]),
       findBySharedDomainTags: vi.fn(async () => [existing])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const emitKarmaEvent = vi.fn(async () => {});
     const service = new ConflictDetectionService({
       memoryRepo,
@@ -131,7 +132,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [ambiguous]),
       findBySharedDomainTags: vi.fn(async () => [])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const emitKarmaEvent = vi.fn(async () => {});
     const llmPort = { classifyPair: vi.fn(async () => "contradicts" as const) };
     const service = new ConflictDetectionService({
@@ -174,7 +175,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [existing]),
       findBySharedDomainTags: vi.fn(async () => [existing])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
@@ -204,7 +205,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => []),
       findBySharedDomainTags: vi.fn(async () => [existing])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
@@ -241,7 +242,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [ambiguous]),
       findBySharedDomainTags: vi.fn(async () => [])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const llmPort = {
       classifyPair: vi.fn(async () => "contradicts" as const)
     };
@@ -277,7 +278,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [ruleHit]),
       findBySharedDomainTags: vi.fn(async () => [])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const llmPort = {
       classifyPair: vi.fn(async () => "contradicts" as const)
     };
@@ -311,7 +312,7 @@ describe("ConflictDetectionService", () => {
       }),
       findBySharedDomainTags: vi.fn(async () => [])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await expect(
@@ -336,7 +337,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [existing]),
       findBySharedDomainTags: vi.fn(async () => [existing])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const llmPort = {
       classifyPair: vi.fn(async () => "contradicts" as const)
     };
@@ -383,7 +384,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [existing]),
       findBySharedDomainTags: vi.fn(async () => [existing])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
@@ -493,7 +494,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => []),
       findBySharedDomainTags
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
@@ -531,7 +532,7 @@ describe("ConflictDetectionService", () => {
       findByDimension: vi.fn(async () => [existing]),
       findBySharedDomainTags: vi.fn(async () => [existing])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async () => true) };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
     const service = new ConflictDetectionService({
       memoryRepo,
       pathCandidatePort,
@@ -549,5 +550,95 @@ describe("ConflictDetectionService", () => {
     });
 
     expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+  });
+
+  // invariant (codex spine-review B5): strict no-drop mode must surface a
+  // candidate-query failure as a throw so the bulk-enrich worker releases the
+  // claim and a later cycle retries — it must NOT degrade to an empty candidate
+  // set that silently drops every owed conflict edge for this memory.
+  it("strictNoDrop=true rethrows a candidate-query failure (no degrade-to-empty)", async () => {
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => {
+        throw new Error("findByDimension db error");
+      }),
+      findBySharedDomainTags: vi.fn(async () => [])
+    };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
+
+    await expect(
+      service.detectAndLinkConflicts({
+        newMemoryId: "mem-B",
+        newMemoryDimension: MemoryDimension.PREFERENCE,
+        newMemoryScopeClass: ScopeClass.PROJECT,
+        newMemoryContent: "I prefer light roast tea instead.",
+        newMemoryDomainTags: ["coffee", "preference"],
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        strictNoDrop: true
+      })
+    ).rejects.toThrow("findByDimension db error");
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+  });
+
+  // invariant (codex spine-review B5): strict no-drop mode must surface a
+  // transient path-mint "failed" as an OBLIGATION_VIOLATION throw so the owed
+  // path is retried, never markProcessed away.
+  it("strictNoDrop=true throws OBLIGATION_VIOLATION when submitCandidate returns a transient failed", async () => {
+    const existing = createMemoryEntry({
+      object_id: "mem-A",
+      content: "I prefer dark roast coffee."
+    });
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => [existing]),
+      findBySharedDomainTags: vi.fn(async () => [existing])
+    };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "failed") };
+    const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
+
+    await expect(
+      service.detectAndLinkConflicts({
+        newMemoryId: "mem-B",
+        newMemoryDimension: MemoryDimension.PREFERENCE,
+        newMemoryScopeClass: ScopeClass.PROJECT,
+        newMemoryContent: "I prefer light roast tea instead.",
+        newMemoryDomainTags: ["coffee", "preference"],
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        strictNoDrop: true
+      })
+    ).rejects.toMatchObject({ name: "CoreError", code: "OBLIGATION_VIOLATION" });
+  });
+
+  // invariant: best-effort inline mode (the default) preserves the prior
+  // contract — a candidate-query failure must NOT break a successful memory
+  // creation, so it degrades to an empty candidate set and warns rather than
+  // throwing. Only the bulk-enrich worker opts into strictNoDrop.
+  it("default (best-effort) mode warns and degrades on a candidate-query failure (no throw)", async () => {
+    const warn = vi.fn();
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => {
+        throw new Error("findByDimension db error");
+      }),
+      findBySharedDomainTags: vi.fn(async () => [])
+    };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort, warn });
+
+    await expect(
+      service.detectAndLinkConflicts({
+        newMemoryId: "mem-B",
+        newMemoryDimension: MemoryDimension.PREFERENCE,
+        newMemoryScopeClass: ScopeClass.PROJECT,
+        newMemoryContent: "I prefer light roast tea instead.",
+        newMemoryDomainTags: ["coffee", "preference"],
+        workspaceId: "workspace-1",
+        runId: "run-1"
+      })
+    ).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      "memoryRepo.findByDimension failed",
+      expect.objectContaining({ workspace_id: "workspace-1" })
+    );
   });
 });

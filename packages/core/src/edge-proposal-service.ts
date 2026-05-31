@@ -21,6 +21,7 @@ import {
 import { CoreError } from "./errors.js";
 import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 import type { PathCandidateSink } from "./path-candidate-sink.js";
+import type { PathMintOutcome } from "./path-relation-proposal-service.js";
 import { parseObjectId } from "./shared/validators.js";
 
 export interface EdgeProposalMemoryRepoPort {
@@ -391,9 +392,9 @@ export class EdgeProposalService {
       sign < 0 && acceptedStatus === EdgeProposalStatus.AUTO_ACCEPTED
         ? "attention_only"
         : "recall_allowed";
-    let minted: boolean;
+    let outcome: PathMintOutcome;
     try {
-      minted = await this.dependencies.pathCandidatePort.submitCandidate({
+      outcome = await this.dependencies.pathCandidatePort.submitCandidate({
         workspaceId: proposal.workspace_id,
         sourceAnchor: { kind: "object", object_id: proposal.source_memory_id },
         targetAnchor: { kind: "object", object_id: proposal.target_memory_id },
@@ -408,9 +409,9 @@ export class EdgeProposalService {
       });
     } catch (mintError) {
       // defensive: submitCandidate is contracted to catch its own materialize
-      // errors and return false, but a thrown error must still produce the
-      // durable obligation record before propagating, so the auditability path
-      // is identical regardless of how the mint failure arrives.
+      // errors and return a discriminated outcome, but a thrown error must still
+      // produce the durable obligation record before propagating, so the
+      // auditability path is identical regardless of how the mint failure arrives.
       await this.recordPathMintFailure(proposal, reviewerIdentity, "submit_threw", mintError);
       throw new CoreError(
         "OBLIGATION_VIOLATION",
@@ -419,17 +420,19 @@ export class EdgeProposalService {
       );
     }
     // invariant: under the single-plane model the minted path is the ONLY
-    // durable landing for an accepted proposal. submitCandidate catches its
-    // own materialize errors and returns false; if it does, the review row is
-    // already durably ACCEPTED/AUTO_ACCEPTED but no path exists. That loss must
-    // never be silent — emit a durable, queryable SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED
+    // durable landing for an accepted proposal. applied / already_present mean
+    // the owed path exists. Any other outcome means the review row is already
+    // durably ACCEPTED/AUTO_ACCEPTED but no path exists, which must never be
+    // silent — emit a durable, queryable SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED
     // record keyed on proposal_id (so an operator can reconcile the owed-path
     // obligation without a forensic cross-join) and throw so the immediate caller
-    // also observes it. The review row already committed with its reviewed
-    // ancestor, so this is the loud-failure outcome, not silent. A retry is
-    // safe: materialize dedups via findByAnchorMemoryId, so re-minting the same
-    // pair is idempotent.
-    if (!minted) {
+    // also observes it. "failed" is transient (a retry may succeed; materialize
+    // dedups via findByAnchorMemoryId, so re-minting the same pair is idempotent);
+    // "rejected" is a permanent anchor refusal (a missing / foreign source or
+    // target memory) that retry cannot fix — both are loud here because an
+    // accepted proposal with no landing path is an obligation violation either way.
+    // The path service emits its own path.relation_rejected audit on rejection.
+    if (outcome === "failed" || outcome === "rejected") {
       await this.recordPathMintFailure(proposal, reviewerIdentity, "submit_returned_false", null);
       throw new CoreError(
         "OBLIGATION_VIOLATION",

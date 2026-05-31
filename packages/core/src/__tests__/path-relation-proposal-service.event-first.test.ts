@@ -142,7 +142,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
       runId: "run-7f3c"
     });
 
-    expect(minted).toBe(true);
+    expect(minted).toBe("applied");
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
     const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
     expect(eventInputs[0].event_type).toBe("path.relation_created");

@@ -113,7 +113,7 @@ describe("PathRelationProposalService — object-anchor existence + ownership ga
 
     const result = await service.submitCandidate(candidate());
 
-    expect(result).toBe(true);
+    expect(result).toBe("applied");
     expect(repoCreate).toHaveBeenCalledTimes(1);
     expect(events.map((e) => e.event_type)).toEqual(["path.relation_created"]);
   });
@@ -126,7 +126,7 @@ describe("PathRelationProposalService — object-anchor existence + ownership ga
 
     const result = await service.submitCandidate(candidate());
 
-    expect(result).toBe(false);
+    expect(result).toBe("rejected");
     expect(repoCreate).not.toHaveBeenCalled();
     expect(events.map((e) => e.event_type)).toEqual(["path.relation_rejected"]);
     expect(events[0]!.payload_json).toMatchObject({
@@ -146,7 +146,7 @@ describe("PathRelationProposalService — object-anchor existence + ownership ga
 
     const result = await service.submitCandidate(candidate());
 
-    expect(result).toBe(false);
+    expect(result).toBe("rejected");
     expect(repoCreate).not.toHaveBeenCalled();
     expect(events.map((e) => e.event_type)).toEqual(["path.relation_rejected"]);
     expect(events[0]!.payload_json).toMatchObject({
@@ -164,7 +164,7 @@ describe("PathRelationProposalService — object-anchor existence + ownership ga
 
     const result = await service.submitCandidate(candidate());
 
-    expect(result).toBe(false);
+    expect(result).toBe("rejected");
     expect(repoCreate).not.toHaveBeenCalled();
     expect(events.map((e) => e.event_type)).toEqual(["path.relation_rejected"]);
     expect(events[0]!.payload_json).toMatchObject({
