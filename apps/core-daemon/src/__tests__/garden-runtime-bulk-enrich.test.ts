@@ -319,7 +319,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     ).toHaveLength(0);
   });
 
-  it("the 60s pass enqueues a BULK_ENRICH for every workspace with pending rows (S3c I2)", async () => {
+  it("the 60s pass enqueues AND drains a BULK_ENRICH for every workspace with pending rows in one pass (S3c I2 + I3)", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     enrichPendingRepo.enqueue("workspace-1", "memory-1");
     enrichPendingRepo.enqueue("workspace-2", "memory-2");
@@ -332,28 +332,60 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
       })
     );
 
-    // The 60s pass enqueues a per-workspace BULK_ENRICH for BOTH pending
-    // workspaces, then dispatches the LIBRARIAN role once per pass — so a
-    // multi-workspace backlog drains across successive passes. Asserted by the
-    // union of the queued (not-yet-dispatched) + completed (dispatched) tasks.
+    // I3: a single 60s pass enqueues a per-workspace BULK_ENRICH for BOTH
+    // pending workspaces AND drains every one of them in the bounded drain loop
+    // (not one-per-pass), so a multi-workspace backlog clears within the ~1-min
+    // bound. Proven by completion for both workspaces and pending draining to 0.
     await getService(runtime, "GardenScheduler").task();
-    const touchedWorkspaces = new Set(
-      currentScheduler()
-        .queue.filter((task) => task.task_kind === GardenTaskKind.BULK_ENRICH)
-        .map((task) => task.workspace_id)
-        .concat(
-          currentScheduler()
-            .completions.filter((result) => result.task_kind === GardenTaskKind.BULK_ENRICH)
-            .map((result) => result.workspace_id)
-        )
-    );
-    expect([...touchedWorkspaces].sort()).toEqual(["workspace-1", "workspace-2"]);
 
-    // Two more passes drain both workspaces (one LIBRARIAN-role task per pass).
-    await getService(runtime, "GardenScheduler").task();
-    await getService(runtime, "GardenScheduler").task();
+    const completedWorkspaces = currentScheduler()
+      .completions.filter((result) => result.task_kind === GardenTaskKind.BULK_ENRICH)
+      .map((result) => result.workspace_id)
+      .sort();
+    expect(completedWorkspaces).toEqual(["workspace-1", "workspace-2"]);
+    expect(
+      currentScheduler().queue.filter((task) => task.task_kind === GardenTaskKind.BULK_ENRICH)
+    ).toHaveLength(0);
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
     expect(enrichPendingRepo.countPending("workspace-2")).toBe(0);
+  });
+
+  // invariant (codex spine-review I3): the ~60s pass drains EVERY BULK_ENRICH
+  // queued in the pass, bounded by the per-pass cap, so N workspaces' pending
+  // enrichment all clears in a single pass (up to the cap) rather than O(N)
+  // passes. This pins the now-true ~1-min bound under a multi-workspace backlog.
+  it("I3: N workspaces' BULK_ENRICH all drain within a single scheduler pass (up to the cap)", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    const workspaceIds = Array.from({ length: 10 }, (_unused, index) => `workspace-${index + 1}`);
+    for (const workspaceId of workspaceIds) {
+      enrichPendingRepo.enqueue(workspaceId, `memory-${workspaceId}`);
+    }
+    const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) =>
+          buildMemory(memoryId, memoryId.replace("memory-", ""))
+        ),
+        produceForNewMemory,
+        workspaceIds
+      })
+    );
+
+    await getService(runtime, "GardenScheduler").task();
+
+    const completedWorkspaces = currentScheduler()
+      .completions.filter((result) => result.task_kind === GardenTaskKind.BULK_ENRICH)
+      .map((result) => result.workspace_id)
+      .sort();
+    expect(completedWorkspaces).toEqual([...workspaceIds].sort());
+    expect(
+      currentScheduler().queue.filter((task) => task.task_kind === GardenTaskKind.BULK_ENRICH)
+    ).toHaveLength(0);
+    for (const workspaceId of workspaceIds) {
+      expect(enrichPendingRepo.countPending(workspaceId)).toBe(0);
+    }
+    expect(produceForNewMemory).toHaveBeenCalledTimes(workspaceIds.length);
   });
 
   it("the count threshold enqueues a BULK_ENRICH task once the pending count crosses batch_trigger_count (accumulated-count trigger)", async () => {
@@ -652,7 +684,10 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
   });
 });
 
-function buildMemory(memoryId: string): Readonly<{
+function buildMemory(
+  memoryId: string,
+  workspaceId = "workspace-1"
+): Readonly<{
   readonly object_id: string;
   readonly dimension: string;
   readonly scope_class: string;
@@ -667,7 +702,7 @@ function buildMemory(memoryId: string): Readonly<{
     scope_class: "project",
     content: `content-for-${memoryId}`,
     domain_tags: ["rtk"],
-    workspace_id: "workspace-1",
+    workspace_id: workspaceId,
     run_id: "run-1"
   };
 }

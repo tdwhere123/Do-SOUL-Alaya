@@ -107,6 +107,13 @@ const IN_PROCESS_POST_TURN_CLAIMANT = "in-process";
 // reconnect doesn't have to wait an hour".
 const GARDEN_CLAIM_STALE_AFTER_MS = 10 * 60 * 1000;
 const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
+// invariant: per ~60s scheduler pass, drain up to this many BULK_ENRICH tasks
+// so every workspace whose enrich_pending grew this pass is enriched within
+// the ~1-min bound (one Librarian dispatch per pass would push a multi-
+// workspace backlog to O(workspaces) passes). Capped so a huge backlog cannot
+// starve the other scheduler work that shares this pass; beyond the cap the
+// bound degrades to O(workspaces / cap) * scheduler interval.
+const BULK_ENRICH_DRAIN_CAP_PER_PASS = 32;
 const JANITOR_RUNTIME_TASK_KINDS = [
   GardenTaskKind.TTL_CLEANUP,
   GardenTaskKind.HOT_INDEX_DEMOTION,
@@ -756,18 +763,32 @@ export function createGardenRuntime(input: {
     requestBacklogTelemetryCapture(`enqueue:${GardenTaskKind.BULK_ENRICH}`);
   };
 
-  const hasBulkEnrichQueued = (workspaceId: string): boolean =>
-    gardenTaskRepo
+  // The dedup set is the authoritative per-pass guard: both triggers run in the
+  // same scheduler pass, and peekPending(gardenTaskRepo) does not reflect a task
+  // enqueued earlier in this same pass (and is a no-op when gardenTaskRepo is
+  // unwired), so a workspace enqueued by the unconditional drain would otherwise
+  // be re-enqueued by the threshold trigger before the first task is visible.
+  const hasBulkEnrichQueued = (
+    workspaceId: string,
+    enqueuedThisPass: ReadonlySet<string>
+  ): boolean =>
+    enqueuedThisPass.has(workspaceId) ||
+    (gardenTaskRepo
       ?.peekPending(GardenRole.LIBRARIAN, workspaceId, 50)
-      .some((candidate) => candidate.kind === GardenTaskKind.BULK_ENRICH) ?? false;
+      .some((candidate) => candidate.kind === GardenTaskKind.BULK_ENRICH) ??
+      false);
 
   // invariant: unconditional per-workspace drain, run on the ~60s GardenScheduler
   // pass so a freshly materialized memory's conflict-suppression edges form
-  // within a ~1-min best-effort-eventual bound. Guarded by countPending>0 (an
+  // within a ~1-min best-effort-eventual bound (the scheduler pass drains every
+  // BULK_ENRICH queued here, up to BULK_ENRICH_DRAIN_CAP_PER_PASS, so the bound
+  // holds across multiple workspaces in one pass). Guarded by countPending>0 (an
   // empty workspace enqueues nothing — a 60s all-workspace check is near-free)
   // AND no-BULK_ENRICH-already-queued (a backlog cannot stack duplicate tasks
   // faster than the worker drains them).
-  const enqueueBulkEnrichForAllWorkspaces = async (): Promise<void> => {
+  const enqueueBulkEnrichForAllWorkspaces = async (
+    enqueuedThisPass: Set<string>
+  ): Promise<void> => {
     const enrichPendingRepo = input.enrichPendingRepo;
     if (!bulkEnrichWired || enrichPendingRepo === undefined) {
       return;
@@ -778,10 +799,11 @@ export function createGardenRuntime(input: {
       if (enrichPendingRepo.countPending(workspace.workspace_id) === 0) {
         continue;
       }
-      if (hasBulkEnrichQueued(workspace.workspace_id)) {
+      if (hasBulkEnrichQueued(workspace.workspace_id, enqueuedThisPass)) {
         continue;
       }
       enqueueBulkEnrichForWorkspace(workspace.workspace_id, nowIso);
+      enqueuedThisPass.add(workspace.workspace_id);
     }
   };
 
@@ -792,7 +814,9 @@ export function createGardenRuntime(input: {
   // workspace whose pending count crossed the threshold and that has no
   // BULK_ENRICH already queued, so a backlog cannot stack duplicate tasks faster
   // than the worker drains them.
-  const enqueueBulkEnrichForCountThreshold = async (): Promise<void> => {
+  const enqueueBulkEnrichForCountThreshold = async (
+    enqueuedThisPass: Set<string>
+  ): Promise<void> => {
     const enrichPendingRepo = input.enrichPendingRepo;
     if (!bulkEnrichWired || enrichPendingRepo === undefined) {
       return;
@@ -804,10 +828,11 @@ export function createGardenRuntime(input: {
       if (pending < DYNAMICS_CONSTANTS.enrich.batch_trigger_count) {
         continue;
       }
-      if (hasBulkEnrichQueued(workspace.workspace_id)) {
+      if (hasBulkEnrichQueued(workspace.workspace_id, enqueuedThisPass)) {
         continue;
       }
       enqueueBulkEnrichForWorkspace(workspace.workspace_id, nowIso);
+      enqueuedThisPass.add(workspace.workspace_id);
     }
   };
 
@@ -1477,8 +1502,10 @@ export function createGardenRuntime(input: {
           );
         }
         // invariant: the unconditional per-workspace BULK_ENRICH drain runs on
-        // the ~60s GardenScheduler pass, not here, so conflict-suppression edges
-        // form within a ~1-min best-effort-eventual bound.
+        // the ~60s GardenScheduler pass, not here. That pass drains every
+        // BULK_ENRICH queued in the pass (up to BULK_ENRICH_DRAIN_CAP_PER_PASS),
+        // so conflict-suppression edges form within a ~1-min best-effort-eventual
+        // bound for up to the cap many workspaces per pass.
         // see also: enqueueBulkEnrichForAllWorkspaces.
         markBackgroundPassCompleted();
       }
@@ -1497,8 +1524,26 @@ export function createGardenRuntime(input: {
         // best-effort-eventual bound. The unconditional drain covers slow drip;
         // the threshold trigger below covers bursts. Both enqueue only when
         // there is something to drain, so a 60s all-workspace check is near-free.
-        await enqueueBulkEnrichForAllWorkspaces();
-        await enqueueBulkEnrichForCountThreshold();
+        const bulkEnrichEnqueuedThisPass = new Set<string>();
+        await enqueueBulkEnrichForAllWorkspaces(bulkEnrichEnqueuedThisPass);
+        await enqueueBulkEnrichForCountThreshold(bulkEnrichEnqueuedThisPass);
+        // invariant: drain EVERY BULK_ENRICH queued this pass, not just one, so
+        // a multi-workspace backlog all enriches within the ~1-min bound rather
+        // than O(workspaces) passes. Bounded by BULK_ENRICH_DRAIN_CAP_PER_PASS
+        // so a huge backlog cannot starve the per-role dispatch that shares this
+        // pass; beyond the cap the bound degrades to O(workspaces / cap) * pass.
+        // Runs before the per-role loop so BULK_ENRICH does not consume the
+        // single Librarian dispatch slot the other Librarian task kinds need.
+        for (let drained = 0; drained < BULK_ENRICH_DRAIN_CAP_PER_PASS; drained += 1) {
+          const bulkEnrichTask = await runtimeGardenScheduler.dispatchNextMatchingTaskKind(
+            GardenRole.LIBRARIAN,
+            [GardenTaskKind.BULK_ENRICH]
+          );
+          if (bulkEnrichTask === null) {
+            break;
+          }
+          await runBulkEnrichTask(bulkEnrichTask);
+        }
         for (const [role, handler, runtimeTaskKinds] of [
           [GardenRole.JANITOR, janitor, JANITOR_RUNTIME_TASK_KINDS],
           [GardenRole.AUDITOR, auditor, AUDITOR_RUNTIME_TASK_KINDS],

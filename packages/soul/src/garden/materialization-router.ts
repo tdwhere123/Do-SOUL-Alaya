@@ -941,7 +941,9 @@ export class MaterializationRouter {
   // best-effort-eventual, not synchronous-at-materialize. A freshly materialized
   // memory is recallable before its not-yet-detected contradiction/supersession
   // edges form — surfaced != conflict-checked within that window. The Garden
-  // drains on the ~60s GardenScheduler cadence, so the upper bound is ~1 min.
+  // drains every BULK_ENRICH queued in a ~60s GardenScheduler pass (up to a
+  // bounded per-pass cap), so the upper bound is ~1 min per workspace up to the
+  // cap, and O(workspaces / cap) * ~1 min beyond it.
   // see also: packages/storage/src/repos/enrich-pending-repo.ts
   // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask.
   private enqueueEnrichment(memoryId: string, signal: CandidateMemorySignal): void {
