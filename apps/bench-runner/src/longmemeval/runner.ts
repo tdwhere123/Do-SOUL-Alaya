@@ -711,12 +711,13 @@ export async function runLongMemEval(
   const reportSideEffectSnapshots: LongMemEvalReportSideEffectSnapshot[] = [];
   const embeddingWarmups: BenchEmbeddingWarmupSummary[] = [];
   const queryEmbeddingWarmups: BenchQueryEmbeddingWarmupSummary[] = [];
-  const edgeProposalKpiRowsAcrossQuestions: EdgeProposalKpiEventRow[] = [];
   // @anchor edge-proposal-rate-per-question: keep per-question row chunks
   // so aggregateEdgeProposalRate can emit the proposals_per_question
   // distribution. K3.2's "40-80/workspace/day" target is uninterpretable
   // off per_workspace_per_day_* alone because the bench harness uses
   // one workspaceId per run. see also: packages/eval/src/kpi-schema.ts.
+  // The flat across-questions list is derived by flattening these chunks at
+  // the aggregator call site rather than stored a second time.
   const edgeProposalKpiRowsPerQuestion: EdgeProposalKpiEventRow[][] = [];
 
   for (let i = 0; i < collected.length; i++) {
@@ -750,9 +751,6 @@ export async function runLongMemEval(
     tokenMetricsPerQuestion.push(res.tokenMetrics);
     if (res.recallTokenEconomy !== null) {
       recallTokenEconomySamples.push(res.recallTokenEconomy);
-    }
-    for (const row of res.edgeProposalKpiRows) {
-      edgeProposalKpiRowsAcrossQuestions.push(row);
     }
     edgeProposalKpiRowsPerQuestion.push([...res.edgeProposalKpiRows]);
     perScenario.push({
@@ -807,6 +805,7 @@ export async function runLongMemEval(
   // collected from every per-question bench daemon into one run total.
   // Each aggregator returns undefined when no events were observed —
   // the KPI omits the block in that case (honest reporting).
+  const edgeProposalKpiRowsAcrossQuestions = edgeProposalKpiRowsPerQuestion.flat();
   const edgeProposalRate = aggregateEdgeProposalRate(
     edgeProposalKpiRowsAcrossQuestions,
     edgeProposalKpiRowsPerQuestion
