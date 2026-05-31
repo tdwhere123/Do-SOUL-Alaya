@@ -9,7 +9,7 @@ import {
   type PathGovernanceClass,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
+import { EventPublisherPropagationError, type EventPublisher, type EventPublisherInput } from "./event-publisher.js";
 
 // invariant: PathRelationProposalService is the single producer of
 // PathRelation entities. It accepts seeding signals from many producers
@@ -374,6 +374,25 @@ export class PathRelationProposalService {
         runId: input.runId ?? null
       });
     } catch (err) {
+      // invariant: distinguish a post-commit propagation error from a true mint
+      // failure. EventPublisher commits the path_relations row + PATH_RELATION_CREATED
+      // event inside the transaction, THEN runs propagate(); a propagate() throw
+      // surfaces as EventPublisherPropagationError AFTER the durable row already
+      // landed. The path EXISTS and propagation is eventually-consistent (the
+      // final-listener replay pattern handles it), so this is an "applied"
+      // outcome — returning "failed" here would make a no-drop consumer record a
+      // misleading PATH_MINT_FAILED audit and needlessly revert an accepted
+      // proposal whose path is durable.
+      // see also: event-publisher.ts appendManyWithMutation (commit-then-propagate),
+      //   edge-proposal-service.ts handleMintFailure (the revert this avoids).
+      if (err instanceof EventPublisherPropagationError) {
+        this.warn("PathRelation submitCandidate committed but propagation failed", {
+          workspace_id: input.workspaceId,
+          relation_kind: input.relationKind,
+          error: errorMessage(err)
+        });
+        return "applied";
+      }
       this.warn("PathRelation submitCandidate failed", {
         workspace_id: input.workspaceId,
         relation_kind: input.relationKind,

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
+import { EventPublisherPropagationError } from "../event-publisher.js";
 import {
   PathRelationProposalService,
   PATH_RELATION_PROPOSE_THRESHOLD,
@@ -192,6 +193,117 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
     });
 
     expect(capturedRunId).toBeNull();
+  });
+
+  // invariant (FIX-4): a propagation failure AFTER the row+event committed is
+  // not a mint failure. EventPublisher.appendManyWithMutation commits the
+  // path_relations row + PATH_RELATION_CREATED event in the transaction, runs
+  // propagate() after, and surfaces a propagate() throw as
+  // EventPublisherPropagationError — the path is DURABLE. submitCandidate must
+  // return "applied", not "failed", so a no-drop consumer (edge-proposal accept)
+  // does not record a misleading PATH_MINT_FAILED audit and needlessly revert an
+  // accepted proposal whose path exists.
+  it("returns applied (not failed) when propagation throws AFTER the row committed", async () => {
+    const repoCreate = vi.fn((relation: any) => relation);
+    const committedEntries: EventLogEntry[] = [];
+    const appendManyWithMutation = vi.fn(
+      async <T,>(
+        eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+        mutate: (entries: readonly EventLogEntry[]) => T
+      ): Promise<T> => {
+        const persisted = eventInputs.map((entry, idx) => ({
+          event_id: `evt_${idx}`,
+          created_at: "2026-05-16T00:00:00.000Z",
+          revision: 0,
+          ...entry
+        })) as EventLogEntry[];
+        // The transaction commits (mutate runs, row + event durable) BEFORE the
+        // post-commit propagate() throw surfaces.
+        const result = mutate(persisted);
+        committedEntries.push(...persisted);
+        void result;
+        throw new EventPublisherPropagationError(
+          persisted[0]!,
+          new Error("in-process listener rejected"),
+          persisted
+        );
+      }
+    );
+
+    const warn = vi.fn();
+    const service = new PathRelationProposalService({
+      repo: {
+        create: repoCreate,
+        findByAnchorMemoryId: vi.fn(async () => [])
+      },
+      counterStore: inMemoryCounterStore(),
+      eventPublisher: {
+        appendManyWithMutation
+      } as unknown as PathRelationProposalEventPublisherPort,
+      generateId: () => "path-post-commit-1",
+      warn
+    });
+
+    const outcome = await service.submitCandidate({
+      workspaceId: "workspace-1",
+      sourceAnchor: { kind: "object", object_id: "mem-A" },
+      targetAnchor: { kind: "object", object_id: "mem-B" },
+      relationKind: "supports",
+      initialStrength: 0.5,
+      governanceClass: "attention_only",
+      evidenceBasis: ["llm_supports_verdict"],
+      recallBiasSign: 1
+    });
+
+    // The durable row landed and the outcome is applied (eventually-consistent
+    // propagation), NOT a transient failed.
+    expect(outcome).toBe("applied");
+    expect(repoCreate).toHaveBeenCalledTimes(1);
+    expect(committedEntries).toHaveLength(1);
+    // It is logged as a committed-but-propagation-failed, not a mint failure.
+    expect(warn).toHaveBeenCalledWith(
+      "PathRelation submitCandidate committed but propagation failed",
+      expect.objectContaining({ workspace_id: "workspace-1", relation_kind: "supports" })
+    );
+    expect(warn).not.toHaveBeenCalledWith("PathRelation submitCandidate failed", expect.anything());
+  });
+
+  // invariant (FIX-4): a genuine pre-commit failure (the row never committed)
+  // is still "failed" — the post-commit guard must not mask a real mint failure.
+  it("returns failed for a non-propagation throw (row never committed)", async () => {
+    const appendManyWithMutation = vi.fn(async (): Promise<never> => {
+      throw new Error("BEGIN IMMEDIATE failed before commit");
+    });
+    const warn = vi.fn();
+    const service = new PathRelationProposalService({
+      repo: {
+        create: vi.fn((relation: any) => relation),
+        findByAnchorMemoryId: vi.fn(async () => [])
+      },
+      counterStore: inMemoryCounterStore(),
+      eventPublisher: {
+        appendManyWithMutation
+      } as unknown as PathRelationProposalEventPublisherPort,
+      generateId: () => "path-precommit-fail-1",
+      warn
+    });
+
+    const outcome = await service.submitCandidate({
+      workspaceId: "workspace-1",
+      sourceAnchor: { kind: "object", object_id: "mem-A" },
+      targetAnchor: { kind: "object", object_id: "mem-B" },
+      relationKind: "supports",
+      initialStrength: 0.5,
+      governanceClass: "attention_only",
+      evidenceBasis: ["llm_supports_verdict"],
+      recallBiasSign: 1
+    });
+
+    expect(outcome).toBe("failed");
+    expect(warn).toHaveBeenCalledWith(
+      "PathRelation submitCandidate failed",
+      expect.objectContaining({ workspace_id: "workspace-1" })
+    );
   });
 
   it("rolls back the staged path.relation_created event when repo.create throws inside the tx callback", async () => {
