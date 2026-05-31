@@ -6,7 +6,7 @@ import {
   type PathLifecycleStatus,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import type { SqliteConnection, StorageDatabase } from "../db.js";
+import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
 import { parseNonEmptyString } from "./shared/validators.js";
@@ -64,10 +64,42 @@ const PATH_RELATION_SELECT_COLUMNS = `
       updated_at
 `;
 
-const SOURCE_ANCHOR_KEY_SQL =
-  "serialize_path_anchor_ref(json_extract(anchors_json, '$.source_anchor'))";
-const TARGET_ANCHOR_KEY_SQL =
-  "serialize_path_anchor_ref(json_extract(anchors_json, '$.target_anchor'))";
+// invariant: byte-identical to the CASE/json_array expressions indexed in
+// migrations/048-path-relations-and-event-log-indexes.sql. SQLite only uses an
+// expression index when the query predicate matches the indexed expression, so
+// the anchor-key SQL here MUST stay in lockstep with that index, and the bound
+// parameter MUST equal serializePathAnchorRef(...) — json_array(...) renders the
+// same text JSON.stringify(["object", id]) produces.
+// cross-file ref: migrations/048-path-relations-and-event-log-indexes.sql
+// cross-file ref: @do-soul/alaya-protocol serializePathAnchorRef (bound-param side)
+function anchorKeySql(anchorPath: "source_anchor" | "target_anchor"): string {
+  return `CASE json_extract(anchors_json, '$.${anchorPath}.kind')
+      WHEN 'object' THEN json_array('object', json_extract(anchors_json, '$.${anchorPath}.object_id'))
+      WHEN 'object_facet' THEN json_array(
+        'object_facet',
+        json_extract(anchors_json, '$.${anchorPath}.object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.facet_key')
+      )
+      WHEN 'obligation' THEN json_array(
+        'obligation',
+        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.obligation_digest')
+      )
+      WHEN 'risk_concern' THEN json_array(
+        'risk_concern',
+        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.concern_digest')
+      )
+      WHEN 'time_concern' THEN json_array(
+        'time_concern',
+        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.window_digest')
+      )
+    END`;
+}
+
+const SOURCE_ANCHOR_KEY_SQL = anchorKeySql("source_anchor");
+const TARGET_ANCHOR_KEY_SQL = anchorKeySql("target_anchor");
 
 const WAVE_1_ACTIVE_LIFECYCLE_SQL = `CASE
       WHEN json_valid(lifecycle_json) = 0 THEN 0
@@ -139,7 +171,6 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
   private readonly deleteStatement;
 
   public constructor(private readonly db: StorageDatabase) {
-    registerSerializePathAnchorRefFunction(db.connection);
     this.createStatement = db.connection.prepare(`
       INSERT INTO path_relations (
         path_id,
@@ -541,23 +572,6 @@ function parsePathAnchorRef(value: PathAnchorRef): Readonly<PathAnchorRef> {
   }
 }
 
-function registerSerializePathAnchorRefFunction(connection: SqliteConnection): void {
-  connection.function(
-    "serialize_path_anchor_ref",
-    { deterministic: true },
-    (anchorJson: string | null): string | null => {
-      if (typeof anchorJson !== "string" || anchorJson.length === 0) {
-        return null;
-      }
-
-      try {
-        return serializePathAnchorRef(parsePathAnchorRef(JSON.parse(anchorJson)));
-      } catch {
-        return null;
-      }
-    }
-  );
-}
 
 function parsePathRelationRow(row: PathRelationRow): Readonly<PathRelation> {
   return parsePathRelation({

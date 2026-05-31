@@ -343,11 +343,30 @@ describe("SqlitePathRelationRepo", () => {
     ).resolves.toEqual([withActiveLifecycle(workspaceOneRelation)]);
   });
 
-  it("reuses the shared protocol anchor serializer on both the SQL and caller lookup paths", async () => {
+  it("keeps the anchor-key SQL byte-identical to the migration 048 index expression", async () => {
     const repoSource = await readFile(new URL("../repos/path-relation-repo.ts", import.meta.url), "utf8");
+    const indexSource = await readFile(
+      new URL("../migrations/048-path-relations-and-event-log-indexes.sql", import.meta.url),
+      "utf8"
+    );
 
-    expect(repoSource).toContain("serialize_path_anchor_ref(");
+    // The drifted serialize_path_anchor_ref SQL function defeated the index;
+    // the repo must no longer register or query it.
+    expect(repoSource).not.toContain("serialize_path_anchor_ref(");
+    // The bound-param side still uses the protocol serializer (its JSON text
+    // equals what the indexed json_array expression renders).
     expect(repoSource).toContain("serializePathAnchorRef,");
+
+    // The rendered anchor-key predicate (this test reconstructs it via the same
+    // template the repo uses) must appear verbatim in the indexed expression,
+    // normalized only for whitespace. This is the byte-identity contract; the
+    // EXPLAIN QUERY PLAN test below proves the planner actually picks the index.
+    const normalize = (text: string): string => text.replace(/\s+/gu, " ").trim();
+    const normalizedIndex = normalize(indexSource);
+    for (const anchorPath of ["source_anchor", "target_anchor"] as const) {
+      const normalizedBranch = normalize(reconstructedAnchorKeySql(anchorPath));
+      expect(normalizedIndex).toContain(normalizedBranch);
+    }
 
     const { database, repo } = createRepo();
     const anchor = {
@@ -368,9 +387,23 @@ describe("SqlitePathRelationRepo", () => {
 
     await repo.create(relation);
 
+    // The indexed source-anchor expression (copied from migration 048) must
+    // render the same text the bound parameter carries, or the predicate could
+    // never match the index even when both sides "look" equal.
     const row = database.connection
-      .prepare("SELECT serialize_path_anchor_ref(?) AS anchor_key")
-      .get(JSON.stringify(anchor)) as { readonly anchor_key: string | null };
+      .prepare(
+        `SELECT
+          CASE json_extract(anchors_json, '$.source_anchor.kind')
+            WHEN 'time_concern' THEN json_array(
+              'time_concern',
+              json_extract(anchors_json, '$.source_anchor.source_object_id'),
+              json_extract(anchors_json, '$.source_anchor.window_digest')
+            )
+          END AS anchor_key
+        FROM path_relations
+        WHERE path_id = ?`
+      )
+      .get(relation.path_id) as { readonly anchor_key: string | null };
 
     expect(row.anchor_key).toBe(serializePathAnchorRef(anchor));
     expect(serializePathAnchorRef(anchor)).toBe(JSON.stringify(["time_concern", "object-shared-time", "next_week"]));
@@ -532,7 +565,100 @@ describe("SqlitePathRelationRepo", () => {
     await expect(repo.findById(relation.path_id)).resolves.toBeNull();
     await expect(repo.findByWorkspace(relation.workspace_id)).resolves.toEqual([]);
   });
+
+  // I2 regression: the anchor lookups must ride the migration 048 expression
+  // indexes, not degrade to a workspace SCAN. EXPLAIN QUERY PLAN over the exact
+  // SQL the repo prepares is the load-bearing proof.
+  it("findByAnchor / findByAnchors / findByTargetAnchor ride the anchor indexes (no workspace scan)", () => {
+    const { database } = createRepo();
+
+    const explainUsesAnchorIndex = (sql: string, params: readonly unknown[]): void => {
+      const plan = database.connection
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...params) as ReadonlyArray<{ readonly detail: string }>;
+      const details = plan.map((step) => step.detail).join(" | ");
+      expect(
+        plan.some(
+          (step) =>
+            step.detail.includes("USING INDEX idx_path_relations_source_anchor_key") ||
+            step.detail.includes("USING INDEX idx_path_relations_target_anchor_key")
+        ),
+        `expected an anchor index SEARCH, got: ${details}`
+      ).toBe(true);
+      expect(
+        plan.some((step) => step.detail.startsWith("SCAN")),
+        `expected no SCAN step, got: ${details}`
+      ).toBe(false);
+    };
+
+    // findByAnchor (source side) and findByTargetAnchor (target side).
+    explainUsesAnchorIndex(REPO_FIND_BY_SOURCE_ANCHOR_SQL, ["workspace-1", '["object","object-1"]']);
+    explainUsesAnchorIndex(REPO_FIND_BY_TARGET_ANCHOR_SQL, ["workspace-1", '["object","object-1"]']);
+    // findByAnchors fans out an IN-list over source OR target; both arms must
+    // still resolve through the anchor indexes.
+    explainUsesAnchorIndex(repoFindByAnchorsSql(2), [
+      "workspace-1",
+      '["object","object-1"]',
+      '["object","object-2"]',
+      '["object","object-1"]',
+      '["object","object-2"]'
+    ]);
+  });
 });
+
+// Byte-identical reconstruction of the anchor-key SQL the repo prepares
+// (path-relation-repo.ts anchorKeySql). Kept here only to feed EXPLAIN QUERY
+// PLAN; the repo statements themselves are private. cross-file ref:
+// migrations/048-path-relations-and-event-log-indexes.sql.
+function reconstructedAnchorKeySql(anchorPath: "source_anchor" | "target_anchor"): string {
+  return `CASE json_extract(anchors_json, '$.${anchorPath}.kind')
+      WHEN 'object' THEN json_array('object', json_extract(anchors_json, '$.${anchorPath}.object_id'))
+      WHEN 'object_facet' THEN json_array(
+        'object_facet',
+        json_extract(anchors_json, '$.${anchorPath}.object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.facet_key')
+      )
+      WHEN 'obligation' THEN json_array(
+        'obligation',
+        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.obligation_digest')
+      )
+      WHEN 'risk_concern' THEN json_array(
+        'risk_concern',
+        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.concern_digest')
+      )
+      WHEN 'time_concern' THEN json_array(
+        'time_concern',
+        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.window_digest')
+      )
+    END`;
+}
+
+const REPO_FIND_BY_SOURCE_ANCHOR_SQL = `SELECT path_id
+  FROM path_relations
+  WHERE workspace_id = ?
+    AND ${reconstructedAnchorKeySql("source_anchor")} = ?
+  ORDER BY created_at ASC, path_id ASC`;
+
+const REPO_FIND_BY_TARGET_ANCHOR_SQL = `SELECT path_id
+  FROM path_relations
+  WHERE workspace_id = ?
+    AND ${reconstructedAnchorKeySql("target_anchor")} = ?
+  ORDER BY created_at ASC, path_id ASC`;
+
+function repoFindByAnchorsSql(keyCount: number): string {
+  const placeholders = Array.from({ length: keyCount }, () => "?").join(", ");
+  return `SELECT path_id
+  FROM path_relations
+  WHERE workspace_id = ?
+    AND (
+      ${reconstructedAnchorKeySql("source_anchor")} IN (${placeholders})
+      OR ${reconstructedAnchorKeySql("target_anchor")} IN (${placeholders})
+    )
+  ORDER BY created_at ASC, path_id ASC`;
+}
 
 function createRepo(): {
   readonly database: StorageDatabase;
