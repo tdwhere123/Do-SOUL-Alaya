@@ -500,6 +500,67 @@ describe("EdgeAutoProducerService", () => {
     });
   });
 
+  // invariant (FIX-3): the per-memory MAX_EDGE_PROPOSALS budget counts only
+  // "applied" outcomes. already_present (an equivalent link already exists) and
+  // failed (retried later) must NOT consume budget — otherwise already-linked or
+  // transiently-failed neighbors starve genuinely-new neighbors past the cap.
+  // With 7 eligible neighbors all returning already_present, every neighbor is
+  // still attempted because budget never increments.
+  it("FIX-3 already_present / failed outcomes do not consume the per-memory proposal budget", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbors = Array.from({ length: 7 }, (_unused, index) =>
+      createMemoryEntry({
+        object_id: `memory-${index}`,
+        content: "Repository shell commands must use the RTK wrapper for scripts.",
+        domain_tags: ["rtk", "workflow"]
+      })
+    );
+    const { deps, pathCandidatePort } = createDeps([newMemory, ...neighbors]);
+    // Every candidate reports the link already exists (a no-op mint).
+    pathCandidatePort.submitCandidate.mockImplementation(
+      async (): Promise<PathMintOutcome> => "already_present"
+    );
+    const service = new EdgeAutoProducerService({ ...deps });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // All 7 neighbors are attempted: already_present never burns budget, so the
+    // MAX_EDGE_PROPOSALS=5 cap is not falsely tripped by no-op outcomes.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(7);
+  });
+
+  // invariant (FIX-3): the cap still bounds genuinely-applied proposals. With 7
+  // eligible neighbors all applying, the loop stops at MAX_EDGE_PROPOSALS=5.
+  it("FIX-3 caps genuinely-applied proposals at MAX_EDGE_PROPOSALS", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbors = Array.from({ length: 7 }, (_unused, index) =>
+      createMemoryEntry({
+        object_id: `memory-${index}`,
+        content: "Repository shell commands must use the RTK wrapper for scripts.",
+        domain_tags: ["rtk", "workflow"]
+      })
+    );
+    const { deps, pathCandidatePort } = createDeps([newMemory, ...neighbors]);
+    pathCandidatePort.submitCandidate.mockImplementation(
+      async (): Promise<PathMintOutcome> => "applied"
+    );
+    const service = new EdgeAutoProducerService({ ...deps });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(5);
+  });
+
   it("B-2 pregate skips the LLM port for structurally eligible but unrelated pairs", async () => {
     // Same workspace + dimension + scope as the new memory so the
     // structural eligibility check passes, but zero shared content

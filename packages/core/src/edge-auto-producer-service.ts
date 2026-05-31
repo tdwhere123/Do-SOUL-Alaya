@@ -227,7 +227,16 @@ export class EdgeAutoProducerService {
       if (outcome === "failed") {
         transientFailures += 1;
       }
-      proposalCount += 1;
+      // invariant: the per-memory MAX_EDGE_PROPOSALS budget counts only paths
+      // that actually landed ("applied"). already_present means an equivalent
+      // link already exists (no new topology, so it must not consume budget);
+      // a transient "failed" will be retried by a later enrich cycle; a
+      // permanent "rejected" minted nothing. Counting non-applied outcomes
+      // would let already-linked / failed neighbors starve genuinely-new
+      // neighbors past the cap on retry.
+      if (outcome === "applied") {
+        proposalCount += 1;
+      }
     }
     if (transientFailures > 0) {
       throw new CoreError(
