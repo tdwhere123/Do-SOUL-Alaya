@@ -100,3 +100,18 @@ merged review as the verification evidence.
   `path-relation-repo`, `memory-entry-repo` (L3).
 No lens ran the full suite or benchmark (WSL2 cap; parallel reviewers). Consolidated
 `rtk pnpm build` + full `rtk pnpm test` is the orchestrator's post-fix gate.
+
+## ROUND CLOSURE (orchestrator)
+HEAD now `b49eda9`. Sequence after the merged review above:
+1. `84df260` — B4-R1 fix: bound `enrich_pending` retry seam with attempt cap (`DYNAMICS_CONSTANTS.enrich.max_attempts=5`) + auditable dead-letter (`SOUL_ENRICH_ABANDONED` EventLog event) + migration 088. Independent reviewer (`.do-it/codex-review/b4r1-fix-review.md`) = zero Blocking/Important, all 8 checks PASS (dead-letter fires once at cap with full payload; `rejected` not counted; cap arithmetic correct; claim excludes abandoned; migration idempotent; no B4/B5/happy-path regression; tests non-vacuous).
+2. `9135503` — Part 2 hygiene: stale all-variant-gate comments, dangling `anchorObjectId` cross-refs repointed to protocol `getPathAnchorBackingObjectId`, 085 whitespace, new `findByBackingObjectId` EXPLAIN guard.
+3. `def1f35` — pre-existing storage typecheck red fixed: `edge-proposal-repo.test.ts` was missing the `type EdgeProposal` import (codex's 91ac7d2 ran `pnpm build` which excludes tests, so it slipped the build gate but the `tsconfig.typecheck.json` gate — which includes `__tests__` — caught it).
+4. `b49eda9` — semver-surface public-surface snapshot updated for the new `SoulEnrichAbandonedPayloadSchema` event; delta verified to be EXACTLY that one additive line (no other surface drift).
+
+Gates at `b49eda9`: all 9 package `tsconfig.typecheck.json` GREEN; `rtk pnpm build` exit 0; full `rtk pnpm test` = 3870 tests, all real failures resolved.
+
+KNOWN full-suite parallel-load flakes (NOT regressions; both proven green in isolation; untouched by this work) — flag for Phase H test-infra cleanup (likely bump testTimeout / reduce parallel worker memory pressure on WSL2):
+- `apps/core-daemon/src/__tests__/daemon-embedding-runtime.test.ts` — 5000ms timeout under full-suite load; runs in ~1890ms isolated (green).
+- bench-runner `bench-fast-pragma` — env-leak under parallel run; green isolated.
+
+Note: the LSP `new-diagnostics` stream emitted false positives during this round (`max_attempts does not exist`, `Cannot find module @do-soul/alaya-*`, port-arg mismatch) — all stale-dist artifacts (the harness LSP resolves `@do-soul/alaya-*` via dist `.d.ts`, which lagged the worker's src edits + the dist rebuild). The authoritative `tsconfig.typecheck.json` gate (paths -> src) was green throughout. Do not chase LSP module-resolution diagnostics in this monorepo mid-edit.
