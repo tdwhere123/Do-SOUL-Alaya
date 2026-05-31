@@ -31,6 +31,28 @@
 -- survive, doubling the associative recall weight for one pair.
 -- cross-file ref: packages/core/src/path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE
 -- cross-file ref: packages/protocol/src/soul/memory-graph.ts mapRelationKindToGraphEdgeType
+--
+-- invariant: graph support / recalls counts consume the MAPPED graph edge_type,
+-- not the literal relation_kind. SEVERAL relation kinds fold to graph `recalls`
+-- (the recalls-tier: recalls / co_recalled / shares_entity / signal_graph_ref).
+-- So a legacy `recalls` edge must dedupe against ANY active path in that whole
+-- tier for the same pair, not just the literal `co_recalled` rename — otherwise
+-- a pre-upgrade active `shares_entity` or `signal_graph_ref` path plus a legacy
+-- `recalls` edge for the same pair would both survive and double-count the same
+-- semantic edge after cutover. Non-recalls edge_types map 1:1 to their own graph
+-- edge_type, so they keep the narrower same-kind dedup.
+-- cross-file ref: packages/core/src/graph-explore-service.ts (mapped-type support/recall counts)
+--
+-- Defensive backfill: a corrupt or externally-mutated local DB (an FK-orphaned
+-- legacy row, or an edge_type outside the migration-017 CHECK set that slipped
+-- in under PRAGMA foreign_keys=OFF) must not wedge the cutover. The whole file
+-- runs in one transaction; an INSERT that trips an FK or the recall_bias CASE
+-- would roll back all of 085, the legacy table would never drop, and the DB
+-- could fail to upgrade. So the SELECT only backfills rows whose workspace and
+-- both memory anchors resolve in the SAME workspace AND whose edge_type is in
+-- the known legacy allow-list; invalid/orphaned/malformed rows are skipped
+-- (best-effort quarantine, no new table) and the DROP still runs.
+-- cross-file ref: packages/storage/src/migrations/017-memory-graph-edges.sql (edge_type CHECK set)
 
 INSERT INTO path_relations (
   path_id,
@@ -102,21 +124,44 @@ SELECT
   e.created_at,
   e.created_at
 FROM memory_graph_edges AS e
-WHERE NOT EXISTS (
-  SELECT 1
-  FROM path_relations AS p
-  WHERE p.workspace_id = e.workspace_id
-    AND json_extract(p.constitution_json, '$.relation_kind') =
-      CASE e.edge_type
-        WHEN 'recalls' THEN 'co_recalled'
-        ELSE e.edge_type
-      END
-    AND json_extract(p.anchors_json, '$.source_anchor.kind') = 'object'
-    AND json_extract(p.anchors_json, '$.source_anchor.object_id') = e.source_memory_id
-    AND json_extract(p.anchors_json, '$.target_anchor.kind') = 'object'
-    AND json_extract(p.anchors_json, '$.target_anchor.object_id') = e.target_memory_id
-    AND COALESCE(json_extract(p.lifecycle_json, '$.status'), 'active') = 'active'
-);
+WHERE e.edge_type IN (
+    'supports',
+    'derives_from',
+    'contradicts',
+    'supersedes',
+    'recalls',
+    'exception_to',
+    'incompatible_with'
+  )
+  AND EXISTS (
+    SELECT 1 FROM workspaces AS w WHERE w.workspace_id = e.workspace_id
+  )
+  AND EXISTS (
+    SELECT 1 FROM memory_entries AS sm
+    WHERE sm.object_id = e.source_memory_id AND sm.workspace_id = e.workspace_id
+  )
+  AND EXISTS (
+    SELECT 1 FROM memory_entries AS tm
+    WHERE tm.object_id = e.target_memory_id AND tm.workspace_id = e.workspace_id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM path_relations AS p
+    WHERE p.workspace_id = e.workspace_id
+      AND (
+        CASE WHEN e.edge_type = 'recalls'
+          -- recalls-tier: every relation_kind that maps to graph `recalls`.
+          THEN json_extract(p.constitution_json, '$.relation_kind')
+            IN ('recalls', 'co_recalled', 'shares_entity', 'signal_graph_ref')
+          ELSE json_extract(p.constitution_json, '$.relation_kind') = e.edge_type
+        END
+      )
+      AND json_extract(p.anchors_json, '$.source_anchor.kind') = 'object'
+      AND json_extract(p.anchors_json, '$.source_anchor.object_id') = e.source_memory_id
+      AND json_extract(p.anchors_json, '$.target_anchor.kind') = 'object'
+      AND json_extract(p.anchors_json, '$.target_anchor.object_id') = e.target_memory_id
+      AND COALESCE(json_extract(p.lifecycle_json, '$.status'), 'active') = 'active'
+  );
 
 DROP INDEX IF EXISTS idx_memory_graph_edges_source;
 DROP INDEX IF EXISTS idx_memory_graph_edges_target;

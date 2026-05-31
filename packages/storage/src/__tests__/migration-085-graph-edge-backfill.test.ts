@@ -491,6 +491,211 @@ describe("migration 085 legacy graph-edge backfill", () => {
     expect(associativeRows).toHaveLength(1);
   });
 
+  it("dedupes a legacy `recalls` edge against ANY recalls-tier path (shares_entity / signal_graph_ref) for the same pair", () => {
+    const { db } = migrateThroughPre085();
+    seedWorkspace(db, "workspace-1");
+    for (const id of ["mem-a", "mem-b", "mem-c", "mem-d"]) {
+      seedMemory(db, id, "workspace-1");
+    }
+
+    // Graph support / recalls counts consume the MAPPED graph edge_type. Several
+    // relation kinds fold to graph `recalls`: recalls / co_recalled /
+    // shares_entity / signal_graph_ref. A pre-upgrade DB can already hold an
+    // active `shares_entity` (or `signal_graph_ref`) path for a pair. A legacy
+    // `recalls` edge for that SAME pair must dedupe against the WHOLE recalls
+    // tier, not just the literal `co_recalled` rename — else the pair carries
+    // two associative paths and double-counts the same semantic edge.
+    // cross-file ref: packages/protocol/src/soul/memory-graph.ts mapRelationKindToGraphEdgeType
+    const seedAssociativePath = (
+      pathId: string,
+      relationKind: string,
+      source: string,
+      target: string
+    ): void => {
+      db.prepare(
+        `INSERT INTO path_relations (
+          path_id, workspace_id, anchors_json, constitution_json,
+          effect_vector_json, plasticity_state_json, lifecycle_json, legitimacy_json,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        pathId,
+        "workspace-1",
+        JSON.stringify({
+          source_anchor: { kind: "object", object_id: source },
+          target_anchor: { kind: "object", object_id: target }
+        }),
+        JSON.stringify({ relation_kind: relationKind, why_this_relation_exists: ["pre_existing"] }),
+        JSON.stringify({
+          salience: 0.5,
+          recall_bias: 0.5,
+          verification_bias: 0,
+          unfinishedness_bias: 0,
+          default_manifestation_preference: "lens_entry"
+        }),
+        JSON.stringify({
+          strength: 0.3,
+          direction_bias: "bidirectional_asymmetric",
+          stability_class: "stable",
+          support_events_count: 0,
+          contradiction_events_count: 0
+        }),
+        JSON.stringify({ status: "active", retirement_rule: "manual" }),
+        JSON.stringify({ evidence_basis: ["pre_existing"], governance_class: "attention_only" }),
+        "2026-04-17T00:30:00.000Z",
+        "2026-04-17T00:30:00.000Z"
+      );
+    };
+
+    // Pair A: an active `shares_entity` path already exists.
+    seedAssociativePath("existing-shares-entity", "shares_entity", "mem-a", "mem-b");
+    // Pair B: an active `signal_graph_ref` path already exists.
+    seedAssociativePath("existing-signal-graph-ref", "signal_graph_ref", "mem-c", "mem-d");
+
+    // Legacy `recalls` edges for both pairs — both must be deduped (skipped).
+    seedLegacyEdge(db, {
+      edgeId: "edge-recalls-vs-shares",
+      source: "mem-a",
+      target: "mem-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:00:00.000Z"
+    });
+    seedLegacyEdge(db, {
+      edgeId: "edge-recalls-vs-signal",
+      source: "mem-c",
+      target: "mem-d",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:01:00.000Z"
+    });
+
+    applyMigration(db, MIGRATION_085);
+
+    const paths = readPaths(db);
+    const byPathId = new Map(paths.map((row) => [row.path_id, row]));
+
+    // The pre-existing tier paths survive; neither legacy `recalls` edge minted
+    // a second associative duplicate for its pair.
+    expect(byPathId.has("existing-shares-entity")).toBe(true);
+    expect(byPathId.has("existing-signal-graph-ref")).toBe(true);
+    expect(byPathId.has("legacy-edge:edge-recalls-vs-shares")).toBe(false);
+    expect(byPathId.has("legacy-edge:edge-recalls-vs-signal")).toBe(false);
+
+    // No new `legacy-edge:*` associative path of ANY recalls-tier kind landed
+    // for either pair.
+    const recallsTier = new Set(["recalls", "co_recalled", "shares_entity", "signal_graph_ref"]);
+    const pairAssociative = (source: string, target: string): readonly PathRow[] =>
+      paths.filter((row) => {
+        const anchors = JSON.parse(row.anchors_json);
+        return (
+          recallsTier.has(JSON.parse(row.constitution_json).relation_kind) &&
+          anchors.source_anchor.object_id === source &&
+          anchors.target_anchor.object_id === target
+        );
+      });
+    expect(pairAssociative("mem-a", "mem-b")).toHaveLength(1);
+    expect(pairAssociative("mem-c", "mem-d")).toHaveLength(1);
+  });
+
+  it("skips corrupt / FK-orphaned / malformed legacy rows and still completes the cutover (drops the table)", () => {
+    const { db } = migrateThroughPre085();
+    seedWorkspace(db, "workspace-1");
+    for (const id of ["mem-a", "mem-b"]) {
+      seedMemory(db, id, "workspace-1");
+    }
+
+    // One VALID legacy edge must migrate. The corrupt rows below would, without
+    // the defensive WHERE guards, trip an FK or the recall_bias CASE and roll
+    // back the whole 085 transaction — leaving memory_graph_edges undropped and
+    // wedging the graph-plane cutover. Seed them under foreign_keys=OFF so the
+    // FK-orphaned and malformed-edge_type rows can land in the legacy table.
+    seedLegacyEdge(db, {
+      edgeId: "edge-valid",
+      source: "mem-a",
+      target: "mem-b",
+      edgeType: "supports",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:00:00.000Z"
+    });
+
+    db.pragma("foreign_keys = OFF");
+    // FK-orphaned workspace (no such workspace row).
+    seedLegacyEdge(db, {
+      edgeId: "edge-orphan-workspace",
+      source: "mem-a",
+      target: "mem-b",
+      edgeType: "supports",
+      workspaceId: "workspace-missing",
+      createdAt: "2026-04-17T01:01:00.000Z"
+    });
+    // FK-orphaned memory (target memory id does not exist).
+    seedLegacyEdge(db, {
+      edgeId: "edge-orphan-memory",
+      source: "mem-a",
+      target: "mem-missing",
+      edgeType: "supports",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:02:00.000Z"
+    });
+    // Memory exists but in a DIFFERENT workspace than the edge claims (the
+    // legacy FK never enforced same-workspace; the path plane is workspace
+    // scoped, so this row is not safely backfillable).
+    seedWorkspace(db, "workspace-2");
+    seedMemory(db, "ws2-mem", "workspace-2");
+    seedLegacyEdge(db, {
+      edgeId: "edge-cross-workspace",
+      source: "mem-a",
+      target: "ws2-mem",
+      edgeType: "supports",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:03:00.000Z"
+    });
+    // Malformed edge_type outside the migration-017 CHECK set — falls through
+    // the recall_bias CASE to NULL and is not a known graph kind. The CHECK is
+    // enforced independently of foreign_keys, so simulate an externally-mutated
+    // DB by suppressing CHECK enforcement just for this insert.
+    db.pragma("ignore_check_constraints = ON");
+    db.prepare(
+      `INSERT INTO memory_graph_edges (
+        edge_id, source_memory_id, target_memory_id, edge_type, workspace_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      "edge-malformed-type",
+      "mem-a",
+      "mem-b",
+      "totally_unknown_kind",
+      "workspace-1",
+      "2026-04-17T01:04:00.000Z"
+    );
+    db.pragma("ignore_check_constraints = OFF");
+    db.pragma("foreign_keys = ON");
+
+    applyMigration(db, MIGRATION_085);
+
+    // The cutover completed: the legacy table is dropped, the migration did not
+    // abort despite the corrupt rows.
+    expect(
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_graph_edges'")
+        .get()
+    ).toBeUndefined();
+
+    const paths = readPaths(db);
+    const byPathId = new Map(paths.map((row) => [row.path_id, row]));
+    // The valid edge migrated.
+    expect(byPathId.has("legacy-edge:edge-valid")).toBe(true);
+    // Every corrupt / orphaned / malformed row was skipped (not inserted).
+    for (const skipped of [
+      "legacy-edge:edge-orphan-workspace",
+      "legacy-edge:edge-orphan-memory",
+      "legacy-edge:edge-cross-workspace",
+      "legacy-edge:edge-malformed-type"
+    ]) {
+      expect(byPathId.has(skipped)).toBe(false);
+    }
+  });
+
   it("is a safe no-op when there are no legacy edges to backfill", () => {
     const { db } = migrateThroughPre085();
     seedWorkspace(db, "workspace-1");
