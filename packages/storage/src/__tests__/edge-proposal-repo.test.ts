@@ -9,6 +9,7 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
+  type EdgeProposal,
   type MemoryEntry,
   type PathRelation
 } from "@do-soul/alaya-protocol";
