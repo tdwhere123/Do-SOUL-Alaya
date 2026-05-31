@@ -41,6 +41,7 @@ export {
   CustomApiGardenProvider,
   LocalModelGardenProvider,
   parseOfficialApiSignals,
+  salvageRawSignalElements,
   type GardenCompileContext,
   type GardenComputeProvider,
   type OfficialApiSignalDraft

@@ -333,6 +333,118 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(runner.stats.cachedExtractionFailures).toBe(0);
   });
 
+  it("salvages valid signals when one envelope entry is corrupt — recovered, not a fallback", async () => {
+    // Two clean entries straddle one corrupt entry (bad `\'` escape) so the
+    // whole-envelope JSON.parse throws. Element-wise salvage recovers the
+    // two clean siblings; the corrupt entry is dropped to parseDropped, and
+    // NEITHER the cached/live failure counters NOR offline_fallbacks bump —
+    // the turn is a successful extraction, so the release blocker still sees
+    // a clean offline_fallbacks / failure count.
+    const corruptEnvelope =
+      `{"signals":[` +
+      `{"signal_kind":"potential_preference","object_kind":"user_preference",` +
+      `"confidence":0.9,"matched_text":"moved to Berlin","distilled_fact":"Alice lives in Berlin."},` +
+      `{"signal_kind":"potential_preference","object_kind":"user_preference",` +
+      `"confidence":0.8,"matched_text":"I\\'ll bring my dog","distilled_fact":"bad"},` +
+      `{"signal_kind":"potential_preference","object_kind":"user_preference",` +
+      `"confidence":0.9,"matched_text":"started my job","distilled_fact":"Alice started her job."}` +
+      `]}`;
+    expect(() => JSON.parse(corruptEnvelope)).toThrow();
+
+    const seeded: BenchSignalSeedInput[] = [];
+    let counter = 0;
+    const daemon = buildCompileSeedDaemon((input) => {
+      seeded.push(input);
+      counter += 1;
+      return buildSeed(`memory-${counter}`);
+    });
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      extractorFactory: () => ({
+        extract: async () => ({ rawJson: corruptEnvelope })
+      })
+    });
+
+    const result = await runner.seedTurn({
+      daemon,
+      turnContent: "I moved to Berlin and I started my job.",
+      evidenceRefBase: "q1-s0-t0",
+      seedIndex: 0,
+      ...SEED_CONTEXT
+    });
+
+    // Two salvaged facts seeded — NOT one degraded full-turn fact.
+    expect(result.seeds.map((seed) => seed.memoryId)).toEqual([
+      "memory-1",
+      "memory-2"
+    ]);
+    expect(seeded.map((input) => input.distilledFact)).toEqual([
+      "Alice lives in Berlin.",
+      "Alice started her job."
+    ]);
+    expect(
+      seeded.every((input) => input.extractionProvider === "official_api_compile")
+    ).toBe(true);
+    // Recovered turn is a success: no failure-bucket increments.
+    expect(runner.stats.cachedExtractionFailures).toBe(0);
+    expect(runner.stats.liveExtractionFailures).toBe(0);
+    expect(runner.stats.offlineFallbacks).toBe(0);
+    expect(runner.stats.factsProduced).toBe(2);
+    // The one dropped corrupt entry is attributed to parseDropped (raw=3,
+    // parsed=2), so nothing is silently lost.
+    expect(runner.stats.parseDropped).toBe(1);
+    expect(runner.stats.signalsDropped).toBe(1);
+    // The release blocker reads these stats; a recovered run is releasable on
+    // the seed-extraction dimension (path stays official_api_compile, zero
+    // offline fallbacks / failures).
+    const kpi = toSeedExtractionPathKpi(runner.stats);
+    expect(kpi.path).toBe("official_api_compile");
+    expect(kpi.offline_fallbacks).toBe(0);
+    expect(kpi.cached_extraction_failures).toBe(0);
+    expect(kpi.parse_dropped).toBe(1);
+  });
+
+  it("falls back to the full turn when the envelope is degenerate (no complete entry)", async () => {
+    // The only entry is truncated mid-string (max_tokens) — no complete
+    // element survives salvage, so the turn correctly degrades to the
+    // full-turn fallback and is NOT counted as a successful extraction.
+    const degenerate =
+      `{"signals":[{"signal_kind":"potential_preference","object_kind":"user_preference",` +
+      `"confidence":0.9,"matched_text":"`;
+    expect(() => JSON.parse(degenerate)).toThrow();
+
+    const seeded: BenchSignalSeedInput[] = [];
+    const daemon = buildCompileSeedDaemon((input) => {
+      seeded.push(input);
+      return buildSeed("memory-1");
+    });
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      extractorFactory: () => ({
+        extract: async () => ({ rawJson: degenerate })
+      })
+    });
+
+    const result = await runner.seedTurn({
+      daemon,
+      turnContent: "I moved to Berlin.",
+      evidenceRefBase: "q1-s0-t0",
+      seedIndex: 0,
+      ...SEED_CONTEXT
+    });
+
+    // One degraded full-turn fact; the failure is counted (live source here,
+    // since a fresh seedTurn live-extracts on cache miss).
+    expect(result.seeds).toHaveLength(1);
+    expect(seeded[0]?.distilledFact).toBe("I moved to Berlin.");
+    expect(seeded[0]?.extractionProvider).toBe("no_credentials_fallback");
+    expect(runner.stats.offlineFallbacks).toBe(1);
+    expect(runner.stats.liveExtractionFailures).toBe(1);
+    expect(runner.stats.cachedExtractionFailures).toBe(0);
+  });
+
   it("seeds the full turn as one fact when the extractor finds no candidates", async () => {
     const seeded: BenchSignalSeedInput[] = [];
     const daemon = buildCompileSeedDaemon((input) => {

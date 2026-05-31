@@ -20,6 +20,7 @@ import {
   OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider,
   parseOfficialApiSignals,
+  salvageRawSignalElements,
   type GardenCompileContext
 } from "@do-soul/alaya-soul";
 import {
@@ -451,9 +452,15 @@ function recordExtractionDraftCounts(
 
 /**
  * Count the entries in the model envelope's raw `.signals` array, with no
- * cap and no per-entry validation. A malformed envelope (not an object, or
- * no `.signals` array) counts as 0 — parseOfficialApiSignals would throw on
- * it, which the seed path treats as a whole-turn extraction failure.
+ * cap and no per-entry validation. When the whole envelope parses cleanly,
+ * this is the array length. When the envelope is corrupt (parseOfficialApiSignals
+ * now salvages it element-wise), count the RAW salvageable `{...}` element
+ * population — including the corrupt element(s) — so the dropped corrupt
+ * entries land in parseDropped (raw - parsed) instead of vanishing from the
+ * attribution. A genuinely-degenerate envelope (no `.signals` region, or no
+ * complete element) counts as 0, matching the whole-turn fallback the seed
+ * path still applies when zero drafts survive.
+ * see also: packages/soul/src/garden/compute-provider.ts salvageRawSignalElements
  */
 function countRawEnvelopeSignals(rawJson: string): number {
   try {
@@ -464,7 +471,7 @@ function countRawEnvelopeSignals(rawJson: string): number {
     const signals = (parsed as { readonly signals?: unknown }).signals;
     return Array.isArray(signals) ? signals.length : 0;
   } catch {
-    return 0;
+    return salvageRawSignalElements(rawJson).length;
   }
 }
 

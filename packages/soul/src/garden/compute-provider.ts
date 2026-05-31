@@ -467,7 +467,21 @@ const MAX_OFFICIAL_API_REASON_CHARS = 400;
 // copy.
 // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
 export function parseOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
-  const parsed = JSON.parse(content) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content) as unknown;
+  } catch {
+    // The whole envelope did not parse. One corrupt `signals[]` entry (a bad
+    // `\'` escape, a stray `,""}` empty key, an unescaped inner quote, a
+    // malformed key missing `":"`, or a max_tokens-truncated final element)
+    // otherwise nukes every clean sibling signal. Degrade element-wise: walk
+    // the `signals` array, JSON.parse each `{...}` independently, keep the
+    // valid entries, drop the corrupt one(s), and tolerate a truncated final
+    // element. This is the array-level analogue of the per-entry drop policy
+    // applied below after a successful parse — a sibling's corruption is not
+    // allowed to abort the turn's good signals.
+    return salvageOfficialApiSignals(content);
+  }
   // invariant: a malformed *envelope* (response is not an object, or has no
   // signals array) is a genuine total failure of the extraction call, so it
   // still throws hard. A malformed single *entry* is one bad fact among
@@ -492,6 +506,116 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
     }
   }
   return Object.freeze(drafts);
+}
+
+// Element-wise salvage for a `{"signals":[...]}` envelope whose strict
+// JSON.parse threw. Reuses parseOfficialApiSignalEntry so every salvaged
+// element passes the SAME per-entry validation/drop as the strict path — the
+// downstream draft shape is byte-identical. THROWS when zero valid elements
+// are recoverable (a degenerate envelope: no `signals` region, or only a
+// truncated first/only element) so the caller's existing failure attribution
+// (offline_fallbacks + recordExtractionFailureSource) still fires — a corrupt
+// degenerate body must NOT masquerade as an empty `{"signals":[]}` extraction.
+// see also: salvageRawSignalElements (string-aware balanced-brace walk).
+function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
+  const drafts: OfficialApiSignalDraft[] = [];
+  for (const element of salvageRawSignalElements(content)) {
+    if (drafts.length >= MAX_OFFICIAL_API_SIGNALS) {
+      break;
+    }
+    let candidate: unknown;
+    try {
+      candidate = JSON.parse(element) as unknown;
+    } catch {
+      // A single corrupt element (bad escape / unescaped quote / malformed
+      // key) — skip it, keep walking the clean siblings.
+      continue;
+    }
+    const draft = parseOfficialApiSignalEntry(candidate);
+    if (draft !== null) {
+      drafts.push(draft);
+    }
+  }
+  if (drafts.length === 0) {
+    throw new Error("signals envelope unparseable and no element recoverable");
+  }
+  return Object.freeze(drafts);
+}
+
+// Walk the `signals` array region of an envelope and return each top-level
+// `{...}` element as an independent substring. String-aware (braces inside a
+// JSON string literal do not change depth; `\` escapes the next char) so a
+// `}` inside `matched_text` never miscounts. A truncated/incomplete FINAL
+// element (the array ends before its closing `}`) is dropped — only complete
+// balanced elements are returned. Returns [] when no `signals` array region
+// is found, so the caller degrades to zero signals (existing fallback).
+//
+// Exported so the LongMemEval bench seed path can count the RAW salvageable
+// element population (lastTurnRawSignalCount) when the strict envelope parse
+// fails — otherwise the dropped corrupt entries would vanish from the
+// parse-drop attribution instead of landing in parseDropped.
+// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+//   countRawEnvelopeSignals
+export function salvageRawSignalElements(content: string): readonly string[] {
+  const signalsKeyIndex = findSignalsArrayStart(content);
+  if (signalsKeyIndex < 0) {
+    return [];
+  }
+  const elements: string[] = [];
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let elementStart = -1;
+  for (let i = signalsKeyIndex; i < content.length; i += 1) {
+    const ch = content[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\" && inString) {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) {
+        elementStart = i;
+      }
+      depth += 1;
+    } else if (ch === "}") {
+      if (depth > 0) {
+        depth -= 1;
+        if (depth === 0 && elementStart >= 0) {
+          elements.push(content.slice(elementStart, i + 1));
+          elementStart = -1;
+        }
+      }
+    } else if (ch === "]" && depth === 0) {
+      // Closing the signals array at top level — no in-flight element.
+      break;
+    }
+  }
+  // An element still open (depth > 0 / elementStart set) at end-of-buffer is
+  // the truncated final element — intentionally NOT pushed.
+  return elements;
+}
+
+// Find the index of the `[` that opens the `signals` array, scanning past the
+// `"signals"` key. String-aware so a `"signals"` substring inside an earlier
+// string value is not mistaken for the key. Returns -1 when not found.
+function findSignalsArrayStart(content: string): number {
+  const keyMatch = /"signals"\s*:\s*\[/u.exec(content);
+  if (keyMatch === null) {
+    return -1;
+  }
+  // Position the walk at the `[` so the first `{` after it starts element 0.
+  return keyMatch.index + keyMatch[0].length - 1;
 }
 
 // Parse one entry of the official-API {"signals":[...]} envelope. Returns

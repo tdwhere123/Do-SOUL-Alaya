@@ -53,6 +53,7 @@ export {
   OfficialApiGardenProvider,
   OFFICIAL_API_SYSTEM_PROMPT,
   parseOfficialApiSignals,
+  salvageRawSignalElements,
   CustomApiGardenProvider,
   LocalModelGardenProvider,
   SessionOverrideRemediation,
