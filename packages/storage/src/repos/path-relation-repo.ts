@@ -122,6 +122,23 @@ function anchorBackingObjectIdSql(anchorPath: "source_anchor" | "target_anchor")
 export const PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL = anchorBackingObjectIdSql("source_anchor");
 export const PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL = anchorBackingObjectIdSql("target_anchor");
 
+// Single source for the dynamic `findByAnchors` statement so the production
+// query and the prepared-statement EXPLAIN guard execute byte-identical SQL.
+// cross-file ref: packages/storage/src/__tests__/path-relation-repo.test.ts
+function findByAnchorsSql(keyCount: number): string {
+  const placeholders = Array.from({ length: keyCount }, () => "?").join(", ");
+  return `
+      SELECT${PATH_RELATION_SELECT_COLUMNS}
+      FROM path_relations
+      WHERE workspace_id = ?
+        AND (
+          ${SOURCE_ANCHOR_KEY_SQL} IN (${placeholders})
+          OR ${TARGET_ANCHOR_KEY_SQL} IN (${placeholders})
+        )
+      ORDER BY created_at ASC, path_id ASC
+    `;
+}
+
 const WAVE_1_ACTIVE_LIFECYCLE_SQL = `CASE
       WHEN json_valid(lifecycle_json) = 0 THEN 0
       WHEN json_type(lifecycle_json, '$.retirement_rule') IS NULL
@@ -493,17 +510,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       return deepFreeze([]);
     }
 
-    const placeholders = anchorKeys.map(() => "?").join(", ");
-    const statement = this.db.connection.prepare(`
-      SELECT${PATH_RELATION_SELECT_COLUMNS}
-      FROM path_relations
-      WHERE workspace_id = ?
-        AND (
-          ${SOURCE_ANCHOR_KEY_SQL} IN (${placeholders})
-          OR ${TARGET_ANCHOR_KEY_SQL} IN (${placeholders})
-        )
-      ORDER BY created_at ASC, path_id ASC
-    `);
+    const statement = this.db.connection.prepare(findByAnchorsSql(anchorKeys.length));
 
     try {
       const rows = statement.all(
@@ -574,6 +581,25 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to delete path relation ${parsedPathId}.`, error);
     }
+  }
+
+  // Test-only seam: the SQL text the repo actually prepared for its anchor
+  // lookups. Returning .source from the live prepared statements lets the
+  // EXPLAIN QUERY PLAN guard prove the planner rides the migration 048
+  // expression indexes against the REAL statements, not a reconstruction that
+  // could silently drift from them. findByAnchors builds its statement per
+  // call, so it is rendered through the same shared findByAnchorsSql builder.
+  // cross-file ref: packages/storage/src/__tests__/path-relation-repo.test.ts
+  public __anchorLookupSqlForTest(): Readonly<{
+    readonly findBySourceAnchor: string;
+    readonly findByTargetAnchor: string;
+    readonly findByAnchors: (keyCount: number) => string;
+  }> {
+    return Object.freeze({
+      findBySourceAnchor: (this.findBySourceAnchorStatement as { readonly source: string }).source,
+      findByTargetAnchor: (this.findByTargetAnchorStatement as { readonly source: string }).source,
+      findByAnchors: (keyCount: number) => findByAnchorsSql(keyCount)
+    });
   }
 }
 

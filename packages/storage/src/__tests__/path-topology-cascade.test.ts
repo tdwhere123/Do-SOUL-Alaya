@@ -68,6 +68,29 @@ describe("path topology cascade on memory hard-delete", () => {
         }
       })
     );
+    // risk_concern relation: identical source_object_id backing path as
+    // obligation. Closes the cascade matrix over every memory-backing kind.
+    ctx.pathRepo.create(
+      pathRelationFixture("path-risk-concern", {
+        source_anchor: { kind: "object", object_id: SURVIVING_MEMORY_ID },
+        target_anchor: {
+          kind: "risk_concern",
+          source_object_id: DELETED_MEMORY_ID,
+          concern_digest: "risk-1"
+        }
+      })
+    );
+    // time_concern relation: same source_object_id backing path.
+    ctx.pathRepo.create(
+      pathRelationFixture("path-time-concern", {
+        source_anchor: { kind: "object", object_id: SURVIVING_MEMORY_ID },
+        target_anchor: {
+          kind: "time_concern",
+          source_object_id: DELETED_MEMORY_ID,
+          window_digest: "window-1"
+        }
+      })
+    );
     // relation referencing neither deleted memory — must survive.
     ctx.pathRepo.create(
       pathRelationFixture("path-survivor", {
@@ -100,6 +123,20 @@ describe("path topology cascade on memory hard-delete", () => {
         kind: "obligation",
         source_object_id: DELETED_MEMORY_ID,
         obligation_digest: "digest-1"
+      })
+    ).resolves.toEqual([]);
+    await expect(
+      ctx.pathRepo.findByAnchor("workspace-1", {
+        kind: "risk_concern",
+        source_object_id: DELETED_MEMORY_ID,
+        concern_digest: "risk-1"
+      })
+    ).resolves.toEqual([]);
+    await expect(
+      ctx.pathRepo.findByAnchor("workspace-1", {
+        kind: "time_concern",
+        source_object_id: DELETED_MEMORY_ID,
+        window_digest: "window-1"
       })
     ).resolves.toEqual([]);
     // The unrelated relation survives.

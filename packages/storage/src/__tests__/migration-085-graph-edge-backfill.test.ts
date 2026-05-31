@@ -305,7 +305,9 @@ describe("migration 085 legacy graph-edge backfill", () => {
         workspaceId: "workspace-1",
         source: "mem-a",
         target: "mem-c",
-        relationKind: "recalls",
+        // A legacy `recalls` edge backfills under the live associative seeder's
+        // name `co_recalled`; both fold to the same graph edge_type and weight.
+        relationKind: "co_recalled",
         recallBias: 0.5,
         governanceClass: "attention_only",
         createdAt: "2026-04-17T01:01:00.000Z"
@@ -417,6 +419,76 @@ describe("migration 085 legacy graph-edge backfill", () => {
     }
     const active2 = await repo.findActive("workspace-2");
     expect(active2.map((relation) => relation.path_id)).toEqual(["legacy-edge:edge-ws2"]);
+  });
+
+  it("dedupes a legacy `recalls` edge against a cutover-minted `co_recalled` path for the same pair", () => {
+    const { db } = migrateThroughPre085();
+    seedWorkspace(db, "workspace-1");
+    for (const id of ["mem-a", "mem-b"]) {
+      seedMemory(db, id, "workspace-1");
+    }
+
+    // The cutover already minted a `co_recalled` path for the mem-a -> mem-b
+    // pair (the live associative seeder's name). A pre-spine `recalls` edge for
+    // the SAME pair must NOT survive as a second associative path, or the pair
+    // would carry double the recall weight. The dedup catches it because the
+    // legacy `recalls` edge backfills under the same `co_recalled` name.
+    db.prepare(
+      `INSERT INTO path_relations (
+        path_id, workspace_id, anchors_json, constitution_json,
+        effect_vector_json, plasticity_state_json, lifecycle_json, legitimacy_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "cutover-co-recalled",
+      "workspace-1",
+      JSON.stringify({
+        source_anchor: { kind: "object", object_id: "mem-a" },
+        target_anchor: { kind: "object", object_id: "mem-b" }
+      }),
+      JSON.stringify({ relation_kind: "co_recalled", why_this_relation_exists: ["recalls_edge_co_usage"] }),
+      JSON.stringify({
+        salience: 0.5,
+        recall_bias: 0.5,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "lens_entry"
+      }),
+      JSON.stringify({
+        strength: 0.3,
+        direction_bias: "bidirectional_asymmetric",
+        stability_class: "stable",
+        support_events_count: 0,
+        contradiction_events_count: 0
+      }),
+      JSON.stringify({ status: "active", retirement_rule: "manual" }),
+      JSON.stringify({ evidence_basis: ["recalls_edge_co_usage"], governance_class: "attention_only" }),
+      "2026-04-17T00:30:00.000Z",
+      "2026-04-17T00:30:00.000Z"
+    );
+    seedLegacyEdge(db, {
+      edgeId: "edge-recalls-dup",
+      source: "mem-a",
+      target: "mem-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:00:00.000Z"
+    });
+
+    applyMigration(db, MIGRATION_085);
+
+    const paths = readPaths(db);
+    const byPathId = new Map(paths.map((row) => [row.path_id, row]));
+    // The cutover path survives; the legacy `recalls` edge did NOT mint a second.
+    expect(byPathId.has("cutover-co-recalled")).toBe(true);
+    expect(byPathId.has("legacy-edge:edge-recalls-dup")).toBe(false);
+    const associativeRows = paths.filter(
+      (row) =>
+        JSON.parse(row.constitution_json).relation_kind === "co_recalled" &&
+        JSON.parse(row.anchors_json).source_anchor.object_id === "mem-a" &&
+        JSON.parse(row.anchors_json).target_anchor.object_id === "mem-b"
+    );
+    expect(associativeRows).toHaveLength(1);
   });
 
   it("is a safe no-op when there are no legacy edges to backfill", () => {

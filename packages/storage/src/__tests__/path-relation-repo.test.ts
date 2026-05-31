@@ -1,9 +1,30 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import type { PathAnchorRef, PathRelation } from "@do-soul/alaya-protocol";
-import { serializePathAnchorRef } from "@do-soul/alaya-protocol";
+import { PathAnchorRefSchema, serializePathAnchorRef } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../db.js";
-import { SqlitePathRelationRepo } from "../repos/path-relation-repo.js";
+import {
+  PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
+  PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL,
+  SqlitePathRelationRepo
+} from "../repos/path-relation-repo.js";
+
+// invariant: the backing-id-coverage guard reads anchor discriminant kinds
+// from the protocol schema rather than a hardcoded list, so the live union is
+// always the source of truth for what the CASE must cover.
+// PathAnchorRefSchema is a discriminatedUnion wrapped in .readonly(); unwrap
+// _def.innerType to reach .options.
+// cross-file ref: packages/protocol/src/soul/path-relation.ts PathAnchorRefSchema
+function anchorKindsFromSchema(): readonly string[] {
+  const wrapped = PathAnchorRefSchema as unknown as {
+    readonly _def: {
+      readonly innerType: {
+        readonly options: ReadonlyArray<{ readonly shape: { readonly kind: { readonly value: string } } }>;
+      };
+    };
+  };
+  return wrapped._def.innerType.options.map((member) => member.shape.kind.value);
+}
 
 const databases = new Set<StorageDatabase>();
 
@@ -567,10 +588,13 @@ describe("SqlitePathRelationRepo", () => {
   });
 
   // I2 regression: the anchor lookups must ride the migration 048 expression
-  // indexes, not degrade to a workspace SCAN. EXPLAIN QUERY PLAN over the exact
-  // SQL the repo prepares is the load-bearing proof.
+  // indexes, not degrade to a workspace SCAN. EXPLAIN QUERY PLAN runs over the
+  // SQL text the repo's OWN prepared statements carry (via .source) so a drift
+  // between the indexed expression and the live statement fails this test — a
+  // reconstruction could pass while the private statement drifted.
   it("findByAnchor / findByAnchors / findByTargetAnchor ride the anchor indexes (no workspace scan)", () => {
-    const { database } = createRepo();
+    const { database, repo } = createRepo();
+    const repoSql = repo.__anchorLookupSqlForTest();
 
     const explainUsesAnchorIndex = (sql: string, params: readonly unknown[]): void => {
       const plan = database.connection
@@ -591,12 +615,14 @@ describe("SqlitePathRelationRepo", () => {
       ).toBe(false);
     };
 
-    // findByAnchor (source side) and findByTargetAnchor (target side).
-    explainUsesAnchorIndex(REPO_FIND_BY_SOURCE_ANCHOR_SQL, ["workspace-1", '["object","object-1"]']);
-    explainUsesAnchorIndex(REPO_FIND_BY_TARGET_ANCHOR_SQL, ["workspace-1", '["object","object-1"]']);
+    // The REAL prepared statements: findByAnchor (source side) and
+    // findByTargetAnchor (target side).
+    explainUsesAnchorIndex(repoSql.findBySourceAnchor, ["workspace-1", '["object","object-1"]']);
+    explainUsesAnchorIndex(repoSql.findByTargetAnchor, ["workspace-1", '["object","object-1"]']);
     // findByAnchors fans out an IN-list over source OR target; both arms must
-    // still resolve through the anchor indexes.
-    explainUsesAnchorIndex(repoFindByAnchorsSql(2), [
+    // still resolve through the anchor indexes. Rendered by the same builder the
+    // production path prepares.
+    explainUsesAnchorIndex(repoSql.findByAnchors(2), [
       "workspace-1",
       '["object","object-1"]',
       '["object","object-2"]',
@@ -604,12 +630,35 @@ describe("SqlitePathRelationRepo", () => {
       '["object","object-2"]'
     ]);
   });
+
+  // invariant: anchorBackingObjectIdSql has no ELSE, so an anchor kind absent
+  // from its CASE returns NULL and `NULL IN (...)` never matches — such a kind
+  // escapes cascade pruning (orphaned topology). This guard fails when a kind
+  // exists in PathAnchorRefSchema without a matching WHEN branch in the
+  // backing-id SQL, forcing a conscious coverage decision.
+  // cross-file ref: packages/storage/src/repos/path-relation-repo.ts anchorBackingObjectIdSql
+  it("backing-id SQL covers every PathAnchorRef kind (no silently-unpruned kind)", () => {
+    const kinds = anchorKindsFromSchema();
+    expect(kinds.length).toBeGreaterThan(0);
+    for (const kind of kinds) {
+      const branch = `WHEN '${kind}' THEN`;
+      expect(
+        PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL.includes(branch),
+        `source backing-id SQL is missing a WHEN branch for anchor kind '${kind}'`
+      ).toBe(true);
+      expect(
+        PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL.includes(branch),
+        `target backing-id SQL is missing a WHEN branch for anchor kind '${kind}'`
+      ).toBe(true);
+    }
+  });
 });
 
 // Byte-identical reconstruction of the anchor-key SQL the repo prepares
-// (path-relation-repo.ts anchorKeySql). Kept here only to feed EXPLAIN QUERY
-// PLAN; the repo statements themselves are private. cross-file ref:
-// migrations/048-path-relations-and-event-log-indexes.sql.
+// (path-relation-repo.ts anchorKeySql). Used only by the byte-identity test to
+// assert the rendered branch appears verbatim in the migration 048 index; the
+// EXPLAIN test runs the repo's own prepared statements instead.
+// cross-file ref: migrations/048-path-relations-and-event-log-indexes.sql.
 function reconstructedAnchorKeySql(anchorPath: "source_anchor" | "target_anchor"): string {
   return `CASE json_extract(anchors_json, '$.${anchorPath}.kind')
       WHEN 'object' THEN json_array('object', json_extract(anchors_json, '$.${anchorPath}.object_id'))
@@ -634,30 +683,6 @@ function reconstructedAnchorKeySql(anchorPath: "source_anchor" | "target_anchor"
         json_extract(anchors_json, '$.${anchorPath}.window_digest')
       )
     END`;
-}
-
-const REPO_FIND_BY_SOURCE_ANCHOR_SQL = `SELECT path_id
-  FROM path_relations
-  WHERE workspace_id = ?
-    AND ${reconstructedAnchorKeySql("source_anchor")} = ?
-  ORDER BY created_at ASC, path_id ASC`;
-
-const REPO_FIND_BY_TARGET_ANCHOR_SQL = `SELECT path_id
-  FROM path_relations
-  WHERE workspace_id = ?
-    AND ${reconstructedAnchorKeySql("target_anchor")} = ?
-  ORDER BY created_at ASC, path_id ASC`;
-
-function repoFindByAnchorsSql(keyCount: number): string {
-  const placeholders = Array.from({ length: keyCount }, () => "?").join(", ");
-  return `SELECT path_id
-  FROM path_relations
-  WHERE workspace_id = ?
-    AND (
-      ${reconstructedAnchorKeySql("source_anchor")} IN (${placeholders})
-      OR ${reconstructedAnchorKeySql("target_anchor")} IN (${placeholders})
-    )
-  ORDER BY created_at ASC, path_id ASC`;
 }
 
 function createRepo(): {

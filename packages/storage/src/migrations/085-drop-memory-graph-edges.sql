@@ -20,6 +20,17 @@
 -- already produced some). It is safe over an empty memory_graph_edges (the
 -- INSERT...SELECT touches no rows); migration 017 always creates the table
 -- before this migration runs, so the source table is guaranteed present.
+--
+-- A legacy `recalls` edge backfills as relation_kind `co_recalled`, the name
+-- the live associative co-usage/co-recall seeder mints. Both fold to the same
+-- graph edge_type (`recalls`, contribution_weight 0.3) and carry identical
+-- recall_bias (+0.5) / strength (0.3) / governance (attention_only), so the
+-- rename is recall-behavior-identical. It exists so the dedup NOT EXISTS below
+-- matches a cutover-minted `co_recalled` row for the same pair; without it a
+-- pre-spine `recalls` edge and the cutover `co_recalled` path would both
+-- survive, doubling the associative recall weight for one pair.
+-- cross-file ref: packages/core/src/path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE
+-- cross-file ref: packages/protocol/src/soul/memory-graph.ts mapRelationKindToGraphEdgeType
 
 INSERT INTO path_relations (
   path_id,
@@ -41,7 +52,11 @@ SELECT
     'target_anchor', json_object('kind', 'object', 'object_id', e.target_memory_id)
   ),
   json_object(
-    'relation_kind', e.edge_type,
+    'relation_kind',
+      CASE e.edge_type
+        WHEN 'recalls' THEN 'co_recalled'
+        ELSE e.edge_type
+      END,
     'why_this_relation_exists', json_array('legacy_memory_graph_edge:' || e.edge_id)
   ),
   json_object(
@@ -91,7 +106,11 @@ WHERE NOT EXISTS (
   SELECT 1
   FROM path_relations AS p
   WHERE p.workspace_id = e.workspace_id
-    AND json_extract(p.constitution_json, '$.relation_kind') = e.edge_type
+    AND json_extract(p.constitution_json, '$.relation_kind') =
+      CASE e.edge_type
+        WHEN 'recalls' THEN 'co_recalled'
+        ELSE e.edge_type
+      END
     AND json_extract(p.anchors_json, '$.source_anchor.kind') = 'object'
     AND json_extract(p.anchors_json, '$.source_anchor.object_id') = e.source_memory_id
     AND json_extract(p.anchors_json, '$.target_anchor.kind') = 'object'
