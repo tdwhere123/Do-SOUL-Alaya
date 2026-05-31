@@ -1197,6 +1197,12 @@ export class MaterializationRouter {
       }
 
       let outcome: PathCandidateMintOutcome;
+      // A thrown sink (port wiring fault, not a decided outcome) folds into the
+      // same transient "failed" treatment as a returned "failed" — the error
+      // text is threaded into the single failed-block warn below so a thrown ref
+      // produces exactly ONE loud line, not two. It must not block the memory's
+      // materialization, so we catch-and-continue rather than rethrow.
+      let thrownError: string | null = null;
       try {
         outcome = await port.submitCandidate({
           workspaceId: signal.workspace_id,
@@ -1215,17 +1221,8 @@ export class MaterializationRouter {
           runId: signal.run_id
         });
       } catch (err) {
-        // A thrown sink (port wiring fault, not a decided outcome) is treated
-        // as a transient failure: loud, never silent. It must not block the
-        // memory's materialization, so we warn-and-continue rather than rethrow.
         outcome = "failed";
-        console.warn("materialization-router: path candidate submission threw", {
-          sourceMemoryId: newObjectId,
-          targetMemoryId: ref,
-          relationKind: spec.relationKind,
-          signalId: signal.signal_id,
-          error: err instanceof Error ? err.message : String(err)
-        });
+        thrownError = err instanceof Error ? err.message : String(err);
       }
 
       // invariant: only "failed" gets the non-silent treatment. The signal-ref
@@ -1236,7 +1233,8 @@ export class MaterializationRouter {
       // still re-form the association via co-usage. A permanent "rejected" stays
       // a CLEAN, quiet drop — the sink already audited the B3 refusal and retry
       // cannot help, so loud noise here would be wrong. applied / already_present
-      // settle silently (the owed path exists).
+      // settle silently (the owed path exists). A thrown sink and a returned
+      // "failed" both land here so each dropped ref emits exactly ONE loud warn.
       // see also: packages/core/src/path-relation-proposal-service.ts PathMintOutcome.
       // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask (no re-derive).
       if (outcome === "failed") {
@@ -1246,7 +1244,8 @@ export class MaterializationRouter {
           relationKind: spec.relationKind,
           signalRefsKey: spec.signalRefsKey,
           signalId: signal.signal_id,
-          runId: signal.run_id
+          runId: signal.run_id,
+          error: thrownError
         });
       }
     }

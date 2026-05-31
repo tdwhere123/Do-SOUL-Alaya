@@ -1231,6 +1231,60 @@ describe("MaterializationRouter ingest reconciliation", () => {
     }
   });
 
+  it("emits exactly ONE loud warn when the signal-ref sink THROWS (no double-log)", async () => {
+    // invariant (FIX-3): a THROWN sink folds into the same transient "failed"
+    // treatment as a returned "failed", so a thrown ref produces exactly ONE
+    // loud warn — the unified failed-block warn (carrying the thrown error) —
+    // not two (the old code warned in the catch AND again in the failed block).
+    const deps = createDeps();
+    deps.pathCandidateSinkPort.submitCandidate.mockImplementation(async (input) => {
+      if (input.targetAnchor.object_id === "mem-thrower") {
+        throw new Error("port wiring fault");
+      }
+      return "applied";
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const router = new MaterializationRouter(deps);
+
+    try {
+      const result = await router.materializeSignal(
+        factSignal({
+          source_memory_refs: ["mem-thrower"],
+          raw_payload: {
+            excerpt: "Fact whose derives_from edge mint throws.",
+            distilled_fact: "Fact whose derives_from edge mint throws."
+          }
+        })
+      );
+
+      // The memory itself still materializes — a thrown best-effort edge never
+      // blocks it.
+      expect(result.success).toBe(true);
+
+      // Exactly ONE loud warn for the dropped ref: the unified failed-block warn.
+      const loud = warnSpy.mock.calls.filter(
+        (args) =>
+          typeof args[0] === "string" &&
+          args[0].includes("signal-ref path candidate failed transiently")
+      );
+      expect(loud).toHaveLength(1);
+      expect(loud[0]?.[1]).toMatchObject({
+        sourceMemoryId: "memory-1",
+        targetMemoryId: "mem-thrower",
+        relationKind: "derives_from",
+        signalRefsKey: "source_memory_refs",
+        error: "port wiring fault"
+      });
+      // The retired separate "submission threw" warn no longer fires.
+      const threwLine = warnSpy.mock.calls.filter(
+        (args) => typeof args[0] === "string" && args[0].includes("submission threw")
+      );
+      expect(threwLine).toHaveLength(0);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("keeps a permanently-rejected signal-ref a CLEAN silent drop (no loud failure noise)", async () => {
     // invariant (codex spine-review B5): only "failed" gets the non-silent
     // treatment. A "rejected" is a DECIDED B3 anchor refusal — already audited
