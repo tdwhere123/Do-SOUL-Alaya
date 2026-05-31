@@ -5,6 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { execFileWithFileCapture } from "./script-capture";
 
 const execFileAsync = promisify(execFile);
 
@@ -73,17 +74,21 @@ describe("bench maintenance scripts", () => {
       process.cwd(),
       "scripts/append-bench-degradation-backlog.mjs"
     );
-    const result = await execFileAsync(process.execPath, [
-      scriptPath,
-      "--history-root",
-      historyRoot,
-      "--bench",
-      "public",
-      "--backlog",
-      backlogPath,
-      "--threshold-pp",
-      "5"
-    ]);
+    const result = await execFileWithFileCapture(
+      process.execPath,
+      [
+        scriptPath,
+        "--history-root",
+        historyRoot,
+        "--bench",
+        "public",
+        "--backlog",
+        backlogPath,
+        "--threshold-pp",
+        "5"
+      ],
+      { env: cliScriptEnv() }
+    );
 
     expect(JSON.parse(result.stdout)).toMatchObject({
       action: "opened",
@@ -123,7 +128,7 @@ describe("bench maintenance scripts", () => {
     const fakeBin = await writeFakeNodeBin(2, markerPath);
 
     const result = await execFileRejects("bash", [scriptPath], {
-      ...process.env,
+      ...cliScriptEnv(),
       PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
       BENCH_DAILY_EMBEDDINGS: "disabled",
       BENCH_DAILY_POLICY_SHAPES: "stress",
@@ -145,7 +150,7 @@ describe("bench maintenance scripts", () => {
     const fakeBin = await writeFakeNodeBin(1, markerPath);
 
     const result = await execFileRejects("bash", [scriptPath], {
-      ...process.env,
+      ...cliScriptEnv(),
       PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
       BENCH_DAILY_EMBEDDINGS: "disabled",
       BENCH_DAILY_POLICY_SHAPES: "stress",
@@ -190,6 +195,17 @@ async function writeFakeNodeBin(
   );
   await chmod(fakeNodePath, 0o755);
   return binDir;
+}
+
+function cliScriptEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("npm_") || key.startsWith("VITEST")) {
+      delete env[key];
+    }
+  }
+  delete env.NODE_OPTIONS;
+  return env;
 }
 
 async function execFileRejects(

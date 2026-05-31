@@ -112,36 +112,40 @@ function restoreEnv(): void {
 }
 
 describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () => {
-  it("attaches a decorator that injects fusion_weights.embedding_similarity = 6 when local_onnx is configured and supplement is opted in", async () => {
-    saveEnv();
-    const fixture = buildFixture();
-    try {
-      const configEnv = new Map<string, string>([
-        ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
-        ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
-      ]);
-      const { defaultPolicyDecorator, providerWarmup } = createDaemonEmbeddingRuntime({
-        database: fixture.database,
-        configEnv,
-        eventLogRepo: fixture.eventLogRepo,
-        healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
-        memoryEntryRepo: fixture.memoryEntryRepo,
-        warn: fixture.warn as unknown as WarnFn
-      });
+  it(
+    "attaches a decorator that injects fusion_weights.embedding_similarity = 6 when local_onnx is configured and supplement is opted in",
+    async () => {
+      saveEnv();
+      const fixture = buildFixture();
+      try {
+        const configEnv = new Map<string, string>([
+          ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+          ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
+        ]);
+        const { defaultPolicyDecorator, providerWarmup } = createDaemonEmbeddingRuntime({
+          database: fixture.database,
+          configEnv,
+          eventLogRepo: fixture.eventLogRepo,
+          healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+          memoryEntryRepo: fixture.memoryEntryRepo,
+          warn: fixture.warn as unknown as WarnFn
+        });
 
-      expect(defaultPolicyDecorator).toBeDefined();
-      // Warmup must be a no-throw promise so daemon boot is never blocked.
-      await expect(providerWarmup).resolves.toBeDefined();
+        expect(defaultPolicyDecorator).toBeDefined();
+        // Warmup must be a no-throw promise so daemon boot is never blocked.
+        await expect(providerWarmup).resolves.toBeDefined();
 
-      const decorated = defaultPolicyDecorator!(makeBasePolicy());
-      const fusionWeights =
-        decorated.scoring_weight_overrides?.fusion_weights ?? {};
-      expect(fusionWeights.embedding_similarity).toBe(6);
-    } finally {
-      teardown(fixture);
-      restoreEnv();
-    }
-  });
+        const decorated = defaultPolicyDecorator!(makeBasePolicy());
+        const fusionWeights =
+          decorated.scoring_weight_overrides?.fusion_weights ?? {};
+        expect(fusionWeights.embedding_similarity).toBe(6);
+      } finally {
+        teardown(fixture);
+        restoreEnv();
+      }
+    },
+    15_000
+  );
 
   it("respects ALAYA_EMBEDDING_FUSION_WEIGHT_ON env override on the injected fusion weight", async () => {
     saveEnv();

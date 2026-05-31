@@ -1,6 +1,6 @@
 name: Release
 
-# v0.1.2: Do-SOUL Alaya is distributed via GitHub Releases (source tarball
+# Do-SOUL Alaya is distributed via GitHub Releases (source tarball
 # + SHA256SUMS), not npm. The end-user installer scripts/install.sh
 # downloads these two assets, verifies the checksum, then runs pnpm
 # install + pnpm build inside the user's $ALAYA_HOME.
@@ -9,30 +9,54 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to package, smoke, and optionally publish'
+        required: true
+        type: string
+      publish:
+        description: 'Create the GitHub Release after all gates pass'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '20.19.0'
+  PNPM_VERSION: '9.15.9'
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
-  publish:
+  quality:
+    name: Build, test, hygiene
     runs-on: ubuntu-latest
-    permissions:
-      contents: write   # gh release create + upload assets
-
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'pnpm'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Validate release versions
-        run: pnpm run release:check-version -- "${GITHUB_REF_NAME}"
+        run: pnpm run release:check-version -- "$RELEASE_TAG"
+
+      - name: Typecheck
+        run: pnpm run --if-present typecheck
 
       - name: Build
         run: pnpm build
@@ -43,28 +67,71 @@ jobs:
       - name: Hygiene
         run: pnpm run hygiene:unused
 
+  content-contracts:
+    name: Bench content contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check bench-history contract
+        run: node scripts/ci/check-content-contracts.mjs
+
+  package:
+    name: Package release assets
+    runs-on: ubuntu-latest
+    needs:
+      - quality
+      - content-contracts
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    outputs:
+      tag: ${{ steps.pack.outputs.tag }}
+      tarball: ${{ steps.pack.outputs.tarball }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release versions
+        run: pnpm run release:check-version -- "$RELEASE_TAG"
+
+      - name: Build
+        run: pnpm build
+
       - name: Pack source tarball + SHA256SUMS
         id: pack
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF##refs/tags/}"
+          TAG="${RELEASE_TAG}"
           VERSION="${TAG#v}"
           PREFIX="do-soul-alaya-${VERSION}"
           TARBALL="${PREFIX}.tar.gz"
 
-          # git archive HEAD captures exactly what the tag points to.
-          # Generated paths (dist/, node_modules/, var/, data/, .do-it/,
-          # .codex/) are .gitignored so they're never tracked, and git
-          # archive only emits tracked content — the resulting tarball is
-          # exactly what install.sh needs to run pnpm install + pnpm build.
+          # git archive HEAD captures exactly what the checked-out tag points to.
           git archive --format=tar.gz --prefix="${PREFIX}/" -o "${TARBALL}" HEAD
 
-          # Sanity-check the tarball before publishing. We cache the
-          # tar listing to a file because `tar -tzf | grep -q ...`
-          # combined with `set -o pipefail` reports the pipeline as
-          # failed: grep -q exits early on first match, tar gets
-          # SIGPIPE, pipefail surfaces tar's 141 exit and the `||`
-          # block fires even when the file IS present in the tarball.
           tar -tzf "${TARBALL}" > tarball-listing.txt
           grep -qF "${PREFIX}/bin/alaya.mjs" tarball-listing.txt \
             || { echo "FATAL: tarball missing bin/alaya.mjs"; exit 1; }
@@ -76,7 +143,6 @@ jobs:
           [ "$tar_size" -gt 1024 ] \
             || { echo "FATAL: tarball is suspiciously small (${tar_size} bytes)"; exit 1; }
 
-          # SHA256SUMS — install.sh validates this with `sha256sum -c`.
           sha256sum "${TARBALL}" > SHA256SUMS
           cat SHA256SUMS
 
@@ -85,41 +151,91 @@ jobs:
             echo "tarball=${TARBALL}"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Smoke test installer against the just-built tarball
-        # End-to-end check that the real installer can consume the
-        # release artifact format produced above. The local-asset
-        # override bypasses only the GitHub download step because the
-        # release does not exist yet.
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            ${{ steps.pack.outputs.tarball }}
+            SHA256SUMS
+            tarball-listing.txt
+          retention-days: 14
+
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            ${{ steps.pack.outputs.tarball }}
+            SHA256SUMS
+
+  install-smoke:
+    name: Installer smoke from packaged assets
+    runs-on: ubuntu-latest
+    needs: package
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.package.outputs.tag }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Smoke test installer against packaged assets
         run: |
           set -euo pipefail
-          TARBALL="${GITHUB_WORKSPACE}/${{ steps.pack.outputs.tarball }}"
-          SUMS="${GITHUB_WORKSPACE}/SHA256SUMS"
+          TARBALL="${GITHUB_WORKSPACE}/release-assets/${{ needs.package.outputs.tarball }}"
+          SUMS="${GITHUB_WORKSPACE}/release-assets/SHA256SUMS"
           SMOKE_HOME="${RUNNER_TEMP}/alaya-smoke-home"
           SMOKE_BIN="${RUNNER_TEMP}/alaya-smoke-bin"
           rm -rf "$SMOKE_HOME" "$SMOKE_BIN" "${SMOKE_HOME}.bak" "${SMOKE_HOME}".staging-*
           mkdir -p "$SMOKE_BIN"
 
-          ALAYA_VERSION="${{ steps.pack.outputs.tag }}" \
+          ALAYA_VERSION="${{ needs.package.outputs.tag }}" \
           ALAYA_LOCAL_TARBALL="$TARBALL" \
           ALAYA_LOCAL_SHA256SUMS="$SUMS" \
           ALAYA_HOME="$SMOKE_HOME" \
           ALAYA_BIN_DIR="$SMOKE_BIN" \
             bash scripts/install.sh
 
-          "$SMOKE_BIN/alaya" --help >/dev/null 2>&1 \
-            || { echo "FATAL: installed alaya --help failed"; exit 1; }
+          "$SMOKE_BIN/alaya" --help > install-smoke.txt
+          echo "SMOKE OK: tarball + install.sh contract upholds end-to-end." >> install-smoke.txt
 
-          echo "SMOKE OK: tarball + install.sh contract upholds end-to-end."
+      - name: Upload install smoke evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-smoke
+          path: install-smoke.txt
+          retention-days: 14
+
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - package
+      - install-smoke
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.package.outputs.tag }}
+          TARBALL: ${{ needs.package.outputs.tarball }}
         run: |
           set -euo pipefail
-          TAG="${{ steps.pack.outputs.tag }}"
-          TARBALL="${{ steps.pack.outputs.tarball }}"
           gh release create "$TAG" \
+            --verify-tag \
             --title "$TAG" \
             --generate-notes \
-            "$TARBALL" \
-            SHA256SUMS
+            "release-assets/$TARBALL" \
+            release-assets/SHA256SUMS

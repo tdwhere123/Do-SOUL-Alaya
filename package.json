@@ -11,7 +11,9 @@
   },
   "scripts": {
     "build": "node ./scripts/build-existing.mjs",
-    "test": "vitest run --config vitest.config.mjs",
+    "test": "node ./scripts/ci/run-vitest-projects.mjs",
+    "test:parallel": "vitest run --config vitest.config.mjs",
+    "ci:content-contracts": "node ./scripts/ci/check-content-contracts.mjs",
     "hygiene:unused": "knip --config knip.json --no-progress --no-config-hints",
     "release:check-version": "node ./scripts/check-release-version.mjs",
     "fixtures:host-autonomy-witness": "node ./scripts/export-host-autonomy-witness.mjs",

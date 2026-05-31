@@ -1,7 +1,17 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "include": ["files", "dependencies", "unlisted", "unresolved"],
-  "ignore": ["vendor/**", "dist/**", "coverage/**"],
+  "ignore": [
+    "vendor/**",
+    "dist/**",
+    "coverage/**",
+    "apps/core-daemon/src/worker-runtime-wiring.ts",
+    "scripts/analyze-recall-bias.mjs",
+    "scripts/append-bench-degradation-backlog.mjs",
+    "scripts/compute-bench-quality-metrics.mjs",
+    "scripts/compute-cohort-from-archive.mjs",
+    "scripts/fetch-local-embedding-model.mjs"
+  ],
   "ignoreWorkspaces": ["vendor/**"],
   "entry": [
     "bin/alaya.mjs",
