@@ -113,17 +113,44 @@ describe("edge auto producer daemon wiring", () => {
         generateObjectId: () => EVIDENCE_ID,
         now: () => "2026-05-25T00:00:00.000Z"
       });
+      // invariant: mirrors the daemon composition root — the atomic create +
+      // enrich_pending marker (enrichPendingWriter) + the router's
+      // enrichmentEnqueued-reporting adapter, so the marker commits inside the
+      // memory-row transaction and the router skips its loud fallback.
+      const enqueueEnrichPending = (params: {
+        readonly workspaceId: string;
+        readonly memoryId: string;
+        readonly runId: string | null;
+        readonly sourceSignalId: string | null;
+      }): void =>
+        enrichPendingRepo.enqueue({
+          workspaceId: params.workspaceId,
+          memoryId: params.memoryId,
+          runId: params.runId,
+          sourceSignalId: params.sourceSignalId,
+          enqueuedAt: "2026-05-25T00:00:01.000Z"
+        });
       const memoryService = new MemoryService({
         memoryEntryRepo: memoryRepo,
         evidenceService,
         eventLogRepo,
         runtimeNotifier,
+        enrichPendingWriter: { enqueue: enqueueEnrichPending },
         generateObjectId: () => NEW_MEMORY_ID,
         now: () => "2026-05-25T00:00:00.000Z"
       });
       const router = new MaterializationRouter({
         evidenceService,
-        memoryService,
+        memoryService: {
+          create: async (input) => {
+            const created = await memoryService.create(input);
+            return {
+              object_kind: created.object_kind,
+              object_id: created.object_id,
+              enrichmentEnqueued: input.enqueueEnrichment !== undefined
+            };
+          }
+        },
         synthesisService: {
           create: async () => ({ object_kind: "synthesis_capsule", object_id: "synthesis-1" })
         },
@@ -136,16 +163,7 @@ describe("edge auto producer daemon wiring", () => {
             return outcome === "applied" || outcome === "already_present";
           }
         },
-        enrichPendingPort: {
-          enqueue: (params) =>
-            enrichPendingRepo.enqueue({
-              workspaceId: params.workspaceId,
-              memoryId: params.memoryId,
-              runId: params.runId,
-              sourceSignalId: params.sourceSignalId,
-              enqueuedAt: "2026-05-25T00:00:01.000Z"
-            })
-        },
+        enrichPendingPort: { enqueue: enqueueEnrichPending },
         handoffGapHandler: new InMemoryHandoffGapHandler()
       });
 

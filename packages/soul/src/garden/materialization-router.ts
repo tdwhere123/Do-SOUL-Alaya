@@ -104,6 +104,19 @@ type MemoryMaterializationInput = Omit<
   | "superseded_by"
 > & {
   readonly storage_tier?: MemoryEntry["storage_tier"];
+  // invariant: atomic create + enrich_pending no-drop marker. When set, the
+  // memory-create port commits the row + the enrich_pending marker in ONE
+  // transaction (or neither, so the originating signal can replay). The router
+  // sets this ONLY on memory-creating branches that owe enrichment; the port
+  // reports back via MaterializationCreatedObject.enrichmentEnqueued. When the
+  // port does not honor the atomic seam the router falls back to a loud (not
+  // swallowed) separate enqueue. workspace_id + memory_id are filled by the
+  // truth boundary from the created row.
+  // see also: packages/core/src/memory-service.ts MemoryService.create.
+  readonly enqueueEnrichment?: {
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  };
 };
 
 type SynthesisMaterializationInput = Omit<
@@ -136,8 +149,18 @@ interface EvidenceMaterializationPort {
   create(input: EvidenceMaterializationInput): Promise<MaterializationCreatedObject>;
 }
 
+// invariant: the memory-create port reports whether the enrich_pending no-drop
+// marker was enqueued atomically with the row (see MemoryMaterializationInput
+// .enqueueEnrichment). enrichmentEnqueued === true means the row + marker
+// committed together; otherwise the router must enqueue the marker itself (loud
+// on failure — it is the mandatory no-drop handoff, never warn-and-continue).
+// see also: packages/core/src/memory-service.ts MemoryService.create.
+export type MemoryMaterializationCreatedObject = MaterializationCreatedObject & {
+  readonly enrichmentEnqueued?: boolean;
+};
+
 interface MemoryMaterializationPort {
-  create(input: MemoryMaterializationInput): Promise<MaterializationCreatedObject>;
+  create(input: MemoryMaterializationInput): Promise<MemoryMaterializationCreatedObject>;
 }
 
 interface SynthesisMaterializationPort {
@@ -591,7 +614,9 @@ export class MaterializationRouter {
       const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
       createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
-      const memory = await this.dependencies.memoryService.create(buildMemoryInput(signal, [evidence.object_id]));
+      const memory = await this.dependencies.memoryService.create(
+        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal))
+      );
       createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
 
       const claim = await this.dependencies.claimService.create(
@@ -600,11 +625,13 @@ export class MaterializationRouter {
       createdObjects.push({ object_kind: claim.object_kind, object_id: claim.object_id });
 
       // invariant: enqueue-not-inline + no-drop. The durable enrich_pending
-      // marker must precede every optional, throw-capable side effect below so
-      // a freshly materialized memory is never stranded without enrichment.
-      // Edge auto-production + conflict detection run off-path in the
-      // BULK_ENRICH worker. see enqueueEnrichment.
-      this.enqueueEnrichment(memory.object_id, signal);
+      // marker is committed atomically with the memory row (enrichmentIntent on
+      // the create input); this loud fallback only fires when the wired port did
+      // not honor the atomic seam, and it precedes every optional, throw-capable
+      // side effect below so a freshly materialized memory is never stranded
+      // without enrichment. Edge auto-production + conflict detection run
+      // off-path in the BULK_ENRICH worker. see enqueueEnrichmentAfterCreate.
+      this.enqueueEnrichmentAfterCreate(memory, signal);
 
       await this.createAllMemoryRefEdges(memory.object_id, signal);
       const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
@@ -770,14 +797,16 @@ export class MaterializationRouter {
       createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
       const memory = await this.dependencies.memoryService.create(
-        buildMemoryInput(signal, [evidence.object_id])
+        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal))
       );
       createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
 
       // invariant: enqueue-not-inline + no-drop. The durable enrich_pending
-      // marker must precede every optional, throw-capable side effect below.
-      // see enqueueEnrichment.
-      this.enqueueEnrichment(memory.object_id, signal);
+      // marker is committed atomically with the memory row; this loud fallback
+      // only fires when the wired port did not honor the atomic seam, and it
+      // precedes every optional, throw-capable side effect below.
+      // see enqueueEnrichmentAfterCreate.
+      this.enqueueEnrichmentAfterCreate(memory, signal);
 
       await this.createAllMemoryRefEdges(memory.object_id, signal);
 
@@ -833,7 +862,7 @@ export class MaterializationRouter {
   ): Promise<MaterializationResult> {
     const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
     let evidenceId: string | undefined;
-    let appendedMemoryId: string | undefined;
+    let appendedMemory: MemoryMaterializationCreatedObject | undefined;
 
     const ensureEvidence = async (): Promise<string> => {
       if (evidenceId === undefined) {
@@ -865,11 +894,12 @@ export class MaterializationRouter {
             // ref; the router creates no memory_entry on this branch.
             return { incomingEvidenceRef: evidenceRef };
           }
-          // ADD: append the memory_entry against the fresh evidence.
+          // ADD: append the memory_entry against the fresh evidence. The
+          // enrich_pending marker commits atomically with the row.
           const memory = await this.dependencies.memoryService.create(
-            buildMemoryInput(signal, [evidenceRef])
+            buildMemoryInput(signal, [evidenceRef], this.enrichmentIntent(signal))
           );
-          appendedMemoryId = memory.object_id;
+          appendedMemory = memory;
           createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
           return { incomingEvidenceRef: evidenceRef };
         }
@@ -879,11 +909,14 @@ export class MaterializationRouter {
       // its detectAndLinkConflicts now runs in the BULK_ENRICH worker, not
       // inline. Only an ADD mints a new memory_entry endpoint; UPDATE / NOOP
       // reuse an existing row and enqueue nothing (no fresh enrichment target).
-      if (appendedMemoryId !== undefined) {
+      if (appendedMemory !== undefined) {
+        const appendedMemoryId = appendedMemory.object_id;
         // invariant: enqueue-not-inline + no-drop. The durable enrich_pending
-        // marker must precede every optional, throw-capable side effect below.
-        // see enqueueEnrichment.
-        this.enqueueEnrichment(appendedMemoryId, signal);
+        // marker is committed atomically with the memory row; this loud fallback
+        // only fires when the wired port did not honor the atomic seam, and it
+        // precedes every optional, throw-capable side effect below.
+        // see enqueueEnrichmentAfterCreate.
+        this.enqueueEnrichmentAfterCreate(appendedMemory, signal);
 
         await this.createAllMemoryRefEdges(appendedMemoryId, signal);
         const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
@@ -928,15 +961,16 @@ export class MaterializationRouter {
     }
   }
 
-  // invariant: write-path/enrich-path decouple (S3c). Enqueues a durable
-  // enrich_pending marker for a freshly materialized memory instead of running
-  // ConflictDetectionService.detectAndLinkConflicts + EdgeAutoProducer inline.
-  // The Garden BULK_ENRICH worker reconstructs the conflict-scan params from
-  // the persisted memory row (content/dimension/scope/domain_tags match
-  // buildMemoryInput exactly) and runs both governed services off-path. The
-  // enqueue must never break a successful memory creation, so a failure is
-  // swallowed with a warning. With no enrichPendingPort wired, enrichment is
-  // disabled (same as an absent enrichment service before the decouple).
+  // invariant: write-path/enrich-path decouple (S3c). The durable enrich_pending
+  // marker is the mandatory no-drop handoff between the synchronous write-path
+  // and the Garden BULK_ENRICH worker (which reconstructs the conflict-scan
+  // params from the persisted memory row — content/dimension/scope/domain_tags
+  // match buildMemoryInput exactly — and runs ConflictDetectionService
+  // .detectAndLinkConflicts + EdgeAutoProducer off-path). The PREFERRED enqueue
+  // path is atomic: the memory-create port commits the row + the marker in one
+  // transaction (enrichmentIntent on the create input), so a created memory
+  // ALWAYS carries its marker. enrichmentIntent returns undefined only when no
+  // enrichPendingPort is wired (enrichment disabled, same as an absent service).
   // invariant: conflict suppression (contradicts/supersedes edges) is now
   // best-effort-eventual, not synchronous-at-materialize. A freshly materialized
   // memory is recallable before its not-yet-detected contradiction/supersession
@@ -946,25 +980,42 @@ export class MaterializationRouter {
   // cap, and O(workspaces / cap) * ~1 min beyond it.
   // see also: packages/storage/src/repos/enrich-pending-repo.ts
   // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask.
-  private enqueueEnrichment(memoryId: string, signal: CandidateMemorySignal): void {
+  private enrichmentIntent(
+    signal: CandidateMemorySignal
+  ): MemoryMaterializationInput["enqueueEnrichment"] {
+    if (this.dependencies.enrichPendingPort === undefined) {
+      return undefined;
+    }
+    return buildEnrichmentIntent(signal);
+  }
+
+  // invariant: loud no-drop fallback. The atomic create+enqueue is the primary
+  // path (enrichmentIntent). This fires ONLY when the wired memory-create port
+  // did not honor the atomic seam (enrichmentEnqueued !== true) yet an
+  // enrichPendingPort is wired — the marker is mandatory, so a failure here
+  // must surface (the caller's catch flips the branch to success:false → the
+  // signal is marked FAILED rather than leaving a memory stranded with no
+  // marker). NOT warn-and-continue: that swallow is the bug B6's intent must
+  // not reintroduce. The genuinely-optional time_concern proposal keeps its
+  // warn-and-continue (createTimeConcernProposalBestEffort) — this does not.
+  // see also: packages/core/src/signal-service.ts terminal-FAILED on success!=true
+  private enqueueEnrichmentAfterCreate(
+    memory: MemoryMaterializationCreatedObject,
+    signal: CandidateMemorySignal
+  ): void {
+    if (memory.enrichmentEnqueued === true) {
+      return;
+    }
     const port = this.dependencies.enrichPendingPort;
     if (port === undefined) {
       return;
     }
-    try {
-      port.enqueue({
-        workspaceId: signal.workspace_id,
-        memoryId,
-        runId: signal.run_id,
-        sourceSignalId: signal.signal_id
-      });
-    } catch (err) {
-      console.warn("materialization-router: enrich enqueue failed", {
-        memoryId,
-        signalId: signal.signal_id,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
+    port.enqueue({
+      workspaceId: signal.workspace_id,
+      memoryId: memory.object_id,
+      runId: signal.run_id,
+      sourceSignalId: signal.signal_id
+    });
   }
 
   private async materializePathRelationProposal(
@@ -1391,7 +1442,8 @@ function buildSignalPhysicalAnchor(signal: CandidateMemorySignal): EvidenceCapsu
 
 function buildMemoryInput(
   signal: CandidateMemorySignal,
-  evidenceRefs: readonly string[]
+  evidenceRefs: readonly string[],
+  enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"]
 ): MemoryMaterializationInput {
   return {
     created_by: signal.source,
@@ -1409,8 +1461,18 @@ function buildMemoryInput(
     workspace_id: signal.workspace_id,
     run_id: signal.run_id,
     surface_id: signal.surface_id,
-    storage_tier: StorageTier.HOT
+    storage_tier: StorageTier.HOT,
+    ...(enqueueEnrichment === undefined ? {} : { enqueueEnrichment })
   };
+}
+
+// invariant: the enrich_pending no-drop intent carried into a memory-creating
+// branch's create input — the truth boundary commits the row + marker
+// atomically. see also: MaterializationRouter enqueueEnrichmentAfterCreate.
+function buildEnrichmentIntent(
+  signal: CandidateMemorySignal
+): NonNullable<MemoryMaterializationInput["enqueueEnrichment"]> {
+  return { runId: signal.run_id, sourceSignalId: signal.signal_id };
 }
 
 function buildClaimInput(

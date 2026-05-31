@@ -15,6 +15,7 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../db.js";
+import { SqliteEnrichPendingRepo } from "../repos/enrich-pending-repo.js";
 import { SqliteMemoryEntryRepo } from "../repos/memory-entry-repo.js";
 import { SqliteRunRepo } from "../repos/run-repo.js";
 import { SqliteWorkspaceRepo } from "../repos/workspace-repo.js";
@@ -71,6 +72,45 @@ describe("SqliteMemoryEntryRepo", () => {
 
     await expect(repo.create(entry)).resolves.toEqual(entry);
     await expect(repo.findById(entry.object_id)).resolves.toEqual(entry);
+  });
+
+  it("createWithinTransaction commits the row and the co-write atomically", async () => {
+    const { repo, database } = await createRepo();
+    const enrichRepo = new SqliteEnrichPendingRepo(database);
+    const entry = createMemoryEntry();
+
+    const returned = repo.createWithinTransaction(entry, () => {
+      enrichRepo.enqueue({
+        workspaceId: entry.workspace_id,
+        memoryId: entry.object_id,
+        runId: entry.run_id,
+        sourceSignalId: "signal-1",
+        enqueuedAt: "2026-03-21T00:00:00.000Z"
+      });
+    });
+
+    expect(returned).toEqual(entry);
+    await expect(repo.findById(entry.object_id)).resolves.toEqual(entry);
+    expect(enrichRepo.countPending(entry.workspace_id)).toBe(1);
+  });
+
+  it("createWithinTransaction rolls back the row when the co-write throws (no marker-less memory)", async () => {
+    // invariant pinned: a created memory ALWAYS carries its enrich_pending
+    // marker, or NEITHER lands. A throw in the co-write rolls the row insert
+    // back, so the originating signal can replay rather than leave a durable
+    // memory with no enrichment marker and no replay path.
+    const { repo, database } = await createRepo();
+    const enrichRepo = new SqliteEnrichPendingRepo(database);
+    const entry = createMemoryEntry();
+
+    expect(() =>
+      repo.createWithinTransaction(entry, () => {
+        throw new Error("co-write failed");
+      })
+    ).toThrow("co-write failed");
+
+    await expect(repo.findById(entry.object_id)).resolves.toBeNull();
+    expect(enrichRepo.countPending(entry.workspace_id)).toBe(0);
   });
 
   it("finds memory entries by ids without duplicates and skips missing ids", async () => {

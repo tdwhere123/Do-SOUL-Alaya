@@ -77,6 +77,14 @@ export interface MemoryEntryKeywordSearchResult {
 
 export interface MemoryEntryRepo {
   create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>>;
+  // invariant: atomic create + caller-supplied co-write. Runs the row insert and
+  // `withinTransaction` inside ONE connection.transaction so a created memory row
+  // and its co-write (the enrich_pending no-drop marker) either both commit or
+  // neither does. `withinTransaction` MUST be synchronous — better-sqlite3 commits
+  // on return, so an awaited write would land after COMMIT.
+  // see also: packages/core/src/memory-service.ts MemoryService.create enrich enqueue
+  // see also: packages/storage/src/repos/enrich-pending-repo.ts enqueue
+  createWithinTransaction(entry: MemoryEntry, withinTransaction: () => void): Readonly<MemoryEntry>;
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
   findByIds(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
   findByWorkspaceId(
@@ -344,7 +352,24 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
 
   public async create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>> {
     const parsedEntry = parseMemoryEntry(entry);
+    this.runCreateStatement(parsedEntry);
+    return parsedEntry;
+  }
 
+  public createWithinTransaction(
+    entry: MemoryEntry,
+    withinTransaction: () => void
+  ): Readonly<MemoryEntry> {
+    const parsedEntry = parseMemoryEntry(entry);
+    const txn = this.db.connection.transaction(() => {
+      this.runCreateStatement(parsedEntry);
+      withinTransaction();
+    });
+    txn.immediate();
+    return parsedEntry;
+  }
+
+  private runCreateStatement(parsedEntry: Readonly<MemoryEntry>): void {
     try {
       this.createStatement.run(
         parsedEntry.object_id,
@@ -384,8 +409,6 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         error
       );
     }
-
-    return parsedEntry;
   }
 
   public async findById(objectId: string): Promise<Readonly<MemoryEntry> | null> {

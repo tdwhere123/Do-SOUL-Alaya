@@ -48,6 +48,21 @@ export type MemoryEntryInput = Omit<
   | "superseded_by"
 > & {
   readonly storage_tier?: MemoryEntry["storage_tier"];
+  // invariant: atomic create + enrich_pending no-drop marker. When present, the
+  // memory row insert and the enrich_pending enqueue commit in ONE storage
+  // transaction (so a created memory ALWAYS carries its marker, or neither
+  // lands and the originating signal can replay). The caller (soul materializer)
+  // owns the enqueue DECISION — it sets this only on the branches that enqueue;
+  // run_id / source_signal_id are carried here, while workspace_id + memory_id
+  // are filled from the freshly created row inside core. Requires both the
+  // enrichPendingWriter dep and memoryEntryRepo.createWithinTransaction to be
+  // wired; otherwise create throws rather than silently dropping the marker.
+  // see also: packages/soul/src/garden/materialization-router.ts enqueueEnrichment
+  // see also: packages/storage/src/repos/enrich-pending-repo.ts enqueue
+  readonly enqueueEnrichment?: {
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  };
 };
 
 export type MemoryEntryUpdateFields = MemoryEntryMutableFields & {
@@ -66,6 +81,13 @@ export interface MemoryServiceEventLogRepoPort {
 
 export interface MemoryServiceMemoryEntryRepoPort {
   create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>>;
+  // see also: packages/storage/src/repos/memory-entry-repo.ts createWithinTransaction.
+  // The synchronous `withinTransaction` co-write commits atomically with the row
+  // insert; used for the enrich_pending no-drop marker.
+  createWithinTransaction?(
+    entry: MemoryEntry,
+    withinTransaction: () => void
+  ): Readonly<MemoryEntry>;
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
   findByWorkspaceId(
     workspaceId: string,
@@ -120,6 +142,22 @@ export interface MemoryServiceDynamicsPort {
   };
 }
 
+// invariant: synchronous enrich_pending writer for the atomic create+enqueue
+// path. The enqueue runs INSIDE the memory-row create transaction, so it must be
+// synchronous (better-sqlite3 commits on return). memory_id + workspace_id come
+// from the freshly created row; run_id + source_signal_id from the create input.
+// Core depends on a storage abstraction here exactly as it does on
+// memoryEntryRepo — the daemon wires it to SqliteEnrichPendingRepo.enqueue.
+// see also: packages/storage/src/repos/enrich-pending-repo.ts enqueue
+export interface MemoryServiceEnrichPendingWriterPort {
+  enqueue(params: {
+    readonly workspaceId: string;
+    readonly memoryId: string;
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  }): void;
+}
+
 export interface MemoryServiceGreenPort {
   reevaluate(params: {
     readonly targetObjectId: string;
@@ -140,6 +178,11 @@ export interface MemoryServiceDependencies {
   readonly runtimeNotifier: MemoryRuntimeNotifier;
   readonly dynamicsService?: MemoryServiceDynamicsPort;
   readonly greenService?: MemoryServiceGreenPort;
+  // invariant: when wired alongside memoryEntryRepo.createWithinTransaction, a
+  // create whose input carries `enqueueEnrichment` commits the row + the
+  // enrich_pending marker atomically. Absent, an enqueueEnrichment intent throws
+  // (no silent no-drop violation) rather than dropping the marker.
+  readonly enrichPendingWriter?: MemoryServiceEnrichPendingWriterPort;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
 }
@@ -208,7 +251,7 @@ export class MemoryService {
       })
     });
 
-    const created = await this.dependencies.memoryEntryRepo.create(memoryEntry);
+    const created = await this.createRowMaybeAtomicallyEnqueued(memoryEntry, input.enqueueEnrichment);
     await this.dependencies.runtimeNotifier.notifyEntry(event);
 
     if (
@@ -224,6 +267,44 @@ export class MemoryService {
     }
 
     return created;
+  }
+
+  // invariant: atomic create + enrich_pending no-drop marker. When the caller
+  // supplies an `enqueueEnrichment` intent, the memory row insert and the
+  // enrich_pending enqueue commit in ONE storage transaction, so a created
+  // memory ALWAYS carries its marker (or neither lands and the originating
+  // signal can replay — closing both the swallowed-enqueue-write and the
+  // crash-window gaps). The enqueue is NOT best-effort here: if the atomic
+  // seam is requested but the storage capability or writer is not wired, this
+  // throws rather than dropping the marker silently. With no intent, the plain
+  // async create path is unchanged.
+  // see also: packages/soul/src/garden/materialization-router.ts enqueueEnrichment
+  // see also: packages/core/src/signal-service.ts terminal-FAILED on success!=true
+  private async createRowMaybeAtomicallyEnqueued(
+    memoryEntry: Readonly<MemoryEntry>,
+    enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"]
+  ): Promise<Readonly<MemoryEntry>> {
+    if (enqueueEnrichment === undefined) {
+      return await this.dependencies.memoryEntryRepo.create(memoryEntry);
+    }
+
+    const createWithinTransaction = this.dependencies.memoryEntryRepo.createWithinTransaction;
+    const enrichPendingWriter = this.dependencies.enrichPendingWriter;
+    if (createWithinTransaction === undefined || enrichPendingWriter === undefined) {
+      throw new CoreError(
+        "CONFLICT",
+        "Atomic enrich_pending enqueue requested but the storage transaction port or enrich-pending writer is not wired."
+      );
+    }
+
+    return createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, () => {
+      enrichPendingWriter.enqueue({
+        workspaceId: memoryEntry.workspace_id,
+        memoryId: memoryEntry.object_id,
+        runId: enqueueEnrichment.runId,
+        sourceSignalId: enqueueEnrichment.sourceSignalId
+      });
+    });
   }
 
   public async update(

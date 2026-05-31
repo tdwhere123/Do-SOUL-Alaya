@@ -281,6 +281,22 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const pathRelationRepo = new SqlitePathRelationRepo(database);
   const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
   const enrichPendingRepo = new SqliteEnrichPendingRepo(database);
+  // invariant: single enrich_pending enqueue adapter shared by the atomic
+  // create+marker seam (core MemoryService.enrichPendingWriter) and the
+  // router's loud fallback port (enrichPendingPort). enqueuedAt is stamped here.
+  const enqueueEnrichPending = (params: {
+    readonly workspaceId: string;
+    readonly memoryId: string;
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  }): void =>
+    enrichPendingRepo.enqueue({
+      workspaceId: params.workspaceId,
+      memoryId: params.memoryId,
+      runId: params.runId,
+      sourceSignalId: params.sourceSignalId,
+      enqueuedAt: new Date().toISOString()
+    });
   const pathPlasticityWatermarkRepo = new SqlitePathPlasticityWatermarkRepo(database);
   const pathGraphSnapshotRepo = new SqlitePathGraphSnapshotRepo(database);
   const deferredObligationRepo = new SqliteDeferredObligationRepo(database);
@@ -400,7 +416,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     eventLogRepo,
     runtimeNotifier,
     dynamicsService,
-    greenService
+    greenService,
+    // invariant: atomic create + enrich_pending no-drop marker. When a create
+    // input carries an enqueueEnrichment intent, the row insert and this enqueue
+    // commit in one storage transaction. see also:
+    // packages/core/src/memory-service.ts createRowMaybeAtomicallyEnqueued
+    enrichPendingWriter: { enqueue: enqueueEnrichPending }
   });
   const graphExploreService = new GraphExploreService({
     // soul.explore_graph and recall graph_support counts both read the unified
@@ -1155,29 +1176,34 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     }
   };
   // invariant: write-path/enrich-path decouple (S3c). The router no longer runs
-  // edge auto-production / conflict detection inline; it enqueues an
-  // enrich_pending marker per new memory and the Garden BULK_ENRICH worker runs
-  // the governed services off-path. The conflictDetectionPort is still wired for
-  // the potential_conflict `evaluate` route (a raw signal with no memory yet).
+  // edge auto-production / conflict detection inline; the enrich_pending marker
+  // per new memory drives the Garden BULK_ENRICH worker off-path. The marker is
+  // committed atomically with the memory row inside MemoryService.create (the
+  // create input carries the enqueueEnrichment intent); this port is the
+  // router's loud no-drop fallback for the case the create did not enqueue
+  // atomically. The conflictDetectionPort is still wired for the
+  // potential_conflict `evaluate` route (a raw signal with no memory yet).
   // see also: garden-runtime.ts runBulkEnrichTask.
-  const enrichPendingPort = {
-    enqueue: (params: {
-      readonly workspaceId: string;
-      readonly memoryId: string;
-      readonly runId: string | null;
-      readonly sourceSignalId: string | null;
-    }) =>
-      enrichPendingRepo.enqueue({
-        workspaceId: params.workspaceId,
-        memoryId: params.memoryId,
-        runId: params.runId,
-        sourceSignalId: params.sourceSignalId,
-        enqueuedAt: new Date().toISOString()
-      })
+  const enrichPendingPort = { enqueue: enqueueEnrichPending };
+  // invariant: the router needs to know whether MemoryService.create committed
+  // the enrich_pending marker atomically (so it skips its loud fallback). Core
+  // throws if an enqueueEnrichment intent is requested but the atomic seam is
+  // unwired, so a successful return WITH the intent means the marker landed
+  // atomically. see also: packages/soul/src/garden/materialization-router.ts
+  // MemoryMaterializationCreatedObject.enrichmentEnqueued
+  const materializationMemoryService = {
+    create: async (input: Parameters<typeof memoryService.create>[0]) => {
+      const created = await memoryService.create(input);
+      return {
+        object_kind: created.object_kind,
+        object_id: created.object_id,
+        enrichmentEnqueued: input.enqueueEnrichment !== undefined
+      };
+    }
   };
   const materializationRouter = new MaterializationRouter({
     evidenceService,
-    memoryService,
+    memoryService: materializationMemoryService,
     synthesisService,
     claimService,
     pathRelationProposalPort,

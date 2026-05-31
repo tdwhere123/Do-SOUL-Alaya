@@ -242,6 +242,130 @@ describe("MemoryService", () => {
     });
   });
 
+  it("commits the enrich_pending marker atomically with the row when the create input carries the intent", async () => {
+    // invariant pinned: a created memory ALWAYS carries its enrich_pending
+    // marker — the row insert and the enqueue run inside ONE storage
+    // transaction. The enqueue uses the freshly created memory_id + workspace_id
+    // and the intent's run_id / source_signal_id.
+    const order: string[] = [];
+    const enqueueSpy = vi.fn((_params: unknown) => {
+      order.push("enqueue");
+    });
+    const createWithinTransaction = vi.fn(
+      (entry: MemoryEntry, withinTransaction: () => void): Readonly<MemoryEntry> => {
+        order.push("repo_create");
+        withinTransaction();
+        return Object.freeze({ ...entry });
+      }
+    );
+    const plainCreate = vi.fn(async (entry: MemoryEntry) => Object.freeze({ ...entry }));
+
+    const { dependencies } = createDependencies({
+      memoryEntryRepo: {
+        create: plainCreate,
+        createWithinTransaction,
+        findById: vi.fn(async () => null),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      },
+      enrichPendingWriter: { enqueue: enqueueSpy }
+    });
+
+    const service = new MemoryService(dependencies);
+    const created = await service.create(
+      createMemoryInput({
+        evidence_refs: ["evidence"],
+        enqueueEnrichment: { runId: "run-7", sourceSignalId: "signal-7" }
+      })
+    );
+
+    expect(plainCreate).not.toHaveBeenCalled();
+    expect(createWithinTransaction).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["repo_create", "enqueue"]);
+    expect(enqueueSpy).toHaveBeenCalledWith({
+      workspaceId: created.workspace_id,
+      memoryId: created.object_id,
+      runId: "run-7",
+      sourceSignalId: "signal-7"
+    });
+  });
+
+  it("rolls back the whole create (no marker-less memory) when the enrich_pending enqueue throws", async () => {
+    // invariant pinned: the no-drop handoff. If the marker enqueue throws inside
+    // the row transaction, the row insert rolls back too — neither the memory
+    // nor the marker lands, so the originating signal can replay. There is no
+    // durable memory left without a marker (the silent no-drop violation).
+    const enqueueSpy = vi.fn(() => {
+      throw new Error("SQLITE_BUSY: enrich_pending insert failed");
+    });
+    // Mirrors connection.transaction rollback: if withinTransaction throws, the
+    // row insert is not visible and the error propagates out of create.
+    const createWithinTransaction = vi.fn(
+      (_entry: MemoryEntry, withinTransaction: () => void): Readonly<MemoryEntry> => {
+        withinTransaction();
+        throw new Error("unreachable: withinTransaction already threw");
+      }
+    );
+    const plainCreate = vi.fn(async (entry: MemoryEntry) => Object.freeze({ ...entry }));
+
+    const { dependencies } = createDependencies({
+      memoryEntryRepo: {
+        create: plainCreate,
+        createWithinTransaction,
+        findById: vi.fn(async () => null),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      },
+      enrichPendingWriter: { enqueue: enqueueSpy }
+    });
+
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.create(
+        createMemoryInput({
+          evidence_refs: ["evidence"],
+          enqueueEnrichment: { runId: "run-7", sourceSignalId: "signal-7" }
+        })
+      )
+    ).rejects.toThrow("SQLITE_BUSY");
+    expect(plainCreate).not.toHaveBeenCalled();
+  });
+
+  it("throws rather than silently dropping the marker when the atomic enqueue seam is not wired", async () => {
+    // invariant pinned: an enqueueEnrichment intent without the
+    // createWithinTransaction capability / enrichPendingWriter must fail loud,
+    // never fall back to a non-atomic create that could strand the memory.
+    const { dependencies } = createDependencies();
+
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.create(
+        createMemoryInput({
+          evidence_refs: ["evidence"],
+          enqueueEnrichment: { runId: "run-7", sourceSignalId: "signal-7" }
+        })
+      )
+    ).rejects.toMatchObject({ name: "CoreError", code: "CONFLICT" });
+  });
+
   it("rejects create when evidence_refs contains a missing reference", async () => {
     const { dependencies, appendSpy } = createDependencies({
       evidenceService: {

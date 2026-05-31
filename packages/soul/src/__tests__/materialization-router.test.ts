@@ -310,6 +310,73 @@ describe("MaterializationRouter", () => {
     });
   });
 
+  it("passes the enrichment intent on the create input so the marker commits atomically", async () => {
+    const deps = createDeps();
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
+
+    await router.materializeSignal(createSignal());
+
+    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+      readonly enqueueEnrichment?: { readonly runId: string | null; readonly sourceSignalId: string | null };
+    };
+    expect(memoryInput.enqueueEnrichment).toEqual({ runId: "run-1", sourceSignalId: "signal-1" });
+  });
+
+  it("skips the loud fallback enqueue when the create reported it enqueued atomically", async () => {
+    const deps = createDeps();
+    // The atomic-capable create commits the row + marker in one transaction and
+    // reports enrichmentEnqueued: true, so the router must NOT enqueue again.
+    deps.memoryService.create = vi.fn<(input: Record<string, unknown>) => Promise<MockCreatedObjectWithEnrich>>(
+      async () => ({ object_kind: "memory_entry", object_id: "memory-1", enrichmentEnqueued: true })
+    );
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
+
+    const result = await router.materializeSignal(createSignal());
+
+    expect(result.success).toBe(true);
+    expect(enrichPendingPort.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("fails the branch loudly when the marker enqueue throws and the create did not enqueue atomically", async () => {
+    // invariant pinned: the enrich_pending marker is the mandatory no-drop
+    // handoff. When the create did NOT commit it atomically and the fallback
+    // enqueue write itself throws, the branch must NOT return success: true with
+    // a memory stranded marker-less — it surfaces so SignalService marks the
+    // signal FAILED (a swallow here is the B6 regression this fix closes).
+    const deps = createDeps();
+    const enrichPendingPort = {
+      enqueue: vi.fn<EnqueueFn>(() => {
+        throw new Error("SQLITE_BUSY: enrich_pending insert failed");
+      })
+    };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
+
+    const result = await router.materializeSignal(createSignal());
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("SQLITE_BUSY");
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails the memory_entry_only append branch loudly when the marker enqueue throws", async () => {
+    const deps = createDeps();
+    const enrichPendingPort = {
+      enqueue: vi.fn<EnqueueFn>(() => {
+        throw new Error("disk full");
+      })
+    };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
+
+    const result = await router.materializeSignal(
+      createSignal({ object_kind: "fact", raw_payload: { distilled_fact: "The user lives in Berlin." } })
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("disk full");
+  });
+
   it("uses validated schema-grounded field values as memory content", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter(deps);
@@ -1429,6 +1496,11 @@ function createRouter() {
 interface MockCreatedObject {
   readonly object_kind: string;
   readonly object_id: string;
+}
+// invariant: mirrors MemoryMaterializationCreatedObject — the memory-create port
+// optionally reports whether the enrich_pending marker committed atomically.
+interface MockCreatedObjectWithEnrich extends MockCreatedObject {
+  readonly enrichmentEnqueued?: boolean;
 }
 type MockServiceInput = Record<string, unknown>;
 type MockPathCandidateInput = {
