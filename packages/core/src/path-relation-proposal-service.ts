@@ -402,6 +402,36 @@ export class PathRelationProposalService {
     }
   }
 
+  // invariant: the SAME object-anchor existence + ownership gate the mint sink
+  // runs (validateObjectAnchors), exposed for the second durable path-insert
+  // route — the proposal accept-apply path mints a stored proposed_path_relation
+  // through the storage transaction, which cannot import this service. The
+  // workflow calls this before that insert so an object anchor naming a missing
+  // or foreign memory is refused with the same path.relation_rejected audit,
+  // and no durable path lands. Returns "accepted" when both anchors pass (or
+  // are non-object / the existence port is unwired) and "rejected" — after
+  // emitting the audit — on the first failure. This is decided, never transient:
+  // a rejected accept-apply must NOT retry.
+  // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts accept path
+  // see also: packages/storage/src/repos/proposal-repo.ts acceptPendingPathRelationGovernanceWithEvents
+  public async validateProposedObjectAnchors(input: {
+    readonly workspaceId: string;
+    readonly relationKind: string;
+    readonly sourceAnchor: PathAnchorRef;
+    readonly targetAnchor: PathAnchorRef;
+  }): Promise<"accepted" | "rejected"> {
+    const failure = await this.validateObjectAnchors(
+      input.workspaceId,
+      input.sourceAnchor,
+      input.targetAnchor
+    );
+    if (failure === undefined) {
+      return "accepted";
+    }
+    await this.emitRejection(input.workspaceId, input.relationKind, failure);
+    return "rejected";
+  }
+
   public async evictExpired(nowMs?: number, ttlMs?: number): Promise<number> {
     const cutoffMs = (nowMs ?? this.nowMs()) - (ttlMs ?? this.counterTtlMs);
     return await this.counterStore.evictExpired(new Date(cutoffMs).toISOString());

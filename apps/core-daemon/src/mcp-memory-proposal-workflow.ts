@@ -15,6 +15,7 @@ import {
   TransitionCausedBy,
   type MemoryEntryMutableFields,
   type EventLogEntry,
+  type PathAnchorRef,
   type Proposal,
   type SoulListPendingProposalsRequest,
   type SoulPendingProposalSummary,
@@ -113,6 +114,14 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly target_object_id?: string | null;
     readonly target_object_kind?: string | null;
     readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
+    // Scoped path-relation governance payload. The accept-apply path reads the
+    // target anchor to gate it through the object-anchor existence/ownership
+    // check before the durable insert. Optional for compatibility with legacy
+    // storage fakes that predate path_relation proposals.
+    readonly proposed_path_relation?: Readonly<{
+      readonly target_anchor: PathAnchorRef;
+      readonly constitution?: Readonly<{ readonly relation_kind?: string | null }> | null;
+    }> | null;
     readonly target_baseline_updated_at?: string | null;
     readonly source_delivery_ids?: readonly string[] | null;
   }> | null>;
@@ -218,6 +227,22 @@ export interface McpMemoryProposalWorkflowDependencies {
       sourceDeliveryIds: readonly string[],
       context: McpMemoryToolCallContext
     ): Promise<void> | void;
+  };
+  // invariant: the SAME object-anchor existence + ownership gate the path mint
+  // sink runs. The accept-apply path inserts a stored proposed_path_relation
+  // into the durable path plane through the storage transaction (which cannot
+  // import the core service), so this seam routes that second insert through
+  // B3's gate before it lands. Wired by the daemon to
+  // PathRelationProposalService.validateProposedObjectAnchors; left undefined
+  // only in unit tests that do not exercise path_relation proposals.
+  // see also: packages/core/src/path-relation-proposal-service.ts validateProposedObjectAnchors
+  readonly objectAnchorGate?: {
+    validateProposedObjectAnchors(input: {
+      readonly workspaceId: string;
+      readonly relationKind: string;
+      readonly sourceAnchor: PathAnchorRef;
+      readonly targetAnchor: PathAnchorRef;
+    }): Promise<"accepted" | "rejected">;
   };
   readonly now?: () => string;
   readonly generateObjectId?: () => string;
@@ -487,6 +512,10 @@ export function createMcpMemoryProposalWorkflow(
       readonly target_object_kind?: string | null;
       readonly target_object_id?: string | null;
       readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
+      readonly proposed_path_relation?: Readonly<{
+        readonly target_anchor: PathAnchorRef;
+        readonly constitution?: Readonly<{ readonly relation_kind?: string | null }> | null;
+      }> | null;
       readonly target_baseline_updated_at?: string | null;
     }>,
     context: McpMemoryToolCallContext
@@ -545,6 +574,10 @@ export function createMcpMemoryProposalWorkflow(
       readonly proposal: Readonly<Proposal>;
       readonly workspace_id: string;
       readonly target_object_id?: string | null;
+      readonly proposed_path_relation?: Readonly<{
+        readonly target_anchor: PathAnchorRef;
+        readonly constitution?: Readonly<{ readonly relation_kind?: string | null }> | null;
+      }> | null;
     }>,
     context: McpMemoryToolCallContext
   ): Promise<AcceptedProposalApply> {
@@ -564,6 +597,18 @@ export function createMcpMemoryProposalWorkflow(
         `Target memory object not found in workspace: ${targetObjectId}`
       );
     }
+
+    // invariant: this is the second durable path-insert route; gate its object
+    // anchors through B3's existence + ownership check before the storage
+    // accept-apply commits a path_relations row. The storage layer builds the
+    // source anchor as {kind:object, object_id: targetObjectId} and the target
+    // anchor from proposed_path_relation.target_anchor (the only field an
+    // untrusted producer could aim at a foreign/missing object). A rejection
+    // emits the same path.relation_rejected audit the mint sink uses and stops
+    // the accept-apply before any durable insert.
+    // see also: packages/storage/src/repos/proposal-repo.ts createPathRelationFromProposalPayload
+    await assertProposedPathAnchorsValid(scopedProposal, context.workspaceId, targetObjectId);
+
     return {
       kind: "path_relation_governance",
       pathRelationGovernance: {
@@ -573,6 +618,44 @@ export function createMcpMemoryProposalWorkflow(
         caused_by: `proposal_accept:${proposalId}`
       }
     };
+  }
+
+  async function assertProposedPathAnchorsValid(
+    scopedProposal: Readonly<{
+      readonly proposed_path_relation?: Readonly<{
+        readonly target_anchor: PathAnchorRef;
+        readonly constitution?: Readonly<{ readonly relation_kind?: string | null }> | null;
+      }> | null;
+    }>,
+    workspaceId: string,
+    targetObjectId: string
+  ): Promise<void> {
+    if (deps.objectAnchorGate === undefined) {
+      return;
+    }
+    const payload = scopedProposal.proposed_path_relation ?? null;
+    // The storage insert always mints the source as an object anchor on the
+    // (already existence/ownership-checked) target memory; the target anchor is
+    // the payload's when present, else a synthetic object_facet on the same
+    // memory. Both are passed to the gate, which only acts on kind:"object".
+    const sourceAnchor: PathAnchorRef = { kind: "object", object_id: targetObjectId };
+    const targetAnchor: PathAnchorRef =
+      payload === null
+        ? { kind: "object_facet", object_id: targetObjectId, facet_key: "strictly_governed_constraint" }
+        : payload.target_anchor;
+    const relationKind = payload?.constitution?.relation_kind ?? "governance_constraint";
+    const outcome = await deps.objectAnchorGate.validateProposedObjectAnchors({
+      workspaceId,
+      relationKind,
+      sourceAnchor,
+      targetAnchor
+    });
+    if (outcome === "rejected") {
+      throw createWorkflowError(
+        "VALIDATION",
+        "Proposed path relation names an object anchor that is missing or owned by another workspace."
+      );
+    }
   }
 
   async function acceptProposalWithDurableMemoryUpdate(

@@ -1434,6 +1434,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     memoryEntryRepo,
     evidenceService,
     pathRelationProposalService,
+    // invariant: route B3's object-anchor gate into the proposal accept-apply
+    // path so the second durable path-insert route is existence/ownership-
+    // checked before the storage insert.
+    objectAnchorGate: pathRelationProposalService,
     signalService,
     graphExploreService,
     edgeProposalService,

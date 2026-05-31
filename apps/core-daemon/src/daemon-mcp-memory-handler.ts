@@ -1,6 +1,7 @@
 import {
   createMcpMemoryProposalWorkflow,
   SourceDeliveryAnchorValidationError,
+  type McpMemoryProposalWorkflowDependencies,
   type McpMemoryProposalWorkflowEventLogRepo,
   type McpMemoryProposalWorkflowProposalRepo,
   type McpMemoryProposalWorkflowRuntimeNotifier,
@@ -22,6 +23,11 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly memoryEntryRepo: NonNullable<McpMemoryToolHandlerDependencies["memoryEntryRepo"]>;
   readonly evidenceService?: McpMemoryToolHandlerDependencies["evidenceService"];
   readonly pathRelationProposalService?: McpMemoryToolHandlerDependencies["pathRelationProposalService"];
+  // invariant: B3's object-anchor existence + ownership gate, routed into the
+  // proposal accept-apply path so the second durable path-insert route is
+  // validated before the storage insert. Wired from PathRelationProposalService.
+  // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts objectAnchorGate
+  readonly objectAnchorGate?: McpMemoryProposalWorkflowDependencies["objectAnchorGate"];
   readonly signalService: McpMemoryToolHandlerDependencies["signalService"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
   readonly edgeProposalService?: McpMemoryToolHandlerDependencies["edgeProposalService"];
@@ -118,6 +124,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
           }
         }
       },
+      ...(input.objectAnchorGate === undefined ? {} : { objectAnchorGate: input.objectAnchorGate }),
       ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding })
     })
   });
