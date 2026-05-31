@@ -120,6 +120,7 @@ evt:file-approval.ts#SoulApprovalResolvedPayloadSchema(approval_id,description,m
 evt:file-approval.ts#SoulCorrectionIssuedPayloadSchema(correction,message_id,original,source_kind)#c62fb62
 evt:file-approval.ts#SoulExplanationProvidedPayloadSchema(explanation,message_id,source_kind,title)#e299a92
 evt:file-approval.ts#SoulHintEmittedPayloadSchema(hint,message_id,source_kind)#ae3ed73
+evt:garden.ts#SoulEnrichAbandonedPayloadSchema(attempt_count,last_failure_kind,memory_id,occurred_at,run_id,source_signal_id,workspace_id)#a498e3a
 evt:garden.ts#SoulGardenTaskClaimReclaimedPayloadSchema(claimed_at,occurred_at,previous_claimed_by,role,run_id,stale_after_ms,task_id,task_kind,tier,workspace_id)#022470e
 evt:garden.ts#SoulGardenTaskCompletedPayloadSchema(candidate_signals_count,objects_affected,occurred_at,role,success,task_id,task_kind,tier,workspace_id)#ac0e75b
 evt:garden.ts#SoulGardenTaskDispatchedPayloadSchema(occurred_at,role,run_id,task_id,task_kind,tier,workspace_id)#2f80f28
