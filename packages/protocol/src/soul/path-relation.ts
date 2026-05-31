@@ -235,3 +235,81 @@ export type PathAnchorRef = z.infer<typeof PathAnchorRefSchema>;
 export type PathEffectVector = z.infer<typeof PathEffectVectorSchema>;
 export type PathRelation = z.infer<typeof PathRelationSchema>;
 export type PathPlasticityState = z.infer<typeof PathPlasticityStateSchema>;
+
+const recallsTierRelationKinds = new Set([
+  "recalls",
+  "co_recalled",
+  "shares_entity",
+  "signal_graph_ref"
+]);
+
+export interface PathRelationIdentityCandidate {
+  readonly sourceAnchor: PathAnchorRef;
+  readonly targetAnchor: PathAnchorRef;
+  readonly relationKind: string;
+  readonly recallBias: number;
+}
+
+export interface PathRelationIdentitySubject {
+  readonly anchors: {
+    readonly source_anchor: PathAnchorRef;
+    readonly target_anchor: PathAnchorRef;
+  };
+  readonly constitution: {
+    readonly relation_kind: string;
+  };
+  readonly effect_vector: {
+    readonly recall_bias: number;
+  };
+}
+
+export function getPathAnchorBackingObjectId(anchor: PathAnchorRef): string {
+  switch (anchor.kind) {
+    case "object":
+    case "object_facet":
+      return anchor.object_id;
+    case "obligation":
+    case "risk_concern":
+    case "time_concern":
+      return anchor.source_object_id;
+  }
+}
+
+export function pathRelationMatchesIdentity(
+  relation: PathRelationIdentitySubject,
+  candidate: PathRelationIdentityCandidate
+): boolean {
+  const relationFamily = pathRelationIdentityFamily(
+    relation.constitution.relation_kind,
+    relation.effect_vector.recall_bias
+  );
+  const candidateFamily = pathRelationIdentityFamily(
+    candidate.relationKind,
+    candidate.recallBias
+  );
+  if (relationFamily !== candidateFamily) {
+    return false;
+  }
+
+  const relationSource = getPathAnchorBackingObjectId(relation.anchors.source_anchor);
+  const relationTarget = getPathAnchorBackingObjectId(relation.anchors.target_anchor);
+  const candidateSource = getPathAnchorBackingObjectId(candidate.sourceAnchor);
+  const candidateTarget = getPathAnchorBackingObjectId(candidate.targetAnchor);
+
+  if (relationFamily === "positive:recalls") {
+    return (
+      (relationSource === candidateSource && relationTarget === candidateTarget) ||
+      (relationSource === candidateTarget && relationTarget === candidateSource)
+    );
+  }
+
+  return relationSource === candidateSource && relationTarget === candidateTarget;
+}
+
+function pathRelationIdentityFamily(relationKind: string, recallBias: number): string {
+  const sign = recallBias > 0 ? "positive" : recallBias < 0 ? "negative" : "neutral";
+  if (sign === "positive" && recallsTierRelationKinds.has(relationKind)) {
+    return "positive:recalls";
+  }
+  return `${sign}:${relationKind}`;
+}

@@ -39,7 +39,7 @@ Final decisive commands:
 - `rtk pnpm test`
 - `rtk pnpm exec tsc --noEmit -p apps/core-daemon`
 - `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon final-review`
-- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon e2e gate4-attached-agent-mcp-proof operations mcp-memory-tool-handler mcp-memory-governance cli-register`
+- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon e2e attached-agent-mcp-proof operations mcp-memory-tool-handler mcp-memory-governance cli-register`
 - `rtk pnpm exec vitest run --project @do-soul/alaya-core graph-contract`
 - `rtk pnpm exec vitest run --project @do-soul/alaya-protocol soul-graph`
 - `rtk pnpm exec vitest run --project @do-soul/alaya-storage proposal-repo`

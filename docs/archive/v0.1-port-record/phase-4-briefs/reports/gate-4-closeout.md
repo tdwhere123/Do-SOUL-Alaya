@@ -23,9 +23,9 @@ replay before recorder readiness.
 ## Fresh Evidence
 
 ```bash
-rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon gate4-attached-agent-mcp-proof
+rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon attached-agent-mcp-proof
 rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon trust-state-persistence
-rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon routes-config-port app embedding-status trust-state trust-state-persistence gate4-attached-agent-mcp-proof
+rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon routes-config-port app embedding-status trust-state trust-state-persistence attached-agent-mcp-proof
 rtk pnpm exec vitest run --project @do-soul/alaya-inspector routes
 rtk pnpm exec vitest run --project @do-soul/alaya-inspector-web EmbeddingSupplementForm
 rtk pnpm exec vitest run --project @do-soul/alaya-storage trust-state-repo migration-parity

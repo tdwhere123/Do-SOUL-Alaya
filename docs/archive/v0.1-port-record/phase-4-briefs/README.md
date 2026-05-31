@@ -22,7 +22,7 @@ green" into "actually works for a user".
 
 Phase 4 passed Gate-4 on 2026-05-01. Non-frontend recovery work is
 `implementation-ready`; the first-party MCP memory surface is
-`mcp-consumable` through `gate4-attached-agent-mcp-proof.test.ts`,
+`mcp-consumable` through `attached-agent-mcp-proof.test.ts`,
 which asserts Garden EventLog and health-journal evidence. The
 Inspector config-write path is `live-event-ready`, and trust-state
 delivery/usage durability is SQL-backed and verified.

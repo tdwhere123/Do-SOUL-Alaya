@@ -202,7 +202,7 @@ implemented and tested. Gate-4 passed on 2026-05-01 after the attached-agent
 MCP proof, Inspector config-write repair, and trust delivery/usage durability
 repair all passed targeted verification.
 
-`apps/core-daemon/src/__tests__/gate4-attached-agent-mcp-proof.test.ts`
+`apps/core-daemon/src/__tests__/attached-agent-mcp-proof.test.ts`
 now resolves `#BL-018`: it runs `alaya install`, `alaya attach codex`,
 MCP `tools/list`, `soul.recall`, `soul.open_pointer`,
 `soul.report_context_usage`, `soul.emit_candidate_signal`, proposal
@@ -325,7 +325,7 @@ sub-agent waves and are worth pinning so the next multi-card closeout
 does not pay the same cost:
 
 - **Test-shape pin vs behaviour pin.** A1's
-  `final-review-evidence-locks` doc-cite loop, A2's workspace-service
+  `review-evidence-locks` doc-cite loop, A2's workspace-service
   `Promise.all` parallel-insert assertion, and A2's
   `routes-config-port` "persist callback IS the SQL boundary" test all
   pinned implementation shape (catalog count, async ordering, callback
@@ -493,15 +493,18 @@ New / changed runtime-visible surfaces:
   and acks; the Garden BULK_ENRICH worker drains it and runs
   `ConflictDetectionService` + edge auto-production off-path. The
   unconditional per-workspace drain runs on the ~60s GardenScheduler
-  cadence and clears every queued `BULK_ENRICH` task in one pass up to
-  `BULK_ENRICH_DRAIN_CAP_PER_PASS = 32`
-  (`apps/core-daemon/src/garden-runtime.ts`), so within that cap the
-  upper bound between a memory becoming recallable and its
-  contradiction/supersession edges forming is ~1 min (surfaced !=
-  conflict-checked within that window). Beyond the cap a single-pass
-  backlog larger than 32 workspaces degrades to
-  ~`O(workspaces / 32) * 60s` because the cap protects the other
-  scheduler work that shares the pass. A claim stranded by a daemon
+  cadence and dispatches up to `BULK_ENRICH_DRAIN_CAP_PER_PASS = 32`
+  `BULK_ENRICH` tasks per pass (`apps/core-daemon/src/garden-runtime.ts`).
+  Each task is scoped to one workspace and claims at most
+  `DYNAMICS_CONSTANTS.enrich.claim_batch_size = 50` pending markers, so
+  the per-pass cap is 32 workspaces / 1600 markers while the per-workspace
+  cycle cap remains 50. Within those caps the upper bound between a memory
+  becoming recallable and its contradiction/supersession edges forming is
+  ~1 min (surfaced != conflict-checked within that window). Beyond the cap
+  a single-pass backlog larger than 32 workspaces degrades to
+  ~`O(workspaces / 32) * 60s`; a single workspace with more than 50 pending
+  markers drains across additional cycles because the claim batch bounds
+  per-workspace work. A claim stranded by a daemon
   crash between claim and processed is re-armed after a TTL
   (`DYNAMICS_CONSTANTS.enrich.claim_stale_after_ms`, 10 min) by the same
   scheduler pass that reclaims abandoned `garden_task` claims, so no
@@ -805,7 +808,7 @@ push tag v*` it runs CI, generates the tarball + `SHA256SUMS` via
   evidence. `mcp-callable` requires this SDK-driven attached-agent
   proof, not P4-mcp-tooling alone; `agent-used` requires real host
   autonomy and is deferred to v0.2.2 / #BL-038. Current proof:
-  `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon gate4-attached-agent-mcp-proof`.
+  `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon attached-agent-mcp-proof`.
 - **Gate-5 (v0.1.0 release)**: Gate-4 plus graph contract derived
   from real PathRelation data, full E2E proof, and final multi-lens
   review with zero Blocking / Important findings. Benchmark fixtures

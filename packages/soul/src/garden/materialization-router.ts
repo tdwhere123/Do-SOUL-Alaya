@@ -72,7 +72,7 @@ export interface MaterializationResult {
   readonly error?: string;
 }
 
-interface MaterializationCreatedObject {
+export interface MaterializationCreatedObject {
   readonly object_kind: string;
   readonly object_id: string;
 }
@@ -181,6 +181,11 @@ export interface PathRelationProposalPayload {
 }
 
 export interface PathRelationProposalPort {
+  assertPathRelationProposalAvailable?(input: {
+    readonly workspaceId: string;
+    readonly runId: string;
+    readonly sourceSignalId: string;
+  }): Promise<void>;
   createPathRelationProposal(input: {
     readonly workspaceId: string;
     readonly runId: string;
@@ -225,12 +230,14 @@ export interface GraphEdgeCreationPort {
 // the port boundary as a literal union, like the seed shape above). The router
 // MUST preserve the rejected/failed distinction the sink decides: "rejected" is
 // a PERMANENT B3 anchor refusal (clean silent drop, already audited downstream),
-// "failed" is a TRANSIENT mint error that is NOT re-derived by the BULK_ENRICH
-// pass (enrich derives neighbors from memory content, never from a signal's
-// *_memory_refs), so a swallowed "failed" silently and permanently loses the
-// owed associative edge. The router makes "failed" observable (loud) instead.
+// "failed" is a TRANSIENT mint error. The synchronous write path first tries to
+// persist a durable path_relation proposal for failed refs; when that post-create
+// write is unavailable, the already-durable enrich_pending marker makes the
+// failure retryable in the BULK_ENRICH worker instead of terminally failing a
+// partially materialized signal.
 // see also: packages/core/src/path-relation-proposal-service.ts PathMintOutcome.
 export type PathCandidateMintOutcome = "applied" | "already_present" | "rejected" | "failed";
+type SignalRefTransientFailureMode = "durable_proposal" | "throw_for_retry";
 
 export interface PathCandidateSinkPort {
   submitCandidate(input: {
@@ -468,6 +475,23 @@ export class MaterializationRouter {
     this.handoffGapHandler = dependencies.handoffGapHandler;
   }
 
+  public async replaySignalRefs(input: {
+    readonly newObjectId: string;
+    readonly signal: CandidateMemorySignal;
+  }): Promise<readonly MaterializationCreatedObject[]> {
+    if (
+      this.dependencies.pathCandidateSinkPort === undefined &&
+      hasMaterializableSignalMemoryRefs(input.signal)
+    ) {
+      throw new Error("PathCandidateSinkPort unavailable during signal-ref replay.");
+    }
+    return await this.createAllMemoryRefEdges(
+      input.newObjectId,
+      input.signal,
+      "throw_for_retry"
+    );
+  }
+
   public route(signal: CandidateMemorySignal): MaterializationTarget {
     const schemaGroundingValidation = validateSchemaGroundingForSignal(signal);
     if (schemaGroundingValidation.declared && schemaGroundingValidation.status !== "valid") {
@@ -624,6 +648,8 @@ export class MaterializationRouter {
     const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
 
     try {
+      await this.preflightSignalRefFallback(signal);
+
       const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
       createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
@@ -646,7 +672,13 @@ export class MaterializationRouter {
       // off-path in the BULK_ENRICH worker. see enqueueEnrichmentAfterCreate.
       this.enqueueEnrichmentAfterCreate(memory, signal);
 
-      await this.createAllMemoryRefEdges(memory.object_id, signal);
+      createdObjects.push(
+        ...(await this.createAllMemoryRefEdgesBestEffort(
+          memory.object_id,
+          signal,
+          this.isSignalRefRetryAvailable(memory)
+        ))
+      );
       const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
         memory.object_id,
         signal
@@ -806,6 +838,8 @@ export class MaterializationRouter {
   ): Promise<MaterializationResult> {
     const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
     try {
+      await this.preflightSignalRefFallback(signal);
+
       const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
       createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
@@ -821,7 +855,13 @@ export class MaterializationRouter {
       // see enqueueEnrichmentAfterCreate.
       this.enqueueEnrichmentAfterCreate(memory, signal);
 
-      await this.createAllMemoryRefEdges(memory.object_id, signal);
+      createdObjects.push(
+        ...(await this.createAllMemoryRefEdgesBestEffort(
+          memory.object_id,
+          signal,
+          this.isSignalRefRetryAvailable(memory)
+        ))
+      );
 
       const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
         memory.object_id,
@@ -901,12 +941,14 @@ export class MaterializationRouter {
             // memory_entry. There is no orphan to relink.
             return {};
           }
-          const evidenceRef = await ensureEvidence();
           if (verdict.kind === "update") {
             // The core service rewrites the target row and relinks this
             // ref; the router creates no memory_entry on this branch.
+            const evidenceRef = await ensureEvidence();
             return { incomingEvidenceRef: evidenceRef };
           }
+          await this.preflightSignalRefFallback(signal);
+          const evidenceRef = await ensureEvidence();
           // ADD: append the memory_entry against the fresh evidence. The
           // enrich_pending marker commits atomically with the row.
           const memory = await this.dependencies.memoryService.create(
@@ -931,7 +973,13 @@ export class MaterializationRouter {
         // see enqueueEnrichmentAfterCreate.
         this.enqueueEnrichmentAfterCreate(appendedMemory, signal);
 
-        await this.createAllMemoryRefEdges(appendedMemoryId, signal);
+        createdObjects.push(
+          ...(await this.createAllMemoryRefEdgesBestEffort(
+            appendedMemoryId,
+            signal,
+            this.isSignalRefRetryAvailable(appendedMemory)
+          ))
+        );
         const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
           appendedMemoryId,
           signal
@@ -1031,6 +1079,10 @@ export class MaterializationRouter {
     });
   }
 
+  private isSignalRefRetryAvailable(memory: MemoryMaterializationCreatedObject): boolean {
+    return memory.enrichmentEnqueued === true || this.dependencies.enrichPendingPort !== undefined;
+  }
+
   private async materializePathRelationProposal(
     signal: CandidateMemorySignal,
     target: MaterializationTarget
@@ -1102,6 +1154,29 @@ export class MaterializationRouter {
     });
   }
 
+  private async preflightSignalRefFallback(signal: CandidateMemorySignal): Promise<void> {
+    if (
+      this.dependencies.pathCandidateSinkPort === undefined ||
+      !hasMaterializableSignalMemoryRefs(signal)
+    ) {
+      return;
+    }
+    if (this.dependencies.enrichPendingPort !== undefined) {
+      return;
+    }
+    const port = this.dependencies.pathRelationProposalPort;
+    if (port === undefined) {
+      throw new Error(
+        "PathRelationProposalPort unavailable before materializing a signal with first-class memory refs"
+      );
+    }
+    await port.assertPathRelationProposalAvailable?.({
+      workspaceId: signal.workspace_id,
+      runId: signal.run_id,
+      sourceSignalId: signal.signal_id
+    });
+  }
+
   // invariant: potential_conflict route sink. evaluate is the only
   // producer for contradicts / incompatible_with edges that originates
   // from a raw signal (memory-time detection runs through
@@ -1158,19 +1233,29 @@ export class MaterializationRouter {
 
   /**
    * Submits a governed path candidate for every first-class memory ref
-   * carried by a memory-creating signal. A submission throw / a permanent
-   * "rejected" never blocks materialization of the memory itself. This also
-   * activates the historically dormant signal-ref edge source — the refs now
-   * flow through PathRelationProposalService. A TRANSIENT "failed" is the one
-   * outcome that must not be silently lost (see submitCandidatesFromSignalRefs).
+   * carried by a memory-creating signal. A permanent "rejected" never blocks
+   * materialization of the memory itself. A transient "failed" or thrown sink
+   * must either leave a durable proposal record or remain retryable through the
+   * enrich_pending marker. This also activates the historically dormant
+   * signal-ref edge source — the refs now flow through PathRelationProposalService.
    */
   private async createAllMemoryRefEdges(
     newObjectId: string,
-    signal: CandidateMemorySignal
-  ): Promise<void> {
+    signal: CandidateMemorySignal,
+    transientFailureMode: SignalRefTransientFailureMode = "durable_proposal"
+  ): Promise<readonly MaterializationCreatedObject[]> {
+    const createdObjects: MaterializationCreatedObject[] = [];
     for (const spec of SIGNAL_REF_SEED_SPECS) {
-      await this.submitCandidatesFromSignalRefs(newObjectId, signal, spec);
+      createdObjects.push(
+        ...(await this.submitCandidatesFromSignalRefs(
+          newObjectId,
+          signal,
+          spec,
+          transientFailureMode
+        ))
+      );
     }
+    return createdObjects;
   }
 
   // see also: createAllMemoryRefEdges — drives one spec per signal key.
@@ -1179,16 +1264,18 @@ export class MaterializationRouter {
   private async submitCandidatesFromSignalRefs(
     newObjectId: string,
     signal: CandidateMemorySignal,
-    spec: SignalRefSeedSpec
-  ): Promise<void> {
+    spec: SignalRefSeedSpec,
+    transientFailureMode: SignalRefTransientFailureMode
+  ): Promise<readonly MaterializationCreatedObject[]> {
+    const createdObjects: MaterializationCreatedObject[] = [];
     const port = this.dependencies.pathCandidateSinkPort;
     if (port === undefined) {
-      return;
+      return createdObjects;
     }
 
     const refs = signal[spec.signalRefsKey];
     if (refs.length === 0) {
-      return;
+      return createdObjects;
     }
 
     for (const ref of refs) {
@@ -1198,10 +1285,9 @@ export class MaterializationRouter {
 
       let outcome: PathCandidateMintOutcome;
       // A thrown sink (port wiring fault, not a decided outcome) folds into the
-      // same transient "failed" treatment as a returned "failed" — the error
-      // text is threaded into the single failed-block warn below so a thrown ref
-      // produces exactly ONE loud line, not two. It must not block the memory's
-      // materialization, so we catch-and-continue rather than rethrow.
+      // same durable fallback treatment as a returned "failed" — the error
+      // text is threaded into the failed proposal so a thrown ref produces
+      // exactly ONE durable record when the proposal port is healthy.
       let thrownError: string | null = null;
       try {
         outcome = await port.submitCandidate({
@@ -1225,30 +1311,86 @@ export class MaterializationRouter {
         thrownError = err instanceof Error ? err.message : String(err);
       }
 
-      // invariant: only "failed" gets the non-silent treatment. The signal-ref
-      // edge is derived ONLY here (BULK_ENRICH never re-derives a signal's
-      // *_memory_refs), so a transient "failed" would otherwise drop the owed
-      // edge with no retry and no audit. We make it observable (loud warn) so a
-      // dropped associative edge is at least visible; the plastic path plane can
-      // still re-form the association via co-usage. A permanent "rejected" stays
+      // invariant: only "failed" gets the durable fallback treatment. The
+      // signal-ref edge is derived by this helper both inline and in the
+      // BULK_ENRICH retry lane, so a transient "failed" must either create a
+      // durable proposal or throw while the retry marker remains pending.
+      // A permanent "rejected" stays
       // a CLEAN, quiet drop — the sink already audited the B3 refusal and retry
-      // cannot help, so loud noise here would be wrong. applied / already_present
-      // settle silently (the owed path exists). A thrown sink and a returned
-      // "failed" both land here so each dropped ref emits exactly ONE loud warn.
+      // cannot help. applied / already_present settle silently (the owed path
+      // exists). A thrown sink and a returned "failed" both land here and must
+      // either persist exactly one durable proposal for the failed ref or throw
+      // for the enrich_pending retry lane.
       // see also: packages/core/src/path-relation-proposal-service.ts PathMintOutcome.
-      // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask (no re-derive).
+      // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask.
       if (outcome === "failed") {
-        console.warn("materialization-router: signal-ref path candidate failed transiently (edge dropped, not retried)", {
-          sourceMemoryId: newObjectId,
-          targetMemoryId: ref,
-          relationKind: spec.relationKind,
-          signalRefsKey: spec.signalRefsKey,
-          signalId: signal.signal_id,
-          runId: signal.run_id,
-          error: thrownError
-        });
+        const failedParams = {
+          newObjectId,
+          failedRef: ref,
+          signal,
+          spec,
+          thrownError
+        };
+        if (transientFailureMode === "throw_for_retry") {
+          throw new Error(buildFailedSignalRefPathRelationProposalReason(failedParams));
+        }
+        createdObjects.push(
+          await this.createFailedSignalRefPathRelationProposal(failedParams)
+        );
       }
     }
+
+    return createdObjects;
+  }
+
+  private async createAllMemoryRefEdgesBestEffort(
+    newObjectId: string,
+    signal: CandidateMemorySignal,
+    retryAvailable: boolean
+  ): Promise<readonly MaterializationCreatedObject[]> {
+    try {
+      return await this.createAllMemoryRefEdges(
+        newObjectId,
+        signal,
+        retryAvailable ? "throw_for_retry" : "durable_proposal"
+      );
+    } catch (error) {
+      if (!retryAvailable || !hasMaterializableSignalMemoryRefs(signal)) {
+        throw error;
+      }
+      console.warn("materialization-router: signal-ref path candidate deferred to enrich_pending retry", {
+        sourceMemoryId: newObjectId,
+        targetMemoryIds: collectMaterializableSignalMemoryRefs(signal),
+        signalId: signal.signal_id,
+        runId: signal.run_id,
+        error: readErrorMessage(error)
+      });
+      return [];
+    }
+  }
+
+  private async createFailedSignalRefPathRelationProposal(params: {
+    readonly newObjectId: string;
+    readonly failedRef: string;
+    readonly signal: CandidateMemorySignal;
+    readonly spec: SignalRefSeedSpec;
+    readonly thrownError: string | null;
+  }): Promise<MaterializationCreatedObject> {
+    const port = this.dependencies.pathRelationProposalPort;
+    if (port === undefined) {
+      throw new Error(
+        `PathRelationProposalPort unavailable after failed ${params.spec.signalRefsKey} path candidate for ${params.failedRef}`
+      );
+    }
+
+    return await port.createPathRelationProposal({
+      workspaceId: params.signal.workspace_id,
+      runId: params.signal.run_id,
+      sourceSignalId: params.signal.signal_id,
+      targetObjectId: params.newObjectId,
+      reason: buildFailedSignalRefPathRelationProposalReason(params),
+      proposedPathRelation: buildFailedSignalRefPathRelationProposal(params)
+    });
   }
 
   private async materializeEvidenceOnly(
@@ -1410,6 +1552,86 @@ function buildTimeConcernPathRelationProposal(
       governance_class: PathGovernanceClass.RECALL_ALLOWED
     }
   };
+}
+
+function buildFailedSignalRefPathRelationProposal(params: {
+  readonly newObjectId: string;
+  readonly failedRef: string;
+  readonly signal: CandidateMemorySignal;
+  readonly spec: SignalRefSeedSpec;
+  readonly thrownError: string | null;
+}): PathRelationProposalPayload {
+  const recallBias = params.spec.recallBiasSign * params.spec.recallBiasMagnitude;
+  const why = [
+    `${params.spec.signalRefsKey} on candidate signal ${params.signal.signal_id}`,
+    `run=${params.signal.run_id}`,
+    `path candidate mint failed for target_anchor=${params.failedRef}`
+  ];
+  if (params.thrownError !== null) {
+    why.push(`submitCandidate threw: ${params.thrownError}`);
+  }
+
+  return {
+    target_anchor: {
+      kind: "object",
+      object_id: params.failedRef
+    },
+    constitution: {
+      relation_kind: params.spec.relationKind,
+      why_this_relation_exists: why
+    },
+    effect_vector: {
+      salience: params.spec.initialStrength,
+      recall_bias: recallBias,
+      verification_bias: 0,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "lens_entry"
+    },
+    plasticity_state: {
+      strength: params.spec.initialStrength,
+      direction_bias: "source_to_target",
+      stability_class: "volatile",
+      support_events_count: 1,
+      contradiction_events_count: 0
+    },
+    lifecycle: {
+      status: "active",
+      retirement_rule: "governance_reject_or_low_strength"
+    },
+    legitimacy: {
+      evidence_basis: params.spec.evidenceBasis,
+      governance_class: params.spec.governanceClass
+    }
+  };
+}
+
+function buildFailedSignalRefPathRelationProposalReason(params: {
+  readonly newObjectId: string;
+  readonly failedRef: string;
+  readonly signal: CandidateMemorySignal;
+  readonly spec: SignalRefSeedSpec;
+  readonly thrownError: string | null;
+}): string {
+  const base =
+    `Persist failed ${params.spec.signalRefsKey} path_relation candidate ` +
+    `${params.spec.relationKind} from ${params.newObjectId} to ${params.failedRef}. ` +
+    `Source signal: ${params.signal.signal_id}.`;
+  if (params.thrownError === null) {
+    return base;
+  }
+  return `${base} submitCandidate error: ${params.thrownError}.`;
+}
+
+function hasMaterializableSignalMemoryRefs(signal: CandidateMemorySignal): boolean {
+  return SIGNAL_REF_SEED_SPECS.some((spec) =>
+    signal[spec.signalRefsKey].some((ref) => typeof ref === "string" && ref.trim().length > 0)
+  );
+}
+
+function collectMaterializableSignalMemoryRefs(signal: CandidateMemorySignal): readonly string[] {
+  return SIGNAL_REF_SEED_SPECS.flatMap((spec) =>
+    signal[spec.signalRefsKey].filter((ref) => typeof ref === "string" && ref.trim().length > 0)
+  );
 }
 
 function computeEvidenceHealthState(signal: CandidateMemorySignal): EvidenceHealthStateValue {

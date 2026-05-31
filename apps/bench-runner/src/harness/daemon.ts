@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -545,6 +545,7 @@ export async function startBenchDaemon(
 
   const dataDir =
     opts.dataDirRoot ?? (await mkdtemp(join(tmpdir(), "alaya-bench-")));
+  const managedWorkspaceRoots = new Map<string, string>();
 
   const savedEnv: Partial<Record<ManagedEnvKey, string | undefined>> = {};
   for (const key of MANAGED_ENV_KEYS) {
@@ -688,9 +689,14 @@ export async function startBenchDaemon(
     // those tables. Seed the bench workspace + run directly so the MCP
     // call context (which binds these ids from the trusted context provider)
     // resolves to existing FK rows.
-    // see also: apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts
+    // see also: apps/core-daemon/src/__tests__/agent-use-protocol.test.ts
     //   workspace + run seeding fixture using the same repos.
-    await seedBenchWorkspaceAndRun(dataDir, defaultWorkspaceId, defaultRunId);
+    await seedBenchWorkspaceAndRun(
+      dataDir,
+      defaultWorkspaceId,
+      defaultRunId,
+      await createManagedWorkspaceRoot(defaultWorkspaceId)
+    );
     // Apply bench-only SQLite tuning. The DB has now been opened by install +
     // seedBenchWorkspaceAndRun, so initDatabase's cache returns the daemon's
     // live connection. Production daemon (apps/core-daemon) never calls this.
@@ -704,6 +710,7 @@ export async function startBenchDaemon(
     try {
       await closeBenchDaemonResources({ mcpClient, server, runtime });
     } finally {
+      await cleanupManagedWorkspaceRoots();
       restoreEnv(savedEnv);
       releaseActive();
     }
@@ -1431,9 +1438,37 @@ export async function startBenchDaemon(
         runtime: activeRuntime
       });
     } finally {
+      await cleanupManagedWorkspaceRoots();
       restoreEnv(savedEnv);
       releaseActive();
     }
+  }
+
+  async function createManagedWorkspaceRoot(workspaceId: string): Promise<string> {
+    const workspaceRoot = join(
+      dataDir,
+      "bench-workspaces",
+      encodeURIComponent(workspaceId)
+    );
+    await mkdir(workspaceRoot, { recursive: true });
+    managedWorkspaceRoots.set(workspaceId, workspaceRoot);
+    return workspaceRoot;
+  }
+
+  async function cleanupManagedWorkspaceRoot(workspaceId: string): Promise<void> {
+    const workspaceRoot = managedWorkspaceRoots.get(workspaceId);
+    if (workspaceRoot === undefined) return;
+    managedWorkspaceRoots.delete(workspaceId);
+    await rm(workspaceRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+
+  async function cleanupManagedWorkspaceRoots(): Promise<void> {
+    const workspaceIds = [...managedWorkspaceRoots.keys()];
+    await Promise.all(
+      workspaceIds.map(async (workspaceId) => {
+        await cleanupManagedWorkspaceRoot(workspaceId);
+      })
+    );
   }
 
   // @anchor bench-workspace-attach: bind activeContext to a workspace/run
@@ -1444,6 +1479,7 @@ export async function startBenchDaemon(
   async function attachWorkspace(
     input: { readonly workspaceId: string; readonly runId: string }
   ): Promise<BenchWorkspaceHandle> {
+    const managedWorkspaceRoot = await createManagedWorkspaceRoot(input.workspaceId);
     if (!knownWorkspaces.has(input.workspaceId)) {
       // @anchor recall-eval-snapshot-restore: a restored snapshot DB already
       // carries the seeded workspace rows; the daemon's in-memory
@@ -1451,7 +1487,12 @@ export async function startBenchDaemon(
       // when the workspace row already exists (recreating it would violate the
       // workspaces.workspace_id UNIQUE constraint). see also:
       // apps/bench-runner/src/longmemeval/recall-eval.ts
-      await seedBenchWorkspaceIfAbsent(dataDir, input.workspaceId, input.runId);
+      await seedBenchWorkspaceIfAbsent(
+        dataDir,
+        input.workspaceId,
+        input.runId,
+        managedWorkspaceRoot
+      );
       knownWorkspaces.add(input.workspaceId);
     } else {
       await seedBenchRunOnly(dataDir, input.workspaceId, input.runId);
@@ -1486,6 +1527,7 @@ export async function startBenchDaemon(
           activeContext.workspaceId = previous.workspaceId;
           activeContext.runId = previous.runId;
         }
+        await cleanupManagedWorkspaceRoot(input.workspaceId);
       }
     };
   }
@@ -2096,7 +2138,8 @@ export function applyBenchFastPragmaIfRequested(dataDir: string): BenchFastPragm
 async function seedBenchWorkspaceAndRun(
   dataDir: string,
   workspaceId: string,
-  runId: string
+  runId: string,
+  workspaceRoot: string
 ): Promise<void> {
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   const workspaceRepo = new SqliteWorkspaceRepo(db);
@@ -2104,7 +2147,7 @@ async function seedBenchWorkspaceAndRun(
   workspaceRepo.create({
     workspace_id: workspaceId,
     name: workspaceId,
-    root_path: join(dataDir, "bench-workspace-root"),
+    root_path: workspaceRoot,
     workspace_kind: WorkspaceKind.LOCAL_REPO,
     default_engine_binding: null,
     workspace_state: WorkspaceState.ACTIVE
@@ -2130,13 +2173,14 @@ async function seedBenchWorkspaceAndRun(
 async function seedBenchWorkspaceIfAbsent(
   dataDir: string,
   workspaceId: string,
-  runId: string
+  runId: string,
+  workspaceRoot: string
 ): Promise<void> {
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   const workspaceRepo = new SqliteWorkspaceRepo(db);
   const existing = await workspaceRepo.getById(workspaceId);
   if (existing === null) {
-    await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId);
+    await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId, workspaceRoot);
     return;
   }
   await seedBenchRunIfAbsent(dataDir, workspaceId, runId);

@@ -30,7 +30,7 @@ Fresh verification:
 
 - `rtk pnpm build` passed.
 - `rtk pnpm exec vitest run --project @do-soul/alaya-storage -- proposal` passed: 46 files, 344 tests.
-- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon -- phase6-agent-use-protocol mcp-memory-governance cli-tools cli-review cli-register profile-mutation attach-codex attach-claude cli-register garden-runtime daemon-runtime-lifecycle` passed: 55 files, 314 tests.
+- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon -- agent-use-protocol mcp-memory-governance cli-tools cli-review cli-register profile-mutation attach-codex attach-claude cli-register garden-runtime daemon-runtime-lifecycle` passed: 55 files, 314 tests.
 
 ## Architecture compliance
 

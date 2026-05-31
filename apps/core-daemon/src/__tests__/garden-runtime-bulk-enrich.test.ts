@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type CandidateMemorySignal,
   DYNAMICS_CONSTANTS,
   GardenTaskKind,
   type GardenTaskDescriptor,
@@ -103,6 +104,12 @@ type ProduceFn = NonNullable<GardenRuntimeInput["enrichEdgeProducerPort"]>["prod
 type DetectFn = NonNullable<
   GardenRuntimeInput["enrichConflictDetectionPort"]
 >["detectAndLinkConflicts"];
+type ReplaySignalRefsFn = NonNullable<
+  GardenRuntimeInput["enrichSignalRefReplayPort"]
+>["replaySignalRefs"];
+type SourceSignalLookupFn = NonNullable<
+  GardenRuntimeInput["enrichSourceSignalLookup"]
+>["getById"];
 
 interface PendingRow {
   workspaceId: string;
@@ -683,6 +690,94 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(detectAndLinkConflicts).toHaveBeenCalledTimes(1);
   });
 
+  it("replays first-class signal refs from the persisted source signal before marking the row processed", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-1", "memory-signal-ref");
+
+    const markProcessed = vi.spyOn(enrichPendingRepo, "markProcessed");
+    const sourceSignal = buildSignal("signal-memory-signal-ref");
+    const getById = vi.fn<SourceSignalLookupFn>(async () => sourceSignal);
+    const replaySignalRefs = vi.fn<ReplaySignalRefsFn>(async () => undefined);
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        omitEnrichmentServices: true,
+        sourceSignalLookup: getById,
+        replaySignalRefs
+      })
+    );
+
+    await dispatchBulkEnrich(runtime);
+
+    expect(getById).toHaveBeenCalledWith("signal-memory-signal-ref");
+    expect(replaySignalRefs).toHaveBeenCalledWith({
+      newMemoryId: "memory-signal-ref",
+      signal: sourceSignal
+    });
+    expect(markProcessed).toHaveBeenCalledWith(
+      "workspace-1",
+      "memory-signal-ref",
+      expect.any(String)
+    );
+    expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
+  });
+
+  it("keeps signal-ref replay failures pending by releasing the enrich claim", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-1", "memory-retry-signal-ref");
+
+    const releaseClaim = vi.spyOn(enrichPendingRepo, "releaseClaim");
+    const markProcessed = vi.spyOn(enrichPendingRepo, "markProcessed");
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        omitEnrichmentServices: true,
+        sourceSignalLookup: vi.fn<SourceSignalLookupFn>(async (signalId) => buildSignal(signalId)),
+        replaySignalRefs: vi.fn<ReplaySignalRefsFn>(async () => {
+          throw new Error("signal-ref mint still transient");
+        })
+      })
+    );
+
+    await dispatchBulkEnrich(runtime);
+
+    expect(releaseClaim).toHaveBeenCalledWith("workspace-1", "memory-retry-signal-ref");
+    expect(markProcessed).not.toHaveBeenCalled();
+    expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
+    const completion = currentScheduler().completions.find(
+      (result) => result.task_kind === GardenTaskKind.BULK_ENRICH
+    );
+    expect(completion?.audit_entries).toContain("bulk_enrich:processed_0");
+    expect(completion?.audit_entries).toContain("bulk_enrich:failed_1");
+  });
+
+  it("does not mark processed when signal-ref replay cannot load the source signal", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-1", "memory-missing-signal");
+
+    const releaseClaim = vi.spyOn(enrichPendingRepo, "releaseClaim");
+    const markProcessed = vi.spyOn(enrichPendingRepo, "markProcessed");
+    const replaySignalRefs = vi.fn<ReplaySignalRefsFn>(async () => undefined);
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        omitEnrichmentServices: true,
+        sourceSignalLookup: vi.fn<SourceSignalLookupFn>(async () => null),
+        replaySignalRefs
+      })
+    );
+
+    await dispatchBulkEnrich(runtime);
+
+    expect(replaySignalRefs).not.toHaveBeenCalled();
+    expect(releaseClaim).toHaveBeenCalledWith("workspace-1", "memory-missing-signal");
+    expect(markProcessed).not.toHaveBeenCalled();
+    expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
+  });
+
   // invariant (FIX-2): the 60s GardenScheduler pass re-drives owed path mints
   // for accept->mint crash-window orphans, once per workspace, bounded. LOGs a
   // tally only when it acted on a row (scanned > 0). When the port is unwired the
@@ -766,6 +861,32 @@ function buildMemory(
   };
 }
 
+function buildSignal(signalId: string): CandidateMemorySignal {
+  return {
+    signal_id: signalId,
+    workspace_id: "workspace-1",
+    run_id: "run-1",
+    surface_id: null,
+    source: "garden_compile",
+    signal_kind: "potential_claim",
+    object_kind: "fact",
+    scope_hint: "project",
+    domain_tags: ["rtk"],
+    confidence: 0.9,
+    evidence_refs: [],
+    source_memory_refs: ["memory-source"],
+    supersedes_refs: [],
+    exception_to_refs: [],
+    contradicts_refs: [],
+    incompatible_with_refs: [],
+    raw_payload: {
+      distilled_fact: "Signal ref replay fact."
+    },
+    signal_state: "compiled",
+    created_at: "2026-05-30T12:00:00.000Z"
+  };
+}
+
 function bulkEnrichTask(): GardenTaskDescriptor {
   return {
     task_id: `bulk-${Math.random()}`,
@@ -808,6 +929,8 @@ function createRuntimeInput(options: {
   readonly findById: (memoryId: string) => Promise<ReturnType<typeof buildMemory> | null>;
   readonly produceForNewMemory?: ProduceFn;
   readonly detectAndLinkConflicts?: DetectFn;
+  readonly sourceSignalLookup?: SourceSignalLookupFn;
+  readonly replaySignalRefs?: ReplaySignalRefsFn;
   readonly omitEnrichmentServices?: boolean;
   readonly workspaceIds?: readonly string[];
   readonly edgeProposalReconcile?: NonNullable<GardenRuntimeInput["edgeProposalReconcile"]>;
@@ -862,6 +985,16 @@ function createRuntimeInput(options: {
       GardenRuntimeInput["enrichPendingRepo"]
     >,
     enrichMemoryLookup: { findById: options.findById },
+    ...(options.replaySignalRefs === undefined
+      ? {}
+      : {
+          enrichSourceSignalLookup: {
+            getById: options.sourceSignalLookup ?? (async (signalId: string) => buildSignal(signalId))
+          },
+          enrichSignalRefReplayPort: {
+            replaySignalRefs: options.replaySignalRefs
+          }
+        }),
     ...(options.edgeProposalReconcile === undefined
       ? {}
       : { edgeProposalReconcile: options.edgeProposalReconcile }),

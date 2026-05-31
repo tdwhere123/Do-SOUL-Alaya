@@ -57,6 +57,45 @@
 -- (best-effort quarantine, no new table) and the DROP still runs.
 -- cross-file ref: packages/storage/src/migrations/017-memory-graph-edges.sql (edge_type CHECK set)
 
+WITH ranked_edges AS (
+  SELECT
+    e.*,
+    ROW_NUMBER() OVER (
+      PARTITION BY
+        e.workspace_id,
+        CASE WHEN e.edge_type = 'recalls' THEN 'recalls-tier' ELSE e.edge_type END,
+        CASE
+          WHEN e.edge_type = 'recalls' AND e.source_memory_id > e.target_memory_id THEN e.target_memory_id
+          ELSE e.source_memory_id
+        END,
+        CASE
+          WHEN e.edge_type = 'recalls' AND e.source_memory_id > e.target_memory_id THEN e.source_memory_id
+          ELSE e.target_memory_id
+        END
+      ORDER BY e.created_at ASC, e.edge_id ASC
+    ) AS backfill_rank
+  FROM memory_graph_edges AS e
+  WHERE e.edge_type IN (
+      'supports',
+      'derives_from',
+      'contradicts',
+      'supersedes',
+      'recalls',
+      'exception_to',
+      'incompatible_with'
+    )
+    AND EXISTS (
+      SELECT 1 FROM workspaces AS w WHERE w.workspace_id = e.workspace_id
+    )
+    AND EXISTS (
+      SELECT 1 FROM memory_entries AS sm
+      WHERE sm.object_id = e.source_memory_id AND sm.workspace_id = e.workspace_id
+    )
+    AND EXISTS (
+      SELECT 1 FROM memory_entries AS tm
+      WHERE tm.object_id = e.target_memory_id AND tm.workspace_id = e.workspace_id
+    )
+)
 INSERT INTO path_relations (
   path_id,
   workspace_id,
@@ -126,40 +165,25 @@ SELECT
   ),
   e.created_at,
   e.created_at
-FROM memory_graph_edges AS e
-WHERE e.edge_type IN (
-    'supports',
-    'derives_from',
-    'contradicts',
-    'supersedes',
-    'recalls',
-    'exception_to',
-    'incompatible_with'
-  )
-  AND EXISTS (
-    SELECT 1 FROM workspaces AS w WHERE w.workspace_id = e.workspace_id
-  )
-  AND EXISTS (
-    SELECT 1 FROM memory_entries AS sm
-    WHERE sm.object_id = e.source_memory_id AND sm.workspace_id = e.workspace_id
-  )
-  AND EXISTS (
-    SELECT 1 FROM memory_entries AS tm
-    WHERE tm.object_id = e.target_memory_id AND tm.workspace_id = e.workspace_id
-  )
+FROM ranked_edges AS e
+WHERE e.backfill_rank = 1
   AND NOT EXISTS (
     SELECT 1
     FROM path_relations AS p
     WHERE p.workspace_id = e.workspace_id
-      AND (
-        CASE WHEN e.edge_type = 'recalls'
-          -- recalls-tier: every relation_kind that maps to graph `recalls`.
-          THEN json_extract(p.constitution_json, '$.relation_kind')
-            IN ('recalls', 'co_recalled', 'shares_entity', 'signal_graph_ref')
-          ELSE json_extract(p.constitution_json, '$.relation_kind') = e.edge_type
-        END
-      )
-      AND json_extract(p.anchors_json, '$.source_anchor.kind') = 'object'
+	      AND (
+	        CASE WHEN e.edge_type = 'recalls'
+	          -- recalls-tier: every relation_kind that maps to graph `recalls`.
+	          THEN json_extract(p.constitution_json, '$.relation_kind')
+	            IN ('recalls', 'co_recalled', 'shares_entity', 'signal_graph_ref')
+	          ELSE json_extract(p.constitution_json, '$.relation_kind') = e.edge_type
+	        END
+	      )
+	      AND (
+	        e.edge_type <> 'recalls'
+	        OR COALESCE(json_extract(p.effect_vector_json, '$.recall_bias'), 0) > 0
+	      )
+	      AND json_extract(p.anchors_json, '$.source_anchor.kind') = 'object'
       AND json_extract(p.anchors_json, '$.target_anchor.kind') = 'object'
       -- invariant: the recalls-tier is the SYMMETRIC associative family — a
       -- reverse-oriented path is the SAME semantic edge, so a legacy `recalls`

@@ -242,12 +242,11 @@ describe("SqliteEdgeProposalRepo", () => {
     ]);
   });
 
-  // invariant: a healthy accepted row whose owed path already landed is EXCLUDED
-  // (the await-path predicate), so re-driving the sweep does not re-mint it.
-  // The match mirrors the mint dedup: it is direction-insensitive and ignores
-  // relation_kind, so a path minted source->target OR target->source, under a
-  // different relation_kind, still excludes the proposal.
-  it("excludes accepted proposals whose owed path already landed (either direction, any relation_kind)", async () => {
+  // invariant: positive recalls-family identity is unordered across
+  // recalls/co_recalled/shares_entity/signal_graph_ref. A healthy accepted
+  // recalls row whose owed identity already landed is EXCLUDED so the repair
+  // sweep does not re-mint it.
+  it("excludes accepted recalls proposals already satisfied by the positive recalls family", async () => {
     const { repo, pathRepo } = await createRepo();
     repo.create(createProposalInput("proposal-1", MEMORY_1, MEMORY_2, "recalls"));
     repo.create(createProposalInput("proposal-2", MEMORY_2, MEMORY_3, "recalls"));
@@ -265,14 +264,45 @@ describe("SqliteEdgeProposalRepo", () => {
       reviewReason: "auto-accepted",
       reviewedAt: "2026-05-24T00:05:01.000Z"
     });
-    // proposal-1's path landed in source->target order; proposal-2's landed in
-    // REVERSE order under a different relation_kind. Both must drop out.
+    // proposal-1's path landed source->target as recalls; proposal-2's landed
+    // in REVERSE order as co_recalled. Both are one positive recalls family.
     mintObjectPath(pathRepo, 1, MEMORY_1, MEMORY_2);
     mintObjectPath(pathRepo, 2, MEMORY_3, MEMORY_2, {
-      constitution: { relation_kind: "contradicts", why_this_relation_exists: ["x"] }
+      constitution: { relation_kind: "co_recalled", why_this_relation_exists: ["x"] }
     });
 
     expect(repo.listAcceptedAwaitingPath("workspace-1", 32)).toEqual([]);
+  });
+
+  it("keeps supports and contradicts proposals awaiting when only unrelated co_recalled paths exist", async () => {
+    const { repo, pathRepo } = await createRepo();
+    repo.create(createProposalInput("proposal-supports-kind", MEMORY_1, MEMORY_2, "supports"));
+    repo.create(createProposalInput("proposal-contradicts-sign", MEMORY_2, MEMORY_3, "contradicts"));
+    repo.create(createProposalInput("proposal-supports-direction", MEMORY_1, MEMORY_3, "supports"));
+    for (const proposalId of ["proposal-supports-kind", "proposal-contradicts-sign", "proposal-supports-direction"]) {
+      repo.updateReview({
+        proposalId,
+        status: "accepted",
+        reviewerIdentity: "user:reviewer",
+        reviewReason: "accepted",
+        reviewedAt: "2026-05-24T00:05:00.000Z"
+      });
+    }
+    mintObjectPath(pathRepo, 1, MEMORY_1, MEMORY_2, {
+      constitution: { relation_kind: "co_recalled", why_this_relation_exists: ["same objects, wrong family"] }
+    });
+    mintObjectPath(pathRepo, 2, MEMORY_2, MEMORY_3, {
+      constitution: { relation_kind: "co_recalled", why_this_relation_exists: ["same objects, wrong sign"] }
+    });
+    mintObjectPath(pathRepo, 3, MEMORY_3, MEMORY_1, {
+      constitution: { relation_kind: "supports", why_this_relation_exists: ["same kind, wrong direction"] }
+    });
+
+    expect(repo.listAcceptedAwaitingPath("workspace-1", 32).map((row) => row.proposal_id)).toEqual([
+      "proposal-contradicts-sign",
+      "proposal-supports-direction",
+      "proposal-supports-kind"
+    ]);
   });
 
   // invariant (regression for the cap-starvation hazard): a backlog of healthy
@@ -329,14 +359,61 @@ describe("SqliteEdgeProposalRepo", () => {
     expect(awaiting.map((row) => row.proposal_id)).toEqual(["orphan-zz"]);
   });
 
-  // invariant (FIX-2): the await-path NOT EXISTS subquery must ride the
-  // migration 048 anchor-key expression indexes, not degrade to a workspace
+  it("does not starve an orphan behind a proposal satisfied by derived backing anchors", async () => {
+    const extraMemoryIds = [objectId(40), objectId(41), objectId(42), objectId(43)];
+    const { repo, pathRepo } = await createRepo(extraMemoryIds);
+    const healthySource = extraMemoryIds[0];
+    const healthyTarget = extraMemoryIds[1];
+    const orphanSource = extraMemoryIds[2];
+    const orphanTarget = extraMemoryIds[3];
+
+    repo.create(
+      createProposalInput("healthy-derived-anchor", healthySource, healthyTarget, "recalls", "2026-05-24T00:00:00.000Z")
+    );
+    repo.updateReview({
+      proposalId: "healthy-derived-anchor",
+      status: "accepted",
+      reviewerIdentity: "user:reviewer",
+      reviewReason: "accepted and represented by derived path",
+      reviewedAt: "2026-05-24T00:01:00.000Z"
+    });
+    mintObjectPath(pathRepo, 40, healthySource, healthyTarget, {
+      anchors: {
+        source_anchor: {
+          kind: "risk_concern",
+          source_object_id: healthySource,
+          concern_digest: "credential_leak"
+        },
+        target_anchor: { kind: "object", object_id: healthyTarget }
+      }
+    });
+    expect((await pathRepo.findByAnchors("workspace-1", [{ kind: "object", object_id: healthySource }])).map(
+      (row) => row.path_id
+    )).toEqual([]);
+    expect((await pathRepo.findByBackingObjectId("workspace-1", healthySource)).map((row) => row.path_id)).toEqual([
+      "path-40"
+    ]);
+
+    repo.create(createProposalInput("orphan-real", orphanSource, orphanTarget, "recalls", "2026-05-24T01:00:00.000Z"));
+    repo.updateReview({
+      proposalId: "orphan-real",
+      status: "accepted",
+      reviewerIdentity: "user:reviewer",
+      reviewReason: "accepted then crashed before mint",
+      reviewedAt: "2026-05-24T01:00:01.000Z"
+    });
+
+    expect(repo.listAcceptedAwaitingPath("workspace-1", 1).map((row) => row.proposal_id)).toEqual(["orphan-real"]);
+  });
+
+  // invariant (FIX-2): the await-path path-exists probe must ride the
+  // migration 087 backing-object expression indexes, not degrade to a workspace
   // SCAN of path_relations per accepted proposal. A single OR across the
-  // source-key and target-key expressions defeats the seek; the UNION ALL split
-  // lets each orientation seek its own index. EXPLAIN QUERY PLAN runs over the
-  // SQL the repo's OWN prepared statement carries (via .source) so a drift
-  // between the indexed expression and the live statement fails this test.
-  it("await-path subquery rides the anchor-key indexes (SEARCH path_relations, no workspace SCAN)", async () => {
+  // source-backing and target-backing expressions defeats the seek; the UNION
+  // ALL split lets each orientation seek the backing-object index. EXPLAIN
+  // QUERY PLAN runs over the repo's OWN prepared statement so expression drift
+  // fails this test.
+  it("await-path probe rides the backing-object indexes (SEARCH path_relations, no workspace SCAN)", async () => {
     const { repo, pathRepo, database } = await createRepo();
     // Seed enough path_relations that a scan plan would be the costly path the
     // planner avoids only by riding the expression index.
@@ -344,30 +421,37 @@ describe("SqliteEdgeProposalRepo", () => {
     mintObjectPath(pathRepo, 2, MEMORY_2, MEMORY_3);
     mintObjectPath(pathRepo, 3, MEMORY_1, MEMORY_3);
 
-    const sql = repo.__awaitingPathSqlForTest();
-    const plan = database.connection
-      .prepare(`EXPLAIN QUERY PLAN ${sql}`)
-      .all("workspace-1", 32) as ReadonlyArray<{ readonly detail: string }>;
-    const details = plan.map((step) => step.detail).join(" | ");
+    const statements = repo.__pathExistsSqlForTest();
+    const plans = [
+      database.connection
+        .prepare(`EXPLAIN QUERY PLAN ${statements.positiveRecalls}`)
+        .all("workspace-1", MEMORY_1, MEMORY_2, "workspace-1", MEMORY_2, MEMORY_1),
+      database.connection
+        .prepare(`EXPLAIN QUERY PLAN ${statements.directional}`)
+        .all("workspace-1", MEMORY_1, MEMORY_2, "supports", "positive", "positive", "positive")
+    ] as ReadonlyArray<ReadonlyArray<{ readonly detail: string }>>;
 
-    // The subquery SEARCHes path_relations through one of the anchor-key indexes
-    // with the anchor key BOUND (an index seek), not a residual filter.
-    expect(
-      plan.some(
-        (step) =>
-          step.detail.includes("SEARCH") &&
-          step.detail.includes("path_relations") &&
-          (step.detail.includes("idx_path_relations_source_anchor_key") ||
-            step.detail.includes("idx_path_relations_target_anchor_key"))
-      ),
-      `expected an anchor-key index SEARCH of path_relations, got: ${details}`
-    ).toBe(true);
-    // path_relations is never SCANned (a workspace-scoped scan per proposal is
-    // exactly the regression this guard catches).
-    expect(
-      plan.some((step) => step.detail.startsWith("SCAN") && step.detail.includes("path_relations")),
-      `expected no SCAN of path_relations, got: ${details}`
-    ).toBe(false);
+    for (const plan of plans) {
+      const details = plan.map((step) => step.detail).join(" | ");
+      // The subquery SEARCHes path_relations through one backing-object index
+      // with the backing id BOUND (an index seek), not a residual filter.
+      expect(
+        plan.some(
+          (step) =>
+            step.detail.includes("SEARCH") &&
+            step.detail.includes("path_relations") &&
+            (step.detail.includes("idx_path_relations_source_backing_object_id") ||
+              step.detail.includes("idx_path_relations_target_backing_object_id"))
+        ),
+        `expected a backing-object index SEARCH of path_relations, got: ${details}`
+      ).toBe(true);
+      // path_relations is never SCANned (a workspace-scoped scan per proposal is
+      // exactly the regression this guard catches).
+      expect(
+        plan.some((step) => step.detail.startsWith("SCAN") && step.detail.includes("path_relations")),
+        `expected no SCAN of path_relations, got: ${details}`
+      ).toBe(false);
+    }
   });
 
   // invariant (I1): reconcile is CAS-gated on fromStatus, so a concurrent
@@ -442,9 +526,8 @@ async function createRepo(extraMemoryIds: readonly string[] = []): Promise<{
 }
 
 // Mirrors the accept mint's landing topology: a path_relations row whose
-// source/target are object anchors on the two memory ids. The await-path query
-// must treat a proposal owning such a path as no-longer-orphaned regardless of
-// relation_kind / lifecycle. `index` keeps path_id unique per fixture.
+// source/target are object anchors on the two memory ids. `index` keeps path_id
+// unique per fixture.
 function mintObjectPath(
   pathRepo: SqlitePathRelationRepo,
   index: number,
@@ -500,7 +583,7 @@ function createProposalInput(
   proposalId: string,
   sourceMemoryId: string,
   targetMemoryId: string,
-  edgeType: "recalls" | "contradicts",
+  edgeType: EdgeProposal["edge_type"],
   createdAt = "2026-05-24T00:00:00.000Z"
 ) {
   return {

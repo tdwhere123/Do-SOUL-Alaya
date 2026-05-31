@@ -1,6 +1,8 @@
 import {
+  isPathActiveForRecall,
   RuntimeGovernanceEventType,
-  type EventLogEntry
+  type EventLogEntry,
+  type PathRelation
 } from "@do-soul/alaya-protocol";
 import type {
   EventLogRepo,
@@ -63,21 +65,22 @@ export function createGraphHealthService(deps: {
         )
       ]);
 
+      const activePathRelations = pathRelations.filter(isActivePathRelation);
       const byKind: Record<string, number> = {};
-      for (const relation of pathRelations) {
+      for (const relation of activePathRelations) {
         const kind = relation.constitution.relation_kind;
         byKind[kind] = (byKind[kind] ?? 0) + 1;
       }
 
       const warnings: GraphHealthWarning[] = [];
-      if (pathRelations.length === 0) {
+      if (activePathRelations.length === 0) {
         warnings.push("path_relations_empty");
       }
 
       return Object.freeze({
         workspace_id: workspaceId,
         status: warnings.length === 0 ? "healthy" : "degraded",
-        path_relations_total: pathRelations.length,
+        path_relations_total: activePathRelations.length,
         path_relations_by_kind: Object.freeze(byKind),
         latest_path_event_at: latestEventCreatedAt(pathEventBatches.flat()),
         warnings: Object.freeze(warnings),
@@ -85,6 +88,10 @@ export function createGraphHealthService(deps: {
       });
     }
   });
+}
+
+function isActivePathRelation(relation: Readonly<PathRelation>): boolean {
+  return isPathActiveForRecall(relation.lifecycle.status);
 }
 
 export function createEmptyGraphHealthSnapshot(workspaceId: string): GraphHealthSnapshot {

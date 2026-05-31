@@ -260,10 +260,10 @@ interface PostTurnExtractTaskPayload {
 
 // invariant: BULK_ENRICH drain-worker ports (S3c). The worker claims rows from
 // enrich_pending, reconstructs the conflict-scan params from each persisted
-// memory row (content/dimension/scope/domain_tags match buildMemoryInput), and
-// runs the two governed enrichment services that materialization used to run
-// inline. These narrow shapes keep the wiring decoupled from the concrete
-// storage repo / core service types.
+// memory row (content/dimension/scope/domain_tags match buildMemoryInput),
+// replays first-class signal refs from the persisted source signal, and runs
+// governed enrichment services that materialization used to run inline. These
+// narrow shapes keep the wiring decoupled from concrete storage/core types.
 // see also: packages/storage/src/repos/enrich-pending-repo.ts
 // see also: packages/soul/src/garden/materialization-router.ts EnrichPendingPort
 interface BulkEnrichPendingPort {
@@ -322,6 +322,17 @@ interface BulkEnrichEdgeProducerPort {
     readonly workspaceId: string;
     readonly runId: string;
     readonly sourceSignalId: string;
+  }): Promise<void>;
+}
+
+interface BulkEnrichSourceSignalLookupPort {
+  getById(signalId: string): Promise<CandidateMemorySignal | null>;
+}
+
+interface BulkEnrichSignalRefReplayPort {
+  replaySignalRefs(params: {
+    readonly newMemoryId: string;
+    readonly signal: CandidateMemorySignal;
   }): Promise<void>;
 }
 
@@ -392,6 +403,8 @@ export function createGardenRuntime(input: {
   readonly enrichMemoryLookup?: BulkEnrichMemoryLookupPort;
   readonly enrichConflictDetectionPort?: BulkEnrichConflictDetectionPort;
   readonly enrichEdgeProducerPort?: BulkEnrichEdgeProducerPort;
+  readonly enrichSourceSignalLookup?: BulkEnrichSourceSignalLookupPort;
+  readonly enrichSignalRefReplayPort?: BulkEnrichSignalRefReplayPort;
   // invariant: when wired, the ~60s GardenScheduler pass re-drives owed path
   // mints for accept->mint crash-window orphans (accepted/auto_accepted with no
   // path). Optional so unit tests and reduced wirings can omit it.
@@ -771,14 +784,15 @@ export function createGardenRuntime(input: {
   };
 
   // invariant: BULK_ENRICH is wired only when there is somewhere to drain to.
-  // enrichPendingRepo + enrichMemoryLookup are mandatory; at least one of the
-  // two enrichment services must be present, mirroring the inline gate the
+  // enrichPendingRepo + enrichMemoryLookup are mandatory; at least one
+  // enrichment service must be present, mirroring the inline gate the
   // write-path used (a missing service meant that half of enrichment was off).
   const bulkEnrichWired =
     input.enrichPendingRepo !== undefined &&
     input.enrichMemoryLookup !== undefined &&
     (input.enrichEdgeProducerPort !== undefined ||
-      input.enrichConflictDetectionPort !== undefined);
+      input.enrichConflictDetectionPort !== undefined ||
+      input.enrichSignalRefReplayPort !== undefined);
 
   const enqueueBulkEnrichForWorkspace = (workspaceId: string, nowIso: string): void => {
     gardenScheduler.enqueue({
@@ -1103,7 +1117,8 @@ export function createGardenRuntime(input: {
 
   // invariant: BULK_ENRICH drain worker (S3c). Claims a batch from
   // enrich_pending and, for each claimed memory, reconstructs the conflict-scan
-  // params from the persisted memory row and runs the SAME governed services
+  // params from the persisted memory row, replays first-class signal refs from
+  // the persisted source signal, and runs the SAME governed services
   // materialization used to run inline (detectAndLinkConflicts +
   // produceForNewMemory). Enrichment is a SYSTEM Garden decision — no agent
   // input drives it; the services own the truth boundary, this worker only
@@ -1120,13 +1135,15 @@ export function createGardenRuntime(input: {
     const memoryLookup = input.enrichMemoryLookup;
     const edgeProducer = input.enrichEdgeProducerPort;
     const conflictDetection = input.enrichConflictDetectionPort;
+    const signalLookup = input.enrichSourceSignalLookup;
+    const signalRefReplay = input.enrichSignalRefReplayPort;
     if (enrichPendingRepo === undefined || memoryLookup === undefined) {
       await reportBulkEnrichCompletion(task, completedAt, true, [
         "bulk_enrich_skipped:no_enrich_pending_table"
       ]);
       return;
     }
-    if (edgeProducer === undefined && conflictDetection === undefined) {
+    if (edgeProducer === undefined && conflictDetection === undefined && signalRefReplay === undefined) {
       await reportBulkEnrichCompletion(task, completedAt, true, [
         "bulk_enrich_skipped:enrichment_disabled"
       ]);
@@ -1151,6 +1168,21 @@ export function createGardenRuntime(input: {
             enrichPendingRepo.delete(pending.workspaceId, pending.memoryId);
             missingCount += 1;
             continue;
+          }
+          if (signalRefReplay !== undefined && pending.sourceSignalId !== null) {
+            if (signalLookup === undefined) {
+              throw new Error("BULK_ENRICH signal-ref replay is wired without a source signal lookup port.");
+            }
+            const sourceSignal = await signalLookup.getById(pending.sourceSignalId);
+            if (sourceSignal === null) {
+              throw new Error(
+                `BULK_ENRICH signal-ref replay could not load source signal ${pending.sourceSignalId}.`
+              );
+            }
+            await signalRefReplay.replaySignalRefs({
+              newMemoryId: memory.object_id,
+              signal: sourceSignal
+            });
           }
           if (edgeProducer !== undefined) {
             await edgeProducer.produceForNewMemory({
@@ -1188,9 +1220,10 @@ export function createGardenRuntime(input: {
           processedCount += 1;
         } catch (memoryError) {
           // Isolate a per-memory failure: release the claim so a later cycle
-          // retries it, never drop the marker. produceForNewMemory and
-          // detectAndLinkConflicts (strictNoDrop) throw on transient path-mint
-          // failure, so this path is the no-drop retry seam.
+          // retries it, never drop the marker. signal-ref replay,
+          // produceForNewMemory, and detectAndLinkConflicts(strictNoDrop) throw
+          // on transient path-mint failure, so this path is the no-drop retry
+          // seam.
           enrichPendingRepo.releaseClaim(pending.workspaceId, pending.memoryId);
           failedCount += 1;
           warn("bulk enrich memory failed; released claim for retry", {

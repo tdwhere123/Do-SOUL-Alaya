@@ -3,6 +3,7 @@ import {
   EdgeProposalStatus,
   EdgeProposalStatusSchema,
   EdgeProposalTriggerSourceSchema,
+  MEMORY_GRAPH_EDGE_RECALL_WEIGHTS,
   MemoryGraphEdgeTypeSchema,
   type EdgeProposal,
   type EdgeProposalFilter,
@@ -12,8 +13,8 @@ import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
 import {
-  PATH_RELATION_SOURCE_ANCHOR_KEY_SQL,
-  PATH_RELATION_TARGET_ANCHOR_KEY_SQL
+  PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
+  PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
 } from "./path-relation-repo.js";
 import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
 
@@ -84,13 +85,15 @@ export interface EdgeProposalRepo {
   // invariant: returns ONLY accepted / auto_accepted proposals that still owe a
   // path — a crash after the accept review row committed but before the mint
   // landed strands such a row with no path and invisible to listPending (which
-  // filters status='pending'). Rows whose owed path already landed are excluded
-  // (NOT EXISTS against the mint's own anchor dedup), so a backlog of healthy
+  // filters status='pending'). Rows whose owed path already landed are filtered
+  // against the mint's own anchor dedup, so a backlog of healthy
   // accepts can never exhaust `limit` and starve a genuine orphan behind them.
   // The daemon reconcile sweep reads these, oldest first, to re-drive the owed
-  // mint idempotently. Bounded by `limit` so one pass cannot scan unbounded.
+  // mint idempotently. Returned rows are bounded by `limit`; accepted
+  // candidates are paged through the status/time index until enough true
+  // orphans are found or the accepted set is exhausted.
   // see also: core/src/edge-proposal-service.ts reconcileStuckAccepts;
-  //   path-relation-repo.ts PATH_RELATION_*_ANCHOR_KEY_SQL (the await-path match).
+  //   path-relation-repo.ts PATH_RELATION_*_BACKING_OBJECT_ID_SQL (the await-path match).
   listAcceptedAwaitingPath(workspaceId: string, limit: number): readonly EdgeProposal[];
   updateReview(input: EdgeProposalReviewInput): EdgeProposal;
   reconcileAfterMintFailure(input: EdgeProposalMintFailureReconcileInput): EdgeProposal;
@@ -115,11 +118,24 @@ interface EdgeProposalRow {
   readonly expires_at: string | null;
 }
 
+const POSITIVE_RECALLS_FAMILY_RELATION_KIND_SQL =
+  "'recalls', 'co_recalled', 'shares_entity', 'signal_graph_ref'";
+const POSITIVE_RECALLS_FAMILY_RELATION_KINDS = new Set([
+  "recalls",
+  "co_recalled",
+  "shares_entity",
+  "signal_graph_ref"
+]);
+
+type PathIdentitySign = "positive" | "negative" | "neutral";
+
 export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
   private readonly createStatement;
   private readonly findByIdStatement;
   private readonly findPendingDuplicateStatement;
   private readonly listAcceptedAwaitingPathStatement;
+  private readonly acceptedPositiveRecallsPathExistsStatement;
+  private readonly acceptedDirectionalPathExistsStatement;
   private readonly updateReviewStatement;
   private readonly reconcileAfterMintFailureStatement;
 
@@ -160,70 +176,86 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
         AND status = 'pending'
       LIMIT 1
     `);
-    // invariant: returns only accepted / auto_accepted rows that STILL owe a
-    // path — the NOT EXISTS excludes any whose owed path already landed. Without
-    // it the sweep selected every accepted row oldest-first, so > limit healthy
-    // accepts (each already minted) permanently hid a real crash-window orphan
-    // behind them: the per-pass cap was exhausted re-minting healthy rows to
-    // already_present and the orphan was never reached.
-    // The await-path predicate MIRRORS the accept mint's dedup exactly
-    // (path-relation-proposal-service.materialize -> findByAnchorMemoryId ->
-    // anchorPointsAt): a path "satisfies" the proposal iff some path_relations
-    // row in the same workspace links the proposal's source/target memory ids in
-    // EITHER direction. Like that dedup it ignores relation_kind and lifecycle
-    // status (findByAnchors applies neither), so a row this query excludes is
-    // exactly a row the re-mint would resolve to already_present.
-    // The proposal anchors the mint writes are always object anchors
-    // ({kind:'object', object_id: <memory_id>}); json_array('object', col)
-    // renders the same text serializePathAnchorRef(...) produces, and matching
-    // it against PATH_RELATION_*_ANCHOR_KEY_SQL (byte-identical to the
-    // idx_path_relations_*_anchor_key expression indexes, migration 048).
+    // invariant: list accepted / auto_accepted candidates oldest-first, then
+    // filter out rows whose owed path already landed through a separate
+    // parameter-bound path-exists statement. Filtering in a correlated NOT
+    // EXISTS looks compact, but SQLite cannot seek the expression index when
+    // the backing-object expression is compared to an outer-column value; it
+    // falls back to a per-proposal path_relations scan. Bound parameters make
+    // the expression index probe a real SEARCH.
+    // Without the path-exists filter the sweep selected every accepted row
+    // oldest-first, so > limit healthy accepts (each already minted)
+    // permanently hid a real crash-window orphan behind them: the per-pass cap
+    // was exhausted re-minting healthy rows to already_present and the orphan
+    // was never reached.
+    // The path-exists predicate mirrors protocol pathRelationMatchesIdentity:
+    // positive recalls-family paths are unordered across recalls/co_recalled/
+    // shares_entity/signal_graph_ref, while every other relation/sign family is
+    // directional and relation-kind/sign aware. This keeps the crash-window
+    // repair list aligned with the accept re-mint's already_present decision.
     // invariant: the bidirectional match is split into a UNION ALL of two
     // single-orientation branches rather than one OR across two different
-    // expression columns. A single OR mixing the source-key and target-key
-    // expressions defeats the expression-index seek (SQLite cannot pick one
-    // index for a disjunction over two distinct indexed expressions) and
+    // expression columns. A single OR mixing the source-backing and
+    // target-backing expressions defeats the expression-index seek and
     // degrades to a workspace-scoped SCAN of path_relations per accepted
     // proposal. Each UNION ALL branch binds ONE orientation, so each rides its
-    // own idx_path_relations_*_anchor_key index seek. Semantics are identical:
-    // a path satisfies the proposal iff some row links the source/target memory
-    // ids in EITHER direction (relation_kind- and lifecycle-agnostic).
+    // own idx_path_relations_*_backing_object_id index seek. Semantics are
+    // identical for the positive recalls-family case. Directional families use
+    // only the source->target branch, by contract. INDEXED BY keeps this
+    // reconcile path on the backing-object identity index when SQLite would
+    // otherwise prefer the narrower anchor-key index.
     // invariant: the match is asymmetric-safe. A genuine orphan owns NO path, so
     // NO row matches and it is always included (never starved). A healthy accept
-    // that some non-object-anchor producer happens to satisfy would re-appear
-    // here, but the re-mint resolves it to already_present — a harmless no-op,
-    // never a lost orphan.
+    // that some non-object-anchor producer satisfies is excluded here because
+    // the backing object id, not the full anchor key, is the mint dedup key.
     // invariant: oldest-first so a backlog of stranded accepts drains FIFO
     // across passes; idx_edge_proposals_workspace_status(workspace_id, status,
     // created_at) covers the accepted-row predicate + ordering.
     // see also: core/src/edge-proposal-service.ts reconcileStuckAccepts,
     //   mintAcceptedPath (object-anchor mint + idempotent dedup).
-    // invariant: the anchor-key SQL is spliced VERBATIM (unqualified
-    // anchors_json) so its parse tree stays byte-identical to the migration-048
-    // expression indexes and SQLite probes them. `path_relations` is the only
-    // table in this subquery carrying an anchors_json column, so the unqualified
-    // reference binds unambiguously to pr.anchors_json; edge_proposals is
-    // referenced only through its `ep.` alias.
+    // invariant: the backing-object SQL is spliced VERBATIM (unqualified
+    // anchors_json) so its parse tree stays byte-identical to the migration-087
+    // expression indexes and SQLite probes them.
     this.listAcceptedAwaitingPathStatement = db.connection.prepare(`
-      SELECT ep.*
-      FROM edge_proposals AS ep
-      WHERE ep.workspace_id = ?
-        AND ep.status IN ('accepted', 'auto_accepted')
-        AND NOT EXISTS (
-          SELECT 1
-          FROM path_relations AS pr
-          WHERE pr.workspace_id = ep.workspace_id
-            AND ${PATH_RELATION_SOURCE_ANCHOR_KEY_SQL} = json_array('object', ep.source_memory_id)
-            AND ${PATH_RELATION_TARGET_ANCHOR_KEY_SQL} = json_array('object', ep.target_memory_id)
-          UNION ALL
-          SELECT 1
-          FROM path_relations AS pr
-          WHERE pr.workspace_id = ep.workspace_id
-            AND ${PATH_RELATION_SOURCE_ANCHOR_KEY_SQL} = json_array('object', ep.target_memory_id)
-            AND ${PATH_RELATION_TARGET_ANCHOR_KEY_SQL} = json_array('object', ep.source_memory_id)
-        )
-      ORDER BY ep.created_at ASC, ep.proposal_id ASC
+      SELECT *
+      FROM edge_proposals
+      WHERE workspace_id = ?
+        AND status IN ('accepted', 'auto_accepted')
+      ORDER BY created_at ASC, proposal_id ASC
       LIMIT ?
+      OFFSET ?
+    `);
+    this.acceptedPositiveRecallsPathExistsStatement = db.connection.prepare(`
+      SELECT 1
+      FROM path_relations INDEXED BY idx_path_relations_source_backing_object_id
+      WHERE workspace_id = ?
+        AND ${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} = ?
+        AND ${PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL} = ?
+        AND json_extract(constitution_json, '$.relation_kind') IN (${POSITIVE_RECALLS_FAMILY_RELATION_KIND_SQL})
+        AND json_extract(effect_vector_json, '$.recall_bias') > 0
+      UNION ALL
+      SELECT 1
+      FROM path_relations INDEXED BY idx_path_relations_target_backing_object_id
+      WHERE workspace_id = ?
+        AND ${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} = ?
+        AND ${PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL} = ?
+        AND json_extract(constitution_json, '$.relation_kind') IN (${POSITIVE_RECALLS_FAMILY_RELATION_KIND_SQL})
+        AND json_extract(effect_vector_json, '$.recall_bias') > 0
+      LIMIT 1
+    `);
+    this.acceptedDirectionalPathExistsStatement = db.connection.prepare(`
+      SELECT 1
+      FROM path_relations INDEXED BY idx_path_relations_source_backing_object_id
+      WHERE workspace_id = ?
+        AND ${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} = ?
+        AND ${PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL} = ?
+        AND json_extract(constitution_json, '$.relation_kind') = ?
+        AND (
+          (? = 'positive' AND json_extract(effect_vector_json, '$.recall_bias') > 0)
+          OR (? = 'negative' AND json_extract(effect_vector_json, '$.recall_bias') < 0)
+          OR (? = 'neutral' AND json_extract(effect_vector_json, '$.recall_bias') = 0)
+        )
+      LIMIT 1
     `);
     this.updateReviewStatement = db.connection.prepare(`
       UPDATE edge_proposals
@@ -356,8 +388,36 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
       throw new StorageError("VALIDATION_FAILED", `listAcceptedAwaitingPath limit must be a positive integer: ${limit}`);
     }
     try {
-      const rows = this.listAcceptedAwaitingPathStatement.all(parsedWorkspaceId, limit) as EdgeProposalRow[];
-      return Object.freeze(rows.map((row) => parseRow(row)));
+      const awaiting: EdgeProposalRow[] = [];
+      const batchSize = Math.max(limit, 64);
+      let offset = 0;
+
+      while (awaiting.length < limit) {
+        const rows = this.listAcceptedAwaitingPathStatement.all(
+          parsedWorkspaceId,
+          batchSize,
+          offset
+        ) as EdgeProposalRow[];
+        if (rows.length === 0) {
+          break;
+        }
+
+        for (const row of rows) {
+          if (!this.acceptedProposalHasPath(row)) {
+            awaiting.push(row);
+            if (awaiting.length === limit) {
+              break;
+            }
+          }
+        }
+
+        offset += rows.length;
+        if (rows.length < batchSize) {
+          break;
+        }
+      }
+
+      return Object.freeze(awaiting.map((row) => parseRow(row)));
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -512,6 +572,43 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
     return (this.listAcceptedAwaitingPathStatement as { readonly source: string }).source;
   }
 
+  // Test-only seam: the SQL text for the parameter-bound path-exists probe.
+  // This is the query whose planner contract matters for path_relations:
+  // SEARCH the migration 087 backing-object expression indexes, never SCAN.
+  // cross-file ref: packages/storage/src/__tests__/edge-proposal-repo.test.ts
+  public __pathExistsSqlForTest(): Readonly<{
+    readonly positiveRecalls: string;
+    readonly directional: string;
+  }> {
+    return Object.freeze({
+      positiveRecalls: (this.acceptedPositiveRecallsPathExistsStatement as { readonly source: string }).source,
+      directional: (this.acceptedDirectionalPathExistsStatement as { readonly source: string }).source
+    });
+  }
+
+  private acceptedProposalHasPath(row: EdgeProposalRow): boolean {
+    const identity = edgeProposalPathIdentity(row.edge_type);
+    const existing = identity.isPositiveRecallsFamily
+      ? this.acceptedPositiveRecallsPathExistsStatement.get(
+          row.workspace_id,
+          row.source_memory_id,
+          row.target_memory_id,
+          row.workspace_id,
+          row.target_memory_id,
+          row.source_memory_id
+        )
+      : this.acceptedDirectionalPathExistsStatement.get(
+          row.workspace_id,
+          row.source_memory_id,
+          row.target_memory_id,
+          identity.relationKind,
+          identity.sign,
+          identity.sign,
+          identity.sign
+        );
+    return existing !== undefined;
+  }
+
   private findRequired(proposalId: string): EdgeProposal {
     const proposal = this.findById(proposalId);
     if (proposal === null) {
@@ -547,6 +644,30 @@ function isUniqueConstraintError(error: unknown): boolean {
     current = (current as { readonly cause?: unknown }).cause;
   }
   return false;
+}
+
+function edgeProposalPathIdentity(edgeTypeValue: string): {
+  readonly relationKind: EdgeProposal["edge_type"];
+  readonly sign: PathIdentitySign;
+  readonly isPositiveRecallsFamily: boolean;
+} {
+  const relationKind = parseEdgeTypeForIdentity(edgeTypeValue);
+  const weight = MEMORY_GRAPH_EDGE_RECALL_WEIGHTS[relationKind];
+  const sign: PathIdentitySign = weight > 0 ? "positive" : weight < 0 ? "negative" : "neutral";
+
+  return {
+    relationKind,
+    sign,
+    isPositiveRecallsFamily: sign === "positive" && POSITIVE_RECALLS_FAMILY_RELATION_KINDS.has(relationKind)
+  };
+}
+
+function parseEdgeTypeForIdentity(value: string): EdgeProposal["edge_type"] {
+  try {
+    return MemoryGraphEdgeTypeSchema.parse(value);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate edge proposal edge_type: ${value}`, error);
+  }
 }
 
 function parseCreateInput(input: EdgeProposalCreateInput): EdgeProposalCreateInput {

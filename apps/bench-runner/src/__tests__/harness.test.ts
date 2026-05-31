@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -246,6 +246,38 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
           runId: "harness-second-daemon-run"
         })
       ).rejects.toThrow(/only one active daemon per process/);
+    },
+    60_000
+  );
+
+  it(
+    "cleans up managed attachWorkspace roots without deleting the daemon data root",
+    async () => {
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-managed-root-default-ws",
+        runId: "harness-managed-root-default-run"
+      });
+      handles.push(daemon);
+      const workspace = await daemon.attachWorkspace({
+        workspaceId: "harness-managed-root-ws",
+        runId: "harness-managed-root-run"
+      });
+
+      const row = initDatabase({ filename: join(daemon.dataDir, "alaya.db") })
+        .connection.prepare(
+          `SELECT root_path AS rootPath
+             FROM workspaces
+            WHERE workspace_id = ?`
+        )
+        .get(workspace.workspaceId) as { readonly rootPath: string };
+
+      expect(row.rootPath).toContain(join(daemon.dataDir, "bench-workspaces"));
+      await expect(access(row.rootPath)).resolves.toBeUndefined();
+
+      await workspace.detach();
+
+      await expect(access(row.rootPath)).rejects.toThrow();
+      await expect(access(daemon.dataDir)).resolves.toBeUndefined();
     },
     60_000
   );

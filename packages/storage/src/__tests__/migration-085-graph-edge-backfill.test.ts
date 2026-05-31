@@ -144,6 +144,51 @@ function readPaths(db: BetterSqlite3.Database): readonly PathRow[] {
     .all() as PathRow[];
 }
 
+function seedExistingPath(
+  db: BetterSqlite3.Database,
+  input: {
+    readonly pathId: string;
+    readonly source: string;
+    readonly target: string;
+    readonly relationKind: string;
+    readonly recallBias: number;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO path_relations (
+      path_id, workspace_id, anchors_json, constitution_json,
+      effect_vector_json, plasticity_state_json, lifecycle_json, legitimacy_json,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.pathId,
+    "workspace-1",
+    JSON.stringify({
+      source_anchor: { kind: "object", object_id: input.source },
+      target_anchor: { kind: "object", object_id: input.target }
+    }),
+    JSON.stringify({ relation_kind: input.relationKind, why_this_relation_exists: ["pre_existing"] }),
+    JSON.stringify({
+      salience: 0.5,
+      recall_bias: input.recallBias,
+      verification_bias: 0,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "lens_entry"
+    }),
+    JSON.stringify({
+      strength: 0.3,
+      direction_bias: "bidirectional_asymmetric",
+      stability_class: "stable",
+      support_events_count: 0,
+      contradiction_events_count: 0
+    }),
+    JSON.stringify({ status: "active", retirement_rule: "manual" }),
+    JSON.stringify({ evidence_basis: ["pre_existing"], governance_class: "attention_only" }),
+    "2026-04-17T00:30:00.000Z",
+    "2026-04-17T00:30:00.000Z"
+  );
+}
+
 describe("migration 085 legacy graph-edge backfill", () => {
   it("backfills surviving legacy edges into active path_relations, dedupes existing, drops the table", async () => {
     const { db } = migrateThroughPre085();
@@ -598,6 +643,60 @@ describe("migration 085 legacy graph-edge backfill", () => {
     expect(pairAssociative("mem-c", "mem-d")).toHaveLength(1);
   });
 
+  it("does not dedupe positive legacy `recalls` against negative or neutral recalls-tier paths", () => {
+    const { db } = migrateThroughPre085();
+    seedWorkspace(db, "workspace-1");
+    for (const id of ["mem-a", "mem-b", "mem-c", "mem-d"]) {
+      seedMemory(db, id, "workspace-1");
+    }
+
+    seedExistingPath(db, {
+      pathId: "existing-negative-co-recalled",
+      source: "mem-a",
+      target: "mem-b",
+      relationKind: "co_recalled",
+      recallBias: -0.5
+    });
+    seedExistingPath(db, {
+      pathId: "existing-neutral-shares-entity",
+      source: "mem-c",
+      target: "mem-d",
+      relationKind: "shares_entity",
+      recallBias: 0
+    });
+    seedLegacyEdge(db, {
+      edgeId: "edge-recalls-vs-negative",
+      source: "mem-a",
+      target: "mem-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:00:00.000Z"
+    });
+    seedLegacyEdge(db, {
+      edgeId: "edge-recalls-vs-neutral",
+      source: "mem-c",
+      target: "mem-d",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:01:00.000Z"
+    });
+
+    applyMigration(db, MIGRATION_085);
+
+    const paths = readPaths(db);
+    const byPathId = new Map(paths.map((row) => [row.path_id, row]));
+    expect(byPathId.has("existing-negative-co-recalled")).toBe(true);
+    expect(byPathId.has("existing-neutral-shares-entity")).toBe(true);
+    expect(byPathId.has("legacy-edge:edge-recalls-vs-negative")).toBe(true);
+    expect(byPathId.has("legacy-edge:edge-recalls-vs-neutral")).toBe(true);
+
+    const recallBiasByPathId = new Map(
+      paths.map((row) => [row.path_id, JSON.parse(row.effect_vector_json).recall_bias])
+    );
+    expect(recallBiasByPathId.get("legacy-edge:edge-recalls-vs-negative")).toBe(0.5);
+    expect(recallBiasByPathId.get("legacy-edge:edge-recalls-vs-neutral")).toBe(0.5);
+  });
+
   it("dedupes a REVERSE-oriented legacy `recalls` edge against a cutover-minted `co_recalled` path for the same pair", () => {
     const { db } = migrateThroughPre085();
     seedWorkspace(db, "workspace-1");
@@ -679,6 +778,49 @@ describe("migration 085 legacy graph-edge backfill", () => {
       );
     });
     expect(pairAssociative).toHaveLength(1);
+  });
+
+  it("dedupes reciprocal legacy `recalls` source rows before backfill", () => {
+    const { db } = migrateThroughPre085();
+    seedWorkspace(db, "workspace-1");
+    for (const id of ["mem-low", "mem-high"]) {
+      seedMemory(db, id, "workspace-1");
+    }
+
+    seedLegacyEdge(db, {
+      edgeId: "edge-recalls-low-high",
+      source: "mem-low",
+      target: "mem-high",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:00:00.000Z"
+    });
+    seedLegacyEdge(db, {
+      edgeId: "edge-recalls-high-low",
+      source: "mem-high",
+      target: "mem-low",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:01:00.000Z"
+    });
+
+    applyMigration(db, MIGRATION_085);
+
+    const paths = readPaths(db);
+    const byPathId = new Map(paths.map((row) => [row.path_id, row]));
+    expect(byPathId.has("legacy-edge:edge-recalls-low-high")).toBe(true);
+    expect(byPathId.has("legacy-edge:edge-recalls-high-low")).toBe(false);
+
+    const pairRows = paths.filter((row) => {
+      const anchors = JSON.parse(row.anchors_json);
+      const ids = new Set([anchors.source_anchor.object_id, anchors.target_anchor.object_id]);
+      return (
+        JSON.parse(row.constitution_json).relation_kind === "co_recalled" &&
+        ids.has("mem-low") &&
+        ids.has("mem-high")
+      );
+    });
+    expect(pairRows).toHaveLength(1);
   });
 
   it("keeps DIRECTIONAL kinds same-orientation-only: a reverse-oriented active `supports` path does NOT dedup a forward legacy `supports` edge", () => {

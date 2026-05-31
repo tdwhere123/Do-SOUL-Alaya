@@ -289,7 +289,7 @@ D20 决策：**不做**。X1 是 generic RAG 的标准 trick，违反 Alaya-nati
 
 | Item | Owner | Acceptance | Verification lane |
 |---|---|---|---|
-| P1 usage_proof gate removal | core owner | cold workspace path expansion no longer depends on usage proof lookup | `recall-regression-suite/v0.3.10-regressions.test.ts` cold path case |
+| P1 usage_proof gate removal | core owner | cold workspace path expansion no longer depends on usage proof lookup | `recall-regression-suite/recall-current-behavior.test.ts` cold path case |
 | P3 time_concern producer/path | core + storage owner | date query probes reach `time_concern` path expansion without reintroducing `temporal_proximity` plane | `recall-query-probes` + path expansion regression |
 | P4 active constraints channel | core-daemon owner | governance-backed constraints/hazards are returned via `active_constraints[]`, while draft or dimension-only agent outputs stay out of the hard channel | active constraint regression + MCP response schema test |
 | G governance/control-plane | governance owner | control-plane outputs remain explicit proposals/audit records; no silent durable-memory write path | governance/proposal regression sweep |

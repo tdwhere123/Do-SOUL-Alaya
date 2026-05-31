@@ -9,9 +9,9 @@ Backfill confirms a deterministic harness exists for one-daemon-lifetime proof o
 
 ## Build and test evidence
 
-- Primary harness: `apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts`.
-- Supporting E2E harness: `apps/core-daemon/src/__tests__/e2e/v0.1-release-loop.test.ts`.
-- Legacy attach proof continuity: `apps/core-daemon/src/__tests__/gate4-attached-agent-mcp-proof.test.ts`.
+- Primary harness: `apps/core-daemon/src/__tests__/agent-use-protocol.test.ts`.
+- Supporting E2E harness: `apps/core-daemon/src/__tests__/e2e/release-loop.test.ts`.
+- Legacy attach proof continuity: `apps/core-daemon/src/__tests__/attached-agent-mcp-proof.test.ts`.
 
 ## Closeout review/fix evidence (2026-05-06)
 
@@ -28,7 +28,7 @@ Fresh verification:
 - `rtk pnpm build` passed.
 - `rtk pnpm test` passed: 266 files, 2081 tests.
 - `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon -- cli-tools cli-review cli-register` passed after the shared run-validation fix: 55 files, 317 tests.
-- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon apps/core-daemon/src/__tests__/mcp-memory-tool-handler.test.ts apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts` passed in Round-3 red-team re-review: 2 files, 9 tests.
+- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon apps/core-daemon/src/__tests__/mcp-memory-tool-handler.test.ts apps/core-daemon/src/__tests__/agent-use-protocol.test.ts` passed in Round-3 red-team re-review: 2 files, 9 tests.
 - Isolated `alaya mcp stdio` smoke exited 0 and started Janitor, Auditor,
   Librarian, and GardenScheduler background services.
 

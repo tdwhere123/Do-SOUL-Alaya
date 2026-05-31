@@ -6,14 +6,14 @@
 - Port mode: `requires-redesign`
 - Sources used: `n/a`
 - Targets changed:
-  - `apps/core-daemon/src/__tests__/e2e/v0.1-release-loop.test.ts`
+  - `apps/core-daemon/src/__tests__/e2e/release-loop.test.ts`
 
 No daemon runtime, MCP server, CLI command implementation, storage, protocol,
 core, vendor, or shared barrel files were changed.
 
 ## Redesign Summary
 
-`v0.1-release-loop.test.ts` reuses the Gate-4 single-daemon pattern:
+`release-loop.test.ts` reuses the Gate-4 single-daemon pattern:
 
 - isolated `DATA_DIR`, `ALAYA_CONFIG_DIR`, `CODEX_HOME`, and `HOME`
 - seeded SQLite fixture with one active workspace, run, and memory entry
@@ -47,7 +47,7 @@ The test proves:
 - `rtk pnpm exec tsc --noEmit -p apps/core-daemon` - passed.
 - `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon e2e` -
   passed.
-- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon gate4-attached-agent-mcp-proof` -
+- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon attached-agent-mcp-proof` -
   passed.
 - `rtk git diff --check` - passed.
 

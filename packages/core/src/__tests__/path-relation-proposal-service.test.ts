@@ -11,6 +11,7 @@ import {
   CONTRADICTS_SEED_PROFILE,
   EXCEPTION_TO_SEED_PROFILE,
   type CoUsageCounterPort,
+  type MemoryAnchorExistencePort,
   type PathRelationProposalEventPublisherPort,
   type PathRelationProposalRepoPort,
   type SubmitCandidateInput
@@ -232,14 +233,13 @@ describe("PathRelationProposalService", () => {
   });
 
   it("skips propose when a PathRelation already exists between the pair", async () => {
-    // Only `anchors` is load-bearing here: anchorPointsAt dedup reads
-    // relation.anchors and nothing else, so a partial stub asserted to
-    // PathRelation exercises the skip-on-existing branch without a full clone.
     const existing = {
       anchors: {
         source_anchor: { kind: "object" as const, object_id: "mem-A" },
         target_anchor: { kind: "object" as const, object_id: "mem-B" }
-      }
+      },
+      constitution: { relation_kind: "co_recalled" },
+      effect_vector: { recall_bias: 0.5 }
     } as PathRelation;
     const repo = {
       create: vi.fn((relation: any) => relation),
@@ -711,7 +711,9 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
       anchors: {
         source_anchor: { kind: "object" as const, object_id: "mem-A" },
         target_anchor: { kind: "object" as const, object_id: "mem-B" }
-      }
+      },
+      constitution: { relation_kind: "supports" },
+      effect_vector: { recall_bias: 0.5 }
     } as PathRelation;
     const repo = {
       create: vi.fn((relation: any) => relation),
@@ -730,6 +732,145 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
     expect(result).toBe("already_present");
     expect(repo.create).not.toHaveBeenCalled();
+  });
+
+  it("submitCandidate does not dedup contradicts against an existing co_recalled path", async () => {
+    const existing = {
+      anchors: {
+        source_anchor: { kind: "object" as const, object_id: "mem-A" },
+        target_anchor: { kind: "object" as const, object_id: "mem-B" }
+      },
+      constitution: { relation_kind: "co_recalled" },
+      effect_vector: { recall_bias: 0.5 }
+    } as PathRelation;
+    const repo = {
+      create: vi.fn((relation: any) => relation),
+      findByAnchorMemoryId: vi.fn<NonNullable<PathRelationProposalRepoPort["findByAnchorMemoryId"]>>(
+        async () => [existing]
+      )
+    };
+    const { publisher } = createEventPublisher();
+    const service = new PathRelationProposalService({
+      repo,
+      counterStore: createCounterStore(),
+      eventPublisher: publisher
+    });
+
+    const result = await service.submitCandidate(
+      baseInput({
+        relationKind: CONTRADICTS_SEED_PROFILE.relationKind,
+        initialStrength: CONTRADICTS_SEED_PROFILE.initialStrength,
+        governanceClass: CONTRADICTS_SEED_PROFILE.governanceClass,
+        evidenceBasis: CONTRADICTS_SEED_PROFILE.evidenceBasis,
+        recallBiasSign: CONTRADICTS_SEED_PROFILE.recallBiasSign,
+        recallBiasMagnitude: CONTRADICTS_SEED_PROFILE.recallBiasMagnitude
+      })
+    );
+
+    expect(result).toBe("applied");
+    expect(repo.create).toHaveBeenCalledTimes(1);
+    expect(repo.create.mock.calls[0][0].constitution.relation_kind).toBe("contradicts");
+  });
+
+  it("submitCandidate does not dedup supports against an existing contradicts path", async () => {
+    const existing = {
+      anchors: {
+        source_anchor: { kind: "object" as const, object_id: "mem-A" },
+        target_anchor: { kind: "object" as const, object_id: "mem-B" }
+      },
+      constitution: { relation_kind: "contradicts" },
+      effect_vector: { recall_bias: -0.5 }
+    } as PathRelation;
+    const repo = {
+      create: vi.fn((relation: any) => relation),
+      findByAnchorMemoryId: vi.fn<NonNullable<PathRelationProposalRepoPort["findByAnchorMemoryId"]>>(
+        async () => [existing]
+      )
+    };
+    const { publisher } = createEventPublisher();
+    const service = new PathRelationProposalService({
+      repo,
+      counterStore: createCounterStore(),
+      eventPublisher: publisher
+    });
+
+    const result = await service.submitCandidate(baseInput({}));
+
+    expect(result).toBe("applied");
+    expect(repo.create).toHaveBeenCalledTimes(1);
+    expect(repo.create.mock.calls[0][0].constitution.relation_kind).toBe("supports");
+  });
+
+  it("rejects a foreign object_facet backing object before materializing", async () => {
+    const repo = {
+      create: vi.fn((relation: any) => relation),
+      findByAnchorMemoryId: vi.fn(async () => [])
+    };
+    const memoryExistence: MemoryAnchorExistencePort = {
+      workspaceOfObject: vi.fn(async (objectId: string) =>
+        objectId === "mem-foreign" ? "workspace-2" : "workspace-1"
+      )
+    };
+    const { publisher, appendManyWithMutation } = createEventPublisher();
+    const service = new PathRelationProposalService({
+      repo,
+      counterStore: createCounterStore(),
+      eventPublisher: publisher,
+      memoryExistence
+    });
+
+    const result = await service.submitCandidate(
+      baseInput({
+        sourceAnchor: {
+          kind: "object_facet",
+          object_id: "mem-foreign",
+          facet_key: "status"
+        }
+      })
+    );
+
+    expect(result).toBe("rejected");
+    expect(repo.create).not.toHaveBeenCalled();
+    expect(memoryExistence.workspaceOfObject).toHaveBeenCalledWith("mem-foreign");
+    const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
+    expect(eventInputs[0].event_type).toBe("path.relation_rejected");
+    expect(eventInputs[0].payload_json.rejection_reason).toBe("object_foreign_workspace");
+  });
+
+  it("rejects a missing time_concern backing object before materializing", async () => {
+    const repo = {
+      create: vi.fn((relation: any) => relation),
+      findByAnchorMemoryId: vi.fn(async () => [])
+    };
+    const memoryExistence: MemoryAnchorExistencePort = {
+      workspaceOfObject: vi.fn(async (objectId: string) =>
+        objectId === "mem-missing" ? null : "workspace-1"
+      )
+    };
+    const { publisher, appendManyWithMutation } = createEventPublisher();
+    const service = new PathRelationProposalService({
+      repo,
+      counterStore: createCounterStore(),
+      eventPublisher: publisher,
+      memoryExistence
+    });
+
+    const result = await service.submitCandidate(
+      baseInput({
+        targetAnchor: {
+          kind: "time_concern",
+          source_object_id: "mem-missing",
+          window_digest: "next_week"
+        }
+      })
+    );
+
+    expect(result).toBe("rejected");
+    expect(repo.create).not.toHaveBeenCalled();
+    expect(memoryExistence.workspaceOfObject).toHaveBeenCalledWith("mem-missing");
+    const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
+    expect(eventInputs[0].event_type).toBe("path.relation_rejected");
+    expect(eventInputs[0].payload_json.rejection_reason).toBe("object_missing");
   });
 
   it("submitCandidate swallows a materialize failure and returns failed with a warn", async () => {

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -625,17 +625,19 @@ export async function runLongMemEval(
     (captureSnapshot
       ? await mkdtemp(join(tmpdir(), "alaya-bench-seed-"))
       : undefined);
-  const daemon = await startBenchDaemon({
-    workspaceId: `${benchRunId}-default`,
-    runId: `${benchRunId}-default-run`,
-    embeddingMode: opts.embeddingMode ?? "disabled",
-    ...(opts.embeddingProviderKind === undefined
-      ? {}
-      : { embeddingProviderKind: opts.embeddingProviderKind }),
-    ...(seedDataDirRoot === undefined ? {} : { dataDirRoot: seedDataDirRoot }),
-    recallWeightOverrides
-  });
+  const removeSeedDataDirRoot = opts.dataDirRoot === undefined && captureSnapshot;
+  let daemon: BenchDaemonHandle | undefined;
   try {
+    daemon = await startBenchDaemon({
+      workspaceId: `${benchRunId}-default`,
+      runId: `${benchRunId}-default-run`,
+      embeddingMode: opts.embeddingMode ?? "disabled",
+      ...(opts.embeddingProviderKind === undefined
+        ? {}
+        : { embeddingProviderKind: opts.embeddingProviderKind }),
+      ...(seedDataDirRoot === undefined ? {} : { dataDirRoot: seedDataDirRoot }),
+      recallWeightOverrides
+    });
     for (let i = 0; i < window.length; i++) {
       const q = window[i];
       if (q === undefined) continue;
@@ -665,7 +667,13 @@ export async function runLongMemEval(
       );
     }
   } finally {
-    await daemon.shutdown();
+    try {
+      await daemon?.shutdown();
+    } finally {
+      if (removeSeedDataDirRoot && seedDataDirRoot !== undefined) {
+        await rm(seedDataDirRoot, { recursive: true, force: true });
+      }
+    }
   }
   const extractionStats = seedRunner.stats;
   // Disclose which seed path ran: official_api_compile (production garden

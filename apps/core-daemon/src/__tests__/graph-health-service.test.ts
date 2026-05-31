@@ -1,6 +1,7 @@
 import {
   RuntimeGovernanceEventType,
-  type EventLogEntry
+  type EventLogEntry,
+  type PathRelation
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { createGraphHealthService } from "../services/graph-health-service.js";
@@ -21,10 +22,11 @@ describe("GraphHealthService", () => {
     const service = createGraphHealthService({
       pathRelationRepo: {
         findByWorkspace: vi.fn(async () => [
-          { constitution: { relation_kind: "supports" } },
-          { constitution: { relation_kind: "recalls" } },
-          { constitution: { relation_kind: "recalls" } }
-        ] as never)
+          createRelation("supports", "active"),
+          createRelation("recalls", "active"),
+          createRelation("recalls", "dormant"),
+          createRelation("contradicts", "retired")
+        ])
       },
       eventLogRepo
     });
@@ -34,10 +36,10 @@ describe("GraphHealthService", () => {
     expect(snapshot).toMatchObject({
       workspace_id: "workspace-1",
       status: "healthy",
-      path_relations_total: 3,
+      path_relations_total: 2,
       path_relations_by_kind: {
         supports: 1,
-        recalls: 2
+        recalls: 1
       },
       latest_path_event_at: "2026-05-12T00:00:00.000Z",
       warnings: [],
@@ -73,8 +75,8 @@ describe("GraphHealthService", () => {
     const service = createGraphHealthService({
       pathRelationRepo: {
         findByWorkspace: vi.fn(async () => [
-          { constitution: { relation_kind: "supports" } }
-        ] as never)
+          createRelation("supports", "active")
+        ])
       },
       eventLogRepo
     });
@@ -120,7 +122,44 @@ describe("GraphHealthService", () => {
     });
     expect(snapshot.hint).toContain("new install");
   });
+
+  it("treats dormant or merged-away lifecycle rows as inactive for health counts", async () => {
+    const service = createGraphHealthService({
+      pathRelationRepo: {
+        findByWorkspace: vi.fn(async () => [
+          createRelation("supports", "dormant"),
+          createRelation("recalls", "retired")
+        ])
+      },
+      eventLogRepo: {
+        queryByWorkspaceAndType: vi.fn(async () => [])
+      }
+    });
+
+    const snapshot = await service.getStatus("workspace-inactive");
+
+    expect(snapshot).toMatchObject({
+      workspace_id: "workspace-inactive",
+      status: "degraded",
+      path_relations_total: 0,
+      path_relations_by_kind: {},
+      warnings: ["path_relations_empty"]
+    });
+  });
 });
+
+function createRelation(
+  relationKind: string,
+  status: "active" | "dormant" | "retired"
+): Readonly<PathRelation> {
+  return {
+    constitution: { relation_kind: relationKind },
+    lifecycle: {
+      status,
+      retirement_rule: "manual"
+    }
+  } as Readonly<PathRelation>;
+}
 
 function createEvent(eventType: string, createdAt: string): EventLogEntry {
   return {

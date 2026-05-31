@@ -82,11 +82,15 @@ export interface MemoryServiceEventLogRepoPort {
 export interface MemoryServiceMemoryEntryRepoPort {
   create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>>;
   // see also: packages/storage/src/repos/memory-entry-repo.ts createWithinTransaction.
-  // The synchronous `withinTransaction` co-write commits atomically with the row
-  // insert; used for the enrich_pending no-drop marker.
+  // The synchronous callbacks commit atomically with the row insert. `beforeCreate`
+  // is used for the EventLog-first audit row; `afterCreate` is used for the
+  // enrich_pending no-drop marker.
   createWithinTransaction?(
     entry: MemoryEntry,
-    withinTransaction: () => void
+    callbacks: {
+      readonly beforeCreate?: () => void;
+      readonly afterCreate?: () => void;
+    }
   ): Readonly<MemoryEntry>;
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
   findByWorkspaceId(
@@ -236,7 +240,7 @@ export class MemoryService {
     });
 
     await this.validateEvidenceRefs(memoryEntry.evidence_refs);
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_CREATED,
       entity_type: "memory_entry",
       entity_id: memoryEntry.object_id,
@@ -249,9 +253,13 @@ export class MemoryService {
         workspace_id: memoryEntry.workspace_id,
         run_id: memoryEntry.run_id
       })
-    });
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
-    const created = await this.createRowMaybeAtomicallyEnqueued(memoryEntry, input.enqueueEnrichment);
+    const { created, event } = await this.createRowMaybeAtomicallyEnqueued(
+      memoryEntry,
+      input.enqueueEnrichment,
+      eventInput
+    );
     await this.dependencies.runtimeNotifier.notifyEntry(event);
 
     if (
@@ -269,42 +277,80 @@ export class MemoryService {
     return created;
   }
 
-  // invariant: atomic create + enrich_pending no-drop marker. When the caller
-  // supplies an `enqueueEnrichment` intent, the memory row insert and the
-  // enrich_pending enqueue commit in ONE storage transaction, so a created
-  // memory ALWAYS carries its marker (or neither lands and the originating
-  // signal can replay — closing both the swallowed-enqueue-write and the
-  // crash-window gaps). The enqueue is NOT best-effort here: if the atomic
-  // seam is requested but the storage capability or writer is not wired, this
-  // throws rather than dropping the marker silently. With no intent, the plain
-  // async create path is unchanged.
+  // invariant: atomic audit + create + enrich_pending no-drop marker. When the
+  // storage transaction seam is available (production SQLite), the
+  // soul.memory.created event, memory row, and optional enrich_pending marker
+  // commit in ONE transaction and in EventLog-first order. A create failure
+  // rolls back the audit row; an audit/enqueue failure leaves no marker-less or
+  // audit-less memory row. The plain async fallback exists only for minimal test
+  // fakes that do not advertise the transaction seam.
   // see also: packages/soul/src/garden/materialization-router.ts enqueueEnrichment
   // see also: packages/core/src/signal-service.ts terminal-FAILED on success!=true
   private async createRowMaybeAtomicallyEnqueued(
     memoryEntry: Readonly<MemoryEntry>,
-    enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"]
-  ): Promise<Readonly<MemoryEntry>> {
-    if (enqueueEnrichment === undefined) {
-      return await this.dependencies.memoryEntryRepo.create(memoryEntry);
+    enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"],
+    createdEventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+  ): Promise<{
+    readonly created: Readonly<MemoryEntry>;
+    readonly event: EventLogEntry;
+  }> {
+    const createWithinTransaction = this.dependencies.memoryEntryRepo.createWithinTransaction;
+    if (createWithinTransaction !== undefined) {
+      const enrichPendingWriter = this.dependencies.enrichPendingWriter;
+      if (enqueueEnrichment !== undefined && enrichPendingWriter === undefined) {
+        throw new CoreError(
+          "CONFLICT",
+          "Atomic enrich_pending enqueue requested but the enrich-pending writer is not wired."
+        );
+      }
+
+      let event: EventLogEntry | undefined;
+      const created = createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, {
+        beforeCreate: () => {
+          event = this.appendCreatedEventSynchronously(createdEventInput);
+        },
+        afterCreate: () => {
+          if (enqueueEnrichment !== undefined) {
+            enrichPendingWriter?.enqueue({
+              workspaceId: memoryEntry.workspace_id,
+              memoryId: memoryEntry.object_id,
+              runId: enqueueEnrichment.runId,
+              sourceSignalId: enqueueEnrichment.sourceSignalId
+            });
+          }
+        }
+      });
+
+      if (event === undefined) {
+        throw new CoreError("CONFLICT", "Memory create transaction did not append its audit event.");
+      }
+
+      return { created, event };
     }
 
-    const createWithinTransaction = this.dependencies.memoryEntryRepo.createWithinTransaction;
-    const enrichPendingWriter = this.dependencies.enrichPendingWriter;
-    if (createWithinTransaction === undefined || enrichPendingWriter === undefined) {
+    if (enqueueEnrichment !== undefined) {
       throw new CoreError(
         "CONFLICT",
-        "Atomic enrich_pending enqueue requested but the storage transaction port or enrich-pending writer is not wired."
+        "Atomic enrich_pending enqueue requested but the storage transaction port is not wired."
       );
     }
 
-    return createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, () => {
-      enrichPendingWriter.enqueue({
-        workspaceId: memoryEntry.workspace_id,
-        memoryId: memoryEntry.object_id,
-        runId: enqueueEnrichment.runId,
-        sourceSignalId: enqueueEnrichment.sourceSignalId
-      });
-    });
+    const event = await this.dependencies.eventLogRepo.append(createdEventInput);
+    const created = await this.dependencies.memoryEntryRepo.create(memoryEntry);
+    return { created, event };
+  }
+
+  private appendCreatedEventSynchronously(
+    eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+  ): EventLogEntry {
+    const event = this.dependencies.eventLogRepo.append(eventInput);
+    if (isPromiseLike(event)) {
+      throw new CoreError(
+        "CONFLICT",
+        "Memory create transaction requires a synchronous EventLog append port."
+      );
+    }
+    return event;
   }
 
   public async update(
@@ -824,4 +870,8 @@ function ensureAllowedLifecycleTransition(
   if (!isValidLifecycleTransition(from, to)) {
     throw new CoreError("VALIDATION", `Invalid memory lifecycle transition: ${from} -> ${to}`);
   }
+}
+
+function isPromiseLike(value: unknown): value is Promise<unknown> {
+  return value instanceof Promise || typeof (value as { readonly then?: unknown })?.then === "function";
 }

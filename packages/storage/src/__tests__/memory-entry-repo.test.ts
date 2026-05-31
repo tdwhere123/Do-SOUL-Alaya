@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   FormationKind,
   MemoryDimension,
+  MemoryGovernanceEventType,
   RunMode,
   RunState,
   ScopeClass,
@@ -16,6 +17,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../db.js";
 import { SqliteEnrichPendingRepo } from "../repos/enrich-pending-repo.js";
+import { SqliteEventLogRepo } from "../repos/event-log-repo.js";
 import { SqliteMemoryEntryRepo } from "../repos/memory-entry-repo.js";
 import { SqliteRunRepo } from "../repos/run-repo.js";
 import { SqliteWorkspaceRepo } from "../repos/workspace-repo.js";
@@ -65,6 +67,25 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   };
 }
 
+function createMemoryCreatedEventInput(
+  entry: MemoryEntry
+): Parameters<SqliteEventLogRepo["append"]>[0] {
+  return {
+    event_type: MemoryGovernanceEventType.SOUL_MEMORY_CREATED,
+    entity_type: "memory_entry",
+    entity_id: entry.object_id,
+    workspace_id: entry.workspace_id,
+    run_id: entry.run_id,
+    caused_by: entry.created_by,
+    payload_json: {
+      object_id: entry.object_id,
+      object_kind: entry.object_kind,
+      workspace_id: entry.workspace_id,
+      run_id: entry.run_id
+    }
+  };
+}
+
 describe("SqliteMemoryEntryRepo", () => {
   it("creates and loads a memory entry by id", async () => {
     const { repo } = await createRepo();
@@ -74,40 +95,91 @@ describe("SqliteMemoryEntryRepo", () => {
     await expect(repo.findById(entry.object_id)).resolves.toEqual(entry);
   });
 
-  it("createWithinTransaction commits the row and the co-write atomically", async () => {
+  it("createWithinTransaction commits EventLog-first, row, and co-write atomically", async () => {
     const { repo, database } = await createRepo();
     const enrichRepo = new SqliteEnrichPendingRepo(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
     const entry = createMemoryEntry();
+    const order: string[] = [];
 
-    const returned = repo.createWithinTransaction(entry, () => {
-      enrichRepo.enqueue({
-        workspaceId: entry.workspace_id,
-        memoryId: entry.object_id,
-        runId: entry.run_id,
-        sourceSignalId: "signal-1",
-        enqueuedAt: "2026-03-21T00:00:00.000Z"
-      });
+    const returned = repo.createWithinTransaction(entry, {
+      beforeCreate: () => {
+        order.push("event_log");
+        eventLogRepo.append(createMemoryCreatedEventInput(entry));
+      },
+      afterCreate: () => {
+        order.push("enqueue");
+        enrichRepo.enqueue({
+          workspaceId: entry.workspace_id,
+          memoryId: entry.object_id,
+          runId: entry.run_id,
+          sourceSignalId: "signal-1",
+          enqueuedAt: "2026-03-21T00:00:00.000Z"
+        });
+      }
     });
 
     expect(returned).toEqual(entry);
+    expect(order).toEqual(["event_log", "enqueue"]);
     await expect(repo.findById(entry.object_id)).resolves.toEqual(entry);
+    await expect(eventLogRepo.queryByEntity("memory_entry", entry.object_id)).resolves.toHaveLength(1);
     expect(enrichRepo.countPending(entry.workspace_id)).toBe(1);
   });
 
-  it("createWithinTransaction rolls back the row when the co-write throws (no marker-less memory)", async () => {
+  it("createWithinTransaction rolls back the EventLog row and memory row when the co-write throws", async () => {
     // invariant pinned: a created memory ALWAYS carries its enrich_pending
-    // marker, or NEITHER lands. A throw in the co-write rolls the row insert
-    // back, so the originating signal can replay rather than leave a durable
-    // memory with no enrichment marker and no replay path.
+    // marker and audit row, or NONE land. A throw in the co-write rolls the
+    // EventLog row and memory row back, so the originating signal can replay
+    // rather than leave durable truth with no enrichment marker.
+    const { repo, database } = await createRepo();
+    const enrichRepo = new SqliteEnrichPendingRepo(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const entry = createMemoryEntry();
+
+    expect(() =>
+      repo.createWithinTransaction(entry, {
+        beforeCreate: () => {
+          eventLogRepo.append(createMemoryCreatedEventInput(entry));
+        },
+        afterCreate: () => {
+          enrichRepo.enqueue({
+            workspaceId: entry.workspace_id,
+            memoryId: entry.object_id,
+            runId: entry.run_id,
+            sourceSignalId: "signal-1",
+            enqueuedAt: "2026-03-21T00:00:00.000Z"
+          });
+          throw new Error("co-write failed");
+        }
+      })
+    ).toThrow("co-write failed");
+
+    await expect(repo.findById(entry.object_id)).resolves.toBeNull();
+    await expect(eventLogRepo.queryByEntity("memory_entry", entry.object_id)).resolves.toEqual([]);
+    expect(enrichRepo.countPending(entry.workspace_id)).toBe(0);
+  });
+
+  it("createWithinTransaction does not insert the row or marker when the EventLog-first callback throws", async () => {
     const { repo, database } = await createRepo();
     const enrichRepo = new SqliteEnrichPendingRepo(database);
     const entry = createMemoryEntry();
 
     expect(() =>
-      repo.createWithinTransaction(entry, () => {
-        throw new Error("co-write failed");
+      repo.createWithinTransaction(entry, {
+        beforeCreate: () => {
+          throw new Error("event append failed");
+        },
+        afterCreate: () => {
+          enrichRepo.enqueue({
+            workspaceId: entry.workspace_id,
+            memoryId: entry.object_id,
+            runId: entry.run_id,
+            sourceSignalId: "signal-1",
+            enqueuedAt: "2026-03-21T00:00:00.000Z"
+          });
+        }
       })
-    ).toThrow("co-write failed");
+    ).toThrow("event append failed");
 
     await expect(repo.findById(entry.object_id)).resolves.toBeNull();
     expect(enrichRepo.countPending(entry.workspace_id)).toBe(0);

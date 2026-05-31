@@ -187,7 +187,7 @@ Opened by v0.1.1 Slice L1 (Codex diagnostic finding B-PL2 in
 `.do-it/product-logic/agent-use-garden-config-diagnostic.md`).
 
 **Why:** Today `mcp-callable` is proven only by an SDK-driven
-deterministic harness (`apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts`).
+deterministic harness (`apps/core-daemon/src/__tests__/agent-use-protocol.test.ts`).
 That proves the daemon can serve calls when something invokes them.
 It does NOT prove a real Codex or Claude Code session, with the
 attach-written `operator_instructions`, autonomously selects
@@ -218,7 +218,7 @@ during a normal user conversation.
 
 Open work for v0.2.2 task card: items 1-3 (real Codex/Claude session
 capture) and item 6 (offline replay fixture). Items 4-5 are now
-testable via `phase6-agent-use-protocol.test.ts` + the new metering
+testable via `agent-use-protocol.test.ts` + the new metering
 service, but the live-host autonomous selection proof still requires
 a recorded transcript.
 
@@ -637,7 +637,7 @@ The payload includes `prior_green_state`, `prior_valid_until`, and
 ### #BL-018 — attached-agent MCP proof harness
 
 Resolved by
-`apps/core-daemon/src/__tests__/gate4-attached-agent-mcp-proof.test.ts`.
+`apps/core-daemon/src/__tests__/attached-agent-mcp-proof.test.ts`.
 The harness keeps one daemon runtime alive for install, attach, MCP
 `tools/list`, recall, pointer open, usage report, candidate signal,
 proposal, governance reject, Garden background pass, status, and doctor.

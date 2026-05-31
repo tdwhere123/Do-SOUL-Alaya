@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   DYNAMICS_CONSTANTS,
+  getPathAnchorBackingObjectId,
+  pathRelationMatchesIdentity,
   PathRelationSchema,
   RuntimeGovernanceEventType,
   parseRuntimeGovernanceEventPayload,
@@ -528,26 +530,25 @@ export class PathRelationProposalService {
     readonly why: readonly string[];
     readonly runId: string | null;
   }): Promise<PathMintOutcome> {
-    const sourceId = anchorObjectId(params.sourceAnchor);
-    const targetId = anchorObjectId(params.targetAnchor);
-    if (
-      this.deps.repo.findByAnchorMemoryId !== undefined &&
-      sourceId !== undefined &&
-      targetId !== undefined
-    ) {
+    const sourceId = getPathAnchorBackingObjectId(params.sourceAnchor);
+    if (this.deps.repo.findByAnchorMemoryId !== undefined) {
       const existing = await this.deps.repo.findByAnchorMemoryId(sourceId, params.workspaceId);
       const alreadyLinked = existing.some((relation) =>
-        anchorPointsAt(relation, sourceId, targetId)
+        pathRelationMatchesIdentity(relation, {
+          sourceAnchor: params.sourceAnchor,
+          targetAnchor: params.targetAnchor,
+          relationKind: params.relationKind,
+          recallBias: params.recallBias
+        })
       );
       if (alreadyLinked) {
-        // Counter row is stale once a durable path exists; caller drops it
-        // so the pair stops re-querying on every future co-occurrence. The
-        // owed path already exists, so this is a settled success.
+        // Counter row is stale once this durable path identity exists; caller
+        // drops it so the pair stops re-querying on every future co-occurrence.
         return "already_present";
       }
     }
 
-    // invariant: refuse the mint when an object anchor names a memory that is
+    // invariant: refuse the mint when any memory-backed anchor names an object
     // missing from, or owned by a workspace other than, this relation's
     // workspace. The check runs BEFORE the EventLog append + DB insert so an
     // untrusted agent/Garden ref cannot become durable governed topology.
@@ -637,14 +638,12 @@ export class PathRelationProposalService {
     return "applied";
   }
 
-  // invariant: only kind:"object" anchors carry an agent/Garden-supplied
-  // memory id as their identity, so only they are gated. The derived anchor
-  // kinds (object_facet / obligation / risk_concern / time_concern) are minted
-  // by trusted internal producers from already-loaded memories, not from raw
-  // candidate-signal *_memory_refs, and keep current behavior. Returns the
-  // first failure found (source checked before target), or undefined when both
-  // object anchors exist in this workspace. No-op when the existence port is
-  // unwired (isolated unit tests); the daemon always wires it.
+  // invariant: every PathAnchorRef variant carries a backing memory object id,
+  // and that object must exist in the candidate workspace before durable
+  // topology can be minted. Returns the first failure found (source checked
+  // before target), or undefined when both backing objects exist in this
+  // workspace. No-op when the existence port is unwired (isolated unit tests);
+  // the daemon always wires it.
   private async validateObjectAnchors(
     workspaceId: string,
     sourceAnchor: PathAnchorRef,
@@ -667,15 +666,13 @@ export class PathRelationProposalService {
     anchor: PathAnchorRef,
     anchorRole: "source" | "target"
   ): Promise<AnchorValidationFailure | undefined> {
-    if (anchor.kind !== "object") {
-      return undefined;
-    }
-    const owningWorkspace = await port.workspaceOfObject(anchor.object_id);
+    const objectId = getPathAnchorBackingObjectId(anchor);
+    const owningWorkspace = await port.workspaceOfObject(objectId);
     if (owningWorkspace === null) {
-      return { anchorRole, objectId: anchor.object_id, reason: "object_missing" };
+      return { anchorRole, objectId, reason: "object_missing" };
     }
     if (owningWorkspace !== workspaceId) {
-      return { anchorRole, objectId: anchor.object_id, reason: "object_foreign_workspace" };
+      return { anchorRole, objectId, reason: "object_foreign_workspace" };
     }
     return undefined;
   }
@@ -723,36 +720,6 @@ export class PathRelationProposalService {
     if (this.deps.warn !== undefined) {
       this.deps.warn(message, meta);
     }
-  }
-}
-
-function anchorPointsAt(
-  relation: Readonly<PathRelation>,
-  memoryA: string,
-  memoryB: string
-): boolean {
-  const source = anchorObjectId(relation.anchors.source_anchor);
-  const target = anchorObjectId(relation.anchors.target_anchor);
-  if (source === undefined || target === undefined) {
-    return false;
-  }
-  return (
-    (source === memoryA && target === memoryB) ||
-    (source === memoryB && target === memoryA)
-  );
-}
-
-function anchorObjectId(anchor: PathRelation["anchors"]["source_anchor"]): string | undefined {
-  switch (anchor.kind) {
-    case "object":
-    case "object_facet":
-      return anchor.object_id;
-    case "obligation":
-    case "risk_concern":
-    case "time_concern":
-      return anchor.source_object_id;
-    default:
-      return undefined;
   }
 }
 

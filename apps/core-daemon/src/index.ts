@@ -1057,9 +1057,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     repo: {
       create: (relation) => pathRelationRepo.create(relation),
       findByAnchorMemoryId: async (memoryId, workspaceId) =>
-        await pathRelationRepo.findByAnchors(workspaceId, [
-          { kind: "object", object_id: memoryId }
-        ])
+        await pathRelationRepo.findByBackingObjectId(workspaceId, memoryId)
     },
     counterStore: coUsageCounterRepo,
     // invariant: object-anchor mints are gated by real memory existence +
@@ -1113,6 +1111,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   }, pathRelationEvictionIntervalMs);
   pathRelationEvictionTimer.unref?.();
   const pathRelationProposalPort: PathRelationProposalPort = {
+    assertPathRelationProposalAvailable: async (input) => {
+      await proposalRepo.countPending(input.workspaceId);
+    },
     createPathRelationProposal: async (input) => {
       const timestamp = new Date().toISOString();
       const proposalId = randomUUID();
@@ -1214,8 +1215,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     // structurally). core's submitCandidate already returns exactly that union,
     // so we forward it untouched: applied / already_present mean the owed path
     // exists; rejected is a decided B3 refusal (router drops it cleanly); failed
-    // is transient (router makes it loud so a dropped signal-ref edge is not
-    // silently lost — BULK_ENRICH does not re-derive a signal's *_memory_refs).
+    // is transient (router either records a durable proposal or defers the owed
+    // signal-ref path to BULK_ENRICH retry through enrich_pending).
     // see also: packages/soul/src/garden/materialization-router.ts PathCandidateMintOutcome.
     pathCandidateSinkPort: {
       submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
@@ -1363,6 +1364,14 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
           workspace_id: memory.workspace_id,
           run_id: memory.run_id
         };
+      }
+    },
+    enrichSourceSignalLookup: {
+      getById: async (signalId: string) => await signalRepo.getById(signalId)
+    },
+    enrichSignalRefReplayPort: {
+      replaySignalRefs: async ({ newMemoryId, signal }) => {
+        await materializationRouter.replaySignalRefs({ newObjectId: newMemoryId, signal });
       }
     },
     enrichEdgeProducerPort: edgeAutoProducerService,

@@ -77,14 +77,21 @@ export interface MemoryEntryKeywordSearchResult {
 
 export interface MemoryEntryRepo {
   create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>>;
-  // invariant: atomic create + caller-supplied co-write. Runs the row insert and
-  // `withinTransaction` inside ONE connection.transaction so a created memory row
-  // and its co-write (the enrich_pending no-drop marker) either both commit or
-  // neither does. `withinTransaction` MUST be synchronous — better-sqlite3 commits
-  // on return, so an awaited write would land after COMMIT.
+  // invariant: atomic caller-supplied audit/create/co-write. Runs `beforeCreate`,
+  // the row insert, and `afterCreate` inside ONE connection.transaction so the
+  // EventLog row, created memory row, and co-write (the enrich_pending no-drop
+  // marker) commit in EventLog-first order or none commit. Callbacks MUST be
+  // synchronous — better-sqlite3 commits on return, so an awaited write would
+  // land after COMMIT.
   // see also: packages/core/src/memory-service.ts MemoryService.create enrich enqueue
   // see also: packages/storage/src/repos/enrich-pending-repo.ts enqueue
-  createWithinTransaction(entry: MemoryEntry, withinTransaction: () => void): Readonly<MemoryEntry>;
+  createWithinTransaction(
+    entry: MemoryEntry,
+    callbacks: {
+      readonly beforeCreate?: () => void;
+      readonly afterCreate?: () => void;
+    }
+  ): Readonly<MemoryEntry>;
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
   findByIds(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
   findByWorkspaceId(
@@ -358,12 +365,16 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
 
   public createWithinTransaction(
     entry: MemoryEntry,
-    withinTransaction: () => void
+    callbacks: {
+      readonly beforeCreate?: () => void;
+      readonly afterCreate?: () => void;
+    }
   ): Readonly<MemoryEntry> {
     const parsedEntry = parseMemoryEntry(entry);
     const txn = this.db.connection.transaction(() => {
+      callbacks.beforeCreate?.();
       this.runCreateStatement(parsedEntry);
-      withinTransaction();
+      callbacks.afterCreate?.();
     });
     txn.immediate();
     return parsedEntry;

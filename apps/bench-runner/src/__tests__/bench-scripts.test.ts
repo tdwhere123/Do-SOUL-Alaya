@@ -2,11 +2,12 @@ import { execFile } from "node:child_process";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 let tmpDir: string;
 
@@ -70,7 +71,7 @@ describe("bench maintenance scripts", () => {
     );
 
     const scriptPath = path.resolve(
-      process.cwd(),
+      repoRoot,
       "scripts/append-bench-degradation-backlog.mjs"
     );
     const result = await execFileAsync(process.execPath, [
@@ -96,7 +97,7 @@ describe("bench maintenance scripts", () => {
 
   it("keeps local ONNX default cache fallback outside the current working tree", async () => {
     const scriptUrl = pathToFileURL(
-      path.resolve(process.cwd(), "scripts/fetch-local-embedding-model.mjs")
+      path.resolve(repoRoot, "scripts/fetch-local-embedding-model.mjs")
     ).href;
     const { defaultCacheDir } = (await import(scriptUrl)) as {
       readonly defaultCacheDir: (
@@ -117,7 +118,7 @@ describe("bench maintenance scripts", () => {
   it("does not append degradation backlog after daily runner infrastructure failures", async () => {
     const markerPath = path.join(tmpDir, "append-called");
     const scriptPath = path.resolve(
-      process.cwd(),
+      repoRoot,
       "apps/bench-runner/scripts/run-daily-public-bench.sh"
     );
     const fakeBin = await writeFakeNodeBin(2, markerPath);
@@ -139,7 +140,7 @@ describe("bench maintenance scripts", () => {
   it("appends degradation backlog after daily hard-gate failures", async () => {
     const markerPath = path.join(tmpDir, "append-called");
     const scriptPath = path.resolve(
-      process.cwd(),
+      repoRoot,
       "apps/bench-runner/scripts/run-daily-public-bench.sh"
     );
     const fakeBin = await writeFakeNodeBin(1, markerPath);

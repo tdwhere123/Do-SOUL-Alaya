@@ -36,6 +36,10 @@ export interface PathRelationRepo {
     workspaceId: string,
     anchorRefs: readonly PathAnchorRef[]
   ): Promise<readonly Readonly<PathRelation>[]>;
+  findByBackingObjectId(
+    workspaceId: string,
+    objectId: string
+  ): Promise<readonly Readonly<PathRelation>[]>;
   findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
   /**
    * Dormant paths whose last mutation (`updated_at`) is strictly older than
@@ -110,12 +114,13 @@ const TARGET_ANCHOR_KEY_SQL = PATH_RELATION_TARGET_ANCHOR_KEY_SQL;
 
 // invariant: SQL mirror of anchorObjectId() — object/object_facet anchors back
 // on object_id; obligation/risk_concern/time_concern anchors back on
-// source_object_id. Consumed by cascade-delete to prune relations whose source
-// OR target endpoint is a hard-deleted memory. Deliberately does NOT ride the
-// composite anchor-key expression indexes: a key match would miss memory ids
-// carried as source_object_id by the concern kinds.
+// source_object_id. Consumed by cascade-delete and accepted-edge reconciliation
+// to match rows by the backing memory object, not by the full anchor identity.
+// Deliberately does NOT ride the composite anchor-key expression indexes: a key
+// match would miss memory ids carried as source_object_id by the concern kinds.
 // cross-file ref: packages/core/src/path-relation-proposal-service.ts anchorObjectId
 // cross-file ref: packages/storage/src/repos/cascade-delete.ts pruneOrphanedPathTopology
+// cross-file ref: packages/storage/src/repos/edge-proposal-repo.ts listAcceptedAwaitingPath
 function anchorBackingObjectIdSql(anchorPath: "source_anchor" | "target_anchor"): string {
   return `CASE json_extract(anchors_json, '$.${anchorPath}.kind')
       WHEN 'object' THEN json_extract(anchors_json, '$.${anchorPath}.object_id')
@@ -142,6 +147,21 @@ function findByAnchorsSql(keyCount: number): string {
           ${SOURCE_ANCHOR_KEY_SQL} IN (${placeholders})
           OR ${TARGET_ANCHOR_KEY_SQL} IN (${placeholders})
         )
+      ORDER BY created_at ASC, path_id ASC
+    `;
+}
+
+function findByBackingObjectIdSql(): string {
+  return `
+      SELECT${PATH_RELATION_SELECT_COLUMNS}
+      FROM path_relations
+      WHERE workspace_id = ?
+        AND ${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} = ?
+      UNION ALL
+      SELECT${PATH_RELATION_SELECT_COLUMNS}
+      FROM path_relations
+      WHERE workspace_id = ?
+        AND ${PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL} = ?
       ORDER BY created_at ASC, path_id ASC
     `;
 }
@@ -211,6 +231,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
   private readonly findByWorkspaceStatement;
   private readonly findBySourceAnchorStatement;
   private readonly findByTargetAnchorStatement;
+  private readonly findByBackingObjectIdStatement;
   private readonly findActiveStatement;
   private readonly findDormantStatement;
   private readonly deleteStatement;
@@ -271,6 +292,8 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
         AND ${TARGET_ANCHOR_KEY_SQL} = ?
       ORDER BY created_at ASC, path_id ASC
     `);
+
+    this.findByBackingObjectIdStatement = db.connection.prepare(findByBackingObjectIdSql());
 
     this.findActiveStatement = db.connection.prepare(`
       SELECT${PATH_RELATION_SELECT_COLUMNS}
@@ -535,6 +558,34 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     }
   }
 
+  public async findByBackingObjectId(
+    workspaceId: string,
+    objectId: string
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+    const parsedObjectId = parseNonEmptyString(objectId, "object id");
+
+    try {
+      const rows = this.findByBackingObjectIdStatement.all(
+        parsedWorkspaceId,
+        parsedObjectId,
+        parsedWorkspaceId,
+        parsedObjectId
+      ) as PathRelationRow[];
+      return parsePathRelationRows(rows, { dedupe: true });
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list path relations by backing object id for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
   public async findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]> {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
@@ -601,11 +652,13 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     readonly findBySourceAnchor: string;
     readonly findByTargetAnchor: string;
     readonly findByAnchors: (keyCount: number) => string;
+    readonly findByBackingObjectId: string;
   }> {
     return Object.freeze({
       findBySourceAnchor: (this.findBySourceAnchorStatement as { readonly source: string }).source,
       findByTargetAnchor: (this.findByTargetAnchorStatement as { readonly source: string }).source,
-      findByAnchors: (keyCount: number) => findByAnchorsSql(keyCount)
+      findByAnchors: (keyCount: number) => findByAnchorsSql(keyCount),
+      findByBackingObjectId: (this.findByBackingObjectIdStatement as { readonly source: string }).source
     });
   }
 }
