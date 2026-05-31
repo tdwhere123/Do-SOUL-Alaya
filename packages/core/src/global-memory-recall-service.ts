@@ -152,6 +152,13 @@ export function createGlobalMemoryRecallPort(params: {
   return new GlobalMemoryRecallService(params.globalMemorySource);
 }
 
+// LRU bound on the query cache. Keys are (workspaceId, queryText, limit) and a
+// new workspace per recall means keys never collide, so without a cap the map
+// grows unbounded for a long-lived daemon. The cache is a recall SUPPLEMENT:
+// an evicted entry just forces a recompute, never a correctness change. Mirrors
+// the embedding-recall query-embedding cache LRU (DEFAULT_QUERY_EMBEDDING_CACHE_SIZE).
+const GLOBAL_RECALL_QUERY_CACHE_SIZE = 512;
+
 class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
   private readonly cacheByQuery = new Map<string, readonly Readonly<GlobalMemoryRecallEntry>[]>();
 
@@ -165,6 +172,9 @@ class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
     const cacheKey = createRecallCacheKey(params);
     const cached = this.cacheByQuery.get(cacheKey);
     if (cached !== undefined) {
+      // Refresh recency: re-insert so the most-recently-read key is youngest.
+      this.cacheByQuery.delete(cacheKey);
+      this.cacheByQuery.set(cacheKey, cached);
       return [...cached];
     }
 
@@ -188,7 +198,15 @@ class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
       })
     );
 
+    this.cacheByQuery.delete(cacheKey);
     this.cacheByQuery.set(cacheKey, recallEntries);
+    while (this.cacheByQuery.size > GLOBAL_RECALL_QUERY_CACHE_SIZE) {
+      const oldestKey = this.cacheByQuery.keys().next().value as string | undefined;
+      if (oldestKey === undefined) {
+        break;
+      }
+      this.cacheByQuery.delete(oldestKey);
+    }
     return [...recallEntries];
   }
 
