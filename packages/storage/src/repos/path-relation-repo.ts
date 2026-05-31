@@ -112,13 +112,13 @@ export const PATH_RELATION_TARGET_ANCHOR_KEY_SQL = anchorKeySql("target_anchor")
 const SOURCE_ANCHOR_KEY_SQL = PATH_RELATION_SOURCE_ANCHOR_KEY_SQL;
 const TARGET_ANCHOR_KEY_SQL = PATH_RELATION_TARGET_ANCHOR_KEY_SQL;
 
-// invariant: SQL mirror of anchorObjectId() — object/object_facet anchors back
-// on object_id; obligation/risk_concern/time_concern anchors back on
+// invariant: SQL mirror of getPathAnchorBackingObjectId() — object/object_facet
+// anchors back on object_id; obligation/risk_concern/time_concern anchors back on
 // source_object_id. Consumed by cascade-delete and accepted-edge reconciliation
 // to match rows by the backing memory object, not by the full anchor identity.
 // Deliberately does NOT ride the composite anchor-key expression indexes: a key
 // match would miss memory ids carried as source_object_id by the concern kinds.
-// cross-file ref: packages/core/src/path-relation-proposal-service.ts anchorObjectId
+// cross-file ref: packages/protocol/src/soul/path-relation.ts getPathAnchorBackingObjectId
 // cross-file ref: packages/storage/src/repos/cascade-delete.ts pruneOrphanedPathTopology
 // cross-file ref: packages/storage/src/repos/edge-proposal-repo.ts listAcceptedAwaitingPath
 function anchorBackingObjectIdSql(anchorPath: "source_anchor" | "target_anchor"): string {

@@ -631,6 +631,39 @@ describe("SqlitePathRelationRepo", () => {
     ]);
   });
 
+  // I2 regression (migration 087): findByBackingObjectId resolves rows by the
+  // backing memory object id of each anchor variant (a UNION ALL of a source-side
+  // and target-side lookup). Each arm must ride the migration-087 backing-object
+  // expression indexes, not degrade to a workspace SCAN — proven over the repo's
+  // OWN prepared statement (.source), so a drift between the indexed expression
+  // and the live statement fails this test.
+  it("findByBackingObjectId rides the migration-087 backing-object indexes (no workspace scan)", () => {
+    const { database, repo } = createRepo();
+    const repoSql = repo.__anchorLookupSqlForTest();
+
+    const plan = database.connection
+      .prepare(`EXPLAIN QUERY PLAN ${repoSql.findByBackingObjectId}`)
+      .all("workspace-1", "object-1", "workspace-1", "object-1") as ReadonlyArray<{
+      readonly detail: string;
+    }>;
+    const details = plan.map((step) => step.detail).join(" | ");
+
+    // Both UNION ALL arms must SEARCH via a backing-object expression index.
+    const indexSearches = plan.filter(
+      (step) =>
+        step.detail.includes("USING INDEX idx_path_relations_source_backing_object_id") ||
+        step.detail.includes("USING INDEX idx_path_relations_target_backing_object_id")
+    );
+    expect(
+      indexSearches.length,
+      `expected two backing-object index SEARCHes (one per UNION arm), got: ${details}`
+    ).toBe(2);
+    expect(
+      plan.some((step) => step.detail.startsWith("SCAN")),
+      `expected no SCAN step, got: ${details}`
+    ).toBe(false);
+  });
+
   // invariant: anchorBackingObjectIdSql has no ELSE, so an anchor kind absent
   // from its CASE returns NULL and `NULL IN (...)` never matches — such a kind
   // escapes cascade pruning (orphaned topology). This guard fails when a kind

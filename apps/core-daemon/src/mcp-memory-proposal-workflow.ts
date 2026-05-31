@@ -637,7 +637,8 @@ export function createMcpMemoryProposalWorkflow(
     // The storage insert always mints the source as an object anchor on the
     // (already existence/ownership-checked) target memory; the target anchor is
     // the payload's when present, else a synthetic object_facet on the same
-    // memory. Both are passed to the gate, which only acts on kind:"object".
+    // memory. Both are passed to the gate, which resolves the backing memory
+    // object id of every anchor variant and checks its existence + ownership.
     const sourceAnchor: PathAnchorRef = { kind: "object", object_id: targetObjectId };
     const targetAnchor: PathAnchorRef =
       payload === null

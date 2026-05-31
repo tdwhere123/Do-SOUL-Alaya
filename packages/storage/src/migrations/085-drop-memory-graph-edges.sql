@@ -171,19 +171,19 @@ WHERE e.backfill_rank = 1
     SELECT 1
     FROM path_relations AS p
     WHERE p.workspace_id = e.workspace_id
-	      AND (
-	        CASE WHEN e.edge_type = 'recalls'
-	          -- recalls-tier: every relation_kind that maps to graph `recalls`.
-	          THEN json_extract(p.constitution_json, '$.relation_kind')
-	            IN ('recalls', 'co_recalled', 'shares_entity', 'signal_graph_ref')
-	          ELSE json_extract(p.constitution_json, '$.relation_kind') = e.edge_type
-	        END
-	      )
-	      AND (
-	        e.edge_type <> 'recalls'
-	        OR COALESCE(json_extract(p.effect_vector_json, '$.recall_bias'), 0) > 0
-	      )
-	      AND json_extract(p.anchors_json, '$.source_anchor.kind') = 'object'
+      AND (
+        CASE WHEN e.edge_type = 'recalls'
+          -- recalls-tier: every relation_kind that maps to graph `recalls`.
+          THEN json_extract(p.constitution_json, '$.relation_kind')
+            IN ('recalls', 'co_recalled', 'shares_entity', 'signal_graph_ref')
+          ELSE json_extract(p.constitution_json, '$.relation_kind') = e.edge_type
+        END
+      )
+      AND (
+        e.edge_type <> 'recalls'
+        OR COALESCE(json_extract(p.effect_vector_json, '$.recall_bias'), 0) > 0
+      )
+      AND json_extract(p.anchors_json, '$.source_anchor.kind') = 'object'
       AND json_extract(p.anchors_json, '$.target_anchor.kind') = 'object'
       -- invariant: the recalls-tier is the SYMMETRIC associative family — a
       -- reverse-oriented path is the SAME semantic edge, so a legacy `recalls`

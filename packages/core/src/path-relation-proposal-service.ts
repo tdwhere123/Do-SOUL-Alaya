@@ -404,14 +404,15 @@ export class PathRelationProposalService {
     }
   }
 
-  // invariant: the SAME object-anchor existence + ownership gate the mint sink
+  // invariant: the SAME backing-object existence + ownership gate the mint sink
   // runs (validateObjectAnchors), exposed for the second durable path-insert
   // route — the proposal accept-apply path mints a stored proposed_path_relation
   // through the storage transaction, which cannot import this service. The
-  // workflow calls this before that insert so an object anchor naming a missing
-  // or foreign memory is refused with the same path.relation_rejected audit,
-  // and no durable path lands. Returns "accepted" when both anchors pass (or
-  // are non-object / the existence port is unwired) and "rejected" — after
+  // workflow calls this before that insert so an anchor whose backing memory
+  // object (resolved from every variant via getPathAnchorBackingObjectId) is
+  // missing or foreign is refused with the same path.relation_rejected audit,
+  // and no durable path lands. Returns "accepted" when both anchors' backing
+  // objects pass (or the existence port is unwired) and "rejected" — after
   // emitting the audit — on the first failure. This is decided, never transient:
   // a rejected accept-apply must NOT retry.
   // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts accept path
