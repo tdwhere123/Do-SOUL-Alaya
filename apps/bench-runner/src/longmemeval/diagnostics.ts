@@ -94,6 +94,12 @@ export interface LongMemEvalReportUsageSummary {
 export interface LongMemEvalReportSideEffectSnapshot {
   readonly question_id: string;
   readonly workspace_id: string;
+  // invariant: `memory_graph_edges_*` are COMPATIBILITY ALIASES of the
+  // unified `path_relations` (path-plane) counts, NOT a live
+  // `memory_graph_edges` table — that table is retired (migration 085).
+  // Names are kept verbatim so historical bench-archive schemas stay stable;
+  // do not rename. Populated from path-plane counts in runner.ts
+  // (readLongMemEvalReportSideEffectSnapshot); see graph-health-service.ts.
   readonly memory_graph_edges_total: number;
   readonly memory_graph_edges_by_type: Readonly<Record<string, number>>;
   readonly recalls_edge_count: number;

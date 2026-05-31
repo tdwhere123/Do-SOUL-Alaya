@@ -188,9 +188,9 @@ reflect the state at the time of the row's last update.
 | Trustworthy Memory Loop | `live-event-ready`; accepted memory proposals validate through `MemoryService.validateUpdate`, apply inside an atomic proposal/storage transaction, reject leaves durable memory unchanged, and v0.2.0 carries optional `source_delivery_ids` through agent-originated candidate signals, proposal rows, proposal events, and daemon audit proof after validating anchors against recorded deliveries in the current trusted context | `live-event-ready` | P6-governance-accept-apply + v0.2.0-slice-8..9 |
 | Recall explainability + operator control | `schema-ready`; recall results expose selection reason, source channels, score factors, budget state, response strategy mix, and degradation reason; CLI/status names control-plane states distinctly. v0.3.2 adds internal recall evidence packs for fixture-level selected ids, source channels, score factors, budget state, evidence pointers, delivery/usage links, and metrics. v0.3.3 adds cold graph/path score reallocation and reports the resolved activation weights in score factors. | `schema-ready` | P6-recall-explainability + P6-operator-control + v0.3.2 + v0.3.3 |
 | Recall utilization telemetry | `live-event-ready`; daemon emits `soul.recall.delivered` (delivery_id / session_id / run_id / agent_target / query_hash / pointer_count / latency_ms) per `soul.recall` MCP call and `soul.context_usage.reported` per `soul.report_context_usage`. session_id is process-stable for `mcp stdio` and per-call for HTTP / CLI surfaces. usage events attribute run_id / agent_target / workspace_id from the linked delivery (not the reporter context) so retries land in the right session. `alaya status --recall-stats --workspace <id> [--since/--until]` aggregates total / unique_sessions / unique_runs / miss_ratio / used_ratio / follow_through_ratio over the EventLog window; aggregation excludes `inspector` / `cli` / `tools-cli` agent_targets by default (configurable via `excludeAgentTargets`); failures of the telemetry append never surface to the MCP caller. | `live-event-ready` | apps/core-daemon/src/services/recall-utilization-service.ts |
-| MemoryGraphEdge production | `implementation-ready`; v0.3.3 persists bounded `RECALLS` edges from used recall reports and later recall can read those persisted memory graph edges as weighted `graph_support`. This is memory-entry to memory-entry only; evidence/synthesis object edges remain outside v0.3.3. | `implementation-ready` | v0.3.3 |
+| Memory-entry graph production | `live-event-ready`; the memory graph is the unified `path_relations` plane only — migration 085 dropped the legacy `memory_graph_edges` table and no producer writes it. Co-usage from used recall reports reinforces memory-entry `path_relations`, and later recall reads those path relations as weighted `graph_support`. This is memory-entry to memory-entry only; evidence/synthesis object edges remain out of scope. | `live-event-ready` | migration 085 + 5F-* + v0.3.3 |
 | PathRelation production | `live-event-ready` for existing PathRelation plasticity reinforcement, weakening, retirement, and direction-bias redirection. v0.3.3 bootstrap reconcile is explicit-template-only: daemon defaults do not plant ontology seeds and empty defaults return `skipped_no_templates`; corrupt partial records degrade doctor. | `live-event-ready` for plasticity; explicit-template bootstrap only | 5F-C + 5F-D + 5F-E + v0.3.3 |
-| Memory graph + path health diagnostics | `cli-consumable`; v0.3.3 `alaya doctor` reports advisory graph-health counts for memory graph edges, path relations, and latest path events. Sparse new workspaces warn without failing the doctor gate. | `cli-consumable` | v0.3.3 |
+| Memory graph + path health diagnostics | `cli-consumable`; `alaya doctor` reports advisory graph-health counts from the unified `path_relations` plane only — active path relations grouped by relation kind and the latest path event (`apps/core-daemon/src/services/graph-health-service.ts`); the retired `memory_graph_edges` table is no longer counted. Sparse new workspaces warn without failing the doctor gate. | `cli-consumable` | migration 085 + v0.3.3 |
 | Cross-surface Phase 6 contract parity docs | `docs-truth-ready` | `docs-truth-ready` | P6-contract-parity-reset |
 | Graph inspector data contract | `live-event-ready`; daemon `GET /workspaces/:workspaceId/soul/graph` (`apps/core-daemon/src/routes/soul-graph.ts`) serves a `SoulGraph` projection assembled by `SoulGraphService` from the unified `path_relations` path graph (migration 085 dropped the legacy `memory_graph_edges` table; the graph plane is `path_relations` only); Inspector backend proxies as `GET /api/graph/:workspaceId` (`apps/inspector/src/routes/graph.ts`); Inspector Graph page consumes it. v0.3.3 doctor `graph_health` reuses the same SQL data | `live-event-ready` | P5-graph-contract + v0.3.3 |
 
@@ -493,9 +493,15 @@ New / changed runtime-visible surfaces:
   and acks; the Garden BULK_ENRICH worker drains it and runs
   `ConflictDetectionService` + edge auto-production off-path. The
   unconditional per-workspace drain runs on the ~60s GardenScheduler
-  cadence, so the upper bound between a memory becoming recallable and
-  its contradiction/supersession edges forming is ~1 min (surfaced !=
-  conflict-checked within that window). A claim stranded by a daemon
+  cadence and clears every queued `BULK_ENRICH` task in one pass up to
+  `BULK_ENRICH_DRAIN_CAP_PER_PASS = 32`
+  (`apps/core-daemon/src/garden-runtime.ts`), so within that cap the
+  upper bound between a memory becoming recallable and its
+  contradiction/supersession edges forming is ~1 min (surfaced !=
+  conflict-checked within that window). Beyond the cap a single-pass
+  backlog larger than 32 workspaces degrades to
+  ~`O(workspaces / 32) * 60s` because the cap protects the other
+  scheduler work that shares the pass. A claim stranded by a daemon
   crash between claim and processed is re-armed after a TTL
   (`DYNAMICS_CONSTANTS.enrich.claim_stale_after_ms`, 10 min) by the same
   scheduler pass that reclaims abandoned `garden_task` claims, so no
