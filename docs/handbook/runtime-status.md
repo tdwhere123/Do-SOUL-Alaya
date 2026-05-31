@@ -192,7 +192,7 @@ reflect the state at the time of the row's last update.
 | PathRelation production | `live-event-ready` for existing PathRelation plasticity reinforcement, weakening, retirement, and direction-bias redirection. v0.3.3 bootstrap reconcile is explicit-template-only: daemon defaults do not plant ontology seeds and empty defaults return `skipped_no_templates`; corrupt partial records degrade doctor. | `live-event-ready` for plasticity; explicit-template bootstrap only | 5F-C + 5F-D + 5F-E + v0.3.3 |
 | Memory graph + path health diagnostics | `cli-consumable`; v0.3.3 `alaya doctor` reports advisory graph-health counts for memory graph edges, path relations, and latest path events. Sparse new workspaces warn without failing the doctor gate. | `cli-consumable` | v0.3.3 |
 | Cross-surface Phase 6 contract parity docs | `docs-truth-ready` | `docs-truth-ready` | P6-contract-parity-reset |
-| Graph inspector data contract | `live-event-ready`; daemon `GET /workspaces/:workspaceId/soul/graph` (`apps/core-daemon/src/routes/soul-graph.ts`) serves a `SoulGraph` projection assembled by `SoulGraphService` from active PathRelation + memory_graph_edges data; Inspector backend proxies as `GET /api/graph/:workspaceId` (`apps/inspector/src/routes/graph.ts`); Inspector Graph page consumes it. v0.3.3 doctor `graph_health` reuses the same SQL data | `live-event-ready` | P5-graph-contract + v0.3.3 |
+| Graph inspector data contract | `live-event-ready`; daemon `GET /workspaces/:workspaceId/soul/graph` (`apps/core-daemon/src/routes/soul-graph.ts`) serves a `SoulGraph` projection assembled by `SoulGraphService` from the unified `path_relations` path graph (migration 085 dropped the legacy `memory_graph_edges` table; the graph plane is `path_relations` only); Inspector backend proxies as `GET /api/graph/:workspaceId` (`apps/inspector/src/routes/graph.ts`); Inspector Graph page consumes it. v0.3.3 doctor `graph_health` reuses the same SQL data | `live-event-ready` | P5-graph-contract + v0.3.3 |
 
 ## Known Wiring Gaps
 
@@ -217,13 +217,14 @@ P5-graph-contract is `live-event-ready`: the daemon serves
 `GET /workspaces/:workspaceId/soul/graph`
 (`apps/core-daemon/src/routes/soul-graph.ts:23`) returning a
 `SoulGraph` projection that `SoulGraphService.buildSoulGraph` assembles
-from active PathRelation rows and `memory_graph_edges` (the v0.3.3
-RECALLS-edge table). The Inspector backend proxies the route as
+from the unified `path_relations` path graph (migration 085 dropped the
+legacy `memory_graph_edges` RECALLS-edge table; recall edges fold into
+`path_relations`). The Inspector backend proxies the route as
 `GET /api/graph/:workspaceId` (`apps/inspector/src/routes/graph.ts:5`)
 and the Inspector Graph page consumes it
 (`apps/inspector/web/src/pages/Graph.tsx:162`). v0.3.3 also adds
 CLI-consumable doctor `graph_health` reading the same SQL data
-(`memory_edges` / `path_relations` / `latest_path_event`). Daemon default
+(`path_relations` / `latest_path_event`). Daemon default
 bootstrap templates remain empty; explicit templates can still be
 planted, and empty defaults reconcile as `skipped_no_templates`. P5-e2e is
 `live-event-ready`: the
