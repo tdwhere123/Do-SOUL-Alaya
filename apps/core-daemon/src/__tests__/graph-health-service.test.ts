@@ -49,6 +49,55 @@ describe("GraphHealthService", () => {
     );
   });
 
+  it("a later dormant/revived/merged event wins latest_path_event_at", async () => {
+    const eventLogRepo = {
+      queryByWorkspaceAndType: vi.fn(async (_workspaceId: string, eventType: string) => {
+        if (eventType === RuntimeGovernanceEventType.PATH_RELATION_CREATED) {
+          return [createEvent(eventType, "2026-05-10T00:00:00.000Z")];
+        }
+        // A later dormancy and a later-still consolidation merge / revival
+        // each mutate path lifecycle/topology, so the freshest of them must
+        // win latest_path_event_at rather than leaving it stale at CREATED.
+        if (eventType === RuntimeGovernanceEventType.PATH_RELATION_DORMANT) {
+          return [createEvent(eventType, "2026-05-14T00:00:00.000Z")];
+        }
+        if (eventType === RuntimeGovernanceEventType.PATH_RELATION_REVIVED) {
+          return [createEvent(eventType, "2026-05-16T00:00:00.000Z")];
+        }
+        if (eventType === RuntimeGovernanceEventType.PATH_RELATION_MERGED) {
+          return [createEvent(eventType, "2026-05-20T00:00:00.000Z")];
+        }
+        return [];
+      })
+    };
+    const service = createGraphHealthService({
+      pathRelationRepo: {
+        findByWorkspace: vi.fn(async () => [
+          { constitution: { relation_kind: "supports" } }
+        ] as never)
+      },
+      eventLogRepo
+    });
+
+    const snapshot = await service.getStatus("workspace-1");
+
+    expect(snapshot.latest_path_event_at).toBe("2026-05-20T00:00:00.000Z");
+    expect(eventLogRepo.queryByWorkspaceAndType).toHaveBeenCalledWith(
+      "workspace-1",
+      RuntimeGovernanceEventType.PATH_RELATION_MERGED
+    );
+    expect(eventLogRepo.queryByWorkspaceAndType).toHaveBeenCalledWith(
+      "workspace-1",
+      RuntimeGovernanceEventType.PATH_RELATION_REVIVED
+    );
+    // A refused candidate never became topology, so graph health never queries
+    // PATH_RELATION_REJECTED — even a later rejection cannot move the timestamp.
+    expect(eventLogRepo.queryByWorkspaceAndType).not.toHaveBeenCalledWith(
+      "workspace-1",
+      RuntimeGovernanceEventType.PATH_RELATION_REJECTED
+    );
+  });
+
   it("marks sparse path workspaces degraded with an operator hint", async () => {
     const service = createGraphHealthService({
       pathRelationRepo: {

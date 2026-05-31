@@ -24,13 +24,22 @@ export interface GraphHealthService {
   getStatus(workspaceId: string): Promise<GraphHealthSnapshot>;
 }
 
+// invariant: every PATH_RELATION_* event that mutates path lifecycle/topology
+// feeds latest_path_event_at, so a later dormancy/revival/consolidation-merge
+// is not stale. PATH_RELATION_REJECTED is deliberately excluded: a refused
+// candidate never became durable topology — it is a forensic refusal record,
+// not graph activity.
+// see also: packages/protocol/src/events/runtime-governance.ts PATH_RELATION_*.
 const PATH_RELATION_EVENT_TYPES = [
   RuntimeGovernanceEventType.PATH_RELATION_CREATED,
   RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
   RuntimeGovernanceEventType.PATH_RELATION_REINFORCED,
   RuntimeGovernanceEventType.PATH_RELATION_WEAKENED,
   RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED,
-  RuntimeGovernanceEventType.PATH_RELATION_RETIRED
+  RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
+  RuntimeGovernanceEventType.PATH_RELATION_DORMANT,
+  RuntimeGovernanceEventType.PATH_RELATION_REVIVED,
+  RuntimeGovernanceEventType.PATH_RELATION_MERGED
 ] as const;
 
 const SPARSE_GRAPH_HINT =
