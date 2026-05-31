@@ -32,6 +32,10 @@ import {
   parseUpdateFields,
   type MemoryEntryRow
 } from "./memory-entry-row-mapper.js";
+import {
+  PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
+  PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
+} from "./path-relation-repo.js";
 import { parseNonEmptyString } from "./shared/validators.js";
 
 export type MemoryEntryRepoUpdateFields = ProtocolMemoryEntryRepoUpdateFields & {
@@ -157,6 +161,11 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   private readonly transitionLifecycleStatement;
   private readonly archiveStatement;
   private readonly hardDeleteTombstonedStatement;
+  // invariant: path topology endpoints reference memory ids only via JSON
+  // anchors / plain text (no FK), so hard-delete must prune them explicitly in
+  // the same transaction. cross-file ref: cascade-delete.ts pruneOrphanedPathTopology
+  private readonly deleteOrphanedPathRelationsStatement;
+  private readonly deleteOrphanedCoUsageCountersStatement;
 
   public constructor(private readonly db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
@@ -321,6 +330,15 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       WHERE object_id = ?
         AND retention_state = 'tombstoned'
         AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
+    `);
+    this.deleteOrphanedPathRelationsStatement = db.connection.prepare(`
+      DELETE FROM path_relations
+      WHERE ${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} = ?
+         OR ${PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL} = ?
+    `);
+    this.deleteOrphanedCoUsageCountersStatement = db.connection.prepare(`
+      DELETE FROM path_relation_co_usage_counters
+      WHERE low_memory_id = ? OR high_memory_id = ?
     `);
   }
 
@@ -909,14 +927,22 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
 
   public async hardDeleteTombstoned(objectId: string): Promise<void> {
     try {
-      const result = this.hardDeleteTombstonedStatement.run(objectId);
+      this.db.connection.transaction(() => {
+        const result = this.hardDeleteTombstonedStatement.run(objectId);
 
-      if (result.changes === 0) {
-        throw new StorageError(
-          "NOT_FOUND",
-          `Tombstoned memory entry ${objectId} was not found or is not eligible for deletion.`
-        );
-      }
+        if (result.changes === 0) {
+          throw new StorageError(
+            "NOT_FOUND",
+            `Tombstoned memory entry ${objectId} was not found or is not eligible for deletion.`
+          );
+        }
+
+        // invariant: only prune once the memory row actually qualified and was
+        // deleted, so an ineligible (non-tombstoned / <24h) row never strips its
+        // live path topology.
+        this.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
+        this.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
+      })();
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;

@@ -101,6 +101,27 @@ function anchorKeySql(anchorPath: "source_anchor" | "target_anchor"): string {
 const SOURCE_ANCHOR_KEY_SQL = anchorKeySql("source_anchor");
 const TARGET_ANCHOR_KEY_SQL = anchorKeySql("target_anchor");
 
+// invariant: SQL mirror of anchorObjectId() — object/object_facet anchors back
+// on object_id; obligation/risk_concern/time_concern anchors back on
+// source_object_id. Consumed by cascade-delete to prune relations whose source
+// OR target endpoint is a hard-deleted memory. Deliberately does NOT ride the
+// composite anchor-key expression indexes: a key match would miss memory ids
+// carried as source_object_id by the concern kinds.
+// cross-file ref: packages/core/src/path-relation-proposal-service.ts anchorObjectId
+// cross-file ref: packages/storage/src/repos/cascade-delete.ts pruneOrphanedPathTopology
+function anchorBackingObjectIdSql(anchorPath: "source_anchor" | "target_anchor"): string {
+  return `CASE json_extract(anchors_json, '$.${anchorPath}.kind')
+      WHEN 'object' THEN json_extract(anchors_json, '$.${anchorPath}.object_id')
+      WHEN 'object_facet' THEN json_extract(anchors_json, '$.${anchorPath}.object_id')
+      WHEN 'obligation' THEN json_extract(anchors_json, '$.${anchorPath}.source_object_id')
+      WHEN 'risk_concern' THEN json_extract(anchors_json, '$.${anchorPath}.source_object_id')
+      WHEN 'time_concern' THEN json_extract(anchors_json, '$.${anchorPath}.source_object_id')
+    END`;
+}
+
+export const PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL = anchorBackingObjectIdSql("source_anchor");
+export const PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL = anchorBackingObjectIdSql("target_anchor");
+
 const WAVE_1_ACTIVE_LIFECYCLE_SQL = `CASE
       WHEN json_valid(lifecycle_json) = 0 THEN 0
       WHEN json_type(lifecycle_json, '$.retirement_rule') IS NULL
