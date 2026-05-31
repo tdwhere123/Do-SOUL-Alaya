@@ -1,0 +1,26 @@
+# Small-scale bench result + the debug chain that got there (for morning review)
+
+Worktree `v0.3.11-completion`. Driven autonomously overnight per the user's "fix → small bench → if problems research+fix → if clean+target-met run full" directive.
+
+## Headline: R@5 = 90% (45/50) on the cached LongMemEval-S subset — TARGET MET
+Clean archive: `docs/bench-history/public/2026-05-31T175552Z-efa910c-policy-chat/`
+- `r_at_1=0.62  r_at_5=0.90  r_at_10=0.90`, evaluated_count=50
+- `latency_ms_p50=609  p95=885` (monotonic, all positive)
+- `llm_calls=0` (fully cached, NO paid extraction), `live_extraction_failures=0`
+Recall quality HELD after codex's B1/B2/B3 path-identity changes + all the fixes below. This is the directional signal the whole spine + codex-finding effort was gated on.
+
+## Debug chain (each problem root-caused → fixed → reviewed; this is why it took 3 small-bench iterations)
+1. **Q4 OOM (first re-run)** — root cause was memory CONTENTION: an IDE-triggered full-project `tsc -b` (the user had `scripts/install.sh` open) + TS server + MCP daemons + the bench's own ~1.5GB footprint exceeded the 7.6GB WSL2 cap; OS OOM-killer SIGKILLed the bench. dmesg-confirmed.
+2. **The bench's own footprint ("second OOM leak")** — investigated (`.do-it/findings/bench-second-oom-leak.md`). The prior "InMemoryTrustStateRepo / 27MB/q" suspicion was REFUTED (dead code / not on path). Real drivers: D2 `GlobalMemoryRecallService.cacheByQuery` (unbounded, every recall) + D4 SQLite `temp_store=MEMORY` (FTS/sort temp B-trees in RAM, off-heap, fed the OOM RSS). Fixed: D2 LRU cap 512, D4 `temp_store=FILE` + `--max-old-space-size=5000` on the runner child, D1 dead-code karma-store leak removed, D3 harness dup-store removed, + the orch `unref()`-defeats-`await` detach bug. Commits b9164c9/ff07ac2/9c91ef8/46a1f1c/4c8fb97. Reviewed clean (`.do-it/codex-review/leak-fix-review.md`). VALIDATED: 50q now completes, RSS bounded, no OOM.
+3. **Negative latency surfaced (second re-run, exit 2)** — once the run completed, KPI validation hit a negative `latency_ms`. Recall latency used wall-clock `Date.now()` across the recall await → WSL2/NTP backward clock jump → negative. Fixed: monotonic `process.hrtime.bigint()` via a shared `monotonic.ts`, all 6 recall-latency sites across 5 runners (commit e998c65). But this did NOT fully unblock — see #4.
+4. **THE REAL BLOCKER (deterministic per_scenario[47], unchanged by #3)** — the abort was NOT the current run's data (all current latencies positive). A STALE local archive `2026-05-31T003312Z-5fd0836-policy-stress/kpi.json` (pre-monotonic-fix run, untracked, the `latest-run` pointer target) contains `per_scenario[47].latency_ms = -5507`. `KpiPayloadSchema` was later tightened with `.nonnegative()`, and the advisory baseline DIFF read it via strict `readEntry` → ZodError → aborted otherwise-clean new runs. (The offset-47 isolated probe passed only because it used a fresh empty `--history-root`.) Fixed: `readEntryForDiff` lenient wrapper (catch ZodError/SyntaxError → warn + null) routed to advisory baseline/diff reads ONLY; merge + integrity reads stay strict (commit efa910c). Reviewed clean (`.do-it/codex-review/baseline-diff-fix-review.md`). VALIDATED: 3rd run archives cleanly.
+
+## Corrected stale assumption (was in the prior session summary)
+The extraction cache is FULL-COVERAGE for lme-s (`docs/bench-history/datasets/longmemeval-extraction-cache/manifest.json`: coverage=1, 24424 cached turns, 128MB git-tracked). The summary's "cache covers only ~53 questions / paid at Q54" was PRE-fill / pre-offline-fallback and is stale. A full 500q lme-s run is fully cached (`llm_calls=0`), free, ~3.2h local compute, memory now bounded.
+
+## Remaining release-gate item (NOT recall quality — needs a user decision)
+The run exits 1 (not 2) — the archive writes fine; the non-zero is the **seed-extraction-fallback release blocker** firing on `offline_fallbacks=6`. Diagnostic: `cached_extraction_failures=6` — the cache CONTAINS 6 failed extractions (extraction-fill originally hit yunwu.ai `invalid_response` on 6 turns and cached the FAILURE). Every run reads those cached failures → offline full-turn fallback. `live_extraction_failures=0`, `llm_calls=0` (no new calls; it's reading cached failures).
+- To reach `offline_fallbacks=0` (release-grade, per plan Phase E), those 6 (and the rest across the 500q window) cached failures must be RE-EXTRACTED successfully — which needs live paid yunwu.ai calls + the provider/tolerance to actually succeed on those turns. That is Phase A residual territory; the plan said NOT to warm-cache-bypass it and to instrument the real cause first. Deliberately NOT auto-fixed overnight (paid + provider-dependent + a judgment call). DECISION NEEDED: re-extract (paid) vs accept-and-document vs investigate the 6 turns' provider failure.
+
+## Next (running now, overnight)
+Launched the FULL 500q lme-s run (`--bench lme-s`, no --limit) for the K1.1 directional R@5 verdict at full scale. It will also exit-1 on the fallback gate (offline_fallbacks scales) but the R@5 + the archive are captured regardless. Memory fix is validated at 50q; 500q is the real scale test of the leak fix — if it OOMs, dmesg + step-log progress will localize it.
