@@ -9,6 +9,7 @@ export type { KarmaEvent, KarmaEventKind } from "@do-soul/alaya-protocol";
 export interface KarmaEventRepo {
   create(event: Readonly<KarmaEvent>): Promise<Readonly<KarmaEvent>>;
   findByObjectId(objectId: string): Promise<readonly Readonly<KarmaEvent>[]>;
+  findByObjectIdSync(objectId: string): readonly Readonly<KarmaEvent>[];
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<KarmaEvent>[]>;
   sumByObjectId(objectId: string): Promise<number>;
   sumByObjectIds(objectIds: readonly string[]): Promise<Readonly<Record<string, number>>>;
@@ -104,6 +105,13 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
   }
 
   public async findByObjectId(objectId: string): Promise<readonly Readonly<KarmaEvent>[]> {
+    return this.findByObjectIdSync(objectId);
+  }
+
+  // Synchronous read shared with the async wrapper; better-sqlite3 statements
+  // execute synchronously, so the sync KarmaEventStore contract can read here
+  // without retaining an in-memory event mirror.
+  public findByObjectIdSync(objectId: string): readonly Readonly<KarmaEvent>[] {
     const parsedObjectId = parseNonEmptyString(objectId, "object id");
 
     try {

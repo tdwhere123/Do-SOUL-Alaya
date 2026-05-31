@@ -63,6 +63,18 @@ describe("SqliteKarmaEventRepo", () => {
     await expect(repo.findByObjectId(event.object_id)).resolves.toEqual([event]);
   });
 
+  it("findByObjectIdSync returns the same rows as the async read", async () => {
+    const { repo } = await createRepo();
+    const event = createKarmaEvent();
+
+    await repo.create(event);
+
+    expect(repo.findByObjectIdSync(event.object_id)).toEqual([event]);
+    expect(await repo.findByObjectId(event.object_id)).toEqual(
+      repo.findByObjectIdSync(event.object_id)
+    );
+  });
+
   it("round-trips run_id attribution", async () => {
     const { repo } = await createRepo();
     const attributed = createKarmaEvent({
