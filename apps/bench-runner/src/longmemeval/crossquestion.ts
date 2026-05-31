@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
 import {
   buildTokenEconomy,
   computeTokenSavedRatio,
@@ -228,11 +229,11 @@ export async function runLongMemEvalCrossQuestion(
         )
         .map(([memoryId]) => memoryId);
 
-      const recallStart = Date.now();
+      const recallStart = monotonicNowNs();
       const recallResult = await daemon.recall(question.question, {
         maxResults: 10
       });
-      const latencyMs = Date.now() - recallStart;
+      const latencyMs = monotonicElapsedMs(recallStart);
       const results = recallResult.results;
       const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
         object_id: pointer.object_id,

@@ -40,6 +40,7 @@ import {
   type BenchTokenMetrics,
   type BenchWorkspaceHandle
 } from "../harness/daemon.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
 import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
   aggregateRecallTokenEconomy,
@@ -1047,14 +1048,14 @@ export async function runLongMemEvalRecallCycle(input: {
   readonly questionText: string;
 }): Promise<LongMemEvalRecallCycleResult> {
   if (input.simulateReport === "none") {
-    const recallStart = Date.now();
+    const recallStart = monotonicNowNs();
     const scoredRecallResult = await input.daemon.recall(
       input.query,
       input.recallOptions
     );
     return {
       scoredRecallResult,
-      scoredRecallLatencyMs: Date.now() - recallStart,
+      scoredRecallLatencyMs: monotonicElapsedMs(recallStart),
       reportUsageStats: {
         reportsAttempted: 0,
         reportsUsed: 0,
@@ -1080,14 +1081,14 @@ export async function runLongMemEvalRecallCycle(input: {
     await input.daemon.reportContextUsage(reportUsage.reportInput);
   }
 
-  const recallStart = Date.now();
+  const recallStart = monotonicNowNs();
   const scoredRecallResult = await input.daemon.recall(
     input.query,
     input.recallOptions
   );
   return {
     scoredRecallResult,
-    scoredRecallLatencyMs: Date.now() - recallStart,
+    scoredRecallLatencyMs: monotonicElapsedMs(recallStart),
     reportUsageStats: reportUsage.stats
   };
 }

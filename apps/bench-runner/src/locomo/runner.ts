@@ -15,6 +15,7 @@ import {
   resolveBenchCommitSha7,
   resolveBenchRunnerVersion
 } from "../version.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   startBenchDaemon,
@@ -483,9 +484,9 @@ async function runQuestion(
   workspace: BenchWorkspaceHandle,
   qa: LocomoQa
 ): Promise<QaResult> {
-  const recallStart = Date.now();
+  const recallStart = monotonicNowNs();
   const recallResult = await workspace.recall(qa.question, { maxResults: 10 });
-  const latencyMs = Date.now() - recallStart;
+  const latencyMs = monotonicElapsedMs(recallStart);
   const pointers = recallResult.results.slice(0, 10).map((pointer) => ({
     object_id: pointer.object_id,
     relevance_score: pointer.relevance_score

@@ -1017,6 +1017,32 @@ describe("LongMemEval runner", () => {
     expect(result.reportUsageStats.reportsAttempted).toBe(0);
   });
 
+  // Guards KpiPayloadSchema's latency_ms* nonnegative() invariant: a
+  // monotonic recall clock can never report a negative duration even when
+  // recall resolves instantly. see also: packages/eval/src/kpi-schema.ts.
+  it.each(["none", "mixed"] as const)(
+    "reports a non-negative finite scoredRecallLatencyMs for simulate_report=%s",
+    async (simulateReport) => {
+      const recall = vi
+        .fn()
+        .mockResolvedValue(buildRecallResult("delivery-scored", ["gold"]));
+      const reportContextUsage = vi.fn().mockResolvedValue(undefined);
+
+      const result = await runLongMemEvalRecallCycle({
+        daemon: { recall, reportContextUsage },
+        query: "Which memory was used?",
+        recallOptions: { maxResults: 10, conflictAwareness: true },
+        simulateReport,
+        goldMemoryIds: ["gold"],
+        turnIndex: 9,
+        questionText: "Which memory was used?"
+      });
+
+      expect(Number.isFinite(result.scoredRecallLatencyMs)).toBe(true);
+      expect(result.scoredRecallLatencyMs).toBeGreaterThanOrEqual(0);
+    }
+  );
+
   it(
     "runs 2-question mock dataset through the real MCP propose+review chain and produces a valid kpi.json with mcp_propose_review harness_mode",
     async () => {
