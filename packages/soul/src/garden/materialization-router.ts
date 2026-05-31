@@ -599,17 +599,21 @@ export class MaterializationRouter {
       );
       createdObjects.push({ object_kind: claim.object_kind, object_id: claim.object_id });
 
+      // invariant: enqueue-not-inline + no-drop. The durable enrich_pending
+      // marker must precede every optional, throw-capable side effect below so
+      // a freshly materialized memory is never stranded without enrichment.
+      // Edge auto-production + conflict detection run off-path in the
+      // BULK_ENRICH worker. see enqueueEnrichment.
+      this.enqueueEnrichment(memory.object_id, signal);
+
       await this.createAllMemoryRefEdges(memory.object_id, signal);
-      const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+      const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
         memory.object_id,
         signal
       );
       if (timeConcernProposal !== null) {
         createdObjects.push(timeConcernProposal);
       }
-      // invariant: enqueue-not-inline. Edge auto-production + conflict
-      // detection run off-path in the BULK_ENRICH worker. see enqueueEnrichment.
-      this.enqueueEnrichment(memory.object_id, signal);
 
       return {
         signal_id: signal.signal_id,
@@ -770,17 +774,20 @@ export class MaterializationRouter {
       );
       createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
 
+      // invariant: enqueue-not-inline + no-drop. The durable enrich_pending
+      // marker must precede every optional, throw-capable side effect below.
+      // see enqueueEnrichment.
+      this.enqueueEnrichment(memory.object_id, signal);
+
       await this.createAllMemoryRefEdges(memory.object_id, signal);
 
-      const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+      const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
         memory.object_id,
         signal
       );
       if (timeConcernProposal !== null) {
         createdObjects.push(timeConcernProposal);
       }
-      // invariant: enqueue-not-inline. see enqueueEnrichment.
-      this.enqueueEnrichment(memory.object_id, signal);
 
       return {
         signal_id: signal.signal_id,
@@ -873,16 +880,19 @@ export class MaterializationRouter {
       // inline. Only an ADD mints a new memory_entry endpoint; UPDATE / NOOP
       // reuse an existing row and enqueue nothing (no fresh enrichment target).
       if (appendedMemoryId !== undefined) {
+        // invariant: enqueue-not-inline + no-drop. The durable enrich_pending
+        // marker must precede every optional, throw-capable side effect below.
+        // see enqueueEnrichment.
+        this.enqueueEnrichment(appendedMemoryId, signal);
+
         await this.createAllMemoryRefEdges(appendedMemoryId, signal);
-        const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+        const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
           appendedMemoryId,
           signal
         );
         if (timeConcernProposal !== null) {
           createdObjects.push(timeConcernProposal);
         }
-        // invariant: enqueue-not-inline. see enqueueEnrichment.
-        this.enqueueEnrichment(appendedMemoryId, signal);
       }
 
       const reconciledObjects =
@@ -980,6 +990,28 @@ export class MaterializationRouter {
       created_objects: created === null ? [] : [created],
       success: true
     };
+  }
+
+  // invariant: optional-side-effect isolation. On a memory-creating branch the
+  // memory row + its enrich_pending marker are already durable before this
+  // runs, so a time_concern proposal failure must warn-and-continue: a throw
+  // here may never flip the branch to success: false (which SignalService would
+  // mark terminally FAILED) nor strand the memory without enrichment.
+  // see also: packages/core/src/signal-service.ts terminal-FAILED on success!=true
+  private async createTimeConcernProposalBestEffort(
+    targetObjectId: string,
+    signal: CandidateMemorySignal
+  ): Promise<MaterializationCreatedObject | null> {
+    try {
+      return await this.createTimeConcernPathRelationProposal(targetObjectId, signal);
+    } catch (err) {
+      console.warn("materialization-router: time_concern proposal failed", {
+        targetObjectId,
+        signalId: signal.signal_id,
+        error: err instanceof Error ? err.message : String(err)
+      });
+      return null;
+    }
   }
 
   private async createTimeConcernPathRelationProposal(

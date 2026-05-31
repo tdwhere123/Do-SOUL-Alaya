@@ -564,6 +564,71 @@ describe("MaterializationRouter", () => {
     });
   });
 
+  it("keeps the memory enriched when the time_concern proposal throws on memory_and_claim", async () => {
+    // invariant (codex spine-review B6): the optional time_concern proposal is
+    // a best-effort side effect on top of an already-durable memory. A throw
+    // must NOT strand the memory — enrich_pending is enqueued BEFORE the
+    // proposal, and the branch still returns success so SignalService does not
+    // mark the signal terminally FAILED.
+    const pathRelationProposalPort = {
+      createPathRelationProposal: vi.fn(async () => {
+        throw new Error("path relation proposal port unavailable");
+      })
+    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const deps = { ...createDeps(), pathRelationProposalPort, enrichPendingPort };
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(
+      createSignal({
+        domain_tags: ["time_concern"],
+        raw_payload: {
+          excerpt: "Never print secrets.",
+          time_concern: { window_digest: "yesterday", matched_text: "yesterday" }
+        }
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
+    // The failed optional proposal contributes no created object.
+    expect(result.created_objects).not.toContainEqual(
+      expect.objectContaining({ object_kind: "proposal" })
+    );
+  });
+
+  it("keeps the memory enriched when the time_concern proposal throws on memory_entry_only append", async () => {
+    // invariant (codex spine-review B6): same no-drop guarantee on the
+    // memory_entry_only append branch.
+    const pathRelationProposalPort = {
+      createPathRelationProposal: vi.fn(async () => {
+        throw new Error("path relation proposal port unavailable");
+      })
+    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const deps = { ...createDeps(), pathRelationProposalPort, enrichPendingPort };
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(
+      createSignal({
+        object_kind: "fact",
+        domain_tags: ["time_concern"],
+        raw_payload: {
+          excerpt: "We reviewed the issue yesterday.",
+          distilled_fact: "We reviewed the issue yesterday.",
+          time_concern: { window_digest: "yesterday", matched_text: "yesterday" }
+        }
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
+  });
+
   it("routes direct path_relation signals to a path relation proposal sink", async () => {
     const pathRelationProposalPort = {
       createPathRelationProposal: vi.fn(async () => ({
@@ -1096,6 +1161,43 @@ describe("MaterializationRouter ingest reconciliation", () => {
       runId: "run-1",
       sourceSignalId: "signal-1"
     });
+  });
+
+  it("ADD verdict keeps the memory enriched when the time_concern proposal throws", async () => {
+    // invariant (codex spine-review B6): on the reconciled-ADD branch the
+    // enrich_pending marker is enqueued for the appended memory BEFORE the
+    // optional time_concern proposal, so a proposal throw cannot strand the
+    // memory or flip the branch to terminally-FAILED success: false.
+    const deps = createDeps();
+    const { reconciliationPort } = fakeReconciliationPort({ kind: "add" });
+    const pathRelationProposalPort = {
+      createPathRelationProposal: vi.fn(async () => {
+        throw new Error("path relation proposal port unavailable");
+      })
+    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const router = new MaterializationRouter({
+      ...deps,
+      reconciliationPort,
+      pathRelationProposalPort,
+      enrichPendingPort
+    });
+
+    const result = await router.materializeSignal(
+      factSignal({
+        domain_tags: ["time_concern"],
+        raw_payload: {
+          excerpt: "We shipped it yesterday.",
+          distilled_fact: "We shipped it yesterday.",
+          time_concern: { window_digest: "yesterday", matched_text: "yesterday" }
+        }
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
   });
 
   it("UPDATE verdict (reconciled path) does not create derives_from edges", async () => {
