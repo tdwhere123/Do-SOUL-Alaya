@@ -75,6 +75,7 @@ export {
   listEntries,
   policyShapeSlug,
   readEntry,
+  readEntryForDiff,
   readLatest,
   readPrevious,
   simulateReportSlug,

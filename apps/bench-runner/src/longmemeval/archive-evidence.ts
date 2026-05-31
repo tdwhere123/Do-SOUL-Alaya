@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   listEntries,
-  readEntry,
+  readEntryForDiff,
   type BenchName,
   type BenchPolicyShape,
   type BenchSimulateReportMode,
@@ -300,7 +300,7 @@ export async function readLatestLongMemEvalOppositeArchive(input: {
   for (let i = slugs.length - 1; i >= 0; i -= 1) {
     const slug = slugs[i];
     if (slug === undefined) continue;
-    const payload = await readEntry(input.layout, "public", slug);
+    const payload = await readEntryForDiff(input.layout, "public", slug);
     if (
       payload !== null &&
       payload.split === input.current.split &&

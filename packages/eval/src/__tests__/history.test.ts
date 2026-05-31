@@ -1,13 +1,15 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ZodError } from "zod";
 import { diffKpis } from "../diff.js";
 import {
   entrySlug,
   listEntries,
   policyShapeSlug,
   readEntry,
+  readEntryForDiff,
   readLatest,
   readPrevious,
   writeEntry,
@@ -1526,5 +1528,88 @@ describe("history archive", () => {
       "locomo_full_embedding_on_r_at_5 LoCoMo full embedding-on R@5"
     );
     expect(report).toContain("39.00% < target 90.00%");
+  });
+
+  // @anchor read-entry-for-diff-lenient — a tightened KpiPayloadSchema must not
+  // brick new runs over a pre-existing archive that violates the new
+  // constraint; the diff is advisory and degrades to no-baseline.
+  async function plantSchemaInvalidArchive(slug: string): Promise<void> {
+    const invalid = {
+      ...buildPayload("0ff0ff0"),
+      kpi: {
+        ...buildPayload("0ff0ff0").kpi,
+        per_scenario: [
+          {
+            id: "q-47",
+            version: 1,
+            hit_at_5: true,
+            tier: "hot",
+            latency_ms: -5507
+          }
+        ]
+      }
+    };
+    const entryRoot = path.join(root, "self", slug);
+    await mkdir(entryRoot, { recursive: true });
+    await writeFile(
+      path.join(entryRoot, "kpi.json"),
+      JSON.stringify(invalid, null, 2) + "\n",
+      "utf8"
+    );
+    await writeFile(path.join(entryRoot, "report.md"), "report\n", "utf8");
+  }
+
+  it("readEntry stays strict on a schema-invalid historical archive", async () => {
+    const slug = "2026-05-31T003312Z-0ff0ff0";
+    await plantSchemaInvalidArchive(slug);
+    await expect(readEntry(layout, "self", slug)).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("readEntryForDiff degrades a schema-invalid archive to no-baseline with a warning", async () => {
+    const slug = "2026-05-31T003312Z-0ff0ff0";
+    await plantSchemaInvalidArchive(slug);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await readEntryForDiff(layout, "self", slug);
+      expect(result).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = String(warn.mock.calls[0]?.[0] ?? "");
+      expect(message).toContain(slug);
+      expect(message).toContain("latency_ms");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a new run still writes its archive when the prior baseline is schema-invalid", async () => {
+    const staleSlug = "2026-05-31T003312Z-0ff0ff0";
+    await plantSchemaInvalidArchive(staleSlug);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // readLatest / readPrevious are the advisory baseline-diff readers; both
+      // must degrade rather than throw when the prior archive is invalid.
+      await expect(readLatest(layout, "self", {})).resolves.toBeNull();
+      const currentSlug = "2026-05-31T010000Z-feeded0";
+      await expect(
+        readPrevious(layout, "self", currentSlug)
+      ).resolves.toBeNull();
+
+      const payload = buildPayload("feeded0");
+      const entry = await writeEntry(
+        layout,
+        "self",
+        currentSlug,
+        payload,
+        "# report\n",
+        null
+      );
+      expect(entry.slug).toBe(currentSlug);
+      const written = JSON.parse(await readFile(entry.kpiPath, "utf8")) as {
+        alaya_commit: string;
+      };
+      expect(written.alaya_commit).toBe("feeded0");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

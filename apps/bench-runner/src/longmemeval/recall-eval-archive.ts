@@ -3,7 +3,7 @@ import { join } from "node:path";
 import {
   evaluateSeedExtractionReleaseBlocker,
   listEntries,
-  readEntry,
+  readEntryForDiff,
   readLatest,
   releaseHardGateAllowsLatestPassing,
   type BenchName,
@@ -79,7 +79,7 @@ export async function selectFullRunBaseline(
   for (let i = slugs.length - 1; i >= 0; i--) {
     const slug = slugs[i];
     if (slug === undefined) continue;
-    const entry = await readEntry(layout, benchName, slug);
+    const entry = await readEntryForDiff(layout, benchName, slug);
     if (entry === null) continue;
     if (isRecallEvalArchive(entry)) continue;
     if (entry.split !== opts.split) continue;
@@ -114,7 +114,7 @@ export async function selectRecallEvalBaseline(
   for (let i = slugs.length - 1; i >= 0; i--) {
     const slug = slugs[i];
     if (slug === undefined) continue;
-    const entry = await readEntry(layout, benchName, slug);
+    const entry = await readEntryForDiff(layout, benchName, slug);
     if (entry === null) continue;
     if (!isRecallEvalArchive(entry)) continue;
     if (entry.split !== opts.split) continue;
