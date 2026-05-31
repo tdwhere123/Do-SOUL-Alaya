@@ -270,7 +270,8 @@ interface BulkEnrichPendingPort {
   claimBatch(
     workspaceId: string,
     limit: number,
-    claimedAt: string
+    claimedAt: string,
+    maxAttempts: number
   ): readonly {
     readonly workspaceId: string;
     readonly memoryId: string;
@@ -278,7 +279,16 @@ interface BulkEnrichPendingPort {
     readonly sourceSignalId: string | null;
   }[];
   markProcessed(workspaceId: string, memoryId: string, processedAt: string): void;
-  releaseClaim(workspaceId: string, memoryId: string): void;
+  // invariant: bounded transient-retry seam. Records a TRANSIENT failure against
+  // a claimed marker; under the cap it releases the claim for retry, at/over the
+  // cap it dead-letters the marker (excluded from future claims) and returns
+  // abandoned=true so the caller emits the SOUL_ENRICH_ABANDONED audit event.
+  recordFailedAttempt(
+    workspaceId: string,
+    memoryId: string,
+    maxAttempts: number,
+    abandonedAt: string
+  ): { readonly attemptCount: number; readonly abandoned: boolean };
   delete(workspaceId: string, memoryId: string): void;
   countPending(workspaceId: string): number;
   reclaimStale(now: string, staleAfterMs: number): number;
@@ -1154,11 +1164,13 @@ export function createGardenRuntime(input: {
       const claimed = enrichPendingRepo.claimBatch(
         task.workspace_id,
         DYNAMICS_CONSTANTS.enrich.claim_batch_size,
-        completedAt
+        completedAt,
+        DYNAMICS_CONSTANTS.enrich.max_attempts
       );
       let processedCount = 0;
       let missingCount = 0;
       let failedCount = 0;
+      let abandonedCount = 0;
       for (const pending of claimed) {
         try {
           const memory = await memoryLookup.findById(pending.memoryId);
@@ -1219,24 +1231,51 @@ export function createGardenRuntime(input: {
           enrichPendingRepo.markProcessed(pending.workspaceId, pending.memoryId, completedAt);
           processedCount += 1;
         } catch (memoryError) {
-          // Isolate a per-memory failure: release the claim so a later cycle
-          // retries it, never drop the marker. signal-ref replay,
+          // Isolate a per-memory TRANSIENT failure (signal-ref replay,
           // produceForNewMemory, and detectAndLinkConflicts(strictNoDrop) throw
-          // on transient path-mint failure, so this path is the no-drop retry
-          // seam.
-          enrichPendingRepo.releaseClaim(pending.workspaceId, pending.memoryId);
+          // on transient path-mint failure; a permanent rejection settles
+          // silently above and never reaches here). recordFailedAttempt bumps the
+          // attempt counter and, under the cap, releases the claim for retry so
+          // the marker is never dropped. At/over the cap it DEAD-LETTERS the
+          // marker (excluded from future claims) instead of re-arming it forever,
+          // and we emit a SOUL_ENRICH_ABANDONED audit event — a never-clearing
+          // fault can no longer starve the per-pass claim budget, and the drop is
+          // never silent.
+          const failureKind =
+            memoryError instanceof Error ? memoryError.message : String(memoryError);
+          const outcome = enrichPendingRepo.recordFailedAttempt(
+            pending.workspaceId,
+            pending.memoryId,
+            DYNAMICS_CONSTANTS.enrich.max_attempts,
+            completedAt
+          );
           failedCount += 1;
-          warn("bulk enrich memory failed; released claim for retry", {
-            workspace_id: pending.workspaceId,
-            memory_id: pending.memoryId,
-            error: memoryError instanceof Error ? memoryError.message : String(memoryError)
-          });
+          if (outcome.abandoned) {
+            abandonedCount += 1;
+            await emitEnrichAbandoned(pending, outcome.attemptCount, failureKind, completedAt);
+            warn("bulk enrich memory abandoned after exhausting retries; dead-lettered", {
+              workspace_id: pending.workspaceId,
+              memory_id: pending.memoryId,
+              source_signal_id: pending.sourceSignalId,
+              attempt_count: outcome.attemptCount,
+              max_attempts: DYNAMICS_CONSTANTS.enrich.max_attempts,
+              error: failureKind
+            });
+          } else {
+            warn("bulk enrich memory failed; released claim for retry", {
+              workspace_id: pending.workspaceId,
+              memory_id: pending.memoryId,
+              attempt_count: outcome.attemptCount,
+              error: failureKind
+            });
+          }
         }
       }
       await reportBulkEnrichCompletion(task, completedAt, true, [
         `bulk_enrich:processed_${processedCount}`,
         `bulk_enrich:missing_${missingCount}`,
-        `bulk_enrich:failed_${failedCount}`
+        `bulk_enrich:failed_${failedCount}`,
+        `bulk_enrich:abandoned_${abandonedCount}`
       ]);
     } catch (error) {
       await reportBulkEnrichCompletion(task, completedAt, false, [], error);
@@ -1245,6 +1284,41 @@ export function createGardenRuntime(input: {
         error: error instanceof Error ? error.message : String(error)
       });
     }
+  };
+
+  // invariant: governance/runtime drops must be auditable. A BULK_ENRICH marker
+  // that exhausted its transient-retry budget is dead-lettered, not silently
+  // dropped — this emits the EventLog record carrying the owed-work identity
+  // (memory id + optional signal-ref), final attempt count, and last failure.
+  // see also: packages/protocol/src/events/garden.ts SOUL_ENRICH_ABANDONED
+  const emitEnrichAbandoned = async (
+    pending: Readonly<{
+      readonly workspaceId: string;
+      readonly memoryId: string;
+      readonly runId: string | null;
+      readonly sourceSignalId: string | null;
+    }>,
+    attemptCount: number,
+    lastFailureKind: string,
+    occurredAt: string
+  ): Promise<void> => {
+    await input.eventPublisher.publish({
+      event_type: GardenEventType.SOUL_ENRICH_ABANDONED,
+      entity_type: "memory",
+      entity_id: pending.memoryId,
+      workspace_id: pending.workspaceId,
+      run_id: pending.runId,
+      caused_by: "garden-runtime",
+      payload_json: parseGardenEventPayload(GardenEventType.SOUL_ENRICH_ABANDONED, {
+        workspace_id: pending.workspaceId,
+        memory_id: pending.memoryId,
+        source_signal_id: pending.sourceSignalId,
+        run_id: pending.runId,
+        attempt_count: attemptCount,
+        last_failure_kind: lastFailureKind,
+        occurred_at: occurredAt
+      })
+    });
   };
 
   const reportBulkEnrichCompletion = async (

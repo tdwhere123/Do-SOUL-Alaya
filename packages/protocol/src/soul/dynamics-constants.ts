@@ -108,10 +108,22 @@ export const DYNAMICS_CONSTANTS = Object.freeze({
   //   crash-recovery upper bound, not a contention knob. 10 min mirrors the
   //   garden_task rationale ("long enough for a real round-trip, short enough
   //   that a restart re-drains promptly").
+  // - max_attempts: the transient-retry seam is otherwise unbounded (a claimed
+  //   marker that fails transiently releases its claim and is re-claimed every
+  //   pass). A fault that never clears (a permanent fault mis-classified as
+  //   transient, or a stuck input) would then sit at the oldest-first front of
+  //   the queue and consume one of claim_batch_size every pass forever, starving
+  //   healthy markers behind it. After this many failed attempts the marker is
+  //   dead-lettered (abandoned_at set, excluded from claims) with an auditable
+  //   SOUL_ENRICH_ABANDONED event. 5 attempts against the ~10-min
+  //   claim_stale_after_ms reclaim TTL gives a genuine SQLITE_BUSY / transient
+  //   storm roughly an hour of wall-clock to clear before terminal abandon, while
+  //   still bounding how long a poison marker can hold a budget slot.
   enrich: Object.freeze({
     batch_trigger_count: 50,
     claim_batch_size: 50,
-    claim_stale_after_ms: 10 * 60 * 1000
+    claim_stale_after_ms: 10 * 60 * 1000,
+    max_attempts: 5
   })
 } as const);
 

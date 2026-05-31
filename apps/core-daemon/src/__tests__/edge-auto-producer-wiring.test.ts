@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CandidateMemorySignalSchema,
+  DYNAMICS_CONSTANTS,
   MemoryDimension,
   RunMode,
   RunState,
@@ -181,7 +182,12 @@ describe("edge auto producer daemon wiring", () => {
 
       // The BULK_ENRICH worker drains the marker and runs produceForNewMemory
       // off-path (driven directly here as the daemon dispatch branch does).
-      const claimed = enrichPendingRepo.claimBatch("workspace-1", 50, "2026-05-25T00:01:00.000Z");
+      const claimed = enrichPendingRepo.claimBatch(
+        "workspace-1",
+        50,
+        "2026-05-25T00:01:00.000Z",
+        DYNAMICS_CONSTANTS.enrich.max_attempts
+      );
       expect(claimed.map((entry) => entry.memoryId)).toEqual([NEW_MEMORY_ID]);
       for (const entry of claimed) {
         const memory = await memoryRepo.findById(entry.memoryId);

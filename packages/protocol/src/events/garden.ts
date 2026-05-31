@@ -8,6 +8,7 @@ const gardenEventTypeValues = [
   "soul.garden.task_completed",
   "soul.garden.task_claim_reclaimed",
   "soul.garden.tier_violation_rejected",
+  "soul.garden.enrich_abandoned",
   "soul.health_journal.recorded"
 ] as const;
 
@@ -16,6 +17,10 @@ export const GardenEventType = {
   SOUL_GARDEN_TASK_COMPLETED: "soul.garden.task_completed",
   SOUL_GARDEN_TASK_CLAIM_RECLAIMED: "soul.garden.task_claim_reclaimed",
   SOUL_GARDEN_TIER_VIOLATION_REJECTED: "soul.garden.tier_violation_rejected",
+  // invariant: governance/runtime drops must be auditable. A BULK_ENRICH marker
+  // that exhausts its transient-retry budget is dead-lettered, never silently
+  // dropped — this event records the abandon with the owed-work identity.
+  SOUL_ENRICH_ABANDONED: "soul.garden.enrich_abandoned",
   SOUL_HEALTH_JOURNAL_RECORDED: "soul.health_journal.recorded"
 } as const;
 
@@ -73,6 +78,23 @@ export const SoulGardenTierViolationRejectedPayloadSchema = z
   })
   .readonly();
 
+export const SoulEnrichAbandonedPayloadSchema = z
+  .object({
+    workspace_id: NonEmptyStringSchema,
+    // The owed-work identity. memory_id is always present; source_signal_id is
+    // the signal-ref-replay owed work when the marker carried one (null when the
+    // owed work was edge-production / conflict-detection only).
+    memory_id: NonEmptyStringSchema,
+    source_signal_id: NonEmptyStringSchema.nullable(),
+    run_id: NonEmptyStringSchema.nullable(),
+    attempt_count: NonNegativeIntSchema,
+    // The last transient failure that drove the marker over the cap, captured
+    // for audit (an Error message string).
+    last_failure_kind: z.string(),
+    occurred_at: IsoDatetimeStringSchema
+  })
+  .readonly();
+
 export const SoulHealthJournalRecordedPayloadSchema = z
   .object({
     entry_id: NonEmptyStringSchema,
@@ -96,6 +118,7 @@ const gardenPayloadSchemas = {
   [GardenEventType.SOUL_GARDEN_TASK_COMPLETED]: SoulGardenTaskCompletedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED]: SoulGardenTaskClaimReclaimedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED]: SoulGardenTierViolationRejectedPayloadSchema,
+  [GardenEventType.SOUL_ENRICH_ABANDONED]: SoulEnrichAbandonedPayloadSchema,
   [GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED]: SoulHealthJournalRecordedPayloadSchema
 } as const;
 
@@ -122,6 +145,10 @@ const SoulGardenTierViolationRejectedEventObjectSchema = createGardenEventObject
   GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
   SoulGardenTierViolationRejectedPayloadSchema
 );
+const SoulEnrichAbandonedEventObjectSchema = createGardenEventObjectSchema(
+  GardenEventType.SOUL_ENRICH_ABANDONED,
+  SoulEnrichAbandonedPayloadSchema
+);
 const SoulHealthJournalRecordedEventObjectSchema = createGardenEventObjectSchema(
   GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
   SoulHealthJournalRecordedPayloadSchema
@@ -131,6 +158,7 @@ export const SoulGardenTaskDispatchedEventSchema = SoulGardenTaskDispatchedEvent
 export const SoulGardenTaskCompletedEventSchema = SoulGardenTaskCompletedEventObjectSchema.readonly();
 export const SoulGardenTaskClaimReclaimedEventSchema = SoulGardenTaskClaimReclaimedEventObjectSchema.readonly();
 export const SoulGardenTierViolationRejectedEventSchema = SoulGardenTierViolationRejectedEventObjectSchema.readonly();
+export const SoulEnrichAbandonedEventSchema = SoulEnrichAbandonedEventObjectSchema.readonly();
 export const SoulHealthJournalRecordedEventSchema = SoulHealthJournalRecordedEventObjectSchema.readonly();
 
 export const GardenEventUnionSchema = z
@@ -139,6 +167,7 @@ export const GardenEventUnionSchema = z
     SoulGardenTaskCompletedEventObjectSchema,
     SoulGardenTaskClaimReclaimedEventObjectSchema,
     SoulGardenTierViolationRejectedEventObjectSchema,
+    SoulEnrichAbandonedEventObjectSchema,
     SoulHealthJournalRecordedEventObjectSchema
   ])
   .readonly();
