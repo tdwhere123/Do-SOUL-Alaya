@@ -54,6 +54,7 @@ describe("Phase C event registry", () => {
       "stance.policy_evaluated",
       "stance.resolution_changed",
       "path.relation_created",
+      "path.relation_rejected",
       "path.relation_legitimacy_updated",
       "path.relation_reinforced",
       "path.relation_weakened",
@@ -126,6 +127,14 @@ describe("Phase C event registry", () => {
       initial_strength: 0.3,
       governance_class: "hint_only",
       created_at: validTimestamp
+    } as const;
+    const pathRejectedPayload = {
+      workspace_id: "workspace-1",
+      relation_kind: "supports",
+      anchor_role: "target",
+      rejected_object_id: "mem-foreign-1",
+      rejection_reason: "object_foreign_workspace",
+      rejected_at: validTimestamp
     } as const;
     const reinforcedPayload = {
       path_id: "path-1",
@@ -441,6 +450,9 @@ describe("Phase C event registry", () => {
     expect(parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_CREATED, pathCreatedPayload)).toEqual(
       pathCreatedPayload
     );
+    expect(
+      parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_REJECTED, pathRejectedPayload)
+    ).toEqual(pathRejectedPayload);
     expect(
       parseRuntimeGovernanceEventPayload(
         RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,

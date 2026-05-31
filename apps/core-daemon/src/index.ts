@@ -1041,6 +1041,17 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         ])
     },
     counterStore: coUsageCounterRepo,
+    // invariant: object-anchor mints are gated by real memory existence +
+    // ownership at the durable sink. findById returns the owning workspace so
+    // an agent/Garden ref to a missing or cross-workspace object is refused
+    // before any path_relations row is written.
+    // see also: packages/core/src/path-relation-proposal-service.ts validateObjectAnchors
+    memoryExistence: {
+      workspaceOfObject: async (objectId) => {
+        const entry = await memoryEntryRepo.findById(objectId);
+        return entry === null ? null : entry.workspace_id;
+      }
+    },
     eventPublisher,
     ...(pathRelationCounterTtlMs === undefined ? {} : { counterTtlMs: pathRelationCounterTtlMs }),
     ...(pathRelationCoUsageThreshold === undefined ? {} : { threshold: pathRelationCoUsageThreshold }),

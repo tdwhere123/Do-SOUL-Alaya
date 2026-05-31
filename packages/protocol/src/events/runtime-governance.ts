@@ -38,6 +38,7 @@ const runtimeGovernanceEventTypeValues = [
   "stance.policy_evaluated",
   "stance.resolution_changed",
   "path.relation_created",
+  "path.relation_rejected",
   "path.relation_legitimacy_updated",
   "path.relation_reinforced",
   "path.relation_weakened",
@@ -76,6 +77,13 @@ export const RuntimeGovernanceEventType = {
   STANCE_POLICY_EVALUATED: "stance.policy_evaluated",
   STANCE_RESOLUTION_CHANGED: "stance.resolution_changed",
   PATH_RELATION_CREATED: "path.relation_created",
+  // invariant: durable audit that an agent/Garden-proposed path candidate was
+  // refused at the mint sink because an object anchor it carries does not
+  // exist in, or is not owned by, the relation workspace. Agents PROPOSE;
+  // Alaya DECIDES — a rejected candidate never becomes durable graph topology,
+  // and this event is the only forensic trace that the refusal happened.
+  // see also: path-relation-proposal-service.ts materialize anchor gate.
+  PATH_RELATION_REJECTED: "path.relation_rejected",
   PATH_RELATION_LEGITIMACY_UPDATED: "path.relation_legitimacy_updated",
   PATH_RELATION_REINFORCED: "path.relation_reinforced",
   PATH_RELATION_WEAKENED: "path.relation_weakened",
@@ -198,6 +206,23 @@ export const PathRelationCreatedPayloadSchema = z
     initial_strength: z.number(),
     governance_class: PathGovernanceClassSchema,
     created_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+// invariant: rejection_reason distinguishes a missing object id from one that
+// exists but belongs to another workspace; both are refused, but the operator
+// needs to tell a stale ref from a cross-workspace leak attempt. anchor_role
+// names which side of the proposed relation failed. No path_id exists — the
+// path was never minted — so the rejected anchor's object id keys the record.
+export const PathRelationRejectedPayloadSchema = z
+  .object({
+    workspace_id: NonEmptyStringSchema,
+    relation_kind: NonEmptyStringSchema,
+    anchor_role: z.enum(["source", "target"]),
+    rejected_object_id: NonEmptyStringSchema,
+    rejection_reason: z.enum(["object_missing", "object_foreign_workspace"]),
+    rejected_at: IsoDatetimeStringSchema
   })
   .strict()
   .readonly();
@@ -590,6 +615,7 @@ const runtimeGovernancePayloadSchemas = {
   [RuntimeGovernanceEventType.COMPUTE_PROVIDER_ROUTED]: ComputeProviderRoutedPayloadSchema,
   [RuntimeGovernanceEventType.BOOTSTRAPPING_PATHS_PLANTED]: BootstrappingPathsPlantedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_CREATED]: PathRelationCreatedPayloadSchema,
+  [RuntimeGovernanceEventType.PATH_RELATION_REJECTED]: PathRelationRejectedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED]:
     PathRelationLegitimacyUpdatedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_REINFORCED]: PathRelationReinforcedPayloadSchema,
@@ -668,6 +694,10 @@ const BootstrappingPathsPlantedEventObjectSchema = createRuntimeGovernanceEventO
 const PathRelationCreatedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   RuntimeGovernanceEventType.PATH_RELATION_CREATED,
   PathRelationCreatedPayloadSchema
+);
+const PathRelationRejectedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
+  RuntimeGovernanceEventType.PATH_RELATION_REJECTED,
+  PathRelationRejectedPayloadSchema
 );
 const PathRelationLegitimacyUpdatedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
@@ -791,6 +821,7 @@ export const ComputeProviderRoutedEventSchema = ComputeProviderRoutedEventObject
 export const BootstrappingPathsPlantedEventSchema =
   BootstrappingPathsPlantedEventObjectSchema.readonly();
 export const PathRelationCreatedEventSchema = PathRelationCreatedEventObjectSchema.readonly();
+export const PathRelationRejectedEventSchema = PathRelationRejectedEventObjectSchema.readonly();
 export const PathRelationLegitimacyUpdatedEventSchema =
   PathRelationLegitimacyUpdatedEventObjectSchema.readonly();
 export const PathRelationReinforcedEventSchema = PathRelationReinforcedEventObjectSchema.readonly();
@@ -844,6 +875,7 @@ export const RuntimeGovernanceEventUnionSchema = z
     ComputeProviderRoutedEventObjectSchema,
     BootstrappingPathsPlantedEventObjectSchema,
     PathRelationCreatedEventObjectSchema,
+    PathRelationRejectedEventObjectSchema,
     PathRelationLegitimacyUpdatedEventObjectSchema,
     PathRelationReinforcedEventObjectSchema,
     PathRelationWeakenedEventObjectSchema,
@@ -904,6 +936,7 @@ export type BootstrappingPathsPlantedPayload = z.infer<
   typeof BootstrappingPathsPlantedPayloadSchema
 >;
 export type PathRelationCreatedPayload = z.infer<typeof PathRelationCreatedPayloadSchema>;
+export type PathRelationRejectedPayload = z.infer<typeof PathRelationRejectedPayloadSchema>;
 export type PathRelationLegitimacyUpdatedPayload = z.infer<
   typeof PathRelationLegitimacyUpdatedPayloadSchema
 >;

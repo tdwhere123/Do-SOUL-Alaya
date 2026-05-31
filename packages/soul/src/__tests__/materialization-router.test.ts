@@ -994,14 +994,25 @@ describe("MaterializationRouter ingest reconciliation", () => {
     ).toBe(true);
   });
 
-  it("memory_entry_only append branch submits every first-class memory ref path candidate", async () => {
-    // invariant: first-class *_refs are candidate signal graph-proposal
-    // hints, not claim-only fields. Every memory-creating branch must
-    // preserve them so auto proposals survive triage/materialization.
+  it("defers every first-class memory ref to the gating sink, which refuses refs that fail existence/ownership", async () => {
+    // invariant (codex spine-review B3): first-class *_refs are agent/Garden
+    // PROPOSALS, not durable truth. The router forwards each ref to the path
+    // candidate sink, but the sink — PathRelationProposalService — DECIDES:
+    // a ref whose object does not exist in (or is owned by another workspace
+    // than) this workspace is REFUSED and never becomes durable topology.
+    // The router must not silently mint paths from arbitrary agent refs; it
+    // hands the decision to the gate and tolerates a refusal (false) per ref.
+    // see also: packages/core path-relation-proposal-service.anchor-gate.test.ts
     const deps = createDeps();
+    // Model the durable gate: only "mem-prior-1" is a real object in this
+    // workspace; the other refs are missing or foreign and are refused.
+    const validRefs = new Set(["mem-prior-1"]);
+    deps.pathCandidateSinkPort.submitCandidate.mockImplementation(
+      async (input) => validRefs.has(input.targetAnchor.object_id)
+    );
     const router = new MaterializationRouter(deps);
 
-    await router.materializeSignal(
+    const result = await router.materializeSignal(
       factSignal({
         source_memory_refs: ["mem-prior-1"],
         supersedes_refs: ["mem-old-1"],
@@ -1015,15 +1026,26 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     );
 
+    // The memory itself is still materialized; ref gating never blocks it.
+    expect(result.success).toBe(true);
+
     const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
-    expect(
-      calls.map((candidate) => [candidate.relationKind, candidate.targetAnchor.object_id])
-    ).toEqual([
-      ["derives_from", "mem-prior-1"],
-      ["supersedes", "mem-old-1"],
-      ["exception_to", "mem-rule-2"],
-      ["contradicts", "mem-conflict-3"],
-      ["incompatible_with", "mem-incompat-4"]
+    const results = deps.pathCandidateSinkPort.submitCandidate.mock.results.map(
+      (entry) => entry.value
+    );
+    // The router forwards each ref to the gate (its job), but only the valid
+    // ref is accepted; the four missing/foreign refs are refused by the sink.
+    const accepted = await Promise.all(results);
+    const decisions = calls.map((candidate, idx) => [
+      candidate.targetAnchor.object_id,
+      accepted[idx]
+    ]);
+    expect(decisions).toEqual([
+      ["mem-prior-1", true],
+      ["mem-old-1", false],
+      ["mem-rule-2", false],
+      ["mem-conflict-3", false],
+      ["mem-incompat-4", false]
     ]);
   });
 

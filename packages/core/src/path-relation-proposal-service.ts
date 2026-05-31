@@ -224,10 +224,35 @@ export type PathRelationProposalEventPublisherPort = Pick<
   "appendManyWithMutation"
 >;
 
+// invariant: object-anchor existence + ownership gate. A path object anchor
+// names a durable memory entry by object id; this port answers "does this
+// object id exist, and in which workspace" so the mint sink can refuse a
+// candidate whose source/target memory is missing or owned by another
+// workspace. This is the single referential check the durable graph plane
+// has — path_relations carries memory ids inside anchors_json with no SQL FK,
+// so without this gate an untrusted agent/Garden ref would become durable
+// governed topology pointing at a non-existent or foreign object.
+// Returns null when the object id is unknown; otherwise the owning workspace.
+// see also: SqliteMemoryEntryRepo.findById — daemon wiring of this port.
+export interface MemoryAnchorExistencePort {
+  workspaceOfObject(objectId: string): Promise<string | null>;
+}
+
+type AnchorValidationFailure = {
+  readonly anchorRole: "source" | "target";
+  readonly objectId: string;
+  readonly reason: "object_missing" | "object_foreign_workspace";
+};
+
 export interface PathRelationProposalServiceDeps {
   readonly repo: PathRelationProposalRepoPort;
   readonly counterStore: CoUsageCounterPort;
   readonly eventPublisher: PathRelationProposalEventPublisherPort;
+  // invariant: when wired (the daemon always wires it), object-anchor mints are
+  // gated before EventLog append + DB insert. Left undefined only in unit
+  // tests that exercise the seed/dedup machinery in isolation; the daemon
+  // composition MUST supply it so the MCP and Garden mint paths are covered.
+  readonly memoryExistence?: MemoryAnchorExistencePort;
   readonly threshold?: number;
   readonly now?: () => string;
   readonly nowMs?: () => number;
@@ -446,6 +471,22 @@ export class PathRelationProposalService {
       }
     }
 
+    // invariant: refuse the mint when an object anchor names a memory that is
+    // missing from, or owned by a workspace other than, this relation's
+    // workspace. The check runs BEFORE the EventLog append + DB insert so an
+    // untrusted agent/Garden ref cannot become durable governed topology.
+    // A refusal emits an auditable path.relation_rejected event and returns
+    // false — no path_relations row, no audit "created" row, no graph neighbor.
+    const validationFailure = await this.validateObjectAnchors(
+      params.workspaceId,
+      params.sourceAnchor,
+      params.targetAnchor
+    );
+    if (validationFailure !== undefined) {
+      await this.emitRejection(params.workspaceId, params.relationKind, validationFailure);
+      return false;
+    }
+
     const occurredAt = this.now();
     const relation: PathRelation = PathRelationSchema.parse({
       path_id: this.generateId(),
@@ -516,6 +557,88 @@ export class PathRelationProposalService {
       }
     );
     return true;
+  }
+
+  // invariant: only kind:"object" anchors carry an agent/Garden-supplied
+  // memory id as their identity, so only they are gated. The derived anchor
+  // kinds (object_facet / obligation / risk_concern / time_concern) are minted
+  // by trusted internal producers from already-loaded memories, not from raw
+  // candidate-signal *_memory_refs, and keep current behavior. Returns the
+  // first failure found (source checked before target), or undefined when both
+  // object anchors exist in this workspace. No-op when the existence port is
+  // unwired (isolated unit tests); the daemon always wires it.
+  private async validateObjectAnchors(
+    workspaceId: string,
+    sourceAnchor: PathAnchorRef,
+    targetAnchor: PathAnchorRef
+  ): Promise<AnchorValidationFailure | undefined> {
+    const port = this.deps.memoryExistence;
+    if (port === undefined) {
+      return undefined;
+    }
+    const sourceFailure = await this.checkObjectAnchor(port, workspaceId, sourceAnchor, "source");
+    if (sourceFailure !== undefined) {
+      return sourceFailure;
+    }
+    return await this.checkObjectAnchor(port, workspaceId, targetAnchor, "target");
+  }
+
+  private async checkObjectAnchor(
+    port: MemoryAnchorExistencePort,
+    workspaceId: string,
+    anchor: PathAnchorRef,
+    anchorRole: "source" | "target"
+  ): Promise<AnchorValidationFailure | undefined> {
+    if (anchor.kind !== "object") {
+      return undefined;
+    }
+    const owningWorkspace = await port.workspaceOfObject(anchor.object_id);
+    if (owningWorkspace === null) {
+      return { anchorRole, objectId: anchor.object_id, reason: "object_missing" };
+    }
+    if (owningWorkspace !== workspaceId) {
+      return { anchorRole, objectId: anchor.object_id, reason: "object_foreign_workspace" };
+    }
+    return undefined;
+  }
+
+  private async emitRejection(
+    workspaceId: string,
+    relationKind: string,
+    failure: AnchorValidationFailure
+  ): Promise<void> {
+    const payload = parseRuntimeGovernanceEventPayload(
+      RuntimeGovernanceEventType.PATH_RELATION_REJECTED,
+      {
+        workspace_id: workspaceId,
+        relation_kind: relationKind,
+        anchor_role: failure.anchorRole,
+        rejected_object_id: failure.objectId,
+        rejection_reason: failure.reason,
+        rejected_at: this.now()
+      }
+    );
+    const eventInput: EventPublisherInput = {
+      event_type: RuntimeGovernanceEventType.PATH_RELATION_REJECTED,
+      entity_type: "path_relation",
+      // No path row exists; the rejection is scoped to the workspace whose
+      // durable topology was protected from the bad anchor.
+      entity_id: workspaceId,
+      workspace_id: workspaceId,
+      run_id: null,
+      caused_by: "system",
+      payload_json: payload as unknown as Record<string, unknown>
+    };
+    // No mutation: the rejection emits an audit row only. The empty mutate
+    // callback keeps the same single transactional append the mint uses.
+    await this.deps.eventPublisher.appendManyWithMutation([eventInput], () => undefined);
+    this.warn("PathRelation candidate rejected: anchor failed existence/ownership", {
+      workspace_id: workspaceId,
+      relation_kind: relationKind,
+      anchor_role: failure.anchorRole,
+      rejected_object_id: failure.objectId,
+      rejection_reason: failure.reason
+    });
   }
 
   private warn(message: string, meta: Record<string, unknown>): void {
