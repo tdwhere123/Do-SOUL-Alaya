@@ -154,6 +154,57 @@ describe("BenchDaemon attachWorkspace contract", () => {
   );
 
   it(
+    "per-question token metrics stay workspace-scoped (do not accumulate prior workspaces' events)",
+    async () => {
+      // Regression guard for the daemon-per-run scaling bug: the shared
+      // alaya.db holds every attached workspace's EventLog rows, so an
+      // unscoped queryByType readback would fold ALL prior questions'
+      // SOUL_SIGNAL_EMITTED events into THIS question's metrics — an
+      // O(all-prior-questions) scan AND a double-count the run-level
+      // aggregator then sums. queryTokenMetrics must report only the
+      // active workspace's own seeds.
+      // see also: apps/bench-runner/src/harness/daemon.ts queryTokenMetrics
+      const daemon = await startBenchDaemon({
+        workspaceId: "scope-default-ws",
+        runId: "scope-default-run"
+      });
+      handles.push(daemon);
+
+      const workspaceA = await daemon.attachWorkspace({
+        workspaceId: "scope-ws-A",
+        runId: "scope-run-A"
+      });
+      // Seed three memories into A, then capture A's seed_event_count.
+      for (const idx of [1, 2, 3]) {
+        await workspaceA.proposeMemory(
+          `Scope workspace A memory ${idx}.`,
+          `scope-evidence-A-${idx}`
+        );
+      }
+      const metricsA = await workspaceA.queryTokenMetrics();
+      await workspaceA.detach();
+
+      const workspaceB = await daemon.attachWorkspace({
+        workspaceId: "scope-ws-B",
+        runId: "scope-run-B"
+      });
+      // Seed a SINGLE memory into B. If the readback leaked A's events,
+      // B's seed_event_count would include A's three seeds.
+      await workspaceB.proposeMemory(
+        "Scope workspace B sole memory.",
+        "scope-evidence-B-1"
+      );
+      const metricsB = await workspaceB.queryTokenMetrics();
+      await workspaceB.detach();
+
+      // invariant: each workspace's metrics count only its own seed signals.
+      expect(metricsA.seed_event_count).toBe(3);
+      expect(metricsB.seed_event_count).toBe(1);
+    },
+    120_000
+  );
+
+  it(
     "shutdown closes the underlying runtime so dataDir-bound resources are released",
     async () => {
       const daemon = await startBenchDaemon({

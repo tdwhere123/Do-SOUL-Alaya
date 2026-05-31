@@ -1474,8 +1474,8 @@ export async function startBenchDaemon(
       proposeMemoryFromSignal,
       proposeMemoriesFromCompileSignals,
       proposeSynthesis,
-      queryTokenMetrics: () => queryTokenMetrics(dataDir),
-      queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir),
+      queryTokenMetrics: () => queryTokenMetrics(dataDir, input.workspaceId),
+      queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir, input.workspaceId),
       detach: async () => {
         if (detached) return;
         detached = true;
@@ -1509,8 +1509,8 @@ export async function startBenchDaemon(
     proposeMemoryFromSignal,
     proposeMemoriesFromCompileSignals,
     proposeSynthesis,
-    queryTokenMetrics: () => queryTokenMetrics(dataDir),
-    queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir),
+    queryTokenMetrics: () => queryTokenMetrics(dataDir, activeContext.workspaceId),
+    queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir, activeContext.workspaceId),
     attachWorkspace,
     shutdown
   };
@@ -1956,13 +1956,27 @@ function emitBenchContextLensAssembledEvent(
 // metrics fold lives in longmemeval/token-economy.ts deriveBenchTokenMetrics
 // so it is unit-testable against a stubbed EventLog. The connection is NOT
 // closed here.
-async function queryTokenMetrics(dataDir: string): Promise<BenchTokenMetrics> {
+// invariant: scope the event read to the question's workspace. The bench
+// daemon-per-run model shares ONE alaya.db across every attached workspace,
+// so an unscoped queryByType returns every prior question's events too —
+// turning each per-question fold into an O(all-prior-questions) scan AND
+// double-counting every earlier question into this question's token metrics
+// (the run-level aggregateBenchTokenMetrics then SUMS those cumulative
+// snapshots). queryByWorkspaceAndType uses idx_event_log_workspace_type_created
+// so the read stays bounded to this workspace's own emitted/lens events.
+// see also: packages/storage/src/repos/event-log-repo.ts queryByWorkspaceAndType
+async function queryTokenMetrics(
+  dataDir: string,
+  workspaceId: string
+): Promise<BenchTokenMetrics> {
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   const eventLogRepo = new SqliteEventLogRepo(db);
-  const emittedEvents = await eventLogRepo.queryByType(
+  const emittedEvents = await eventLogRepo.queryByWorkspaceAndType(
+    workspaceId,
     SignalEventType.SOUL_SIGNAL_EMITTED
   );
-  const lensEvents = await eventLogRepo.queryByType(
+  const lensEvents = await eventLogRepo.queryByWorkspaceAndType(
+    workspaceId,
     RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED
   );
   return deriveBenchTokenMetrics(emittedEvents, lensEvents);
@@ -1974,15 +1988,23 @@ async function queryTokenMetrics(dataDir: string): Promise<BenchTokenMetrics> {
 // aggregator in @do-soul/alaya-eval consumes. The aggregator is pure so it
 // stays unit-testable without standing up storage.
 // see also: packages/eval/src/edge-proposal-kpi.ts
+// invariant: scope to the question's workspace, for the same reason
+// queryTokenMetrics does — the shared daemon-per-run DB would otherwise
+// re-deliver every prior question's edge-proposal events on each call,
+// duplicating them into edgeProposalKpiRowsAcrossQuestions and growing the
+// scan with the question index.
 async function queryEdgeProposalKpiRows(
-  dataDir: string
+  dataDir: string,
+  workspaceId: string
 ): Promise<readonly EdgeProposalKpiEventRow[]> {
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   const eventLogRepo = new SqliteEventLogRepo(db);
-  const createdEvents = await eventLogRepo.queryByType(
+  const createdEvents = await eventLogRepo.queryByWorkspaceAndType(
+    workspaceId,
     GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED
   );
-  const reviewedEvents = await eventLogRepo.queryByType(
+  const reviewedEvents = await eventLogRepo.queryByWorkspaceAndType(
+    workspaceId,
     GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED
   );
   const rows: EdgeProposalKpiEventRow[] = [];
