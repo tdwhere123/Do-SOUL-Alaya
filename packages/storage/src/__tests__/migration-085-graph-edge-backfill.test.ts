@@ -598,6 +598,152 @@ describe("migration 085 legacy graph-edge backfill", () => {
     expect(pairAssociative("mem-c", "mem-d")).toHaveLength(1);
   });
 
+  it("dedupes a REVERSE-oriented legacy `recalls` edge against a cutover-minted `co_recalled` path for the same pair", () => {
+    const { db } = migrateThroughPre085();
+    seedWorkspace(db, "workspace-1");
+    // mem-low < mem-high lexically; the live co_recalled producer mints SORTED
+    // (source=low, target=high) while the legacy librarian wrote `recalls`
+    // UNSORTED. So the only realistic collision is a REVERSE-oriented legacy
+    // edge (high->low) against a sorted cutover path (low->high). The recalls
+    // tier is symmetric: that reverse edge is the SAME semantic edge and MUST
+    // dedup, else the pair carries two associative paths and graph_support
+    // double-counts the recall weight at both endpoints.
+    // cross-file ref: packages/core/src/path-relation-proposal-service.ts accrueCoOccurrence (sorts then mints low->high)
+    for (const id of ["mem-low", "mem-high"]) {
+      seedMemory(db, id, "workspace-1");
+    }
+
+    // Cutover path: SORTED orientation low -> high.
+    db.prepare(
+      `INSERT INTO path_relations (
+        path_id, workspace_id, anchors_json, constitution_json,
+        effect_vector_json, plasticity_state_json, lifecycle_json, legitimacy_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "cutover-co-recalled-sorted",
+      "workspace-1",
+      JSON.stringify({
+        source_anchor: { kind: "object", object_id: "mem-low" },
+        target_anchor: { kind: "object", object_id: "mem-high" }
+      }),
+      JSON.stringify({ relation_kind: "co_recalled", why_this_relation_exists: ["recalls_edge_co_usage"] }),
+      JSON.stringify({
+        salience: 0.5,
+        recall_bias: 0.5,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "lens_entry"
+      }),
+      JSON.stringify({
+        strength: 0.3,
+        direction_bias: "bidirectional_asymmetric",
+        stability_class: "stable",
+        support_events_count: 0,
+        contradiction_events_count: 0
+      }),
+      JSON.stringify({ status: "active", retirement_rule: "manual" }),
+      JSON.stringify({ evidence_basis: ["recalls_edge_co_usage"], governance_class: "attention_only" }),
+      "2026-04-17T00:30:00.000Z",
+      "2026-04-17T00:30:00.000Z"
+    );
+    // Legacy `recalls` edge in the REVERSE orientation high -> low.
+    seedLegacyEdge(db, {
+      edgeId: "edge-recalls-reverse",
+      source: "mem-high",
+      target: "mem-low",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:00:00.000Z"
+    });
+
+    applyMigration(db, MIGRATION_085);
+
+    const paths = readPaths(db);
+    const byPathId = new Map(paths.map((row) => [row.path_id, row]));
+    // The sorted cutover path survives; the reverse-oriented legacy edge did NOT
+    // mint a second associative path.
+    expect(byPathId.has("cutover-co-recalled-sorted")).toBe(true);
+    expect(byPathId.has("legacy-edge:edge-recalls-reverse")).toBe(false);
+
+    // Exactly ONE associative path links the {mem-low, mem-high} pair, counting
+    // BOTH orientations.
+    const recallsTier = new Set(["recalls", "co_recalled", "shares_entity", "signal_graph_ref"]);
+    const pairAssociative = paths.filter((row) => {
+      const anchors = JSON.parse(row.anchors_json);
+      const ids = new Set([anchors.source_anchor.object_id, anchors.target_anchor.object_id]);
+      return (
+        recallsTier.has(JSON.parse(row.constitution_json).relation_kind) &&
+        ids.has("mem-low") &&
+        ids.has("mem-high")
+      );
+    });
+    expect(pairAssociative).toHaveLength(1);
+  });
+
+  it("keeps DIRECTIONAL kinds same-orientation-only: a reverse-oriented active `supports` path does NOT dedup a forward legacy `supports` edge", () => {
+    const { db } = migrateThroughPre085();
+    seedWorkspace(db, "workspace-1");
+    for (const id of ["mem-a", "mem-b"]) {
+      seedMemory(db, id, "workspace-1");
+    }
+
+    // A directional `supports` path b -> a is a DISTINCT edge from a forward
+    // legacy `supports` edge a -> b — reverse is NOT the same semantic edge for
+    // directional kinds, so the forward legacy edge must STILL backfill. Only
+    // the symmetric recalls tier gets orientation-agnostic dedup.
+    db.prepare(
+      `INSERT INTO path_relations (
+        path_id, workspace_id, anchors_json, constitution_json,
+        effect_vector_json, plasticity_state_json, lifecycle_json, legitimacy_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "active-supports-reverse",
+      "workspace-1",
+      JSON.stringify({
+        source_anchor: { kind: "object", object_id: "mem-b" },
+        target_anchor: { kind: "object", object_id: "mem-a" }
+      }),
+      JSON.stringify({ relation_kind: "supports", why_this_relation_exists: ["pre_existing_reverse"] }),
+      JSON.stringify({
+        salience: 0.5,
+        recall_bias: 0.5,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "lens_entry"
+      }),
+      JSON.stringify({
+        strength: 0.5,
+        direction_bias: "bidirectional_asymmetric",
+        stability_class: "stable",
+        support_events_count: 0,
+        contradiction_events_count: 0
+      }),
+      JSON.stringify({ status: "active", retirement_rule: "manual" }),
+      JSON.stringify({ evidence_basis: ["pre_existing_reverse"], governance_class: "attention_only" }),
+      "2026-04-17T00:30:00.000Z",
+      "2026-04-17T00:30:00.000Z"
+    );
+    seedLegacyEdge(db, {
+      edgeId: "edge-supports-forward",
+      source: "mem-a",
+      target: "mem-b",
+      edgeType: "supports",
+      workspaceId: "workspace-1",
+      createdAt: "2026-04-17T01:00:00.000Z"
+    });
+
+    applyMigration(db, MIGRATION_085);
+
+    const paths = readPaths(db);
+    const byPathId = new Map(paths.map((row) => [row.path_id, row]));
+    // Both the reverse active path AND the forward backfilled edge survive —
+    // directional kinds keep same-orientation-only dedup.
+    expect(byPathId.has("active-supports-reverse")).toBe(true);
+    expect(byPathId.has("legacy-edge:edge-supports-forward")).toBe(true);
+  });
+
   it("skips corrupt / FK-orphaned / malformed legacy rows and still completes the cutover (drops the table)", () => {
     const { db } = migrateThroughPre085();
     seedWorkspace(db, "workspace-1");

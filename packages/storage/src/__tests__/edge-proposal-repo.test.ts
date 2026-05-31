@@ -329,6 +329,47 @@ describe("SqliteEdgeProposalRepo", () => {
     expect(awaiting.map((row) => row.proposal_id)).toEqual(["orphan-zz"]);
   });
 
+  // invariant (FIX-2): the await-path NOT EXISTS subquery must ride the
+  // migration 048 anchor-key expression indexes, not degrade to a workspace
+  // SCAN of path_relations per accepted proposal. A single OR across the
+  // source-key and target-key expressions defeats the seek; the UNION ALL split
+  // lets each orientation seek its own index. EXPLAIN QUERY PLAN runs over the
+  // SQL the repo's OWN prepared statement carries (via .source) so a drift
+  // between the indexed expression and the live statement fails this test.
+  it("await-path subquery rides the anchor-key indexes (SEARCH path_relations, no workspace SCAN)", async () => {
+    const { repo, pathRepo, database } = await createRepo();
+    // Seed enough path_relations that a scan plan would be the costly path the
+    // planner avoids only by riding the expression index.
+    mintObjectPath(pathRepo, 1, MEMORY_1, MEMORY_2);
+    mintObjectPath(pathRepo, 2, MEMORY_2, MEMORY_3);
+    mintObjectPath(pathRepo, 3, MEMORY_1, MEMORY_3);
+
+    const sql = repo.__awaitingPathSqlForTest();
+    const plan = database.connection
+      .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+      .all("workspace-1", 32) as ReadonlyArray<{ readonly detail: string }>;
+    const details = plan.map((step) => step.detail).join(" | ");
+
+    // The subquery SEARCHes path_relations through one of the anchor-key indexes
+    // with the anchor key BOUND (an index seek), not a residual filter.
+    expect(
+      plan.some(
+        (step) =>
+          step.detail.includes("SEARCH") &&
+          step.detail.includes("path_relations") &&
+          (step.detail.includes("idx_path_relations_source_anchor_key") ||
+            step.detail.includes("idx_path_relations_target_anchor_key"))
+      ),
+      `expected an anchor-key index SEARCH of path_relations, got: ${details}`
+    ).toBe(true);
+    // path_relations is never SCANned (a workspace-scoped scan per proposal is
+    // exactly the regression this guard catches).
+    expect(
+      plan.some((step) => step.detail.startsWith("SCAN") && step.detail.includes("path_relations")),
+      `expected no SCAN of path_relations, got: ${details}`
+    ).toBe(false);
+  });
+
   // invariant (I1): reconcile is CAS-gated on fromStatus, so a concurrent
   // decision cannot be clobbered. A reconcile against a row that is no longer in
   // fromStatus fails closed.
@@ -359,6 +400,7 @@ describe("SqliteEdgeProposalRepo", () => {
 async function createRepo(extraMemoryIds: readonly string[] = []): Promise<{
   readonly repo: SqliteEdgeProposalRepo;
   readonly pathRepo: SqlitePathRelationRepo;
+  readonly database: ReturnType<typeof initDatabase>;
 }> {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
@@ -394,7 +436,8 @@ async function createRepo(extraMemoryIds: readonly string[] = []): Promise<{
 
   return {
     repo: new SqliteEdgeProposalRepo(database),
-    pathRepo: new SqlitePathRelationRepo(database)
+    pathRepo: new SqlitePathRelationRepo(database),
+    database
   };
 }
 

@@ -39,8 +39,11 @@
 -- tier for the same pair, not just the literal `co_recalled` rename — otherwise
 -- a pre-upgrade active `shares_entity` or `signal_graph_ref` path plus a legacy
 -- `recalls` edge for the same pair would both survive and double-count the same
--- semantic edge after cutover. Non-recalls edge_types map 1:1 to their own graph
--- edge_type, so they keep the narrower same-kind dedup.
+-- semantic edge after cutover. The recalls tier is also SYMMETRIC, so the dedup
+-- matches the pair in EITHER orientation (the legacy librarian wrote `recalls`
+-- UNSORTED while the live co_recalled producer mints SORTED low->high). Non-
+-- recalls edge_types map 1:1 to their own graph edge_type AND are directional,
+-- so they keep the narrower same-kind, same-orientation dedup.
 -- cross-file ref: packages/core/src/graph-explore-service.ts (mapped-type support/recall counts)
 --
 -- Defensive backfill: a corrupt or externally-mutated local DB (an FK-orphaned
@@ -157,9 +160,29 @@ WHERE e.edge_type IN (
         END
       )
       AND json_extract(p.anchors_json, '$.source_anchor.kind') = 'object'
-      AND json_extract(p.anchors_json, '$.source_anchor.object_id') = e.source_memory_id
       AND json_extract(p.anchors_json, '$.target_anchor.kind') = 'object'
-      AND json_extract(p.anchors_json, '$.target_anchor.object_id') = e.target_memory_id
+      -- invariant: the recalls-tier is the SYMMETRIC associative family — a
+      -- reverse-oriented path is the SAME semantic edge, so a legacy `recalls`
+      -- edge (the only legacy edge_type in that tier; the live co_recalled
+      -- producer mints SORTED low->high while the legacy librarian wrote
+      -- UNSORTED) must dedup against an existing tier path in EITHER
+      -- orientation, or a reverse-oriented legacy edge backfills a SECOND
+      -- associative path and graph_support double-counts the recall weight.
+      -- The DIRECTIONAL kinds keep same-orientation-only dedup: for them a
+      -- reverse-oriented path is a DISTINCT edge, not a duplicate.
+      -- cross-file ref: packages/storage/src/repos/edge-proposal-repo.ts listAcceptedAwaitingPath (matches either orientation)
+      -- cross-file ref: packages/core/src/path-relation-proposal-service.ts anchorPointsAt / accrueCoOccurrence
+      AND (
+        (
+          json_extract(p.anchors_json, '$.source_anchor.object_id') = e.source_memory_id
+          AND json_extract(p.anchors_json, '$.target_anchor.object_id') = e.target_memory_id
+        )
+        OR (
+          e.edge_type = 'recalls'
+          AND json_extract(p.anchors_json, '$.source_anchor.object_id') = e.target_memory_id
+          AND json_extract(p.anchors_json, '$.target_anchor.object_id') = e.source_memory_id
+        )
+      )
       AND COALESCE(json_extract(p.lifecycle_json, '$.status'), 'active') = 'active'
   );
 

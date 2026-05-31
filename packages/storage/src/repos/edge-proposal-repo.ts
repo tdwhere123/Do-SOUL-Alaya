@@ -177,8 +177,17 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
     // ({kind:'object', object_id: <memory_id>}); json_array('object', col)
     // renders the same text serializePathAnchorRef(...) produces, and matching
     // it against PATH_RELATION_*_ANCHOR_KEY_SQL (byte-identical to the
-    // idx_path_relations_*_anchor_key expression indexes, migration 048) lets
-    // SQLite probe those indexes instead of scanning path_relations.
+    // idx_path_relations_*_anchor_key expression indexes, migration 048).
+    // invariant: the bidirectional match is split into a UNION ALL of two
+    // single-orientation branches rather than one OR across two different
+    // expression columns. A single OR mixing the source-key and target-key
+    // expressions defeats the expression-index seek (SQLite cannot pick one
+    // index for a disjunction over two distinct indexed expressions) and
+    // degrades to a workspace-scoped SCAN of path_relations per accepted
+    // proposal. Each UNION ALL branch binds ONE orientation, so each rides its
+    // own idx_path_relations_*_anchor_key index seek. Semantics are identical:
+    // a path satisfies the proposal iff some row links the source/target memory
+    // ids in EITHER direction (relation_kind- and lifecycle-agnostic).
     // invariant: the match is asymmetric-safe. A genuine orphan owns NO path, so
     // NO row matches and it is always included (never starved). A healthy accept
     // that some non-object-anchor producer happens to satisfy would re-appear
@@ -204,16 +213,14 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
           SELECT 1
           FROM path_relations AS pr
           WHERE pr.workspace_id = ep.workspace_id
-            AND (
-              (
-                ${PATH_RELATION_SOURCE_ANCHOR_KEY_SQL} = json_array('object', ep.source_memory_id)
-                AND ${PATH_RELATION_TARGET_ANCHOR_KEY_SQL} = json_array('object', ep.target_memory_id)
-              )
-              OR (
-                ${PATH_RELATION_SOURCE_ANCHOR_KEY_SQL} = json_array('object', ep.target_memory_id)
-                AND ${PATH_RELATION_TARGET_ANCHOR_KEY_SQL} = json_array('object', ep.source_memory_id)
-              )
-            )
+            AND ${PATH_RELATION_SOURCE_ANCHOR_KEY_SQL} = json_array('object', ep.source_memory_id)
+            AND ${PATH_RELATION_TARGET_ANCHOR_KEY_SQL} = json_array('object', ep.target_memory_id)
+          UNION ALL
+          SELECT 1
+          FROM path_relations AS pr
+          WHERE pr.workspace_id = ep.workspace_id
+            AND ${PATH_RELATION_SOURCE_ANCHOR_KEY_SQL} = json_array('object', ep.target_memory_id)
+            AND ${PATH_RELATION_TARGET_ANCHOR_KEY_SQL} = json_array('object', ep.source_memory_id)
         )
       ORDER BY ep.created_at ASC, ep.proposal_id ASC
       LIMIT ?
@@ -493,6 +500,16 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
       );
     }
     return this.findRequired(proposalId);
+  }
+
+  // Test-only seam: the SQL text the repo actually prepared for the await-path
+  // sweep. Returning .source from the live prepared statement lets the EXPLAIN
+  // QUERY PLAN guard prove the planner rides the migration 048 anchor-key
+  // expression indexes against the REAL statement, not a reconstruction that
+  // could silently drift from it.
+  // cross-file ref: packages/storage/src/__tests__/edge-proposal-repo.test.ts
+  public __awaitingPathSqlForTest(): string {
+    return (this.listAcceptedAwaitingPathStatement as { readonly source: string }).source;
   }
 
   private findRequired(proposalId: string): EdgeProposal {
