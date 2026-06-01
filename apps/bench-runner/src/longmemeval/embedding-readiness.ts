@@ -36,58 +36,8 @@ export interface RunEmbeddingReadinessPassInput {
   readonly warn?: (message: string) => void;
 }
 
-export interface RunEmbeddingReadinessPassWithResultInput<T> {
-  /** A warmup pass that yields a summary value, e.g. workspace.warmEmbeddingCache. */
-  readonly runPass: () => Promise<T>;
-  /** Workspace id, surfaced in the visible warning for a genuine failure. */
-  readonly workspaceId: string;
-  /**
-   * Label for the unit being warmed (question id for longmemeval, conversation
-   * id for LoCoMo), surfaced in the visible warning for a genuine failure.
-   */
-  readonly questionId: string;
-  /** Sink for the visible per-unit warning; defaults to stderr. */
-  readonly warn?: (message: string) => void;
-}
-
-export interface EmbeddingReadinessPassResultWithValue<T>
-  extends EmbeddingReadinessPassResult {
-  /** The pass value when outcome === "ready"; null when degraded (skip/failure). */
-  readonly value: T | null;
-}
-
 function toReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Run one embedding-readiness pass that yields a summary value, tolerating the
- * throw the same way the harness drain does (never aborts the caller loop). A
- * genuine embedding_failed:* / unexpected-error reason is logged as a VISIBLE
- * warning (naming questionId + workspaceId) so a degraded unit is not silent; a
- * benign embedding_backfill_skipped:* reason continues quietly. On any throw the
- * value is null (degrade), otherwise it carries the pass result. The classified
- * outcome is for the run-level integrity tracker.
- */
-export async function runEmbeddingReadinessPassWithResult<T>(
-  input: RunEmbeddingReadinessPassWithResultInput<T>
-): Promise<EmbeddingReadinessPassResultWithValue<T>> {
-  try {
-    const value = await input.runPass();
-    return { outcome: "ready", reason: null, value };
-  } catch (error) {
-    const reason = toReason(error);
-    if (reason.startsWith(BENIGN_SKIP_PREFIX)) {
-      return { outcome: "benign_skip", reason, value: null };
-    }
-    const warn =
-      input.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
-    warn(
-      `[longmemeval embedding-readiness] WARNING genuine embedding pass failure ` +
-        `question=${input.questionId} workspace=${input.workspaceId} reason=${reason}`
-    );
-    return { outcome: "failed", reason, value: null };
-  }
 }
 
 /**
@@ -102,13 +52,22 @@ export async function runEmbeddingReadinessPassWithResult<T>(
 export async function runEmbeddingReadinessPass(
   input: RunEmbeddingReadinessPassInput
 ): Promise<EmbeddingReadinessPassResult> {
-  const { value: _value, ...result } = await runEmbeddingReadinessPassWithResult({
-    runPass: input.runPass,
-    workspaceId: input.workspaceId,
-    questionId: input.questionId,
-    ...(input.warn === undefined ? {} : { warn: input.warn })
-  });
-  return result;
+  try {
+    await input.runPass();
+    return { outcome: "ready", reason: null };
+  } catch (error) {
+    const reason = toReason(error);
+    if (reason.startsWith(BENIGN_SKIP_PREFIX)) {
+      return { outcome: "benign_skip", reason };
+    }
+    const warn =
+      input.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
+    warn(
+      `[longmemeval embedding-readiness] WARNING genuine embedding pass failure ` +
+        `question=${input.questionId} workspace=${input.workspaceId} reason=${reason}`
+    );
+    return { outcome: "failed", reason };
+  }
 }
 
 /**
@@ -156,20 +115,15 @@ export class EmbeddingReadinessTracker {
     if (this.unresolvedCount === 0) {
       return;
     }
-    // invariant: the noun is "passes", not "questions" — longmemeval records one
-    // pass per question, but LoCoMo records two passes per conversation
-    // (seed-warmup + query-warmup), so totalPasses is the only caller-agnostic
-    // unit. see also: apps/bench-runner/src/locomo/runner.ts
-    //   warmLocomoConversationEmbeddings (the two LoCoMo passes)
     this.warn(
       `[longmemeval embedding-readiness] INTEGRITY WARNING ` +
-        `${this.unresolvedCount}/${this.totalPasses} embedding-readiness passes ` +
-        `ran unresolved ` +
+        `${this.unresolvedCount}/${this.totalPasses} questions ran with an ` +
+        `unresolved embedding-readiness pass ` +
         `(${this.failedQuestions} genuine failure, ` +
         `${this.benignSkipQuestions} benign/transient skip). ` +
-        `Recall for the affected units may have run embedding-OFF; do not read ` +
-        `this run as a clean embedding-ON measurement without checking the ` +
-        `per-pass warnings above.`
+        `Recall for those questions may have run embedding-OFF; do not read this ` +
+        `run as a clean embedding-ON measurement without checking the per-question ` +
+        `warnings above.`
     );
   }
 }

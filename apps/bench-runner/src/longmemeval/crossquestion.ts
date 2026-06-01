@@ -381,6 +381,7 @@ export async function runLongMemEvalCrossQuestion(
           `R@5=${hitAt5 ? "✓" : "✗"} pool=${sidecar.size}\n`
       );
     }
+    embeddingReadiness.finalize();
     // Disclose which seed path ran: official_api_compile (production garden
     // extraction) vs no_credentials_fallback (degraded full-turn single-fact).
     process.stdout.write(
@@ -394,11 +395,6 @@ export async function runLongMemEvalCrossQuestion(
     tokenEconomyInput = await daemon.queryTokenMetrics();
   } finally {
     await daemon.shutdown();
-    // invariant: end-of-run integrity guarantee is unconditional — if the
-    // question loop throws mid-run, the accumulated INTEGRITY WARNING must
-    // still surface (finalize() prints at most once, no-op when nothing was
-    // unresolved). see also: apps/bench-runner/src/locomo/runner.ts (same shape)
-    embeddingReadiness.finalize();
   }
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);

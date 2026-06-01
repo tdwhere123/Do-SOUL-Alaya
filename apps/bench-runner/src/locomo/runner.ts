@@ -38,10 +38,6 @@ import {
 } from "../longmemeval/diagnostics.js";
 import { writeExternalDiagnosticsArtifact } from "../longmemeval/diagnostics-artifacts.js";
 import {
-  EmbeddingReadinessTracker,
-  runEmbeddingReadinessPassWithResult
-} from "../longmemeval/embedding-readiness.js";
-import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
 } from "../longmemeval/recall-token-economy.js";
@@ -128,18 +124,11 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       ? {}
       : { embeddingProviderKind: opts.embeddingProviderKind })
   });
-  // invariant: a throwing per-conversation embedding warmup (e.g. a sustained
-  // provider transport failure that exhausts retries) must DEGRADE + CONTINUE,
-  // never abort the conversation loop. The tracker turns silent embedding-OFF
-  // degradation into an end-of-run INTEGRITY WARNING.
-  // see also: apps/bench-runner/src/longmemeval/embedding-readiness.ts
-  //   (same pattern, multiturn/crossquestion; LoCoMo joined per the exit-13 fix)
-  const embeddingReadiness = new EmbeddingReadinessTracker();
   try {
   for (let i = 0; i < window.length; i++) {
     const conversation = window[i];
     if (conversation === undefined) continue;
-    const convResult = await runOneConversation(daemon, conversation, opts, embeddingReadiness);
+    const convResult = await runOneConversation(daemon, conversation, opts);
     conversationResults.push(convResult);
     totalQa += convResult.qaCount;
     totalHitAt1 += convResult.hitAt1;
@@ -169,11 +158,6 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   }
   } finally {
     await daemon.shutdown();
-    // invariant: the end-of-run integrity guarantee is unconditional — if the
-    // conversation loop throws mid-run, the accumulated INTEGRITY WARNING must
-    // still surface (finalize() prints at most once and is a no-op when no pass
-    // was unresolved), so a partial degraded run cannot crash silently.
-    embeddingReadiness.finalize();
   }
 
   const rAt1 = totalQa === 0 ? 0 : totalHitAt1 / totalQa;
@@ -334,63 +318,6 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   };
 }
 
-// invariant: the only place the LoCoMo runner routes its two per-conversation
-// embedding warmup passes (seed-warmup + query-warmup) through the
-// throw-tolerant readiness helper. Extracted as a dependency-injected seam so
-// the runner wiring is genuinely test-guarded: a fake `warm` that throws must
-// degrade + continue (no rethrow) and the tracker must count it. Reverting
-// either pass to a bare `await workspace.warm...(...)` lets the throw escape
-// and the seam test goes red.
-// see also: apps/bench-runner/src/__tests__/embedding-readiness.test.ts
-//   (warmLocomoConversationEmbeddings seam test)
-export interface WarmLocomoConversationEmbeddingsInput {
-  /**
-   * Structurally-minimal warmup surface (the two BenchWorkspaceHandle warm
-   * methods). A test injects a fake whose warm calls throw.
-   */
-  readonly workspace: Pick<
-    BenchWorkspaceHandle,
-    "warmEmbeddingCache" | "warmQueryEmbeddingCache"
-  >;
-  readonly embeddingReadiness: EmbeddingReadinessTracker;
-  readonly embeddingMode: BenchEmbeddingMode;
-  readonly workspaceId: string;
-  readonly conversationId: string;
-  /** Seed memory ids to warm for the corpus pass. */
-  readonly seedMemoryIds: readonly string[];
-  /** Scored question texts to warm for the query pass. */
-  readonly queryTexts: readonly string[];
-}
-
-export interface WarmLocomoConversationEmbeddingsResult {
-  readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
-  readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
-}
-
-export async function warmLocomoConversationEmbeddings(
-  input: WarmLocomoConversationEmbeddingsInput
-): Promise<WarmLocomoConversationEmbeddingsResult> {
-  if (input.embeddingMode !== "env") {
-    return { embeddingWarmup: null, queryEmbeddingWarmup: null };
-  }
-  const seedPass = await runEmbeddingReadinessPassWithResult({
-    runPass: () => input.workspace.warmEmbeddingCache(input.seedMemoryIds),
-    workspaceId: input.workspaceId,
-    questionId: `${input.conversationId}:seed-warmup`
-  });
-  input.embeddingReadiness.record(seedPass);
-  const queryPass = await runEmbeddingReadinessPassWithResult({
-    runPass: () => input.workspace.warmQueryEmbeddingCache(input.queryTexts),
-    workspaceId: input.workspaceId,
-    questionId: `${input.conversationId}:query-warmup`
-  });
-  input.embeddingReadiness.record(queryPass);
-  return {
-    embeddingWarmup: seedPass.value,
-    queryEmbeddingWarmup: queryPass.value
-  };
-}
-
 interface ConversationResult {
   readonly qaCount: number;
   readonly hitAt1: number;
@@ -417,8 +344,7 @@ interface ConversationResult {
 async function runOneConversation(
   daemon: BenchDaemonHandle,
   conversation: LocomoSample,
-  opts: LocomoRunOptions,
-  embeddingReadiness: EmbeddingReadinessTracker
+  opts: LocomoRunOptions
 ): Promise<ConversationResult> {
   const embeddingMode = opts.embeddingMode ?? "disabled";
   const workspace: BenchWorkspaceHandle = await daemon.attachWorkspace({
@@ -454,18 +380,15 @@ async function runOneConversation(
       }
     }
 
-    const readinessWorkspaceId = `locomo-${conversation.sample_id}`;
+    const embeddingWarmup =
+      opts.embeddingMode === "env"
+        ? await workspace.warmEmbeddingCache([...memoryIdByDiaId.values()])
+        : null;
     const scoredQuestions = conversation.qa.filter((qa) => qa.evidence.length > 0);
-    const { embeddingWarmup, queryEmbeddingWarmup } =
-      await warmLocomoConversationEmbeddings({
-        workspace,
-        embeddingReadiness,
-        embeddingMode,
-        workspaceId: readinessWorkspaceId,
-        conversationId: conversation.sample_id,
-        seedMemoryIds: [...memoryIdByDiaId.values()],
-        queryTexts: scoredQuestions.map((qa) => qa.question)
-      });
+    const queryEmbeddingWarmup =
+      opts.embeddingMode === "env"
+        ? await workspace.warmQueryEmbeddingCache(scoredQuestions.map((qa) => qa.question))
+        : null;
 
     let hitAt1 = 0;
     let hitAt5 = 0;
