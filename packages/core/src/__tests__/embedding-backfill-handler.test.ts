@@ -287,7 +287,7 @@ describe("EmbeddingBackfillHandler", () => {
     });
 
     expect(result.objectsAffected).toEqual(["memory-ok-1", "memory-ok-2", "memory-ok-3"]);
-    expect(result.auditEntries).toContain("embedding_failed:provider:memory-bad");
+    expect(result.auditEntries).toContain("embedding_failed:provider:memory-bad:provider rejected input");
     expect(result.auditEntries).toContain("embedding_upserted:memory-ok-1");
     expect(result.auditEntries).toContain("embedding_upserted:memory-ok-2");
     expect(result.auditEntries).toContain("embedding_upserted:memory-ok-3");
@@ -734,7 +734,9 @@ describe("EmbeddingBackfillHandler", () => {
     expect(result.objectsAffected).toEqual([]);
     expect(upsert).not.toHaveBeenCalled();
     for (const memory of hotMemories) {
-      expect(result.auditEntries).toContain(`embedding_failed:provider:${memory.object_id}`);
+      expect(result.auditEntries).toContain(
+        `embedding_failed:provider:${memory.object_id}:provider permanently down`
+      );
     }
   });
 });

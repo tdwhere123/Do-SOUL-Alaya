@@ -706,6 +706,38 @@ describe("garden runtime targeted embedding backfill pass", () => {
     );
   });
 
+  it("surfaces item-level provider failure reasons to targeted warmup callers", async () => {
+    const embeddingBackfillHandler = {
+      handle: vi.fn(async () => ({
+        objectsAffected: [],
+        auditEntries: ["embedding_failed:provider:memory-bad:provider rejected input"]
+      }))
+    };
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        embeddingBackfillHandler
+      })
+    );
+    const scheduler = currentScheduler();
+
+    await expect(runtime.runEmbeddingBackfillPass("workspace-1")).rejects.toThrow(
+      "embedding_failed:provider:memory-bad:provider rejected input"
+    );
+    expect(scheduler.completions).toHaveLength(1);
+    expect(scheduler.completions[0]).toEqual(
+      expect.objectContaining({
+        success: true,
+        audit_entries: ["embedding_failed:provider:memory-bad:provider rejected input"]
+      })
+    );
+  });
+
   it("includes partial durable side effects in failed EMBEDDING_BACKFILL completions", async () => {
     const partialFailure = new EmbeddingBackfillPartialFailureError({
       workspaceId: "workspace-1",

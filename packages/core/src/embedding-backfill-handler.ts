@@ -366,17 +366,19 @@ export class EmbeddingBackfillHandler {
       if (batch.length <= 1) {
         const entry = batch[0];
         if (entry !== undefined) {
-          const retried = await this.retrySingleItemEmbedding(workspaceId, entry, message);
-          if (retried !== null) {
-            return Object.freeze([retried]);
+          const retryResult = await this.retrySingleItemEmbedding(workspaceId, entry, message);
+          if (retryResult.embedding !== null) {
+            return Object.freeze([retryResult.embedding]);
           }
           this.warn("embedding backfill item failed; continuing with remaining batches", {
             workspace_id: workspaceId,
             object_id: entry.memory.object_id,
             input_chars: batchInputChars,
-            error: message
+            error: retryResult.errorMessage
           });
-          auditEntries.push(`embedding_failed:provider:${entry.memory.object_id}`);
+          auditEntries.push(
+            `embedding_failed:provider:${entry.memory.object_id}:${retryResult.errorMessage}`
+          );
         }
         return Object.freeze([]);
       }
@@ -398,7 +400,12 @@ export class EmbeddingBackfillHandler {
     workspaceId: string,
     entry: EmbeddingBackfillCandidate,
     firstError: string
-  ): Promise<EmbeddedBackfillCandidate | null> {
+  ): Promise<
+    Readonly<{
+      readonly embedding: EmbeddedBackfillCandidate | null;
+      readonly errorMessage: string;
+    }>
+  > {
     let lastError = firstError;
     for (let attempt = 2; attempt <= BACKFILL_ITEM_RETRY_ATTEMPTS; attempt++) {
       this.warn("embedding backfill item failed; retrying item", {
@@ -419,15 +426,18 @@ export class EmbeddingBackfillHandler {
           throw new Error(`Expected 1 embedding but received ${embeddings.length}.`);
         }
         return Object.freeze({
-          entry,
-          embedding: embeddings[0]!
+          embedding: Object.freeze({
+            entry,
+            embedding: embeddings[0]!
+          }),
+          errorMessage: lastError
         });
       } catch (error) {
         lastError = toErrorMessage(error);
       }
     }
 
-    return null;
+    return Object.freeze({ embedding: null, errorMessage: lastError });
   }
 }
 
