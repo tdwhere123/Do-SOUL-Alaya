@@ -280,6 +280,20 @@ export interface DrainEmbeddingWarmupPassesResult {
   readonly lastPassError: string | null;
 }
 
+export function formatEmbeddingWarmupNotReadyError(
+  summary: BenchEmbeddingWarmupSummary,
+  lastPassError: string | null
+): string {
+  const preview = summary.missing_object_ids.slice(0, 5).join(", ");
+  return (
+    `embedding warm cache not ready after ${summary.pass_count} pass(es): ` +
+    `ready=${summary.ready_count} expected=${summary.expected_count} ` +
+    `missing=${summary.missing_object_ids.length}` +
+    (preview.length === 0 ? "" : ` first_missing=${preview}`) +
+    (lastPassError === null ? "" : ` last_error=${lastPassError}`)
+  );
+}
+
 // invariant: drains by progress against an injected runPass(). For embedding
 // warmup, runPass() is runGardenEmbeddingBackfillPass — a targeted
 // EMBEDDING_BACKFILL-only drain whose O(n) handler embeds the whole workspace
@@ -1025,14 +1039,7 @@ export async function startBenchDaemon(
     const summary = drain.summary;
 
     if (summary.ready_count !== summary.expected_count) {
-      const preview = summary.missing_object_ids.slice(0, 5).join(", ");
-      throw new Error(
-        `embedding warm cache not ready after ${summary.pass_count} pass(es): ` +
-          `ready=${summary.ready_count} expected=${summary.expected_count} ` +
-          `missing=${summary.missing_object_ids.length}` +
-          (preview.length === 0 ? "" : ` first_missing=${preview}`) +
-          (drain.lastPassError === null ? "" : ` last_error=${drain.lastPassError}`)
-      );
+      throw new Error(formatEmbeddingWarmupNotReadyError(summary, drain.lastPassError));
     }
 
     return summary;
@@ -1617,7 +1624,7 @@ export async function startBenchDaemon(
   };
 }
 
-async function readEmbeddingWarmupSummary(input: {
+export async function readEmbeddingWarmupSummary(input: {
   readonly dataDir: string;
   readonly workspaceId: string;
   readonly objectIds: readonly string[];
@@ -1642,14 +1649,12 @@ async function readEmbeddingWarmupSummary(input: {
 
   const db = initDatabase({ filename: join(input.dataDir, "alaya.db") });
   const embeddingRepo = new SqliteMemoryEmbeddingRepo(db);
-  const records = await embeddingRepo.listByObjectIds(
-    input.workspaceId,
-    expectedIds
-  );
+  const records = await embeddingRepo.findMetadataByObjectIds(expectedIds);
   const readyIds = new Set(
     records
       .filter(
         (record) =>
+          record.workspace_id === input.workspaceId &&
           record.provider_kind === input.providerKind &&
           record.model_id === input.modelId &&
           record.schema_version === input.schemaVersion
