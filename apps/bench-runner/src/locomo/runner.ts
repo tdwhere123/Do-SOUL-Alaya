@@ -330,6 +330,63 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   };
 }
 
+// invariant: the only place the LoCoMo runner routes its two per-conversation
+// embedding warmup passes (seed-warmup + query-warmup) through the
+// throw-tolerant readiness helper. Extracted as a dependency-injected seam so
+// the runner wiring is genuinely test-guarded: a fake `warm` that throws must
+// degrade + continue (no rethrow) and the tracker must count it. Reverting
+// either pass to a bare `await workspace.warm...(...)` lets the throw escape
+// and the seam test goes red.
+// see also: apps/bench-runner/src/__tests__/embedding-readiness.test.ts
+//   (warmLocomoConversationEmbeddings seam test)
+export interface WarmLocomoConversationEmbeddingsInput {
+  /**
+   * Structurally-minimal warmup surface (the two BenchWorkspaceHandle warm
+   * methods). A test injects a fake whose warm calls throw.
+   */
+  readonly workspace: Pick<
+    BenchWorkspaceHandle,
+    "warmEmbeddingCache" | "warmQueryEmbeddingCache"
+  >;
+  readonly embeddingReadiness: EmbeddingReadinessTracker;
+  readonly embeddingMode: BenchEmbeddingMode;
+  readonly workspaceId: string;
+  readonly conversationId: string;
+  /** Seed memory ids to warm for the corpus pass. */
+  readonly seedMemoryIds: readonly string[];
+  /** Scored question texts to warm for the query pass. */
+  readonly queryTexts: readonly string[];
+}
+
+export interface WarmLocomoConversationEmbeddingsResult {
+  readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
+  readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
+}
+
+export async function warmLocomoConversationEmbeddings(
+  input: WarmLocomoConversationEmbeddingsInput
+): Promise<WarmLocomoConversationEmbeddingsResult> {
+  if (input.embeddingMode !== "env") {
+    return { embeddingWarmup: null, queryEmbeddingWarmup: null };
+  }
+  const seedPass = await runEmbeddingReadinessPassWithResult({
+    runPass: () => input.workspace.warmEmbeddingCache(input.seedMemoryIds),
+    workspaceId: input.workspaceId,
+    questionId: `${input.conversationId}:seed-warmup`
+  });
+  input.embeddingReadiness.record(seedPass);
+  const queryPass = await runEmbeddingReadinessPassWithResult({
+    runPass: () => input.workspace.warmQueryEmbeddingCache(input.queryTexts),
+    workspaceId: input.workspaceId,
+    questionId: `${input.conversationId}:query-warmup`
+  });
+  input.embeddingReadiness.record(queryPass);
+  return {
+    embeddingWarmup: seedPass.value,
+    queryEmbeddingWarmup: queryPass.value
+  };
+}
+
 interface ConversationResult {
   readonly qaCount: number;
   readonly hitAt1: number;
@@ -394,27 +451,17 @@ async function runOneConversation(
     }
 
     const readinessWorkspaceId = `locomo-${conversation.sample_id}`;
-    let embeddingWarmup: BenchEmbeddingWarmupSummary | null = null;
-    if (opts.embeddingMode === "env") {
-      const pass = await runEmbeddingReadinessPassWithResult({
-        runPass: () => workspace.warmEmbeddingCache([...memoryIdByDiaId.values()]),
-        workspaceId: readinessWorkspaceId,
-        questionId: `${conversation.sample_id}:seed-warmup`
-      });
-      embeddingReadiness.record(pass);
-      embeddingWarmup = pass.value;
-    }
     const scoredQuestions = conversation.qa.filter((qa) => qa.evidence.length > 0);
-    let queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null = null;
-    if (opts.embeddingMode === "env") {
-      const pass = await runEmbeddingReadinessPassWithResult({
-        runPass: () => workspace.warmQueryEmbeddingCache(scoredQuestions.map((qa) => qa.question)),
+    const { embeddingWarmup, queryEmbeddingWarmup } =
+      await warmLocomoConversationEmbeddings({
+        workspace,
+        embeddingReadiness,
+        embeddingMode,
         workspaceId: readinessWorkspaceId,
-        questionId: `${conversation.sample_id}:query-warmup`
+        conversationId: conversation.sample_id,
+        seedMemoryIds: [...memoryIdByDiaId.values()],
+        queryTexts: scoredQuestions.map((qa) => qa.question)
       });
-      embeddingReadiness.record(pass);
-      queryEmbeddingWarmup = pass.value;
-    }
 
     let hitAt1 = 0;
     let hitAt5 = 0;

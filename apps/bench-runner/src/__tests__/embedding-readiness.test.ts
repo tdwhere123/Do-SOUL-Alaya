@@ -4,6 +4,7 @@ import {
   runEmbeddingReadinessPass,
   runEmbeddingReadinessPassWithResult
 } from "../longmemeval/embedding-readiness.js";
+import { warmLocomoConversationEmbeddings } from "../locomo/runner.js";
 
 describe("runEmbeddingReadinessPass", () => {
   it("returns ready and warns nothing when the pass resolves", async () => {
@@ -210,5 +211,105 @@ describe("runEmbeddingReadinessPassWithResult", () => {
     expect(visited).toEqual(conversations);
     expect(tracker.failedCount).toBe(1);
     expect(tracker.unresolvedCount).toBe(1);
+  });
+});
+
+describe("warmLocomoConversationEmbeddings (runner wiring seam)", () => {
+  // invariant: this drives the REAL runner seam runOneConversation calls, not a
+  // hand-rolled replica. A fake workspace whose warm methods throw must NOT
+  // abort the caller and the run-level tracker must count the degradation.
+  // Reverting the seam to a bare `await workspace.warm...(...)` lets the throw
+  // escape -> this test rejects -> red. (Confirmed locally by that mutation.)
+  // see also: apps/bench-runner/src/locomo/runner.ts warmLocomoConversationEmbeddings
+  it("degrades + continues when warmEmbeddingCache throws a genuine failure", async () => {
+    const tracker = new EmbeddingReadinessTracker(vi.fn());
+    const warmEmbeddingCache = vi.fn(async () => {
+      throw new Error(
+        "embedding_failed:provider:memory-x:Embedding request transport failed for host yunwu.ai."
+      );
+    });
+    const warmQueryEmbeddingCache = vi.fn(async () => {
+      throw new Error(
+        "embedding_failed:provider:query-x:Embedding request transport failed for host yunwu.ai."
+      );
+    });
+
+    const result = await warmLocomoConversationEmbeddings({
+      workspace: { warmEmbeddingCache, warmQueryEmbeddingCache },
+      embeddingReadiness: tracker,
+      embeddingMode: "env",
+      workspaceId: "locomo-conv-42",
+      conversationId: "conv-42",
+      seedMemoryIds: ["mem-a", "mem-b"],
+      queryTexts: ["who is bob?"]
+    });
+
+    // (a) the seam resolved (did NOT throw) and (b) the caller can keep going.
+    expect(result.embeddingWarmup).toBeNull();
+    expect(result.queryEmbeddingWarmup).toBeNull();
+    // Both passes ran (the throw was tolerated, not short-circuited).
+    expect(warmEmbeddingCache).toHaveBeenCalledTimes(1);
+    expect(warmQueryEmbeddingCache).toHaveBeenCalledTimes(1);
+    // (c) the run-level tracker recorded both degradations as genuine failures.
+    expect(tracker.failedCount).toBe(2);
+    expect(tracker.unresolvedCount).toBe(2);
+  });
+
+  it("tolerates a benign skip from warmEmbeddingCache quietly while continuing", async () => {
+    const tracker = new EmbeddingReadinessTracker(vi.fn());
+    const warmEmbeddingCache = vi.fn(async () => {
+      throw new Error("embedding_backfill_skipped:no_hot_memories");
+    });
+    const warmQueryEmbeddingCache = vi.fn(async () => ({
+      status: "ready" as const,
+      requested_count: 1,
+      ready_count: 1,
+      cache_hit_count: 0,
+      provider_requested_count: 1
+    }));
+
+    const result = await warmLocomoConversationEmbeddings({
+      workspace: {
+        warmEmbeddingCache,
+        warmQueryEmbeddingCache: warmQueryEmbeddingCache as never
+      },
+      embeddingReadiness: tracker,
+      embeddingMode: "env",
+      workspaceId: "locomo-conv-26",
+      conversationId: "conv-26",
+      seedMemoryIds: ["mem-a"],
+      queryTexts: ["where did alice travel?"]
+    });
+
+    expect(result.embeddingWarmup).toBeNull();
+    expect(result.queryEmbeddingWarmup).not.toBeNull();
+    expect(tracker.failedCount).toBe(0);
+    expect(tracker.benignSkipCount).toBe(1);
+    expect(tracker.unresolvedCount).toBe(1);
+  });
+
+  it("runs no warmup passes and records nothing when embeddingMode is not env", async () => {
+    const tracker = new EmbeddingReadinessTracker(vi.fn());
+    const warmEmbeddingCache = vi.fn();
+    const warmQueryEmbeddingCache = vi.fn();
+
+    const result = await warmLocomoConversationEmbeddings({
+      workspace: {
+        warmEmbeddingCache: warmEmbeddingCache as never,
+        warmQueryEmbeddingCache: warmQueryEmbeddingCache as never
+      },
+      embeddingReadiness: tracker,
+      embeddingMode: "disabled",
+      workspaceId: "locomo-conv-1",
+      conversationId: "conv-1",
+      seedMemoryIds: ["mem-a"],
+      queryTexts: ["q"]
+    });
+
+    expect(result.embeddingWarmup).toBeNull();
+    expect(result.queryEmbeddingWarmup).toBeNull();
+    expect(warmEmbeddingCache).not.toHaveBeenCalled();
+    expect(warmQueryEmbeddingCache).not.toHaveBeenCalled();
+    expect(tracker.unresolvedCount).toBe(0);
   });
 });
