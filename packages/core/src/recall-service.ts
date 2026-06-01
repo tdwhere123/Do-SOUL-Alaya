@@ -3147,14 +3147,20 @@ export class RecallService {
     const rankedCandidates = scoredCandidates
       .sort(compareFusedRecallCandidates);
     const featureRerankedCandidates = applyFeatureRerank(rankedCandidates, supplementaryData);
-    const deliveryOrderedCandidates = reserveSynthesisDeliverySlots(
-      prioritizeStrongLexicalDeliveryWindowCandidates(
-        featureRerankedCandidates,
+    const prioritizedCandidates = prioritizeStrongLexicalDeliveryWindowCandidates(
+      featureRerankedCandidates,
+      supplementaryData,
+      config.budgets.max_entries
+    );
+    const deliveryOrderedCandidates = reserveStructuralDeliverySlots(
+      reserveSynthesisDeliverySlots(
+        prioritizedCandidates,
         supplementaryData,
         config.budgets.max_entries
       ),
       supplementaryData,
-      config.budgets.max_entries
+      config.budgets.max_entries,
+      synthesisReserveCount(prioritizedCandidates, config.budgets.max_entries)
     );
 
     type FineAssessmentAccumulator = {
@@ -3926,6 +3932,26 @@ const SYNTHESIS_DELIVERY_RESERVE = 2;
  * one that reads only the top few. A scored, fusion-comparable synthesis
  * signal that would let synthesis place by merit is a v0.3.11 concern.
  */
+// Tail slots the synthesis reserve will consume for this delivery window. The
+// composition site reads this so the structural reserve can cap itself against
+// the slots synthesis already holds. see also: reserveStructuralDeliverySlots.
+function synthesisReserveCount(
+  deliveryOrdered: readonly FusedRecallCandidateInput[],
+  maxEntries: number
+): number {
+  if (maxEntries <= 1) {
+    return 0;
+  }
+  const synthesisCount = deliveryOrdered.reduce(
+    (total, candidate) => total + (candidate.objectKind === "synthesis_capsule" ? 1 : 0),
+    0
+  );
+  if (synthesisCount === 0) {
+    return 0;
+  }
+  return Math.max(0, Math.min(SYNTHESIS_DELIVERY_RESERVE, synthesisCount, maxEntries - 1));
+}
+
 function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
   deliveryOrdered: readonly T[],
   supplementaryData: RecallSupplementaryData,
@@ -3937,11 +3963,7 @@ function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
   if (synthesisCandidates.length === 0 || maxEntries <= 1) {
     return deliveryOrdered;
   }
-  const reserveCount = Math.min(
-    SYNTHESIS_DELIVERY_RESERVE,
-    synthesisCandidates.length,
-    maxEntries - 1
-  );
+  const reserveCount = synthesisReserveCount(deliveryOrdered, maxEntries);
   if (reserveCount <= 0) {
     return deliveryOrdered;
   }
@@ -3965,6 +3987,144 @@ function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
     ...rest.slice(0, headCount),
     ...reservedSynthesis,
     ...rest.slice(headCount)
+  ]);
+}
+
+// invariant: structural-rescue planes. A candidate admitted on one of these
+// planes is structurally reachable; "activation" is the baseline local plane
+// and is NOT rescue-worthy. see also: recall-service-types.ts
+// RecallAdmissionPlane.
+const STRUCTURAL_RESCUE_PLANES: ReadonlySet<RecallAdmissionPlane> = new Set([
+  "graph_expansion",
+  "path_expansion",
+  "evidence_anchor"
+]);
+
+// invariant: the word-level FTS admission plane. A candidate that also admits
+// here competes in the multi-stream lexical lane and is ranked fairly by RRF;
+// it is NOT a single-stream structural gold, so it stays subject to the flat
+// delivery cut and is excluded from the structural reserve.
+const LEXICAL_ADMISSION_PLANE: RecallAdmissionPlane = "lexical";
+
+/**
+ * Delivery slots reserved for structurally-admitted candidates.
+ *
+ * A structural candidate (graph_expansion / path_expansion / evidence_anchor)
+ * with no lexical admission fires on a single fusion stream. RRF rewards
+ * multi-stream presence, so a structural row's fused score is capped near
+ * `weight/(k+1)` while a multi-stream lexical memory_entry accumulates well
+ * past it — single-stream structural golds never reach the delivery budget on
+ * fused rank alone. The reserve mirrors SYNTHESIS_DELIVERY_RESERVE: a bounded
+ * tail presence so the structural plane is reachable through recall. A
+ * candidate that also admits on the lexical plane is excluded (see
+ * isStructuralRescueCandidate) — it competes fairly on fused rank.
+ */
+const STRUCTURAL_DELIVERY_RESERVE = 2;
+
+function isStructuralRescueCandidate(candidate: FusedRecallCandidateInput): boolean {
+  if (candidate.objectKind === "synthesis_capsule") {
+    return false;
+  }
+  const planes = candidate.admissionPlanes ?? [];
+  if (planes.includes(LEXICAL_ADMISSION_PLANE)) {
+    return false;
+  }
+  return planes.some((plane) => STRUCTURAL_RESCUE_PLANES.has(plane));
+}
+
+/**
+ * Reserve the tail of the delivery budget window for the strongest structural
+ * candidates that lost the flat top-N cut. Mirrors reserveSynthesisDeliverySlots:
+ * tail placement keeps high-rank head rows undisplaced; only the lowest
+ * in-budget rows yield their slot.
+ *
+ * Composition with the synthesis reserve: `reservedTailCount` is how many tail
+ * slots the synthesis reserve already consumed. Structural rows insert ABOVE
+ * that synthesis tail block, and the structural reserve caps itself so the
+ * COMBINED reserved count never exceeds `maxEntries - 1` — guaranteeing at
+ * least one pure-fusion head slot and that the two reserves never evict each
+ * other. Returns the input unchanged when no buried structural candidate is
+ * present (a structural row already inside the natural delivery window is not
+ * eligible), so already-delivered structural recall is a guaranteed no-op.
+ *
+ * The reserve is against the ENTRY-COUNT budget only; the downstream
+ * `appendCandidate` reduce still enforces `max_total_tokens`. Ranking is by the
+ * candidate's structuralScore (the consolidated structural signal carried at the
+ * cut point; falls back to supplementaryData.structuralScores), tie-broken by
+ * compareMemoryEntries exactly like the synthesis helper.
+ */
+function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInput>(
+  deliveryOrdered: readonly T[],
+  supplementaryData: RecallSupplementaryData,
+  maxEntries: number,
+  reservedTailCount: number
+): readonly T[] {
+  if (maxEntries <= 1) {
+    return deliveryOrdered;
+  }
+  const naturalWindowSize = Math.min(maxEntries, deliveryOrdered.length);
+  const inWindowKeys = new Set(
+    deliveryOrdered
+      .slice(0, naturalWindowSize)
+      .map((candidate) => buildRecallCandidateDedupeKey(candidate))
+  );
+  const buriedStructural = deliveryOrdered.filter(
+    (candidate) =>
+      isStructuralRescueCandidate(candidate) &&
+      !inWindowKeys.has(buildRecallCandidateDedupeKey(candidate))
+  );
+  if (buriedStructural.length === 0) {
+    return deliveryOrdered;
+  }
+  const reserveBudget = maxEntries - 1 - Math.max(0, reservedTailCount);
+  const reserveCount = Math.min(
+    STRUCTURAL_DELIVERY_RESERVE,
+    buriedStructural.length,
+    reserveBudget
+  );
+  if (reserveCount <= 0) {
+    return deliveryOrdered;
+  }
+  const structuralStrength = (candidate: T): number =>
+    clamp01(
+      candidate.structuralScore ??
+        supplementaryData.structuralScores[candidate.entry.object_id] ??
+        0
+    );
+  const reservedStructural = [...buriedStructural]
+    .sort((left, right) => {
+      const strengthDelta = structuralStrength(right) - structuralStrength(left);
+      return strengthDelta !== 0
+        ? strengthDelta
+        : compareMemoryEntries(left.entry, right.entry);
+    })
+    .slice(0, reserveCount);
+  const reservedKeys = new Set(
+    reservedStructural.map((candidate) => buildRecallCandidateDedupeKey(candidate))
+  );
+  // The synthesis reserve placed its rows at the tail of the natural window
+  // (positions [maxEntries - reservedTailCount, maxEntries)). Peel that block
+  // out so structural rows insert ABOVE it and the synthesis reserve's tail
+  // placement survives — the two reserves never displace each other.
+  const synthesisTailStart = Math.max(0, naturalWindowSize - Math.max(0, reservedTailCount));
+  const synthesisTailBlock = deliveryOrdered.slice(synthesisTailStart, naturalWindowSize);
+  const synthesisTailKeys = new Set(
+    synthesisTailBlock.map((candidate) => buildRecallCandidateDedupeKey(candidate))
+  );
+  const aboveBlock = deliveryOrdered.filter((candidate) => {
+    const key = buildRecallCandidateDedupeKey(candidate);
+    return !reservedKeys.has(key) && !synthesisTailKeys.has(key);
+  });
+  // Tail-place structural rows below the surviving head fusion rows and above
+  // the synthesis tail block, displacing the weakest in-budget fusion rows.
+  // headCount keeps >= 1 pure-fusion head slot because reserveCount is capped
+  // at maxEntries - 1 - reservedTailCount.
+  const headCount = Math.max(0, maxEntries - Math.max(0, reservedTailCount) - reserveCount);
+  return Object.freeze([
+    ...aboveBlock.slice(0, headCount),
+    ...reservedStructural,
+    ...synthesisTailBlock,
+    ...aboveBlock.slice(headCount)
   ]);
 }
 
