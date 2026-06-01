@@ -3158,7 +3158,6 @@ export class RecallService {
         supplementaryData,
         config.budgets.max_entries
       ),
-      supplementaryData,
       config.budgets.max_entries,
       synthesisReserveCount(prioritizedCandidates, config.budgets.max_entries)
     );
@@ -3990,34 +3989,96 @@ function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
   ]);
 }
 
-// invariant: structural-rescue planes. A candidate admitted on one of these
-// planes is structurally reachable; "activation" is the baseline local plane
-// and is NOT rescue-worthy. see also: recall-service-types.ts
-// RecallAdmissionPlane.
-const STRUCTURAL_RESCUE_PLANES: ReadonlySet<RecallAdmissionPlane> = new Set([
+// invariant: structural (topology) FUSION STREAMS — the pure graph/path
+// topology subset of RECALL_FUSION_STREAMS whose RRF burial is the root cause
+// the reserve repairs (RC-1 §B/§C). These are the weight-3 single-fire streams
+// that represent genuine graph/path REACH: a candidate fires here only when it
+// is reachable by graph expansion or path expansion from a query anchor.
+//
+// The generic "structural" stream is DELIBERATELY excluded: structuralScores is
+// set at admission for ANY structural-ish plane including evidence_anchor (see
+// the admission addCandidate path), so a candidate admitted only on
+// evidence_anchor (no graph/path reach) still carries a "structural" stream
+// term. Counting it would make such an evidence-anchor-only filler read as
+// structurally reachable. Restricting the numerator to graph_expansion /
+// path_expansion means structuralFusionContribution is > 0 ONLY for candidates
+// with real graph/path reach — an evidence-anchor / lexical filler scores 0 here
+// and fails the eligibility guard, so it stays subject to the flat cut.
+// evidence_structural_agreement (geometric mean evidence_fts x structural) and
+// entity_seed (query-time entity-FTS surface signal) are likewise NOT topology.
+const STRUCTURAL_FUSION_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
   "graph_expansion",
-  "path_expansion",
-  "evidence_anchor"
+  "path_expansion"
 ]);
 
-// invariant: the word-level FTS admission plane. A candidate that also admits
-// here competes in the multi-stream lexical lane and is ranked fairly by RRF;
-// it is NOT a single-stream structural gold, so it stays subject to the flat
-// delivery cut and is excluded from the structural reserve.
-const LEXICAL_ADMISSION_PLANE: RecallAdmissionPlane = "lexical";
+// invariant: lexical-lane FUSION STREAMS — the content/surface/evidence-FTS
+// streams whose multi-stream RRF co-occurrence is what buries a single
+// structural term (RC-1 §C). A candidate whose fused score is dominated by
+// these competes fairly in the lexical lane and stays subject to the flat cut.
+// structural, existing_score, temporal_recency, and workspace_activation are
+// EXCLUDED from both sides as neutral: "structural" is the generic
+// structuralScore carried by several admission planes (so it is neither pure
+// topology nor lexical); existing_score is the baseline effectiveScore carried
+// by every admitted candidate (weight 8, see RECALL_FUSION_DEFAULT_WEIGHTS) so
+// it would swamp the topology term for genuine structural golds too;
+// temporal_recency and workspace_activation carry weight 0. Excluding the
+// neutral lanes makes the dominance test "graph/path topology streams vs
+// lexical-lane streams", which is exactly the filler-vs-gold discriminator.
+const LEXICAL_LANE_FUSION_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
+  "lexical_fts",
+  "trigram_fts",
+  "synthesis_fts",
+  "evidence_fts",
+  "evidence_structural_agreement",
+  "source_proximity",
+  "source_evidence_agreement",
+  "subject_alignment",
+  "embedding_similarity",
+  "entity_seed"
+]);
+
+// Sum of the candidate's structural-topology fusion-stream contributions to its
+// fused score. The contribution map is the per-stream RRF term weight/(k+rank)
+// frozen at fusion-build time and preserved across sign-aware suppression (see
+// applyPathSuppressionToFusionScores), so this is the query-relevance-weighted
+// structural signal, NOT raw connectivity. see also: buildRecallFusionDetails.
+function structuralFusionContribution(candidate: FusedRecallCandidateInput): number {
+  const contributions = candidate.fusion.fused_rank_contribution_per_stream;
+  let total = 0;
+  for (const stream of STRUCTURAL_FUSION_STREAMS) {
+    total += contributions[stream];
+  }
+  return total;
+}
+
+// Sum of the candidate's lexical-lane fusion-stream contributions.
+function lexicalLaneFusionContribution(candidate: FusedRecallCandidateInput): number {
+  const contributions = candidate.fusion.fused_rank_contribution_per_stream;
+  let total = 0;
+  for (const stream of LEXICAL_LANE_FUSION_STREAMS) {
+    total += contributions[stream];
+  }
+  return total;
+}
 
 /**
- * Delivery slots reserved for structurally-admitted candidates.
+ * Delivery slots reserved for structural-stream-dominated candidates.
  *
- * A structural candidate (graph_expansion / path_expansion / evidence_anchor)
- * with no lexical admission fires on a single fusion stream. RRF rewards
- * multi-stream presence, so a structural row's fused score is capped near
- * `weight/(k+1)` while a multi-stream lexical memory_entry accumulates well
- * past it — single-stream structural golds never reach the delivery budget on
- * fused rank alone. The reserve mirrors SYNTHESIS_DELIVERY_RESERVE: a bounded
- * tail presence so the structural plane is reachable through recall. A
- * candidate that also admits on the lexical plane is excluded (see
- * isStructuralRescueCandidate) — it competes fairly on fused rank.
+ * A candidate whose fused score comes mostly from structural streams (graph /
+ * path topology) fires on streams RRF caps near `weight/(k+1)` while a
+ * multi-stream lexical memory_entry accumulates well past it — structural-
+ * dominated golds never reach the delivery budget on fused rank alone (RC-1
+ * §B/§C). The reserve mirrors SYNTHESIS_DELIVERY_RESERVE: a bounded tail
+ * presence so the structural plane is reachable through recall.
+ *
+ * Eligibility gates on STREAM DOMINANCE (isStructuralRescueCandidate), not on an
+ * admission-plane tag: streams are content/topology-keyed, not admission-gated
+ * (RC-1 §A/§B), so a genuine structural gold can be co-admitted on the lexical
+ * plane with a tiny lexical_fts contribution that does NOT lift its fused rank.
+ * Dominance rescues that gold while still excluding a lexical-dominated filler
+ * that merely carries a structural co-admission — the filler's fused score is
+ * dominated by its lexical/evidence-FTS streams, so it competes fairly on the
+ * flat cut.
  */
 const STRUCTURAL_DELIVERY_RESERVE = 2;
 
@@ -4025,11 +4086,11 @@ function isStructuralRescueCandidate(candidate: FusedRecallCandidateInput): bool
   if (candidate.objectKind === "synthesis_capsule") {
     return false;
   }
-  const planes = candidate.admissionPlanes ?? [];
-  if (planes.includes(LEXICAL_ADMISSION_PLANE)) {
+  const structural = structuralFusionContribution(candidate);
+  if (structural <= 0) {
     return false;
   }
-  return planes.some((plane) => STRUCTURAL_RESCUE_PLANES.has(plane));
+  return structural > lexicalLaneFusionContribution(candidate);
 }
 
 /**
@@ -4049,13 +4110,15 @@ function isStructuralRescueCandidate(candidate: FusedRecallCandidateInput): bool
  *
  * The reserve is against the ENTRY-COUNT budget only; the downstream
  * `appendCandidate` reduce still enforces `max_total_tokens`. Ranking is by the
- * candidate's structuralScore (the consolidated structural signal carried at the
- * cut point; falls back to supplementaryData.structuralScores), tie-broken by
- * compareMemoryEntries exactly like the synthesis helper.
+ * candidate's structural fusion-stream contribution
+ * (structuralFusionContribution: the query-relevance-weighted RRF signal from
+ * the topology streams), tie-broken by compareMemoryEntries exactly like the
+ * synthesis helper. This ranks by structural RELEVANCE, not raw connectivity,
+ * so a well-connected but query-irrelevant distractor cannot steal a reserved
+ * slot from a genuine gold.
  */
 function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInput>(
   deliveryOrdered: readonly T[],
-  supplementaryData: RecallSupplementaryData,
   maxEntries: number,
   reservedTailCount: number
 ): readonly T[] {
@@ -4085,15 +4148,10 @@ function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInput>(
   if (reserveCount <= 0) {
     return deliveryOrdered;
   }
-  const structuralStrength = (candidate: T): number =>
-    clamp01(
-      candidate.structuralScore ??
-        supplementaryData.structuralScores[candidate.entry.object_id] ??
-        0
-    );
   const reservedStructural = [...buriedStructural]
     .sort((left, right) => {
-      const strengthDelta = structuralStrength(right) - structuralStrength(left);
+      const strengthDelta =
+        structuralFusionContribution(right) - structuralFusionContribution(left);
       return strengthDelta !== 0
         ? strengthDelta
         : compareMemoryEntries(left.entry, right.entry);
