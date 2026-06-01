@@ -15,6 +15,7 @@ describe("daemon lifecycle controls", () => {
       stop: vi.fn(async () => "drained" as const)
     };
     const runBackgroundPass = vi.fn(async () => undefined);
+    const runEmbeddingBackfillPass = vi.fn(async () => undefined);
     const controls = createDaemonLifecycleControls({
       app: {
         fetch: vi.fn()
@@ -27,7 +28,8 @@ describe("daemon lifecycle controls", () => {
       gardenRuntime: {
         backgroundManager,
         setBacklogTelemetryObserver: vi.fn(),
-        runBackgroundPass
+        runBackgroundPass,
+        runEmbeddingBackfillPass
       },
       securityStatusService: {
         close: vi.fn()

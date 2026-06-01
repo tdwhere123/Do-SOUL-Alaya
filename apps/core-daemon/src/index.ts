@@ -1579,6 +1579,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     }),
     startBackgroundServices: lifecycleControls.startBackgroundServices,
     runGardenBackgroundPass: lifecycleControls.runGardenBackgroundPass,
+    runGardenEmbeddingBackfillPass: lifecycleControls.runGardenEmbeddingBackfillPass,
     startHttpServer: lifecycleControls.startHttpServer,
     shutdown: lifecycleControls.shutdown
   });

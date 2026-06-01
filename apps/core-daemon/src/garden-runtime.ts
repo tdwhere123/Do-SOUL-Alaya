@@ -114,6 +114,12 @@ const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 // starve the other scheduler work that shares this pass; beyond the cap the
 // bound degrades to O(workspaces / cap) * scheduler interval.
 const BULK_ENRICH_DRAIN_CAP_PER_PASS = 32;
+// invariant: per targeted embedding-backfill drain (runEmbeddingBackfillPass),
+// dispatch at most this many EMBEDDING_BACKFILL tasks. One drain enqueues one
+// task whose O(n) handle() embeds the whole workspace hot corpus, so a single
+// dispatch is the normal case; the cap bounds termination if a task fails and
+// is re-queued, so a stuck embedding cannot spin the warmup forever.
+const EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS = 8;
 // invariant: per ~60s pass, re-drive at most this many accept->mint crash-window
 // orphans per workspace so a backlog of stranded accepts drains without starving
 // the other reclaim work that shares this pass. Beyond the cap the bound degrades
@@ -427,6 +433,7 @@ export function createGardenRuntime(input: {
   getStatus(): GardenRuntimeStatus;
   runEventLogOrphanDetection(): Promise<void>;
   runBackgroundPass(): Promise<void>;
+  runEmbeddingBackfillPass(workspaceId: string): Promise<void>;
   setBacklogTelemetryObserver(observer: GardenBacklogTelemetryObserver | null): void;
 }> {
   const pathPlasticityWatermark: PathPlasticityWatermarkRegistry =
@@ -1789,6 +1796,54 @@ export function createGardenRuntime(input: {
         }
 
         await auditor.run(task);
+      }
+    },
+    // invariant: targeted embedding-backfill drain for a single workspace,
+    // bypassing the full Garden background pass. Enqueues and dispatches ONLY
+    // GardenTaskKind.EMBEDDING_BACKFILL — never BULK_ENRICH, MERGE_PROPOSAL,
+    // PATH_PLASTICITY_UPDATE, PATH_GRAPH_SNAPSHOT, CONSOLIDATION_CYCLE,
+    // post-turn extract, Janitor, or Auditor work. Does NOT call
+    // markBackgroundPassCompleted(): this is a recall-readiness drain, not a
+    // Garden maintenance cadence tick, so it must not advance last_pass_at.
+    // Reuses runEmbeddingBackfillTask; its O(n) handle() drains the whole
+    // workspace hot corpus in one call. The dispatch loop is bounded so a
+    // stuck/failing task cannot spin forever.
+    // see also: enqueueEmbeddingBackfillForAllWorkspaces, runEmbeddingBackfillTask.
+    runEmbeddingBackfillPass: async (workspaceId: string) => {
+      if (input.embeddingBackfillHandler === undefined) {
+        return;
+      }
+
+      if (!pendingEmbeddingBackfillWorkspaces.has(workspaceId)) {
+        pendingEmbeddingBackfillWorkspaces.add(workspaceId);
+        gardenScheduler.enqueue({
+          task_id: randomUUID(),
+          task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
+          required_tier: GardenTier.TIER_2,
+          workspace_id: workspaceId,
+          run_id: null,
+          target_object_refs: [workspaceId],
+          priority: 10,
+          created_at: new Date().toISOString()
+        });
+        requestBacklogTelemetryCapture(`enqueue:${GardenTaskKind.EMBEDDING_BACKFILL}`);
+      }
+
+      for (
+        let drained = 0;
+        drained < EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS;
+        drained += 1
+      ) {
+        const task = await runtimeGardenScheduler.dispatchNextMatchingTaskKind(
+          GardenRole.LIBRARIAN,
+          [GardenTaskKind.EMBEDDING_BACKFILL]
+        );
+        requestBacklogTelemetryCapture("warmup:embedding_backfill");
+        if (task === null) {
+          break;
+        }
+
+        await runEmbeddingBackfillTask(task);
       }
     },
     runBackgroundPass: async () => {

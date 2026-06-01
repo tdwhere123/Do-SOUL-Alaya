@@ -38,6 +38,12 @@ export interface AlayaDaemonRuntime {
   readonly services: AlayaDaemonRuntimeServices;
   startBackgroundServices(): void;
   runGardenBackgroundPass(): Promise<void>;
+  // invariant: targeted embedding-backfill drain for recall readiness; runs
+  // ONLY EMBEDDING_BACKFILL, not the full fire-and-forget Garden background
+  // pass. The bench embedding warmup uses this to reach embedding readiness
+  // without dragging BULK_ENRICH / path-snapshot / consolidation into a
+  // pre-recall gate. see also: daemon-runtime-lifecycle.ts, garden-runtime.ts.
+  runGardenEmbeddingBackfillPass(workspaceId: string): Promise<void>;
   startHttpServer(options?: AlayaDaemonListenOptions): Promise<AlayaDaemonServer>;
   shutdown(): Promise<void>;
 }

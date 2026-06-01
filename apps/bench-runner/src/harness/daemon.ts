@@ -280,14 +280,15 @@ export interface DrainEmbeddingWarmupPassesResult {
   readonly lastPassError: string | null;
 }
 
-// invariant: each runPass() (runGardenBackgroundPass) dispatches at most one
-// Librarian task (single-slot fairness), so warmup advances only when the slot
-// lands on EMBEDDING_BACKFILL. Drains by progress — a pass that raises
-// ready_count resets the stall budget so multi-batch drains continue, a pass
-// that does not (slot taken by a competing Librarian kind, or stuck) spends one
-// stall unit. Exits when ready_count === expected_count, or the stall budget /
-// maxPasses ceiling is hit; both guarantee termination on a stuck embedding.
-// see also: apps/core-daemon/src/garden-runtime.ts LIBRARIAN_RUNTIME_TASK_KINDS
+// invariant: drains by progress against an injected runPass(). For embedding
+// warmup, runPass() is runGardenEmbeddingBackfillPass — a targeted
+// EMBEDDING_BACKFILL-only drain whose O(n) handler embeds the whole workspace
+// hot corpus in one productive pass (no single-Librarian-slot competition with
+// other Garden kinds). A pass that raises ready_count resets the stall budget;
+// a pass that does not (a stuck or failing embedding) spends one stall unit.
+// Exits when ready_count === expected_count, or the stall budget / maxPasses
+// ceiling is hit; both guarantee termination on a stuck embedding.
+// see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
 export async function drainEmbeddingWarmupPasses(
   input: DrainEmbeddingWarmupPassesInput
 ): Promise<DrainEmbeddingWarmupPassesResult> {
@@ -1002,7 +1003,15 @@ export async function startBenchDaemon(
     const drain = await drainEmbeddingWarmupPasses({
       maxPasses,
       maxStallPasses: EMBEDDING_WARMUP_MAX_STALL_PASSES,
-      runPass: () => activeRuntime.runGardenBackgroundPass(),
+      // invariant: embedding readiness drains ONLY EMBEDDING_BACKFILL, not the
+      // full Garden background pass. runGardenBackgroundPass would also drain
+      // BULK_ENRICH conflict-detection/edge-production, path snapshot, merge
+      // proposal, consolidation, etc. — CPU-heavy maintenance that embedding
+      // OFF never runs, so coupling it to warmup both slowed ON ~15x and broke
+      // OFF/ON corpus comparability. The targeted drain reaches the same
+      // all-ready state via the O(n) backfill handler.
+      // see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
+      runPass: () => activeRuntime.runGardenEmbeddingBackfillPass(activeContext.workspaceId),
       readSummary
     });
     const summary = drain.summary;

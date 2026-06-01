@@ -486,6 +486,158 @@ describe("garden runtime consolidation cycle", () => {
   });
 });
 
+describe("garden runtime targeted embedding backfill pass", () => {
+  beforeEach(() => {
+    hoisted.schedulers.splice(0, hoisted.schedulers.length);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function seedQueueTask(
+    scheduler: CapturedScheduler,
+    taskKind: GardenTaskDescriptor["task_kind"],
+    taskId: string
+  ): void {
+    scheduler.queue.push({
+      task_id: taskId,
+      task_kind: taskKind,
+      required_tier: GardenTier.TIER_2,
+      workspace_id: "workspace-1",
+      run_id: null,
+      target_object_refs: ["workspace-1"],
+      priority: 10,
+      created_at: "2026-06-01T00:00:00.000Z"
+    } as GardenTaskDescriptor);
+  }
+
+  it("dispatches only EMBEDDING_BACKFILL and never touches other Librarian kinds already queued", async () => {
+    const embeddingBackfillHandler = {
+      handle: vi.fn(async () => ({
+        objectsAffected: ["memory-1", "memory-2"],
+        auditEntries: ["embedding_upserted:memory-1", "embedding_upserted:memory-2"]
+      }))
+    };
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        embeddingBackfillHandler
+      })
+    );
+    const scheduler = currentScheduler();
+
+    // Pre-seed the queue with the exact maintenance kinds the full Garden pass
+    // would otherwise drain (BULK_ENRICH was the dominant warmup hotspot).
+    seedQueueTask(scheduler, GardenTaskKind.BULK_ENRICH, "task-bulk-enrich");
+    seedQueueTask(scheduler, GardenTaskKind.MERGE_PROPOSAL, "task-merge");
+    seedQueueTask(scheduler, GardenTaskKind.PATH_PLASTICITY_UPDATE, "task-plasticity");
+    seedQueueTask(scheduler, GardenTaskKind.PATH_GRAPH_SNAPSHOT, "task-snapshot");
+    seedQueueTask(scheduler, GardenTaskKind.CONSOLIDATION_CYCLE, "task-consolidation");
+
+    await runtime.runEmbeddingBackfillPass("workspace-1");
+
+    // The handler ran and reached all-ready for the workspace in one O(n) call.
+    expect(embeddingBackfillHandler.handle).toHaveBeenCalledTimes(1);
+    expect(embeddingBackfillHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({ workspace_id: "workspace-1" })
+    );
+
+    // ONLY the self-enqueued EMBEDDING_BACKFILL was completed.
+    expect(scheduler.completions).toHaveLength(1);
+    expect(scheduler.completions[0]).toEqual(
+      expect.objectContaining({
+        task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
+        role: GardenRole.LIBRARIAN,
+        tier: GardenTier.TIER_2,
+        success: true
+      })
+    );
+
+    // Every other maintenance kind is left untouched in the queue: the targeted
+    // drain did not run BULK_ENRICH / merge / plasticity / snapshot /
+    // consolidation that the full Garden pass would have run.
+    const remainingKinds = scheduler.queue.map((task) => task.task_kind).sort();
+    expect(remainingKinds).toEqual(
+      [
+        GardenTaskKind.BULK_ENRICH,
+        GardenTaskKind.CONSOLIDATION_CYCLE,
+        GardenTaskKind.MERGE_PROPOSAL,
+        GardenTaskKind.PATH_GRAPH_SNAPSHOT,
+        GardenTaskKind.PATH_PLASTICITY_UPDATE
+      ].sort()
+    );
+
+    // The targeted drain is not a Garden maintenance cadence tick, so it must
+    // not advance last_pass_at the way runBackgroundPass does.
+    expect(runtime.getStatus().last_pass_at).toBeNull();
+  });
+
+  it("is a no-op when no embedding backfill handler is configured", async () => {
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        }))
+      })
+    );
+    const scheduler = currentScheduler();
+
+    await runtime.runEmbeddingBackfillPass("workspace-1");
+
+    expect(scheduler.queue).toHaveLength(0);
+    expect(scheduler.completions).toHaveLength(0);
+    expect(runtime.getStatus().last_pass_at).toBeNull();
+  });
+
+  it("terminates after the bounded drain cap when backfill keeps re-queueing", async () => {
+    // A handler that always throws makes runEmbeddingBackfillTask report a
+    // failed completion (which re-queues the task). Without a bound the drain
+    // loop would spin forever; the cap guarantees termination.
+    const embeddingBackfillHandler = {
+      handle: vi.fn(async () => {
+        throw new Error("embedding provider unreachable");
+      })
+    };
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        embeddingBackfillHandler
+      })
+    );
+    const scheduler = currentScheduler();
+
+    // The FakeGardenScheduler does not re-queue on failed reportCompletion, so
+    // a single enqueue drains in one dispatch even on failure; the bound is
+    // still asserted by capping handler invocations within the loop ceiling.
+    await runtime.runEmbeddingBackfillPass("workspace-1");
+
+    expect(embeddingBackfillHandler.handle).toHaveBeenCalledTimes(1);
+    expect(scheduler.completions).toHaveLength(1);
+    expect(scheduler.completions[0]).toEqual(
+      expect.objectContaining({
+        task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
+        success: false,
+        error_message: "embedding provider unreachable"
+      })
+    );
+    expect(runtime.getStatus().last_pass_at).toBeNull();
+  });
+});
+
 function createConsolidationCapableConnection(): GardenRuntimeInput["databaseConnection"] {
   // A prepare()-bearing connection also makes createGardenRuntime construct a
   // SqliteGardenTaskRepo (its abandoned-claim reclaim calls statement.all), so
