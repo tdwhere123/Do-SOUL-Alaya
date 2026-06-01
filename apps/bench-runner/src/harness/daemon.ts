@@ -689,12 +689,20 @@ export async function startBenchDaemon(
     // plus a startup pass), which peekPendings POST_TURN_EXTRACT tasks across all
     // workspaces and would fire mid-seed-loop — racing the bench's explicit
     // in-process compile-signal seed path. A benchmark needs deterministic
-    // Garden control: the bench drives
-    // every garden task explicitly, and runs an explicit garden background pass
-    // via runtime.runGardenBackgroundPass() (e.g. for embedding warmup) after the
-    // seed loop completes, when no bench-enqueued task is in flight.
-    // runGardenBackgroundPass() does not depend on startBackgroundServices() having
-    // run, so suppressing the autonomous interval keeps the explicit path intact.
+    // Garden control: the bench drives every garden task explicitly.
+    //
+    // Embedding readiness (ON-only) uses the TARGETED
+    // runtime.runGardenEmbeddingBackfillPass(workspaceId), NOT the full
+    // runGardenBackgroundPass(). The ~156k auto-edges are produced by the
+    // BULK_ENRICH worker (EdgeAutoProducer + ConflictDetectionService run there,
+    // OFF the materialization path — MaterializationRouter does not run them
+    // inline), which only the full background pass drains. embedding-OFF never
+    // runs any of that, so the targeted backfill keeps ON's seeded corpus
+    // identical to OFF (comparability) while skipping the CPU-heavy edge work.
+    // Neither pass depends on startBackgroundServices() having run, so
+    // suppressing the autonomous interval keeps the explicit path intact.
+    // see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass;
+    //   packages/soul/src/garden/materialization-router.ts (EdgeAutoProducer off-path)
 
     server = createAlayaMcpServer({
       memoryToolHandler: runtime.services.mcpMemoryToolHandler,

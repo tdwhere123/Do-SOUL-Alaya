@@ -233,7 +233,13 @@ export async function runLongMemEvalMultiturn(
       }
 
       if (opts.embeddingMode === "env") {
-        await daemon.runtime.runGardenBackgroundPass();
+        // Targeted embedding-backfill drain for this question's workspace, not
+        // the full Garden background pass: readiness needs only embeddings, and
+        // runGardenBackgroundPass would also run BULK_ENRICH edge-production /
+        // conflict-detection that embedding-OFF never runs, breaking ON/OFF
+        // comparability and slowing ON ~15x.
+        // see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
+        await daemon.runtime.runGardenEmbeddingBackfillPass(daemon.workspaceId);
       }
 
       const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);

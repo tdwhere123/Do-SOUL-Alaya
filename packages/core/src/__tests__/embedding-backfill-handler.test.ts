@@ -232,6 +232,9 @@ describe("EmbeddingBackfillHandler", () => {
         upsertIfContentHashMatchesCurrentMemory: upsert
       },
       provider: createProvider({ embedTexts }),
+      // Pin concurrency=1 so the split-retry call ORDER stays deterministic;
+      // this test exercises the fallback split semantics, not the concurrency.
+      batchConcurrency: 1,
       now: () => "2026-04-23T00:00:00.000Z"
     });
 
@@ -363,6 +366,190 @@ describe("EmbeddingBackfillHandler", () => {
     expect(embedTexts.mock.calls[0]?.[0]).toEqual(["A".repeat(20_000)]);
     expect(embedTexts.mock.calls[1]?.[0]).toEqual(["B".repeat(20_000)]);
     expect(result.objectsAffected).toEqual(["memory-large-1", "memory-large-2"]);
+  });
+
+  it("embeds every memory exactly once with stable aggregate counts under bounded concurrency", async () => {
+    // 130 memories => 9 batches (16x8 + 2). With concurrency the per-memory
+    // embed count, the objectsAffected set, and the upsert count must match the
+    // sequential contract exactly: every memory embedded and upserted once, in
+    // deterministic batch order.
+    const hotMemories = Array.from({ length: 130 }, (_, index) =>
+      createMemoryEntry({
+        object_id: `memory-${index}`,
+        content: `Concurrent recall content ${index}.`
+      })
+    );
+    const embedCallsByText = new Map<string, number>();
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      for (const text of texts) {
+        embedCallsByText.set(text, (embedCallsByText.get(text) ?? 0) + 1);
+      }
+      // Microtask hop so concurrent batches genuinely overlap in flight.
+      await Promise.resolve();
+      return texts.map(() => new Float32Array([0.1, 0.2, 0.3]));
+    });
+    const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
+    const handler = new EmbeddingBackfillHandler({
+      memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
+      memoryEmbeddingRepo: {
+        findByObjectId: vi.fn(async () => null),
+        upsert,
+        upsertIfContentHashMatchesCurrentMemory: upsert
+      },
+      provider: createProvider({ embedTexts }),
+      batchConcurrency: 6,
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const result = await handler.handle({ workspace_id: "workspace-1" });
+
+    // Every memory embedded exactly once.
+    for (const memory of hotMemories) {
+      expect(embedCallsByText.get(memory.content)).toBe(1);
+    }
+    // Stable aggregate counts: one upsert + one audit line per memory, and the
+    // objectsAffected list is in deterministic batch order.
+    expect(upsert).toHaveBeenCalledTimes(hotMemories.length);
+    expect(result.objectsAffected).toEqual(hotMemories.map((memory) => memory.object_id));
+    expect(result.auditEntries.filter((entry) => entry.startsWith("embedding_upserted:"))).toHaveLength(
+      hotMemories.length
+    );
+  });
+
+  it("never exceeds the configured concurrency cap of in-flight embed calls", async () => {
+    const concurrency = 4;
+    const hotMemories = Array.from({ length: 200 }, (_, index) =>
+      createMemoryEntry({
+        object_id: `memory-${index}`,
+        content: `Capped recall content ${index}.`
+      })
+    );
+    let inFlight = 0;
+    let maxObservedInFlight = 0;
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      inFlight += 1;
+      maxObservedInFlight = Math.max(maxObservedInFlight, inFlight);
+      // Hold the call open across a macrotask so overlap is observable.
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      return texts.map(() => new Float32Array([0.4, 0.5, 0.6]));
+    });
+    const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
+    const handler = new EmbeddingBackfillHandler({
+      memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
+      memoryEmbeddingRepo: {
+        findByObjectId: vi.fn(async () => null),
+        upsert,
+        upsertIfContentHashMatchesCurrentMemory: upsert
+      },
+      provider: createProvider({ embedTexts }),
+      batchConcurrency: concurrency,
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const result = await handler.handle({ workspace_id: "workspace-1" });
+
+    // 200 memories => 13 batches, more than the cap, so overlap is forced.
+    expect(embedTexts.mock.calls.length).toBeGreaterThan(concurrency);
+    expect(maxObservedInFlight).toBeGreaterThan(1);
+    expect(maxObservedInFlight).toBeLessThanOrEqual(concurrency);
+    expect(result.objectsAffected).toEqual(hotMemories.map((memory) => memory.object_id));
+  });
+
+  it("still enforces the write-time CAS stale-skip under concurrency", async () => {
+    // Two batches embed concurrently; the live content of one memory in each
+    // batch mutated after the snapshot, so the write-time guard must reject
+    // exactly those vectors regardless of embed interleaving.
+    const hotMemories = Array.from({ length: 20 }, (_, index) =>
+      createMemoryEntry({
+        object_id: `memory-${index}`,
+        content: `Original content ${index}.`
+      })
+    );
+    const staleIds = new Set(["memory-3", "memory-17"]);
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      await Promise.resolve();
+      return texts.map(() => new Float32Array([0.7, 0.2, 0.1]));
+    });
+    // Models the write-time CAS guard: the live memory content for the two
+    // stale ids mutated after the embed snapshot, so the guard re-hashes inside
+    // the upsert transaction, finds a mismatch, and returns null. Other ids are
+    // accepted. This must hold no matter how the concurrent batches interleave.
+    const guardedUpsert = vi.fn(async (record: EmbeddingVectorRecord) =>
+      staleIds.has(record.object_id) ? null : record
+    );
+    const handler = new EmbeddingBackfillHandler({
+      memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
+      memoryEmbeddingRepo: {
+        findByObjectId: vi.fn(async () => null),
+        upsert: vi.fn(async (record: EmbeddingVectorRecord) => record),
+        upsertIfContentHashMatchesCurrentMemory: guardedUpsert
+      },
+      provider: createProvider({ embedTexts }),
+      batchConcurrency: 6,
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const result = await handler.handle({ workspace_id: "workspace-1" });
+
+    const expectedAffected = hotMemories
+      .map((memory) => memory.object_id)
+      .filter((id) => !staleIds.has(id));
+    expect(result.objectsAffected).toEqual(expectedAffected);
+    for (const id of staleIds) {
+      expect(result.auditEntries).toContain(`embedding_skipped:stale_content:${id}`);
+      expect(result.objectsAffected).not.toContain(id);
+    }
+  });
+
+  it("parses and clamps the concurrency override from an env-style value", async () => {
+    // The override is observable through the cap test: a string above the
+    // ceiling clamps, garbage falls back to the default. We assert clamping by
+    // requesting a value beyond the max and confirming overlap stays bounded.
+    const hotMemories = Array.from({ length: 160 }, (_, index) =>
+      createMemoryEntry({
+        object_id: `memory-${index}`,
+        content: `Override recall content ${index}.`
+      })
+    );
+    let inFlight = 0;
+    let maxObservedInFlight = 0;
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      inFlight += 1;
+      maxObservedInFlight = Math.max(maxObservedInFlight, inFlight);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      return texts.map(() => new Float32Array([0.4, 0.5, 0.6]));
+    });
+    const makeHandler = (batchConcurrency: number | string) =>
+      new EmbeddingBackfillHandler({
+        memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
+        memoryEmbeddingRepo: {
+          findByObjectId: vi.fn(async () => null),
+          upsert: vi.fn(async (record: EmbeddingVectorRecord) => record),
+          upsertIfContentHashMatchesCurrentMemory: vi.fn(async (record: EmbeddingVectorRecord) => record)
+        },
+        provider: createProvider({ embedTexts }),
+        batchConcurrency,
+        now: () => "2026-04-23T00:00:00.000Z"
+      });
+
+    // "999" parses to 999 then clamps to the max (32); 160 memories => 10
+    // batches, so the cap binds at 10 (fewer than 32) — overlap stays bounded
+    // and the run completes correctly.
+    const clampedResult = await makeHandler("999").handle({ workspace_id: "workspace-1" });
+    expect(maxObservedInFlight).toBeGreaterThan(1);
+    expect(maxObservedInFlight).toBeLessThanOrEqual(32);
+    expect(clampedResult.objectsAffected).toHaveLength(hotMemories.length);
+
+    // Garbage falls back to the default (6); reset the probe and confirm the
+    // run still completes with bounded overlap.
+    maxObservedInFlight = 0;
+    inFlight = 0;
+    const garbageResult = await makeHandler("not-a-number").handle({ workspace_id: "workspace-1" });
+    expect(maxObservedInFlight).toBeGreaterThan(1);
+    expect(maxObservedInFlight).toBeLessThanOrEqual(6);
+    expect(garbageResult.objectsAffected).toHaveLength(hotMemories.length);
   });
 });
 

@@ -216,7 +216,15 @@ export async function runLongMemEvalCrossQuestion(
       }
 
       if (opts.embeddingMode === "env") {
-        await daemon.runtime.runGardenBackgroundPass();
+        // Targeted embedding-backfill drain for the shared cross-question
+        // workspace, not the full Garden background pass: readiness needs only
+        // embeddings, and runGardenBackgroundPass would also run BULK_ENRICH
+        // edge-production / conflict-detection that embedding-OFF never runs,
+        // breaking ON/OFF comparability and slowing ON ~15x. The backfill
+        // handler embeds the whole workspace hot corpus (every prior question's
+        // accumulated seeds), so the cross-question readiness intent holds.
+        // see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
+        await daemon.runtime.runGardenEmbeddingBackfillPass(daemon.workspaceId);
       }
 
       const answerSessionSet = new Set(question.answer_session_ids);

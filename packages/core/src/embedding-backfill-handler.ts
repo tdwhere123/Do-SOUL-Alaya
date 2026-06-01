@@ -30,6 +30,10 @@ export interface EmbeddingBackfillHandlerDependencies {
   readonly now?: () => string;
   readonly retryDelayMs?: number;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+  // Bounded concurrency for in-flight batch embedding calls. Accepts a number
+  // or a raw string (env-style); falsy/garbage falls back to the default.
+  // Overrides ALAYA_EMBEDDING_BACKFILL_CONCURRENCY when set.
+  readonly batchConcurrency?: number | string;
 }
 
 const BACKFILL_TIMEOUT_MS = 10_000;
@@ -37,17 +41,32 @@ const BACKFILL_BATCH_SIZE = 16;
 const BACKFILL_BATCH_MAX_INPUT_CHARS = 32_000;
 const BACKFILL_ITEM_RETRY_ATTEMPTS = 3;
 const BACKFILL_ITEM_RETRY_DELAY_MS = 1_000;
+// invariant: how many batch embedding calls may be in flight to the provider
+// at once. The per-question backfill issues ~47 batches; sequential await made
+// each question network-bound (~5.7 min, CPU idle at 20%). The concurrency is
+// on the NETWORK embedding calls only — the DB upserts run in a deterministic
+// sequential phase after the network phase (see handle()), so better-sqlite3's
+// synchronous transactions never interleave. 6 balances throughput against the
+// provider's per-minute rate limit (429); higher risks throttling, lower leaves
+// the network idle. Override via ALAYA_EMBEDDING_BACKFILL_CONCURRENCY.
+const BACKFILL_BATCH_CONCURRENCY_DEFAULT = 6;
+const BACKFILL_BATCH_CONCURRENCY_MAX = 32;
+const BACKFILL_BATCH_CONCURRENCY_ENV = "ALAYA_EMBEDDING_BACKFILL_CONCURRENCY";
 
 export class EmbeddingBackfillHandler {
   private readonly now: () => string;
   private readonly retryDelayMs: number;
   private readonly warn: (message: string, meta: Record<string, unknown>) => void;
+  private readonly batchConcurrency: number;
 
   public constructor(private readonly dependencies: EmbeddingBackfillHandlerDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.retryDelayMs =
       dependencies.retryDelayMs === undefined ? BACKFILL_ITEM_RETRY_DELAY_MS : Math.max(0, dependencies.retryDelayMs);
     this.warn = dependencies.warn ?? (() => undefined);
+    this.batchConcurrency = resolveBackfillBatchConcurrency(
+      dependencies.batchConcurrency ?? process.env[BACKFILL_BATCH_CONCURRENCY_ENV]
+    );
   }
 
   public async handle(task: Pick<GardenTaskDescriptor, "workspace_id">): Promise<EmbeddingBackfillHandleResult> {
@@ -125,73 +144,123 @@ export class EmbeddingBackfillHandler {
     );
 
     const batches = buildEmbeddingBackfillBatches(memoriesToEmbed);
-    for (const batch of batches) {
-      const embeddedBatch = await this.embedBatchWithFallback(task.workspace_id, batch, auditEntries);
-      if (embeddedBatch.length === 0) {
-        continue;
+
+    // Pipelined bounded-concurrency drain: keep up to `batchConcurrency` batch
+    // embedding calls in flight (the network-bound cost), but persist each
+    // batch IN ORDER as soon as it is ready. This bounds peak in-flight vector
+    // memory to ~`batchConcurrency` batches (a completed batch is consumed and
+    // released before the window slides forward) rather than buffering the
+    // whole corpus, and it keeps the all-ready postcondition: every batch is
+    // embedded and attempted exactly once.
+    //
+    // Each in-flight task owns a private auditFragments array so the recursive
+    // split/retry fallback never races the shared auditEntries; the fragments
+    // and embeddings are replayed deterministically in batch order during
+    // persistence. better-sqlite3 is synchronous, so each guardedUpsert
+    // transaction runs to completion on the event loop before the next begins —
+    // no two upserts interleave mid-transaction even though their embeddings
+    // were fetched concurrently — so aggregate counts and audit ordering are
+    // identical to the prior fully-sequential implementation.
+    // see also: packages/storage/src/repos/memory-embedding-repo.ts guardedUpsertTransaction
+    const concurrencyWindow = Math.max(1, Math.min(this.batchConcurrency, batches.length));
+    const inFlight: (Promise<ConcurrentBatchResult> | null)[] = [];
+    const startBatch = (batch: readonly EmbeddingBackfillCandidate[]): Promise<ConcurrentBatchResult> => {
+      const auditFragments: string[] = [];
+      return this.embedBatchWithFallback(task.workspace_id, batch, auditFragments).then((embedded) => ({
+        embedded,
+        auditFragments
+      }));
+    };
+
+    let nextToStart = 0;
+    for (; nextToStart < concurrencyWindow; nextToStart += 1) {
+      inFlight.push(startBatch(batches[nextToStart]!));
+    }
+
+    for (let head = 0; head < batches.length; head += 1) {
+      const ready = await inFlight[head]!;
+      // Release the resolved promise (and the vectors it holds) before sliding
+      // the window forward, so peak retained vector memory stays ~`concurrencyWindow`.
+      inFlight[head] = null;
+      if (nextToStart < batches.length) {
+        inFlight.push(startBatch(batches[nextToStart]!));
+        nextToStart += 1;
       }
-
-      for (const { entry, embedding } of embeddedBatch) {
-        const latestMemory = snapshotMemories.get(entry.memory.object_id);
-        const latestHash = latestMemory === undefined ? null : hashMemoryContent(latestMemory.content);
-
-        if (latestMemory === undefined || latestHash !== entry.contentHash) {
-          auditEntries.push(`embedding_skipped:stale_content:${entry.memory.object_id}`);
-          continue;
-        }
-
-        const vector = new Float32Array(embedding);
-        try {
-          const persisted =
-            this.dependencies.memoryEmbeddingRepo.upsertIfContentHashMatchesCurrentMemory ===
-            undefined
-              ? await this.dependencies.memoryEmbeddingRepo.upsert({
-                  object_id: latestMemory.object_id,
-                  workspace_id: latestMemory.workspace_id,
-                  content_hash: entry.contentHash,
-                  provider_kind: this.dependencies.provider.providerKind,
-                  model_id: this.dependencies.provider.modelId,
-                  schema_version: this.dependencies.provider.schemaVersion,
-                  dimensions: vector.length,
-                  embedding: vector,
-                  created_at: entry.existing?.created_at ?? this.now(),
-                  updated_at: this.now()
-                })
-              : await this.dependencies.memoryEmbeddingRepo.upsertIfContentHashMatchesCurrentMemory({
-                  object_id: latestMemory.object_id,
-                  workspace_id: latestMemory.workspace_id,
-                  content_hash: entry.contentHash,
-                  provider_kind: this.dependencies.provider.providerKind,
-                  model_id: this.dependencies.provider.modelId,
-                  schema_version: this.dependencies.provider.schemaVersion,
-                  dimensions: vector.length,
-                  embedding: vector,
-                  created_at: entry.existing?.created_at ?? this.now(),
-                  updated_at: this.now()
-                });
-
-          if (persisted === null) {
-            auditEntries.push(`embedding_skipped:stale_content:${entry.memory.object_id}`);
-            continue;
-          }
-
-          objectsAffected.push(latestMemory.object_id);
-          auditEntries.push(`embedding_upserted:${latestMemory.object_id}`);
-        } catch (error) {
-          this.warn("embedding backfill upsert failed", {
-            workspace_id: task.workspace_id,
-            object_id: latestMemory.object_id,
-            error: error instanceof Error ? error.message : String(error)
-          });
-          throw error;
-        }
-      }
+      await this.persistEmbeddedBatch(task.workspace_id, ready, snapshotMemories, objectsAffected, auditEntries);
     }
 
     return Object.freeze({
       objectsAffected: Object.freeze(objectsAffected),
       auditEntries: Object.freeze(auditEntries)
     });
+  }
+
+  // Deterministic, event-loop-serialized persistence for one already-embedded
+  // batch. Called strictly in batch order from handle(); appends the batch's
+  // private audit fragments first, then runs the CAS upserts. better-sqlite3 is
+  // synchronous so each guardedUpsert transaction completes before the next.
+  private async persistEmbeddedBatch(
+    workspaceId: string,
+    result: ConcurrentBatchResult,
+    snapshotMemories: ReadonlyMap<string, Readonly<MemoryEntry>>,
+    objectsAffected: string[],
+    auditEntries: string[]
+  ): Promise<void> {
+    auditEntries.push(...result.auditFragments);
+    for (const { entry, embedding } of result.embedded) {
+      const latestMemory = snapshotMemories.get(entry.memory.object_id);
+      const latestHash = latestMemory === undefined ? null : hashMemoryContent(latestMemory.content);
+
+      if (latestMemory === undefined || latestHash !== entry.contentHash) {
+        auditEntries.push(`embedding_skipped:stale_content:${entry.memory.object_id}`);
+        continue;
+      }
+
+      const vector = new Float32Array(embedding);
+      try {
+        const persisted =
+          this.dependencies.memoryEmbeddingRepo.upsertIfContentHashMatchesCurrentMemory === undefined
+            ? await this.dependencies.memoryEmbeddingRepo.upsert({
+                object_id: latestMemory.object_id,
+                workspace_id: latestMemory.workspace_id,
+                content_hash: entry.contentHash,
+                provider_kind: this.dependencies.provider.providerKind,
+                model_id: this.dependencies.provider.modelId,
+                schema_version: this.dependencies.provider.schemaVersion,
+                dimensions: vector.length,
+                embedding: vector,
+                created_at: entry.existing?.created_at ?? this.now(),
+                updated_at: this.now()
+              })
+            : await this.dependencies.memoryEmbeddingRepo.upsertIfContentHashMatchesCurrentMemory({
+                object_id: latestMemory.object_id,
+                workspace_id: latestMemory.workspace_id,
+                content_hash: entry.contentHash,
+                provider_kind: this.dependencies.provider.providerKind,
+                model_id: this.dependencies.provider.modelId,
+                schema_version: this.dependencies.provider.schemaVersion,
+                dimensions: vector.length,
+                embedding: vector,
+                created_at: entry.existing?.created_at ?? this.now(),
+                updated_at: this.now()
+              });
+
+        if (persisted === null) {
+          auditEntries.push(`embedding_skipped:stale_content:${entry.memory.object_id}`);
+          continue;
+        }
+
+        objectsAffected.push(latestMemory.object_id);
+        auditEntries.push(`embedding_upserted:${latestMemory.object_id}`);
+      } catch (error) {
+        this.warn("embedding backfill upsert failed", {
+          workspace_id: workspaceId,
+          object_id: latestMemory.object_id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        throw error;
+      }
+    }
   }
 
   private async embedBatchWithFallback(
@@ -301,6 +370,26 @@ type EmbeddedBackfillCandidate = Readonly<{
   readonly entry: EmbeddingBackfillCandidate;
   readonly embedding: Float32Array;
 }>;
+
+type ConcurrentBatchResult = Readonly<{
+  readonly embedded: readonly EmbeddedBackfillCandidate[];
+  readonly auditFragments: readonly string[];
+}>;
+
+// Resolve the in-flight batch concurrency from an explicit number, an env-style
+// string, or undefined. Garbage (non-integer, <1, NaN) falls back to the
+// default; values above the ceiling clamp to the max so a misconfigured env
+// cannot flood the provider with rate-limited (429) calls.
+function resolveBackfillBatchConcurrency(raw: number | string | undefined): number {
+  if (raw === undefined) {
+    return BACKFILL_BATCH_CONCURRENCY_DEFAULT;
+  }
+  const parsed = typeof raw === "number" ? raw : Number.parseInt(raw.trim(), 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return BACKFILL_BATCH_CONCURRENCY_DEFAULT;
+  }
+  return Math.min(parsed, BACKFILL_BATCH_CONCURRENCY_MAX);
+}
 
 function buildEmbeddingBackfillBatches(
   entries: readonly EmbeddingBackfillCandidate[]
