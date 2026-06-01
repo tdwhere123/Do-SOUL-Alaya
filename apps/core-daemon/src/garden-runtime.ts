@@ -1885,6 +1885,14 @@ export function createGardenRuntime(input: {
         lastTargetedReason = summarizeEmbeddingBackfillTargetedReason(outcome) ?? lastTargetedReason;
       }
 
+      // invariant: the await above opens a check-then-add TOCTOU window on
+      // pendingEmbeddingBackfillWorkspaces, but it is harmless — every caller
+      // runs these passes strictly sequentially per workspace (awaited per
+      // question), so two concurrent same-workspace passes never occur; and even
+      // if they did, a duplicate EMBEDDING_BACKFILL task is idempotent (the
+      // handler cache-hits every row via the content-hash CAS — no double-spend,
+      // no corruption). No lock machinery is warranted for a window that cannot
+      // occur. see also: packages/core/src/embedding-backfill-handler.ts
       if (dispatchedCount === 0 && !pendingEmbeddingBackfillWorkspaces.has(workspaceId)) {
         pendingEmbeddingBackfillWorkspaces.add(workspaceId);
         gardenScheduler.enqueue({
