@@ -1,8 +1,15 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { EmbeddingBackfillHandler } from "../embedding-backfill-handler.js";
 import type { EmbeddingVectorRecord } from "../embedding-recall-service.js";
 import type { TestMock } from "./mock-types.js";
+
+// Mirrors hashMemoryContent in ../embedding-backfill-handler.ts so the test can
+// model the write-time content-hash guard's live re-check.
+function hashContent(content: string): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
 
 describe("EmbeddingBackfillHandler", () => {
   it("upserts only missing or changed hot-memory embeddings and skips unchanged content hashes", async () => {
@@ -65,17 +72,68 @@ describe("EmbeddingBackfillHandler", () => {
     ]);
   });
 
-  it("skips stale writes when memory content changes before the embedding is persisted", async () => {
+  it("skips stale writes via the write-time content-hash guard when memory content changes before persistence", async () => {
+    // The atomic content-hash guard (upsertIfContentHashMatchesCurrentMemory)
+    // re-reads live memory content inside the upsert transaction and returns
+    // null when it no longer matches the embedded content_hash. This mirrors
+    // SqliteMemoryEmbeddingRepo.guardedUpsertTransaction: it is the sole
+    // stale-content guard, so the handler does not need to re-fetch the corpus
+    // per batch to enforce it.
     const embedTexts = vi.fn(async () => [new Float32Array([0.9, 0.1])]);
-    const findByWorkspaceId = vi
-      .fn(async () => [createMemoryEntry({ object_id: "memory-1", content: "Original content." })])
-      .mockResolvedValueOnce([
-        createMemoryEntry({ object_id: "memory-1", content: "Original content." })
-      ])
-      .mockResolvedValueOnce([
-        createMemoryEntry({ object_id: "memory-1", content: "Updated content." })
-      ]);
+    const findByWorkspaceId = vi.fn(async () => [
+      createMemoryEntry({ object_id: "memory-1", content: "Original content." })
+    ]);
+    // Live content mutated to "Updated content." after the embed snapshot was
+    // taken; the guard hashes the live content and rejects the stale vector.
+    const liveContentHash = hashContent("Updated content.");
+    const guardedUpsert = vi.fn(async (record: EmbeddingVectorRecord) =>
+      record.content_hash === liveContentHash ? record : null
+    );
+    const directUpsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
+    const handler = new EmbeddingBackfillHandler({
+      memoryRepo: {
+        findByWorkspaceId
+      },
+      memoryEmbeddingRepo: {
+        findByObjectId: vi.fn(async () => null),
+        upsert: directUpsert,
+        upsertIfContentHashMatchesCurrentMemory: guardedUpsert
+      },
+      provider: createProvider({ embedTexts }),
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const result = await handler.handle({
+      workspace_id: "workspace-1"
+    });
+
+    expect(embedTexts).toHaveBeenCalledWith(["Original content."], {
+      timeoutMs: 10_000
+    });
+    // The corpus is fetched exactly once (the initial snapshot); no per-batch
+    // re-fetch. The stale guarantee is enforced by the write-time guard below.
+    expect(findByWorkspaceId).toHaveBeenCalledTimes(1);
+    expect(guardedUpsert).toHaveBeenCalledTimes(1);
+    expect(directUpsert).not.toHaveBeenCalled();
+    expect(result.objectsAffected).toEqual([]);
+    expect(result.auditEntries).toEqual(["embedding_skipped:stale_content:memory-1"]);
+  });
+
+  it("fetches the hot corpus exactly once regardless of batch count", async () => {
+    // Two full batches (16 + 1) must not trigger a per-batch corpus re-fetch:
+    // the handler builds one snapshot and reuses it, keeping handle() O(n)
+    // rather than O(n^2) over the hot corpus.
+    const hotMemories = Array.from({ length: 17 }, (_, index) =>
+      createMemoryEntry({
+        object_id: `memory-${index}`,
+        content: `Semantic recall content ${index}.`
+      })
+    );
+    const findByWorkspaceId = vi.fn(async () => hotMemories);
     const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map(() => new Float32Array([0.4, 0.5, 0.6]))
+    );
     const handler = new EmbeddingBackfillHandler({
       memoryRepo: {
         findByWorkspaceId
@@ -93,12 +151,10 @@ describe("EmbeddingBackfillHandler", () => {
       workspace_id: "workspace-1"
     });
 
-    expect(embedTexts).toHaveBeenCalledWith(["Original content."], {
-      timeoutMs: 10_000
-    });
-    expect(upsert).not.toHaveBeenCalled();
-    expect(result.objectsAffected).toEqual([]);
-    expect(result.auditEntries).toEqual(["embedding_skipped:stale_content:memory-1"]);
+    // Two batches embedded (16 + 1) but the corpus is fetched exactly once.
+    expect(embedTexts).toHaveBeenCalledTimes(2);
+    expect(findByWorkspaceId).toHaveBeenCalledTimes(1);
+    expect(result.objectsAffected).toEqual(hotMemories.map((memory) => memory.object_id));
   });
 
   it("returns a deterministic skip when the embedding provider is unavailable", async () => {

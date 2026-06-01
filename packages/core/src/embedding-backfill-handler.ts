@@ -113,6 +113,17 @@ export class EmbeddingBackfillHandler {
     const objectsAffected: string[] = [];
     const auditEntries = [...unchangedAuditEntries];
 
+    // invariant: the single hot-corpus snapshot taken above is the embed input
+    // and the only in-handler stale reference. The atomic write-time guard
+    // (upsertIfContentHashMatchesCurrentMemory) re-reads live memory content
+    // inside the upsert transaction and refuses a vector whose content_hash no
+    // longer matches, so a per-batch re-fetch here would only duplicate that
+    // guard at O(n) hydration per batch (O(n^2) over the corpus).
+    // see also: packages/storage/src/repos/memory-embedding-repo.ts guardedUpsertTransaction
+    const snapshotMemories = new Map(
+      initialHotMemories.map((memory) => [memory.object_id, memory] as const)
+    );
+
     const batches = buildEmbeddingBackfillBatches(memoriesToEmbed);
     for (const batch of batches) {
       const embeddedBatch = await this.embedBatchWithFallback(task.workspace_id, batch, auditEntries);
@@ -120,14 +131,8 @@ export class EmbeddingBackfillHandler {
         continue;
       }
 
-      const latestHotMemories = new Map(
-        (
-          await this.dependencies.memoryRepo.findByWorkspaceId(task.workspace_id, StorageTier.HOT)
-        ).map((memory) => [memory.object_id, memory] as const)
-      );
-
       for (const { entry, embedding } of embeddedBatch) {
-        const latestMemory = latestHotMemories.get(entry.memory.object_id);
+        const latestMemory = snapshotMemories.get(entry.memory.object_id);
         const latestHash = latestMemory === undefined ? null : hashMemoryContent(latestMemory.content);
 
         if (latestMemory === undefined || latestHash !== entry.contentHash) {

@@ -268,6 +268,54 @@ export interface BenchEmbeddingWarmupSummary {
   readonly model_id: string | null;
 }
 
+export interface DrainEmbeddingWarmupPassesInput {
+  readonly maxPasses: number;
+  readonly maxStallPasses: number;
+  readonly runPass: () => Promise<void>;
+  readonly readSummary: (passCount: number) => Promise<BenchEmbeddingWarmupSummary>;
+}
+
+export interface DrainEmbeddingWarmupPassesResult {
+  readonly summary: BenchEmbeddingWarmupSummary;
+  readonly lastPassError: string | null;
+}
+
+// invariant: each runPass() (runGardenBackgroundPass) dispatches at most one
+// Librarian task (single-slot fairness), so warmup advances only when the slot
+// lands on EMBEDDING_BACKFILL. Drains by progress — a pass that raises
+// ready_count resets the stall budget so multi-batch drains continue, a pass
+// that does not (slot taken by a competing Librarian kind, or stuck) spends one
+// stall unit. Exits when ready_count === expected_count, or the stall budget /
+// maxPasses ceiling is hit; both guarantee termination on a stuck embedding.
+// see also: apps/core-daemon/src/garden-runtime.ts LIBRARIAN_RUNTIME_TASK_KINDS
+export async function drainEmbeddingWarmupPasses(
+  input: DrainEmbeddingWarmupPassesInput
+): Promise<DrainEmbeddingWarmupPassesResult> {
+  let passCount = 0;
+  let stallPasses = 0;
+  let lastPassError: string | null = null;
+  let summary = await input.readSummary(passCount);
+
+  while (
+    summary.ready_count < summary.expected_count &&
+    passCount < input.maxPasses &&
+    stallPasses < input.maxStallPasses
+  ) {
+    const readyBefore = summary.ready_count;
+    try {
+      await input.runPass();
+      lastPassError = null;
+    } catch (error) {
+      lastPassError = toErrorMessage(error);
+    }
+    passCount++;
+    summary = await input.readSummary(passCount);
+    stallPasses = summary.ready_count > readyBefore ? 0 : stallPasses + 1;
+  }
+
+  return { summary, lastPassError };
+}
+
 export interface BenchQueryEmbeddingWarmupSummary {
   readonly status: "not_requested" | "ready";
   readonly requested_count: number;
@@ -509,6 +557,12 @@ const DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL = "Xenova/paraphrase-multilingual-MiniL
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
 const BENCH_EMBEDDING_SCHEMA_VERSION = 1;
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 10;
+// invariant: bounds the no-progress passes warmup tolerates before giving up,
+// large enough to outlast the per-pass Librarian slot competition (the runtime
+// dispatches one Librarian task per pass) so EMBEDDING_BACKFILL eventually wins
+// the slot, small enough that a genuinely stuck embedding terminates.
+// see also: apps/core-daemon/src/garden-runtime.ts LIBRARIAN_RUNTIME_TASK_KINDS
+const EMBEDDING_WARMUP_MAX_STALL_PASSES = 10;
 let activeBenchDaemonCount = 0;
 
 export async function startBenchDaemon(
@@ -934,27 +988,8 @@ export async function startBenchDaemon(
       1,
       options.maxPasses ?? DEFAULT_EMBEDDING_WARMUP_PASSES
     );
-    let passCount = 0;
-    let lastPassError: string | null = null;
-    let summary = await readEmbeddingWarmupSummary({
-      dataDir,
-      workspaceId: activeContext.workspaceId,
-      objectIds: uniqueObjectIds,
-      providerKind: embeddingProviderKind,
-      modelId,
-      schemaVersion: BENCH_EMBEDDING_SCHEMA_VERSION,
-      passCount
-    });
-
-    while (summary.ready_count < summary.expected_count && passCount < maxPasses) {
-      try {
-        await activeRuntime.runGardenBackgroundPass();
-        lastPassError = null;
-      } catch (error) {
-        lastPassError = toErrorMessage(error);
-      }
-      passCount++;
-      summary = await readEmbeddingWarmupSummary({
+    const readSummary = (passCount: number): Promise<BenchEmbeddingWarmupSummary> =>
+      readEmbeddingWarmupSummary({
         dataDir,
         workspaceId: activeContext.workspaceId,
         objectIds: uniqueObjectIds,
@@ -963,7 +998,14 @@ export async function startBenchDaemon(
         schemaVersion: BENCH_EMBEDDING_SCHEMA_VERSION,
         passCount
       });
-    }
+
+    const drain = await drainEmbeddingWarmupPasses({
+      maxPasses,
+      maxStallPasses: EMBEDDING_WARMUP_MAX_STALL_PASSES,
+      runPass: () => activeRuntime.runGardenBackgroundPass(),
+      readSummary
+    });
+    const summary = drain.summary;
 
     if (summary.ready_count !== summary.expected_count) {
       const preview = summary.missing_object_ids.slice(0, 5).join(", ");
@@ -972,7 +1014,7 @@ export async function startBenchDaemon(
           `ready=${summary.ready_count} expected=${summary.expected_count} ` +
           `missing=${summary.missing_object_ids.length}` +
           (preview.length === 0 ? "" : ` first_missing=${preview}`) +
-          (lastPassError === null ? "" : ` last_error=${lastPassError}`)
+          (drain.lastPassError === null ? "" : ` last_error=${drain.lastPassError}`)
       );
     }
 
