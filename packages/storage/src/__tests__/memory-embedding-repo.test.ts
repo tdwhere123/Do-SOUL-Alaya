@@ -13,7 +13,10 @@ import { initDatabase } from "../db.js";
 import { SqliteMemoryEntryRepo } from "../repos/memory-entry-repo.js";
 import { SqliteRunRepo } from "../repos/run-repo.js";
 import { SqliteWorkspaceRepo } from "../repos/workspace-repo.js";
-import type { MemoryEmbeddingRecord } from "../repos/memory-embedding-repo.js";
+import type {
+  MemoryEmbeddingMetadata,
+  MemoryEmbeddingRecord
+} from "../repos/memory-embedding-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -224,6 +227,89 @@ describe("Memory embedding storage repo", () => {
     ).resolves.toBeNull();
     await expect(repo.findByObjectId(objectId)).resolves.toBeNull();
   });
+
+  it("returns metadata for requested object ids without the embedding vector", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "11111111-1111-4111-8111-111111111111",
+        workspace_id: workspaceId,
+        content_hash: "sha256:first",
+        embedding: new Float32Array([1, 0, 0])
+      })
+    );
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "22222222-2222-4222-8222-222222222222",
+        workspace_id: workspaceId,
+        content_hash: "sha256:second",
+        embedding: new Float32Array([0, 1, 0])
+      })
+    );
+
+    const metadata = await repo.findMetadataByObjectIds([
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333",
+      "11111111-1111-4111-8111-111111111111"
+    ]);
+
+    expect(metadata).toEqual([
+      expect.objectContaining({
+        object_id: "11111111-1111-4111-8111-111111111111",
+        content_hash: "sha256:first",
+        provider_kind: "openai",
+        model_id: "text-embedding-3-small",
+        schema_version: 1,
+        dimensions: 3
+      }),
+      expect.objectContaining({
+        object_id: "22222222-2222-4222-8222-222222222222",
+        content_hash: "sha256:second"
+      })
+    ]);
+    // The metadata projection never carries the embedding vector.
+    for (const record of metadata) {
+      expect(record).not.toHaveProperty("embedding");
+    }
+    expect(await repo.findMetadataByObjectIds([])).toEqual([]);
+  });
+
+  it("chunks large metadata lookups below SQLite's bind-parameter ceiling", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+    const existingIds = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222"
+    ];
+
+    for (const objectId of existingIds) {
+      await repo.upsert(
+        createEmbeddingRecord({
+          object_id: objectId,
+          workspace_id: workspaceId,
+          content_hash: `sha256:${objectId}`
+        })
+      );
+    }
+
+    const oversizedLookup = Array.from(
+      { length: 32_767 },
+      (_, index) => `missing-${String(index).padStart(5, "0")}`
+    );
+    oversizedLookup[17] = existingIds[1]!;
+    oversizedLookup[5_001] = existingIds[0]!;
+    oversizedLookup[20_000] = existingIds[1]!;
+    oversizedLookup[20_001] = existingIds[0]!;
+
+    const metadata = await repo.findMetadataByObjectIds(oversizedLookup);
+    const hydrated = await repo.listByObjectIds(workspaceId, oversizedLookup);
+
+    expect(metadata.map((record) => record.object_id)).toEqual([...existingIds].sort());
+    expect(hydrated.map((record) => record.object_id)).toEqual([...existingIds].sort());
+    for (const record of metadata) {
+      expect(record).not.toHaveProperty("embedding");
+    }
+  });
 });
 
 async function createRepoContext(): Promise<{
@@ -236,6 +322,9 @@ async function createRepoContext(): Promise<{
       record: MemoryEmbeddingRecord
     ): Promise<Readonly<MemoryEmbeddingRecord> | null>;
     findByObjectId(objectId: string): Promise<Readonly<MemoryEmbeddingRecord> | null>;
+    findMetadataByObjectIds(
+      objectIds: readonly string[]
+    ): Promise<readonly Readonly<MemoryEmbeddingMetadata>[]>;
     listByWorkspace(
       workspaceId: string,
       options?: {

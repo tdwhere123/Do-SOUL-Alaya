@@ -207,6 +207,7 @@ export {
 export {
   SqliteMemoryEmbeddingRepo,
   type MemoryEmbeddingRecord,
+  type MemoryEmbeddingMetadata,
   type MemoryEmbeddingRepo
 } from "./repos/memory-embedding-repo.js";
 export {
