@@ -889,6 +889,53 @@ describe("OpenAIEmbeddingClient", () => {
       expect.closeTo(0.6)
     ]);
   });
+
+  // invariant: embedTexts MUST settle (reject) when the transport never
+  // resolves AND the abort signal is ignored (the undici half-open stall). Only
+  // the wall-clock backstop guarantees this; without it the guard race below
+  // observes "HANG".
+  // see also: packages/core/src/embedding-recall-service.ts
+  //   raceFetchAgainstBackstop / EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS
+  it("rejects via the wall-clock backstop when the transport never settles and the abort is ignored", async () => {
+    // seam: never-resolving fetch that ignores the abort signal == half-open
+    // undici socket the AbortController cannot terminate.
+    let fetchCalls = 0;
+    const fetchImpl = vi.fn(async () => {
+      fetchCalls += 1;
+      return await new Promise<Response>(() => undefined);
+    }) as unknown as typeof fetch;
+    const client = new OpenAIEmbeddingClient({
+      apiKey: "sk-test-secret",
+      baseUrl: "https://embedding.example.test/v1",
+      fetchImpl,
+      maxAttempts: 1,
+      // invariant: 50ms abort + 20ms margin -> settles ~70ms, never the 10s budget.
+      transportBackstopMarginMs: 20
+    });
+
+    const embed = client.embedTexts(["smoke"], { timeoutMs: 50 });
+
+    const guard = new Promise<"HANG">((resolve) => {
+      const handle = setTimeout(() => resolve("HANG"), 1_000);
+      handle.unref?.();
+    });
+    const outcome = await Promise.race([
+      embed.then(
+        () => "RESOLVED" as const,
+        (error: unknown) => ({ rejected: error instanceof Error ? error.message : String(error) })
+      ),
+      guard
+    ]);
+
+    expect(outcome).not.toBe("HANG");
+    expect(outcome).not.toBe("RESOLVED");
+    expect(outcome).toMatchObject({
+      rejected: expect.stringContaining(
+        "Embedding request transport failed for host embedding.example.test."
+      )
+    });
+    expect(fetchCalls).toBe(1);
+  });
 });
 
 describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {

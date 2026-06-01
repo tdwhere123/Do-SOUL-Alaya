@@ -172,6 +172,18 @@ const DEFAULT_EMBEDDING_REQUEST_MAX_ATTEMPTS = 5;
 const MAX_EMBEDDING_REQUEST_ATTEMPTS = 5;
 const DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS = 250;
 const MAX_EMBEDDING_REQUEST_RETRY_DELAY_MS = 2_000;
+// invariant: the wall-clock transport backstop is a safety net that is STRICTLY
+// LATER than the request-level AbortController deadline (options.timeoutMs), so
+// the abort stays the primary mechanism that frees the socket. The backstop only
+// fires when undici does NOT honor the abort on a stalled/half-open connection
+// (the abort cannot reliably terminate every undici stall phase on Node 24), in
+// which case the fetch promise would otherwise never settle and hang the whole
+// embedding-backfill pipeline. The backstop rejection flows through the SAME
+// catch as a real fetch rejection, so it surfaces as the existing
+// "Embedding request transport failed for host ..." error and the caller's
+// retry/split + swallow path degrade to keyword recall instead of hanging.
+// see also: packages/core/src/embedding-backfill-handler.ts embedBatchWithFallback
+const EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS = 2_000;
 const QUERY_EMBEDDING_WARMUP_BATCH_SIZE = 16;
 // Hard cap on the workspace neighbor scan. The recall path drives this every
 // query; without a cap the cost grows linearly with HOT memory count. Tuned
@@ -205,6 +217,15 @@ function clampEmbeddingRequestRetryDelayMs(value: number | undefined): number {
     return DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS;
   }
   return Math.min(MAX_EMBEDDING_REQUEST_RETRY_DELAY_MS, Math.floor(value));
+}
+
+// invariant: margin floored at 1ms so the backstop is always strictly later
+// than the abort deadline; default is EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS.
+function clampEmbeddingTransportBackstopMarginMs(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS;
+  }
+  return Math.max(1, Math.floor(value));
 }
 
 const EMPTY_SUPPLEMENT_RESULT: EmbeddingRecallSupplementResult = Object.freeze({
@@ -1062,6 +1083,9 @@ export interface OpenAIEmbeddingClientOptions {
   readonly fetchImpl?: typeof fetch;
   readonly maxAttempts?: number;
   readonly retryDelayMs?: number;
+  // invariant: backstop margin (ms) over the abort deadline; see
+  // EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS for the constant and rationale.
+  readonly transportBackstopMarginMs?: number;
 }
 
 export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
@@ -1075,6 +1099,7 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
   private readonly fetchImpl: typeof fetch;
   private readonly maxAttempts: number;
   private readonly retryDelayMs: number;
+  private readonly transportBackstopMarginMs: number;
 
   public constructor(options: OpenAIEmbeddingClientOptions) {
     this.apiKey = options.apiKey;
@@ -1083,6 +1108,9 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.maxAttempts = clampEmbeddingRequestAttempts(options.maxAttempts);
     this.retryDelayMs = clampEmbeddingRequestRetryDelayMs(options.retryDelayMs);
+    this.transportBackstopMarginMs = clampEmbeddingTransportBackstopMarginMs(
+      options.transportBackstopMarginMs
+    );
     this.isAvailable = typeof this.apiKey === "string" && this.apiKey.length > 0;
   }
 
@@ -1105,7 +1133,11 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     timeoutHandle.unref?.();
 
     try {
-      const response = await this.fetchEmbeddingWithRetry(texts, abortController.signal);
+      const response = await this.fetchEmbeddingWithRetry(
+        texts,
+        abortController.signal,
+        options.timeoutMs
+      );
 
       if (!response.ok) {
         throw new Error(
@@ -1143,22 +1175,32 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
 
   private async fetchEmbeddingWithRetry(
     texts: readonly string[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    abortTimeoutMs: number
   ): Promise<Response> {
+    // invariant: backstopMs > abortTimeoutMs (see
+    // EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS); abort stays primary, backstop is
+    // strictly later.
+    const backstopMs =
+      (Number.isFinite(abortTimeoutMs) && abortTimeoutMs > 0 ? abortTimeoutMs : 0) +
+      this.transportBackstopMarginMs;
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       try {
-        const response = await this.fetchImpl(`${this.baseUrl}/embeddings`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${this.apiKey}`
-          },
-          body: JSON.stringify({
-            model: this.modelId,
-            input: texts
+        const response = await this.raceFetchAgainstBackstop(
+          this.fetchImpl(`${this.baseUrl}/embeddings`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${this.apiKey}`
+            },
+            body: JSON.stringify({
+              model: this.modelId,
+              input: texts
+            }),
+            signal
           }),
-          signal
-        });
+          backstopMs
+        );
         if (attempt < this.maxAttempts && isRetryableEmbeddingStatus(response.status)) {
           await sleepEmbeddingRetry(this.retryDelayMs * attempt, signal);
           continue;
@@ -1173,6 +1215,41 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     }
 
     throw new Error(`Embedding request retry loop exhausted for host ${formatEmbeddingHost(this.baseUrl)}.`);
+  }
+
+  // invariant: this race is the wall-clock backstop. It does NOT replace the
+  // AbortController (still the primary mechanism that aborts and frees the
+  // socket); it guarantees the awaited fetch settles even when undici never
+  // honors the abort on a stalled connection. The rejection is shaped so the
+  // caller's catch turns it into the existing "transport failed" surface.
+  // see also: EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS
+  private async raceFetchAgainstBackstop(
+    fetchPromise: Promise<Response>,
+    backstopMs: number
+  ): Promise<Response> {
+    let backstopHandle: ReturnType<typeof setTimeout> | null = null;
+    const backstop = new Promise<never>((_resolve, reject) => {
+      backstopHandle = setTimeout(() => {
+        reject(new EmbeddingTransportBackstopError(this.baseUrl, backstopMs));
+      }, backstopMs);
+      backstopHandle.unref?.();
+    });
+    try {
+      return await Promise.race([fetchPromise, backstop]);
+    } finally {
+      if (backstopHandle !== null) {
+        clearTimeout(backstopHandle);
+      }
+    }
+  }
+}
+
+class EmbeddingTransportBackstopError extends Error {
+  public constructor(baseUrl: string, backstopMs: number) {
+    super(
+      `Embedding request transport stalled past ${backstopMs}ms backstop for host ${formatEmbeddingHost(baseUrl)}.`
+    );
+    this.name = "EmbeddingTransportBackstopError";
   }
 }
 
