@@ -12,7 +12,11 @@ import {
   type PathGraphSnapshot,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { ConsolidationExecutor, ConsolidationPlanner } from "@do-soul/alaya-core";
+import {
+  ConsolidationExecutor,
+  ConsolidationPlanner,
+  EmbeddingBackfillPartialFailureError
+} from "@do-soul/alaya-core";
 import type { BackgroundServiceConfig } from "../background/bootstrap.js";
 
 const hoisted = vi.hoisted(() => {
@@ -56,13 +60,15 @@ const hoisted = vi.hoisted(() => {
 
     public async dispatchNextMatchingTaskKind(
       role: string,
-      taskKinds: readonly string[]
+      taskKinds: readonly string[],
+      workspaceId?: string
     ): Promise<GardenTaskDescriptor | null> {
       const roleTierValue = roleTier[role] ?? "tier_0";
       const taskIndex = this.queue.findIndex(
         (task) =>
           taskKinds.includes(task.task_kind) &&
-          tierOrder[task.required_tier] <= tierOrder[roleTierValue]
+          tierOrder[task.required_tier] <= tierOrder[roleTierValue] &&
+          (workspaceId === undefined || task.workspace_id === workspaceId)
       );
       if (taskIndex < 0) {
         return null;
@@ -498,15 +504,16 @@ describe("garden runtime targeted embedding backfill pass", () => {
   function seedQueueTask(
     scheduler: CapturedScheduler,
     taskKind: GardenTaskDescriptor["task_kind"],
-    taskId: string
+    taskId: string,
+    workspaceId = "workspace-1"
   ): void {
     scheduler.queue.push({
       task_id: taskId,
       task_kind: taskKind,
       required_tier: GardenTier.TIER_2,
-      workspace_id: "workspace-1",
+      workspace_id: workspaceId,
       run_id: null,
-      target_object_refs: ["workspace-1"],
+      target_object_refs: [workspaceId],
       priority: 10,
       created_at: "2026-06-01T00:00:00.000Z"
     } as GardenTaskDescriptor);
@@ -532,8 +539,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
     );
     const scheduler = currentScheduler();
 
-    // Pre-seed the queue with the exact maintenance kinds the full Garden pass
-    // would otherwise drain (BULK_ENRICH was the dominant warmup hotspot).
+    // The targeted pass must leave non-embedding maintenance kinds in the queue.
     seedQueueTask(scheduler, GardenTaskKind.BULK_ENRICH, "task-bulk-enrich");
     seedQueueTask(scheduler, GardenTaskKind.MERGE_PROPOSAL, "task-merge");
     seedQueueTask(scheduler, GardenTaskKind.PATH_PLASTICITY_UPDATE, "task-plasticity");
@@ -576,6 +582,175 @@ describe("garden runtime targeted embedding backfill pass", () => {
     // The targeted drain is not a Garden maintenance cadence tick, so it must
     // not advance last_pass_at the way runBackgroundPass does.
     expect(runtime.getStatus().last_pass_at).toBeNull();
+  });
+
+  it("drains only the requested workspace's EMBEDDING_BACKFILL and leaves another workspace's same-kind task queued", async () => {
+    // invariant: targeted embedding warmup is workspace-scoped even when another
+    // workspace already has pending same-kind work.
+    const embeddingBackfillHandler = {
+      handle: vi.fn(async (task: { workspace_id: string }) => ({
+        objectsAffected: [`memory-${task.workspace_id}`],
+        auditEntries: [`embedding_upserted:memory-${task.workspace_id}`]
+      }))
+    };
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        embeddingBackfillHandler
+      })
+    );
+    const scheduler = currentScheduler();
+
+    // Older pending EMBEDDING_BACKFILL for a different workspace (workspace-B).
+    seedQueueTask(scheduler, GardenTaskKind.EMBEDDING_BACKFILL, "task-backfill-B", "workspace-B");
+
+    await runtime.runEmbeddingBackfillPass("workspace-A");
+
+    // The handler ran exactly once, for the requested workspace only.
+    expect(embeddingBackfillHandler.handle).toHaveBeenCalledTimes(1);
+    expect(embeddingBackfillHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({ workspace_id: "workspace-A" })
+    );
+
+    // Only workspace-A's backfill was completed.
+    expect(scheduler.completions).toHaveLength(1);
+    expect(scheduler.completions[0]).toEqual(
+      expect.objectContaining({
+        task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
+        workspace_id: "workspace-A",
+        success: true
+      })
+    );
+
+    // The other workspace's same-kind task is untouched in the queue.
+    const remaining = scheduler.queue.filter(
+      (task) => task.task_kind === GardenTaskKind.EMBEDDING_BACKFILL
+    );
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.workspace_id).toBe("workspace-B");
+  });
+
+  it("drains an existing same-workspace EMBEDDING_BACKFILL without enqueueing a duplicate", async () => {
+    const embeddingBackfillHandler = {
+      handle: vi.fn(async (task: { workspace_id: string }) => ({
+        objectsAffected: [`memory-${task.workspace_id}`],
+        auditEntries: [`embedding_upserted:memory-${task.workspace_id}`]
+      }))
+    };
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        embeddingBackfillHandler
+      })
+    );
+    const scheduler = currentScheduler();
+    seedQueueTask(scheduler, GardenTaskKind.EMBEDDING_BACKFILL, "task-existing", "workspace-A");
+
+    await runtime.runEmbeddingBackfillPass("workspace-A");
+
+    expect(embeddingBackfillHandler.handle).toHaveBeenCalledTimes(1);
+    expect(embeddingBackfillHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({ task_id: "task-existing", workspace_id: "workspace-A" })
+    );
+    expect(scheduler.completions).toHaveLength(1);
+    expect(scheduler.completions[0]).toEqual(
+      expect.objectContaining({
+        task_id: "task-existing",
+        task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
+        workspace_id: "workspace-A",
+        success: true
+      })
+    );
+    expect(scheduler.queue.filter((task) => task.workspace_id === "workspace-A")).toEqual([]);
+  });
+
+  it("surfaces provider-unavailable audit reasons to targeted warmup callers", async () => {
+    const embeddingBackfillHandler = {
+      handle: vi.fn(async () => ({
+        objectsAffected: [],
+        auditEntries: ["embedding_backfill_skipped:provider_unavailable"]
+      }))
+    };
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        embeddingBackfillHandler
+      })
+    );
+    const scheduler = currentScheduler();
+
+    await expect(runtime.runEmbeddingBackfillPass("workspace-1")).rejects.toThrow(
+      "embedding_backfill_skipped:provider_unavailable"
+    );
+    expect(scheduler.completions).toHaveLength(1);
+    expect(scheduler.completions[0]).toEqual(
+      expect.objectContaining({
+        success: true,
+        audit_entries: ["embedding_backfill_skipped:provider_unavailable"]
+      })
+    );
+  });
+
+  it("includes partial durable side effects in failed EMBEDDING_BACKFILL completions", async () => {
+    const partialFailure = new EmbeddingBackfillPartialFailureError({
+      workspaceId: "workspace-1",
+      failedObjectId: "memory-failed",
+      message: "sqlite write failed",
+      objectsAffected: ["memory-ok"],
+      auditEntries: [
+        "embedding_upserted:memory-ok",
+        "embedding_failed:persistence:memory-failed:sqlite write failed"
+      ],
+      cause: new Error("sqlite write failed")
+    });
+    const embeddingBackfillHandler = {
+      handle: vi.fn(async () => {
+        throw partialFailure;
+      })
+    };
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        embeddingBackfillHandler
+      })
+    );
+    const scheduler = currentScheduler();
+
+    await expect(runtime.runEmbeddingBackfillPass("workspace-1")).rejects.toThrow("sqlite write failed");
+
+    expect(scheduler.completions).toHaveLength(1);
+    expect(scheduler.completions[0]).toEqual(
+      expect.objectContaining({
+        task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
+        success: false,
+        objects_affected: ["memory-ok"],
+        audit_entries: [
+          "embedding_upserted:memory-ok",
+          "embedding_failed:persistence:memory-failed:sqlite write failed"
+        ],
+        error_message: "embedding_backfill_failed:persistence:memory-failed:sqlite write failed"
+      })
+    );
   });
 
   it("is a no-op when no embedding backfill handler is configured", async () => {
@@ -623,7 +798,9 @@ describe("garden runtime targeted embedding backfill pass", () => {
     // The FakeGardenScheduler does not re-queue on failed reportCompletion, so
     // a single enqueue drains in one dispatch even on failure; the bound is
     // still asserted by capping handler invocations within the loop ceiling.
-    await runtime.runEmbeddingBackfillPass("workspace-1");
+    await expect(runtime.runEmbeddingBackfillPass("workspace-1")).rejects.toThrow(
+      "embedding provider unreachable"
+    );
 
     expect(embeddingBackfillHandler.handle).toHaveBeenCalledTimes(1);
     expect(scheduler.completions).toHaveLength(1);

@@ -10,8 +10,20 @@ export interface EmbeddingBackfillMemoryRepoPort {
   ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
+// Metadata-only view of an embedding row: every field the backfill cache-hit /
+// stale decision needs, but NOT the embedding vector. Derived from
+// EmbeddingVectorRecord so the field set never drifts; matches the storage
+// port's MemoryEmbeddingMetadata shape structurally.
+// see also: packages/storage/src/repos/memory-embedding-repo.ts MemoryEmbeddingMetadata
+export type EmbeddingBackfillMetadata = Omit<EmbeddingVectorRecord, "embedding">;
+
 export interface EmbeddingBackfillRepoPort {
-  findByObjectId(objectId: string): Promise<Readonly<EmbeddingVectorRecord> | null>;
+  // Batch metadata-only lookup (no vector hydration). The handler's cache-hit /
+  // stale decision reads only these fields, so this replaces n per-id
+  // findByObjectId calls and avoids deserializing the full embedding blob.
+  findMetadataByObjectIds(
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<EmbeddingBackfillMetadata>[]>;
   upsert(record: EmbeddingVectorRecord): Promise<Readonly<EmbeddingVectorRecord>>;
   upsertIfContentHashMatchesCurrentMemory?(
     record: EmbeddingVectorRecord
@@ -21,6 +33,40 @@ export interface EmbeddingBackfillRepoPort {
 export interface EmbeddingBackfillHandleResult {
   readonly objectsAffected: readonly string[];
   readonly auditEntries: readonly string[];
+}
+
+export interface EmbeddingBackfillPartialFailureInput {
+  readonly workspaceId: string;
+  readonly failedObjectId: string;
+  readonly message: string;
+  readonly objectsAffected: readonly string[];
+  readonly auditEntries: readonly string[];
+  readonly cause: unknown;
+}
+
+export class EmbeddingBackfillPartialFailureError extends Error {
+  public override readonly name = "EmbeddingBackfillPartialFailureError";
+  public override readonly cause: unknown;
+  public readonly workspaceId: string;
+  public readonly failedObjectId: string;
+  public readonly objectsAffected: readonly string[];
+  public readonly auditEntries: readonly string[];
+
+  public constructor(input: EmbeddingBackfillPartialFailureInput) {
+    super(`embedding_backfill_failed:persistence:${input.failedObjectId}:${input.message}`);
+    this.workspaceId = input.workspaceId;
+    this.failedObjectId = input.failedObjectId;
+    this.objectsAffected = Object.freeze([...input.objectsAffected]);
+    this.auditEntries = Object.freeze([...input.auditEntries]);
+    this.cause = input.cause;
+    Object.setPrototypeOf(this, EmbeddingBackfillPartialFailureError.prototype);
+  }
+}
+
+export function isEmbeddingBackfillPartialFailureError(
+  error: unknown
+): error is EmbeddingBackfillPartialFailureError {
+  return error instanceof EmbeddingBackfillPartialFailureError;
 }
 
 export interface EmbeddingBackfillHandlerDependencies {
@@ -44,9 +90,11 @@ const BACKFILL_ITEM_RETRY_DELAY_MS = 1_000;
 // invariant: how many batch embedding calls may be in flight to the provider
 // at once. The per-question backfill issues ~47 batches; sequential await made
 // each question network-bound (~5.7 min, CPU idle at 20%). The concurrency is
-// on the NETWORK embedding calls only — the DB upserts run in a deterministic
-// sequential phase after the network phase (see handle()), so better-sqlite3's
-// synchronous transactions never interleave. 6 balances throughput against the
+// on the NETWORK embedding calls only. Network calls may OVERLAP batch-ordered
+// persistence — the drain in handle() starts the next batch's embedding call
+// before persisting the ready head — but the DB upserts themselves are
+// batch-ordered and sequential (better-sqlite3 transactions are synchronous, so
+// no two upserts interleave mid-transaction). 6 balances throughput against the
 // provider's per-minute rate limit (429); higher risks throttling, lower leaves
 // the network idle. Override via ALAYA_EMBEDDING_BACKFILL_CONCURRENCY.
 const BACKFILL_BATCH_CONCURRENCY_DEFAULT = 6;
@@ -88,13 +136,14 @@ export class EmbeddingBackfillHandler {
       });
     }
 
-    const existingById = new Map(
-      await Promise.all(
-        initialHotMemories.map(async (memory) => [
-          memory.object_id,
-          await this.dependencies.memoryEmbeddingRepo.findByObjectId(memory.object_id)
-        ] as const)
-      )
+    // One batched metadata read for the whole hot corpus (no per-memory round
+    // trip, no vector hydration). The cache-hit / stale decision and created_at
+    // preservation below use only these metadata fields.
+    const existingMetadata = await this.dependencies.memoryEmbeddingRepo.findMetadataByObjectIds(
+      initialHotMemories.map((memory) => memory.object_id)
+    );
+    const existingById = new Map<string, Readonly<EmbeddingBackfillMetadata>>(
+      existingMetadata.map((record) => [record.object_id, record] as const)
     );
 
     const unchangedAuditEntries: string[] = [];
@@ -159,8 +208,8 @@ export class EmbeddingBackfillHandler {
     // persistence. better-sqlite3 is synchronous, so each guardedUpsert
     // transaction runs to completion on the event loop before the next begins —
     // no two upserts interleave mid-transaction even though their embeddings
-    // were fetched concurrently — so aggregate counts and audit ordering are
-    // identical to the prior fully-sequential implementation.
+    // were fetched concurrently — so aggregate counts and audit ordering stay
+    // deterministic.
     // see also: packages/storage/src/repos/memory-embedding-repo.ts guardedUpsertTransaction
     const concurrencyWindow = Math.max(1, Math.min(this.batchConcurrency, batches.length));
     const inFlight: (Promise<ConcurrentBatchResult> | null)[] = [];
@@ -186,7 +235,20 @@ export class EmbeddingBackfillHandler {
         inFlight.push(startBatch(batches[nextToStart]!));
         nextToStart += 1;
       }
-      await this.persistEmbeddedBatch(task.workspace_id, ready, snapshotMemories, objectsAffected, auditEntries);
+      try {
+        await this.persistEmbeddedBatch(task.workspace_id, ready, snapshotMemories, objectsAffected, auditEntries);
+      } catch (error) {
+        // invariant: a persistence failure aborts the drain, but the K-1 batch
+        // promises already in flight to the provider must not outlive the task
+        // lifecycle — otherwise a fast retry starts another K calls and the
+        // effective provider concurrency exceeds the cap across failure+retry.
+        // Settle (never reject) every started promise before re-throwing the
+        // ORIGINAL persistence error so the cap guarantee describes task
+        // lifecycle behavior. embedBatchWithFallback already catches provider
+        // errors, so allSettled here is bounded (<=K) and cannot itself throw.
+        await Promise.allSettled(inFlight.filter((entry) => entry !== null));
+        throw error;
+      }
     }
 
     return Object.freeze({
@@ -253,12 +315,21 @@ export class EmbeddingBackfillHandler {
         objectsAffected.push(latestMemory.object_id);
         auditEntries.push(`embedding_upserted:${latestMemory.object_id}`);
       } catch (error) {
+        const message = toErrorMessage(error);
+        auditEntries.push(`embedding_failed:persistence:${latestMemory.object_id}:${message}`);
         this.warn("embedding backfill upsert failed", {
           workspace_id: workspaceId,
           object_id: latestMemory.object_id,
-          error: error instanceof Error ? error.message : String(error)
+          error: message
         });
-        throw error;
+        throw new EmbeddingBackfillPartialFailureError({
+          workspaceId,
+          failedObjectId: latestMemory.object_id,
+          message,
+          objectsAffected,
+          auditEntries,
+          cause: error
+        });
       }
     }
   }
@@ -363,7 +434,7 @@ export class EmbeddingBackfillHandler {
 type EmbeddingBackfillCandidate = Readonly<{
   readonly memory: Readonly<MemoryEntry>;
   readonly contentHash: string;
-  readonly existing: Readonly<EmbeddingVectorRecord> | null;
+  readonly existing: Readonly<EmbeddingBackfillMetadata> | null;
 }>;
 
 type EmbeddedBackfillCandidate = Readonly<{
@@ -379,12 +450,24 @@ type ConcurrentBatchResult = Readonly<{
 // Resolve the in-flight batch concurrency from an explicit number, an env-style
 // string, or undefined. Garbage (non-integer, <1, NaN) falls back to the
 // default; values above the ceiling clamp to the max so a misconfigured env
-// cannot flood the provider with rate-limited (429) calls.
-function resolveBackfillBatchConcurrency(raw: number | string | undefined): number {
+// cannot flood the provider with rate-limited (429) calls. The string path
+// accepts ONLY a full positive-integer string after trimming — integer-prefix
+// garbage like "6abc", "6.7", or "1e3" falls back to the default rather than
+// silently resolving to a partial parse.
+export function resolveBackfillBatchConcurrency(raw: number | string | undefined): number {
   if (raw === undefined) {
     return BACKFILL_BATCH_CONCURRENCY_DEFAULT;
   }
-  const parsed = typeof raw === "number" ? raw : Number.parseInt(raw.trim(), 10);
+  let parsed: number;
+  if (typeof raw === "number") {
+    parsed = raw;
+  } else {
+    const trimmed = raw.trim();
+    if (!/^[1-9]\d*$/.test(trimmed)) {
+      return BACKFILL_BATCH_CONCURRENCY_DEFAULT;
+    }
+    parsed = Number(trimmed);
+  }
   if (!Number.isInteger(parsed) || parsed < 1) {
     return BACKFILL_BATCH_CONCURRENCY_DEFAULT;
   }

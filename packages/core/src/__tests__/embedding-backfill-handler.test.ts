@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, type MemoryEntry } from "@do-soul/alaya-protocol";
-import { EmbeddingBackfillHandler } from "../embedding-backfill-handler.js";
+import {
+  EmbeddingBackfillHandler,
+  isEmbeddingBackfillPartialFailureError,
+  resolveBackfillBatchConcurrency,
+  type EmbeddingBackfillMetadata
+} from "../embedding-backfill-handler.js";
 import type { EmbeddingVectorRecord } from "../embedding-recall-service.js";
 import type { TestMock } from "./mock-types.js";
 
@@ -23,14 +28,12 @@ describe("EmbeddingBackfillHandler", () => {
         content: "Freshly added semantic recall note."
       })
     ];
-    const findByObjectId = vi.fn(async (objectId: string) =>
-      objectId === "memory-unchanged"
-        ? createEmbeddingRecord({
-            object_id: "memory-unchanged",
-            content_hash: "sha256:dccd80818c25010161695fb93c87cc707543c2b90f307b4938f604fff0057bcf"
-          })
-        : null
-    );
+    const findMetadataByObjectIds = vi.fn(async () => [
+      createEmbeddingMetadata({
+        object_id: "memory-unchanged",
+        content_hash: "sha256:dccd80818c25010161695fb93c87cc707543c2b90f307b4938f604fff0057bcf"
+      })
+    ]);
     const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
     const embedTexts = vi.fn(async () => [new Float32Array([0.1, 0.2, 0.3])]);
     const handler = new EmbeddingBackfillHandler({
@@ -38,7 +41,7 @@ describe("EmbeddingBackfillHandler", () => {
         findByWorkspaceId: vi.fn(async () => hotMemories)
       },
       memoryEmbeddingRepo: {
-        findByObjectId,
+        findMetadataByObjectIds,
         upsert,
         upsertIfContentHashMatchesCurrentMemory: upsert
       },
@@ -95,7 +98,7 @@ describe("EmbeddingBackfillHandler", () => {
         findByWorkspaceId
       },
       memoryEmbeddingRepo: {
-        findByObjectId: vi.fn(async () => null),
+        findMetadataByObjectIds: vi.fn(async () => []),
         upsert: directUpsert,
         upsertIfContentHashMatchesCurrentMemory: guardedUpsert
       },
@@ -139,7 +142,7 @@ describe("EmbeddingBackfillHandler", () => {
         findByWorkspaceId
       },
       memoryEmbeddingRepo: {
-        findByObjectId: vi.fn(async () => null),
+        findMetadataByObjectIds: vi.fn(async () => []),
         upsert,
         upsertIfContentHashMatchesCurrentMemory: upsert
       },
@@ -165,7 +168,7 @@ describe("EmbeddingBackfillHandler", () => {
         ])
       },
       memoryEmbeddingRepo: {
-        findByObjectId: vi.fn(async () => null),
+        findMetadataByObjectIds: vi.fn(async () => []),
         upsert: vi.fn(async (record: EmbeddingVectorRecord) => record),
         upsertIfContentHashMatchesCurrentMemory: vi.fn(async (record: EmbeddingVectorRecord) => record)
       },
@@ -190,7 +193,7 @@ describe("EmbeddingBackfillHandler", () => {
         ])
       },
       memoryEmbeddingRepo: {
-        findByObjectId: vi.fn(async () => null),
+        findMetadataByObjectIds: vi.fn(async () => []),
         upsert: vi.fn(async (record: EmbeddingVectorRecord) => record),
         upsertIfContentHashMatchesCurrentMemory: guardedUpsert
       },
@@ -227,7 +230,7 @@ describe("EmbeddingBackfillHandler", () => {
         findByWorkspaceId: vi.fn(async () => hotMemories)
       },
       memoryEmbeddingRepo: {
-        findByObjectId: vi.fn(async () => null),
+        findMetadataByObjectIds: vi.fn(async () => []),
         upsert,
         upsertIfContentHashMatchesCurrentMemory: upsert
       },
@@ -270,7 +273,7 @@ describe("EmbeddingBackfillHandler", () => {
         findByWorkspaceId: vi.fn(async () => hotMemories)
       },
       memoryEmbeddingRepo: {
-        findByObjectId: vi.fn(async () => null),
+        findMetadataByObjectIds: vi.fn(async () => []),
         upsert: vi.fn(async (record: EmbeddingVectorRecord) => record),
         upsertIfContentHashMatchesCurrentMemory: vi.fn(async (record: EmbeddingVectorRecord) => record)
       },
@@ -313,7 +316,7 @@ describe("EmbeddingBackfillHandler", () => {
         findByWorkspaceId: vi.fn(async () => hotMemories)
       },
       memoryEmbeddingRepo: {
-        findByObjectId: vi.fn(async () => null),
+        findMetadataByObjectIds: vi.fn(async () => []),
         upsert: vi.fn(async (record: EmbeddingVectorRecord) => record),
         upsertIfContentHashMatchesCurrentMemory: vi.fn(async (record: EmbeddingVectorRecord) => record)
       },
@@ -350,7 +353,7 @@ describe("EmbeddingBackfillHandler", () => {
         findByWorkspaceId: vi.fn(async () => hotMemories)
       },
       memoryEmbeddingRepo: {
-        findByObjectId: vi.fn(async () => null),
+        findMetadataByObjectIds: vi.fn(async () => []),
         upsert: vi.fn(async (record: EmbeddingVectorRecord) => record),
         upsertIfContentHashMatchesCurrentMemory: vi.fn(async (record: EmbeddingVectorRecord) => record)
       },
@@ -392,7 +395,7 @@ describe("EmbeddingBackfillHandler", () => {
     const handler = new EmbeddingBackfillHandler({
       memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
       memoryEmbeddingRepo: {
-        findByObjectId: vi.fn(async () => null),
+        findMetadataByObjectIds: vi.fn(async () => []),
         upsert,
         upsertIfContentHashMatchesCurrentMemory: upsert
       },
@@ -438,7 +441,7 @@ describe("EmbeddingBackfillHandler", () => {
     const handler = new EmbeddingBackfillHandler({
       memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
       memoryEmbeddingRepo: {
-        findByObjectId: vi.fn(async () => null),
+        findMetadataByObjectIds: vi.fn(async () => []),
         upsert,
         upsertIfContentHashMatchesCurrentMemory: upsert
       },
@@ -481,7 +484,7 @@ describe("EmbeddingBackfillHandler", () => {
     const handler = new EmbeddingBackfillHandler({
       memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
       memoryEmbeddingRepo: {
-        findByObjectId: vi.fn(async () => null),
+        findMetadataByObjectIds: vi.fn(async () => []),
         upsert: vi.fn(async (record: EmbeddingVectorRecord) => record),
         upsertIfContentHashMatchesCurrentMemory: guardedUpsert
       },
@@ -525,7 +528,7 @@ describe("EmbeddingBackfillHandler", () => {
       new EmbeddingBackfillHandler({
         memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
         memoryEmbeddingRepo: {
-          findByObjectId: vi.fn(async () => null),
+          findMetadataByObjectIds: vi.fn(async () => []),
           upsert: vi.fn(async (record: EmbeddingVectorRecord) => record),
           upsertIfContentHashMatchesCurrentMemory: vi.fn(async (record: EmbeddingVectorRecord) => record)
         },
@@ -551,6 +554,239 @@ describe("EmbeddingBackfillHandler", () => {
     expect(maxObservedInFlight).toBeLessThanOrEqual(6);
     expect(garbageResult.objectsAffected).toHaveLength(hotMemories.length);
   });
+
+  it("settles all already-started in-flight batches before the persistence error propagates", async () => {
+    // invariant: when head-batch persistence throws, any younger provider calls
+    // already in flight must settle before handle() rejects.
+    const concurrency = 4;
+    const hotMemories = Array.from({ length: 80 }, (_, index) =>
+      createMemoryEntry({
+        object_id: `memory-${index}`,
+        content: `Settle recall content ${index}.`
+      })
+    );
+    let inFlight = 0;
+    let maxObservedInFlight = 0;
+    let settledCalls = 0;
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      inFlight += 1;
+      maxObservedInFlight = Math.max(maxObservedInFlight, inFlight);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      settledCalls += 1;
+      return texts.map(() => new Float32Array([0.1, 0.2, 0.3]));
+    });
+    const upsertError = new Error("persistence layer down");
+    const upsert = vi.fn(async () => {
+      throw upsertError;
+    });
+    const handler = new EmbeddingBackfillHandler({
+      memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
+      memoryEmbeddingRepo: {
+        findMetadataByObjectIds: vi.fn(async () => []),
+        upsert,
+        upsertIfContentHashMatchesCurrentMemory: upsert
+      },
+      provider: createProvider({ embedTexts }),
+      batchConcurrency: concurrency,
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    let caught: unknown;
+    try {
+      await handler.handle({ workspace_id: "workspace-1" });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(isEmbeddingBackfillPartialFailureError(caught)).toBe(true);
+    if (!isEmbeddingBackfillPartialFailureError(caught)) {
+      throw new Error("expected partial failure error");
+    }
+    expect(caught.cause).toBe(upsertError);
+    expect(caught.failedObjectId).toBe("memory-0");
+    expect(caught.auditEntries).toContain("embedding_failed:persistence:memory-0:persistence layer down");
+
+    // No batch call is left running after handle() rejects: every started embed
+    // call has settled (inFlight drained to 0) before the rejection surfaced.
+    expect(inFlight).toBe(0);
+    expect(settledCalls).toBe(embedTexts.mock.calls.length);
+    // The cap still bounded the started calls across the failure.
+    expect(maxObservedInFlight).toBeGreaterThan(1);
+    expect(maxObservedInFlight).toBeLessThanOrEqual(concurrency);
+  });
+
+  it("reports partial durable side effects when a later batch write fails", async () => {
+    const hotMemories = [
+      createMemoryEntry({ object_id: "memory-ok", content: "Persisted before failure." }),
+      createMemoryEntry({ object_id: "memory-fails", content: "Persistence fails here." })
+    ];
+    const persistenceError = new Error("sqlite write failed");
+    const upsert = vi.fn(async (record: EmbeddingVectorRecord) => {
+      if (record.object_id === "memory-fails") {
+        throw persistenceError;
+      }
+      return record;
+    });
+    const handler = new EmbeddingBackfillHandler({
+      memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
+      memoryEmbeddingRepo: {
+        findMetadataByObjectIds: vi.fn(async () => []),
+        upsert,
+        upsertIfContentHashMatchesCurrentMemory: upsert
+      },
+      provider: createProvider({
+        embedTexts: vi.fn(async (texts: readonly string[]) =>
+          texts.map(() => new Float32Array([0.1, 0.2, 0.3]))
+        )
+      }),
+      batchConcurrency: 1,
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    let caught: unknown;
+    try {
+      await handler.handle({ workspace_id: "workspace-1" });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(isEmbeddingBackfillPartialFailureError(caught)).toBe(true);
+    if (!isEmbeddingBackfillPartialFailureError(caught)) {
+      throw new Error("expected partial failure error");
+    }
+    expect(caught.cause).toBe(persistenceError);
+    expect(caught.failedObjectId).toBe("memory-fails");
+    expect(caught.objectsAffected).toEqual(["memory-ok"]);
+    expect(caught.auditEntries).toContain("embedding_upserted:memory-ok");
+    expect(caught.auditEntries).toContain("embedding_failed:persistence:memory-fails:sqlite write failed");
+  });
+
+  it("persists out-of-order provider resolutions in batch order without buffering the whole corpus", async () => {
+    // Batch 0 resolves slowly, batch 1 quickly. Upserts must still happen in
+    // batch order (0 before 1), proving the drain replays in deterministic head
+    // order rather than persisting whichever provider call returns first.
+    const hotMemories = Array.from({ length: 32 }, (_, index) =>
+      createMemoryEntry({
+        object_id: `memory-${String(index).padStart(2, "0")}`,
+        content: `Ordered recall content ${index}.`
+      })
+    );
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      // The first batch (contains "content 0.") resolves after a longer delay
+      // than the second, forcing out-of-order provider resolution.
+      const isFirstBatch = texts.some((text) => text.endsWith("content 0."));
+      await new Promise<void>((resolve) => setTimeout(resolve, isFirstBatch ? 10 : 1));
+      return texts.map(() => new Float32Array([0.1, 0.2, 0.3]));
+    });
+    const upsertOrder: string[] = [];
+    const upsert = vi.fn(async (record: EmbeddingVectorRecord) => {
+      upsertOrder.push(record.object_id);
+      return record;
+    });
+    const handler = new EmbeddingBackfillHandler({
+      memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
+      memoryEmbeddingRepo: {
+        findMetadataByObjectIds: vi.fn(async () => []),
+        upsert,
+        upsertIfContentHashMatchesCurrentMemory: upsert
+      },
+      provider: createProvider({ embedTexts }),
+      batchConcurrency: 6,
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const result = await handler.handle({ workspace_id: "workspace-1" });
+
+    // 32 memories => 2 batches (16 + 16). Despite batch 0 resolving last, its
+    // 16 ids are upserted before batch 1's 16 ids.
+    expect(upsertOrder).toEqual(hotMemories.map((memory) => memory.object_id));
+    expect(result.objectsAffected).toEqual(hotMemories.map((memory) => memory.object_id));
+  });
+
+  it("returns failed audit entries for an all-failing corpus without throwing", async () => {
+    // Every provider call fails permanently. The handler must not throw; it
+    // records a per-item provider-failure audit entry and affects nothing.
+    const hotMemories = Array.from({ length: 3 }, (_, index) =>
+      createMemoryEntry({
+        object_id: `memory-${index}`,
+        content: `Always-fails content ${index}.`
+      })
+    );
+    const embedTexts = vi.fn(async () => {
+      throw new Error("provider permanently down");
+    });
+    const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
+    const handler = new EmbeddingBackfillHandler({
+      memoryRepo: { findByWorkspaceId: vi.fn(async () => hotMemories) },
+      memoryEmbeddingRepo: {
+        findMetadataByObjectIds: vi.fn(async () => []),
+        upsert,
+        upsertIfContentHashMatchesCurrentMemory: upsert
+      },
+      provider: createProvider({ embedTexts }),
+      retryDelayMs: 0,
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const result = await handler.handle({ workspace_id: "workspace-1" });
+
+    expect(result.objectsAffected).toEqual([]);
+    expect(upsert).not.toHaveBeenCalled();
+    for (const memory of hotMemories) {
+      expect(result.auditEntries).toContain(`embedding_failed:provider:${memory.object_id}`);
+    }
+  });
+});
+
+describe("resolveBackfillBatchConcurrency", () => {
+  // invariant: default = 6, max clamp = 32 (module constants). Strict
+  // invariant: integer-prefix garbage ("7abc"/"8.5"/"1e3") must map to
+  // the default, and oversized valid values ("999") must clamp to 32.
+  it("accepts a full positive-integer string", () => {
+    expect(resolveBackfillBatchConcurrency("8")).toBe(8);
+  });
+
+  it("clamps a valid oversized string to the max ceiling", () => {
+    expect(resolveBackfillBatchConcurrency("999")).toBe(32);
+  });
+
+  it("rejects an integer-prefix garbage string and falls back to the default", () => {
+    expect(resolveBackfillBatchConcurrency("7abc")).toBe(6);
+  });
+
+  it("rejects a decimal string and falls back to the default", () => {
+    expect(resolveBackfillBatchConcurrency("8.5")).toBe(6);
+  });
+
+  it("rejects zero-padded integer-prefix garbage and falls back to the default", () => {
+    expect(resolveBackfillBatchConcurrency("000bad")).toBe(6);
+  });
+
+  it("rejects scientific notation and falls back to the default", () => {
+    expect(resolveBackfillBatchConcurrency("1e3")).toBe(6);
+  });
+
+  it("rejects zero and falls back to the default", () => {
+    expect(resolveBackfillBatchConcurrency("0")).toBe(6);
+  });
+
+  it("rejects a negative string and falls back to the default", () => {
+    expect(resolveBackfillBatchConcurrency("-3")).toBe(6);
+  });
+
+  it("trims surrounding whitespace around a valid integer string", () => {
+    expect(resolveBackfillBatchConcurrency(" 8 ")).toBe(8);
+  });
+
+  it("clamps an oversized explicit number and rejects a non-integer number", () => {
+    expect(resolveBackfillBatchConcurrency(999)).toBe(32);
+    expect(resolveBackfillBatchConcurrency(6.7)).toBe(6);
+  });
+
+  it("falls back to the default when the value is undefined", () => {
+    expect(resolveBackfillBatchConcurrency(undefined)).toBe(6);
+  });
 });
 
 function createProvider(overrides: {
@@ -568,7 +804,9 @@ function createProvider(overrides: {
   };
 }
 
-function createEmbeddingRecord(overrides: Partial<EmbeddingVectorRecord>): EmbeddingVectorRecord {
+function createEmbeddingMetadata(
+  overrides: Partial<EmbeddingBackfillMetadata>
+): EmbeddingBackfillMetadata {
   return {
     object_id: overrides.object_id ?? "memory-1",
     workspace_id: overrides.workspace_id ?? "workspace-1",
@@ -576,8 +814,7 @@ function createEmbeddingRecord(overrides: Partial<EmbeddingVectorRecord>): Embed
     provider_kind: overrides.provider_kind ?? "openai",
     model_id: overrides.model_id ?? "text-embedding-3-small",
     schema_version: overrides.schema_version ?? 1,
-    dimensions: overrides.dimensions ?? overrides.embedding?.length ?? 3,
-    embedding: overrides.embedding ?? new Float32Array([1, 0, 0]),
+    dimensions: overrides.dimensions ?? 3,
     created_at: overrides.created_at ?? "2026-04-23T00:00:00.000Z",
     updated_at: overrides.updated_at ?? "2026-04-23T00:00:00.000Z"
   };

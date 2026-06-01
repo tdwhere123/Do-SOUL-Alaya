@@ -45,7 +45,8 @@ import {
   AuditorSchedulingAdvisor as CoreAuditorSchedulingAdvisor,
   ConsolidationExecutor,
   ConsolidationPlanner,
-  createVerificationBiasReaderFromPathLookup
+  createVerificationBiasReaderFromPathLookup,
+  isEmbeddingBackfillPartialFailureError
 } from "@do-soul/alaya-core";
 import {
   createGardenBackgroundDataPorts,
@@ -86,10 +87,17 @@ import {
 } from "./path-plasticity-runtime.js";
 
 type PathGraphSnapshotRecord = Readonly<PathGraphSnapshot>;
+type EmbeddingBackfillTaskOutcome = Readonly<{
+  readonly success: boolean;
+  readonly objectsAffected: readonly string[];
+  readonly auditEntries: readonly string[];
+  readonly errorMessage: string | null;
+}>;
 type RuntimeGardenScheduler = GardenScheduler & {
   dispatchNextMatchingTaskKind(
     role: Parameters<GardenScheduler["dispatchNext"]>[0],
-    taskKinds: readonly GardenTaskKindValue[]
+    taskKinds: readonly GardenTaskKindValue[],
+    workspaceId?: string
   ): ReturnType<GardenScheduler["dispatchNext"]>;
 };
 
@@ -268,8 +276,8 @@ interface PostTurnExtractTaskPayload {
 // enrich_pending, reconstructs the conflict-scan params from each persisted
 // memory row (content/dimension/scope/domain_tags match buildMemoryInput),
 // replays first-class signal refs from the persisted source signal, and runs
-// governed enrichment services that materialization used to run inline. These
-// narrow shapes keep the wiring decoupled from concrete storage/core types.
+// the governed enrichment services owned by materialization. These narrow
+// shapes keep the wiring decoupled from concrete storage/core types.
 // see also: packages/storage/src/repos/enrich-pending-repo.ts
 // see also: packages/soul/src/garden/materialization-router.ts EnrichPendingPort
 interface BulkEnrichPendingPort {
@@ -1014,7 +1022,9 @@ export function createGardenRuntime(input: {
     }
   };
 
-  const runEmbeddingBackfillTask = async (task: Readonly<GardenTaskDescriptor>): Promise<void> => {
+  const runEmbeddingBackfillTask = async (
+    task: Readonly<GardenTaskDescriptor>
+  ): Promise<EmbeddingBackfillTaskOutcome> => {
     const completedAt = new Date().toISOString();
 
     try {
@@ -1028,18 +1038,26 @@ export function createGardenRuntime(input: {
 
       await gardenScheduler.reportCompletion({
         task_id: task.task_id,
-        task_kind: task.task_kind,
-        role: GardenRole.LIBRARIAN,
-        tier: GardenTier.TIER_2,
-        workspace_id: task.workspace_id,
+          task_kind: task.task_kind,
+          role: GardenRole.LIBRARIAN,
+          tier: GardenTier.TIER_2,
+          workspace_id: task.workspace_id,
         success: true,
         objects_affected: [...result.objectsAffected],
         audit_entries: [...result.auditEntries],
         error_message: null,
-        completed_at: completedAt
+          completed_at: completedAt
+        });
+      return Object.freeze({
+        success: true,
+        objectsAffected: Object.freeze([...result.objectsAffected]),
+        auditEntries: Object.freeze([...result.auditEntries]),
+        errorMessage: null
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const objectsAffected = isEmbeddingBackfillPartialFailureError(error) ? error.objectsAffected : [];
+      const auditEntries = isEmbeddingBackfillPartialFailureError(error) ? error.auditEntries : [];
       await gardenScheduler.reportCompletion({
         task_id: task.task_id,
         task_kind: task.task_kind,
@@ -1047,8 +1065,8 @@ export function createGardenRuntime(input: {
         tier: GardenTier.TIER_2,
         workspace_id: task.workspace_id,
         success: false,
-        objects_affected: [],
-        audit_entries: [],
+        objects_affected: [...objectsAffected],
+        audit_entries: [...auditEntries],
         error_message: errorMessage,
         completed_at: completedAt
       });
@@ -1056,9 +1074,37 @@ export function createGardenRuntime(input: {
         workspace_id: task.workspace_id,
         error: errorMessage
       });
+      return Object.freeze({
+        success: false,
+        objectsAffected: Object.freeze([...objectsAffected]),
+        auditEntries: Object.freeze([...auditEntries]),
+        errorMessage
+      });
     } finally {
       pendingEmbeddingBackfillWorkspaces.delete(task.workspace_id);
     }
+  };
+
+  const summarizeEmbeddingBackfillTargetedReason = (
+    outcome: EmbeddingBackfillTaskOutcome
+  ): string | null => {
+    if (!outcome.success) {
+      return outcome.errorMessage;
+    }
+
+    const failedEntries = outcome.auditEntries.filter(
+      (entry) =>
+        entry.startsWith("embedding_backfill_skipped:") ||
+        entry.startsWith("embedding_failed:provider:") ||
+        entry.startsWith("embedding_failed:persistence:")
+    );
+    if (failedEntries.length === 0) {
+      return null;
+    }
+
+    return failedEntries.length === 1
+      ? failedEntries[0]!
+      : `${failedEntries[0]!} (+${failedEntries.length - 1} more)`;
   };
 
   // invariant: memory_consolidation_enabled (SoulConfig, default true) gates
@@ -1135,9 +1181,8 @@ export function createGardenRuntime(input: {
   // invariant: BULK_ENRICH drain worker (S3c). Claims a batch from
   // enrich_pending and, for each claimed memory, reconstructs the conflict-scan
   // params from the persisted memory row, replays first-class signal refs from
-  // the persisted source signal, and runs the SAME governed services
-  // materialization used to run inline (detectAndLinkConflicts +
-  // produceForNewMemory). Enrichment is a SYSTEM Garden decision — no agent
+  // the persisted source signal, and runs the governed materialization services
+  // (detectAndLinkConflicts + produceForNewMemory). Enrichment is a SYSTEM Garden decision — no agent
   // input drives it; the services own the truth boundary, this worker only
   // moves WHEN they run. Idempotent: detectAndLinkConflicts / produceForNewMemory
   // dedupe their path candidates, and markProcessed + the UNIQUE(workspace,memory)
@@ -1800,7 +1845,10 @@ export function createGardenRuntime(input: {
     },
     // invariant: targeted embedding-backfill drain for a single workspace,
     // bypassing the full Garden background pass. Enqueues and dispatches ONLY
-    // GardenTaskKind.EMBEDDING_BACKFILL — never BULK_ENRICH, MERGE_PROPOSAL,
+    // GardenTaskKind.EMBEDDING_BACKFILL for the requested workspace — the
+    // dispatch passes workspaceId so the scheduler's pending peek is scoped to
+    // it and a same-kind task queued for another workspace is never drained
+    // here. Never BULK_ENRICH, MERGE_PROPOSAL,
     // PATH_PLASTICITY_UPDATE, PATH_GRAPH_SNAPSHOT, CONSOLIDATION_CYCLE,
     // post-turn extract, Janitor, or Auditor work. Does NOT call
     // markBackgroundPassCompleted(): this is a recall-readiness drain, not a
@@ -1814,7 +1862,30 @@ export function createGardenRuntime(input: {
         return;
       }
 
-      if (!pendingEmbeddingBackfillWorkspaces.has(workspaceId)) {
+      let dispatchedCount = 0;
+      let lastTargetedReason: string | null = null;
+
+      for (
+        let drained = 0;
+        drained < EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS;
+        drained += 1
+      ) {
+        const task = await runtimeGardenScheduler.dispatchNextMatchingTaskKind(
+          GardenRole.LIBRARIAN,
+          [GardenTaskKind.EMBEDDING_BACKFILL],
+          workspaceId
+        );
+        requestBacklogTelemetryCapture("warmup:embedding_backfill");
+        if (task === null) {
+          break;
+        }
+
+        dispatchedCount += 1;
+        const outcome = await runEmbeddingBackfillTask(task);
+        lastTargetedReason = summarizeEmbeddingBackfillTargetedReason(outcome) ?? lastTargetedReason;
+      }
+
+      if (dispatchedCount === 0 && !pendingEmbeddingBackfillWorkspaces.has(workspaceId)) {
         pendingEmbeddingBackfillWorkspaces.add(workspaceId);
         gardenScheduler.enqueue({
           task_id: randomUUID(),
@@ -1827,23 +1898,30 @@ export function createGardenRuntime(input: {
           created_at: new Date().toISOString()
         });
         requestBacklogTelemetryCapture(`enqueue:${GardenTaskKind.EMBEDDING_BACKFILL}`);
+
+        for (
+          let drained = 0;
+          drained < EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS;
+          drained += 1
+        ) {
+          const task = await runtimeGardenScheduler.dispatchNextMatchingTaskKind(
+            GardenRole.LIBRARIAN,
+            [GardenTaskKind.EMBEDDING_BACKFILL],
+            workspaceId
+          );
+          requestBacklogTelemetryCapture("warmup:embedding_backfill");
+          if (task === null) {
+            break;
+          }
+
+          dispatchedCount += 1;
+          const outcome = await runEmbeddingBackfillTask(task);
+          lastTargetedReason = summarizeEmbeddingBackfillTargetedReason(outcome) ?? lastTargetedReason;
+        }
       }
 
-      for (
-        let drained = 0;
-        drained < EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS;
-        drained += 1
-      ) {
-        const task = await runtimeGardenScheduler.dispatchNextMatchingTaskKind(
-          GardenRole.LIBRARIAN,
-          [GardenTaskKind.EMBEDDING_BACKFILL]
-        );
-        requestBacklogTelemetryCapture("warmup:embedding_backfill");
-        if (task === null) {
-          break;
-        }
-
-        await runEmbeddingBackfillTask(task);
+      if (lastTargetedReason !== null) {
+        throw new Error(lastTargetedReason);
       }
     },
     runBackgroundPass: async () => {
