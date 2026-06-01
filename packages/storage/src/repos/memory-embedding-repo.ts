@@ -55,10 +55,11 @@ export interface MemoryEmbeddingRepo {
     record: MemoryEmbeddingRecord
   ): Promise<Readonly<MemoryEmbeddingRecord> | null>;
   findByObjectId(objectId: string): Promise<Readonly<MemoryEmbeddingRecord> | null>;
-  // Batch metadata-only lookup (no embedding blob). One query for the whole id
-  // set; the backfill handler uses this for its cache-hit/stale decision so it
-  // pays neither n per-id round-trips nor full-vector hydration. Returns the row
-  // for every matched object_id regardless of provider/model/schema — the
+  // Batch metadata-only lookup (no embedding blob). Implementations may chunk
+  // large id sets to stay below storage bind limits; the backfill handler uses
+  // this for its cache-hit/stale decision so it pays neither n per-id round-trips
+  // nor full-vector hydration. Returns the row for every matched object_id
+  // regardless of provider/model/schema — the
   // provider/model/schema equality check and created_at preservation belong in
   // the handler.
   findMetadataByObjectIds(
