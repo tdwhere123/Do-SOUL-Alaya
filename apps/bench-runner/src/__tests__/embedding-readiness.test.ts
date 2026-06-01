@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   EmbeddingReadinessTracker,
-  runEmbeddingReadinessPass
+  runEmbeddingReadinessPass,
+  runEmbeddingReadinessPassWithResult
 } from "../longmemeval/embedding-readiness.js";
 
 describe("runEmbeddingReadinessPass", () => {
@@ -129,5 +130,85 @@ describe("EmbeddingReadinessTracker.finalize", () => {
     expect(message).toContain("2/3");
     expect(message).toContain("1 genuine failure");
     expect(message).toContain("1 benign/transient skip");
+  });
+});
+
+describe("runEmbeddingReadinessPassWithResult", () => {
+  it("carries the pass value when the pass resolves", async () => {
+    const warn = vi.fn();
+    const result = await runEmbeddingReadinessPassWithResult({
+      runPass: async () => ({ ready_count: 7 }),
+      workspaceId: "ws-1",
+      questionId: "conv-1:seed-warmup",
+      warn
+    });
+    expect(result.outcome).toBe("ready");
+    expect(result.value).toEqual({ ready_count: 7 });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("degrades value to null on a benign skip (quiet)", async () => {
+    const warn = vi.fn();
+    const result = await runEmbeddingReadinessPassWithResult<{ ready_count: number }>({
+      runPass: async () => {
+        throw new Error("embedding_backfill_skipped:provider_unavailable");
+      },
+      workspaceId: "ws-1",
+      questionId: "conv-1:seed-warmup",
+      warn
+    });
+    expect(result.outcome).toBe("benign_skip");
+    expect(result.value).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("degrades value to null on a genuine failure and warns visibly", async () => {
+    const warn = vi.fn();
+    const result = await runEmbeddingReadinessPassWithResult<{ ready_count: number }>({
+      runPass: async () => {
+        throw new Error("embedding_failed:provider:memory-x:Embedding request transport failed");
+      },
+      workspaceId: "locomo-conv-42",
+      questionId: "conv-42:seed-warmup",
+      warn
+    });
+    expect(result.outcome).toBe("failed");
+    expect(result.value).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain("workspace=locomo-conv-42");
+  });
+
+  // invariant: the LoCoMo conversation loop shape. A throwing per-conversation
+  // embedding warmup must NOT abort the loop; every conversation must be visited
+  // and the run-level tracker must count the degraded passes. Reverting Fix B
+  // (awaiting workspace.warmEmbeddingCache directly) lets the first throw escape
+  // the loop -> visited.length < conversations.length -> this fails.
+  // see also: apps/bench-runner/src/locomo/runner.ts runOneConversation
+  it("keeps the LoCoMo conversation loop running despite a throwing warmup and integrity-tracks it", async () => {
+    const tracker = new EmbeddingReadinessTracker(vi.fn());
+    const conversations = ["conv-26", "conv-30", "conv-41", "conv-42"];
+    const visited: string[] = [];
+    for (const conversationId of conversations) {
+      // conv-42 models the sustained provider failure that exhausts retries.
+      const pass = await runEmbeddingReadinessPassWithResult<{ ready_count: number }>({
+        runPass: async () => {
+          if (conversationId === "conv-42") {
+            throw new Error(
+              "embedding_failed:provider:memory-x:Embedding request transport failed for host yunwu.ai."
+            );
+          }
+          return { ready_count: 3 };
+        },
+        workspaceId: `locomo-${conversationId}`,
+        questionId: `${conversationId}:seed-warmup`,
+        warn: vi.fn()
+      });
+      tracker.record(pass);
+      // Reaching here for conv-42 proves the throw did not abort the loop.
+      visited.push(conversationId);
+    }
+    expect(visited).toEqual(conversations);
+    expect(tracker.failedCount).toBe(1);
+    expect(tracker.unresolvedCount).toBe(1);
   });
 });

@@ -38,6 +38,10 @@ import {
 } from "../longmemeval/diagnostics.js";
 import { writeExternalDiagnosticsArtifact } from "../longmemeval/diagnostics-artifacts.js";
 import {
+  EmbeddingReadinessTracker,
+  runEmbeddingReadinessPassWithResult
+} from "../longmemeval/embedding-readiness.js";
+import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
 } from "../longmemeval/recall-token-economy.js";
@@ -124,11 +128,18 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       ? {}
       : { embeddingProviderKind: opts.embeddingProviderKind })
   });
+  // invariant: a throwing per-conversation embedding warmup (e.g. a sustained
+  // provider transport failure that exhausts retries) must DEGRADE + CONTINUE,
+  // never abort the conversation loop. The tracker turns silent embedding-OFF
+  // degradation into an end-of-run INTEGRITY WARNING.
+  // see also: apps/bench-runner/src/longmemeval/embedding-readiness.ts
+  //   (same pattern, multiturn/crossquestion; LoCoMo joined per the exit-13 fix)
+  const embeddingReadiness = new EmbeddingReadinessTracker();
   try {
   for (let i = 0; i < window.length; i++) {
     const conversation = window[i];
     if (conversation === undefined) continue;
-    const convResult = await runOneConversation(daemon, conversation, opts);
+    const convResult = await runOneConversation(daemon, conversation, opts, embeddingReadiness);
     conversationResults.push(convResult);
     totalQa += convResult.qaCount;
     totalHitAt1 += convResult.hitAt1;
@@ -159,6 +170,7 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   } finally {
     await daemon.shutdown();
   }
+  embeddingReadiness.finalize();
 
   const rAt1 = totalQa === 0 ? 0 : totalHitAt1 / totalQa;
   const rAt5 = totalQa === 0 ? 0 : totalHitAt5 / totalQa;
@@ -344,7 +356,8 @@ interface ConversationResult {
 async function runOneConversation(
   daemon: BenchDaemonHandle,
   conversation: LocomoSample,
-  opts: LocomoRunOptions
+  opts: LocomoRunOptions,
+  embeddingReadiness: EmbeddingReadinessTracker
 ): Promise<ConversationResult> {
   const embeddingMode = opts.embeddingMode ?? "disabled";
   const workspace: BenchWorkspaceHandle = await daemon.attachWorkspace({
@@ -380,15 +393,28 @@ async function runOneConversation(
       }
     }
 
-    const embeddingWarmup =
-      opts.embeddingMode === "env"
-        ? await workspace.warmEmbeddingCache([...memoryIdByDiaId.values()])
-        : null;
+    const readinessWorkspaceId = `locomo-${conversation.sample_id}`;
+    let embeddingWarmup: BenchEmbeddingWarmupSummary | null = null;
+    if (opts.embeddingMode === "env") {
+      const pass = await runEmbeddingReadinessPassWithResult({
+        runPass: () => workspace.warmEmbeddingCache([...memoryIdByDiaId.values()]),
+        workspaceId: readinessWorkspaceId,
+        questionId: `${conversation.sample_id}:seed-warmup`
+      });
+      embeddingReadiness.record(pass);
+      embeddingWarmup = pass.value;
+    }
     const scoredQuestions = conversation.qa.filter((qa) => qa.evidence.length > 0);
-    const queryEmbeddingWarmup =
-      opts.embeddingMode === "env"
-        ? await workspace.warmQueryEmbeddingCache(scoredQuestions.map((qa) => qa.question))
-        : null;
+    let queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null = null;
+    if (opts.embeddingMode === "env") {
+      const pass = await runEmbeddingReadinessPassWithResult({
+        runPass: () => workspace.warmQueryEmbeddingCache(scoredQuestions.map((qa) => qa.question)),
+        workspaceId: readinessWorkspaceId,
+        questionId: `${conversation.sample_id}:query-warmup`
+      });
+      embeddingReadiness.record(pass);
+      queryEmbeddingWarmup = pass.value;
+    }
 
     let hitAt1 = 0;
     let hitAt5 = 0;
