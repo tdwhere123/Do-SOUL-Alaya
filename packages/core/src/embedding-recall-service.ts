@@ -170,8 +170,25 @@ const DEFAULT_QUERY_EMBEDDING_CACHE_SIZE = 512;
 const MAX_QUERY_EMBEDDING_CACHE_SIZE = 4096;
 const DEFAULT_EMBEDDING_REQUEST_MAX_ATTEMPTS = 5;
 const MAX_EMBEDDING_REQUEST_ATTEMPTS = 5;
+// invariant: retryDelayMs is the EXPONENTIAL BACKOFF BASE, not a constant delay.
+// gap before retry N = base * 2^(N-1), clamped to
+// MAX_EMBEDDING_REQUEST_RETRY_DELAY_MS, plus random jitter in [0, base) so
+// concurrent embed calls do not retry a struggling provider in lockstep.
 const DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS = 250;
+// invariant: per-gap cap; with base 250ms gaps are 250 / 500 / 1000 / 2000 (+jitter).
 const MAX_EMBEDDING_REQUEST_RETRY_DELAY_MS = 2_000;
+// invariant: sum(backoff gaps) per embedTexts call <= this value.
+// see also: computeEmbeddingBackoffMs / fetchEmbeddingWithRetry
+const MAX_EMBEDDING_REQUEST_TOTAL_BACKOFF_MS = 8_000;
+// invariant: hard wall-clock ceiling on the whole fetchEmbeddingWithRetry loop
+// (transport time across attempts + backoff gaps combined). A new attempt is NOT
+// started once elapsed >= this ceiling; the last error surfaces instead. Caps
+// the per-call worst case so a stalling provider degrades to keyword recall in
+// bounded time rather than over minutes (per-attempt timeout x attempts could
+// otherwise compound, and the backfill handler wraps this in its own item-level
+// retry on top).
+// see also: fetchEmbeddingWithRetry / packages/core/src/embedding-backfill-handler.ts
+const MAX_EMBEDDING_REQUEST_TOTAL_WALLCLOCK_MS = 30_000;
 // invariant: the wall-clock transport backstop is a safety net that is STRICTLY
 // LATER than the request-level AbortController deadline (options.timeoutMs), so
 // the abort stays the primary mechanism that frees the socket. The backstop only
@@ -217,6 +234,40 @@ function clampEmbeddingRequestRetryDelayMs(value: number | undefined): number {
     return DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS;
   }
   return Math.min(MAX_EMBEDDING_REQUEST_RETRY_DELAY_MS, Math.floor(value));
+}
+
+function clampEmbeddingRequestTotalBackoffMs(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return MAX_EMBEDDING_REQUEST_TOTAL_BACKOFF_MS;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function clampEmbeddingRequestTotalWallclockMs(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return MAX_EMBEDDING_REQUEST_TOTAL_WALLCLOCK_MS;
+  }
+  return Math.max(1, Math.floor(value));
+}
+
+// invariant: exponential backoff with full jitter. capped gap = min(maxGapMs,
+// base * 2^attemptIndex); returned gap = capped + uniform jitter in [0, base).
+// attemptIndex is 0 for the gap after the first attempt. random injectable so
+// tests are deterministic.
+// see also: MAX_EMBEDDING_REQUEST_TOTAL_BACKOFF_MS / fetchEmbeddingWithRetry
+function computeEmbeddingBackoffMs(
+  baseMs: number,
+  attemptIndex: number,
+  maxGapMs: number,
+  random: () => number
+): number {
+  if (baseMs <= 0) {
+    return 0;
+  }
+  const exponential = baseMs * 2 ** Math.max(0, attemptIndex);
+  const capped = Math.min(maxGapMs, exponential);
+  const jitter = Math.floor(random() * baseMs);
+  return capped + jitter;
 }
 
 // invariant: margin floored at 1ms so the backstop is always strictly later
@@ -1076,6 +1127,18 @@ export class EmbeddingRecallService {
   }
 }
 
+// invariant: emitted once per retried gap so callers (bench / daemon) can record
+// transport flakiness instead of it being silent. host carries no secret.
+export interface EmbeddingRetryEvent {
+  readonly host: string;
+  readonly attempt: number;
+  readonly maxAttempts: number;
+  readonly delayMs: number;
+  readonly reason: "transport_error" | "retryable_status";
+  readonly status?: number;
+  readonly errorMessage?: string;
+}
+
 export interface OpenAIEmbeddingClientOptions {
   readonly apiKey: string | null;
   readonly model?: string;
@@ -1086,6 +1149,19 @@ export interface OpenAIEmbeddingClientOptions {
   // invariant: backstop margin (ms) over the abort deadline; see
   // EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS for the constant and rationale.
   readonly transportBackstopMarginMs?: number;
+  // invariant: ceiling on summed backoff gaps per embedTexts call; see
+  // MAX_EMBEDDING_REQUEST_TOTAL_BACKOFF_MS.
+  readonly totalBackoffBudgetMs?: number;
+  // invariant: hard wall-clock ceiling on the whole retry loop; see
+  // MAX_EMBEDDING_REQUEST_TOTAL_WALLCLOCK_MS.
+  readonly totalWallclockBudgetMs?: number;
+  // Injectable monotonic clock (ms) for the wall-clock ceiling. Test determinism.
+  readonly now?: () => number;
+  // Injectable RNG for jitter (test determinism). Defaults to Math.random.
+  readonly random?: () => number;
+  // Diagnostics sink for retry activity. When unset, retries emit a structured
+  // console.warn so flakiness is never fully silent.
+  readonly onRetry?: (event: EmbeddingRetryEvent) => void;
 }
 
 export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
@@ -1100,6 +1176,11 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
   private readonly maxAttempts: number;
   private readonly retryDelayMs: number;
   private readonly transportBackstopMarginMs: number;
+  private readonly totalBackoffBudgetMs: number;
+  private readonly totalWallclockBudgetMs: number;
+  private readonly now: () => number;
+  private readonly random: () => number;
+  private readonly onRetry: (event: EmbeddingRetryEvent) => void;
 
   public constructor(options: OpenAIEmbeddingClientOptions) {
     this.apiKey = options.apiKey;
@@ -1111,6 +1192,15 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     this.transportBackstopMarginMs = clampEmbeddingTransportBackstopMarginMs(
       options.transportBackstopMarginMs
     );
+    this.totalBackoffBudgetMs = clampEmbeddingRequestTotalBackoffMs(
+      options.totalBackoffBudgetMs
+    );
+    this.totalWallclockBudgetMs = clampEmbeddingRequestTotalWallclockMs(
+      options.totalWallclockBudgetMs
+    );
+    this.now = options.now ?? (() => Date.now());
+    this.random = options.random ?? Math.random;
+    this.onRetry = options.onRetry ?? defaultEmbeddingRetrySink;
     this.isAvailable = typeof this.apiKey === "string" && this.apiKey.length > 0;
   }
 
@@ -1128,63 +1218,65 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
       return Object.freeze([]);
     }
 
-    const abortController = new AbortController();
-    const timeoutHandle = setTimeout(() => abortController.abort("embedding-timeout"), options.timeoutMs);
-    timeoutHandle.unref?.();
+    const response = await this.fetchEmbeddingWithRetry(texts, options.timeoutMs);
 
-    try {
-      const response = await this.fetchEmbeddingWithRetry(
-        texts,
-        abortController.signal,
-        options.timeoutMs
+    if (!response.ok) {
+      throw new Error(
+        `Embedding request failed with status ${response.status} for host ${formatEmbeddingHost(this.baseUrl)}.`
       );
-
-      if (!response.ok) {
-        throw new Error(
-          `Embedding request failed with status ${response.status} for host ${formatEmbeddingHost(this.baseUrl)}.`
-        );
-      }
-
-      const payload = (await response.json()) as {
-        readonly data?: ReadonlyArray<{
-          readonly embedding?: readonly number[];
-          readonly index?: number;
-        }>;
-      };
-      const data = [...(payload.data ?? [])].sort(
-        (left, right) => (left.index ?? 0) - (right.index ?? 0)
-      );
-
-      if (data.length !== texts.length) {
-        throw new Error(`Embedding request returned ${data.length} vectors for ${texts.length} inputs.`);
-      }
-
-      return Object.freeze(
-        data.map((entry, index) => {
-          if (!Array.isArray(entry.embedding) || entry.embedding.length === 0) {
-            throw new Error(`Embedding response ${index} did not include a valid vector.`);
-          }
-
-          return new Float32Array(entry.embedding);
-        })
-      );
-    } finally {
-      clearTimeout(timeoutHandle);
     }
+
+    const payload = (await response.json()) as {
+      readonly data?: ReadonlyArray<{
+        readonly embedding?: readonly number[];
+        readonly index?: number;
+      }>;
+    };
+    const data = [...(payload.data ?? [])].sort(
+      (left, right) => (left.index ?? 0) - (right.index ?? 0)
+    );
+
+    if (data.length !== texts.length) {
+      throw new Error(`Embedding request returned ${data.length} vectors for ${texts.length} inputs.`);
+    }
+
+    return Object.freeze(
+      data.map((entry, index) => {
+        if (!Array.isArray(entry.embedding) || entry.embedding.length === 0) {
+          throw new Error(`Embedding response ${index} did not include a valid vector.`);
+        }
+
+        return new Float32Array(entry.embedding);
+      })
+    );
   }
 
+  // invariant: each attempt gets a FRESH AbortController + backstop, so a single
+  // attempt's transport timeout is a retryable transport error rather than a
+  // signal that kills the whole retry budget. backstopMs > abortTimeoutMs (see
+  // EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS); abort stays primary, backstop is
+  // strictly later. backoff gaps between attempts are exponential + jittered and
+  // their sum is capped by totalBackoffBudgetMs.
+  // see also: computeEmbeddingBackoffMs / MAX_EMBEDDING_REQUEST_TOTAL_BACKOFF_MS
   private async fetchEmbeddingWithRetry(
     texts: readonly string[],
-    signal: AbortSignal,
     abortTimeoutMs: number
   ): Promise<Response> {
-    // invariant: backstopMs > abortTimeoutMs (see
-    // EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS); abort stays primary, backstop is
-    // strictly later.
     const backstopMs =
       (Number.isFinite(abortTimeoutMs) && abortTimeoutMs > 0 ? abortTimeoutMs : 0) +
       this.transportBackstopMarginMs;
+    let remainingBackoffMs = this.totalBackoffBudgetMs;
+    const startedAt = this.now();
+    const deadline = startedAt + this.totalWallclockBudgetMs;
+    let lastError: unknown = null;
+
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+      const attemptAbort = new AbortController();
+      const attemptTimeout = setTimeout(
+        () => attemptAbort.abort("embedding-timeout"),
+        abortTimeoutMs
+      );
+      attemptTimeout.unref?.();
       try {
         const response = await this.raceFetchAgainstBackstop(
           this.fetchImpl(`${this.baseUrl}/embeddings`, {
@@ -1197,24 +1289,63 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
               model: this.modelId,
               input: texts
             }),
-            signal
+            signal: attemptAbort.signal
           }),
           backstopMs
         );
         if (attempt < this.maxAttempts && isRetryableEmbeddingStatus(response.status)) {
-          await sleepEmbeddingRetry(this.retryDelayMs * attempt, signal);
+          if (this.now() >= deadline) {
+            return response;
+          }
+          remainingBackoffMs = await this.backoffBeforeRetry(
+            attempt,
+            remainingBackoffMs,
+            { reason: "retryable_status", status: response.status }
+          );
           continue;
         }
         return response;
       } catch (error) {
-        if (attempt >= this.maxAttempts || signal.aborted) {
+        lastError = error;
+        if (attempt >= this.maxAttempts || this.now() >= deadline) {
           throw new Error(formatEmbeddingTransportError(this.baseUrl, error));
         }
-        await sleepEmbeddingRetry(this.retryDelayMs * attempt, signal);
+        remainingBackoffMs = await this.backoffBeforeRetry(attempt, remainingBackoffMs, {
+          reason: "transport_error",
+          errorMessage: error instanceof Error ? error.message : String(error)
+        });
+      } finally {
+        clearTimeout(attemptTimeout);
       }
     }
 
-    throw new Error(`Embedding request retry loop exhausted for host ${formatEmbeddingHost(this.baseUrl)}.`);
+    throw new Error(formatEmbeddingTransportError(this.baseUrl, lastError));
+  }
+
+  // invariant: returns the remaining total backoff budget after sleeping the
+  // jittered exponential gap (clamped to what budget is left). emits onRetry so
+  // transport flakiness is recorded, not silent.
+  private async backoffBeforeRetry(
+    attempt: number,
+    remainingBackoffMs: number,
+    detail: Pick<EmbeddingRetryEvent, "reason" | "status" | "errorMessage">
+  ): Promise<number> {
+    const requestedMs = computeEmbeddingBackoffMs(
+      this.retryDelayMs,
+      attempt - 1,
+      MAX_EMBEDDING_REQUEST_RETRY_DELAY_MS,
+      this.random
+    );
+    const delayMs = Math.max(0, Math.min(requestedMs, remainingBackoffMs));
+    this.onRetry({
+      host: formatEmbeddingHost(this.baseUrl),
+      attempt,
+      maxAttempts: this.maxAttempts,
+      delayMs,
+      ...detail
+    });
+    await sleepEmbeddingRetry(delayMs);
+    return remainingBackoffMs - delayMs;
   }
 
   // invariant: this race is the wall-clock backstop. It does NOT replace the
@@ -1257,14 +1388,27 @@ function isRetryableEmbeddingStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
-async function sleepEmbeddingRetry(delayMs: number, signal: AbortSignal): Promise<void> {
-  if (delayMs <= 0 || signal.aborted) {
+// invariant: the backoff gap is NOT tied to the per-attempt abort signal — a
+// per-attempt timeout is exactly the transient blip the retry must ride through,
+// so a fired attempt-signal must not zero the recovery gap. total backoff is
+// bounded by the caller's remaining budget, not by the abort.
+// see also: fetchEmbeddingWithRetry / MAX_EMBEDDING_REQUEST_TOTAL_BACKOFF_MS
+async function sleepEmbeddingRetry(delayMs: number): Promise<void> {
+  if (delayMs <= 0) {
     return;
   }
   await new Promise<void>((resolve) => {
     const timeout = setTimeout(resolve, delayMs);
     timeout.unref?.();
   });
+}
+
+function defaultEmbeddingRetrySink(event: EmbeddingRetryEvent): void {
+  console.warn(
+    `Embedding request retry for host ${event.host} attempt ${event.attempt}/${event.maxAttempts} ` +
+      `reason=${event.reason}${event.status === undefined ? "" : ` status=${event.status}`} ` +
+      `backoff=${event.delayMs}ms`
+  );
 }
 
 function formatEmbeddingTransportError(baseUrl: string, error: unknown): string {
