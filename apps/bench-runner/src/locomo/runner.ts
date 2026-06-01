@@ -169,8 +169,12 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   }
   } finally {
     await daemon.shutdown();
+    // invariant: the end-of-run integrity guarantee is unconditional — if the
+    // conversation loop throws mid-run, the accumulated INTEGRITY WARNING must
+    // still surface (finalize() prints at most once and is a no-op when no pass
+    // was unresolved), so a partial degraded run cannot crash silently.
+    embeddingReadiness.finalize();
   }
-  embeddingReadiness.finalize();
 
   const rAt1 = totalQa === 0 ? 0 : totalHitAt1 / totalQa;
   const rAt5 = totalQa === 0 ? 0 : totalHitAt5 / totalQa;

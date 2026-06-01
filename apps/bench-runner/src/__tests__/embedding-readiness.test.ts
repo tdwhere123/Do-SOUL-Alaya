@@ -131,6 +131,10 @@ describe("EmbeddingReadinessTracker.finalize", () => {
     expect(message).toContain("2/3");
     expect(message).toContain("1 genuine failure");
     expect(message).toContain("1 benign/transient skip");
+    // The unit is "passes" (caller-agnostic), not "questions": LoCoMo records
+    // two passes per conversation, so the inherited "questions" noun was wrong.
+    expect(message).toContain("passes");
+    expect(message).not.toContain("questions ran");
   });
 });
 

@@ -156,15 +156,20 @@ export class EmbeddingReadinessTracker {
     if (this.unresolvedCount === 0) {
       return;
     }
+    // invariant: the noun is "passes", not "questions" — longmemeval records one
+    // pass per question, but LoCoMo records two passes per conversation
+    // (seed-warmup + query-warmup), so totalPasses is the only caller-agnostic
+    // unit. see also: apps/bench-runner/src/locomo/runner.ts
+    //   warmLocomoConversationEmbeddings (the two LoCoMo passes)
     this.warn(
       `[longmemeval embedding-readiness] INTEGRITY WARNING ` +
-        `${this.unresolvedCount}/${this.totalPasses} questions ran with an ` +
-        `unresolved embedding-readiness pass ` +
+        `${this.unresolvedCount}/${this.totalPasses} embedding-readiness passes ` +
+        `ran unresolved ` +
         `(${this.failedQuestions} genuine failure, ` +
         `${this.benignSkipQuestions} benign/transient skip). ` +
-        `Recall for those questions may have run embedding-OFF; do not read this ` +
-        `run as a clean embedding-ON measurement without checking the per-question ` +
-        `warnings above.`
+        `Recall for the affected units may have run embedding-OFF; do not read ` +
+        `this run as a clean embedding-ON measurement without checking the ` +
+        `per-pass warnings above.`
     );
   }
 }
