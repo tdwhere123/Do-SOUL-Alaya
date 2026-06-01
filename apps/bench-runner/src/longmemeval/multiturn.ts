@@ -62,6 +62,10 @@ import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
 } from "./seed-extraction-release-blocker.js";
+import {
+  EmbeddingReadinessTracker,
+  runEmbeddingReadinessPass
+} from "./embedding-readiness.js";
 
 const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
 
@@ -137,7 +141,8 @@ export async function runLongMemEvalMultiturn(
 
   async function runOneQuestion(
     question: typeof window[number],
-    seedRunner: CompileSeedRunner
+    seedRunner: CompileSeedRunner,
+    embeddingReadiness: EmbeddingReadinessTracker
   ): Promise<QuestionResult> {
     const daemon = await startBenchDaemon({
       workspaceId: `lme-mt-${question.question_id.slice(0, 8)}`,
@@ -238,8 +243,21 @@ export async function runLongMemEvalMultiturn(
         // runGardenBackgroundPass would also run BULK_ENRICH edge-production /
         // conflict-detection that embedding-OFF never runs, breaking ON/OFF
         // comparability and slowing ON ~15x.
-        // see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
-        await daemon.runtime.runGardenEmbeddingBackfillPass(daemon.workspaceId);
+        // invariant: this pass is the ONLY embedding-readiness mechanism for the
+        // multiturn variant (no setup-time warmEmbeddingCache gate), so a benign
+        // skip must not abort the run, but an unresolved pass must surface a
+        // run-level integrity signal rather than degrade silently.
+        // see also:
+        //   apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
+        //   apps/bench-runner/src/longmemeval/embedding-readiness.ts
+        embeddingReadiness.record(
+          await runEmbeddingReadinessPass({
+            runPass: () =>
+              daemon.runtime.runGardenEmbeddingBackfillPass(daemon.workspaceId),
+            workspaceId: daemon.workspaceId,
+            questionId: question.question_id
+          })
+        );
       }
 
       const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
@@ -391,10 +409,11 @@ export async function runLongMemEvalMultiturn(
       : undefined
   );
   const collected: QuestionResult[] = [];
+  const embeddingReadiness = new EmbeddingReadinessTracker();
   for (let i = 0; i < window.length; i++) {
     const q = window[i];
     if (q === undefined) continue;
-    const res = await runOneQuestion(q, seedRunner);
+    const res = await runOneQuestion(q, seedRunner, embeddingReadiness);
     collected.push(res);
     const finalRound = res.rounds[res.rounds.length - 1];
     process.stdout.write(
@@ -402,6 +421,7 @@ export async function runLongMemEvalMultiturn(
         `rounds=${rounds} final_R@5=${finalRound?.hitAt5 ? "✓" : "✗"}\n`
     );
   }
+  embeddingReadiness.finalize();
   // Disclose which seed path ran: official_api_compile (production garden
   // extraction) vs no_credentials_fallback (degraded full-turn single-fact).
   process.stdout.write(

@@ -54,6 +54,10 @@ import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
 } from "./seed-extraction-release-blocker.js";
+import {
+  EmbeddingReadinessTracker,
+  runEmbeddingReadinessPass
+} from "./embedding-readiness.js";
 
 const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
 
@@ -155,6 +159,7 @@ export async function runLongMemEvalCrossQuestion(
       ? { allowLiveExtraction: true }
       : undefined
   );
+  const embeddingReadiness = new EmbeddingReadinessTracker();
 
   try {
     for (let qi = 0; qi < window.length; qi++) {
@@ -223,8 +228,21 @@ export async function runLongMemEvalCrossQuestion(
         // breaking ON/OFF comparability and slowing ON ~15x. The backfill
         // handler embeds the whole workspace hot corpus (every prior question's
         // accumulated seeds), so the cross-question readiness intent holds.
-        // see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
-        await daemon.runtime.runGardenEmbeddingBackfillPass(daemon.workspaceId);
+        // invariant: this pass is the ONLY embedding-readiness mechanism for the
+        // crossquestion variant (no setup-time warmEmbeddingCache gate), so a
+        // benign skip must not kill the remaining window, but an unresolved pass
+        // must surface a run-level integrity signal rather than degrade silently.
+        // see also:
+        //   apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
+        //   apps/bench-runner/src/longmemeval/embedding-readiness.ts
+        embeddingReadiness.record(
+          await runEmbeddingReadinessPass({
+            runPass: () =>
+              daemon.runtime.runGardenEmbeddingBackfillPass(daemon.workspaceId),
+            workspaceId: daemon.workspaceId,
+            questionId: question.question_id
+          })
+        );
       }
 
       const answerSessionSet = new Set(question.answer_session_ids);
@@ -363,6 +381,7 @@ export async function runLongMemEvalCrossQuestion(
           `R@5=${hitAt5 ? "✓" : "✗"} pool=${sidecar.size}\n`
       );
     }
+    embeddingReadiness.finalize();
     // Disclose which seed path ran: official_api_compile (production garden
     // extraction) vs no_credentials_fallback (degraded full-turn single-fact).
     process.stdout.write(
