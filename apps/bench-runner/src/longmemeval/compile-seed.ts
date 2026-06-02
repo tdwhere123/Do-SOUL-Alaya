@@ -665,17 +665,42 @@ export function createGardenHttpExtractor(
         let timedOut = false;
         const budgetMs = input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS;
         const startedAt = Date.now();
-        const timer = setTimeout(() => {
+        // invariant: abort alone is NOT enough. On Node 24 a stalled undici
+        // socket does NOT honor controller.abort(): the timer fires, abort() is
+        // called, but `await fetchImpl(...)` never settles and the worker hangs
+        // forever (the repeated 500q extraction-fill wedge). `rejectOnTimeout`
+        // lets the timers REJECT a settlement promise that we race against the
+        // fetch, so the attempt settles within budget even when the fetch
+        // ignores the abort. abort() is still called so abort-aware fetches
+        // cancel cleanly and free the socket. The rejection carries `timedOut`
+        // so it routes through the existing failure_timeout classification
+        // below exactly as a real timer-driven abort would.
+        // cross-file: this MUST stay behaviorally identical to
+        // packages/soul/src/garden/wall-clock-timeout.ts withWallClockTimeout —
+        // the two transports diverged once and that divergence caused this hang.
+        let rejectOnTimeout: ((error: Error) => void) | null = null;
+        const timeoutSettlement = new Promise<never>((_resolve, reject) => {
+          rejectOnTimeout = reject;
+        });
+        const fireTimeout = (): void => {
+          if (timedOut) {
+            return;
+          }
           timedOut = true;
           controller.abort();
-        }, budgetMs);
+          rejectOnTimeout?.(
+            new Error(
+              `garden extraction transport stalled past ${budgetMs}ms budget`
+            )
+          );
+        };
+        const timer = setTimeout(fireTimeout, budgetMs);
         // invariant: wall-clock fallback. setTimeout is paused during host
         // suspend; setInterval catches up on resume and the elapsed check
         // detects budget overrun within one tick.
         const wallClockTimer = setInterval(() => {
           if (Date.now() - startedAt >= budgetMs) {
-            timedOut = true;
-            controller.abort();
+            fireTimeout();
           }
         }, EXTRACTION_WALL_CLOCK_TICK_MS);
         const onOperatorAbort = (): void => controller.abort();
@@ -687,7 +712,7 @@ export function createGardenHttpExtractor(
           }
         }
         try {
-          const response = await fetchImpl(`${config.providerUrl}/chat/completions`, {
+          const fetchPromise = fetchImpl(`${config.providerUrl}/chat/completions`, {
             method: "POST",
             headers: {
               "content-type": "application/json",
@@ -704,6 +729,11 @@ export function createGardenHttpExtractor(
             }),
             signal: controller.signal
           });
+          // invariant: if the timeout backstop wins the race the abandoned
+          // fetch may still reject later (socket finally errors); a no-op catch
+          // keeps that late rejection from surfacing as an unhandledRejection.
+          fetchPromise.catch(() => {});
+          const response = await Promise.race([fetchPromise, timeoutSettlement]);
           if (!response.ok) {
             const err = new Error(
               `garden extraction HTTP ${response.status} ${response.statusText}`

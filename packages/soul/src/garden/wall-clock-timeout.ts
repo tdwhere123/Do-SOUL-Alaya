@@ -15,6 +15,16 @@
 // Both timers feed the SAME AbortController so the caller cannot observe a
 // race between them; the first to fire wins and the promise rejects with a
 // WallClockTimeoutError.
+//
+// invariant: the outer settlement is a Promise.race between `fn(signal)` and a
+// settlement promise the timers REJECT — abort alone is NOT enough. On Node 24
+// a stalled undici socket does NOT honor controller.abort(): the timer fires,
+// abort() is called, but `await fn(signal)` never settles and the caller hangs
+// forever. The race guarantees the outer promise settles on timeout even when
+// the inner fetch ignores the abort. abort() is still called (so abort-aware
+// fetches cancel cleanly and free the socket); the race is the safety net for
+// the transport phases where the abort cannot terminate the stall.
+// see also: packages/core/src/embedding-recall-service.ts raceFetchAgainstBackstop
 
 const WALL_CLOCK_TICK_MS = 5_000;
 
@@ -108,6 +118,18 @@ export async function withWallClockTimeout<T>(
     }
   }
 
+  // invariant: the timeout settlement promise NEVER resolves; it only rejects
+  // when `fire()` runs. Racing it against `fn(signal)` is what guarantees the
+  // outer promise settles even if the inner fetch ignores the abort (the
+  // Node 24 stalled-undici case). Its rejection is a WallClockTimeoutError so
+  // it flows through the SAME catch-rewrap below; the timeout fields are read
+  // from `trigger` / `elapsedAtTrigger` set by `fire()` (so a wall-clock
+  // trigger still surfaces its real elapsed, not the rejection-site value).
+  let rejectOnTimeout: ((error: WallClockTimeoutError) => void) | null = null;
+  const timeoutSettlement = new Promise<never>((_resolve, reject) => {
+    rejectOnTimeout = reject;
+  });
+
   const fire = (cause: "monotonic" | "wall_clock"): void => {
     if (controller.signal.aborted) {
       return;
@@ -115,6 +137,9 @@ export async function withWallClockTimeout<T>(
     trigger = cause;
     elapsedAtTrigger = nowFn() - startedAt;
     controller.abort();
+    rejectOnTimeout?.(
+      new WallClockTimeoutError(options.budgetMs, elapsedAtTrigger, cause)
+    );
   };
 
   monotonicHandle = setTimeoutFn(() => fire("monotonic"), options.budgetMs);
@@ -125,7 +150,13 @@ export async function withWallClockTimeout<T>(
   }, WALL_CLOCK_TICK_MS);
 
   try {
-    return await fn(controller.signal);
+    const inner = fn(controller.signal);
+    // invariant: if the timeout backstop wins the race, the abandoned `inner`
+    // promise may still reject later (e.g. the socket finally errors). Attach a
+    // no-op catch so that late rejection does not surface as an
+    // unhandledRejection and crash the process.
+    inner.catch(() => {});
+    return await Promise.race([inner, timeoutSettlement]);
   } catch (error) {
     // Distinguish OUR timeout from any other rejection. If `trigger` is set,
     // our controller aborted the inner; rewrap as WallClockTimeoutError so

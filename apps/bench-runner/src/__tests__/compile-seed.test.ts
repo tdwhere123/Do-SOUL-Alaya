@@ -1586,6 +1586,47 @@ describe("createGardenHttpExtractor retry policy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  // invariant: root-cause regression. The previous test's fetch rejects when
+  // its abort signal fires — i.e. it is abort-AWARE. The real wedge was a
+  // STALLED undici socket that ignores controller.abort() on Node 24: the
+  // timer fires, abort() is called, but the fetch promise never settles, so
+  // `await fetchImpl(...)` hangs forever and the worker pool wedges with
+  // failures=0. The Promise.race backstop must reject the attempt on the
+  // timer even though this fetch ignores its signal. WITHOUT the fix this
+  // test hangs until the vitest timeout; WITH the fix it surfaces
+  // failure_timeout within budget.
+  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  it("settles a never-resolving fetch that ignores its abort signal via the timeout backstop", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      // Never settles and never reads the signal — the stalled-socket shape.
+      .mockImplementation(() => new Promise<Response>(() => {}));
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({
+        systemPrompt: "s",
+        userPrompt: "t",
+        timeoutMs: 20
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const benchRetry = (thrown as {
+      benchRetry?: { retryCount: number; retryClassification: string };
+    }).benchRetry;
+    expect(benchRetry?.retryClassification).toBe("failure_timeout");
+    // 2 = first attempt + 1 timeout retry (BENCH_HTTP_MAX_TIMEOUT_RETRIES);
+    // each attempt is forced to settle by the backstop rather than hanging.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("does NOT abort a fetch that resolves within the timeout budget", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
       makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })

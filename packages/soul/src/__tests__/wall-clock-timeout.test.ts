@@ -134,6 +134,105 @@ describe("withWallClockTimeout", () => {
     );
   });
 
+  it("rejects with WallClockTimeoutError when fn never settles AND ignores abort", async () => {
+    // Root-cause regression: on Node 24 a stalled undici socket does NOT honor
+    // controller.abort(), so a fetch that ignores its signal would leave
+    // `await fn(signal)` pending forever — the worker hangs, the catch never
+    // runs, the pool wedges. The Promise.race backstop must make the OUTER
+    // promise reject on timeout even though the inner promise neither resolves
+    // nor reacts to the abort. WITHOUT the fix this test hangs until the vitest
+    // test timeout; WITH the fix it rejects promptly with WallClockTimeoutError.
+    const setTimeoutMock = (handler: () => void) => {
+      queueMicrotask(handler);
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    };
+    const noopInterval = (() => 0) as unknown as typeof setInterval;
+    const noopClear = (() => undefined) as (handle: unknown) => void;
+
+    let thrown: unknown = null;
+    try {
+      await withWallClockTimeout(
+        // Deliberately ignores the abort signal and never settles — the exact
+        // stalled-socket shape controller.abort() cannot terminate.
+        () => new Promise<string>(() => {}),
+        { budgetMs: 60_000 },
+        {
+          setTimeoutImpl: setTimeoutMock as unknown as (
+            h: () => void,
+            ms: number
+          ) => ReturnType<typeof setTimeout>,
+          clearTimeoutImpl: noopClear as (
+            handle: ReturnType<typeof setTimeout>
+          ) => void,
+          setIntervalImpl: noopInterval as unknown as (
+            h: () => void,
+            ms: number
+          ) => ReturnType<typeof setInterval>,
+          clearIntervalImpl: noopClear as (
+            handle: ReturnType<typeof setInterval>
+          ) => void
+        }
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(WallClockTimeoutError);
+    expect((thrown as WallClockTimeoutError).trigger).toBe("monotonic");
+    expect((thrown as WallClockTimeoutError).budgetMs).toBe(60_000);
+  });
+
+  it("rejects with wall_clock trigger when a stalled fn ignores abort after suspend", async () => {
+    // Same stalled-socket shape as above but the monotonic timer never fires
+    // (host suspend pauses libuv); the setInterval tick after resume detects
+    // the elapsed budget and the backstop rejects with the wall_clock trigger.
+    const noopTimeout = (() => 0) as unknown as typeof setTimeout;
+    const noopClear = (() => undefined) as (handle: unknown) => void;
+    let nowValue = 1_000_000;
+    const nowMock = () => nowValue;
+    let intervalHandler: (() => void) | null = null;
+    const setIntervalMock = (handler: () => void) => {
+      intervalHandler = handler;
+      // Fire the resume tick on a macrotask so fn() is in flight first.
+      setTimeout(() => {
+        nowValue += 90_000;
+        intervalHandler?.();
+      }, 0);
+      return 0 as unknown as ReturnType<typeof setInterval>;
+    };
+
+    let thrown: unknown = null;
+    try {
+      await withWallClockTimeout(
+        () => new Promise<string>(() => {}),
+        { budgetMs: 60_000 },
+        {
+          now: nowMock,
+          setTimeoutImpl: noopTimeout as unknown as (
+            h: () => void,
+            ms: number
+          ) => ReturnType<typeof setTimeout>,
+          clearTimeoutImpl: noopClear as (
+            handle: ReturnType<typeof setTimeout>
+          ) => void,
+          setIntervalImpl: setIntervalMock as unknown as (
+            h: () => void,
+            ms: number
+          ) => ReturnType<typeof setInterval>,
+          clearIntervalImpl: noopClear as (
+            handle: ReturnType<typeof setInterval>
+          ) => void
+        }
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(WallClockTimeoutError);
+    expect((thrown as WallClockTimeoutError).trigger).toBe("wall_clock");
+    expect((thrown as WallClockTimeoutError).elapsedMs).toBeGreaterThanOrEqual(
+      60_000
+    );
+  });
+
   it("propagates operator abort without remapping to WallClockTimeoutError", async () => {
     const noopTimeout = (() => 0) as unknown as typeof setTimeout;
     const noopInterval = (() => 0) as unknown as typeof setInterval;
