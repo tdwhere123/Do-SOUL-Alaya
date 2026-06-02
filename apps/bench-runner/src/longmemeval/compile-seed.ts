@@ -675,12 +675,14 @@ export function createGardenHttpExtractor(
         // cancel cleanly and free the socket. The rejection carries `timedOut`
         // so it routes through the existing failure_timeout classification
         // below exactly as a real timer-driven abort would.
-        // cross-file: this MUST stay behaviorally identical to
-        // packages/soul/src/garden/wall-clock-timeout.ts withWallClockTimeout —
-        // the two transports diverged once and that divergence caused this hang.
-        let rejectOnTimeout: ((error: Error) => void) | null = null;
+        // cross-file: this MUST stay behaviorally identical in timeout
+        // *semantics* to packages/soul/src/garden/wall-clock-timeout.ts
+        // withWallClockTimeout (the two transports diverged once and that
+        // divergence caused this hang); the bench surfaces an untyped Error
+        // since classification keys on the `timedOut` flag, not the error type.
+        let rejectSettlement: ((error: Error) => void) | null = null;
         const timeoutSettlement = new Promise<never>((_resolve, reject) => {
-          rejectOnTimeout = reject;
+          rejectSettlement = reject;
         });
         const fireTimeout = (): void => {
           if (timedOut) {
@@ -688,13 +690,18 @@ export function createGardenHttpExtractor(
           }
           timedOut = true;
           controller.abort();
-          rejectOnTimeout?.(
+          rejectSettlement?.(
             new Error(
               `garden extraction transport stalled past ${budgetMs}ms budget`
             )
           );
         };
+        // invariant: .unref?.() so a live backstop timer does not pin the
+        // event loop / block process exit mid-extract; finally-clear + the
+        // awaiting caller make it redundant on the happy path.
+        // see also: packages/core/src/embedding-recall-service.ts:1279,1366
         const timer = setTimeout(fireTimeout, budgetMs);
+        timer.unref?.();
         // invariant: wall-clock fallback. setTimeout is paused during host
         // suspend; setInterval catches up on resume and the elapsed check
         // detects budget overrun within one tick.
@@ -703,10 +710,21 @@ export function createGardenHttpExtractor(
             fireTimeout();
           }
         }, EXTRACTION_WALL_CLOCK_TICK_MS);
-        const onOperatorAbort = (): void => controller.abort();
+        wallClockTimer.unref?.();
+        // invariant: an operator abort MUST settle the race too — abort() alone
+        // does not settle for an abort-ignoring stalled socket, so without this
+        // the attempt would wait the full budget and then misclassify as
+        // failure_timeout. We do NOT set `timedOut`, so the catch routes this
+        // through the failure_aborted branch (never retried), surfacing the
+        // cancel intent promptly. cross-file: withWallClockTimeout
+        // settleOperatorAbort.
+        const onOperatorAbort = (): void => {
+          controller.abort();
+          rejectSettlement?.(new Error("garden extraction operator aborted"));
+        };
         if (input.abortSignal !== undefined) {
           if (input.abortSignal.aborted) {
-            controller.abort();
+            onOperatorAbort();
           } else {
             input.abortSignal.addEventListener("abort", onOperatorAbort);
           }

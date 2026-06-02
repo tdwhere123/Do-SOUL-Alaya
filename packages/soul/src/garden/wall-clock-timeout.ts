@@ -41,6 +41,19 @@ export class WallClockTimeoutError extends Error {
   }
 }
 
+// invariant: an operator abort settles the race with THIS error (NOT a
+// WallClockTimeoutError) only when the inner fn ignores the abort and never
+// settles on its own. When the inner fn honors the abort it rejects first and
+// wins the race, so its original abort error is surfaced instead. Either way
+// the surfaced error is never a WallClockTimeoutError for an operator abort.
+// see also: withWallClockTimeout operatorAbortListener
+class OperatorAbortError extends Error {
+  public constructor() {
+    super("Operator aborted the wall-clock-bounded call.");
+    this.name = "OperatorAbortError";
+  }
+}
+
 export interface WallClockTimeoutDeps {
   // Test seam: defaults to Date.now (wall clock).
   readonly now?: () => number;
@@ -104,31 +117,47 @@ export async function withWallClockTimeout<T>(
   let trigger: "monotonic" | "wall_clock" | null = null;
   let elapsedAtTrigger = 0;
 
-  const operatorAbortListener = (): void => {
-    // Operator abort: forward to inner; outer promise will reject with
-    // whatever the inner throws (the abort error), NOT a WallClockTimeoutError.
+  // invariant: the settlement promise NEVER resolves; it only rejects when a
+  // timeout fires (`fire()`) OR the operator aborts (`settleOperatorAbort()`).
+  // Racing it against `fn(signal)` is what guarantees the outer promise settles
+  // even if the inner fetch ignores the abort (the Node 24 stalled-undici
+  // case). A timeout rejection is a WallClockTimeoutError so it flows through
+  // the SAME catch-rewrap below; the timeout fields are read from `trigger` /
+  // `elapsedAtTrigger` set by `fire()` (so a wall-clock trigger still surfaces
+  // its real elapsed, not the rejection-site value).
+  // invariant: every path that calls controller.abort() MUST also settle this
+  // promise — otherwise a stalled fn that ignores its signal leaves the race
+  // unsettled and the outer await hangs forever. The operator-abort paths
+  // settle via OperatorAbortError so the catch below surfaces it as the abort
+  // (NOT a WallClockTimeoutError); when the inner fn honors the abort it
+  // rejects first and wins the race, surfacing its own original error instead.
+  let rejectSettlement:
+    | ((error: WallClockTimeoutError | OperatorAbortError) => void)
+    | null = null;
+  const timeoutSettlement = new Promise<never>((_resolve, reject) => {
+    rejectSettlement = reject;
+  });
+
+  const settleOperatorAbort = (): void => {
     controller.abort();
+    rejectSettlement?.(new OperatorAbortError());
+  };
+
+  const operatorAbortListener = (): void => {
+    // Operator abort: forward to inner AND settle the race. The outer promise
+    // surfaces the inner's original abort error if the inner honors the abort
+    // (it rejects first), otherwise the OperatorAbortError above — NEVER a
+    // WallClockTimeoutError.
+    settleOperatorAbort();
   };
   const operator = options.operatorAbortSignal;
   if (operator !== undefined) {
     if (operator.aborted) {
-      controller.abort();
+      settleOperatorAbort();
     } else {
       operator.addEventListener("abort", operatorAbortListener);
     }
   }
-
-  // invariant: the timeout settlement promise NEVER resolves; it only rejects
-  // when `fire()` runs. Racing it against `fn(signal)` is what guarantees the
-  // outer promise settles even if the inner fetch ignores the abort (the
-  // Node 24 stalled-undici case). Its rejection is a WallClockTimeoutError so
-  // it flows through the SAME catch-rewrap below; the timeout fields are read
-  // from `trigger` / `elapsedAtTrigger` set by `fire()` (so a wall-clock
-  // trigger still surfaces its real elapsed, not the rejection-site value).
-  let rejectOnTimeout: ((error: WallClockTimeoutError) => void) | null = null;
-  const timeoutSettlement = new Promise<never>((_resolve, reject) => {
-    rejectOnTimeout = reject;
-  });
 
   const fire = (cause: "monotonic" | "wall_clock"): void => {
     if (controller.signal.aborted) {
@@ -137,17 +166,23 @@ export async function withWallClockTimeout<T>(
     trigger = cause;
     elapsedAtTrigger = nowFn() - startedAt;
     controller.abort();
-    rejectOnTimeout?.(
+    rejectSettlement?.(
       new WallClockTimeoutError(options.budgetMs, elapsedAtTrigger, cause)
     );
   };
 
+  // invariant: .unref?.() so a live backstop timer does not pin the event loop
+  // and block process exit mid-extract. finally-clear + awaiting callers make
+  // this redundant on the happy path; it is the safety margin for an abrupt
+  // exit. see also: packages/core/src/embedding-recall-service.ts:1279,1366
   monotonicHandle = setTimeoutFn(() => fire("monotonic"), options.budgetMs);
+  monotonicHandle.unref?.();
   wallClockHandle = setIntervalFn(() => {
     if (nowFn() - startedAt >= options.budgetMs) {
       fire("wall_clock");
     }
   }, WALL_CLOCK_TICK_MS);
+  wallClockHandle.unref?.();
 
   try {
     const inner = fn(controller.signal);

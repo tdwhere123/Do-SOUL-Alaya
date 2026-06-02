@@ -1627,6 +1627,53 @@ describe("createGardenHttpExtractor retry policy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  // invariant: an operator abort (input.abortSignal) must settle the attempt
+  // PROMPTLY and classify failure_aborted (never retried) even when the fetch
+  // ignores its abort signal and never settles. abort() alone does not settle
+  // for that stalled-socket shape, so without the settlement reject the attempt
+  // would wait the full budget and then misclassify as failure_timeout.
+  // cross-file: packages/soul/src/garden/wall-clock-timeout.ts settleOperatorAbort.
+  it("settles failure_aborted (no retry) on operator abort even when the fetch ignores its signal", async () => {
+    const operator = new AbortController();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      // Never settles and never reads the signal — the abort-ignoring stalled
+      // socket. Without the operator-abort settlement this hangs to the full
+      // budget; with it the race settles as soon as the operator aborts.
+      .mockImplementation(() => {
+        // Abort mid-flight, after the attempt has wired its listener.
+        queueMicrotask(() => operator.abort());
+        return new Promise<Response>(() => {});
+      });
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({
+        systemPrompt: "s",
+        userPrompt: "t",
+        // Large budget so a failure_timeout would only appear after 60s; the
+        // test settling promptly proves the operator-abort settlement fired.
+        timeoutMs: 60_000,
+        abortSignal: operator.signal
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const benchRetry = (thrown as {
+      benchRetry?: { retryCount: number; retryClassification: string };
+    }).benchRetry;
+    expect(benchRetry?.retryClassification).toBe("failure_aborted");
+    // Operator abort is never retried: exactly one attempt, no backoff sleep.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
   it("does NOT abort a fetch that resolves within the timeout budget", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
       makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })

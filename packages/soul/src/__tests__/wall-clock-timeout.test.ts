@@ -274,4 +274,102 @@ describe("withWallClockTimeout", () => {
     expect((thrown as Error).message).toBe("inner-saw-operator-abort");
     expect(thrown).not.toBeInstanceOf(WallClockTimeoutError);
   });
+
+  it("settles (not hangs) when operator pre-aborts before budget AND fn ignores abort and never settles", async () => {
+    // I-1 root-cause regression. Operator aborts BEFORE the budget fires, then
+    // the inner fn is the abort-ignoring stalled socket (the exact Node-24
+    // shape this helper targets) that never settles. Before the fix, fire()'s
+    // `signal.aborted` guard returned WITHOUT rejecting the settlement, so
+    // Promise.race([inner, settlement]) never settled and the outer await hung
+    // forever. The operator-abort path must settle the race with an
+    // abort-flavored error — NOT a WallClockTimeoutError — within budget.
+    // WITHOUT the fix this test hangs until the vitest test timeout.
+    const setTimeoutMock = (handler: () => void) => {
+      // Defer the monotonic fire to a macrotask so the operator pre-abort and
+      // the stalled fn are both in flight first; even when it fires it must
+      // hit the guard and NOT be what settles the race.
+      setTimeout(handler, 0);
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    };
+    const noopInterval = (() => 0) as unknown as typeof setInterval;
+    const noopClear = (() => undefined) as (handle: unknown) => void;
+    const operator = new AbortController();
+    operator.abort();
+
+    let thrown: unknown = null;
+    try {
+      await withWallClockTimeout(
+        // Ignores the abort signal and never settles — the stalled-socket
+        // shape controller.abort() cannot terminate.
+        () => new Promise<string>(() => {}),
+        { budgetMs: 60_000, operatorAbortSignal: operator.signal },
+        {
+          setTimeoutImpl: setTimeoutMock as unknown as (
+            h: () => void,
+            ms: number
+          ) => ReturnType<typeof setTimeout>,
+          clearTimeoutImpl: noopClear as (
+            handle: ReturnType<typeof setTimeout>
+          ) => void,
+          setIntervalImpl: noopInterval as unknown as (
+            h: () => void,
+            ms: number
+          ) => ReturnType<typeof setInterval>,
+          clearIntervalImpl: noopClear as (
+            handle: ReturnType<typeof setInterval>
+          ) => void
+        }
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    // Settled (not a hang) with an abort-flavored error, never remapped to a
+    // WallClockTimeoutError for an operator abort.
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBeInstanceOf(WallClockTimeoutError);
+    expect((thrown as Error).name).toBe("OperatorAbortError");
+  });
+
+  it("settles when operator aborts MID-FLIGHT and the in-flight fn ignores abort and never settles", async () => {
+    // The listener path (operator not pre-aborted): fn starts, operator aborts
+    // mid-flight, fn ignores the abort and never settles. The mid-flight
+    // listener must settle the race with the abort-flavored error too.
+    const noopTimeout = (() => 0) as unknown as typeof setTimeout;
+    const noopInterval = (() => 0) as unknown as typeof setInterval;
+    const noopClear = (() => undefined) as (handle: unknown) => void;
+    const operator = new AbortController();
+
+    let thrown: unknown = null;
+    try {
+      await withWallClockTimeout(
+        () =>
+          new Promise<string>(() => {
+            // Abort mid-flight, after fn is in flight, on a microtask.
+            queueMicrotask(() => operator.abort());
+          }),
+        { budgetMs: 60_000, operatorAbortSignal: operator.signal },
+        {
+          setTimeoutImpl: noopTimeout as unknown as (
+            h: () => void,
+            ms: number
+          ) => ReturnType<typeof setTimeout>,
+          clearTimeoutImpl: noopClear as (
+            handle: ReturnType<typeof setTimeout>
+          ) => void,
+          setIntervalImpl: noopInterval as unknown as (
+            h: () => void,
+            ms: number
+          ) => ReturnType<typeof setInterval>,
+          clearIntervalImpl: noopClear as (
+            handle: ReturnType<typeof setInterval>
+          ) => void
+        }
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBeInstanceOf(WallClockTimeoutError);
+    expect((thrown as Error).name).toBe("OperatorAbortError");
+  });
 });
