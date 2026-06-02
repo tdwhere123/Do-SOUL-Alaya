@@ -739,6 +739,13 @@ export function createGardenHttpExtractor(
             body: JSON.stringify({
               model: config.model,
               temperature: 0,
+              // invariant: stream:true is REQUIRED, not an optimization. yunwu.ai
+              // + gpt-5.4-mini returns chat/completions content ONLY as an SSE
+              // delta stream when stream:true; a non-stream request answers with
+              // an EMPTY SSE body (`data: [DONE]\n\n` only), which permanently
+              // wedged the 500q extraction-fill. We parse the SSE body below.
+              // see: .do-it/findings/garden-sse-streaming-rootcause.md
+              stream: true,
               response_format: { type: "json_object" },
               messages: [
                 { role: "system", content: input.systemPrompt },
@@ -759,14 +766,56 @@ export function createGardenHttpExtractor(
             (err as { status?: number }).status = response.status;
             throw err;
           }
-          const payload = (await response.json()) as {
-            readonly choices?: readonly {
-              readonly message?: { readonly content?: unknown };
-            }[];
-          };
-          const content = payload.choices?.[0]?.message?.content;
+          // invariant: the body read MUST stay under the SAME wall-clock
+          // backstop as the fetch. `response.text()` on a mid-stream STALLED
+          // socket can hang exactly like the original abort-ignoring fetch
+          // hang (commits a2d3047 + 34645f1); racing it against
+          // timeoutSettlement keeps the attempt inside budget. The abandoned
+          // body-read promise gets a no-op catch so a late rejection does not
+          // surface as an unhandledRejection (same pattern as fetchPromise).
+          const bodyTextPromise = response.text();
+          bodyTextPromise.catch(() => {});
+          const bodyText = await Promise.race([
+            bodyTextPromise,
+            timeoutSettlement
+          ]);
+          const content = extractContentFromChatCompletionBody(
+            bodyText,
+            response.headers.get("content-type")
+          );
           if (typeof content !== "string" || content.trim().length === 0) {
             throw new Error("garden extraction returned no content");
+          }
+          // invariant: a NON-EMPTY but unparseable body must fail loud, NEVER
+          // cache. A provider/proxy that delivers a PARTIAL SSE body then
+          // cleanly closes the socket makes `response.text()` RESOLVE with the
+          // partial bytes (no stall -> the wall-clock backstop does not fire);
+          // the SSE parser keeps the valid early deltas and silently skips the
+          // truncated final frame, yielding non-empty-but-invalid content like
+          // `{"signals":[{"a"`. The empty-content guard passes (non-empty), so
+          // without this gate the poison body returns success and
+          // createCachingSignalExtractor writes it to a git-tracked cache shard
+          // as a permanent 0-seed "success". We validate through the SAME
+          // downstream consumer the seed path uses (parseOfficialApiSignals,
+          // which strict-parses then element-wise salvages a recoverable
+          // envelope and THROWS only on a genuinely unparseable one) so a
+          // merely-recoverable body is not spuriously rejected and validity
+          // stays consistent across paths. This mirrors production
+          // pi-mono-extractor's parseOrRecoverJson -> invalid_json throw. The
+          // throw routes through the catch below: no HTTP status -> unknown
+          // transport -> classifyBenchHttpError marks it retryable, so it
+          // retries then fails loud (never cached).
+          // see: .do-it/findings/garden-sse-streaming-rootcause.md
+          try {
+            parseOfficialApiSignals(content);
+          } catch (parseError) {
+            throw new Error(
+              `garden extraction returned unparseable content: ${
+                parseError instanceof Error
+                  ? parseError.message
+                  : String(parseError)
+              }`
+            );
           }
           return {
             rawJson: content,
@@ -832,6 +881,78 @@ export function createGardenHttpExtractor(
       );
     }
   };
+}
+
+// invariant: OpenAI-compatible chat/completions body parser shared by the
+// stream and back-compat non-stream shapes. Pure (no fetch) so it is unit
+// testable. yunwu.ai + gpt-5.4-mini now answers ONLY with SSE delta chunks
+// (`data: {...delta...}\n\n ... data: [DONE]\n\n`); a compliant provider may
+// still answer with plain JSON (`choices[0].message.content`). We accept
+// both. A blank line or SSE comment (`:`) is ignored; a chunk that fails
+// JSON.parse is skipped defensively (partial keep-alive noise) rather than
+// thrown — the empty-content guard in the caller still classifies a
+// content-free stream as a failure, so silent corruption cannot pass.
+// see: .do-it/findings/garden-sse-streaming-rootcause.md
+export function extractContentFromChatCompletionBody(
+  bodyText: string,
+  contentType: string | null
+): string {
+  const trimmedBody = bodyText.trim();
+  const isSse =
+    (contentType !== null &&
+      contentType.toLowerCase().includes("text/event-stream")) ||
+    trimmedBody.startsWith("data:");
+  if (!isSse) {
+    // Back-compat: a compliant provider returns plain JSON.
+    const payload = JSON.parse(bodyText) as {
+      readonly choices?: readonly {
+        readonly message?: { readonly content?: unknown };
+      }[];
+    };
+    const content = payload.choices?.[0]?.message?.content;
+    return typeof content === "string" ? content : "";
+  }
+  let accumulated = "";
+  for (const rawLine of bodyText.split("\n")) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith(":")) {
+      // Blank line (SSE event boundary) or comment / keep-alive ping.
+      continue;
+    }
+    if (!line.startsWith("data:")) {
+      continue;
+    }
+    const chunkText = line.slice("data:".length).trim();
+    if (chunkText === "[DONE]") {
+      break;
+    }
+    let chunk: {
+      readonly choices?: readonly {
+        readonly delta?: { readonly content?: unknown };
+        readonly message?: { readonly content?: unknown };
+      }[];
+    };
+    try {
+      chunk = JSON.parse(chunkText) as typeof chunk;
+    } catch {
+      // Partial / non-JSON keep-alive noise — skip defensively. The caller's
+      // empty-content guard is the real failure gate.
+      continue;
+    }
+    const choice = chunk.choices?.[0];
+    const deltaContent = choice?.delta?.content;
+    const messageContent = choice?.message?.content;
+    if (typeof deltaContent === "string") {
+      accumulated += deltaContent;
+    } else if (typeof messageContent === "string") {
+      // Tolerate a chunk carrying a full message.content (some providers emit
+      // the whole assistant message in a single SSE frame instead of deltas).
+      // Prefer delta when both are present in one frame so a provider that
+      // echoes the running message alongside each delta is not double-counted.
+      accumulated += messageContent;
+    }
+  }
+  return accumulated;
 }
 
 // invariant: surface retry_classification + retry_count via the .cause chain
