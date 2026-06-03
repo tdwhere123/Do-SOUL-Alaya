@@ -119,6 +119,17 @@ export interface MemoryServiceMemoryEntryRepoPort {
   ): Promise<Readonly<MemoryEntry>>;
   archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>>;
   hardDeleteTombstoned?(objectId: string): Promise<void>;
+  // invariant: the GATED autonomous-tombstone authority (R3d). Writes the
+  // durable forget_disposition marker and terminalizes a DORMANT row only.
+  autonomousTombstone?(input: {
+    readonly objectId: string;
+    readonly disposition: MemoryEntry["forget_disposition"];
+    readonly dispositionRef: string | null;
+    readonly updatedAt: string;
+  }): Promise<Readonly<MemoryEntry>>;
+  // invariant: the GATED autonomous physical-delete authority (R3d). Removes a
+  // tombstoned + past-grace row ONLY when it carries a non-null disposition.
+  hardDeleteTombstonedWithDisposition?(objectId: string): Promise<void>;
 }
 
 export interface MemoryServiceEvidenceServicePort {
@@ -549,6 +560,148 @@ export class MemoryService {
     });
 
     await hardDeleteTombstoned(parsedObjectId);
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
+  }
+
+  /**
+   * GATED autonomous tombstone (R3d): move a DORMANT memory to tombstoned with a
+   * durable forget_disposition marker, audited via SOUL_MEMORY_STATE_CHANGED.
+   *
+   * SAFE-BY-CONSTRUCTION: the caller (the Garden disposition sweep) has already
+   * verified the disposition — `compressed` means content is preserved in a live
+   * capsule that references this member (dispositionRef = capsule id);
+   * `judged_useless` means the mechanical importance gate cleared it. This method
+   * re-asserts the precondition shape (compressed requires a ref, judged_useless
+   * forbids one) and refuses to terminalize anything but a dormant row (the repo
+   * UPDATE is guarded on lifecycle_state='dormant'). A null/absent disposition is
+   * impossible to pass here.
+   */
+  public async autonomousTombstone(
+    objectId: string,
+    disposition: NonNullable<MemoryEntry["forget_disposition"]>,
+    dispositionRef: string | null,
+    reason: string,
+    causedBy: TransitionCausedBy
+  ): Promise<Readonly<MemoryEntry>> {
+    const parsedObjectId = parseObjectId(objectId);
+    const parsedReason = parseReason(reason);
+    const parsedCausedBy = parseTransitionCausedBy(causedBy);
+
+    if (disposition === "compressed" && (dispositionRef === null || dispositionRef.trim().length === 0)) {
+      throw new CoreError("VALIDATION", "compressed disposition requires a live synthesis-capsule ref");
+    }
+    if (disposition === "judged_useless" && dispositionRef !== null) {
+      throw new CoreError("VALIDATION", "judged_useless disposition must not carry a disposition ref");
+    }
+
+    const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
+    if (existing === null) {
+      throw new CoreError("NOT_FOUND", "Memory entry not found");
+    }
+    if (existing.lifecycle_state !== "dormant") {
+      throw new CoreError(
+        "VALIDATION",
+        "Only a dormant memory may be autonomously tombstoned"
+      );
+    }
+
+    const autonomousTombstone = this.dependencies.memoryEntryRepo.autonomousTombstone;
+    if (autonomousTombstone === undefined) {
+      throw new CoreError("CONFLICT", "Autonomous tombstone port is not available");
+    }
+
+    const occurredAt = this.now();
+    const event = await this.dependencies.eventLogRepo.append({
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedCausedBy,
+      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        from_state: existing.lifecycle_state,
+        to_state: "tombstone",
+        // reason_code carries the disposition + caller rationale so the durable
+        // EventLog row records WHY the autonomous tombstone was permitted.
+        reason_code: `forget_disposition=${disposition}: ${parsedReason}`,
+        caused_by: parsedCausedBy,
+        evidence_refs: dispositionRef === null ? null : [dispositionRef],
+        occurred_at: occurredAt
+      })
+    });
+
+    const updated = await autonomousTombstone({
+      objectId: parsedObjectId,
+      disposition,
+      dispositionRef,
+      updatedAt: occurredAt
+    });
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
+    return updated;
+  }
+
+  /**
+   * GATED autonomous physical removal (R3d, defense in depth): physically remove
+   * a tombstoned + past-grace row ONLY when it carries a non-null disposition.
+   * The repo restates the disposition gate in SQL; this method also re-asserts it
+   * on the loaded row so a no-disposition tombstone (e.g. human Inspector retire)
+   * can never be auto-GC'd. The human/legacy path stays on hardDeleteTombstoned.
+   */
+  public async autonomousHardDeleteTombstoned(
+    objectId: string,
+    reason: string,
+    causedBy: TransitionCausedBy
+  ): Promise<void> {
+    const parsedObjectId = parseObjectId(objectId);
+    const parsedReason = parseReason(reason);
+    const parsedCausedBy = parseTransitionCausedBy(causedBy);
+    const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
+
+    if (existing === null) {
+      throw new CoreError("NOT_FOUND", "Memory entry not found");
+    }
+    if (existing.retention_state !== "tombstoned") {
+      throw new CoreError("VALIDATION", "Only tombstoned memories can be hard-deleted");
+    }
+    if (existing.forget_disposition === null || existing.forget_disposition === undefined) {
+      throw new CoreError(
+        "VALIDATION",
+        "Autonomous hard-delete refused: tombstoned row carries no forget disposition"
+      );
+    }
+
+    const hardDeleteWithDisposition = this.dependencies.memoryEntryRepo.hardDeleteTombstonedWithDisposition;
+    if (hardDeleteWithDisposition === undefined) {
+      throw new CoreError("CONFLICT", "Disposition-gated tombstone delete port is not available");
+    }
+
+    const occurredAt = this.now();
+    const event = await this.dependencies.eventLogRepo.append({
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedCausedBy,
+      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        from_state: existing.lifecycle_state,
+        to_state: "deleted",
+        reason_code: `forget_disposition=${existing.forget_disposition}: ${parsedReason}`,
+        caused_by: parsedCausedBy,
+        evidence_refs: null,
+        occurred_at: occurredAt
+      })
+    });
+
+    await hardDeleteWithDisposition(parsedObjectId);
     await this.dependencies.runtimeNotifier.notifyEntry(event);
   }
 

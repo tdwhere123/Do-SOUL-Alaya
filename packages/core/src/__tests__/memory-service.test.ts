@@ -941,6 +941,164 @@ describe("MemoryService", () => {
     expect(notifySpy).not.toHaveBeenCalled();
   });
 
+  it("autonomousHardDeleteTombstoned REFUSES a tombstoned row that has NO disposition (defense in depth)", async () => {
+    const hardDeleteSpy = vi.fn(async () => undefined);
+    const { dependencies, appendSpy, notifySpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        // tombstoned, but forget_disposition is null (e.g. a human Inspector retire).
+        findById: vi.fn(async () =>
+          createMemoryEntry({ lifecycle_state: "tombstone", retention_state: "tombstoned" })
+        ),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        hardDeleteTombstonedWithDisposition: hardDeleteSpy
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.autonomousHardDeleteTombstoned(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "autonomous_tombstone_gc",
+        TransitionCausedBy.DETERMINISTIC_RULE
+      )
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "VALIDATION",
+      message: "Autonomous hard-delete refused: tombstoned row carries no forget disposition"
+    });
+
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(hardDeleteSpy).not.toHaveBeenCalled();
+    expect(notifySpy).not.toHaveBeenCalled();
+  });
+
+  it("autonomousHardDeleteTombstoned removes a tombstoned row that carries a disposition + audits the deletion", async () => {
+    const hardDeleteSpy = vi.fn(async () => undefined);
+    const { dependencies, appendSpy, notifySpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () =>
+          createMemoryEntry({
+            lifecycle_state: "tombstone",
+            retention_state: "tombstoned",
+            forget_disposition: "judged_useless",
+            forget_disposition_ref: null
+          })
+        ),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        hardDeleteTombstonedWithDisposition: hardDeleteSpy
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await service.autonomousHardDeleteTombstoned(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "autonomous_tombstone_gc",
+      TransitionCausedBy.DETERMINISTIC_RULE
+    );
+
+    expect(hardDeleteSpy).toHaveBeenCalledTimes(1);
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(notifySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("autonomousTombstone refuses a non-dormant row and only fires on dormant memories", async () => {
+    const tombstoneSpy = vi.fn(async () =>
+      createMemoryEntry({ lifecycle_state: "tombstone", retention_state: "tombstoned" })
+    );
+    const { dependencies, appendSpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () => createMemoryEntry({ lifecycle_state: "active" })),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        autonomousTombstone: tombstoneSpy
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.autonomousTombstone(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "judged_useless",
+        null,
+        "autonomous_forget_sweep",
+        TransitionCausedBy.DETERMINISTIC_RULE
+      )
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "VALIDATION",
+      message: "Only a dormant memory may be autonomously tombstoned"
+    });
+
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(tombstoneSpy).not.toHaveBeenCalled();
+  });
+
+  it("autonomousTombstone rejects a compressed disposition with no capsule ref", async () => {
+    const { dependencies } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () => createMemoryEntry({ lifecycle_state: "dormant" })),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        autonomousTombstone: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.autonomousTombstone(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "compressed",
+        null,
+        "autonomous_forget_sweep",
+        TransitionCausedBy.DETERMINISTIC_RULE
+      )
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "VALIDATION",
+      message: "compressed disposition requires a live synthesis-capsule ref"
+    });
+  });
+
   it("writes archive and state_changed events before persistence with consecutive revisions", async () => {
     const order: string[] = [];
     const revisions: number[] = [];

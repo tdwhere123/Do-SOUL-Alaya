@@ -63,6 +63,8 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     reinforcement_count: null,
     contradiction_count: null,
     superseded_by: null,
+    forget_disposition: null,
+    forget_disposition_ref: null,
     ...overrides
   };
 }
@@ -974,6 +976,129 @@ describe("SqliteMemoryEntryRepo", () => {
 
     await expect(repo.hardDeleteTombstoned("55555555-5555-4555-8555-555555555555")).resolves.toBeUndefined();
     await expect(repo.findById("55555555-5555-4555-8555-555555555555")).resolves.toBeNull();
+  });
+
+  it("autonomousTombstone only fires on a dormant row and writes the durable disposition", async () => {
+    const { repo } = await createRepo();
+    const dormant = createMemoryEntry({
+      object_id: "aaaaaaaa-0000-4000-8000-000000000001",
+      lifecycle_state: "dormant"
+    });
+    await repo.create(dormant);
+
+    const tombstoned = await repo.autonomousTombstone({
+      objectId: dormant.object_id,
+      disposition: "judged_useless",
+      dispositionRef: null,
+      updatedAt: "2026-03-22T00:00:00.000Z"
+    });
+    expect(tombstoned.forget_disposition).toBe("judged_useless");
+    expect(tombstoned.forget_disposition_ref).toBeNull();
+    expect(tombstoned.retention_state).toBe("tombstoned");
+    expect(tombstoned.lifecycle_state).toBe("tombstone");
+  });
+
+  it("autonomousTombstone refuses a non-dormant (active) row — recallable memory is never silently tombstoned", async () => {
+    const { repo } = await createRepo();
+    const active = createMemoryEntry({
+      object_id: "aaaaaaaa-0000-4000-8000-000000000002",
+      lifecycle_state: "active"
+    });
+    await repo.create(active);
+
+    await expect(
+      repo.autonomousTombstone({
+        objectId: active.object_id,
+        disposition: "judged_useless",
+        dispositionRef: null,
+        updatedAt: "2026-03-22T00:00:00.000Z"
+      })
+    ).rejects.toMatchObject({ name: "StorageError", code: "NOT_FOUND" });
+
+    const reloaded = await repo.findById(active.object_id);
+    expect(reloaded?.lifecycle_state).toBe("active");
+    expect(reloaded?.forget_disposition ?? null).toBeNull();
+  });
+
+  it("autonomousTombstone rejects a malformed compressed marker without a capsule ref", async () => {
+    const { repo } = await createRepo();
+    const dormant = createMemoryEntry({
+      object_id: "aaaaaaaa-0000-4000-8000-000000000003",
+      lifecycle_state: "dormant"
+    });
+    await repo.create(dormant);
+
+    await expect(
+      repo.autonomousTombstone({
+        objectId: dormant.object_id,
+        disposition: "compressed",
+        dispositionRef: null,
+        updatedAt: "2026-03-22T00:00:00.000Z"
+      })
+    ).rejects.toMatchObject({ name: "StorageError", code: "VALIDATION_FAILED" });
+  });
+
+  it("hardDeleteTombstonedWithDisposition refuses a tombstoned row that has NO disposition (defense in depth)", async () => {
+    const { repo } = await createRepo();
+    // A human-Inspector-style tombstone: retention_state tombstoned, past grace,
+    // but no forget_disposition. The autonomous GC authority must refuse it.
+    const humanTombstoned = createMemoryEntry({
+      object_id: "bbbbbbbb-0000-4000-8000-000000000001",
+      retention_state: "tombstoned",
+      lifecycle_state: "tombstone"
+    });
+    await repo.create(humanTombstoned);
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(humanTombstoned.object_id)
+    ).rejects.toMatchObject({ name: "StorageError", code: "NOT_FOUND" });
+    await expect(repo.findById(humanTombstoned.object_id)).resolves.not.toBeNull();
+  });
+
+  it("hardDeleteTombstonedWithDisposition removes a tombstoned+past-grace row that carries a disposition", async () => {
+    const { repo } = await createRepo();
+    const disposed = createMemoryEntry({
+      object_id: "bbbbbbbb-0000-4000-8000-000000000002",
+      retention_state: "tombstoned",
+      lifecycle_state: "tombstone",
+      forget_disposition: "judged_useless",
+      forget_disposition_ref: null
+    });
+    await repo.create(disposed);
+
+    await expect(
+      repo.findTombstonedMemoriesWithDisposition("workspace-1")
+    ).resolves.toEqual([expect.objectContaining({ object_id: disposed.object_id })]);
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(disposed.object_id)
+    ).resolves.toBeUndefined();
+    await expect(repo.findById(disposed.object_id)).resolves.toBeNull();
+  });
+
+  it("findTombstonedMemoriesWithDisposition excludes tombstoned rows lacking a disposition", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createMemoryEntry({
+        object_id: "cccccccc-0000-4000-8000-000000000001",
+        retention_state: "tombstoned",
+        lifecycle_state: "tombstone"
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "cccccccc-0000-4000-8000-000000000002",
+        retention_state: "tombstoned",
+        lifecycle_state: "tombstone",
+        forget_disposition: "compressed",
+        forget_disposition_ref: "capsule-9"
+      })
+    );
+
+    await expect(
+      repo.findTombstonedMemoriesWithDisposition("workspace-1")
+    ).resolves.toEqual([
+      expect.objectContaining({ object_id: "cccccccc-0000-4000-8000-000000000002" })
+    ]);
   });
 
 

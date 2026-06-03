@@ -15,7 +15,9 @@ import {
   SoulActiveConstraintSchema,
   SoulProposalCreatedPayloadSchema,
   isPathActiveForRecall,
-  type RuntimeGardenComputeConfig
+  type MemoryEntry,
+  type RuntimeGardenComputeConfig,
+  type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import {
   ArbitrationService,
@@ -164,6 +166,10 @@ import { createEdgeAutoProducerLlmPort } from "./edge-auto-producer-llm-adapter.
 import { createEdgeClassifyQueueAdapter } from "./edge-classify-queue-adapter.js";
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
+import {
+  createTombstoneDispositionSweepPort,
+  createTombstoneGcPort
+} from "./forget-disposition-ports.js";
 import { createGardenRuntime } from "./garden-runtime.js";
 import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
 import {
@@ -1394,6 +1400,23 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     eventPublisher
   });
   const healthIssueGroupRepo = new SqliteHealthIssueGroupRepo(database);
+  // invariant: the R3d terminal-forgetting authority adapter. autonomousTombstone
+  // + autonomousHardDeleteTombstoned are the audited, disposition-gated service
+  // methods; findTombstonedMemoriesWithDisposition is the disposition-gated repo
+  // query. Both delete paths refuse a row lacking a non-null forget_disposition.
+  const forgetTombstoneAuthority = {
+    autonomousTombstone: (
+      objectId: string,
+      disposition: NonNullable<MemoryEntry["forget_disposition"]>,
+      dispositionRef: string | null,
+      reason: string,
+      causedBy: TransitionCausedBy
+    ) => memoryService.autonomousTombstone(objectId, disposition, dispositionRef, reason, causedBy),
+    autonomousHardDeleteTombstoned: (objectId: string, reason: string, causedBy: TransitionCausedBy) =>
+      memoryService.autonomousHardDeleteTombstoned(objectId, reason, causedBy),
+    findTombstonedMemoriesWithDisposition: (workspaceId: string) =>
+      memoryEntryRepo.findTombstonedMemoriesWithDisposition(workspaceId)
+  };
   const gardenRuntime = createGardenRuntime({
     databaseConnection: database.connection,
     backlogThresholds: gardenBacklogThresholds,
@@ -1416,6 +1439,16 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     signalReceiver: signalService,
     strongRefService,
     workspaceRepo,
+    // invariant: GATED terminal forgetting (R3d). The disposition sweep
+    // (dormant->tombstoned) and the physical GC both route their authority
+    // through memoryService (audited) + memoryEntryRepo (disposition-gated SQL),
+    // so an un-preserved/un-judged memory can never be autonomously removed.
+    tombstoneDispositionSweepPort: createTombstoneDispositionSweepPort({
+      memoryLookup: { findDormantMemories: (workspaceId) => memoryEntryRepo.findDormantMemories(workspaceId) },
+      capsuleLookup: { findByWorkspaceId: (workspaceId) => synthesisCapsuleRepo.findByWorkspaceId(workspaceId) },
+      tombstoneAuthority: forgetTombstoneAuthority
+    }),
+    tombstoneGcPort: createTombstoneGcPort({ tombstoneAuthority: forgetTombstoneAuthority }),
     // invariant: BULK_ENRICH drain wiring (S3c). The same governed services
     // materialization used to run inline now run in the Garden worker, against
     // memory rows fetched by id. enrichConflictDetectionPort is only wired when

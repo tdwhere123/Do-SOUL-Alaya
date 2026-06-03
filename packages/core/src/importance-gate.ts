@@ -1,4 +1,4 @@
-import { DYNAMICS_CONSTANTS, type PathRelation } from "@do-soul/alaya-protocol";
+import { DYNAMICS_CONSTANTS, type MemoryEntry, type PathRelation } from "@do-soul/alaya-protocol";
 
 /**
  * The minimum support_events_count at which a path is considered well-supported
@@ -108,4 +108,88 @@ export function isConsolidationDeletable(path: PathRelation): boolean {
 export function isConsolidationSurvivorEligible(path: PathRelation): boolean {
   const disposition = classifyPathImportance(path).disposition;
   return disposition === "keep" || disposition === "mergeable";
+}
+
+/**
+ * The disposition the importance gate assigns to a single memory_entry, the
+ * memory-side analogue of {@link ImportanceDisposition}. Consumed by the
+ * autonomous-forgetting sweep (R3d) to decide whether a dormant memory is
+ * `judged_useless` (safe to autonomously tombstone) or KEEP (never
+ * auto-removable). Mechanical / non-LLM.
+ *
+ * - protected:   override-pinned or hazard decay profile — never auto-removable.
+ * - report_only: strictly-governed durable tier (canon/consolidated) — never
+ *                auto-removable; a governance subject must not be silently dropped.
+ * - keep:        evidence-rich or well-supported — durable, never auto-removable.
+ * - judged_useless: failed ALL keep-criteria — the ONLY memory disposition the
+ *                autonomous sweep may terminalize (and only after the gate).
+ */
+export type MemoryImportanceDisposition = "protected" | "report_only" | "keep" | "judged_useless";
+
+export interface MemoryImportanceClassification {
+  readonly disposition: MemoryImportanceDisposition;
+  readonly reason: string;
+}
+
+// invariant: pinned/hazard decay profiles are the memory-side override anchor —
+// a human (pinned) or a safety hazard deliberately marked this memory durable,
+// so the autonomous sweep must never drop it. Mirrors isOverridePinned for paths.
+function isMemoryOverrideProtected(memory: Readonly<MemoryEntry>): boolean {
+  return memory.decay_profile === "pinned" || memory.decay_profile === "hazard";
+}
+
+// invariant: canon and consolidated are the strictly-governed durable retention
+// tiers — accepted, promoted truth. report_only mirrors the path-side
+// governance_class === "strictly_governed" branch: never auto-act.
+function isMemoryStrictlyGoverned(memory: Readonly<MemoryEntry>): boolean {
+  return memory.retention_state === "canon" || memory.retention_state === "consolidated";
+}
+
+/**
+ * Pure, side-effect-free classification of a single memory_entry against the
+ * cheap-proxy importance signals (no LLM, no model). Evaluated in protection
+ * order: the strongest protection wins. Reuses the SAME thresholds as the
+ * path-side gate ({@link RICH_EVIDENCE_BASIS_THRESHOLD},
+ * {@link WELL_SUPPORTED_EVENTS_THRESHOLD}) so the two planes cannot drift.
+ *
+ * Field mapping:
+ *   ① pinned/hazard decay profile           => protected
+ *   ② retention_state canon/consolidated     => report_only
+ *   ③ evidence_refs.length >= 2              => keep (durable: source + evidence)
+ *   ④ reinforcement_count >= support thresh  => keep (well-supported, earned trust)
+ * A memory failing ALL of the above is `judged_useless` — the only disposition
+ * the autonomous-forgetting sweep may use to autonomously tombstone the row.
+ *
+ * see also: packages/core/src/memory-service.ts autonomousTombstone,
+ * packages/soul/src/garden/janitor.ts executeTombstoneGc.
+ */
+export function classifyMemoryImportance(
+  memory: Readonly<MemoryEntry>
+): MemoryImportanceClassification {
+  if (isMemoryOverrideProtected(memory)) {
+    return Object.freeze({ disposition: "protected", reason: "decay_profile_pinned_or_hazard" });
+  }
+
+  if (isMemoryStrictlyGoverned(memory)) {
+    return Object.freeze({ disposition: "report_only", reason: "strictly_governed" });
+  }
+
+  if (memory.evidence_refs.length >= RICH_EVIDENCE_BASIS_THRESHOLD) {
+    return Object.freeze({ disposition: "keep", reason: "evidence_basis_rich" });
+  }
+
+  if ((memory.reinforcement_count ?? 0) >= WELL_SUPPORTED_EVENTS_THRESHOLD) {
+    return Object.freeze({ disposition: "keep", reason: "well_supported" });
+  }
+
+  return Object.freeze({ disposition: "judged_useless", reason: "failed_all_keep_criteria" });
+}
+
+/**
+ * True when the mechanical memory importance gate clears a memory for
+ * autonomous terminal removal (it is `judged_useless`). Every protected /
+ * report_only / keep memory returns false and is NEVER auto-removable.
+ */
+export function isMemoryJudgedUseless(memory: Readonly<MemoryEntry>): boolean {
+  return classifyMemoryImportance(memory).disposition === "judged_useless";
 }

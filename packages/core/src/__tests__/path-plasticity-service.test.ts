@@ -609,11 +609,51 @@ describe("PathPlasticityService", () => {
     expect(retiredEvent).toBeDefined();
     expect(retiredEvent?.payload_json).toMatchObject({
       path_id: "path-1",
-      retirement_reason: "strength_below_threshold_and_inactive",
+      // R3d acceptance #5: the importance gate stamps its verdict onto the
+      // retirement_reason. A thin/mergeable path retires cleanly with gate=mergeable.
+      retirement_reason: "strength_below_threshold_and_inactive; gate=mergeable",
       retired_at: NOW_ISO
     });
     expect(harness.repoUpdates[0]?.updates.lifecycle).toMatchObject({
       status: "retired"
+    });
+  });
+
+  it("R3d acceptance #5: a NON-deletable (strictly-governed) terminal retire records an explicit retained-provenance rationale, never silent", async () => {
+    const path = createPath({
+      path_id: "path-governed",
+      plasticity_state: {
+        strength: 0.05,
+        direction_bias: "source_to_target",
+        stability_class: "normal",
+        support_events_count: 0,
+        contradiction_events_count: 0,
+        last_reinforced_at: PAST_REINFORCED_ISO
+      },
+      legitimacy: {
+        evidence_basis: ["evidence-1"],
+        governance_class: "strictly_governed"
+      }
+    });
+    const harness = buildHarness({
+      usageRecords: [createUsageRecord({ usage_state: "skipped", used_object_ids: [] })],
+      pathsByObjectId: { "obj-target": [path] },
+      deliveredObjectIdsByDeliveryId: { "delivery-1": ["obj-target"] }
+    });
+
+    const result = await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z"
+    });
+
+    expect(result.retired).toBe(1);
+    const retiredEvent = harness.publishedEvents.find(
+      (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_RETIRED
+    );
+    expect(retiredEvent?.payload_json).toMatchObject({
+      path_id: "path-governed",
+      retirement_reason:
+        "strength_below_threshold_and_inactive; gate=report_only:strictly_governed:retained_provenance"
     });
   });
 
@@ -915,7 +955,7 @@ describe("PathPlasticityService", () => {
     expect(retiredEvent).toBeDefined();
     expect(retiredEvent?.payload_json).toMatchObject({
       path_id: "path-stuck-at-zero",
-      retirement_reason: "strength_below_threshold_and_inactive",
+      retirement_reason: "strength_below_threshold_and_inactive; gate=mergeable",
       final_strength: 0
     });
     expect(harness.repoUpdates[0]?.updates.lifecycle).toMatchObject({

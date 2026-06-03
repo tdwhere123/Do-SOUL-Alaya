@@ -65,8 +65,35 @@ export interface TombstonedMemoryRecord {
 }
 
 export interface JanitorTombstoneGcPort {
+  // invariant: returns ONLY tombstoned rows that carry a durable
+  // forget_disposition AND are past the grace age — the disposition gate is
+  // enforced inside the port's query (daemon wires it to
+  // memory-entry-repo.findTombstonedMemoriesWithDisposition).
   findTombstonedMemories(workspaceId: string): Promise<readonly TombstonedMemoryRecord[]>;
+  // invariant: physical removal is GATED. The daemon wires this to
+  // memory-service.autonomousHardDeleteTombstoned, which refuses any row lacking
+  // a non-null disposition even if tombstoned (defense in depth).
   hardDelete(memoryId: string, taskId: string): Promise<void>;
+}
+
+export interface DormantDispositionCandidate {
+  readonly memory_id: string;
+  // The disposition the gate computed for this dormant memory. null means the
+  // memory failed the gate (kept / protected / not yet preserved) and MUST NOT
+  // be tombstoned. Only a non-null disposition is eligible.
+  readonly disposition: "compressed" | "judged_useless" | null;
+  readonly disposition_ref: string | null;
+}
+
+// invariant: the GATED autonomous dormant -> tombstoned producer. The daemon's
+// implementation computes each dormant memory's disposition (compressed = live
+// capsule membership, judged_useless = mechanical importance gate) and only
+// tombstones rows the gate cleared. A memory with a null disposition is left
+// dormant (reversible), never terminalized.
+// see also: packages/core/src/importance-gate.ts classifyMemoryImportance.
+export interface JanitorDispositionSweepPort {
+  findDormantDispositionCandidates(workspaceId: string): Promise<readonly DormantDispositionCandidate[]>;
+  autonomousTombstone(candidate: DormantDispositionCandidate, taskId: string): Promise<void>;
 }
 
 export interface JanitorStrongRefProtectionPort {
@@ -83,6 +110,7 @@ export interface JanitorDependencies {
   readonly scheduler: JanitorSchedulerPort;
   readonly dormantDemotionPort?: JanitorDormantDemotionPort;
   readonly tombstoneGcPort?: JanitorTombstoneGcPort;
+  readonly dispositionSweepPort?: JanitorDispositionSweepPort;
   readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
   // Optional EventLog writer used to commit SOUL_MEMORY_TIER_CHANGED
   // rows in the same SQLite transaction as the storage_tier UPDATE.
@@ -101,6 +129,7 @@ export class Janitor {
   private readonly scheduler: JanitorSchedulerPort;
   private readonly dormantDemotionPort?: JanitorDormantDemotionPort;
   private readonly tombstoneGcPort?: JanitorTombstoneGcPort;
+  private readonly dispositionSweepPort?: JanitorDispositionSweepPort;
   private readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
   private readonly eventLogRepo?: AuditorEventLogPort;
   private readonly now: () => string;
@@ -111,6 +140,7 @@ export class Janitor {
     this.scheduler = deps.scheduler;
     this.dormantDemotionPort = deps.dormantDemotionPort;
     this.tombstoneGcPort = deps.tombstoneGcPort;
+    this.dispositionSweepPort = deps.dispositionSweepPort;
     this.strongRefProtectionPort = deps.strongRefProtectionPort;
     this.eventLogRepo = deps.eventLogRepo;
     this.now = deps.now ?? (() => new Date().toISOString());
@@ -245,9 +275,21 @@ export class Janitor {
     return result;
   }
 
+  // invariant: the terminal forgetting stage (R3d). Two GATED phases run in one
+  // task: (1) the autonomous dormant -> tombstoned disposition sweep (only rows
+  // the gate cleared as compressed-into-a-live-capsule or judged_useless get a
+  // durable marker + tombstone), then (2) the physical GC of tombstoned rows
+  // that carry a disposition and are past grace. Neither phase can touch an
+  // un-preserved/un-judged memory: phase 1 needs a non-null disposition, phase 2
+  // re-checks the disposition gate in the delete authority (defense in depth).
   private async executeTombstoneGc(task: GardenTaskDescriptor, completedAt: string): Promise<GardenTaskResult> {
+    const auditEntries: string[] = [];
+
+    const tombstonedNow = await this.runDispositionSweep(task, auditEntries);
+
     if (this.tombstoneGcPort === undefined) {
-      const result = this.createSuccessResult(task, completedAt, [], ["[SKIPPED] tombstone_gc: port not wired"]);
+      auditEntries.push("[SKIPPED] tombstone_gc: gc port not wired");
+      const result = this.createSuccessResult(task, completedAt, tombstonedNow, auditEntries);
       await this.scheduler.reportCompletion(result);
       return result;
     }
@@ -255,7 +297,6 @@ export class Janitor {
     const candidates = await this.tombstoneGcPort.findTombstonedMemories(task.workspace_id);
     const batch = candidates.slice(0, JANITOR_CONSTANTS.BATCH_SIZE);
     const objectIds: string[] = [];
-    const auditEntries: string[] = [];
 
     for (const candidate of batch) {
       if (this.strongRefProtectionPort !== undefined) {
@@ -273,9 +314,47 @@ export class Janitor {
     auditEntries.push(
       `tombstone_gc: ${objectIds.length} tombstoned memories hard-deleted`
     );
-    const result = this.createSuccessResult(task, completedAt, objectIds, auditEntries);
+    const result = this.createSuccessResult(
+      task,
+      completedAt,
+      [...tombstonedNow, ...objectIds],
+      auditEntries
+    );
     await this.scheduler.reportCompletion(result);
     return result;
+  }
+
+  // Phase 1: the gated dormant -> tombstoned disposition sweep. Returns the ids
+  // freshly tombstoned this pass (appended to objects_affected). Skips any
+  // candidate whose disposition is null — that memory stays dormant (reversible)
+  // because it is neither compressed into a live capsule nor judged useless.
+  private async runDispositionSweep(
+    task: GardenTaskDescriptor,
+    auditEntries: string[]
+  ): Promise<readonly string[]> {
+    if (this.dispositionSweepPort === undefined) {
+      auditEntries.push("[SKIPPED] tombstone_gc: disposition sweep port not wired");
+      return [];
+    }
+
+    const candidates = await this.dispositionSweepPort.findDormantDispositionCandidates(task.workspace_id);
+    const batch = candidates.slice(0, JANITOR_CONSTANTS.BATCH_SIZE);
+    const tombstoned: string[] = [];
+    let skipped = 0;
+
+    for (const candidate of batch) {
+      if (candidate.disposition === null) {
+        skipped += 1;
+        continue;
+      }
+      await this.dispositionSweepPort.autonomousTombstone(candidate, task.task_id);
+      tombstoned.push(candidate.memory_id);
+    }
+
+    auditEntries.push(
+      `disposition_sweep: ${tombstoned.length} dormant memories autonomously tombstoned (${skipped} retained, no disposition)`
+    );
+    return tombstoned;
   }
 
   private createSuccessResult(

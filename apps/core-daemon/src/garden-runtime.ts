@@ -76,7 +76,9 @@ import {
   type GardenComputeProvider,
   type GardenSchedulerEventLogPort,
   type JanitorControlPlaneCleanupPort,
+  type JanitorDispositionSweepPort,
   type JanitorSchedulerPort,
+  type JanitorTombstoneGcPort,
   type LibrarianSchedulerPort
 } from "@do-soul/alaya-soul";
 import { findEventLogOrphansForWorkspace, findOrphanedMemoriesForWorkspace } from "./orphan-query.js";
@@ -433,6 +435,13 @@ export function createGardenRuntime(input: {
   };
   readonly strongRefService: StrongRefService;
   readonly workspaceRepo: SqliteWorkspaceRepo;
+  // invariant: the GATED terminal forgetting ports (R3d). When wired, TOMBSTONE_GC
+  // runs the autonomous dormant->tombstoned disposition sweep + the
+  // disposition-gated physical GC. When absent, TOMBSTONE_GC is a safe no-op
+  // (the prior posture — no autonomous deletion). Both gate on a durable
+  // forget_disposition so an un-preserved/un-judged memory can never be removed.
+  readonly tombstoneDispositionSweepPort?: JanitorDispositionSweepPort;
+  readonly tombstoneGcPort?: JanitorTombstoneGcPort;
   // invariant: BULK_ENRICH wiring (S3c). When enrichPendingRepo + edgeProducer
   // are wired the Garden drains enrich_pending off the write-path; when absent
   // the task is a no-op (enrichment disabled, same as no service). The conflict
@@ -559,8 +568,13 @@ export function createGardenRuntime(input: {
     cleanupPort,
     tieringPort: input.gardenDataPorts.tieringPort,
     // REVERSIBLE: flips active -> dormant only (recall-silent, revived on use).
-    // No tombstoneGcPort here by design — hard-delete is a separate later slice.
     dormantDemotionPort: input.gardenDataPorts.dormantDemotionPort,
+    // GATED terminal removal (R3d). Both ports gate on a durable forget_disposition;
+    // when omitted, TOMBSTONE_GC degrades to a safe no-op (no autonomous deletion).
+    ...(input.tombstoneDispositionSweepPort === undefined
+      ? {}
+      : { dispositionSweepPort: input.tombstoneDispositionSweepPort }),
+    ...(input.tombstoneGcPort === undefined ? {} : { tombstoneGcPort: input.tombstoneGcPort }),
     scheduler: janitorSchedulerPort,
     strongRefProtectionPort: {
       isProtected: async (workspaceId: string, targetEntityType: string, targetEntityId: string) =>

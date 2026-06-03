@@ -69,12 +69,16 @@ export {
   Janitor,
   type ExpiredControlPlaneObject,
   type HotDemotionCandidate,
+  type DormantDispositionCandidate,
   type JanitorControlPlaneCleanupPort,
   type JanitorDependencies,
+  type JanitorDispositionSweepPort,
   type JanitorHotDemotionCriteria,
   type JanitorMemoryTieringPort,
   type JanitorStrongRefProtectionPort,
-  type JanitorSchedulerPort
+  type JanitorSchedulerPort,
+  type JanitorTombstoneGcPort,
+  type TombstonedMemoryRecord
 } from "./janitor.js";
 export {
   LIBRARIAN_CONSTANTS,

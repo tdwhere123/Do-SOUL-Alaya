@@ -22,6 +22,7 @@ import {
 import {
   MEMORY_ENTRY_SELECT_COLUMNS,
   parseDynamicsUpdateFields,
+  parseForgetDisposition,
   parseLifecycleState,
   parseMemoryDimension,
   parseMemoryEntry,
@@ -154,6 +155,38 @@ export interface MemoryEntryRepo {
   ): Promise<Readonly<MemoryEntry>>;
   archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>>;
   hardDeleteTombstoned(objectId: string): Promise<void>;
+  // invariant: dormant memories whose decay already silenced them, eligible for
+  // the AUTONOMOUS-tombstone disposition sweep. Returns dormant rows only; the
+  // sweep computes a disposition per row before any tombstone write.
+  findDormantMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
+  // invariant: the GATED autonomous-tombstone authority. Sets the durable
+  // disposition marker AND moves the row to retention_state=tombstoned /
+  // lifecycle_state=tombstone in one UPDATE, but ONLY when the row is currently
+  // dormant. Refuses (changes=0 -> NOT_FOUND) a non-dormant row so it can never
+  // tombstone an active/recallable memory. ref must be null for judged_useless.
+  autonomousTombstone(input: AutonomousTombstoneInput): Promise<Readonly<MemoryEntry>>;
+  // invariant: the GATED autonomous physical-delete authority (defense in
+  // depth). Physically removes a row ONLY when it is tombstoned AND past the
+  // grace age AND carries a non-null forget_disposition. A tombstoned row
+  // lacking a disposition (e.g. human Inspector retire) is refused here, never
+  // auto-GC'd. The human/legacy path stays on hardDeleteTombstoned.
+  hardDeleteTombstonedWithDisposition(objectId: string): Promise<void>;
+  // invariant: tombstoned + past-grace + non-null-disposition rows — the only
+  // rows the autonomous TOMBSTONE_GC may physically remove.
+  findTombstonedMemoriesWithDisposition(
+    workspaceId: string
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+}
+
+// invariant: forget_disposition_ref MUST be a live synthesis_capsule id when
+// disposition='compressed' and MUST be null when disposition='judged_useless'.
+// The caller (memory-service.autonomousTombstone) verifies the capsule is live
+// + references this member before invoking; the column stores the verified ref.
+export interface AutonomousTombstoneInput {
+  readonly objectId: string;
+  readonly disposition: MemoryEntry["forget_disposition"];
+  readonly dispositionRef: string | null;
+  readonly updatedAt: string;
 }
 
 export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
@@ -176,6 +209,10 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   private readonly transitionLifecycleStatement;
   private readonly archiveStatement;
   private readonly hardDeleteTombstonedStatement;
+  private readonly findDormantMemoriesStatement;
+  private readonly autonomousTombstoneStatement;
+  private readonly findTombstonedWithDispositionStatement;
+  private readonly hardDeleteTombstonedWithDispositionStatement;
   // invariant: path topology endpoints reference memory ids only via JSON
   // anchors / plain text (no FK), so hard-delete must prune them explicitly in
   // the same transaction. cross-file ref: cascade-delete.ts pruneOrphanedPathTopology
@@ -213,8 +250,10 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         last_hit_at,
         reinforcement_count,
         contradiction_count,
-        superseded_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        superseded_by,
+        forget_disposition,
+        forget_disposition_ref
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     this.findByIdStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
@@ -361,6 +400,52 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         AND retention_state = 'tombstoned'
         AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
     `);
+    // invariant: only dormant (recall-silent, reversible) rows enter the
+    // autonomous-tombstone sweep. retention_state != 'tombstoned' excludes rows
+    // a prior sweep already terminalized so the sweep stays idempotent.
+    this.findDormantMemoriesStatement = db.connection.prepare(`
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ?
+        AND lifecycle_state = 'dormant'
+        AND COALESCE(retention_state, '') != 'tombstoned'
+      ORDER BY COALESCE(last_hit_at, last_used_at, updated_at, created_at) ASC, object_id ASC
+    `);
+    // invariant: GATED autonomous tombstone. Writes the durable disposition
+    // marker and terminalizes the row in one UPDATE, but ONLY when the row is
+    // currently dormant — refuses (changes=0) an active/archived/already-tombstoned
+    // row so a recallable memory can never be silently tombstoned.
+    this.autonomousTombstoneStatement = db.connection.prepare(`
+      UPDATE memory_entries
+      SET forget_disposition = ?,
+          forget_disposition_ref = ?,
+          retention_state = 'tombstoned',
+          lifecycle_state = 'tombstone',
+          updated_at = ?
+      WHERE object_id = ?
+        AND lifecycle_state = 'dormant'
+        AND COALESCE(retention_state, '') != 'tombstoned'
+    `);
+    this.findTombstonedWithDispositionStatement = db.connection.prepare(`
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ?
+        AND retention_state = 'tombstoned'
+        AND forget_disposition IS NOT NULL
+        AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
+      ORDER BY updated_at ASC, object_id ASC
+    `);
+    // invariant: the disposition gate is restated in SQL (defense in depth). A
+    // tombstoned row without a disposition (human Inspector retire) is refused
+    // here even though hardDeleteTombstoned would delete it — the autonomous GC
+    // never touches an un-preserved/un-judged row.
+    this.hardDeleteTombstonedWithDispositionStatement = db.connection.prepare(`
+      DELETE FROM memory_entries
+      WHERE object_id = ?
+        AND retention_state = 'tombstoned'
+        AND forget_disposition IS NOT NULL
+        AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
+    `);
     this.deleteOrphanedPathRelationsStatement = db.connection.prepare(`
       DELETE FROM path_relations
       WHERE ${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} = ?
@@ -426,7 +511,9 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         parsedEntry.last_hit_at,
         parsedEntry.reinforcement_count,
         parsedEntry.contradiction_count,
-        parsedEntry.superseded_by
+        parsedEntry.superseded_by,
+        parsedEntry.forget_disposition ?? null,
+        parsedEntry.forget_disposition_ref ?? null
       );
     } catch (error) {
       throw new StorageError(
@@ -695,6 +782,124 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to find tombstoned memories for workspace ${workspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async findDormantMemories(
+    workspaceId: string
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    try {
+      const rows = this.findDormantMemoriesStatement.all(workspaceId) as MemoryEntryRow[];
+      return rows.map((row) => parseMemoryEntryRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to find dormant memories for workspace ${workspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async findTombstonedMemoriesWithDisposition(
+    workspaceId: string
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    try {
+      const rows = this.findTombstonedWithDispositionStatement.all(workspaceId) as MemoryEntryRow[];
+      return rows.map((row) => parseMemoryEntryRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to find tombstoned-with-disposition memories for workspace ${workspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async autonomousTombstone(
+    input: AutonomousTombstoneInput
+  ): Promise<Readonly<MemoryEntry>> {
+    const parsedDisposition = parseForgetDisposition(input.disposition);
+    // invariant: judged_useless carries no ref; compressed MUST carry one. This
+    // refuses a malformed marker before it reaches the durable column.
+    if (parsedDisposition === "judged_useless" && input.dispositionRef !== null) {
+      throw new StorageError(
+        "VALIDATION_FAILED",
+        "judged_useless disposition must not carry a disposition ref."
+      );
+    }
+    if (parsedDisposition === "compressed" && input.dispositionRef === null) {
+      throw new StorageError(
+        "VALIDATION_FAILED",
+        "compressed disposition requires a live synthesis-capsule ref."
+      );
+    }
+    const parsedUpdatedAt = parseUpdatedAt(input.updatedAt);
+
+    try {
+      const result = this.autonomousTombstoneStatement.run(
+        parsedDisposition,
+        input.dispositionRef,
+        parsedUpdatedAt,
+        input.objectId
+      );
+
+      if (result.changes === 0) {
+        throw new StorageError(
+          "NOT_FOUND",
+          `Memory entry ${input.objectId} was not found or is not dormant (not eligible for autonomous tombstone).`
+        );
+      }
+
+      const updated = await this.findById(input.objectId);
+
+      if (updated === null) {
+        throw new StorageError(
+          "NOT_FOUND",
+          `Memory entry ${input.objectId} was not found after autonomous tombstone.`
+        );
+      }
+
+      return updated;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to autonomously tombstone memory entry ${input.objectId}.`,
+        error
+      );
+    }
+  }
+
+  public async hardDeleteTombstonedWithDisposition(objectId: string): Promise<void> {
+    try {
+      this.db.connection.transaction(() => {
+        const result = this.hardDeleteTombstonedWithDispositionStatement.run(objectId);
+
+        if (result.changes === 0) {
+          throw new StorageError(
+            "NOT_FOUND",
+            `Tombstoned memory entry ${objectId} was not found, lacks a forget disposition, or is within the grace window (not eligible for autonomous GC).`
+          );
+        }
+
+        // invariant: prune topology only after the disposition-gated row was
+        // actually deleted, so a no-disposition row never strips its live paths.
+        this.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
+        this.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
+      })();
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to autonomously hard-delete memory entry ${objectId}.`,
         error
       );
     }

@@ -15,6 +15,7 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import { EventPublisher, type EventPublisherInput } from "./event-publisher.js";
+import { classifyPathImportance } from "./importance-gate.js";
 import { planPromotion, type PromotionPlan } from "./path-manifestation-policy.js";
 
 /**
@@ -828,11 +829,24 @@ export class PathPlasticityService {
     readonly promotion: PromotionPlan;
     readonly occurredAt: string;
   }): PathPlasticityMutationPlan {
+    // invariant (R3d acceptance #5): negative/neutral terminal retirement passes
+    // the same mechanical importance gate the path consolidation plane uses. A
+    // mechanically-deletable (mergeable) path retires cleanly; a NON-deletable
+    // path (protected / report_only / keep — pinned, strictly-governed, evidence-
+    // rich, or well-supported) is NEVER silently retired: the gate verdict is
+    // stamped into retirement_reason so the PATH_RELATION_RETIRED EventLog row
+    // records the explicit audit-provenance rationale for terminalizing it.
+    // see also: packages/core/src/importance-gate.ts classifyPathImportance.
+    const gate = classifyPathImportance(params.path);
+    const gatedReason =
+      gate.disposition === "mergeable"
+        ? `${params.reason}; gate=mergeable`
+        : `${params.reason}; gate=${gate.disposition}:${gate.reason}:retained_provenance`;
     const payload = parseRuntimeGovernanceEventPayload(
       RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
       {
         path_id: params.path.path_id,
-        retirement_reason: params.reason,
+        retirement_reason: gatedReason,
         final_strength: params.finalStrength,
         retired_at: params.occurredAt
       }
