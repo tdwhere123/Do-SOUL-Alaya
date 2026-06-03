@@ -1578,6 +1578,9 @@ export async function startBenchDaemon(
     // GLOBAL pending-counter size; its delta across this replay isolates pairs
     // that did NOT settle (a transient mint failure leaves the row). On the
     // happy path the delta is 0 and every observed pair is minted.
+    // invariant: the global-delta accounting assumes SERIALIZED accrual (true
+    // for the bench's single serial seed loop); concurrent accrual would let
+    // another session's counter churn the global size and MISATTRIBUTE the delta.
     const beforeCounter = await service.counterSize();
     for (let replay = 0; replay < plan.replayCount; replay += 1) {
       for (const pair of plan.pairs) {
