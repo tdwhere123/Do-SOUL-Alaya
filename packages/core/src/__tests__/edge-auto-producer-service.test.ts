@@ -265,6 +265,73 @@ describe("EdgeAutoProducerService", () => {
     );
   });
 
+  // B7: the local contradicts heuristic — a high-overlap neighbor with an
+  // explicit contradiction cue folds into a weak negative `contradicts` path
+  // (attention_only, recall_bias -0.4), the sibling of the supersedes lane.
+  it("B7 proposes contradicts for a high-overlap neighbor carrying a contradiction cue", async () => {
+    const newMemory = createMemoryEntry({
+      content:
+        "The claim that the repo uses npm commands through rtk for package scripts is not true.",
+      domain_tags: ["package-manager", "workflow"],
+      created_at: "2026-05-24T12:00:00.000Z"
+    });
+    const neighbor = createMemoryEntry({
+      object_id: "memory-claim",
+      content: "The repo uses npm commands through rtk for package scripts.",
+      domain_tags: ["package-manager", "workflow"],
+      created_at: "2026-05-23T12:00:00.000Z"
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const service = new EdgeAutoProducerService(deps);
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceAnchor: { kind: "object", object_id: "memory-new" },
+        targetAnchor: { kind: "object", object_id: "memory-claim" },
+        relationKind: "contradicts",
+        recallBiasSign: -1,
+        governanceClass: "attention_only",
+        initialStrength: 0.5
+      })
+    );
+  });
+
+  it("does not propose contradicts when the high-overlap neighbor carries no contradiction cue", async () => {
+    const newMemory = createMemoryEntry({
+      content: "The repo uses npm commands through rtk for package scripts in detail.",
+      domain_tags: ["package-manager", "workflow"],
+      created_at: "2026-05-24T12:00:00.000Z"
+    });
+    const neighbor = createMemoryEntry({
+      object_id: "memory-claim",
+      content: "The repo uses npm commands through rtk for package scripts.",
+      domain_tags: ["package-manager", "workflow"],
+      created_at: "2026-05-23T12:00:00.000Z"
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const service = new EdgeAutoProducerService(deps);
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // No contradiction cue -> not a contradicts edge (it may fold into a
+    // positive supports/derives_from path instead, but never contradicts).
+    for (const call of pathCandidatePort.submitCandidate.mock.calls) {
+      expect(call[0].relationKind).not.toBe("contradicts");
+    }
+  });
+
   it("does not propose edges for weak, cross-scope, or cross-dimension neighbors", async () => {
     const newMemory = createMemoryEntry();
     const weak = createMemoryEntry({

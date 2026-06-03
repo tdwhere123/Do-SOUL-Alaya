@@ -14,7 +14,15 @@ import {
 const healthIssueCauseKindValues = [
   "orphan_radar",
   "green_revoked",
-  "evidence_failure"
+  "evidence_failure",
+  // invariant: a governed path-relation creation/mint failure surfaced to the
+  // operator triage inbox. The post-cutover path plane is the only durable
+  // landing for an accepted edge proposal and for signal-ref / co-occurrence
+  // seeds; an anchor-rejected mint (path-relation-proposal-service.emitRejection)
+  // or an accept-owed mint failure (edge-proposal-service.handleMintFailure) is
+  // EventLog-audited but was otherwise invisible to the inbox. target_object_id
+  // is the source memory/workspace whose durable topology failed to form.
+  "path_relation_failure"
 ] as const;
 
 const healthIssueResolutionStateValues = [
@@ -33,13 +41,19 @@ const healthIssueSuggestedActionValues = [
   "suppress",
   "defer",
   "promote",
-  "review_proposal"
+  "review_proposal",
+  // invariant: triage action for a path_relation_failure group. The operator
+  // inspects the EventLog path-failure record (PATH_RELATION_REJECTED /
+  // SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED) keyed by the same target/workspace
+  // to decide whether the failing anchor must be relinked, re-proposed, or left.
+  "inspect_path_failure"
 ] as const;
 
 export const HealthIssueCauseKind = {
   ORPHAN_RADAR: "orphan_radar",
   GREEN_REVOKED: "green_revoked",
-  EVIDENCE_FAILURE: "evidence_failure"
+  EVIDENCE_FAILURE: "evidence_failure",
+  PATH_RELATION_FAILURE: "path_relation_failure"
 } as const;
 
 export const HealthIssueResolutionState = {
@@ -62,7 +76,8 @@ export const HealthIssueSuggestedAction = {
   SUPPRESS: "suppress",
   DEFER: "defer",
   PROMOTE: "promote",
-  REVIEW_PROPOSAL: "review_proposal"
+  REVIEW_PROPOSAL: "review_proposal",
+  INSPECT_PATH_FAILURE: "inspect_path_failure"
 } as const;
 
 export const HealthIssueCauseKindSchema = z.enum(healthIssueCauseKindValues);

@@ -111,6 +111,11 @@ export interface GardenTaskReclaimInput {
   readonly event: GardenTaskEventInput;
 }
 
+export interface GardenTaskExpiryInput {
+  readonly task_id: string;
+  readonly event: GardenTaskEventInput;
+}
+
 export interface GardenTaskRepoPort {
   enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
   findById(taskId: string): GardenTaskRow | null;
@@ -160,6 +165,25 @@ export interface GardenTaskRepoPort {
   ): Promise<void>;
   peekAbandonedClaims(now: string, staleAfterMs: number): readonly GardenTaskRow[];
   gcAbandonedClaims(reclaims: readonly GardenTaskReclaimInput[]): Promise<number>;
+  // invariant: never-claimed pending tasks of a host-worker-only kind
+  // (EDGE_CLASSIFY / POST_TURN_EXTRACT) accrete forever on a no-agent deployment
+  // — no worker claims them, so neither completeWithEvents nor gcAbandonedClaims
+  // (which only touches status='claimed') ever removes them. peek selects rows
+  // still status='pending' whose created_at is older than expiredBeforeIso,
+  // oldest-first and bounded by limit, so the daemon can build one audit event
+  // per task before the bounded delete. Read-only; no mutation.
+  // see also: expireUnclaimedTasks; apps/core-daemon/src/garden-runtime.ts.
+  peekExpiredUnclaimedTasks(
+    kind: GardenTaskKindValue,
+    expiredBeforeIso: string,
+    limit: number
+  ): readonly GardenTaskRow[];
+  // invariant: deletes the named pending tasks AND appends their expiry audit
+  // events in ONE SQLite transaction (mirrors gcAbandonedClaims). Each delete is
+  // CAS-gated on status='pending' so a task a worker claimed between peek and
+  // delete is left intact (changes===0 -> skipped, not an error). Returns the
+  // count actually removed.
+  expireUnclaimedTasks(expirations: readonly GardenTaskExpiryInput[]): Promise<number>;
   countBacklog(workspace_id?: string): readonly GardenTaskBacklogCount[];
   // invariant: per-kind eventual-consistency diagnostic. pending = tasks not
   // yet claimed by a host worker; stale = tasks claimed but whose claim is
@@ -207,6 +231,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   private readonly completeStatement;
   private readonly peekAbandonedClaimsStatement;
   private readonly gcAbandonedClaimStatement;
+  private readonly peekExpiredUnclaimedStatement;
+  private readonly expireUnclaimedStatement;
   private readonly countByKindStatement;
   private readonly countByKindByWorkspaceStatement;
   private readonly countByRoleStatusStatement;
@@ -366,6 +392,32 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       UPDATE garden_tasks
       SET status = 'pending', claimed_by = NULL, claimed_at = NULL
       WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND claimed_at = ?
+    `);
+    this.peekExpiredUnclaimedStatement = connection.prepare(`
+      SELECT
+        id,
+        workspace_id,
+        role,
+        kind,
+        payload_json,
+        status,
+        claimed_by,
+        claimed_at,
+        created_at,
+        completed_at,
+        attempt_count,
+        last_error_text,
+        completion_envelope_json
+      FROM garden_tasks
+      WHERE status = 'pending' AND kind = ? AND created_at < ?
+      ORDER BY created_at ASC, id ASC
+      LIMIT ?
+    `);
+    // invariant: CAS-gated on status='pending' so a task a worker claimed
+    // between peek and this delete is left intact (changes===0, skipped).
+    this.expireUnclaimedStatement = connection.prepare(`
+      DELETE FROM garden_tasks
+      WHERE id = ? AND status = 'pending'
     `);
     this.countByRoleStatusStatement = connection.prepare(`
       SELECT role, status, COUNT(*) AS count
@@ -705,6 +757,63 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         throw error;
       }
       throw new StorageError("QUERY_FAILED", "Failed to reclaim abandoned Garden tasks.", error);
+    }
+  }
+
+  public peekExpiredUnclaimedTasks(
+    kind: GardenTaskKindValue,
+    expiredBeforeIso: string,
+    limit: number
+  ): readonly GardenTaskRow[] {
+    const parsedKind = GardenTaskKindSchema.parse(kind);
+    const cutoff = parseTimestamp(expiredBeforeIso);
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new StorageError(
+        "VALIDATION_FAILED",
+        `peekExpiredUnclaimedTasks limit must be a positive integer: ${limit}`
+      );
+    }
+    try {
+      const rows = this.peekExpiredUnclaimedStatement.all(parsedKind, cutoff, limit) as GardenTaskDbRow[];
+      return rows.map((row) => parseGardenTaskRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to read expired unclaimed Garden tasks for kind ${parsedKind}.`,
+        error
+      );
+    }
+  }
+
+  public async expireUnclaimedTasks(expirations: readonly GardenTaskExpiryInput[]): Promise<number> {
+    if (expirations.length === 0) {
+      return 0;
+    }
+    const parsedExpirations = expirations.map((expiration) => ({
+      task_id: parseNonEmptyString(expiration.task_id, "garden_task.id"),
+      event: expiration.event
+    }));
+    try {
+      return await this.eventPublisher.appendManyWithMutation(
+        parsedExpirations.map((expiration) => expiration.event),
+        () => {
+          let expired = 0;
+          for (const expiration of parsedExpirations) {
+            const result = this.expireUnclaimedStatement.run(expiration.task_id);
+            // CAS lost (a worker claimed it between peek and delete) -> skip,
+            // not an error: the task is now live work, not an orphan.
+            if (result.changes === 1) {
+              expired += 1;
+            }
+          }
+          return expired;
+        }
+      );
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      throw new StorageError("QUERY_FAILED", "Failed to expire unclaimed Garden tasks.", error);
     }
   }
 

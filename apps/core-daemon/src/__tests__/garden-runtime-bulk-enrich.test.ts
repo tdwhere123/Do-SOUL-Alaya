@@ -1008,6 +1008,11 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
       rejected: 0,
       transient_failed: 0
     }));
+    const sweepExpired = vi.fn(async (_input: { readonly workspaceId: string; readonly limit: number }) => ({
+      scanned: 0,
+      expired: 0,
+      skipped: 0
+    }));
     const warn = vi.fn();
     const runtime = createGardenRuntime({
       ...createRuntimeInput({
@@ -1015,7 +1020,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
         findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
         produceForNewMemory: vi.fn(async () => undefined),
         workspaceIds: ["workspace-1", "workspace-2"],
-        edgeProposalReconcile: { reconcileStuckAccepts }
+        edgeProposalReconcile: { reconcileStuckAccepts, sweepExpired }
       }),
       warn
     });

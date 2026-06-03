@@ -21,6 +21,7 @@ import {
 import { CoreError } from "./errors.js";
 import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 import type { PathCandidateSink } from "./path-candidate-sink.js";
+import type { PathFailureHealthInboxPort } from "./path-failure-health-inbox.js";
 import type { PathMintOutcome } from "./path-relation-proposal-service.js";
 import { parseObjectId } from "./shared/validators.js";
 
@@ -50,6 +51,10 @@ export interface EdgeProposalRepoPort {
     readonly edgeType: MemoryGraphEdgeTypeValue;
   }): EdgeProposal | null;
   listPending(workspaceId: string, filter?: EdgeProposalFilter): readonly EdgeProposal[];
+  // invariant: pending proposals past their non-null expires_at, oldest-expiry
+  // first, bounded by limit. The TTL sweep flips each to `expired`. A null
+  // expires_at is never returned. see also: sweepExpired.
+  listExpiredPending(workspaceId: string, nowIso: string, limit: number): readonly EdgeProposal[];
   // invariant: accepted / auto_accepted proposals owe a minted path. The
   // daemon reconcile sweep reads these (oldest first, bounded) to recover a
   // crash-window orphan — an accept whose review row committed but whose mint
@@ -100,6 +105,15 @@ export interface EdgeProposalServiceDependencies {
   // see also: path-candidate-sink.ts PathCandidateSink.
   readonly pathCandidatePort: PathCandidateSink;
   readonly eventPublisher: Pick<EventPublisher, "appendManyWithMutation">;
+  // invariant: D-EDGEAUDIT operator-triage surface. When wired, an accept-owed
+  // path mint failure ALSO upserts a `path_relation_failure` health_inbox group
+  // (in addition to the durable SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED event)
+  // so the failure is visible in the Inspector inbox, not only by forensic
+  // EventLog scan. Optional: when absent the EventLog audit stands alone.
+  // Best-effort — a port throw must never break the accept path.
+  // see also: path-relation-proposal-service.ts (the mint-side failure twin);
+  //   protocol HealthIssueCauseKind.PATH_RELATION_FAILURE.
+  readonly healthInboxPort?: PathFailureHealthInboxPort;
   readonly generateId?: () => string;
   readonly now?: () => string;
 }
@@ -161,6 +175,31 @@ export const AUTO_ACCEPT_FLOOR_BY_TRIGGER: Readonly<
 // the decision and so audit-trail consumers can distinguish auto vs human.
 export const AUTO_ACCEPT_REVIEWER_IDENTITY = "system:auto_accept_policy";
 const AUTO_ACCEPT_REVIEW_REASON = "auto-accepted by trigger floor policy";
+
+// invariant: default pending-proposal TTL. proposeEdge stamps
+// expires_at = created_at + this TTL when no caller value is given, so the
+// `expired` status + expires_at column are a live feature (producer here,
+// sweeper in sweepExpired) rather than dead schema. 30 days is conservative:
+// long enough for a human/agent reviewer, short enough that a stale
+// auto-produced proposal cannot pile up unbounded on a no-reviewer deployment.
+// An explicit caller expiresAt overrides this default.
+export const EDGE_PROPOSAL_DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+// invariant: reviewer_identity + review_reason stamped on a proposal the TTL
+// sweep moves pending -> expired. Distinguishes a policy expiry from a human
+// reject in the durable review columns so KPI attribution stays unambiguous.
+export const TTL_EXPIRY_REVIEWER_IDENTITY = "system:edge_proposal_ttl_policy";
+const TTL_EXPIRY_REVIEW_REASON = "auto-expired: pending proposal outlived its TTL with no review";
+
+// invariant: per-pass tally the TTL sweep returns so the daemon can LOG what it
+// expired (no silent cap). `scanned` rows examined; `expired` flipped to
+// terminal expired; `skipped` rows whose CAS lost (a concurrent decision moved
+// them off pending between list and updateReview).
+export interface EdgeProposalExpirySweepResult {
+  readonly scanned: number;
+  readonly expired: number;
+  readonly skipped: number;
+}
 
 // invariant: review_reason stamped on a proposal auto-rejected because its owed
 // path mint was permanently refused (a missing / foreign source or target
@@ -259,7 +298,10 @@ export class EdgeProposalService {
       source_signal_id: params.sourceSignalId ?? null,
       run_id: params.runId ?? null,
       created_at: createdAt,
-      expires_at: params.expiresAt ?? null
+      // invariant: every proposal is born with a TTL. A caller-supplied expiresAt
+      // wins; otherwise stamp created_at + the default so the TTL sweep has a
+      // cutoff and the `expired` status/column are never dead schema.
+      expires_at: params.expiresAt ?? this.defaultExpiresAt(createdAt)
     };
     const created = await this.dependencies.eventPublisher.appendManyWithMutation(
       [buildProposalCreatedEvent(createInput)],
@@ -575,6 +617,71 @@ export class EdgeProposalService {
     };
   }
 
+  private defaultExpiresAt(createdAt: string): string {
+    return new Date(new Date(createdAt).getTime() + EDGE_PROPOSAL_DEFAULT_TTL_MS).toISOString();
+  }
+
+  // invariant: TTL sweep. Flips pending proposals whose expires_at has passed to
+  // terminal `expired` (CAS-gated on pending in updateReview), emitting a
+  // SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED audit with status=expired per row so the
+  // expiry is attributable, never a silent status change. Bounded per pass /
+  // workspace; oldest-expiry first. The daemon GardenScheduler tick drives it
+  // next to reconcileStuckAccepts. A row whose CAS lost (a concurrent
+  // accept/reject moved it off pending between list and update) is counted
+  // `skipped`, not an error.
+  // see also: edge-proposal-repo.ts listExpiredPending; apps/core-daemon
+  //   garden-runtime.ts sweepExpiredEdgeProposals.
+  public async sweepExpired(input: {
+    readonly workspaceId: string;
+    readonly limit: number;
+  }): Promise<EdgeProposalExpirySweepResult> {
+    const workspaceId = parseObjectId(input.workspaceId);
+    const nowIso = this.now();
+    const candidates = this.dependencies.proposalRepo.listExpiredPending(workspaceId, nowIso, input.limit);
+    let expired = 0;
+    let skipped = 0;
+    for (const proposal of candidates) {
+      const reviewedAt = this.now();
+      try {
+        await this.dependencies.eventPublisher.appendManyWithMutation(
+          [
+            buildProposalReviewedEvent(
+              proposal,
+              EdgeProposalStatus.EXPIRED,
+              TTL_EXPIRY_REVIEWER_IDENTITY,
+              TTL_EXPIRY_REVIEW_REASON,
+              reviewedAt
+            )
+          ],
+          () => {
+            this.dependencies.proposalRepo.updateReview({
+              proposalId: proposal.proposal_id,
+              status: EdgeProposalStatus.EXPIRED,
+              reviewerIdentity: TTL_EXPIRY_REVIEWER_IDENTITY,
+              reviewReason: TTL_EXPIRY_REVIEW_REASON,
+              reviewedAt
+            });
+          }
+        );
+        expired += 1;
+      } catch (error) {
+        // invariant: CAS lost -> the row is no longer pending (a concurrent
+        // accept/reject won). updateReview is CAS-gated on status='pending' and
+        // raises a CONFLICT-coded error (CoreError or the repo's StorageError)
+        // when the predicate matches no row. The audit append + updateReview run
+        // in one txn, so the CONFLICT rolled the audit back too; nothing was
+        // written. Treat as skipped, not fatal, so one raced row never aborts the
+        // whole sweep. Duck-typed on `code` to avoid a core->storage import.
+        if (isConflictError(error)) {
+          skipped += 1;
+          continue;
+        }
+        throw error;
+      }
+    }
+    return { scanned: candidates.length, expired, skipped };
+  }
+
   // invariant: emit the durable owed-path obligation AND compensate the review
   // row in ONE transaction before the caller's OBLIGATION_VIOLATION throw
   // propagates. The accept just committed ACCEPTED/AUTO_ACCEPTED, so the
@@ -624,6 +731,28 @@ export class EdgeProposalService {
         });
       }
     );
+    // invariant: D-EDGEAUDIT. The owed-path mint failure is now durably audited;
+    // ALSO surface it to the operator-triage inbox (best-effort, after the
+    // atomic audit+reconcile committed) so it is visible without a forensic
+    // EventLog scan. target_object_id = the proposal's source memory whose
+    // durable topology failed to form. A port throw must not break the accept.
+    await this.recordPathFailureToInbox(proposal.workspace_id, proposal.source_memory_id);
+  }
+
+  private async recordPathFailureToInbox(workspaceId: string, targetObjectId: string): Promise<void> {
+    const port = this.dependencies.healthInboxPort;
+    if (port === undefined) {
+      return;
+    }
+    try {
+      await port.recordPathRelationFailure({
+        workspaceId,
+        targetObjectId,
+        observedAt: this.now()
+      });
+    } catch {
+      // best-effort projection: never break the accept flow on an inbox write.
+    }
   }
 
   private async rejectProposal(
@@ -672,11 +801,22 @@ function buildProposalCreatedEvent(proposal: EdgeProposalCreateEventInput): Even
   };
 }
 
+// invariant: CONFLICT-coded error from either the CoreError path or the repo's
+// StorageError, matched structurally so core never imports @do-soul/alaya-storage.
+function isConflictError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { readonly code?: unknown }).code === "CONFLICT"
+  );
+}
+
 function buildProposalReviewedEvent(
   proposal: EdgeProposal,
   status:
     | typeof EdgeProposalStatus.ACCEPTED
     | typeof EdgeProposalStatus.REJECTED
+    | typeof EdgeProposalStatus.EXPIRED
     | typeof EdgeProposalStatus.AUTO_ACCEPTED,
   reviewerIdentity: string,
   reviewReason: string | null,

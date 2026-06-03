@@ -50,10 +50,12 @@ interface Harness {
   readonly service: PathRelationProposalService;
   readonly repoCreate: ReturnType<typeof vi.fn>;
   readonly events: EventLogEntry[];
+  readonly recordPathRelationFailure: ReturnType<typeof vi.fn>;
 }
 
 function buildHarness(owners: Record<string, string>): Harness {
   const events: EventLogEntry[] = [];
+  const recordPathRelationFailure = vi.fn();
   const repoCreate = vi.fn((relation: any) => relation);
   const appendManyWithMutation = vi.fn(
     async <T,>(
@@ -83,9 +85,10 @@ function buildHarness(owners: Record<string, string>): Harness {
     eventPublisher: {
       appendManyWithMutation
     } as unknown as PathRelationProposalEventPublisherPort,
+    healthInboxPort: { recordPathRelationFailure },
     generateId: () => "path-should-not-mint"
   });
-  return { service, repoCreate, events };
+  return { service, repoCreate, events, recordPathRelationFailure };
 }
 
 function candidate(overrides: Partial<SubmitCandidateInput> = {}): SubmitCandidateInput {
@@ -173,6 +176,21 @@ describe("PathRelationProposalService — object-anchor existence + ownership ga
       rejected_object_id: "mem-target",
       rejection_reason: "object_foreign_workspace"
     });
+  });
+
+  // D-EDGEAUDIT: an anchor-rejected mint also surfaces a health_inbox
+  // path_relation_failure entry (best-effort) keyed on the rejected object id,
+  // in addition to the path.relation_rejected EventLog row. A clean mint does not.
+  it("surfaces a health_inbox path-relation-failure on anchor reject and not on a clean mint", async () => {
+    const rejected = buildHarness({ "mem-source": "workspace-A" });
+    await rejected.service.submitCandidate(candidate());
+    expect(rejected.recordPathRelationFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "workspace-A", targetObjectId: "mem-target" })
+    );
+
+    const clean = buildHarness({ "mem-source": "workspace-A", "mem-target": "workspace-A" });
+    await clean.service.submitCandidate(candidate());
+    expect(clean.recordPathRelationFailure).not.toHaveBeenCalled();
   });
 
   it("does not mutate durable memory on the co-recall counter path when the pair object id is missing", async () => {

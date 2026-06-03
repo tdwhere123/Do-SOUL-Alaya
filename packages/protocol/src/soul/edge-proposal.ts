@@ -31,6 +31,7 @@ const edgeProposalTriggerSourceValues = [
   "llm_supports",
   "local_supports",
   "local_supersedes",
+  "local_contradicts",
   "local_derives_from",
   "system"
 ] as const;
@@ -52,6 +53,7 @@ export const EdgeProposalTriggerSource = {
   LLM_SUPPORTS: "llm_supports",
   LOCAL_SUPPORTS: "local_supports",
   LOCAL_SUPERSEDES: "local_supersedes",
+  LOCAL_CONTRADICTS: "local_contradicts",
   LOCAL_DERIVES_FROM: "local_derives_from",
   SYSTEM: "system"
 } as const;

@@ -82,6 +82,14 @@ export interface EdgeProposalRepo {
     readonly edgeType: EdgeProposal["edge_type"];
   }): EdgeProposal | null;
   listPending(workspaceId: string, filter?: EdgeProposalFilter): readonly EdgeProposal[];
+  // invariant: returns pending proposals whose expires_at is non-null AND has
+  // passed nowIso, oldest-expiry-first and bounded by limit. The TTL sweep reads
+  // these and flips each to `expired` through updateReview (CAS-gated on
+  // status='pending'). A null expires_at is never selected — only proposals
+  // born with a TTL are sweepable, so legacy/null-TTL rows are untouched.
+  // see also: core/src/edge-proposal-service.ts sweepExpired;
+  //   apps/core-daemon/src/garden-runtime.ts sweepExpiredEdgeProposals.
+  listExpiredPending(workspaceId: string, nowIso: string, limit: number): readonly EdgeProposal[];
   // invariant: returns ONLY accepted / auto_accepted proposals that still owe a
   // path — a crash after the accept review row committed but before the mint
   // landed strands such a row with no path and invisible to listPending (which
@@ -379,6 +387,35 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
       return Object.freeze(rows.map((row) => parseRow(row)));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list edge proposals for workspace ${parsedWorkspaceId}.`, error);
+    }
+  }
+
+  public listExpiredPending(workspaceId: string, nowIso: string, limit: number): readonly EdgeProposal[] {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+    const now = parseTimestamp(nowIso);
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new StorageError("VALIDATION_FAILED", `listExpiredPending limit must be a positive integer: ${limit}`);
+    }
+    try {
+      const rows = this.db.connection
+        .prepare(
+          `SELECT *
+           FROM edge_proposals
+           WHERE workspace_id = ?
+             AND status = 'pending'
+             AND expires_at IS NOT NULL
+             AND expires_at < ?
+           ORDER BY expires_at ASC, proposal_id ASC
+           LIMIT ?`
+        )
+        .all(parsedWorkspaceId, now, limit) as EdgeProposalRow[];
+      return Object.freeze(rows.map((row) => parseRow(row)));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list expired pending edge proposals for workspace ${parsedWorkspaceId}.`,
+        error
+      );
     }
   }
 

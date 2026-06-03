@@ -62,6 +62,86 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     expect(["agent-target-a", "agent-target-b"]).toContain(row.claimed_by);
   });
 
+  // B5(b): never-claimed host-worker tasks past their TTL are removed (audited),
+  // while a recent unclaimed task and any claimed task are left intact.
+  it("expires only never-claimed EDGE_CLASSIFY tasks older than the cutoff", async () => {
+    const { database, repo } = createHarness();
+    repo.enqueue({
+      id: "edge-old",
+      workspace_id: "workspace-1",
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.EDGE_CLASSIFY,
+      payload: { task_kind: GardenTaskKind.EDGE_CLASSIFY },
+      created_at: "2026-05-01T00:00:00.000Z"
+    });
+    repo.enqueue({
+      id: "edge-recent",
+      workspace_id: "workspace-1",
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.EDGE_CLASSIFY,
+      payload: { task_kind: GardenTaskKind.EDGE_CLASSIFY },
+      created_at: "2026-05-20T00:00:00.000Z"
+    });
+
+    const cutoffIso = "2026-05-10T00:00:00.000Z";
+    const expired = repo.peekExpiredUnclaimedTasks(GardenTaskKind.EDGE_CLASSIFY, cutoffIso, 64);
+    expect(expired.map((row) => row.id)).toEqual(["edge-old"]);
+
+    const removed = await repo.expireUnclaimedTasks(
+      expired.map((row) => ({
+        task_id: row.id,
+        event: {
+          event_type: GardenEventType.SOUL_GARDEN_TASK_EXPIRED,
+          entity_type: "garden_task",
+          entity_id: row.id,
+          workspace_id: row.workspace_id,
+          run_id: null,
+          caused_by: "garden-runtime",
+          payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_EXPIRED, {
+            task_id: row.id,
+            task_kind: row.kind,
+            role: row.role,
+            tier: GardenTier.TIER_2,
+            workspace_id: row.workspace_id,
+            run_id: null,
+            enqueued_at: row.created_at,
+            ttl_ms: 7 * 24 * 60 * 60 * 1000,
+            occurred_at: "2026-05-21T00:00:00.000Z"
+          })
+        }
+      }))
+    );
+    expect(removed).toBe(1);
+
+    // edge-old is gone; edge-recent remains pending.
+    expect(repo.findById("edge-old")).toBeNull();
+    expect(getGardenTask(database, "edge-recent").status).toBe("pending");
+  });
+
+  it("does not expire a claimed task even if its created_at is past the cutoff", async () => {
+    const { database, repo } = createHarness();
+    repo.enqueue({
+      id: "edge-claimed",
+      workspace_id: "workspace-1",
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.EDGE_CLASSIFY,
+      payload: { task_kind: GardenTaskKind.EDGE_CLASSIFY },
+      created_at: "2026-05-01T00:00:00.000Z"
+    });
+    expect(
+      repo.claimAtomic("edge-claimed", "agent-target-a", "2026-05-02T00:00:00.000Z")
+    ).toBe("claimed");
+
+    // peek selects only status='pending' rows, so a claimed task is never listed.
+    const expired = repo.peekExpiredUnclaimedTasks(
+      GardenTaskKind.EDGE_CLASSIFY,
+      "2026-05-10T00:00:00.000Z",
+      64
+    );
+    expect(expired).toHaveLength(0);
+    expect(getGardenTask(database, "edge-claimed").status).toBe("claimed");
+  });
+
   it("lets the production scheduler dispatch persisted EMBEDDING_BACKFILL by workspace without draining other kinds", async () => {
     const { eventPublisher, repo } = createHarness();
     const scheduler = new GardenScheduler(

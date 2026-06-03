@@ -50,6 +50,7 @@ import {
 } from "@do-soul/alaya-core";
 import {
   createGardenBackgroundDataPorts,
+  type GardenTaskExpiryInput,
   type GardenTaskReclaimInput,
   type GardenTaskRow,
   type PathPlasticityWatermarkRepo,
@@ -150,6 +151,30 @@ const EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS = 8;
 // to O(stranded / cap) passes; oldest-first ordering keeps it FIFO-fair.
 // see also: packages/core/src/edge-proposal-service.ts reconcileStuckAccepts.
 const EDGE_PROPOSAL_RECONCILE_CAP_PER_PASS = 32;
+// invariant: B5(a) per ~60s pass, expire at most this many past-TTL pending edge
+// proposals per workspace so the TTL sweep shares the pass without starving the
+// other reclaim work. Beyond the cap the bound degrades to O(expired / cap)
+// passes; oldest-expiry-first keeps it FIFO-fair.
+const EDGE_PROPOSAL_EXPIRY_CAP_PER_PASS = 64;
+// invariant: B5(b) never-claimed host-worker tasks (EDGE_CLASSIFY /
+// POST_TURN_EXTRACT) outlive their usefulness on a no-agent deployment — the
+// heuristic edge / extract already stands, and a stale unclaimed LLM-refinement
+// task just grows garden_tasks unbounded. 7 days is conservative: far beyond the
+// 15-min host-worker fallback window and the 10-min stale-claim reclaim, so a
+// real attached worker has had every chance to claim, yet bounded enough that a
+// no-agent deployment's queue cannot grow without limit.
+const HOST_WORKER_TASK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// invariant: per ~60s pass, expire at most this many unclaimed host-worker tasks
+// per kind so the delete sweep shares the pass; oldest-first FIFO.
+const HOST_WORKER_TASK_EXPIRY_CAP_PER_PASS = 128;
+// invariant: the host-worker-only kinds whose never-claimed pending rows the TTL
+// sweep removes. Both are enqueued for an attached CLI agent; neither is claimed
+// by an in-process role, so neither completeWithEvents nor gcAbandonedClaims ever
+// removes an unclaimed one. see also: protocol garden-tier.ts (host-worker kinds).
+const HOST_WORKER_TTL_TASK_KINDS = [
+  GardenTaskKind.EDGE_CLASSIFY,
+  GardenTaskKind.POST_TURN_EXTRACT
+] as const satisfies readonly GardenTaskKindValue[];
 const JANITOR_RUNTIME_TASK_KINDS = [
   GardenTaskKind.TTL_CLEANUP,
   GardenTaskKind.HOT_INDEX_DEMOTION,
@@ -393,6 +418,18 @@ interface EdgeProposalReconcilePort {
     readonly already_present: number;
     readonly rejected: number;
     readonly transient_failed: number;
+  }>;
+  // invariant: B5(a) TTL sweep. Flips pending proposals past their expires_at to
+  // terminal `expired` (audited), bounded per pass/workspace. Runs on the same
+  // ~60s pass as reconcileStuckAccepts. see also: edge-proposal-service.ts
+  // sweepExpired; sweepExpiredEdgeProposals below.
+  sweepExpired(input: {
+    readonly workspaceId: string;
+    readonly limit: number;
+  }): Promise<{
+    readonly scanned: number;
+    readonly expired: number;
+    readonly skipped: number;
   }>;
 }
 
@@ -1679,6 +1716,60 @@ export function createGardenRuntime(input: {
     await repo.gcAbandonedClaims(reclaims);
   };
 
+  // invariant: B5(b) TTL sweep for never-claimed host-worker tasks. Removes
+  // EDGE_CLASSIFY / POST_TURN_EXTRACT pending rows older than HOST_WORKER_TASK_TTL_MS
+  // so a no-agent deployment's host-worker queue cannot grow unbounded (the
+  // heuristic edge / extract already stands; the stale LLM-refinement task is
+  // dead weight). Each removal emits a SOUL_GARDEN_TASK_EXPIRED audit so the
+  // delete is never silent. CAS-gated on status='pending' in the repo, so a task
+  // a worker claimed between peek and delete is left intact. Runs on the same
+  // ~60s pass as reclaimAbandonedGardenClaims; bounded per kind.
+  // see also: storage garden-task-repo.ts peekExpiredUnclaimedTasks / expireUnclaimedTasks.
+  const expireUnclaimedHostWorkerTasks = async (repo: SqliteGardenTaskRepo): Promise<void> => {
+    const occurredAt = new Date().toISOString();
+    const expiredBeforeIso = new Date(Date.now() - HOST_WORKER_TASK_TTL_MS).toISOString();
+    for (const kind of HOST_WORKER_TTL_TASK_KINDS) {
+      const expiredRows = repo.peekExpiredUnclaimedTasks(
+        kind,
+        expiredBeforeIso,
+        HOST_WORKER_TASK_EXPIRY_CAP_PER_PASS
+      );
+      if (expiredRows.length === 0) {
+        continue;
+      }
+      const expirations: GardenTaskExpiryInput[] = expiredRows.map((row) => ({
+        task_id: row.id,
+        event: {
+          event_type: GardenEventType.SOUL_GARDEN_TASK_EXPIRED,
+          entity_type: "garden_task",
+          entity_id: row.id,
+          workspace_id: row.workspace_id,
+          run_id: extractGardenTaskRunId(row.payload),
+          caused_by: "garden-runtime",
+          payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_EXPIRED, {
+            task_id: row.id,
+            task_kind: row.kind,
+            role: row.role,
+            tier: GARDEN_ROLE_TIER_MAP[row.role],
+            workspace_id: row.workspace_id,
+            run_id: extractGardenTaskRunId(row.payload),
+            enqueued_at: row.created_at,
+            ttl_ms: HOST_WORKER_TASK_TTL_MS,
+            occurred_at: occurredAt
+          })
+        }
+      }));
+      const removed = await repo.expireUnclaimedTasks(expirations);
+      if (removed > 0) {
+        warn("expired never-claimed host-worker garden tasks past TTL", {
+          task_kind: kind,
+          removed,
+          ttl_ms: HOST_WORKER_TASK_TTL_MS
+        });
+      }
+    }
+  };
+
   // invariant: enrich_pending crash-recovery sweep. A row claimed by a
   // BULK_ENRICH cycle that died before markProcessed is stranded (claimable
   // requires claimed_at IS NULL); after the TTL it is re-armed so a later cycle
@@ -1727,6 +1818,41 @@ export function createGardenRuntime(input: {
         }
       } catch (error) {
         warn("edge proposal accept->mint reconcile pass failed; continuing", {
+          workspace_id: workspace.workspace_id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  };
+
+  // invariant: B5(a) edge-proposal TTL expiry sweep. Flips past-TTL pending
+  // proposals to terminal `expired` (audited) per workspace, bounded per pass,
+  // so an unreviewed backlog cannot grow unbounded on a no-reviewer deployment.
+  // Runs on the same ~60s pass as reconcileStuckEdgeProposalAccepts. LOGs a
+  // per-workspace tally whenever it expired any row.
+  // see also: packages/core/src/edge-proposal-service.ts sweepExpired.
+  const sweepExpiredEdgeProposals = async (): Promise<void> => {
+    const edgeProposalReconcile = input.edgeProposalReconcile;
+    if (edgeProposalReconcile === undefined) {
+      return;
+    }
+    const workspaces = await input.workspaceRepo.list();
+    for (const workspace of workspaces) {
+      try {
+        const result = await edgeProposalReconcile.sweepExpired({
+          workspaceId: workspace.workspace_id,
+          limit: EDGE_PROPOSAL_EXPIRY_CAP_PER_PASS
+        });
+        if (result.expired > 0 || result.skipped > 0) {
+          warn("edge proposal TTL sweep expired past-TTL pending proposals", {
+            workspace_id: workspace.workspace_id,
+            scanned: result.scanned,
+            expired: result.expired,
+            skipped: result.skipped
+          });
+        }
+      } catch (error) {
+        warn("edge proposal TTL sweep failed; continuing", {
           workspace_id: workspace.workspace_id,
           error: error instanceof Error ? error.message : String(error)
         });
@@ -1795,9 +1921,15 @@ export function createGardenRuntime(input: {
       task: async () => {
         if (gardenTaskRepo !== undefined) {
           await reclaimAbandonedGardenClaims(gardenTaskRepo);
+          // B5(b): expire never-claimed host-worker tasks past their TTL so a
+          // no-agent deployment's garden_tasks queue cannot grow unbounded.
+          await expireUnclaimedHostWorkerTasks(gardenTaskRepo);
         }
         reclaimStaleEnrichClaims();
         await reconcileStuckEdgeProposalAccepts();
+        // B5(a): expire past-TTL pending edge proposals so the unreviewed
+        // backlog cannot grow unbounded on a no-reviewer deployment.
+        await sweepExpiredEdgeProposals();
         await processPostTurnExtractTask();
         // invariant: drain enrich_pending on the ~60s cadence (not the 15-min
         // Librarian pass) so conflict-suppression edges form within a ~1-min

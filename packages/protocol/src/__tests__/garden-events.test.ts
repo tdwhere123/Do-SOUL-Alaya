@@ -266,6 +266,7 @@ describe("Phase 4A protocol schemas", () => {
       GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
       GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED,
+      GardenEventType.SOUL_GARDEN_TASK_EXPIRED,
       GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
       GardenEventType.SOUL_ENRICH_ABANDONED,
       GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED

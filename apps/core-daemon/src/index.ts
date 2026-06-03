@@ -6,6 +6,11 @@ import {
   ControlPlaneObjectKind,
   GardenTaskKind,
   HealthEventKind,
+  HealthIssueCauseKind,
+  HealthIssueResolutionState,
+  HealthIssueSeverity,
+  HealthIssueSuggestedAction,
+  type HealthIssueGroup,
   MemoryGovernanceEventType,
   ProposalOptionKind,
   ProposalResolutionState,
@@ -45,6 +50,7 @@ import {
   DeferredObligationService,
   PathRelationProposalService,
   type PathCandidateSink,
+  type PathFailureHealthInboxPort,
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   ProjectMappingService,
   ProposalService,
@@ -458,6 +464,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     // see also: packages/core/src/edge-proposal-service.ts acceptProposal.
     pathCandidatePort: {
       submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
+    },
+    // invariant: D-EDGEAUDIT. Forward-references the health-inbox adapter
+    // (declared after healthIssueGroupRepo below); invoked only at accept-mint
+    // failure time, long after init. see also: pathFailureHealthInboxPort.
+    healthInboxPort: {
+      recordPathRelationFailure: (entry) => pathFailureHealthInboxPort.recordPathRelationFailure(entry)
     },
     eventPublisher
   });
@@ -1157,6 +1169,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       }
     },
     eventPublisher,
+    // invariant: D-EDGEAUDIT. Forward-references the health-inbox adapter
+    // (declared after healthIssueGroupRepo below); invoked only at anchor-reject
+    // time, long after init. see also: pathFailureHealthInboxPort.
+    healthInboxPort: {
+      recordPathRelationFailure: (entry) => pathFailureHealthInboxPort.recordPathRelationFailure(entry)
+    },
     ...(pathRelationCounterTtlMs === undefined ? {} : { counterTtlMs: pathRelationCounterTtlMs }),
     ...(pathRelationCoUsageThreshold === undefined ? {} : { threshold: pathRelationCoUsageThreshold }),
     warn: warnLogger.warn
@@ -1407,6 +1425,42 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     eventPublisher
   });
   const healthIssueGroupRepo = new SqliteHealthIssueGroupRepo(database);
+  // invariant: D-EDGEAUDIT. Implements the core PathFailureHealthInboxPort once
+  // against SqliteHealthIssueGroupRepo. A path-relation creation/mint failure
+  // (mint-side anchor reject OR accept-owed mint failure) upserts a
+  // `path_relation_failure` group keyed on (workspace_id, target_object_id,
+  // cause_kind), incrementing count on repeat like the Auditor's orphan/evidence
+  // upserts. Best-effort projection: any throw is swallowed by the caller so the
+  // underlying mint/accept flow is never broken. The EdgeProposalService and
+  // PathRelationProposalService both forward-reference this via closures.
+  // see also: packages/core/src/path-failure-health-inbox.ts;
+  //   packages/soul/src/garden/auditor.ts upsertHealthIssueGroup.
+  const pathFailureHealthInboxPort: PathFailureHealthInboxPort = {
+    recordPathRelationFailure: (entry) => {
+      const existing = healthIssueGroupRepo.findByCompositeKey(
+        entry.workspaceId,
+        entry.targetObjectId,
+        HealthIssueCauseKind.PATH_RELATION_FAILURE
+      );
+      const next: HealthIssueGroup = {
+        group_id: existing?.group_id ?? randomUUID(),
+        workspace_id: entry.workspaceId,
+        target_object_id: entry.targetObjectId,
+        target_object_kind: "memory_entry",
+        cause_kind: HealthIssueCauseKind.PATH_RELATION_FAILURE,
+        severity: HealthIssueSeverity.WARN,
+        confidence: 1,
+        first_seen_at: existing?.first_seen_at ?? entry.observedAt,
+        last_seen_at: entry.observedAt,
+        count: (existing?.count ?? 0) + 1,
+        suggested_actions: [HealthIssueSuggestedAction.INSPECT_PATH_FAILURE],
+        resolution_state: HealthIssueResolutionState.PENDING,
+        resolved_at: null,
+        resolved_by: null
+      };
+      healthIssueGroupRepo.upsert(next);
+    }
+  };
   // invariant: the R3d terminal-forgetting authority adapter. autonomousTombstone
   // + autonomousHardDeleteTombstoned are the audited, disposition-gated service
   // methods; findTombstonedMemoriesWithDisposition is the disposition-gated repo

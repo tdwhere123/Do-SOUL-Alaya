@@ -1026,6 +1026,125 @@ describe("EdgeProposalService", () => {
       message: "Target memory does not belong to workspace workspace-1: memory-b"
     });
   });
+
+  // B5(a): edge-proposal TTL — proposeEdge stamps a default expires_at and the
+  // sweep flips past-TTL pending proposals to terminal `expired`.
+  it("stamps a default expires_at at creation when the caller supplies none", async () => {
+    const repo = createProposalRepo();
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort: createPathCandidatePort(),
+      eventPublisher: createEventPublisher(),
+      generateId: () => "p1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    const proposal = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1"
+    });
+    // created_at 2026-05-24 + 30d = 2026-06-23.
+    expect(proposal.expires_at).toBe("2026-06-23T00:00:00.000Z");
+  });
+
+  it("honors an explicit caller expiresAt over the default TTL", async () => {
+    const repo = createProposalRepo();
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort: createPathCandidatePort(),
+      eventPublisher: createEventPublisher(),
+      generateId: () => "p1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    const proposal = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      expiresAt: "2026-05-25T00:00:00.000Z"
+    });
+    expect(proposal.expires_at).toBe("2026-05-25T00:00:00.000Z");
+  });
+
+  it("sweepExpired flips a past-TTL pending proposal to terminal expired with an audited reviewer", async () => {
+    const repo = createProposalRepo();
+    const eventPublisher = createEventPublisher();
+    let nowIso = "2026-05-24T00:00:00.000Z";
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      pathCandidatePort: createPathCandidatePort(),
+      eventPublisher,
+      generateId: () => "p1",
+      now: () => nowIso
+    });
+    await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      expiresAt: "2026-05-25T00:00:00.000Z"
+    });
+    // before the TTL: nothing expires.
+    const before = await service.sweepExpired({ workspaceId: "workspace-1", limit: 16 });
+    expect(before).toEqual({ scanned: 0, expired: 0, skipped: 0 });
+
+    // after the TTL: the pending proposal is flipped to expired.
+    nowIso = "2026-05-26T00:00:00.000Z";
+    const after = await service.sweepExpired({ workspaceId: "workspace-1", limit: 16 });
+    expect(after).toEqual({ scanned: 1, expired: 1, skipped: 0 });
+    expect(repo.findById("edge_prop_p1")).toMatchObject({
+      status: EdgeProposalStatus.EXPIRED,
+      reviewer_identity: "system:edge_proposal_ttl_policy"
+    });
+    expect(eventPublisher.appendManyWithMutation).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          event_type: "soul.graph.edge_proposal_reviewed",
+          entity_id: "edge_prop_p1"
+        })
+      ],
+      expect.any(Function)
+    );
+  });
+
+  // D-EDGEAUDIT: an accept-owed path mint failure surfaces a health_inbox entry
+  // in addition to the durable EventLog audit, best-effort.
+  it("records a health_inbox path-relation-failure on accept-owed mint failure", async () => {
+    const repo = createProposalRepo();
+    const recordPathRelationFailure = vi.fn();
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      // a permanent "rejected" mint outcome drives handleMintFailure.
+      pathCandidatePort: { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "rejected") },
+      eventPublisher: createEventPublisher(),
+      healthInboxPort: { recordPathRelationFailure },
+      generateId: createIdGenerator(),
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+    const proposal = await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1"
+    });
+    await expect(
+      service.batchReview({
+        workspaceId: "workspace-1",
+        verdict: "accept",
+        filter: { proposal_ids: [proposal.proposal_id] },
+        reason: null,
+        reviewerIdentity: "operator-1"
+      })
+    ).rejects.toMatchObject({ name: "CoreError", code: "OBLIGATION_VIOLATION" });
+    expect(recordPathRelationFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "workspace-1", targetObjectId: "memory-a" })
+    );
+  });
 });
 
 function createProposalRepo(options: {
@@ -1094,6 +1213,17 @@ function createProposalRepo(options: {
         }
         return true;
       });
+    },
+    listExpiredPending(workspaceId, nowIso, limit) {
+      return proposals
+        .filter(
+          (proposal) =>
+            proposal.workspace_id === workspaceId &&
+            proposal.status === EdgeProposalStatus.PENDING &&
+            proposal.expires_at !== null &&
+            proposal.expires_at < nowIso
+        )
+        .slice(0, limit);
     },
     updateReview(input) {
       options.beforeUpdateReview?.(input.proposalId);

@@ -7,6 +7,7 @@ const gardenEventTypeValues = [
   "soul.garden.task_dispatched",
   "soul.garden.task_completed",
   "soul.garden.task_claim_reclaimed",
+  "soul.garden.task_expired",
   "soul.garden.tier_violation_rejected",
   "soul.garden.enrich_abandoned",
   "soul.health_journal.recorded"
@@ -16,6 +17,15 @@ export const GardenEventType = {
   SOUL_GARDEN_TASK_DISPATCHED: "soul.garden.task_dispatched",
   SOUL_GARDEN_TASK_COMPLETED: "soul.garden.task_completed",
   SOUL_GARDEN_TASK_CLAIM_RECLAIMED: "soul.garden.task_claim_reclaimed",
+  // invariant: a never-claimed pending Garden task that outlived its kind TTL is
+  // removed so a no-agent deployment's host-worker queue (EDGE_CLASSIFY /
+  // POST_TURN_EXTRACT) cannot grow unbounded. The removal is audited here rather
+  // than left a silent DELETE. Distinct from CLAIM_RECLAIMED: CLAIM_RECLAIMED
+  // re-arms a claimed-but-abandoned task back to pending; TASK_EXPIRED discards
+  // a pending task no worker ever claimed.
+  // see also: storage/src/repos/garden-task-repo.ts expireUnclaimedByKind;
+  //   apps/core-daemon/src/garden-runtime.ts expireUnclaimedHostWorkerTasks.
+  SOUL_GARDEN_TASK_EXPIRED: "soul.garden.task_expired",
   SOUL_GARDEN_TIER_VIOLATION_REJECTED: "soul.garden.tier_violation_rejected",
   // invariant: governance/runtime drops must be auditable. A BULK_ENRICH marker
   // that exhausts its transient-retry budget is dead-lettered, never silently
@@ -63,6 +73,22 @@ export const SoulGardenTaskClaimReclaimedPayloadSchema = z
     previous_claimed_by: NonEmptyStringSchema,
     claimed_at: IsoDatetimeStringSchema,
     stale_after_ms: NonNegativeIntSchema,
+    occurred_at: IsoDatetimeStringSchema
+  })
+  .readonly();
+
+export const SoulGardenTaskExpiredPayloadSchema = z
+  .object({
+    task_id: NonEmptyStringSchema,
+    task_kind: GardenTaskKindSchema,
+    role: GardenRoleSchema,
+    tier: GardenTierSchema,
+    workspace_id: NonEmptyStringSchema,
+    run_id: NonEmptyStringSchema.nullable(),
+    // age of the unclaimed task at removal and the kind TTL it crossed, so the
+    // operator can audit the expiry policy without re-deriving it.
+    enqueued_at: IsoDatetimeStringSchema,
+    ttl_ms: NonNegativeIntSchema,
     occurred_at: IsoDatetimeStringSchema
   })
   .readonly();
@@ -117,6 +143,7 @@ const gardenPayloadSchemas = {
   [GardenEventType.SOUL_GARDEN_TASK_DISPATCHED]: SoulGardenTaskDispatchedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_COMPLETED]: SoulGardenTaskCompletedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED]: SoulGardenTaskClaimReclaimedPayloadSchema,
+  [GardenEventType.SOUL_GARDEN_TASK_EXPIRED]: SoulGardenTaskExpiredPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED]: SoulGardenTierViolationRejectedPayloadSchema,
   [GardenEventType.SOUL_ENRICH_ABANDONED]: SoulEnrichAbandonedPayloadSchema,
   [GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED]: SoulHealthJournalRecordedPayloadSchema
@@ -141,6 +168,10 @@ const SoulGardenTaskClaimReclaimedEventObjectSchema = createGardenEventObjectSch
   GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED,
   SoulGardenTaskClaimReclaimedPayloadSchema
 );
+const SoulGardenTaskExpiredEventObjectSchema = createGardenEventObjectSchema(
+  GardenEventType.SOUL_GARDEN_TASK_EXPIRED,
+  SoulGardenTaskExpiredPayloadSchema
+);
 const SoulGardenTierViolationRejectedEventObjectSchema = createGardenEventObjectSchema(
   GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
   SoulGardenTierViolationRejectedPayloadSchema
@@ -157,6 +188,7 @@ const SoulHealthJournalRecordedEventObjectSchema = createGardenEventObjectSchema
 export const SoulGardenTaskDispatchedEventSchema = SoulGardenTaskDispatchedEventObjectSchema.readonly();
 export const SoulGardenTaskCompletedEventSchema = SoulGardenTaskCompletedEventObjectSchema.readonly();
 export const SoulGardenTaskClaimReclaimedEventSchema = SoulGardenTaskClaimReclaimedEventObjectSchema.readonly();
+export const SoulGardenTaskExpiredEventSchema = SoulGardenTaskExpiredEventObjectSchema.readonly();
 export const SoulGardenTierViolationRejectedEventSchema = SoulGardenTierViolationRejectedEventObjectSchema.readonly();
 export const SoulEnrichAbandonedEventSchema = SoulEnrichAbandonedEventObjectSchema.readonly();
 export const SoulHealthJournalRecordedEventSchema = SoulHealthJournalRecordedEventObjectSchema.readonly();
@@ -166,6 +198,7 @@ export const GardenEventUnionSchema = z
     SoulGardenTaskDispatchedEventObjectSchema,
     SoulGardenTaskCompletedEventObjectSchema,
     SoulGardenTaskClaimReclaimedEventObjectSchema,
+    SoulGardenTaskExpiredEventObjectSchema,
     SoulGardenTierViolationRejectedEventObjectSchema,
     SoulEnrichAbandonedEventObjectSchema,
     SoulHealthJournalRecordedEventObjectSchema

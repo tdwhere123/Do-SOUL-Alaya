@@ -248,6 +248,7 @@ export {
   type GardenTaskEnqueueInput,
   type GardenTaskEventInput,
   type GardenTaskEventPublisherPort,
+  type GardenTaskExpiryInput,
   type GardenTaskReclaimInput,
   type GardenTaskRepoPort,
   type GardenTaskRow,

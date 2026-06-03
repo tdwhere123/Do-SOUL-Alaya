@@ -26,6 +26,13 @@ const MAX_EDGE_PROPOSALS_PER_MEMORY = 5;
 const SUPPORTS_TOKEN_JACCARD_MIN = 0.45;
 const DERIVES_TOKEN_JACCARD_MIN = 0.28;
 const SUPERSEDES_TOKEN_JACCARD_MIN = 0.5;
+// invariant: the local contradicts heuristic shares the supersedes token-Jaccard
+// floor (0.5) — a contradicts pair must be about the same subject (high lexical
+// overlap) for a negation cue between them to mean disagreement rather than two
+// unrelated statements. Strong-overlap + a CONTRADICTION cue is the conservative
+// signal; below this floor the pair is left to the SUPPORTS/DERIVES_FROM lanes
+// or to no edge. see also: isContradictsCandidate, CONTRADICTION_CUES.
+const CONTRADICTS_TOKEN_JACCARD_MIN = 0.5;
 const STRONG_TAG_OVERLAP_MIN = 0.5;
 // invariant: LLM pair-classifier verdicts MUST clear this confidence
 // floor to enter the proposal queue. A below-floor verdict is dropped
@@ -78,6 +85,37 @@ const REPLACEMENT_CUES = [
   "改成",
   "不要",
   "禁止"
+];
+
+// invariant: conservative contradiction cues. These mark a new memory that
+// explicitly DISAGREES WITH / NEGATES a prior claim, distinct from REPLACEMENT_CUES
+// (which mark a newer-version-replaces-older supersession). The two cue sets are
+// intentionally disjoint: a "no longer / replace" statement is supersedes (the
+// new fact is the live one), while a "contradicts / not true / actually the
+// opposite" statement is contradicts (the two facts disagree without one
+// retiring the other). Bilingual (en + zh). A bare negation word like "not" is
+// deliberately absent — it is too noisy; only explicit disagreement phrases
+// qualify so the rule never fabricates a contradiction from incidental negation.
+// see also: isContradictsCandidate, REPLACEMENT_CUES.
+const CONTRADICTION_CUES = [
+  "contradicts",
+  "contradict",
+  "is not true",
+  "is false",
+  "is incorrect",
+  "is wrong",
+  "actually the opposite",
+  "on the contrary",
+  "disagree with",
+  "not the case",
+  "矛盾",
+  "相反",
+  "并非",
+  "不是真的",
+  "是错的",
+  "是错误的",
+  "不对",
+  "恰恰相反"
 ];
 
 const STOPWORDS = new Set([
@@ -643,6 +681,27 @@ const LOCAL_SUPERSEDES_SEED_PROFILE: PathSeedProfile = Object.freeze({
   evidenceBasis: Object.freeze(["supersession_evidence"]) as readonly string[]
 });
 
+// invariant: the local contradicts heuristic is the negative-cue sibling of
+// LOCAL_SUPERSEDES_SEED_PROFILE. It is a weak local claim (a deterministic
+// negation/contradiction cue between a new memory and a strong-overlap
+// neighbor), NOT a SYSTEM-derived conflict ruling, so it seeds attention_only
+// at recall_bias -0.4 and earns recall eligibility only through plasticity
+// reinforcement — it never mints the recall_allowed/0.9 CONTRADICTS_SEED_PROFILE
+// reserved for ConflictDetectionService's LLM/Jaccard verdict. Magnitude 0.4
+// mirrors the contradicts entry in the SIGNAL_REF_SEED_SPECS / shared catalog so
+// a local-cue contradicts and an agent-asserted contradicts_ref carry the same
+// negative weight.
+// see also: packages/core/src/conflict-detection-service.ts — SYSTEM negatives;
+//   packages/soul/src/garden/materialization-router.ts SIGNAL_REF_SEED_SPECS.
+const LOCAL_CONTRADICTS_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "contradicts",
+  initialStrength: 0.5,
+  governanceClass: "attention_only",
+  recallBiasSign: -1,
+  recallBiasMagnitude: 0.4,
+  evidenceBasis: Object.freeze(["contradiction_evidence"]) as readonly string[]
+});
+
 // invariant: maps the producer's edge-type verdict to the path seed
 // profile that carries its initial strength / governance / recall_bias
 // sign. supports + derives_from are positive associative profiles; the
@@ -654,6 +713,8 @@ function seedProfileForEdgeType(edgeType: MemoryGraphEdgeTypeValue): PathSeedPro
       return DERIVES_FROM_SEED_PROFILE;
     case MemoryGraphEdgeType.SUPERSEDES:
       return LOCAL_SUPERSEDES_SEED_PROFILE;
+    case MemoryGraphEdgeType.CONTRADICTS:
+      return LOCAL_CONTRADICTS_SEED_PROFILE;
     case MemoryGraphEdgeType.SUPPORTS:
     default:
       return SUPPORTS_SEED_PROFILE;
@@ -677,6 +738,18 @@ function classifyNeighbor(
       confidence: confidence(0.55, features, 0.05, 0.85),
       reason: describeDecision("B-3 local supersedes heuristic", features),
       triggerSource: EdgeProposalTriggerSource.LOCAL_SUPERSEDES
+    };
+  }
+  // invariant: contradicts is checked AFTER supersedes — a replacement cue is a
+  // stronger retirement signal and wins when both fire. Its own LOCAL_CONTRADICTS
+  // trigger_source keeps the K3.2 per-trigger KPI bucket distinct from the
+  // supersedes lane.
+  if (isContradictsCandidate(newMemory, features)) {
+    return {
+      edgeType: MemoryGraphEdgeType.CONTRADICTS,
+      confidence: confidence(0.55, features, 0, 0.8),
+      reason: describeDecision("B-3 local contradicts heuristic", features),
+      triggerSource: EdgeProposalTriggerSource.LOCAL_CONTRADICTS
     };
   }
   if (isDerivesFromCandidate(newMemory, features)) {
@@ -739,6 +812,23 @@ function isSupersedesCandidate(
     newMemory.created_at > neighbor.created_at &&
     features.tokenJaccard >= SUPERSEDES_TOKEN_JACCARD_MIN &&
     hasAnyCue(newMemory.content, REPLACEMENT_CUES)
+  );
+}
+
+// invariant: conservative local contradicts detection. Requires high lexical
+// overlap (same subject) AND an explicit CONTRADICTION cue in the new memory.
+// No created_at ordering gate (unlike supersedes): a contradiction is symmetric
+// disagreement, not a newer-version replacement. The strongTagOverlap gate from
+// classifyNeighbor still applies upstream, so the pair is already same-subject;
+// this adds the lexical-overlap floor + the explicit-cue requirement so an
+// incidental negation never fabricates a contradicts edge.
+function isContradictsCandidate(
+  newMemory: Readonly<MemoryEntry>,
+  features: SimilarityFeatures
+): boolean {
+  return (
+    features.tokenJaccard >= CONTRADICTS_TOKEN_JACCARD_MIN &&
+    hasAnyCue(newMemory.content, CONTRADICTION_CUES)
   );
 }
 

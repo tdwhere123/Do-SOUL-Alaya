@@ -12,6 +12,7 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { EventPublisherPropagationError, type EventPublisher, type EventPublisherInput } from "./event-publisher.js";
+import type { PathFailureHealthInboxPort } from "./path-failure-health-inbox.js";
 
 // invariant: PathRelationProposalService is the single producer of
 // PathRelation entities. It accepts seeding signals from many producers
@@ -282,6 +283,15 @@ export interface PathRelationProposalServiceDeps {
   // tests that exercise the seed/dedup machinery in isolation; the daemon
   // composition MUST supply it so the MCP and Garden mint paths are covered.
   readonly memoryExistence?: MemoryAnchorExistencePort;
+  // invariant: D-EDGEAUDIT operator-triage surface. When wired, an anchor-rejected
+  // mint (emitRejection) ALSO upserts a `path_relation_failure` health_inbox group
+  // in addition to its PATH_RELATION_REJECTED EventLog row, so the failure is
+  // visible in the Inspector inbox, not only by forensic EventLog scan. Optional:
+  // when absent the EventLog audit stands alone. Best-effort — a port throw must
+  // never break the mint flow.
+  // see also: edge-proposal-service.ts (the accept-owed failure twin);
+  //   protocol HealthIssueCauseKind.PATH_RELATION_FAILURE.
+  readonly healthInboxPort?: PathFailureHealthInboxPort;
   readonly threshold?: number;
   readonly now?: () => string;
   readonly nowMs?: () => number;
@@ -722,6 +732,27 @@ export class PathRelationProposalService {
       rejected_object_id: failure.objectId,
       rejection_reason: failure.reason
     });
+    // invariant: D-EDGEAUDIT. The reject is durably audited above; ALSO surface
+    // it to the operator-triage inbox (best-effort, after the audit committed).
+    // target_object_id = the rejected anchor's backing object id (no path row
+    // exists). A port throw must not break the mint flow.
+    await this.recordPathFailureToInbox(workspaceId, failure.objectId);
+  }
+
+  private async recordPathFailureToInbox(workspaceId: string, targetObjectId: string): Promise<void> {
+    const port = this.deps.healthInboxPort;
+    if (port === undefined) {
+      return;
+    }
+    try {
+      await port.recordPathRelationFailure({
+        workspaceId,
+        targetObjectId,
+        observedAt: this.now()
+      });
+    } catch {
+      // best-effort projection: never break the mint flow on an inbox write.
+    }
   }
 
   private warn(message: string, meta: Record<string, unknown>): void {
