@@ -3169,7 +3169,7 @@ describe("RecallService", () => {
       }
     });
 
-    const result = await service.recall({
+    await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",

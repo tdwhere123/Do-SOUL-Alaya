@@ -367,6 +367,8 @@ describe("LongMemEval recall diagnostics", () => {
       });
       const metrics = buildLongMemEvalQualityMetrics([buildQuestion([hop1PathGold])]);
       const fanin = metrics.path_vs_graph_fanin;
+      expect(fanin).toBeDefined();
+      if (!fanin) throw new Error("path_vs_graph_fanin missing");
 
       expect(fanin.path_gold_source_count).toBe(1);
       expect(fanin.path_gold_hit_at_5_count).toBe(1);
@@ -391,6 +393,8 @@ describe("LongMemEval recall diagnostics", () => {
       });
       const metrics = buildLongMemEvalQualityMetrics([buildQuestion([multiHopGraphGold])]);
       const fanin = metrics.path_vs_graph_fanin;
+      expect(fanin).toBeDefined();
+      if (!fanin) throw new Error("path_vs_graph_fanin missing");
 
       expect(fanin.graph_gold_source_count).toBe(1);
       expect(fanin.graph_gold_hit_at_5_count).toBe(1);
