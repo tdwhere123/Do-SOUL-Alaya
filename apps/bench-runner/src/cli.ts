@@ -1594,6 +1594,14 @@ function mergeQualityMetrics(
   const missDistribution: Record<string, number> = {};
   const planeGoldCounts = new Map<string, number>();
   const planeHitAt5Counts = new Map<string, number>();
+  // Cohort fan-in attribution (codex I2): additive across shards; rate is
+  // recomputed from the merged counts. Present only when a shard carried it.
+  let anyCohortAttribution = false;
+  let cohortDeliveredPlaneCount = 0;
+  let cohortGoldSourcePlaneCount = 0;
+  let cohortGoldFirstAdmittedCount = 0;
+  let cohortGoldWinningAdmissionCount = 0;
+  let cohortGoldHitAt5Count = 0;
 
   for (const metric of metrics) {
     if (metric === undefined) continue;
@@ -1630,6 +1638,14 @@ function mergeQualityMetrics(
     }
     for (const [key, count] of Object.entries(metric.miss_distribution)) {
       missDistribution[key] = (missDistribution[key] ?? 0) + count;
+    }
+    if (metric.cohort_attribution !== undefined) {
+      anyCohortAttribution = true;
+      cohortDeliveredPlaneCount += metric.cohort_attribution.delivered_plane_count;
+      cohortGoldSourcePlaneCount += metric.cohort_attribution.gold_source_plane_count;
+      cohortGoldFirstAdmittedCount += metric.cohort_attribution.gold_first_admitted_count;
+      cohortGoldWinningAdmissionCount += metric.cohort_attribution.gold_winning_admission_count;
+      cohortGoldHitAt5Count += metric.cohort_attribution.hit_at_5_count;
     }
   }
 
@@ -1675,6 +1691,18 @@ function mergeQualityMetrics(
       planeGoldCounts,
       planeHitAt5Counts
     ),
+    ...(anyCohortAttribution
+      ? {
+          cohort_attribution: {
+            delivered_plane_count: cohortDeliveredPlaneCount,
+            gold_source_plane_count: cohortGoldSourcePlaneCount,
+            gold_first_admitted_count: cohortGoldFirstAdmittedCount,
+            gold_winning_admission_count: cohortGoldWinningAdmissionCount,
+            hit_at_5_count: cohortGoldHitAt5Count,
+            hit_at_5_rate: ratio(cohortGoldHitAt5Count, cohortGoldSourcePlaneCount)
+          }
+        }
+      : {}),
     miss_distribution: missDistribution
   };
 }

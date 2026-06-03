@@ -365,6 +365,11 @@ export type RecallFusionStream =
   // see also: scoreRecallFusionStream case "entity_seed"
   | "entity_seed"
   | "path_expansion"
+  // see also: scoreRecallFusionStream case "session_cohort_fanin". One
+  // nominated representative per session cohort fires this stream; cohort
+  // distractors never do, so a multi-session answer cluster promotes a single
+  // memory_entry by fusion merit instead of flat-dumping every member.
+  | "session_cohort_fanin"
   | "temporal_recency"
   | "workspace_activation";
 
@@ -561,6 +566,14 @@ export interface RecallSupplementaryData {
   // produced from the FTS rank of the strongest entity surface that hit.
   readonly entitySeedScores: Readonly<Record<string, number>>;
   readonly pathExpansionScores: Readonly<Record<string, number>>;
+  // Fan-in score keyed by the ONE nominated representative memory_entry of each
+  // session cohort. A cohort nominates its argmax query/evidence-relevant member
+  // and writes a log-damped fan-in boost here; non-representative members are
+  // ABSENT from this map so the session_cohort_fanin stream lifts exactly one
+  // member per cohort. Empty when no cohort nominated a query-relevant member.
+  // see also: recall-service.ts addContentDerivedExpansionCandidates,
+  // scoreRecallFusionStream case "session_cohort_fanin".
+  readonly cohortFaninScores: Readonly<Record<string, number>>;
   // Active sign-aware suppression deltas keyed by target memory id. A positive
   // value is subtracted from that memory's fused recall score before final
   // ranking, demoting targets that a reinforced negative path (recall_bias < 0)

@@ -242,6 +242,12 @@ const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "semantic_supplement"
 ] as const);
 
+// Recall admission-plane label for the multi-session cohort plane. The cohort
+// fan-in attribution split (codex I2) keys on this plane to measure how the
+// session cohort representative converts to delivered top-5 gold.
+// see also: packages/core/src/recall-service.ts addContentDerivedExpansionCandidates.
+const COHORT_PLANE = "session_surface_cohort";
+
 const DIAGNOSTIC_SOURCE_LABELS = new Set<string>([
   ...DIAGNOSTIC_ADMISSION_PLANES,
   ...DIAGNOSTIC_ADMISSION_PLANES.map((plane) => `plane:${plane}`),
@@ -465,6 +471,13 @@ export function buildLongMemEvalQualityMetrics(
   // candidates' source_planes, never a hardcoded plane list.
   const planeGoldCounts = new Map<string, number>();
   const planeHitAt5Counts = new Map<string, number>();
+  // Cohort fan-in attribution (codex I2). Five classes splitting how the session
+  // cohort plane participates in gold delivery; see CohortAttributionSchema.
+  let cohortDeliveredPlaneCount = 0;
+  let cohortGoldSourcePlaneCount = 0;
+  let cohortGoldFirstAdmittedCount = 0;
+  let cohortGoldWinningAdmissionCount = 0;
+  let cohortGoldHitAt5Count = 0;
 
   for (const question of diagnostics) {
     missDistribution[question.miss_classification] =
@@ -494,6 +507,12 @@ export function buildLongMemEvalQualityMetrics(
       if (hasPathStreamContribution(delivered)) {
         pathStreamTop10Count++;
       }
+      if (
+        delivered.plane_first_admitted === COHORT_PLANE ||
+        delivered.plane_winning_admission === COHORT_PLANE
+      ) {
+        cohortDeliveredPlaneCount++;
+      }
     }
 
     for (const gold of question.gold) {
@@ -507,6 +526,18 @@ export function buildLongMemEvalQualityMetrics(
             (planeHitAt5Counts.get(plane) ?? 0) + 1
           );
         }
+      }
+      if (gold.source_planes.includes(COHORT_PLANE)) {
+        cohortGoldSourcePlaneCount++;
+        if (goldHitAt5) {
+          cohortGoldHitAt5Count++;
+        }
+      }
+      if (gold.plane_first_admitted === COHORT_PLANE) {
+        cohortGoldFirstAdmittedCount++;
+      }
+      if (gold.plane_winning_admission === COHORT_PLANE) {
+        cohortGoldWinningAdmissionCount++;
       }
       if (isDeliveryBudgetLoss(gold)) {
         const dropReason = gold.budget_drop_reason;
@@ -575,6 +606,14 @@ export function buildLongMemEvalQualityMetrics(
       planeGoldCounts,
       planeHitAt5Counts
     ),
+    cohort_attribution: {
+      delivered_plane_count: cohortDeliveredPlaneCount,
+      gold_source_plane_count: cohortGoldSourcePlaneCount,
+      gold_first_admitted_count: cohortGoldFirstAdmittedCount,
+      gold_winning_admission_count: cohortGoldWinningAdmissionCount,
+      hit_at_5_count: cohortGoldHitAt5Count,
+      hit_at_5_rate: ratio(cohortGoldHitAt5Count, cohortGoldSourcePlaneCount)
+    },
     // Calibrated-confidence audit block: how many `_abs` questions were
     // scored, how many stayed appropriately unconfident at each k, and the
     // false-confident threshold the verdict used. A future benchmark swap

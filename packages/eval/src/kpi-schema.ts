@@ -180,6 +180,28 @@ const PerPlaneRecallCoverageEntrySchema = z
   })
   .strict();
 
+// Cohort fan-in attribution split (codex I2). The session cohort plane surfaces
+// the most gold of any plane but historically flat-dumped it; this block splits
+// its contribution into the five classes codex defined so the fan-in promotion
+// is readable in the gate archive:
+//   - delivered_plane_count: delivered rows (any rank) carrying the cohort plane
+//   - gold_source_plane_count: gold whose source_planes include the cohort plane
+//   - gold_first_admitted_count: gold whose plane_first_admitted is the cohort plane
+//   - gold_winning_admission_count: gold whose plane_winning_admission is the cohort plane
+//   - hit_at_5_count / hit_at_5_rate: cohort-source gold that delivered in top-5
+// gold_winning_admission converting to hit@5 is the load-bearing signal that the
+// cohort representative promoted by merit rather than borrowing a co-admitted plane.
+const CohortAttributionSchema = z
+  .object({
+    delivered_plane_count: z.number().int().nonnegative(),
+    gold_source_plane_count: z.number().int().nonnegative(),
+    gold_first_admitted_count: z.number().int().nonnegative(),
+    gold_winning_admission_count: z.number().int().nonnegative(),
+    hit_at_5_count: z.number().int().nonnegative(),
+    hit_at_5_rate: RatioSchema
+  })
+  .strict();
+
 const QualityMetricsSchema = z
   .object({
     schema_version: z.literal("bench-quality-metrics.v1"),
@@ -210,6 +232,9 @@ const QualityMetricsSchema = z
     per_plane_recall_coverage: z
       .record(PerPlaneRecallCoverageEntrySchema)
       .default({}),
+    // Cohort fan-in attribution (codex I2). Optional so pre-fan-in kpi.json
+    // records stay valid; new LongMemEval runs always populate it.
+    cohort_attribution: CohortAttributionSchema.optional(),
     // @anchor longmemeval-abstention: calibrated-confidence scoring of the
     // LongMemEval-S abstention questions (`question_id` ending `_abs`).
     // Optional so pre-abstention-scoring kpi.json records stay valid; new
