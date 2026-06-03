@@ -161,6 +161,7 @@ import {
 } from "./daemon-runtime-support.js";
 import { createReconciliationLlmDecisionPort } from "./reconciliation-llm-decision.js";
 import { createEdgeAutoProducerLlmPort } from "./edge-auto-producer-llm-adapter.js";
+import { createEdgeClassifyQueueAdapter } from "./edge-classify-queue-adapter.js";
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
 import { createGardenRuntime } from "./garden-runtime.js";
@@ -882,10 +883,54 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         }
       })
     : null;
+  // invariant: host-worker defer for the B-2 LLM-quality verdict. When ON, the
+  // EDGE_CLASSIFY garden task is enqueued for the attached CLI agent (the
+  // compute) instead of the synchronous in-process llmPort; the deterministic
+  // heuristic still produces the edge inline. Defaults OFF here so the existing
+  // garden-compute path stays the default — flipping host_worker to the install
+  // default (and adding the no-network regression) is a separate slice. The
+  // gardenTaskRepo this closure reads is created later in init; the closure is
+  // only invoked at materialization time, long after assignment, so there is no
+  // use-before-assignment. see also: edge-classify-queue-adapter.ts.
+  const edgeClassifyHostWorkerEnabled = (() => {
+    const raw = process.env.ALAYA_EDGE_CLASSIFY_HOST_WORKER?.toLowerCase();
+    return raw === "1" || raw === "true";
+  })();
+  let edgeClassifyQueueRepoHolder:
+    | { enqueue: typeof SqliteGardenTaskRepo.prototype.enqueue; findById: typeof SqliteGardenTaskRepo.prototype.findById }
+    | undefined;
+  const edgeClassifyQueue = edgeClassifyHostWorkerEnabled
+    ? createEdgeClassifyQueueAdapter({
+        gardenTaskRepo: {
+          enqueue: (input) => {
+            if (edgeClassifyQueueRepoHolder === undefined) {
+              throw new Error("EDGE_CLASSIFY queue used before the garden task repo was wired.");
+            }
+            return edgeClassifyQueueRepoHolder.enqueue(input);
+          },
+          findById: (taskId) => {
+            if (edgeClassifyQueueRepoHolder === undefined) {
+              return null;
+            }
+            const row = edgeClassifyQueueRepoHolder.findById(taskId);
+            return row === null ? null : { id: row.id };
+          }
+        },
+        now: () => new Date().toISOString(),
+        warn: warnLogger.warn
+      })
+    : null;
   const edgeAutoProducerService = new EdgeAutoProducerService({
     memoryRepo: memoryEntryRepo,
     pathCandidatePort,
-    ...(edgeAutoProducerLlmPort === null ? {} : { llmPort: edgeAutoProducerLlmPort }),
+    // invariant: when the host-worker queue is wired the synchronous llmPort is
+    // NOT passed — the LLM-quality verdict is deferred. The service still runs
+    // the heuristic inline either way.
+    ...(edgeClassifyQueue !== null
+      ? { edgeClassifyQueue }
+      : edgeAutoProducerLlmPort === null
+        ? {}
+        : { llmPort: edgeAutoProducerLlmPort }),
     warn: warnLogger.warn
   });
   // invariant: ConflictDetectionService rule path is ON by default per
@@ -1388,6 +1433,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     typeof (database.connection as { readonly prepare?: unknown }).prepare === "function"
       ? new SqliteGardenTaskRepo(database.connection, eventPublisher)
       : undefined;
+  // Resolve the forward-referenced EDGE_CLASSIFY enqueue holder now that the
+  // garden task repo exists. The defer closure declared above only fires at
+  // materialization time, so this assignment always precedes the first use.
+  if (gardenTaskRepo !== undefined) {
+    edgeClassifyQueueRepoHolder = gardenTaskRepo;
+  }
   const gardenBacklogTelemetryService = new GardenBacklogTelemetryService({
     scheduler: gardenRuntime.backlogTelemetrySource,
     eventLogRepo,
@@ -1454,6 +1505,13 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     trustStateRecorder,
     eventPublisher,
     ...(gardenTaskRepo === undefined ? {} : { gardenTaskRepo }),
+    // invariant: applies a host-worker EDGE_CLASSIFY verdict to the existing
+    // heuristic path. Wired to the same EdgeAutoProducerService that produced
+    // the inline edge so the verdict refinement goes through the identical
+    // governed PathCandidateSink. see also: edge-auto-producer-service.ts applyVerdict.
+    edgeVerdictApplier: {
+      applyVerdict: (verdictInput) => edgeAutoProducerService.applyVerdict(verdictInput)
+    },
     eventLogRepo,
     proposalRepo,
     runtimeNotifier,

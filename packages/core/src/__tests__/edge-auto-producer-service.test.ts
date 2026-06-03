@@ -668,6 +668,209 @@ describe("EdgeAutoProducerService", () => {
     expect(llmPort.classifyPair).toHaveBeenCalledTimes(1);
   });
 
+  // R0-B host-worker defer: when the edgeClassifyQueue is wired, the
+  // LLM-quality verdict is ENQUEUED (not called synchronously) and the
+  // deterministic heuristic still produces the edge inline.
+  it("host-worker defer: enqueues EDGE_CLASSIFY AND still submits the inline heuristic edge", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const edgeClassifyQueue = {
+      enqueueEdgeClassify: vi.fn(async () => undefined)
+    };
+    const service = new EdgeAutoProducerService({ ...deps, edgeClassifyQueue });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // The LLM-quality verdict was DEFERRED to the host worker.
+    expect(edgeClassifyQueue.enqueueEdgeClassify).toHaveBeenCalledTimes(1);
+    expect(edgeClassifyQueue.enqueueEdgeClassify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        source: expect.objectContaining({ object_id: "memory-new" }),
+        neighbor: expect.objectContaining({ object_id: "memory-existing" })
+      })
+    );
+    // The inline heuristic edge still landed (eventual consistency: the edge
+    // exists now; the LLM verdict refines it later).
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ relationKind: "supports", recallBiasSign: 1 })
+    );
+    const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+    expect(submitArgs.why?.some((line) => line.includes("local_supports"))).toBe(true);
+  });
+
+  it("host-worker defer: a queue enqueue failure is non-fatal — the heuristic edge still stands", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const edgeClassifyQueue = {
+      enqueueEdgeClassify: vi.fn(async () => {
+        throw new Error("queue is down");
+      })
+    };
+    const warn = vi.fn();
+    const service = new EdgeAutoProducerService({ ...deps, edgeClassifyQueue, warn });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // Enqueue threw, but the inline heuristic edge still landed and the call
+    // did not abort. A single observable warn fires for the operator.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls[0]![0]).toContain("edge-classify enqueue failed");
+  });
+
+  it("host-worker defer: bypasses the synchronous llmPort entirely", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "supports" as const,
+        confidence: 0.95,
+        rationale: "should never be consulted when the queue is wired"
+      }))
+    };
+    const edgeClassifyQueue = {
+      enqueueEdgeClassify: vi.fn(async () => undefined)
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort, edgeClassifyQueue });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // The in-process llmPort is NOT consulted: the verdict is deferred.
+    expect(llmPort.classifyPair).not.toHaveBeenCalled();
+    expect(edgeClassifyQueue.enqueueEdgeClassify).toHaveBeenCalledTimes(1);
+  });
+
+  describe("applyVerdict (host-worker verdict upgrade)", () => {
+    it("applies a supports verdict above floor through the path candidate sink", async () => {
+      const { deps, pathCandidatePort } = createDeps([]);
+      const service = new EdgeAutoProducerService(deps);
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "supports",
+          confidence: 0.93,
+          rationale: "both rows assert the same rule"
+        }
+      });
+
+      expect(outcome).toBe("applied");
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceAnchor: { kind: "object", object_id: "memory-new" },
+          targetAnchor: { kind: "object", object_id: "memory-existing" },
+          relationKind: "supports",
+          recallBiasSign: 1
+        })
+      );
+      const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+      expect(submitArgs.why?.some((line) => line.includes("host-worker pair classifier"))).toBe(true);
+      expect(submitArgs.why?.some((line) => line.includes("llm_supports"))).toBe(true);
+    });
+
+    it("applies a derives_from verdict into the DERIVES_FROM profile", async () => {
+      const { deps, pathCandidatePort } = createDeps([]);
+      const service = new EdgeAutoProducerService(deps);
+
+      await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: null,
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-source",
+          edge_type: "derives_from",
+          confidence: 0.9,
+          rationale: ""
+        }
+      });
+
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+        expect.objectContaining({ relationKind: "derives_from", recallBiasSign: 1 })
+      );
+    });
+
+    it("a none verdict is a no-op — the heuristic edge is never touched", async () => {
+      const { deps, pathCandidatePort } = createDeps([]);
+      const service = new EdgeAutoProducerService(deps);
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "none",
+          confidence: 0.99,
+          rationale: "no relationship"
+        }
+      });
+
+      expect(outcome).toBeNull();
+      expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+    });
+
+    it("a below-floor verdict is a no-op (heuristic edge stands)", async () => {
+      const { deps, pathCandidatePort } = createDeps([]);
+      const service = new EdgeAutoProducerService(deps);
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "supports",
+          confidence: 0.5,
+          rationale: "uncertain"
+        }
+      });
+
+      expect(outcome).toBeNull();
+      expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+    });
+  });
+
   it("uses bounded local search only and has no external provider dependency", async () => {
     const newMemory = createMemoryEntry();
     const neighbors = Array.from({ length: 20 }, (_, index) =>

@@ -21,6 +21,7 @@ import {
   GraphNeighborSchema,
   MemoryGraphEdgeTypeSchema
 } from "./memory-graph.js";
+import { EdgeClassifyVerdictSchema } from "./garden-tier.js";
 import {
   SoulBatchReviewEdgeProposalsRequestSchema,
   SoulBatchReviewEdgeProposalsResponseSchema,
@@ -352,10 +353,20 @@ export const GardenClaimTaskResponseSchema = z
   .strict()
   .readonly();
 
-// Garden candidate_signals use the anchor-free CONTENT-ONLY shape. The
-// daemon binds workspace_id / run_id / surface_id / source from trusted MCP
-// context + the claimed task row, and Garden-originated extraction has no
-// prior recall delivery to attribute.
+// The garden.complete_task result envelope is the discriminated result type
+// for the two host-worker task kinds:
+//   - POST_TURN_EXTRACT reports `candidate_signals` (anchor-free CONTENT-ONLY
+//     shape; the daemon binds workspace_id / run_id / surface_id / source from
+//     trusted MCP context + the claimed task row, and Garden-originated
+//     extraction has no prior recall delivery to attribute).
+//   - EDGE_CLASSIFY reports `edge_verdict` (the supports/derives_from/none
+//     pair judgement). The daemon refines the existing heuristic path with the
+//     verdict; a "none"/below-floor verdict refines nothing and the inline
+//     heuristic verdict stands.
+// invariant: exactly one result shape is meaningful per task kind. The handler
+// rejects a candidate_signals envelope on an EDGE_CLASSIFY task and an
+// edge_verdict envelope on a POST_TURN_EXTRACT task, so a host cannot smuggle
+// the wrong result type into a claimed task.
 export const GardenTaskResultEnvelopeSchema = z
   .object({
     candidate_signals: z
@@ -363,6 +374,7 @@ export const GardenTaskResultEnvelopeSchema = z
       .max(GARDEN_COMPLETE_CANDIDATE_SIGNAL_MAX)
       .readonly()
       .optional(),
+    edge_verdict: EdgeClassifyVerdictSchema.optional(),
     extracted_proposals: z
       .array(BoundedJsonObjectSchema)
       .max(GARDEN_COMPLETE_EXTRACTED_PROPOSAL_MAX)

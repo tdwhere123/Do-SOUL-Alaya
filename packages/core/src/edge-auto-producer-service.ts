@@ -1,6 +1,7 @@
 import {
   EdgeProposalTriggerSource,
   MemoryGraphEdgeType,
+  type EdgeClassifyVerdict,
   type EdgeProposalTriggerSourceValue,
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue
@@ -116,6 +117,27 @@ export interface EdgeAutoProducerMemoryRepoPort {
   findByIds(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
+// invariant: the host-worker defer port. When present, the LLM-quality pair
+// verdict for an eligible neighbor is ENQUEUED as an EDGE_CLASSIFY garden task
+// for an attached CLI agent (the compute) to render, instead of a synchronous
+// in-process cloud call. The deterministic heuristic still runs inline and the
+// path is still submitted, so an edge exists at enrichment time regardless of
+// whether a worker ever claims. enqueueEdgeClassify is best-effort: a failure
+// to enqueue must not abort proposal production (the heuristic verdict already
+// stands), so the service swallows enqueue errors through the warn callback.
+// see also: apps/core-daemon/src/mcp-memory-tool-handler.ts EDGE_CLASSIFY surface.
+export interface EdgeClassifyQueuePort {
+  enqueueEdgeClassify(input: {
+    readonly workspaceId: string;
+    readonly runId: string;
+    readonly sourceSignalId: string;
+    readonly dimension: string;
+    readonly scopeClass: string;
+    readonly source: { readonly object_id: string; readonly content: string; readonly domainTags: readonly string[] };
+    readonly neighbor: { readonly object_id: string; readonly content: string; readonly domainTags: readonly string[] };
+  }): Promise<void>;
+}
+
 // invariant: edge auto-producer sink is the governed path candidate
 // intake (PathCandidateSink), not memory_graph_edges. A supports/
 // derives_from candidate is born a weak attention_only path (recall_bias
@@ -126,15 +148,31 @@ export interface EdgeAutoProducerServiceDependencies {
   readonly memoryRepo: EdgeAutoProducerMemoryRepoPort;
   readonly pathCandidatePort: PathCandidateSink;
   /**
-   * Optional pair classifier port. When present the service asks the
-   * port for a supports / derives_from verdict before running the
-   * local heuristic; a verdict >= LLM_CONFIDENCE_FLOOR is emitted with
-   * trigger_source = "llm_supports". A null / failing / below-floor
-   * verdict triggers the local-heuristic fallback for that neighbor.
-   * Adapter failures are observable via the optional warn callback;
-   * they never abort proposal production for the new memory.
+   * Optional in-process pair classifier port. When present AND no
+   * edgeClassifyQueue is wired, the service asks the port for a
+   * supports / derives_from verdict before running the local heuristic;
+   * a verdict >= LLM_CONFIDENCE_FLOOR is emitted with trigger_source =
+   * "llm_supports". A null / failing / below-floor verdict triggers the
+   * local-heuristic fallback for that neighbor. Adapter failures are
+   * observable via the optional warn callback; they never abort proposal
+   * production for the new memory.
+   *
+   * invariant: when edgeClassifyQueue is wired the synchronous llmPort
+   * is NOT consulted — the LLM-quality verdict is deferred to the
+   * host-worker EDGE_CLASSIFY task instead. The product form is MCP/CLI:
+   * the attached agent is the compute, not an in-process cloud call.
    */
   readonly llmPort?: EdgeAutoProducerLlmPort;
+  /**
+   * Optional host-worker defer port. When present, the
+   * LLM-quality verdict step is enqueued as an EDGE_CLASSIFY garden task
+   * (best-effort / eventual) for the attached CLI agent to render, and
+   * the synchronous llmPort is bypassed. The deterministic heuristic
+   * still runs inline and submits its path immediately, so recall right
+   * after memory creation uses the heuristic verdict until the host
+   * worker completes the task. see EdgeClassifyQueuePort.
+   */
+  readonly edgeClassifyQueue?: EdgeClassifyQueuePort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
@@ -203,7 +241,7 @@ export class EdgeAutoProducerService {
       if (proposalCount >= MAX_EDGE_PROPOSALS_PER_MEMORY) {
         break;
       }
-      const decision = await this.decideForNeighbor(newMemory, neighbor);
+      const decision = await this.decideForNeighbor(newMemory, neighbor, input);
       if (decision === null) {
         continue;
       }
@@ -247,23 +285,40 @@ export class EdgeAutoProducerService {
   }
 
   /**
-   * LLM port runs first for the supports / derives_from universe. A
-   * null / failing / below-floor verdict falls back to the deterministic
-   * local heuristic, so a degraded garden never blocks proposal
-   * generation. The eligibility prefilter (same workspace, dimension,
-   * scope, lifecycle=active) is shared with the heuristic to spare the
-   * LLM obvious non-pairs. A second, content-similarity pregate
-   * (token-Jaccard + tag-overlap) runs before the LLM call so a fan-out
-   * of 12 structurally-eligible-but-unrelated neighbors does not fire
-   * 12 garden round-trips per new memory.
-   * see also: passesLlmPregate, LLM_PREGATE_TOKEN_JACCARD_MIN.
+   * Decides the inline verdict for a neighbor and, when the host-worker
+   * defer port is wired, enqueues the best-effort LLM-quality verdict.
+   *
+   * invariant: the deterministic heuristic (classifyNeighbor) ALWAYS
+   * runs inline so an edge is produced at enrichment time regardless of
+   * any LLM-quality verdict. The LLM-quality step is one of:
+   *   - DEFERRED: when edgeClassifyQueue is wired, an EDGE_CLASSIFY task
+   *     is enqueued (best-effort) for the attached CLI agent to render;
+   *     the inline heuristic verdict is what is returned and submitted
+   *     now. A later host verdict refines the path via applyVerdict.
+   *   - SYNCHRONOUS: when only llmPort is wired (no edgeClassifyQueue),
+   *     the LLM runs in-process first and its >= floor verdict wins;
+   *     null / below-floor falls back to the heuristic.
+   * The eligibility prefilter (same workspace, dimension, scope,
+   * lifecycle=active) is shared so the LLM/host worker only ever sees
+   * eligible pairs. A content-similarity pregate (token-Jaccard +
+   * tag-overlap) gates the LLM/defer step so a fan-out of 12
+   * structurally-eligible-but-unrelated neighbors does not fire 12
+   * garden round-trips per new memory.
+   * see also: passesLlmPregate, LLM_PREGATE_TOKEN_JACCARD_MIN, applyVerdict.
    */
   private async decideForNeighbor(
     newMemory: Readonly<MemoryEntry>,
-    neighbor: Readonly<MemoryEntry>
+    neighbor: Readonly<MemoryEntry>,
+    input: EdgeAutoProducerInput
   ): Promise<EdgeAutoDecision | null> {
     if (!isEligibleNeighbor(newMemory, neighbor)) {
       return null;
+    }
+    if (this.deps.edgeClassifyQueue !== undefined) {
+      if (passesLlmPregate(newMemory, neighbor)) {
+        await this.deferEdgeClassify(newMemory, neighbor, input);
+      }
+      return classifyNeighbor(newMemory, neighbor);
     }
     if (this.deps.llmPort !== undefined && passesLlmPregate(newMemory, neighbor)) {
       const llmDecision = await this.tryLlmDecision(newMemory, neighbor);
@@ -272,6 +327,112 @@ export class EdgeAutoProducerService {
       }
     }
     return classifyNeighbor(newMemory, neighbor);
+  }
+
+  /**
+   * Enqueues the best-effort EDGE_CLASSIFY garden task for an eligible
+   * pregate-passing pair. Failure to enqueue is non-fatal: the inline
+   * heuristic verdict already stands, so a queue hiccup only loses the
+   * LLM-quality refinement, never the edge. A single observable warn is
+   * emitted for the operator.
+   */
+  private async deferEdgeClassify(
+    newMemory: Readonly<MemoryEntry>,
+    neighbor: Readonly<MemoryEntry>,
+    input: EdgeAutoProducerInput
+  ): Promise<void> {
+    const queue = this.deps.edgeClassifyQueue;
+    if (queue === undefined) {
+      return;
+    }
+    try {
+      await queue.enqueueEdgeClassify({
+        workspaceId: input.workspaceId,
+        runId: input.runId,
+        sourceSignalId: input.sourceSignalId,
+        dimension: newMemory.dimension,
+        scopeClass: newMemory.scope_class,
+        source: {
+          object_id: newMemory.object_id,
+          content: newMemory.content,
+          domainTags: newMemory.domain_tags
+        },
+        neighbor: {
+          object_id: neighbor.object_id,
+          content: neighbor.content,
+          domainTags: neighbor.domain_tags
+        }
+      });
+    } catch (err) {
+      this.warn("edge auto producer edge-classify enqueue failed", {
+        new_memory_id: newMemory.object_id,
+        neighbor_memory_id: neighbor.object_id,
+        error: errorMessage(err)
+      });
+    }
+  }
+
+  /**
+   * Applies a host-worker EDGE_CLASSIFY verdict to the existing path.
+   * Called by the daemon when an attached agent completes an
+   * EDGE_CLASSIFY task. The verdict refines the heuristic edge by
+   * submitting the LLM-quality relation through the SAME governed
+   * PathCandidateSink the inline heuristic used:
+   *   - matches the heuristic relation -> already_present (no-op, the
+   *     heuristic verdict stands);
+   *   - a different relation (e.g. supports -> derives_from) -> a new
+   *     refined association is added alongside.
+   * invariant: a "none" or below-LLM_CONFIDENCE_FLOOR verdict refines
+   * nothing — the inline heuristic edge is never destroyed by a host
+   * verdict (agents propose, Alaya decides; the verdict only ever adds a
+   * weak governed candidate, never removes durable topology). Returns the
+   * PathMintOutcome string when a relation was submitted, or null when
+   * the verdict was a no-op (none / below floor).
+   */
+  public async applyVerdict(input: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+    readonly verdict: EdgeClassifyVerdict;
+  }): Promise<string | null> {
+    const workspaceId = parseObjectId(input.workspaceId);
+    const sourceId = parseObjectId(input.verdict.source_object_id);
+    const targetId = parseObjectId(input.verdict.neighbor_object_id);
+    if (input.verdict.edge_type === "none") {
+      return null;
+    }
+    if (clamp01(input.verdict.confidence) < LLM_CONFIDENCE_FLOOR) {
+      return null;
+    }
+    const edgeType =
+      input.verdict.edge_type === "supports"
+        ? MemoryGraphEdgeType.SUPPORTS
+        : MemoryGraphEdgeType.DERIVES_FROM;
+    const profile = seedProfileForEdgeType(edgeType);
+    const rationale = input.verdict.rationale.trim();
+    const why = [
+      // invariant: trigger_source = llm_supports for the host-worker pair
+      // verdict (both supports and derives_from), matching the in-process
+      // llmPort path so K3.2 keeps a single LLM bucket.
+      `${EdgeProposalTriggerSource.LLM_SUPPORTS}: B-2 host-worker pair classifier: ${input.verdict.edge_type}${
+        rationale.length === 0 ? "" : ` (${rationale})`
+      }`,
+      `source_signal=${input.sourceSignalId ?? sourceId} run=${input.runId ?? "unattributed"}`
+    ];
+    const outcome = await this.deps.pathCandidatePort.submitCandidate({
+      workspaceId,
+      sourceAnchor: { kind: "object", object_id: sourceId },
+      targetAnchor: { kind: "object", object_id: targetId },
+      relationKind: profile.relationKind,
+      initialStrength: profile.initialStrength,
+      governanceClass: profile.governanceClass,
+      evidenceBasis: profile.evidenceBasis,
+      recallBiasSign: profile.recallBiasSign,
+      recallBiasMagnitude: profile.recallBiasMagnitude,
+      why,
+      runId: input.runId
+    });
+    return outcome;
   }
 
   private async tryLlmDecision(

@@ -55,6 +55,7 @@ import {
   TaskObjectSurfaceSchema,
   type CandidateMemorySignal,
   type ContextDeliveryRecord,
+  type EdgeClassifyVerdict,
   type EventLogEntry,
   type GardenClaimTaskRequest,
   type GardenCompleteTaskRequest,
@@ -117,6 +118,10 @@ const RECALL_HIT_ACTIVATION_BUMP = 0.05;
 // reports of the same set are idempotent.
 const MAX_CROSS_LINK_FANOUT = 8;
 const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
+// A claimed EDGE_CLASSIFY task older than this is "stale" for the backlog
+// diagnostic: a host worker claimed it but never reported a verdict. Matches
+// the order of magnitude of the abandoned-claim reclaim window.
+const EDGE_CLASSIFY_STALE_AFTER_MS = 5 * 60 * 1000;
 // Auto-extract from a recall turn only when there is enough text for the
 // Garden compute provider to find a durable signal in; a bare keyword query
 // is below this floor and not worth a Garden task.
@@ -353,6 +358,29 @@ export interface McpMemoryToolHandlerDependencies {
     ): boolean;
     refreshClaim(taskId: string, claimedBy: string, claimedAt: string): boolean;
     releaseClaim(taskId: string, claimedBy: string): boolean;
+    // invariant: per-kind eventual-consistency diagnostic source. pending =
+    // unclaimed; stale = claimed past the cutoff. Optional so a fake repo in a
+    // test need not implement it; the EDGE_CLASSIFY completion only emits the
+    // diagnostic when present. see also: garden-task-repo.ts countByKind.
+    countByKind?(
+      kind: string,
+      staleBeforeIso: string,
+      workspace_id?: string
+    ): { readonly kind: string; readonly pending: number; readonly stale: number };
+  };
+  // invariant: applies a host-worker EDGE_CLASSIFY verdict to the existing
+  // heuristic path. Wired to EdgeAutoProducerService.applyVerdict. A "none" /
+  // below-floor verdict refines nothing; the inline heuristic edge always
+  // stands. When unwired, an EDGE_CLASSIFY completion that carries an
+  // edge_verdict is rejected (the queue should not have been enabled).
+  // see also: packages/core/src/edge-auto-producer-service.ts applyVerdict.
+  readonly edgeVerdictApplier?: {
+    applyVerdict(input: {
+      readonly workspaceId: string;
+      readonly runId: string | null;
+      readonly sourceSignalId: string | null;
+      readonly verdict: EdgeClassifyVerdict;
+    }): Promise<string | null>;
   };
   // invariant: surface_identities row is the canonical record that a
   // given agent_target has ever attached to this workspace. The handler
@@ -871,6 +899,28 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         : null;
     const resolvedRunId = taskPayloadRunId ?? context.runId;
 
+    // invariant: the result envelope is a discriminated result type — exactly
+    // one result shape is meaningful per task kind. EDGE_CLASSIFY carries
+    // edge_verdict; every other host-worker kind (POST_TURN_EXTRACT) carries
+    // candidate_signals. Reject the mismatched shape so a host cannot smuggle
+    // the wrong result type into a claimed task. The claimant-only rule above
+    // still gates both branches.
+    const edgeVerdict = request.result_envelope?.edge_verdict;
+    const candidateSignalsCount = request.result_envelope?.candidate_signals?.length ?? 0;
+    if (row.kind === GardenTaskKind.EDGE_CLASSIFY) {
+      if (candidateSignalsCount > 0) {
+        throw new ToolValidationError(
+          `Garden task ${row.id} is an edge_classify task; complete it with result_envelope.edge_verdict, not candidate_signals.`
+        );
+      }
+      return await completeEdgeClassifyTask(request, context, row, resolvedRunId, edgeVerdict);
+    }
+    if (edgeVerdict !== undefined) {
+      throw new ToolValidationError(
+        `Garden task ${row.id} (${row.kind}) does not accept an edge_verdict; that result shape is only valid for edge_classify tasks.`
+      );
+    }
+
     const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
     const completionEnvelopeJson =
       contentOnlySignals.length === 0
@@ -973,6 +1023,127 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       status: request.status,
       events_appended: 1
     });
+  }
+
+  // invariant: EDGE_CLASSIFY completion. The claimant reports the LLM-quality
+  // supports/derives_from/none verdict; the daemon applies it to the existing
+  // heuristic path via edgeVerdictApplier. The verdict's pair MUST match the
+  // task's payload pair so a claimant cannot redirect the refinement to an
+  // arbitrary memory pair. A "none" / below-floor verdict (or status=failed)
+  // refines nothing — the inline heuristic edge always stands. Completion is
+  // recorded with a SOUL_GARDEN_TASK_COMPLETED event; only the claimant reaches
+  // here (the caller already enforced the claimant-only rule).
+  async function completeEdgeClassifyTask(
+    request: GardenCompleteTaskRequest,
+    context: McpMemoryToolCallContext,
+    row: GardenTaskRow,
+    resolvedRunId: string | null,
+    verdict: EdgeClassifyVerdict | undefined
+  ) {
+    if (deps.gardenTaskRepo === undefined) {
+      throw new ToolUnavailableError("Garden task queue is not available.");
+    }
+    const payloadPair = readEdgeClassifyPayloadPair(row.payload);
+    if (
+      verdict !== undefined &&
+      request.status === "completed" &&
+      payloadPair !== null &&
+      (verdict.source_object_id !== payloadPair.sourceObjectId ||
+        verdict.neighbor_object_id !== payloadPair.neighborObjectId)
+    ) {
+      throw new ToolValidationError(
+        `Garden task ${row.id} edge_verdict pair does not match the claimed task's source/neighbor memory pair.`
+      );
+    }
+
+    let objectsAffected: readonly string[] = [];
+    if (verdict !== undefined && request.status === "completed") {
+      if (deps.edgeVerdictApplier === undefined) {
+        throw new ToolUnavailableError(
+          "garden.complete_task received an edge_verdict but no edge-classification applier is wired."
+        );
+      }
+      const outcome = await deps.edgeVerdictApplier.applyVerdict({
+        workspaceId: context.workspaceId,
+        runId: resolvedRunId,
+        sourceSignalId: payloadPair?.sourceSignalId ?? null,
+        verdict
+      });
+      // outcome is null when the verdict was a no-op (none / below floor) and a
+      // PathMintOutcome string when a relation was submitted. Surface the
+      // applied pair only when a relation actually landed.
+      if (outcome === "applied" && payloadPair !== null) {
+        objectsAffected = [payloadPair.sourceObjectId, payloadPair.neighborObjectId];
+      }
+    }
+
+    const completedAt = now();
+    const event: GardenTaskEventInput = {
+      event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
+      entity_type: "garden_task",
+      entity_id: row.id,
+      workspace_id: context.workspaceId,
+      run_id: resolvedRunId,
+      caused_by: context.agentTarget,
+      payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
+        task_id: row.id,
+        task_kind: row.kind,
+        role: row.role,
+        tier: GARDEN_ROLE_TIER_MAP[row.role],
+        success: request.status === "completed",
+        objects_affected: [...objectsAffected],
+        candidate_signals_count: 0,
+        workspace_id: context.workspaceId,
+        occurred_at: completedAt
+      })
+    };
+
+    await deps.gardenTaskRepo.completeWithEvents(
+      row.id,
+      {
+        status: request.status,
+        completed_at: completedAt,
+        ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
+      },
+      [event],
+      context.agentTarget
+    );
+
+    // invariant (eventual consistency): recall right after memory creation uses
+    // the inline heuristic verdict; the LLM-quality refinement lands only when a
+    // host worker completes the EDGE_CLASSIFY task. Emit the still-pending /
+    // stale EDGE_CLASSIFY backlog as an observable diagnostic so an operator can
+    // see how many heuristic edges are still awaiting refinement (and whether
+    // claimed tasks are going stale because no host worker is completing them).
+    emitEdgeClassifyBacklogDiagnostic(context.workspaceId);
+
+    return GardenCompleteTaskResponseSchema.parse({
+      task_id: row.id,
+      status: request.status,
+      events_appended: 1
+    });
+  }
+
+  function emitEdgeClassifyBacklogDiagnostic(workspaceId: string): void {
+    const repo = deps.gardenTaskRepo;
+    if (repo?.countByKind === undefined) {
+      return;
+    }
+    try {
+      const staleBeforeIso = new Date(Date.now() - EDGE_CLASSIFY_STALE_AFTER_MS).toISOString();
+      const backlog = repo.countByKind(GardenTaskKind.EDGE_CLASSIFY, staleBeforeIso, workspaceId);
+      warn("edge_classify backlog (heuristic edges awaiting host-worker LLM verdict)", {
+        workspace_id: workspaceId,
+        pending: backlog.pending,
+        stale: backlog.stale
+      });
+    } catch (error) {
+      // A diagnostic must never break completion.
+      warn("edge_classify backlog diagnostic failed", {
+        workspace_id: workspaceId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
   function warnIfModelToolSignalMissingDeliveryAnchor(signal: CandidateMemorySignal): void {
@@ -1950,20 +2121,70 @@ function toGardenClaimTaskPayload(row: GardenTaskRow) {
   };
 }
 
+// invariant: POST_TURN_EXTRACT and EDGE_CLASSIFY are the two host-worker task
+// kinds — the attached CLI agent (Codex / Claude Code / similar) is the
+// compute, so both surface as role "host_worker" to the MCP worker loop.
+const HOST_WORKER_TASK_KINDS: ReadonlySet<string> = new Set([
+  GardenTaskKind.POST_TURN_EXTRACT,
+  GardenTaskKind.EDGE_CLASSIFY
+]);
+
 function gardenWorkerRoleForRow(row: GardenTaskRow): string {
-  return row.kind === GardenTaskKind.POST_TURN_EXTRACT ? "host_worker" : row.role;
+  return HOST_WORKER_TASK_KINDS.has(row.kind) ? "host_worker" : row.role;
 }
 
 function publicGardenTaskPayload(row: GardenTaskRow): unknown {
-  if (row.kind !== GardenTaskKind.POST_TURN_EXTRACT || !isUnknownRecord(row.payload)) {
+  if (!isUnknownRecord(row.payload)) {
     return row.payload;
   }
+  if (row.kind === GardenTaskKind.POST_TURN_EXTRACT) {
+    return {
+      run_id: row.payload.run_id,
+      turn_index: row.payload.turn_index,
+      workspace_id: row.payload.workspace_id,
+      turn_digest: row.payload.turn_digest
+    };
+  }
+  if (row.kind === GardenTaskKind.EDGE_CLASSIFY) {
+    // The host worker needs only the pair content + classification context to
+    // render a verdict. source_signal_id is provenance the daemon re-binds at
+    // apply time and is not exposed to the worker.
+    return {
+      run_id: row.payload.run_id,
+      workspace_id: row.payload.workspace_id,
+      dimension: row.payload.dimension,
+      scope_class: row.payload.scope_class,
+      source_memory: row.payload.source_memory,
+      neighbor_memory: row.payload.neighbor_memory
+    };
+  }
+  return row.payload;
+}
 
+// invariant: reads the source/neighbor pair refs + source_signal provenance
+// from an EDGE_CLASSIFY task payload. Returns null when the payload is not the
+// expected shape so a malformed row cannot crash completion (the verdict simply
+// cannot be pair-validated, which the caller treats as "do not redirect").
+function readEdgeClassifyPayloadPair(payload: unknown): {
+  readonly sourceObjectId: string;
+  readonly neighborObjectId: string;
+  readonly sourceSignalId: string | null;
+} | null {
+  if (!isUnknownRecord(payload)) {
+    return null;
+  }
+  const source = payload.source_memory;
+  const neighbor = payload.neighbor_memory;
+  if (!isUnknownRecord(source) || !isUnknownRecord(neighbor)) {
+    return null;
+  }
+  if (typeof source.object_id !== "string" || typeof neighbor.object_id !== "string") {
+    return null;
+  }
   return {
-    run_id: row.payload.run_id,
-    turn_index: row.payload.turn_index,
-    workspace_id: row.payload.workspace_id,
-    turn_digest: row.payload.turn_digest
+    sourceObjectId: source.object_id,
+    neighborObjectId: neighbor.object_id,
+    sourceSignalId: typeof payload.source_signal_id === "string" ? payload.source_signal_id : null
   };
 }
 

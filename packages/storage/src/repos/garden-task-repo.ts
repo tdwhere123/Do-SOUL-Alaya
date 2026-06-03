@@ -92,6 +92,12 @@ export interface GardenTaskBacklogCount {
   readonly count: number;
 }
 
+export interface GardenTaskKindBacklogCount {
+  readonly kind: GardenTaskKindValue;
+  readonly pending: number;
+  readonly stale: number;
+}
+
 export interface GardenTaskCompletionResult {
   readonly status: "completed" | "failed";
   readonly completed_at: string;
@@ -155,6 +161,16 @@ export interface GardenTaskRepoPort {
   peekAbandonedClaims(now: string, staleAfterMs: number): readonly GardenTaskRow[];
   gcAbandonedClaims(reclaims: readonly GardenTaskReclaimInput[]): Promise<number>;
   countBacklog(workspace_id?: string): readonly GardenTaskBacklogCount[];
+  // invariant: per-kind eventual-consistency diagnostic. pending = tasks not
+  // yet claimed by a host worker; stale = tasks claimed but whose claim is
+  // older than staleBeforeIso (a worker took the task but never completed).
+  // Used to observe the EDGE_CLASSIFY backlog: how many heuristic edges are
+  // still awaiting their LLM-quality refinement. Read-only count, no mutation.
+  countByKind(
+    kind: GardenTaskKindValue,
+    staleBeforeIso: string,
+    workspace_id?: string
+  ): GardenTaskKindBacklogCount;
 }
 
 interface GardenTaskDbRow {
@@ -191,6 +207,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   private readonly completeStatement;
   private readonly peekAbandonedClaimsStatement;
   private readonly gcAbandonedClaimStatement;
+  private readonly countByKindStatement;
+  private readonly countByKindByWorkspaceStatement;
   private readonly countByRoleStatusStatement;
 
   public constructor(
@@ -356,6 +374,23 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         AND (? IS NULL OR workspace_id = ?)
       GROUP BY role, status
       ORDER BY role ASC, status ASC
+    `);
+    // pending = unclaimed; stale = claimed with a claim older than the cutoff
+    // (a worker took the task but never completed it). Bind order: kind,
+    // stale-cutoff iso. The workspace-scoped variant adds a workspace_id bind.
+    this.countByKindStatement = connection.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+        SUM(CASE WHEN status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ? THEN 1 ELSE 0 END) AS stale
+      FROM garden_tasks
+      WHERE kind = ?
+    `);
+    this.countByKindByWorkspaceStatement = connection.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+        SUM(CASE WHEN status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ? THEN 1 ELSE 0 END) AS stale
+      FROM garden_tasks
+      WHERE kind = ? AND workspace_id = ?
     `);
   }
 
@@ -686,6 +721,33 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       return rows.map((row) => parseBacklogCountRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to count Garden task backlog.", error);
+    }
+  }
+
+  public countByKind(
+    kind: GardenTaskKindValue,
+    staleBeforeIso: string,
+    workspace_id?: string
+  ): GardenTaskKindBacklogCount {
+    const parsedKind = GardenTaskKindSchema.parse(kind);
+    const staleBefore = parseTimestamp(staleBeforeIso);
+    try {
+      const row = (
+        workspace_id === undefined
+          ? this.countByKindStatement.get(staleBefore, parsedKind)
+          : this.countByKindByWorkspaceStatement.get(
+              staleBefore,
+              parsedKind,
+              parseNonEmptyString(workspace_id, "garden_task.workspace_id")
+            )
+      ) as { readonly pending: number | null; readonly stale: number | null } | undefined;
+      return {
+        kind: parsedKind,
+        pending: row?.pending ?? 0,
+        stale: row?.stale ?? 0
+      };
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to count Garden task backlog by kind.", error);
     }
   }
 

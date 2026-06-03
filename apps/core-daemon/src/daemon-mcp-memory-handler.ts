@@ -36,6 +36,9 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly trustStateRecorder: McpMemoryToolHandlerDependencies["trustStateRecorder"];
   readonly eventPublisher: NonNullable<McpMemoryToolHandlerDependencies["eventPublisher"]>;
   readonly gardenTaskRepo?: McpMemoryToolHandlerDependencies["gardenTaskRepo"];
+  // invariant: applies a host-worker EDGE_CLASSIFY verdict to the existing
+  // heuristic path. see also: mcp-memory-tool-handler.ts completeEdgeClassifyTask.
+  readonly edgeVerdictApplier?: McpMemoryToolHandlerDependencies["edgeVerdictApplier"];
   readonly eventLogRepo: McpMemoryProposalWorkflowEventLogRepo;
   readonly proposalRepo: McpMemoryProposalWorkflowProposalRepo;
   readonly runtimeNotifier: McpMemoryProposalWorkflowRuntimeNotifier;
@@ -98,6 +101,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
     trustStateRecorder: input.trustStateRecorder,
     eventPublisher: input.eventPublisher,
     ...(input.gardenTaskRepo === undefined ? {} : { gardenTaskRepo: input.gardenTaskRepo }),
+    ...(input.edgeVerdictApplier === undefined ? {} : { edgeVerdictApplier: input.edgeVerdictApplier }),
     ...(input.attachSurfaceRegistrar === undefined
       ? {}
       : { attachSurfaceRegistrar: input.attachSurfaceRegistrar }),

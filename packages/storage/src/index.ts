@@ -242,6 +242,7 @@ export {
 export {
   SqliteGardenTaskRepo,
   type GardenTaskBacklogCount,
+  type GardenTaskKindBacklogCount,
   type GardenTaskClaimResult,
   type GardenTaskCompletionResult,
   type GardenTaskEnqueueInput,

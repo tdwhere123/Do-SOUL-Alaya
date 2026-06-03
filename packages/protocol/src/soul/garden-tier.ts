@@ -26,7 +26,8 @@ const gardenTaskKindValues = [
   "path_plasticity_update",
   "post_turn_extract",
   "consolidation_cycle",
-  "bulk_enrich"
+  "bulk_enrich",
+  "edge_classify"
 ] as const;
 
 export const GardenRole = {
@@ -64,7 +65,15 @@ export const GardenTaskKind = {
   PATH_PLASTICITY_UPDATE: "path_plasticity_update",
   POST_TURN_EXTRACT: "post_turn_extract",
   CONSOLIDATION_CYCLE: "consolidation_cycle",
-  BULK_ENRICH: "bulk_enrich"
+  BULK_ENRICH: "bulk_enrich",
+  // invariant: EDGE_CLASSIFY is the host-worker form of the B-2 LLM-quality
+  // supports/derives_from pair verdict. The deterministic heuristic still runs
+  // inline at enrichment time so an edge always exists; this task carries the
+  // best-effort LLM-quality verdict that an attached CLI agent (the compute)
+  // produces and reports back via garden.complete_task, refining the existing
+  // path. A claim that never arrives leaves the heuristic verdict standing.
+  // see also: packages/core/src/edge-auto-producer-service.ts decideForNeighbor.
+  EDGE_CLASSIFY: "edge_classify"
 } as const;
 
 export const GardenRoleSchema = z.enum(gardenRoleValues);
@@ -122,6 +131,12 @@ const librarianTaskKinds = Object.freeze([
   GardenTaskKind.CONSOLIDATION_CYCLE,
   GardenTaskKind.BULK_ENRICH
 ] as const);
+// invariant: EDGE_CLASSIFY and POST_TURN_EXTRACT are host-worker-only kinds —
+// the attached CLI agent is the compute, so they are intentionally absent from
+// every in-process role permission set (an in-process librarian must not claim
+// them). They are enqueued under the LIBRARIAN role for queue tiering but
+// surface as role "host_worker" to the MCP worker loop.
+// see also: apps/core-daemon/src/mcp-memory-tool-handler.ts gardenWorkerRoleForRow.
 
 export const GARDEN_ROLE_PERMISSIONS = Object.freeze({
   [GardenRole.JANITOR]: GardenPermissionSchema.parse({
@@ -175,3 +190,60 @@ export const GardenTaskResultSchema = z
 
 export type GardenTaskDescriptor = z.infer<typeof GardenTaskDescriptorSchema>;
 export type GardenTaskResult = z.infer<typeof GardenTaskResultSchema>;
+
+// invariant: EDGE_CLASSIFY task payload. Carries one candidate pair (the
+// freshly materialized source memory + a same-dimension same-scope neighbor)
+// plus the content/tag context the classifier needs to judge a supports /
+// derives_from relationship. The pair already cleared the cheap eligibility
+// prefilter inline; the host worker only renders the LLM-quality verdict. The
+// payload is content-only on purpose: it carries no governance, strength, or
+// recall-bias hint — those stay owned by the deterministic seed profile in
+// edge-auto-producer-service.ts so an untrusted host verdict can never inject
+// topology weight. run_id is the run that materialized the source memory.
+const EdgeClassifyMemoryRefSchema = z
+  .object({
+    object_id: NonEmptyStringSchema,
+    content: z.string().max(4000),
+    domain_tags: z.array(NonEmptyStringSchema).max(64).readonly()
+  })
+  .strict()
+  .readonly();
+
+export const EdgeClassifyTaskPayloadSchema = z
+  .object({
+    task_id: NonEmptyStringSchema,
+    task_kind: z.literal(GardenTaskKind.EDGE_CLASSIFY),
+    required_tier: z.literal(GardenTier.TIER_2),
+    run_id: NonEmptyStringSchema.nullable(),
+    workspace_id: NonEmptyStringSchema,
+    priority: NonNegativeIntSchema.max(100),
+    created_at: IsoDatetimeStringSchema,
+    dimension: NonEmptyStringSchema,
+    scope_class: NonEmptyStringSchema,
+    source_memory: EdgeClassifyMemoryRefSchema,
+    neighbor_memory: EdgeClassifyMemoryRefSchema,
+    // provenance only: the source signal that triggered enrichment, echoed
+    // into the path why-provenance when the verdict is applied.
+    source_signal_id: NonEmptyStringSchema.nullable()
+  })
+  .strict()
+  .readonly();
+
+// invariant: the host-worker edge-classification result. edge_type "none" is
+// the well-formed "no relationship" answer (the verdict is not applied, the
+// heuristic verdict stands). supports / derives_from carry a 0..1 confidence
+// the daemon clamps and floors (LLM_CONFIDENCE_FLOOR) exactly as the in-process
+// port did; a below-floor or "none" verdict refines nothing.
+export const EdgeClassifyVerdictSchema = z
+  .object({
+    source_object_id: NonEmptyStringSchema,
+    neighbor_object_id: NonEmptyStringSchema,
+    edge_type: z.enum(["supports", "derives_from", "none"]),
+    confidence: z.number().min(0).max(1),
+    rationale: z.string().max(2000)
+  })
+  .strict()
+  .readonly();
+
+export type EdgeClassifyTaskPayload = z.infer<typeof EdgeClassifyTaskPayloadSchema>;
+export type EdgeClassifyVerdict = z.infer<typeof EdgeClassifyVerdictSchema>;
