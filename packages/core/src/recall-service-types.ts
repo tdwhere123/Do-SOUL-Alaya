@@ -613,6 +613,19 @@ export interface CoarseRecallCandidate {
   readonly structuralScore?: number;
   readonly scoreMultiplier?: number;
   readonly pathExpansionSources?: readonly RecallPathExpansionSourceDiagnostic[];
+  // invariant: true when this candidate was admitted on the path_expansion plane
+  // by traversing an EARNED `co_recalled` PathRelation — the R1 sparse durable
+  // fan-in carrier (path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE,
+  // minted only after the threshold-3 co-usage counter gate). Gold-blind: it
+  // reads the path's earned relation_kind, never a gold label. The structural
+  // delivery reserve consumes this as the bounded exemption that lets a
+  // zero-relevance earned fan-in sibling claim a reserve slot (the multi-session
+  // fan-in mechanism) WITHOUT re-opening displacement to generic structural
+  // distractors. Internal-only: it never reaches the emitted RecallDiagnostics
+  // / bench path_expansion_sources surface.
+  // see also: recall-service.ts isStructuralRescueCandidate,
+  //   path-relation-proposal-service.ts (co_recalled accrual gate).
+  readonly reachedViaEarnedCoRecalledFanin?: boolean;
   // Set to "synthesis_capsule" when the candidate is sourced from an L2
   // synthesis row rather than an L1 memory_entry. The `entry` is then a
   // synthesis-shaped pseudo memory carrying the synthesis summary as content.

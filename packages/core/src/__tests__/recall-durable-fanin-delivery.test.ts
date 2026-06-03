@@ -80,6 +80,12 @@ type FusedCandidate = Readonly<{
   // helpers never read score_factors, so the minimal valid shape suffices.
   readonly effectiveFactors: { readonly relevance: number; readonly activation: number };
   readonly structuralScore?: number;
+  // Internal-only discriminator: true when the candidate was admitted on the
+  // path_expansion plane via an EARNED co_recalled fan-in carrier (R1, the
+  // sparse durable multi-session fan-in route). isStructuralRescueCandidate
+  // reads it as the bounded exemption from the relevance gate. see also:
+  // recall-service.ts isStructuralRescueCandidate.
+  readonly reachedViaEarnedCoRecalledFanin?: boolean;
   readonly fusion: Readonly<RecallFusionBreakdown>;
 }>;
 
@@ -88,6 +94,7 @@ function fusedCandidate(input: {
   readonly objectKind?: "memory_entry" | "synthesis_capsule";
   readonly evidenceRefs?: readonly string[];
   readonly contributions?: Partial<Record<RecallFusionStream, number>>;
+  readonly reachedViaEarnedCoRecalledFanin?: boolean;
 }): FusedCandidate {
   const objectKind = input.objectKind ?? "memory_entry";
   const entry = memory({
@@ -105,6 +112,9 @@ function fusedCandidate(input: {
     objectKind,
     effectiveScore: 0,
     effectiveFactors: { relevance: 0, activation: 0 },
+    ...(input.reachedViaEarnedCoRecalledFanin
+      ? { reachedViaEarnedCoRecalledFanin: true }
+      : {}),
     fusion: Object.freeze({
       ...breakdown,
       object_kind: objectKind,
@@ -286,16 +296,35 @@ describe("structural reserve — durable-edge path/graph fan-in eligible + bound
   });
 });
 
-describe("I-1 — query/evidence-relevance guard on path/graph fan-in rescue (gold-blind)", () => {
-  it("refuses an irrelevant membership-reached sibling (path_expansion, zero relevance)", () => {
-    // A non-gold session-mate reached purely via an R1 co_recalled edge fires
-    // path_expansion but carries NO lexical/evidence relevance term. It must NOT
-    // be a rescue candidate: a pure membership hop cannot consume a reserve slot.
+describe("I-1 — query/evidence-relevance guard on GENERIC path/graph fan-in rescue (gold-blind)", () => {
+  it("refuses an irrelevant GENERIC membership-reached sibling (path_expansion, zero relevance, NOT earned co_recalled)", () => {
+    // A non-gold sibling reached via a GENERIC structural path / membership hop
+    // (NOT the earned co_recalled fan-in carrier) fires path_expansion but
+    // carries NO lexical/evidence relevance term and NO earned-fan-in
+    // provenance. It must NOT be a rescue candidate: a generic membership hop
+    // cannot consume a reserve slot. (reachedViaEarnedCoRecalledFanin defaults
+    // to undefined here — this is the displacement-protection I-1 guards.)
     const membershipSibling = fusedCandidate({
       objectId: "membership-sibling",
       contributions: { path_expansion: 0.3 }
     });
     expect(isStructuralRescueCandidate(membershipSibling, supplementary())).toBe(false);
+  });
+
+  it("rescues a zero-relevance sibling reached via an EARNED co_recalled fan-in edge (Route 乙)", () => {
+    // The earned co_recalled fan-in carrier (R1, threshold-3 sparse) is the
+    // INTENDED multi-session fan-in mechanism, not a distractor. A
+    // content-disjoint, ZERO-query-relevance sibling reached via that earned
+    // edge MUST be rescue-eligible — the bounded exemption that makes Route 乙
+    // load-bearing. Identical topology to the GENERIC case above; the ONLY delta
+    // is the earned-fan-in provenance, proving the discriminator (not relevance)
+    // is what flips eligibility.
+    const earnedFaninSibling = fusedCandidate({
+      objectId: "earned-fanin-sibling",
+      contributions: { path_expansion: 0.3 },
+      reachedViaEarnedCoRecalledFanin: true
+    });
+    expect(isStructuralRescueCandidate(earnedFaninSibling, supplementary())).toBe(true);
   });
 
   it("admits the SAME fan-in target once it carries a relevance signal (guard is the discriminator)", () => {
@@ -309,12 +338,15 @@ describe("I-1 — query/evidence-relevance guard on path/graph fan-in rescue (go
     expect(isStructuralRescueCandidate(relevantSibling, supplementary())).toBe(true);
   });
 
-  it("does not let an irrelevant co_recalled sibling displace a rank-4/5 lexical gold", () => {
+  it("does not let an irrelevant GENERIC structural sibling displace a rank-4/5 lexical gold", () => {
     // Window of 5. Ranks 1-5 are genuine lexical golds (descending lexical_fts);
     // the rank-4 and rank-5 golds are the displacement targets. An irrelevant
-    // membership-reached sibling sits buried below the cut with a STRONG
-    // path_expansion contribution and zero relevance. Without the guard it would
-    // out-rank the buried-set and steal a reserve slot, displacing a lexical gold.
+    // GENERIC structural sibling (path_expansion, NOT earned co_recalled) sits
+    // buried below the cut with a STRONG path_expansion contribution and zero
+    // relevance. Without the guard it would out-rank the buried-set and steal a
+    // reserve slot, displacing a lexical gold. This is the displacement
+    // protection I-1 exists to enforce, and it is UNCHANGED by the earned
+    // co_recalled exemption (this sibling carries no earned-fan-in provenance).
     const lexicalGolds = Array.from({ length: 5 }, (_unused, index) =>
       fusedCandidate({
         objectId: `lexical-gold-${index + 1}`,
@@ -322,7 +354,7 @@ describe("I-1 — query/evidence-relevance guard on path/graph fan-in rescue (go
       })
     );
     const irrelevantSibling = fusedCandidate({
-      objectId: "membership-sibling",
+      objectId: "generic-structural-sibling",
       contributions: { path_expansion: 0.9 }
     });
     const delivered = [...lexicalGolds, irrelevantSibling];
@@ -330,7 +362,7 @@ describe("I-1 — query/evidence-relevance guard on path/graph fan-in rescue (go
     const result = reserveStructuralDeliverySlots(delivered, supplementary(), maxEntries, 0);
     const windowIds = result.slice(0, maxEntries).map((candidate) => candidate.entry.object_id);
     // The guard refuses the sibling: it is NOT rescued into the window.
-    expect(windowIds).not.toContain("membership-sibling");
+    expect(windowIds).not.toContain("generic-structural-sibling");
     // The rank-4 and rank-5 lexical golds are not displaced.
     expect(windowIds).toContain("lexical-gold-4");
     expect(windowIds).toContain("lexical-gold-5");
@@ -338,6 +370,32 @@ describe("I-1 — query/evidence-relevance guard on path/graph fan-in rescue (go
     expect(result.map((candidate) => candidate.entry.object_id)).toEqual(
       delivered.map((candidate) => candidate.entry.object_id)
     );
+  });
+
+  it("DOES rescue a zero-relevance EARNED co_recalled fan-in sibling into the window (Route 乙 delivery)", () => {
+    // Same shape as the GENERIC-distractor case above, but the buried sibling
+    // was admitted via the EARNED co_recalled fan-in carrier and carries ZERO
+    // query relevance. The earned-fan-in exemption admits it and the reserve
+    // rescues it past the weakest in-window lexical row — proving the
+    // multi-session fan-in mechanism delivers the content-disjoint sibling,
+    // while the generic distractor above is still refused. The ONLY delta vs the
+    // refused case is the earned-fan-in provenance (gold-blind discriminator).
+    const lexicalGolds = Array.from({ length: 5 }, (_unused, index) =>
+      fusedCandidate({
+        objectId: `lexical-gold-${index + 1}`,
+        contributions: { lexical_fts: 0.5 - index * 0.05 }
+      })
+    );
+    const earnedFaninSibling = fusedCandidate({
+      objectId: "earned-fanin-sibling",
+      contributions: { path_expansion: 0.9 },
+      reachedViaEarnedCoRecalledFanin: true
+    });
+    const delivered = [...lexicalGolds, earnedFaninSibling];
+    const maxEntries = 5;
+    const result = reserveStructuralDeliverySlots(delivered, supplementary(), maxEntries, 0);
+    const windowIds = result.slice(0, maxEntries).map((candidate) => candidate.entry.object_id);
+    expect(windowIds).toContain("earned-fanin-sibling");
   });
 
   it("DOES rescue a relevant buried fan-in target, displacing the weakest in-window lexical row", () => {
@@ -364,16 +422,20 @@ describe("I-1 — query/evidence-relevance guard on path/graph fan-in rescue (go
 });
 
 describe("I-2 — structural reserve honors active sign-aware suppression", () => {
-  it("does not rescue a co_recalled-reached candidate that carries a positive suppression delta", () => {
-    // The candidate is path_expansion-dominated AND carries a relevance term, so
-    // it passes the I-1 relevance guard. But the sign-aware suppression collector
-    // floored it (contradicts/supersedes-reinforced negative): its
-    // pathSuppressionScores delta exceeds its structural contribution. The reserve
-    // must honor that demotion and refuse to resurface the stale/contradicted
-    // target — even though the preserved per-stream map still shows full topology.
+  it("does not rescue an EARNED co_recalled-reached candidate that carries a positive suppression delta", () => {
+    // The candidate is path_expansion-dominated, carries a relevance term, AND
+    // was admitted via the EARNED co_recalled fan-in carrier — so it clears BOTH
+    // the relevance gate AND the earned-fan-in exemption. But the sign-aware
+    // suppression collector floored it (contradicts/supersedes-reinforced
+    // negative): its pathSuppressionScores delta exceeds its structural
+    // contribution. The suppression floor is UPSTREAM of both eligibility
+    // branches, so the reserve must still honor that demotion and refuse to
+    // resurface the stale/contradicted target — proving the earned exemption
+    // does NOT override active suppression (I-2 holds even for earned fan-in).
     const suppressedTarget = fusedCandidate({
       objectId: "suppressed-fanin",
-      contributions: { path_expansion: 0.3, lexical_fts: 0.02 }
+      contributions: { path_expansion: 0.3, lexical_fts: 0.02 },
+      reachedViaEarnedCoRecalledFanin: true
     });
     const suppressed = supplementary({
       pathSuppressionScores: Object.freeze({ "suppressed-fanin": 0.5 })
@@ -393,12 +455,14 @@ describe("I-2 — structural reserve honors active sign-aware suppression", () =
   });
 
   it("rescues the SAME candidate when no suppression delta is present (suppression is the discriminator)", () => {
-    // Identical candidate and pool, but pathSuppressionScores is empty. The
-    // reserve rescues it — proving the refusal above is driven by the suppression
-    // delta, not by the candidate failing some other gate.
+    // Identical candidate (earned co_recalled fan-in) and pool, but
+    // pathSuppressionScores is empty. The reserve rescues it — proving the
+    // refusal above is driven by the suppression delta, not by the candidate
+    // failing some other gate.
     const target = fusedCandidate({
       objectId: "suppressed-fanin",
-      contributions: { path_expansion: 0.3, lexical_fts: 0.02 }
+      contributions: { path_expansion: 0.3, lexical_fts: 0.02 },
+      reachedViaEarnedCoRecalledFanin: true
     });
     expect(isStructuralRescueCandidate(target, supplementary())).toBe(true);
 

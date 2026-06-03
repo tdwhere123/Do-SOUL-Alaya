@@ -191,6 +191,15 @@ const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdgeType, 
 // see also: packages/protocol/src/soul/memory-graph.ts EDGE_TYPE_RECALL_MODEL
 // see also: packages/core/src/path-relation-proposal-service.ts seed catalog
 const PATH_ASSOCIATIVE_RELATION_KIND_FALLBACK: RecallGraphExpansionTrackedEdgeType = "recalls";
+// invariant: the earned multi-session fan-in carrier relation_kind. Mirrors
+// path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE.relationKind — the
+// R1 path the co-usage counter mints ONLY after the threshold-3 gate (sparse,
+// bounded). A path_expansion admission traversing this kind is the durable
+// fan-in route Route 乙 depends on, so the structural delivery reserve grants it
+// a gold-blind, earned exemption from the relevance gate (a zero-relevance
+// earned sibling is the intended fan-in target, not a distractor). Any OTHER
+// relation_kind (generic structural / session membership) stays relevance-gated.
+const EARNED_CO_RECALLED_FANIN_RELATION_KIND = "co_recalled";
 // Maps a path's free-string relation_kind onto the tracked transitive
 // edge-type set used for graph-traversal scoring and the per-edge-type
 // diagnostic. Unmapped associative kinds fold onto the recalls tier so the
@@ -360,6 +369,13 @@ interface CoarseCandidateDraft {
   // confidence falls below ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR.
   // see also: collectEntityDerivedSeeds (graph_expansion seed extraSeedMemoryIds path)
   readonly entityConfidence?: number;
+  // invariant: sticky-true once this draft is admitted on the path_expansion
+  // plane via an EARNED `co_recalled` PathRelation (relation_kind === COG). This
+  // is the R1 sparse durable fan-in carrier; the structural delivery reserve
+  // reads it as the bounded exemption that admits a zero-relevance earned fan-in
+  // sibling without re-opening displacement to generic structural distractors.
+  // Gold-blind. see also: isStructuralRescueCandidate, addCandidate.
+  readonly reachedViaEarnedCoRecalledFanin?: boolean;
 }
 
 interface SourceProximitySeedDraft {
@@ -411,7 +427,11 @@ type CoarseCandidateAdder = (
   pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
   // invariant: only forwarded for plane === "entity_seed" by
   // collectEntityDerivedSeeds; other planes leave this undefined.
-  entityConfidence?: number
+  entityConfidence?: number,
+  // invariant: only forwarded true by the direct path_expansion admission when
+  // the traversed PathRelation's relation_kind is the earned co_recalled fan-in
+  // carrier; other admissions leave it undefined. see also: addCandidate.
+  reachedViaEarnedCoRecalledFanin?: boolean
 ) => boolean;
 
 export class RecallService {
@@ -925,7 +945,8 @@ export class RecallService {
       structuralScore = 0,
       sourceChannel?: string,
       pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
-      entityConfidence?: number
+      entityConfidence?: number,
+      reachedViaEarnedCoRecalledFanin?: boolean
     ): boolean => {
       if (
         plane !== "protected_winner" &&
@@ -957,6 +978,14 @@ export class RecallService {
         plane === "entity_seed" && entityConfidence !== undefined
           ? Math.max(current?.entityConfidence ?? 0, entityConfidence)
           : current?.entityConfidence;
+      // invariant: sticky-OR. Once a co_recalled fan-in admission marks this
+      // memory id, no later plane admission (lexical / activation / structural)
+      // can clear the earned-fan-in provenance, so a sibling reached via the R1
+      // carrier keeps its reserve exemption even when it also picks up a generic
+      // structural co-admission. see also: isStructuralRescueCandidate.
+      const nextReachedViaEarnedCoRecalledFanin =
+        (current?.reachedViaEarnedCoRecalledFanin ?? false) ||
+        reachedViaEarnedCoRecalledFanin === true;
       drafts.set(entry.object_id, {
         entry,
         admissionPlanes: uniquePlanes([...(current?.admissionPlanes ?? []), plane]),
@@ -970,7 +999,10 @@ export class RecallService {
           ...(current?.pathExpansionSources ?? []),
           ...(pathExpansionSource === undefined ? [] : [pathExpansionSource])
         ]),
-        ...(nextEntityConfidence === undefined ? {} : { entityConfidence: nextEntityConfidence })
+        ...(nextEntityConfidence === undefined ? {} : { entityConfidence: nextEntityConfidence }),
+        ...(nextReachedViaEarnedCoRecalledFanin
+          ? { reachedViaEarnedCoRecalledFanin: true }
+          : {})
       });
       structuralScores.set(
         entry.object_id,
@@ -1273,6 +1305,9 @@ export class RecallService {
             ])),
             structuralScore: draft.structuralScore,
             pathExpansionSources: Object.freeze([...draft.pathExpansionSources]),
+            ...(draft.reachedViaEarnedCoRecalledFanin
+              ? { reachedViaEarnedCoRecalledFanin: true }
+              : {}),
             ...(options.sourceChannel === undefined ? {} : { sourceChannel: options.sourceChannel }),
             ...(options.scoreMultiplier === undefined ? {} : { scoreMultiplier: options.scoreMultiplier })
           })
@@ -2001,6 +2036,12 @@ export class RecallService {
       if (isPathExcludedFromRecall(path)) {
         continue;
       }
+      // Gold-blind: the discriminator reads the EARNED path's relation_kind, not
+      // a gold label. Only the co_recalled fan-in carrier (minted past the R1
+      // threshold-3 counter gate) grants the reserve exemption; every other
+      // relation_kind admitted here stays relevance-gated downstream.
+      const reachedViaEarnedCoRecalledFanin =
+        path.constitution.relation_kind === EARNED_CO_RECALLED_FANIN_RELATION_KIND;
       for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
         const entry = params.byId.get(target.targetId);
         if (entry === undefined) {
@@ -2017,7 +2058,9 @@ export class RecallService {
             seed_kind: "memory",
             target_object_id: target.targetId,
             source_channel: "path_expansion"
-          }
+          },
+          undefined,
+          reachedViaEarnedCoRecalledFanin
         );
         added += 1;
         if (added >= DYNAMIC_RECALL_PLANE_CAP) {
@@ -4200,17 +4243,21 @@ function lexicalLaneFusionContribution(candidate: FusedRecallCandidateInput): nu
  */
 const STRUCTURAL_DELIVERY_RESERVE = 2;
 
-// invariant: structural rescue is GOLD-BLIND. The reserve eligibility guard
-// reads only query/evidence-relevance signals (scoreQueryEvidenceMatch against
-// the compiled query probes, scoreEvidenceAnchorMatch against the query's
-// evidence anchors, and the lexical-lane fusion contribution) — never a gold
-// label. A path/graph fan-in target reached PURELY by membership (e.g. an R1
-// co_recalled edge fanning a query into a same-session sibling) carries a
-// path_expansion contribution but no relevance term; this guard refuses to spend
-// a scarce reserve slot on it so it cannot displace a genuine lexical/evidence
-// gold. A target that ALSO matches the query lexically, overlaps a query
-// evidence anchor, or fired a lexical-lane stream is a genuine relevant fan-in
-// and stays eligible. see also: scoreQueryEvidenceMatch, scoreEvidenceAnchorMatch.
+// invariant: structural rescue is GOLD-BLIND. This signal reads only
+// query/evidence-relevance terms (scoreQueryEvidenceMatch against the compiled
+// query probes, scoreEvidenceAnchorMatch against the query's evidence anchors,
+// and the lexical-lane fusion contribution) — never a gold label. It is the
+// gate that isStructuralRescueCandidate applies to GENERIC structural candidates
+// (a generic path / graph edge, or session_surface_cohort flat-dump membership):
+// a target reached by generic membership with zero relevance scores 0 here and
+// is refused, so it cannot displace a genuine lexical/evidence gold. A target
+// that ALSO matches the query lexically, overlaps a query evidence anchor, or
+// fired a lexical-lane stream scores > 0 and stays eligible. The one EARNED
+// exemption — a sibling reached via the threshold-3 co_recalled fan-in carrier —
+// is handled by isStructuralRescueCandidate ABOVE this signal (the
+// reachedViaEarnedCoRecalledFanin discriminator), so it does not enter here.
+// see also: scoreQueryEvidenceMatch, scoreEvidenceAnchorMatch,
+//   isStructuralRescueCandidate.
 function structuralRescueRelevanceSignal(
   candidate: FusedRecallCandidateInput,
   supplementaryData: RecallSupplementaryData
@@ -4247,8 +4294,28 @@ function isStructuralRescueCandidate(
   if (structural <= lexicalLaneFusionContribution(candidate)) {
     return false;
   }
-  // A pure membership-reached sibling (path/graph contribution, zero relevance)
-  // must NOT consume a reserve slot. Require a gold-blind relevance signal.
+  // Eligibility gate, scoped so BOTH durable-edge contracts hold:
+  //  (1) the EARNED co_recalled fan-in carrier (Route 乙, the R1 multi-session
+  //      fan-in mechanism) is rescue-eligible even at ZERO query relevance — a
+  //      content-disjoint sibling reached via the threshold-3 earned edge is the
+  //      INTENDED fan-in target, not a distractor. The exemption is bounded by
+  //      co_recalled sparsity (born attention_only, ≤3 pairs/session past the
+  //      counter gate), so it cannot re-open broad displacement.
+  //  (2) any OTHER structural-dominated candidate (generic path / graph edge,
+  //      session_surface_cohort flat-dump membership) still REQUIRES a gold-blind
+  //      query/evidence-relevance signal, so a generic zero-relevance distractor
+  //      cannot consume a scarce reserve slot and displace a rank-4/5 lexical
+  //      gold (I-1's displacement protection).
+  // The discriminator (reachedViaEarnedCoRecalledFanin) reads the earned path's
+  // relation_kind at admission, never a gold label — gold-blind. The suppression
+  // floor and dominance checks above are UPSTREAM of this gate, so an
+  // earned-fan-in candidate that is suppressed or lexical-dominated is still
+  // refused (I-2 + filler protection unaffected).
+  // see also: addCandidate (co_recalled provenance threading),
+  //   EARNED_CO_RECALLED_FANIN_RELATION_KIND, structuralRescueRelevanceSignal.
+  if (candidate.reachedViaEarnedCoRecalledFanin === true) {
+    return true;
+  }
   return structuralRescueRelevanceSignal(candidate, supplementaryData) > 0;
 }
 
@@ -4272,13 +4339,15 @@ function isStructuralRescueCandidate(
  * candidate's suppression-adjusted structural fusion-stream contribution
  * (suppressedStructuralFusionContribution: the topology-stream RRF signal minus
  * any active sign-aware suppression delta), tie-broken by compareMemoryEntries
- * exactly like the synthesis helper. Eligibility itself is gold-blind and
- * relevance-gated (isStructuralRescueCandidate): a candidate must be
- * topology-dominated, survive its own sign-aware suppression, AND carry a
- * nonzero query/evidence-relevance signal, so a well-connected but
- * query-irrelevant distractor — or a pure membership-reached (co_recalled)
- * sibling, or a suppressed contradicted target — cannot steal a reserved slot
- * from a genuine gold.
+ * exactly like the synthesis helper. Eligibility itself is gold-blind
+ * (isStructuralRescueCandidate): a candidate must be topology-dominated, survive
+ * its own sign-aware suppression, AND either (a) carry a nonzero
+ * query/evidence-relevance signal OR (b) have been admitted via the EARNED
+ * co_recalled fan-in carrier (the bounded multi-session fan-in exemption). So a
+ * well-connected but query-irrelevant GENERIC distractor — a generic path/graph
+ * membership sibling or a suppressed contradicted target — still cannot steal a
+ * reserved slot from a genuine gold, while a zero-relevance sibling reached via
+ * the earned threshold-3 co_recalled edge IS delivered (Route 乙).
  */
 function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInput>(
   deliveryOrdered: readonly T[],
