@@ -51,6 +51,7 @@ import {
 import {
   createGardenBackgroundDataPorts,
   type GardenTaskReclaimInput,
+  type GardenTaskRow,
   type PathPlasticityWatermarkRepo,
   type SqliteEventLogRepo,
   SqliteGardenTaskRepo,
@@ -114,6 +115,19 @@ const IN_PROCESS_POST_TURN_CLAIMANT = "in-process";
 // enough for a real LLM round-trip" against "short enough that operator
 // reconnect doesn't have to wait an hour".
 const GARDEN_CLAIM_STALE_AFTER_MS = 10 * 60 * 1000;
+// invariant: host_worker is the product default (Alaya owns no LLM). A
+// POST_TURN_EXTRACT task is left PENDING for an attached CLI agent to claim and
+// run as LLM-quality extraction. But host_worker would silently stall forever
+// if no agent is ever attached, so after this bounded window with no host-worker
+// claim the in-process runtime falls back to the deterministic, zero-cloud
+// localHeuristicsProvider for that row. This keeps the agent-first LLM path
+// (an attached worker claims well within the window) while guaranteeing extract
+// work never sits unclaimed indefinitely. 15 min > the 10-min stale-claim TTL so
+// a worker that claimed-then-died still gets reclaimed-and-retried by a real
+// host before the heuristic fallback fires. doctor/status warn when host_worker
+// is the default and no worker has claimed recently so the operator knows to
+// attach an agent for LLM quality (else it runs on heuristics).
+const HOST_WORKER_EXTRACT_FALLBACK_AFTER_MS = 15 * 60 * 1000;
 const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 // invariant: per ~60s scheduler pass, drain up to this many BULK_ENRICH tasks
 // so every workspace whose enrich_pending grew this pass is enriched within
@@ -1411,7 +1425,7 @@ export function createGardenRuntime(input: {
     }
 
     const config = await input.configService.getRuntimeGardenComputeConfig();
-    const provider = selectPostTurnExtractProvider(config);
+    const provider = selectPostTurnExtractProvider(config, row);
     if (provider === null) {
       return;
     }
@@ -1549,10 +1563,26 @@ export function createGardenRuntime(input: {
   };
 
   const selectPostTurnExtractProvider = (
-    config: RuntimeGardenComputeConfig
+    config: RuntimeGardenComputeConfig,
+    row: GardenTaskRow
   ): GardenComputeProvider | null => {
     if (config.provider_kind === "host_worker") {
-      return null;
+      // Leave the row PENDING for an attached host worker (LLM quality) until
+      // the bounded fallback window elapses. Past that window with no claim,
+      // run the deterministic zero-cloud localHeuristicsProvider in-process so
+      // the extract never stalls forever when no agent is attached. A freshly
+      // enqueued task (within the window) stays null so peekPending still
+      // surfaces it to the MCP worker loop. created_at is the enqueue time;
+      // any unparseable timestamp is treated as "not yet stale" (keep waiting
+      // for the worker) rather than firing the fallback early.
+      const enqueuedAtMs = Date.parse(row.created_at);
+      const pendingForMs = Number.isNaN(enqueuedAtMs)
+        ? 0
+        : Date.now() - enqueuedAtMs;
+      if (pendingForMs < HOST_WORKER_EXTRACT_FALLBACK_AFTER_MS) {
+        return null;
+      }
+      return input.localHeuristicsProvider ?? null;
     }
 
     if (config.provider_kind === "official_api") {

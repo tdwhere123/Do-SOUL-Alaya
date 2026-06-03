@@ -356,17 +356,23 @@ describe("post-turn extract Garden task", () => {
     });
   });
 
-  it("host_worker routing leaves the task pending for MCP workers", async () => {
+  it("host_worker routing leaves a freshly-enqueued task pending for MCP workers", async () => {
     const officialCompile = vi.fn(async () => [createSignal()]);
+    const localCompile = vi.fn(async () => [createSignal()]);
     const harness = await createRoutingHarness({
       provider_kind: "host_worker",
-      officialCompile
+      officialCompile,
+      localCompile
     });
+    // Just enqueued (default created_at = now) -> within the host-worker wait
+    // window, so the in-process runtime leaves it for an attached agent and
+    // does NOT run any provider inline.
     harness.enqueuePostTurnTask();
 
     await harness.runScheduler();
 
     expect(officialCompile).not.toHaveBeenCalled();
+    expect(localCompile).not.toHaveBeenCalled();
     expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
       status: "pending",
       claimed_by: null
@@ -386,6 +392,38 @@ describe("post-turn extract Garden task", () => {
         kind: GardenTaskKind.POST_TURN_EXTRACT
       })
     ]);
+  });
+
+  it("host_worker routing falls back to the zero-cloud local heuristic after the wait window with no claim", async () => {
+    const officialCompile = vi.fn(async () => [createSignal()]);
+    const localCompile = vi.fn(async () => [createSignal({ signal_id: "signal-fallback" })]);
+    const harness = await createRoutingHarness({
+      provider_kind: "host_worker",
+      officialCompile,
+      localCompile
+    });
+    // Enqueued well before the host-worker fallback window (created_at aged 1h)
+    // with no agent claim. The in-process runtime must claim it and run the
+    // deterministic localHeuristicsProvider so the extract never stalls — and
+    // must NOT touch the official (cloud) provider.
+    harness.enqueuePostTurnTask({
+      created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    });
+
+    await harness.runScheduler();
+
+    expect(officialCompile).not.toHaveBeenCalled();
+    expect(localCompile).toHaveBeenCalledTimes(1);
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "completed",
+      claimed_by: "in-process"
+    });
+    await expect(
+      harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))
+    ).resolves.toMatchObject({
+      signal_id: gardenTaskSignalId("post-turn-task-1", 0),
+      workspace_id: "workspace-1"
+    });
   });
 
   it("local_heuristics routing claims, compiles, and completes inline", async () => {
@@ -676,6 +714,7 @@ interface RoutingHarness extends ClosableHarness {
   enqueuePostTurnTask(overrides?: {
     readonly id?: string;
     readonly payload?: PostTurnPayload;
+    readonly created_at?: string;
   }): void;
   runScheduler(): Promise<void>;
 }
@@ -786,7 +825,11 @@ async function createRoutingHarness(options: {
         role: GardenRole.LIBRARIAN,
         kind: GardenTaskKind.POST_TURN_EXTRACT,
         payload: overrides.payload ?? createPostTurnPayload(),
-        created_at: "2026-05-07T00:00:00.000Z"
+        // Default to "just enqueued" so host_worker rows stay within the
+        // in-process fallback wait window — the host worker gets first claim.
+        // The bounded-fallback test below enqueues with an explicitly aged
+        // created_at to exercise the zero-cloud heuristic fallback path.
+        created_at: overrides.created_at ?? new Date().toISOString()
       });
     },
     async runScheduler() {

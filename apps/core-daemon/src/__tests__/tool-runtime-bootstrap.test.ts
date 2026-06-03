@@ -332,6 +332,13 @@ describe("daemon tool runtime bootstrap", () => {
   });
 
   it("boots ConversationService with the compute-routing resolver and no legacy stance resolver", async () => {
+    // No garden secret in this boot -> the product default is host_worker, so
+    // the compute-routing fallback provider is local_heuristics (the zero-cloud
+    // in-process provider host_worker degrades to until a worker attaches).
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+    delete process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF;
+    delete process.env.ALAYA_GARDEN_OPENAI_SECRET_REF;
+
     await bootDaemonRuntime();
 
     expect(hoisted.conversationServiceDeps).toMatchObject({

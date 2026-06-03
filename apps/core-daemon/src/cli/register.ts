@@ -169,7 +169,32 @@ export async function resolveGardenComputeStatus(
     provider_url: config.provider_url,
     credential_source: credential,
     routing_decision: deriveGardenRoutingDecision(config, resolved),
-    ...keychainCheckField(config.secret_ref, resolved)
+    ...keychainCheckField(config.secret_ref, resolved),
+    ...hostWorkerAdvisoryField(config.provider_kind, runtime)
+  };
+}
+
+// Under the host_worker product default, surface whether recall-driven extract
+// work is waiting for an attached CLI agent (LLM quality) or being left to the
+// zero-cloud heuristic fallback. Omitted for every other provider_kind, and
+// omitted when no garden task repo is wired (non-sqlite harness).
+function hostWorkerAdvisoryField(
+  providerKind: GardenComputeStatus["provider_kind"],
+  runtime: AlayaDaemonRuntime
+): Pick<GardenComputeStatus, "host_worker_advisory"> {
+  if (providerKind !== "host_worker") {
+    return {};
+  }
+  const backlog = runtime.services.gardenStatus.getHostWorkerExtractBacklog();
+  if (backlog === null) {
+    return {};
+  }
+  return {
+    host_worker_advisory: {
+      pending_extract_tasks: backlog.pending,
+      stale_claimed_extract_tasks: backlog.stale,
+      attach_worker_recommended: backlog.pending > 0
+    }
   };
 }
 

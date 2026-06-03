@@ -581,16 +581,23 @@ async function defaultRuntimeGardenComputeConfig(
   const embeddingFallbackSecretRef = readRawSecretRef(configEnv, ALAYA_OPENAI_SECRET_REF_ENV);
   const secretRef = gardenSecretRef ?? embeddingFallbackSecretRef;
   const modelId = readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_MODEL_ENV)) ?? OFFICIAL_API_GARDEN_MODEL;
-  // An explicit ALAYA_GARDEN_PROVIDER_KIND wins over secret-presence inference;
-  // it is the only way a non-Inspector setup can request host_worker. An
-  // unrecognized value falls back to inference rather than crashing boot.
+  // invariant: the product DEFAULT compute mode is host_worker — the attached
+  // CLI agent (Codex / Claude Code / similar) is the compute, so Alaya owns no
+  // LLM and makes no edge-LLM cloud call out of the box. An explicit
+  // ALAYA_GARDEN_PROVIDER_KIND wins over inference and is how an operator (or
+  // the bench harness, via the same env tier) opts INTO official_api or pins
+  // local_heuristics. A garden/embedding secret_ref being present is treated as
+  // an explicit official_api opt-in (an operator who configured a key wants
+  // cloud); otherwise — fresh install, no secret — the default is host_worker,
+  // NOT local_heuristics. An unrecognized declared value falls back to this
+  // inference rather than crashing boot.
   const declaredProviderKind = RuntimeGardenProviderKindSchema.safeParse(
     readNonEmptyEnv(readConfigEnvValue(configEnv, ALAYA_GARDEN_PROVIDER_KIND_ENV))
   );
   const providerKind = declaredProviderKind.success
     ? declaredProviderKind.data
     : secretRef === null
-      ? "local_heuristics"
+      ? "host_worker"
       : "official_api";
 
   return parseGardenComputeConfigWithLegacyFallback(

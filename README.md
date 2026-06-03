@@ -209,27 +209,36 @@ no evidence → deferred; otherwise → may flow into the proposal pipeline.
 The built-in extractor (`LocalHeuristics`) is deliberately conservative
 — pattern matching for forms like *"I always use X"* / *"we decided …"*
 in English and Chinese, plus Chinese self-introduction (*"请叫我 …"*) —
-so it catches the obvious durable facts and misses nuanced ones;
-pointing Garden compute at an `official_api` model widens that. The
-explicit `soul.emit_candidate_signal` channel stays available for facts
-the agent judges worth recording that the heuristics won't see.
+so it catches the obvious durable facts and misses nuanced ones; an
+attached CLI agent running as `host_worker` (the default) or pointing
+Garden compute at an `official_api` model widens that. The explicit
+`soul.emit_candidate_signal` channel stays available for facts the agent
+judges worth recording that the heuristics won't see.
 
-**Garden compute mode** is one of three: `local_heuristics` (the
-default — no external calls), `official_api` (an OpenAI-compatible
-model), or `host_worker` (the attached CLI agent itself drains the
-extract queue via `garden.list_pending_tasks` / `garden.claim_task` /
-`garden.complete_task`). The default is inferred from whether a Garden
-credential is configured; to pick it explicitly — `host_worker` in
-particular can't be inferred — set `ALAYA_GARDEN_PROVIDER_KIND` in
-`~/.config/alaya/.env` or pass `garden_provider_kind` to `alaya install
---non-interactive` for a fresh setup, or use the Garden Compute form in
-`alaya inspect --open` (which writes the persisted runtime config and,
-once saved, takes precedence over the env default). `alaya doctor` prints
-the live mode on its `garden compute:` line. The official-API endpoint
-and model are the non-secret `OFFICIAL_API_GARDEN_PROVIDER_URL` /
-`OFFICIAL_API_GARDEN_MODEL` (plain `.env` or the same Inspector form);
-only the API key is a secret — store it with `alaya install --keychain`
-(or `env:` / `file:` refs).
+**Garden compute mode** is one of three: `host_worker` (the default —
+the attached CLI agent itself is the compute, draining the extract queue
+via `garden.list_pending_tasks` / `garden.claim_task` /
+`garden.complete_task`, so Alaya owns no LLM and makes no external call
+out of the box), `local_heuristics` (the deterministic in-process
+extractor, no external calls), or `official_api` (an OpenAI-compatible
+model — an explicit opt-in). On a fresh install with no Garden
+credential the mode is `host_worker`; if a Garden/embedding secret is
+present the mode is inferred as `official_api` (configuring a key is
+read as opting into cloud). Under `host_worker`, recall-driven extract
+work waits for an attached agent for LLM-quality extraction; if no agent
+claims it within a bounded window, the in-process `local_heuristics`
+extractor runs it (zero-cloud) so memory capture never stalls — `alaya
+doctor` warns when extract work is sitting unclaimed so you know to
+attach an agent. To pick a mode explicitly, set
+`ALAYA_GARDEN_PROVIDER_KIND` in `~/.config/alaya/.env` or pass
+`garden_provider_kind` to `alaya install --non-interactive`, or use the
+Garden Compute form in `alaya inspect --open` (which writes the persisted
+runtime config and, once saved, takes precedence over the env default).
+`alaya doctor` prints the live mode on its `garden compute:` line. The
+official-API endpoint and model are the non-secret
+`OFFICIAL_API_GARDEN_PROVIDER_URL` / `OFFICIAL_API_GARDEN_MODEL` (plain
+`.env` or the same Inspector form); only the API key is a secret — store
+it with `alaya install --keychain` (or `env:` / `file:` refs).
 
 **Failure mode this prevents.** If the agent could write durable
 truth at perception, every fluent-but-wrong assertion would become

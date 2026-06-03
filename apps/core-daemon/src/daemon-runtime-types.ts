@@ -84,6 +84,15 @@ export interface AlayaDaemonRuntimeServices {
   >;
   readonly gardenStatus: Readonly<{
     getStatus(): Readonly<{ readonly last_pass_at: string | null }>;
+    // Recall-driven POST_TURN_EXTRACT backlog snapshot used by doctor/status to
+    // warn under the host_worker product default when extract work is aging
+    // unclaimed (no attached CLI agent). `stale` counts pending tasks older than
+    // the host-worker wait window. Returns null when no garden task repo is
+    // wired (e.g. a non-sqlite harness).
+    getHostWorkerExtractBacklog(): Readonly<{
+      readonly pending: number;
+      readonly stale: number;
+    }> | null;
   }>;
   readonly principalCodingEngineAvailable: boolean;
 }

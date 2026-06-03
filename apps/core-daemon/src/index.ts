@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   ComputeProviderPriority,
   ControlPlaneObjectKind,
+  GardenTaskKind,
   HealthEventKind,
   MemoryGovernanceEventType,
   ProposalOptionKind,
@@ -154,8 +155,6 @@ import {
   listServerHardConstraints,
   loadConfigEnv,
   patchArbitrationClaimService,
-  readOfficialGardenModelId,
-  readOfficialGardenProviderUrl,
   recordStartupStep,
   resolveDatabasePath
 } from "./daemon-runtime-support.js";
@@ -208,6 +207,11 @@ export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secr
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
 const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
+// doctor/status host_worker advisory: a POST_TURN_EXTRACT task claimed but not
+// completed within this window counts as a stale (abandoned) claim. Mirrors the
+// garden-runtime stale-claim TTL (10 min) so the advisory's "abandoned" count
+// agrees with what the scheduler will reclaim back to pending.
+const HOST_WORKER_EXTRACT_ADVISORY_STALE_MS = 10 * 60 * 1000;
 
 export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // anchor: warm jieba (CJK word segmenter) at daemon start so the first
@@ -837,25 +841,25 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const pathCandidatePort: PathCandidateSink = {
     submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
   };
-  // invariant: pair-classifier port enabled by default
-  // (ALAYA_EDGE_PRODUCER_LLM_ENABLED!=0/false) so the LLM gets a chance
-  // at every same-dimension same-scope candidate neighbor before the
-  // deterministic local heuristic runs. The adapter walks the
-  // operator's garden compute config — when the config is missing,
-  // disabled, or its secret_ref does not resolve, createEdgeAutoProducerLlmPort
-  // returns null and the service quietly falls back to the local
-  // heuristic. invariant: no new cloud dependency may be introduced
-  // here; this port runs on the operator's existing garden compute
-  // config or is disabled.
+  // invariant: the product default is zero-own-LLM. The synchronous in-process
+  // edge-LLM pair-classifier (a direct cloud call from the daemon) is STRICT
+  // OPT-IN — it runs only when an operator sets ALAYA_EDGE_PRODUCER_LLM_ENABLED
+  // to 1/true. With host_worker the product default and this flag unset, B-2
+  // edge classification makes NO external call: the deterministic heuristic
+  // produces the edge inline and, under host_worker, the LLM-quality verdict is
+  // deferred to the attached CLI agent via the EDGE_CLASSIFY garden task. The
+  // garden compute config is read once and shared so the routing decision below
+  // (host_worker -> defer) and the opt-in cloud port use a single source of
+  // truth. invariant: no new cloud dependency may be introduced here; the cloud
+  // port runs on the operator's existing official_api garden compute config or
+  // is disabled.
+  const sharedGardenComputeConfig = await rawConfigService.getRuntimeGardenComputeConfig();
   const edgeAutoProducerLlmEnabled = (() => {
     const raw = process.env.ALAYA_EDGE_PRODUCER_LLM_ENABLED?.toLowerCase();
-    if (raw === undefined || raw === "") {
-      return true;
-    }
-    return raw !== "0" && raw !== "false";
+    return raw === "1" || raw === "true";
   })();
   const edgeAutoProducerGardenComputeConfig = edgeAutoProducerLlmEnabled
-    ? await rawConfigService.getRuntimeGardenComputeConfig()
+    ? sharedGardenComputeConfig
     : null;
   const edgeAutoProducerGardenApiKey = ((): string | null => {
     if (
@@ -872,29 +876,47 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       return null;
     }
   })();
-  const edgeAutoProducerLlmPort = edgeAutoProducerLlmEnabled
-    ? createEdgeAutoProducerLlmPort({
-        config: {
-          providerUrl:
-            edgeAutoProducerGardenComputeConfig?.provider_url ?? "https://yunwu.ai/v1",
-          model:
-            edgeAutoProducerGardenComputeConfig?.model_id ?? OFFICIAL_API_GARDEN_MODEL,
-          apiKey: edgeAutoProducerGardenApiKey
-        }
-      })
-    : null;
+  // The synchronous cloud port is created only when opt-in AND the official_api
+  // garden config resolves a real key AND that config carries an explicit
+  // provider_url. providerUrl/model come straight from that config — there is NO
+  // yunwu.ai default URL: an opt-in without a configured provider_url leaves the
+  // port null, so the service falls back to the deterministic heuristic instead
+  // of calling out to a hardcoded host.
+  const edgeAutoProducerProviderUrl =
+    edgeAutoProducerGardenComputeConfig?.provider_url ?? null;
+  const edgeAutoProducerLlmPort =
+    edgeAutoProducerLlmEnabled &&
+    edgeAutoProducerGardenApiKey !== null &&
+    edgeAutoProducerProviderUrl !== null
+      ? createEdgeAutoProducerLlmPort({
+          config: {
+            providerUrl: edgeAutoProducerProviderUrl,
+            model:
+              edgeAutoProducerGardenComputeConfig?.model_id ?? OFFICIAL_API_GARDEN_MODEL,
+            apiKey: edgeAutoProducerGardenApiKey
+          }
+        })
+      : null;
   // invariant: host-worker defer for the B-2 LLM-quality verdict. When ON, the
   // EDGE_CLASSIFY garden task is enqueued for the attached CLI agent (the
   // compute) instead of the synchronous in-process llmPort; the deterministic
-  // heuristic still produces the edge inline. Defaults OFF here so the existing
-  // garden-compute path stays the default — flipping host_worker to the install
-  // default (and adding the no-network regression) is a separate slice. The
-  // gardenTaskRepo this closure reads is created later in init; the closure is
-  // only invoked at materialization time, long after assignment, so there is no
-  // use-before-assignment. see also: edge-classify-queue-adapter.ts.
+  // heuristic still produces the edge inline. Auto-ON whenever the resolved
+  // garden compute provider_kind is host_worker (the product default) so
+  // edge-classify routes to the agent rather than a cloud call; an operator can
+  // also force it with ALAYA_EDGE_CLASSIFY_HOST_WORKER=1/true regardless of
+  // provider_kind. The gardenTaskRepo this closure reads is created later in
+  // init; the closure is only invoked at materialization time, long after
+  // assignment, so there is no use-before-assignment.
+  // see also: edge-classify-queue-adapter.ts.
   const edgeClassifyHostWorkerEnabled = (() => {
     const raw = process.env.ALAYA_EDGE_CLASSIFY_HOST_WORKER?.toLowerCase();
-    return raw === "1" || raw === "true";
+    if (raw === "1" || raw === "true") {
+      return true;
+    }
+    if (raw === "0" || raw === "false") {
+      return false;
+    }
+    return sharedGardenComputeConfig.provider_kind === "host_worker";
   })();
   let edgeClassifyQueueRepoHolder:
     | { enqueue: typeof SqliteGardenTaskRepo.prototype.enqueue; findById: typeof SqliteGardenTaskRepo.prototype.findById }
@@ -1029,30 +1051,26 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       return null;
     }
   })();
-  // providerUrl + model are resolved as one unit from one source tier so
-  // a stale URL can never pair with a fresh model: when the garden
-  // compute config is present BOTH come from it (a missing field on that
-  // config takes the canonical default, never the configEnv tier);
-  // otherwise BOTH come from the configEnv tier with the canonical
-  // fallback. The two tiers are never mixed across the pair.
-  const reconciliationProviderPair = ((): { providerUrl: string; model: string } => {
-    if (reconciliationGardenComputeConfig !== null) {
-      return {
-        providerUrl: reconciliationGardenComputeConfig.provider_url ?? "https://yunwu.ai/v1",
-        model: reconciliationGardenComputeConfig.model_id ?? OFFICIAL_API_GARDEN_MODEL
-      };
-    }
-    return {
-      providerUrl: readOfficialGardenProviderUrl(configEnv) ?? "https://yunwu.ai/v1",
-      model: readOfficialGardenModelId(configEnv) ?? OFFICIAL_API_GARDEN_MODEL
-    };
-  })();
+  // invariant: reconciliation's per-fact refines-vs-distinct decision routes
+  // through the SAME zero-own-LLM compute model as B-2 — it never operates a
+  // self-owned cloud LLM and there is NO yunwu.ai default URL. The cloud
+  // decision port is created only when the official_api garden config resolves
+  // a real key (reconciliationGardenApiKey !== null, which already requires
+  // provider_kind=official_api + enabled) AND that config carries an explicit
+  // provider_url. Under the host_worker product default the key is null, so the
+  // port is null and reconciliation cleanly stays off (an honest no-op — the
+  // host-worker / rule path owns the decision, not a daemon-operated LLM).
+  // providerUrl + model are taken as one unit from the resolved garden config so
+  // a stale URL can never pair with a fresh model.
+  const reconciliationProviderUrl = reconciliationGardenComputeConfig?.provider_url ?? null;
   const reconciliationLlmDecisionPort =
-    ingestReconciliationEnabled
+    ingestReconciliationEnabled &&
+    reconciliationGardenApiKey !== null &&
+    reconciliationProviderUrl !== null
       ? createReconciliationLlmDecisionPort({
           config: {
-            providerUrl: reconciliationProviderPair.providerUrl,
-            model: reconciliationProviderPair.model,
+            providerUrl: reconciliationProviderUrl,
+            model: reconciliationGardenComputeConfig?.model_id ?? OFFICIAL_API_GARDEN_MODEL,
             apiKey: reconciliationGardenApiKey
           }
         })
@@ -1631,6 +1649,25 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
           return {
             last_pass_at: current.last_pass_at ?? initialGardenLastPassAt
           };
+        },
+        // doctor/status advisory under the host_worker product default: a
+        // recall-driven extract task that no attached CLI agent has claimed
+        // within HOST_WORKER_EXTRACT_ADVISORY_STALE_MS counts as "stale", i.e.
+        // aging toward the in-process zero-cloud heuristic fallback. Aggregated
+        // across workspaces. Returns null when no sqlite garden task repo is
+        // wired so the advisory is simply omitted rather than fabricated.
+        getHostWorkerExtractBacklog: () => {
+          if (gardenTaskRepo === undefined) {
+            return null;
+          }
+          const staleBefore = new Date(
+            Date.now() - HOST_WORKER_EXTRACT_ADVISORY_STALE_MS
+          ).toISOString();
+          const backlog = gardenTaskRepo.countByKind(
+            GardenTaskKind.POST_TURN_EXTRACT,
+            staleBefore
+          );
+          return { pending: backlog.pending, stale: backlog.stale };
         }
       },
       principalCodingEngineAvailable: principalCodingAvailability.available

@@ -47,6 +47,20 @@ export interface GardenComputeStatus {
   readonly routing_decision: "official_api" | "local_heuristics" | "host_worker";
   // Present only when the active Garden secret_ref is keychain:<service>:<account>.
   readonly keychain_check?: GardenKeychainCheck;
+  // Present only under the host_worker product default. Surfaces whether
+  // recall-driven extract work is waiting for an attached CLI agent (LLM
+  // quality) or being left to the zero-cloud heuristic fallback.
+  // pending_extract_tasks counts unclaimed POST_TURN_EXTRACT tasks;
+  // stale_claimed_extract_tasks counts tasks a worker claimed but abandoned past
+  // the stale window (reclaimed back to pending on the next scheduler pass).
+  // attach_worker_recommended is true when there is unclaimed extract work —
+  // the operator should attach Codex / Claude Code for LLM-quality extraction,
+  // else Alaya runs on the deterministic heuristic after the wait window.
+  readonly host_worker_advisory?: Readonly<{
+    readonly pending_extract_tasks: number;
+    readonly stale_claimed_extract_tasks: number;
+    readonly attach_worker_recommended: boolean;
+  }>;
 }
 
 export type GardenKeychainCheck =
@@ -542,6 +556,28 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
         : `in-process via ${report.garden_compute.routing_decision}`
     }\n`
   );
+  // Surface the zero-own-LLM default's operating mode: under host_worker, tell
+  // the operator whether an attached CLI agent is claiming extract work (LLM
+  // quality) or whether it is aging unclaimed and falling back to the zero-cloud
+  // heuristic — so "attach an agent for better extraction" is diagnosable from
+  // doctor alone.
+  if (report.garden_compute.host_worker_advisory !== undefined) {
+    const advisory = report.garden_compute.host_worker_advisory;
+    if (advisory.attach_worker_recommended) {
+      stream.write(
+        `garden compute WARNING: provider_kind=host_worker is the default and` +
+          ` ${advisory.pending_extract_tasks} recall-driven POST_TURN_EXTRACT task(s) are unclaimed` +
+          ` (${advisory.stale_claimed_extract_tasks} claimed-then-abandoned). Attach Codex /` +
+          ` Claude Code (\`alaya attach <target>\`) for LLM-quality extraction; unclaimed work` +
+          ` falls back to the zero-cloud heuristic after the host-worker wait window.\n`
+      );
+    } else {
+      stream.write(
+        `garden compute: host_worker default — attach a CLI agent for LLM-quality extraction` +
+          ` (zero-cloud heuristic fallback runs if no worker claims).\n`
+      );
+    }
+  }
   stream.write(
     `recall path plasticity lookup: count=${report.recall.path_plasticity_lookup.lookup_count}` +
       ` p99_ms=${report.recall.path_plasticity_lookup.duration_p99_ms ?? "n/a"}` +
