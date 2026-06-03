@@ -62,7 +62,21 @@ async function executeInstall(
   }
 
   if (!args.nonInteractive || args.answers === null) {
-    ctx.stderr.write("interactive install is not implemented in this build; use --non-interactive <json>\n");
+    // invariant: `alaya install` is configuration-as-data — the supported form
+    // is `--non-interactive <answers-json>` (or `--keychain` for the guided
+    // secret prompt). There is no free-text TTY wizard; surface the JSON form
+    // with a runnable example rather than a "not implemented" dead-end.
+    // cross-file: README.md §Quickstart, apps/core-daemon/src/cli/install/support.ts InstallAnswers
+    ctx.stderr.write(
+      "alaya install takes its answers as JSON.\n" +
+        "Run:  alaya install --non-interactive '<answers-json>'\n" +
+        "      alaya install --keychain                 # guided secret prompt\n" +
+        "Example answers JSON:\n" +
+        '  {"db_path":"~/.local/share/alaya/alaya.db","model_id":"gpt-4.1-mini",' +
+        '"api_key_source":"file","key_file_path":"~/.config/alaya/secrets/openai",' +
+        '"default_workspace":"default","garden_provider_kind":"official_api"}\n' +
+        "Fields are documented in README.md §Quickstart.\n"
+    );
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
 

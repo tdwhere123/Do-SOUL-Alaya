@@ -153,7 +153,7 @@ describe("McpBridge", () => {
     }
   );
 
-  it("returns the tools handler stub only when hasConversationToolName opts a builtin tool in", async () => {
+  it("fails loud with a configuration error when a conversation tool is opted in but no tools handler is injected", async () => {
     const bridge = new McpBridge({
       hasConversationToolName: (toolName) => toolName === "tools.exec_shell",
       soulHandler: vi.fn()
@@ -168,7 +168,7 @@ describe("McpBridge", () => {
     expect(result).toEqual({
       type: "tool_result",
       tool_use_id: "toolu_tools.exec_shell",
-      content: JSON.stringify({ error: "tools.* is deferred to #BL-008." }),
+      content: JSON.stringify({ error: "no tools handler injected for this MCP bridge" }),
       is_error: true
     });
   });

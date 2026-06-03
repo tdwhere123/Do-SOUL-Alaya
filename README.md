@@ -584,6 +584,16 @@ alaya install --non-interactive "$(printf '{"db_path":"%s/.config/alaya/alaya.db
 alaya attach claude-code
 ```
 
+`alaya install` takes its answers **as a JSON object** —
+`--non-interactive '<answers-json>'` is the supported form (there is no
+free-text TTY wizard). Bare `alaya install` prints this usage with a
+runnable example. The optional `--keychain` flag adds a single guided
+secret prompt for OS-keychain key storage. Answer fields (`db_path`,
+`embedding_enabled`, `model_id`, `provider_base_url`, `api_key_source`
+= `env`/`file`/`paste`, `key_file_path`, `default_workspace`,
+`garden_provider_kind`, …) are all optional and merge over any existing
+config.
+
 Pipe-to-bash shortcut (faster, but you execute the downloaded
 installer directly; the release tarball is still checksum-verified by
 the script):

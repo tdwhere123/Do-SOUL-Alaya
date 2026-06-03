@@ -28,9 +28,17 @@ export class McpBridge {
   private readonly hasConversationToolName: (toolName: string) => boolean;
 
   public constructor(private readonly dependencies: McpBridgeDependencies) {
+    // invariant: production always injects a toolsHandler; this default is only
+    // reachable in a misconfigured embedding (a hasConversationToolName that
+    // matches with no handler injected). Fail loud with a configuration error
+    // instead of pretending the call is unsupported.
     this.toolsHandler =
       dependencies.toolsHandler ??
-      (async (toolUse) => createErrorResult(toolUse.id, "tools.* is deferred to #BL-008."));
+      (async (toolUse) =>
+        createErrorResult(
+          toolUse.id,
+          "no tools handler injected for this MCP bridge"
+        ));
     this.hasConversationToolName = dependencies.hasConversationToolName ?? (() => false);
   }
 
