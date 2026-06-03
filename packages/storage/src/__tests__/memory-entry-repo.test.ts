@@ -333,6 +333,79 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(coldRows).toEqual([]);
   });
 
+  it("excludes dormant rows from the recall candidate load but keeps them fetchable by id (REVERSIBLE)", async () => {
+    const { repo } = await createRepo();
+
+    await repo.create(
+      createMemoryEntry({
+        object_id: "7ab81ca8-9425-4e18-ad4a-81ab6406db55",
+        storage_tier: StorageTier.HOT,
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        lifecycle_state: "active"
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "ca648194-c03c-4932-b103-3ec4d318732a",
+        storage_tier: StorageTier.HOT,
+        workspace_id: "workspace-1",
+        run_id: "run-2",
+        lifecycle_state: "dormant"
+      })
+    );
+
+    // invariant: dormant drops out of the recall candidate load (recall-silent).
+    const rows = await repo.findByWorkspaceId("workspace-1", StorageTier.HOT);
+    expect(rows.map((row) => row.object_id)).toEqual(["7ab81ca8-9425-4e18-ad4a-81ab6406db55"]);
+
+    // invariant: dormant is NOT deleted — findById still returns it and it
+    // transitions back to active (reversible).
+    const dormant = await repo.findById("ca648194-c03c-4932-b103-3ec4d318732a");
+    expect(dormant?.lifecycle_state).toBe("dormant");
+    const revived = await repo.transitionLifecycle(
+      "ca648194-c03c-4932-b103-3ec4d318732a",
+      "active",
+      new Date().toISOString()
+    );
+    expect(revived.lifecycle_state).toBe("active");
+    const afterRevival = await repo.findByWorkspaceId("workspace-1", StorageTier.HOT);
+    expect(afterRevival.map((row) => row.object_id).sort()).toEqual([
+      "7ab81ca8-9425-4e18-ad4a-81ab6406db55",
+      "ca648194-c03c-4932-b103-3ec4d318732a"
+    ]);
+  });
+
+  it("excludes dormant rows from keyword (FTS) recall search", async () => {
+    const { repo } = await createRepo();
+
+    await repo.create(
+      createMemoryEntry({
+        object_id: "7ab81ca8-9425-4e18-ad4a-81ab6406db55",
+        storage_tier: StorageTier.HOT,
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        content: "alpha bravo charlie keyword match",
+        lifecycle_state: "active"
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "ca648194-c03c-4932-b103-3ec4d318732a",
+        storage_tier: StorageTier.HOT,
+        workspace_id: "workspace-1",
+        run_id: "run-2",
+        content: "alpha bravo charlie keyword match",
+        lifecycle_state: "dormant"
+      })
+    );
+
+    const results = await repo.searchByKeyword("workspace-1", "keyword", 10);
+    expect(results.map((result) => result.object_id)).toEqual([
+      "7ab81ca8-9425-4e18-ad4a-81ab6406db55"
+    ]);
+  });
+
   it("lists entries by run id across both tiers", async () => {
     const { repo } = await createRepo();
 

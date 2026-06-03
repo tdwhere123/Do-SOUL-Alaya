@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type {
-  BrokenPointerRecord,
-  ColdStartAssessment,
-  DraftCandidate,
-  ExpiringGreenStatus,
-  HighFrequencyPattern,
-  StaleMemoryEntry
+import {
+  DYNAMICS_CONSTANTS,
+  type BrokenPointerRecord,
+  type ColdStartAssessment,
+  type DraftCandidate,
+  type ExpiringGreenStatus,
+  type HighFrequencyPattern,
+  type StaleMemoryEntry
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../db.js";
 import {
@@ -61,6 +62,23 @@ export interface GardenJanitorMemoryTieringPort {
   // EventPublisher.appendManyWithMutation alongside the
   // SOUL_MEMORY_TIER_CHANGED event row.
   demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): void;
+}
+
+export interface GardenLowActivityMemoryRecord {
+  readonly memory_id: string;
+}
+
+// invariant: dormancy is REVERSIBLE. setLifecycleDormant only flips
+// lifecycle_state active -> dormant; it never tombstones or deletes. A fresh
+// reuse_gain revives the row (DynamicsService.processKarmaEvent dormant ->
+// active). The demotion criterion mirrors the path-side dormancy posture: a
+// memory whose decayed activation has fallen at/below the silent band
+// (manifestation_thresholds.hint_max = 0.3) AND that has been idle long
+// enough drops out of recall but stays restorable.
+// see also: packages/soul/src/garden/janitor.ts executeDormantDemotion.
+export interface GardenJanitorDormantDemotionPort {
+  findLowActivityActiveMemories(workspaceId: string): Promise<readonly GardenLowActivityMemoryRecord[]>;
+  setLifecycleDormant(memoryId: string, taskId: string): Promise<void>;
 }
 
 export interface GardenMergeCandidate {
@@ -176,6 +194,7 @@ export interface GardenAuditorBootstrappingPort {
 
 export interface GardenBackgroundDataPorts {
   readonly tieringPort: GardenJanitorMemoryTieringPort;
+  readonly dormantDemotionPort: GardenJanitorDormantDemotionPort;
   readonly evidenceCheckPort: GardenAuditorEvidenceCheckPort;
   readonly pointerHealthPort: GardenAuditorPointerHealthPort;
   readonly greenMaintenancePort: GardenAuditorGreenMaintenancePort;
@@ -206,6 +225,7 @@ export function createGardenBackgroundDataPorts(
 
   return {
     tieringPort: createTieringPort(context),
+    dormantDemotionPort: createDormantDemotionPort(context),
     evidenceCheckPort: createEvidenceCheckPort(context),
     pointerHealthPort: createPointerHealthPort(context),
     greenMaintenancePort: createGreenMaintenancePort(context),
@@ -263,6 +283,61 @@ function createTieringPort(context: BaseFactoryContext): GardenJanitorMemoryTier
              AND lifecycle_state = '${ACTIVE_STATE}'`
         )
         .run(context.now(), workspaceId, ...uniqueIds);
+    }
+  };
+}
+
+function createDormantDemotionPort(context: BaseFactoryContext): GardenJanitorDormantDemotionPort {
+  // invariant: dormancy criterion is REVERSIBLE silencing, never deletion —
+  // active+hot memory whose decayed activation is at/below the silent band AND
+  // idle past the inactivity window. Both bounds reuse existing
+  // DYNAMICS_CONSTANTS (no new tuning constants):
+  //   - manifestation_thresholds.hint_max: at/below this activation the memory
+  //     already manifests only as hint/hidden, so demotion changes recall
+  //     eligibility, not delivered visibility.
+  //   - path_plasticity.retirement_inactivity_ms: same idle window the path
+  //     plane uses before demoting a path to dormant.
+  // COALESCE(last_hit_at, last_used_at, created_at): last_used_at is the
+  // "last reinforced" proxy; created_at floors a never-hit memory at birth age.
+  const SILENT_ACTIVATION_BAND = DYNAMICS_CONSTANTS.manifestation_thresholds.hint_max;
+  const IDLE_WINDOW_MS = DYNAMICS_CONSTANTS.path_plasticity.retirement_inactivity_ms;
+  const DORMANT_DEMOTION_LIMIT = 120;
+
+  const findLowActivityStatement = context.database.connection.prepare(`
+    SELECT object_id AS memory_id
+    FROM memory_entries
+    WHERE workspace_id = ?
+      AND lifecycle_state = '${ACTIVE_STATE}'
+      AND storage_tier = 'hot'
+      AND COALESCE(activation_score, 0.0) <= ?
+      AND COALESCE(last_hit_at, last_used_at, created_at) <= ?
+    ORDER BY COALESCE(activation_score, 0.0) ASC,
+             COALESCE(last_hit_at, last_used_at, created_at) ASC,
+             object_id ASC
+    LIMIT ${DORMANT_DEMOTION_LIMIT}
+  `);
+
+  // invariant: active -> dormant ONLY. No retention_state / tombstone write.
+  // The WHERE lifecycle_state guard keeps the flip idempotent and refuses to
+  // touch a row another transition already moved.
+  const setDormantStatement = context.database.connection.prepare(`
+    UPDATE memory_entries
+    SET lifecycle_state = 'dormant', updated_at = ?
+    WHERE object_id = ?
+      AND lifecycle_state = '${ACTIVE_STATE}'
+  `);
+
+  return {
+    findLowActivityActiveMemories: async (workspaceId) => {
+      const idleBefore = addMilliseconds(context.now(), -Math.max(0, IDLE_WINDOW_MS));
+      return findLowActivityStatement.all(
+        workspaceId,
+        SILENT_ACTIVATION_BAND,
+        idleBefore
+      ) as readonly GardenLowActivityMemoryRecord[];
+    },
+    setLifecycleDormant: async (memoryId) => {
+      setDormantStatement.run(context.now(), memoryId);
     }
   };
 }

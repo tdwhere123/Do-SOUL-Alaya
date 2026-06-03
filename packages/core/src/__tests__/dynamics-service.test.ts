@@ -117,6 +117,19 @@ function createHarness(memoryEntries: readonly MemoryEntry[], options: { readonl
 
         entriesById.set(objectId, updated);
         return Object.freeze({ ...updated });
+      }),
+      transitionLifecycle: vi.fn(async (objectId, lifecycleState, updatedAt) => {
+        const existing = entriesById.get(objectId);
+        if (existing === undefined) {
+          throw new Error(`missing entry ${objectId}`);
+        }
+        const updated: MemoryEntry = {
+          ...existing,
+          lifecycle_state: lifecycleState,
+          updated_at: updatedAt
+        };
+        entriesById.set(objectId, updated);
+        return Object.freeze({ ...updated });
       })
     },
     karmaEventRepo: {
@@ -277,6 +290,62 @@ describe("DynamicsService", () => {
 
     const updated = entriesById.get("memory-pinned");
     expect(updated?.retention_score).toBe(0.8);
+  });
+
+  it("revives a dormant memory to active on a positive karma event (REVERSIBLE, never deletes)", async () => {
+    const { service, entriesById, appendedEvents } = createHarness([
+      createMemoryEntry({ object_id: "memory-dormant", lifecycle_state: "dormant" })
+    ]);
+
+    await service.processKarmaEvent(
+      createKarmaEvent({ object_id: "memory-dormant", kind: "reuse_gain", amount: 0.05, event_id: "event-5" })
+    );
+
+    const updated = entriesById.get("memory-dormant");
+    expect(updated?.lifecycle_state).toBe("active");
+    const stateEvents = appendedEvents.filter(
+      (entry) =>
+        entry.event_type === "soul.memory.state_changed" &&
+        (entry.payload_json as { from_state?: string; to_state?: string }).from_state === "dormant" &&
+        (entry.payload_json as { to_state?: string }).to_state === "active"
+    );
+    expect(stateEvents).toHaveLength(1);
+  });
+
+  it("does not revive a dormant memory on a penalty karma event", async () => {
+    const { service, entriesById, appendedEvents } = createHarness([
+      createMemoryEntry({ object_id: "memory-dormant", lifecycle_state: "dormant" })
+    ]);
+
+    await service.processKarmaEvent(
+      createKarmaEvent({ object_id: "memory-dormant", kind: "reject_penalty", amount: -0.3, event_id: "event-6" })
+    );
+
+    expect(entriesById.get("memory-dormant")?.lifecycle_state).toBe("dormant");
+    const revivalEvents = appendedEvents.filter(
+      (entry) =>
+        entry.event_type === "soul.memory.state_changed" &&
+        (entry.payload_json as { to_state?: string }).to_state === "active"
+    );
+    expect(revivalEvents).toHaveLength(0);
+  });
+
+  it("does not touch lifecycle when a positive karma event lands on an already-active memory", async () => {
+    const { service, entriesById, appendedEvents } = createHarness([
+      createMemoryEntry({ object_id: "memory-active", lifecycle_state: "active" })
+    ]);
+
+    await service.processKarmaEvent(
+      createKarmaEvent({ object_id: "memory-active", kind: "reuse_gain", amount: 0.05, event_id: "event-7" })
+    );
+
+    expect(entriesById.get("memory-active")?.lifecycle_state).toBe("active");
+    const revivalEvents = appendedEvents.filter(
+      (entry) =>
+        entry.event_type === "soul.memory.state_changed" &&
+        (entry.payload_json as { from_state?: string }).from_state === "dormant"
+    );
+    expect(revivalEvents).toHaveLength(0);
   });
 
   it("computeActivationScore favors scope/domain matches", () => {

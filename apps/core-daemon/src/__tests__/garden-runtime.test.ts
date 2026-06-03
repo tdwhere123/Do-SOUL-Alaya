@@ -152,8 +152,9 @@ describe("garden runtime path plasticity queue", () => {
       required_tier: GardenTier.TIER_2,
       workspace_id: "workspace-1"
     });
+    // tier_0 = 2 ticks * 2 Janitor kinds (TTL_CLEANUP + DORMANT_DEMOTION).
     expect(runtime.backlogTelemetrySource.getBacklogSnapshot().queue_depth_by_tier).toMatchObject({
-      tier_0: 2,
+      tier_0: 4,
       tier_1: 2,
       tier_2: 5
     });
@@ -315,6 +316,50 @@ describe("garden runtime path plasticity queue", () => {
     await getService(runtime, "Janitor").task();
 
     expect(runtime.getStatus().last_pass_at).toEqual(expect.any(String));
+  });
+
+  it("enqueues DORMANT_DEMOTION on the Janitor pass and demotes faded+idle memories (reversible, never tombstoned)", async () => {
+    const setLifecycleDormant = vi.fn(async () => undefined);
+    const findLowActivityActiveMemories = vi.fn(async () => [{ memory_id: "memory-faded" }]);
+    const gardenDataPorts = createGardenDataPorts({
+      dormantDemotionPort: {
+        findLowActivityActiveMemories,
+        setLifecycleDormant
+      }
+    });
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        gardenDataPorts,
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        }))
+      })
+    );
+    const scheduler = currentScheduler();
+
+    await getService(runtime, "Janitor").task();
+
+    // DORMANT_DEMOTION is enqueued alongside TTL_CLEANUP. TOMBSTONE_GC is NOT
+    // enqueued by this slice (destructive GC is a separate later slice).
+    expect(scheduler.queue.some((task) => task.task_kind === GardenTaskKind.DORMANT_DEMOTION)).toBe(true);
+    expect(scheduler.queue.some((task) => task.task_kind === GardenTaskKind.TOMBSTONE_GC)).toBe(false);
+
+    await drainScheduler(runtime);
+
+    // The faded+idle memory was flipped to lifecycle_state=dormant (REVERSIBLE).
+    expect(findLowActivityActiveMemories).toHaveBeenCalledWith("workspace-1");
+    expect(setLifecycleDormant).toHaveBeenCalledWith("memory-faded", expect.any(String));
+    expect(scheduler.completions).toContainEqual(
+      expect.objectContaining({
+        task_kind: GardenTaskKind.DORMANT_DEMOTION,
+        role: GardenRole.JANITOR,
+        success: true,
+        objects_affected: ["memory-faded"]
+      })
+    );
   });
 
   it("records a default-workspace Garden pass when no workspaces exist yet", async () => {
@@ -1036,6 +1081,11 @@ function createGardenDataPorts(
     tieringPort: {
       findHotDemotionCandidates: vi.fn(async () => []),
       demoteToWarm: vi.fn(async () => undefined)
+    },
+    dormantDemotionPort: {
+      findLowActivityActiveMemories: vi.fn(async () => []),
+      setLifecycleDormant: vi.fn(async () => undefined),
+      ...(overrides.dormantDemotionPort ?? {})
     },
     mergePort: {
       findMergeCandidates: vi.fn(async () => []),

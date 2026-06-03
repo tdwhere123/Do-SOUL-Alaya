@@ -558,6 +558,9 @@ export function createGardenRuntime(input: {
   const janitor = new Janitor({
     cleanupPort,
     tieringPort: input.gardenDataPorts.tieringPort,
+    // REVERSIBLE: flips active -> dormant only (recall-silent, revived on use).
+    // No tombstoneGcPort here by design — hard-delete is a separate later slice.
+    dormantDemotionPort: input.gardenDataPorts.dormantDemotionPort,
     scheduler: janitorSchedulerPort,
     strongRefProtectionPort: {
       isProtected: async (workspaceId: string, targetEntityType: string, targetEntityId: string) =>
@@ -1723,6 +1726,10 @@ export function createGardenRuntime(input: {
       intervalMs: 300_000,
       task: async () => {
         await enqueueForAllWorkspaces(GardenTaskKind.TTL_CLEANUP, GardenTier.TIER_0);
+        // REVERSIBLE memory-side forgetting: demote faded+idle active memories
+        // to lifecycle_state=dormant (recall-silent, revived on next use). Not
+        // TOMBSTONE_GC — destructive GC is a separate later slice.
+        await enqueueForAllWorkspaces(GardenTaskKind.DORMANT_DEMOTION, GardenTier.TIER_0);
         markBackgroundPassCompleted();
       }
     },

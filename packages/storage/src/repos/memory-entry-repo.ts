@@ -222,16 +222,25 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       WHERE object_id = ?
       LIMIT 1
     `);
+    // invariant: recall/list candidate loads exclude tombstoned (destructive,
+    // terminal) AND dormant (REVERSIBLE silencing). A dormant memory drops out
+    // of the recall candidate pool but is revived on next use
+    // (DynamicsService.processKarmaEvent dormant -> active) and stays directly
+    // fetchable by object_id via findById (open_pointer never filters).
     this.findByWorkspaceHotStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
-      WHERE workspace_id = ? AND storage_tier = 'hot' AND COALESCE(retention_state, '') != 'tombstoned'
+      WHERE workspace_id = ? AND storage_tier = 'hot'
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
       ORDER BY created_at ASC, object_id ASC
     `);
     this.findByWorkspaceTierStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
-      WHERE workspace_id = ? AND storage_tier = ? AND COALESCE(retention_state, '') != 'tombstoned'
+      WHERE workspace_id = ? AND storage_tier = ?
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
       ORDER BY created_at ASC, object_id ASC
     `);
     this.findByRunIdStatement = db.connection.prepare(`
@@ -243,13 +252,17 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     this.findByDimensionHotStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
-      WHERE workspace_id = ? AND dimension = ? AND storage_tier = 'hot' AND COALESCE(retention_state, '') != 'tombstoned'
+      WHERE workspace_id = ? AND dimension = ? AND storage_tier = 'hot'
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
       ORDER BY created_at ASC, object_id ASC
     `);
     this.findByScopeClassHotStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
-      WHERE workspace_id = ? AND scope_class = ? AND storage_tier = 'hot' AND COALESCE(retention_state, '') != 'tombstoned'
+      WHERE workspace_id = ? AND scope_class = ? AND storage_tier = 'hot'
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
       ORDER BY created_at ASC, object_id ASC
     `);
     this.updateStatement = db.connection.prepare(`
@@ -290,6 +303,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         memory_content_fts.workspace_id = ?
         AND memory_content_fts MATCH ?
         AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
+        AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
       ORDER BY raw_rank ASC, memory_content_fts.object_id ASC
       LIMIT ?
     `);
@@ -303,6 +317,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         memory_content_fts_porter.workspace_id = ?
         AND memory_content_fts_porter MATCH ?
         AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
+        AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
       ORDER BY raw_rank ASC, memory_content_fts_porter.object_id ASC
       LIMIT ?
     `);
@@ -549,6 +564,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       WHERE memory_entries.workspace_id = ?
         AND memory_entries.storage_tier = 'hot'
         AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
+        AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
       ORDER BY memory_entries.created_at ASC, memory_entries.object_id ASC
     `);
 
@@ -594,6 +610,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
            FROM memory_entries
            WHERE workspace_id = ?
              AND COALESCE(retention_state, '') != 'tombstoned'
+             AND COALESCE(lifecycle_state, '') != 'dormant'
              AND (${likePatterns.join(" OR ")})
            ORDER BY object_id ASC
            LIMIT 512`
@@ -1064,6 +1081,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       FROM memory_entries
       WHERE workspace_id = ?
       AND COALESCE(retention_state, '') != 'tombstoned'
+      AND COALESCE(lifecycle_state, '') != 'dormant'
       ${objectIdFilter.sql}
       ORDER BY object_id ASC
     `).all(workspaceId, ...objectIdFilter.params) as readonly ExactKeywordCandidateRow[];
@@ -1108,6 +1126,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         memory_content_fts.workspace_id = ?
         AND memory_content_fts MATCH ?
         AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
+        AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
       ${objectIdFilter.sql}
       ORDER BY raw_rank ASC, memory_content_fts.object_id ASC
       LIMIT ?
@@ -1166,6 +1185,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         memory_content_fts_porter.workspace_id = ?
         AND memory_content_fts_porter MATCH ?
         AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
+        AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
       ${objectIdFilter.sql}
       ORDER BY raw_rank ASC, memory_content_fts_porter.object_id ASC
       LIMIT ?
