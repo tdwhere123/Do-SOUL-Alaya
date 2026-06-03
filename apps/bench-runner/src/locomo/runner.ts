@@ -364,6 +364,9 @@ async function runOneConversation(
     for (const session of sessions) {
       // see also: longmemeval/runner.ts session-adjacent derives_from anchor
       let previousTurnSeedMemoryIds: readonly string[] = [];
+      // anchor: same-session co-recall members, seed order. see also:
+      //   apps/bench-runner/src/longmemeval/runner.ts sessionMemberMemoryIds
+      const sessionMemberMemoryIds: string[] = [];
       for (const turn of session.turns) {
         const seedContent = `${turn.speaker}: ${turn.text}`;
         const evidenceRef = `${conversation.sample_id}-${turn.dia_id}`;
@@ -377,7 +380,14 @@ async function runOneConversation(
         memoryIdByDiaId.set(turn.dia_id, seed.memoryId);
         seedIndex += 1;
         previousTurnSeedMemoryIds = [seed.memoryId];
+        sessionMemberMemoryIds.push(seed.memoryId);
       }
+      // invariant: same-session co-recall hub. Mirror of the LongMemEval seed
+      // path so LoCoMo's graph/path plane carries the production recalls-tier
+      // topology (co_recalled) it otherwise would not. Session membership is the
+      // only clustering signal; representative is the first-seeded member.
+      // see also: apps/bench-runner/src/harness/co-recall-hub.ts planSessionCoRecallHub
+      await workspace.mintSessionCoRecallHub(sessionMemberMemoryIds);
     }
 
     const embeddingWarmup =

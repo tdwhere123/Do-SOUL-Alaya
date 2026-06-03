@@ -40,7 +40,12 @@ import {
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
+import { CO_RECALLED_SEED_PROFILE } from "@do-soul/alaya-core";
 import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
+import {
+  planSessionCoRecallHub,
+  type CoRecallHubMintSummary
+} from "./co-recall-hub.js";
 import {
   initDatabase,
   SqliteEventLogRepo,
@@ -483,6 +488,25 @@ export interface BenchDaemonHandle {
    */
   proposeSynthesis(input: BenchSynthesisSeedInput): Promise<SeededSynthesisResult>;
   /**
+   * @anchor mintSessionCoRecallHub — same-session co-recall hub mint
+   *
+   * Mints recalls-tier co_recalled PathRelations among ONE session's member
+   * memory ids, in a HUB shape (each capped member -> the first-seeded
+   * representative), through the SAME PathCandidateSink production uses
+   * (PathRelationProposalService.submitCandidate) with the production
+   * CO_RECALLED_SEED_PROFILE. Faithfully approximates B-1 cross-link's live
+   * report_context_usage co-usage topology, which the bench cannot grow (no
+   * attached agent reports usage). The minted edges are ACCEPTED/materialized
+   * and recall-eligible at the born band (recall_bias +0.5, active lifecycle).
+   *
+   * Clustering uses ONLY session membership — never gold/answer knowledge.
+   *
+   * see also: apps/bench-runner/src/harness/co-recall-hub.ts planSessionCoRecallHub
+   */
+  mintSessionCoRecallHub(
+    memberMemoryIds: readonly string[]
+  ): Promise<CoRecallHubMintSummary>;
+  /**
    * @anchor queryTokenMetrics — event-sourced token-economy reader.
    *
    * Re-reads the bench run's EventLog (the SAME read pattern as
@@ -541,6 +565,7 @@ export interface BenchWorkspaceHandle {
   proposeMemoryFromSignal: BenchDaemonHandle["proposeMemoryFromSignal"];
   proposeMemoriesFromCompileSignals: BenchDaemonHandle["proposeMemoriesFromCompileSignals"];
   proposeSynthesis: BenchDaemonHandle["proposeSynthesis"];
+  mintSessionCoRecallHub: BenchDaemonHandle["mintSessionCoRecallHub"];
   queryTokenMetrics: BenchDaemonHandle["queryTokenMetrics"];
   queryEdgeProposalKpiRows: BenchDaemonHandle["queryEdgeProposalKpiRows"];
   detach(): Promise<void>;
@@ -1496,6 +1521,68 @@ export async function startBenchDaemon(
     return { synthesisId: synthesis.object_id };
   }
 
+  // @anchor bench-co-recall-hub: mint same-session co-recall PathRelations.
+  //
+  // invariant: production-faithful sink, bench-only trigger. The members of one
+  // session are co-recall-linked in a HUB (planSessionCoRecallHub: each capped
+  // member -> the first-seeded representative) through the SAME PathCandidateSink
+  // production uses (PathRelationProposalService.submitCandidate) with the
+  // production CO_RECALLED_SEED_PROFILE. This mirrors what B-1 cross-link grows
+  // from live report_context_usage co-usage; the bench has no attached agent
+  // reporting usage, so session co-occurrence at seed time is the stand-in
+  // trigger. submitCandidate mints once (no counter gate) and materializes an
+  // ACCEPTED co_recalled edge — NOT the confidence-0.5 edge-proposal path, which
+  // stays PENDING with the read side unwired.
+  //
+  // Recall-eligibility: CO_RECALLED_SEED_PROFILE seeds recall_bias = +0.5 and
+  // materialize() sets lifecycle.status="active", so isPathRecallEligible
+  // (active AND recall_bias > 0) is satisfied at the born band — no plasticity
+  // reinforcement needed. attention_only governance gates only the suppression
+  // lane (isPathGovernedForSuppression), not positive recall eligibility.
+  //
+  // see also: apps/bench-runner/src/harness/co-recall-hub.ts planSessionCoRecallHub
+  // see also: packages/core/src/path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE
+  // see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible
+  async function mintSessionCoRecallHub(
+    memberMemoryIds: readonly string[]
+  ): Promise<CoRecallHubMintSummary> {
+    const plan = planSessionCoRecallHub(memberMemoryIds);
+    if (plan === null) {
+      return { applied: 0, alreadyPresent: 0, rejected: 0, failed: 0 };
+    }
+    const profile = CO_RECALLED_SEED_PROFILE;
+    let applied = 0;
+    let alreadyPresent = 0;
+    let rejected = 0;
+    let failed = 0;
+    for (const edge of plan.edges) {
+      const outcome =
+        await activeRuntime.services.pathRelationProposalService.submitCandidate({
+          workspaceId: activeContext.workspaceId,
+          sourceAnchor: { kind: "object", object_id: edge.sourceMemoryId },
+          targetAnchor: { kind: "object", object_id: edge.targetMemoryId },
+          relationKind: profile.relationKind,
+          initialStrength: profile.initialStrength,
+          governanceClass: profile.governanceClass,
+          evidenceBasis: [...profile.evidenceBasis],
+          recallBiasSign: profile.recallBiasSign,
+          recallBiasMagnitude: profile.recallBiasMagnitude,
+          why: ["bench same-session co-occurrence co-recall hub"],
+          runId: activeContext.runId
+        });
+      if (outcome === "applied") {
+        applied += 1;
+      } else if (outcome === "already_present") {
+        alreadyPresent += 1;
+      } else if (outcome === "rejected") {
+        rejected += 1;
+      } else {
+        failed += 1;
+      }
+    }
+    return { applied, alreadyPresent, rejected, failed };
+  }
+
   async function shutdown(): Promise<void> {
     try {
       await closeBenchDaemonResources({
@@ -1581,6 +1668,7 @@ export async function startBenchDaemon(
       proposeMemoryFromSignal,
       proposeMemoriesFromCompileSignals,
       proposeSynthesis,
+      mintSessionCoRecallHub,
       queryTokenMetrics: () => queryTokenMetrics(dataDir, input.workspaceId),
       queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir, input.workspaceId),
       detach: async () => {
@@ -1617,6 +1705,7 @@ export async function startBenchDaemon(
     proposeMemoryFromSignal,
     proposeMemoriesFromCompileSignals,
     proposeSynthesis,
+    mintSessionCoRecallHub,
     queryTokenMetrics: () => queryTokenMetrics(dataDir, activeContext.workspaceId),
     queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir, activeContext.workspaceId),
     attachWorkspace,

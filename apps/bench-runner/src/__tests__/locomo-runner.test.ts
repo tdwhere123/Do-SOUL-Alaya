@@ -310,11 +310,22 @@ function buildMockDaemon(overrides: {
       charsClipped: 0
     };
   });
+  // Stubbed co-recall hub mint: the LoCoMo seed loop now calls it once per
+  // session; the fake returns a settled no-op summary so the runner exercises
+  // the call without the real PathCandidateSink.
+  // see also: apps/bench-runner/src/harness/co-recall-hub.ts
+  const mintSessionCoRecallHub = vi.fn(async () => ({
+    applied: 0,
+    alreadyPresent: 0,
+    rejected: 0,
+    failed: 0
+  }));
   return {
     proposeMemory,
     warmEmbeddingCache,
     warmQueryEmbeddingCache,
     recall,
+    mintSessionCoRecallHub,
     attachWorkspace: vi.fn(async (input: { workspaceId: string; runId: string }) => ({
       workspaceId: input.workspaceId,
       runId: input.runId,
@@ -322,6 +333,7 @@ function buildMockDaemon(overrides: {
       warmEmbeddingCache,
       warmQueryEmbeddingCache,
       recall,
+      mintSessionCoRecallHub,
       detach: vi.fn(async () => undefined)
     })),
     shutdown: vi.fn(async () => undefined)

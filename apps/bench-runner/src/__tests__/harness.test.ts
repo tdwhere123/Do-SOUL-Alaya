@@ -12,6 +12,8 @@ import {
   GardenRole,
   GardenTaskKind,
   SignalSource,
+  isPathRecallEligible,
+  mapRelationKindToGraphEdgeType,
   type GardenClaimTaskResponse
 } from "@do-soul/alaya-protocol";
 import {
@@ -56,6 +58,37 @@ function readDerivesFromPathRelation(
           AND json_extract(constitution_json, '$.relation_kind') = 'derives_from'`
     )
     .get(sourceObjectId, targetObjectId) as DerivesFromPathRow | undefined;
+}
+
+interface CoRecalledPathRow {
+  readonly source_object_id: string;
+  readonly target_object_id: string;
+  readonly recall_bias: number;
+  readonly lifecycle_status: string;
+  readonly governance_class: string;
+}
+
+// invariant: read the recalls-tier co_recalled paths the bench co-recall hub
+// mints. recall_bias + lifecycle_status are what isPathRecallEligible gates on
+// (active lifecycle AND recall_bias > 0), so the test asserts eligibility from
+// the durable row, not from a re-import of the predicate.
+// see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible
+function readCoRecalledPathRelations(
+  db: BenchDatabase,
+  workspaceId: string
+): readonly CoRecalledPathRow[] {
+  return db.connection
+    .prepare(
+      `SELECT json_extract(anchors_json, '$.source_anchor.object_id')   AS source_object_id,
+              json_extract(anchors_json, '$.target_anchor.object_id')   AS target_object_id,
+              json_extract(effect_vector_json, '$.recall_bias')         AS recall_bias,
+              json_extract(lifecycle_json, '$.status')                  AS lifecycle_status,
+              json_extract(legitimacy_json, '$.governance_class')       AS governance_class
+         FROM path_relations
+        WHERE workspace_id = ?
+          AND json_extract(constitution_json, '$.relation_kind') = 'co_recalled'`
+    )
+    .all(workspaceId) as readonly CoRecalledPathRow[];
 }
 
 function edgeProposalCount(
@@ -545,6 +578,91 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       });
       expect(pathRow!.recall_bias).toBeGreaterThan(0);
       expect(edgeProposalCount(db, child.memoryId, parent.memoryId)).toBe(0);
+    },
+    60_000
+  );
+
+  it(
+    "mintSessionCoRecallHub mints accepted recall-eligible recalls-tier co_recalled paths in a hub shape",
+    async () => {
+      const workspaceId = "harness-co-recall-hub-ws";
+      const daemon = await startBenchDaemon({
+        workspaceId,
+        runId: "harness-co-recall-hub-run"
+      });
+      handles.push(daemon);
+
+      // Seed three same-session members in seed order. The FIRST is the
+      // session-deterministic hub representative; NO gold/answer knowledge
+      // is consulted (the test never marks any member as the answer).
+      const first = await daemon.proposeMemory(
+        "Session member one: the team picked Postgres for the ledger.",
+        "co-recall-hub-m0",
+        { objectKind: "fact" }
+      );
+      const second = await daemon.proposeMemory(
+        "Session member two: the ledger migration is scheduled for Q3.",
+        "co-recall-hub-m1",
+        { objectKind: "fact" }
+      );
+      const third = await daemon.proposeMemory(
+        "Session member three: Mira owns the migration runbook.",
+        "co-recall-hub-m2",
+        { objectKind: "fact" }
+      );
+      const members = [first.memoryId, second.memoryId, third.memoryId];
+
+      const summary = await daemon.mintSessionCoRecallHub(members);
+
+      // Hub of N members yields N-1 accepted spokes.
+      expect(summary.applied + summary.alreadyPresent).toBe(members.length - 1);
+      expect(summary.rejected).toBe(0);
+      expect(summary.failed).toBe(0);
+
+      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+      const coRecalled = readCoRecalledPathRelations(db, workspaceId);
+
+      // NONZERO recalls-tier co_recalled paths minted.
+      expect(coRecalled.length).toBe(members.length - 1);
+
+      // Every spoke targets the first-seeded member (hub representative),
+      // never a gold turn; sources are the remaining members.
+      for (const row of coRecalled) {
+        expect(row.target_object_id).toBe(first.memoryId);
+        expect(members).toContain(row.source_object_id);
+        expect(row.source_object_id).not.toBe(first.memoryId);
+      }
+      const spokeSources = new Set(coRecalled.map((row) => row.source_object_id));
+      expect(spokeSources).toEqual(new Set([second.memoryId, third.memoryId]));
+
+      // Recall-eligibility: every minted edge satisfies isPathRecallEligible
+      // (active lifecycle AND recall_bias > 0) at the born band — no
+      // plasticity reinforcement required.
+      for (const row of coRecalled) {
+        expect(row.recall_bias).toBeGreaterThan(0);
+        expect(
+          isPathRecallEligible({
+            lifecycle: { status: row.lifecycle_status as "active" },
+            effect_vector: { recall_bias: row.recall_bias }
+          } as Parameters<typeof isPathRecallEligible>[0])
+        ).toBe(true);
+      }
+
+      // The KPI the 500q archive records: graph health groups by raw
+      // relation_kind, and the runner folds each kind into its graph edge_type
+      // (mapRelationKindToGraphEdgeType) before summing recalls_edge_count. The
+      // co_recalled paths fold into the "recalls" tier, so recalls_edge_count > 0.
+      // see also: apps/bench-runner/src/longmemeval/runner.ts
+      //   readLongMemEvalReportSideEffectSnapshot
+      const status =
+        await daemon.runtime.services.graphHealthService.getStatus(workspaceId);
+      let recallsCount = 0;
+      for (const [kind, count] of Object.entries(status.path_relations_by_kind)) {
+        if (mapRelationKindToGraphEdgeType(kind) === "recalls") {
+          recallsCount += count;
+        }
+      }
+      expect(recallsCount).toBeGreaterThan(0);
     },
     60_000
   );

@@ -10,6 +10,7 @@ import type { RecallUtilizationService } from "./services/recall-utilization-ser
 import type { TrustStateRecorder } from "./trust-state.js";
 import type {
   EmbeddingRecallService,
+  PathRelationProposalService,
   RecallService,
   RunService,
   SignalService,
@@ -75,6 +76,20 @@ export interface AlayaDaemonRuntimeServices {
   // potential_synthesis signal route (materializeSynthesis) so no duplicate
   // evidence_capsule rows are minted into the recall store.
   readonly synthesisService: Pick<SynthesisService, "create">;
+  // invariant: the bench harness mints same-session co-recall PathRelations
+  // through the SAME PathCandidateSink production uses (submitCandidate), so a
+  // bench-seeded co_recalled edge is the production recalls-tier edge — not a
+  // bench-only shape. Production grows these from B-1 cross-link over live
+  // report_context_usage; the bench has no attached agent reporting usage, so
+  // it triggers the SAME sink on session co-occurrence at seed time. Narrowed
+  // to submitCandidate so the bench cannot reach the counter-gated co-usage
+  // path or the durable repo.
+  // see also: packages/core/src/path-relation-proposal-service.ts submitCandidate
+  // see also: apps/bench-runner/src/harness/daemon.ts mintSessionCoRecallHub
+  readonly pathRelationProposalService: Pick<
+    PathRelationProposalService,
+    "submitCandidate"
+  >;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;
   readonly trustStateRecorder: TrustStateRecorder;

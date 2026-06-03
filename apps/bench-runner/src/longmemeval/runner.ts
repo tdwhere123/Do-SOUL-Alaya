@@ -67,7 +67,10 @@ import {
   type LongMemEvalReportSideEffectSnapshot
 } from "./diagnostics.js";
 import { writeExternalDiagnosticsArtifact } from "./diagnostics-artifacts.js";
-import { MemoryGraphEdgeType } from "@do-soul/alaya-protocol";
+import {
+  MemoryGraphEdgeType,
+  mapRelationKindToGraphEdgeType
+} from "@do-soul/alaya-protocol";
 import {
   buildLongMemEvalColdWarmComparisonSidecar,
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
@@ -369,6 +372,12 @@ export async function runLongMemEval(
         const rounds = pairSessionIntoRounds(session);
         // Per-session turns collected for the L2 synthesis seed below.
         const sessionTurns: SessionSeededTurn[] = [];
+        // anchor: same-session co-recall members. Collects every seeded
+        // memory_entry id of THIS session in seed order so the post-loop
+        // co-recall hub mint links co-occurring members. Order is
+        // session-deterministic (seed order), never gold-derived.
+        // see also: apps/bench-runner/src/harness/co-recall-hub.ts planSessionCoRecallHub
+        const sessionMemberMemoryIds: string[] = [];
         let sessionHasAnswer = false;
         // anchor: session-adjacent derives_from. Carries the prior turn's
         // seeded memory_entry ids so the next turn's signal carries
@@ -414,12 +423,23 @@ export async function runLongMemEval(
               turnContent: round.content,
               evidenceId: seed.evidenceId
             });
+            sessionMemberMemoryIds.push(seed.memoryId);
           }
           // invariant: single-id D-1 fan-out. see also:
           //   apps/bench-runner/src/longmemeval/compile-seed.ts computeNextTurnSeedRefs
           //   apps/bench-runner/src/locomo/runner.ts previousTurnSeedMemoryIds
           previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
         }
+
+        // invariant: same-session co-recall hub. Mint recalls-tier co_recalled
+        // PathRelations among THIS session's member memories so the graph/path
+        // plane carries the edges production grows from B-1 cross-link over
+        // live report_context_usage co-usage (which the bench cannot exercise
+        // — no attached agent reports usage). Session membership is the ONLY
+        // clustering signal; the hub representative is the first-seeded member,
+        // never the gold turn.
+        // see also: apps/bench-runner/src/harness/co-recall-hub.ts planSessionCoRecallHub
+        await workspace.mintSessionCoRecallHub(sessionMemberMemoryIds);
 
         // L2 synthesis seed: emit ONE session-level synthesis capsule pointing
         // at this session's real evidence_capsule ids. It is sidecar-tracked
@@ -1104,13 +1124,23 @@ async function readLongMemEvalReportSideEffectSnapshot(
   // invariant: memory_graph_edges_by_type aliases the unified path plane
   // (path_relations_by_kind / _total) and must carry every canonical
   // edge_type key (defaulting to 0) so historical-archive deltas keep a stable
-  // key set; path_relations_by_kind itself stays group-by-present.
+  // key set. graphHealthService groups by raw constitution.relation_kind, so
+  // a recalls-tier kind (co_recalled / shares_entity / signal_graph_ref) lands
+  // under its own key, NOT under "recalls". mapRelationKindToGraphEdgeType folds
+  // each kind into its canonical graph edge_type bucket — the SAME fold
+  // graph-explore-service applies when it counts inbound recalls — so the
+  // archive's recalls_edge_count reflects the recalls TIER (what production
+  // grows from B-1 cross-link as co_recalled), not just literal "recalls".
+  // Without the fold, the bench co-recall hub's co_recalled paths would be
+  // invisible to recalls_edge_count and the plane would read dead again.
   // canonical key set: @do-soul/alaya-protocol MemoryGraphEdgeType.
+  // see also: packages/core/src/graph-explore-service.ts (recalls-tier count)
   const byKind: Record<string, number> = Object.fromEntries(
     Object.values(MemoryGraphEdgeType).map((edgeType) => [edgeType, 0])
   );
   for (const [kind, count] of Object.entries(status.path_relations_by_kind)) {
-    byKind[kind] = count;
+    const edgeType = mapRelationKindToGraphEdgeType(kind);
+    byKind[edgeType] = (byKind[edgeType] ?? 0) + count;
   }
   return {
     question_id: questionId,
