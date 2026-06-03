@@ -324,11 +324,11 @@ export type QualityMetrics = z.infer<typeof QualityMetricsSchema>;
 // call cost in token-shaped work — delivered tokens, pool sizes, evaluated
 // candidates, fusion-stream coverage, and embedding provider invocations.
 //
-// Wave 2 / Phase 7 (D5 decision): measure-only. The figures publish what
-// the recall pipeline ACTUALLY did, on every call, without setting a "must
-// pass" threshold. They feed honest release notes, not a marketing target;
-// the v0.3.10 "对标 95% data-driven design" anti-pattern is intentionally
-// avoided.
+// Measure-only. The figures publish what the recall pipeline ACTUALLY did,
+// on every call, without setting a "must pass" threshold. They feed honest
+// release notes, not a marketing target; the "对标 95% data-driven design"
+// anti-pattern (designing the system to hit a chosen headline number) is
+// intentionally avoided.
 //
 // @anchor recall-token-economy-token-units: every *_tokens / *_token_*
 // figure under this block is the chars/4 approximation produced by
@@ -365,9 +365,9 @@ const RecallTokenEconomySchema = z
     delivered_context_tokens_estimate: PerCallStatSchema,
     // Coarse-pool size — the candidate count flowing into fineAssess.
     coarse_pool_size: PerCallStatSchema,
-    // Fine-assess evaluated count — for now equals coarse pool size, so
-    // distributions match; the field exists separately for forward
-    // compatibility when fineAssess gains early-out paths.
+    // Fine-assess evaluated count — equals coarse pool size while fineAssess
+    // has no early-out paths, so distributions match; the field is separate
+    // for forward compatibility if fineAssess gains early-out paths.
     fine_evaluated: PerCallStatSchema,
     // Distinct fusion streams that contributed at least one non-null
     // per-stream rank across the pre-budget candidate set, per recall.
@@ -505,11 +505,12 @@ const KpiCoreSchema = z.object({
   latency_ms_p95: z.number().nonnegative(),
   latency_source: LatencySourceSchema,
   token_saved_ratio_vs_full_prompt: z.number(),
-  // Optional so pre-S6 kpi.json records stay schema-valid. When present,
-  // token_saved_ratio_vs_full_prompt is derived from this block.
+  // Optional so kpi.json records written before this block existed stay
+  // schema-valid. When present, token_saved_ratio_vs_full_prompt is derived
+  // from this block.
   token_economy: TokenEconomySchema.optional(),
-  // Optional so pre-phase-7 kpi.json records stay schema-valid; runs that
-  // collect per-recall diagnostics populate it.
+  // Optional so kpi.json records written before per-recall diagnostics
+  // existed stay schema-valid; runs that collect them populate it.
   // see also: @anchor recall-token-economy
   recall_token_economy: RecallTokenEconomySchema.optional(),
   tier_distribution: TierDistributionSchema,

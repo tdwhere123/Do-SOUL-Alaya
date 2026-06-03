@@ -25,9 +25,9 @@ export interface ConstitutionalFragmentStorePort {
   ): Promise<Readonly<ConstitutionalFragment> | null>;
   register(fragment: ConstitutionalFragment): Promise<Readonly<ConstitutionalFragment>>;
   /**
-   * Sync sibling for use inside `EventPublisher.appendManyWithMutation`
-   * (#BL-022). The hydrate path that runs the registration mutation in the
-   * same transaction as the EventLog append needs a synchronous insert.
+   * Sync sibling for use inside `EventPublisher.appendManyWithMutation`.
+   * The hydrate path that runs the registration mutation in the same
+   * transaction as the EventLog append needs a synchronous insert.
    */
   registerSync(fragment: ConstitutionalFragment): Readonly<ConstitutionalFragment>;
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<ConstitutionalFragment>[]>;

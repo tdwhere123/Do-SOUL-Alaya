@@ -47,15 +47,14 @@ export class EventPublisher {
 
   /**
    * Append one or more EventLog rows AND run a synchronous mutation in a single
-   * SQLite transaction. Closes #BL-022: previously the EventLog row was
-   * appended outside the transaction and the unique index on
-   * (entity_type, entity_id, revision) was load-bearing for concurrency
-   * correctness. With this method the index becomes belt-and-suspenders.
+   * SQLite transaction. The EventLog row and the mutation commit atomically, so
+   * the unique index on (entity_type, entity_id, revision) is belt-and-suspenders
+   * rather than the sole concurrency-correctness guard.
    *
-   * Closes #BL-021: the mutate callback receives the persisted entries with
-   * their final `event_id`, so trust-state-style records can persist
-   * `audit_event_id` exactly once with no divergence between the EventLog row
-   * and the consumer's row.
+   * The mutate callback receives the persisted entries with their final
+   * `event_id`, so trust-state-style records can persist `audit_event_id`
+   * exactly once with no divergence between the EventLog row and the
+   * consumer's row.
    *
    * Constraints:
    *   - `mutate` MUST be synchronous. Any `await` inside it would commit the

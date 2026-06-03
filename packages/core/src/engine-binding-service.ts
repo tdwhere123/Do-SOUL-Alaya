@@ -76,7 +76,7 @@ export class EngineBindingService {
       ],
       () => {
         // Both writes are sync better-sqlite3 ops; the publish/upsert/binding
-        // update now happens inside a single transaction (#BL-022).
+        // update happens inside a single transaction.
         const record = this.dependencies.bindingRepo.upsert({
           binding_id: bindingId,
           workspace_id: workspace.workspace_id,

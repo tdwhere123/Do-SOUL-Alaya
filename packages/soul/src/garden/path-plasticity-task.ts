@@ -11,8 +11,8 @@
 export const PATH_PLASTICITY_TASK_DEFAULTS = {
   /**
    * Default lookback window when the task descriptor does not embed an
-   * explicit `since` timestamp. v0.1 keeps it conservative (24h) — wider
-   * windows can be configured by the daemon when wiring the descriptor.
+   * explicit `since` timestamp. Conservative (24h) — wider windows can be
+   * configured by the daemon when wiring the descriptor.
    */
   DEFAULT_LOOKBACK_MS: 24 * 60 * 60 * 1000,
   MAX_EXECUTION_MS: 30_000

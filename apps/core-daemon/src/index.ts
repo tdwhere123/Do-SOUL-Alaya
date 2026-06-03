@@ -989,9 +989,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         : { llmPort: edgeAutoProducerLlmPort }),
     warn: warnLogger.warn
   });
-  // invariant: ConflictDetectionService rule path is ON by default per
-  // v0.3.11 §C C3. Rule-path findings submit governed negative-family path
-  // candidates through pathCandidatePort (recall_bias -); durable truth is
+  // invariant: ConflictDetectionService rule path is ON by default.
+  // Rule-path findings submit governed negative-family path candidates
+  // through pathCandidatePort (recall_bias -); durable truth is
   // never mutated by this service alone, and no permanent edge is
   // auto-accepted. The cost of findByDimension + findByWorkspaceId is
   // paid per materialization; high-frequency seeding paths (bench
@@ -1033,14 +1033,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         warn: warnLogger.warn
       })
     : null;
-  // invariant: ingest reconciliation is opt-in and a deliberate,
-  // recorded v0.3.10 decision — the bench enables it via
+  // invariant: ingest reconciliation is opt-in — the bench enables it via
   // ALAYA_INGEST_RECONCILIATION_ENABLED to measure token economy; the
-  // production default is unchanged blind append. The two ingest
-  // behaviors diverging by flag is intentional for this release, not an
-  // oversight (recall-optimization §18a). It covers the
-  // materializeMemoryEntryOnly path (the bench `fact` kind);
-  // materialize_and_claim is intentionally not reconciled in v0.3.10.
+  // production default is blind append. The two ingest behaviors diverging
+  // by flag is intentional, not an oversight (recall-optimization §18a). It
+  // covers the materializeMemoryEntryOnly path (the bench `fact` kind);
+  // materialize_and_claim is intentionally not reconciled.
   // When enabled each fact pays one lexical FTS query, a findByIds
   // fetch, and — only for an ambiguous-band neighbor — one disk-cached
   // garden-LLM decision call. The LLM is the field-standard semantic

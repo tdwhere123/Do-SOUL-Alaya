@@ -638,7 +638,7 @@ export class MaterializationRouter {
 
   // invariant: ingest reconciliation covers the materializeMemoryEntryOnly
   // path only (the bench `fact` object_kind). materialize_and_claim is
-  // intentionally NOT reconciled in v0.3.10 — a claim-bearing signal
+  // intentionally NOT reconciled — a claim-bearing signal
   // carries governance structure whose dedup is the conflict / claim
   // surface's job, not the lexical ingest gate.
   private async materializeMemoryAndClaim(

@@ -140,9 +140,8 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     // test fakes that omit it remain compatible via the optional shape.
     readonly reviewer_identity?: string | null;
     readonly reviewer_assignment?: Readonly<{ readonly reviewer_identity: string }> | null;
-    // Phase 6 MCP/runtime patch is expected to add durable apply context.
-    // Keep optional for compatibility with legacy storage fakes; accept
-    // path returns NEEDS_CONTEXT when unavailable.
+    // Durable apply context. Optional for compatibility with legacy storage
+    // fakes; the accept path returns NEEDS_CONTEXT when unavailable.
     readonly target_object_id?: string | null;
     readonly target_object_kind?: string | null;
     readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;

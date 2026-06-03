@@ -101,8 +101,8 @@ interface RoundResult {
   readonly latencyMs: number;
   readonly degradationReason: string | null;
   readonly diagnostics: LongMemEvalQuestionDiagnostic;
-  // Phase 7 per-recall token-economy sample for this round; null when the
-  // degraded recall path (any non-null degradation_reason) omits the
+  // Per-recall token-economy sample for this round; null when the degraded
+  // recall path (any non-null degradation_reason) omits the
   // token_economy block in core, so the bench extractor returns null and
   // degraded rounds don't dilute the run-level distribution.
   // see also: packages/core/src/recall-service.ts
@@ -479,8 +479,8 @@ export async function runLongMemEvalMultiturn(
   );
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
-  // Phase 7: aggregate across EVERY round of every question so the
-  // distribution reflects each recall call, not just the final round.
+  // Aggregate across EVERY round of every question so the distribution
+  // reflects each recall call, not just the final round.
   const recallTokenEconomy = aggregateRecallTokenEconomy(
     collected.flatMap((result) =>
       result.rounds

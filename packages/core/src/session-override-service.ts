@@ -26,7 +26,7 @@ export interface SessionOverrideServiceDependencies {
 }
 
 /**
- * Session overrides are ephemeral control-plane objects in Phase 3B.
+ * Session overrides are ephemeral control-plane objects.
  * The in-memory store is a cache over EventLog-backed truth so overrides can
  * be reconstructed after daemon restart.
  */

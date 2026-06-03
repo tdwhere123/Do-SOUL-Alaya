@@ -366,7 +366,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
   /**
    * Required by `PathPlasticityService` so that `appendManyWithMutation`
    * can wrap the EventLog row and the `path_relation` mutation in one
-   * SQLite transaction (closes the BL-022 race for path-relation writes).
+   * SQLite transaction, closing the race for path-relation writes.
    */
   public update(
     pathId: string,

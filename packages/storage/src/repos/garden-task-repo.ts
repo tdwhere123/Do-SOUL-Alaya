@@ -16,7 +16,7 @@ import { parseNonEmptyString, parseNullableString, parseTimestamp } from "./shar
 // in workspace-repo.ts; better-sqlite3's error format is library-version
 // coupled, so the cause walk handles eventual error-wrapping by upstream
 // layers. Used by enqueue() to surface PK collisions as the structured
-// DUPLICATE_KEY StorageError code that v0.1.0 commit aacb4f2 standardised.
+// DUPLICATE_KEY StorageError code.
 function isUniqueConstraintError(error: unknown, qualifiedColumn: string): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
@@ -458,12 +458,11 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       this.enqueueStatement.run(id, workspaceId, role, kind, payloadJson, createdAt);
       return { task_id: id };
     } catch (error) {
-      // Wave-end M3: surface PK collisions as the structured DUPLICATE_KEY
-      // error code that v0.1.0 commit aacb4f2 already standardised for
-      // the workspace repo. Callers (notably H3's POST_TURN_EXTRACT
-      // dedupe path) use `error.code === "DUPLICATE_KEY"` instead of
-      // walking the SQLite error message string, which couples the dedupe
-      // contract to better-sqlite3's internal text format.
+      // Surface PK collisions as the structured DUPLICATE_KEY error code,
+      // matching the convention the workspace repo uses. Callers (notably the
+      // POST_TURN_EXTRACT dedupe path) use `error.code === "DUPLICATE_KEY"`
+      // instead of walking the SQLite error message string, which couples the
+      // dedupe contract to better-sqlite3's internal text format.
       if (isUniqueConstraintError(error, "garden_tasks.id")) {
         throw new StorageError(
           "DUPLICATE_KEY",

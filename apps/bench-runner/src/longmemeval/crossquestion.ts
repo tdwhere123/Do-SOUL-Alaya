@@ -104,8 +104,8 @@ interface QuestionResult {
   readonly answerTurnsTruncated: number;
   readonly seedCharsClipped: number;
   readonly diagnostics: LongMemEvalQuestionDiagnostic;
-  // Phase 7 per-recall token-economy sample, null when the degraded
-  // recall path (any non-null degradation_reason) omits the token_economy
+  // Per-recall token-economy sample, null when the degraded recall path
+  // (any non-null degradation_reason) omits the token_economy
   // block in core, so the bench extractor returns null and degraded
   // questions don't dilute the run-level distribution.
   // see also: packages/core/src/recall-service.ts
@@ -398,8 +398,8 @@ export async function runLongMemEvalCrossQuestion(
   }
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
-  // Phase 7: per-recall structural distribution across the shared-workspace
-  // question sequence; one sample per recall call.
+  // Per-recall structural distribution across the shared-workspace question
+  // sequence; one sample per recall call.
   const recallTokenEconomy = aggregateRecallTokenEconomy(
     collected
       .map((result) => result.recallTokenEconomy)

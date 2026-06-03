@@ -51,8 +51,8 @@ interface OfficialApiGardenProviderDependencies {
   readonly extractor?: SignalExtractor;
   readonly now?: () => string;
   readonly generateSignalId?: () => string;
-  // Phase A.1 instrument: when set, a requestSignals invalid_response failure
-  // dumps a diagnostic JSON envelope to <diagnosticDir>/<ISO-ts>-<uuid>.json
+  // When set, a requestSignals invalid_response failure dumps a diagnostic
+  // JSON envelope to <diagnosticDir>/<ISO-ts>-<uuid>.json
   // BEFORE the exception is rethrown. The dump is observation-only — it does
   // not alter blocker logic or recover the failed call. Leave undefined to
   // disable (no fs writes). Defaults to the cwd-rooted directory
@@ -132,8 +132,8 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   private readonly extractor: SignalExtractor | null;
   private readonly now: () => string;
   private readonly generateSignalId: () => string;
-  // Phase A.1 instrument: absolute directory for invalid_response diagnostic
-  // dumps, or null when dumps are disabled. Resolved once at construction so
+  // Absolute directory for invalid_response diagnostic dumps, or null when
+  // dumps are disabled. Resolved once at construction so
   // a later cwd change does not retarget the dump file mid-run.
   private readonly diagnosticDir: string | null;
 
@@ -300,12 +300,12 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       extractorMeta = response.extractorMeta ?? null;
       return parseOfficialApiSignals(rawJson);
     } catch (error) {
-      // Phase A.1 instrument: only the invalid_response branch — JSON shape
-      // failure on the body the extractor returned, OR a SignalExtractorError
-      // of kind "invalid_json" (empty/oversized/non-JSON content). Both are
-      // what the bench preflight blocker rejects as `invalid_response`; the
-      // dump tells A.3 whether the model truncated, the provider returned
-      // chat noise, or the cache shard was torn. Network/timeout errors
+      // Only the invalid_response branch — JSON shape failure on the body the
+      // extractor returned, OR a SignalExtractorError of kind "invalid_json"
+      // (empty/oversized/non-JSON content). Both are what the bench preflight
+      // blocker rejects as `invalid_response`; the dump tells the diagnostic
+      // reader whether the model truncated, the provider returned chat noise,
+      // or the cache shard was torn. Network/timeout errors
       // skip the dump — they are observable from the bench log already
       // and the body is empty by definition.
       // invariant: wall-clock timeout is a network-class failure, not an
@@ -317,8 +317,8 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         !(error instanceof SignalExtractorError) ||
         error.kind === "invalid_json";
       if (isInvalidResponse) {
-        // await so a Phase A.2 preflight reading the dump immediately after
-        // sees the file — but a dump that itself throws (e.g. read-only fs)
+        // await so a preflight reading the dump immediately after sees the
+        // file — but a dump that itself throws (e.g. read-only fs)
         // must not mask the real provider error.
         await this.dumpInvalidResponseDiagnostic({
           error,
@@ -344,8 +344,8 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   }
 
   /**
-   * Phase A.1 instrument: best-effort diagnostic dump of one invalid_response
-   * failure. Writes status (if surfaced via the cause chain) / response body
+   * Best-effort diagnostic dump of one invalid_response failure. Writes
+   * status (if surfaced via the cause chain) / response body
    * prefix / SignalExtractorError kind+message / user-prompt prefix / model /
    * provider kind / timestamp to a per-failure JSON file. Atomic (tmp + rename
    * on the same filesystem). Returns even if writing fails — observation must
@@ -420,7 +420,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       mkdirSync(dirname(filePath), { recursive: true });
       // Atomic write: tmp + rename guards against an interrupted dump
       // (WSL2 OOM is a known crash mode in this env) leaving a torn file
-      // a Phase A.2 reader would mis-parse.
+      // a reader would mis-parse.
       const tmpPath = `${filePath}.${randomUUID()}.tmp`;
       writeFileSync(tmpPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
       renameSync(tmpPath, filePath);
@@ -711,7 +711,7 @@ function extractRecoveryKindFromInputs(
   }
   // No meta available — the extract() call threw before returning. The
   // recovery branch is unknowable in that case; emit "none" so the dump
-  // shape stays stable for the Phase A.2 / Phase F readers.
+  // shape stays stable for diagnostic readers.
   return "none";
 }
 

@@ -84,12 +84,12 @@ export interface PiMonoExtractorDependencies {
   readonly endpoint?: string;
   readonly complete?: PiMonoComplete;
   readonly getModel?: PiMonoGetModel;
-  // Phase A.3 instrument: test seam for the jitter sleep so retry-with-jitter
-  // unit tests do not have to wait wall-clock 250-750ms per retry. Defaults
-  // to setTimeout-backed sleep in production.
+  // test seam for the jitter sleep so retry-with-jitter unit tests do not
+  // have to wait wall-clock 250-750ms per retry. Defaults to setTimeout-backed
+  // sleep in production.
   readonly sleep?: (ms: number) => Promise<void>;
-  // Phase A.3 instrument: test seam for the jitter RNG so retries are
-  // deterministic in unit tests. Defaults to Math.random in production.
+  // test seam for the jitter RNG so retries are deterministic in unit tests.
+  // Defaults to Math.random in production.
   readonly random?: () => number;
 }
 
@@ -338,8 +338,8 @@ function readTextContent(message: AssistantMessage): string {
   return text;
 }
 
-// Phase A.3 instrument: try strict parse first; on failure walk the recovery
-// ladder (markdown wrap strip → trailing-text strip → balanced-brace close).
+// Try strict parse first; on failure walk the recovery ladder (markdown wrap
+// strip → trailing-text strip → balanced-brace close).
 // Returns the recovered text + which strategy ran, or null when every
 // strategy fails — caller throws SignalExtractorError so the blocker still
 // trips on genuinely unrecoverable bodies. NEVER fabricates content: every
@@ -564,8 +564,8 @@ function mapExtractorTransportError(
   });
 }
 
-// Phase A.3 instrument: decide whether to spend the single retry budget on
-// this failure. RETRYABLE: empty/invalid JSON body (the dominant yunwu.ai
+// Decide whether to spend the single retry budget on this failure.
+// RETRYABLE: empty/invalid JSON body (the dominant yunwu.ai
 // failure mode), transport failure with an HTTP 5xx or 429 status surfaced
 // in the cause chain or message. NOT RETRYABLE: timeout (caller already
 // chose the budget), auth/4xx other than 429 (will fail identically), or a

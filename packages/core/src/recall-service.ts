@@ -294,7 +294,7 @@ export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
 const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
   lexical_fts: 1,
   // trigram_fts rescues substring / spelling-variant / CJK matches the
-  // word-level lexical lane misses. Initial low weight; grid-tuned later.
+  // word-level lexical lane misses.
   trigram_fts: 1,
   // synthesis_fts no longer drives cross-kind fusion: a synthesis candidate
   // cannot out-RRF a multi-stream memory_entry, so delivery is handled by
@@ -313,8 +313,7 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   graph_expansion: 3,
   // anchor: entity_seed parity with lexical_fts so entity-bearing memories
   // can compete on the same RRF axis as direct surface-term hits without
-  // out-weighting the existing lexical lane. weight tuning is deferred to
-  // phase-6 sub-workflow D-2/D-6 once the graph plane is non-zero.
+  // out-weighting the existing lexical lane.
   entity_seed: 1,
   path_expansion: 3,
   temporal_recency: 0,

@@ -336,7 +336,7 @@ export class Janitor {
     return result;
   }
 
-  // Phase 1: the gated dormant -> tombstoned disposition sweep. Returns the ids
+  // The gated dormant -> tombstoned disposition sweep. Returns the ids
   // freshly tombstoned this pass (appended to objects_affected). Skips any
   // candidate whose disposition is null — that memory stays dormant (reversible)
   // because it is neither compressed into a live capsule nor judged useless.

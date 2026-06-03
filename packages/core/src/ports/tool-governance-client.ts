@@ -56,9 +56,8 @@ export class ToolGovernanceClient {
   }
 
   /**
-   * Invalidate all cached decisions for the given nodeId.
-   * Lease pierce integration is deferred to A2-1b; this card only exposes
-   * invalidation APIs for the future hot-path hook to call.
+   * Invalidate all cached decisions for the given nodeId. Exposes the
+   * invalidation API a lease-pierce hot-path hook calls.
    */
   public invalidateNode(nodeId: string): void {
     this.cache.delete(nodeId);

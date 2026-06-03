@@ -138,14 +138,13 @@ export function registerAlayaCliCommands(
 }
 
 /**
- * C2: derive the Garden compute snapshot the doctor command reports.
+ * Derive the Garden compute snapshot the doctor command reports.
  *
  * Reading the saved RuntimeGardenComputeConfig (via configService) gives us
  * provider_kind / model_id / provider_url. The credential_source needs raw
- * env so we can distinguish the dedicated Garden key from the embedding
-   * fallback (deprecated for v0.1.1, removed in v0.2). routing_decision
-   * stays separate from provider_kind so official_api can degrade to
-   * local_heuristics when credentials are missing.
+ * env so we can distinguish the dedicated Garden key from an embedding key.
+ * routing_decision stays separate from provider_kind so official_api can
+ * degrade to local_heuristics when credentials are missing.
  */
 export async function resolveGardenComputeStatus(
   runtime: AlayaDaemonRuntime

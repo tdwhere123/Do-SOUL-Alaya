@@ -249,8 +249,8 @@ export function renderReport(
     );
   }
   if (rte !== undefined && rte.sample_count > 0) {
-    // Phase 7 per-recall structural instrument (D5 measure-only):
-    // distributions over all recall calls in the run. Numbers describe
+    // Per-recall structural instrument (measure-only): distributions over
+    // all recall calls in the run. Numbers describe
     // what the recall pipeline actually did per call; they are not
     // gates and not threshold targets. The token-unit caveat (chars/4
     // heuristic, CJK underestimated ~3-4x) lives on RecallTokenEconomy

@@ -459,8 +459,8 @@ async function patchRuntimeEmbeddingConfig(input: {
   //      across FS + EventLog + SQL even though FS is not part of the
   //      SQLite transaction itself.
   //
-  // This preserves the prior FS/SQL rollback contract while closing BL-022
-  // for the runtime-config SQL row.
+  // This keeps the FS/SQL rollback contract atomic for the runtime-config
+  // SQL row.
   return await applyRuntimeEmbeddingConfigFiles({
     paths: input.paths,
     normalized,

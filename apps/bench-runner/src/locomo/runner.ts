@@ -175,8 +175,8 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       result.queryEmbeddingWarmup === null ? [] : [result.queryEmbeddingWarmup]
     )
   );
-  // Phase 7: aggregate per-recall structural samples across every QA in
-  // every conversation; one sample per recall call.
+  // Aggregate per-recall structural samples across every QA in every
+  // conversation; one sample per recall call.
   const recallTokenEconomy = aggregateRecallTokenEconomy(
     conversationResults.flatMap((result) => result.recallTokenEconomySamples)
   );
@@ -330,8 +330,8 @@ interface ConversationResult {
   readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
   readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
   readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
-  // Phase 7: one per-recall token-economy sample per QA in this
-  // conversation. Degraded recalls (any non-null degradation_reason from
+  // One per-recall token-economy sample per QA in this conversation.
+  // Degraded recalls (any non-null degradation_reason from
   // RecallService) emit no token_economy block, so the bench extractor
   // returns null and those samples are skipped (not pushed) — the
   // conversation-level array length therefore matches the number of
