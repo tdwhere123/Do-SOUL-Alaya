@@ -382,12 +382,13 @@ async function runOneConversation(
         previousTurnSeedMemoryIds = [seed.memoryId];
         sessionMemberMemoryIds.push(seed.memoryId);
       }
-      // invariant: same-session co-recall hub. Mirror of the LongMemEval seed
-      // path so LoCoMo's graph/path plane carries the production recalls-tier
-      // topology (co_recalled) it otherwise would not. Session membership is the
-      // only clustering signal; representative is the first-seeded member.
-      // see also: apps/bench-runner/src/harness/co-recall-hub.ts planSessionCoRecallHub
-      await workspace.mintSessionCoRecallHub(sessionMemberMemoryIds);
+      // invariant: same-session EARNED co-recall accrual. Mirror of the
+      // LongMemEval seed path so LoCoMo's graph/path plane earns the production
+      // recalls-tier topology (co_recalled) through the onCoUsage counter gate.
+      // The earned set is SPARSE (at most BENCH_CO_RECALL_WARMUP_PAIR_CAP per
+      // session); pair selection uses session membership (seed order) only.
+      // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
+      await workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
     }
 
     const embeddingWarmup =

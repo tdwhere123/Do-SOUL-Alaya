@@ -21,6 +21,7 @@ import {
   type BenchDaemonHandle,
   type BenchSignalSeedInput
 } from "../harness/daemon.js";
+import { BENCH_CO_RECALL_WARMUP_PAIR_CAP } from "../harness/co-recall-warmup.js";
 import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
@@ -583,62 +584,67 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   );
 
   it(
-    "mintSessionCoRecallHub mints accepted recall-eligible recalls-tier co_recalled paths in a hub shape",
+    "accrueSessionCoRecall EARNS sparse recall-eligible co_recalled paths through the production counter gate",
     async () => {
-      const workspaceId = "harness-co-recall-hub-ws";
+      const workspaceId = "harness-co-recall-ws";
       const daemon = await startBenchDaemon({
         workspaceId,
-        runId: "harness-co-recall-hub-run"
+        runId: "harness-co-recall-run"
       });
       handles.push(daemon);
 
-      // Seed three same-session members in seed order. The FIRST is the
-      // session-deterministic hub representative; NO gold/answer knowledge
-      // is consulted (the test never marks any member as the answer).
-      const first = await daemon.proposeMemory(
-        "Session member one: the team picked Postgres for the ledger.",
-        "co-recall-hub-m0",
-        { objectKind: "fact" }
-      );
-      const second = await daemon.proposeMemory(
-        "Session member two: the ledger migration is scheduled for Q3.",
-        "co-recall-hub-m1",
-        { objectKind: "fact" }
-      );
-      const third = await daemon.proposeMemory(
-        "Session member three: Mira owns the migration runbook.",
-        "co-recall-hub-m2",
-        { objectKind: "fact" }
-      );
-      const members = [first.memoryId, second.memoryId, third.memoryId];
+      // Seed five same-session members in seed order. Pair selection is
+      // positional (adjacent in seed order); NO gold/answer knowledge is
+      // consulted (the test never marks any member as the answer).
+      const seeded = [];
+      for (let i = 0; i < 5; i += 1) {
+        seeded.push(
+          await daemon.proposeMemory(
+            `Session member ${i}: ledger detail number ${i}.`,
+            `co-recall-m${i}`,
+            { objectKind: "fact" }
+          )
+        );
+      }
+      const members = seeded.map((s) => s.memoryId);
 
-      const summary = await daemon.mintSessionCoRecallHub(members);
+      const summary = await daemon.accrueSessionCoRecall(members);
 
-      // Hub of N members yields N-1 accepted spokes.
-      expect(summary.applied + summary.alreadyPresent).toBe(members.length - 1);
-      expect(summary.rejected).toBe(0);
-      expect(summary.failed).toBe(0);
+      // EARNED: pairs reached the production co_usage_threshold and minted.
+      // SPARSE: at most BENCH_CO_RECALL_WARMUP_PAIR_CAP (3) pairs are observed,
+      // FAR below a same-session hub's N-1=4 spokes or a clique's C(5,2)=10
+      // edges. This is the sparseness contract.
+      expect(summary.pairsObserved).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
+      expect(summary.minted).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
+      expect(summary.belowThreshold).toBe(0);
+      expect(summary.minted).toBeLessThan(members.length - 1);
 
       const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
       const coRecalled = readCoRecalledPathRelations(db, workspaceId);
 
-      // NONZERO recalls-tier co_recalled paths minted.
-      expect(coRecalled.length).toBe(members.length - 1);
+      // NONZERO and SPARSE recalls-tier co_recalled paths earned (one per
+      // settled pair), not a saturated hub.
+      expect(coRecalled.length).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
+      expect(coRecalled.length).toBeLessThan(members.length - 1);
 
-      // Every spoke targets the first-seeded member (hub representative),
-      // never a gold turn; sources are the remaining members.
-      for (const row of coRecalled) {
-        expect(row.target_object_id).toBe(first.memoryId);
-        expect(members).toContain(row.source_object_id);
-        expect(row.source_object_id).not.toBe(first.memoryId);
-      }
-      const spokeSources = new Set(coRecalled.map((row) => row.source_object_id));
-      expect(spokeSources).toEqual(new Set([second.memoryId, third.memoryId]));
+      // The earned edges are the adjacent member pairs (chain), normalized to
+      // (low, high) to match the production counter key.
+      const sortedPair = (a: string, b: string): [string, string] =>
+        a < b ? [a, b] : [b, a];
+      const expectedPairs = new Set(
+        [0, 1, 2].map((i) => {
+          const [low, high] = sortedPair(members[i]!, members[i + 1]!);
+          return `${low} ${high}`;
+        })
+      );
+      const earnedPairs = new Set(
+        coRecalled.map((row) => `${row.source_object_id} ${row.target_object_id}`)
+      );
+      expect(earnedPairs).toEqual(expectedPairs);
 
-      // Recall-eligibility: every minted edge satisfies isPathRecallEligible
-      // (active lifecycle AND recall_bias > 0) at the born band — no
-      // plasticity reinforcement required.
       for (const row of coRecalled) {
+        // Recall-eligibility at the born band: active lifecycle AND
+        // recall_bias > 0 — no plasticity reinforcement required.
         expect(row.recall_bias).toBeGreaterThan(0);
         expect(
           isPathRecallEligible({
@@ -646,12 +652,15 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
             effect_vector: { recall_bias: row.recall_bias }
           } as Parameters<typeof isPathRecallEligible>[0])
         ).toBe(true);
+        // invariant: earned co_recalled is born at attention_only (the
+        // auto-build associative band), gating only the suppression lane.
+        expect(row.governance_class).toBe("attention_only");
       }
 
-      // The KPI the 500q archive records: graph health groups by raw
-      // relation_kind, and the runner folds each kind into its graph edge_type
-      // (mapRelationKindToGraphEdgeType) before summing recalls_edge_count. The
-      // co_recalled paths fold into the "recalls" tier, so recalls_edge_count > 0.
+      // graph health groups by raw relation_kind; the runner folds each kind
+      // into its graph edge_type (mapRelationKindToGraphEdgeType) before
+      // summing recalls_edge_count. co_recalled folds into the "recalls" tier,
+      // so recalls_edge_count > 0.
       // see also: apps/bench-runner/src/longmemeval/runner.ts
       //   readLongMemEvalReportSideEffectSnapshot
       const status =
@@ -662,7 +671,76 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
           recallsCount += count;
         }
       }
-      expect(recallsCount).toBeGreaterThan(0);
+      expect(recallsCount).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
+    },
+    60_000
+  );
+
+  it(
+    "a query hitting a NON-representative co-recall member fans into its sibling via graph_expansion at hop-2",
+    async () => {
+      // red-team Important 3: the mechanism R2 depends on. An earned co_recalled
+      // edge is minted with direction_bias=bidirectional_asymmetric, so
+      // graph_expansion (collectPathGraphNeighbors) traverses it in BOTH
+      // directions. A query that surfaces ONE member of an earned pair must
+      // fan into the other member through the path plane, even though that
+      // sibling is not a direct content/embedding hit for the query.
+      //
+      // Topology note (the actual earned shape, not a strict hub): earned
+      // accrual mints PAIRS (chain of adjacent members), each minted via
+      // proposeCoRecalled(low, high) where low<high — so the lexicographically
+      // SMALLER member id is the source and the LARGER is the target. The
+      // graph_support recall factor credits ONLY inbound/target paths
+      // (graph-explore-service.findInboundRecallEligiblePaths ->
+      // findByTargetAnchor), so of an earned pair only the LARGER-id member
+      // receives graph_support amplification. graph_expansion fan-in, by
+      // contrast, is bidirectional and reaches the sibling regardless of which
+      // id is larger — that is why R2 must rely on graph_expansion, not
+      // graph_support, for sibling fan-in.
+      // see also: packages/core/src/recall-service.ts collectPathGraphNeighbors
+      // see also: packages/core/src/graph-explore-service.ts findInboundRecallEligiblePaths
+      const workspaceId = "harness-co-recall-fanin-ws";
+      const daemon = await startBenchDaemon({
+        workspaceId,
+        runId: "harness-co-recall-fanin-run"
+      });
+      handles.push(daemon);
+
+      // Two co-session members whose CONTENT does not overlap, so a query for
+      // one cannot surface the other by content/embedding similarity — only a
+      // path-plane edge can connect them.
+      const anchorMember = await daemon.proposeMemory(
+        "The quarterly ledger reconciliation runbook lives in the finance vault.",
+        "fanin-anchor",
+        { objectKind: "fact" }
+      );
+      const siblingMember = await daemon.proposeMemory(
+        "Aurora prefers oat milk in her espresso every morning.",
+        "fanin-sibling",
+        { objectKind: "fact" }
+      );
+
+      // Earn the co_recalled edge between them through the production gate.
+      const summary = await daemon.accrueSessionCoRecall([
+        anchorMember.memoryId,
+        siblingMember.memoryId
+      ]);
+      expect(summary.minted).toBe(1);
+
+      // A query that hits ONLY the anchor member by content. The sibling has no
+      // lexical/semantic overlap with the query, so absent the path edge it
+      // would never appear.
+      const recallResult = await daemon.recall(
+        "quarterly ledger reconciliation runbook finance vault",
+        { maxResults: 10 }
+      );
+      const recalledIds = new Set(recallResult.results.map((r) => r.object_id));
+
+      // The anchor is the direct content hit.
+      expect(recalledIds).toContain(anchorMember.memoryId);
+      // The sibling fans in via graph_expansion across the earned co_recalled
+      // edge (bidirectional traversal at hop-1/2), NOT by content match.
+      expect(recalledIds).toContain(siblingMember.memoryId);
     },
     60_000
   );

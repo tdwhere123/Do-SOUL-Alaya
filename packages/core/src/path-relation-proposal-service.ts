@@ -81,8 +81,15 @@ export interface PathSeedProfile {
   readonly evidenceBasis: readonly string[];
 }
 
-// Positive associative families. recall_bias positive; born below the
-// recall-eligible band (auto-build ceiling honored downstream).
+// Positive associative families. recall_bias positive, lifecycle active at
+// birth, so isPathRecallEligible (active AND recall_bias > 0) holds AT BIRTH —
+// a born positive associative path is recall-eligible immediately.
+// governance_class (attention_only here) gates only the negative-suppression
+// lane (isPathGovernedForSuppression), never positive recall eligibility, so
+// the auto-build ceiling clamp downstream bounds suppression authority, not
+// recall eligibility. A weak born path still manifests SILENTLY: manifestation
+// is strength-graded (low strength -> hidden tier), and plasticity/decay raise
+// or fade strength over time. see also: path-relation.ts isPathRecallEligible.
 export const CO_RECALLED_SEED_PROFILE: PathSeedProfile = Object.freeze({
   relationKind: "co_recalled",
   initialStrength: 0.3,

@@ -374,9 +374,9 @@ export async function runLongMemEval(
         const sessionTurns: SessionSeededTurn[] = [];
         // anchor: same-session co-recall members. Collects every seeded
         // memory_entry id of THIS session in seed order so the post-loop
-        // co-recall hub mint links co-occurring members. Order is
+        // earned co-recall accrual selects co-occurring pairs. Order is
         // session-deterministic (seed order), never gold-derived.
-        // see also: apps/bench-runner/src/harness/co-recall-hub.ts planSessionCoRecallHub
+        // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
         const sessionMemberMemoryIds: string[] = [];
         let sessionHasAnswer = false;
         // anchor: session-adjacent derives_from. Carries the prior turn's
@@ -431,15 +431,16 @@ export async function runLongMemEval(
           previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
         }
 
-        // invariant: same-session co-recall hub. Mint recalls-tier co_recalled
-        // PathRelations among THIS session's member memories so the graph/path
-        // plane carries the edges production grows from B-1 cross-link over
-        // live report_context_usage co-usage (which the bench cannot exercise
-        // — no attached agent reports usage). Session membership is the ONLY
-        // clustering signal; the hub representative is the first-seeded member,
-        // never the gold turn.
-        // see also: apps/bench-runner/src/harness/co-recall-hub.ts planSessionCoRecallHub
-        await workspace.mintSessionCoRecallHub(sessionMemberMemoryIds);
+        // invariant: same-session EARNED co-recall accrual. Drives the
+        // production onCoUsage counter gate over a bounded gold-blind pair set
+        // so THIS session earns a SPARSE set of recalls-tier co_recalled
+        // PathRelations (at most BENCH_CO_RECALL_WARMUP_PAIR_CAP), mirroring
+        // what production grows from B-1 cross-link over live
+        // report_context_usage co-usage (which the bench cannot exercise — no
+        // attached agent reports usage). Session membership (seed order) is the
+        // ONLY pair-selection signal; no gold turn is consulted.
+        // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
+        await workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
 
         // L2 synthesis seed: emit ONE session-level synthesis capsule pointing
         // at this session's real evidence_capsule ids. It is sidecar-tracked

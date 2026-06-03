@@ -40,12 +40,12 @@ import {
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
-import { CO_RECALLED_SEED_PROFILE } from "@do-soul/alaya-core";
+import { PATH_RELATION_PROPOSE_THRESHOLD } from "@do-soul/alaya-core";
 import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
 import {
-  planSessionCoRecallHub,
-  type CoRecallHubMintSummary
-} from "./co-recall-hub.js";
+  planSessionCoRecallWarmup,
+  type CoRecallWarmupSummary
+} from "./co-recall-warmup.js";
 import {
   initDatabase,
   SqliteEventLogRepo,
@@ -488,24 +488,30 @@ export interface BenchDaemonHandle {
    */
   proposeSynthesis(input: BenchSynthesisSeedInput): Promise<SeededSynthesisResult>;
   /**
-   * @anchor mintSessionCoRecallHub — same-session co-recall hub mint
+   * @anchor accrueSessionCoRecall — same-session EARNED co-recall accrual
    *
-   * Mints recalls-tier co_recalled PathRelations among ONE session's member
-   * memory ids, in a HUB shape (each capped member -> the first-seeded
-   * representative), through the SAME PathCandidateSink production uses
-   * (PathRelationProposalService.submitCandidate) with the production
-   * CO_RECALLED_SEED_PROFILE. Faithfully approximates B-1 cross-link's live
-   * report_context_usage co-usage topology, which the bench cannot grow (no
-   * attached agent reports usage). The minted edges are ACCEPTED/materialized
-   * and recall-eligible at the born band (recall_bias +0.5, active lifecycle).
+   * EARNS recalls-tier co_recalled PathRelations among ONE session's member
+   * memory ids by driving the PRODUCTION counter gate
+   * (PathRelationProposalService.onCoUsage -> accrueCoOccurrence ->
+   * co_usage_threshold -> proposeCoRecalled with CO_RECALLED_SEED_PROFILE). A
+   * bounded, gold-blind set of adjacent member pairs (planSessionCoRecallWarmup)
+   * is replayed `threshold` times so each pair clears the production threshold
+   * and mints exactly one co_recalled edge — earned, not minted on sight. The
+   * resulting topology is SPARSE: at most BENCH_CO_RECALL_WARMUP_PAIR_CAP edges
+   * per session. Faithfully approximates B-1 cross-link's live
+   * report_context_usage co-usage, which the bench cannot grow (no attached
+   * agent reports usage). The earned edges are ACCEPTED/materialized and
+   * recall-eligible at the born band (recall_bias +0.5, active lifecycle).
    *
-   * Clustering uses ONLY session membership — never gold/answer knowledge.
+   * Pair selection uses ONLY session membership in seed order — never
+   * gold/answer knowledge.
    *
-   * see also: apps/bench-runner/src/harness/co-recall-hub.ts planSessionCoRecallHub
+   * see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
+   * see also: packages/core/src/path-relation-proposal-service.ts onCoUsage
    */
-  mintSessionCoRecallHub(
+  accrueSessionCoRecall(
     memberMemoryIds: readonly string[]
-  ): Promise<CoRecallHubMintSummary>;
+  ): Promise<CoRecallWarmupSummary>;
   /**
    * @anchor queryTokenMetrics — event-sourced token-economy reader.
    *
@@ -565,7 +571,7 @@ export interface BenchWorkspaceHandle {
   proposeMemoryFromSignal: BenchDaemonHandle["proposeMemoryFromSignal"];
   proposeMemoriesFromCompileSignals: BenchDaemonHandle["proposeMemoriesFromCompileSignals"];
   proposeSynthesis: BenchDaemonHandle["proposeSynthesis"];
-  mintSessionCoRecallHub: BenchDaemonHandle["mintSessionCoRecallHub"];
+  accrueSessionCoRecall: BenchDaemonHandle["accrueSessionCoRecall"];
   queryTokenMetrics: BenchDaemonHandle["queryTokenMetrics"];
   queryEdgeProposalKpiRows: BenchDaemonHandle["queryEdgeProposalKpiRows"];
   detach(): Promise<void>;
@@ -1521,66 +1527,74 @@ export async function startBenchDaemon(
     return { synthesisId: synthesis.object_id };
   }
 
-  // @anchor bench-co-recall-hub: mint same-session co-recall PathRelations.
+  // @anchor bench-co-recall-accrual: EARN same-session co-recall PathRelations
+  // through the production counter gate.
   //
-  // invariant: production-faithful sink, bench-only trigger. The members of one
-  // session are co-recall-linked in a HUB (planSessionCoRecallHub: each capped
-  // member -> the first-seeded representative) through the SAME PathCandidateSink
-  // production uses (PathRelationProposalService.submitCandidate) with the
-  // production CO_RECALLED_SEED_PROFILE. This mirrors what B-1 cross-link grows
-  // from live report_context_usage co-usage; the bench has no attached agent
-  // reporting usage, so session co-occurrence at seed time is the stand-in
-  // trigger. submitCandidate mints once (no counter gate) and materializes an
-  // ACCEPTED co_recalled edge — NOT the confidence-0.5 edge-proposal path, which
-  // stays PENDING with the read side unwired.
+  // invariant: production-faithful gate, bench-only trigger. A bounded,
+  // gold-blind set of adjacent session-member pairs (planSessionCoRecallWarmup)
+  // is replayed `PATH_RELATION_PROPOSE_THRESHOLD` times through the SAME
+  // production seam B-1 cross-link uses (PathRelationProposalService.onCoUsage),
+  // which accrues a durable counter per unordered pair and mints a co_recalled
+  // edge (CO_RECALLED_SEED_PROFILE) ONLY once a pair reaches the production
+  // co_usage_threshold. The bench has no attached agent reporting usage, so the
+  // fixed warm-up replay is the stand-in for live report_context_usage; the
+  // counter gate, threshold, seed profile, and materialize path are production.
+  // The earned topology is SPARSE — at most BENCH_CO_RECALL_WARMUP_PAIR_CAP
+  // edges per session — never a saturated hub/clique.
   //
-  // Recall-eligibility: CO_RECALLED_SEED_PROFILE seeds recall_bias = +0.5 and
+  // invariant: drives onCoUsage directly (not via the soul.report_context_usage
+  // MCP wrapper) — the SAME established direct-seam pattern the bench uses for
+  // proposeMemoriesFromCompileSignals (signalService.receiveSignal). This skips
+  // the delivery-subset gate and recall non-determinism without changing the
+  // EARNED/SPARSE property: the production co_usage_threshold gate still decides
+  // every mint.
+  //
+  // invariant: gold-blind. planSessionCoRecallWarmup selects pairs by SEED
+  // ORDER only; no gold/answer id is consulted.
+  //
+  // Recall-eligibility: proposeCoRecalled seeds recall_bias = +0.5 and
   // materialize() sets lifecycle.status="active", so isPathRecallEligible
-  // (active AND recall_bias > 0) is satisfied at the born band — no plasticity
+  // (active AND recall_bias > 0) holds at the born band — no plasticity
   // reinforcement needed. attention_only governance gates only the suppression
   // lane (isPathGovernedForSuppression), not positive recall eligibility.
   //
-  // see also: apps/bench-runner/src/harness/co-recall-hub.ts planSessionCoRecallHub
-  // see also: packages/core/src/path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE
+  // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
+  // see also: packages/core/src/path-relation-proposal-service.ts onCoUsage / CO_RECALLED_SEED_PROFILE
   // see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible
-  async function mintSessionCoRecallHub(
+  async function accrueSessionCoRecall(
     memberMemoryIds: readonly string[]
-  ): Promise<CoRecallHubMintSummary> {
-    const plan = planSessionCoRecallHub(memberMemoryIds);
+  ): Promise<CoRecallWarmupSummary> {
+    const plan = planSessionCoRecallWarmup(
+      memberMemoryIds,
+      PATH_RELATION_PROPOSE_THRESHOLD
+    );
     if (plan === null) {
-      return { applied: 0, alreadyPresent: 0, rejected: 0, failed: 0 };
+      return { pairsObserved: 0, minted: 0, belowThreshold: 0 };
     }
-    const profile = CO_RECALLED_SEED_PROFILE;
-    let applied = 0;
-    let alreadyPresent = 0;
-    let rejected = 0;
-    let failed = 0;
-    for (const edge of plan.edges) {
-      const outcome =
-        await activeRuntime.services.pathRelationProposalService.submitCandidate({
-          workspaceId: activeContext.workspaceId,
-          sourceAnchor: { kind: "object", object_id: edge.sourceMemoryId },
-          targetAnchor: { kind: "object", object_id: edge.targetMemoryId },
-          relationKind: profile.relationKind,
-          initialStrength: profile.initialStrength,
-          governanceClass: profile.governanceClass,
-          evidenceBasis: [...profile.evidenceBasis],
-          recallBiasSign: profile.recallBiasSign,
-          recallBiasMagnitude: profile.recallBiasMagnitude,
-          why: ["bench same-session co-occurrence co-recall hub"],
-          runId: activeContext.runId
-        });
-      if (outcome === "applied") {
-        applied += 1;
-      } else if (outcome === "already_present") {
-        alreadyPresent += 1;
-      } else if (outcome === "rejected") {
-        rejected += 1;
-      } else {
-        failed += 1;
+    const service = activeRuntime.services.pathRelationProposalService;
+    // invariant: replayCount === production threshold, so each unordered pair's
+    // durable counter reaches the threshold during this replay and mints exactly
+    // once (then accrueCoOccurrence DELETEs the counter row). counterSize is the
+    // GLOBAL pending-counter size; its delta across this replay isolates pairs
+    // that did NOT settle (a transient mint failure leaves the row). On the
+    // happy path the delta is 0 and every observed pair is minted.
+    const beforeCounter = await service.counterSize();
+    for (let replay = 0; replay < plan.replayCount; replay += 1) {
+      for (const pair of plan.pairs) {
+        await service.onCoUsage(
+          [pair.lowMemoryId, pair.highMemoryId],
+          activeContext.workspaceId
+        );
       }
     }
-    return { applied, alreadyPresent, rejected, failed };
+    const afterCounter = await service.counterSize();
+    const residualPending = Math.max(0, afterCounter - beforeCounter);
+    const minted = Math.max(0, plan.pairs.length - residualPending);
+    return {
+      pairsObserved: plan.pairs.length,
+      minted,
+      belowThreshold: residualPending
+    };
   }
 
   async function shutdown(): Promise<void> {
@@ -1668,7 +1682,7 @@ export async function startBenchDaemon(
       proposeMemoryFromSignal,
       proposeMemoriesFromCompileSignals,
       proposeSynthesis,
-      mintSessionCoRecallHub,
+      accrueSessionCoRecall,
       queryTokenMetrics: () => queryTokenMetrics(dataDir, input.workspaceId),
       queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir, input.workspaceId),
       detach: async () => {
@@ -1705,7 +1719,7 @@ export async function startBenchDaemon(
     proposeMemoryFromSignal,
     proposeMemoriesFromCompileSignals,
     proposeSynthesis,
-    mintSessionCoRecallHub,
+    accrueSessionCoRecall,
     queryTokenMetrics: () => queryTokenMetrics(dataDir, activeContext.workspaceId),
     queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir, activeContext.workspaceId),
     attachWorkspace,
