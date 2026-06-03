@@ -231,20 +231,20 @@ describe("synthesis backstop — fires only for uncovered capsules, not a tail-p
 });
 
 describe("structural reserve — durable-edge path/graph fan-in eligible + bounded", () => {
-  it("treats a path_expansion-dominated candidate as a structural rescue candidate", () => {
+  it("treats a path_expansion-dominated candidate that carries a relevance signal as a structural rescue candidate", () => {
     const candidate = fusedCandidate({
       objectId: "path-fanin",
       contributions: { path_expansion: 0.3, lexical_fts: 0.05 }
     });
-    expect(isStructuralRescueCandidate(candidate)).toBe(true);
+    expect(isStructuralRescueCandidate(candidate, supplementary())).toBe(true);
   });
 
-  it("treats a graph_expansion-dominated candidate as a structural rescue candidate", () => {
+  it("treats a graph_expansion-dominated candidate that carries a relevance signal as a structural rescue candidate", () => {
     const candidate = fusedCandidate({
       objectId: "graph-fanin",
       contributions: { graph_expansion: 0.3, lexical_fts: 0.05 }
     });
-    expect(isStructuralRescueCandidate(candidate)).toBe(true);
+    expect(isStructuralRescueCandidate(candidate, supplementary())).toBe(true);
   });
 
   it("does not rescue a lexical-dominated row that merely carries a small path term", () => {
@@ -252,7 +252,7 @@ describe("structural reserve — durable-edge path/graph fan-in eligible + bound
       objectId: "lexical-filler",
       contributions: { path_expansion: 0.05, lexical_fts: 0.4 }
     });
-    expect(isStructuralRescueCandidate(candidate)).toBe(false);
+    expect(isStructuralRescueCandidate(candidate, supplementary())).toBe(false);
   });
 
   it("keeps at least one pure-fusion head slot (bounded reserve)", () => {
@@ -263,15 +263,18 @@ describe("structural reserve — durable-edge path/graph fan-in eligible + bound
         contributions: { lexical_fts: 0.5 - index * 0.01 }
       })
     );
+    // Each buried row is path-fan-in-DOMINATED but also carries a small lexical
+    // relevance term, so it passes the gold-blind relevance guard while staying
+    // structural-dominated (path_expansion >> lexical_fts).
     const buried = Array.from({ length: 3 }, (_unused, index) =>
       fusedCandidate({
         objectId: `buried-${index}`,
-        contributions: { path_expansion: 0.4 - index * 0.01 }
+        contributions: { path_expansion: 0.4 - index * 0.01, lexical_fts: 0.02 }
       })
     );
     const delivered = [...head, ...buried];
     const maxEntries = 10;
-    const result = reserveStructuralDeliverySlots(delivered, maxEntries, 0);
+    const result = reserveStructuralDeliverySlots(delivered, supplementary(), maxEntries, 0);
     // Reserve is capped at STRUCTURAL_DELIVERY_RESERVE (2) and at maxEntries-1,
     // so at least one of the original head rows survives in the window head.
     const windowHead = result.slice(0, maxEntries).map((candidate) => candidate.entry.object_id);
@@ -280,5 +283,134 @@ describe("structural reserve — durable-edge path/graph fan-in eligible + bound
     // No more than 2 buried path-fan-in reps are pulled into the window.
     const rescued = windowHead.filter((id) => id.startsWith("buried-"));
     expect(rescued.length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("I-1 — query/evidence-relevance guard on path/graph fan-in rescue (gold-blind)", () => {
+  it("refuses an irrelevant membership-reached sibling (path_expansion, zero relevance)", () => {
+    // A non-gold session-mate reached purely via an R1 co_recalled edge fires
+    // path_expansion but carries NO lexical/evidence relevance term. It must NOT
+    // be a rescue candidate: a pure membership hop cannot consume a reserve slot.
+    const membershipSibling = fusedCandidate({
+      objectId: "membership-sibling",
+      contributions: { path_expansion: 0.3 }
+    });
+    expect(isStructuralRescueCandidate(membershipSibling, supplementary())).toBe(false);
+  });
+
+  it("admits the SAME fan-in target once it carries a relevance signal (guard is the discriminator)", () => {
+    // Identical topology contribution; the only delta is a nonzero lexical-lane
+    // relevance term. Proves the guard refuses on ZERO relevance, not on the
+    // path_expansion plane itself — so genuine relevant fan-in stays eligible.
+    const relevantSibling = fusedCandidate({
+      objectId: "relevant-sibling",
+      contributions: { path_expansion: 0.3, lexical_fts: 0.02 }
+    });
+    expect(isStructuralRescueCandidate(relevantSibling, supplementary())).toBe(true);
+  });
+
+  it("does not let an irrelevant co_recalled sibling displace a rank-4/5 lexical gold", () => {
+    // Window of 5. Ranks 1-5 are genuine lexical golds (descending lexical_fts);
+    // the rank-4 and rank-5 golds are the displacement targets. An irrelevant
+    // membership-reached sibling sits buried below the cut with a STRONG
+    // path_expansion contribution and zero relevance. Without the guard it would
+    // out-rank the buried-set and steal a reserve slot, displacing a lexical gold.
+    const lexicalGolds = Array.from({ length: 5 }, (_unused, index) =>
+      fusedCandidate({
+        objectId: `lexical-gold-${index + 1}`,
+        contributions: { lexical_fts: 0.5 - index * 0.05 }
+      })
+    );
+    const irrelevantSibling = fusedCandidate({
+      objectId: "membership-sibling",
+      contributions: { path_expansion: 0.9 }
+    });
+    const delivered = [...lexicalGolds, irrelevantSibling];
+    const maxEntries = 5;
+    const result = reserveStructuralDeliverySlots(delivered, supplementary(), maxEntries, 0);
+    const windowIds = result.slice(0, maxEntries).map((candidate) => candidate.entry.object_id);
+    // The guard refuses the sibling: it is NOT rescued into the window.
+    expect(windowIds).not.toContain("membership-sibling");
+    // The rank-4 and rank-5 lexical golds are not displaced.
+    expect(windowIds).toContain("lexical-gold-4");
+    expect(windowIds).toContain("lexical-gold-5");
+    // The reserve is a strict no-op here (no eligible buried structural row).
+    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(
+      delivered.map((candidate) => candidate.entry.object_id)
+    );
+  });
+
+  it("DOES rescue a relevant buried fan-in target, displacing the weakest in-window lexical row", () => {
+    // Same shape as above, but the buried fan-in target ALSO carries a lexical
+    // relevance term. The guard now admits it and the reserve rescues it past the
+    // weakest in-window lexical row — confirming the guard gates on relevance,
+    // not on a blanket refusal of the path plane.
+    const lexicalGolds = Array.from({ length: 5 }, (_unused, index) =>
+      fusedCandidate({
+        objectId: `lexical-gold-${index + 1}`,
+        contributions: { lexical_fts: 0.5 - index * 0.05 }
+      })
+    );
+    const relevantFanin = fusedCandidate({
+      objectId: "relevant-fanin",
+      contributions: { path_expansion: 0.9, lexical_fts: 0.02 }
+    });
+    const delivered = [...lexicalGolds, relevantFanin];
+    const maxEntries = 5;
+    const result = reserveStructuralDeliverySlots(delivered, supplementary(), maxEntries, 0);
+    const windowIds = result.slice(0, maxEntries).map((candidate) => candidate.entry.object_id);
+    expect(windowIds).toContain("relevant-fanin");
+  });
+});
+
+describe("I-2 — structural reserve honors active sign-aware suppression", () => {
+  it("does not rescue a co_recalled-reached candidate that carries a positive suppression delta", () => {
+    // The candidate is path_expansion-dominated AND carries a relevance term, so
+    // it passes the I-1 relevance guard. But the sign-aware suppression collector
+    // floored it (contradicts/supersedes-reinforced negative): its
+    // pathSuppressionScores delta exceeds its structural contribution. The reserve
+    // must honor that demotion and refuse to resurface the stale/contradicted
+    // target — even though the preserved per-stream map still shows full topology.
+    const suppressedTarget = fusedCandidate({
+      objectId: "suppressed-fanin",
+      contributions: { path_expansion: 0.3, lexical_fts: 0.02 }
+    });
+    const suppressed = supplementary({
+      pathSuppressionScores: Object.freeze({ "suppressed-fanin": 0.5 })
+    });
+    expect(isStructuralRescueCandidate(suppressedTarget, suppressed)).toBe(false);
+
+    const lexicalRows = Array.from({ length: 5 }, (_unused, index) =>
+      fusedCandidate({
+        objectId: `lexical-row-${index + 1}`,
+        contributions: { lexical_fts: 0.5 - index * 0.05 }
+      })
+    );
+    const delivered = [...lexicalRows, suppressedTarget];
+    const result = reserveStructuralDeliverySlots(delivered, suppressed, 5, 0);
+    const windowIds = result.slice(0, 5).map((candidate) => candidate.entry.object_id);
+    expect(windowIds).not.toContain("suppressed-fanin");
+  });
+
+  it("rescues the SAME candidate when no suppression delta is present (suppression is the discriminator)", () => {
+    // Identical candidate and pool, but pathSuppressionScores is empty. The
+    // reserve rescues it — proving the refusal above is driven by the suppression
+    // delta, not by the candidate failing some other gate.
+    const target = fusedCandidate({
+      objectId: "suppressed-fanin",
+      contributions: { path_expansion: 0.3, lexical_fts: 0.02 }
+    });
+    expect(isStructuralRescueCandidate(target, supplementary())).toBe(true);
+
+    const lexicalRows = Array.from({ length: 5 }, (_unused, index) =>
+      fusedCandidate({
+        objectId: `lexical-row-${index + 1}`,
+        contributions: { lexical_fts: 0.5 - index * 0.05 }
+      })
+    );
+    const delivered = [...lexicalRows, target];
+    const result = reserveStructuralDeliverySlots(delivered, supplementary(), 5, 0);
+    const windowIds = result.slice(0, 5).map((candidate) => candidate.entry.object_id);
+    expect(windowIds).toContain("suppressed-fanin");
   });
 });

@@ -3171,6 +3171,7 @@ export class RecallService {
         supplementaryData,
         config.budgets.max_entries
       ),
+      supplementaryData,
       config.budgets.max_entries,
       synthesisReserveCount(prioritizedCandidates, config.budgets.max_entries)
     );
@@ -4119,6 +4120,27 @@ function structuralFusionContribution(candidate: FusedRecallCandidateInput): num
   return total;
 }
 
+// Structural fusion contribution after subtracting the candidate's active
+// sign-aware suppression delta. applyPathSuppressionToFusionScores demotes the
+// fused_score but PRESERVES the per-stream contribution map, so the raw
+// structuralFusionContribution still reads a suppressed target's full topology
+// signal. The reserve must mirror the fused-score demotion: a candidate the
+// suppression collector floored cannot present an unsuppressed structural lead
+// to win a reserve slot past its suppression. Floored at 0 (a suppression delta
+// larger than the structural contribution does not produce a negative lead).
+// see also: applyPathSuppressionToFusionScores, RecallSupplementaryData.pathSuppressionScores.
+function suppressedStructuralFusionContribution(
+  candidate: FusedRecallCandidateInput,
+  supplementaryData: RecallSupplementaryData
+): number {
+  const structural = structuralFusionContribution(candidate);
+  const suppression = supplementaryData.pathSuppressionScores[candidate.entry.object_id] ?? 0;
+  if (suppression <= 0) {
+    return structural;
+  }
+  return Math.max(0, structural - suppression);
+}
+
 // Sum of the candidate's lexical-lane fusion-stream contributions.
 function lexicalLaneFusionContribution(candidate: FusedRecallCandidateInput): number {
   const contributions = candidate.fusion.fused_rank_contribution_per_stream;
@@ -4150,15 +4172,56 @@ function lexicalLaneFusionContribution(candidate: FusedRecallCandidateInput): nu
  */
 const STRUCTURAL_DELIVERY_RESERVE = 2;
 
-function isStructuralRescueCandidate(candidate: FusedRecallCandidateInput): boolean {
+// invariant: structural rescue is GOLD-BLIND. The reserve eligibility guard
+// reads only query/evidence-relevance signals (scoreQueryEvidenceMatch against
+// the compiled query probes, scoreEvidenceAnchorMatch against the query's
+// evidence anchors, and the lexical-lane fusion contribution) — never a gold
+// label. A path/graph fan-in target reached PURELY by membership (e.g. an R1
+// co_recalled edge fanning a query into a same-session sibling) carries a
+// path_expansion contribution but no relevance term; this guard refuses to spend
+// a scarce reserve slot on it so it cannot displace a genuine lexical/evidence
+// gold. A target that ALSO matches the query lexically, overlaps a query
+// evidence anchor, or fired a lexical-lane stream is a genuine relevant fan-in
+// and stays eligible. see also: scoreQueryEvidenceMatch, scoreEvidenceAnchorMatch.
+function structuralRescueRelevanceSignal(
+  candidate: FusedRecallCandidateInput,
+  supplementaryData: RecallSupplementaryData
+): number {
+  const lexicalLane = lexicalLaneFusionContribution(candidate);
+  if (lexicalLane > 0) {
+    return lexicalLane;
+  }
+  const queryEvidenceRefs = new Set<string>(supplementaryData.queryProbes.evidence_refs);
+  return (
+    scoreQueryEvidenceMatch(candidate.entry, supplementaryData.queryProbes) +
+    0.5 * scoreEvidenceAnchorMatch(candidate.entry, queryEvidenceRefs)
+  );
+}
+
+function isStructuralRescueCandidate(
+  candidate: FusedRecallCandidateInput,
+  supplementaryData: RecallSupplementaryData
+): boolean {
   if (candidate.objectKind === "synthesis_capsule") {
     return false;
   }
-  const structural = structuralFusionContribution(candidate);
+  // Honor the same demotion the fused-score path applies: a target the
+  // sign-aware suppression collector floored (e.g. a contradicts/supersedes-
+  // reinforced negative that is ALSO co_recalled-reached) presents its full
+  // unsuppressed per-stream contribution map, so subtract its suppression delta
+  // from the structural contribution before the dominance test. A candidate
+  // whose suppression delta wipes its structural lead must not be rescued past
+  // the demotion. see also: applyPathSuppressionToFusionScores.
+  const structural = suppressedStructuralFusionContribution(candidate, supplementaryData);
   if (structural <= 0) {
     return false;
   }
-  return structural > lexicalLaneFusionContribution(candidate);
+  if (structural <= lexicalLaneFusionContribution(candidate)) {
+    return false;
+  }
+  // A pure membership-reached sibling (path/graph contribution, zero relevance)
+  // must NOT consume a reserve slot. Require a gold-blind relevance signal.
+  return structuralRescueRelevanceSignal(candidate, supplementaryData) > 0;
 }
 
 /**
@@ -4178,15 +4241,20 @@ function isStructuralRescueCandidate(candidate: FusedRecallCandidateInput): bool
  *
  * The reserve is against the ENTRY-COUNT budget only; the downstream
  * `appendCandidate` reduce still enforces `max_total_tokens`. Ranking is by the
- * candidate's structural fusion-stream contribution
- * (structuralFusionContribution: the query-relevance-weighted RRF signal from
- * the topology streams), tie-broken by compareMemoryEntries exactly like the
- * synthesis helper. This ranks by structural RELEVANCE, not raw connectivity,
- * so a well-connected but query-irrelevant distractor cannot steal a reserved
- * slot from a genuine gold.
+ * candidate's suppression-adjusted structural fusion-stream contribution
+ * (suppressedStructuralFusionContribution: the topology-stream RRF signal minus
+ * any active sign-aware suppression delta), tie-broken by compareMemoryEntries
+ * exactly like the synthesis helper. Eligibility itself is gold-blind and
+ * relevance-gated (isStructuralRescueCandidate): a candidate must be
+ * topology-dominated, survive its own sign-aware suppression, AND carry a
+ * nonzero query/evidence-relevance signal, so a well-connected but
+ * query-irrelevant distractor — or a pure membership-reached (co_recalled)
+ * sibling, or a suppressed contradicted target — cannot steal a reserved slot
+ * from a genuine gold.
  */
 function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInput>(
   deliveryOrdered: readonly T[],
+  supplementaryData: RecallSupplementaryData,
   maxEntries: number,
   reservedTailCount: number
 ): readonly T[] {
@@ -4201,7 +4269,7 @@ function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInput>(
   );
   const buriedStructural = deliveryOrdered.filter(
     (candidate) =>
-      isStructuralRescueCandidate(candidate) &&
+      isStructuralRescueCandidate(candidate, supplementaryData) &&
       !inWindowKeys.has(buildRecallCandidateDedupeKey(candidate))
   );
   if (buriedStructural.length === 0) {
@@ -4219,7 +4287,8 @@ function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInput>(
   const reservedStructural = [...buriedStructural]
     .sort((left, right) => {
       const strengthDelta =
-        structuralFusionContribution(right) - structuralFusionContribution(left);
+        suppressedStructuralFusionContribution(right, supplementaryData) -
+        suppressedStructuralFusionContribution(left, supplementaryData);
       return strengthDelta !== 0
         ? strengthDelta
         : compareMemoryEntries(left.entry, right.entry);

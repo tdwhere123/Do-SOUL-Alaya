@@ -4357,15 +4357,29 @@ describe("RecallService", () => {
         object_id: memory.object_id,
         normalized_rank: 1 - index * 0.02
       }));
+      // The active lexical lane is searchByKeywordWithinObjectIds (preferred over
+      // searchByKeyword when both are wired). The anchor + every decoy hold strong
+      // lexical ranks; memory-gold holds the WEAKEST hit (0.04) so it ranks last
+      // in the lexical_fts stream. Under the corrected I-1 contract a structural
+      // gold the reserve rescues must be relevance-bearing (not a pure
+      // membership-reached sibling), but the bottom-ranked 0.04 hit keeps the gold
+      // topology-DOMINATED and buried below the flat cut — the decoys out-fuse it
+      // on both the lexical and path lanes.
+      const withinObjectIdRows = [
+        { object_id: "memory-anchor", normalized_rank: 0.9 },
+        ...params.decoys.map((decoy, index) => ({
+          object_id: decoy.object_id,
+          normalized_rank: 0.88 - index * 0.02
+        })),
+        { object_id: "memory-gold", normalized_rank: 0.04 }
+      ];
       return new RecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
           searchByKeyword: vi.fn(async () => lexicalRows),
           searchByKeywordWithinObjectIds: vi.fn(async (_workspaceId: string, query: string) =>
-            query.toLowerCase().includes("materializationrouter")
-              ? [{ object_id: "memory-anchor", normalized_rank: 0.9 }]
-              : []
+            query.toLowerCase().includes("materializationrouter") ? withinObjectIdRows : []
           )
         },
         pathExpansionPort: { findByAnchors: params.findByAnchors },
@@ -4399,6 +4413,15 @@ describe("RecallService", () => {
       const policy = overridePolicy(
         service.buildDefaultPolicy("chat", createTaskSurface().runtime_id),
         {
+          // Widen the lexical supplement so a structural gold's bottom-ranked weak
+          // lexical co-admission (its gold-blind relevance signal under the
+          // corrected I-1 contract) is not dropped by the default top-N cut. The
+          // gold still ranks last in the lexical_fts stream and stays buried.
+          coarse_filter: {
+            deterministic_match: { scope_filter: null, dimension_filter: null, domain_tag_filter: null },
+            precomputed_rank: { max_candidates: 50, min_activation_score: 0.01 },
+            semantic_supplement: { enabled: true, max_supplement: 20, embedding_enabled: false }
+          },
           fine_assessment: {
             budgets: { max_entries: maxEntries, max_total_tokens: 40000, per_dimension_limits: null },
             conflict_awareness: false
@@ -4444,9 +4467,19 @@ describe("RecallService", () => {
       const goldDiagnostic = result.diagnostics?.candidates.find(
         (candidate) => candidate.object_id === "memory-gold"
       );
-      // The gold is single-stream structural (path_expansion only) and lands
-      // below the entry-count cut on fused rank.
-      expect(goldDiagnostic?.admission_planes).toEqual(["path_expansion"]);
+      // The gold is topology-DOMINATED (path_expansion) and carries a tiny lexical
+      // co-admission (0.04) that satisfies the gold-blind relevance guard without
+      // lifting it out of structural dominance. It still lands below the
+      // entry-count cut on fused rank.
+      expect(goldDiagnostic?.admission_planes).toContain("path_expansion");
+      expect(goldDiagnostic?.admission_planes).toContain("lexical");
+      const goldContributions = goldDiagnostic?.fused_rank_contribution_per_stream;
+      expect((goldContributions?.path_expansion ?? 0) + (goldContributions?.graph_expansion ?? 0))
+        .toBeGreaterThan(
+          (goldContributions?.lexical_fts ?? 0) +
+            (goldContributions?.trigram_fts ?? 0) +
+            (goldContributions?.evidence_fts ?? 0)
+        );
       expect(goldDiagnostic?.pre_budget_rank ?? 0).toBeGreaterThan(5);
 
       // The reserve tail-places the buried structural gold into delivery.
@@ -4849,13 +4882,31 @@ describe("RecallService", () => {
       // connectivity or arbitrary order. The weakest buried structural candidate
       // is the "distractor" that loses its slot to the more query-relevant golds.
       const STRUCTURAL_DELIVERY_RESERVE = 2;
+      // Each gold carries a tiny lexical co-admission (0.04) so it passes the
+      // gold-blind query/evidence-relevance guard while staying topology-
+      // dominated (its weak 0.04 lexical_fts term sits below its path
+      // contribution). The decoys hold STRONG lexical hits (0.89-0.99) so the
+      // golds rank last in the lexical_fts stream and stay buried below the flat
+      // cut. A relevance-bearing structural gold is the genuine fan-in the
+      // reserve rescues; a zero-relevance membership-only sibling is refused.
       const { service } = buildMultiGoldFixture({
         decoyCount: 6,
         golds: [
           { id: "gold-strong", pathStrength: 0.5 },
           { id: "gold-mid", pathStrength: 0.3 },
           { id: "gold-weak-distractor", pathStrength: 0.05 }
-        ]
+        ],
+        extraLexicalRanks: {
+          "decoy-1": 0.99,
+          "decoy-2": 0.97,
+          "decoy-3": 0.95,
+          "decoy-4": 0.93,
+          "decoy-5": 0.91,
+          "decoy-6": 0.89,
+          "gold-strong": 0.04,
+          "gold-mid": 0.04,
+          "gold-weak-distractor": 0.04
+        }
       });
       const result = await runStructuralRecall(service, 5);
       const delivered = result.candidates.map((candidate) => candidate.object_id);
@@ -4985,10 +5036,23 @@ describe("RecallService", () => {
       // forward by prioritizeStrongLexicalDeliveryWindowCandidates; a buried
       // structural gold is rescued into the tail at the same time. Both passes
       // run without evicting each other and without overflowing the budget.
+      // memory-gold carries a tiny lexical co-admission (0.04) so it passes the
+      // gold-blind relevance guard while staying topology-dominated; every decoy
+      // holds a strong lexical hit so the gold ranks last in the lexical_fts
+      // stream and stays buried, while decoy-1 (rank 1) is reordered forward into
+      // the head window.
       const { service } = buildMultiGoldFixture({
         decoyCount: 6,
         golds: [{ id: "memory-gold", pathStrength: 0.05 }],
-        extraLexicalRanks: { "decoy-1": 1 }
+        extraLexicalRanks: {
+          "decoy-1": 1,
+          "decoy-2": 0.97,
+          "decoy-3": 0.95,
+          "decoy-4": 0.93,
+          "decoy-5": 0.91,
+          "decoy-6": 0.89,
+          "memory-gold": 0.04
+        }
       });
       const result = await runStructuralRecall(service, 5);
       const delivered = result.candidates;

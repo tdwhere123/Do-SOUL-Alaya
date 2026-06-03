@@ -648,6 +648,15 @@ export function buildLongMemEvalQualityMetrics(
       hit_at_5_count: cohortGoldHitAt5Count,
       hit_at_5_rate: ratio(cohortGoldHitAt5Count, cohortGoldSourcePlaneCount)
     },
+    // path_*  = golds bearing the direct hop-1 path_expansion stream.
+    // graph_* = golds admitted on the MULTI-HOP graph_expansion plane only
+    //   (hasGoldGraphExpansionStream restricts to admission-plane membership; the
+    //   hop-1-polluted per_stream_rank.graph_expansion term is excluded so hop-1
+    //   path golds are NOT over-reported as graph-bearing).
+    // path_primary_hit_at_5_count / graph_only_hit_at_5_count are the disjoint
+    //   partition: a gold bearing both is credited path-primary; graph_only is the
+    //   genuine multi-hop-only metric. graph_gold_* can still overlap path_* when a
+    //   gold reached top-5 by both a direct hop-1 path AND a multi-hop graph admit.
     path_vs_graph_fanin: {
       path_gold_source_count: pathFaninGoldSourceCount,
       path_gold_hit_at_5_count: pathFaninGoldHitAt5Count,
@@ -709,15 +718,28 @@ function hasGoldPathExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
   );
 }
 
-// Durable-edge fan-in proof: a gold candidate bears the graph_expansion stream
-// (multi-hop fan-in) when it was admitted on the graph plane or fired the
-// graph_expansion fusion stream. see also: buildLongMemEvalQualityMetrics.
+// Durable-edge fan-in proof: a gold candidate bears genuine MULTI-HOP
+// graph_expansion fan-in when it was admitted on the graph_expansion plane. The
+// graph_expansion admission carries a double-count guard (it skips any target
+// path_expansion already admitted as a direct hop-1 neighbor, see
+// recall-service.ts addGraphExpansionCandidates), so plane membership isolates
+// the hop-2+ reach the direct path pass never produced.
+//
+// invariant: the per_stream_rank.graph_expansion term is DELIBERATELY NOT a
+// multi-hop signal here. The production graph_expansion fusion STREAM score is
+// max(graphExpansionScores, normalizeGraphSupport(graphSupportCounts)) — the
+// graphSupport aggregate counts the hop-1 co_recalled inbound edge, so a direct
+// hop-1 path gold fires a nonzero graph_expansion per_stream_rank too. Counting
+// it would mis-attribute hop-1 path golds as graph-bearing and over-report
+// graph_gold_*. We rely on the admission plane (true multi-hop) instead; the
+// path-primary partition (hasGoldPathExpansionStream) still credits the direct
+// hop-1 term, and graph_only_hit_at_5_count remains the clean multi-hop metric.
+// see also: buildLongMemEvalQualityMetrics, recall-service.ts scoreRecallFusionStream "graph_expansion".
 function hasGoldGraphExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
   return (
     gold.source_planes.includes("graph_expansion") ||
     gold.plane_first_admitted === "graph_expansion" ||
-    gold.plane_winning_admission === "graph_expansion" ||
-    (gold.per_stream_rank?.graph_expansion ?? null) !== null
+    gold.plane_winning_admission === "graph_expansion"
   );
 }
 
