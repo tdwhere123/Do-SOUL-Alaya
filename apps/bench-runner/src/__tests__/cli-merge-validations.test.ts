@@ -1402,7 +1402,12 @@ describe("merge-longmemeval validations", () => {
       facts_produced: 12,
       signals_dropped: 2,
       parse_dropped: 1,
-      compile_overflow_dropped: 0
+      compile_overflow_dropped: 0,
+      // Per-signal drop attribution (seed materialization failure isolation):
+      // both shard inputs default to zero on each reason, so the summed merge is
+      // zero on each. The field is preserved through the merge (cli.ts sums each
+      // reason across shards); the expected literal omitted it before this gate.
+      signals_dropped_by_reason: { candidate_absent: 0, materialization_error: 0 }
     });
     expect(report).toContain("Seed extraction path: no_credentials_fallback");
     expect(report).toContain("Release evidence blockers");
