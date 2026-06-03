@@ -50,7 +50,7 @@ tokens/year / ~$10/yr 是 lifetime baseline。Alaya 等价 metric 待 phase 7
 
 | 指标 | must | 检查方式 |
 |---|---|---|
-| K4.1 Truth boundary 完整 | propose → accept 仍是唯一 durable truth 入口 | 集成测试（B 落地后是否仍满足） |
+| K4.1 Truth boundary 完整 | durable graph topology 仅两个 governed 入口，无 ungoverned durable truth：(a) review-gated——手动 `soul.propose_edge` + B-1 cross-link → `edge_proposals`（pending → accept / auto-accept → mintAcceptedPath）；(b) direct-materialized weak path——B-2/B-3/B-4 → PathCandidateSink，出生即 `attention_only`（出生不可召回，召回靠 plasticity 自挣），受 auto-build governance ceiling + anchor 校验约束，全程 EventLog 审计，无未审计压制、无 `strictly_governed` 出生 | 集成测试（两入口契约 lock test + B 落地后是否仍满足） |
 | K4.2 EventLog auditable | 所有 edge create/delete 进 EventLog | grep `event_log` 全覆盖 |
 | K4.3 Plasticity / trust loop | 不被 B/D 改变；plasticity watermark 仍由 path_graph_snapshots 驱动 | 单元测试 + bench 对比 |
 | K4.4 CLI 13 verbs governance | review pending/accept/reject 仍可审计任何 propose | e2e（含 B-2 LLM trigger 提议） |

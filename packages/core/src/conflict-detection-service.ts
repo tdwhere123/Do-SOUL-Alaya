@@ -117,8 +117,10 @@ export interface ConflictDetectionServiceDeps {
 // rule path also lets the {coffee,alpha} vs {coffee,beta}
 // ambiguous-band case through, while still rejecting single-tag
 // drive-bys (1/N where N≥3) — those flow to the LLM ambiguous path
-// when enabled. Writes still go through proposeEdge so a stricter
-// reviewer or auto-accept policy is the final gate, not this constant.
+// when enabled. invariant: a rule hit does not write durable truth — it
+// submits to PathCandidateSink and is born attention_only (not
+// recall-eligible at birth), so a generous threshold cannot inject a
+// recall-eligible suppression; recall is earned only via plasticity.
 const TAG_OVERLAP_CONTRADICTS_THRESHOLD = 0.35;
 const TOKEN_JACCARD_CONTRADICTS_MAX = 0.35;
 const DEFAULT_LLM_MAX_PAIRS = 4;

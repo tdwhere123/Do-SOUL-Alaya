@@ -82,6 +82,76 @@ describe("ConflictDetectionService", () => {
     );
   });
 
+  // invariant (two-entry truth-boundary lock): B-4 ConflictDetection is the
+  // direct-materialize entry — it submits to PathCandidateSink and NEVER routes
+  // through the edge_proposals review queue (the service has no edge-proposal
+  // dependency, so it structurally cannot create a proposal row). Every minted
+  // path is born in a governed band (rule -> attention_only, llm -> recall_allowed)
+  // and NEVER strictly_governed. Compare: the review-gated entry (manual
+  // soul.propose_edge + B-1 cross-link) creates an edge_proposals row and does
+  // NOT call submitCandidate at propose time — locked in
+  // edge-proposal-service.test.ts ("creates a pending proposal ...").
+  // see also: packages/core/src/edge-proposal-service.ts AUTO_ACCEPT_FLOOR_BY_TRIGGER;
+  //   docs/v0.3/v0.3.11/kpi-targets.md K4.1.
+  it("B-4 direct-materializes a governed weak path (rule attention_only / llm recall_allowed), never edge_proposals, never strictly_governed", async () => {
+    const ruleExisting = createMemoryEntry({ object_id: "mem-A", content: "I prefer dark roast coffee." });
+    const ruleMemoryRepo = {
+      findByDimension: vi.fn(async () => [ruleExisting]),
+      findBySharedDomainTags: vi.fn(async () => [ruleExisting])
+    };
+    const ruleSink = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const ruleService = new ConflictDetectionService({ memoryRepo: ruleMemoryRepo, pathCandidatePort: ruleSink });
+    await ruleService.detectAndLinkConflicts({
+      newMemoryId: "mem-B",
+      newMemoryDimension: MemoryDimension.PREFERENCE,
+      newMemoryScopeClass: ScopeClass.PROJECT,
+      newMemoryContent: "I prefer light roast tea instead.",
+      newMemoryDomainTags: ["coffee", "preference"],
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+    expect(ruleSink.submitCandidate.mock.calls.length).toBeGreaterThan(0);
+    for (const call of ruleSink.submitCandidate.mock.calls as any[]) {
+      expect(call[0].governanceClass).toBe("attention_only");
+      expect(call[0].governanceClass).not.toBe("strictly_governed");
+    }
+
+    const llmAmbiguous = createMemoryEntry({
+      object_id: "mem-A",
+      content: "Generic coffee preference text.",
+      domain_tags: ["coffee", "alpha"]
+    });
+    const llmMemoryRepo = {
+      findByDimension: vi.fn(async () => [llmAmbiguous]),
+      findBySharedDomainTags: vi.fn(async () => [])
+    };
+    const llmSink = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const llmPort = { classifyPair: vi.fn(async () => "contradicts" as const) };
+    const llmService = new ConflictDetectionService({
+      memoryRepo: llmMemoryRepo,
+      pathCandidatePort: llmSink,
+      llmPort,
+      llmMaxPairsPerNewMemory: 4
+    });
+    await llmService.detectAndLinkConflicts({
+      newMemoryId: "mem-B",
+      newMemoryDimension: MemoryDimension.PREFERENCE,
+      newMemoryScopeClass: ScopeClass.PROJECT,
+      newMemoryContent: "Different but related coffee fact.",
+      newMemoryDomainTags: ["coffee", "beta"],
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+    expect(llmSink.submitCandidate.mock.calls.length).toBeGreaterThan(0);
+    for (const call of llmSink.submitCandidate.mock.calls as any[]) {
+      expect(call[0].governanceClass).toBe("recall_allowed");
+      expect(call[0].governanceClass).not.toBe("strictly_governed");
+    }
+    // ConflictDetectionService deps surface has no edge-proposal port: the
+    // direct-materialize entry cannot create an edge_proposals row by construction.
+    expect(Object.keys(llmService as object)).not.toContain("proposalRepo");
+  });
+
   it("rule-path contradicts does NOT fire supersede_penalty karma (strength-gated to the LLM verdict)", async () => {
     const existing = createMemoryEntry({
       object_id: "mem-A",

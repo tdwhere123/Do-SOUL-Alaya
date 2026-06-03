@@ -130,30 +130,29 @@ function edgeTypeToRecallBiasSign(edgeType: MemoryGraphEdgeTypeValue): 1 | 0 | -
 }
 
 // invariant: auto-accept floor table by trigger_source. This file is
-// the single source of truth for the mapping; downstream calibration
-// tunes these floors based on per-trigger accuracy on closed bench
-// runs. No producer may inline its own magic constant — always read
-// from this table.
+// the single source of truth for the mapping; no producer may inline its
+// own magic constant — always read from this table.
 //
-// EXPLICIT and CANDIDATE_SIGNAL_REF are agent-driven and intentionally
-// absent: agent-reported confidence is already clamped to 0.5 in
-// proposeEdge (see clampAgentReportedConfidence), and a human reviewer
-// must remain in the loop to defeat prompt-injection. SYSTEM and
-// BENCH_SEED are also absent because their semantics vary by caller; if
-// a system or bench path wants auto-accept it must use a trigger source
-// with a floor here (or the caller must invoke acceptProposal directly
-// via batchReview, which is an explicit reviewer action).
-//
-// see also: docs/handbook/runtime-status.md (4-trigger map).
+// invariant: only triggers that actually reach proposeEdge belong here.
+// proposeEdge has exactly three production sources: proposeExplicitEdge
+// (EXPLICIT), graphEdgePort.createEdge from the MCP report_context_usage
+// cross-link (RECALL_CROSS_LINK), and graphEdgePort.createEdge from the
+// librarian subject-neighbor pass (SYSTEM). RECALL_CROSS_LINK is the only
+// one that may auto-accept; EXPLICIT is agent-self-reported (clamped to
+// 0.5 in proposeEdge, human reviewer stays decisive) and SYSTEM keeps a
+// human in the loop, so both are intentionally absent. The LLM/local
+// rule triggers (LLM_SUPPORTS, LOCAL_SUPPORTS, LOCAL_DERIVES_FROM,
+// LOCAL_SUPERSEDES) and CONFLICT_DETECTION never reach proposeEdge —
+// EdgeAutoProducerService and ConflictDetectionService submit straight to
+// PathCandidateSink (born attention_only), so a floor row for them would
+// be dead config.
+// see also: apps/core-daemon/src/index.ts (graphEdgePort.createEdge ->
+//   proposeEdge wiring; EdgeAutoProducerService / ConflictDetectionService
+//   wired to pathCandidatePort), docs/handbook/runtime-status.md.
 export const AUTO_ACCEPT_FLOOR_BY_TRIGGER: Readonly<
   Partial<Record<EdgeProposalTriggerSourceValue, number>>
 > = Object.freeze({
-  [EdgeProposalTriggerSource.RECALL_CROSS_LINK]: 0.8,
-  [EdgeProposalTriggerSource.LLM_SUPPORTS]: 0.85,
-  [EdgeProposalTriggerSource.LOCAL_SUPPORTS]: 0.85,
-  [EdgeProposalTriggerSource.LOCAL_DERIVES_FROM]: 0.85,
-  [EdgeProposalTriggerSource.LOCAL_SUPERSEDES]: 0.9,
-  [EdgeProposalTriggerSource.CONFLICT_DETECTION]: 0.9
+  [EdgeProposalTriggerSource.RECALL_CROSS_LINK]: 0.8
 });
 
 // invariant: system-policy auto-accept emits SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED

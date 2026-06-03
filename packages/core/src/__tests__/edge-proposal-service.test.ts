@@ -138,32 +138,38 @@ describe("EdgeProposalService", () => {
     expect(repo.findById(rejected.proposal_id)?.status).toBe(EdgeProposalStatus.REJECTED);
   });
 
-  // invariant (Wave-1): a negative edge_type AUTO_ACCEPTED by system floor
-  // policy is NOT a trust verdict — it must mint an attention_only path that
-  // cannot suppress (suppression gate requires recall_allowed; negative
-  // governance promotion is sign-guarded off). recall_allowed for a negative
-  // path is reachable only via a trusted llm-verdict birth seed or a human
-  // governance decision.
+  // invariant (Wave-1): an AUTO_ACCEPTED negative edge_type mint is NOT a trust
+  // verdict — it must be born attention_only so it cannot suppress (suppression
+  // gate requires recall_allowed; negative governance promotion is sign-guarded
+  // off). recall_allowed for a negative path is reachable only via a trusted
+  // llm-verdict birth seed or a human governance decision. No production
+  // proposeEdge trigger auto-accepts a negative edge (RECALL_CROSS_LINK is the
+  // only floor-mapped trigger and maps to positive `recalls`), so this band is
+  // exercised through the reachable path: the reconcile sweep re-driving the
+  // owed mint of an AUTO_ACCEPTED negative row.
   it("AUTO_ACCEPTED negative edge_type mints an attention_only path (cannot suppress)", async () => {
-    const negativeCases: ReadonlyArray<{
-      readonly trigger: EdgeProposalTriggerSourceValue;
-      readonly edgeType: "contradicts" | "supersedes";
-    }> = [
-      { trigger: EdgeProposalTriggerSource.CONFLICT_DETECTION, edgeType: "contradicts" },
-      { trigger: EdgeProposalTriggerSource.LOCAL_SUPERSEDES, edgeType: "supersedes" }
-    ];
-    for (const { trigger, edgeType } of negativeCases) {
-      const { service, repo, pathCandidatePort } = createAutoAcceptHarness();
+    const negativeCases: ReadonlyArray<"contradicts" | "supersedes"> = ["contradicts", "supersedes"];
+    for (const edgeType of negativeCases) {
+      const repo = createProposalRepo();
+      const pathCandidatePort = createPathCandidatePort();
+      const service = new EdgeProposalService({
+        memoryRepo: createMemoryRepo(),
+        proposalRepo: repo,
+        pathCandidatePort,
+        eventPublisher: createEventPublisher(),
+        generateId: () => "proposal-1",
+        now: () => "2026-05-24T00:00:00.000Z"
+      });
       const proposal = await service.proposeEdge({
         sourceMemoryId: "memory-a",
         targetMemoryId: "memory-b",
         edgeType,
-        workspaceId: "workspace-1",
-        triggerSource: trigger,
-        confidence: 1
+        workspaceId: "workspace-1"
       });
-      expect(proposal.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
-      expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
+      // Force the crash-window AUTO_ACCEPTED-without-path state, then let the
+      // reconcile sweep re-drive the owed mint (the reachable auto-accept mint).
+      repo.forceStatus(proposal.proposal_id, EdgeProposalStatus.AUTO_ACCEPTED);
+      await service.reconcileStuckAccepts({ workspaceId: "workspace-1", limit: 32 });
       expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
       const mintArgs = pathCandidatePort.submitCandidate.mock.calls[0][0];
       expect(mintArgs.relationKind).toBe(edgeType);
@@ -215,14 +221,14 @@ describe("EdgeProposalService", () => {
     await service.proposeEdge({
       sourceMemoryId: "memory-a",
       targetMemoryId: "memory-b",
-      edgeType: "supports",
+      edgeType: "recalls",
       workspaceId: "workspace-1",
-      triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS,
+      triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
       confidence: 1
     });
     expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
     const mintArgs = pathCandidatePort.submitCandidate.mock.calls[0][0];
-    expect(mintArgs.relationKind).toBe("supports");
+    expect(mintArgs.relationKind).toBe("recalls");
     expect(mintArgs.recallBiasSign).toBe(1);
     expect(mintArgs.governanceClass).toBe("recall_allowed");
   });
@@ -672,19 +678,16 @@ describe("EdgeProposalService", () => {
 
   // System-policy auto-accept floors: each trigger_source in
   // AUTO_ACCEPT_FLOOR_BY_TRIGGER auto-accepts when confidence >= floor and
-  // stays pending when confidence < floor. The floor table is the
-  // single source of truth so this loop iterates the published map.
+  // stays pending when confidence < floor. The floor table is the single
+  // source of truth so this loop iterates the published map. Only
+  // RECALL_CROSS_LINK reaches proposeEdge through an auto-accept-eligible
+  // route; the other triggers direct-materialize and never enter this table.
   describe("system-policy auto-accept by trigger floor", () => {
     const cases: ReadonlyArray<{
       readonly trigger: keyof typeof AUTO_ACCEPT_FLOOR_BY_TRIGGER;
       readonly edgeType: "recalls" | "supports" | "supersedes" | "derives_from" | "contradicts";
     }> = [
-      { trigger: EdgeProposalTriggerSource.RECALL_CROSS_LINK, edgeType: "recalls" },
-      { trigger: EdgeProposalTriggerSource.LLM_SUPPORTS, edgeType: "supports" },
-      { trigger: EdgeProposalTriggerSource.LOCAL_SUPPORTS, edgeType: "supports" },
-      { trigger: EdgeProposalTriggerSource.LOCAL_DERIVES_FROM, edgeType: "derives_from" },
-      { trigger: EdgeProposalTriggerSource.LOCAL_SUPERSEDES, edgeType: "supersedes" },
-      { trigger: EdgeProposalTriggerSource.CONFLICT_DETECTION, edgeType: "contradicts" }
+      { trigger: EdgeProposalTriggerSource.RECALL_CROSS_LINK, edgeType: "recalls" }
     ];
 
     for (const { trigger, edgeType } of cases) {
@@ -756,14 +759,26 @@ describe("EdgeProposalService", () => {
       expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
     });
 
-    it("never auto-accepts SYSTEM / CANDIDATE_SIGNAL_REF / BENCH_SEED at any confidence", async () => {
-      const conservativeTriggers = [
+    // invariant: every trigger absent from AUTO_ACCEPT_FLOOR_BY_TRIGGER stays
+    // pending at any confidence. SYSTEM / CANDIDATE_SIGNAL_REF / BENCH_SEED keep
+    // a human in the loop by design. The LLM/local rule triggers and
+    // CONFLICT_DETECTION never reach proposeEdge in production (they
+    // direct-materialize via PathCandidateSink), so their floor rows were
+    // removed as dead config — if a future caller did route one here, it MUST
+    // stay pending, never silently auto-accept.
+    it("never auto-accepts any trigger absent from the floor table at any confidence", async () => {
+      const nonAutoAcceptTriggers = [
         EdgeProposalTriggerSource.SYSTEM,
         EdgeProposalTriggerSource.CANDIDATE_SIGNAL_REF,
-        EdgeProposalTriggerSource.BENCH_SEED
+        EdgeProposalTriggerSource.BENCH_SEED,
+        EdgeProposalTriggerSource.LLM_SUPPORTS,
+        EdgeProposalTriggerSource.LOCAL_SUPPORTS,
+        EdgeProposalTriggerSource.LOCAL_DERIVES_FROM,
+        EdgeProposalTriggerSource.LOCAL_SUPERSEDES,
+        EdgeProposalTriggerSource.CONFLICT_DETECTION
       ] as const;
-      for (const trigger of conservativeTriggers) {
-        const { service, repo } = createAutoAcceptHarness();
+      for (const trigger of nonAutoAcceptTriggers) {
+        const { service, repo, pathCandidatePort } = createAutoAcceptHarness();
         const proposal = await service.proposeEdge({
           sourceMemoryId: "memory-a",
           targetMemoryId: "memory-b",
@@ -774,7 +789,18 @@ describe("EdgeProposalService", () => {
         });
         expect(proposal.status).toBe(EdgeProposalStatus.PENDING);
         expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.PENDING);
+        expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
       }
+    });
+
+    // invariant: the floor table is exactly { RECALL_CROSS_LINK } — the only
+    // trigger that reaches proposeEdge through an auto-accept-eligible route.
+    // Locks the dead-config removal: re-adding a floor for a direct-materialize
+    // trigger (LLM/local rule, CONFLICT_DETECTION) is dead config and trips here.
+    it("floor table contains only the reachable auto-accept trigger (RECALL_CROSS_LINK)", () => {
+      expect(Object.keys(AUTO_ACCEPT_FLOOR_BY_TRIGGER)).toEqual([
+        EdgeProposalTriggerSource.RECALL_CROSS_LINK
+      ]);
     });
 
     it("emits a single SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED with status=auto_accepted and system reviewer_identity", async () => {
