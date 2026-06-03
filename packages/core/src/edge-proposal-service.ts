@@ -144,8 +144,9 @@ function edgeTypeToRecallBiasSign(edgeType: MemoryGraphEdgeTypeValue): 1 | 0 | -
 // rule triggers (LLM_SUPPORTS, LOCAL_SUPPORTS, LOCAL_DERIVES_FROM,
 // LOCAL_SUPERSEDES) and CONFLICT_DETECTION never reach proposeEdge —
 // EdgeAutoProducerService and ConflictDetectionService submit straight to
-// PathCandidateSink (born attention_only), so a floor row for them would
-// be dead config.
+// PathCandidateSink in a governed birth band (rule verdict / positive
+// auto-build -> attention_only; the CONFLICT_DETECTION LLM verdict ->
+// recall_allowed), so a floor row for them would be dead config.
 // see also: apps/core-daemon/src/index.ts (graphEdgePort.createEdge ->
 //   proposeEdge wiring; EdgeAutoProducerService / ConflictDetectionService
 //   wired to pathCandidatePort), docs/handbook/runtime-status.md.

@@ -2,8 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   EdgeProposalStatus,
   EdgeProposalTriggerSource,
-  type EdgeProposal,
-  type EdgeProposalTriggerSourceValue
+  type EdgeProposal
 } from "@do-soul/alaya-protocol";
 import {
   AUTO_ACCEPT_FLOOR_BY_TRIGGER,

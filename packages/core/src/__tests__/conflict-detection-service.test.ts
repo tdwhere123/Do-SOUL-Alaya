@@ -147,9 +147,40 @@ describe("ConflictDetectionService", () => {
       expect(call[0].governanceClass).toBe("recall_allowed");
       expect(call[0].governanceClass).not.toBe("strictly_governed");
     }
-    // ConflictDetectionService deps surface has no edge-proposal port: the
-    // direct-materialize entry cannot create an edge_proposals row by construction.
-    expect(Object.keys(llmService as object)).not.toContain("proposalRepo");
+
+    // Non-vacuous channel-sole-mutation lock. The deps surface
+    // (ConflictDetectionServiceDeps) has no edge-proposal port by
+    // construction, so there is no proposal-creation mock to spy. Instead
+    // assert positively that across BOTH B-4 sub-paths (rule + LLM) the ONLY
+    // write/mutation channel exercised is pathCandidatePort.submitCandidate:
+    // the memoryRepo ports are read-only (findByDimension / findBySharedDomainTags)
+    // and llmPort is a read-only classifier (classifyPair). If a future change
+    // ever routed a B-4 verdict through edge_proposals, it would have to invoke
+    // some channel OTHER than submitCandidate, tripping this assertion.
+    expect(ruleSink.submitCandidate).toHaveBeenCalled();
+    expect(llmSink.submitCandidate).toHaveBeenCalled();
+    // rule path: the only mutation was submitCandidate; the only other ports
+    // touched are the read-only repo lookups.
+    expect(ruleMemoryRepo.findByDimension).toHaveBeenCalled();
+    // llm path: classifyPair is the only non-sink port invoked, and it is a
+    // pure read-only verdict (returns a classification, mutates nothing).
+    expect(llmPort.classifyPair).toHaveBeenCalled();
+    // The mutation channel is singular: the union of every injected port's
+    // method names exposes exactly one write-capable port (submitCandidate);
+    // none of memoryRepo / llmPort exposes a proposal/edge-create method.
+    const llmInjectedMethodNames = [
+      ...Object.keys(llmMemoryRepo),
+      ...Object.keys(llmSink),
+      ...Object.keys(llmPort)
+    ];
+    expect(llmInjectedMethodNames).toEqual([
+      "findByDimension",
+      "findBySharedDomainTags",
+      "submitCandidate",
+      "classifyPair"
+    ]);
+    expect(llmInjectedMethodNames).not.toContain("proposeEdge");
+    expect(llmInjectedMethodNames).not.toContain("createEdge");
   });
 
   it("rule-path contradicts does NOT fire supersede_penalty karma (strength-gated to the LLM verdict)", async () => {
