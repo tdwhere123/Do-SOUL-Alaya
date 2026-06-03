@@ -118,9 +118,13 @@ export interface ConflictDetectionServiceDeps {
 // ambiguous-band case through, while still rejecting single-tag
 // drive-bys (1/N where N≥3) — those flow to the LLM ambiguous path
 // when enabled. invariant: a rule hit does not write durable truth — it
-// submits to PathCandidateSink and is born attention_only (not
-// recall-eligible at birth), so a generous threshold cannot inject a
-// recall-eligible suppression; recall is earned only via plasticity.
+// submits to PathCandidateSink in a verdict-tiered birth band. A RULE
+// verdict is born attention_only (not recall-eligible at birth, earns
+// recall only via plasticity), so a generous threshold cannot inject a
+// recall-eligible suppression. The LLM verdict is born recall_allowed/0.9
+// (recall-eligible negative/suppressive judgment, recallBiasSign -1),
+// bounded by the auto-build ceiling + EventLog audit and carrying no
+// review gate, because the system computed that classification itself.
 const TAG_OVERLAP_CONTRADICTS_THRESHOLD = 0.35;
 const TOKEN_JACCARD_CONTRADICTS_MAX = 0.35;
 const DEFAULT_LLM_MAX_PAIRS = 4;
