@@ -3357,24 +3357,34 @@ export class RecallService {
     const isSynthesisCandidate = objectKind === "synthesis_capsule";
     const canUseMemorySupplement = !isGlobalCandidate && !isSynthesisCandidate;
     // D-DECAY-2 lazy time/idle decay (read-time, no full-table sweep): the
-    // stored activation fades by elapsed time since last reinforcement. We
-    // reuse computeFreshnessFactor (bounded [0,1], FRESHNESS_DECAY_DAYS) so a
-    // long-idle memory's EFFECTIVE recall strength drops even between karma
-    // recomputes. last_used_at is the "last reinforced" proxy; created_at
-    // floors a never-used memory's age at birth. This composes with (does not
-    // replace) the competitive/karma decay already baked into the stored
-    // activation_score — both are strength inputs. Only memory entries carry
+    // stored activation fades by elapsed time since last reinforcement.
+    // invariant (reviewer-I1): freshness is counted ONCE. The stored
+    // activation_score ALREADY bakes a freshness sub-term (weight
+    // activation_weights_phase1b.freshness, computed at store time). Multiplying
+    // the WHOLE composite by a read-time freshness factor double-counts freshness
+    // AND wrongly decays the scope/domain/retention sub-terms. Instead we decay
+    // ONLY the freshness band: the non-freshness floor (stored minus at-most the
+    // freshness weight) is preserved, and the freshness band is re-weighted by
+    // the read-time factor. last_used_at is the "last reinforced" proxy; created_at
+    // floors a never-used memory's age at birth. Bounded: the result is <= stored
+    // and at full idle collapses ONLY the <=0.19 freshness contribution (plus the
+    // legitimate idle decay), never the whole composite. Only memory entries carry
     // these timestamps, so leave global/synthesis activation un-decayed.
     const storedActivationScore = normalizeActivationScore(entry.activation_score);
-    const activationTimeDecay =
-      canUseMemorySupplement && typeof entry.created_at === "string" && entry.created_at.length > 0
-        ? computeFreshnessFactor({
-            lastUsedAt: entry.last_used_at ?? null,
-            createdAt: entry.created_at,
-            now: this.now()
-          })
-        : 1;
-    const activationScore = clamp01(storedActivationScore * activationTimeDecay);
+    const shouldTimeDecay =
+      canUseMemorySupplement && typeof entry.created_at === "string" && entry.created_at.length > 0;
+    const freshnessFactorNow = shouldTimeDecay
+      ? computeFreshnessFactor({
+          lastUsedAt: entry.last_used_at ?? null,
+          createdAt: entry.created_at,
+          now: this.now()
+        })
+      : 1;
+    const freshnessWeight = DYNAMICS_CONSTANTS.activation_weights_phase1b.freshness;
+    const nonFreshnessFloor = Math.max(0, storedActivationScore - freshnessWeight);
+    const activationScore = shouldTimeDecay
+      ? Math.min(storedActivationScore, clamp01(nonFreshnessFloor + freshnessWeight * freshnessFactorNow))
+      : storedActivationScore;
     const ftsFactor = canUseMemorySupplement ? supplementaryData.ftsRanks[entry.object_id] ?? 0 : 0;
     const synthesisFtsFactor =
       isGlobalCandidate || !isSynthesisCandidate

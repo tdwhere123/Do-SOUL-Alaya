@@ -619,7 +619,11 @@ describe("PathPlasticityService", () => {
     });
   });
 
-  it("R3d acceptance #5: a NON-deletable (strictly-governed) terminal retire records an explicit retained-provenance rationale, never silent", async () => {
+  it("redteam-I1 + reviewer-I3: a NON-mergeable (strictly-governed) idle negative path goes DORMANT (reversible), NEVER terminally retires", async () => {
+    // A strictly-governed path classifies as report_only (NOT mergeable). Even
+    // when it is neutral/negative family and idle past the retirement window, it
+    // must NOT terminally retire (which would lose its live suppression). It is
+    // routed to reversible dormancy instead. see shouldRouteToDormant.
     const path = createPath({
       path_id: "path-governed",
       plasticity_state: {
@@ -646,15 +650,17 @@ describe("PathPlasticityService", () => {
       sinceIso: "2026-05-03T00:00:00.000Z"
     });
 
-    expect(result.retired).toBe(1);
+    expect(result.retired).toBe(0);
+    expect(result.dormant).toBe(1);
     const retiredEvent = harness.publishedEvents.find(
       (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_RETIRED
     );
-    expect(retiredEvent?.payload_json).toMatchObject({
-      path_id: "path-governed",
-      retirement_reason:
-        "strength_below_threshold_and_inactive; gate=report_only:strictly_governed:retained_provenance"
-    });
+    expect(retiredEvent).toBeUndefined();
+    const dormantEvent = harness.publishedEvents.find(
+      (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_DORMANT
+    );
+    expect(dormantEvent?.payload_json).toMatchObject({ path_id: "path-governed" });
+    expect(harness.repoUpdates[0]?.updates.lifecycle).toMatchObject({ status: "dormant" });
   });
 
   it("emits PathRelationWeakened (not Retired) when strength drops to the threshold but the path was reinforced inside the retirement window", async () => {

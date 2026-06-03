@@ -1021,6 +1021,157 @@ describe("MemoryService", () => {
     expect(notifySpy).toHaveBeenCalledTimes(1);
   });
 
+  // invariant (B1): a `compressed` member is hard-deleted ONLY when its
+  // preserving capsule is re-verified LIVE + still referencing the member at
+  // delete time (>=24h after marking). Each capsule-archived/superseded/
+  // dropped-member/deleted variant during the grace window MUST refuse the
+  // physical delete so the preserved content can never be permanently lost.
+  function compressedDeps(input: {
+    readonly capsuleFindById: () => Promise<unknown>;
+    readonly hardDeleteSpy: TestMock;
+    readonly forgetDispositionRef?: string | null;
+  }) {
+    return createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () =>
+          createMemoryEntry({
+            lifecycle_state: "tombstone",
+            retention_state: "tombstoned",
+            forget_disposition: "compressed",
+            forget_disposition_ref:
+              input.forgetDispositionRef === undefined ? "capsule-1" : input.forgetDispositionRef
+          })
+        ),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        hardDeleteTombstonedWithDisposition: input.hardDeleteSpy
+      },
+      synthesisCapsuleLookup: {
+        findById: vi.fn(input.capsuleFindById)
+      } as MemoryServiceDependencies["synthesisCapsuleLookup"]
+    });
+  }
+
+  function liveCapsule(overrides: Record<string, unknown> = {}) {
+    return {
+      object_id: "capsule-1",
+      object_kind: "synthesis_capsule",
+      schema_version: 1,
+      lifecycle_state: "active",
+      created_at: "2026-03-21T00:00:00.000Z",
+      updated_at: "2026-03-21T00:00:00.000Z",
+      created_by: "consolidation-executor",
+      topic_key: "topic",
+      synthesis_type: "cross_evidence",
+      summary: "preserved content",
+      evidence_refs: [],
+      source_memory_refs: ["70a0b18b-5f8b-4fd2-a1b0-97ce48113fca"],
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      synthesis_status: "stable",
+      ...overrides
+    };
+  }
+
+  it("B1: hard-deletes a compressed member only when the capsule is STILL live + references it", async () => {
+    const hardDeleteSpy = vi.fn(async () => undefined);
+    const { dependencies } = compressedDeps({
+      capsuleFindById: async () => liveCapsule(),
+      hardDeleteSpy
+    });
+    const service = new MemoryService(dependencies);
+
+    await service.autonomousHardDeleteTombstoned(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "autonomous_tombstone_gc",
+      TransitionCausedBy.DETERMINISTIC_RULE
+    );
+
+    expect(hardDeleteSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["capsule archived during grace", async () => liveCapsule({ synthesis_status: "archived" })],
+    ["capsule tombstoned/superseded during grace", async () => liveCapsule({ lifecycle_state: "tombstone" })],
+    ["capsule dropped the member during grace", async () => liveCapsule({ source_memory_refs: [] })],
+    ["capsule cascade-deleted during grace", async () => null]
+  ])(
+    "B1: REFUSES the physical delete (memory survives, recoverable) when %s",
+    async (_label, capsuleFindById) => {
+      const hardDeleteSpy = vi.fn(async () => undefined);
+      const { dependencies, appendSpy, notifySpy } = compressedDeps({
+        capsuleFindById,
+        hardDeleteSpy
+      });
+      const service = new MemoryService(dependencies);
+
+      // The call RESOLVES (no throw) but performs NO physical delete: the row
+      // stays tombstoned and a preservation_revoked skip event is audited.
+      await service.autonomousHardDeleteTombstoned(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "autonomous_tombstone_gc",
+        TransitionCausedBy.DETERMINISTIC_RULE
+      );
+
+      expect(hardDeleteSpy).not.toHaveBeenCalled();
+      expect(appendSpy).toHaveBeenCalledTimes(1);
+      expect(appendSpy.mock.calls[0]?.[0]).toMatchObject({
+        payload_json: expect.objectContaining({
+          to_state: "tombstone",
+          reason_code: expect.stringContaining("preservation_revoked")
+        })
+      });
+      expect(notifySpy).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("B1: REFUSES the delete when the capsule-lookup port is unwired (fail-closed)", async () => {
+    const hardDeleteSpy = vi.fn(async () => undefined);
+    const { dependencies } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () =>
+          createMemoryEntry({
+            lifecycle_state: "tombstone",
+            retention_state: "tombstoned",
+            forget_disposition: "compressed",
+            forget_disposition_ref: "capsule-1"
+          })
+        ),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        hardDeleteTombstonedWithDisposition: hardDeleteSpy
+      }
+      // synthesisCapsuleLookup intentionally absent.
+    });
+    const service = new MemoryService(dependencies);
+
+    await service.autonomousHardDeleteTombstoned(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "autonomous_tombstone_gc",
+      TransitionCausedBy.DETERMINISTIC_RULE
+    );
+
+    expect(hardDeleteSpy).not.toHaveBeenCalled();
+  });
+
   it("autonomousTombstone refuses a non-dormant row and only fires on dormant memories", async () => {
     const tombstoneSpy = vi.fn(async () =>
       createMemoryEntry({ lifecycle_state: "tombstone", retention_state: "tombstoned" })

@@ -148,17 +148,20 @@ function isMemoryStrictlyGoverned(memory: Readonly<MemoryEntry>): boolean {
 /**
  * Pure, side-effect-free classification of a single memory_entry against the
  * cheap-proxy importance signals (no LLM, no model). Evaluated in protection
- * order: the strongest protection wins. Reuses the SAME thresholds as the
- * path-side gate ({@link RICH_EVIDENCE_BASIS_THRESHOLD},
- * {@link WELL_SUPPORTED_EVENTS_THRESHOLD}) so the two planes cannot drift.
+ * order: the strongest protection wins.
  *
  * Field mapping:
  *   ① pinned/hazard decay profile           => protected
  *   ② retention_state canon/consolidated     => report_only
- *   ③ evidence_refs.length >= 2              => keep (durable: source + evidence)
- *   ④ reinforcement_count >= support thresh  => keep (well-supported, earned trust)
- * A memory failing ALL of the above is `judged_useless` — the only disposition
- * the autonomous-forgetting sweep may use to autonomously tombstone the row.
+ *   ③ evidence_refs.length >= 1              => keep (durable: ANY evidence)
+ *   ④ reinforcement_count >= 1               => keep (reinforced at least once)
+ * invariant (redteam-I2): only a truly source-less (evidence_refs.length === 0)
+ * AND never-reinforced (reinforcement_count === 0) memory is `judged_useless` —
+ * the only disposition the autonomous-forgetting sweep may use to tombstone the
+ * row. The memory gate is intentionally STRICTER than the path-side gate's
+ * rich-basis (>=2) / well-supported thresholds: a memory is durable truth, and
+ * "durable memories require source AND evidence" makes a single evidence ref
+ * sufficient to forbid autonomous deletion.
  *
  * see also: packages/core/src/memory-service.ts autonomousTombstone,
  * packages/soul/src/garden/janitor.ts executeTombstoneGc.
@@ -174,15 +177,20 @@ export function classifyMemoryImportance(
     return Object.freeze({ disposition: "report_only", reason: "strictly_governed" });
   }
 
-  if (memory.evidence_refs.length >= RICH_EVIDENCE_BASIS_THRESHOLD) {
-    return Object.freeze({ disposition: "keep", reason: "evidence_basis_rich" });
+  // invariant (redteam-I2): "durable memories require source AND evidence" — so
+  // ANY valid evidence ref makes the memory durable, not just a rich (>=2) basis.
+  // A single-evidence durable fact must NEVER be autonomously deleted. Only a
+  // memory that is truly source-less (evidence_refs.length === 0) AND was never
+  // reinforced (reinforcement_count === 0) fails all keep-criteria.
+  if (memory.evidence_refs.length >= 1) {
+    return Object.freeze({ disposition: "keep", reason: "evidence_basis" });
   }
 
-  if ((memory.reinforcement_count ?? 0) >= WELL_SUPPORTED_EVENTS_THRESHOLD) {
-    return Object.freeze({ disposition: "keep", reason: "well_supported" });
+  if ((memory.reinforcement_count ?? 0) >= 1) {
+    return Object.freeze({ disposition: "keep", reason: "reinforced" });
   }
 
-  return Object.freeze({ disposition: "judged_useless", reason: "failed_all_keep_criteria" });
+  return Object.freeze({ disposition: "judged_useless", reason: "no_evidence_and_never_reinforced" });
 }
 
 /**

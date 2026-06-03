@@ -21,6 +21,7 @@ import {
   type MemoryEntryMutableFields,
   type MemoryEntryRepoUpdateFields as ProtocolMemoryEntryRepoUpdateFields,
   type ScopeClass,
+  type SynthesisCapsule,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
@@ -136,6 +137,17 @@ export interface MemoryServiceEvidenceServicePort {
   findById(objectId: string): Promise<unknown | null>;
 }
 
+// invariant (B1 delete-time TOCTOU backstop): the disposition-gated physical
+// delete authority re-verifies a `compressed` member's preserving capsule at
+// DELETE time, not just at marking time. A capsule can archive / tombstone /
+// drop the member / be cascade-deleted during the >=24h grace, which would make
+// the member's "preserved" rationale stale and turn the hard-delete into
+// permanent loss. This port lets the delete authority re-load the capsule by
+// forget_disposition_ref and re-assert liveness + membership before deleting.
+export interface MemoryServiceSynthesisCapsuleLookupPort {
+  findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null>;
+}
+
 export interface MemoryRuntimeNotifier {
   notifyEntry(entry: EventLogEntry): void | Promise<void>;
 }
@@ -193,6 +205,12 @@ export interface MemoryServiceDependencies {
   readonly runtimeNotifier: MemoryRuntimeNotifier;
   readonly dynamicsService?: MemoryServiceDynamicsPort;
   readonly greenService?: MemoryServiceGreenPort;
+  // invariant (B1): the delete authority re-verifies a `compressed` member's
+  // preserving capsule at delete time. Optional so narrow test fakes that never
+  // exercise the compressed branch need not wire it — but a `compressed`
+  // tombstone whose capsule cannot be re-verified is REFUSED rather than
+  // silently deleted (fail-closed), so an absent port can never cause loss.
+  readonly synthesisCapsuleLookup?: MemoryServiceSynthesisCapsuleLookupPort;
   // invariant: when wired alongside memoryEntryRepo.createWithinTransaction, a
   // create whose input carries `enqueueEnrichment` commits the row + the
   // enrich_pending marker atomically. Absent, an enqueueEnrichment intent throws
@@ -674,6 +692,49 @@ export class MemoryService {
       );
     }
 
+    // invariant (B1 delete-time TOCTOU re-verify): a `compressed` member earned
+    // its terminal-removal right ONLY because a live capsule preserved its
+    // content. That right is re-checked HERE (T0+>=24h), not just at marking
+    // time (T0). If the capsule archived / tombstoned / dropped this member /
+    // was cascade-deleted during the grace window, the preservation is gone, so
+    // physical deletion would be permanent loss. We REFUSE: the row stays
+    // tombstoned (recoverable) and an audited skip event records the revocation.
+    // see also: apps/core-daemon/src/forget-disposition-ports.ts isCapsuleLive.
+    if (existing.forget_disposition === "compressed") {
+      const preserved = await this.compressedPreservationStillValid(existing);
+      if (!preserved) {
+        const skipEvent = await this.dependencies.eventLogRepo.append({
+          event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+          entity_type: "memory_entry",
+          entity_id: existing.object_id,
+          workspace_id: existing.workspace_id,
+          run_id: existing.run_id,
+          caused_by: parsedCausedBy,
+          payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+            object_id: existing.object_id,
+            object_kind: existing.object_kind,
+            workspace_id: existing.workspace_id,
+            run_id: existing.run_id,
+            // The row is NOT deleted: tombstone -> tombstone, preservation_revoked.
+            from_state: existing.lifecycle_state,
+            to_state: existing.lifecycle_state,
+            reason_code: `preservation_revoked: compressed capsule ${
+              existing.forget_disposition_ref ?? "<null>"
+            } no longer preserves this member; physical delete refused: ${parsedReason}`,
+            caused_by: parsedCausedBy,
+            evidence_refs:
+              existing.forget_disposition_ref === null ||
+              existing.forget_disposition_ref === undefined
+                ? null
+                : [existing.forget_disposition_ref],
+            occurred_at: this.now()
+          })
+        });
+        await this.dependencies.runtimeNotifier.notifyEntry(skipEvent);
+        return;
+      }
+    }
+
     const hardDeleteWithDisposition = this.dependencies.memoryEntryRepo.hardDeleteTombstonedWithDisposition;
     if (hardDeleteWithDisposition === undefined) {
       throw new CoreError("CONFLICT", "Disposition-gated tombstone delete port is not available");
@@ -703,6 +764,35 @@ export class MemoryService {
 
     await hardDeleteWithDisposition(parsedObjectId);
     await this.dependencies.runtimeNotifier.notifyEntry(event);
+  }
+
+  // invariant (B1): re-verify that a `compressed` member is STILL preserved by a
+  // live capsule that STILL references it, at delete time. Fail-closed: a null
+  // ref, an unwired capsule-lookup port, a missing/archived/tombstoned capsule,
+  // or a capsule that no longer lists this member all return false -> the caller
+  // REFUSES the physical delete. Mirrors the marking-time liveness + membership
+  // check in forget-disposition-ports.ts (isCapsuleLive + source_memory_refs).
+  private async compressedPreservationStillValid(
+    existing: Readonly<MemoryEntry>
+  ): Promise<boolean> {
+    const ref = existing.forget_disposition_ref;
+    if (ref === null || ref === undefined) {
+      return false;
+    }
+    const capsuleLookup = this.dependencies.synthesisCapsuleLookup;
+    if (capsuleLookup === undefined) {
+      return false;
+    }
+    const capsule = await capsuleLookup.findById(ref);
+    if (capsule === null) {
+      return false;
+    }
+    const isLive =
+      capsule.lifecycle_state !== "tombstone" && capsule.synthesis_status !== "archived";
+    if (!isLive) {
+      return false;
+    }
+    return capsule.source_memory_refs.includes(existing.object_id);
   }
 
   public findById(objectId: string): Promise<Readonly<MemoryEntry> | null> {

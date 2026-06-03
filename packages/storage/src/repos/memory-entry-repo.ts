@@ -153,6 +153,8 @@ export interface MemoryEntryRepo {
     lifecycleState: MemoryEntry["lifecycle_state"],
     updatedAt: string
   ): Promise<Readonly<MemoryEntry>>;
+  // invariant (N1): guarded reversible revival; null when the row was not dormant.
+  reviveDormant(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry> | null>;
   archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>>;
   hardDeleteTombstoned(objectId: string): Promise<void>;
   // invariant: dormant memories whose decay already silenced them, eligible for
@@ -207,6 +209,11 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   private readonly findLowActivityActiveMemoriesStatement;
   private readonly findTombstonedMemoriesStatement;
   private readonly transitionLifecycleStatement;
+  // invariant (I3): a revived / non-tombstone transition clears the terminal
+  // forget marker so an active/dormant row never carries a removal disposition.
+  private readonly transitionLifecycleClearForgetStatement;
+  // invariant (N1): guarded dormant -> active revival; changes=0 when not dormant.
+  private readonly reviveDormantStatement;
   private readonly archiveStatement;
   private readonly hardDeleteTombstonedStatement;
   private readonly findDormantMemoriesStatement;
@@ -388,6 +395,34 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       UPDATE memory_entries
       SET lifecycle_state = ?, updated_at = ?
       WHERE object_id = ?
+    `);
+    // invariant (I3): clear the terminal forget marker on any transition to a
+    // NON-tombstone state. A revived / re-activated / re-dormant row must never
+    // carry forget_disposition / forget_disposition_ref (a marker that would let
+    // the autonomous GC physically delete it). The B1 delete-time re-verify is
+    // the backstop for an import-carried stale marker; this clears the marker on
+    // the revival path itself.
+    this.transitionLifecycleClearForgetStatement = db.connection.prepare(`
+      UPDATE memory_entries
+      SET lifecycle_state = ?,
+          updated_at = ?,
+          forget_disposition = NULL,
+          forget_disposition_ref = NULL
+      WHERE object_id = ?
+    `);
+    // invariant (N1): guarded reversible revival. Flip a memory dormant -> active
+    // ONLY when it is currently dormant, so a concurrent (or duplicate) revival of
+    // an already-active row reports changes=0 and the caller skips the audit event
+    // instead of emitting a spurious from_state="dormant" transition. Clears the
+    // forget marker (I3) since the target state (active) is not tombstone.
+    this.reviveDormantStatement = db.connection.prepare(`
+      UPDATE memory_entries
+      SET lifecycle_state = 'active',
+          updated_at = ?,
+          forget_disposition = NULL,
+          forget_disposition_ref = NULL
+      WHERE object_id = ?
+        AND lifecycle_state = 'dormant'
     `);
     this.archiveStatement = db.connection.prepare(`
       UPDATE memory_entries
@@ -1155,7 +1190,14 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
     try {
-      const result = this.transitionLifecycleStatement.run(parsedLifecycleState, parsedUpdatedAt, objectId);
+      // invariant (I3): transitioning to any NON-tombstone state clears the
+      // terminal forget marker; only a tombstone transition keeps it (the
+      // marker is what authorizes the disposition-gated GC).
+      const statement =
+        parsedLifecycleState === "tombstone"
+          ? this.transitionLifecycleStatement
+          : this.transitionLifecycleClearForgetStatement;
+      const result = statement.run(parsedLifecycleState, parsedUpdatedAt, objectId);
 
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
@@ -1178,6 +1220,33 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         `Failed to transition lifecycle for memory entry ${objectId}.`,
         error
       );
+    }
+  }
+
+  // invariant (N1): guarded reversible revival. Returns the updated row when the
+  // memory was dormant and is now active; returns null when the row was NOT
+  // dormant (changes=0) so the caller can skip emitting a spurious
+  // from_state="dormant" -> "active" audit event for an already-active row.
+  public async reviveDormant(
+    objectId: string,
+    updatedAt: string
+  ): Promise<Readonly<MemoryEntry> | null> {
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+    try {
+      const result = this.reviveDormantStatement.run(parsedUpdatedAt, objectId);
+      if (result.changes === 0) {
+        return null;
+      }
+      const updated = await this.findById(objectId);
+      if (updated === null) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after revival.`);
+      }
+      return updated;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      throw new StorageError("QUERY_FAILED", `Failed to revive dormant memory entry ${objectId}.`, error);
     }
   }
 

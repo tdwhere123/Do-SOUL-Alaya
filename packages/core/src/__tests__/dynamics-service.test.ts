@@ -130,6 +130,24 @@ function createHarness(memoryEntries: readonly MemoryEntry[], options: { readonl
         };
         entriesById.set(objectId, updated);
         return Object.freeze({ ...updated });
+      }),
+      // invariant (N1): SQL-accurate guarded revival fake — flips dormant ->
+      // active and returns the row; returns null (no-op) when not dormant so the
+      // service skips the spurious revival audit event for an already-active row.
+      reviveDormant: vi.fn(async (objectId: string, updatedAt: string) => {
+        const existing = entriesById.get(objectId);
+        if (existing === undefined || existing.lifecycle_state !== "dormant") {
+          return null;
+        }
+        const updated: MemoryEntry = {
+          ...existing,
+          lifecycle_state: "active",
+          forget_disposition: null,
+          forget_disposition_ref: null,
+          updated_at: updatedAt
+        };
+        entriesById.set(objectId, updated);
+        return Object.freeze({ ...updated });
       })
     },
     karmaEventRepo: {
@@ -346,6 +364,27 @@ describe("DynamicsService", () => {
         (entry.payload_json as { from_state?: string }).from_state === "dormant"
     );
     expect(revivalEvents).toHaveLength(0);
+  });
+
+  it("N1: revival via the SQL-guarded reviveDormant clears any stale forget marker", async () => {
+    const { service, entriesById } = createHarness([
+      createMemoryEntry({
+        object_id: "memory-stale-marker",
+        lifecycle_state: "dormant",
+        forget_disposition: "compressed",
+        forget_disposition_ref: "capsule-x"
+      })
+    ]);
+
+    await service.processKarmaEvent(
+      createKarmaEvent({ object_id: "memory-stale-marker", kind: "reuse_gain", amount: 0.05, event_id: "event-8" })
+    );
+
+    const revived = entriesById.get("memory-stale-marker");
+    expect(revived?.lifecycle_state).toBe("active");
+    // A revived row must NOT carry a terminal-removal marker (I3 + N1).
+    expect(revived?.forget_disposition).toBeNull();
+    expect(revived?.forget_disposition_ref).toBeNull();
   });
 
   it("computeActivationScore favors scope/domain matches", () => {

@@ -429,6 +429,13 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     runtimeNotifier,
     dynamicsService,
     greenService,
+    // invariant (B1): the disposition-gated physical delete authority re-verifies
+    // a `compressed` member's preserving capsule at delete time (>=24h after
+    // marking) before any irreversible removal. see also:
+    // packages/core/src/memory-service.ts compressedPreservationStillValid
+    synthesisCapsuleLookup: {
+      findById: (objectId: string) => synthesisCapsuleRepo.findById(objectId)
+    },
     // invariant: atomic create + enrich_pending no-drop marker. When a create
     // input carries an enqueueEnrichment intent, the row insert and this enqueue
     // commit in one storage transaction. see also:

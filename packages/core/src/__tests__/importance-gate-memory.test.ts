@@ -17,9 +17,10 @@ function memory(overrides: Partial<MemoryEntry> = {}): Readonly<MemoryEntry> {
     scope_class: "project",
     content: "noise",
     domain_tags: [],
-    // Default: single evidence ref so the evidence-rich keep-criterion (>=2)
-    // does NOT fire unless a test sets two.
-    evidence_refs: ["evidence-1"],
+    // Default: source-less (no evidence) so the evidence keep-criterion does NOT
+    // fire unless a test sets one. A judged_useless candidate must also be
+    // never-reinforced (reinforcement_count 0/null).
+    evidence_refs: [],
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,
@@ -61,30 +62,39 @@ describe("classifyMemoryImportance keep-criteria", () => {
   it("KEEPs (keep) an evidence-rich memory (>=2 evidence refs)", () => {
     const result = classifyMemoryImportance(memory({ evidence_refs: ["e1", "e2"] }));
     expect(result.disposition).toBe("keep");
-    expect(result.reason).toBe("evidence_basis_rich");
+    expect(result.reason).toBe("evidence_basis");
   });
 
-  it("KEEPs (keep) a well-supported memory (reinforcement_count above threshold)", () => {
-    const result = classifyMemoryImportance(memory({ reinforcement_count: 50 }));
+  // invariant (redteam-I2): a single evidence ref is durable — "durable memories
+  // require source AND evidence". A single-evidence fact must NEVER be deleted.
+  it("KEEPs (keep) a single-evidence memory — ANY evidence forbids autonomous deletion", () => {
+    const result = classifyMemoryImportance(memory({ evidence_refs: ["only-one"], reinforcement_count: 0 }));
     expect(result.disposition).toBe("keep");
-    expect(result.reason).toBe("well_supported");
+    expect(result.reason).toBe("evidence_basis");
+    expect(isMemoryJudgedUseless(memory({ evidence_refs: ["only-one"], reinforcement_count: 0 }))).toBe(false);
   });
 
-  it("judges USELESS only when ALL keep-criteria fail", () => {
+  it("KEEPs (keep) a reinforced source-less memory (reinforcement_count >= 1)", () => {
+    const result = classifyMemoryImportance(memory({ evidence_refs: [], reinforcement_count: 1 }));
+    expect(result.disposition).toBe("keep");
+    expect(result.reason).toBe("reinforced");
+  });
+
+  it("judges USELESS only when source-less AND never reinforced", () => {
     const candidate = memory({
       decay_profile: "normal",
       retention_state: "working",
-      evidence_refs: ["only-one"],
+      evidence_refs: [],
       reinforcement_count: 0
     });
     expect(classifyMemoryImportance(candidate).disposition).toBe("judged_useless");
     expect(isMemoryJudgedUseless(candidate)).toBe(true);
   });
 
-  it("treats a null reinforcement_count as zero support (not a keep signal)", () => {
+  it("treats a null reinforcement_count as zero support (source-less + null => useless)", () => {
     const candidate = memory({
       retention_state: "working",
-      evidence_refs: ["only-one"],
+      evidence_refs: [],
       reinforcement_count: null
     });
     expect(classifyMemoryImportance(candidate).disposition).toBe("judged_useless");
@@ -94,7 +104,7 @@ describe("classifyMemoryImportance keep-criteria", () => {
     const candidate = memory({
       decay_profile: "pinned",
       retention_state: "working",
-      evidence_refs: ["only-one"],
+      evidence_refs: [],
       reinforcement_count: 0
     });
     expect(classifyMemoryImportance(candidate).disposition).toBe("protected");

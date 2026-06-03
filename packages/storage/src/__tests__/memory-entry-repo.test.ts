@@ -1101,6 +1101,68 @@ describe("SqliteMemoryEntryRepo", () => {
     ]);
   });
 
+  it("I3: transitionLifecycle to a NON-tombstone state clears the forget marker", async () => {
+    const { repo } = await createRepo();
+    // A row that carries a stale terminal-removal marker (e.g. import-carried, or
+    // tombstoned then revived). Any non-tombstone transition must strip it so the
+    // autonomous GC can never physically delete a revived/active row.
+    const marked = createMemoryEntry({
+      object_id: "dddddddd-0000-4000-8000-000000000001",
+      lifecycle_state: "dormant",
+      forget_disposition: "compressed",
+      forget_disposition_ref: "capsule-stale"
+    });
+    await repo.create(marked);
+
+    const revived = await repo.transitionLifecycle(marked.object_id, "active", "2026-03-22T00:00:00.000Z");
+    expect(revived.lifecycle_state).toBe("active");
+    expect(revived.forget_disposition).toBeNull();
+    expect(revived.forget_disposition_ref).toBeNull();
+  });
+
+  it("I3: transitionLifecycle to tombstone KEEPS the forget marker (GC authorization)", async () => {
+    const { repo } = await createRepo();
+    const marked = createMemoryEntry({
+      object_id: "dddddddd-0000-4000-8000-000000000002",
+      lifecycle_state: "dormant",
+      forget_disposition: "judged_useless",
+      forget_disposition_ref: null
+    });
+    await repo.create(marked);
+
+    const tombstoned = await repo.transitionLifecycle(marked.object_id, "tombstone", "2026-03-22T00:00:00.000Z");
+    expect(tombstoned.lifecycle_state).toBe("tombstone");
+    expect(tombstoned.forget_disposition).toBe("judged_useless");
+  });
+
+  it("N1: reviveDormant flips a dormant row to active and clears the forget marker", async () => {
+    const { repo } = await createRepo();
+    const dormant = createMemoryEntry({
+      object_id: "eeeeeeee-0000-4000-8000-000000000001",
+      lifecycle_state: "dormant",
+      forget_disposition: "compressed",
+      forget_disposition_ref: "capsule-y"
+    });
+    await repo.create(dormant);
+
+    const revived = await repo.reviveDormant(dormant.object_id, "2026-03-22T00:00:00.000Z");
+    expect(revived?.lifecycle_state).toBe("active");
+    expect(revived?.forget_disposition).toBeNull();
+    expect(revived?.forget_disposition_ref).toBeNull();
+  });
+
+  it("N1: reviveDormant is a guarded no-op (returns null) for an already-active row", async () => {
+    const { repo } = await createRepo();
+    const active = createMemoryEntry({
+      object_id: "eeeeeeee-0000-4000-8000-000000000002",
+      lifecycle_state: "active"
+    });
+    await repo.create(active);
+
+    await expect(repo.reviveDormant(active.object_id, "2026-03-22T00:00:00.000Z")).resolves.toBeNull();
+    expect((await repo.findById(active.object_id))?.lifecycle_state).toBe("active");
+  });
+
 
   it("throws NOT_FOUND when updating dynamics for a missing entry", async () => {
     const { repo } = await createRepo();

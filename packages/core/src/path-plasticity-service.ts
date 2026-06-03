@@ -563,8 +563,10 @@ export class PathPlasticityService {
 
     if (netDelta < 0) {
       const nextStrength = proposedStrength;
-      // Weak path with no recent reinforcement. Positive associative family
-      // goes dormant (reversible); negative/neutral family retires (terminal).
+      // Weak path with no recent reinforcement. Positive-associative AND any
+      // non-mergeable (protected/report_only/keep) path goes dormant (reversible);
+      // only a mergeable negative/neutral path retires (terminal). see
+      // shouldRouteToDormant (redteam-I1 + reviewer-I3).
       if (retirementEligible) {
         const nextPlasticity = parsePlasticityState({
           ...path.plasticity_state,
@@ -574,7 +576,7 @@ export class PathPlasticityService {
           contradiction_events_count: nextContradictionEventsCount,
           last_weakened_at: occurredAt
         });
-        if (isPositiveAssociativeFamily(path)) {
+        if (shouldRouteToDormant(path)) {
           return this.createDormantPlan({
             path,
             dormantStrength: nextStrength,
@@ -655,7 +657,7 @@ export class PathPlasticityService {
         support_events_count: nextSupportEventsCount,
         last_weakened_at: occurredAt
       });
-      if (isPositiveAssociativeFamily(path)) {
+      if (shouldRouteToDormant(path)) {
         return this.createDormantPlan({
           path,
           dormantStrength: proposedStrength,
@@ -1169,6 +1171,24 @@ function isDormantPath(path: Readonly<PathRelation>): boolean {
 // see also: path-relation-proposal-service.ts (recall_bias sign = family).
 function isPositiveAssociativeFamily(path: Readonly<PathRelation>): boolean {
   return path.effect_vector.recall_bias > 0;
+}
+
+// invariant (redteam-I1 + reviewer-I3): terminal (irreversible) retirement is
+// load-bearing — it must pass the SAME mechanical importance gate the path
+// consolidation plane uses. A path is routed to REVERSIBLE dormancy instead of
+// terminal retirement when EITHER:
+//   - it is positive-associative (the existing dormancy family), OR
+//   - it is NOT `mergeable` (protected / report_only / keep — pinned,
+//     strictly-governed, evidence-rich, or well-supported). A protected /
+//     evidence-rich / strictly-governed NEGATIVE path carries live suppression
+//     and must NOT silently retire (which would lose that suppression).
+// Only a `mergeable` negative/neutral path terminally retires.
+// see also: packages/core/src/importance-gate.ts classifyPathImportance.
+function shouldRouteToDormant(path: Readonly<PathRelation>): boolean {
+  if (isPositiveAssociativeFamily(path)) {
+    return true;
+  }
+  return classifyPathImportance(path).disposition !== "mergeable";
 }
 
 function withClearedSalience(

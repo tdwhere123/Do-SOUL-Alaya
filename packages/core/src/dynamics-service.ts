@@ -62,6 +62,12 @@ export interface DynamicsServiceMemoryRepoPort {
     lifecycleState: MemoryEntry["lifecycle_state"],
     updatedAt: string
   ): Promise<Readonly<MemoryEntry>>;
+  // invariant (N1): guarded revival. Returns the row when it transitioned
+  // dormant -> active, or null when the row was NOT dormant (no-op). The caller
+  // skips the revival audit event on null so an already-active row never emits a
+  // spurious from_state="dormant" transition. Optional; absent => fall back to
+  // the in-memory-guarded transitionLifecycle path.
+  reviveDormant?(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry> | null>;
 }
 
 export interface DynamicsServiceKarmaEventRepoPort {
@@ -238,12 +244,26 @@ export class DynamicsService {
     // flip is best-effort: a missing transitionLifecycle port (narrow test
     // fakes) or an active memory is a no-op. see also: lifecycle.ts dormant ->
     // active transition; garden-data-ports.ts setLifecycleDormant.
-    if (
-      memory.lifecycle_state === "dormant" &&
-      parsedEvent.amount > 0 &&
-      this.dependencies.memoryRepo.transitionLifecycle !== undefined
-    ) {
-      await this.dependencies.memoryRepo.transitionLifecycle(memory.object_id, "active", now);
+    // invariant (N1): only revive (and audit) when the row was ACTUALLY dormant.
+    // Prefer the SQL-guarded reviveDormant (atomic dormant -> active; returns null
+    // when not dormant) so a concurrent/duplicate revival of an already-active row
+    // emits no spurious from_state="dormant" event. Fall back to the in-memory
+    // guard (lifecycle_state==="dormant") + transitionLifecycle for narrow fakes.
+    const reviveDormant = this.dependencies.memoryRepo.reviveDormant;
+    let revived = false;
+    if (parsedEvent.amount > 0) {
+      if (reviveDormant !== undefined) {
+        const revivedRow = await reviveDormant(memory.object_id, now);
+        revived = revivedRow !== null;
+      } else if (
+        memory.lifecycle_state === "dormant" &&
+        this.dependencies.memoryRepo.transitionLifecycle !== undefined
+      ) {
+        await this.dependencies.memoryRepo.transitionLifecycle(memory.object_id, "active", now);
+        revived = true;
+      }
+    }
+    if (revived) {
       const revivalEvent = await this.dependencies.eventLogRepo.append({
         event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
         entity_type: "memory_entry",

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ControlPlaneObjectKind,
+  DYNAMICS_CONSTANTS,
   MemoryDimension,
   MemoryGovernanceEventType,
   ObjectLifecycleState,
@@ -3823,11 +3824,14 @@ describe("RecallService", () => {
     expect(highCandidate?.relevance_score).toBeGreaterThan(lowCandidate?.relevance_score ?? 0);
   });
 
-  it("fades a long-idle memory's effective activation at recall read while a recently-used memory keeps full strength (R3e lazy time-decay)", async () => {
+  it("fades ONLY the freshness band of a long-idle memory at recall read; a recently-used memory keeps full strength (R3e single-count lazy time-decay)", async () => {
     // Identical stored activation_score; only the last-reinforced timestamp
-    // differs. The recently-used memory keeps full activation; the long-idle
-    // memory (>= FRESHNESS_DECAY_DAYS since last_used_at, floored by created_at)
-    // fades to ~0 effective activation deterministically. now = 2026-03-23.
+    // differs. invariant (reviewer-I1): freshness is counted ONCE. The recently-
+    // used memory keeps its full stored activation. The long-idle memory loses
+    // ONLY the freshness band (weight activation_weights_phase1b.freshness ===
+    // 0.19), NOT the whole composite — its scope/domain/retention contributions
+    // are preserved. now = 2026-03-23.
+    const freshnessWeight = DYNAMICS_CONSTANTS.activation_weights_phase1b.freshness;
     const memories = [
       createMemoryEntry({
         object_id: "memory-recent",
@@ -3859,18 +3863,29 @@ describe("RecallService", () => {
     const recent = result.candidates.find((candidate) => candidate.object_id === "memory-recent");
     const idle = result.candidates.find((candidate) => candidate.object_id === "memory-idle");
 
-    // Recently-used keeps full stored activation; idle fades toward 0.
+    // Recently-used keeps full stored activation (no decay).
     expect(recent?.score_factors?.activation).toBeCloseTo(0.8, 5);
-    expect(idle?.score_factors?.activation ?? 1).toBeLessThan(0.05);
-    // Effective recall strength of the idle memory is strictly lower.
+    // Idle collapses ONLY the <=0.19 freshness band: 0.8 -> ~0.61, NOT ~0.
+    // (the buggy whole-composite multiply would have produced ~0.)
+    expect(idle?.score_factors?.activation ?? 0).toBeCloseTo(0.8 - freshnessWeight, 5);
+    // Bounded: idle effective activation is strictly lower than the fresh one,
+    // and never exceeds the stored score.
+    expect(idle?.score_factors?.activation ?? 1).toBeLessThan(recent?.score_factors?.activation ?? 0);
+    expect(idle?.score_factors?.activation ?? 1).toBeLessThanOrEqual(0.8);
+    // Effective recall strength of the idle memory is strictly lower (directional).
     expect(recent?.relevance_score ?? 0).toBeGreaterThan(idle?.relevance_score ?? 0);
   });
 
-  it("does not decay a recently-used memory's activation at recall read (R3e bound)", async () => {
+  it("does NOT double-penalize a freshly-used high-scope memory's activation at recall read (R3e single-count bound)", async () => {
+    // invariant (reviewer-I1): the stored activation already bakes a freshness
+    // sub-term. A freshly-used memory's read-time freshness factor is ~1, so the
+    // re-weighted freshness band equals the baked band — the EFFECTIVE activation
+    // must equal the stored score exactly, never a doubly-decayed value.
     const memories = [
       createMemoryEntry({
         object_id: "memory-fresh",
         dimension: MemoryDimension.PROCEDURE,
+        scope_class: ScopeClass.PROJECT,
         activation_score: 0.6,
         created_at: "2026-03-22T00:00:00.000Z",
         last_used_at: "2026-03-23T00:00:00.000Z"
