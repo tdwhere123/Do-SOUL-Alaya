@@ -1,10 +1,12 @@
 import {
   EdgeProposalTriggerSource,
   MemoryGraphEdgeType,
+  getPathAnchorBackingObjectId,
   type EdgeClassifyVerdict,
   type EdgeProposalTriggerSourceValue,
   type MemoryEntry,
-  type MemoryGraphEdgeTypeValue
+  type MemoryGraphEdgeTypeValue,
+  type PathRelation
 } from "@do-soul/alaya-protocol";
 import type {
   EdgeAutoProducerLlmDecision,
@@ -120,10 +122,14 @@ export interface EdgeAutoProducerMemoryRepoPort {
 // invariant: the host-worker defer port. When present, the LLM-quality pair
 // verdict for an eligible neighbor is ENQUEUED as an EDGE_CLASSIFY garden task
 // for an attached CLI agent (the compute) to render, instead of a synchronous
-// in-process cloud call. The deterministic heuristic still runs inline and the
-// path is still submitted, so an edge exists at enrichment time regardless of
-// whether a worker ever claims. enqueueEdgeClassify is best-effort: a failure
-// to enqueue must not abort proposal production (the heuristic verdict already
+// in-process cloud call. The deterministic heuristic still runs inline, but it
+// only emits an edge for a STRONG-overlap pair (tag overlap >= STRONG_TAG_OVERLAP_MIN).
+// A weak-overlap pair (passes the LLM pregate but below strongTagOverlap) gets
+// NO inline edge — it is edge-on-verdict: the host verdict is the only edge it
+// can ever earn. So for strong-overlap pairs an edge exists at enrichment time
+// regardless of whether a worker ever claims; for weak-overlap pairs the edge
+// is eventual (verdict-only). enqueueEdgeClassify is best-effort: a failure to
+// enqueue must not abort proposal production (any heuristic verdict already
 // stands), so the service swallows enqueue errors through the warn callback.
 // see also: apps/core-daemon/src/mcp-memory-tool-handler.ts EDGE_CLASSIFY surface.
 export interface EdgeClassifyQueuePort {
@@ -136,6 +142,26 @@ export interface EdgeClassifyQueuePort {
     readonly source: { readonly object_id: string; readonly content: string; readonly domainTags: readonly string[] };
     readonly neighbor: { readonly object_id: string; readonly content: string; readonly domainTags: readonly string[] };
   }): Promise<void>;
+}
+
+// invariant: applyVerdict-local read port for directional-dedup. A host
+// EDGE_CLASSIFY verdict and the inline heuristic on the SAME ordered pair are
+// ONE positive-associative slot: the verdict refines the heuristic edge, it
+// never mints a SECOND parallel positive path. The shared
+// pathRelationMatchesIdentity treats supports vs derives_from as DIFFERENT
+// identity families (positive:supports != positive:derives_from), so a
+// family-swap verdict would otherwise slip past the sink's durable dedup and
+// double the pair's recall-bias from untrusted worker input. This port lets
+// applyVerdict ask "does any positive associative path already exist for this
+// exact ordered pair?" so the verdict becomes a no-op refinement instead.
+// Optional: when unwired (e.g. unit fakes) applyVerdict falls back to the
+// sink's same-family dedup only — the family-swap guard is daemon-wired.
+// see also: packages/protocol/src/soul/path-relation.ts pathRelationIdentityFamily.
+export interface EdgeClassifyExistingPathReaderPort {
+  findByBackingObjectId(
+    workspaceId: string,
+    objectId: string
+  ): Promise<readonly Readonly<PathRelation>[]>;
 }
 
 // invariant: edge auto-producer sink is the governed path candidate
@@ -168,11 +194,23 @@ export interface EdgeAutoProducerServiceDependencies {
    * LLM-quality verdict step is enqueued as an EDGE_CLASSIFY garden task
    * (best-effort / eventual) for the attached CLI agent to render, and
    * the synchronous llmPort is bypassed. The deterministic heuristic
-   * still runs inline and submits its path immediately, so recall right
-   * after memory creation uses the heuristic verdict until the host
-   * worker completes the task. see EdgeClassifyQueuePort.
+   * still runs inline and submits its path immediately for STRONG-overlap
+   * pairs, so recall right after memory creation uses that heuristic edge
+   * until the host worker completes the task. A weak-overlap pair (below
+   * strongTagOverlap) has no inline edge — its edge is eventual,
+   * materializing only when the host verdict arrives. see
+   * EdgeClassifyQueuePort.
    */
   readonly edgeClassifyQueue?: EdgeClassifyQueuePort;
+  /**
+   * Optional read port for applyVerdict directional-dedup. When present, a
+   * host EDGE_CLASSIFY verdict on an ordered pair that ALREADY carries a
+   * positive associative path (e.g. the inline heuristic minted `supports`)
+   * is a no-op refinement rather than a parallel `derives_from` mint, so the
+   * pair never gets a doubled recall-bias from untrusted worker input. When
+   * unwired, applyVerdict relies on the sink's same-family durable dedup only.
+   */
+  readonly existingPathReader?: EdgeClassifyExistingPathReaderPort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
@@ -289,12 +327,17 @@ export class EdgeAutoProducerService {
    * defer port is wired, enqueues the best-effort LLM-quality verdict.
    *
    * invariant: the deterministic heuristic (classifyNeighbor) ALWAYS
-   * runs inline so an edge is produced at enrichment time regardless of
-   * any LLM-quality verdict. The LLM-quality step is one of:
+   * runs inline, but it only emits an edge for a STRONG-overlap pair
+   * (tag overlap >= STRONG_TAG_OVERLAP_MIN). A weak-overlap pair (passes
+   * the LLM pregate but below strongTagOverlap) gets NO inline edge — for
+   * such a pair the edge is eventual, earned only when a host verdict
+   * arrives. The LLM-quality step is one of:
    *   - DEFERRED: when edgeClassifyQueue is wired, an EDGE_CLASSIFY task
    *     is enqueued (best-effort) for the attached CLI agent to render;
-   *     the inline heuristic verdict is what is returned and submitted
-   *     now. A later host verdict refines the path via applyVerdict.
+   *     the inline heuristic verdict (possibly null for weak overlap) is
+   *     what is returned and submitted now. A later host verdict refines
+   *     a strong-overlap edge, or first creates a weak-overlap edge, via
+   *     applyVerdict.
    *   - SYNCHRONOUS: when only llmPort is wired (no edgeClassifyQueue),
    *     the LLM runs in-process first and its >= floor verdict wins;
    *     null / below-floor falls back to the heuristic.
@@ -380,14 +423,22 @@ export class EdgeAutoProducerService {
    * PathCandidateSink the inline heuristic used:
    *   - matches the heuristic relation -> already_present (no-op, the
    *     heuristic verdict stands);
-   *   - a different relation (e.g. supports -> derives_from) -> a new
-   *     refined association is added alongside.
+   *   - a DIFFERENT positive family on the SAME ordered pair (e.g. the
+   *     heuristic minted supports, the verdict says derives_from) is ONE
+   *     positive-associative slot: the verdict is a no-op refinement (the
+   *     heuristic edge stands), NOT a second parallel positive path. This is
+   *     enforced via existingPathReader because the shared
+   *     pathRelationMatchesIdentity treats supports vs derives_from as
+   *     distinct identity families, so the sink alone would let the
+   *     family-swap double the pair's recall-bias. When existingPathReader is
+   *     unwired the verdict still submits and relies on same-family sink dedup.
    * invariant: a "none" or below-LLM_CONFIDENCE_FLOOR verdict refines
    * nothing — the inline heuristic edge is never destroyed by a host
    * verdict (agents propose, Alaya decides; the verdict only ever adds a
    * weak governed candidate, never removes durable topology). Returns the
-   * PathMintOutcome string when a relation was submitted, or null when
-   * the verdict was a no-op (none / below floor).
+   * PathMintOutcome string when a relation was submitted, "already_present"
+   * when the directional-dedup short-circuited a family-swap mint, or null
+   * when the verdict was a no-op (none / below floor).
    */
   public async applyVerdict(input: {
     readonly workspaceId: string;
@@ -403,6 +454,15 @@ export class EdgeAutoProducerService {
     }
     if (clamp01(input.verdict.confidence) < LLM_CONFIDENCE_FLOOR) {
       return null;
+    }
+    // Directional-dedup: a host verdict on an ordered pair that already carries
+    // a positive associative path is ONE slot with the inline heuristic edge.
+    // A family-swap (heuristic supports -> verdict derives_from) must NOT mint a
+    // second parallel positive path. The verdict only ever refines in-place
+    // within the same family (which the sink already settles as already_present);
+    // a different positive family is a no-op refinement here.
+    if (await this.positiveAssociativePathExists(workspaceId, sourceId, targetId)) {
+      return "already_present";
     }
     const edgeType =
       input.verdict.edge_type === "supports"
@@ -432,7 +492,58 @@ export class EdgeAutoProducerService {
       why,
       runId: input.runId
     });
+    if (outcome === "failed") {
+      // A transient mint failure on the host verdict loses the LLM-quality
+      // refinement; the inline heuristic edge still stands so this is not
+      // fatal, but it must be observable rather than silently swallowed.
+      this.warn("edge auto producer host verdict mint failed transiently", {
+        source_object_id: sourceId,
+        neighbor_object_id: targetId,
+        edge_type: input.verdict.edge_type
+      });
+    }
     return outcome;
+  }
+
+  /**
+   * Returns true when a positive associative (recall_bias > 0) path already
+   * exists for the exact ordered pair sourceId -> targetId. Used by
+   * applyVerdict to collapse a heuristic+verdict family-swap into one slot.
+   * Returns false when no reader is wired (the sink's same-family dedup is the
+   * only guard then). A reader failure is non-fatal: it falls back to letting
+   * the verdict submit (the sink still settles same-family duplicates).
+   */
+  private async positiveAssociativePathExists(
+    workspaceId: string,
+    sourceId: string,
+    targetId: string
+  ): Promise<boolean> {
+    const reader = this.deps.existingPathReader;
+    if (reader === undefined) {
+      return false;
+    }
+    let existing: readonly Readonly<PathRelation>[];
+    try {
+      existing = await reader.findByBackingObjectId(workspaceId, sourceId);
+    } catch (err) {
+      this.warn("edge auto producer existing-path lookup failed", {
+        source_object_id: sourceId,
+        neighbor_object_id: targetId,
+        error: errorMessage(err)
+      });
+      return false;
+    }
+    return existing.some((relation) => {
+      if (relation.effect_vector.recall_bias <= 0) {
+        return false;
+      }
+      if (relation.lifecycle.status !== "active") {
+        return false;
+      }
+      const relationSource = getPathAnchorBackingObjectId(relation.anchors.source_anchor);
+      const relationTarget = getPathAnchorBackingObjectId(relation.anchors.target_anchor);
+      return relationSource === sourceId && relationTarget === targetId;
+    });
   }
 
   private async tryLlmDecision(

@@ -2,10 +2,30 @@ import { describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
   ScopeClass,
-  type MemoryEntry
+  type MemoryEntry,
+  type PathRelation
 } from "@do-soul/alaya-protocol";
 import { EdgeAutoProducerService } from "../edge-auto-producer-service.js";
 import type { PathMintOutcome } from "../path-relation-proposal-service.js";
+
+// Minimal active positive-associative PathRelation for the applyVerdict
+// directional-dedup tests; only the fields the dedup guard reads
+// (anchors, effect_vector.recall_bias, lifecycle.status) are load-bearing.
+function makePositiveAssociativePath(
+  relationKind: string,
+  sourceObjectId: string,
+  targetObjectId: string
+): Readonly<PathRelation> {
+  return {
+    anchors: {
+      source_anchor: { kind: "object", object_id: sourceObjectId },
+      target_anchor: { kind: "object", object_id: targetObjectId }
+    },
+    constitution: { relation_kind: relationKind },
+    effect_vector: { recall_bias: 0.5 },
+    lifecycle: { status: "active" }
+  } as unknown as Readonly<PathRelation>;
+}
 
 // Structural shape the assertions read off the submitCandidate fake; the
 // full SubmitCandidateInput is wider but these are the fields under test.
@@ -868,6 +888,106 @@ describe("EdgeAutoProducerService", () => {
 
       expect(outcome).toBeNull();
       expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+    });
+
+    it("directional-dedup: a family-swap verdict does NOT mint a second positive path", async () => {
+      // The inline heuristic already minted a positive associative `supports`
+      // path for the exact ordered pair. A host verdict of a DIFFERENT positive
+      // family (derives_from) on the SAME ordered pair must NOT mint a parallel
+      // positive path (that would double the pair's recall-bias from untrusted
+      // worker input); it is a no-op refinement instead.
+      const { deps, pathCandidatePort } = createDeps([]);
+      const existingPathReader = {
+        findByBackingObjectId: vi.fn(async (_workspaceId: string, objectId: string) => {
+          if (objectId !== "memory-new") {
+            return [];
+          }
+          return [
+            makePositiveAssociativePath("supports", "memory-new", "memory-existing")
+          ];
+        })
+      };
+      const service = new EdgeAutoProducerService({ ...deps, existingPathReader });
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "derives_from",
+          confidence: 0.95,
+          rationale: "host worker says derives_from"
+        }
+      });
+
+      // Exactly ONE positive path on the pair: the verdict refined nothing, so
+      // submitCandidate was never invoked a second time.
+      expect(outcome).toBe("already_present");
+      expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+      expect(existingPathReader.findByBackingObjectId).toHaveBeenCalledWith(
+        "workspace-1",
+        "memory-new"
+      );
+    });
+
+    it("directional-dedup: a verdict for a pair with NO existing positive path still mints", async () => {
+      // The legitimate weak-overlap / first-edge case: no inline heuristic edge
+      // exists for the pair, so the host verdict is the first (and only) edge.
+      const { deps, pathCandidatePort } = createDeps([]);
+      const existingPathReader = {
+        findByBackingObjectId: vi.fn(async () => [])
+      };
+      const service = new EdgeAutoProducerService({ ...deps, existingPathReader });
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "derives_from",
+          confidence: 0.95,
+          rationale: "host worker says derives_from"
+        }
+      });
+
+      expect(outcome).toBe("applied");
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+        expect.objectContaining({ relationKind: "derives_from", recallBiasSign: 1 })
+      );
+    });
+
+    it("directional-dedup: an existing path on a DIFFERENT pair does not block the mint", async () => {
+      // A positive path exists from memory-new to memory-other; the verdict pair
+      // is memory-new -> memory-existing. Different ordered pair, so the verdict
+      // still mints its own first edge.
+      const { deps, pathCandidatePort } = createDeps([]);
+      const existingPathReader = {
+        findByBackingObjectId: vi.fn(async () => [
+          makePositiveAssociativePath("supports", "memory-new", "memory-other")
+        ])
+      };
+      const service = new EdgeAutoProducerService({ ...deps, existingPathReader });
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "supports",
+          confidence: 0.95,
+          rationale: "host worker says supports"
+        }
+      });
+
+      expect(outcome).toBe("applied");
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
     });
   });
 

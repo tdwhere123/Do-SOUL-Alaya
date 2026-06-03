@@ -174,10 +174,11 @@ export async function resolveGardenComputeStatus(
   };
 }
 
-// Under the host_worker product default, surface whether recall-driven extract
-// work is waiting for an attached CLI agent (LLM quality) or being left to the
-// zero-cloud heuristic fallback. Omitted for every other provider_kind, and
-// omitted when no garden task repo is wired (non-sqlite harness).
+// Under the host_worker product default, surface whether recall-driven
+// host-worker work (POST_TURN_EXTRACT and EDGE_CLASSIFY) is waiting for an
+// attached CLI agent (LLM quality) or being left to the zero-cloud heuristic
+// fallback. Omitted for every other provider_kind, and omitted when no garden
+// task repo is wired (non-sqlite harness).
 function hostWorkerAdvisoryField(
   providerKind: GardenComputeStatus["provider_kind"],
   runtime: AlayaDaemonRuntime
@@ -193,7 +194,9 @@ function hostWorkerAdvisoryField(
     host_worker_advisory: {
       pending_extract_tasks: backlog.pending,
       stale_claimed_extract_tasks: backlog.stale,
-      attach_worker_recommended: backlog.pending > 0
+      pending_edge_classify_tasks: backlog.edgeClassifyPending,
+      stale_claimed_edge_classify_tasks: backlog.edgeClassifyStale,
+      attach_worker_recommended: backlog.pending > 0 || backlog.edgeClassifyPending > 0
     }
   };
 }

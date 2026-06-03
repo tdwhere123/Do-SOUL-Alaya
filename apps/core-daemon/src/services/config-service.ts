@@ -248,7 +248,8 @@ async function getSectionConfig<T>(
   schema: { parse(value: unknown): T },
   defaults: T
 ): Promise<T> {
-  const raw = await repo.get<T>(key);
+  // ConfigRepo.get is synchronous (sqlite prepared statement); no await needed.
+  const raw = repo.get<T>(key);
   return schema.parse(raw ?? defaults);
 }
 
@@ -267,13 +268,15 @@ async function patchSectionConfig<T extends Record<string, unknown>>(
     throw new CoreError("VALIDATION", validationMessage, { cause: parsedPatch.error });
   }
 
-  const next = await repo.patch(key, parsedPatch.data, defaults);
+  // ConfigRepo.patch is synchronous (sqlite read-modify-write); no await needed.
+  const next = repo.patch(key, parsedPatch.data, defaults);
   return fullSchema.parse(next);
 }
 
 async function getRuntimeEmbeddingConfig(repo: ConfigRepo): Promise<RuntimeEmbeddingConfig> {
+  // ConfigRepo.get is synchronous; no await needed.
   return RuntimeEmbeddingConfigSchema.parse(
-    (await repo.get<RuntimeEmbeddingConfig>(RUNTIME_EMBEDDING_CONFIG_KEY)) ??
+    repo.get<RuntimeEmbeddingConfig>(RUNTIME_EMBEDDING_CONFIG_KEY) ??
       DEFAULT_RUNTIME_EMBEDDING_CONFIG
   );
 }
@@ -283,7 +286,8 @@ async function getManifestationBudgetConfig(
   workspaceId: string,
   clock: () => string
 ): Promise<ManifestationBudgetConfigRead> {
-  const stored = await repo.get<ManifestationBudgetConfig>(
+  // ConfigRepo.get is synchronous; no await needed.
+  const stored = repo.get<ManifestationBudgetConfig>(
     keyFor(workspaceId, MANIFESTATION_BUDGET_CONFIG_SECTION)
   );
   return {
@@ -389,7 +393,9 @@ async function getRuntimeGardenComputeConfig(
   paths: AlayaConfigPaths,
   warn: (message: string) => void
 ): Promise<RuntimeGardenComputeConfig> {
-  const persisted = await repo.get<RuntimeGardenComputeConfig>(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY);
+  // ConfigRepo.get is synchronous; defaultRuntimeGardenComputeConfig is the
+  // genuinely-async fallback (reads files), so only the latter is awaited.
+  const persisted = repo.get<RuntimeGardenComputeConfig>(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY);
   const raw = persisted ?? (await defaultRuntimeGardenComputeConfig(paths, warn));
   return parseGardenComputeConfigWithLegacyFallback(raw, "garden-compute config", warn);
 }

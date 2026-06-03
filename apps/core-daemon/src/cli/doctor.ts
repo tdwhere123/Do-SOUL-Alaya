@@ -48,17 +48,23 @@ export interface GardenComputeStatus {
   // Present only when the active Garden secret_ref is keychain:<service>:<account>.
   readonly keychain_check?: GardenKeychainCheck;
   // Present only under the host_worker product default. Surfaces whether
-  // recall-driven extract work is waiting for an attached CLI agent (LLM
+  // recall-driven host-worker work is waiting for an attached CLI agent (LLM
   // quality) or being left to the zero-cloud heuristic fallback.
   // pending_extract_tasks counts unclaimed POST_TURN_EXTRACT tasks;
   // stale_claimed_extract_tasks counts tasks a worker claimed but abandoned past
   // the stale window (reclaimed back to pending on the next scheduler pass).
-  // attach_worker_recommended is true when there is unclaimed extract work —
-  // the operator should attach Codex / Claude Code for LLM-quality extraction,
-  // else Alaya runs on the deterministic heuristic after the wait window.
+  // pending_edge_classify_tasks / stale_claimed_edge_classify_tasks carry the
+  // same split for EDGE_CLASSIFY tasks (the LLM-quality edge verdict): unclaimed
+  // means heuristic edges that have not been refined by any host worker.
+  // attach_worker_recommended is true when there is unclaimed extract OR
+  // edge-classify work — the operator should attach Codex / Claude Code for
+  // LLM-quality processing, else Alaya runs on the deterministic heuristic after
+  // the wait window.
   readonly host_worker_advisory?: Readonly<{
     readonly pending_extract_tasks: number;
     readonly stale_claimed_extract_tasks: number;
+    readonly pending_edge_classify_tasks: number;
+    readonly stale_claimed_edge_classify_tasks: number;
     readonly attach_worker_recommended: boolean;
   }>;
 }
@@ -567,9 +573,11 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
       stream.write(
         `garden compute WARNING: provider_kind=host_worker is the default and` +
           ` ${advisory.pending_extract_tasks} recall-driven POST_TURN_EXTRACT task(s) are unclaimed` +
-          ` (${advisory.stale_claimed_extract_tasks} claimed-then-abandoned). Attach Codex /` +
-          ` Claude Code (\`alaya attach <target>\`) for LLM-quality extraction; unclaimed work` +
-          ` falls back to the zero-cloud heuristic after the host-worker wait window.\n`
+          ` (${advisory.stale_claimed_extract_tasks} claimed-then-abandoned),` +
+          ` ${advisory.pending_edge_classify_tasks} EDGE_CLASSIFY task(s) are unclaimed` +
+          ` (${advisory.stale_claimed_edge_classify_tasks} claimed-then-abandoned). Attach Codex /` +
+          ` Claude Code (\`alaya attach <target>\`) for LLM-quality extraction and edge refinement;` +
+          ` unclaimed work falls back to the zero-cloud heuristic after the host-worker wait window.\n`
       );
     } else {
       stream.write(

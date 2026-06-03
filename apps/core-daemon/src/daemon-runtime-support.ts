@@ -57,8 +57,6 @@ import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 
 export const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
 export const ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
-export const OFFICIAL_API_GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
-export const OFFICIAL_API_GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
 const GARDEN_BACKLOG_REARM_RATIO = 0.7;
 const GARDEN_BACKLOG_SNAPSHOT_INTERVAL_MS = 60_000;
 
@@ -157,12 +155,64 @@ export function readOfficialGardenSecretRef(configEnv: ReadonlyMap<string, strin
   );
 }
 
-export function readOfficialGardenModelId(configEnv: ReadonlyMap<string, string>): string | null {
-  return readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_MODEL_ENV));
+export const ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV = "ALAYA_EDGE_PRODUCER_LLM_ENABLED";
+export const ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV = "ALAYA_EDGE_CLASSIFY_HOST_WORKER";
+
+// invariant: the B-2 edge-classify routing mode. Mutually exclusive by
+// construction: host-worker defer wins over the synchronous cloud LLM, which
+// wins over the local heuristic-only floor.
+//   - "host_worker_defer": the EDGE_CLASSIFY garden task is enqueued for an
+//     attached CLI agent (the compute). No cloud call. This is the product
+//     default whenever the resolved garden compute provider_kind is
+//     host_worker, or when ALAYA_EDGE_CLASSIFY_HOST_WORKER forces it on.
+//   - "cloud_llm": the operator strict-opted-in via ALAYA_EDGE_PRODUCER_LLM_ENABLED
+//     AND host-worker defer is NOT active. The synchronous in-process cloud
+//     port is then attempted (it still needs a resolvable key + provider_url,
+//     resolved separately; this mode reports the INTENT to call cloud).
+//   - "heuristic_only": neither defer nor opt-in — the deterministic heuristic
+//     is the only classifier; zero external call.
+export type EdgeClassifyWiringMode = "host_worker_defer" | "cloud_llm" | "heuristic_only";
+
+export interface EdgeClassifyWiring {
+  readonly mode: EdgeClassifyWiringMode;
+  // strict opt-in for the synchronous cloud edge-LLM (1/true only).
+  readonly llmEnabled: boolean;
+  // host-worker defer is on (explicit override OR provider_kind=host_worker default).
+  readonly hostWorkerEnabled: boolean;
 }
 
-export function readOfficialGardenProviderUrl(configEnv: ReadonlyMap<string, string>): string | null {
-  return readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_PROVIDER_URL_ENV));
+function readBooleanOptIn(raw: string | undefined): boolean {
+  const value = raw?.toLowerCase();
+  return value === "1" || value === "true";
+}
+
+// invariant: the single decision that chooses cloud llmPort vs the
+// host-worker EDGE_CLASSIFY defer queue vs heuristic-only for B-2 edge
+// classification. PURE: depends only on the passed env reader and the resolved
+// garden compute provider_kind, so the zero-cloud-by-default guarantee is unit
+// testable without standing up the daemon. index.ts consumes this; behavior
+// must not diverge between the two. A regression that flips the default back
+// to cloud changes this function's output and is caught by its tests.
+// see also: apps/core-daemon/src/index.ts edgeAutoProducerLlmPort /
+//   edgeClassifyHostWorkerEnabled wiring.
+export function resolveEdgeClassifyWiring(
+  env: Readonly<Record<string, string | undefined>>,
+  gardenComputeConfig: { readonly provider_kind: string }
+): EdgeClassifyWiring {
+  const llmEnabled = readBooleanOptIn(env[ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV]);
+  const hostWorkerRaw = env[ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV]?.toLowerCase();
+  const hostWorkerEnabled =
+    hostWorkerRaw === "1" || hostWorkerRaw === "true"
+      ? true
+      : hostWorkerRaw === "0" || hostWorkerRaw === "false"
+        ? false
+        : gardenComputeConfig.provider_kind === "host_worker";
+  const mode: EdgeClassifyWiringMode = hostWorkerEnabled
+    ? "host_worker_defer"
+    : llmEnabled
+      ? "cloud_llm"
+      : "heuristic_only";
+  return { mode, llmEnabled, hostWorkerEnabled };
 }
 
 export function createOptionalMemoryEmbeddingRepo(database: StorageDatabase): MemoryEmbeddingRepo | null {

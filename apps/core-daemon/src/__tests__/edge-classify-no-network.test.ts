@@ -2,20 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { EdgeAutoProducerService } from "@do-soul/alaya-core";
 
-// K4.5 no-network regression: under the product DEFAULT garden compute config
-// (provider_kind=host_worker, ALAYA_EDGE_PRODUCER_LLM_ENABLED unset), B-2 edge
-// classification must make NO external/network call. The deterministic heuristic
+// K4.5 no-network regression (SERVICE-LEVEL): given the DEFAULT-config wiring
+// shape `{ edgeClassifyQueue }` only (no synchronous llmPort), B-2 edge
+// classification makes NO external/network call. The deterministic heuristic
 // produces the edge inline and the LLM-quality verdict is DEFERRED to the
-// attached CLI agent via the EDGE_CLASSIFY garden task (a local DB enqueue), so
-// the daemon never reaches out to a cloud provider for edge classification.
+// attached CLI agent via the EDGE_CLASSIFY garden task (a local DB enqueue).
 //
-// This exercises the exact EdgeAutoProducerService wiring apps/core-daemon/
-// src/index.ts builds under default config: `{ edgeClassifyQueue }` only, with
-// no synchronous llmPort (edge-LLM off) — because edgeAutoProducerLlmEnabled is
-// strict opt-in and host_worker auto-routes edge-classify to the defer path. A
-// globalThis.fetch spy fails the test if any network call is attempted.
+// SCOPE: this test hand-builds the EdgeAutoProducerService deps and asserts the
+// defer path never fetches. It does NOT exercise the index.ts env+config
+// DECISION that chooses this wiring shape under default config — that decision
+// is locked separately by the PURE resolveEdgeClassifyWiring regression in
+// garden-compute-config-wiring.test.ts (DEFAULT -> host_worker_defer, llm off).
+// Together: that test proves the daemon WIRES the defer shape by default; this
+// test proves the defer shape makes no network call. A globalThis.fetch spy
+// fails this test if any network call is attempted.
 // see also:
-//   apps/core-daemon/src/index.ts edgeAutoProducerLlmPort / edgeClassifyHostWorkerEnabled
+//   apps/core-daemon/src/daemon-runtime-support.ts resolveEdgeClassifyWiring (the decision)
+//   apps/core-daemon/src/index.ts edgeClassifyWiring consumption
 //   apps/core-daemon/src/edge-auto-producer-llm-adapter.ts requestVerdictFromGarden (the only fetch)
 //   packages/core/src/edge-auto-producer-service.ts decideForNeighbor / deferEdgeClassify
 

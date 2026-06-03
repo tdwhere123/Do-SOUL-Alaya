@@ -156,7 +156,8 @@ import {
   loadConfigEnv,
   patchArbitrationClaimService,
   recordStartupStep,
-  resolveDatabasePath
+  resolveDatabasePath,
+  resolveEdgeClassifyWiring
 } from "./daemon-runtime-support.js";
 import { createReconciliationLlmDecisionPort } from "./reconciliation-llm-decision.js";
 import { createEdgeAutoProducerLlmPort } from "./edge-auto-producer-llm-adapter.js";
@@ -854,10 +855,16 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // port runs on the operator's existing official_api garden compute config or
   // is disabled.
   const sharedGardenComputeConfig = await rawConfigService.getRuntimeGardenComputeConfig();
-  const edgeAutoProducerLlmEnabled = (() => {
-    const raw = process.env.ALAYA_EDGE_PRODUCER_LLM_ENABLED?.toLowerCase();
-    return raw === "1" || raw === "true";
-  })();
+  // invariant: the single B-2 edge-classify routing decision. resolveEdgeClassifyWiring
+  // is the PURE source of truth for cloud-llm vs host-worker-defer vs
+  // heuristic-only; index.ts must derive both branches from it so the
+  // zero-cloud-by-default guarantee cannot drift between the daemon and its
+  // regression test. see also: daemon-runtime-support.ts resolveEdgeClassifyWiring.
+  const edgeClassifyWiring = resolveEdgeClassifyWiring(
+    process.env,
+    sharedGardenComputeConfig
+  );
+  const edgeAutoProducerLlmEnabled = edgeClassifyWiring.llmEnabled;
   const edgeAutoProducerGardenComputeConfig = edgeAutoProducerLlmEnabled
     ? sharedGardenComputeConfig
     : null;
@@ -897,27 +904,20 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
           }
         })
       : null;
-  // invariant: host-worker defer for the B-2 LLM-quality verdict. When ON, the
-  // EDGE_CLASSIFY garden task is enqueued for the attached CLI agent (the
-  // compute) instead of the synchronous in-process llmPort; the deterministic
-  // heuristic still produces the edge inline. Auto-ON whenever the resolved
-  // garden compute provider_kind is host_worker (the product default) so
-  // edge-classify routes to the agent rather than a cloud call; an operator can
-  // also force it with ALAYA_EDGE_CLASSIFY_HOST_WORKER=1/true regardless of
-  // provider_kind. The gardenTaskRepo this closure reads is created later in
-  // init; the closure is only invoked at materialization time, long after
-  // assignment, so there is no use-before-assignment.
+  // invariant: host-worker defer for the B-2 LLM-quality verdict. When ON (mode
+  // == "host_worker_defer"), the EDGE_CLASSIFY garden task is enqueued for the
+  // attached CLI agent (the compute) instead of the synchronous in-process
+  // llmPort; the deterministic heuristic still produces the edge inline for
+  // strong-overlap pairs. Auto-ON whenever the resolved garden compute
+  // provider_kind is host_worker (the product default) so edge-classify routes
+  // to the agent rather than a cloud call; an operator can also force it with
+  // ALAYA_EDGE_CLASSIFY_HOST_WORKER=1/true regardless of provider_kind. The
+  // gardenTaskRepo the queue closure reads is created later in init; the closure
+  // is only invoked at materialization time, long after assignment, so there is
+  // no use-before-assignment. The branch is derived from the same pure
+  // resolveEdgeClassifyWiring decision as edgeAutoProducerLlmEnabled.
   // see also: edge-classify-queue-adapter.ts.
-  const edgeClassifyHostWorkerEnabled = (() => {
-    const raw = process.env.ALAYA_EDGE_CLASSIFY_HOST_WORKER?.toLowerCase();
-    if (raw === "1" || raw === "true") {
-      return true;
-    }
-    if (raw === "0" || raw === "false") {
-      return false;
-    }
-    return sharedGardenComputeConfig.provider_kind === "host_worker";
-  })();
+  const edgeClassifyHostWorkerEnabled = edgeClassifyWiring.hostWorkerEnabled;
   let edgeClassifyQueueRepoHolder:
     | { enqueue: typeof SqliteGardenTaskRepo.prototype.enqueue; findById: typeof SqliteGardenTaskRepo.prototype.findById }
     | undefined;
@@ -945,6 +945,15 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const edgeAutoProducerService = new EdgeAutoProducerService({
     memoryRepo: memoryEntryRepo,
     pathCandidatePort,
+    // invariant: directional-dedup read port. applyVerdict consults the path
+    // plane to collapse a heuristic+host-verdict family-swap (e.g. heuristic
+    // supports vs verdict derives_from on the SAME ordered pair) into one
+    // positive-associative slot, so an untrusted worker verdict cannot mint a
+    // SECOND parallel positive path and double the pair's recall-bias.
+    existingPathReader: {
+      findByBackingObjectId: (workspaceId, objectId) =>
+        pathRelationRepo.findByBackingObjectId(workspaceId, objectId)
+    },
     // invariant: when the host-worker queue is wired the synchronous llmPort is
     // NOT passed — the LLM-quality verdict is deferred. The service still runs
     // the heuristic inline either way.
@@ -1663,11 +1672,23 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
           const staleBefore = new Date(
             Date.now() - HOST_WORKER_EXTRACT_ADVISORY_STALE_MS
           ).toISOString();
-          const backlog = gardenTaskRepo.countByKind(
+          const extract = gardenTaskRepo.countByKind(
             GardenTaskKind.POST_TURN_EXTRACT,
             staleBefore
           );
-          return { pending: backlog.pending, stale: backlog.stale };
+          // Also surface the EDGE_CLASSIFY backlog so a no-agent deployment's
+          // unrefined heuristic edges (the LLM-quality verdict that no host
+          // worker has rendered) are visible from doctor, not just extract work.
+          const edgeClassify = gardenTaskRepo.countByKind(
+            GardenTaskKind.EDGE_CLASSIFY,
+            staleBefore
+          );
+          return {
+            pending: extract.pending,
+            stale: extract.stale,
+            edgeClassifyPending: edgeClassify.pending,
+            edgeClassifyStale: edgeClassify.stale
+          };
         }
       },
       principalCodingEngineAvailable: principalCodingAvailability.available
