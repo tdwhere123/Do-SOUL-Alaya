@@ -281,10 +281,15 @@ export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "graph_expansion",
   "entity_seed",
   "path_expansion",
-  "session_cohort_fanin",
   "temporal_recency",
   "workspace_activation"
 ];
+// NOTE: session_cohort_fanin was a recall-time session-grouping fusion stream
+// (one nominated representative per cohort) that is now retired. The multi-
+// session fan-in carrier is the durable co_recalled PathRelation: a query that
+// hits a non-representative same-session member fans into its siblings via the
+// unified path plane (direct hop-1 path_expansion + multi-hop graph_expansion).
+// see also: scoreRecallFusionStream case "path_expansion".
 const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
   lexical_fts: 1,
   // trigram_fts rescues substring / spelling-variant / CJK matches the
@@ -311,45 +316,13 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   // phase-6 sub-workflow D-2/D-6 once the graph plane is non-zero.
   entity_seed: 1,
   path_expansion: 3,
-  // session_cohort_fanin parity with lexical_fts: the nominated cohort
-  // representative ALREADY carries its own lexical_fts / evidence_fts terms (it
-  // was query-relevant by construction), so the fan-in stream only needs to ADD
-  // a gentle one-axis merit increment, not out-weight the lexical lane. A larger
-  // weight over-promotes the rep and evicts true lexical/evidence gold (the
-  // displacement risk); weight 1 keeps the rep in the fusion competition for real
-  // rank promotion while the bounded structural reserve catches reps fusion
-  // floats to rank 6-8. see also: reserveStructuralDeliverySlots, COHORT_FANIN_DAMPEN.
-  session_cohort_fanin: 1,
   temporal_recency: 0,
   workspace_activation: 0
 });
-// invariant: cohort fan-in dampening. A nominated representative's query/
-// evidence relevance is multiplied by (1 + COHORT_FANIN_DAMPEN * log1p(
-// memberCount - 1)) and clamped to [0,1], so corroborating session mass behind
-// the rep raises its fan-in score but log-damped — a 17-member cohort cannot
-// dominate a 3-member one and membership alone cannot manufacture a high score
-// from an irrelevant base. see also: addContentDerivedExpansionCandidates.
-const COHORT_FANIN_DAMPEN = 0.15;
-/**
- * Log-damped cohort fan-in score for a nominated representative. `repScore` is
- * the rep's query/evidence relevance in [0,1]; `memberCount` is the cohort size.
- * The boost grows with corroborating session mass but log-damped and clamped to
- * [0,1], so a 17-member cohort cannot dominate a 3-member one and membership
- * alone (repScore=0) yields 0. Exported as the pure fan-in contract the cohort
- * nomination writes and the session_cohort_fanin stream reads.
- */
-export function computeCohortFaninScore(repScore: number, memberCount: number): number {
-  if (repScore <= 0) {
-    return 0;
-  }
-  return clamp01(
-    clamp01(repScore) * (1 + COHORT_FANIN_DAMPEN * Math.log1p(Math.max(0, memberCount - 1)))
-  );
-}
-// invariant: synthesis-anchor nomination bonus. A cohort member that a synthesis
-// capsule's curated evidence set points at is the capsule's preferred answer
-// carrier, so it gets this additive tiebreak when the synthesis backstop selects
-// which buried member to rescue. The capsule contributes signal only; the
+// invariant: synthesis-anchor nomination bonus. A path-reached memory_entry that
+// a synthesis capsule's curated evidence set points at is the capsule's preferred
+// answer carrier, so it gets this additive tiebreak when the synthesis backstop
+// selects which buried member to rescue. The capsule contributes signal only; the
 // delivered object stays a real gold memory_entry, never the capsule.
 // see also: reserveSynthesisDeliverySlots.
 const SYNTHESIS_ANCHOR_BONUS = 0.1;
@@ -898,9 +871,6 @@ export class RecallService {
     // see also: collectEntityDerivedSeeds — entity_seed plane score by memory id.
     readonly entitySeedScores: Readonly<Record<string, number>>;
     readonly pathExpansionScores: Readonly<Record<string, number>>;
-    // Fan-in score keyed by the nominated cohort representative memory id.
-    // see also: addContentDerivedExpansionCandidates representative nomination.
-    readonly cohortFaninScores: Readonly<Record<string, number>>;
     // Negative-path active suppression deltas keyed by target memory id.
     // see also: collectNegativePathSuppressions, applyPathSuppressionToFusionScores.
     readonly pathSuppressionScores: Readonly<Record<string, number>>;
@@ -944,11 +914,6 @@ export class RecallService {
       new Map();
     const entitySeedScores = new Map<string, number>();
     const pathExpansionScores = new Map<string, number>();
-    // Cohort fan-in score keyed by the ONE nominated representative of each
-    // session cohort. Written post-cohort by addContentDerivedExpansionCandidates
-    // (argmax query/evidence relevance, log-damped by cohort size); cohort
-    // distractors stay absent. see also: scoreRecallFusionStream "session_cohort_fanin".
-    const cohortFaninScores = new Map<string, number>();
     // Active sign-aware suppression: target memory id -> accumulated demotion
     // delta sourced from negative (recall_bias < 0) paths anchored on the
     // expansion seeds. Applied to the fused score before sort.
@@ -1209,8 +1174,7 @@ export class RecallService {
       tierMemories,
       drafts,
       queryProbes,
-      addCandidate,
-      cohortFaninScores
+      addCandidate
     });
     sourceCohortKeys = await this.addSourceProximityCandidates({
       workspaceId,
@@ -1332,7 +1296,6 @@ export class RecallService {
       graphExpansionCandidateSources,
       entitySeedScores: Object.freeze(Object.fromEntries(entitySeedScores.entries())),
       pathExpansionScores: Object.freeze(Object.fromEntries(pathExpansionScores.entries())),
-      cohortFaninScores: Object.freeze(Object.fromEntries(cohortFaninScores.entries())),
       pathSuppressionScores: Object.freeze(Object.fromEntries(pathSuppressionScores.entries())),
       degradation_reason: null
     });
@@ -1343,10 +1306,6 @@ export class RecallService {
     readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
     readonly queryProbes: Readonly<RecallQueryProbes>;
     readonly addCandidate: CoarseCandidateAdder;
-    // Mutated in place: the caller (coarseFilter) owns this map and reads it
-    // into the coarse result. We write the ONE nominated representative per
-    // cohort; distractors are never written.
-    readonly cohortFaninScores: Map<string, number>;
   }>): void {
     const queryEvidenceEntries = params.tierMemories
       .map((entry) => Object.freeze({
@@ -1434,9 +1393,6 @@ export class RecallService {
       for (const entry of exactCohortMatches) {
         params.addCandidate(entry, "session_surface_cohort", 0.8, "session_surface_cohort");
       }
-      // Nominate ONE representative for the exact cohort by query/evidence
-      // relevance and write its damped fan-in score; distractors stay flat.
-      this.nominateCohortRepresentative(exactCohortMatches, params.queryProbes, evidenceRefs, params.cohortFaninScores);
     }
 
     if (structuralSeeds.length > 0) {
@@ -1483,73 +1439,9 @@ export class RecallService {
               params.addCandidate(entry, "session_surface_cohort", 0.55, "session_surface_cohort");
             }
           }
-          // Nominate ONE representative per seed cohort across the radius window
-          // (seed center included — it is a legitimate answer carrier). Distractor
-          // members keep only the flat 0.55 structural term.
-          this.nominateCohortRepresentative(
-            cohort.slice(start, end),
-            params.queryProbes,
-            evidenceRefs,
-            params.cohortFaninScores
-          );
         }
       }
     }
-  }
-
-  /**
-   * Nominate exactly ONE answer representative for a session cohort and write its
-   * damped fan-in score into `cohortFaninScores`. The representative is the
-   * argmax member by query relevance (not cohort membership):
-   *
-   *   repScore = scoreQueryEvidenceMatch + 0.5 * scoreEvidenceAnchorMatch
-   *
-   * A cohort whose best member scores 0 (no query-relevant member) nominates
-   * NOBODY — this is the distractor-promotion guard: a large irrelevant cohort
-   * cannot manufacture a fan-in score from membership alone. The nominated rep's
-   * score is multiplied by a log-damped cohort-mass factor and clamped to [0,1],
-   * so corroborating session members raise the rep without a 17-member cohort
-   * dominating a 3-member one. Higher fan-in already written for the same memory
-   * id (it is a representative of more than one cohort) is kept via max, so the
-   * strongest corroboration wins and distractors never overwrite a rep.
-   * see also: scoreRecallFusionStream "session_cohort_fanin".
-   */
-  private nominateCohortRepresentative(
-    cohort: readonly Readonly<MemoryEntry>[],
-    queryProbes: Readonly<RecallQueryProbes>,
-    evidenceRefs: ReadonlySet<string>,
-    cohortFaninScores: Map<string, number>
-  ): void {
-    if (cohort.length === 0) {
-      return;
-    }
-    let best: Readonly<MemoryEntry> | null = null;
-    let bestScore = 0;
-    for (const member of cohort) {
-      const repScore = clamp01(
-        scoreQueryEvidenceMatch(member, queryProbes) +
-          0.5 * scoreEvidenceAnchorMatch(member, evidenceRefs)
-      );
-      if (repScore <= 0) {
-        continue;
-      }
-      if (
-        best === null ||
-        repScore > bestScore ||
-        (repScore === bestScore && compareMemoryEntries(member, best) < 0)
-      ) {
-        best = member;
-        bestScore = repScore;
-      }
-    }
-    if (best === null || bestScore <= 0) {
-      return;
-    }
-    const fanin = computeCohortFaninScore(bestScore, cohort.length);
-    cohortFaninScores.set(
-      best.object_id,
-      Math.max(cohortFaninScores.get(best.object_id) ?? 0, fanin)
-    );
   }
 
   private async addSourceProximityCandidates(params: Readonly<{
@@ -2372,7 +2264,6 @@ export class RecallService {
       coarseGraphExpansionScores: params.coarseFilter.graphExpansionScores,
       coarseEntitySeedScores: params.coarseFilter.entitySeedScores,
       coarsePathExpansionScores: params.coarseFilter.pathExpansionScores,
-      coarseCohortFaninScores: params.coarseFilter.cohortFaninScores,
       coarsePathSuppressionScores: params.coarseFilter.pathSuppressionScores
     });
     const assessment = this.fineAssess(
@@ -2465,10 +2356,6 @@ export class RecallService {
         ...current.pathExpansionScores,
         ...next.pathExpansionScores
       }),
-      cohortFaninScores: Object.freeze({
-        ...current.cohortFaninScores,
-        ...next.cohortFaninScores
-      }),
       pathSuppressionScores: Object.freeze({
         ...current.pathSuppressionScores,
         ...next.pathSuppressionScores
@@ -2495,7 +2382,6 @@ export class RecallService {
     readonly coarseGraphExpansionScores: Readonly<Record<string, number>>;
     readonly coarseEntitySeedScores: Readonly<Record<string, number>>;
     readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
-    readonly coarseCohortFaninScores: Readonly<Record<string, number>>;
     readonly coarsePathSuppressionScores: Readonly<Record<string, number>>;
   }): Promise<RecallSupplementaryData> {
     // graph_support is a weighted inbound aggregate across edge types; the
@@ -2612,7 +2498,6 @@ export class RecallService {
       graphExpansionScores: params.coarseGraphExpansionScores,
       entitySeedScores: params.coarseEntitySeedScores,
       pathExpansionScores: params.coarsePathExpansionScores,
-      cohortFaninScores: params.coarseCohortFaninScores,
       pathSuppressionScores: params.coarsePathSuppressionScores,
       embeddingSimilarityScores: Object.freeze({}),
       graphSupportCounts: Object.freeze(graphSupportCounts),
@@ -3894,11 +3779,6 @@ function scoreRecallFusionStream(
         return 0;
       }
       return clamp01(supplementaryData.pathExpansionScores[objectId] ?? 0);
-    case "session_cohort_fanin":
-      if (isGlobalCandidate) {
-        return 0;
-      }
-      return clamp01(supplementaryData.cohortFaninScores[objectId] ?? 0);
     case "temporal_recency":
       return scoreTemporalRecency(candidate.entry, nowIso);
     case "workspace_activation":
@@ -4044,12 +3924,13 @@ function applyFeatureRerank<T extends FusedRecallCandidateInput>(
  * The scorer stays memory_entry-only: a synthesis_capsule can never be credited
  * as gold (it fires only synthesis_fts and is fail-closed on every other stream).
  * The promotion path for an L2 cluster is its anchor member memory_entry, lifted
- * by the session_cohort_fanin stream (see addContentDerivedExpansionCandidates).
+ * by the path/graph-expansion streams when a durable co_recalled PathRelation
+ * fans a query into it (see scoreRecallFusionStream "path_expansion").
  * This reserve is therefore a BACKSTOP, not a tail-pin: it fires only for a
  * capsule whose evidence set reached no top-5 member, guaranteeing the L2 layer
- * stays reachable through recall when fan-in did not float a member into the
- * head window. A capsule whose member already delivered in top-5 needs no
- * reserved slot — its signal is already in the delivered context.
+ * stays reachable through recall when path/graph fan-in did not float a member
+ * into the head window. A capsule whose member already delivered in top-5 needs
+ * no reserved slot — its signal is already in the delivered context.
  */
 const SYNTHESIS_DELIVERY_RESERVE = 2;
 // invariant: top-of-window coverage horizon. A synthesis capsule is "covered"
@@ -4125,23 +4006,24 @@ function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
   }
   // Prefer the capsule whose curated anchor most strongly matches the query
   // (synthesis FTS rank), with a tiebreak bonus when the capsule's evidence set
-  // overlaps the evidence_refs of a fan-in-nominated cohort representative — that
-  // capsule corroborates a representative the cohort plane already trusts, so it
-  // is the most answer-relevant uncovered cluster to surface. The capsule still
-  // contributes signal only; the rep memory_entry remains the credited gold.
-  const nominatedRepEvidenceRefs = new Set<string>();
+  // overlaps the evidence_refs of a path/graph-expansion-reached member — that
+  // capsule corroborates a member the durable co_recalled path plane already
+  // fanned into the pool, so it is the most answer-relevant uncovered cluster to
+  // surface. The capsule still contributes signal only; the reached member
+  // memory_entry remains the credited gold. see also: STRUCTURAL_FUSION_STREAMS.
+  const pathReachedEvidenceRefs = new Set<string>();
   for (const candidate of deliveryOrdered) {
     if (
       candidate.objectKind !== "synthesis_capsule" &&
-      (supplementaryData.cohortFaninScores[candidate.entry.object_id] ?? 0) > 0
+      structuralFusionContribution(candidate) > 0
     ) {
       for (const ref of candidate.entry.evidence_refs) {
-        nominatedRepEvidenceRefs.add(ref);
+        pathReachedEvidenceRefs.add(ref);
       }
     }
   }
   const synthesisAnchorBonus = (capsule: T): number =>
-    capsule.entry.evidence_refs.some((ref) => nominatedRepEvidenceRefs.has(ref))
+    capsule.entry.evidence_refs.some((ref) => pathReachedEvidenceRefs.has(ref))
       ? SYNTHESIS_ANCHOR_BONUS
       : 0;
   const reservedSynthesis = [...uncoveredCapsules]
@@ -4187,16 +4069,14 @@ function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
 // evidence_structural_agreement (geometric mean evidence_fts x structural) and
 // entity_seed (query-time entity-FTS surface signal) are likewise NOT topology.
 //
-// session_cohort_fanin IS included: a nominated cohort representative fires this
-// single weight-6 stream, which RRF caps near weight/(k+1) just like the graph/
-// path topology streams, so a rep that fan-in-promotes but still loses the flat
-// cut is eligible for the bounded structural-rescue backstop. This is a tail
-// safety net for reps fusion floated to rank 6-8, NOT the primary promotion
-// lever — the primary lever is the weight-6 fusion accumulation itself.
+// This is the multi-session fan-in rescue lever: when a durable co_recalled
+// PathRelation fans a query into a same-session sibling, the sibling fires
+// path_expansion (direct hop-1) or graph_expansion (multi-hop) and — if that
+// fan-in loses the flat top-N cut — becomes eligible for the bounded structural-
+// rescue backstop. see also: reserveStructuralDeliverySlots.
 const STRUCTURAL_FUSION_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
   "graph_expansion",
-  "path_expansion",
-  "session_cohort_fanin"
+  "path_expansion"
 ]);
 
 // invariant: lexical-lane FUSION STREAMS — the content/surface/evidence-FTS
@@ -4380,7 +4260,7 @@ function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInput>(
 // capsules, structural reserve keeps >= 1 pure-fusion head slot — are
 // load-bearing and unit-tested directly. Exported only for the test suite; no
 // production module imports this object. see also:
-// __tests__/recall-cohort-fanin.test.ts.
+// __tests__/recall-durable-fanin-delivery.test.ts.
 export const recallDeliveryReserveTestInternals = Object.freeze({
   selectUncoveredSynthesisCapsules,
   reserveSynthesisDeliverySlots,

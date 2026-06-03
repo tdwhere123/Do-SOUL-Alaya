@@ -16,7 +16,6 @@ const RecallFusionStreamRankSchema = z
     graph_expansion: z.number().int().positive().nullable(),
     entity_seed: z.number().int().positive().nullable(),
     path_expansion: z.number().int().positive().nullable(),
-    session_cohort_fanin: z.number().int().positive().nullable(),
     temporal_recency: z.number().int().positive().nullable(),
     workspace_activation: z.number().int().positive().nullable()
   })
@@ -39,7 +38,6 @@ const RecallFusionStreamContributionSchema = z
     graph_expansion: z.number().min(0),
     entity_seed: z.number().min(0),
     path_expansion: z.number().min(0),
-    session_cohort_fanin: z.number().min(0),
     temporal_recency: z.number().min(0),
     workspace_activation: z.number().min(0)
   })

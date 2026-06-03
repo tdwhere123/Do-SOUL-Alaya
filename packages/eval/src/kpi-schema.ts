@@ -202,6 +202,29 @@ const CohortAttributionSchema = z
   })
   .strict();
 
+// Durable-edge fan-in proof instrument (R2). Splits path_expansion (direct
+// hop-1 co_recalled fan-in) vs graph_expansion (multi-hop) gold-bearing top-5
+// movement SEPARATELY, so the gate archive shows whether the durable
+// co_recalled PathRelation carrier — which replaced the retired
+// session_cohort_fanin heuristic — actually promotes gold siblings into top-5.
+//   - path_gold_*: gold bearing the path_expansion stream and its hit@5 share
+//   - graph_gold_*: gold bearing the graph_expansion stream and its hit@5 share
+//   - path_primary_hit_at_5_count: hit@5 gold attributed to path (the unified
+//     plane's double-count guard credits direct hop-1 before multi-hop)
+//   - graph_only_hit_at_5_count: hit@5 gold reached purely via multi-hop
+const PathVsGraphFaninSchema = z
+  .object({
+    path_gold_source_count: z.number().int().nonnegative(),
+    path_gold_hit_at_5_count: z.number().int().nonnegative(),
+    path_gold_hit_at_5_rate: RatioSchema,
+    graph_gold_source_count: z.number().int().nonnegative(),
+    graph_gold_hit_at_5_count: z.number().int().nonnegative(),
+    graph_gold_hit_at_5_rate: RatioSchema,
+    path_primary_hit_at_5_count: z.number().int().nonnegative(),
+    graph_only_hit_at_5_count: z.number().int().nonnegative()
+  })
+  .strict();
+
 const QualityMetricsSchema = z
   .object({
     schema_version: z.literal("bench-quality-metrics.v1"),
@@ -235,6 +258,9 @@ const QualityMetricsSchema = z
     // Cohort fan-in attribution (codex I2). Optional so pre-fan-in kpi.json
     // records stay valid; new LongMemEval runs always populate it.
     cohort_attribution: CohortAttributionSchema.optional(),
+    // Durable-edge path-vs-graph fan-in proof (R2). Optional so pre-R2 kpi.json
+    // records stay valid; new LongMemEval runs always populate it.
+    path_vs_graph_fanin: PathVsGraphFaninSchema.optional(),
     // @anchor longmemeval-abstention: calibrated-confidence scoring of the
     // LongMemEval-S abstention questions (`question_id` ending `_abs`).
     // Optional so pre-abstention-scoring kpi.json records stay valid; new

@@ -478,6 +478,20 @@ export function buildLongMemEvalQualityMetrics(
   let cohortGoldFirstAdmittedCount = 0;
   let cohortGoldWinningAdmissionCount = 0;
   let cohortGoldHitAt5Count = 0;
+  // Durable-edge fan-in proof instrument: how the path_expansion (direct hop-1
+  // co_recalled fan-in) vs graph_expansion (multi-hop) streams carry gold into
+  // top-5 SEPARATELY. The unified path plane's double-count guard credits a
+  // direct 1-hop path_expansion term before any multi-hop graph_expansion term,
+  // so a gold bearing both is attributed path-primary. graph_only isolates gold
+  // that reached top-5 purely via multi-hop. This is the load-bearing signal
+  // that the retired session_cohort_fanin heuristic was replaced by the durable
+  // co_recalled PathRelation carrier. see also: PathVsGraphFaninSchema.
+  let pathFaninGoldSourceCount = 0;
+  let pathFaninGoldHitAt5Count = 0;
+  let graphFaninGoldSourceCount = 0;
+  let graphFaninGoldHitAt5Count = 0;
+  let pathPrimaryGoldHitAt5Count = 0;
+  let graphOnlyGoldHitAt5Count = 0;
 
   for (const question of diagnostics) {
     missDistribution[question.miss_classification] =
@@ -538,6 +552,26 @@ export function buildLongMemEvalQualityMetrics(
       }
       if (gold.plane_winning_admission === COHORT_PLANE) {
         cohortGoldWinningAdmissionCount++;
+      }
+      const bearsPathFanin = hasGoldPathExpansionStream(gold);
+      const bearsGraphFanin = hasGoldGraphExpansionStream(gold);
+      if (bearsPathFanin) {
+        pathFaninGoldSourceCount++;
+        if (goldHitAt5) {
+          pathFaninGoldHitAt5Count++;
+          // Double-count guard: a gold bearing the direct hop-1 path_expansion
+          // term is attributed path-primary even if it also bears graph_expansion.
+          pathPrimaryGoldHitAt5Count++;
+        }
+      }
+      if (bearsGraphFanin) {
+        graphFaninGoldSourceCount++;
+        if (goldHitAt5) {
+          graphFaninGoldHitAt5Count++;
+          if (!bearsPathFanin) {
+            graphOnlyGoldHitAt5Count++;
+          }
+        }
       }
       if (isDeliveryBudgetLoss(gold)) {
         const dropReason = gold.budget_drop_reason;
@@ -614,6 +648,16 @@ export function buildLongMemEvalQualityMetrics(
       hit_at_5_count: cohortGoldHitAt5Count,
       hit_at_5_rate: ratio(cohortGoldHitAt5Count, cohortGoldSourcePlaneCount)
     },
+    path_vs_graph_fanin: {
+      path_gold_source_count: pathFaninGoldSourceCount,
+      path_gold_hit_at_5_count: pathFaninGoldHitAt5Count,
+      path_gold_hit_at_5_rate: ratio(pathFaninGoldHitAt5Count, pathFaninGoldSourceCount),
+      graph_gold_source_count: graphFaninGoldSourceCount,
+      graph_gold_hit_at_5_count: graphFaninGoldHitAt5Count,
+      graph_gold_hit_at_5_rate: ratio(graphFaninGoldHitAt5Count, graphFaninGoldSourceCount),
+      path_primary_hit_at_5_count: pathPrimaryGoldHitAt5Count,
+      graph_only_hit_at_5_count: graphOnlyGoldHitAt5Count
+    },
     // Calibrated-confidence audit block: how many `_abs` questions were
     // scored, how many stayed appropriately unconfident at each k, and the
     // false-confident threshold the verdict used. A future benchmark swap
@@ -650,6 +694,30 @@ function hasPathStreamContribution(delivered: DiagnosticRecallResult): boolean {
     delivered.plane_first_admitted === "path_expansion" ||
     delivered.plane_winning_admission === "path_expansion" ||
     (delivered.per_stream_rank?.path_expansion ?? null) !== null
+  );
+}
+
+// Durable-edge fan-in proof: a gold candidate bears the path_expansion stream
+// (direct hop-1 co_recalled fan-in) when it was admitted on the path plane or
+// fired the path_expansion fusion stream. see also: buildLongMemEvalQualityMetrics.
+function hasGoldPathExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
+  return (
+    gold.source_planes.includes("path_expansion") ||
+    gold.plane_first_admitted === "path_expansion" ||
+    gold.plane_winning_admission === "path_expansion" ||
+    (gold.per_stream_rank?.path_expansion ?? null) !== null
+  );
+}
+
+// Durable-edge fan-in proof: a gold candidate bears the graph_expansion stream
+// (multi-hop fan-in) when it was admitted on the graph plane or fired the
+// graph_expansion fusion stream. see also: buildLongMemEvalQualityMetrics.
+function hasGoldGraphExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
+  return (
+    gold.source_planes.includes("graph_expansion") ||
+    gold.plane_first_admitted === "graph_expansion" ||
+    gold.plane_winning_admission === "graph_expansion" ||
+    (gold.per_stream_rank?.graph_expansion ?? null) !== null
   );
 }
 

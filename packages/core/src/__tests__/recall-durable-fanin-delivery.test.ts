@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   MemoryDimension,
-  RetentionPolicy,
   ScopeClass,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import {
   RECALL_FUSION_STREAMS,
-  computeCohortFaninScore,
   recallDeliveryReserveTestInternals
 } from "../recall-service.js";
 import type {
@@ -78,7 +76,9 @@ type FusedCandidate = Readonly<{
   readonly originPlane: "workspace_local";
   readonly objectKind: "memory_entry" | "synthesis_capsule";
   readonly effectiveScore: number;
-  readonly effectiveFactors: Record<string, number>;
+  // RecallScoreFactors requires relevance + activation; the delivery-reserve
+  // helpers never read score_factors, so the minimal valid shape suffices.
+  readonly effectiveFactors: { readonly relevance: number; readonly activation: number };
   readonly structuralScore?: number;
   readonly fusion: Readonly<RecallFusionBreakdown>;
 }>;
@@ -104,7 +104,7 @@ function fusedCandidate(input: {
     originPlane: "workspace_local" as const,
     objectKind,
     effectiveScore: 0,
-    effectiveFactors: {},
+    effectiveFactors: { relevance: 0, activation: 0 },
     fusion: Object.freeze({
       ...breakdown,
       object_kind: objectKind,
@@ -132,7 +132,6 @@ function supplementary(
     graphExpansionScores: Object.freeze({}),
     entitySeedScores: Object.freeze({}),
     pathExpansionScores: Object.freeze({}),
-    cohortFaninScores: Object.freeze({}),
     pathSuppressionScores: Object.freeze({}),
     embeddingSimilarityScores: Object.freeze({}),
     graphSupportCounts: Object.freeze({}),
@@ -147,42 +146,14 @@ function supplementary(
   });
 }
 
-describe("session_cohort_fanin stream registration", () => {
-  it("registers session_cohort_fanin in the production fusion stream list", () => {
-    expect(RECALL_FUSION_STREAMS).toContain("session_cohort_fanin");
-  });
-});
-
-describe("computeCohortFaninScore — fan-in dampening", () => {
-  it("returns 0 when the representative is not query-relevant (membership alone never scores)", () => {
-    expect(computeCohortFaninScore(0, 17)).toBe(0);
-    expect(computeCohortFaninScore(-1, 17)).toBe(0);
+describe("durable-edge fan-in stream registration", () => {
+  it("does NOT register the retired session_cohort_fanin heuristic stream", () => {
+    expect(RECALL_FUSION_STREAMS).not.toContain("session_cohort_fanin");
   });
 
-  it("boosts a relevant rep above its base repScore, monotonic in cohort size", () => {
-    const base = 0.4;
-    const small = computeCohortFaninScore(base, 3);
-    const large = computeCohortFaninScore(base, 17);
-    expect(small).toBeGreaterThan(base);
-    expect(large).toBeGreaterThan(small);
-  });
-
-  it("log-damps so a 17-member cohort does not dominate a 3-member one", () => {
-    const base = 0.4;
-    const small = computeCohortFaninScore(base, 3);
-    const large = computeCohortFaninScore(base, 17);
-    const smallUplift = small - base;
-    const largeUplift = large - base;
-    // A linear (un-damped) fan-in would scale uplift by raw member count, i.e.
-    // 16/2 = 8x. log1p damping must keep the uplift ratio far below that — it is
-    // log1p(16)/log1p(2) ≈ 2.58x, comfortably under half the linear ratio.
-    const linearRatio = (17 - 1) / (3 - 1);
-    expect(largeUplift / smallUplift).toBeLessThan(linearRatio / 2);
-  });
-
-  it("clamps to [0,1] so a high-relevance large cohort cannot exceed a normal stream score", () => {
-    expect(computeCohortFaninScore(0.95, 50)).toBeLessThanOrEqual(1);
-    expect(computeCohortFaninScore(1, 1)).toBeLessThanOrEqual(1);
+  it("registers the durable-edge fan-in carriers path_expansion + graph_expansion", () => {
+    expect(RECALL_FUSION_STREAMS).toContain("path_expansion");
+    expect(RECALL_FUSION_STREAMS).toContain("graph_expansion");
   });
 });
 
@@ -220,27 +191,72 @@ describe("synthesis backstop — fires only for uncovered capsules, not a tail-p
     const windowIds = reserved.slice(0, 5).map((candidate) => candidate.entry.object_id);
     expect(windowIds).toContain("syn-uncov");
   });
+
+  it("prefers an uncovered capsule whose evidence overlaps a path-reached member (durable-edge anchor bonus)", () => {
+    // The coverage window is min(maxEntries, 5)=5 here. Fillers 0-4 fill that
+    // window WITHOUT carrying ev-shared, so the anchored capsule stays uncovered.
+    // A path-reached member (path_expansion stream contribution) sits OUTSIDE the
+    // coverage window carrying ev-shared. Two uncovered capsules tie on synthesis
+    // FTS rank (0); the anchor bonus must break the tie toward the capsule whose
+    // evidence corroborates the path-reached member.
+    const fillers = Array.from({ length: 5 }, (_unused, index) =>
+      fusedCandidate({ objectId: `filler-${index}`, evidenceRefs: [`other-${index}`] })
+    );
+    const pathReachedMember = fusedCandidate({
+      objectId: "mem-path-reached",
+      evidenceRefs: ["ev-shared"],
+      contributions: { path_expansion: 0.3 }
+    });
+    const anchoredCapsule = fusedCandidate({
+      objectId: "syn-anchored",
+      objectKind: "synthesis_capsule",
+      evidenceRefs: ["ev-shared"]
+    });
+    const unanchoredCapsule = fusedCandidate({
+      objectId: "syn-unanchored",
+      objectKind: "synthesis_capsule",
+      evidenceRefs: ["ev-orphan"]
+    });
+    // maxEntries 6 reserves up to SYNTHESIS_DELIVERY_RESERVE (2) tail slots; with
+    // two uncovered capsules tied on FTS rank, the anchor bonus orders the
+    // anchored one ahead of the orphan in the reserved tail.
+    const delivered = [...fillers, pathReachedMember, unanchoredCapsule, anchoredCapsule];
+    const reserved = reserveSynthesisDeliverySlots(delivered, supplementary(), 6);
+    const anchoredPos = reserved.findIndex((c) => c.entry.object_id === "syn-anchored");
+    const unanchoredPos = reserved.findIndex((c) => c.entry.object_id === "syn-unanchored");
+    expect(anchoredPos).toBeGreaterThanOrEqual(0);
+    expect(unanchoredPos).toBeGreaterThanOrEqual(0);
+    expect(anchoredPos).toBeLessThan(unanchoredPos);
+  });
 });
 
-describe("structural reserve — session_cohort_fanin eligible + bounded", () => {
-  it("treats a session_cohort_fanin-dominated candidate as a structural rescue candidate", () => {
+describe("structural reserve — durable-edge path/graph fan-in eligible + bounded", () => {
+  it("treats a path_expansion-dominated candidate as a structural rescue candidate", () => {
     const candidate = fusedCandidate({
-      objectId: "cohort-rep",
-      contributions: { session_cohort_fanin: 0.3, lexical_fts: 0.05 }
+      objectId: "path-fanin",
+      contributions: { path_expansion: 0.3, lexical_fts: 0.05 }
     });
     expect(isStructuralRescueCandidate(candidate)).toBe(true);
   });
 
-  it("does not rescue a lexical-dominated row that merely carries a small cohort term", () => {
+  it("treats a graph_expansion-dominated candidate as a structural rescue candidate", () => {
+    const candidate = fusedCandidate({
+      objectId: "graph-fanin",
+      contributions: { graph_expansion: 0.3, lexical_fts: 0.05 }
+    });
+    expect(isStructuralRescueCandidate(candidate)).toBe(true);
+  });
+
+  it("does not rescue a lexical-dominated row that merely carries a small path term", () => {
     const candidate = fusedCandidate({
       objectId: "lexical-filler",
-      contributions: { session_cohort_fanin: 0.05, lexical_fts: 0.4 }
+      contributions: { path_expansion: 0.05, lexical_fts: 0.4 }
     });
     expect(isStructuralRescueCandidate(candidate)).toBe(false);
   });
 
   it("keeps at least one pure-fusion head slot (bounded reserve)", () => {
-    // Head rows: pure lexical winners. Buried rows: cohort-fanin-dominated, out of window.
+    // Head rows: pure lexical winners. Buried rows: path-fan-in-dominated, out of window.
     const head = Array.from({ length: 10 }, (_unused, index) =>
       fusedCandidate({
         objectId: `head-${index}`,
@@ -250,7 +266,7 @@ describe("structural reserve — session_cohort_fanin eligible + bounded", () =>
     const buried = Array.from({ length: 3 }, (_unused, index) =>
       fusedCandidate({
         objectId: `buried-${index}`,
-        contributions: { session_cohort_fanin: 0.4 - index * 0.01 }
+        contributions: { path_expansion: 0.4 - index * 0.01 }
       })
     );
     const delivered = [...head, ...buried];
@@ -261,7 +277,7 @@ describe("structural reserve — session_cohort_fanin eligible + bounded", () =>
     const windowHead = result.slice(0, maxEntries).map((candidate) => candidate.entry.object_id);
     const headSurvivors = windowHead.filter((id) => id.startsWith("head-"));
     expect(headSurvivors.length).toBeGreaterThanOrEqual(1);
-    // No more than 2 buried cohort reps are pulled into the window.
+    // No more than 2 buried path-fan-in reps are pulled into the window.
     const rescued = windowHead.filter((id) => id.startsWith("buried-"));
     expect(rescued.length).toBeLessThanOrEqual(2);
   });

@@ -1602,6 +1602,15 @@ function mergeQualityMetrics(
   let cohortGoldFirstAdmittedCount = 0;
   let cohortGoldWinningAdmissionCount = 0;
   let cohortGoldHitAt5Count = 0;
+  // Durable-edge path-vs-graph fan-in proof (R2): additive across shards; rates
+  // recomputed from the merged counts. Present only when a shard carried it.
+  let anyPathVsGraphFanin = false;
+  let pathFaninGoldSourceCount = 0;
+  let pathFaninGoldHitAt5Count = 0;
+  let graphFaninGoldSourceCount = 0;
+  let graphFaninGoldHitAt5Count = 0;
+  let pathPrimaryGoldHitAt5Count = 0;
+  let graphOnlyGoldHitAt5Count = 0;
 
   for (const metric of metrics) {
     if (metric === undefined) continue;
@@ -1646,6 +1655,15 @@ function mergeQualityMetrics(
       cohortGoldFirstAdmittedCount += metric.cohort_attribution.gold_first_admitted_count;
       cohortGoldWinningAdmissionCount += metric.cohort_attribution.gold_winning_admission_count;
       cohortGoldHitAt5Count += metric.cohort_attribution.hit_at_5_count;
+    }
+    if (metric.path_vs_graph_fanin !== undefined) {
+      anyPathVsGraphFanin = true;
+      pathFaninGoldSourceCount += metric.path_vs_graph_fanin.path_gold_source_count;
+      pathFaninGoldHitAt5Count += metric.path_vs_graph_fanin.path_gold_hit_at_5_count;
+      graphFaninGoldSourceCount += metric.path_vs_graph_fanin.graph_gold_source_count;
+      graphFaninGoldHitAt5Count += metric.path_vs_graph_fanin.graph_gold_hit_at_5_count;
+      pathPrimaryGoldHitAt5Count += metric.path_vs_graph_fanin.path_primary_hit_at_5_count;
+      graphOnlyGoldHitAt5Count += metric.path_vs_graph_fanin.graph_only_hit_at_5_count;
     }
   }
 
@@ -1700,6 +1718,20 @@ function mergeQualityMetrics(
             gold_winning_admission_count: cohortGoldWinningAdmissionCount,
             hit_at_5_count: cohortGoldHitAt5Count,
             hit_at_5_rate: ratio(cohortGoldHitAt5Count, cohortGoldSourcePlaneCount)
+          }
+        }
+      : {}),
+    ...(anyPathVsGraphFanin
+      ? {
+          path_vs_graph_fanin: {
+            path_gold_source_count: pathFaninGoldSourceCount,
+            path_gold_hit_at_5_count: pathFaninGoldHitAt5Count,
+            path_gold_hit_at_5_rate: ratio(pathFaninGoldHitAt5Count, pathFaninGoldSourceCount),
+            graph_gold_source_count: graphFaninGoldSourceCount,
+            graph_gold_hit_at_5_count: graphFaninGoldHitAt5Count,
+            graph_gold_hit_at_5_rate: ratio(graphFaninGoldHitAt5Count, graphFaninGoldSourceCount),
+            path_primary_hit_at_5_count: pathPrimaryGoldHitAt5Count,
+            graph_only_hit_at_5_count: graphOnlyGoldHitAt5Count
           }
         }
       : {}),
