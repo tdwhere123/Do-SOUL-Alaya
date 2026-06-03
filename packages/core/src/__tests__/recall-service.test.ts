@@ -3823,6 +3823,72 @@ describe("RecallService", () => {
     expect(highCandidate?.relevance_score).toBeGreaterThan(lowCandidate?.relevance_score ?? 0);
   });
 
+  it("fades a long-idle memory's effective activation at recall read while a recently-used memory keeps full strength (R3e lazy time-decay)", async () => {
+    // Identical stored activation_score; only the last-reinforced timestamp
+    // differs. The recently-used memory keeps full activation; the long-idle
+    // memory (>= FRESHNESS_DECAY_DAYS since last_used_at, floored by created_at)
+    // fades to ~0 effective activation deterministically. now = 2026-03-23.
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-recent",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.8,
+        created_at: "2026-03-23T00:00:00.000Z",
+        last_used_at: "2026-03-23T00:00:00.000Z",
+        content: "Recently used procedure baseline."
+      }),
+      createMemoryEntry({
+        object_id: "memory-idle",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.8,
+        // 30 days before now and never used since -> freshness factor ~0.
+        created_at: "2026-02-21T00:00:00.000Z",
+        last_used_at: null,
+        content: "Long-idle procedure baseline."
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+
+    const recent = result.candidates.find((candidate) => candidate.object_id === "memory-recent");
+    const idle = result.candidates.find((candidate) => candidate.object_id === "memory-idle");
+
+    // Recently-used keeps full stored activation; idle fades toward 0.
+    expect(recent?.score_factors?.activation).toBeCloseTo(0.8, 5);
+    expect(idle?.score_factors?.activation ?? 1).toBeLessThan(0.05);
+    // Effective recall strength of the idle memory is strictly lower.
+    expect(recent?.relevance_score ?? 0).toBeGreaterThan(idle?.relevance_score ?? 0);
+  });
+
+  it("does not decay a recently-used memory's activation at recall read (R3e bound)", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-fresh",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.6,
+        created_at: "2026-03-22T00:00:00.000Z",
+        last_used_at: "2026-03-23T00:00:00.000Z"
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+
+    const fresh = result.candidates.find((candidate) => candidate.object_id === "memory-fresh");
+    expect(fresh?.score_factors?.activation).toBeCloseTo(0.6, 5);
+  });
+
   it("does not let plasticity alone override a base lexical/activation rank inversion (mirror of the embedding-supplement contract)", async () => {
     // Strong-activation lexical baseline vs weak-activation candidate with
     // moderate plasticity. The lexical baseline must still win because the

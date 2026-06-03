@@ -39,6 +39,7 @@ import {
   buildRecallCandidate,
   buildSynthesisCoarseRecallCandidate
 } from "./recall-candidate-builder.js";
+import { computeFreshnessFactor } from "./dynamics-constants-runtime.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
 import {
   EMBEDDING_SIMILARITY_WEIGHT,
@@ -3355,7 +3356,25 @@ export class RecallService {
     const isGlobalCandidate = originPlane === "global";
     const isSynthesisCandidate = objectKind === "synthesis_capsule";
     const canUseMemorySupplement = !isGlobalCandidate && !isSynthesisCandidate;
-    const activationScore = normalizeActivationScore(entry.activation_score);
+    // D-DECAY-2 lazy time/idle decay (read-time, no full-table sweep): the
+    // stored activation fades by elapsed time since last reinforcement. We
+    // reuse computeFreshnessFactor (bounded [0,1], FRESHNESS_DECAY_DAYS) so a
+    // long-idle memory's EFFECTIVE recall strength drops even between karma
+    // recomputes. last_used_at is the "last reinforced" proxy; created_at
+    // floors a never-used memory's age at birth. This composes with (does not
+    // replace) the competitive/karma decay already baked into the stored
+    // activation_score — both are strength inputs. Only memory entries carry
+    // these timestamps, so leave global/synthesis activation un-decayed.
+    const storedActivationScore = normalizeActivationScore(entry.activation_score);
+    const activationTimeDecay =
+      canUseMemorySupplement && typeof entry.created_at === "string" && entry.created_at.length > 0
+        ? computeFreshnessFactor({
+            lastUsedAt: entry.last_used_at ?? null,
+            createdAt: entry.created_at,
+            now: this.now()
+          })
+        : 1;
+    const activationScore = clamp01(storedActivationScore * activationTimeDecay);
     const ftsFactor = canUseMemorySupplement ? supplementaryData.ftsRanks[entry.object_id] ?? 0 : 0;
     const synthesisFtsFactor =
       isGlobalCandidate || !isSynthesisCandidate

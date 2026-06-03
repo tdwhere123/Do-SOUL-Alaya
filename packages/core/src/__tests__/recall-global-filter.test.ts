@@ -338,7 +338,10 @@ describe("RecallService global project-mapping filter", () => {
     expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(
       expectedDynamicGap
     );
-    expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(0.1143348);
+    // R3e lazy time-decay: both candidates share created_at/last_used_at so the
+    // freshness factor scales both activations equally; the accepted-vs-advisory
+    // gap is the un-decayed gap (0.1143348) times that shared factor.
+    expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(0.0866254);
     expect(accepted?.is_advisory).toBe(false);
     expect(advisory?.is_advisory).toBe(true);
   });
