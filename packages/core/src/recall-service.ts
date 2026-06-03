@@ -311,13 +311,15 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   // phase-6 sub-workflow D-2/D-6 once the graph plane is non-zero.
   entity_seed: 1,
   path_expansion: 3,
-  // session_cohort_fanin parity with evidence_structural_agreement (the
-  // strongest non-existing_score axis). The nominated cohort representative
-  // fires this stream PLUS its own lexical_fts / evidence_fts terms (it was
-  // query-relevant by construction), so multi-stream RRF accumulation can clear
-  // top-5 by merit. Only one member per cohort fires it, so it adds a rep to the
-  // competition without displacing the lexical winners.
-  session_cohort_fanin: 6,
+  // session_cohort_fanin parity with lexical_fts: the nominated cohort
+  // representative ALREADY carries its own lexical_fts / evidence_fts terms (it
+  // was query-relevant by construction), so the fan-in stream only needs to ADD
+  // a gentle one-axis merit increment, not out-weight the lexical lane. A larger
+  // weight over-promotes the rep and evicts true lexical/evidence gold (the
+  // displacement risk); weight 1 keeps the rep in the fusion competition for real
+  // rank promotion while the bounded structural reserve catches reps fusion
+  // floats to rank 6-8. see also: reserveStructuralDeliverySlots, COHORT_FANIN_DAMPEN.
+  session_cohort_fanin: 1,
   temporal_recency: 0,
   workspace_activation: 0
 });
