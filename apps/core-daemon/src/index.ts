@@ -1524,6 +1524,16 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     // path so the second durable path-insert route is existence/ownership-
     // checked before the storage insert.
     objectAnchorGate: pathRelationProposalService,
+    // invariant: workspace-scoped evidence-gist reader for the synthesis-create
+    // accept-apply. Reuses EvidenceService.findByIdScoped so the deterministic
+    // summary and the evidence-existence gate run on the same scoped read the
+    // open_pointer path uses (no cross-workspace gist leakage).
+    synthesisEvidenceReader: {
+      findGistById: async (evidenceId: string, scopedWorkspaceId: string) => {
+        const evidence = await evidenceService.findByIdScoped(evidenceId, scopedWorkspaceId);
+        return evidence === null ? null : evidence.gist;
+      }
+    },
     signalService,
     graphExploreService,
     edgeProposalService,

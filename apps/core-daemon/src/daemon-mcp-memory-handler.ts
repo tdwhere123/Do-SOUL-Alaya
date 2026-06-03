@@ -28,6 +28,11 @@ export function createDaemonMcpMemoryToolHandler(input: {
   // validated before the storage insert. Wired from PathRelationProposalService.
   // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts objectAnchorGate
   readonly objectAnchorGate?: McpMemoryProposalWorkflowDependencies["objectAnchorGate"];
+  // invariant: reads member evidence gists so the synthesis-create accept-apply
+  // can distill a deterministic NO-LLM summary and validate cluster evidence
+  // exists before the durable insert. Wired from EvidenceService.findByIdScoped.
+  // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts synthesisEvidenceReader
+  readonly synthesisEvidenceReader?: McpMemoryProposalWorkflowDependencies["synthesisEvidenceReader"];
   readonly signalService: McpMemoryToolHandlerDependencies["signalService"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
   readonly edgeProposalService?: McpMemoryToolHandlerDependencies["edgeProposalService"];
@@ -129,6 +134,9 @@ export function createDaemonMcpMemoryToolHandler(input: {
         }
       },
       ...(input.objectAnchorGate === undefined ? {} : { objectAnchorGate: input.objectAnchorGate }),
+      ...(input.synthesisEvidenceReader === undefined
+        ? {}
+        : { synthesisEvidenceReader: input.synthesisEvidenceReader }),
       ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding })
     })
   });
