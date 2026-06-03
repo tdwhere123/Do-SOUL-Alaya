@@ -135,11 +135,17 @@ const SeedTruncationSchema = z
 // parse_dropped counts malformed single entries and over-64-cap signals
 // discarded inside parseOfficialApiSignals; compile_overflow_dropped counts
 // parsed drafts dropped inside compile() for raw_payload past the 16 KB cap.
-// A third, non-attributed source also rolls into signals_dropped: a whole
-// turn's signals lost when the seed-materialization batch throws (e.g. a
-// garden-task complete mismatch). So the invariant is
-// signals_dropped >= parse_dropped + compile_overflow_dropped, not a clean
-// equality. see also:
+// The remaining drops happen at the materialization seam and are now
+// attributed in signals_dropped_by_reason: candidate_absent (routed to
+// evidence_only / deferred, no memory_entry) and materialization_error (the
+// signal threw and was isolated PER SIGNAL, so one bad signal no longer drops
+// its whole turn batch — the fix for the silent 1963-signal whole-batch
+// swallow). So the invariant is
+// signals_dropped >= parse_dropped + compile_overflow_dropped
+//   + signals_dropped_by_reason.candidate_absent
+//   + signals_dropped_by_reason.materialization_error,
+// not a clean equality (the >= absorbs any defensive whole-batch backstop
+// drop, which is also attributed to materialization_error). see also:
 // apps/bench-runner/src/longmemeval/compile-seed.ts CompileSeedExtractionStats.
 const SeedExtractionPathSchema = z
   .object({
@@ -152,7 +158,23 @@ const SeedExtractionPathSchema = z
     facts_produced: z.number().int().nonnegative(),
     signals_dropped: z.number().int().nonnegative(),
     parse_dropped: z.number().int().nonnegative(),
-    compile_overflow_dropped: z.number().int().nonnegative()
+    compile_overflow_dropped: z.number().int().nonnegative(),
+    // Materialization-seam drops by reason (a SUBSET of signals_dropped):
+    //   - candidate_absent: routed to evidence_only / deferred (no
+    //     memory_entry materialized) — the seed-quality hole the bench surfaces.
+    //   - materialization_error: the signal threw and was isolated per-signal,
+    //     so one bad signal never drops its batch-mates.
+    // Optional with a zero default so archives written before this field shipped
+    // still parse; new runs always populate it.
+    // see also:
+    // apps/bench-runner/src/longmemeval/compile-seed.ts CompileSeedExtractionStats
+    signals_dropped_by_reason: z
+      .object({
+        candidate_absent: z.number().int().nonnegative(),
+        materialization_error: z.number().int().nonnegative()
+      })
+      .strict()
+      .default({ candidate_absent: 0, materialization_error: 0 })
   })
   .strict();
 export type SeedExtractionPath = z.infer<typeof SeedExtractionPathSchema>;

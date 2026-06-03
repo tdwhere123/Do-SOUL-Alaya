@@ -131,6 +131,47 @@ export interface SeededSynthesisResult {
 }
 
 /**
+ * Why one compile-seed signal failed to produce a durable memory_entry.
+ *
+ * - `candidate_absent`: the signal was received and triaged, but the
+ *   MaterializationRouter routed it to evidence_only / deferred — no
+ *   memory_entry was created. This is an expected sub-threshold outcome, not
+ *   an error; it surfaces a seed-quality (candidate-absent) signal.
+ * - `materialization_error`: the signal THREW during receiveSignal / schema
+ *   parse / acceptSeededMemory. Historically this aborted the whole turn batch
+ *   (its healthy batch-mates were lost too — the 1963-signal archive drop);
+ *   it is now isolated per-signal so one bad signal never drops its mates.
+ */
+export type CompileSeedDropReason = "candidate_absent" | "materialization_error";
+
+/**
+ * One per-signal drop record from proposeMemoriesFromCompileSignals. `detail`
+ * carries the routing_reason (candidate_absent) or the error message
+ * (materialization_error) so the caller can persist a root-causable reason
+ * into the run KPI instead of only logging to stderr.
+ */
+export interface CompileSeedSignalDrop {
+  readonly reason: CompileSeedDropReason;
+  readonly detail: string;
+}
+
+/**
+ * Result of seeding ONE turn's batch of compile-extracted signals. Carries the
+ * materialized seeds AND a per-signal drop ledger so the caller no longer
+ * infers drops from a `inputs.length - seeds.length` subtraction (which could
+ * not distinguish an expected candidate_absent skip from a thrown
+ * materialization error, and which silently lost an entire batch when any one
+ * signal threw).
+ *
+ * invariant: seeds.length + dropped.length === inputs.length. Every input is
+ * accounted for exactly once.
+ */
+export interface CompileSeedBatchResult {
+  readonly seeds: readonly SeededMemoryResult[];
+  readonly dropped: readonly CompileSeedSignalDrop[];
+}
+
+/**
  * One production-extracted candidate signal to seed as a memory_entry.
  *
  * The compile-based LongMemEval seed path (longmemeval/compile-seed.ts) runs
@@ -460,16 +501,21 @@ export interface BenchDaemonHandle {
    * straight from the result with no event-log scan.
    *
    * Returns one SeededMemoryResult per signal that materialized a durable
-   * memory_entry. A signal the MaterializationRouter routed to evidence_only
-   * / deferred (no memory_entry) is skipped, so the returned list may be
-   * SHORTER than `inputs`; the shortfall is the caller's drop count.
+   * memory_entry PLUS a per-signal drop ledger for every signal that did not.
+   * A signal the MaterializationRouter routed to evidence_only / deferred (no
+   * memory_entry) is recorded with reason=candidate_absent; a signal that
+   * THREW during receiveSignal / schema parse / accept is isolated per-signal
+   * and recorded with reason=materialization_error — one bad signal never
+   * aborts its healthy batch-mates.
+   *
+   * invariant: seeds.length + dropped.length === inputs.length.
    *
    * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
    * see also: apps/core-daemon/src/garden-runtime.ts processPostTurnExtractTask
    */
   proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
-  ): Promise<readonly SeededMemoryResult[]>;
+  ): Promise<CompileSeedBatchResult>;
   /**
    * @anchor proposeSynthesis — session-level L2 synthesis seed
    *
@@ -1396,9 +1442,9 @@ export async function startBenchDaemon(
 
   async function proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
-  ): Promise<readonly SeededMemoryResult[]> {
+  ): Promise<CompileSeedBatchResult> {
     if (inputs.length === 0) {
-      return [];
+      return { seeds: [], dropped: [] };
     }
 
     // Seed each compile()-extracted signal through the daemon's in-process
@@ -1416,88 +1462,138 @@ export async function startBenchDaemon(
     //
     // receiveSignal's return carries materialization.created_objects directly,
     // so the memory_entry object_id is read from the result — no event-log
-    // scan. A signal the MaterializationRouter routed to evidence_only /
-    // deferred (no memory_entry — e.g. a sub-0.5-confidence signal) is SKIPPED
-    // per-signal, not fatal: the turn's other healthy facts still seed. The
-    // returned list may be SHORTER than `inputs`; the shortfall is the caller's
-    // drop count.
+    // scan.
+    //
+    // invariant: PER-SIGNAL failure isolation. Each signal's materialization is
+    // wrapped so one bad signal NEVER aborts its batch-mates:
+    //   - routed to evidence_only / deferred (no memory_entry — e.g. a
+    //     sub-0.5-confidence signal): recorded as reason=candidate_absent and
+    //     skipped; the turn's other healthy facts still seed.
+    //   - a thrown error (schema parse / receiveSignal / accept): caught,
+    //     recorded as reason=materialization_error, the loop continues.
+    // A prior version let a single throw propagate out of this loop, which the
+    // caller's batch-level catch turned into a whole-turn drop — the regression
+    // that silently lost 1963 signals (and their healthy batch-mates) in the
+    // 500q archive, logged only to stderr. The structured drop ledger persists
+    // the reason so candidate-absent / seed-quality is root-causable from the
+    // archive KPI, not just stderr.
     // see also: apps/bench-runner/src/longmemeval/compile-seed.ts seedTurn
     const results: SeededMemoryResult[] = [];
+    const dropped: CompileSeedSignalDrop[] = [];
     for (const input of inputs) {
-      const clip = clipSeedContent(input.turnContent);
-      const safeDistilledFact =
-        input.distilledFact.length > SEED_CONTENT_MAX
-          ? `${input.distilledFact.slice(0, SEED_CONTENT_MAX)} [truncated at ${SEED_CONTENT_MAX} chars]`
-          : input.distilledFact;
-      // Event-sourced token-economy KPI block (S6) — see proposeMemoryFromSignal.
-      const tokenEconomy = benchTokenEconomyPayload({
-        fullTurnContent: clip.safe,
-        storedContent: safeDistilledFact,
-        turnSeedIndex: input.turnSeedIndex,
-        ...(input.productionRawPayload === undefined
-          ? { excerptSibling: clip.safe, distilledFactSibling: safeDistilledFact }
-          : {})
-      });
-      const rawPayload: Record<string, unknown> =
-        input.productionRawPayload === undefined
-          ? {
-              excerpt: clip.safe,
-              distilled_fact: safeDistilledFact,
-              extraction_provider: input.extractionProvider,
-              ...tokenEconomy
-            }
-          : {
-              ...stripFirstClassMemoryRefsFromRawPayload(input.productionRawPayload),
-              extraction_provider: input.extractionProvider,
-              ...tokenEconomy
-            };
-
-      const signal: CandidateMemorySignal = normalizeSchemaGroundedSignal(
-        CandidateMemorySignalSchema.parse({
-          signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
-          workspace_id: activeContext.workspaceId,
-          run_id: activeContext.runId,
-          surface_id: null,
-          source: SignalSource.GARDEN_COMPILE,
-          signal_kind: input.signalKind,
-          object_kind: input.objectKind,
-          scope_hint: ScopeClass.PROJECT,
-          domain_tags: ["bench-seed"],
-          confidence: input.confidence,
-          evidence_refs: [input.evidenceRef],
-          ...buildSourceMemoryRefsField(input.sourceMemoryRefs),
-          raw_payload: rawPayload,
-          created_at: new Date().toISOString()
-        })
-      );
-
-      const received = await activeRuntime.services.signalService.receiveSignal(signal);
-      const memoryObject = received.materialization?.created_objects.find(
-        (obj) => obj.object_kind === "memory_entry"
-      );
-      if (memoryObject === undefined) {
+      try {
+        const seeded = await seedOneCompileSignal(input);
+        if (seeded.kind === "dropped") {
+          dropped.push(seeded.drop);
+          continue;
+        }
+        results.push(seeded.result);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        dropped.push({ reason: "materialization_error", detail });
         process.stderr.write(
-          `[bench compile-seed] signal ${received.signal.signal_id} ` +
-            `triage=${received.triage_result} ` +
-            `routing=${received.materialization?.routing_reason ?? "n/a"} ` +
-            `did not materialize a memory_entry — skipped, turn batch continues\n`
+          `[bench compile-seed] signal evidence_ref=${input.evidenceRef} ` +
+            `threw during materialization — isolated per-signal, turn batch ` +
+            `continues: ${detail}\n`
         );
-        continue;
       }
-      const evidenceObject = received.materialization?.created_objects.find(
-        (obj) => obj.object_kind === "evidence_capsule"
+    }
+    return { seeds: results, dropped };
+  }
+
+  // invariant: extracted from the proposeMemoriesFromCompileSignals loop body
+  // so the per-signal try/catch wraps a single, total unit of materialization
+  // work. Returns a tagged result (seeded vs dropped/candidate_absent) and
+  // THROWS only on an unexpected materialization error, which the caller
+  // isolates and records as reason=materialization_error.
+  async function seedOneCompileSignal(
+    input: BenchSignalSeedInput
+  ): Promise<
+    | { readonly kind: "seeded"; readonly result: SeededMemoryResult }
+    | { readonly kind: "dropped"; readonly drop: CompileSeedSignalDrop }
+  > {
+    const clip = clipSeedContent(input.turnContent);
+    const safeDistilledFact =
+      input.distilledFact.length > SEED_CONTENT_MAX
+        ? `${input.distilledFact.slice(0, SEED_CONTENT_MAX)} [truncated at ${SEED_CONTENT_MAX} chars]`
+        : input.distilledFact;
+    // Event-sourced token-economy KPI block (S6) — see proposeMemoryFromSignal.
+    const tokenEconomy = benchTokenEconomyPayload({
+      fullTurnContent: clip.safe,
+      storedContent: safeDistilledFact,
+      turnSeedIndex: input.turnSeedIndex,
+      ...(input.productionRawPayload === undefined
+        ? { excerptSibling: clip.safe, distilledFactSibling: safeDistilledFact }
+        : {})
+    });
+    const rawPayload: Record<string, unknown> =
+      input.productionRawPayload === undefined
+        ? {
+            excerpt: clip.safe,
+            distilled_fact: safeDistilledFact,
+            extraction_provider: input.extractionProvider,
+            ...tokenEconomy
+          }
+        : {
+            ...stripFirstClassMemoryRefsFromRawPayload(input.productionRawPayload),
+            extraction_provider: input.extractionProvider,
+            ...tokenEconomy
+          };
+
+    const signal: CandidateMemorySignal = normalizeSchemaGroundedSignal(
+      CandidateMemorySignalSchema.parse({
+        signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
+        workspace_id: activeContext.workspaceId,
+        run_id: activeContext.runId,
+        surface_id: null,
+        source: SignalSource.GARDEN_COMPILE,
+        signal_kind: input.signalKind,
+        object_kind: input.objectKind,
+        scope_hint: ScopeClass.PROJECT,
+        domain_tags: ["bench-seed"],
+        confidence: input.confidence,
+        evidence_refs: [input.evidenceRef],
+        ...buildSourceMemoryRefsField(input.sourceMemoryRefs),
+        raw_payload: rawPayload,
+        created_at: new Date().toISOString()
+      })
+    );
+
+    const received = await activeRuntime.services.signalService.receiveSignal(signal);
+    const memoryObject = received.materialization?.created_objects.find(
+      (obj) => obj.object_kind === "memory_entry"
+    );
+    if (memoryObject === undefined) {
+      const routingReason = received.materialization?.routing_reason ?? "n/a";
+      process.stderr.write(
+        `[bench compile-seed] signal ${received.signal.signal_id} ` +
+          `triage=${received.triage_result} ` +
+          `routing=${routingReason} ` +
+          `did not materialize a memory_entry — skipped, turn batch continues\n`
       );
-      const accepted = await acceptSeededMemory(memoryObject.object_id, input.evidenceRef);
-      results.push({
+      return {
+        kind: "dropped",
+        drop: {
+          reason: "candidate_absent",
+          detail: `triage=${received.triage_result} routing=${routingReason}`
+        }
+      };
+    }
+    const evidenceObject = received.materialization?.created_objects.find(
+      (obj) => obj.object_kind === "evidence_capsule"
+    );
+    const accepted = await acceptSeededMemory(memoryObject.object_id, input.evidenceRef);
+    return {
+      kind: "seeded",
+      result: {
         memoryId: memoryObject.object_id,
         signalId: received.signal.signal_id,
         proposalId: accepted.proposalId,
         evidenceId: evidenceObject?.object_id ?? null,
         truncated: clip.truncated,
         charsClipped: clip.charsClipped
-      });
-    }
-    return results;
+      }
+    };
   }
 
   // @anchor bench-synthesis-seed: create ONE session-level synthesis_capsule

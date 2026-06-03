@@ -32,7 +32,10 @@ function buildCompileSeedDaemon(
 ): CompileSeedDaemon {
   return {
     proposeMemoryFromSignal: async (input) => onSignal(input),
-    proposeMemoriesFromCompileSignals: async (inputs) => inputs.map(onSignal),
+    proposeMemoriesFromCompileSignals: async (inputs) => ({
+      seeds: inputs.map(onSignal),
+      dropped: []
+    }),
     // The compile-seed tests do not exercise the session-level L2 synthesis
     // emission seam (covered by harness/daemon tests); the stub keeps the
     // CompileSeedDaemon contract satisfied and returns a null synthesisId
@@ -92,6 +95,7 @@ describe("createCachingSignalExtractor", () => {
       cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
+      signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
@@ -132,6 +136,7 @@ describe("createCachingSignalExtractor", () => {
       cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
+      signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
@@ -157,6 +162,7 @@ describe("createCachingSignalExtractor", () => {
       cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
+      signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
@@ -676,6 +682,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
       cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
+      signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
@@ -707,6 +714,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
       cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
+      signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
@@ -1011,6 +1019,87 @@ describe("compile() signal-drop count is observable", () => {
     expect(runner.stats.signalsDropped).toBe(1);
     expect(runner.stats.factsProduced).toBe(2);
   });
+
+  it("isolates per-signal materialization drops by reason and keeps healthy batch-mates", async () => {
+    // Regression for the 1963-signal whole-batch drop: when some signals of a
+    // turn fail to materialize a memory_entry (candidate_absent) or threw and
+    // were isolated per-signal (materialization_error), the turn's HEALTHY
+    // batch-mates must still seed, and each drop must be attributed by reason
+    // in the stats so candidate-absent / seed-quality is root-causable from the
+    // KPI archive — not just stderr.
+    const daemon: CompileSeedDaemon = {
+      proposeMemoryFromSignal: async () => ({
+        memoryId: "memory-fallback",
+        signalId: "signal-fallback",
+        proposalId: "proposal-fallback",
+        evidenceId: "evidence-fallback",
+        truncated: false,
+        charsClipped: 0
+      }),
+      // Three clean facts arrive; the daemon seeds the first, drops the second
+      // as candidate_absent, drops the third as materialization_error.
+      proposeMemoriesFromCompileSignals: async () => ({
+        seeds: [
+          {
+            memoryId: "memory-1",
+            signalId: "signal-1",
+            proposalId: "proposal-1",
+            evidenceId: "evidence-1",
+            truncated: false,
+            charsClipped: 0
+          }
+        ],
+        dropped: [
+          { reason: "candidate_absent", detail: "triage=accepted routing=evidence archival" },
+          { reason: "materialization_error", detail: "boom" }
+        ]
+      }),
+      proposeSynthesis: async () => ({ synthesisId: null })
+    };
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      extractorFactory: () => ({
+        extract: async () => ({
+          rawJson: signalsEnvelope([
+            { distilled: "Survivor.", matched: "Intro span" },
+            { distilled: "Absent.", matched: "Middle span" },
+            { distilled: "Threw.", matched: "Closing span" }
+          ])
+        })
+      })
+    });
+
+    const result = await runner.seedTurn({
+      daemon,
+      turnContent: "Intro span. Middle span. Closing span.",
+      evidenceRefBase: "q1-s0-t0",
+      seedIndex: 0,
+      workspaceId: "ws-test",
+      runId: "run-test"
+    });
+
+    // The one healthy fact seeded — the two failures did NOT drop it.
+    expect(result.seeds).toHaveLength(1);
+    expect(result.seeds[0]?.memoryId).toBe("memory-1");
+    // Both materialization-seam drops are counted, attributed by reason.
+    expect(runner.stats.signalsDropped).toBe(2);
+    expect(runner.stats.signalsDroppedByReason).toEqual({
+      candidate_absent: 1,
+      materialization_error: 1
+    });
+    // No extraction-stage drops on this clean envelope.
+    expect(runner.stats.parseDropped).toBe(0);
+    expect(runner.stats.compileOverflowDropped).toBe(0);
+
+    // The per-reason ledger surfaces in the persisted KPI.
+    const kpi = toSeedExtractionPathKpi(runner.stats);
+    expect(kpi.signals_dropped_by_reason).toEqual({
+      candidate_absent: 1,
+      materialization_error: 1
+    });
+    expect(kpi.signals_dropped).toBe(2);
+  });
 });
 
 describe("extraction cache write is atomic", () => {
@@ -1301,7 +1390,7 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
         truncated: false,
         charsClipped: 0
       }),
-      proposeMemoriesFromCompileSignals: async () => [],
+      proposeMemoriesFromCompileSignals: async () => ({ seeds: [], dropped: [] }),
       proposeSynthesis: async () => ({ synthesisId: null })
     };
     const runner = createCompileSeedRunner({
@@ -1373,7 +1462,7 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
         truncated: false,
         charsClipped: 0
       }),
-      proposeMemoriesFromCompileSignals: async () => [],
+      proposeMemoriesFromCompileSignals: async () => ({ seeds: [], dropped: [] }),
       proposeSynthesis: async () => ({ synthesisId: null })
     };
     const runner = createCompileSeedRunner({

@@ -58,7 +58,8 @@ function cleanSeedExtractionPath(): NonNullable<KpiPayload["kpi"]["seed_extracti
     facts_produced: 1872,
     signals_dropped: 4,
     parse_dropped: 3,
-    compile_overflow_dropped: 0
+    compile_overflow_dropped: 0,
+    signals_dropped_by_reason: { candidate_absent: 1, materialization_error: 0 }
   };
 }
 

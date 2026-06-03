@@ -31,6 +31,8 @@ import {
 import type {
   BenchSignalSeedInput,
   BenchSynthesisSeedInput,
+  CompileSeedBatchResult,
+  CompileSeedDropReason,
   SeededMemoryResult,
   SeededSynthesisResult
 } from "../harness/daemon.js";
@@ -204,6 +206,20 @@ export interface CompileSeedExtractionStats {
    */
   signalsDropped: number;
   /**
+   * Per-reason breakdown of signals lost AT THE MATERIALIZATION SEAM (the
+   * proposeMemoriesFromCompileSignals path), so a candidate-absent seed-quality
+   * miss is root-causable from the archive instead of only stderr:
+   *   - candidate_absent: received + triaged but the router produced no
+   *     memory_entry (evidence_only / deferred) — an expected sub-threshold
+   *     outcome, the signal-quality hole the bench must surface.
+   *   - materialization_error: the signal THREW (schema parse / receiveSignal /
+   *     accept). Isolated per-signal so one bad signal never drops its
+   *     batch-mates — the fix for the 1963-signal whole-batch swallow.
+   * These are a SUBSET of signalsDropped (the parse / compile-overflow drops
+   * happen earlier, before this seam, and are NOT counted here).
+   */
+  signalsDroppedByReason: Record<CompileSeedDropReason, number>;
+  /**
    * Signals discarded INSIDE parseOfficialApiSignals — a malformed single
    * entry rejected by parseOfficialApiSignalEntry, OR a signal past the
    * MAX_OFFICIAL_API_SIGNALS=64 slice cap. These never reach compile().
@@ -262,6 +278,18 @@ export interface SeedExtractionPathKpi {
   readonly parse_dropped: number;
   /** Signals dropped by compile() (raw_payload past the 16 KB cap). */
   readonly compile_overflow_dropped: number;
+  /**
+   * Materialization-seam drops by reason (a SUBSET of signals_dropped) so the
+   * archive discloses WHY a seeded fact never became a durable memory_entry:
+   *   - candidate_absent: routed to evidence_only / deferred (no memory_entry).
+   *   - materialization_error: the signal threw and was isolated per-signal.
+   * Persisted so candidate-absent / seed-quality misses are root-causable from
+   * the KPI archive, not just stderr.
+   */
+  readonly signals_dropped_by_reason: {
+    readonly candidate_absent: number;
+    readonly materialization_error: number;
+  };
 }
 
 export function toSeedExtractionPathKpi(
@@ -277,7 +305,11 @@ export function toSeedExtractionPathKpi(
     facts_produced: stats.factsProduced,
     signals_dropped: stats.signalsDropped,
     parse_dropped: stats.parseDropped,
-    compile_overflow_dropped: stats.compileOverflowDropped
+    compile_overflow_dropped: stats.compileOverflowDropped,
+    signals_dropped_by_reason: {
+      candidate_absent: stats.signalsDroppedByReason.candidate_absent,
+      materialization_error: stats.signalsDroppedByReason.materialization_error
+    }
   };
 }
 
@@ -1001,10 +1033,15 @@ export interface CompileSeedDaemon {
    * in-process signalService.receiveSignal — the same seam production
    * POST_TURN_EXTRACT completion uses — so they materialize with
    * source = garden_compile. Used for the credentialled compile path.
+   *
+   * Returns the materialized seeds AND a per-signal drop ledger
+   * (candidate_absent / materialization_error). Per-signal failure isolation
+   * lives in the daemon implementation — one bad signal never drops its
+   * batch-mates. see also: apps/bench-runner/src/harness/daemon.ts
    */
   proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
-  ): Promise<readonly SeededMemoryResult[]>;
+  ): Promise<CompileSeedBatchResult>;
   /**
    * Seeds one signal through soul.emit_candidate_signal (source =
    * model_tool). Used ONLY for the no-credentials / extraction-failure
@@ -1352,6 +1389,7 @@ export function createCompileSeedRunner(options?: {
     cachedExtractionFailures: 0,
     factsProduced: 0,
     signalsDropped: 0,
+    signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
     parseDropped: 0,
     compileOverflowDropped: 0,
     lastTurnRawSignalCount: 0,
@@ -1478,26 +1516,43 @@ export function createCompileSeedRunner(options?: {
     // path uses soul.emit_candidate_signal, whose source = model_tool is the
     // honest label for an agent-style full-round proposal.
     if (signalInputs[0]?.extractionProvider === "official_api_compile") {
-      // A signal the MaterializationRouter routed to evidence_only / deferred
-      // (no memory_entry — e.g. a sub-0.5-confidence signal) is skipped
-      // per-signal by proposeMemoriesFromCompileSignals, so the round's other
-      // healthy facts still seed; that signal surfaces here as a shortfall
-      // between requested inputs and returned seeds. A harder failure (a
-      // schema-parse error) still throws and aborts the round batch.
+      // proposeMemoriesFromCompileSignals isolates failures PER SIGNAL: a
+      // signal routed to evidence_only / deferred (candidate_absent) and a
+      // signal that threw during materialization (materialization_error) are
+      // each recorded in the returned `dropped` ledger WITHOUT aborting the
+      // round's healthy batch-mates. The per-reason ledger is folded into the
+      // stats so candidate-absent / seed-quality is root-causable from the KPI
+      // archive. The outer try/catch is now a defensive backstop for a truly
+      // unexpected whole-batch failure (a daemon-level bug, not a per-signal
+      // one); the per-signal path no longer routes through it.
       try {
-        seeds = await input.daemon.proposeMemoriesFromCompileSignals(signalInputs);
-        const evidenceOnlySkipped = signalInputs.length - seeds.length;
-        if (evidenceOnlySkipped > 0) {
-          stats.signalsDropped += evidenceOnlySkipped;
+        const batch: CompileSeedBatchResult =
+          await input.daemon.proposeMemoriesFromCompileSignals(signalInputs);
+        seeds = batch.seeds;
+        if (batch.dropped.length > 0) {
+          stats.signalsDropped += batch.dropped.length;
+          for (const drop of batch.dropped) {
+            stats.signalsDroppedByReason[drop.reason] += 1;
+          }
+          const byReason = batch.dropped.reduce<Record<string, number>>(
+            (acc, drop) => {
+              acc[drop.reason] = (acc[drop.reason] ?? 0) + 1;
+              return acc;
+            },
+            {}
+          );
+          const breakdown = Object.entries(byReason)
+            .map(([reason, count]) => `${reason}=${count}`)
+            .join(" ");
           process.stderr.write(
-            `[longmemeval compile-seed] ${evidenceOnlySkipped} signal(s) of ` +
+            `[longmemeval compile-seed] ${batch.dropped.length} signal(s) of ` +
               `${signalInputs.length} did not materialize a memory_entry ` +
-              `(routed to evidence_only / deferred); the round's other facts ` +
-              `seeded normally\n`
+              `(${breakdown}); the round's other facts seeded normally\n`
           );
         }
       } catch (error) {
         stats.signalsDropped += signalInputs.length;
+        stats.signalsDroppedByReason.materialization_error += signalInputs.length;
         process.stderr.write(
           `[longmemeval compile-seed] dropped ${signalInputs.length} signal(s) during compile seed: ${stringifyError(error)}\n`
         );

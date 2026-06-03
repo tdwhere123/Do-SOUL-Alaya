@@ -334,7 +334,9 @@ export function renderReport(
         `cached_failures=${extractionPath.cached_extraction_failures} ` +
         `facts=${extractionPath.facts_produced} signals_dropped=${extractionPath.signals_dropped} ` +
         `[parse_dropped=${extractionPath.parse_dropped} ` +
-        `compile_overflow_dropped=${extractionPath.compile_overflow_dropped}])`
+        `compile_overflow_dropped=${extractionPath.compile_overflow_dropped} ` +
+        `candidate_absent=${extractionPath.signals_dropped_by_reason.candidate_absent} ` +
+        `materialization_error=${extractionPath.signals_dropped_by_reason.materialization_error}])`
     );
     if (extractionPath.path === "no_credentials_fallback") {
       lines.push(

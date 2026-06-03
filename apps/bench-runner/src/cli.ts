@@ -708,7 +708,18 @@ function mergeSeedExtractionPath(
     compile_overflow_dropped: present.reduce(
       (sum, path) => sum + path.compile_overflow_dropped,
       0
-    )
+    ),
+    signals_dropped_by_reason: {
+      candidate_absent: present.reduce(
+        (sum, path) => sum + path.signals_dropped_by_reason.candidate_absent,
+        0
+      ),
+      materialization_error: present.reduce(
+        (sum, path) =>
+          sum + path.signals_dropped_by_reason.materialization_error,
+        0
+      )
+    }
   };
 }
 

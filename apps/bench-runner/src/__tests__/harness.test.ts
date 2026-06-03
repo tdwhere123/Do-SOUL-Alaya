@@ -473,8 +473,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         }
       ];
 
-      const seeds = await daemon.proposeMemoriesFromCompileSignals(inputs);
+      const { seeds, dropped } = await daemon.proposeMemoriesFromCompileSignals(inputs);
 
+      expect(dropped).toHaveLength(0);
       expect(seeds).toHaveLength(2);
       expect(new Set(seeds.map((seed) => seed.memoryId)).size).toBe(2);
 
@@ -577,7 +578,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         }
       ];
 
-      const seeds = await daemon.proposeMemoriesFromCompileSignals(inputs);
+      const { seeds } = await daemon.proposeMemoriesFromCompileSignals(inputs);
       const child = seeds[0];
       if (child === undefined) {
         throw new Error("compile seed did not materialize a child memory");
