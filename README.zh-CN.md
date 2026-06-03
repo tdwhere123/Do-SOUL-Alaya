@@ -107,6 +107,14 @@ node apps/bench-runner/bin/alaya-bench-runner.mjs self
 node apps/bench-runner/bin/alaya-bench-runner.mjs live --help
 ```
 
+检查点说明（2026-06-04）：v0.3.11 实现已完成，但全量公开 bench **没有**
+在当前 HEAD 重跑 —— 500q gate 在本地 7.6GB 机器上会 OOM，已 defer 到更大的
+主机（即 R5 gate）。**R@5 → 90% 没被宣称达成。** 当前跟踪的
+`latest-baseline*` 是遗留/陈旧 baseline，不是 v0.3.11 release evidence。
+诚实的 fan-in 前 500q-OFF baseline 是 R@1=52.0% / R@5=81.6% / R@10=83.6%
+（clean，`llm_calls=0`）；早先 90%@50q 是小样本伪迹。每个新的全量 release
+bench 都必须包含 `recall_token_economy`。
+
 赌注的形状没有变：retrieval 数字只有在 agent 行动所依据的 durable claim
 有审计、可回滚、能追到原始证据时才真正有价值。
 
@@ -317,9 +325,21 @@ Garden，先跑一次启动清理 pass，然后按 tier 周期调度四个角色
 Garden 清理都落在你打开的这个项目上。
 
 - **Auditor** —— 证据陈旧检查、pointer 健康度、孤儿检测。
-- **Janitor** —— TTL 清理、热/温分层降级、休眠标记、墓碑 GC。
-- **Librarian** —— 合并检测、模板聚类、邻居发现、path 压缩。
+- **Janitor** —— TTL 清理、热/温分层降级、可逆休眠降级、墓碑 GC，以及
+  遗忘生命周期的 *判无用*-删除臂（decay → dormant → 仅删无来源、从未被
+  强化的行，且必须过删除授权 disposition 闸 + capsule 复核）。该生命周期
+  的 *压缩* 臂（删除被 capsule 保留的合并成员）已建成但 **休眠中，等运维
+  决策**。
+- **Librarian** —— 合并检测、模板聚类、邻居发现、path 压缩，以及 accept
+  即创建 capsule 的 synthesis proposal。
 - **Scheduler** —— 拥有队列、tier 优先级、冷却期、任务记账。
+
+Garden compute 默认走 **`host_worker`**（零云）：由 attach 的 CLI agent
+跑 `POST_TURN_EXTRACT` 和 `EDGE_CLASSIFY`；配了 Garden secret 才读成显式的
+`official_api` 选择。云端 edge-LLM 默认关闭。host-worker 工作超过有界窗口
+仍未被领取时，进程内会回退到零云的本地启发式抽取，保证捕获不卡死，
+`alaya doctor` 会告警。写入后立即召回可能早于 host-worker 边分类完成；
+此时确定性规则启发式是即时回退（最终一致性）。
 
 **这一步不这么做会出什么问题。** 一个直接写 durable 的维护系统，
 等于绕过了治理；一个和召回同步跑的维护系统，等数据集长大就会把召
@@ -582,9 +602,13 @@ pnpm alaya tools call soul.recall \
 
 ## 接下来的方向
 
-### 当前状态（2026-05-25）
+### 当前状态（2026-06-04）
 
-v0.3.11 是当前 release-gate readiness checkpoint；v0.3.4 是 v0.3.x 这条线第一次正式对外发布。
+v0.3.11 **实现已完成，但大机器 500q KPI gate 仍未跑** —— 本次 completion
+的所有代码都已落地并过 code-review，但 LongMemEval / LoCoMo 全量 bench 还
+没在更大的主机上重跑（本地 7.6GB WSL2 在 500q 会 OOM），所以它 **不是
+release-closed，"R@5 → 90%" 这个目标也没被宣称达成。** v0.3.4 是 v0.3.x
+这条线第一次正式对外发布。
 从 v0.3.0 起累积下来：真实的 Codex 和 Claude Code MCP 会话已经
 被观察到在正常对话里自主调 `soul.recall` → `soul.report_context_usage`，
 真实 live-usage EventLog witness 落档在 `docs/v0.3/v0.3.0/`
@@ -605,9 +629,21 @@ live MCP catalog 是 **16 个工具**（13 个 `soul.*` + 3 个 `garden.*`）。
 GitHub Release source tarball + `SHA256SUMS`，由 `scripts/install.sh`
 本地校验；npm 是有意不做的。
 
-v0.3.11 仍处在 completion/fix-loop：只有每个 phase fix-loop 都干净、
-LongMemEval / LoCoMo full bench gates 都归档后，才能把它描述成 full
-release-ready。
+**v0.3.11** 把 Garden compute 改成 **默认零云** —— `host_worker`（由 attach
+的 CLI agent 计算）是产品默认，云端 edge-LLM 默认关闭，B-2 边分类作为
+host-worker `EDGE_CLASSIFY` 任务运行并带确定性规则启发式回退；用持久的
+accepted member→representative 共现边取代临时的召回 fan-in 启发式；补完
+遗忘-压缩生命周期的 *判无用*-删除臂（decay → dormant → 仅删无来源、从未被
+强化的行，且过删除授权 disposition 闸 + capsule 复核）；并接上 production
+synthesis review accept → 创建 capsule。该生命周期的 *压缩* 臂已建成但
+**休眠中，等运维决策**（`docs/handbook/backlog.md` `#BL-049`）；在激活之前
+它不会删除任何记忆。
+
+v0.3.11 **实现已完成，但大机器 500q gate 仍未跑。** 只有该 gate 在更大的
+主机上跑过、LongMemEval / LoCoMo 全量 bench 归档通过后，才能把它描述成
+full release-ready。**R@5 → 90% 没被宣称达成** —— 召回 fan-in 已实现并过
+code-review，但 R@5 这个数字在本地未测量，已 defer 到那个 gate。见
+`docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`。
 
 ### 下一步要走的方向
 

@@ -6,7 +6,7 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-047` (`#BL-022` was opened by
+sequence. **Next available number**: `#BL-056` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
@@ -22,12 +22,169 @@ v0.3.8 closes `#BL-039` / `#BL-040` / `#BL-041` / `#BL-042` /
 For v0.3.10 planning, keep `docs/v0.3/v0.3.9/reports/v0.3.9-closeout.md`
 as the canonical carry-forward tracker (24 items) until v0.3.10
 closeout republishes the consolidated open/closed list.
+v0.3.11 opens `#BL-049` through `#BL-055` for the genuinely-deferred
+items surfaced during the completion effort (see
+`docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`).
 
 ## Open Issues
 
-No open `#BL-*` issues at this time. During v0.3.10 plan-stage, open
-work is tracked in the v0.3.9 closeout carry-forward list (24 items)
-rather than as BL tickets.
+### #BL-049 — Activate the forgetting-lifecycle compress arm
+
+**Status**: Open (DORMANT pending an operator decision; opened v0.3.11, 2026-06-04;
+mirrors `.do-it/` task #64). **Due**: operator morning-decision queue.
+
+**Context**: The forgetting lifecycle (`decay -> dormant -> [compress | judge-useless]
+-> retire/delete`) ships with the `judged_useless`-delete arm LIVE and
+B1-data-loss-safe. The **compress arm** — delete consolidated members that are
+preserved in a capsule — is BUILT and safe (delete-time re-verify) but **NOT
+activated**. Three things gate activation: (1) a `source_memory_refs` producer must
+wire the capsule -> member relationship so compress can prove preservation; (2) the
+compress-vs-protection ordering must be decided (a member protected by another path
+must not be deleted out from under it); (3) a lossy-summary-preservation product
+decision — whether a deterministic summary capsule is an acceptable terminal form for
+the members it absorbs.
+
+**Why deferred (not hidden debt)**: the `judged_useless`-delete arm is the
+data-loss-safe terminal path and is LIVE today; the compress arm is a net-new
+preservation-then-delete capability that needs the producer wiring + a product call,
+not a half-built shortcut. No memory is deleted by the compress arm until activated.
+
+**Close condition**: `source_memory_refs` producer wired; compress-vs-protection
+ordering documented + tested ("no compress-delete of a member protected by another
+path"); operator decision recorded on lossy-summary preservation; a "no tombstone
+before compression/disposition" enforcement test covers the compress arm.
+
+### #BL-050 — Ingest reconciliation default-ON under zero-own-LLM
+
+**Status**: Open (deferred; opened v0.3.11, 2026-06-04; mirrors `.do-it/` task #41).
+**Due**: revisit at v0.3.12 planning.
+
+**Context**: D-F1 ingest reconciliation routes the per-fact reconcile decision through
+the same agent/rule path (not a self-cloud LLM), gated by
+`ALAYA_INGEST_RECONCILIATION_ENABLED`. It is **default-OFF**, so production currently
+appends new facts without reconciling against existing rows (duplicate risk). Turning
+it default-ON needs a reconcile-decision-basis that holds under the zero-own-LLM
+default (`host_worker` / rule heuristic), not a cloud reconcile call.
+
+**Why deferred (not hidden debt)**: the routing exists and is opt-in-exercisable; the
+blocker is the decision basis under zero-own-LLM, which interacts with the
+host-worker compute contract (R0). Defaulting it ON before that basis is settled would
+either degrade every fact through a weak rule or quietly route to cloud.
+
+**Close condition**: a zero-own-LLM reconcile-decision basis (rule heuristic and/or
+host-worker `EDGE_CLASSIFY`-style task) proven adequate on bench, then flip the
+default to ON with token-economy evidence.
+
+### #BL-051 — Abstention calibration re-test on 500q data
+
+**Status**: Open (deferred to R5 data; opened v0.3.11, 2026-06-04; mirrors `.do-it/`
+task #30). **Due**: after the R5 big-machine 500q gate produces archives.
+
+**Context**: `abstain_false_confident=9` misses are a calibration question, NOT a
+threshold-bump. The prior verdict (`abstention-calibration-design.md`) found
+grader-level calibration inert (OFF) / gaming (ON). The re-test needs the real 500q
+data, which is gated on the big-machine R5 run; it may route to a product
+evidence-strength signal rather than a grader threshold.
+
+**Why deferred (not hidden debt)**: the input data does not exist until R5; testing
+on the wrong (offline-fallback / small-sample) corpus is what produced the earlier
+invalid finding.
+
+**Close condition**: re-evaluate against the R5 500q cached archive; either land a
+calibrated evidence-strength signal with before/after miss-bucket deltas, or record a
+written "calibration inert on real corpus" verdict.
+
+### #BL-052 — Scale LongMemEval CI sample-floor (was #BL-040)
+
+**Status**: Open (re-opened as a scale-up; opened v0.3.11, 2026-06-04).
+**Due**: after a larger CI host is available.
+
+**Context**: `#BL-040` shipped a confidence-interval sample for the LongMemEval-S
+smoke. The CI sample-floor still runs small because the 500q full bench OOMs on the
+7.6 GB WSL2 box. Scaling the CI floor up requires a larger CI host (the same
+constraint that defers the R5 gate off-box).
+
+**Why deferred (not hidden debt)**: this is an infrastructure capacity item, not a
+recall-quality gap; the full gate runs on the big machine in R5 regardless.
+
+**Close condition**: a larger CI host runs a category-balanced sample-floor at or
+above the confidence-interval threshold without OOM, wired into the CI gate.
+
+### #BL-053 — Edge `llm_supports` LOCAL pair-classifier (host-worker / ONNX)
+
+**Status**: Open (deferred; opened v0.3.11, 2026-06-04).
+**Due**: revisit alongside the local ONNX cache work.
+
+**Context**: `EdgeAutoProducerService` accepts an optional in-process pair-classifier
+port and the host-worker LLM-verdict path mints with `trigger_source = llm_supports`,
+but a LOCAL (host-worker / ONNX) classifier producing `llm_supports` is not yet built.
+Until then the local rule heuristic tags `local_*` trigger sources only.
+
+**Why deferred (not hidden debt)**: the port + the host-worker verdict path are wired;
+the missing piece is a local model classifier, which is net-new and depends on the
+local ONNX cache infrastructure (same dependency as the embedding-ON LoCoMo gate).
+
+**Close condition**: a local pair-classifier (host-worker or ONNX) produces
+confidence-floor-clearing `llm_supports` verdicts offline, with a no-network
+regression.
+
+### #BL-054 — Lease-pierce governance-cache hot-path hook
+
+**Status**: Open (deferred; opened v0.3.11, 2026-06-04). **Due**: revisit if the
+governance cache moves onto the production recall hot path.
+
+**Context**: A lease-pierce invalidation hook for the governance cache was scoped
+during D-LEASE. The governance cache is **not** on the production recall hot path
+today, so the hook is moot in the current wiring — but if a future change puts the
+cache on the hot path, lease piercing must invalidate it.
+
+**Why deferred (not hidden debt)**: the codex completeness pass confirmed the cache is
+off the hot path, so the hook is genuinely not load-bearing now; opening it here keeps
+the dependency visible instead of silently dropping it.
+
+**Close condition**: close as not-needed if the governance cache stays off the recall
+hot path through v0.3.12; otherwise land the lease-pierce invalidation hook with a
+test that a pierced lease invalidates a cached governance verdict.
+
+### #BL-055 — Inspector web UI label/filter for `path_relation_failure`
+
+**Status**: Open (deferred; opened v0.3.11, 2026-06-04). **Due**: next Inspector UI
+pass.
+
+**Context**: D-EDGEAUDIT surfaces path-relation / edge-proposal failures as a new
+`path_relation_failure` health cause in the Health Inbox projection. The Inspector web
+UI renders the grouped Health Inbox but does not yet carry a dedicated label/filter
+for this new cause kind, so an operator cannot filter to it directly.
+
+**Why deferred (not hidden debt)**: the producer + projection are live and auditable
+via the daemon; this is a UI affordance on top of an already-surfaced cause, not a
+missing capability.
+
+**Close condition**: the Inspector Health Inbox renders a human label for
+`path_relation_failure` and offers a cause-kind filter that includes it, covered by a
+component test.
+
+### #BL-047 — `multi_hop_path` as a dedicated recall fusion stream
+
+**Status**: Open (deferred by explicit operator decision, v0.3.11, 2026-06-03).
+
+**Context**: Multi-hop graph traversal capability ALREADY exists — `MAX_GRAPH_HOPS=2`
+2-hop BFS (phase-6-graph-plan.md D-3) folds multi-hop-reached candidates into the
+`graph_expansion` fusion stream, and the v0.3.11 cohort fan-in (member→representative
+hub edges) rides that same path. `multi_hop_path` (D-7) would give multi-hop-reached
+candidates their OWN dedicated fusion lane with independent weight instead of folding
+them into `graph_expansion`. Estimated +0–2pt, L effort.
+
+**Why deferred (not hidden debt)**: this is a scoring-topology refinement, NOT a missing
+capability — the multi-hop traversal it would serve is already load-bearing via
+`graph_expansion`. Lowest-ROI item in the D-series.
+
+**Close condition**: revisit if a 500q LongMemEval root-cause diagnostic shows multi-hop
+-reached gold drowned inside the `graph_expansion` stream and needing a separate weighted
+lane to surface. Otherwise leave folded into `graph_expansion`.
+
+(The broader backlog-as-authoritative-deferral-list rebuild is tracked as D-BACKLOG in
+`.do-it/plans/v0.3.11-completion-masterplan.md`, to be done at Phase G closeout.)
 
 ## Resolved in v0.3.8 (2026-05-16)
 

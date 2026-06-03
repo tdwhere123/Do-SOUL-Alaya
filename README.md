@@ -119,12 +119,14 @@ node apps/bench-runner/bin/alaya-bench-runner.mjs self
 node apps/bench-runner/bin/alaya-bench-runner.mjs live --help
 ```
 
-Checkpoint note (2026-05-25): HEAD `96e9bb9` has not rerun the full public
-release benches yet. Current tracked `latest-baseline*` pointers are
-legacy/stale baselines, not v0.3.11 HEAD release evidence. The staged
-artifact-hygiene cleanup removes old full diagnostics only; it does not delete
-KPI, report, or pointer evidence. Every new full release bench must include
-`recall_token_economy`.
+Checkpoint note (2026-06-04): v0.3.11 is implementation complete but the full
+public release benches have **not** rerun on the current HEAD — the 500q gate
+OOMs on the local 7.6 GB box and is deferred to a larger host (the R5 gate).
+**R@5 → 90% is not claimed as achieved.** Current tracked `latest-baseline*`
+pointers are legacy/stale baselines, not v0.3.11 release evidence. The honest
+pre-fan-in 500q-OFF baseline is R@1=52.0% / R@5=81.6% / R@10=83.6% (clean,
+`llm_calls=0`); the earlier 90%@50q was a small-sample artifact. Every new full
+release bench must include `recall_token_economy`.
 
 The shape of the bet is unchanged: a retrieval number is useful only
 when the durable claims an agent acts on are audited, reversible, and
@@ -400,9 +402,24 @@ recall, proposals, usage receipts, and Garden cleanup stay scoped to the
 project you opened.
 
 - **Auditor** — evidence staleness check, pointer health, orphan detection.
-- **Janitor** — TTL cleanup, hot/warm tier demotion, dormant marking, tombstone GC.
-- **Librarian** — merge detection, template clustering, neighbour discovery, path compression.
+- **Janitor** — TTL cleanup, hot/warm tier demotion, reversible dormant
+  demotion, tombstone GC, and the *judged-useless*-delete arm of the
+  forgetting lifecycle (decay → dormant → delete of sourceless,
+  never-reinforced rows only, behind a delete-authority disposition gate +
+  capsule re-verify). The *compress* arm — delete consolidated members
+  preserved in a capsule — is built but dormant pending an operator decision.
+- **Librarian** — merge detection, template clustering, neighbour discovery,
+  path compression, and synthesis proposals whose `accept` creates a capsule.
 - **Scheduler** — owns the queue, tier prioritisation, cooling periods, task accounting.
+
+Garden compute defaults to **`host_worker`** (zero-cloud): the attached CLI
+agent runs `POST_TURN_EXTRACT` and `EDGE_CLASSIFY` work; a configured Garden
+secret is read as an explicit `official_api` opt-in. The cloud edge-LLM is
+default-off. When host-worker work sits unclaimed past a bounded window, a
+zero-cloud local-heuristic fallback runs in-process so capture never stalls,
+and `alaya doctor` warns. Recall right after a write may run before
+host-worker edge classification completes; the deterministic rule heuristic is
+the immediate fallback (eventual consistency).
 
 **Failure mode this prevents.** A maintenance system that writes
 durable directly bypasses governance. A maintenance system that
@@ -685,10 +702,14 @@ place to look. The full project layout is documented in
 
 ## Where this is going
 
-### Current state (2026-05-25)
+### Current state (2026-06-04)
 
-v0.3.11 is the current implementation checkpoint with release evidence still
-pending; v0.3.4 was the first publicly released v0.3.x line. Cumulative since
+v0.3.11 is **implementation complete with the big-machine 500q KPI gate
+pending** — all completion-effort code is landed and code-reviewed, but the
+full LongMemEval / LoCoMo benches have not been rerun on a larger host (the
+local 7.6 GB WSL2 box OOMs at 500q), so it is **not release-closed and the
+"R@5 -> 90%" target is not claimed as achieved.** v0.3.4 was the first
+publicly released v0.3.x line. Cumulative since
 v0.3.0: real Codex and Claude
 Code MCP sessions autonomously run `soul.recall` →
 `soul.report_context_usage` during normal conversations, with a
@@ -715,9 +736,25 @@ operator actions; and `SynthesisCapsule.promotion` is retired now
 that a replacement exists. The live MCP catalog is **16 tools** (13
 `soul.*` + 3 `garden.*`).
 
-v0.3.11 is under completion/fix-loop. It is not full release-ready
-until every phase fix-loop is clean and the LongMemEval / LoCoMo full
-bench gates are archived.
+**v0.3.11** makes Garden compute **zero-cloud by default** — `host_worker`
+(the attached CLI agent computes) is the product default, the cloud edge-LLM
+is default-off, and B-2 edge classification runs as a host-worker
+`EDGE_CLASSIFY` task with a deterministic rule-heuristic fallback. It retires
+the temporary recall fan-in heuristic in favour of durable accepted
+member→representative co-occurrence edges; completes the
+forgetting-compression lifecycle's *judged-useless*-delete arm
+(decay → dormant → delete of sourceless, never-reinforced rows only, with a
+delete-authority disposition gate + capsule re-verify); and wires production
+synthesis review accept → capsule create. The *compress* arm of that lifecycle
+is built but **dormant pending an operator decision** (`docs/handbook/backlog.md`
+`#BL-049`); no memory is deleted by it until activated.
+
+v0.3.11 is **implementation complete with the big-machine 500q gate
+pending.** It is not full release-ready until that gate runs on a larger host
+and the LongMemEval / LoCoMo full-bench archives pass. **R@5 → 90% is not
+claimed as achieved** — the recall fan-in is implemented and code-reviewed,
+but the R@5 number is unmeasured locally and deferred to that gate. See
+`docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`.
 
 `keychain:` secret refs are code-reviewed across Linux / macOS /
 Windows adapters (runtime cross-platform write→read still deferred —
