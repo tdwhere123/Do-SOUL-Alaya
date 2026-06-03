@@ -38,8 +38,6 @@ export {
   OFFICIAL_API_GARDEN_MODEL,
   OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider,
-  CustomApiGardenProvider,
-  LocalModelGardenProvider,
   parseOfficialApiSignals,
   salvageRawSignalElements,
   type GardenCompileContext,

@@ -22,29 +22,10 @@ describe("ComputeRoutingService", () => {
     {
       configuredProviders: [
         createCandidate({ kind: ComputeProviderPriority.STUB, model_id: "stub-local-heuristics" }),
-        createCandidate({ kind: ComputeProviderPriority.LOCAL_MODEL, model_id: "llama-3.2" }),
-        createCandidate({ kind: ComputeProviderPriority.CUSTOM_API, model_id: "gpt-4.1-mini" }),
         createCandidate({ kind: ComputeProviderPriority.OFFICIAL_API, model_id: "gpt-5-mini" })
       ],
       expectedProvider: ComputeProviderPriority.OFFICIAL_API,
       expectedModelId: "gpt-5-mini"
-    },
-    {
-      configuredProviders: [
-        createCandidate({ kind: ComputeProviderPriority.STUB, model_id: "stub-local-heuristics" }),
-        createCandidate({ kind: ComputeProviderPriority.LOCAL_MODEL, model_id: "llama-3.2" }),
-        createCandidate({ kind: ComputeProviderPriority.CUSTOM_API, model_id: "gpt-4.1-mini" })
-      ],
-      expectedProvider: ComputeProviderPriority.CUSTOM_API,
-      expectedModelId: "gpt-4.1-mini"
-    },
-    {
-      configuredProviders: [
-        createCandidate({ kind: ComputeProviderPriority.STUB, model_id: "stub-local-heuristics" }),
-        createCandidate({ kind: ComputeProviderPriority.LOCAL_MODEL, model_id: "llama-3.2" })
-      ],
-      expectedProvider: ComputeProviderPriority.LOCAL_MODEL,
-      expectedModelId: "llama-3.2"
     },
     {
       configuredProviders: [
@@ -94,14 +75,14 @@ describe("ComputeRoutingService", () => {
     const service = new ComputeRoutingService({
       providers: [
         createCandidate({
-          kind: ComputeProviderPriority.CUSTOM_API,
-          providerKind: GardenProviderKind.CUSTOM_API,
+          kind: ComputeProviderPriority.OFFICIAL_API,
+          providerKind: GardenProviderKind.OFFICIAL_API,
           model_id: "z-model",
           adapter: "z-adapter"
         }),
         createCandidate({
-          kind: ComputeProviderPriority.CUSTOM_API,
-          providerKind: GardenProviderKind.CUSTOM_API,
+          kind: ComputeProviderPriority.OFFICIAL_API,
+          providerKind: GardenProviderKind.OFFICIAL_API,
           model_id: "a-model",
           adapter: "a-adapter"
         })
@@ -111,7 +92,7 @@ describe("ComputeRoutingService", () => {
     });
 
     await expect(service.route("workspace-1")).resolves.toMatchObject({
-      selected_provider: ComputeProviderPriority.CUSTOM_API,
+      selected_provider: ComputeProviderPriority.OFFICIAL_API,
       model_id: "a-model",
       adapter: "a-adapter"
     });

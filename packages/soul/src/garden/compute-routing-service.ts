@@ -23,9 +23,7 @@ export interface ComputeRoutingDependencies {
 
 const providerPriorityRank: Readonly<Record<ComputeProviderPriorityValue, number>> = Object.freeze({
   [ComputeProviderPriority.OFFICIAL_API]: 0,
-  [ComputeProviderPriority.CUSTOM_API]: 1,
-  [ComputeProviderPriority.LOCAL_MODEL]: 2,
-  [ComputeProviderPriority.STUB]: 3
+  [ComputeProviderPriority.STUB]: 1
 });
 const SYSTEM_NOW = () => new Date().toISOString();
 

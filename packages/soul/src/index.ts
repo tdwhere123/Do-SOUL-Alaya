@@ -54,8 +54,6 @@ export {
   OFFICIAL_API_SYSTEM_PROMPT,
   parseOfficialApiSignals,
   salvageRawSignalElements,
-  CustomApiGardenProvider,
-  LocalModelGardenProvider,
   SessionOverrideRemediation,
   toModelRef,
   DISTILLED_FACT_MAX_CHARS,

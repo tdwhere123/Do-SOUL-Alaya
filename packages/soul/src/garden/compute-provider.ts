@@ -435,28 +435,6 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   }
 }
 
-export class CustomApiGardenProvider implements GardenComputeProvider {
-  public readonly provider_kind = GardenProviderKind.CUSTOM_API;
-
-  public async compile(): Promise<readonly CandidateMemorySignal[]> {
-    throw new GardenProviderError(
-      "CustomApiGardenProvider is not implemented in Phase 0.5.",
-      "provider_failure"
-    );
-  }
-}
-
-export class LocalModelGardenProvider implements GardenComputeProvider {
-  public readonly provider_kind = GardenProviderKind.LOCAL_MODEL;
-
-  public async compile(): Promise<readonly CandidateMemorySignal[]> {
-    throw new GardenProviderError(
-      "LocalModelGardenProvider is not implemented in Phase 0.5.",
-      "provider_failure"
-    );
-  }
-}
-
 const MAX_OFFICIAL_API_SIGNALS = 64;
 const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;

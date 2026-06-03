@@ -187,16 +187,14 @@ describe("Phase C shared-contract foundation", () => {
     const decision = {
       decision_id: "decision-1",
       workspace_id: "workspace-1",
-      selected_provider: ComputeProviderPriority.CUSTOM_API,
+      selected_provider: ComputeProviderPriority.OFFICIAL_API,
       model_id: "gpt-4.1-mini",
-      adapter: "custom-openai-compatible",
-      selection_reason: "custom_api selected as highest-priority configured compute provider",
+      adapter: "official-openai-compatible",
+      selection_reason: "official_api selected as highest-priority configured compute provider",
       decided_at: validTimestamp
     } as const;
 
     expect(ComputeProviderPrioritySchema.parse("official_api")).toBe("official_api");
-    expect(ComputeProviderPrioritySchema.parse("custom_api")).toBe("custom_api");
-    expect(ComputeProviderPrioritySchema.parse("local_model")).toBe("local_model");
     expect(ComputeProviderPrioritySchema.parse("stub")).toBe("stub");
     expect(ComputeRoutingDecisionSchema.parse(decision)).toEqual(decision);
     expect(
@@ -215,13 +213,9 @@ describe("Phase C shared-contract foundation", () => {
   it("exports garden provider kinds from protocol ownership", () => {
     expect(GardenProviderKindSchema.parse("local_heuristics")).toBe("local_heuristics");
     expect(GardenProviderKindSchema.parse("official_api")).toBe("official_api");
-    expect(GardenProviderKindSchema.parse("custom_api")).toBe("custom_api");
-    expect(GardenProviderKindSchema.parse("local_model")).toBe("local_model");
     expect(Object.values(GardenProviderKind)).toEqual([
       "local_heuristics",
-      "official_api",
-      "custom_api",
-      "local_model"
+      "official_api"
     ]);
   });
 

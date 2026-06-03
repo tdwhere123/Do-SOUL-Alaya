@@ -3,10 +3,8 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  CustomApiGardenProvider,
   GardenProviderError,
   GardenProviderKind,
-  LocalModelGardenProvider,
   OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider
 } from "../garden/compute-provider.js";
@@ -534,25 +532,6 @@ describe("OfficialApiGardenProvider", () => {
     expect((signals[0]!.raw_payload as { extraction_reason: string }).extraction_reason.length).toBe(400);
   });
 
-  it("surfaces the custom API stub as a typed provider failure", async () => {
-    const provider = new CustomApiGardenProvider();
-
-    await expect(provider.compile()).rejects.toMatchObject({
-      name: "GardenProviderError",
-      kind: "provider_failure",
-      message: "CustomApiGardenProvider is not implemented in Phase 0.5."
-    } satisfies Partial<GardenProviderError>);
-  });
-
-  it("surfaces the local model stub as a typed provider failure", async () => {
-    const provider = new LocalModelGardenProvider();
-
-    await expect(provider.compile()).rejects.toMatchObject({
-      name: "GardenProviderError",
-      kind: "provider_failure",
-      message: "LocalModelGardenProvider is not implemented in Phase 0.5."
-    } satisfies Partial<GardenProviderError>);
-  });
 });
 
 // Phase A.1 instrument coverage: an invalid_response failure must drop one
