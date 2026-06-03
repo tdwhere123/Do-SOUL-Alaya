@@ -46,7 +46,7 @@ describe("Janitor GC task kinds", () => {
             memory_id: `memory-${index + 1}`
           }))
       ),
-      hardDelete: vi.fn(async () => undefined)
+      hardDelete: vi.fn(async () => true)
     };
     const janitor = new Janitor({
       cleanupPort: {
@@ -77,7 +77,7 @@ describe("Janitor GC task kinds", () => {
   it("skips tombstone gc deletions for strong-ref protected memories", async () => {
     const tombstoneGcPort = {
       findTombstonedMemories: vi.fn(async () => [{ memory_id: "memory-1" }, { memory_id: "memory-2" }]),
-      hardDelete: vi.fn(async () => undefined)
+      hardDelete: vi.fn(async () => true)
     };
     const strongRefProtectionPort = {
       isProtected: vi.fn(async (_workspaceId: string, _targetEntityType: string, targetEntityId: string) => targetEntityId === "memory-1")
@@ -112,6 +112,38 @@ describe("Janitor GC task kinds", () => {
     ]);
   });
 
+  it("counts only physically-deleted rows; a refused (preservation-revoked) row is excluded and reported", async () => {
+    const tombstoneGcPort = {
+      findTombstonedMemories: vi.fn(async () => [{ memory_id: "memory-1" }, { memory_id: "memory-2" }]),
+      // memory-2 refuses (B1 preservation_revoked): hardDelete resolves false.
+      hardDelete: vi.fn(async (memoryId: string) => memoryId !== "memory-2")
+    };
+    const janitor = new Janitor({
+      cleanupPort: {
+        findExpiredObjects: vi.fn(async () => []),
+        removeExpiredObjects: vi.fn(async () => undefined)
+      },
+      tieringPort: {
+        findHotDemotionCandidates: vi.fn(async () => []),
+        demoteToWarm: vi.fn(async () => undefined)
+      },
+      tombstoneGcPort,
+      scheduler: {
+        reportCompletion: vi.fn(async () => undefined)
+      },
+      now: () => "2026-03-28T00:00:00.000Z"
+    } as ConstructorParameters<typeof Janitor>[0]);
+
+    const result = await janitor.run(createTask("tombstone_gc"));
+
+    expect(tombstoneGcPort.hardDelete).toHaveBeenCalledTimes(2);
+    expect(result.objects_affected).toEqual(["memory-1"]);
+    expect(result.audit_entries).toEqual([
+      "[SKIPPED] tombstone_gc: disposition sweep port not wired",
+      "tombstone_gc: 1 tombstoned memories hard-deleted (1 refused: preservation revoked)"
+    ]);
+  });
+
   it("disposition sweep tombstones only dormant rows the gate cleared, never a null-disposition row", async () => {
     const dispositionSweepPort = {
       findDormantDispositionCandidates: vi.fn(async () => [
@@ -124,7 +156,7 @@ describe("Janitor GC task kinds", () => {
     };
     const tombstoneGcPort = {
       findTombstonedMemories: vi.fn(async () => []),
-      hardDelete: vi.fn(async () => undefined)
+      hardDelete: vi.fn(async () => true)
     };
     const janitor = new Janitor({
       cleanupPort: {
@@ -174,7 +206,7 @@ describe("Janitor GC task kinds", () => {
       },
       tombstoneGcPort: {
         findTombstonedMemories: vi.fn(async () => []),
-        hardDelete: vi.fn(async () => undefined)
+        hardDelete: vi.fn(async () => true)
       },
       dispositionSweepPort,
       scheduler: { reportCompletion: vi.fn(async () => undefined) },

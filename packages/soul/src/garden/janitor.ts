@@ -72,8 +72,10 @@ export interface JanitorTombstoneGcPort {
   findTombstonedMemories(workspaceId: string): Promise<readonly TombstonedMemoryRecord[]>;
   // invariant: physical removal is GATED. The daemon wires this to
   // memory-service.autonomousHardDeleteTombstoned, which refuses any row lacking
-  // a non-null disposition even if tombstoned (defense in depth).
-  hardDelete(memoryId: string, taskId: string): Promise<void>;
+  // a non-null disposition even if tombstoned (defense in depth). Resolves
+  // `true` only when the row was physically deleted; `false` when the delete was
+  // refused (B1 preservation_revoked) so the caller counts only deleted rows.
+  hardDelete(memoryId: string, taskId: string): Promise<boolean>;
 }
 
 export interface DormantDispositionCandidate {
@@ -297,6 +299,7 @@ export class Janitor {
     const candidates = await this.tombstoneGcPort.findTombstonedMemories(task.workspace_id);
     const batch = candidates.slice(0, JANITOR_CONSTANTS.BATCH_SIZE);
     const objectIds: string[] = [];
+    let refused = 0;
 
     for (const candidate of batch) {
       if (this.strongRefProtectionPort !== undefined) {
@@ -307,12 +310,21 @@ export class Janitor {
         }
       }
 
-      await this.tombstoneGcPort.hardDelete(candidate.memory_id, task.task_id);
-      objectIds.push(candidate.memory_id);
+      // invariant: count only rows the gate actually deleted. A `false` return is
+      // the B1 preservation_revoked refuse path (row stays tombstoned), so it must
+      // not enter objects_affected nor the hard-deleted tally.
+      const deleted = await this.tombstoneGcPort.hardDelete(candidate.memory_id, task.task_id);
+      if (deleted) {
+        objectIds.push(candidate.memory_id);
+      } else {
+        refused += 1;
+      }
     }
 
     auditEntries.push(
-      `tombstone_gc: ${objectIds.length} tombstoned memories hard-deleted`
+      `tombstone_gc: ${objectIds.length} tombstoned memories hard-deleted${
+        refused > 0 ? ` (${refused} refused: preservation revoked)` : ""
+      }`
     );
     const result = this.createSuccessResult(
       task,

@@ -123,7 +123,7 @@ describe("createTombstoneDispositionSweepPort", () => {
     };
     const tombstoneAuthority = {
       autonomousTombstone: vi.fn(async () => memory()),
-      autonomousHardDeleteTombstoned: vi.fn(async () => undefined),
+      autonomousHardDeleteTombstoned: vi.fn(async () => true),
       findTombstonedMemoriesWithDisposition: vi.fn(async () => [])
     };
 
@@ -140,7 +140,7 @@ describe("createTombstoneDispositionSweepPort", () => {
   it("autonomousTombstone short-circuits a null-disposition candidate (never tombstones a kept row)", async () => {
     const tombstoneAuthority = {
       autonomousTombstone: vi.fn(async () => memory()),
-      autonomousHardDeleteTombstoned: vi.fn(async () => undefined),
+      autonomousHardDeleteTombstoned: vi.fn(async () => true),
       findTombstonedMemoriesWithDisposition: vi.fn(async () => [])
     };
     const port = createTombstoneDispositionSweepPort({
@@ -160,7 +160,7 @@ describe("createTombstoneDispositionSweepPort", () => {
   it("autonomousTombstone routes a cleared candidate through the audited authority", async () => {
     const tombstoneAuthority = {
       autonomousTombstone: vi.fn(async () => memory()),
-      autonomousHardDeleteTombstoned: vi.fn(async () => undefined),
+      autonomousHardDeleteTombstoned: vi.fn(async () => true),
       findTombstonedMemoriesWithDisposition: vi.fn(async () => [])
     };
     const port = createTombstoneDispositionSweepPort({

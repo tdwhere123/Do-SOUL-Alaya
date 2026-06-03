@@ -668,12 +668,16 @@ export class MemoryService {
    * The repo restates the disposition gate in SQL; this method also re-asserts it
    * on the loaded row so a no-disposition tombstone (e.g. human Inspector retire)
    * can never be auto-GC'd. The human/legacy path stays on hardDeleteTombstoned.
+   *
+   * invariant: returns `true` only when the row was physically deleted; returns
+   * `false` on the B1 preservation_revoked fail-closed refuse path (row stays
+   * tombstoned). Callers count actually-deleted rows by this signal.
    */
   public async autonomousHardDeleteTombstoned(
     objectId: string,
     reason: string,
     causedBy: TransitionCausedBy
-  ): Promise<void> {
+  ): Promise<boolean> {
     const parsedObjectId = parseObjectId(objectId);
     const parsedReason = parseReason(reason);
     const parsedCausedBy = parseTransitionCausedBy(causedBy);
@@ -731,7 +735,7 @@ export class MemoryService {
           })
         });
         await this.dependencies.runtimeNotifier.notifyEntry(skipEvent);
-        return;
+        return false;
       }
     }
 
@@ -764,6 +768,7 @@ export class MemoryService {
 
     await hardDeleteWithDisposition(parsedObjectId);
     await this.dependencies.runtimeNotifier.notifyEntry(event);
+    return true;
   }
 
   // invariant (B1): re-verify that a `compressed` member is STILL preserved by a

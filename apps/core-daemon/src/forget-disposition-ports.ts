@@ -36,11 +36,13 @@ export interface ForgetDispositionTombstoneAuthorityPort {
     reason: string,
     causedBy: TransitionCausedBy
   ): Promise<Readonly<MemoryEntry>>;
+  // invariant: resolves `true` only when the row was physically deleted; `false`
+  // on the B1 preservation_revoked fail-closed refuse path (row stays tombstoned).
   autonomousHardDeleteTombstoned(
     objectId: string,
     reason: string,
     causedBy: TransitionCausedBy
-  ): Promise<void>;
+  ): Promise<boolean>;
   findTombstonedMemoriesWithDisposition(
     workspaceId: string
   ): Promise<readonly Readonly<MemoryEntry>[]>;
@@ -178,12 +180,11 @@ export function createTombstoneGcPort(input: {
       const rows = await input.tombstoneAuthority.findTombstonedMemoriesWithDisposition(workspaceId);
       return rows.map((row) => ({ memory_id: row.object_id }));
     },
-    hardDelete: async (memoryId: string, _taskId: string): Promise<void> => {
-      await input.tombstoneAuthority.autonomousHardDeleteTombstoned(
+    hardDelete: async (memoryId: string, _taskId: string): Promise<boolean> =>
+      input.tombstoneAuthority.autonomousHardDeleteTombstoned(
         memoryId,
         "autonomous_tombstone_gc",
         causedBy
-      );
-    }
+      )
   };
 }
