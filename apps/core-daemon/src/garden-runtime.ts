@@ -1867,9 +1867,18 @@ export function createGardenRuntime(input: {
       task: async () => {
         await enqueueForAllWorkspaces(GardenTaskKind.TTL_CLEANUP, GardenTier.TIER_0);
         // REVERSIBLE memory-side forgetting: demote faded+idle active memories
-        // to lifecycle_state=dormant (recall-silent, revived on next use). Not
-        // TOMBSTONE_GC — destructive GC is a separate later slice.
+        // to lifecycle_state=dormant (recall-silent, revived on next use).
         await enqueueForAllWorkspaces(GardenTaskKind.DORMANT_DEMOTION, GardenTier.TIER_0);
+        // invariant: TERMINAL forgetting (R3d). Runs the gated dormant->tombstoned
+        // disposition sweep + the gated physical GC. Both are fail-closed: a row is
+        // tombstoned only with a non-null forget_disposition (compressed-into-a-live-
+        // capsule or judged_useless), and physically deleted only when it is past
+        // the >=24h grace AND its compressed-member preservation is re-verified
+        // atomically with the DELETE. When the disposition/GC ports are unwired the
+        // task is a safe no-op.
+        // see also: packages/soul/src/garden/janitor.ts executeTombstoneGc,
+        // apps/core-daemon/src/forget-disposition-ports.ts computeForgetDisposition.
+        await enqueueForAllWorkspaces(GardenTaskKind.TOMBSTONE_GC, GardenTier.TIER_0);
         markBackgroundPassCompleted();
       }
     },

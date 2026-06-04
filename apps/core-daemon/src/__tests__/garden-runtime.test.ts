@@ -152,9 +152,9 @@ describe("garden runtime path plasticity queue", () => {
       required_tier: GardenTier.TIER_2,
       workspace_id: "workspace-1"
     });
-    // tier_0 = 2 ticks * 2 Janitor kinds (TTL_CLEANUP + DORMANT_DEMOTION).
+    // tier_0 = 2 ticks * 3 Janitor kinds (TTL_CLEANUP + DORMANT_DEMOTION + TOMBSTONE_GC).
     expect(runtime.backlogTelemetrySource.getBacklogSnapshot().queue_depth_by_tier).toMatchObject({
-      tier_0: 4,
+      tier_0: 6,
       tier_1: 2,
       tier_2: 5
     });
@@ -342,10 +342,11 @@ describe("garden runtime path plasticity queue", () => {
 
     await getService(runtime, "Janitor").task();
 
-    // DORMANT_DEMOTION is enqueued alongside TTL_CLEANUP. TOMBSTONE_GC is NOT
-    // enqueued by this slice (destructive GC is a separate later slice).
+    // DORMANT_DEMOTION and TERMINAL TOMBSTONE_GC are both enqueued alongside
+    // TTL_CLEANUP. TOMBSTONE_GC's destructive sweep is gated (disposition required
+    // + >=24h grace + atomic capsule re-verify), so enabling it is safe.
     expect(scheduler.queue.some((task) => task.task_kind === GardenTaskKind.DORMANT_DEMOTION)).toBe(true);
-    expect(scheduler.queue.some((task) => task.task_kind === GardenTaskKind.TOMBSTONE_GC)).toBe(false);
+    expect(scheduler.queue.some((task) => task.task_kind === GardenTaskKind.TOMBSTONE_GC)).toBe(true);
 
     await drainScheduler(runtime);
 
