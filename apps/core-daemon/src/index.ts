@@ -1659,17 +1659,29 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     },
     // invariant: resolves the synthesis cluster's member memories at capsule-build
     // time so source_memory_refs is populated. findByEvidenceRefs returns the
-    // active, non-tombstoned memories whose evidence_refs intersect the capsule's
-    // evidence_refs, workspace-scoped and bounded (id-set cap + row LIMIT). A
-    // populated member set is what lets the autonomous compress arm earn each
-    // member the `compressed` disposition while a live capsule preserves it.
+    // active, non-tombstoned memories whose evidence_refs INTERSECT the capsule's
+    // evidence_refs, workspace-scoped and bounded (id-set cap + row LIMIT). The
+    // intersection set is then narrowed to the SUBSET members — those whose
+    // evidence_refs are FULLY contained in the capsule's evidence set, i.e. the
+    // member has NO private evidence living outside the cluster. Only a fully
+    // consolidated member is eligible for source_memory_refs: the capsule
+    // preserves the cluster's shared evidence + a deterministic gist summary, so
+    // a member with private evidence outside the cluster is NOT preserved by it
+    // and must stay un-armed (fail-safe: it falls through to dormant /
+    // judged_useless, never compress-deleted on a partial-preservation claim).
+    // see also: forget-disposition-ports.ts computeForgetDisposition.
     synthesisMemberResolver: {
       findMemberObjectIdsByEvidenceRefs: async (
         scopedWorkspaceId: string,
         evidenceRefs: readonly string[]
       ) => {
+        const capsuleEvidence = new Set(evidenceRefs);
         const members = await memoryEntryRepo.findByEvidenceRefs(scopedWorkspaceId, evidenceRefs);
-        return members.map((member) => member.object_id);
+        return members
+          .filter((member) =>
+            member.evidence_refs.every((ref) => capsuleEvidence.has(ref))
+          )
+          .map((member) => member.object_id);
       }
     },
     signalService,

@@ -792,13 +792,16 @@ export class MemoryService {
     const isCompressed = existing.forget_disposition === "compressed";
 
     // invariant (delete-time TOCTOU re-verify): a `compressed` member earned its
-    // terminal-removal right ONLY because a live capsule preserved its content.
-    // That right is re-checked HERE (T0+>=24h), not just at marking time (T0). If
-    // the capsule archived / tombstoned / dropped this member / was
-    // cascade-deleted during the grace window, the preservation is gone, so
-    // physical deletion would be permanent loss. This pre-check fails fast with a
-    // precise reason; the physical delete below is ALSO guarded atomically so a
-    // capsule mutation racing between this check and the delete cannot leak.
+    // terminal-removal right ONLY because a live capsule FULLY CONSOLIDATES it
+    // (subset membership: the capsule preserves the cluster's shared evidence as
+    // evidence_capsules + a deterministic gist summary; the member's distilled
+    // `content` is NOT byte-preserved). That right is re-checked HERE (T0+>=24h),
+    // not just at marking time (T0). If the capsule archived / tombstoned / dropped
+    // this member / was cascade-deleted during the grace window, the consolidation
+    // is gone, so physical deletion would be permanent loss. This pre-check fails
+    // fast with a precise reason; the physical delete below is ALSO guarded
+    // atomically so a capsule mutation racing between this check and the delete
+    // cannot leak.
     // see also: apps/core-daemon/src/forget-disposition-ports.ts isCapsuleLive.
     if (isCompressed) {
       const preserved = await this.compressedPreservationStillValid(existing);

@@ -280,15 +280,17 @@ export interface McpMemoryProposalWorkflowDependencies {
     ): Promise<string | null>;
   };
   // invariant: resolves the synthesis cluster's member memories at capsule-build
-  // time so source_memory_refs is populated, not hard-coded empty. A member is a
-  // workspace-scoped memory whose evidence_refs intersect the capsule's
-  // evidence_refs (the cluster the librarian/auditor summarized). The compress arm
-  // of autonomous forgetting earns the `compressed` disposition ONLY for a member
-  // listed here, so an unpopulated set leaves the arm inert. The lookup is
-  // mechanical (no LLM) and BOUNDED by the repo (caps the id set + LIMITs the
-  // row scan). Wired by the daemon to memoryEntryRepo.findByEvidenceRefs; left
-  // undefined in unit tests that do not exercise member resolution (capsule then
-  // builds with an empty member set, as before).
+  // time so source_memory_refs is populated, not hard-coded empty. An eligible
+  // member is a workspace-scoped memory whose evidence_refs are a SUBSET of the
+  // capsule's evidence_refs (the member is FULLY consolidated by the cluster the
+  // librarian/auditor summarized — it has no private evidence living outside the
+  // cluster). The compress arm of autonomous forgetting earns the `compressed`
+  // disposition ONLY for a member listed here, so an unpopulated set leaves the
+  // arm inert. The lookup is mechanical (no LLM) and BOUNDED by the repo (caps
+  // the id set + LIMITs the row scan). Wired by the daemon to
+  // memoryEntryRepo.findByEvidenceRefs (intersection candidates) then narrowed to
+  // the subset members; left undefined in unit tests that do not exercise member
+  // resolution (capsule then builds with an empty member set).
   // see also: packages/storage/src/repos/memory-entry-repo.ts findByEvidenceRefs,
   // apps/core-daemon/src/forget-disposition-ports.ts buildLiveCapsuleMemberIndex
   readonly synthesisMemberResolver?: {
@@ -733,11 +735,16 @@ export function createMcpMemoryProposalWorkflow(
     const gists = await resolveSynthesisEvidenceGists(evidenceRefs, context.workspaceId, proposalId);
     const summary = buildDeterministicSynthesisSummary(topicKey, gists);
 
-    // invariant: populate source_memory_refs with the cluster's member memories
-    // (those whose evidence_refs intersect the capsule's) so the live capsule
-    // preserves their content and the autonomous compress arm can earn each member
-    // the `compressed` disposition. A topic-only capsule (no evidence) has no
-    // members. see also: forget-disposition-ports.ts buildLiveCapsuleMemberIndex.
+    // invariant: populate source_memory_refs with the cluster's FULLY-consolidated
+    // member memories (those whose evidence_refs are a SUBSET of the capsule's) so
+    // the autonomous compress arm can earn each such member the `compressed`
+    // disposition. The capsule preserves the cluster's SHARED EVIDENCE (which
+    // survives independently as evidence_capsules) plus a deterministic gist-level
+    // summary — it does NOT byte-preserve a member's distilled `content`. A member
+    // with private evidence outside the cluster is NOT a subset member and is left
+    // un-armed, because the capsule does not consolidate its full evidence basis.
+    // A topic-only capsule (no evidence) has no members.
+    // see also: forget-disposition-ports.ts buildLiveCapsuleMemberIndex.
     const sourceMemoryRefs = await resolveSynthesisMemberRefs(evidenceRefs, context.workspaceId);
 
     const timestamp = now();
@@ -801,13 +808,15 @@ export function createMcpMemoryProposalWorkflow(
     return gists;
   }
 
-  // Resolves the member memory object_ids that back the capsule's evidence set:
-  // workspace-scoped memories whose evidence_refs intersect evidenceRefs. The
-  // resolver is bounded by the repo (caps the id set + LIMITs the row scan) and
-  // mechanical (no LLM). Returns a sorted, de-duplicated list so two accepts over
-  // identical input produce identical source_memory_refs (deterministic). When the
-  // resolver is unwired (unit tests) or there is no evidence, the member set is
-  // empty and the capsule preserves no members (the prior posture).
+  // Resolves the member memory object_ids that are FULLY consolidated by the
+  // capsule's evidence set: workspace-scoped memories whose evidence_refs are a
+  // SUBSET of evidenceRefs (subset narrowing is applied by the wired resolver,
+  // which fetches intersection candidates then keeps only the fully-contained
+  // ones). The resolver is bounded by the repo (caps the id set + LIMITs the row
+  // scan) and mechanical (no LLM). Returns a sorted, de-duplicated list so two
+  // accepts over identical input produce identical source_memory_refs
+  // (deterministic). When the resolver is unwired (unit tests) or there is no
+  // evidence, the member set is empty and the capsule arms no members.
   async function resolveSynthesisMemberRefs(
     evidenceRefs: readonly string[],
     workspaceId: string

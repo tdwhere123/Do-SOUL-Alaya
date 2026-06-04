@@ -59,6 +59,12 @@ function createHarness(options: {
   // The member object_ids the resolver returns for the capsule's evidence_refs.
   // Defaults to none (the resolver-unwired posture: empty source_memory_refs).
   readonly memberObjectIdsByEvidence?: Readonly<Record<string, readonly string[]>>;
+  // Each member's FULL evidence_refs set. The fake resolver mirrors the daemon
+  // wiring: fetch intersection candidates (memberObjectIdsByEvidence), then keep
+  // only members whose evidence_refs are a SUBSET of the capsule's evidence_refs.
+  // A member absent here defaults to "evidence == the intersecting refs only"
+  // (no private evidence), so existing intersection-only tests stay armed.
+  readonly memberEvidenceRefs?: Readonly<Record<string, readonly string[]>>;
 }): Harness {
   const events: EventLogEntry[] = [];
   const order: string[] = [];
@@ -173,17 +179,33 @@ function createHarness(options: {
       findGistById: async (evidenceId) => options.gistsByEvidence[evidenceId] ?? null
     },
     synthesisMemberResolver: {
-      // Mirrors memoryEntryRepo.findByEvidenceRefs: returns the member object_ids
-      // for every memory whose evidence_refs intersect the queried evidence set.
+      // Mirrors the daemon wiring: first fetch the intersection candidates
+      // (memoryEntryRepo.findByEvidenceRefs returns every memory whose
+      // evidence_refs intersect the queried set), then narrow to the SUBSET
+      // members — those whose FULL evidence_refs are contained in the capsule's
+      // evidence set (no private evidence outside the cluster). A candidate
+      // absent from memberEvidenceRefs defaults to "evidence == the intersecting
+      // refs only", so it is trivially a subset and stays armed.
       findMemberObjectIdsByEvidenceRefs: async (_workspaceId, evidenceRefs) => {
         const map = options.memberObjectIdsByEvidence ?? {};
-        const members = new Set<string>();
+        const fullEvidence = options.memberEvidenceRefs ?? {};
+        const capsuleEvidence = new Set(evidenceRefs);
+        const candidates = new Map<string, string[]>();
         for (const evidenceRef of evidenceRefs) {
           for (const memberId of map[evidenceRef] ?? []) {
-            members.add(memberId);
+            const intersecting = candidates.get(memberId) ?? [];
+            intersecting.push(evidenceRef);
+            candidates.set(memberId, intersecting);
           }
         }
-        return [...members];
+        const armed: string[] = [];
+        for (const [memberId, intersectingRefs] of candidates) {
+          const memberEvidence = fullEvidence[memberId] ?? intersectingRefs;
+          if (memberEvidence.every((ref) => capsuleEvidence.has(ref))) {
+            armed.push(memberId);
+          }
+        }
+        return armed;
       }
     }
   });
@@ -297,6 +319,74 @@ describe("mcp synthesis create accept", () => {
 
     expect(harness.capsules).toHaveLength(1);
     expect(harness.capsules[0]!.source_memory_refs).toEqual(["mem-intersecting"]);
+  });
+
+  it("arms a member whose evidence is a SUBSET of the capsule (fully consolidated)", async () => {
+    const proposal = createSynthesisProposal("librarian.synthesis", ["ev-1", "ev-2"]);
+    const harness = createHarness({
+      proposal,
+      gistsByEvidence: {
+        "ev-1": "prefer pnpm for workspace commands",
+        "ev-2": "npm is deprecated for this repo"
+      },
+      memberObjectIdsByEvidence: {
+        "ev-1": ["mem-subset"],
+        "ev-2": ["mem-subset"]
+      },
+      // mem-subset's full evidence basis (ev-1 + ev-2) is contained in the
+      // capsule's evidence set, so the capsule fully consolidates it: armed.
+      memberEvidenceRefs: {
+        "mem-subset": ["ev-1", "ev-2"]
+      }
+    });
+
+    await harness.workflow.reviewMemoryProposal(
+      {
+        proposal_id: proposal.proposal_id,
+        verdict: "accept",
+        reason: "confirmed",
+        reviewer_identity: "user:reviewer-1"
+      },
+      { workspaceId: "ws1", runId: null, agentTarget: "cli", sessionId: "session-1" }
+    );
+
+    expect(harness.capsules).toHaveLength(1);
+    expect(harness.capsules[0]!.source_memory_refs).toEqual(["mem-subset"]);
+  });
+
+  it("does NOT arm a member with PRIVATE evidence outside the cluster (partial)", async () => {
+    const proposal = createSynthesisProposal("librarian.synthesis", ["ev-1", "ev-2"]);
+    const harness = createHarness({
+      proposal,
+      gistsByEvidence: {
+        "ev-1": "prefer pnpm for workspace commands",
+        "ev-2": "npm is deprecated for this repo"
+      },
+      // mem-partial shares ev-1 with the capsule (so it surfaces as an
+      // intersection candidate) but also carries ev-private, which lives OUTSIDE
+      // the cluster. The capsule does not consolidate that private evidence, so
+      // mem-partial must NOT earn the compress disposition (fail-safe: omitted
+      // from source_memory_refs => it stays dormant, never compress-deleted).
+      memberObjectIdsByEvidence: {
+        "ev-1": ["mem-partial"]
+      },
+      memberEvidenceRefs: {
+        "mem-partial": ["ev-1", "ev-private"]
+      }
+    });
+
+    await harness.workflow.reviewMemoryProposal(
+      {
+        proposal_id: proposal.proposal_id,
+        verdict: "accept",
+        reason: "confirmed",
+        reviewer_identity: "user:reviewer-1"
+      },
+      { workspaceId: "ws1", runId: null, agentTarget: "cli", sessionId: "session-1" }
+    );
+
+    expect(harness.capsules).toHaveLength(1);
+    expect(harness.capsules[0]!.source_memory_refs).toEqual([]);
   });
 
   it("creates a topic-only capsule for a bootstrapping synthesis_candidate (no evidence)", async () => {

@@ -12,10 +12,14 @@ import type {
   TombstonedMemoryRecord
 } from "@do-soul/alaya-soul";
 
-// invariant: a synthesis capsule preserves its members' content ONLY while it is
-// live. A tombstoned envelope or an archived synthesis_status no longer carries
-// the summary forward, so a member backed only by such a capsule is NOT
-// preserved and must not earn the `compressed` disposition.
+// invariant: a synthesis capsule consolidates its subset members ONLY while it is
+// live. It carries the cluster's SHARED EVIDENCE (which survives independently as
+// evidence_capsules) plus a deterministic gist-level summary forward — it does
+// NOT byte-preserve a member's distilled `content`. compress-delete is acceptable
+// only for a member FULLY consolidated by a LIVE capsule (its evidence_refs are a
+// subset of the capsule's). A tombstoned envelope or an archived synthesis_status
+// no longer carries the summary forward, so a member backed only by such a capsule
+// is NOT consolidated and must not earn the `compressed` disposition.
 function isCapsuleLive(capsule: Readonly<SynthesisCapsule>): boolean {
   return capsule.lifecycle_state !== "tombstone" && capsule.synthesis_status !== "archived";
 }
@@ -54,8 +58,11 @@ export interface ForgetDispositionTombstoneAuthorityPort {
  *   - { disposition: null } when the memory is EXPLICITLY PROTECTED (pinned /
  *     hazard / canon / consolidated): it stays dormant (reversible) and is NEVER
  *     autonomously removed, even when it is also a live-capsule member.
- *   - { disposition: 'compressed', ref } when a LIVE capsule references a
- *     NON-protected member in source_memory_refs (content preserved — R3a output).
+ *   - { disposition: 'compressed', ref } when a LIVE capsule lists a NON-protected
+ *     member in source_memory_refs (the member is FULLY consolidated by the
+ *     capsule: its evidence is the shared cluster evidence preserved as
+ *     evidence_capsules + a deterministic gist summary; the member's distilled
+ *     `content` is NOT byte-preserved — R3a output).
  *   - { disposition: 'judged_useless', ref: null } when the mechanical importance
  *     gate finds the memory safe to drop (failed ALL keep-criteria).
  *   - { disposition: null } otherwise (preserved-or-kept): stays dormant.
@@ -93,9 +100,10 @@ export function computeForgetDisposition(
 
 /**
  * Builds a per-member index from the live capsules in a workspace: member id ->
- * the live capsule id that preserves it. A member preserved by more than one
- * live capsule binds to the first by capsule creation order (findByWorkspaceId
- * returns created_at ASC), which is deterministic.
+ * the live capsule id that consolidates it (subset member of source_memory_refs).
+ * A member consolidated by more than one live capsule binds to the first by
+ * capsule creation order (findByWorkspaceId returns created_at ASC), which is
+ * deterministic.
  */
 export async function buildLiveCapsuleMemberIndex(
   workspaceId: string,
