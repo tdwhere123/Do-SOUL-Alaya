@@ -226,7 +226,7 @@ describe("Janitor GC task kinds", () => {
     );
     expect(result.objects_affected).toEqual(["memory-compressed", "memory-useless"]);
     expect(result.audit_entries).toEqual([
-      "disposition_sweep: 2 dormant memories autonomously tombstoned (1 retained, no disposition)",
+      "disposition_sweep: 2 dormant memories autonomously tombstoned (1 retained, no disposition or strong ref)",
       "tombstone_gc: 0 tombstoned memories hard-deleted"
     ]);
   });
@@ -262,7 +262,55 @@ describe("Janitor GC task kinds", () => {
     expect(dispositionSweepPort.autonomousTombstone).not.toHaveBeenCalled();
     expect(result.objects_affected).toEqual([]);
     expect(result.audit_entries).toEqual([
-      "disposition_sweep: 0 dormant memories autonomously tombstoned (2 retained, no disposition)",
+      "disposition_sweep: 0 dormant memories autonomously tombstoned (2 retained, no disposition or strong ref)",
+      "tombstone_gc: 0 tombstoned memories hard-deleted"
+    ]);
+  });
+
+  it("disposition sweep skips a dormant candidate the strong-ref protection port protects", async () => {
+    const dispositionSweepPort = {
+      findDormantDispositionCandidates: vi.fn(async () => [
+        { memory_id: "memory-protected", disposition: "judged_useless" as const, disposition_ref: null },
+        { memory_id: "memory-free", disposition: "judged_useless" as const, disposition_ref: null }
+      ]),
+      autonomousTombstone: vi.fn(async () => undefined)
+    };
+    const strongRefProtectionPort = {
+      isProtected: vi.fn(
+        async (_workspaceId: string, _targetEntityType: string, targetEntityId: string) =>
+          targetEntityId === "memory-protected"
+      )
+    };
+    const janitor = new Janitor({
+      cleanupPort: {
+        findExpiredObjects: vi.fn(async () => []),
+        removeExpiredObjects: vi.fn(async () => undefined)
+      },
+      tieringPort: {
+        findHotDemotionCandidates: vi.fn(async () => []),
+        demoteToWarm: vi.fn(async () => undefined)
+      },
+      tombstoneGcPort: {
+        findTombstonedMemories: vi.fn(async () => []),
+        hardDelete: vi.fn(async () => true)
+      },
+      dispositionSweepPort,
+      strongRefProtectionPort,
+      scheduler: { reportCompletion: vi.fn(async () => undefined) },
+      now: () => "2026-03-28T00:00:00.000Z"
+    } as ConstructorParameters<typeof Janitor>[0]);
+
+    const result = await janitor.run(createTask("tombstone_gc"));
+
+    expect(dispositionSweepPort.autonomousTombstone).toHaveBeenCalledTimes(1);
+    expect(dispositionSweepPort.autonomousTombstone).not.toHaveBeenCalledWith(
+      expect.objectContaining({ memory_id: "memory-protected" }),
+      expect.anything()
+    );
+    expect(result.objects_affected).toEqual(["memory-free"]);
+    expect(result.audit_entries).toEqual([
+      "[SKIPPED] disposition_sweep: memory-protected protected by strong ref",
+      "disposition_sweep: 1 dormant memories autonomously tombstoned (1 retained, no disposition or strong ref)",
       "tombstone_gc: 0 tombstoned memories hard-deleted"
     ]);
   });

@@ -378,12 +378,24 @@ export class Janitor {
         skipped += 1;
         continue;
       }
+      // invariant: consult the same strong-ref protection the physical GC checks,
+      // so a dormant memory another object strongly references is never tombstoned
+      // by the sweep (symmetry with executeTombstoneGc; defense in depth alongside
+      // the not-protected backstop at the tombstone authority).
+      if (this.strongRefProtectionPort !== undefined) {
+        const isProtected = await this.strongRefProtectionPort.isProtected(task.workspace_id, "memory", candidate.memory_id);
+        if (isProtected) {
+          auditEntries.push(`[SKIPPED] disposition_sweep: ${candidate.memory_id} protected by strong ref`);
+          skipped += 1;
+          continue;
+        }
+      }
       await this.dispositionSweepPort.autonomousTombstone(candidate, task.task_id);
       tombstoned.push(candidate.memory_id);
     }
 
     auditEntries.push(
-      `disposition_sweep: ${tombstoned.length} dormant memories autonomously tombstoned (${skipped} retained, no disposition)`
+      `disposition_sweep: ${tombstoned.length} dormant memories autonomously tombstoned (${skipped} retained, no disposition or strong ref)`
     );
     return tombstoned;
   }
