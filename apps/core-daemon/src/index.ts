@@ -1480,11 +1480,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // invariant: active -> dormant is a recall-visibility change (dormant rows are
   // excluded from recall / list / FTS), so it MUST be audited like the
   // delete/tombstone paths. The raw storage UPDATE is not audited, so route the
-  // demotion through the core transition authority (SOUL_MEMORY_STATE_CHANGED
-  // appended BEFORE the DB mutation, then notified) while keeping the storage
-  // candidate query and the Janitor port boundary intact. causedBy mirrors the
-  // forget sweep's deterministic_rule attribution. see also:
-  // packages/core/src/memory-service.ts transitionLifecycle.
+  // demotion through the core transition authority, which appends
+  // SOUL_MEMORY_STATE_CHANGED ATOMICALLY with the guarded UPDATE (one transaction,
+  // via onTransition) and then notifies, while keeping the storage candidate query
+  // and the Janitor port boundary intact. causedBy mirrors the forget sweep's
+  // deterministic_rule attribution. see also:
+  // packages/core/src/memory-service.ts demoteActiveToDormantIfActive.
   const auditedDormantDemotionPort = {
     findLowActivityActiveMemories: (workspaceId: string) =>
       gardenBackgroundDataPorts.dormantDemotionPort.findLowActivityActiveMemories(workspaceId),
