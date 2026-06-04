@@ -189,6 +189,28 @@ export interface ReconciliationLlmDecisionPort {
   }>;
 }
 
+// invariant: the rule-only, zero-cloud decision basis. Reconciliation
+// must run out of the box without any cloud call (R0 zero-cloud stance:
+// the cloud edge-LLM stays default-off). The identity NOOP (dedup) and
+// the below-floor ADD are decided in `decide()` BEFORE the port is ever
+// consulted, so a rule-only basis only has to resolve the ambiguous band
+// — and it resolves it conservatively to ADD: a rule-based UPDATE or
+// NOOP on a non-identical neighbor would need the semantic judge to tell
+// "refines" from "distinct", and getting that wrong erases an answer
+// (the §18 failure mode). ADD never loses a fact. The garden/cloud LLM
+// (apps/core-daemon/src/reconciliation-llm-decision.ts) is the OPTIONAL
+// upgrade that can resolve the ambiguous band to UPDATE/NOOP; until it is
+// configured AND enabled, this rule-only port is the wired default so
+// dedup works zero-cloud. It performs no network I/O.
+export function createRuleOnlyReconciliationDecisionPort(): ReconciliationLlmDecisionPort {
+  return {
+    decide: async () => ({
+      kind: "add",
+      reason: "rule-only reconciliation basis — ambiguous band resolves to ADD (no semantic judge wired)"
+    })
+  };
+}
+
 export interface ReconciliationServiceThresholds {
   /** Below this token-Jaccard similarity no neighbor is close enough to
    *  be worth a semantic check — ADD, zero LLM. A neighbor at or above it
