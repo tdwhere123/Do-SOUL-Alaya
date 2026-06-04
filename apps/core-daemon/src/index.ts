@@ -1476,12 +1476,37 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     findTombstonedMemoriesWithDisposition: (workspaceId: string) =>
       memoryEntryRepo.findTombstonedMemoriesWithDisposition(workspaceId)
   };
+  const gardenBackgroundDataPorts = createGardenBackgroundDataPorts(database);
+  // invariant: active -> dormant is a recall-visibility change (dormant rows are
+  // excluded from recall / list / FTS), so it MUST be audited like the
+  // delete/tombstone paths. The raw storage UPDATE is not audited, so route the
+  // demotion through the core transition authority (SOUL_MEMORY_STATE_CHANGED
+  // appended BEFORE the DB mutation, then notified) while keeping the storage
+  // candidate query and the Janitor port boundary intact. causedBy mirrors the
+  // forget sweep's deterministic_rule attribution. see also:
+  // packages/core/src/memory-service.ts transitionLifecycle.
+  const auditedDormantDemotionPort = {
+    findLowActivityActiveMemories: (workspaceId: string) =>
+      gardenBackgroundDataPorts.dormantDemotionPort.findLowActivityActiveMemories(workspaceId),
+    setLifecycleDormant: async (memoryId: string, taskId: string): Promise<void> => {
+      await memoryService.transitionLifecycle(
+        memoryId,
+        "dormant",
+        `autonomous_dormant_demotion: ${taskId}`,
+        "deterministic_rule"
+      );
+    }
+  };
+  const gardenDataPorts = {
+    ...gardenBackgroundDataPorts,
+    dormantDemotionPort: auditedDormantDemotionPort
+  };
   const gardenRuntime = createGardenRuntime({
     databaseConnection: database.connection,
     backlogThresholds: gardenBacklogThresholds,
     eventLogRepo,
     eventPublisher,
-    gardenDataPorts: createGardenBackgroundDataPorts(database),
+    gardenDataPorts,
     healthJournalRepo,
     handoffGapRepo: sqliteHandoffGapRepo,
     orphanDetectionEnabled,

@@ -875,6 +875,72 @@ describe("MemoryService", () => {
     expect(notifySpy).not.toHaveBeenCalled();
   });
 
+  it("audits an active -> dormant demotion (SOUL_MEMORY_STATE_CHANGED) BEFORE the row leaves recall via the DB mutation", async () => {
+    // invariant pinned: dormancy is a recall-visibility change (dormant rows are
+    // excluded from recall / list / FTS at the storage layer), so the demotion
+    // MUST be audited EventLog-first — the SOUL_MEMORY_STATE_CHANGED row is
+    // appended BEFORE the lifecycle_state UPDATE that removes the row from recall.
+    const order: string[] = [];
+    const appendEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
+
+    const { dependencies } = createDependencies({
+      eventLogRepo: {
+        append: vi.fn((event) => {
+          order.push("event_log");
+          appendEvents.push(event);
+          return {
+            event_id: "event-dormant",
+            created_at: "2026-03-21T01:00:00.000Z",
+            revision: 0,
+            ...event
+          };
+        }),
+        queryByEntity: vi.fn(async () => [] as readonly EventLogEntry[])
+      },
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => Object.freeze({ ...entry })),
+        findById: vi.fn(async () => createMemoryEntry({ lifecycle_state: "active" })),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        transitionLifecycle: vi.fn(async (_objectId: string, lifecycleState: MemoryEntry["lifecycle_state"], updatedAt: string) => {
+          order.push("repo_transition");
+          return Object.freeze(createMemoryEntry({ lifecycle_state: lifecycleState, updated_at: updatedAt }));
+        })
+      },
+      runtimeNotifier: {
+        notifyEntry: vi.fn(async () => {
+          order.push("notify");
+        })
+      }
+    });
+
+    const service = new MemoryService(dependencies);
+    const updated = await service.transitionLifecycle(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "dormant",
+      "autonomous_dormant_demotion: task-1",
+      TransitionCausedBy.DETERMINISTIC_RULE
+    );
+
+    expect(order).toEqual(["event_log", "repo_transition", "notify"]);
+    expect(updated.lifecycle_state).toBe("dormant");
+    expect(appendEvents[0]).toMatchObject({
+      event_type: "soul.memory.state_changed",
+      payload_json: expect.objectContaining({
+        from_state: "active",
+        to_state: "dormant"
+      })
+    });
+  });
+
   it("rejects hard delete when retention_state is not tombstoned", async () => {
     const hardDeleteSpy = vi.fn(async () => undefined);
     const { dependencies, appendSpy, notifySpy } = createDependencies({
