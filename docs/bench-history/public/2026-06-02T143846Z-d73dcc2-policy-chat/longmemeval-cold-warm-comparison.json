@@ -1,0 +1,639 @@
+{
+  "schema_version": 1,
+  "comparison": "cold-none-vs-warm-mixed",
+  "bench_name": "public",
+  "split": "longmemeval-s",
+  "policy_shape": "chat",
+  "current": {
+    "slug": "2026-06-02T143846Z-d73dcc2-policy-chat",
+    "run_at": "2026-06-02T14:38:46.088Z",
+    "simulate_report": "none",
+    "r_at_1": 0.5666666666666667,
+    "r_at_5": 0.9,
+    "r_at_10": 0.9,
+    "tier_distribution": {
+      "hot": 30,
+      "warm": 0,
+      "cold": 0
+    },
+    "degradation_reasons": {
+      "none": 30,
+      "warm_cascade_engaged": 0,
+      "cold_cascade_engaged": 0,
+      "recall_explainability_partial": 0
+    },
+    "report_side_effects": {
+      "mode": "none",
+      "workspaces_observed": 30,
+      "memory_graph_edges_total": 44456,
+      "memory_graph_edges_by_type": {
+        "supports": 0,
+        "derives_from": 44456,
+        "contradicts": 0,
+        "supersedes": 0,
+        "recalls": 0,
+        "exception_to": 0,
+        "incompatible_with": 0
+      },
+      "recalls_edge_count": 0,
+      "path_relations_total": 44456,
+      "latest_path_event_at": "2026-06-02T14:52:47.072Z",
+      "snapshots": [
+        {
+          "question_id": "e47becba",
+          "workspace_id": "lme-e47becba",
+          "memory_graph_edges_total": 1475,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1475,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1475,
+          "latest_path_event_at": "2026-06-02T14:39:10.342Z",
+          "warnings": []
+        },
+        {
+          "question_id": "118b2229",
+          "workspace_id": "lme-118b2229",
+          "memory_graph_edges_total": 1388,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1388,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1388,
+          "latest_path_event_at": "2026-06-02T14:39:36.049Z",
+          "warnings": []
+        },
+        {
+          "question_id": "51a45a95",
+          "workspace_id": "lme-51a45a95",
+          "memory_graph_edges_total": 1452,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1452,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1452,
+          "latest_path_event_at": "2026-06-02T14:40:02.889Z",
+          "warnings": []
+        },
+        {
+          "question_id": "58bf7951",
+          "workspace_id": "lme-58bf7951",
+          "memory_graph_edges_total": 1676,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1676,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1676,
+          "latest_path_event_at": "2026-06-02T14:40:27.046Z",
+          "warnings": []
+        },
+        {
+          "question_id": "1e043500",
+          "workspace_id": "lme-1e043500",
+          "memory_graph_edges_total": 1460,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1460,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1460,
+          "latest_path_event_at": "2026-06-02T14:40:54.235Z",
+          "warnings": []
+        },
+        {
+          "question_id": "c5e8278d",
+          "workspace_id": "lme-c5e8278d",
+          "memory_graph_edges_total": 1447,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1447,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1447,
+          "latest_path_event_at": "2026-06-02T14:41:19.338Z",
+          "warnings": []
+        },
+        {
+          "question_id": "6ade9755",
+          "workspace_id": "lme-6ade9755",
+          "memory_graph_edges_total": 1664,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1664,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1664,
+          "latest_path_event_at": "2026-06-02T14:41:50.874Z",
+          "warnings": []
+        },
+        {
+          "question_id": "6f9b354f",
+          "workspace_id": "lme-6f9b354f",
+          "memory_graph_edges_total": 1408,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1408,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1408,
+          "latest_path_event_at": "2026-06-02T14:42:14.806Z",
+          "warnings": []
+        },
+        {
+          "question_id": "58ef2f1c",
+          "workspace_id": "lme-58ef2f1c",
+          "memory_graph_edges_total": 1516,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1516,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1516,
+          "latest_path_event_at": "2026-06-02T14:42:42.939Z",
+          "warnings": []
+        },
+        {
+          "question_id": "f8c5f88b",
+          "workspace_id": "lme-f8c5f88b",
+          "memory_graph_edges_total": 1383,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1383,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1383,
+          "latest_path_event_at": "2026-06-02T14:43:08.873Z",
+          "warnings": []
+        },
+        {
+          "question_id": "5d3d2817",
+          "workspace_id": "lme-5d3d2817",
+          "memory_graph_edges_total": 1510,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1510,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1510,
+          "latest_path_event_at": "2026-06-02T14:43:35.890Z",
+          "warnings": []
+        },
+        {
+          "question_id": "7527f7e2",
+          "workspace_id": "lme-7527f7e2",
+          "memory_graph_edges_total": 1542,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1542,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1542,
+          "latest_path_event_at": "2026-06-02T14:44:08.174Z",
+          "warnings": []
+        },
+        {
+          "question_id": "c960da58",
+          "workspace_id": "lme-c960da58",
+          "memory_graph_edges_total": 1659,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1659,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1659,
+          "latest_path_event_at": "2026-06-02T14:44:39.861Z",
+          "warnings": []
+        },
+        {
+          "question_id": "3b6f954b",
+          "workspace_id": "lme-3b6f954b",
+          "memory_graph_edges_total": 1405,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1405,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1405,
+          "latest_path_event_at": "2026-06-02T14:45:06.420Z",
+          "warnings": []
+        },
+        {
+          "question_id": "726462e0",
+          "workspace_id": "lme-726462e0",
+          "memory_graph_edges_total": 1395,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1395,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1395,
+          "latest_path_event_at": "2026-06-02T14:45:36.940Z",
+          "warnings": []
+        },
+        {
+          "question_id": "94f70d80",
+          "workspace_id": "lme-94f70d80",
+          "memory_graph_edges_total": 1463,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1463,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1463,
+          "latest_path_event_at": "2026-06-02T14:46:09.843Z",
+          "warnings": []
+        },
+        {
+          "question_id": "66f24dbb",
+          "workspace_id": "lme-66f24dbb",
+          "memory_graph_edges_total": 1364,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1364,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1364,
+          "latest_path_event_at": "2026-06-02T14:46:43.579Z",
+          "warnings": []
+        },
+        {
+          "question_id": "ad7109d1",
+          "workspace_id": "lme-ad7109d1",
+          "memory_graph_edges_total": 1272,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1272,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1272,
+          "latest_path_event_at": "2026-06-02T14:47:09.732Z",
+          "warnings": []
+        },
+        {
+          "question_id": "af8d2e46",
+          "workspace_id": "lme-af8d2e46",
+          "memory_graph_edges_total": 1300,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1300,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1300,
+          "latest_path_event_at": "2026-06-02T14:47:38.164Z",
+          "warnings": []
+        },
+        {
+          "question_id": "dccbc061",
+          "workspace_id": "lme-dccbc061",
+          "memory_graph_edges_total": 1372,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1372,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1372,
+          "latest_path_event_at": "2026-06-02T14:48:08.519Z",
+          "warnings": []
+        },
+        {
+          "question_id": "c8c3f81d",
+          "workspace_id": "lme-c8c3f81d",
+          "memory_graph_edges_total": 1458,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1458,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1458,
+          "latest_path_event_at": "2026-06-02T14:48:52.394Z",
+          "warnings": []
+        },
+        {
+          "question_id": "8ebdbe50",
+          "workspace_id": "lme-8ebdbe50",
+          "memory_graph_edges_total": 1286,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1286,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1286,
+          "latest_path_event_at": "2026-06-02T14:49:13.442Z",
+          "warnings": []
+        },
+        {
+          "question_id": "6b168ec8",
+          "workspace_id": "lme-6b168ec8",
+          "memory_graph_edges_total": 1328,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1328,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1328,
+          "latest_path_event_at": "2026-06-02T14:49:40.529Z",
+          "warnings": []
+        },
+        {
+          "question_id": "75499fd8",
+          "workspace_id": "lme-75499fd8",
+          "memory_graph_edges_total": 1469,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1469,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1469,
+          "latest_path_event_at": "2026-06-02T14:50:09.303Z",
+          "warnings": []
+        },
+        {
+          "question_id": "21436231",
+          "workspace_id": "lme-21436231",
+          "memory_graph_edges_total": 1286,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1286,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1286,
+          "latest_path_event_at": "2026-06-02T14:50:32.233Z",
+          "warnings": []
+        },
+        {
+          "question_id": "95bcc1c8",
+          "workspace_id": "lme-95bcc1c8",
+          "memory_graph_edges_total": 1577,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1577,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1577,
+          "latest_path_event_at": "2026-06-02T14:50:58.411Z",
+          "warnings": []
+        },
+        {
+          "question_id": "0862e8bf",
+          "workspace_id": "lme-0862e8bf",
+          "memory_graph_edges_total": 1597,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1597,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1597,
+          "latest_path_event_at": "2026-06-02T14:51:20.724Z",
+          "warnings": []
+        },
+        {
+          "question_id": "853b0a1d",
+          "workspace_id": "lme-853b0a1d",
+          "memory_graph_edges_total": 1746,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1746,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1746,
+          "latest_path_event_at": "2026-06-02T14:51:48.952Z",
+          "warnings": []
+        },
+        {
+          "question_id": "a06e4cfe",
+          "workspace_id": "lme-a06e4cfe",
+          "memory_graph_edges_total": 1721,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1721,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1721,
+          "latest_path_event_at": "2026-06-02T14:52:19.064Z",
+          "warnings": []
+        },
+        {
+          "question_id": "37d43f65",
+          "workspace_id": "lme-37d43f65",
+          "memory_graph_edges_total": 1837,
+          "memory_graph_edges_by_type": {
+            "supports": 0,
+            "derives_from": 1837,
+            "contradicts": 0,
+            "supersedes": 0,
+            "recalls": 0,
+            "exception_to": 0,
+            "incompatible_with": 0
+          },
+          "recalls_edge_count": 0,
+          "path_relations_total": 1837,
+          "latest_path_event_at": "2026-06-02T14:52:47.072Z",
+          "warnings": []
+        }
+      ]
+    },
+    "scored_recall_evidence": {
+      "delivered_result_count": 300,
+      "graph_support_gold_count": 0,
+      "path_plasticity_gold_count": 0,
+      "graph_expansion_plane_count": 12,
+      "path_expansion_plane_count": 93,
+      "graph_expansion_plane_count_per_hop": [
+        0,
+        4388
+      ],
+      "graph_expansion_plane_count_per_edge_type": {
+        "derives_from": 4388,
+        "recalls": 0,
+        "supports": 0
+      },
+      "delivered_plane_counts": {
+        "first_admitted": {
+          "lexical": 231,
+          "session_surface_cohort": 15,
+          "path_expansion": 18,
+          "activation": 36
+        },
+        "winning_admission": {
+          "lexical": 245,
+          "path_expansion": 55
+        }
+      },
+      "gold_source_channel_counts": {
+        "workspace_local": 93,
+        "lexical": 55,
+        "lexical_expanded": 55,
+        "evidence_fts": 50,
+        "query_probe_lexical": 51,
+        "evidence_anchor": 55,
+        "session_surface_cohort": 89,
+        "plane:lexical": 60,
+        "plane:evidence_anchor": 55,
+        "plane:session_surface_cohort": 89,
+        "path_expansion": 38,
+        "plane:path_expansion": 38,
+        "graph_expansion": 12,
+        "plane:graph_expansion": 12
+      },
+      "gold_source_plane_counts": {
+        "lexical": 60,
+        "evidence_anchor": 55,
+        "session_surface_cohort": 89,
+        "path_expansion": 38,
+        "graph_expansion": 12
+      }
+    }
+  },
+  "opposite": null,
+  "delta_current_minus_opposite": null,
+  "note": "No prior same split/policy/embedding_provider simulate_report=mixed archive found"
+}
