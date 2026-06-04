@@ -33,6 +33,10 @@ describe("daemon tool runtime bootstrap", () => {
     }
     vi.useRealTimers();
     resetToolRuntimeWiringState();
+    // Reset the reconciliation off-switch here (not at the end of each test body)
+    // so a thrown bootDaemonRuntime() cannot leak a disable value into a later
+    // test that asserts the DEFAULT-ON behavior.
+    delete process.env.ALAYA_INGEST_RECONCILIATION_ENABLED;
     for (const configDir of isolatedConfigDirs.splice(0)) {
       await rm(configDir, { force: true, recursive: true }).catch(() => undefined);
     }
@@ -874,6 +878,19 @@ describe("daemon tool runtime bootstrap", () => {
     });
   });
 
+  it("keeps reconciliation ON for a non-disable value: ALAYA_INGEST_RECONCILIATION_ENABLED=1 still constructs it", async () => {
+    // The env var is a DISABLE switch (only "0"/"false" turn it off, see
+    // index.ts ingestReconciliationEnabled). Anything else must leave the
+    // default-ON behavior intact, so an explicit positive value must NOT be
+    // misread as a disable.
+    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = "1";
+
+    await bootDaemonRuntime();
+
+    const core = (await import("@do-soul/alaya-core")) as Record<string, any>;
+    expect(core.ReconciliationService).toHaveBeenCalledTimes(1);
+  });
+
   it("leaves an operator off-switch: ALAYA_INGEST_RECONCILIATION_ENABLED=0 skips reconciliation construction", async () => {
     process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = "0";
 
@@ -882,8 +899,19 @@ describe("daemon tool runtime bootstrap", () => {
     const core = (await import("@do-soul/alaya-core")) as Record<string, any>;
     expect(core.ReconciliationService).not.toHaveBeenCalled();
     expect(core.createRuleOnlyReconciliationDecisionPort).not.toHaveBeenCalled();
+  });
 
-    delete process.env.ALAYA_INGEST_RECONCILIATION_ENABLED;
+  it("leaves an operator off-switch: ALAYA_INGEST_RECONCILIATION_ENABLED=false skips reconciliation construction", async () => {
+    // The second documented disable token alongside "0" (index.ts checks
+    // raw !== "0" && raw !== "false"). Asserting it explicitly pins both
+    // off-switch spellings so a future single-token parse regresses loudly.
+    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = "false";
+
+    await bootDaemonRuntime();
+
+    const core = (await import("@do-soul/alaya-core")) as Record<string, any>;
+    expect(core.ReconciliationService).not.toHaveBeenCalled();
+    expect(core.createRuleOnlyReconciliationDecisionPort).not.toHaveBeenCalled();
   });
 
   it("marks principal coding unavailable when a required sandbox tool is missing", async () => {

@@ -57,9 +57,11 @@ const RUN = "run-1";
 const QUERY_TERM = "zylphqorbex";
 
 const SEED_ID = "00000000-0000-4000-8000-000000000001";
-// Sibling sorts AFTER every filler id, so it can never win the flat-cut tie on
-// compareMemoryEntries — its only route into the window is the structural
-// reserve.
+// compareMemoryEntries (recall-service-helpers.ts) ranks by activation_score
+// FIRST; the id tie-break is only reached on an activation tie. The sibling is
+// buried by the WIDE activation margin (sibling activation 0.01 vs filler ~0.9),
+// not by its id ordering — that margin keeps it below the flat top-N cut, so its
+// only route into the window is the structural reserve.
 const SIBLING_ID = "00000000-0000-4000-8000-000000000009";
 
 // Eight lexical fillers fill the flat top window above the zero-relevance
@@ -85,6 +87,22 @@ function fillerId(index: number): string {
 async function deliverSiblingViaPath(relationKind: string): Promise<{
   readonly delivered: boolean;
   readonly sourceChannels: readonly string[] | undefined;
+  // Zero-based position of the sibling in the truncated top-N result, or -1 when
+  // it was refused. Used to assert the sibling rides the trailing reserve slot
+  // rather than a natural high-fused-score window slot.
+  readonly deliveredRank: number;
+  // Count of delivered candidates that carry the query term verbatim (the seed +
+  // lexical fillers, all out-activating the sibling). The sibling is lexically
+  // disjoint, so this is the size of the NATURAL window it would have to crack to
+  // be delivered without the reserve. With FILLER_COUNT (8) + seed = 9 lexical
+  // candidates available for MAX_ENTRIES (6) slots, the window stays fully
+  // saturated by lexical entries; the reserve displaces ONE of them for the
+  // sibling, so naturalWindowSize lands at MAX_ENTRIES - 1.
+  readonly naturalWindowSize: number;
+  // Size of the truncated top-N result. The reserve operates WITHIN max_entries
+  // (it carves a slot, not appends one), so this equals MAX_ENTRIES when the
+  // sibling is delivered.
+  readonly totalDelivered: number;
 }> {
   const { database, memoryEntryRepo, pathRelationRepo } = await createRealStorage();
 
@@ -147,15 +165,26 @@ async function deliverSiblingViaPath(relationKind: string): Promise<{
     policyOverride: buildWideOpenPolicy(recallService)
   });
 
-  const candidate = result.candidates.find((row) => row.object_id === SIBLING_ID);
+  const deliveredRank = result.candidates.findIndex((row) => row.object_id === SIBLING_ID);
+  const candidate = deliveredRank === -1 ? undefined : result.candidates[deliveredRank];
+  const naturalWindowSize = result.candidates.filter((row) =>
+    row.content_preview.toLowerCase().includes(QUERY_TERM.toLowerCase())
+  ).length;
   database.close();
   databases.delete(database);
-  return { delivered: candidate !== undefined, sourceChannels: candidate?.source_channels };
+  return {
+    delivered: candidate !== undefined,
+    sourceChannels: candidate?.source_channels,
+    deliveredRank,
+    naturalWindowSize,
+    totalDelivered: result.candidates.length
+  };
 }
 
 describe("production-path earned co_recalled fan-in delivery (real RecallService.recall)", () => {
   it("delivers a zero-relevance gold sibling reached via a real co_recalled PathRelation (earned fan-in reserve exemption, no injected flag)", async () => {
-    const { delivered, sourceChannels } = await deliverSiblingViaPath("co_recalled");
+    const { delivered, sourceChannels, deliveredRank, naturalWindowSize, totalDelivered } =
+      await deliverSiblingViaPath("co_recalled");
 
     // The sibling has zero query relevance and is buried below the flat top-N
     // cut; it is delivered ONLY because production admission set
@@ -171,6 +200,31 @@ describe("production-path earned co_recalled fan-in delivery (real RecallService
     expect(
       sourceChannels?.some((channel) => channel.includes("path_expansion"))
     ).toBe(true);
+    // ANTI-TAUTOLOGY: prove the sibling is GENUINELY BURIED, not trivially
+    // winning a window slot on merit. The seed + every filler carries the query
+    // term and out-activates the sibling (0.9..0.82 vs 0.01), and there are 9
+    // such lexical candidates (FILLER_COUNT + seed) contending for MAX_ENTRIES
+    // (6) slots. Without the reserve the whole window is lexical (see the
+    // negative control, which delivers 6 lexical entries and refuses the
+    // sibling). The reserve operates WITHIN max_entries, so admitting the sibling
+    // DISPLACES one higher-activation lexical filler: the delivered window stays
+    // MAX_ENTRIES wide, exactly MAX_ENTRIES - 1 of those slots are the surviving
+    // lexical entries, and the sibling rides the single trailing slot AFTER all
+    // of them. A future fusion-weight change that un-buries the sibling — lifting
+    // it ahead of any lexical entry or letting the window grow without
+    // displacement — breaks these invariants LOUDLY instead of passing trivially.
+    expect(
+      totalDelivered,
+      "the reserve must carve a slot WITHIN max_entries, not append one beyond it"
+    ).toBe(MAX_ENTRIES);
+    expect(
+      naturalWindowSize,
+      "the reserve must displace exactly one higher-activation lexical entry, so all but the sibling's slot stay lexical"
+    ).toBe(MAX_ENTRIES - 1);
+    expect(
+      deliveredRank,
+      "the buried sibling must ride the single trailing reserve slot, after every higher-activation lexical entry — never a natural high-fused-score slot"
+    ).toBe(MAX_ENTRIES - 1);
   });
 
   it("NEGATIVE CONTROL: an identical zero-relevance sibling reached via a NON-co_recalled relation_kind stays relevance-gated and is NOT delivered", async () => {
