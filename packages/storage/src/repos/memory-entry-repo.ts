@@ -178,7 +178,10 @@ export interface MemoryEntryRepo {
   // lifecycle_state=tombstone in one UPDATE, but ONLY when the row is currently
   // dormant. Refuses (changes=0 -> NOT_FOUND) a non-dormant row so it can never
   // tombstone an active/recallable memory. ref must be null for judged_useless.
-  autonomousTombstone(input: AutonomousTombstoneInput): Promise<Readonly<MemoryEntry>>;
+  autonomousTombstone(
+    input: AutonomousTombstoneInput,
+    options?: { readonly onTransition?: () => void }
+  ): Promise<Readonly<MemoryEntry>>;
   // invariant: the GATED autonomous physical-delete authority (defense in
   // depth). Physically removes a row ONLY when it is tombstoned AND past the
   // grace age AND carries a non-null forget_disposition. A tombstoned row
@@ -193,7 +196,11 @@ export interface MemoryEntryRepo {
   // fires on a 0-row preservation-revoked race (no spurious "deleted" audit).
   hardDeleteTombstonedWithDisposition(
     objectId: string,
-    options?: { readonly requireLiveCapsuleRef?: boolean; readonly onDeleted?: () => void }
+    options?: {
+      readonly requireLiveCapsuleRef?: boolean;
+      readonly requireJudgedUselessVerdict?: boolean;
+      readonly onDeleted?: () => void;
+    }
   ): Promise<boolean>;
   // invariant: tombstoned + past-grace + non-null-disposition rows — the only
   // rows the autonomous TOMBSTONE_GC may physically remove.
@@ -265,6 +272,10 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   // membership inside the DELETE so the preservation re-check is atomic with the
   // physical removal (no TOCTOU window). 0 rows changed == preservation revoked.
   private readonly hardDeleteTombstonedCompressedGuardedStatement;
+  // invariant: the judged_useless-disposition delete restates the mechanical
+  // importance verdict in the DELETE so evidence / reinforcement / protection
+  // gained during grace turns into 0 rows changed, not permanent data loss.
+  private readonly hardDeleteTombstonedJudgedUselessGuardedStatement;
   // invariant: path topology endpoints reference memory ids only via JSON
   // anchors / plain text (no FK), so hard-delete must prune them explicitly in
   // the same transaction. cross-file ref: cascade-delete.ts pruneOrphanedPathTopology
@@ -570,6 +581,22 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
             AND COALESCE(capsule.synthesis_status, '') != 'archived'
             AND member.value = memory_entries.object_id
         )
+    `);
+    // invariant: the `judged_useless` disposition is not trusted just because it
+    // was written at tombstone time. The DELETE replays the local-only verdict
+    // shape atomically: no evidence refs, no reinforcement, and no pinned/hazard
+    // protection. A row that gained any of those during grace matches 0 rows and
+    // remains tombstoned/recoverable.
+    this.hardDeleteTombstonedJudgedUselessGuardedStatement = db.connection.prepare(`
+      DELETE FROM memory_entries
+      WHERE object_id = ?
+        AND retention_state = 'tombstoned'
+        AND forget_disposition = 'judged_useless'
+        AND forget_disposition_ref IS NULL
+        AND json_array_length(COALESCE(evidence_refs, '[]')) = 0
+        AND COALESCE(reinforcement_count, 0) = 0
+        AND COALESCE(decay_profile, '') NOT IN ('pinned', 'hazard')
+        AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
     `);
     this.deleteOrphanedPathRelationsStatement = db.connection.prepare(`
       DELETE FROM path_relations
@@ -962,7 +989,8 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   }
 
   public async autonomousTombstone(
-    input: AutonomousTombstoneInput
+    input: AutonomousTombstoneInput,
+    options?: { readonly onTransition?: () => void }
   ): Promise<Readonly<MemoryEntry>> {
     const parsedDisposition = parseForgetDisposition(input.disposition);
     // invariant: judged_useless carries no ref; compressed MUST carry one. This
@@ -980,32 +1008,36 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       );
     }
     const parsedUpdatedAt = parseUpdatedAt(input.updatedAt);
+    const onTransition = options?.onTransition;
 
     try {
-      const result = this.autonomousTombstoneStatement.run(
-        parsedDisposition,
-        input.dispositionRef,
-        parsedUpdatedAt,
-        input.objectId
-      );
-
-      if (result.changes === 0) {
-        throw new StorageError(
-          "NOT_FOUND",
-          `Memory entry ${input.objectId} was not found or is not dormant (not eligible for autonomous tombstone).`
+      return this.db.connection.transaction(() => {
+        const result = this.autonomousTombstoneStatement.run(
+          parsedDisposition,
+          input.dispositionRef,
+          parsedUpdatedAt,
+          input.objectId
         );
-      }
 
-      const updated = await this.findById(input.objectId);
+        if (result.changes === 0) {
+          throw new StorageError(
+            "NOT_FOUND",
+            `Memory entry ${input.objectId} was not found or is not dormant (not eligible for autonomous tombstone).`
+          );
+        }
 
-      if (updated === null) {
-        throw new StorageError(
-          "NOT_FOUND",
-          `Memory entry ${input.objectId} was not found after autonomous tombstone.`
-        );
-      }
+        onTransition?.();
 
-      return updated;
+        const updated = this.findByIdStatement.get(input.objectId) as MemoryEntryRow | undefined;
+        if (updated === undefined) {
+          throw new StorageError(
+            "NOT_FOUND",
+            `Memory entry ${input.objectId} was not found after autonomous tombstone.`
+          );
+        }
+
+        return parseMemoryEntryRow(updated);
+      })();
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -1021,11 +1053,23 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
 
   public async hardDeleteTombstonedWithDisposition(
     objectId: string,
-    options?: { readonly requireLiveCapsuleRef?: boolean; readonly onDeleted?: () => void }
+    options?: {
+      readonly requireLiveCapsuleRef?: boolean;
+      readonly requireJudgedUselessVerdict?: boolean;
+      readonly onDeleted?: () => void;
+    }
   ): Promise<boolean> {
     const requireLiveCapsuleRef = options?.requireLiveCapsuleRef === true;
+    const requireJudgedUselessVerdict = options?.requireJudgedUselessVerdict === true;
     const onDeleted = options?.onDeleted;
     try {
+      if (requireLiveCapsuleRef && requireJudgedUselessVerdict) {
+        throw new StorageError(
+          "VALIDATION_FAILED",
+          "A disposition-gated delete cannot require both compressed-capsule and judged_useless verdict guards."
+        );
+      }
+
       return this.db.connection.transaction(() => {
         // invariant: a `compressed` member earned terminal removal ONLY because a
         // live capsule preserved its content. requireLiveCapsuleRef routes the
@@ -1048,14 +1092,21 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
           return true;
         }
 
-        const result = this.hardDeleteTombstonedWithDispositionStatement.run(objectId);
+        const result = requireJudgedUselessVerdict
+          ? this.hardDeleteTombstonedJudgedUselessGuardedStatement.run(objectId)
+          : this.hardDeleteTombstonedWithDispositionStatement.run(objectId);
 
         if (result.changes === 0) {
+          if (requireJudgedUselessVerdict) {
+            return false;
+          }
           throw new StorageError(
             "NOT_FOUND",
             `Tombstoned memory entry ${objectId} was not found, lacks a forget disposition, or is within the grace window (not eligible for autonomous GC).`
           );
         }
+
+        onDeleted?.();
 
         // invariant: prune topology only after the disposition-gated row was
         // actually deleted, so a no-disposition row never strips its live paths.

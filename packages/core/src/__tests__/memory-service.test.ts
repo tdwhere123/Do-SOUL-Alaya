@@ -1165,7 +1165,18 @@ describe("MemoryService", () => {
   });
 
   it("autonomousHardDeleteTombstoned removes a tombstoned row that carries a disposition + audits the deletion", async () => {
-    const hardDeleteSpy = vi.fn(async () => true);
+    const hardDeleteSpy = vi.fn(
+      async (
+        _objectId: string,
+        options?: {
+          readonly requireJudgedUselessVerdict?: boolean;
+          readonly onDeleted?: () => void;
+        }
+      ) => {
+        options?.onDeleted?.();
+        return true;
+      }
+    );
     const { dependencies, appendSpy, notifySpy } = createDependencies({
       memoryEntryRepo: {
         create: vi.fn(async (entry) => entry),
@@ -1203,7 +1214,62 @@ describe("MemoryService", () => {
     );
 
     expect(hardDeleteSpy).toHaveBeenCalledTimes(1);
+    expect(hardDeleteSpy).toHaveBeenCalledWith(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      expect.objectContaining({ requireJudgedUselessVerdict: true })
+    );
     expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(notifySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("autonomousHardDeleteTombstoned REFUSES a judged_useless delete when the atomic verdict guard returns 0 rows", async () => {
+    const hardDeleteSpy = vi.fn(async () => false);
+    const { dependencies, appendSpy, notifySpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () =>
+          createMemoryEntry({
+            lifecycle_state: "tombstone",
+            retention_state: "tombstoned",
+            forget_disposition: "judged_useless",
+            forget_disposition_ref: null,
+            evidence_refs: [],
+            reinforcement_count: 0
+          })
+        ),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        hardDeleteTombstonedWithDisposition: hardDeleteSpy
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    const deleted = await service.autonomousHardDeleteTombstoned(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "autonomous_tombstone_gc",
+      TransitionCausedBy.DETERMINISTIC_RULE
+    );
+
+    expect(deleted).toBe(false);
+    expect(hardDeleteSpy).toHaveBeenCalledWith(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      expect.objectContaining({ requireJudgedUselessVerdict: true })
+    );
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(appendSpy.mock.calls[0]?.[0]).toMatchObject({
+      payload_json: expect.objectContaining({
+        to_state: "tombstone",
+        reason_code: expect.stringContaining("verdict_revoked")
+      })
+    });
     expect(notifySpy).toHaveBeenCalledTimes(1);
   });
 

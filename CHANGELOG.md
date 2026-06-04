@@ -59,10 +59,13 @@ unmeasured locally and deferred to the R5 gate. See
   full-table scan); autonomous terminal removal deletes only sourceless,
   never-reinforced rows (evidence == 0 AND reinforcement == 0), with a
   delete-authority disposition gate + capsule TOCTOU re-verify (B1 data-loss fix).
-- **Compress arm is BUILT but DORMANT** pending an operator decision (needs
-  `source_memory_refs` wiring + compress-vs-protection ordering + a
-  lossy-summary-preservation product decision). No memory is deleted by the
-  compress arm until activated. Tracked as backlog `#BL-049`.
+- **Compress arm is ARMED** behind the same delete-authority gate: synthesis
+  accept populates `source_memory_refs`; only fully-consolidated members whose
+  `evidence_refs` are a subset of a live capsule's evidence can earn the
+  `compressed` disposition; pinned / hazard / canon / consolidated memories are
+  never compress-deleted. The capsule preserves shared evidence plus a
+  deterministic gist summary, not the member `content` byte-for-byte. Backlog
+  `#BL-049` is closed by this activation.
 - **Production synthesis review accept -> capsule create** is now wired (a
   `synthesis_create` branch with a deterministic no-LLM summary, atomic
   accept-with-events) — the memory-compression entry point.
@@ -87,9 +90,10 @@ unmeasured locally and deferred to the R5 gate. See
 - Replaced shipped "not implemented" CLI surfaces with honest behavior.
 - Retired stale phase/history/deferral comments from source.
 
-### Deferred (opened as backlog with close conditions)
+### Deferred / closed backlog
 
-`#BL-049` compress-arm activation; `#BL-050` ingest-reconciliation default-ON;
+Closed in the closeout fix-loop: `#BL-049` compress-arm activation and `#BL-050`
+ingest-reconciliation default-ON. Still deferred with close conditions:
 `#BL-051` abstention re-test on 500q data; `#BL-052` LongMemEval CI sample-floor
 scale-up; `#BL-053` edge `llm_supports` LOCAL pair-classifier; `#BL-054`
 lease-pierce governance-cache hot-path hook; `#BL-055` Inspector label/filter for

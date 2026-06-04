@@ -1006,6 +1006,39 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(tombstoned.lifecycle_state).toBe("tombstone");
   });
 
+  it("autonomousTombstone rolls the tombstone update back when the transition audit callback throws", async () => {
+    const { repo } = await createRepo();
+    const dormant = createMemoryEntry({
+      object_id: "aaaaaaaa-0000-4000-8000-000000000004",
+      lifecycle_state: "dormant"
+    });
+    await repo.create(dormant);
+    const onTransition = vi.fn(() => {
+      throw new Error("audit append failed mid-transaction");
+    });
+
+    await expect(
+      repo.autonomousTombstone(
+        {
+          objectId: dormant.object_id,
+          disposition: "judged_useless",
+          dispositionRef: null,
+          updatedAt: "2026-03-22T00:00:00.000Z"
+        },
+        { onTransition }
+      )
+    ).rejects.toThrow(StorageError);
+    expect(onTransition).toHaveBeenCalledTimes(1);
+    await expect(repo.findById(dormant.object_id)).resolves.toEqual(
+      expect.objectContaining({
+        lifecycle_state: "dormant",
+        retention_state: null,
+        forget_disposition: null,
+        forget_disposition_ref: null
+      })
+    );
+  });
+
   it("autonomousTombstone refuses a non-dormant (active) row — recallable memory is never silently tombstoned", async () => {
     const { repo } = await createRepo();
     const active = createMemoryEntry({
@@ -1081,6 +1114,92 @@ describe("SqliteMemoryEntryRepo", () => {
       repo.hardDeleteTombstonedWithDisposition(disposed.object_id)
     ).resolves.toBe(true);
     await expect(repo.findById(disposed.object_id)).resolves.toBeNull();
+  });
+
+  it("hardDeleteTombstonedWithDisposition (judged_useless-guarded) deletes only while the verdict still holds", async () => {
+    const { repo } = await createRepo();
+    const disposed = createMemoryEntry({
+      object_id: "bbbbbbbb-0000-4000-8000-000000000003",
+      retention_state: "tombstoned",
+      lifecycle_state: "tombstone",
+      forget_disposition: "judged_useless",
+      forget_disposition_ref: null,
+      evidence_refs: [],
+      reinforcement_count: 0,
+      decay_profile: null
+    });
+    await repo.create(disposed);
+    const onDeleted = vi.fn();
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(disposed.object_id, {
+        requireJudgedUselessVerdict: true,
+        onDeleted
+      })
+    ).resolves.toBe(true);
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+    await expect(repo.findById(disposed.object_id)).resolves.toBeNull();
+  });
+
+  it.each([
+    ["gained evidence", { evidence_refs: ["late-evidence"] } satisfies Partial<MemoryEntry>],
+    ["gained reinforcement", { reinforcement_count: 1 } satisfies Partial<MemoryEntry>],
+    ["became pinned", { decay_profile: "pinned" } satisfies Partial<MemoryEntry>],
+    ["became hazard", { decay_profile: "hazard" } satisfies Partial<MemoryEntry>]
+  ])(
+    "hardDeleteTombstonedWithDisposition (judged_useless-guarded) atomically REFUSES when the row %s",
+    async (_label, overrides) => {
+      const { repo } = await createRepo();
+      const disposed = createMemoryEntry({
+        object_id: "bbbbbbbb-0000-4000-8000-000000000004",
+        retention_state: "tombstoned",
+        lifecycle_state: "tombstone",
+        forget_disposition: "judged_useless",
+        forget_disposition_ref: null,
+        evidence_refs: [],
+        reinforcement_count: 0,
+        decay_profile: null,
+        ...overrides
+      });
+      await repo.create(disposed);
+      const onDeleted = vi.fn();
+
+      await expect(
+        repo.hardDeleteTombstonedWithDisposition(disposed.object_id, {
+          requireJudgedUselessVerdict: true,
+          onDeleted
+        })
+      ).resolves.toBe(false);
+      expect(onDeleted).not.toHaveBeenCalled();
+      await expect(repo.findById(disposed.object_id)).resolves.not.toBeNull();
+    }
+  );
+
+  it("hardDeleteTombstonedWithDisposition (judged_useless-guarded) rolls back the physical delete when onDeleted throws", async () => {
+    const { repo } = await createRepo();
+    const disposed = createMemoryEntry({
+      object_id: "bbbbbbbb-0000-4000-8000-000000000005",
+      retention_state: "tombstoned",
+      lifecycle_state: "tombstone",
+      forget_disposition: "judged_useless",
+      forget_disposition_ref: null,
+      evidence_refs: [],
+      reinforcement_count: 0,
+      decay_profile: null
+    });
+    await repo.create(disposed);
+    const onDeleted = vi.fn(() => {
+      throw new Error("audit append failed mid-transaction");
+    });
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(disposed.object_id, {
+        requireJudgedUselessVerdict: true,
+        onDeleted
+      })
+    ).rejects.toThrow(StorageError);
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+    await expect(repo.findById(disposed.object_id)).resolves.not.toBeNull();
   });
 
   // invariant: the compressed delete (requireLiveCapsuleRef) re-asserts capsule

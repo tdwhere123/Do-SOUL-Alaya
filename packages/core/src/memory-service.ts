@@ -137,7 +137,7 @@ export interface MemoryServiceMemoryEntryRepoPort {
     readonly disposition: MemoryEntry["forget_disposition"];
     readonly dispositionRef: string | null;
     readonly updatedAt: string;
-  }): Promise<Readonly<MemoryEntry>>;
+  }, options?: { readonly onTransition?: () => void }): Promise<Readonly<MemoryEntry>>;
   // invariant: the GATED autonomous physical-delete authority (R3d). Removes a
   // tombstoned + past-grace row ONLY when it carries a non-null disposition.
   // requireLiveCapsuleRef makes the compressed-member preservation re-check
@@ -145,7 +145,11 @@ export interface MemoryServiceMemoryEntryRepoPort {
   // false when that guard removed 0 rows (preservation revoked, fail-closed).
   hardDeleteTombstonedWithDisposition?(
     objectId: string,
-    options?: { readonly requireLiveCapsuleRef?: boolean; readonly onDeleted?: () => void }
+    options?: {
+      readonly requireLiveCapsuleRef?: boolean;
+      readonly requireJudgedUselessVerdict?: boolean;
+      readonly onDeleted?: () => void;
+    }
   ): Promise<boolean>;
 }
 
@@ -738,7 +742,7 @@ export class MemoryService {
     }
 
     const occurredAt = this.now();
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision"> = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -759,14 +763,25 @@ export class MemoryService {
         evidence_refs: dispositionRef === null ? null : [dispositionRef],
         occurred_at: occurredAt
       })
-    });
+    };
+    let event: EventLogEntry | undefined;
 
-    const updated = await autonomousTombstone({
-      objectId: parsedObjectId,
-      disposition,
-      dispositionRef,
-      updatedAt: occurredAt
-    });
+    const updated = await autonomousTombstone(
+      {
+        objectId: parsedObjectId,
+        disposition,
+        dispositionRef,
+        updatedAt: occurredAt
+      },
+      {
+        onTransition: () => {
+          event = this.appendAuditEventSynchronously(eventInput);
+        }
+      }
+    );
+    if (event === undefined) {
+      throw new CoreError("CONFLICT", "Autonomous tombstone transaction did not append its audit event.");
+    }
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return updated;
   }
@@ -837,8 +852,8 @@ export class MemoryService {
     // preservation re-check is atomic with the removal — no TOCTOU window. The
     // guarded delete runs FIRST so a capsule revocation that raced past the
     // fast pre-check (0 rows changed) is recorded as preservation_revoked
-    // instead of a spurious "deleted" audit. The judged_useless path has no
-    // capsule dependency and keeps strict EventLog-first (append -> delete).
+    // instead of a spurious "deleted" audit. The judged_useless arm mirrors
+    // this shape with its own verdict-restating DELETE guard.
     if (isCompressed) {
       // invariant: the to_state=deleted audit append is the onDeleted callback,
       // so it commits INSIDE the guarded-delete transaction (a crash cannot leave
@@ -880,9 +895,22 @@ export class MemoryService {
       return false;
     }
 
-    const event = await this.appendAutonomousDeleteEvent(existing, parsedReason, parsedCausedBy);
-    await hardDeleteWithDisposition(parsedObjectId);
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
+    const deleteEventInput = this.buildAutonomousDeleteEventInput(existing, parsedReason, parsedCausedBy);
+    let deletedEvent: EventLogEntry | undefined;
+    const deleted = await hardDeleteWithDisposition(parsedObjectId, {
+      requireJudgedUselessVerdict: true,
+      onDeleted: () => {
+        deletedEvent = this.appendAuditEventSynchronously(deleteEventInput);
+      }
+    });
+    if (!deleted) {
+      await this.emitVerdictRevoked(existing, parsedReason, parsedCausedBy);
+      return false;
+    }
+    if (deletedEvent === undefined) {
+      throw new CoreError("CONFLICT", "Judged-useless tombstone delete transaction did not append its audit event.");
+    }
+    await this.dependencies.runtimeNotifier.notifyEntry(deletedEvent);
     return true;
   }
 
@@ -916,18 +944,9 @@ export class MemoryService {
     };
   }
 
-  private async appendAutonomousDeleteEvent(
-    existing: Readonly<MemoryEntry>,
-    parsedReason: string,
-    parsedCausedBy: TransitionCausedBy
-  ): Promise<EventLogEntry> {
-    return await this.dependencies.eventLogRepo.append(
-      this.buildAutonomousDeleteEventInput(existing, parsedReason, parsedCausedBy)
-    );
-  }
-
   // invariant: synchronous EventLog append for the audit-inside-transaction seams
-  // (compressed delete onDeleted, active->dormant onTransition). eventLogRepo.append
+  // (dormant/tombstone transitions and compressed/judged terminal deletes).
+  // eventLogRepo.append
   // joins the open SQLite txn (inTransaction) when called from a transaction
   // callback; a Promise-returning port cannot, so reject it loudly rather than
   // silently committing the storage mutation without an atomic audit.

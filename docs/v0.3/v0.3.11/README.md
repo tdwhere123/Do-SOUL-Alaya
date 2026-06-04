@@ -9,7 +9,8 @@ R5 500q gate passes. **R@5 -> 90% is not claimed as achieved** — it is deferre
 that gate. The authoritative status, the proven-vs-unproven framing, and the
 codex-Blocking / R-phase commit map live in
 [`reports/v0.3.11-closeout-report.md`](reports/v0.3.11-closeout-report.md). The
-plan of record is `.do-it/plans/v0.3.11-completion-masterplan.md`.
+task-worktree planning card is `.do-it/plans/v0.3.11-completion-masterplan.md`;
+the tracked status of record is this README plus the closeout report.
 
 ## What landed (proven: code + review-loops + full build + targeted tests)
 
@@ -21,9 +22,13 @@ plan of record is `.do-it/plans/v0.3.11-completion-masterplan.md`.
   PathRelations through the production co-usage gate.
 - **Durable recall fan-in (R2)** — the temporary `session_cohort_fanin` heuristic is
   retired; durable accepted member -> representative hub edges are the carrier.
-- **Forgetting-compression lifecycle** — the `judged_useless`-delete arm is LIVE and
-  data-loss-safe; the compress arm is BUILT but DORMANT pending an operator decision
-  (`#BL-049`); production synthesis review accept -> capsule create is wired (R3a).
+- **Forgetting-compression lifecycle** — both terminal arms are now armed behind
+  the delete-authority gate. The `judged_useless` arm deletes only sourceless,
+  never-reinforced rows; the compress arm deletes only a fully-consolidated member
+  whose `evidence_refs` are a subset of a live capsule's evidence. The capsule
+  preserves shared evidence plus a deterministic gist summary, not the member
+  `content` byte-for-byte. Explicitly protected pinned / hazard / canon /
+  consolidated memories are never compress-deleted (`#BL-049` closed).
 - **Edge / path governance** — edge-proposal expiry (B5), `contradicts_refs`
   ref-hints (B7), path-relation failure -> Health Inbox (D-EDGEAUDIT).
 - **Truth-boundary doc alignment** (B3) + debt cleanup.

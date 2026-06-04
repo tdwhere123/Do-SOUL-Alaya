@@ -18,6 +18,8 @@ import {
   EvidenceService,
   MemoryService,
   PathRelationProposalService,
+  ReconciliationService,
+  createRuleOnlyReconciliationDecisionPort,
   type PathCandidateSink
 } from "@do-soul/alaya-core";
 import {
@@ -31,6 +33,7 @@ import {
   SqliteEvidenceCapsuleRepo,
   SqliteMemoryEntryRepo,
   SqlitePathRelationRepo,
+  SqliteReconciliationLeaseRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo,
   initDatabase
@@ -213,6 +216,119 @@ describe("edge auto producer daemon wiring", () => {
       expect(supports!.legitimacy.governance_class).toBe("attention_only");
       expect(supports!.effect_vector.recall_bias).toBeGreaterThan(0);
       expect(supports!.plasticity_state.strength).toBeCloseTo(0.5, 5);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("wires rule-only reconciliation through the real materialization path so exact duplicates NOOP", async () => {
+    const database = initDatabase({ filename: ":memory:" });
+    try {
+      const workspaceRepo = new SqliteWorkspaceRepo(database);
+      const runRepo = new SqliteRunRepo(database);
+      const eventLogRepo = new SqliteEventLogRepo(database);
+      const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
+      const memoryRepo = new SqliteMemoryEntryRepo(database);
+      const enrichPendingRepo = new SqliteEnrichPendingRepo(database);
+      const reconciliationLeaseRepo = new SqliteReconciliationLeaseRepo(database);
+      const runtimeNotifier = {
+        notify: async () => undefined,
+        notifyEntry: async (_entry: EventLogEntry) => undefined
+      };
+
+      await seedWorkspaceRun(workspaceRepo, runRepo);
+      const duplicateContent = "RTK wrapper is required for shell commands in this repository.";
+      await memoryRepo.create(
+        createMemoryEntry({
+          object_id: OLD_MEMORY_ID,
+          content: duplicateContent,
+          domain_tags: ["rtk", "workflow"],
+          evidence_refs: [],
+          created_at: "2026-05-24T00:00:00.000Z",
+          updated_at: "2026-05-24T00:00:00.000Z"
+        })
+      );
+
+      const evidenceService = new EvidenceService({
+        evidenceCapsuleRepo: evidenceRepo,
+        eventLogRepo,
+        runtimeNotifier,
+        generateObjectId: () => EVIDENCE_ID,
+        now: () => "2026-05-25T00:00:00.000Z"
+      });
+      const enqueueEnrichPending = (params: {
+        readonly workspaceId: string;
+        readonly memoryId: string;
+        readonly runId: string | null;
+        readonly sourceSignalId: string | null;
+      }): void =>
+        enrichPendingRepo.enqueue({
+          workspaceId: params.workspaceId,
+          memoryId: params.memoryId,
+          runId: params.runId,
+          sourceSignalId: params.sourceSignalId,
+          enqueuedAt: "2026-05-25T00:00:01.000Z"
+        });
+      const memoryService = new MemoryService({
+        memoryEntryRepo: memoryRepo,
+        evidenceService,
+        eventLogRepo,
+        runtimeNotifier,
+        enrichPendingWriter: { enqueue: enqueueEnrichPending },
+        generateObjectId: () => NEW_MEMORY_ID,
+        now: () => "2026-05-25T00:00:00.000Z"
+      });
+      const reconciliationService = new ReconciliationService({
+        keywordSearch: {
+          searchByKeyword: async (workspaceId, queryText, limit) =>
+            await memoryRepo.searchByKeyword(workspaceId, queryText, limit)
+        },
+        memoryRepo: {
+          findByIds: async (objectIds) => await memoryRepo.findByIds(objectIds)
+        },
+        memoryUpdate: {
+          update: async (objectId, fields, reason) =>
+            await memoryService.update(objectId, fields, reason)
+        },
+        eventLog: {
+          append: (event) => eventLogRepo.append(event)
+        },
+        llmDecision: createRuleOnlyReconciliationDecisionPort(),
+        lease: reconciliationLeaseRepo,
+        now: () => new Date("2026-05-25T00:00:02.000Z")
+      });
+      const router = new MaterializationRouter({
+        evidenceService,
+        memoryService: {
+          create: async (input) => {
+            const created = await memoryService.create(input);
+            return {
+              object_kind: created.object_kind,
+              object_id: created.object_id,
+              enrichmentEnqueued: input.enqueueEnrichment !== undefined
+            };
+          }
+        },
+        synthesisService: {
+          create: async () => ({ object_kind: "synthesis_capsule", object_id: "synthesis-1" })
+        },
+        claimService: {
+          create: async () => ({ object_kind: "claim_form", object_id: "claim-1" })
+        },
+        enrichPendingPort: { enqueue: enqueueEnrichPending },
+        reconciliationPort: reconciliationService,
+        handoffGapHandler: new InMemoryHandoffGapHandler()
+      });
+
+      const result = await router.materializeSignal(createFactSignal());
+
+      expect(result.success).toBe(true);
+      expect(result.created_objects).toEqual([
+        { object_kind: "memory_entry", object_id: OLD_MEMORY_ID }
+      ]);
+      await expect(memoryRepo.findByWorkspaceId("workspace-1")).resolves.toHaveLength(1);
+      await expect(evidenceRepo.findByWorkspaceId("workspace-1")).resolves.toHaveLength(0);
+      expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
     } finally {
       database.close();
     }
