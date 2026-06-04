@@ -43,8 +43,8 @@ export interface DriftLeaseRepoPort {
 export interface SurfaceDriftEventPublisherPort {
   publish(event: SurfaceDriftEventInput): Promise<Readonly<EventLogEntry>>;
   /**
-   * Atomic append + sync mutation (#BL-022). Surface-drift lease acquire/release
-   * uses this to keep the EventLog row and the lease repo write in a single
+   * Atomic append + sync mutation. Surface-drift lease acquire/release uses
+   * this to keep the EventLog row and the lease repo write in a single
    * SQLite transaction.
    */
   appendManyWithMutation<T>(

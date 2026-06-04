@@ -1,4 +1,4 @@
-import type { PathRelation } from "@do-soul/alaya-protocol";
+import { isPathActiveForRecall, type PathRelation } from "@do-soul/alaya-protocol";
 
 // invariant: AuditorSchedulingAdvisor reads PathRelation.effect_vector.
 // verification_bias and produces a deterministic priority ordering for
@@ -96,7 +96,7 @@ export function createVerificationBiasReaderFromPathLookup(
       const paths = await lookup.findActiveByAnchorObjectIds(workspaceId, [memoryObjectId]);
       let maxBias = 0;
       for (const path of paths) {
-        if (path.lifecycle.status === "retired") {
+        if (!isPathActiveForRecall(path.lifecycle.status)) {
           continue;
         }
         if (path.effect_vector.verification_bias > maxBias) {

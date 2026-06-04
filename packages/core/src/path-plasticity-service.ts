@@ -7,6 +7,7 @@ import {
   type EventLogEntry,
   type PathAnchorRef,
   type PathGovernanceClass,
+  type PathLifecycleStatus,
   type PathPlasticityState,
   type PathRelation,
   type SoulContextObjectIdentity,
@@ -14,6 +15,7 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import { EventPublisher, type EventPublisherInput } from "./event-publisher.js";
+import { classifyPathImportance } from "./importance-gate.js";
 import { planPromotion, type PromotionPlan } from "./path-manifestation-policy.js";
 
 /**
@@ -35,7 +37,8 @@ export const PATH_PLASTICITY_CONSTANTS = Object.freeze({
   STRENGTH_FLOOR: DYNAMICS_CONSTANTS.path_plasticity.strength_floor,
   STRENGTH_CEILING: DYNAMICS_CONSTANTS.path_plasticity.strength_ceiling,
   RETIREMENT_STRENGTH_THRESHOLD: DYNAMICS_CONSTANTS.path_plasticity.retirement_strength_threshold,
-  RETIREMENT_INACTIVITY_MS: DYNAMICS_CONSTANTS.path_plasticity.retirement_inactivity_ms
+  RETIREMENT_INACTIVITY_MS: DYNAMICS_CONSTANTS.path_plasticity.retirement_inactivity_ms,
+  REVIVE_STRENGTH: DYNAMICS_CONSTANTS.path_plasticity.revive_strength
 } as const);
 
 export interface UsageProofReaderPort {
@@ -110,6 +113,8 @@ export interface PathPlasticityComputeResult {
   readonly reinforced: number;
   readonly weakened: number;
   readonly retired: number;
+  readonly dormant: number;
+  readonly revived: number;
   readonly affectedPathIds: readonly string[];
   readonly promotions: readonly PathPlasticityPromotionRecord[];
 }
@@ -131,7 +136,31 @@ export interface PathPlasticityComputeResult {
  *   - reinforcement (used → +USED_DELTA strength)
  *   - weakening (skipped → -SKIPPED_DELTA strength)
  *   - redirection (source/target anchor usage → direction_bias)
- *   - retirement (strength <= threshold + inactivity → emit retired event)
+ *   - retirement (negative/neutral family, strength <= threshold + inactivity
+ *     → emit retired event, terminal)
+ *   - dormancy (positive associative family, strength <= threshold +
+ *     inactivity → emit dormant event, salience cleared, reversible)
+ *   - revival (dormant path receives a used receipt → emit revived event,
+ *     strength reset to REVIVE_STRENGTH, status back to active)
+ *
+ * Family discriminator: a path is positive-associative when
+ * effect_vector.recall_bias > 0 (supports / derives_from / co_recalled /
+ * shares_entity seeds). recall_bias <= 0 (negative lifecycle family such as
+ * supersedes / contradicts, plus neutral exception_to / unset) keeps the
+ * existing retirement behaviour. This coexistence keeps negative-family
+ * retirement and the legacy neutral-default retire tests intact while the
+ * positive family decays into reversible dormancy. Endpoint-following for
+ * the negative family is intentionally not implemented here: this service
+ * mutates only strength/lifecycle, never recall_bias, so family membership
+ * stays stable across plasticity passes.
+ *
+ * Governance asymmetry: for negative paths (recall_bias < 0) this service
+ * never mutates governance_class either — only strength/lifecycle/stability
+ * evolve. Positive paths (recall_bias >= 0) still promote governance via the
+ * support_events ladder (planPromotion → evolveGovernanceClass). This blocks
+ * an agent from pumping a negative path's governance up through co-usage
+ * receipts to clear the suppression governance gate. see also:
+ * path-manifestation-policy.ts planPromotion (sign-guarded governance ladder).
  */
 export class PathPlasticityService {
   private readonly now: () => string;
@@ -167,6 +196,8 @@ export class PathPlasticityService {
         reinforced: 0,
         weakened: 0,
         retired: 0,
+        dormant: 0,
+        revived: 0,
         affectedPathIds: [],
         promotions: []
       });
@@ -186,12 +217,15 @@ export class PathPlasticityService {
     let reinforced = 0;
     let weakened = 0;
     let retired = 0;
+    let dormant = 0;
+    let revived = 0;
     const mutationPlans: PathPlasticityMutationPlan[] = [];
     const promotions: PathPlasticityPromotionRecord[] = [];
 
     for (const { path, counts } of pathAggregates.values()) {
-      // Retired paths are durable lifecycle state, not a strength heuristic
-      // or a per-tick audit-log lookup.
+      // Retired paths are terminal durable lifecycle state and never reactivate
+      // from a strength heuristic. Dormant paths, by contrast, stay reachable
+      // here so a fresh used receipt can revive them.
       if (isRetiredPath(path)) {
         continue;
       }
@@ -214,6 +248,12 @@ export class PathPlasticityService {
         affected.add(plan.pathId);
       } else if (plan.outcome === "retired") {
         retired += 1;
+        affected.add(plan.pathId);
+      } else if (plan.outcome === "dormant") {
+        dormant += 1;
+        affected.add(plan.pathId);
+      } else if (plan.outcome === "revived") {
+        revived += 1;
         affected.add(plan.pathId);
       } else if (plan.outcome === "redirected") {
         affected.add(plan.pathId);
@@ -239,6 +279,8 @@ export class PathPlasticityService {
       reinforced,
       weakened,
       retired,
+      dormant,
+      revived,
       affectedPathIds: Object.freeze([...affected]),
       promotions: Object.freeze(promotions)
     });
@@ -471,6 +513,33 @@ export class PathPlasticityService {
       proposedStrength <= PATH_PLASTICITY_CONSTANTS.RETIREMENT_STRENGTH_THRESHOLD &&
       this.isInactive(path.plasticity_state.last_reinforced_at, occurredAt);
 
+    // Revival: a dormant path that earns a fresh used receipt returns to
+    // active. This is the Hebbian "used → reinforced" reactivation: strength
+    // is reset to REVIVE_STRENGTH (not just the small reinforcement delta) so
+    // the path re-enters recall with meaningful pressure. Skipped-only signals
+    // never revive a dormant path.
+    if (isDormantPath(path) && counts.used > 0) {
+      const revivedStrength = clampStrength(PATH_PLASTICITY_CONSTANTS.REVIVE_STRENGTH);
+      const nextPlasticity = parsePlasticityState({
+        ...path.plasticity_state,
+        strength: revivedStrength,
+        direction_bias: nextDirectionBias,
+        support_events_count: nextSupportEventsCount,
+        contradiction_events_count: nextContradictionEventsCount,
+        last_reinforced_at: occurredAt
+      });
+      return this.createRevivedPlan({
+        path,
+        previousStrength,
+        revivedStrength,
+        nextPlasticity,
+        trigger: "used_receipt",
+        promotion,
+        occurredAt,
+        ...(redirection === undefined ? {} : { redirection })
+      });
+    }
+
     if (netDelta > 0) {
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
@@ -494,8 +563,10 @@ export class PathPlasticityService {
 
     if (netDelta < 0) {
       const nextStrength = proposedStrength;
-      // Retirement: weak path with no recent reinforcement → emit
-      // PathRelationRetired instead of PathRelationWeakened.
+      // Weak path with no recent reinforcement. Positive-associative AND any
+      // non-mergeable (protected/report_only/keep) path goes dormant (reversible);
+      // only a mergeable negative/neutral path retires (terminal). see
+      // shouldRouteToDormant (redteam-I1 + reviewer-I3).
       if (retirementEligible) {
         const nextPlasticity = parsePlasticityState({
           ...path.plasticity_state,
@@ -505,6 +576,17 @@ export class PathPlasticityService {
           contradiction_events_count: nextContradictionEventsCount,
           last_weakened_at: occurredAt
         });
+        if (shouldRouteToDormant(path)) {
+          return this.createDormantPlan({
+            path,
+            dormantStrength: nextStrength,
+            nextPlasticity,
+            reason: "strength_below_threshold_and_inactive",
+            promotion,
+            occurredAt,
+            ...(redirection === undefined ? {} : { redirection })
+          });
+        }
         return this.createRetiredPlan({
           path,
           finalStrength: nextStrength,
@@ -564,9 +646,9 @@ export class PathPlasticityService {
     }
 
     // netDelta === 0, no contradiction signal. A path at the strength floor
-    // with skipped receipts still retires after the inactivity window. Mixed
-    // receipts can also reach this branch; preserve the support tally before
-    // the path is retired.
+    // with skipped receipts still leaves active after the inactivity window.
+    // Mixed receipts can also reach this branch; preserve the support tally
+    // before the path goes dormant (positive family) or retires (otherwise).
     if (retirementEligible && counts.skipped > 0) {
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
@@ -575,6 +657,17 @@ export class PathPlasticityService {
         support_events_count: nextSupportEventsCount,
         last_weakened_at: occurredAt
       });
+      if (shouldRouteToDormant(path)) {
+        return this.createDormantPlan({
+          path,
+          dormantStrength: proposedStrength,
+          nextPlasticity,
+          reason: "strength_below_threshold_and_inactive",
+          promotion,
+          occurredAt,
+          ...(redirection === undefined ? {} : { redirection })
+        });
+      }
       return this.createRetiredPlan({
         path,
         finalStrength: proposedStrength,
@@ -738,11 +831,24 @@ export class PathPlasticityService {
     readonly promotion: PromotionPlan;
     readonly occurredAt: string;
   }): PathPlasticityMutationPlan {
+    // invariant (R3d acceptance #5): negative/neutral terminal retirement passes
+    // the same mechanical importance gate the path consolidation plane uses. A
+    // mechanically-deletable (mergeable) path retires cleanly; a NON-deletable
+    // path (protected / report_only / keep — pinned, strictly-governed, evidence-
+    // rich, or well-supported) is NEVER silently retired: the gate verdict is
+    // stamped into retirement_reason so the PATH_RELATION_RETIRED EventLog row
+    // records the explicit audit-provenance rationale for terminalizing it.
+    // see also: packages/core/src/importance-gate.ts classifyPathImportance.
+    const gate = classifyPathImportance(params.path);
+    const gatedReason =
+      gate.disposition === "mergeable"
+        ? `${params.reason}; gate=mergeable`
+        : `${params.reason}; gate=${gate.disposition}:${gate.reason}:retained_provenance`;
     const payload = parseRuntimeGovernanceEventPayload(
       RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
       {
         path_id: params.path.path_id,
-        retirement_reason: params.reason,
+        retirement_reason: gatedReason,
         final_strength: params.finalStrength,
         retired_at: params.occurredAt
       }
@@ -769,6 +875,107 @@ export class PathPlasticityService {
         lifecycleStatus: "retired",
         promotion: params.promotion,
         occurredAt: params.occurredAt
+      }),
+      promotion: params.promotion
+    });
+  }
+
+  // Active -> dormant. The path stays in the DB but leaves recall: status is
+  // set to "dormant" and effect_vector.salience is cleared to 0. Strength is
+  // preserved (not zeroed) so a future revive has a baseline to lift from and
+  // the importance gate can still read evidence/strength.
+  private createDormantPlan(params: {
+    readonly path: Readonly<PathRelation>;
+    readonly dormantStrength: number;
+    readonly nextPlasticity: Readonly<PathPlasticityState>;
+    readonly reason: string;
+    readonly redirection?: RedirectionPublication;
+    readonly promotion: PromotionPlan;
+    readonly occurredAt: string;
+  }): PathPlasticityMutationPlan {
+    const payload = parseRuntimeGovernanceEventPayload(
+      RuntimeGovernanceEventType.PATH_RELATION_DORMANT,
+      {
+        path_id: params.path.path_id,
+        dormancy_reason: params.reason,
+        dormant_strength: params.dormantStrength,
+        dormant_at: params.occurredAt
+      }
+    );
+
+    return Object.freeze({
+      pathId: params.path.path_id,
+      outcome: "dormant",
+      eventInputs: Object.freeze([
+        ...this.createRedirectionInputs(params.path, params.redirection),
+        {
+          event_type: RuntimeGovernanceEventType.PATH_RELATION_DORMANT,
+          entity_type: "path_relation",
+          entity_id: params.path.path_id,
+          workspace_id: params.path.workspace_id,
+          run_id: null,
+          caused_by: "system",
+          payload_json: payload as unknown as Record<string, unknown>
+        }
+      ]),
+      updates: buildUpdatesWithPromotion({
+        path: params.path,
+        nextPlasticity: params.nextPlasticity,
+        lifecycleStatus: "dormant",
+        promotion: params.promotion,
+        occurredAt: params.occurredAt,
+        effectVector: withClearedSalience(params.path.effect_vector)
+      }),
+      promotion: params.promotion
+    });
+  }
+
+  // Dormant -> active. Strength is reset to REVIVE_STRENGTH and salience is
+  // restored to that same level so the revived path re-enters recall with
+  // meaningful pressure rather than the cleared-to-0 dormant value.
+  private createRevivedPlan(params: {
+    readonly path: Readonly<PathRelation>;
+    readonly previousStrength: number;
+    readonly revivedStrength: number;
+    readonly nextPlasticity: Readonly<PathPlasticityState>;
+    readonly trigger: string;
+    readonly redirection?: RedirectionPublication;
+    readonly promotion: PromotionPlan;
+    readonly occurredAt: string;
+  }): PathPlasticityMutationPlan {
+    const payload = parseRuntimeGovernanceEventPayload(
+      RuntimeGovernanceEventType.PATH_RELATION_REVIVED,
+      {
+        path_id: params.path.path_id,
+        revive_trigger: params.trigger,
+        previous_strength: params.previousStrength,
+        new_strength: params.revivedStrength,
+        revived_at: params.occurredAt
+      }
+    );
+
+    return Object.freeze({
+      pathId: params.path.path_id,
+      outcome: "revived",
+      eventInputs: Object.freeze([
+        ...this.createRedirectionInputs(params.path, params.redirection),
+        {
+          event_type: RuntimeGovernanceEventType.PATH_RELATION_REVIVED,
+          entity_type: "path_relation",
+          entity_id: params.path.path_id,
+          workspace_id: params.path.workspace_id,
+          run_id: null,
+          caused_by: "system",
+          payload_json: payload as unknown as Record<string, unknown>
+        }
+      ]),
+      updates: buildUpdatesWithPromotion({
+        path: params.path,
+        nextPlasticity: params.nextPlasticity,
+        lifecycleStatus: "active",
+        promotion: params.promotion,
+        occurredAt: params.occurredAt,
+        effectVector: withRestoredSalience(params.path.effect_vector, params.revivedStrength)
       }),
       promotion: params.promotion
     });
@@ -861,7 +1068,13 @@ interface RedirectionPublication {
   readonly occurredAt: string;
 }
 
-type PathPlasticityMutationOutcome = "reinforced" | "weakened" | "retired" | "redirected";
+type PathPlasticityMutationOutcome =
+  | "reinforced"
+  | "weakened"
+  | "retired"
+  | "dormant"
+  | "revived"
+  | "redirected";
 
 interface PathPlasticityMutationPlan {
   readonly pathId: string;
@@ -945,6 +1158,58 @@ function isRetiredPath(path: Readonly<PathRelation>): boolean {
   return (path.lifecycle as PathLifecycleWithStatus).status === "retired";
 }
 
+function isDormantPath(path: Readonly<PathRelation>): boolean {
+  return (path.lifecycle as PathLifecycleWithStatus).status === "dormant";
+}
+
+// Family discriminator: positive-associative paths carry a strictly positive
+// recall_bias (supports / derives_from / co_recalled / shares_entity seeds).
+// recall_bias <= 0 covers the negative lifecycle family (supersedes /
+// contradicts, born with negative bias) and the neutral default (exception_to
+// / unset, recall_bias === 0). Only the positive family decays into dormancy;
+// the rest keep the existing terminal-retire behaviour.
+// see also: path-relation-proposal-service.ts (recall_bias sign = family).
+function isPositiveAssociativeFamily(path: Readonly<PathRelation>): boolean {
+  return path.effect_vector.recall_bias > 0;
+}
+
+// invariant (redteam-I1 + reviewer-I3): terminal (irreversible) retirement is
+// load-bearing — it must pass the SAME mechanical importance gate the path
+// consolidation plane uses. A path is routed to REVERSIBLE dormancy instead of
+// terminal retirement when EITHER:
+//   - it is positive-associative (the existing dormancy family), OR
+//   - it is NOT `mergeable` (protected / report_only / keep — pinned,
+//     strictly-governed, evidence-rich, or well-supported). A protected /
+//     evidence-rich / strictly-governed NEGATIVE path carries live suppression
+//     and must NOT silently retire (which would lose that suppression).
+// Only a `mergeable` negative/neutral path terminally retires.
+// see also: packages/core/src/importance-gate.ts classifyPathImportance.
+function shouldRouteToDormant(path: Readonly<PathRelation>): boolean {
+  if (isPositiveAssociativeFamily(path)) {
+    return true;
+  }
+  return classifyPathImportance(path).disposition !== "mergeable";
+}
+
+function withClearedSalience(
+  effectVector: PathRelation["effect_vector"]
+): PathRelation["effect_vector"] {
+  return Object.freeze({
+    ...effectVector,
+    salience: 0
+  });
+}
+
+function withRestoredSalience(
+  effectVector: PathRelation["effect_vector"],
+  salience: number
+): PathRelation["effect_vector"] {
+  return Object.freeze({
+    ...effectVector,
+    salience
+  });
+}
+
 function isObjectAnchor(anchor: PathAnchorRef, objectId: string): boolean {
   return anchor.kind === "object" && anchor.object_id === objectId;
 }
@@ -979,6 +1244,9 @@ function buildUpdatesWithPromotion(params: {
   readonly lifecycleStatus: NonNullable<PathLifecycleWithStatus["status"]>;
   readonly promotion: PromotionPlan;
   readonly occurredAt: string;
+  // Optional effect_vector rewrite. Dormancy clears salience to 0; revival
+  // restores it. Other outcomes leave effect_vector untouched.
+  readonly effectVector?: PathRelation["effect_vector"];
 }): PathPlasticityRepoUpdate {
   const plasticityWithPromotion =
     params.promotion.stability === null
@@ -1002,12 +1270,13 @@ function buildUpdatesWithPromotion(params: {
     plasticity_state: plasticityWithPromotion,
     lifecycle: withLifecycleStatus(params.path.lifecycle, params.lifecycleStatus),
     updated_at: params.occurredAt,
-    ...(legitimacyUpdate ?? {})
+    ...(legitimacyUpdate ?? {}),
+    ...(params.effectVector === undefined ? {} : { effect_vector: params.effectVector })
   });
 }
 
 type PathLifecycleWithStatus = PathRelation["lifecycle"] & {
-  readonly status?: "active" | "retired";
+  readonly status?: PathLifecycleStatus;
 };
 
 function throwIfPathPlasticityAborted(signal: AbortSignal | undefined): void {

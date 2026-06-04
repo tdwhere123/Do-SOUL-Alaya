@@ -2,17 +2,19 @@ import { randomUUID } from "node:crypto";
 import {
   ControlPlaneObjectKind,
   DYNAMICS_CONSTANTS,
-  MEMORY_GRAPH_EDGE_RECALL_WEIGHTS,
+  EDGE_TYPE_RECALL_MODEL,
   RecallContextEventType,
   RetentionPolicy,
   SoulRecallCompletedPayloadSchema,
   SoulRecallWeightTransferPayloadSchema,
   StorageTier,
+  isPathActiveForRecall,
+  isPathGovernedForSuppression,
+  isPathRecallEligible,
   type FineAssessmentConfig,
   type ActivationWeights,
+  type ManifestationState,
   type MemoryDimension as MemoryDimensionType,
-  type MemoryGraphEdge,
-  type MemoryGraphEdgeTypeValue,
   type MemoryEntry,
   type PathAnchorRef,
   type PathRelation,
@@ -37,6 +39,7 @@ import {
   buildRecallCandidate,
   buildSynthesisCoarseRecallCandidate
 } from "./recall-candidate-builder.js";
+import { computeFreshnessFactor } from "./dynamics-constants-runtime.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
 import {
   EMBEDDING_SIMILARITY_WEIGHT,
@@ -79,6 +82,7 @@ import type {
   RecallEmbeddingProviderStatus,
   RecallGraphExpansionDiagnostics,
   RecallGraphExpansionTrackedEdgeType,
+  RecallMultiSeedGraphFanInDiagnostics,
   RecallPathExpansionSourceDiagnostic,
   RecallResult,
   RecallServiceDependencies,
@@ -88,6 +92,11 @@ import type {
   TokenEstimator
 } from "./recall-service-types.js";
 import { makeTokenEstimator } from "./recall-service-types.js";
+import {
+  GOVERNANCE_CEILING_FAILSAFE_BAND,
+  memoryGovernanceCeiling,
+  type PathGovernanceContribution
+} from "./path-manifestation-policy.js";
 import { parseRecallPolicy } from "./shared/recall-policy.js";
 
 export { classifyGlobalCandidate } from "./recall-service-helpers.js";
@@ -101,7 +110,6 @@ export type {
   RecallServiceDependencies,
   RecallServiceEmbeddingRecallPort,
   RecallServiceEventLogRepoPort,
-  RecallServiceGraphExpansionPort,
   RecallServiceGraphSupportPort,
   RecallServiceMemoryRepoPort,
   RecallServicePathExpansionPort,
@@ -141,16 +149,121 @@ const SOURCE_PROXIMITY_STRUCTURAL_CARRY_MAX = 0.25;
 const STRONG_LEXICAL_DELIVERY_RANK = 0.85;
 const DYNAMIC_RECALL_EDGE_FANOUT = 12;
 const MAX_GRAPH_HOPS = 2;
+// anchor: shared cap for entity_seed fan-in. Reuses DYNAMIC_RECALL_PLANE_CAP
+// so the per-plane admit ceiling is the structural truth and the multi-seed
+// path inherits the same bound. see also: DYNAMIC_RECALL_PLANE_CAP
+const MULTI_SEED_GRAPH_FAN_OUT_CAP = DYNAMIC_RECALL_PLANE_CAP;
+// invariant: membership equals EDGE_TYPE_RECALL_MODEL transitive rows
+// (membership asserted in edge-hop-decay-derivation.test.ts; order asserted
+// in recall-service.test.ts). order is load-bearing — indexOf here drives the
+// edge_type tie-break, so the array stays explicit rather than derived from
+// declaration order.
+// see also: shouldReplaceGraphExpansionCandidate, compareGraphExpansionCandidateDrafts
 const GRAPH_EXPANSION_TRACKED_EDGE_TYPES: readonly RecallGraphExpansionTrackedEdgeType[] = [
   "derives_from",
   "recalls",
   "supports"
 ];
-const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdgeType, number>> = Object.freeze({
-  derives_from: 0.6,
-  recalls: 0.3,
-  supports: 0.5
-});
+// Derived view of EDGE_TYPE_RECALL_MODEL.hop_decay restricted to the
+// transitive rows; only read at hop >= 2 in expandGraph.
+const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdgeType, number>> = Object.freeze(
+  Object.fromEntries(
+    GRAPH_EXPANSION_TRACKED_EDGE_TYPES.map((edgeType) => {
+      const decay = EDGE_TYPE_RECALL_MODEL[edgeType].hop_decay;
+      if (decay === null) {
+        throw new Error(`graph-expansion tracked edge_type "${edgeType}" has null hop_decay in EDGE_TYPE_RECALL_MODEL`);
+      }
+      return [edgeType, decay];
+    })
+  ) as Record<RecallGraphExpansionTrackedEdgeType, number>
+);
+// invariant: path-graph traversal reads PathRelation rows (the single
+// associative plane) instead of memory_graph_edges. A path's
+// constitution.relation_kind is a free string, so traversal scoring maps it
+// back onto the EDGE_TYPE_RECALL_MODEL contribution_weight / hop_decay basis
+// when the kind names a transitive edge type (supports / derives_from /
+// recalls). Path-only associative kinds (co_recalled / shares_entity /
+// signal_graph_ref) have no edge-type row; they are treated as recalls-tier
+// associations (contribution 0.3, hop_decay 0.3) — the weakest positive
+// associative band — so they propagate at most one extra hop without
+// over-amplifying. Negative / neutral kinds never reach this map because the
+// traversal only follows isPathRecallEligible (recall_bias > 0) paths.
+// see also: packages/protocol/src/soul/memory-graph.ts EDGE_TYPE_RECALL_MODEL
+// see also: packages/core/src/path-relation-proposal-service.ts seed catalog
+const PATH_ASSOCIATIVE_RELATION_KIND_FALLBACK: RecallGraphExpansionTrackedEdgeType = "recalls";
+// invariant: the earned multi-session fan-in carrier relation_kind. Mirrors
+// path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE.relationKind — the
+// R1 path the co-usage counter mints ONLY after the threshold-3 gate (sparse,
+// bounded). A path_expansion admission traversing this kind is the durable
+// fan-in route Route 乙 depends on, so the structural delivery reserve grants it
+// a gold-blind, earned exemption from the relevance gate (a zero-relevance
+// earned sibling is the intended fan-in target, not a distractor). Any OTHER
+// relation_kind (generic structural / session membership) stays relevance-gated.
+const EARNED_CO_RECALLED_FANIN_RELATION_KIND = "co_recalled";
+// Maps a path's free-string relation_kind onto the tracked transitive
+// edge-type set used for graph-traversal scoring and the per-edge-type
+// diagnostic. Unmapped associative kinds fold onto the recalls tier so the
+// {derives_from, recalls, supports} diagnostic key set (consumed by the
+// bench-runner zod schema) is preserved without inventing a new key.
+function pathRelationKindToTrackedEdgeType(
+  relationKind: string
+): RecallGraphExpansionTrackedEdgeType {
+  return GRAPH_EXPANSION_TRACKED_EDGE_TYPES.includes(relationKind as RecallGraphExpansionTrackedEdgeType)
+    ? (relationKind as RecallGraphExpansionTrackedEdgeType)
+    : PATH_ASSOCIATIVE_RELATION_KIND_FALLBACK;
+}
+// Active sign-aware suppression scale. A negative path (recall_bias < 0)
+// demotes its target's fused recall score by
+//   delta = |recall_bias| * f(strength) * PATH_SUPPRESSION_SCALE
+// where f(strength) is the path's plasticity strength in [0, 1] (an
+// attention_only co-occurrence sits near 0.5; a plasticity-reinforced
+// contradiction climbs toward 0.9-1.0). PATH_SUPPRESSION_SCALE is the only
+// magnitude tuned by intent here, and it is set so the gate is strength-aware
+// rather than benchmark-fitted (no-benchmark-specific-patch):
+//   - fused_score contributions are RRF terms ~weight/(k+rank), so a single
+//     mid-table stream contributes on the order of 0.01-0.05 and a strong
+//     multi-stream memory totals ~0.1-0.3.
+//   - a weak attention_only negative (|bias|~0.4, strength~0.5) yields
+//     delta ~ 0.4 * 0.5 * 0.5 = 0.10 ... too aggressive, so the strength gate
+//     below floors weak/forming paths out of suppression entirely and only
+//     stable/pinned high-strength negatives apply the full delta.
+// The strength gate (PATH_SUPPRESSION_STRENGTH_FLOOR) makes "weak attention_only
+// barely suppresses" literal: below the floor delta collapses to 0; at/above it
+// scales linearly so a reinforced contradiction (strength ~0.9) lands
+// delta ~ 0.4 * 0.9 * 0.6 = 0.216, enough to push a target out of a tight
+// top-K, while a freshly-seeded weak negative does not move rankings.
+const PATH_SUPPRESSION_SCALE = 0.6;
+// invariant: strength below this floor contributes no suppression. Matches the
+// attention_only seed band (initial strength 0.3-0.5 for co-occurrence-class
+// paths) so a barely-formed negative association cannot demote a memory until
+// plasticity has reinforced it past the floor. see also:
+// path-relation-proposal-service.ts seed catalog (initialStrength per family).
+const PATH_SUPPRESSION_STRENGTH_FLOOR = 0.6;
+// invariant: hard ceiling on the total suppression delta any single target may
+// accumulate, across all converging negative paths. Sized to one supersedes-class
+// negative at full reinforcement: |recall_bias 0.5| * strength 0.9 *
+// PATH_SUPPRESSION_SCALE 0.6 = 0.27, so a lone reinforced supersession can
+// demote a target out of a tight top-K but stacked negatives can never exceed
+// the worst single legitimate suppression. This bounds the accumulated delta
+// (rank loss). The per-target cap limits the DELTA, not the residual score: a
+// single full-strength negative whose target had a low base fused_score
+// (< 0.27) could still drive that target's fused_score to 0 via one subtraction
+// and drop it out of the candidate set. PATH_SUPPRESSION_RESIDUAL_FLOOR (below)
+// is the residual-side guard that demotes, never erases.
+// see also: collectNegativePathSuppressions, PATH_SUPPRESSION_SCALE rationale,
+// PATH_SUPPRESSION_RESIDUAL_FLOOR.
+const PATH_SUPPRESSION_MAX_PER_TARGET = 0.27;
+// invariant: suppression demotes, never erases. A suppressed candidate whose
+// pre-suppression fused_score > 0 retains at least this floor residual so it
+// stays a tail candidate (ranked last) rather than being driven to 0 and
+// dropped from the candidate set. The floor is far below any live fused score
+// (RRF fusion contributions are >= ~0.01), so it never reorders live
+// candidates upward — it only keeps a fully-suppressed memory present at the
+// bottom of the ranked list. A candidate already at fused_score 0 is not
+// lifted by this floor. Matches the "lower the recall score" semantics of
+// suppression without weaponising it into deletion.
+// see also: applyPathSuppressionToFusionScores.
+const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
@@ -160,7 +273,10 @@ const RECALL_RRF_DEFAULT_K = 60;
 // this fraction of their raw fts rank so an inflected-only match cannot
 // out-RRF a memory that matched the original query surface terms.
 const EXPANDED_QUERY_RANK_DISCOUNT = 0.6;
-const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
+// Production fusion-stream identifiers (16). Exported so bench tuners can
+// derive their override whitelist from the live set instead of hand-copying
+// it. see also: apps/bench-runner/src/harness/recall-weight-overrides.ts
+export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "lexical_fts",
   "trigram_fts",
   "synthesis_fts",
@@ -178,10 +294,16 @@ const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "temporal_recency",
   "workspace_activation"
 ];
+// NOTE: session_cohort_fanin was a recall-time session-grouping fusion stream
+// (one nominated representative per cohort) that is now retired. The multi-
+// session fan-in carrier is the durable co_recalled PathRelation: a query that
+// hits a non-representative same-session member fans into its siblings via the
+// unified path plane (direct hop-1 path_expansion + multi-hop graph_expansion).
+// see also: scoreRecallFusionStream case "path_expansion".
 const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
   lexical_fts: 1,
   // trigram_fts rescues substring / spelling-variant / CJK matches the
-  // word-level lexical lane misses. Initial low weight; grid-tuned later.
+  // word-level lexical lane misses.
   trigram_fts: 1,
   // synthesis_fts no longer drives cross-kind fusion: a synthesis candidate
   // cannot out-RRF a multi-stream memory_entry, so delivery is handled by
@@ -200,22 +322,38 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   graph_expansion: 3,
   // anchor: entity_seed parity with lexical_fts so entity-bearing memories
   // can compete on the same RRF axis as direct surface-term hits without
-  // out-weighting the existing lexical lane. weight tuning is deferred to
-  // phase-6 sub-workflow D-2/D-6 once the graph plane is non-zero.
+  // out-weighting the existing lexical lane.
   entity_seed: 1,
   path_expansion: 3,
   temporal_recency: 0,
   workspace_activation: 0
 });
+// invariant: synthesis-anchor nomination bonus. A path-reached memory_entry that
+// a synthesis capsule's curated evidence set points at is the capsule's preferred
+// answer carrier, so it gets this additive tiebreak when the synthesis backstop
+// selects which buried member to rescue. The capsule contributes signal only; the
+// delivered object stays a real gold memory_entry, never the capsule.
+// see also: reserveSynthesisDeliverySlots.
+const SYNTHESIS_ANCHOR_BONUS = 0.1;
 // invariant: confidence sub-weight is additive (outside sum-to-1
 // activation_weights). MemoryEntry.confidence is propose/accept-updated
 // epistemic certainty; reading it directly here keeps later confidence
 // edits visible to recall ordering without waiting for retention decay
 // or activation rescore. Final score stays clamp01.
 const CONFIDENCE_DIRECT_WEIGHT = 0.08;
-// Prior-only activation/confidence should not make weak query evidence look
-// answer-confident. Full evidence keeps the pre-existing score shape.
-const WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR = 0.72;
+// invariant: prior dampening floor — minimum weight applied to the
+// prior signal when calibrating weak-evidence candidates so that
+// prior-only activation/confidence MUST NOT make weak query evidence
+// look answer-confident. Intentionally a SEPARATE constant from the
+// calibration gate below so each purpose can be tuned independently
+// without silently shifting the other.
+const WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR = 0.72;
+// invariant: calibration gate threshold — calibration only fires when
+// queryEvidenceCalibrationStrength is BELOW this floor; at-or-above
+// evidence is treated as sufficient and the score shape is preserved.
+// Matches WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR by initial design intent
+// but is intentionally a separate constant to keep each purpose tunable.
+const WEAK_EVIDENCE_CALIBRATION_GATE = 0.72;
 
 interface CoarseCandidateDraft {
   readonly entry: Readonly<MemoryEntry>;
@@ -231,6 +369,13 @@ interface CoarseCandidateDraft {
   // confidence falls below ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR.
   // see also: collectEntityDerivedSeeds (graph_expansion seed extraSeedMemoryIds path)
   readonly entityConfidence?: number;
+  // invariant: sticky-true once this draft is admitted on the path_expansion
+  // plane via an EARNED `co_recalled` PathRelation (relation_kind === COG). This
+  // is the R1 sparse durable fan-in carrier; the structural delivery reserve
+  // reads it as the bounded exemption that admits a zero-relevance earned fan-in
+  // sibling without re-opening displacement to generic structural distractors.
+  // Gold-blind. see also: isStructuralRescueCandidate, addCandidate.
+  readonly reachedViaEarnedCoRecalledFanin?: boolean;
 }
 
 interface SourceProximitySeedDraft {
@@ -241,6 +386,15 @@ interface SourceProximitySeedDraft {
 interface MutableGraphExpansionDiagnostics {
   readonly graph_expansion_plane_count_per_hop: [number, number];
   readonly graph_expansion_plane_count_per_edge_type: Record<RecallGraphExpansionTrackedEdgeType, number>;
+  // invariant: 0 = pooled-seed only; 1+ = entity_seed fan-in ran.
+  // see also: addGraphExpansionCandidates multi-seed branch
+  multi_seed_fan_in_distinct_seeds: number;
+  // anchor: dedup_collisions counts every collision (not unique colliders);
+  // max-score reduction keeps one candidate.
+  multi_seed_fan_in_dedup_collisions: number;
+  // anchor: per-seed candidate counts (post-dedup, pre-cap) consumed by
+  // freezeGraphExpansionDiagnostics to derive p50 / p95.
+  readonly multi_seed_fan_in_candidates_per_seed: number[];
 }
 
 interface GraphExpansionFrontierNode {
@@ -273,7 +427,11 @@ type CoarseCandidateAdder = (
   pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
   // invariant: only forwarded for plane === "entity_seed" by
   // collectEntityDerivedSeeds; other planes leave this undefined.
-  entityConfidence?: number
+  entityConfidence?: number,
+  // invariant: only forwarded true by the direct path_expansion admission when
+  // the traversed PathRelation's relation_kind is the earned co_recalled fan-in
+  // carrier; other admissions leave it undefined. see also: addCandidate.
+  reachedViaEarnedCoRecalledFanin?: boolean
 ) => boolean;
 
 export class RecallService {
@@ -733,6 +891,9 @@ export class RecallService {
     // see also: collectEntityDerivedSeeds — entity_seed plane score by memory id.
     readonly entitySeedScores: Readonly<Record<string, number>>;
     readonly pathExpansionScores: Readonly<Record<string, number>>;
+    // Negative-path active suppression deltas keyed by target memory id.
+    // see also: collectNegativePathSuppressions, applyPathSuppressionToFusionScores.
+    readonly pathSuppressionScores: Readonly<Record<string, number>>;
     readonly degradation_reason: RecallResult["degradation_reason"];
   }> {
     const tier = options.tier ?? StorageTier.HOT;
@@ -773,13 +934,19 @@ export class RecallService {
       new Map();
     const entitySeedScores = new Map<string, number>();
     const pathExpansionScores = new Map<string, number>();
+    // Active sign-aware suppression: target memory id -> accumulated demotion
+    // delta sourced from negative (recall_bias < 0) paths anchored on the
+    // expansion seeds. Applied to the fused score before sort.
+    // see also: collectNegativePathSuppressions, applyPathSuppressionToFusionScores.
+    const pathSuppressionScores = new Map<string, number>();
     const addCandidate = (
       entry: Readonly<MemoryEntry>,
       plane: RecallAdmissionPlane,
       structuralScore = 0,
       sourceChannel?: string,
       pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
-      entityConfidence?: number
+      entityConfidence?: number,
+      reachedViaEarnedCoRecalledFanin?: boolean
     ): boolean => {
       if (
         plane !== "protected_winner" &&
@@ -811,6 +978,14 @@ export class RecallService {
         plane === "entity_seed" && entityConfidence !== undefined
           ? Math.max(current?.entityConfidence ?? 0, entityConfidence)
           : current?.entityConfidence;
+      // invariant: sticky-OR. Once a co_recalled fan-in admission marks this
+      // memory id, no later plane admission (lexical / activation / structural)
+      // can clear the earned-fan-in provenance, so a sibling reached via the R1
+      // carrier keeps its reserve exemption even when it also picks up a generic
+      // structural co-admission. see also: isStructuralRescueCandidate.
+      const nextReachedViaEarnedCoRecalledFanin =
+        (current?.reachedViaEarnedCoRecalledFanin ?? false) ||
+        reachedViaEarnedCoRecalledFanin === true;
       drafts.set(entry.object_id, {
         entry,
         admissionPlanes: uniquePlanes([...(current?.admissionPlanes ?? []), plane]),
@@ -824,7 +999,10 @@ export class RecallService {
           ...(current?.pathExpansionSources ?? []),
           ...(pathExpansionSource === undefined ? [] : [pathExpansionSource])
         ]),
-        ...(nextEntityConfidence === undefined ? {} : { entityConfidence: nextEntityConfidence })
+        ...(nextEntityConfidence === undefined ? {} : { entityConfidence: nextEntityConfidence }),
+        ...(nextReachedViaEarnedCoRecalledFanin
+          ? { reachedViaEarnedCoRecalledFanin: true }
+          : {})
       });
       structuralScores.set(
         entry.object_id,
@@ -1054,21 +1232,50 @@ export class RecallService {
     const graphExpansionSeedIds = entityDerivedSeeds
       .filter((seed) => seed.entityConfidence >= ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR)
       .map((seed) => seed.memoryId);
-    const graphExpansionResult = await this.addGraphExpansionCandidates({
-      workspaceId,
-      byId,
-      drafts,
-      addCandidate,
-      extraSeedMemoryIds: graphExpansionSeedIds
-    });
-    graphExpansionDiagnostics = graphExpansionResult.diagnostics;
-    graphExpansionCandidateSources = graphExpansionResult.candidateSources;
+    // invariant: path_expansion (direct hop-1 associations) runs before
+    // graph_expansion (multi-hop path traversal) because both planes now read
+    // the same PathRelation rows. A direct association admitted on
+    // path_expansion must not be re-admitted on graph_expansion — that would
+    // give one target two RRF stream slots (double-count). graph_expansion
+    // therefore skips any draft already carrying the path_expansion plane and
+    // keeps only the propagation reach (hop-2 neighbors, plus hop-1 neighbors
+    // of entity-derived seeds that path_expansion's draft-seed pass never
+    // visited). see also: addGraphExpansionCandidates skip-path-admitted guard.
+    // Snapshot the Pool A draft seeds before path_expansion runs. Once
+    // path_expansion admits a direct hop-1 neighbor, that neighbor becomes a
+    // draft carrying the path_expansion plane and would otherwise qualify as a
+    // graph BFS seed — collapsing genuine hop-2 reach into hop-1 and rooting
+    // traversal at path-reached nodes rather than query anchors. Pinning the
+    // seed set to the pre-path drafts keeps hop semantics stable across the
+    // ordering change. see also: addGraphExpansionCandidates draftSeedIds.
+    const prePathGraphSeedIds = selectExpansionSeedDrafts(drafts).map((draft) => draft.entry.object_id);
     await this.addPathExpansionCandidates({
       workspaceId,
       byId,
       drafts,
       queryProbes,
       addCandidate
+    });
+    const graphExpansionResult = await this.addGraphExpansionCandidates({
+      workspaceId,
+      byId,
+      drafts,
+      addCandidate,
+      extraSeedMemoryIds: graphExpansionSeedIds,
+      draftSeedIds: prePathGraphSeedIds
+    });
+    graphExpansionDiagnostics = graphExpansionResult.diagnostics;
+    graphExpansionCandidateSources = graphExpansionResult.candidateSources;
+    // Active sign-aware suppression runs off the same expansion seeds. Negative
+    // paths are excluded from the positive expansion lanes above (the
+    // isPathRecallEligible / direction filters never add their targets); here
+    // they are collected separately so a reinforced negative actually demotes
+    // its target's fused score instead of merely failing to amplify it.
+    await this.collectNegativePathSuppressions({
+      workspaceId,
+      byId,
+      drafts,
+      suppressionScores: pathSuppressionScores
     });
 
     const anchorMap = new Map(projectMappings.map((mapping) => [mapping.global_object_id, mapping]));
@@ -1098,6 +1305,9 @@ export class RecallService {
             ])),
             structuralScore: draft.structuralScore,
             pathExpansionSources: Object.freeze([...draft.pathExpansionSources]),
+            ...(draft.reachedViaEarnedCoRecalledFanin
+              ? { reachedViaEarnedCoRecalledFanin: true }
+              : {}),
             ...(options.sourceChannel === undefined ? {} : { sourceChannel: options.sourceChannel }),
             ...(options.scoreMultiplier === undefined ? {} : { scoreMultiplier: options.scoreMultiplier })
           })
@@ -1121,6 +1331,7 @@ export class RecallService {
       graphExpansionCandidateSources,
       entitySeedScores: Object.freeze(Object.fromEntries(entitySeedScores.entries())),
       pathExpansionScores: Object.freeze(Object.fromEntries(pathExpansionScores.entries())),
+      pathSuppressionScores: Object.freeze(Object.fromEntries(pathSuppressionScores.entries())),
       degradation_reason: null
     });
   }
@@ -1407,131 +1618,135 @@ export class RecallService {
     // into graph_expansion as additional seeds so the graph plane is reachable
     // even when the query never hits a prior expansion seed.
     readonly extraSeedMemoryIds?: readonly string[];
+    // Pool A draft-seed object ids snapshotted before path_expansion mutated
+    // drafts. When provided, only these ids are eligible as content/structural
+    // BFS roots so path-reached neighbors do not become traversal seeds. When
+    // omitted the helper falls back to the live draft-seed selection.
+    readonly draftSeedIds?: readonly string[];
   }>): Promise<Readonly<GraphExpansionCandidatesResult>> {
     const diagnostics = createMutableGraphExpansionDiagnostics();
     const candidateSources = new Map<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>();
-    const graphExpansionPort = this.dependencies.graphExpansionPort;
-    if (graphExpansionPort === undefined) {
+    // invariant: graph_expansion is the multi-hop traversal of the unified
+    // PathRelation plane. It reads the same pathExpansionPort the direct
+    // path_expansion plane uses. When no path port is wired the plane is empty.
+    const pathExpansionPort = this.dependencies.pathExpansionPort;
+    if (pathExpansionPort === undefined) {
       return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
     }
 
-    const draftSeeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
-    const draftSeedIds = new Set(draftSeeds.map((seed) => seed.entry.object_id));
-    const extraSeedEntries: Readonly<MemoryEntry>[] = [];
+    // invariant: entity-derived seeds drive the per-seed fan-in path (Pool B)
+    // even when they were also admitted into drafts via the entity_seed plane.
+    // Filtering them out of the pooled draft seeds (Pool A) below avoids
+    // double-traversing the same anchor while keeping the legacy
+    // content/structural seed BFS intact for non-entity callers.
+    // see also: collectEntityDerivedSeeds (entity-derived seed source)
+    const entitySeedIdSet = new Set<string>();
+    const entitySeedEntries: Readonly<MemoryEntry>[] = [];
     for (const id of params.extraSeedMemoryIds ?? []) {
-      if (draftSeedIds.has(id)) {
+      if (entitySeedIdSet.has(id)) {
         continue;
       }
       const entry = params.byId.get(id);
-      if (entry !== undefined) {
-        extraSeedEntries.push(entry);
-        draftSeedIds.add(id);
+      if (entry === undefined) {
+        continue;
       }
-      if (extraSeedEntries.length + draftSeeds.length >= DYNAMIC_RECALL_SEED_CAP) {
+      entitySeedEntries.push(entry);
+      entitySeedIdSet.add(id);
+      if (entitySeedEntries.length >= DYNAMIC_RECALL_SEED_CAP) {
         break;
       }
     }
-    const seedEntries: readonly Readonly<MemoryEntry>[] = [
-      ...draftSeeds.map((seed) => seed.entry),
-      ...extraSeedEntries
-    ];
-    if (seedEntries.length === 0) {
+    const draftSeedIdAllowList = params.draftSeedIds === undefined ? null : new Set(params.draftSeedIds);
+    const draftSeedsAll = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
+    const draftSeeds = draftSeedsAll.filter(
+      (seed) =>
+        !entitySeedIdSet.has(seed.entry.object_id) &&
+        (draftSeedIdAllowList === null || draftSeedIdAllowList.has(seed.entry.object_id))
+    );
+
+    if (draftSeeds.length === 0 && entitySeedEntries.length === 0) {
       return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
     }
 
-    const expandedIds = new Set<string>();
     const bestCandidates = new Map<string, GraphExpansionCandidateDraft>();
-    let frontier: readonly GraphExpansionFrontierNode[] = seedEntries.map((entry) => ({
-      memoryId: entry.object_id,
-      pathScore: 1
-    }));
 
-    for (let hop = 1; hop <= MAX_GRAPH_HOPS && frontier.length > 0; hop += 1) {
-      const nextFrontier = new Map<string, GraphExpansionFrontierNode>();
-      for (const node of frontier) {
-        if (expandedIds.has(node.memoryId)) {
-          continue;
+    // Pool A: content / structural draft seeds (entity-derived seeds run
+    // through Pool B instead) expand as a single pooled frontier. When no
+    // entity-derived seeds are present this is the only active branch and
+    // multi_seed_graph_fan_in stays undefined.
+    if (draftSeeds.length > 0) {
+      const draftSeedEntries = draftSeeds.map((seed) => seed.entry);
+      await this.expandGraphFrontier({
+        workspaceId: params.workspaceId,
+        byId: params.byId,
+        pathExpansionPort,
+        seedEntries: draftSeedEntries,
+        onCandidate: (candidate) => {
+          const current = bestCandidates.get(candidate.entry.object_id);
+          if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
+            bestCandidates.set(candidate.entry.object_id, candidate);
+          }
         }
-        expandedIds.add(node.memoryId);
-        let edges: readonly Readonly<MemoryGraphEdge>[];
-        try {
-          edges = await graphExpansionPort.findByMemoryId(
-            node.memoryId,
-            params.workspaceId,
-            GRAPH_EXPANSION_TRACKED_EDGE_TYPES
-          );
-        } catch (error) {
-          this.warn("graph expansion lookup failed", {
-            workspace_id: params.workspaceId,
-            seed_memory_id: node.memoryId,
-            error: toErrorMessage(error)
-          });
-          continue;
-        }
-        const trackedEdges = edges
-          .map((edge) => Object.freeze({
-            edge,
-            edgeType: toTrackedGraphExpansionEdgeType(edge.edge_type)
-          }))
-          .filter((item): item is Readonly<{
-            readonly edge: Readonly<MemoryGraphEdge>;
-            readonly edgeType: RecallGraphExpansionTrackedEdgeType;
-          }> => item.edgeType !== null)
-          .slice(0, DYNAMIC_RECALL_EDGE_FANOUT);
-        for (const { edge, edgeType } of trackedEdges) {
-          const edgeScore = scoreGraphExpansionEdge(edge);
-          if (edgeScore <= 0) {
-            continue;
+      });
+    }
+
+    // Pool B: entity-derived seeds fan in independently. Each seed runs its
+    // own BFS with a fresh expandedIds set so a seed reached early by one
+    // entity does not starve another entity's expansion. Per-seed candidate
+    // maps feed max-score dedup so a memory hit by two different entity
+    // paths records 1 dedup collision and keeps the higher-scoring draft.
+    if (entitySeedEntries.length > 0) {
+      diagnostics.multi_seed_fan_in_distinct_seeds = entitySeedEntries.length;
+      const perSeedCandidates: Map<string, GraphExpansionCandidateDraft>[] = [];
+      for (const seedEntry of entitySeedEntries) {
+        const seedMap = new Map<string, GraphExpansionCandidateDraft>();
+        await this.expandGraphFrontier({
+          workspaceId: params.workspaceId,
+          byId: params.byId,
+          pathExpansionPort,
+          seedEntries: [seedEntry],
+          onCandidate: (candidate) => {
+            const current = seedMap.get(candidate.entry.object_id);
+            if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
+              seedMap.set(candidate.entry.object_id, candidate);
+            }
           }
-          const neighborId = edge.source_memory_id === node.memoryId
-            ? edge.target_memory_id
-            : edge.target_memory_id === node.memoryId
-              ? edge.source_memory_id
-              : null;
-          if (neighborId === null) {
-            continue;
+        });
+        diagnostics.multi_seed_fan_in_candidates_per_seed.push(seedMap.size);
+        perSeedCandidates.push(seedMap);
+      }
+      // anchor: max-score reduction across per-seed maps. Same candidate
+      // reached by two distinct entity seeds increments dedup_collisions
+      // once per extra arrival and keeps the strongest draft via the
+      // shared shouldReplaceGraphExpansionCandidate ordering.
+      const fanInSeen = new Set<string>();
+      for (const seedMap of perSeedCandidates) {
+        for (const [neighborId, candidate] of seedMap) {
+          if (fanInSeen.has(neighborId)) {
+            diagnostics.multi_seed_fan_in_dedup_collisions += 1;
           }
-          if (expandedIds.has(neighborId)) {
-            continue;
-          }
-          const entry = params.byId.get(neighborId);
-          if (entry === undefined) {
-            continue;
-          }
-          const candidateScore = hop === 1
-            ? edgeScore
-            : clamp01(node.pathScore * EDGE_TYPE_HOP_DECAY[edgeType] * edgeScore);
-          if (candidateScore <= 0) {
-            continue;
-          }
-          const candidate = {
-            entry,
-            score: candidateScore,
-            hop: hop as 1 | 2,
-            edgeType
-          };
+          fanInSeen.add(neighborId);
           const current = bestCandidates.get(neighborId);
           if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
             bestCandidates.set(neighborId, candidate);
           }
-          if (hop < MAX_GRAPH_HOPS && !expandedIds.has(neighborId)) {
-            const queued = nextFrontier.get(neighborId);
-            if (queued === undefined || candidateScore > queued.pathScore) {
-              nextFrontier.set(neighborId, {
-                memoryId: neighborId,
-                pathScore: candidateScore
-              });
-            }
-          }
         }
       }
-      frontier = [...nextFrontier.values()].sort((a, b) => a.memoryId.localeCompare(b.memoryId));
     }
 
     const admitted = [...bestCandidates.values()]
       .sort(compareGraphExpansionCandidateDrafts)
-      .slice(0, DYNAMIC_RECALL_PLANE_CAP);
+      .slice(0, MULTI_SEED_GRAPH_FAN_OUT_CAP);
     for (const candidate of admitted) {
+      // double-count guard: path_expansion already runs (earlier in
+      // coarseFilter) and admits direct associations off the same PathRelation
+      // rows. A target it admitted must not also enter the graph_expansion
+      // plane — both planes feed independent RRF streams, so re-admitting here
+      // would hand one memory two stream slots. The graph plane keeps only the
+      // multi-hop reach path_expansion's direct pass never produced.
+      if (params.drafts.get(candidate.entry.object_id)?.admissionPlanes.includes("path_expansion") === true) {
+        continue;
+      }
       const admittedByGraphExpansion = params.addCandidate(
         candidate.entry,
         "graph_expansion",
@@ -1550,6 +1765,108 @@ export class RecallService {
     }
 
     return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
+  }
+
+  // anchor: single-source / pooled BFS expansion shared by both the pooled
+  // draft-seed path and the per-seed entity fan-in path. expandedIds is
+  // private to each invocation so a per-seed Pool B call cannot starve a
+  // sibling seed by absorbing its 1-hop neighbors first.
+  // see also: addGraphExpansionCandidates (Pool A / Pool B)
+  private async expandGraphFrontier(params: Readonly<{
+    readonly workspaceId: string;
+    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+    readonly pathExpansionPort: NonNullable<RecallServiceDependencies["pathExpansionPort"]>;
+    readonly seedEntries: readonly Readonly<MemoryEntry>[];
+    readonly onCandidate: (candidate: Readonly<GraphExpansionCandidateDraft>) => void;
+  }>): Promise<void> {
+    if (params.seedEntries.length === 0) {
+      return;
+    }
+    const expandedIds = new Set<string>();
+    let frontier: readonly GraphExpansionFrontierNode[] = params.seedEntries.map((entry) => ({
+      memoryId: entry.object_id,
+      pathScore: 1
+    }));
+
+    for (let hop = 1; hop <= MAX_GRAPH_HOPS && frontier.length > 0; hop += 1) {
+      const nextFrontier = new Map<string, GraphExpansionFrontierNode>();
+      // Resolve the still-unexpanded frontier nodes into a single batched
+      // findByAnchors lookup so multi-hop traversal does not issue one query
+      // per node. The path repo returns every active path anchored on any of
+      // the requested object ids; the per-node direction filter below re-binds
+      // each path to the frontier node it actually leaves from.
+      const frontierIds = frontier
+        .map((node) => node.memoryId)
+        .filter((memoryId) => !expandedIds.has(memoryId));
+      if (frontierIds.length === 0) {
+        break;
+      }
+      const anchorRefs: PathAnchorRef[] = frontierIds.map((memoryId) => ({
+        kind: "object",
+        object_id: memoryId
+      }));
+      let paths: readonly Readonly<PathRelation>[];
+      try {
+        paths = await params.pathExpansionPort.findByAnchors(params.workspaceId, anchorRefs);
+      } catch (error) {
+        this.warn("graph expansion path lookup failed", {
+          workspace_id: params.workspaceId,
+          seed_count: frontierIds.length,
+          error: toErrorMessage(error)
+        });
+        break;
+      }
+      // invariant: only recall-eligible (active + recall_bias > 0) paths
+      // propagate. Negative / neutral paths are handled by active suppression
+      // (collectNegativePathSuppressions), never by traversal — admitting them
+      // as positive neighbors would amplify a suppressed memory.
+      const eligiblePaths = paths.filter((path) => isPathRecallEligible(path));
+      const frontierIdSet = new Set(frontierIds);
+      for (const node of frontier) {
+        if (expandedIds.has(node.memoryId)) {
+          continue;
+        }
+        expandedIds.add(node.memoryId);
+        const nodeNeighbors = collectPathGraphNeighbors(eligiblePaths, node.memoryId)
+          .slice(0, DYNAMIC_RECALL_EDGE_FANOUT);
+        for (const neighbor of nodeNeighbors) {
+          const edgeScore = graphTraversalScoreFromPath(neighbor.edgeType);
+          if (edgeScore <= 0) {
+            continue;
+          }
+          const neighborId = neighbor.neighborId;
+          if (expandedIds.has(neighborId)) {
+            continue;
+          }
+          const entry = params.byId.get(neighborId);
+          if (entry === undefined) {
+            continue;
+          }
+          const candidateScore = hop === 1
+            ? edgeScore
+            : clamp01(node.pathScore * EDGE_TYPE_HOP_DECAY[neighbor.edgeType] * edgeScore);
+          if (candidateScore <= 0) {
+            continue;
+          }
+          params.onCandidate({
+            entry,
+            score: candidateScore,
+            hop: hop as 1 | 2,
+            edgeType: neighbor.edgeType
+          });
+          if (hop < MAX_GRAPH_HOPS && !expandedIds.has(neighborId) && !frontierIdSet.has(neighborId)) {
+            const queued = nextFrontier.get(neighborId);
+            if (queued === undefined || candidateScore > queued.pathScore) {
+              nextFrontier.set(neighborId, {
+                memoryId: neighborId,
+                pathScore: candidateScore
+              });
+            }
+          }
+        }
+      }
+      frontier = [...nextFrontier.values()].sort((a, b) => a.memoryId.localeCompare(b.memoryId));
+    }
   }
 
   // anchor: query-time entity FTS seeding. Returns the memory ids of every
@@ -1716,9 +2033,15 @@ export class RecallService {
       if (added >= DYNAMIC_RECALL_PLANE_CAP) {
         return;
       }
-      if (isRetiredPathRelation(path)) {
+      if (isPathExcludedFromRecall(path)) {
         continue;
       }
+      // Gold-blind: the discriminator reads the EARNED path's relation_kind, not
+      // a gold label. Only the co_recalled fan-in carrier (minted past the R1
+      // threshold-3 counter gate) grants the reserve exemption; every other
+      // relation_kind admitted here stays relevance-gated downstream.
+      const reachedViaEarnedCoRecalledFanin =
+        path.constitution.relation_kind === EARNED_CO_RECALLED_FANIN_RELATION_KIND;
       for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
         const entry = params.byId.get(target.targetId);
         if (entry === undefined) {
@@ -1735,7 +2058,9 @@ export class RecallService {
             seed_kind: "memory",
             target_object_id: target.targetId,
             source_channel: "path_expansion"
-          }
+          },
+          undefined,
+          reachedViaEarnedCoRecalledFanin
         );
         added += 1;
         if (added >= DYNAMIC_RECALL_PLANE_CAP) {
@@ -1787,7 +2112,7 @@ export class RecallService {
       if (added >= DYNAMIC_RECALL_PLANE_CAP) {
         return added;
       }
-      if (isRetiredPathRelation(path) || !pathMatchesTimeConcernWindowDigest(path, windowDigests)) {
+      if (isPathExcludedFromRecall(path) || !pathMatchesTimeConcernWindowDigest(path, windowDigests)) {
         continue;
       }
       for (const targetId of pathRelationMemoryIds(path)) {
@@ -1815,6 +2140,84 @@ export class RecallService {
       }
     }
     return added;
+  }
+
+  // anchor: active sign-aware suppression collector. Reuses the same expansion
+  // seeds and pathExpansionPort.findByAnchors lookup as path_expansion, but
+  // selects the negative (recall_bias < 0) active paths that the positive
+  // lanes deliberately exclude. Each such path demotes its direction-eligible
+  // target by a strength-gated delta (scorePathRelationSuppression). Deltas
+  // accumulate per target so multiple converging negatives compound. The
+  // collected map is applied to the fused score before sort. Fail-soft: a
+  // missing port or lookup failure leaves suppression empty and recall
+  // degrades to the no-suppression behavior.
+  // see also: applyPathSuppressionToFusionScores, scorePathRelationSuppression.
+  private async collectNegativePathSuppressions(params: Readonly<{
+    readonly workspaceId: string;
+    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+    readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
+    readonly suppressionScores: Map<string, number>;
+  }>): Promise<void> {
+    const pathExpansionPort = this.dependencies.pathExpansionPort;
+    if (pathExpansionPort === undefined || params.drafts.size === 0) {
+      return;
+    }
+    const seeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
+    if (seeds.length === 0) {
+      return;
+    }
+    const seedIds = new Set(seeds.map((seed) => seed.entry.object_id));
+    const anchors: PathAnchorRef[] = seeds.map((seed) => ({
+      kind: "object",
+      object_id: seed.entry.object_id
+    }));
+    let paths: readonly Readonly<PathRelation>[];
+    try {
+      paths = await pathExpansionPort.findByAnchors(params.workspaceId, anchors);
+    } catch (error) {
+      this.warn("path suppression lookup failed", {
+        workspace_id: params.workspaceId,
+        seed_count: seeds.length,
+        error: toErrorMessage(error)
+      });
+      return;
+    }
+    for (const path of paths) {
+      // invariant: only active, strictly-negative, governance-trusted paths
+      // suppress. Active lifecycle reuses isPathActiveForRecall (dormant/retired
+      // never suppress). isPathGovernedForSuppression is the governance gate:
+      // attention_only / hint_only negatives are agent-reachable through
+      // co-occurrence seeding + strength reinforcement, so they may exclude (via
+      // isPathRecallEligible) but never actively demote — strength alone cannot
+      // license suppression. Only recall_allowed / strictly_governed negatives
+      // reach the strength-scaled delta below.
+      // see also: path-relation.ts isPathGovernedForSuppression.
+      if (
+        !isPathActiveForRecall(path.lifecycle.status) ||
+        path.effect_vector.recall_bias >= 0 ||
+        !isPathGovernedForSuppression(path)
+      ) {
+        continue;
+      }
+      const delta = scorePathRelationSuppression(path);
+      if (delta <= 0) {
+        continue;
+      }
+      for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
+        if (!params.byId.has(target.targetId)) {
+          continue;
+        }
+        // invariant: per-target accumulation is capped at
+        // PATH_SUPPRESSION_MAX_PER_TARGET so converging negatives compound up to
+        // one reinforced-supersession delta but never gang into erasure.
+        const accumulated =
+          (params.suppressionScores.get(target.targetId) ?? 0) + delta;
+        params.suppressionScores.set(
+          target.targetId,
+          Math.min(accumulated, PATH_SUPPRESSION_MAX_PER_TARGET)
+        );
+      }
+    }
   }
 
   private async expandTierCascade(params: {
@@ -1903,7 +2306,8 @@ export class RecallService {
       coarseStructuralScores: params.coarseFilter.structuralScores,
       coarseGraphExpansionScores: params.coarseFilter.graphExpansionScores,
       coarseEntitySeedScores: params.coarseFilter.entitySeedScores,
-      coarsePathExpansionScores: params.coarseFilter.pathExpansionScores
+      coarsePathExpansionScores: params.coarseFilter.pathExpansionScores,
+      coarsePathSuppressionScores: params.coarseFilter.pathSuppressionScores
     });
     const assessment = this.fineAssess(
       params.coarseFilter.candidates,
@@ -1981,8 +2385,11 @@ export class RecallService {
         next.graphExpansionScores,
         nextCandidateIds
       ),
-      graphExpansionDiagnostics:
-        summarizeGraphExpansionCandidateSources(graphExpansionCandidateSources),
+      graphExpansionDiagnostics: mergeGraphExpansionDiagnosticsAcrossCascade({
+        sources: graphExpansionCandidateSources,
+        currentFanIn: current.graphExpansionDiagnostics.multi_seed_graph_fan_in,
+        nextFanIn: next.graphExpansionDiagnostics.multi_seed_graph_fan_in
+      }),
       graphExpansionCandidateSources,
       entitySeedScores: Object.freeze({
         ...current.entitySeedScores,
@@ -1991,6 +2398,10 @@ export class RecallService {
       pathExpansionScores: Object.freeze({
         ...current.pathExpansionScores,
         ...next.pathExpansionScores
+      }),
+      pathSuppressionScores: Object.freeze({
+        ...current.pathSuppressionScores,
+        ...next.pathSuppressionScores
       }),
       degradation_reason: degradationReason
     });
@@ -2014,6 +2425,7 @@ export class RecallService {
     readonly coarseGraphExpansionScores: Readonly<Record<string, number>>;
     readonly coarseEntitySeedScores: Readonly<Record<string, number>>;
     readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
+    readonly coarsePathSuppressionScores: Readonly<Record<string, number>>;
   }): Promise<RecallSupplementaryData> {
     // graph_support is a weighted inbound aggregate across edge types; the
     // storage repo owns the concrete edge_type weight map.
@@ -2112,6 +2524,11 @@ export class RecallService {
       params.coarseEvidenceFtsRanksPerRef
     );
 
+    const governanceCeilingByMemoryId = await this.collectGovernanceCeilings(
+      params.workspaceId,
+      params.candidates
+    );
+
     return Object.freeze({
       queryProbes: params.queryProbes,
       ftsRanks: params.coarseFtsRanks,
@@ -2124,6 +2541,7 @@ export class RecallService {
       graphExpansionScores: params.coarseGraphExpansionScores,
       entitySeedScores: params.coarseEntitySeedScores,
       pathExpansionScores: params.coarsePathExpansionScores,
+      pathSuppressionScores: params.coarsePathSuppressionScores,
       embeddingSimilarityScores: Object.freeze({}),
       graphSupportCounts: Object.freeze(graphSupportCounts),
       budgetPenaltyFactor,
@@ -2131,7 +2549,8 @@ export class RecallService {
       graphAndPathColdScore,
       recallsEdgeCount,
       weightTransferAmount,
-      evidenceGistsByMemoryId
+      evidenceGistsByMemoryId,
+      governanceCeilingByMemoryId
     });
   }
 
@@ -2244,6 +2663,94 @@ export class RecallService {
       });
       return Object.freeze({});
     }
+  }
+
+  // invariant: governance_class is a HARD CEILING on recall manifestation.
+  // For each candidate memory, collect its INBOUND recall-eligible
+  // PathRelations (isPathRecallEligible: active + recall_bias > 0) — the paths
+  // whose target_anchor resolves to that memory — and reduce their governance
+  // contributions through memoryGovernanceCeiling. A memory with no governing
+  // inbound path is ABSENT from the returned map; the clamp site defaults it to
+  // full_eligible (unrestricted), so the ceiling only LOWERS, never suppresses
+  // an ordinary ungoverned memory.
+  //
+  // invariant: the ceiling must not ride the agent-pumpable governance band. We
+  // pass each path's legitimacy.evidence_basis alongside its governance_class so
+  // memoryGovernanceCeiling can treat an auto-promoted recall_allowed (birth
+  // marker only) as at most excerpt; only a trusted-provenance recall_allowed
+  // contributes full_eligible. (The recall-WEIGHTING / plasticity use of the
+  // promoted band elsewhere is unchanged — only this ceiling's trust narrows.)
+  //
+  // invariant: fail-OPEN vs fail-CLOSED are distinct:
+  //   - pathExpansionPort ABSENT  => governance plane not deployed; empty map =>
+  //     full_eligible (open) is an acceptable deployment choice.
+  //   - findByAnchors THREW        => transient read failure; a hard ceiling that
+  //     vanishes on error is soft. Cap EVERY candidate to the safe band
+  //     (GOVERNANCE_CEILING_FAILSAFE_BAND = excerpt) via an explicit per-id map,
+  //     NOT an empty map. Recall still returns/scores/ranks; only preview DETAIL
+  //     is conservatively bounded until governance can be read.
+  // see also: path-manifestation-policy.ts memoryGovernanceCeiling,
+  //   path-manifestation-policy.ts GOVERNANCE_CEILING_FAILSAFE_BAND,
+  //   recall-candidate-builder.ts buildRecallCandidate (clamp site).
+  private async collectGovernanceCeilings(
+    workspaceId: string,
+    candidates: readonly Readonly<MemoryEntry>[]
+  ): Promise<Readonly<Record<string, ManifestationState>>> {
+    const pathExpansionPort = this.dependencies.pathExpansionPort;
+    if (pathExpansionPort === undefined || candidates.length === 0) {
+      return Object.freeze({});
+    }
+    const candidateIds = new Set(candidates.map((candidate) => candidate.object_id));
+    const anchors: PathAnchorRef[] = [...candidateIds].map((object_id) => ({
+      kind: "object",
+      object_id
+    }));
+    let paths: readonly Readonly<PathRelation>[];
+    try {
+      paths = await pathExpansionPort.findByAnchors(workspaceId, anchors);
+    } catch (error) {
+      this.warn("governance ceiling path lookup failed", {
+        workspace_id: workspaceId,
+        candidate_count: candidates.length,
+        error: toErrorMessage(error)
+      });
+      // fail-CLOSED: cap every candidate to the safe band so a transient read
+      // error cannot lift a governed memory to its full strength tier.
+      const failsafeCeilings: Record<string, ManifestationState> = {};
+      for (const object_id of candidateIds) {
+        failsafeCeilings[object_id] = GOVERNANCE_CEILING_FAILSAFE_BAND;
+      }
+      return Object.freeze(failsafeCeilings);
+    }
+    const contributionsByMemoryId = new Map<string, PathGovernanceContribution[]>();
+    for (const path of paths) {
+      if (!isPathRecallEligible(path)) {
+        continue;
+      }
+      // invariant: the ceiling is INBOUND — keyed on the path's target memory.
+      // findByAnchors also returns paths where the candidate is the SOURCE
+      // anchor; those govern the path's target, not the source, so they must
+      // not raise/lower the source memory's ceiling.
+      const targetMemoryId = anchorMemoryId(path.anchors.target_anchor);
+      if (targetMemoryId === undefined || !candidateIds.has(targetMemoryId)) {
+        continue;
+      }
+      const contribution: PathGovernanceContribution = {
+        governance_class: path.legitimacy.governance_class,
+        evidence_basis: path.legitimacy.evidence_basis
+      };
+      const contributions = contributionsByMemoryId.get(targetMemoryId);
+      if (contributions === undefined) {
+        contributionsByMemoryId.set(targetMemoryId, [contribution]);
+      } else {
+        contributions.push(contribution);
+      }
+    }
+    const ceilingByMemoryId: Record<string, ManifestationState> = {};
+    for (const [memoryId, contributions] of contributionsByMemoryId) {
+      ceilingByMemoryId[memoryId] = memoryGovernanceCeiling(contributions);
+    }
+    return Object.freeze(ceilingByMemoryId);
   }
 
   private computeMaxWeightTransferAmount(
@@ -2675,12 +3182,20 @@ export class RecallService {
         effectiveFactors: scored.factors
       });
     });
-    const fusionByCandidateKey = buildRecallFusionDetails({
+    const fusedDetails = buildRecallFusionDetails({
       candidates: additiveScoredCandidates,
       policy,
       supplementaryData,
       nowIso: this.now()
     });
+    // Active sign-aware suppression: subtract the negative-path demotion delta
+    // from the fused score and re-rank, before delivery sort. Runs after the
+    // positive fusion so suppression demotes a target that positive streams
+    // would otherwise rank highly. No-op when no suppression was collected.
+    const fusionByCandidateKey = applyPathSuppressionToFusionScores(
+      fusedDetails,
+      supplementaryData.pathSuppressionScores
+    );
     const scoredCandidates = additiveScoredCandidates.map((candidate) => Object.freeze({
       ...candidate,
       fusion: fusionByCandidateKey.get(buildRecallCandidateDedupeKey(candidate)) ?? buildEmptyRecallFusionBreakdown(candidate.entry.object_id)
@@ -2688,14 +3203,20 @@ export class RecallService {
     const rankedCandidates = scoredCandidates
       .sort(compareFusedRecallCandidates);
     const featureRerankedCandidates = applyFeatureRerank(rankedCandidates, supplementaryData);
-    const deliveryOrderedCandidates = reserveSynthesisDeliverySlots(
-      prioritizeStrongLexicalDeliveryWindowCandidates(
-        featureRerankedCandidates,
+    const prioritizedCandidates = prioritizeStrongLexicalDeliveryWindowCandidates(
+      featureRerankedCandidates,
+      supplementaryData,
+      config.budgets.max_entries
+    );
+    const deliveryOrderedCandidates = reserveStructuralDeliverySlots(
+      reserveSynthesisDeliverySlots(
+        prioritizedCandidates,
         supplementaryData,
         config.budgets.max_entries
       ),
       supplementaryData,
-      config.budgets.max_entries
+      config.budgets.max_entries,
+      synthesisReserveCount(prioritizedCandidates, config.budgets.max_entries)
     );
 
     type FineAssessmentAccumulator = {
@@ -2825,7 +3346,10 @@ export class RecallService {
         tokenEstimate,
         budgets: config.budgets,
         index: accumulator.selected.length,
-        usedTokensBeforeCandidate: accumulator.totalTokens
+        usedTokensBeforeCandidate: accumulator.totalTokens,
+        // governance HARD CEILING; absent => unrestricted (full_eligible).
+        // see also: collectGovernanceCeilings, path-manifestation-policy.ts.
+        governanceCeiling: supplementaryData.governanceCeilingByMemoryId[entry.object_id]
       });
 
       return {
@@ -2874,7 +3398,35 @@ export class RecallService {
     const isGlobalCandidate = originPlane === "global";
     const isSynthesisCandidate = objectKind === "synthesis_capsule";
     const canUseMemorySupplement = !isGlobalCandidate && !isSynthesisCandidate;
-    const activationScore = normalizeActivationScore(entry.activation_score);
+    // D-DECAY-2 lazy time/idle decay (read-time, no full-table sweep): the
+    // stored activation fades by elapsed time since last reinforcement.
+    // invariant (reviewer-I1): freshness is counted ONCE. The stored
+    // activation_score ALREADY bakes a freshness sub-term (weight
+    // activation_weights_phase1b.freshness, computed at store time). Multiplying
+    // the WHOLE composite by a read-time freshness factor double-counts freshness
+    // AND wrongly decays the scope/domain/retention sub-terms. Instead we decay
+    // ONLY the freshness band: the non-freshness floor (stored minus at-most the
+    // freshness weight) is preserved, and the freshness band is re-weighted by
+    // the read-time factor. last_used_at is the "last reinforced" proxy; created_at
+    // floors a never-used memory's age at birth. Bounded: the result is <= stored
+    // and at full idle collapses ONLY the <=0.19 freshness contribution (plus the
+    // legitimate idle decay), never the whole composite. Only memory entries carry
+    // these timestamps, so leave global/synthesis activation un-decayed.
+    const storedActivationScore = normalizeActivationScore(entry.activation_score);
+    const shouldTimeDecay =
+      canUseMemorySupplement && typeof entry.created_at === "string" && entry.created_at.length > 0;
+    const freshnessFactorNow = shouldTimeDecay
+      ? computeFreshnessFactor({
+          lastUsedAt: entry.last_used_at ?? null,
+          createdAt: entry.created_at,
+          now: this.now()
+        })
+      : 1;
+    const freshnessWeight = DYNAMICS_CONSTANTS.activation_weights_phase1b.freshness;
+    const nonFreshnessFloor = Math.max(0, storedActivationScore - freshnessWeight);
+    const activationScore = shouldTimeDecay
+      ? Math.min(storedActivationScore, clamp01(nonFreshnessFloor + freshnessWeight * freshnessFactorNow))
+      : storedActivationScore;
     const ftsFactor = canUseMemorySupplement ? supplementaryData.ftsRanks[entry.object_id] ?? 0 : 0;
     const synthesisFtsFactor =
       isGlobalCandidate || !isSynthesisCandidate
@@ -2932,16 +3484,21 @@ export class RecallService {
       graphSupportFactor,
       embeddingSimilarityFactor
     );
+    // invariant: calibration only fires when query-grounded evidence is
+    // BELOW WEAK_EVIDENCE_CALIBRATION_GATE. At-or-above the gate evidence
+    // is treated as sufficient and the score shape is preserved. A prior-side
+    // signal (plasticity / confidence) must also be present; without one
+    // there is no prior term to dampen.
     const shouldCalibrateWeakEvidence =
-      queryEvidenceCalibrationStrength < 1 &&
+      queryEvidenceCalibrationStrength < WEAK_EVIDENCE_CALIBRATION_GATE &&
       (plasticityFactor > 0 || (confidenceFactor > 0 && queryEvidenceCalibrationStrength > 0));
     const evidenceContributionCalibration = shouldCalibrateWeakEvidence
       ? queryEvidenceCalibrationStrength
       : 1;
     const priorEvidenceCalibration =
       shouldCalibrateWeakEvidence
-        ? WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR +
-          (1 - WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR) * queryEvidenceCalibrationStrength
+        ? WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR +
+          (1 - WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR) * queryEvidenceCalibrationStrength
         : 1;
     const calibratedRelevanceFactor = relevanceFactor * evidenceContributionCalibration;
     const effectiveRelevanceWeight =
@@ -3146,6 +3703,70 @@ function buildRecallFusionDetails(params: Readonly<{
           fused_rank: fusedRankByCandidateKey.get(candidate.candidateKey) ?? Number.MAX_SAFE_INTEGER,
           fused_score: candidate.fusedScore,
           fused_rank_contribution_per_stream: candidate.contributions
+        })
+      ] as const)
+    )
+  );
+}
+
+// Applies active sign-aware suppression to a built fusion breakdown map. For
+// each candidate, the negative-path suppression delta keyed on its object_id
+// is subtracted from fused_score; the map is then re-ranked so fused_rank
+// reflects the demotion. invariant: demotes, never erases — a suppressed
+// candidate retains a PATH_SUPPRESSION_RESIDUAL_FLOOR residual so it stays a
+// tail candidate (ranked last) rather than dropping out of the candidate set.
+// Returns the input map unchanged when no suppression delta applies (the
+// common case), so the no-suppression path is allocation-free. The per-stream
+// contribution breakdown is preserved as-is — suppression is an aggregate
+// demotion on the fused score, not a per-stream rank change.
+// see also: collectNegativePathSuppressions, scorePathRelationSuppression,
+// PATH_SUPPRESSION_RESIDUAL_FLOOR.
+//
+// invariant: no `suppression_score` key is added to RecallFusionBreakdown /
+// RecallCandidateDiagnostic — the suppression effect is carried by the reduced
+// fused_score + demoted fused_rank only. A new key would break the strict()
+// parse in apps/bench-runner/src/harness/recall-diagnostics-schema.ts.
+// see also: apps/bench-runner/src/harness/recall-diagnostics-schema.ts (fusion_breakdown strict)
+function applyPathSuppressionToFusionScores(
+  fusionByCandidateKey: ReadonlyMap<string, RecallFusionBreakdown>,
+  suppressionScores: Readonly<Record<string, number>>
+): ReadonlyMap<string, RecallFusionBreakdown> {
+  const hasAnySuppression = Object.values(suppressionScores).some((delta) => delta > 0);
+  if (!hasAnySuppression) {
+    return fusionByCandidateKey;
+  }
+  const adjusted = [...fusionByCandidateKey.values()].map((breakdown) => {
+    const delta = suppressionScores[breakdown.object_id] ?? 0;
+    // invariant: demote, never erase. Floor the residual at
+    // PATH_SUPPRESSION_RESIDUAL_FLOOR only for candidates whose pre-suppression
+    // fused_score was already positive, so a fully-suppressed memory stays a
+    // tail candidate. Candidates already at 0 are not lifted.
+    const fusedScore =
+      delta > 0 && breakdown.fused_score > 0
+        ? Math.max(PATH_SUPPRESSION_RESIDUAL_FLOOR, breakdown.fused_score - delta)
+        : breakdown.fused_score;
+    return { breakdown, fusedScore };
+  });
+  // Re-rank by the suppressed fused score; ties keep the original fused_rank
+  // ordering so suppression only ever demotes, never reshuffles equal scores.
+  const ranked = [...adjusted].sort((left, right) => {
+    const delta = right.fusedScore - left.fusedScore;
+    if (delta !== 0) {
+      return delta;
+    }
+    return left.breakdown.fused_rank - right.breakdown.fused_rank;
+  });
+  const suppressedRankByKey = new Map(
+    ranked.map((entry, index) => [entry.breakdown.candidate_key, index + 1] as const)
+  );
+  return Object.freeze(
+    new Map(
+      adjusted.map((entry) => [
+        entry.breakdown.candidate_key,
+        Object.freeze({
+          ...entry.breakdown,
+          fused_rank: suppressedRankByKey.get(entry.breakdown.candidate_key) ?? entry.breakdown.fused_rank,
+          fused_score: entry.fusedScore
         })
       ] as const)
     )
@@ -3368,56 +3989,121 @@ function applyFeatureRerank<T extends FusedRecallCandidateInput>(
 }
 
 /**
- * Delivery slots reserved for L2 synthesis_capsule candidates.
+ * Delivery slots the synthesis backstop may consume for L2 synthesis_capsule
+ * candidates whose curated evidence set is NOT already represented in the
+ * top-5 delivery window.
  *
- * A synthesis candidate fires on exactly one fusion stream (synthesis_fts).
- * RRF rewards multi-stream presence, so a synthesis row's fused score is
- * capped near `weight/(k+1)` while a multi-stream memory_entry accumulates
- * well past it — synthesis never reaches the delivery budget on fused rank
- * alone. The reserve guarantees the top synthesis rows (by synthesis FTS
- * relevance) a bounded presence so the L2 layer is reachable through recall.
+ * The scorer stays memory_entry-only: a synthesis_capsule can never be credited
+ * as gold (it fires only synthesis_fts and is fail-closed on every other stream).
+ * The promotion path for an L2 cluster is its anchor member memory_entry, lifted
+ * by the path/graph-expansion streams when a durable co_recalled PathRelation
+ * fans a query into it (see scoreRecallFusionStream "path_expansion").
+ * This reserve is therefore a BACKSTOP, not a tail-pin: it fires only for a
+ * capsule whose evidence set reached no top-5 member, guaranteeing the L2 layer
+ * stays reachable through recall when path/graph fan-in did not float a member
+ * into the head window. A capsule whose member already delivered in top-5 needs
+ * no reserved slot — its signal is already in the delivered context.
  */
 const SYNTHESIS_DELIVERY_RESERVE = 2;
+// invariant: top-of-window coverage horizon. A synthesis capsule is "covered"
+// when a memory_entry sharing one of its evidence_refs already sits in the
+// natural top-K delivery window; covered capsules do not fire the backstop.
+const SYNTHESIS_COVERAGE_WINDOW = 5;
 
 /**
- * Reserve the tail of the delivery budget window for the strongest synthesis
- * candidates. Tail placement keeps high-rank memory_entry results at the head
- * undisplaced; only the lowest in-budget memory rows yield their slot. Returns
- * the input unchanged when no synthesis candidate is present, so memory-only
- * recall is a guaranteed no-op.
- *
- * The reserve is against the ENTRY-COUNT budget only. The downstream
- * `appendCandidate` reduce still enforces `max_total_tokens`, so a
- * tail-placed reserved synthesis can still be evicted under a tight token
- * budget — the reserve is a best-effort entry-count guarantee, not a hard
- * delivery guarantee. Because placement is tail-only, a synthesis row is
- * reachable by a consumer that reads the whole delivery window but not by
- * one that reads only the top few. A scored, fusion-comparable synthesis
- * signal that would let synthesis place by merit is a v0.3.11 concern.
+ * Synthesis capsules whose curated evidence set has NO member memory_entry in
+ * the natural top-K window. These are the only capsules the backstop reserves a
+ * slot for — a capsule already represented in the head window is dropped from
+ * reserve eligibility, so the reserve never pins a redundant capsule.
  */
-function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
+function selectUncoveredSynthesisCapsules<T extends FusedRecallCandidateInput>(
   deliveryOrdered: readonly T[],
-  supplementaryData: RecallSupplementaryData,
   maxEntries: number
 ): readonly T[] {
   const synthesisCandidates = deliveryOrdered.filter(
     (candidate) => candidate.objectKind === "synthesis_capsule"
   );
-  if (synthesisCandidates.length === 0 || maxEntries <= 1) {
+  if (synthesisCandidates.length === 0) {
+    return Object.freeze([]);
+  }
+  const coverageWindow = Math.min(maxEntries, SYNTHESIS_COVERAGE_WINDOW);
+  const coveredEvidenceRefs = new Set<string>();
+  for (const candidate of deliveryOrdered.slice(0, coverageWindow)) {
+    if (candidate.objectKind === "synthesis_capsule") {
+      continue;
+    }
+    for (const ref of candidate.entry.evidence_refs) {
+      coveredEvidenceRefs.add(ref);
+    }
+  }
+  return Object.freeze(
+    synthesisCandidates.filter(
+      (capsule) => !capsule.entry.evidence_refs.some((ref) => coveredEvidenceRefs.has(ref))
+    )
+  );
+}
+
+// Tail slots the synthesis backstop will consume for this delivery window. The
+// composition site reads this so the structural reserve can cap itself against
+// the slots synthesis already holds. see also: reserveStructuralDeliverySlots.
+function synthesisReserveCount(
+  deliveryOrdered: readonly FusedRecallCandidateInput[],
+  maxEntries: number
+): number {
+  if (maxEntries <= 1) {
+    return 0;
+  }
+  const uncoveredCount = selectUncoveredSynthesisCapsules(deliveryOrdered, maxEntries).length;
+  if (uncoveredCount === 0) {
+    return 0;
+  }
+  return Math.max(0, Math.min(SYNTHESIS_DELIVERY_RESERVE, uncoveredCount, maxEntries - 1));
+}
+
+function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
+  deliveryOrdered: readonly T[],
+  supplementaryData: RecallSupplementaryData,
+  maxEntries: number
+): readonly T[] {
+  if (maxEntries <= 1) {
     return deliveryOrdered;
   }
-  const reserveCount = Math.min(
-    SYNTHESIS_DELIVERY_RESERVE,
-    synthesisCandidates.length,
-    maxEntries - 1
-  );
+  const uncoveredCapsules = selectUncoveredSynthesisCapsules(deliveryOrdered, maxEntries);
+  if (uncoveredCapsules.length === 0) {
+    return deliveryOrdered;
+  }
+  const reserveCount = synthesisReserveCount(deliveryOrdered, maxEntries);
   if (reserveCount <= 0) {
     return deliveryOrdered;
   }
-  const reservedSynthesis = [...synthesisCandidates]
+  // Prefer the capsule whose curated anchor most strongly matches the query
+  // (synthesis FTS rank), with a tiebreak bonus when the capsule's evidence set
+  // overlaps the evidence_refs of a path/graph-expansion-reached member — that
+  // capsule corroborates a member the durable co_recalled path plane already
+  // fanned into the pool, so it is the most answer-relevant uncovered cluster to
+  // surface. The capsule still contributes signal only; the reached member
+  // memory_entry remains the credited gold. see also: STRUCTURAL_FUSION_STREAMS.
+  const pathReachedEvidenceRefs = new Set<string>();
+  for (const candidate of deliveryOrdered) {
+    if (
+      candidate.objectKind !== "synthesis_capsule" &&
+      structuralFusionContribution(candidate) > 0
+    ) {
+      for (const ref of candidate.entry.evidence_refs) {
+        pathReachedEvidenceRefs.add(ref);
+      }
+    }
+  }
+  const synthesisAnchorBonus = (capsule: T): number =>
+    capsule.entry.evidence_refs.some((ref) => pathReachedEvidenceRefs.has(ref))
+      ? SYNTHESIS_ANCHOR_BONUS
+      : 0;
+  const reservedSynthesis = [...uncoveredCapsules]
     .sort((left, right) => {
-      const leftRank = supplementaryData.synthesisFtsRanks[left.entry.object_id] ?? 0;
-      const rightRank = supplementaryData.synthesisFtsRanks[right.entry.object_id] ?? 0;
+      const leftRank =
+        (supplementaryData.synthesisFtsRanks[left.entry.object_id] ?? 0) + synthesisAnchorBonus(left);
+      const rightRank =
+        (supplementaryData.synthesisFtsRanks[right.entry.object_id] ?? 0) + synthesisAnchorBonus(right);
       return rightRank - leftRank !== 0
         ? rightRank - leftRank
         : compareMemoryEntries(left.entry, right.entry);
@@ -3436,6 +4122,319 @@ function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
     ...rest.slice(headCount)
   ]);
 }
+
+// invariant: structural (topology) FUSION STREAMS — the pure graph/path
+// topology subset of RECALL_FUSION_STREAMS whose RRF burial is the root cause
+// the reserve repairs (RC-1 §B/§C). These are the weight-3 single-fire streams
+// that represent genuine graph/path REACH: a candidate fires here only when it
+// is reachable by graph expansion or path expansion from a query anchor.
+//
+// The generic "structural" stream is DELIBERATELY excluded: structuralScores is
+// set at admission for ANY structural-ish plane including evidence_anchor (see
+// the admission addCandidate path), so a candidate admitted only on
+// evidence_anchor (no graph/path reach) still carries a "structural" stream
+// term. Counting it would make such an evidence-anchor-only filler read as
+// structurally reachable. Restricting the numerator to graph_expansion /
+// path_expansion means structuralFusionContribution is > 0 ONLY for candidates
+// with real graph/path reach — an evidence-anchor / lexical filler scores 0 here
+// and fails the eligibility guard, so it stays subject to the flat cut.
+// evidence_structural_agreement (geometric mean evidence_fts x structural) and
+// entity_seed (query-time entity-FTS surface signal) are likewise NOT topology.
+//
+// This is the multi-session fan-in rescue lever: when a durable co_recalled
+// PathRelation fans a query into a same-session sibling, the sibling fires
+// path_expansion (direct hop-1) or graph_expansion (multi-hop) and — if that
+// fan-in loses the flat top-N cut — becomes eligible for the bounded structural-
+// rescue backstop. see also: reserveStructuralDeliverySlots.
+const STRUCTURAL_FUSION_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
+  "graph_expansion",
+  "path_expansion"
+]);
+
+// invariant: lexical-lane FUSION STREAMS — the content/surface/evidence-FTS
+// streams whose multi-stream RRF co-occurrence is what buries a single
+// structural term (RC-1 §C). A candidate whose fused score is dominated by
+// these competes fairly in the lexical lane and stays subject to the flat cut.
+// structural, existing_score, temporal_recency, and workspace_activation are
+// EXCLUDED from both sides as neutral: "structural" is the generic
+// structuralScore carried by several admission planes (so it is neither pure
+// topology nor lexical); existing_score is the baseline effectiveScore carried
+// by every admitted candidate (weight 8, see RECALL_FUSION_DEFAULT_WEIGHTS) so
+// it would swamp the topology term for genuine structural golds too;
+// temporal_recency and workspace_activation carry weight 0. Excluding the
+// neutral lanes makes the dominance test "graph/path topology streams vs
+// lexical-lane streams", which is exactly the filler-vs-gold discriminator.
+const LEXICAL_LANE_FUSION_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
+  "lexical_fts",
+  "trigram_fts",
+  "synthesis_fts",
+  "evidence_fts",
+  "evidence_structural_agreement",
+  "source_proximity",
+  "source_evidence_agreement",
+  "subject_alignment",
+  "embedding_similarity",
+  "entity_seed"
+]);
+
+// Sum of the candidate's structural-topology fusion-stream contributions to its
+// fused score. The contribution map is the per-stream RRF term weight/(k+rank)
+// frozen at fusion-build time and preserved across sign-aware suppression (see
+// applyPathSuppressionToFusionScores), so this is the query-relevance-weighted
+// structural signal, NOT raw connectivity. see also: buildRecallFusionDetails.
+function structuralFusionContribution(candidate: FusedRecallCandidateInput): number {
+  const contributions = candidate.fusion.fused_rank_contribution_per_stream;
+  let total = 0;
+  for (const stream of STRUCTURAL_FUSION_STREAMS) {
+    total += contributions[stream];
+  }
+  return total;
+}
+
+// Structural fusion contribution after subtracting the candidate's active
+// sign-aware suppression delta. applyPathSuppressionToFusionScores demotes the
+// fused_score but PRESERVES the per-stream contribution map, so the raw
+// structuralFusionContribution still reads a suppressed target's full topology
+// signal. The reserve must mirror the fused-score demotion: a candidate the
+// suppression collector floored cannot present an unsuppressed structural lead
+// to win a reserve slot past its suppression. Floored at 0 (a suppression delta
+// larger than the structural contribution does not produce a negative lead).
+// see also: applyPathSuppressionToFusionScores, RecallSupplementaryData.pathSuppressionScores.
+function suppressedStructuralFusionContribution(
+  candidate: FusedRecallCandidateInput,
+  supplementaryData: RecallSupplementaryData
+): number {
+  const structural = structuralFusionContribution(candidate);
+  const suppression = supplementaryData.pathSuppressionScores[candidate.entry.object_id] ?? 0;
+  if (suppression <= 0) {
+    return structural;
+  }
+  return Math.max(0, structural - suppression);
+}
+
+// Sum of the candidate's lexical-lane fusion-stream contributions.
+function lexicalLaneFusionContribution(candidate: FusedRecallCandidateInput): number {
+  const contributions = candidate.fusion.fused_rank_contribution_per_stream;
+  let total = 0;
+  for (const stream of LEXICAL_LANE_FUSION_STREAMS) {
+    total += contributions[stream];
+  }
+  return total;
+}
+
+/**
+ * Delivery slots reserved for structural-stream-dominated candidates.
+ *
+ * A candidate whose fused score comes mostly from structural streams (graph /
+ * path topology) fires on streams RRF caps near `weight/(k+1)` while a
+ * multi-stream lexical memory_entry accumulates well past it — structural-
+ * dominated golds never reach the delivery budget on fused rank alone (RC-1
+ * §B/§C). The reserve mirrors SYNTHESIS_DELIVERY_RESERVE: a bounded tail
+ * presence so the structural plane is reachable through recall.
+ *
+ * Eligibility gates on STREAM DOMINANCE (isStructuralRescueCandidate), not on an
+ * admission-plane tag: streams are content/topology-keyed, not admission-gated
+ * (RC-1 §A/§B), so a genuine structural gold can be co-admitted on the lexical
+ * plane with a tiny lexical_fts contribution that does NOT lift its fused rank.
+ * Dominance rescues that gold while still excluding a lexical-dominated filler
+ * that merely carries a structural co-admission — the filler's fused score is
+ * dominated by its lexical/evidence-FTS streams, so it competes fairly on the
+ * flat cut.
+ */
+const STRUCTURAL_DELIVERY_RESERVE = 2;
+
+// invariant: structural rescue is GOLD-BLIND. This signal reads only
+// query/evidence-relevance terms (scoreQueryEvidenceMatch against the compiled
+// query probes, scoreEvidenceAnchorMatch against the query's evidence anchors,
+// and the lexical-lane fusion contribution) — never a gold label. It is the
+// gate that isStructuralRescueCandidate applies to GENERIC structural candidates
+// (a generic path / graph edge, or session_surface_cohort flat-dump membership):
+// a target reached by generic membership with zero relevance scores 0 here and
+// is refused, so it cannot displace a genuine lexical/evidence gold. A target
+// that ALSO matches the query lexically, overlaps a query evidence anchor, or
+// fired a lexical-lane stream scores > 0 and stays eligible. The one EARNED
+// exemption — a sibling reached via the threshold-3 co_recalled fan-in carrier —
+// is handled by isStructuralRescueCandidate ABOVE this signal (the
+// reachedViaEarnedCoRecalledFanin discriminator), so it does not enter here.
+// see also: scoreQueryEvidenceMatch, scoreEvidenceAnchorMatch,
+//   isStructuralRescueCandidate.
+function structuralRescueRelevanceSignal(
+  candidate: FusedRecallCandidateInput,
+  supplementaryData: RecallSupplementaryData
+): number {
+  const lexicalLane = lexicalLaneFusionContribution(candidate);
+  if (lexicalLane > 0) {
+    return lexicalLane;
+  }
+  const queryEvidenceRefs = new Set<string>(supplementaryData.queryProbes.evidence_refs);
+  return (
+    scoreQueryEvidenceMatch(candidate.entry, supplementaryData.queryProbes) +
+    0.5 * scoreEvidenceAnchorMatch(candidate.entry, queryEvidenceRefs)
+  );
+}
+
+function isStructuralRescueCandidate(
+  candidate: FusedRecallCandidateInput,
+  supplementaryData: RecallSupplementaryData
+): boolean {
+  if (candidate.objectKind === "synthesis_capsule") {
+    return false;
+  }
+  // Honor the same demotion the fused-score path applies: a target the
+  // sign-aware suppression collector floored (e.g. a contradicts/supersedes-
+  // reinforced negative that is ALSO co_recalled-reached) presents its full
+  // unsuppressed per-stream contribution map, so subtract its suppression delta
+  // from the structural contribution before the dominance test. A candidate
+  // whose suppression delta wipes its structural lead must not be rescued past
+  // the demotion. see also: applyPathSuppressionToFusionScores.
+  const structural = suppressedStructuralFusionContribution(candidate, supplementaryData);
+  if (structural <= 0) {
+    return false;
+  }
+  if (structural <= lexicalLaneFusionContribution(candidate)) {
+    return false;
+  }
+  // Eligibility gate, scoped so BOTH durable-edge contracts hold:
+  //  (1) the EARNED co_recalled fan-in carrier (Route 乙, the R1 multi-session
+  //      fan-in mechanism) is rescue-eligible even at ZERO query relevance — a
+  //      content-disjoint sibling reached via the threshold-3 earned edge is the
+  //      INTENDED fan-in target, not a distractor. The exemption is bounded by
+  //      co_recalled sparsity (born attention_only, ≤3 pairs/session past the
+  //      counter gate), so it cannot re-open broad displacement.
+  //  (2) any OTHER structural-dominated candidate (generic path / graph edge,
+  //      session_surface_cohort flat-dump membership) still REQUIRES a gold-blind
+  //      query/evidence-relevance signal, so a generic zero-relevance distractor
+  //      cannot consume a scarce reserve slot and displace a rank-4/5 lexical
+  //      gold (I-1's displacement protection).
+  // The discriminator (reachedViaEarnedCoRecalledFanin) reads the earned path's
+  // relation_kind at admission, never a gold label — gold-blind. The suppression
+  // floor and dominance checks above are UPSTREAM of this gate, so an
+  // earned-fan-in candidate that is suppressed or lexical-dominated is still
+  // refused (I-2 + filler protection unaffected).
+  // see also: addCandidate (co_recalled provenance threading),
+  //   EARNED_CO_RECALLED_FANIN_RELATION_KIND, structuralRescueRelevanceSignal.
+  if (candidate.reachedViaEarnedCoRecalledFanin === true) {
+    return true;
+  }
+  return structuralRescueRelevanceSignal(candidate, supplementaryData) > 0;
+}
+
+/**
+ * Reserve the tail of the delivery budget window for the strongest structural
+ * candidates that lost the flat top-N cut. Mirrors reserveSynthesisDeliverySlots:
+ * tail placement keeps high-rank head rows undisplaced; only the lowest
+ * in-budget rows yield their slot.
+ *
+ * Composition with the synthesis reserve: `reservedTailCount` is how many tail
+ * slots the synthesis reserve already consumed. Structural rows insert ABOVE
+ * that synthesis tail block, and the structural reserve caps itself so the
+ * COMBINED reserved count never exceeds `maxEntries - 1` — guaranteeing at
+ * least one pure-fusion head slot and that the two reserves never evict each
+ * other. Returns the input unchanged when no buried structural candidate is
+ * present (a structural row already inside the natural delivery window is not
+ * eligible), so already-delivered structural recall is a guaranteed no-op.
+ *
+ * The reserve is against the ENTRY-COUNT budget only; the downstream
+ * `appendCandidate` reduce still enforces `max_total_tokens`. Ranking is by the
+ * candidate's suppression-adjusted structural fusion-stream contribution
+ * (suppressedStructuralFusionContribution: the topology-stream RRF signal minus
+ * any active sign-aware suppression delta), tie-broken by compareMemoryEntries
+ * exactly like the synthesis helper. Eligibility itself is gold-blind
+ * (isStructuralRescueCandidate): a candidate must be topology-dominated, survive
+ * its own sign-aware suppression, AND either (a) carry a nonzero
+ * query/evidence-relevance signal OR (b) have been admitted via the EARNED
+ * co_recalled fan-in carrier (the bounded multi-session fan-in exemption). So a
+ * well-connected but query-irrelevant GENERIC distractor — a generic path/graph
+ * membership sibling or a suppressed contradicted target — still cannot steal a
+ * reserved slot from a genuine gold, while a zero-relevance sibling reached via
+ * the earned threshold-3 co_recalled edge IS delivered (Route 乙).
+ */
+function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInput>(
+  deliveryOrdered: readonly T[],
+  supplementaryData: RecallSupplementaryData,
+  maxEntries: number,
+  reservedTailCount: number
+): readonly T[] {
+  if (maxEntries <= 1) {
+    return deliveryOrdered;
+  }
+  const naturalWindowSize = Math.min(maxEntries, deliveryOrdered.length);
+  const inWindowKeys = new Set(
+    deliveryOrdered
+      .slice(0, naturalWindowSize)
+      .map((candidate) => buildRecallCandidateDedupeKey(candidate))
+  );
+  const buriedStructural = deliveryOrdered.filter(
+    (candidate) =>
+      isStructuralRescueCandidate(candidate, supplementaryData) &&
+      !inWindowKeys.has(buildRecallCandidateDedupeKey(candidate))
+  );
+  if (buriedStructural.length === 0) {
+    return deliveryOrdered;
+  }
+  const reserveBudget = maxEntries - 1 - Math.max(0, reservedTailCount);
+  const reserveCount = Math.min(
+    STRUCTURAL_DELIVERY_RESERVE,
+    buriedStructural.length,
+    reserveBudget
+  );
+  if (reserveCount <= 0) {
+    return deliveryOrdered;
+  }
+  const reservedStructural = [...buriedStructural]
+    .sort((left, right) => {
+      const strengthDelta =
+        suppressedStructuralFusionContribution(right, supplementaryData) -
+        suppressedStructuralFusionContribution(left, supplementaryData);
+      return strengthDelta !== 0
+        ? strengthDelta
+        : compareMemoryEntries(left.entry, right.entry);
+    })
+    .slice(0, reserveCount);
+  const reservedKeys = new Set(
+    reservedStructural.map((candidate) => buildRecallCandidateDedupeKey(candidate))
+  );
+  // The synthesis reserve placed its rows at the tail of the natural window
+  // (positions [maxEntries - reservedTailCount, maxEntries)). Peel that block
+  // out so structural rows insert ABOVE it and the synthesis reserve's tail
+  // placement survives — the two reserves never displace each other.
+  const synthesisTailStart = Math.max(0, naturalWindowSize - Math.max(0, reservedTailCount));
+  const synthesisTailBlock = deliveryOrdered.slice(synthesisTailStart, naturalWindowSize);
+  const synthesisTailKeys = new Set(
+    synthesisTailBlock.map((candidate) => buildRecallCandidateDedupeKey(candidate))
+  );
+  const aboveBlock = deliveryOrdered.filter((candidate) => {
+    const key = buildRecallCandidateDedupeKey(candidate);
+    return !reservedKeys.has(key) && !synthesisTailKeys.has(key);
+  });
+  // Tail-place structural rows below the surviving head fusion rows and above
+  // the synthesis tail block, displacing the weakest in-budget fusion rows.
+  // headCount keeps >= 1 pure-fusion head slot because reserveCount is capped
+  // at maxEntries - 1 - reservedTailCount.
+  const headCount = Math.max(0, maxEntries - Math.max(0, reservedTailCount) - reserveCount);
+  return Object.freeze([
+    ...aboveBlock.slice(0, headCount),
+    ...reservedStructural,
+    ...synthesisTailBlock,
+    ...aboveBlock.slice(headCount)
+  ]);
+}
+
+// @internal test seam: the delivery-reserve helpers are module-private (they
+// depend on FusedRecallCandidateInput, an internal fused-candidate shape) but
+// their boundary contracts — synthesis backstop fires only for uncovered
+// capsules, structural reserve keeps >= 1 pure-fusion head slot — are
+// load-bearing and unit-tested directly. Exported only for the test suite; no
+// production module imports this object. see also:
+// __tests__/recall-durable-fanin-delivery.test.ts.
+export const recallDeliveryReserveTestInternals = Object.freeze({
+  selectUncoveredSynthesisCapsules,
+  reserveSynthesisDeliverySlots,
+  reserveStructuralDeliverySlots,
+  synthesisReserveCount,
+  buildEmptyRecallFusionBreakdown,
+  isStructuralRescueCandidate
+});
 
 function isStrongLexicalCandidate(
   candidate: FusedRecallCandidateInput,
@@ -3553,6 +4552,9 @@ function buildRecallDiagnostics(params: Readonly<{
       params.graphExpansionDiagnostics.graph_expansion_plane_count_per_hop,
     graph_expansion_plane_count_per_edge_type:
       params.graphExpansionDiagnostics.graph_expansion_plane_count_per_edge_type,
+    ...(params.graphExpansionDiagnostics.multi_seed_graph_fan_in === undefined
+      ? {}
+      : { multi_seed_graph_fan_in: params.graphExpansionDiagnostics.multi_seed_graph_fan_in }),
     fusion_breakdown: Object.freeze(
       params.candidates.map((candidate) => Object.freeze({
         candidate_key: candidate.candidate_key,
@@ -4240,16 +5242,31 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   return 1;
 }
 
-function scoreGraphExpansionEdge(edge: Readonly<MemoryGraphEdge>): number {
-  return clamp01(Math.max(0, MEMORY_GRAPH_EDGE_RECALL_WEIGHTS[edge.edge_type] ?? 0));
-}
-
-function toTrackedGraphExpansionEdgeType(
-  edgeType: MemoryGraphEdgeTypeValue
-): RecallGraphExpansionTrackedEdgeType | null {
-  return GRAPH_EXPANSION_TRACKED_EDGE_TYPES.includes(edgeType as RecallGraphExpansionTrackedEdgeType)
-    ? (edgeType as RecallGraphExpansionTrackedEdgeType)
-    : null;
+// Graph-traversal admission score MAGNITUDE for a PathRelation hop. The
+// contribution basis is EDGE_TYPE_RECALL_MODEL[trackedEdgeType].contribution_weight
+// (supports 1.0 / derives_from 0.5 / recalls 0.3); path-only relation kinds
+// fold onto the recalls tier via pathRelationKindToTrackedEdgeType. Floored at
+// 0 because only recall-eligible (recall_bias > 0) paths reach traversal.
+// Strength deliberately does NOT scale the basis here: the caller routes hop-1
+// (direct) associations through scorePathRelationExpansion (which already folds
+// strength), and this traversal score carries only the static contribution
+// magnitude.
+// note: the score MAGNITUDE matches the static edge-era contribution_weight,
+// but the traversal is NOT edge-equivalent in TOPOLOGY — collectPathGraphNeighbors
+// follows path direction_bias (a source_to_target path is followed forward
+// only), whereas retired memory_graph_edges propagated undirected. This is
+// intentional and aligned with the hop-1 path_expansion direction filter
+// (directionEligiblePathExpansionTargets), so the two planes agree on which way
+// a path may be followed; it is not a zero-drift reproduction of the undirected
+// edge plane. Producer-seeded paths are minted bidirectional_asymmetric (see
+// path-relation-proposal-service.ts submitCandidate), so hop-2 reach narrows
+// only after plasticity redirects a path to an asymmetric direction.
+// see also: collectPathGraphNeighbors, directionEligiblePathExpansionTargets.
+function graphTraversalScoreFromPath(
+  trackedEdgeType: RecallGraphExpansionTrackedEdgeType
+): number {
+  const weight = EDGE_TYPE_RECALL_MODEL[trackedEdgeType].contribution_weight;
+  return clamp01(Math.max(0, weight));
 }
 
 function createMutableGraphExpansionDiagnostics(): MutableGraphExpansionDiagnostics {
@@ -4259,7 +5276,10 @@ function createMutableGraphExpansionDiagnostics(): MutableGraphExpansionDiagnost
       derives_from: 0,
       recalls: 0,
       supports: 0
-    }
+    },
+    multi_seed_fan_in_distinct_seeds: 0,
+    multi_seed_fan_in_dedup_collisions: 0,
+    multi_seed_fan_in_candidates_per_seed: []
   };
 }
 
@@ -4267,10 +5287,30 @@ function createEmptyGraphExpansionDiagnostics(): Readonly<RecallGraphExpansionDi
   return freezeGraphExpansionDiagnostics(createMutableGraphExpansionDiagnostics());
 }
 
+// anchor: percentile-of-sample helper used only by multi_seed_graph_fan_in
+// diagnostics. Linear interpolation between adjacent ranks, matches
+// numpy.percentile(..., method='linear') for stable cross-language reads.
+function percentileOfSorted(samples: readonly number[], percentile: number): number {
+  if (samples.length === 0) {
+    return 0;
+  }
+  if (samples.length === 1) {
+    return samples[0];
+  }
+  const rank = ((samples.length - 1) * percentile) / 100;
+  const lower = Math.floor(rank);
+  const upper = Math.ceil(rank);
+  if (lower === upper) {
+    return samples[lower];
+  }
+  const weight = rank - lower;
+  return samples[lower] * (1 - weight) + samples[upper] * weight;
+}
+
 function freezeGraphExpansionDiagnostics(
   diagnostics: Readonly<MutableGraphExpansionDiagnostics>
 ): Readonly<RecallGraphExpansionDiagnostics> {
-  return Object.freeze({
+  const base = {
     graph_expansion_plane_count_per_hop: Object.freeze([
       diagnostics.graph_expansion_plane_count_per_hop[0],
       diagnostics.graph_expansion_plane_count_per_hop[1]
@@ -4280,6 +5320,20 @@ function freezeGraphExpansionDiagnostics(
       recalls: diagnostics.graph_expansion_plane_count_per_edge_type.recalls,
       supports: diagnostics.graph_expansion_plane_count_per_edge_type.supports
     })
+  };
+  if (diagnostics.multi_seed_fan_in_distinct_seeds === 0) {
+    return Object.freeze(base);
+  }
+  const sortedCounts = [...diagnostics.multi_seed_fan_in_candidates_per_seed].sort((a, b) => a - b);
+  const fanIn: RecallMultiSeedGraphFanInDiagnostics = {
+    distinct_seeds: diagnostics.multi_seed_fan_in_distinct_seeds,
+    candidates_per_seed_p50: percentileOfSorted(sortedCounts, 50),
+    candidates_per_seed_p95: percentileOfSorted(sortedCounts, 95),
+    dedup_collisions: diagnostics.multi_seed_fan_in_dedup_collisions
+  };
+  return Object.freeze({
+    ...base,
+    multi_seed_graph_fan_in: Object.freeze(fanIn)
   });
 }
 
@@ -4332,6 +5386,42 @@ function summarizeGraphExpansionCandidateSources(
     diagnostics.graph_expansion_plane_count_per_edge_type[source.edgeType] += 1;
   }
   return freezeGraphExpansionDiagnostics(diagnostics);
+}
+
+// anchor: cascade merge for graph_expansion diagnostics. Re-derives hop /
+// edge_type counts from candidate sources so the merged surface stays
+// consistent with the kept candidates. multi_seed_graph_fan_in is not
+// re-derivable from sources (per-seed BFS history is local to each
+// addGraphExpansionCandidates call) so the merger prefers the cascade tier
+// with more distinct_seeds; when only one tier carries fan-in stats, that
+// tier wins. see also: mergeCoarseFilters
+function mergeGraphExpansionDiagnosticsAcrossCascade(params: Readonly<{
+  readonly sources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
+  readonly currentFanIn?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
+  readonly nextFanIn?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
+}>): Readonly<RecallGraphExpansionDiagnostics> {
+  const summary = summarizeGraphExpansionCandidateSources(params.sources);
+  const chosenFanIn = chooseStrongerFanIn(params.currentFanIn, params.nextFanIn);
+  if (chosenFanIn === undefined) {
+    return summary;
+  }
+  return Object.freeze({
+    ...summary,
+    multi_seed_graph_fan_in: chosenFanIn
+  });
+}
+
+function chooseStrongerFanIn(
+  left: Readonly<RecallMultiSeedGraphFanInDiagnostics> | undefined,
+  right: Readonly<RecallMultiSeedGraphFanInDiagnostics> | undefined
+): Readonly<RecallMultiSeedGraphFanInDiagnostics> | undefined {
+  if (left === undefined) {
+    return right;
+  }
+  if (right === undefined) {
+    return left;
+  }
+  return right.distinct_seeds > left.distinct_seeds ? right : left;
 }
 
 function shouldReplaceGraphExpansionCandidate(
@@ -4391,6 +5481,27 @@ function scorePathRelationExpansion(path: Readonly<PathRelation>): number {
   );
 }
 
+// Strength-gated active suppression delta for one negative path. recall_bias
+// is negative for the suppressing families (contradicts / supersedes /
+// incompatible_with), so |recall_bias| is the suppression magnitude. The
+// plasticity strength gate keeps weak / forming negatives inert: below
+// PATH_SUPPRESSION_STRENGTH_FLOOR the delta is exactly 0, so an attention_only
+// co-occurrence cannot demote a memory. At or above the floor the strength
+// scales the delta linearly, so a plasticity-reinforced contradiction applies
+// real demotion. Returns 0 for non-negative paths defensively (callers pass
+// only recall_bias < 0 paths). see also: PATH_SUPPRESSION_SCALE rationale.
+function scorePathRelationSuppression(path: Readonly<PathRelation>): number {
+  const recallBias = path.effect_vector.recall_bias;
+  if (recallBias >= 0) {
+    return 0;
+  }
+  const strength = clamp01(path.plasticity_state.strength);
+  if (strength < PATH_SUPPRESSION_STRENGTH_FLOOR) {
+    return 0;
+  }
+  return Math.abs(recallBias) * strength * PATH_SUPPRESSION_SCALE;
+}
+
 function directionEligiblePathExpansionTargets(
   path: Readonly<PathRelation>,
   seedIds: ReadonlySet<string>
@@ -4422,6 +5533,57 @@ function directionEligiblePathExpansionTargets(
 interface DirectionEligiblePathExpansionTarget {
   readonly seedId: string;
   readonly targetId: string;
+}
+
+interface PathGraphNeighbor {
+  readonly neighborId: string;
+  readonly edgeType: RecallGraphExpansionTrackedEdgeType;
+}
+
+// anchor: path-graph traversal neighbor extraction shared by expandGraphFrontier.
+// Given a frontier node id, returns the direction-eligible object neighbors
+// reachable through the supplied recall-eligible paths, each tagged with the
+// tracked edge type its relation_kind maps onto. Reuses the same
+// direction_bias semantics as directionEligiblePathExpansionTargets so the
+// graph-traversal plane and the direct path_expansion plane agree on which
+// way a path may be followed. Self-loops and non-object anchors yield nothing.
+function collectPathGraphNeighbors(
+  paths: readonly Readonly<PathRelation>[],
+  nodeId: string
+): readonly PathGraphNeighbor[] {
+  const neighbors: PathGraphNeighbor[] = [];
+  const seen = new Set<string>();
+  for (const path of paths) {
+    const sourceId = anchorMemoryId(path.anchors.source_anchor);
+    const targetId = anchorMemoryId(path.anchors.target_anchor);
+    if (sourceId === undefined || targetId === undefined || sourceId === targetId) {
+      continue;
+    }
+    const edgeType = pathRelationKindToTrackedEdgeType(path.constitution.relation_kind);
+    if (
+      sourceId === nodeId &&
+      (path.plasticity_state.direction_bias === "source_to_target" ||
+        path.plasticity_state.direction_bias === "bidirectional_asymmetric")
+    ) {
+      const key = `${targetId}:${edgeType}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        neighbors.push({ neighborId: targetId, edgeType });
+      }
+    }
+    if (
+      targetId === nodeId &&
+      (path.plasticity_state.direction_bias === "target_to_source" ||
+        path.plasticity_state.direction_bias === "bidirectional_asymmetric")
+    ) {
+      const key = `${sourceId}:${edgeType}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        neighbors.push({ neighborId: sourceId, edgeType });
+      }
+    }
+  }
+  return neighbors;
 }
 
 function pathRelationMemoryIds(path: Readonly<PathRelation>): readonly string[] {
@@ -4478,8 +5640,30 @@ function anchorMemoryId(anchor: PathAnchorRef): string | undefined {
   }
 }
 
-function isRetiredPathRelation(path: Readonly<PathRelation>): boolean {
-  return (path.lifecycle as { readonly status?: string }).status === "retired";
+// invariant: recall path_expansion only consumes recall-eligible paths —
+// active lifecycle AND recall_bias > 0 (the shared isPathRecallEligible
+// predicate). This is the negation of recall-eligible, so it excludes in
+// one gate:
+//   - lifecycle: retired (terminal) and dormant (reversible cold storage)
+//     never leak back into recall scoring;
+//   - negative families (contradicts / supersedes / incompatible_with,
+//     recall_bias < 0): suppression, not association — adding the target as
+//     a positive path_expansion candidate would AMPLIFY the suppressed
+//     memory instead of demoting it;
+//   - the recall-neutral exception_to marker (recall_bias == 0): a topology
+//     marker that must not enter positive expansion either.
+// Using the shared predicate keeps the < 0 / <= 0 family boundary aligned
+// with PathPlasticityService (which retires the negative + neutral family)
+// rather than re-deriving the sign test here.
+// Active sign-aware suppression that scores negatives as a demotion rather
+// than a non-add is a separate recall pass, not yet implemented; this guard
+// only stops the amplification.
+// see also: path-relation-proposal-service.ts — recall_bias is
+// recallBiasSign * recallBiasMagnitude, so a negative family is < 0 and the
+// exception_to marker is exactly 0.
+// see also: path-relation.ts isPathRecallEligible — the shared predicate.
+function isPathExcludedFromRecall(path: Readonly<PathRelation>): boolean {
+  return !isPathRecallEligible(path);
 }
 
 function uniqueStrings(values: readonly string[]): readonly string[] {
@@ -4532,10 +5716,6 @@ function selectRecallAdmissionAttributionPlane(
     }
   }
   return fallback ?? admissionPlanes[0] ?? "activation";
-}
-
-function isWorkspaceLocalRecallCandidate(candidate: Readonly<RecallCandidate>): boolean {
-  return (candidate.origin_plane ?? "workspace_local") === "workspace_local";
 }
 
 function resolveDynamicActivationWeights(

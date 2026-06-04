@@ -116,6 +116,18 @@ const RecallGraphExpansionPlaneCountPerEdgeTypeSchema = z
   .strict()
   .readonly();
 
+// see also: packages/core/src/recall-service-types.ts
+//   RecallMultiSeedGraphFanInDiagnostics
+const RecallMultiSeedGraphFanInDiagnosticsSchema = z
+  .object({
+    distinct_seeds: z.number().int().nonnegative(),
+    candidates_per_seed_p50: z.number().nonnegative(),
+    candidates_per_seed_p95: z.number().nonnegative(),
+    dedup_collisions: z.number().int().nonnegative()
+  })
+  .strict()
+  .readonly();
+
 export const BenchRecallDiagnosticsSchema = z
   .object({
     query_probes: z
@@ -155,6 +167,11 @@ export const BenchRecallDiagnosticsSchema = z
       RecallGraphExpansionPlaneCountPerHopSchema,
     graph_expansion_plane_count_per_edge_type:
       RecallGraphExpansionPlaneCountPerEdgeTypeSchema,
+    // Optional. Present when entity-derived seeds drove graph fan-in for
+    // this recall. see also: packages/core/src/recall-service-types.ts
+    //   RecallMultiSeedGraphFanInDiagnostics
+    multi_seed_graph_fan_in:
+      RecallMultiSeedGraphFanInDiagnosticsSchema.optional(),
     fusion_breakdown: z
       .array(
         z

@@ -14,7 +14,8 @@ import {
   VerifiedBy,
   type GreenStatus,
   type MemoryEntry,
-  type Proposal
+  type Proposal,
+  type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../db.js";
 import { SqliteGreenStatusRepo } from "../repos/green-status-repo.js";
@@ -89,6 +90,38 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     reinforcement_count: 0,
     contradiction_count: 0,
     superseded_by: null,
+    ...overrides
+  };
+}
+
+function createSynthesisProposal(overrides: Partial<Proposal> = {}): Proposal {
+  return createProposal({
+    runtime_id: "7c0d1f2e-3a4b-4c5d-8e6f-708192a3b4c5",
+    proposal_id: "7c0d1f2e-3a4b-4c5d-8e6f-708192a3b4c5",
+    derived_from: "synthesis-subject:tooling/package-manager",
+    dossier_ref: "librarian.synthesis",
+    retention_policy: RetentionPolicy.RUN_SCOPED,
+    ...overrides
+  });
+}
+
+function createSynthesisCapsule(overrides: Partial<SynthesisCapsule> = {}): SynthesisCapsule {
+  return {
+    object_id: "a8b9c0d1-2e3f-4a5b-8c6d-7e8f90a1b2c3",
+    object_kind: "synthesis_capsule",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: "2026-03-21T03:00:00.000Z",
+    updated_at: "2026-03-21T03:00:00.000Z",
+    created_by: "proposal_accept:7c0d1f2e-3a4b-4c5d-8e6f-708192a3b4c5",
+    topic_key: "tooling/package-manager",
+    synthesis_type: "cross_evidence",
+    summary: "Synthesis of tooling/package-manager: prefer pnpm; npm deprecated",
+    evidence_refs: ["evidence-1", "evidence-2"],
+    source_memory_refs: [],
+    workspace_id: "workspace-1",
+    run_id: "synthesis-accept:workspace-1",
+    synthesis_status: "working",
     ...overrides
   };
 }
@@ -861,6 +894,130 @@ describe("SqliteProposalRepo", () => {
       (created as { resolution_state: string }).resolution_state = "accepted";
     }).toThrow(TypeError);
   });
+
+  it("atomically accepts a librarian synthesis proposal, inserts the capsule, and writes audit events", async () => {
+    const { repo, database } = createRepo();
+    const proposal = createSynthesisProposal({ dossier_ref: "librarian.synthesis" });
+    const capsule = createSynthesisCapsule();
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: null,
+      target_object_kind: "memory_entry",
+      proposed_change_summary: "Synthesis cluster"
+    });
+
+    const result = await repo.acceptPendingSynthesisCreateWithEvents(
+      proposal.proposal_id,
+      "2026-03-21T03:00:00.000Z",
+      createReviewEvents(proposal),
+      {
+        workspace_id: "workspace-1",
+        capsule,
+        caused_by: `proposal_accept:${proposal.proposal_id}`
+      },
+      { reviewerIdentity: "user:alice" }
+    );
+
+    expect(result.proposal.resolution_state).toBe("accepted");
+    expect(result.synthesis).toEqual(capsule);
+    expect(result.events.map((event) => event.event_type)).toEqual([
+      MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
+      MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED,
+      MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED,
+      MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED
+    ]);
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(3);
+    expect(countSynthesisCreatedEvents(database, capsule.object_id)).toBe(1);
+    expect(countSynthesisCapsules(database, capsule.object_id)).toBe(1);
+    const synthesisEvent = result.events.at(-1);
+    expect(synthesisEvent).toMatchObject({
+      event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED,
+      entity_type: "synthesis_capsule",
+      entity_id: capsule.object_id,
+      caused_by: capsule.created_by
+    });
+  });
+
+  it("atomically accepts a bootstrapping synthesis_candidate proposal", async () => {
+    const { repo, database } = createRepo();
+    const proposal = createSynthesisProposal({
+      dossier_ref: "bootstrapping.synthesis_candidate"
+    });
+    const capsule = createSynthesisCapsule({ evidence_refs: [] });
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: null,
+      target_object_kind: "memory_entry"
+    });
+
+    const result = await repo.acceptPendingSynthesisCreateWithEvents(
+      proposal.proposal_id,
+      "2026-03-21T03:00:00.000Z",
+      createReviewEvents(proposal),
+      {
+        workspace_id: "workspace-1",
+        capsule,
+        caused_by: `proposal_accept:${proposal.proposal_id}`
+      }
+    );
+
+    expect(result.proposal.resolution_state).toBe("accepted");
+    expect(countSynthesisCapsules(database, capsule.object_id)).toBe(1);
+  });
+
+  it("rejects a synthesis proposal without inserting any capsule", async () => {
+    const { repo, database } = createRepo();
+    const proposal = createSynthesisProposal({ dossier_ref: "librarian.synthesis" });
+    const capsule = createSynthesisCapsule();
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: null,
+      target_object_kind: "memory_entry"
+    });
+
+    const result = await repo.updatePendingResolutionWithEvents(
+      proposal.proposal_id,
+      "rejected",
+      "2026-03-21T03:00:00.000Z",
+      createReviewEvents(proposal),
+      { reviewerIdentity: "user:alice" }
+    );
+
+    expect(result.proposal.resolution_state).toBe("rejected");
+    expect(countSynthesisCapsules(database, capsule.object_id)).toBe(0);
+    expect(countSynthesisCreatedEvents(database, capsule.object_id)).toBe(0);
+  });
+
+  it("rejects a synthesis create that does not match the proposal dossier", async () => {
+    const { repo, database } = createRepo();
+    // A plain memory_entry proposal (dossier_ref=null) must not be acceptable
+    // through the synthesis-create path.
+    const proposal = createProposal();
+    const capsule = createSynthesisCapsule();
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry"
+    });
+
+    await expect(
+      repo.acceptPendingSynthesisCreateWithEvents(
+        proposal.proposal_id,
+        "2026-03-21T03:00:00.000Z",
+        createReviewEvents(proposal),
+        {
+          workspace_id: "workspace-1",
+          capsule,
+          caused_by: `proposal_accept:${proposal.proposal_id}`
+        }
+      )
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(countSynthesisCapsules(database, capsule.object_id)).toBe(0);
+  });
 });
 
 function createRepo(): { readonly repo: SqliteProposalRepo; readonly database: StorageDatabase } {
@@ -961,5 +1118,21 @@ function countGreenPiercedEvents(database: StorageDatabase, memoryId: string): n
       "SELECT COUNT(*) AS count FROM event_log WHERE event_type = ? AND json_extract(payload_json, '$.target_object_id') = ?"
     )
     .get(GreenGovernanceEventType.SOUL_GREEN_PIERCED, memoryId) as { readonly count: number };
+  return row.count;
+}
+
+function countSynthesisCreatedEvents(database: StorageDatabase, synthesisId: string): number {
+  const row = database.connection
+    .prepare(
+      "SELECT COUNT(*) AS count FROM event_log WHERE event_type = ? AND entity_type = 'synthesis_capsule' AND entity_id = ?"
+    )
+    .get(MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED, synthesisId) as { readonly count: number };
+  return row.count;
+}
+
+function countSynthesisCapsules(database: StorageDatabase, synthesisId: string): number {
+  const row = database.connection
+    .prepare("SELECT COUNT(*) AS count FROM synthesis_capsules WHERE object_id = ?")
+    .get(synthesisId) as { readonly count: number };
   return row.count;
 }

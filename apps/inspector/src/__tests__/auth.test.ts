@@ -39,7 +39,12 @@ function createApp(): Hono {
   return app;
 }
 
-async function expectStatus(app: Hono, path: string, status: number, headers?: HeadersInit): Promise<void> {
+async function expectStatus(
+  app: Hono,
+  path: string,
+  status: number,
+  headers?: Record<string, string>
+): Promise<void> {
   const response = await app.request(path, { headers });
   expect(response.status).toBe(status);
   expect(await response.json()).toEqual({ error: "unauthorized" });

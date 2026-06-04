@@ -73,7 +73,7 @@ test-rigor pass rather than carried forward.
 - `migration-parity.test.ts` — added a `sqlite_master` /
   `PRAGMA index_list` / `PRAGMA table_info` assertion set after the
   full migration suite (056 trust tables + 057 orphan_radar rebuild).
-- `gate4-attached-agent-mcp-proof.test.ts` — added two reverse
+- `attached-agent-mcp-proof.test.ts` — added two reverse
   assertions in the same daemon lifetime: `soul.recall` with malformed
   arguments and an unknown tool name both return `isError: true`.
 - `EmbeddingSupplementForm.test.tsx` — three new cases cover initial

@@ -306,12 +306,15 @@ describe("routes-config port batch", () => {
     });
   });
 
-  it("ignores an unrecognized ALAYA_GARDEN_PROVIDER_KIND and falls back to secret-presence inference", async () => {
+  it("ignores an unrecognized ALAYA_GARDEN_PROVIDER_KIND and falls back to the host_worker no-secret default", async () => {
     const harness = await createServiceHarness();
     await writeFile(harness.paths.envPath, "ALAYA_GARDEN_PROVIDER_KIND=not-a-real-kind\n", "utf8");
 
+    // No secret_ref present -> the product default is host_worker (Alaya owns
+    // no LLM). official_api is reached only via secret presence or an explicit
+    // declared provider_kind.
     await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
-      provider_kind: "local_heuristics"
+      provider_kind: "host_worker"
     });
   });
 
@@ -600,9 +603,9 @@ describe("routes-config port batch", () => {
     const firstPublishCanFail = createDeferred<void>();
     let publishCalls = 0;
     const harness = await createServiceHarness({ repo: backingRepo });
-    const realAppend = harness.appendManyWithMutation
-      .getMockImplementation()!
-      .bind(harness.appendManyWithMutation);
+    const realAppend = (
+      harness.appendManyWithMutation.getMockImplementation()! as (...args: unknown[]) => unknown
+    ).bind(harness.appendManyWithMutation);
     harness.appendManyWithMutation.mockImplementation(async (events: any, mutate: any) => {
       publishCalls += 1;
       if (publishCalls === 1) {
@@ -853,7 +856,9 @@ async function createServiceHarness(options: {
   return {
     service: createConfigService({
       configRepo: repo,
-      eventPublisher: { appendManyWithMutation },
+      eventPublisher: {
+        appendManyWithMutation
+      } as Parameters<typeof createConfigService>[0]["eventPublisher"],
       configPathsProvider: () => paths,
       clock: () => "2026-05-01T00:00:00.000Z",
       platform: options.platform,
@@ -884,17 +889,8 @@ function createMemoryConfigRepo(): ConfigRepo {
     return next;
   };
   return {
-    get: async <T>(key: string): Promise<T | null> => get<T>(key),
     get,
-    set: async <T>(key: string, value: T): Promise<void> => {
-      set(key, value);
-    },
     set,
-    patch: async <T extends Record<string, unknown>>(
-      key: string,
-      partial: Partial<T>,
-      defaults: T
-    ): Promise<T> => patch(key, partial, defaults),
     patch
   };
 }

@@ -89,6 +89,28 @@ describe("bench recall weight overrides", () => {
     });
   });
 
+  it("accepts every production fusion stream incl. trigram_fts / synthesis_fts", () => {
+    const overrides = resolveBenchRecallWeightOverrides({
+      cliJson: JSON.stringify({
+        fusion_weights: {
+          trigram_fts: 2,
+          synthesis_fts: 1.5
+        }
+      })
+    });
+
+    expect(overrides?.summary.fusion_weights).toEqual({
+      trigram_fts: 2,
+      synthesis_fts: 1.5
+    });
+
+    const policy = applyBenchRecallWeightOverrides(basePolicy(), overrides);
+    expect(policy.scoring_weight_overrides?.fusion_weights).toEqual({
+      trigram_fts: 2,
+      synthesis_fts: 1.5
+    });
+  });
+
   it("rejects partial activation overrides that do not resolve to sum 1", () => {
     expect(() =>
       resolveBenchRecallWeightOverrides({

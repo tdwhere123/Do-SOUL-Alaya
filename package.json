@@ -14,6 +14,7 @@
     "test": "node ./scripts/ci/run-vitest-projects.mjs",
     "test:parallel": "vitest run --config vitest.config.mjs",
     "ci:content-contracts": "node ./scripts/ci/check-content-contracts.mjs",
+    "typecheck": "pnpm --workspace-concurrency=1 --filter @do-soul/alaya-protocol --filter @do-soul/alaya-core --filter @do-soul/alaya-storage --filter @do-soul/alaya-engine-gateway --filter @do-soul/alaya-eval --filter @do-soul/alaya-inspector --filter @do-soul/alaya-bench-runner --filter @do-soul/alaya-soul --filter @do-soul/alaya-core-daemon run typecheck",
     "hygiene:unused": "knip --config knip.json --no-progress --no-config-hints",
     "release:check-version": "node ./scripts/check-release-version.mjs",
     "fixtures:host-autonomy-witness": "node ./scripts/export-host-autonomy-witness.mjs",

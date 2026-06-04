@@ -10,6 +10,8 @@ import {
   RuntimeGovernanceEventType,
   SoulGreenPiercedPayloadSchema,
   SoulMemoryUpdatedPayloadSchema,
+  SoulSynthesisCreatedPayloadSchema,
+  SynthesisCapsuleSchema,
   parseRuntimeGovernanceEventPayload,
   serializePathAnchorRef,
   type EventLogEntry,
@@ -17,7 +19,8 @@ import {
   type MemoryEntryMutableFields,
   type PathRelation,
   type Proposal,
-  type ProposalResolutionState
+  type ProposalResolutionState,
+  type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
@@ -153,6 +156,31 @@ export interface AcceptedPathRelationGovernanceInput {
   readonly caused_by: string;
 }
 
+// invariant: the durable side of the librarian/auditor synthesis review
+// accept-apply. The workflow fully composes the SynthesisCapsule (object_id,
+// deterministic summary, evidence_refs recovered from the proposal's dropped
+// candidate set, topic_key derived from `derived_from`) outside the
+// transaction; this input only carries the pre-built capsule plus the
+// proposal-resolve scope so the storage layer flips the proposal to accepted,
+// inserts the capsule row, and appends SOUL_SYNTHESIS_CREATED in ONE
+// transaction. caused_by attributes the resolve to `proposal_accept:<id>`.
+// see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts synthesis_create branch
+export interface AcceptedSynthesisCreateInput {
+  readonly workspace_id: string;
+  readonly capsule: SynthesisCapsule;
+  readonly caused_by: string;
+}
+
+// The dossier_ref values that route a pending proposal to the synthesis-create
+// accept-apply (librarian clusters + auditor pattern synthesis). Branching on
+// dossier_ref is robust: these proposals carry no target_object_kind beyond the
+// migration default, so the kind alone cannot distinguish them from a plain
+// memory_entry update.
+const SYNTHESIS_CREATE_DOSSIER_REFS: ReadonlySet<string> = new Set([
+  "librarian.synthesis",
+  "bootstrapping.synthesis_candidate"
+]);
+
 export interface CreateProposalWithEventsOptions {
   readonly reviewerAssignment?: ProposalReviewerAssignmentInput;
 }
@@ -235,6 +263,17 @@ export interface ProposalRepo {
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;
     readonly path_relation: Readonly<PathRelation>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
+  acceptPendingSynthesisCreateWithEvents(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    synthesisCreate: AcceptedSynthesisCreateInput,
+    options?: UpdatePendingResolutionOptions
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly synthesis: Readonly<SynthesisCapsule>;
     readonly events: readonly EventLogEntry[];
   }>>;
 }
@@ -343,6 +382,10 @@ export class SqliteProposalRepo implements ProposalRepo {
   private readonly findPathRelationByAnchorMemoryIdStatement;
   private readonly createPathRelationStatement;
   private readonly updatePathRelationLegitimacyStatement;
+  // see also: synthesis-capsule-repo.ts SqliteSynthesisCapsuleRepo.createStatement
+  // — the same INSERT column order, prepared here so the synthesis-create
+  // accept-apply can insert the capsule inside the proposal-resolve transaction.
+  private readonly createSynthesisCapsuleStatement;
   private readonly eventLogWriter;
 
   public constructor(private readonly db: StorageDatabase) {
@@ -551,6 +594,26 @@ export class SqliteProposalRepo implements ProposalRepo {
       UPDATE path_relations
       SET legitimacy_json = ?, updated_at = ?
       WHERE path_id = ?
+    `);
+
+    this.createSynthesisCapsuleStatement = db.connection.prepare(`
+      INSERT INTO synthesis_capsules (
+        object_id,
+        object_kind,
+        schema_version,
+        lifecycle_state,
+        created_at,
+        updated_at,
+        created_by,
+        topic_key,
+        synthesis_type,
+        summary,
+        evidence_refs,
+        source_memory_refs,
+        workspace_id,
+        run_id,
+        synthesis_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.eventLogWriter = getEventLogWriter(db.connection);
@@ -1399,6 +1462,113 @@ export class SqliteProposalRepo implements ProposalRepo {
     }
   }
 
+  public async acceptPendingSynthesisCreateWithEvents(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    synthesisCreate: AcceptedSynthesisCreateInput,
+    options: UpdatePendingResolutionOptions = {}
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly synthesis: Readonly<SynthesisCapsule>;
+    readonly events: readonly EventLogEntry[];
+  }>> {
+    const parsedProposalId = parseProposalId(proposalId);
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+    const reviewerIdentity =
+      options.reviewerIdentity === undefined
+        ? undefined
+        : parseNonEmptyString(options.reviewerIdentity, "reviewer_identity");
+    const parsedSynthesisCreate = parseAcceptedSynthesisCreateInput(synthesisCreate);
+
+    try {
+      return this.db.connection.transaction(() => {
+        const proposalRow = this.findByIdStatement.get(parsedProposalId) as ProposalRow | undefined;
+        if (proposalRow === undefined) {
+          throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found.`);
+        }
+        if (proposalRow.resolution_state !== "pending") {
+          throw this.createPendingResolutionFailure(parsedProposalId);
+        }
+        assertAcceptedSynthesisCreateMatchesProposal(proposalRow, parsedSynthesisCreate);
+
+        const storedReviewEvents = events.map((event) => insertEventLogEntry(this.eventLogWriter, event));
+        const acceptedState = "accepted" satisfies ProposalResolutionState;
+        const result =
+          reviewerIdentity === undefined
+            ? this.updatePendingResolutionStatement.run(
+                acceptedState,
+                parsedUpdatedAt,
+                parsedProposalId
+              )
+            : this.updatePendingResolutionWithIdentityStatement.run(
+                acceptedState,
+                parsedUpdatedAt,
+                reviewerIdentity,
+                parsedProposalId
+              );
+
+        if (result.changes === 0) {
+          throw this.createPendingResolutionFailure(parsedProposalId);
+        }
+
+        const capsule = parsedSynthesisCreate.capsule;
+        const synthesisEvent = insertEventLogEntry(this.eventLogWriter, {
+          event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED,
+          entity_type: "synthesis_capsule",
+          entity_id: capsule.object_id,
+          workspace_id: capsule.workspace_id,
+          run_id: capsule.run_id,
+          caused_by: capsule.created_by,
+          payload_json: SoulSynthesisCreatedPayloadSchema.parse({
+            object_id: capsule.object_id,
+            object_kind: capsule.object_kind,
+            workspace_id: capsule.workspace_id,
+            run_id: capsule.run_id
+          })
+        });
+        this.createSynthesisCapsuleStatement.run(
+          capsule.object_id,
+          capsule.object_kind,
+          capsule.schema_version,
+          capsule.lifecycle_state,
+          capsule.created_at,
+          capsule.updated_at,
+          capsule.created_by,
+          capsule.topic_key,
+          capsule.synthesis_type,
+          capsule.summary,
+          JSON.stringify(capsule.evidence_refs),
+          JSON.stringify(capsule.source_memory_refs),
+          capsule.workspace_id,
+          capsule.run_id,
+          capsule.synthesis_status
+        );
+
+        const updatedProposalRow = this.findByIdStatement.get(parsedProposalId) as ProposalRow | undefined;
+        if (updatedProposalRow === undefined) {
+          throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found after update.`);
+        }
+
+        return deepFreeze({
+          proposal: parseProposalRow(updatedProposalRow),
+          synthesis: capsule,
+          events: [...storedReviewEvents, synthesisEvent]
+        });
+      })();
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to accept proposal ${parsedProposalId} with durable synthesis create.`,
+        error
+      );
+    }
+  }
+
   private createPendingResolutionFailure(proposalId: string): StorageError {
     const row = this.findByIdStatement.get(proposalId) as ProposalRow | undefined;
     if (row === undefined) {
@@ -1781,6 +1951,53 @@ function createAcceptedPathRelationGovernanceMismatch(proposalId: string): Stora
   return new StorageError(
     "CONFLICT",
     `Accepted path relation governance update does not match proposal ${proposalId}.`
+  );
+}
+
+function parseAcceptedSynthesisCreateInput(
+  input: AcceptedSynthesisCreateInput
+): Readonly<{
+  readonly workspace_id: string;
+  readonly capsule: Readonly<SynthesisCapsule>;
+  readonly caused_by: string;
+}> {
+  let capsule: Readonly<SynthesisCapsule>;
+  try {
+    capsule = SynthesisCapsuleSchema.parse(input.capsule);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate synthesis capsule.", error);
+  }
+  const workspaceId = parseWorkspaceId(input.workspace_id);
+  if (capsule.workspace_id !== workspaceId) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      `Synthesis capsule workspace ${capsule.workspace_id} does not match accept scope ${workspaceId}.`
+    );
+  }
+  return deepFreeze({
+    workspace_id: workspaceId,
+    capsule,
+    caused_by: parseNonEmptyString(input.caused_by, "caused_by")
+  });
+}
+
+function assertAcceptedSynthesisCreateMatchesProposal(
+  row: ProposalRow,
+  create: ReturnType<typeof parseAcceptedSynthesisCreateInput>
+): void {
+  if (
+    row.workspace_id !== create.workspace_id ||
+    row.dossier_ref === null ||
+    !SYNTHESIS_CREATE_DOSSIER_REFS.has(row.dossier_ref)
+  ) {
+    throw createAcceptedSynthesisCreateMismatch(row.proposal_id);
+  }
+}
+
+function createAcceptedSynthesisCreateMismatch(proposalId: string): StorageError {
+  return new StorageError(
+    "CONFLICT",
+    `Accepted synthesis create does not match proposal ${proposalId}.`
   );
 }
 

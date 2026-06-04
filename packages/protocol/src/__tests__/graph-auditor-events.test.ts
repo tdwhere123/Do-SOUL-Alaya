@@ -185,10 +185,29 @@ describe("Phase 4B protocol schemas", () => {
       orphanReportedPayload
     );
 
+    const edgeProposalPathMintFailedPayload = {
+      proposal_id: "edge-proposal-1",
+      source_memory_id: "memory-1",
+      target_memory_id: "memory-2",
+      edge_type: "recalls",
+      reviewer_identity: "user:reviewer",
+      failure_kind: "submit_returned_false",
+      failure_detail: null,
+      workspace_id: "workspace-1",
+      occurred_at: validTimestamp
+    } as const;
+    expect(
+      parseGraphAuditorEventPayload(
+        GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED,
+        edgeProposalPathMintFailedPayload
+      )
+    ).toEqual(edgeProposalPathMintFailedPayload);
+
     expect(GraphAuditorEventTypeSchema.options).toEqual([
       GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
       GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED,
       GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED,
+      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED,
       GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
       GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED,
       GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED

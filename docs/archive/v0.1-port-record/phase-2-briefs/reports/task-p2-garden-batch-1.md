@@ -22,7 +22,7 @@
   - `packages/soul/src/garden/compute-routing-service.ts`
   - `packages/soul/src/garden/local-heuristics.ts`
   - `packages/soul/src/__tests__/auditor.test.ts`
-  - `packages/soul/src/__tests__/auditor-4b.test.ts`
+  - `packages/soul/src/__tests__/auditor-repair-orphan-detection.test.ts`
   - `packages/soul/src/__tests__/garden-scheduler.test.ts`
   - `packages/soul/src/__tests__/compute-provider.test.ts`
   - `packages/soul/src/__tests__/compute-routing-service.test.ts`
@@ -70,7 +70,7 @@ rewrite and the two task-card test-boundary adapter points.
 - `rtk pnpm install` - passed.
 - `rtk pnpm build` - passed.
 - `rtk pnpm exec tsc --noEmit -p packages/soul` - passed.
-- `rtk pnpm exec vitest run --project @do-soul/alaya-soul auditor auditor-4b garden-scheduler compute-provider compute-routing-service local-heuristics` - passed; 6 files / 69 tests passed.
+- `rtk pnpm exec vitest run --project @do-soul/alaya-soul auditor auditor-repair-orphan-detection garden-scheduler compute-provider compute-routing-service local-heuristics` - passed; 6 files / 69 tests passed.
 - `rtk git diff --check` - passed.
 
 ## Architecture Compliance

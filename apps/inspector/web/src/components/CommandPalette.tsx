@@ -18,13 +18,15 @@ interface PaletteItem {
 
 const PAGE_ITEMS: ReadonlyArray<Omit<PaletteItem, "action"> & { readonly to: string }> = [
   { id: "page-overview", kind: "page", title: "Overview", subtitle: "/overview", to: "/overview" },
-  { id: "page-bench-trend", kind: "page", title: "Bench Trend", subtitle: "/bench-trend", to: "/bench-trend" },
-  { id: "page-graph", kind: "page", title: "Memory Graph", subtitle: "/graph", to: "/graph" },
-  { id: "page-memory-browser", kind: "page", title: "Memory Browser", subtitle: "/memory-browser", to: "/memory-browser" },
-  { id: "page-proposals", kind: "page", title: "Pending Proposals", subtitle: "/proposals", to: "/proposals" },
+  { id: "page-governance", kind: "page", title: "Governance", subtitle: "/governance", to: "/governance" },
+  { id: "page-memory-browser", kind: "page", title: "Browse", subtitle: "/memory-browser", to: "/memory-browser" },
+  { id: "page-graph", kind: "page", title: "Graph", subtitle: "/graph", to: "/graph" },
+  { id: "page-system", kind: "page", title: "System", subtitle: "/system", to: "/system" },
+  { id: "page-proposals", kind: "page", title: "Pending Proposals", subtitle: "/governance?tab=proposals", to: "/governance?tab=proposals" },
+  { id: "page-health-inbox", kind: "page", title: "Health Inbox", subtitle: "/governance?tab=health-inbox", to: "/governance?tab=health-inbox" },
+  { id: "page-config", kind: "page", title: "Configuration", subtitle: "/system?tab=config", to: "/system?tab=config" },
   { id: "page-recall", kind: "page", title: "Recall Stats", subtitle: "/recall", to: "/recall" },
-  { id: "page-status", kind: "page", title: "System Status", subtitle: "/status", to: "/status" },
-  { id: "page-config", kind: "page", title: "Configuration", subtitle: "/config", to: "/config" }
+  { id: "page-bench-trend", kind: "page", title: "Bench Trend", subtitle: "/bench-trend", to: "/bench-trend" }
 ];
 
 const VERB_ITEMS: ReadonlyArray<{ readonly id: string; readonly title: string; readonly command: string; readonly hint: string }> = [

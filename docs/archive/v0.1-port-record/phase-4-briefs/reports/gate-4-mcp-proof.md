@@ -8,7 +8,7 @@
 Fresh proof:
 
 ```bash
-rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon gate4-attached-agent-mcp-proof
+rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon attached-agent-mcp-proof
 ```
 
 Result: 1 file passed, 1 test passed.

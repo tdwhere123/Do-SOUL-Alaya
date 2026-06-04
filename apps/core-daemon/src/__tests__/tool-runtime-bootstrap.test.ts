@@ -33,6 +33,10 @@ describe("daemon tool runtime bootstrap", () => {
     }
     vi.useRealTimers();
     resetToolRuntimeWiringState();
+    // Reset the reconciliation off-switch here (not at the end of each test body)
+    // so a thrown bootDaemonRuntime() cannot leak a disable value into a later
+    // test that asserts the DEFAULT-ON behavior.
+    delete process.env.ALAYA_INGEST_RECONCILIATION_ENABLED;
     for (const configDir of isolatedConfigDirs.splice(0)) {
       await rm(configDir, { force: true, recursive: true }).catch(() => undefined);
     }
@@ -311,14 +315,15 @@ describe("daemon tool runtime bootstrap", () => {
 
     const runtime = await bootDaemonRuntime();
 
+    const mcpDiscoverCalls = hoisted.mcpDiscoverAndRegister.mock.calls as readonly (readonly unknown[])[];
     expect(
-      (hoisted.mcpDiscoverAndRegister.mock.calls[0]?.[0] as readonly { readonly server_name: string }[]).map(
+      (mcpDiscoverCalls[0]?.[0] as readonly { readonly server_name: string }[]).map(
         (server) => server.server_name
       )
     ).toEqual(["filesystem"]);
 
     expect(
-      (hoisted.mcpDiscoverAndRegister.mock.calls.at(-1)?.[0] as readonly { readonly server_name: string }[]).map(
+      (mcpDiscoverCalls.at(-1)?.[0] as readonly { readonly server_name: string }[]).map(
         (server) => server.server_name
       )
     ).toEqual(["filesystem"]);
@@ -331,6 +336,13 @@ describe("daemon tool runtime bootstrap", () => {
   });
 
   it("boots ConversationService with the compute-routing resolver and no legacy stance resolver", async () => {
+    // No garden secret in this boot -> the product default is host_worker, so
+    // the compute-routing fallback provider is local_heuristics (the zero-cloud
+    // in-process provider host_worker degrades to until a worker attaches).
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+    delete process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF;
+    delete process.env.ALAYA_GARDEN_OPENAI_SECRET_REF;
+
     await bootDaemonRuntime();
 
     expect(hoisted.conversationServiceDeps).toMatchObject({
@@ -664,7 +676,7 @@ describe("daemon tool runtime bootstrap", () => {
   it("wires the worker-dispatch static alias into the live server hard-constraint allowlist", async () => {
     await bootDaemonRuntime();
 
-    const appDeps = hoisted.createApp.mock.calls[0]?.[0] as
+    const appDeps = (hoisted.createApp.mock.calls as readonly (readonly unknown[])[])[0]?.[0] as
       | { listServerHardConstraints?: (workspaceId: string) => Promise<readonly { ref: string; content: string }[]> }
       | undefined;
     expect(typeof appDeps?.listServerHardConstraints).toBe("function");
@@ -708,7 +720,7 @@ describe("daemon tool runtime bootstrap", () => {
     expect(wrappedAssembler).toBeDefined();
 
     const order: string[] = [];
-    hoisted.contextLensAssemble.mockImplementationOnce(async (params) => {
+    (hoisted.contextLensAssemble as ReturnType<typeof vi.fn>).mockImplementationOnce(async (params: unknown) => {
       order.push("assemble");
       expect(params).toEqual({
         run: {
@@ -844,6 +856,64 @@ describe("daemon tool runtime bootstrap", () => {
     await expectBootstrapWaitsForBothCjkWarmups("storage");
   });
 
+  it("constructs ingest reconciliation by default with the rule-only zero-cloud decision port", async () => {
+    // No garden secret + no reconciliation env var -> reconciliation is
+    // DEFAULT-ON on the rule-only basis: the cloud garden-LLM is absent so
+    // the wired decision port is the rule-only one (zero cloud), and dedup
+    // runs out of the box.
+    delete process.env.ALAYA_INGEST_RECONCILIATION_ENABLED;
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+    delete process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF;
+    delete process.env.ALAYA_GARDEN_OPENAI_SECRET_REF;
+
+    await bootDaemonRuntime();
+
+    const core = (await import("@do-soul/alaya-core")) as Record<string, any>;
+    expect(core.ReconciliationService).toHaveBeenCalledTimes(1);
+    // The wired LLM-decision port is the rule-only one (no cloud configured).
+    expect(core.createRuleOnlyReconciliationDecisionPort).toHaveBeenCalledTimes(1);
+    const ruleOnlyPort = core.createRuleOnlyReconciliationDecisionPort.mock.results[0]?.value;
+    expect(core.ReconciliationService.mock.calls[0]?.[0]).toMatchObject({
+      llmDecision: ruleOnlyPort
+    });
+  });
+
+  it("keeps reconciliation ON for a non-disable value: ALAYA_INGEST_RECONCILIATION_ENABLED=1 still constructs it", async () => {
+    // The env var is a DISABLE switch (only "0"/"false" turn it off, see
+    // index.ts ingestReconciliationEnabled). Anything else must leave the
+    // default-ON behavior intact, so an explicit positive value must NOT be
+    // misread as a disable.
+    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = "1";
+
+    await bootDaemonRuntime();
+
+    const core = (await import("@do-soul/alaya-core")) as Record<string, any>;
+    expect(core.ReconciliationService).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves an operator off-switch: ALAYA_INGEST_RECONCILIATION_ENABLED=0 skips reconciliation construction", async () => {
+    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = "0";
+
+    await bootDaemonRuntime();
+
+    const core = (await import("@do-soul/alaya-core")) as Record<string, any>;
+    expect(core.ReconciliationService).not.toHaveBeenCalled();
+    expect(core.createRuleOnlyReconciliationDecisionPort).not.toHaveBeenCalled();
+  });
+
+  it("leaves an operator off-switch: ALAYA_INGEST_RECONCILIATION_ENABLED=false skips reconciliation construction", async () => {
+    // The second documented disable token alongside "0" (index.ts checks
+    // raw !== "0" && raw !== "false"). Asserting it explicitly pins both
+    // off-switch spellings so a future single-token parse regresses loudly.
+    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = "false";
+
+    await bootDaemonRuntime();
+
+    const core = (await import("@do-soul/alaya-core")) as Record<string, any>;
+    expect(core.ReconciliationService).not.toHaveBeenCalled();
+    expect(core.createRuleOnlyReconciliationDecisionPort).not.toHaveBeenCalled();
+  });
+
   it("marks principal coding unavailable when a required sandbox tool is missing", async () => {
     const appModule = await import("../app.js");
 
@@ -874,7 +944,8 @@ function createEventLogEntry(
   return {
     ...entry,
     event_id: crypto.randomUUID(),
-    created_at: "2026-04-23T08:05:00.000Z"
+    created_at: "2026-04-23T08:05:00.000Z",
+    revision: 0
   };
 }
 
@@ -936,7 +1007,9 @@ async function expectBootstrapWaitsForBothCjkWarmups(
 
   hoisted.coreWarmCjkSegmentation.mockImplementationOnce(async () => coreGate.promise);
   hoisted.storageWarmCjkSegmentation.mockImplementationOnce(async () => storageGate.promise);
-  hoisted.loadConfigEnv.mockImplementationOnce(async () => configGate.promise);
+  hoisted.loadConfigEnv.mockImplementationOnce(
+    async () => configGate.promise as unknown as Map<string, string>
+  );
 
   let completed = false;
   const runtimePromise = bootDaemonRuntime().then((runtime) => {

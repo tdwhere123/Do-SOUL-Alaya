@@ -37,7 +37,6 @@ import {
   SqliteGlobalMemoryRepo,
   SqliteKarmaEventRepo,
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
   type ProposalRepo,
   SqliteToolExecutionRecordRepo,
   type GlobalMemoryRecallCacheRepo,
@@ -58,8 +57,6 @@ import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 
 export const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
 export const ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
-export const OFFICIAL_API_GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
-export const OFFICIAL_API_GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
 const GARDEN_BACKLOG_REARM_RATIO = 0.7;
 const GARDEN_BACKLOG_SNAPSHOT_INTERVAL_MS = 60_000;
 
@@ -158,12 +155,64 @@ export function readOfficialGardenSecretRef(configEnv: ReadonlyMap<string, strin
   );
 }
 
-export function readOfficialGardenModelId(configEnv: ReadonlyMap<string, string>): string | null {
-  return readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_MODEL_ENV));
+export const ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV = "ALAYA_EDGE_PRODUCER_LLM_ENABLED";
+export const ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV = "ALAYA_EDGE_CLASSIFY_HOST_WORKER";
+
+// invariant: the B-2 edge-classify routing mode. Mutually exclusive by
+// construction: host-worker defer wins over the synchronous cloud LLM, which
+// wins over the local heuristic-only floor.
+//   - "host_worker_defer": the EDGE_CLASSIFY garden task is enqueued for an
+//     attached CLI agent (the compute). No cloud call. This is the product
+//     default whenever the resolved garden compute provider_kind is
+//     host_worker, or when ALAYA_EDGE_CLASSIFY_HOST_WORKER forces it on.
+//   - "cloud_llm": the operator strict-opted-in via ALAYA_EDGE_PRODUCER_LLM_ENABLED
+//     AND host-worker defer is NOT active. The synchronous in-process cloud
+//     port is then attempted (it still needs a resolvable key + provider_url,
+//     resolved separately; this mode reports the INTENT to call cloud).
+//   - "heuristic_only": neither defer nor opt-in — the deterministic heuristic
+//     is the only classifier; zero external call.
+export type EdgeClassifyWiringMode = "host_worker_defer" | "cloud_llm" | "heuristic_only";
+
+export interface EdgeClassifyWiring {
+  readonly mode: EdgeClassifyWiringMode;
+  // strict opt-in for the synchronous cloud edge-LLM (1/true only).
+  readonly llmEnabled: boolean;
+  // host-worker defer is on (explicit override OR provider_kind=host_worker default).
+  readonly hostWorkerEnabled: boolean;
 }
 
-export function readOfficialGardenProviderUrl(configEnv: ReadonlyMap<string, string>): string | null {
-  return readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_PROVIDER_URL_ENV));
+function readBooleanOptIn(raw: string | undefined): boolean {
+  const value = raw?.toLowerCase();
+  return value === "1" || value === "true";
+}
+
+// invariant: the single decision that chooses cloud llmPort vs the
+// host-worker EDGE_CLASSIFY defer queue vs heuristic-only for B-2 edge
+// classification. PURE: depends only on the passed env reader and the resolved
+// garden compute provider_kind, so the zero-cloud-by-default guarantee is unit
+// testable without standing up the daemon. index.ts consumes this; behavior
+// must not diverge between the two. A regression that flips the default back
+// to cloud changes this function's output and is caught by its tests.
+// see also: apps/core-daemon/src/index.ts edgeAutoProducerLlmPort /
+//   edgeClassifyHostWorkerEnabled wiring.
+export function resolveEdgeClassifyWiring(
+  env: Readonly<Record<string, string | undefined>>,
+  gardenComputeConfig: { readonly provider_kind: string }
+): EdgeClassifyWiring {
+  const llmEnabled = readBooleanOptIn(env[ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV]);
+  const hostWorkerRaw = env[ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV]?.toLowerCase();
+  const hostWorkerEnabled =
+    hostWorkerRaw === "1" || hostWorkerRaw === "true"
+      ? true
+      : hostWorkerRaw === "0" || hostWorkerRaw === "false"
+        ? false
+        : gardenComputeConfig.provider_kind === "host_worker";
+  const mode: EdgeClassifyWiringMode = hostWorkerEnabled
+    ? "host_worker_defer"
+    : llmEnabled
+      ? "cloud_llm"
+      : "heuristic_only";
+  return { mode, llmEnabled, hostWorkerEnabled };
 }
 
 export function createOptionalMemoryEmbeddingRepo(database: StorageDatabase): MemoryEmbeddingRepo | null {
@@ -246,7 +295,6 @@ export function createGlobalMemoryRecallCachePort(params: {
 
 export function createSoulGraphService(input: {
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
-  readonly memoryGraphEdgeRepo: SqliteMemoryGraphEdgeRepo;
   readonly pathRelationRepo: Pick<PathRelationRepo, "findActive">;
   readonly proposalRepo: Pick<
     ProposalRepo,
@@ -266,14 +314,12 @@ export function createSoulGraphService(input: {
     }): Promise<SoulGraph> => {
       const [
         memories,
-        edges,
         pathRelations,
         pendingProposals,
         pendingProposalsTotal,
         memoryUpdateEvents
       ] = await Promise.all([
         input.memoryEntryRepo.findByWorkspaceId(workspaceId),
-        input.memoryGraphEdgeRepo.findByWorkspace(workspaceId),
         input.pathRelationRepo.findActive(workspaceId),
         input.proposalRepo.findPendingSummaries(workspaceId, {
           limit,
@@ -291,20 +337,11 @@ export function createSoulGraphService(input: {
         await input.proposalRepo.countPendingMemoryTargetEdges(workspaceId, allMemoryIds);
       const limitedMemories = memories.slice(0, limit);
       const memoryIds = new Set(limitedMemories.map((memory: MemoryEntryRecord) => memory.object_id));
-      // Edge limit precedence under pressure: PathRelation edges (the new
-      // dynamics-driven view, with strength + stability + last_reinforced_at
-      // metadata that Phase 3 visual encoding depends on) claim limit slots
-      // first; legacy memoryGraphEdge rows fill the remainder. This means a
-      // workspace with >limit PathRelation edges will visually drop the
-      // legacy edges entirely until the limit is raised. The precedence is
-      // intentional — path-plasticity edges carry richer semantics — but it
-      // is pinned by `prefers PathRelation edges over legacy edges under
-      // limit pressure` in soul-graph-service.test.ts so any future re-order
-      // surfaces in the test diff.
+      // invariant: the Inspector graph view shows only PathRelation edges —
+      // the unified plane carries strength + stability + last_reinforced_at
+      // metadata the visual encoding depends on. memory_graph_edges is no
+      // longer read here (no producer writes it; accept mints paths).
       const pathRelationEdges = buildPathRelationEdges(pathRelations, memoryIds).slice(0, limit);
-      const limitedEdges = edges
-        .filter((edge) => memoryIds.has(edge.source_memory_id) && memoryIds.has(edge.target_memory_id))
-        .slice(0, Math.max(0, limit - pathRelationEdges.length));
       const tagProjection = buildDomainTagProjection(limitedMemories);
       const influenceCounts = buildInfluenceCounts(pathRelations);
       const proposalProjection = buildPendingProposalProjection(pendingProposals, memoryIds);
@@ -343,19 +380,11 @@ export function createSoulGraphService(input: {
         ],
         edges: [
           ...pathRelationEdges,
-          ...limitedEdges.map((edge) => ({
-            id: edge.edge_id,
-            kind: "references" as const,
-            source_id: edge.source_memory_id,
-            target_id: edge.target_memory_id,
-            created_at: edge.created_at
-          })),
           ...proposalProjection.edges,
           ...tagProjection.edges
         ],
         truncated:
           memories.length > limitedMemories.length ||
-          edges.length > limitedEdges.length ||
           pathRelations.length > pathRelationEdges.length ||
           pendingProposalsTotal > pendingProposals.length,
         // Use the cheap COUNT(*) over pending proposals, NOT pendingProposals.length:
@@ -364,7 +393,6 @@ export function createSoulGraphService(input: {
         // pending — the inspector "sampled vs complete" chip would silently lie.
         node_total: memories.length + pendingProposalsTotal + countUniqueDomainTags(memories),
         edge_total:
-          edges.length +
           countPathRelationEdges(pathRelations, allMemoryIdSet) +
           pendingProposalEdgesTotal +
           countDomainTagEdges(memories)

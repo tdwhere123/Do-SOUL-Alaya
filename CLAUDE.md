@@ -32,9 +32,16 @@ Important invariants (full set in `docs/handbook/invariants.md`):
   surfaces are MCP (for agent attach) and the `alaya` CLI (13 verbs:
   `doctor / install / attach / detach / status / inspect / update /
   tools list / tools call --json / backup / export / import / mcp stdio /
-  review pending|accept|reject`). The Memory Inspector is an additional
-  memory-tooling loopback surface, not an agent surface, and never
-  participates in agent control flow.
+  review pending|accept|reject|edges`). The `review` verb is one CLI
+  verb with subcommands; v0.3.11 extends it with `review edges
+  pending|accept|reject` for edge-proposal governance — this is a
+  subcommand surface extension, not a new top-level verb, so the verb
+  count remains 13. The live MCP tool catalog is 16 (13 `soul.*` + 3
+  `garden.*`); v0.3.11 added three edge-proposal `soul.*` tools
+  (`soul.propose_edge`, `soul.list_pending_edge_proposals`,
+  `soul.batch_review_edge_proposals`) inside that catalog. The Memory
+  Inspector is an additional memory-tooling loopback surface, not an
+  agent surface, and never participates in agent control flow.
 - Public-facing copy must describe Alaya as a memory plane for CLI
   agents (Codex / Claude Code / similar) and must not invite
   non-engineering users to install or operate Alaya. See

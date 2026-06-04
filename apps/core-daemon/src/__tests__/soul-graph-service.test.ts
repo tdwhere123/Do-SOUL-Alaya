@@ -7,11 +7,13 @@ import {
 import { MemoryGovernanceEventType, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
 import type {
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
   ProposalRepo,
-  PathRelationRepo,
-  MemoryEntryRecord
+  PathRelationRepo
 } from "@do-soul/alaya-storage";
+
+// Mirrors the non-exported MemoryEntryRecord alias in
+// daemon-runtime-support.ts (the row shape findByWorkspaceId returns).
+type MemoryEntryRecord = Awaited<ReturnType<SqliteMemoryEntryRepo["findByWorkspaceId"]>>[number];
 
 type SoulGraphProposalRepo = Pick<
   ProposalRepo,
@@ -35,9 +37,6 @@ describe("createSoulGraphService", () => {
           })
         ]
       } as unknown as SqliteMemoryEntryRepo,
-      memoryGraphEdgeRepo: {
-        findByWorkspace: async () => []
-      } as unknown as SqliteMemoryGraphEdgeRepo,
       pathRelationRepo: {
         findActive: async () => []
       } as unknown as Pick<PathRelationRepo, "findActive">,
@@ -113,9 +112,6 @@ describe("createSoulGraphService", () => {
           })
         ]
       } as unknown as SqliteMemoryEntryRepo,
-      memoryGraphEdgeRepo: {
-        findByWorkspace: async () => []
-      } as unknown as SqliteMemoryGraphEdgeRepo,
       pathRelationRepo: {
         findActive: async () => []
       } as unknown as Pick<PathRelationRepo, "findActive">,
@@ -159,9 +155,6 @@ describe("createSoulGraphService", () => {
           })
         ]
       } as unknown as SqliteMemoryEntryRepo,
-      memoryGraphEdgeRepo: {
-        findByWorkspace: async () => []
-      } as unknown as SqliteMemoryGraphEdgeRepo,
       pathRelationRepo: {
         findActive: async () => []
       } as unknown as Pick<PathRelationRepo, "findActive">,
@@ -202,9 +195,6 @@ describe("createSoulGraphService", () => {
           })
         ]
       } as unknown as SqliteMemoryEntryRepo,
-      memoryGraphEdgeRepo: {
-        findByWorkspace: async () => []
-      } as unknown as SqliteMemoryGraphEdgeRepo,
       pathRelationRepo: {
         findActive: async () => []
       } as unknown as Pick<PathRelationRepo, "findActive">,
@@ -258,9 +248,6 @@ describe("createSoulGraphService", () => {
           })
         ]
       } as unknown as SqliteMemoryEntryRepo,
-      memoryGraphEdgeRepo: {
-        findByWorkspace: async () => []
-      } as unknown as SqliteMemoryGraphEdgeRepo,
       pathRelationRepo: {
         findActive: async () => [
           createPathRelation({
@@ -501,7 +488,7 @@ describe("createSoulGraphService", () => {
     ).toBe("engineering_chunk");
   });
 
-  it("prefers PathRelation edges over legacy edges under limit pressure", async () => {
+  it("truncates PathRelation edges under limit pressure (path plane is the only edge source)", async () => {
     const service = createSoulGraphService({
       memoryEntryRepo: {
         findByWorkspaceId: async () => [
@@ -509,18 +496,6 @@ describe("createSoulGraphService", () => {
           createMemory({ object_id: "memory-b", domain_tags: [] })
         ]
       } as unknown as SqliteMemoryEntryRepo,
-      memoryGraphEdgeRepo: {
-        findByWorkspace: async () => [
-          {
-            edge_id: "legacy-edge-1",
-            source_memory_id: "memory-a",
-            target_memory_id: "memory-b",
-            edge_type: "explicit",
-            workspace_id: "default",
-            created_at: "2026-05-05T00:00:00.000Z"
-          }
-        ]
-      } as unknown as SqliteMemoryGraphEdgeRepo,
       pathRelationRepo: {
         findActive: async () =>
           Array.from({ length: 5 }, (_, index) => createPathRelation({
@@ -542,9 +517,7 @@ describe("createSoulGraphService", () => {
     const graph = await service.buildSoulGraph({ workspaceId: "default", depth: 2, limit: 4 });
 
     const pathEdges = graph.edges.filter((edge) => edge.id.startsWith("path-"));
-    const legacyEdges = graph.edges.filter((edge) => edge.id === "legacy-edge-1");
     expect(pathEdges).toHaveLength(4);
-    expect(legacyEdges).toHaveLength(0);
     expect(graph.truncated).toBe(true);
   });
 
@@ -556,7 +529,6 @@ describe("createSoulGraphService", () => {
           createMemory({ object_id: "memory-b", domain_tags: ["tooling"] })
         ]
       } as unknown as SqliteMemoryEntryRepo,
-      memoryGraphEdgeRepo: { findByWorkspace: async () => [] } as unknown as SqliteMemoryGraphEdgeRepo,
       pathRelationRepo: { findActive: async () => [] } as unknown as Pick<PathRelationRepo, "findActive">,
       proposalRepo: {
         findPendingSummaries: async () => [
@@ -599,7 +571,6 @@ describe("createSoulGraphService", () => {
       memoryEntryRepo: {
         findByWorkspaceId: async () => [createMemory({ object_id: "memory-a", domain_tags: [] })]
       } as unknown as SqliteMemoryEntryRepo,
-      memoryGraphEdgeRepo: { findByWorkspace: async () => [] } as unknown as SqliteMemoryGraphEdgeRepo,
       pathRelationRepo: { findActive: async () => [] } as unknown as Pick<PathRelationRepo, "findActive">,
       proposalRepo: {
         // Simulating the SQL LIMIT: only 10 of the 25 pending rows surface.

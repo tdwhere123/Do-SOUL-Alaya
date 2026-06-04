@@ -1,9 +1,30 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import type { PathAnchorRef, PathRelation } from "@do-soul/alaya-protocol";
-import { serializePathAnchorRef } from "@do-soul/alaya-protocol";
+import { PathAnchorRefSchema, serializePathAnchorRef } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../db.js";
-import { SqlitePathRelationRepo } from "../repos/path-relation-repo.js";
+import {
+  PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
+  PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL,
+  SqlitePathRelationRepo
+} from "../repos/path-relation-repo.js";
+
+// invariant: the backing-id-coverage guard reads anchor discriminant kinds
+// from the protocol schema rather than a hardcoded list, so the live union is
+// always the source of truth for what the CASE must cover.
+// PathAnchorRefSchema is a discriminatedUnion wrapped in .readonly(); unwrap
+// _def.innerType to reach .options.
+// cross-file ref: packages/protocol/src/soul/path-relation.ts PathAnchorRefSchema
+function anchorKindsFromSchema(): readonly string[] {
+  const wrapped = PathAnchorRefSchema as unknown as {
+    readonly _def: {
+      readonly innerType: {
+        readonly options: ReadonlyArray<{ readonly shape: { readonly kind: { readonly value: string } } }>;
+      };
+    };
+  };
+  return wrapped._def.innerType.options.map((member) => member.shape.kind.value);
+}
 
 const databases = new Set<StorageDatabase>();
 
@@ -278,11 +299,95 @@ describe("SqlitePathRelationRepo", () => {
     ]);
   });
 
-  it("reuses the shared protocol anchor serializer on both the SQL and caller lookup paths", async () => {
-    const repoSource = await readFile(new URL("../repos/path-relation-repo.ts", import.meta.url), "utf8");
+  it("findByTargetAnchor returns only target-anchored rows, excluding source-anchored-only rows", async () => {
+    const { repo } = createRepo();
+    const inboundRelation = createPathRelationFixture({
+      path_id: "path-inbound",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-source" },
+        target_anchor: { kind: "object", object_id: "object-pivot" }
+      }
+    });
+    const outboundRelation = createPathRelationFixture({
+      path_id: "path-outbound",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-pivot" },
+        target_anchor: { kind: "object", object_id: "object-other" }
+      },
+      created_at: "2026-04-17T00:01:00.000Z",
+      updated_at: "2026-04-17T00:01:00.000Z"
+    });
 
-    expect(repoSource).toContain("serialize_path_anchor_ref(");
+    repo.create(inboundRelation);
+    repo.create(outboundRelation);
+
+    // Target-anchored only: the inbound row (object-pivot is its target) is
+    // returned; the outbound row (object-pivot is its source) is excluded.
+    // findByAnchor would return both — findByTargetAnchor is the inbound half.
+    await expect(
+      repo.findByTargetAnchor("workspace-1", { kind: "object", object_id: "object-pivot" })
+    ).resolves.toEqual([withActiveLifecycle(inboundRelation)]);
+    await expect(
+      repo.findByAnchor("workspace-1", { kind: "object", object_id: "object-pivot" })
+    ).resolves.toEqual([
+      withActiveLifecycle(inboundRelation),
+      withActiveLifecycle(outboundRelation)
+    ]);
+  });
+
+  it("findByTargetAnchor scopes to a single workspace", async () => {
+    const { repo, database } = createRepo();
+    seedWorkspace(database, "workspace-2");
+    const workspaceOneRelation = createPathRelationFixture({
+      path_id: "path-ws1",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-source" },
+        target_anchor: { kind: "object", object_id: "object-pivot" }
+      }
+    });
+    const workspaceTwoRelation = createPathRelationFixture({
+      path_id: "path-ws2",
+      workspace_id: "workspace-2",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-source" },
+        target_anchor: { kind: "object", object_id: "object-pivot" }
+      },
+      created_at: "2026-04-17T00:01:00.000Z",
+      updated_at: "2026-04-17T00:01:00.000Z"
+    });
+
+    repo.create(workspaceOneRelation);
+    repo.create(workspaceTwoRelation);
+
+    await expect(
+      repo.findByTargetAnchor("workspace-1", { kind: "object", object_id: "object-pivot" })
+    ).resolves.toEqual([withActiveLifecycle(workspaceOneRelation)]);
+  });
+
+  it("keeps the anchor-key SQL byte-identical to the migration 048 index expression", async () => {
+    const repoSource = await readFile(new URL("../repos/path-relation-repo.ts", import.meta.url), "utf8");
+    const indexSource = await readFile(
+      new URL("../migrations/048-path-relations-and-event-log-indexes.sql", import.meta.url),
+      "utf8"
+    );
+
+    // The drifted serialize_path_anchor_ref SQL function defeated the index;
+    // the repo must no longer register or query it.
+    expect(repoSource).not.toContain("serialize_path_anchor_ref(");
+    // The bound-param side still uses the protocol serializer (its JSON text
+    // equals what the indexed json_array expression renders).
     expect(repoSource).toContain("serializePathAnchorRef,");
+
+    // The rendered anchor-key predicate (this test reconstructs it via the same
+    // template the repo uses) must appear verbatim in the indexed expression,
+    // normalized only for whitespace. This is the byte-identity contract; the
+    // EXPLAIN QUERY PLAN test below proves the planner actually picks the index.
+    const normalize = (text: string): string => text.replace(/\s+/gu, " ").trim();
+    const normalizedIndex = normalize(indexSource);
+    for (const anchorPath of ["source_anchor", "target_anchor"] as const) {
+      const normalizedBranch = normalize(reconstructedAnchorKeySql(anchorPath));
+      expect(normalizedIndex).toContain(normalizedBranch);
+    }
 
     const { database, repo } = createRepo();
     const anchor = {
@@ -303,9 +408,23 @@ describe("SqlitePathRelationRepo", () => {
 
     await repo.create(relation);
 
+    // The indexed source-anchor expression (copied from migration 048) must
+    // render the same text the bound parameter carries, or the predicate could
+    // never match the index even when both sides "look" equal.
     const row = database.connection
-      .prepare("SELECT serialize_path_anchor_ref(?) AS anchor_key")
-      .get(JSON.stringify(anchor)) as { readonly anchor_key: string | null };
+      .prepare(
+        `SELECT
+          CASE json_extract(anchors_json, '$.source_anchor.kind')
+            WHEN 'time_concern' THEN json_array(
+              'time_concern',
+              json_extract(anchors_json, '$.source_anchor.source_object_id'),
+              json_extract(anchors_json, '$.source_anchor.window_digest')
+            )
+          END AS anchor_key
+        FROM path_relations
+        WHERE path_id = ?`
+      )
+      .get(relation.path_id) as { readonly anchor_key: string | null };
 
     expect(row.anchor_key).toBe(serializePathAnchorRef(anchor));
     expect(serializePathAnchorRef(anchor)).toBe(JSON.stringify(["time_concern", "object-shared-time", "next_week"]));
@@ -383,6 +502,80 @@ describe("SqlitePathRelationRepo", () => {
     await expect(repo.findActive("workspace-1")).resolves.toEqual([withActiveLifecycle(relation)]);
   });
 
+  it("findDormant returns only dormant rows whose updated_at is older than the threshold", async () => {
+    const { repo, database } = createRepo();
+
+    // Active rows are never dormant candidates.
+    repo.create(createPathRelationFixture({ path_id: "path-active" }));
+
+    // A dormant row last touched well before the threshold: a candidate.
+    insertRawPathRelationRow(database, {
+      pathId: "path-dormant-old",
+      lifecycleJson: JSON.stringify({
+        status: "dormant",
+        retirement_rule: "retire_after_cooldown",
+        cooldown_rule: "7d_without_support"
+      }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-10T00:00:00.000Z"
+    });
+
+    // A dormant row touched after the threshold: too fresh, excluded.
+    insertRawPathRelationRow(database, {
+      pathId: "path-dormant-fresh",
+      lifecycleJson: JSON.stringify({
+        status: "dormant",
+        retirement_rule: "retire_after_cooldown",
+        cooldown_rule: "7d_without_support"
+      }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z"
+    });
+
+    // A retired row is terminal, never a dormant candidate even if old.
+    insertRawPathRelationRow(database, {
+      pathId: "path-retired-old",
+      lifecycleJson: JSON.stringify({
+        status: "retired",
+        retirement_rule: "retire_after_cooldown"
+      }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-10T00:00:00.000Z"
+    });
+
+    const dormant = await repo.findDormant("workspace-1", "2026-02-01T00:00:00.000Z");
+    expect(dormant.map((relation) => relation.path_id)).toEqual(["path-dormant-old"]);
+  });
+
+  it("findDormant scopes to a single workspace", async () => {
+    const { repo, database } = createRepo();
+    seedWorkspace(database, "workspace-2");
+
+    insertRawPathRelationRow(database, {
+      pathId: "path-ws1-dormant",
+      workspaceId: "workspace-1",
+      lifecycleJson: JSON.stringify({
+        status: "dormant",
+        retirement_rule: "retire_after_cooldown"
+      }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-10T00:00:00.000Z"
+    });
+    insertRawPathRelationRow(database, {
+      pathId: "path-ws2-dormant",
+      workspaceId: "workspace-2",
+      lifecycleJson: JSON.stringify({
+        status: "dormant",
+        retirement_rule: "retire_after_cooldown"
+      }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-10T00:00:00.000Z"
+    });
+
+    const dormant = await repo.findDormant("workspace-1", "2026-02-01T00:00:00.000Z");
+    expect(dormant.map((relation) => relation.path_id)).toEqual(["path-ws1-dormant"]);
+  });
+
   it("deletes path relations", async () => {
     const { repo } = createRepo();
     const relation = createPathRelationFixture();
@@ -393,7 +586,137 @@ describe("SqlitePathRelationRepo", () => {
     await expect(repo.findById(relation.path_id)).resolves.toBeNull();
     await expect(repo.findByWorkspace(relation.workspace_id)).resolves.toEqual([]);
   });
+
+  // I2 regression: the anchor lookups must ride the migration 048 expression
+  // indexes, not degrade to a workspace SCAN. EXPLAIN QUERY PLAN runs over the
+  // SQL text the repo's OWN prepared statements carry (via .source) so a drift
+  // between the indexed expression and the live statement fails this test — a
+  // reconstruction could pass while the private statement drifted.
+  it("findByAnchor / findByAnchors / findByTargetAnchor ride the anchor indexes (no workspace scan)", () => {
+    const { database, repo } = createRepo();
+    const repoSql = repo.__anchorLookupSqlForTest();
+
+    const explainUsesAnchorIndex = (sql: string, params: readonly unknown[]): void => {
+      const plan = database.connection
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...params) as ReadonlyArray<{ readonly detail: string }>;
+      const details = plan.map((step) => step.detail).join(" | ");
+      expect(
+        plan.some(
+          (step) =>
+            step.detail.includes("USING INDEX idx_path_relations_source_anchor_key") ||
+            step.detail.includes("USING INDEX idx_path_relations_target_anchor_key")
+        ),
+        `expected an anchor index SEARCH, got: ${details}`
+      ).toBe(true);
+      expect(
+        plan.some((step) => step.detail.startsWith("SCAN")),
+        `expected no SCAN step, got: ${details}`
+      ).toBe(false);
+    };
+
+    // The REAL prepared statements: findByAnchor (source side) and
+    // findByTargetAnchor (target side).
+    explainUsesAnchorIndex(repoSql.findBySourceAnchor, ["workspace-1", '["object","object-1"]']);
+    explainUsesAnchorIndex(repoSql.findByTargetAnchor, ["workspace-1", '["object","object-1"]']);
+    // findByAnchors fans out an IN-list over source OR target; both arms must
+    // still resolve through the anchor indexes. Rendered by the same builder the
+    // production path prepares.
+    explainUsesAnchorIndex(repoSql.findByAnchors(2), [
+      "workspace-1",
+      '["object","object-1"]',
+      '["object","object-2"]',
+      '["object","object-1"]',
+      '["object","object-2"]'
+    ]);
+  });
+
+  // I2 regression (migration 087): findByBackingObjectId resolves rows by the
+  // backing memory object id of each anchor variant (a UNION ALL of a source-side
+  // and target-side lookup). Each arm must ride the migration-087 backing-object
+  // expression indexes, not degrade to a workspace SCAN — proven over the repo's
+  // OWN prepared statement (.source), so a drift between the indexed expression
+  // and the live statement fails this test.
+  it("findByBackingObjectId rides the migration-087 backing-object indexes (no workspace scan)", () => {
+    const { database, repo } = createRepo();
+    const repoSql = repo.__anchorLookupSqlForTest();
+
+    const plan = database.connection
+      .prepare(`EXPLAIN QUERY PLAN ${repoSql.findByBackingObjectId}`)
+      .all("workspace-1", "object-1", "workspace-1", "object-1") as ReadonlyArray<{
+      readonly detail: string;
+    }>;
+    const details = plan.map((step) => step.detail).join(" | ");
+
+    // Both UNION ALL arms must SEARCH via a backing-object expression index.
+    const indexSearches = plan.filter(
+      (step) =>
+        step.detail.includes("USING INDEX idx_path_relations_source_backing_object_id") ||
+        step.detail.includes("USING INDEX idx_path_relations_target_backing_object_id")
+    );
+    expect(
+      indexSearches.length,
+      `expected two backing-object index SEARCHes (one per UNION arm), got: ${details}`
+    ).toBe(2);
+    expect(
+      plan.some((step) => step.detail.startsWith("SCAN")),
+      `expected no SCAN step, got: ${details}`
+    ).toBe(false);
+  });
+
+  // invariant: anchorBackingObjectIdSql has no ELSE, so an anchor kind absent
+  // from its CASE returns NULL and `NULL IN (...)` never matches — such a kind
+  // escapes cascade pruning (orphaned topology). This guard fails when a kind
+  // exists in PathAnchorRefSchema without a matching WHEN branch in the
+  // backing-id SQL, forcing a conscious coverage decision.
+  // cross-file ref: packages/storage/src/repos/path-relation-repo.ts anchorBackingObjectIdSql
+  it("backing-id SQL covers every PathAnchorRef kind (no silently-unpruned kind)", () => {
+    const kinds = anchorKindsFromSchema();
+    expect(kinds.length).toBeGreaterThan(0);
+    for (const kind of kinds) {
+      const branch = `WHEN '${kind}' THEN`;
+      expect(
+        PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL.includes(branch),
+        `source backing-id SQL is missing a WHEN branch for anchor kind '${kind}'`
+      ).toBe(true);
+      expect(
+        PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL.includes(branch),
+        `target backing-id SQL is missing a WHEN branch for anchor kind '${kind}'`
+      ).toBe(true);
+    }
+  });
 });
+
+// Byte-identical reconstruction of the anchor-key SQL the repo prepares
+// (path-relation-repo.ts anchorKeySql). Used only by the byte-identity test to
+// assert the rendered branch appears verbatim in the migration 048 index; the
+// EXPLAIN test runs the repo's own prepared statements instead.
+// cross-file ref: migrations/048-path-relations-and-event-log-indexes.sql.
+function reconstructedAnchorKeySql(anchorPath: "source_anchor" | "target_anchor"): string {
+  return `CASE json_extract(anchors_json, '$.${anchorPath}.kind')
+      WHEN 'object' THEN json_array('object', json_extract(anchors_json, '$.${anchorPath}.object_id'))
+      WHEN 'object_facet' THEN json_array(
+        'object_facet',
+        json_extract(anchors_json, '$.${anchorPath}.object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.facet_key')
+      )
+      WHEN 'obligation' THEN json_array(
+        'obligation',
+        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.obligation_digest')
+      )
+      WHEN 'risk_concern' THEN json_array(
+        'risk_concern',
+        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.concern_digest')
+      )
+      WHEN 'time_concern' THEN json_array(
+        'time_concern',
+        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
+        json_extract(anchors_json, '$.${anchorPath}.window_digest')
+      )
+    END`;
+}
 
 function createRepo(): {
   readonly database: StorageDatabase;

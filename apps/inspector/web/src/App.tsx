@@ -3,14 +3,12 @@ import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-r
 import { getInspectorToken, setInspectorToken, setUnauthorizedHandler, setWorkspaceId } from "./api";
 
 import BenchTrendPage from "./pages/BenchTrend";
-import ConfigPage from "./pages/Config";
+import GovernancePage from "./pages/Governance";
 import GraphPage from "./pages/Graph";
-import HealthInboxPage from "./pages/HealthInbox";
 import MemoryBrowserPage from "./pages/MemoryBrowser";
 import OverviewPage from "./pages/Overview";
-import ProposalsPage from "./pages/Proposals";
 import RecallPage from "./pages/Recall";
-import StatusPage from "./pages/Status";
+import SystemPage from "./pages/System";
 
 import CommandPalette, { useCommandPaletteHotkey } from "./components/CommandPalette";
 import Layout from "./components/Layout";
@@ -85,21 +83,40 @@ export function AppContent() {
     <>
       <Routes>
         <Route element={<Layout />}>
+          {/* Five top-level nav surfaces. */}
           <Route path="/overview" element={<OverviewPage />} />
-          <Route path="/bench-trend" element={<BenchTrendPage />} />
-          <Route path="/config" element={<ConfigPage />} />
-          <Route path="/graph" element={<GraphPage />} />
-          <Route path="/proposals" element={<ProposalsPage />} />
-          <Route path="/recall" element={<RecallPage />} />
+          <Route path="/governance" element={<GovernancePage />} />
           <Route path="/memory-browser" element={<MemoryBrowserPage />} />
-          <Route path="/health-inbox" element={<HealthInboxPage />} />
-          <Route path="/status" element={<StatusPage />} />
+          <Route path="/graph" element={<GraphPage />} />
+          <Route path="/system" element={<SystemPage />} />
+          {/* Demoted deep links (reachable via cards / command palette). */}
+          <Route path="/recall" element={<RecallPage />} />
+          <Route path="/bench-trend" element={<BenchTrendPage />} />
+          {/* Legacy paths fold into the merged surfaces, preserving any
+              incoming query string (e.g. Graph's ?highlight=). */}
+          <Route
+            path="/proposals"
+            element={<LegacyRedirect to="/governance" tab="proposals" />}
+          />
+          <Route
+            path="/health-inbox"
+            element={<LegacyRedirect to="/governance" tab="health-inbox" />}
+          />
+          <Route path="/status" element={<LegacyRedirect to="/system" tab="status" />} />
+          <Route path="/config" element={<LegacyRedirect to="/system" tab="config" />} />
           <Route path="/" element={<Navigate to="/overview" replace />} />
         </Route>
       </Routes>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </>
   );
+}
+
+function LegacyRedirect({ to, tab }: { readonly to: string; readonly tab: string }) {
+  const [searchParams] = useSearchParams();
+  const next = new URLSearchParams(searchParams);
+  next.set("tab", tab);
+  return <Navigate to={`${to}?${next.toString()}`} replace />;
 }
 
 function App() {

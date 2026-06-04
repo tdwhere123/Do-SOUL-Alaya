@@ -1,6 +1,7 @@
 import {
   createMcpMemoryProposalWorkflow,
   SourceDeliveryAnchorValidationError,
+  type McpMemoryProposalWorkflowDependencies,
   type McpMemoryProposalWorkflowEventLogRepo,
   type McpMemoryProposalWorkflowProposalRepo,
   type McpMemoryProposalWorkflowRuntimeNotifier,
@@ -22,6 +23,21 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly memoryEntryRepo: NonNullable<McpMemoryToolHandlerDependencies["memoryEntryRepo"]>;
   readonly evidenceService?: McpMemoryToolHandlerDependencies["evidenceService"];
   readonly pathRelationProposalService?: McpMemoryToolHandlerDependencies["pathRelationProposalService"];
+  // invariant: B3's object-anchor existence + ownership gate, routed into the
+  // proposal accept-apply path so the second durable path-insert route is
+  // validated before the storage insert. Wired from PathRelationProposalService.
+  // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts objectAnchorGate
+  readonly objectAnchorGate?: McpMemoryProposalWorkflowDependencies["objectAnchorGate"];
+  // invariant: reads member evidence gists so the synthesis-create accept-apply
+  // can distill a deterministic NO-LLM summary and validate cluster evidence
+  // exists before the durable insert. Wired from EvidenceService.findByIdScoped.
+  // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts synthesisEvidenceReader
+  readonly synthesisEvidenceReader?: McpMemoryProposalWorkflowDependencies["synthesisEvidenceReader"];
+  // invariant: resolves the cluster's member memories at capsule-build time so
+  // source_memory_refs is populated (the compress arm earns the `compressed`
+  // disposition only for a listed member). Wired from memoryEntryRepo.findByEvidenceRefs.
+  // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts synthesisMemberResolver
+  readonly synthesisMemberResolver?: McpMemoryProposalWorkflowDependencies["synthesisMemberResolver"];
   readonly signalService: McpMemoryToolHandlerDependencies["signalService"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
   readonly edgeProposalService?: McpMemoryToolHandlerDependencies["edgeProposalService"];
@@ -30,6 +46,9 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly trustStateRecorder: McpMemoryToolHandlerDependencies["trustStateRecorder"];
   readonly eventPublisher: NonNullable<McpMemoryToolHandlerDependencies["eventPublisher"]>;
   readonly gardenTaskRepo?: McpMemoryToolHandlerDependencies["gardenTaskRepo"];
+  // invariant: applies a host-worker EDGE_CLASSIFY verdict to the existing
+  // heuristic path. see also: mcp-memory-tool-handler.ts completeEdgeClassifyTask.
+  readonly edgeVerdictApplier?: McpMemoryToolHandlerDependencies["edgeVerdictApplier"];
   readonly eventLogRepo: McpMemoryProposalWorkflowEventLogRepo;
   readonly proposalRepo: McpMemoryProposalWorkflowProposalRepo;
   readonly runtimeNotifier: McpMemoryProposalWorkflowRuntimeNotifier;
@@ -92,6 +111,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
     trustStateRecorder: input.trustStateRecorder,
     eventPublisher: input.eventPublisher,
     ...(input.gardenTaskRepo === undefined ? {} : { gardenTaskRepo: input.gardenTaskRepo }),
+    ...(input.edgeVerdictApplier === undefined ? {} : { edgeVerdictApplier: input.edgeVerdictApplier }),
     ...(input.attachSurfaceRegistrar === undefined
       ? {}
       : { attachSurfaceRegistrar: input.attachSurfaceRegistrar }),
@@ -118,6 +138,13 @@ export function createDaemonMcpMemoryToolHandler(input: {
           }
         }
       },
+      ...(input.objectAnchorGate === undefined ? {} : { objectAnchorGate: input.objectAnchorGate }),
+      ...(input.synthesisEvidenceReader === undefined
+        ? {}
+        : { synthesisEvidenceReader: input.synthesisEvidenceReader }),
+      ...(input.synthesisMemberResolver === undefined
+        ? {}
+        : { synthesisMemberResolver: input.synthesisMemberResolver }),
       ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding })
     })
   });

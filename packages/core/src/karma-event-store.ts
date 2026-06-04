@@ -11,6 +11,9 @@ export interface KarmaEventStore {
 
 export interface KarmaEventStoreRepoPort {
   create(event: Readonly<KarmaEvent>): Promise<Readonly<KarmaEvent>>;
+  // Synchronous read keeps SqliteKarmaEventStore.findByObjectId honoring the
+  // sync KarmaEventStore contract without retaining an in-memory event mirror.
+  findByObjectIdSync(objectId: string): readonly Readonly<KarmaEvent>[];
 }
 
 export interface KarmaEventStoreWarnPort {
@@ -34,23 +37,28 @@ export class InMemoryKarmaEventStore implements KarmaEventStore {
   }
 }
 
-export class SqliteKarmaEventStore extends InMemoryKarmaEventStore {
+// invariant: the SQLite-backed store is the source of truth and must not
+// retain an in-memory mirror of every event (that mirror grows unbounded for
+// a long-lived daemon). Reads go straight to the repo; writes persist.
+export class SqliteKarmaEventStore implements KarmaEventStore {
   public constructor(
     private readonly repo: KarmaEventStoreRepoPort,
     private readonly warn?: KarmaEventStoreWarnPort
-  ) {
-    super();
-  }
+  ) {}
 
-  public override record(event: KarmaEvent): void {
+  public record(event: KarmaEvent): void {
     const parsed = parseKarmaEvent(event);
-    this.events.push(parsed);
 
     void this.repo.create(parsed).catch((error) => {
       this.warn?.warn("[SqliteKarmaEventStore] Failed to persist karma event", {
         error
       });
     });
+  }
+
+  public findByObjectId(objectId: string): readonly KarmaEvent[] {
+    const parsedObjectId = parseNonEmptyString(objectId, "object_id");
+    return this.repo.findByObjectIdSync(parsedObjectId);
   }
 }
 

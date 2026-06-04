@@ -1,13 +1,15 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ZodError } from "zod";
 import { diffKpis } from "../diff.js";
 import {
   entrySlug,
   listEntries,
   policyShapeSlug,
   readEntry,
+  readEntryForDiff,
   readLatest,
   readPrevious,
   writeEntry,
@@ -38,12 +40,19 @@ function buildPayload(commit: string): KpiPayload {
       r_at_10: 0.9,
       latency_ms_p50: 60,
       latency_ms_p95: 110,
+      latency_source: "exact",
       token_saved_ratio_vs_full_prompt: 0.88,
       tier_distribution: { hot: 50, warm: 30, cold: 20 },
       degradation_reasons: {
         none: 80,
         warm_cascade_engaged: 12,
-        cold_cascade_engaged: 8
+        cold_cascade_engaged: 8,
+        recall_explainability_partial: 0
+      },
+      seed_truncation: {
+        seed_turns_truncated: 0,
+        answer_turns_truncated: 0,
+        seed_chars_clipped: 0
       },
       per_scenario: []
     }
@@ -76,12 +85,35 @@ function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics
     path_stream_top10_rate: 0.12,
     path_stream_top10_count: 12,
     path_stream_top10_denominator: 100,
+    per_plane_recall_coverage: {},
     miss_distribution: {}
   };
 }
 
 function perCallStat(value: number) {
   return { mean: value, p50: value, p95: value, max: value };
+}
+
+// @anchor seed-extraction-release-blocker
+// invariant: release-grade LongMemEval archives require
+// seed_extraction_path provenance; missing the field on these benches
+// is treated as degraded and blocked from latest_passing.
+function cleanSeedExtractionPath(): NonNullable<
+  KpiPayload["kpi"]["seed_extraction_path"]
+> {
+  return {
+    path: "official_api_compile",
+    cache_hits: 276,
+    llm_calls: 0,
+    offline_fallbacks: 0,
+    live_extraction_failures: 0,
+    cached_extraction_failures: 0,
+    facts_produced: 1872,
+    signals_dropped: 4,
+    parse_dropped: 3,
+    compile_overflow_dropped: 0,
+    signals_dropped_by_reason: { candidate_absent: 1, materialization_error: 0 }
+  };
 }
 
 function buildFullLongMemEvalPayload(
@@ -111,7 +143,8 @@ function buildFullLongMemEvalPayload(
       ...buildPayload(commit).kpi,
       r_at_5: rAt5,
       latency_ms_p95: 120,
-      quality_metrics: passingQualityMetrics()
+      quality_metrics: passingQualityMetrics(),
+      seed_extraction_path: cleanSeedExtractionPath()
     }
   };
 }
@@ -755,6 +788,98 @@ describe("history archive", () => {
       .toBe("c0ffee2");
   });
 
+  // @anchor seed-extraction-release-blocker
+  // Round-2 §B1: even when the live-gates sidecar passes, a degraded
+  // seed_extraction_path (no_credentials_fallback or offline_fallbacks > 0)
+  // must block live strict-real archives from latest-passing.
+  it("blocks live strict-real latest-passing when seed_extraction_path is degraded (no_credentials_fallback)", async () => {
+    const slug = "2026-05-15T160000Z-c0ffee3";
+    const payload: KpiPayload = {
+      ...buildLivePayload("c0ffee3"),
+      kpi: {
+        ...buildLivePayload("c0ffee3").kpi,
+        seed_extraction_path: {
+          path: "no_credentials_fallback",
+          cache_hits: 0,
+          llm_calls: 0,
+          offline_fallbacks: 0,
+          live_extraction_failures: 0,
+          cached_extraction_failures: 0,
+          facts_produced: 100,
+          signals_dropped: 0,
+          parse_dropped: 0,
+          compile_overflow_dropped: 0,
+          signals_dropped_by_reason: { candidate_absent: 0, materialization_error: 0 }
+        }
+      }
+    };
+
+    await writeEntry(layout, "live", slug, payload, "report\n", null, {
+      sidecars: [
+        {
+          filename: "live-gates.json",
+          contents: JSON.stringify({
+            latest_run_id: "run-1",
+            status: "pass",
+            gates: [{ id: "provider_top5", pass: true }]
+          }) + "\n"
+        }
+      ]
+    });
+
+    expect(
+      JSON.parse(await readFile(path.join(root, "live", "latest-run.json"), "utf8")).slug
+    ).toBe(slug);
+    await expect(
+      readFile(path.join(root, "live", "latest-passing.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readLatest(layout, "live", { pointerKind: "passing" })).toBeNull();
+  });
+
+  it("blocks live strict-real latest-passing when seed_extraction_path has offline_fallbacks", async () => {
+    const slug = "2026-05-15T170000Z-c0ffee4";
+    const payload: KpiPayload = {
+      ...buildLivePayload("c0ffee4"),
+      kpi: {
+        ...buildLivePayload("c0ffee4").kpi,
+        seed_extraction_path: {
+          path: "official_api_compile",
+          cache_hits: 10,
+          llm_calls: 5,
+          offline_fallbacks: 3,
+          live_extraction_failures: 0,
+          cached_extraction_failures: 0,
+          facts_produced: 100,
+          signals_dropped: 0,
+          parse_dropped: 0,
+          compile_overflow_dropped: 0,
+          signals_dropped_by_reason: { candidate_absent: 0, materialization_error: 0 }
+        }
+      }
+    };
+
+    await writeEntry(layout, "live", slug, payload, "report\n", null, {
+      sidecars: [
+        {
+          filename: "live-gates.json",
+          contents: JSON.stringify({
+            latest_run_id: "run-1",
+            status: "pass",
+            gates: [{ id: "provider_top5", pass: true }]
+          }) + "\n"
+        }
+      ]
+    });
+
+    expect(
+      JSON.parse(await readFile(path.join(root, "live", "latest-run.json"), "utf8")).slug
+    ).toBe(slug);
+    await expect(
+      readFile(path.join(root, "live", "latest-passing.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readLatest(layout, "live", { pointerKind: "passing" })).toBeNull();
+  });
+
   it("allows mixed live-gates sidecars with status pass and at least one passing source gate", async () => {
     const mixedSlug = "2026-05-15T160000Z-c0ffee3";
 
@@ -1074,7 +1199,8 @@ describe("history archive", () => {
         ...buildPayload("aaa1111").kpi,
         r_at_5: 0.91,
         latency_ms_p95: 110,
-        quality_metrics: passingQualityMetrics()
+        quality_metrics: passingQualityMetrics(),
+        seed_extraction_path: cleanSeedExtractionPath()
       }
     };
 
@@ -1405,5 +1531,88 @@ describe("history archive", () => {
       "locomo_full_embedding_on_r_at_5 LoCoMo full embedding-on R@5"
     );
     expect(report).toContain("39.00% < target 90.00%");
+  });
+
+  // @anchor read-entry-for-diff-lenient — a tightened KpiPayloadSchema must not
+  // brick new runs over a pre-existing archive that violates the new
+  // constraint; the diff is advisory and degrades to no-baseline.
+  async function plantSchemaInvalidArchive(slug: string): Promise<void> {
+    const invalid = {
+      ...buildPayload("0ff0ff0"),
+      kpi: {
+        ...buildPayload("0ff0ff0").kpi,
+        per_scenario: [
+          {
+            id: "q-47",
+            version: 1,
+            hit_at_5: true,
+            tier: "hot",
+            latency_ms: -5507
+          }
+        ]
+      }
+    };
+    const entryRoot = path.join(root, "self", slug);
+    await mkdir(entryRoot, { recursive: true });
+    await writeFile(
+      path.join(entryRoot, "kpi.json"),
+      JSON.stringify(invalid, null, 2) + "\n",
+      "utf8"
+    );
+    await writeFile(path.join(entryRoot, "report.md"), "report\n", "utf8");
+  }
+
+  it("readEntry stays strict on a schema-invalid historical archive", async () => {
+    const slug = "2026-05-31T003312Z-0ff0ff0";
+    await plantSchemaInvalidArchive(slug);
+    await expect(readEntry(layout, "self", slug)).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("readEntryForDiff degrades a schema-invalid archive to no-baseline with a warning", async () => {
+    const slug = "2026-05-31T003312Z-0ff0ff0";
+    await plantSchemaInvalidArchive(slug);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await readEntryForDiff(layout, "self", slug);
+      expect(result).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = String(warn.mock.calls[0]?.[0] ?? "");
+      expect(message).toContain(slug);
+      expect(message).toContain("latency_ms");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a new run still writes its archive when the prior baseline is schema-invalid", async () => {
+    const staleSlug = "2026-05-31T003312Z-0ff0ff0";
+    await plantSchemaInvalidArchive(staleSlug);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // readLatest / readPrevious are the advisory baseline-diff readers; both
+      // must degrade rather than throw when the prior archive is invalid.
+      await expect(readLatest(layout, "self", {})).resolves.toBeNull();
+      const currentSlug = "2026-05-31T010000Z-feeded0";
+      await expect(
+        readPrevious(layout, "self", currentSlug)
+      ).resolves.toBeNull();
+
+      const payload = buildPayload("feeded0");
+      const entry = await writeEntry(
+        layout,
+        "self",
+        currentSlug,
+        payload,
+        "# report\n",
+        null
+      );
+      expect(entry.slug).toBe(currentSlug);
+      const written = JSON.parse(await readFile(entry.kpiPath, "utf8")) as {
+        alaya_commit: string;
+      };
+      expect(written.alaya_commit).toBe("feeded0");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

@@ -9,6 +9,8 @@ export {
   Verdict,
   type DegradationReasons,
   type DiffVsPrevious,
+  type EdgeProposalAutoAccept,
+  type EdgeProposalRate,
   type KpiCore,
   type KpiPayload,
   type QualityMetrics,
@@ -23,6 +25,14 @@ export {
 } from "./kpi-schema.js";
 
 export {
+  aggregateEdgeProposalAutoAccept,
+  aggregateEdgeProposalRate,
+  aggregateEdgeProposalRatePerQuestion,
+  type EdgeProposalKpiEventRow,
+  type ProposalsPerQuestionRollup
+} from "./edge-proposal-kpi.js";
+
+export {
   buildTokenEconomy,
   computeTokenSavedRatio,
   type TokenEconomyInput
@@ -31,9 +41,18 @@ export {
 export {
   collectReleaseHardGates,
   combineVerdicts,
+  releaseHardGateAllowsLatestPassing,
   releaseHardGateVerdict,
   type BenchmarkHardGate
 } from "./release-gates.js";
+
+export {
+  evaluateSeedExtractionReleaseBlocker,
+  formatSeedExtractionCounters,
+  hasSeedExtractionReleaseBlocker,
+  isLongMemEvalBenchName,
+  type SeedExtractionReleaseBlocker
+} from "./seed-extraction-blocker.js";
 
 export {
   DEFAULT_THRESHOLDS,
@@ -56,6 +75,7 @@ export {
   listEntries,
   policyShapeSlug,
   readEntry,
+  readEntryForDiff,
   readLatest,
   readPrevious,
   simulateReportSlug,

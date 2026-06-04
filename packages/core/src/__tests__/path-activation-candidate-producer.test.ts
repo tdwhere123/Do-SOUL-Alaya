@@ -60,6 +60,104 @@ describe("PathActivationCandidateProducer", () => {
     expect(candidates[0]?.source_path_id).toBe("path-active");
   });
 
+  it("emits no candidates for dormant paths (dormant is excluded from activation just like retired)", async () => {
+    const activePath = createPathRelation({
+      path_id: "path-active",
+      sourceMemoryId: "mem-source",
+      targetMemoryId: "mem-target"
+    });
+    const dormantPath = createPathRelation({
+      path_id: "path-dormant",
+      sourceMemoryId: "mem-source",
+      targetMemoryId: "mem-other",
+      lifecycleStatus: PathLifecycleStatus.DORMANT
+    });
+    const reader: PathActivationCandidateProducerPathReaderPort = {
+      findActiveByAnchorObjectIds: vi.fn(async () => [activePath, dormantPath])
+    };
+    const producer = new PathActivationCandidateProducer({
+      pathReader: reader,
+      generateCandidateId: stableIdGenerator("cand"),
+      now: () => NOW
+    });
+
+    const candidates = await producer.produce({
+      workspaceId: WORKSPACE,
+      runId: RUN,
+      anchorMemoryObjectIds: ["mem-source"]
+    });
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.source_path_id).toBe("path-active");
+  });
+
+  it("emits no candidates for negative-bias paths (recall_bias < 0 is suppression, not activation)", async () => {
+    const activePath = createPathRelation({
+      path_id: "path-active",
+      sourceMemoryId: "mem-source",
+      targetMemoryId: "mem-target"
+    });
+    const negativePath = createPathRelation({
+      path_id: "path-negative",
+      sourceMemoryId: "mem-source",
+      targetMemoryId: "mem-other",
+      // recall_bias = recallBiasSign(-1) * magnitude(0.4): a negative path
+      // records suppression and must never surface as a positive activation
+      // candidate, even when its lifecycle is active.
+      effectVectorOverrides: { recall_bias: -0.4 }
+    });
+    const reader: PathActivationCandidateProducerPathReaderPort = {
+      findActiveByAnchorObjectIds: vi.fn(async () => [activePath, negativePath])
+    };
+    const producer = new PathActivationCandidateProducer({
+      pathReader: reader,
+      generateCandidateId: stableIdGenerator("cand"),
+      now: () => NOW
+    });
+
+    const candidates = await producer.produce({
+      workspaceId: WORKSPACE,
+      runId: RUN,
+      anchorMemoryObjectIds: ["mem-source"]
+    });
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.source_path_id).toBe("path-active");
+  });
+
+  it("emits no candidates for recall-neutral exception_to paths (recall_bias == 0)", async () => {
+    const activePath = createPathRelation({
+      path_id: "path-active",
+      sourceMemoryId: "mem-source",
+      targetMemoryId: "mem-target"
+    });
+    const neutralPath = createPathRelation({
+      path_id: "path-neutral",
+      sourceMemoryId: "mem-source",
+      targetMemoryId: "mem-other",
+      // recall_bias exactly 0: a topology marker excluded by the
+      // strict-positive isPathRecallEligible gate.
+      effectVectorOverrides: { recall_bias: 0 }
+    });
+    const reader: PathActivationCandidateProducerPathReaderPort = {
+      findActiveByAnchorObjectIds: vi.fn(async () => [activePath, neutralPath])
+    };
+    const producer = new PathActivationCandidateProducer({
+      pathReader: reader,
+      generateCandidateId: stableIdGenerator("cand"),
+      now: () => NOW
+    });
+
+    const candidates = await producer.produce({
+      workspaceId: WORKSPACE,
+      runId: RUN,
+      anchorMemoryObjectIds: ["mem-source"]
+    });
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.source_path_id).toBe("path-active");
+  });
+
   it("snapshots effect_vector immutably (source mutation does not leak)", async () => {
     const sourceEffectVector = {
       salience: 0.42,
@@ -147,7 +245,7 @@ describe("ManifestationResolver.resolveWithBias", () => {
       source_path_id: "path-pending",
       source_anchor: { kind: "object", object_id: "mem-source" },
       target_anchor: { kind: "object", object_id: "mem-target" },
-      why_now: "path:supports_recall",
+      why_now: "path:co_recalled",
       effect_vector_snapshot: {
         salience: 0.8,
         recall_bias: 0.4,
@@ -192,7 +290,7 @@ describe("ManifestationResolver.resolveWithBias", () => {
       source_path_id: "path-preferred",
       source_anchor: { kind: "object", object_id: "mem-source" },
       target_anchor: { kind: "object", object_id: "mem-target" },
-      why_now: "path:supports_recall",
+      why_now: "path:co_recalled",
       effect_vector_snapshot: {
         salience: 0.2,
         recall_bias: 0.1,
@@ -239,7 +337,7 @@ function createPathRelation(input: {
       target_anchor: Object.freeze({ kind: "object" as const, object_id: input.targetMemoryId })
     }),
     constitution: Object.freeze({
-      relation_kind: "supports_recall",
+      relation_kind: "co_recalled",
       why_this_relation_exists: Object.freeze(["test fixture"])
     }),
     effect_vector: Object.freeze({

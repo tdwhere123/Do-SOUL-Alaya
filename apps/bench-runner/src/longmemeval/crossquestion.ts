@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
 import {
   buildTokenEconomy,
   computeTokenSavedRatio,
@@ -46,12 +47,17 @@ import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
 import {
   computeNextTurnSeedRefs,
   createCompileSeedRunner,
+  resolveBenchAllowLiveExtraction,
   toSeedExtractionPathKpi
 } from "./compile-seed.js";
 import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
 } from "./seed-extraction-release-blocker.js";
+import {
+  EmbeddingReadinessTracker,
+  runEmbeddingReadinessPass
+} from "./embedding-readiness.js";
 
 const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
 
@@ -98,8 +104,8 @@ interface QuestionResult {
   readonly answerTurnsTruncated: number;
   readonly seedCharsClipped: number;
   readonly diagnostics: LongMemEvalQuestionDiagnostic;
-  // Phase 7 per-recall token-economy sample, null when the degraded
-  // recall path (any non-null degradation_reason) omits the token_economy
+  // Per-recall token-economy sample, null when the degraded recall path
+  // (any non-null degradation_reason) omits the token_economy
   // block in core, so the bench extractor returns null and degraded
   // questions don't dilute the run-level distribution.
   // see also: packages/core/src/recall-service.ts
@@ -143,7 +149,17 @@ export async function runLongMemEvalCrossQuestion(
   let tokenEconomyInput: BenchTokenMetrics = aggregateBenchTokenMetrics([]);
   // invariant: one seed runner for the whole run so the on-disk extraction
   // cache and stats accumulate across questions; seed-time only.
-  const seedRunner = createCompileSeedRunner();
+  // createCompileSeedRunner() runs the ~1s run-start fail-loud cache preflight
+  // (model / prompt-sha / coverage); a mismatch throws here instead of a 466h
+  // silent live run.
+  // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+  //   preflightExtractionCache
+  const seedRunner = createCompileSeedRunner(
+    resolveBenchAllowLiveExtraction()
+      ? { allowLiveExtraction: true }
+      : undefined
+  );
+  const embeddingReadiness = new EmbeddingReadinessTracker();
 
   try {
     for (let qi = 0; qi < window.length; qi++) {
@@ -205,7 +221,28 @@ export async function runLongMemEvalCrossQuestion(
       }
 
       if (opts.embeddingMode === "env") {
-        await daemon.runtime.runGardenBackgroundPass();
+        // Targeted embedding-backfill drain for the shared cross-question
+        // workspace, not the full Garden background pass: readiness needs only
+        // embeddings, and runGardenBackgroundPass would also run BULK_ENRICH
+        // edge-production / conflict-detection that embedding-OFF never runs,
+        // breaking ON/OFF comparability and slowing ON ~15x. The backfill
+        // handler embeds the whole workspace hot corpus (every prior question's
+        // accumulated seeds), so the cross-question readiness intent holds.
+        // invariant: this pass is the ONLY embedding-readiness mechanism for the
+        // crossquestion variant (no setup-time warmEmbeddingCache gate), so a
+        // benign skip must not kill the remaining window, but an unresolved pass
+        // must surface a run-level integrity signal rather than degrade silently.
+        // see also:
+        //   apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
+        //   apps/bench-runner/src/longmemeval/embedding-readiness.ts
+        embeddingReadiness.record(
+          await runEmbeddingReadinessPass({
+            runPass: () =>
+              daemon.runtime.runGardenEmbeddingBackfillPass(daemon.workspaceId),
+            workspaceId: daemon.workspaceId,
+            questionId: question.question_id
+          })
+        );
       }
 
       const answerSessionSet = new Set(question.answer_session_ids);
@@ -218,11 +255,11 @@ export async function runLongMemEvalCrossQuestion(
         )
         .map(([memoryId]) => memoryId);
 
-      const recallStart = Date.now();
+      const recallStart = monotonicNowNs();
       const recallResult = await daemon.recall(question.question, {
         maxResults: 10
       });
-      const latencyMs = Date.now() - recallStart;
+      const latencyMs = monotonicElapsedMs(recallStart);
       const results = recallResult.results;
       const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
         object_id: pointer.object_id,
@@ -344,6 +381,7 @@ export async function runLongMemEvalCrossQuestion(
           `R@5=${hitAt5 ? "✓" : "✗"} pool=${sidecar.size}\n`
       );
     }
+    embeddingReadiness.finalize();
     // Disclose which seed path ran: official_api_compile (production garden
     // extraction) vs no_credentials_fallback (degraded full-turn single-fact).
     process.stdout.write(
@@ -360,8 +398,8 @@ export async function runLongMemEvalCrossQuestion(
   }
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
-  // Phase 7: per-recall structural distribution across the shared-workspace
-  // question sequence; one sample per recall call.
+  // Per-recall structural distribution across the shared-workspace question
+  // sequence; one sample per recall call.
   const recallTokenEconomy = aggregateRecallTokenEconomy(
     collected
       .map((result) => result.recallTokenEconomy)

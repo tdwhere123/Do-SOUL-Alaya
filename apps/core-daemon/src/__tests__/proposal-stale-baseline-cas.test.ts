@@ -117,7 +117,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
         proposed_changes: { content: "V1" },
         reason: "first proposal"
       },
-      { workspaceId: "ws-cas-create", runId: null, agentTarget: "codex" }
+      { workspaceId: "ws-cas-create", runId: null, agentTarget: "codex", sessionId: "session-1" }
     );
     const second = await workflow.proposeMemoryUpdate(
       {
@@ -125,7 +125,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
         proposed_changes: { content: "V2 stale" },
         reason: "second proposal against V0"
       },
-      { workspaceId: "ws-cas-create", runId: null, agentTarget: "codex" }
+      { workspaceId: "ws-cas-create", runId: null, agentTarget: "codex", sessionId: "session-1" }
     );
 
     await expect(
@@ -136,7 +136,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
           reason: "accept first",
           reviewer_identity: "user:reviewer"
         },
-        { workspaceId: "ws-cas-create", runId: null, agentTarget: "inspector" }
+        { workspaceId: "ws-cas-create", runId: null, agentTarget: "inspector", sessionId: "session-1" }
       )
     ).resolves.toMatchObject({ resolution_state: ProposalResolutionState.ACCEPTED });
 
@@ -148,7 +148,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
           reason: "accept second after target changed",
           reviewer_identity: "user:reviewer"
         },
-        { workspaceId: "ws-cas-create", runId: null, agentTarget: "inspector" }
+        { workspaceId: "ws-cas-create", runId: null, agentTarget: "inspector", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({
       code: "VALIDATION",
@@ -199,7 +199,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
         proposed_changes: { content: "V1-from-stale-proposal" },
         reason: "stale-baseline test"
       },
-      { workspaceId: "ws-cas-1", runId: "run-cas-1", agentTarget: "codex" }
+      { workspaceId: "ws-cas-1", runId: "run-cas-1", agentTarget: "codex", sessionId: "session-1" }
     );
 
     await expect(
@@ -210,7 +210,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
           reason: "approved despite stale baseline",
           reviewer_identity: "user:reviewer"
         },
-        { workspaceId: "ws-cas-1", runId: null, agentTarget: "inspector" }
+        { workspaceId: "ws-cas-1", runId: null, agentTarget: "inspector", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({
       code: "VALIDATION",
@@ -271,7 +271,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
         proposed_changes: { content: "V1" },
         reason: "matching baseline test"
       },
-      { workspaceId: "ws-cas-2", runId: "run-cas-2", agentTarget: "codex" }
+      { workspaceId: "ws-cas-2", runId: "run-cas-2", agentTarget: "codex", sessionId: "session-1" }
     );
 
     const review = await workflow.reviewMemoryProposal(
@@ -281,7 +281,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
         reason: "approved against matching baseline",
         reviewer_identity: "user:reviewer"
       },
-      { workspaceId: "ws-cas-2", runId: null, agentTarget: "inspector" }
+      { workspaceId: "ws-cas-2", runId: null, agentTarget: "inspector", sessionId: "session-1" }
     );
 
     expect(review.resolution_state).toBe(ProposalResolutionState.ACCEPTED);

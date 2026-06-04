@@ -248,7 +248,8 @@ async function getSectionConfig<T>(
   schema: { parse(value: unknown): T },
   defaults: T
 ): Promise<T> {
-  const raw = await repo.get<T>(key);
+  // ConfigRepo.get is synchronous (sqlite prepared statement); no await needed.
+  const raw = repo.get<T>(key);
   return schema.parse(raw ?? defaults);
 }
 
@@ -267,13 +268,15 @@ async function patchSectionConfig<T extends Record<string, unknown>>(
     throw new CoreError("VALIDATION", validationMessage, { cause: parsedPatch.error });
   }
 
-  const next = await repo.patch(key, parsedPatch.data, defaults);
+  // ConfigRepo.patch is synchronous (sqlite read-modify-write); no await needed.
+  const next = repo.patch(key, parsedPatch.data, defaults);
   return fullSchema.parse(next);
 }
 
 async function getRuntimeEmbeddingConfig(repo: ConfigRepo): Promise<RuntimeEmbeddingConfig> {
+  // ConfigRepo.get is synchronous; no await needed.
   return RuntimeEmbeddingConfigSchema.parse(
-    (await repo.get<RuntimeEmbeddingConfig>(RUNTIME_EMBEDDING_CONFIG_KEY)) ??
+    repo.get<RuntimeEmbeddingConfig>(RUNTIME_EMBEDDING_CONFIG_KEY) ??
       DEFAULT_RUNTIME_EMBEDDING_CONFIG
   );
 }
@@ -283,7 +286,8 @@ async function getManifestationBudgetConfig(
   workspaceId: string,
   clock: () => string
 ): Promise<ManifestationBudgetConfigRead> {
-  const stored = await repo.get<ManifestationBudgetConfig>(
+  // ConfigRepo.get is synchronous; no await needed.
+  const stored = repo.get<ManifestationBudgetConfig>(
     keyFor(workspaceId, MANIFESTATION_BUDGET_CONFIG_SECTION)
   );
   return {
@@ -389,7 +393,9 @@ async function getRuntimeGardenComputeConfig(
   paths: AlayaConfigPaths,
   warn: (message: string) => void
 ): Promise<RuntimeGardenComputeConfig> {
-  const persisted = await repo.get<RuntimeGardenComputeConfig>(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY);
+  // ConfigRepo.get is synchronous; defaultRuntimeGardenComputeConfig is the
+  // genuinely-async fallback (reads files), so only the latter is awaited.
+  const persisted = repo.get<RuntimeGardenComputeConfig>(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY);
   const raw = persisted ?? (await defaultRuntimeGardenComputeConfig(paths, warn));
   return parseGardenComputeConfigWithLegacyFallback(raw, "garden-compute config", warn);
 }
@@ -439,9 +445,9 @@ async function patchRuntimeEmbeddingConfig(input: {
   const occurredAt = parseIsoTimestamp(input.clock());
   const auditEntryId = input.generateAuditId();
 
-  // Per .do-it/findings/a2.md finding-1: the FS write half of this operation
-  // (env file + optional pasted secret) is genuinely async and cannot live
-  // inside a SQLite transaction. The structure is now:
+  // invariant: the FS write half of this operation (env file + optional
+  // pasted secret) is genuinely async and cannot live inside a SQLite
+  // transaction. The structure is:
   //
   //   1. applyRuntimeEmbeddingConfigFiles writes the FS files inside its
   //      cross-process lock and snapshots the previous content.
@@ -453,8 +459,8 @@ async function patchRuntimeEmbeddingConfig(input: {
   //      across FS + EventLog + SQL even though FS is not part of the
   //      SQLite transaction itself.
   //
-  // This preserves the prior FS/SQL rollback contract while closing BL-022
-  // for the runtime-config SQL row.
+  // This keeps the FS/SQL rollback contract atomic for the runtime-config
+  // SQL row.
   return await applyRuntimeEmbeddingConfigFiles({
     paths: input.paths,
     normalized,
@@ -581,16 +587,23 @@ async function defaultRuntimeGardenComputeConfig(
   const embeddingFallbackSecretRef = readRawSecretRef(configEnv, ALAYA_OPENAI_SECRET_REF_ENV);
   const secretRef = gardenSecretRef ?? embeddingFallbackSecretRef;
   const modelId = readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_MODEL_ENV)) ?? OFFICIAL_API_GARDEN_MODEL;
-  // An explicit ALAYA_GARDEN_PROVIDER_KIND wins over secret-presence inference;
-  // it is the only way a non-Inspector setup can request host_worker. An
-  // unrecognized value falls back to inference rather than crashing boot.
+  // invariant: the product DEFAULT compute mode is host_worker — the attached
+  // CLI agent (Codex / Claude Code / similar) is the compute, so Alaya owns no
+  // LLM and makes no edge-LLM cloud call out of the box. An explicit
+  // ALAYA_GARDEN_PROVIDER_KIND wins over inference and is how an operator (or
+  // the bench harness, via the same env tier) opts INTO official_api or pins
+  // local_heuristics. A garden/embedding secret_ref being present is treated as
+  // an explicit official_api opt-in (an operator who configured a key wants
+  // cloud); otherwise — fresh install, no secret — the default is host_worker,
+  // NOT local_heuristics. An unrecognized declared value falls back to this
+  // inference rather than crashing boot.
   const declaredProviderKind = RuntimeGardenProviderKindSchema.safeParse(
     readNonEmptyEnv(readConfigEnvValue(configEnv, ALAYA_GARDEN_PROVIDER_KIND_ENV))
   );
   const providerKind = declaredProviderKind.success
     ? declaredProviderKind.data
     : secretRef === null
-      ? "local_heuristics"
+      ? "host_worker"
       : "official_api";
 
   return parseGardenComputeConfigWithLegacyFallback(

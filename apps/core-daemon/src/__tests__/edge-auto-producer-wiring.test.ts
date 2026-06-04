@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CandidateMemorySignalSchema,
+  DYNAMICS_CONSTANTS,
   MemoryDimension,
-  MemoryGraphEdgeType,
   RunMode,
   RunState,
   ScopeClass,
@@ -14,22 +14,26 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   EdgeAutoProducerService,
-  EdgeProposalService,
   EventPublisher,
   EvidenceService,
-  MemoryService
+  MemoryService,
+  PathRelationProposalService,
+  ReconciliationService,
+  createRuleOnlyReconciliationDecisionPort,
+  type PathCandidateSink
 } from "@do-soul/alaya-core";
 import {
   InMemoryHandoffGapHandler,
-  MaterializationRouter,
-  type GraphEdgeCreationPort
+  MaterializationRouter
 } from "@do-soul/alaya-soul";
 import {
-  SqliteEdgeProposalRepo,
+  SqliteCoUsageCounterRepo,
+  SqliteEnrichPendingRepo,
   SqliteEventLogRepo,
   SqliteEvidenceCapsuleRepo,
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
+  SqlitePathRelationRepo,
+  SqliteReconciliationLeaseRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo,
   initDatabase
@@ -39,8 +43,16 @@ const OLD_MEMORY_ID = "11111111-1111-4111-8111-111111111111";
 const NEW_MEMORY_ID = "22222222-2222-4222-8222-222222222222";
 const EVIDENCE_ID = "33333333-3333-4333-8333-333333333333";
 
+// invariant: the edge auto-producer folds into the governed path candidate
+// intake. A supports verdict becomes a weak attention_only path_relations row
+// that only earns recall eligibility through plasticity reinforcement. Post
+// S3c decouple this runs in the BULK_ENRICH worker, not inline: the router
+// enqueues an enrich_pending marker and the worker (here driven directly, as
+// the daemon dispatch branch does) runs produceForNewMemory off-path. This
+// wiring test pins the full decoupled chain: materialize enqueues, drain mints
+// the path_relations row.
 describe("edge auto producer daemon wiring", () => {
-  it("materialization creates pending edge proposals, not durable graph edges, until review accept", async () => {
+  it("enqueues then folds a supports verdict into a weak SUPPORTS path candidate, not a durable edge", async () => {
     const database = initDatabase({ filename: ":memory:" });
     try {
       const workspaceRepo = new SqliteWorkspaceRepo(database);
@@ -48,8 +60,9 @@ describe("edge auto producer daemon wiring", () => {
       const eventLogRepo = new SqliteEventLogRepo(database);
       const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
       const memoryRepo = new SqliteMemoryEntryRepo(database);
-      const memoryGraphEdgeRepo = new SqliteMemoryGraphEdgeRepo(database);
-      const edgeProposalRepo = new SqliteEdgeProposalRepo(database);
+      const pathRelationRepo = new SqlitePathRelationRepo(database);
+      const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
+      const enrichPendingRepo = new SqliteEnrichPendingRepo(database);
       const runtimeNotifier = {
         notify: async () => undefined,
         notifyEntry: async (_entry: EventLogEntry) => undefined
@@ -71,23 +84,31 @@ describe("edge auto producer daemon wiring", () => {
         })
       );
 
-      let edgeId = 0;
-      const edgeProposalService = new EdgeProposalService({
-        memoryRepo,
-        proposalRepo: edgeProposalRepo,
-        graphPort: memoryGraphEdgeRepo,
+      const pathRelationProposalService = new PathRelationProposalService({
+        repo: {
+          create: (relation) => pathRelationRepo.create(relation),
+          findByAnchorMemoryId: async (memoryId, workspaceId) =>
+            await pathRelationRepo.findByAnchors(workspaceId, [
+              { kind: "object", object_id: memoryId }
+            ])
+        },
+        counterStore: coUsageCounterRepo,
         eventPublisher,
-        generateId: () => `edge-${++edgeId}`,
-        now: () => "2026-05-25T00:00:00.000Z"
+        generateId: () => "path-supports-1"
       });
-      const graphEdgePort: GraphEdgeCreationPort = {
-        createEdge: async (params) => {
-          await edgeProposalService.proposeEdge(params);
-        }
+      const pathCandidatePort: PathCandidateSink = {
+        submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
       };
       const edgeAutoProducerService = new EdgeAutoProducerService({
         memoryRepo,
-        graphEdgePort
+        pathCandidatePort,
+        llmPort: {
+          classifyPair: async () => ({
+            edgeType: "supports",
+            confidence: 0.92,
+            rationale: "test pair classifier verdict"
+          })
+        }
       });
       const evidenceService = new EvidenceService({
         evidenceCapsuleRepo: evidenceRepo,
@@ -96,68 +117,218 @@ describe("edge auto producer daemon wiring", () => {
         generateObjectId: () => EVIDENCE_ID,
         now: () => "2026-05-25T00:00:00.000Z"
       });
+      // invariant: mirrors the daemon composition root — the atomic create +
+      // enrich_pending marker (enrichPendingWriter) + the router's
+      // enrichmentEnqueued-reporting adapter, so the marker commits inside the
+      // memory-row transaction and the router skips its loud fallback.
+      const enqueueEnrichPending = (params: {
+        readonly workspaceId: string;
+        readonly memoryId: string;
+        readonly runId: string | null;
+        readonly sourceSignalId: string | null;
+      }): void =>
+        enrichPendingRepo.enqueue({
+          workspaceId: params.workspaceId,
+          memoryId: params.memoryId,
+          runId: params.runId,
+          sourceSignalId: params.sourceSignalId,
+          enqueuedAt: "2026-05-25T00:00:01.000Z"
+        });
       const memoryService = new MemoryService({
         memoryEntryRepo: memoryRepo,
         evidenceService,
         eventLogRepo,
         runtimeNotifier,
+        enrichPendingWriter: { enqueue: enqueueEnrichPending },
         generateObjectId: () => NEW_MEMORY_ID,
         now: () => "2026-05-25T00:00:00.000Z"
       });
       const router = new MaterializationRouter({
         evidenceService,
-        memoryService,
+        memoryService: {
+          create: async (input) => {
+            const created = await memoryService.create(input);
+            return {
+              object_kind: created.object_kind,
+              object_id: created.object_id,
+              enrichmentEnqueued: input.enqueueEnrichment !== undefined
+            };
+          }
+        },
         synthesisService: {
           create: async () => ({ object_kind: "synthesis_capsule", object_id: "synthesis-1" })
         },
         claimService: {
           create: async () => ({ object_kind: "claim_form", object_id: "claim-1" })
         },
-        graphEdgePort,
-        edgeAutoProducerPort: edgeAutoProducerService,
+        pathCandidateSinkPort: {
+          // Mirrors the daemon wiring seam: forward core's PathMintOutcome
+          // untouched so the rejected/failed distinction survives the boundary.
+          submitCandidate: async (input) => await pathCandidatePort.submitCandidate(input)
+        },
+        enrichPendingPort: { enqueue: enqueueEnrichPending },
         handoffGapHandler: new InMemoryHandoffGapHandler()
       });
 
       const result = await router.materializeSignal(createFactSignal());
 
       expect(result.success).toBe(true);
-      const pending = edgeProposalRepo.listPending("workspace-1");
-      expect(pending).toHaveLength(1);
-      expect(pending[0]).toMatchObject({
-        source_memory_id: NEW_MEMORY_ID,
-        target_memory_id: OLD_MEMORY_ID,
-        edge_type: MemoryGraphEdgeType.SUPPORTS,
-        status: "pending"
-      });
-      await expect(
-        memoryGraphEdgeRepo.findBySourceAndTarget(
-          NEW_MEMORY_ID,
-          OLD_MEMORY_ID,
-          MemoryGraphEdgeType.SUPPORTS,
-          "workspace-1"
-        )
-      ).resolves.toBeNull();
 
-      await edgeProposalService.batchReview({
-        workspaceId: "workspace-1",
-        verdict: "accept",
-        filter: { proposal_ids: [pending[0].proposal_id] },
-        reason: "integration accept",
-        reviewerIdentity: "test-reviewer"
+      // The write-path enqueued a durable enrich_pending marker and ran NO
+      // edge production inline — the path row does not exist yet.
+      expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
+      expect(
+        (await pathRelationRepo.findByAnchors("workspace-1", [
+          { kind: "object", object_id: NEW_MEMORY_ID }
+        ])).find((relation) => relation.constitution.relation_kind === "supports")
+      ).toBeUndefined();
+
+      // The BULK_ENRICH worker drains the marker and runs produceForNewMemory
+      // off-path (driven directly here as the daemon dispatch branch does).
+      const claimed = enrichPendingRepo.claimBatch(
+        "workspace-1",
+        50,
+        "2026-05-25T00:01:00.000Z",
+        DYNAMICS_CONSTANTS.enrich.max_attempts
+      );
+      expect(claimed.map((entry) => entry.memoryId)).toEqual([NEW_MEMORY_ID]);
+      for (const entry of claimed) {
+        const memory = await memoryRepo.findById(entry.memoryId);
+        expect(memory).not.toBeNull();
+        await edgeAutoProducerService.produceForNewMemory({
+          newMemoryId: memory!.object_id,
+          workspaceId: memory!.workspace_id,
+          runId: memory!.run_id,
+          sourceSignalId: entry.sourceSignalId ?? memory!.object_id
+        });
+        enrichPendingRepo.markProcessed(entry.workspaceId, entry.memoryId, "2026-05-25T00:01:01.000Z");
+      }
+      expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
+
+      // A weak supports path_relations row exists, born attention_only.
+      const relations = await pathRelationRepo.findByAnchors("workspace-1", [
+        { kind: "object", object_id: NEW_MEMORY_ID }
+      ]);
+      const supports = relations.find(
+        (relation) => relation.constitution.relation_kind === "supports"
+      );
+      expect(supports).toBeDefined();
+      expect(supports!.legitimacy.governance_class).toBe("attention_only");
+      expect(supports!.effect_vector.recall_bias).toBeGreaterThan(0);
+      expect(supports!.plasticity_state.strength).toBeCloseTo(0.5, 5);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("wires rule-only reconciliation through the real materialization path so exact duplicates NOOP", async () => {
+    const database = initDatabase({ filename: ":memory:" });
+    try {
+      const workspaceRepo = new SqliteWorkspaceRepo(database);
+      const runRepo = new SqliteRunRepo(database);
+      const eventLogRepo = new SqliteEventLogRepo(database);
+      const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
+      const memoryRepo = new SqliteMemoryEntryRepo(database);
+      const enrichPendingRepo = new SqliteEnrichPendingRepo(database);
+      const reconciliationLeaseRepo = new SqliteReconciliationLeaseRepo(database);
+      const runtimeNotifier = {
+        notify: async () => undefined,
+        notifyEntry: async (_entry: EventLogEntry) => undefined
+      };
+
+      await seedWorkspaceRun(workspaceRepo, runRepo);
+      const duplicateContent = "RTK wrapper is required for shell commands in this repository.";
+      await memoryRepo.create(
+        createMemoryEntry({
+          object_id: OLD_MEMORY_ID,
+          content: duplicateContent,
+          domain_tags: ["rtk", "workflow"],
+          evidence_refs: [],
+          created_at: "2026-05-24T00:00:00.000Z",
+          updated_at: "2026-05-24T00:00:00.000Z"
+        })
+      );
+
+      const evidenceService = new EvidenceService({
+        evidenceCapsuleRepo: evidenceRepo,
+        eventLogRepo,
+        runtimeNotifier,
+        generateObjectId: () => EVIDENCE_ID,
+        now: () => "2026-05-25T00:00:00.000Z"
+      });
+      const enqueueEnrichPending = (params: {
+        readonly workspaceId: string;
+        readonly memoryId: string;
+        readonly runId: string | null;
+        readonly sourceSignalId: string | null;
+      }): void =>
+        enrichPendingRepo.enqueue({
+          workspaceId: params.workspaceId,
+          memoryId: params.memoryId,
+          runId: params.runId,
+          sourceSignalId: params.sourceSignalId,
+          enqueuedAt: "2026-05-25T00:00:01.000Z"
+        });
+      const memoryService = new MemoryService({
+        memoryEntryRepo: memoryRepo,
+        evidenceService,
+        eventLogRepo,
+        runtimeNotifier,
+        enrichPendingWriter: { enqueue: enqueueEnrichPending },
+        generateObjectId: () => NEW_MEMORY_ID,
+        now: () => "2026-05-25T00:00:00.000Z"
+      });
+      const reconciliationService = new ReconciliationService({
+        keywordSearch: {
+          searchByKeyword: async (workspaceId, queryText, limit) =>
+            await memoryRepo.searchByKeyword(workspaceId, queryText, limit)
+        },
+        memoryRepo: {
+          findByIds: async (objectIds) => await memoryRepo.findByIds(objectIds)
+        },
+        memoryUpdate: {
+          update: async (objectId, fields, reason) =>
+            await memoryService.update(objectId, fields, reason)
+        },
+        eventLog: {
+          append: (event) => eventLogRepo.append(event)
+        },
+        llmDecision: createRuleOnlyReconciliationDecisionPort(),
+        lease: reconciliationLeaseRepo,
+        now: () => new Date("2026-05-25T00:00:02.000Z")
+      });
+      const router = new MaterializationRouter({
+        evidenceService,
+        memoryService: {
+          create: async (input) => {
+            const created = await memoryService.create(input);
+            return {
+              object_kind: created.object_kind,
+              object_id: created.object_id,
+              enrichmentEnqueued: input.enqueueEnrichment !== undefined
+            };
+          }
+        },
+        synthesisService: {
+          create: async () => ({ object_kind: "synthesis_capsule", object_id: "synthesis-1" })
+        },
+        claimService: {
+          create: async () => ({ object_kind: "claim_form", object_id: "claim-1" })
+        },
+        enrichPendingPort: { enqueue: enqueueEnrichPending },
+        reconciliationPort: reconciliationService,
+        handoffGapHandler: new InMemoryHandoffGapHandler()
       });
 
-      await expect(
-        memoryGraphEdgeRepo.findBySourceAndTarget(
-          NEW_MEMORY_ID,
-          OLD_MEMORY_ID,
-          MemoryGraphEdgeType.SUPPORTS,
-          "workspace-1"
-        )
-      ).resolves.toMatchObject({
-        source_memory_id: NEW_MEMORY_ID,
-        target_memory_id: OLD_MEMORY_ID,
-        edge_type: MemoryGraphEdgeType.SUPPORTS
-      });
+      const result = await router.materializeSignal(createFactSignal());
+
+      expect(result.success).toBe(true);
+      expect(result.created_objects).toEqual([
+        { object_kind: "memory_entry", object_id: OLD_MEMORY_ID }
+      ]);
+      await expect(memoryRepo.findByWorkspaceId("workspace-1")).resolves.toHaveLength(1);
+      await expect(evidenceRepo.findByWorkspaceId("workspace-1")).resolves.toHaveLength(0);
+      expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
     } finally {
       database.close();
     }

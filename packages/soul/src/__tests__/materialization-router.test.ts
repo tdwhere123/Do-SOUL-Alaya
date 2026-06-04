@@ -5,6 +5,10 @@ import {
   MaterializationRouter,
   normalizeSchemaGroundedSignal
 } from "@do-soul/alaya-soul";
+import type {
+  PathCandidateMintOutcome,
+  PathRelationProposalPayload
+} from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 
 function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
@@ -294,21 +298,87 @@ describe("MaterializationRouter", () => {
     expect(claimInput.proposition_digest).toBe("Never print secrets.");
   });
 
-  it("calls the edge auto producer after memory_and_claim creates a memory entry", async () => {
+  it("enqueues enrichment after memory_and_claim creates a memory entry (no inline enrichment)", async () => {
     const deps = createDeps();
-    const edgeAutoProducerPort = {
-      produceForNewMemory: vi.fn(async () => undefined)
-    };
-    const router = new MaterializationRouter({ ...deps, edgeAutoProducerPort });
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
 
     await router.materializeSignal(createSignal());
 
-    expect(edgeAutoProducerPort.produceForNewMemory).toHaveBeenCalledWith({
-      newMemoryId: "memory-1",
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledWith({
+      memoryId: "memory-1",
       workspaceId: "workspace-1",
       runId: "run-1",
       sourceSignalId: "signal-1"
     });
+  });
+
+  it("passes the enrichment intent on the create input so the marker commits atomically", async () => {
+    const deps = createDeps();
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
+
+    await router.materializeSignal(createSignal());
+
+    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+      readonly enqueueEnrichment?: { readonly runId: string | null; readonly sourceSignalId: string | null };
+    };
+    expect(memoryInput.enqueueEnrichment).toEqual({ runId: "run-1", sourceSignalId: "signal-1" });
+  });
+
+  it("skips the loud fallback enqueue when the create reported it enqueued atomically", async () => {
+    const deps = createDeps();
+    // The atomic-capable create commits the row + marker in one transaction and
+    // reports enrichmentEnqueued: true, so the router must NOT enqueue again.
+    deps.memoryService.create = vi.fn<(input: Record<string, unknown>) => Promise<MockCreatedObjectWithEnrich>>(
+      async () => ({ object_kind: "memory_entry", object_id: "memory-1", enrichmentEnqueued: true })
+    );
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
+
+    const result = await router.materializeSignal(createSignal());
+
+    expect(result.success).toBe(true);
+    expect(enrichPendingPort.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("fails the branch loudly when the marker enqueue throws and the create did not enqueue atomically", async () => {
+    // invariant pinned: the enrich_pending marker is the mandatory no-drop
+    // handoff. When the create did NOT commit it atomically and the fallback
+    // enqueue write itself throws, the branch must NOT return success: true with
+    // a memory stranded marker-less — it surfaces so SignalService marks the
+    // signal FAILED (a swallow here is the B6 regression this fix closes).
+    const deps = createDeps();
+    const enrichPendingPort = {
+      enqueue: vi.fn<EnqueueFn>(() => {
+        throw new Error("SQLITE_BUSY: enrich_pending insert failed");
+      })
+    };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
+
+    const result = await router.materializeSignal(createSignal());
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("SQLITE_BUSY");
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails the memory_entry_only append branch loudly when the marker enqueue throws", async () => {
+    const deps = createDeps();
+    const enrichPendingPort = {
+      enqueue: vi.fn<EnqueueFn>(() => {
+        throw new Error("disk full");
+      })
+    };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
+
+    const result = await router.materializeSignal(
+      createSignal({ object_kind: "fact", raw_payload: { distilled_fact: "The user lives in Berlin." } })
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("disk full");
   });
 
   it("uses validated schema-grounded field values as memory content", async () => {
@@ -565,6 +635,71 @@ describe("MaterializationRouter", () => {
     });
   });
 
+  it("keeps the memory enriched when the time_concern proposal throws on memory_and_claim", async () => {
+    // invariant (codex spine-review B6): the optional time_concern proposal is
+    // a best-effort side effect on top of an already-durable memory. A throw
+    // must NOT strand the memory — enrich_pending is enqueued BEFORE the
+    // proposal, and the branch still returns success so SignalService does not
+    // mark the signal terminally FAILED.
+    const pathRelationProposalPort = {
+      createPathRelationProposal: vi.fn(async () => {
+        throw new Error("path relation proposal port unavailable");
+      })
+    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const deps = { ...createDeps(), pathRelationProposalPort, enrichPendingPort };
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(
+      createSignal({
+        domain_tags: ["time_concern"],
+        raw_payload: {
+          excerpt: "Never print secrets.",
+          time_concern: { window_digest: "yesterday", matched_text: "yesterday" }
+        }
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
+    // The failed optional proposal contributes no created object.
+    expect(result.created_objects).not.toContainEqual(
+      expect.objectContaining({ object_kind: "proposal" })
+    );
+  });
+
+  it("keeps the memory enriched when the time_concern proposal throws on memory_entry_only append", async () => {
+    // invariant (codex spine-review B6): same no-drop guarantee on the
+    // memory_entry_only append branch.
+    const pathRelationProposalPort = {
+      createPathRelationProposal: vi.fn(async () => {
+        throw new Error("path relation proposal port unavailable");
+      })
+    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const deps = { ...createDeps(), pathRelationProposalPort, enrichPendingPort };
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(
+      createSignal({
+        object_kind: "fact",
+        domain_tags: ["time_concern"],
+        raw_payload: {
+          excerpt: "We reviewed the issue yesterday.",
+          distilled_fact: "We reviewed the issue yesterday.",
+          time_concern: { window_digest: "yesterday", matched_text: "yesterday" }
+        }
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
+  });
+
   it("routes direct path_relation signals to a path relation proposal sink", async () => {
     const pathRelationProposalPort = {
       createPathRelationProposal: vi.fn(async () => ({
@@ -723,9 +858,12 @@ describe("MaterializationRouter", () => {
     expect(memoryInput.content).toBe(fact);
   });
 
-  it("creates supersedes / exception_to / contradicts / incompatible_with edge proposals from first-class refs", async () => {
+  it("submits supersedes / exception_to / contradicts / incompatible_with path candidates from first-class refs", async () => {
     const deps = createDeps();
-    const router = new MaterializationRouter(deps);
+    const router = new MaterializationRouter({
+      ...deps,
+      pathRelationProposalPort: createPathRelationProposalPort()
+    });
 
     await router.materializeSignal(
       createSignal({
@@ -739,26 +877,79 @@ describe("MaterializationRouter", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    const edgeTypes = calls.map((edge) => edge.edgeType);
-    expect(edgeTypes).toEqual(
+    // Signal refs submit governed path candidates with family-correct
+    // recall_bias signs.
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    const relationKinds = calls.map((candidate) => candidate.relationKind);
+    expect(relationKinds).toEqual(
       expect.arrayContaining(["supersedes", "exception_to", "contradicts", "incompatible_with"])
     );
-    const supersedesEdge = calls.find((edge) => edge.edgeType === "supersedes");
-    expect(supersedesEdge).toMatchObject({
-      sourceMemoryId: "memory-1",
-      targetMemoryId: "mem-old-1",
-      triggerSource: "candidate_signal_ref",
-      confidence: 0.5,
-      sourceSignalId: "signal-1"
+    const supersedes = calls.find((candidate) => candidate.relationKind === "supersedes");
+    expect(supersedes).toMatchObject({
+      sourceAnchor: { kind: "object", object_id: "memory-1" },
+      targetAnchor: { kind: "object", object_id: "mem-old-1" },
+      recallBiasSign: -1
     });
+    const exception = calls.find((candidate) => candidate.relationKind === "exception_to");
+    expect(exception?.recallBiasSign).toBe(0);
   });
 
-  it("creates derives_from edge proposals from first-class source_memory_refs on the memory_and_claim branch", async () => {
+  it("seeds agent-asserted negative refs WEAK (attention_only), never recall_allowed", async () => {
+    // invariant (governance): an agent-asserted negative ref is a weak
+    // claim, not a system conflict ruling. One injected contradicts_ref
+    // yields exactly one attention_only / strength-0.5 path that must earn
+    // recall eligibility through plasticity — it never mints a
+    // recall_allowed/0.9 negative path. Defeats the prompt-injection
+    // amplification surface: a single ref = a single decaying weak path.
+    const deps = createDeps();
+    const router = new MaterializationRouter({
+      ...deps,
+      pathRelationProposalPort: createPathRelationProposalPort()
+    });
+
+    await router.materializeSignal(
+      createSignal({
+        supersedes_refs: ["mem-old-1"],
+        contradicts_refs: ["victim-mem"],
+        incompatible_with_refs: ["mem-incompat-4"],
+        raw_payload: {
+          excerpt: "Agent claims this contradicts the victim memory."
+        }
+      })
+    );
+
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+
+    const contradicts = calls.filter((candidate) => candidate.relationKind === "contradicts");
+    // one ref -> at most one path
+    expect(contradicts).toHaveLength(1);
+    expect(contradicts[0]).toMatchObject({
+      targetAnchor: { kind: "object", object_id: "victim-mem" },
+      recallBiasSign: -1,
+      governanceClass: "attention_only",
+      initialStrength: 0.5
+    });
+
+    for (const relationKind of ["supersedes", "contradicts", "incompatible_with"]) {
+      const negative = calls.filter((candidate) => candidate.relationKind === relationKind);
+      expect(negative).toHaveLength(1);
+      for (const candidate of negative) {
+        expect(candidate.recallBiasSign).toBe(-1);
+        expect(candidate.governanceClass).toBe("attention_only");
+        expect(candidate.governanceClass).not.toBe("recall_allowed");
+        expect(candidate.initialStrength).toBe(0.5);
+      }
+    }
+  });
+
+  it("submits derives_from path candidates from first-class source_memory_refs on the memory_and_claim branch", async () => {
     // invariant: source_memory_refs honored on memory_and_claim branch.
     // see also: createAllMemoryRefEdges
     const deps = createDeps();
-    const router = new MaterializationRouter(deps);
+    const router = new MaterializationRouter({
+      ...deps,
+      pathRelationProposalPort: createPathRelationProposalPort()
+    });
 
     await router.materializeSignal(
       createSignal({
@@ -769,33 +960,40 @@ describe("MaterializationRouter", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    const derivesFromEdges = calls.filter((edge) => edge.edgeType === "derives_from");
-    expect(derivesFromEdges).toHaveLength(2);
-    expect(derivesFromEdges.map((edge) => edge.targetMemoryId).sort()).toEqual([
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    const derivesFrom = calls.filter((candidate) => candidate.relationKind === "derives_from");
+    expect(derivesFrom).toHaveLength(2);
+    expect(derivesFrom.map((candidate) => candidate.targetAnchor.object_id).sort()).toEqual([
       "mem-prior-a",
       "mem-prior-b"
     ]);
-    expect(derivesFromEdges.every((edge) => edge.sourceMemoryId === "memory-1")).toBe(true);
+    expect(derivesFrom.every((candidate) => candidate.recallBiasSign === 1)).toBe(true);
+    expect(
+      derivesFrom.every((candidate) => candidate.sourceAnchor.object_id === "memory-1")
+    ).toBe(true);
   });
 
-  it("invokes conflictDetectionPort with the new memory facts when wired", async () => {
+  it("does NOT run conflict detection inline on the write-path (enqueues instead)", async () => {
+    // invariant: detectAndLinkConflicts moved to the BULK_ENRICH worker. The
+    // write-path must stay synchronous-ack: it enqueues an enrich_pending
+    // marker and never calls the conflict scan inline.
     const deps = createDeps();
     const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
     const router = new MaterializationRouter({
       ...deps,
-      conflictDetectionPort: { detectAndLinkConflicts }
+      conflictDetectionPort: { detectAndLinkConflicts },
+      enrichPendingPort
     });
 
     await router.materializeSignal(createSignal());
 
-    expect(detectAndLinkConflicts).toHaveBeenCalledTimes(1);
-    const call = detectAndLinkConflicts.mock.calls[0][0];
-    expect(call.newMemoryId).toBe("memory-1");
-    expect(call.workspaceId).toBe("workspace-1");
+    expect(detectAndLinkConflicts).not.toHaveBeenCalled();
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
   });
 
-  it("does not call conflictDetectionPort when port is absent", async () => {
+  it("does not enqueue enrichment when enrichPendingPort is absent", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter(deps);
 
@@ -820,6 +1018,9 @@ type RunWithDecisionFn = NonNullable<
 type DetectFn = NonNullable<
   ConstructorParameters<typeof MaterializationRouter>[0]["conflictDetectionPort"]
 >["detectAndLinkConflicts"];
+type EnqueueFn = NonNullable<
+  ConstructorParameters<typeof MaterializationRouter>[0]["enrichPendingPort"]
+>["enqueue"];
 
 // invariant: a fake reconciliation port that runs the router's
 // applyVerdict callback exactly as the core service would — emit the
@@ -890,17 +1091,16 @@ describe("MaterializationRouter ingest reconciliation", () => {
     });
   });
 
-  it("memory_entry_only append branch calls the edge auto producer after creating a memory", async () => {
+  it("memory_entry_only append branch enqueues enrichment after creating a memory", async () => {
     const deps = createDeps();
-    const edgeAutoProducerPort = {
-      produceForNewMemory: vi.fn(async () => undefined)
-    };
-    const router = new MaterializationRouter({ ...deps, edgeAutoProducerPort });
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
 
     await router.materializeSignal(factSignal());
 
-    expect(edgeAutoProducerPort.produceForNewMemory).toHaveBeenCalledWith({
-      newMemoryId: "memory-1",
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledWith({
+      memoryId: "memory-1",
       workspaceId: "workspace-1",
       runId: "run-1",
       sourceSignalId: "signal-1"
@@ -915,7 +1115,10 @@ describe("MaterializationRouter ingest reconciliation", () => {
     // the ~40% of bench-seed object kinds that flow through this branch.
     // see also: createAllMemoryRefEdges
     const deps = createDeps();
-    const router = new MaterializationRouter(deps);
+    const router = new MaterializationRouter({
+      ...deps,
+      pathRelationProposalPort: createPathRelationProposalPort()
+    });
 
     await router.materializeSignal(
       factSignal({
@@ -927,24 +1130,41 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    const derivesFromEdges = calls.filter((edge) => edge.edgeType === "derives_from");
-    expect(derivesFromEdges).toHaveLength(2);
-    expect(derivesFromEdges.map((edge) => edge.targetMemoryId).sort()).toEqual([
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    const derivesFrom = calls.filter((candidate) => candidate.relationKind === "derives_from");
+    expect(derivesFrom).toHaveLength(2);
+    expect(derivesFrom.map((candidate) => candidate.targetAnchor.object_id).sort()).toEqual([
       "mem-prior-1",
       "mem-prior-2"
     ]);
-    expect(derivesFromEdges.every((edge) => edge.sourceMemoryId === "memory-1")).toBe(true);
+    expect(
+      derivesFrom.every((candidate) => candidate.sourceAnchor.object_id === "memory-1")
+    ).toBe(true);
   });
 
-  it("memory_entry_only append branch proposes every first-class memory ref edge", async () => {
-    // invariant: first-class *_refs are candidate signal graph-proposal
-    // hints, not claim-only fields. Every memory-creating branch must
-    // preserve them so auto proposals survive triage/materialization.
+  it("defers every first-class memory ref to the gating sink, which refuses refs that fail existence/ownership", async () => {
+    // invariant (codex spine-review B3): first-class *_refs are agent/Garden
+    // PROPOSALS, not durable truth. The router forwards each ref to the path
+    // candidate sink, but the sink — PathRelationProposalService — DECIDES:
+    // a ref whose object does not exist in (or is owned by another workspace
+    // than) this workspace is REFUSED and never becomes durable topology.
+    // The router must not silently mint paths from arbitrary agent refs; it
+    // hands the decision to the gate and tolerates a refusal (false) per ref.
+    // see also: packages/core path-relation-proposal-service.anchor-gate.test.ts
     const deps = createDeps();
-    const router = new MaterializationRouter(deps);
+    // Model the durable gate: only "mem-prior-1" is a real object in this
+    // workspace; the other refs are missing or foreign and are permanently
+    // rejected (a decided B3 refusal, not a transient failure).
+    const validRefs = new Set(["mem-prior-1"]);
+    deps.pathCandidateSinkPort.submitCandidate.mockImplementation(async (input) =>
+      validRefs.has(input.targetAnchor.object_id) ? "applied" : "rejected"
+    );
+    const router = new MaterializationRouter({
+      ...deps,
+      pathRelationProposalPort: createPathRelationProposalPort()
+    });
 
-    await router.materializeSignal(
+    const result = await router.materializeSignal(
       factSignal({
         source_memory_refs: ["mem-prior-1"],
         supersedes_refs: ["mem-old-1"],
@@ -958,14 +1178,317 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    expect(calls.map((edge) => [edge.edgeType, edge.targetMemoryId])).toEqual([
-      ["derives_from", "mem-prior-1"],
-      ["supersedes", "mem-old-1"],
-      ["exception_to", "mem-rule-2"],
-      ["contradicts", "mem-conflict-3"],
-      ["incompatible_with", "mem-incompat-4"]
+    // The memory itself is still materialized; ref gating never blocks it.
+    expect(result.success).toBe(true);
+
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    const results = deps.pathCandidateSinkPort.submitCandidate.mock.results.map(
+      (entry) => entry.value
+    );
+    // The router forwards each ref to the gate (its job), but only the valid
+    // ref is accepted; the four missing/foreign refs are refused by the sink.
+    const accepted = await Promise.all(results);
+    const decisions = calls.map((candidate, idx) => [
+      candidate.targetAnchor.object_id,
+      accepted[idx]
     ]);
+    expect(decisions).toEqual([
+      ["mem-prior-1", "applied"],
+      ["mem-old-1", "rejected"],
+      ["mem-rule-2", "rejected"],
+      ["mem-conflict-3", "rejected"],
+      ["mem-incompat-4", "rejected"]
+    ]);
+  });
+
+  it("creates a durable path_relation proposal when a signal-ref path candidate returns failed", async () => {
+    // invariant (codex spine-review B4): a TRANSIENT "failed" signal-ref mint
+    // must NOT be silently settled. The inline path must either create a
+    // durable proposal record for the owed relation or defer to the
+    // enrich_pending replay lane; warning-and-forgetting is the no-drop bug.
+    const deps = createDeps();
+    deps.pathCandidateSinkPort.submitCandidate.mockImplementation(async (input) =>
+      input.targetAnchor.object_id === "mem-transient" ? "failed" : "applied"
+    );
+    const pathRelationProposalPort = createPathRelationProposalPort();
+    const router = new MaterializationRouter({ ...deps, pathRelationProposalPort });
+
+    const result = await router.materializeSignal(
+      factSignal({
+        source_memory_refs: ["mem-transient"],
+        raw_payload: {
+          excerpt: "Fact whose derives_from edge mint fails transiently.",
+          distilled_fact: "Fact whose derives_from edge mint fails transiently."
+        }
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.created_objects).toContainEqual({
+      object_kind: "proposal",
+      object_id: "proposal-1"
+    });
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1",
+      targetObjectId: "memory-1",
+      reason: expect.stringContaining("source_memory_refs path_relation candidate derives_from"),
+      proposedPathRelation: {
+        target_anchor: { kind: "object", object_id: "mem-transient" },
+        constitution: {
+          relation_kind: "derives_from",
+          why_this_relation_exists: [
+            "source_memory_refs on candidate signal signal-1",
+            "run=run-1",
+            "path candidate mint failed for target_anchor=mem-transient"
+          ]
+        },
+        effect_vector: {
+          salience: 0.5,
+          recall_bias: 0.5,
+          verification_bias: 0,
+          unfinishedness_bias: 0,
+          default_manifestation_preference: "lens_entry"
+        },
+        plasticity_state: {
+          strength: 0.5,
+          direction_bias: "source_to_target",
+          stability_class: "volatile",
+          support_events_count: 1,
+          contradiction_events_count: 0
+        },
+        lifecycle: {
+          status: "active",
+          retirement_rule: "governance_reject_or_low_strength"
+        },
+        legitimacy: {
+          evidence_basis: ["llm_derives_inference"],
+          governance_class: "attention_only"
+        }
+      }
+    });
+  });
+
+  it("creates exactly one durable path_relation proposal when the signal-ref sink throws", async () => {
+    // invariant (codex spine-review B4): a THROWN sink folds into the same
+    // durable fallback treatment as a returned "failed", so a thrown ref
+    // produces exactly ONE proposal, not a warn-only drop and not a double
+    // record from catch-plus-failed handling.
+    const deps = createDeps();
+    deps.pathCandidateSinkPort.submitCandidate.mockImplementation(async (input) => {
+      if (input.targetAnchor.object_id === "mem-thrower") {
+        throw new Error("port wiring fault");
+      }
+      return "applied";
+    });
+    const pathRelationProposalPort = createPathRelationProposalPort();
+    const router = new MaterializationRouter({ ...deps, pathRelationProposalPort });
+
+    const result = await router.materializeSignal(
+      factSignal({
+        source_memory_refs: ["mem-thrower"],
+        raw_payload: {
+          excerpt: "Fact whose derives_from edge mint throws.",
+          distilled_fact: "Fact whose derives_from edge mint throws."
+        }
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.created_objects).toContainEqual({
+      object_kind: "proposal",
+      object_id: "proposal-1"
+    });
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
+    expect(pathRelationProposalPort.createPathRelationProposal.mock.calls[0][0]).toMatchObject({
+      targetObjectId: "memory-1",
+      reason: expect.stringContaining("submitCandidate error: port wiring fault"),
+      proposedPathRelation: {
+        target_anchor: { kind: "object", object_id: "mem-thrower" },
+        constitution: {
+          relation_kind: "derives_from",
+          why_this_relation_exists: [
+            "source_memory_refs on candidate signal signal-1",
+            "run=run-1",
+            "path candidate mint failed for target_anchor=mem-thrower",
+            "submitCandidate threw: port wiring fault"
+          ]
+        }
+      }
+    });
+  });
+
+  it("keeps a permanently-rejected signal-ref a clean drop without a fallback proposal", async () => {
+    // invariant (codex spine-review B4): only "failed" gets the durable
+    // fallback treatment. A "rejected" is a DECIDED B3 anchor refusal —
+    // already audited by the path service, and retry cannot help — so the
+    // router must drop it quietly without manufacturing a proposal.
+    const deps = createDeps();
+    deps.pathCandidateSinkPort.submitCandidate.mockResolvedValue("rejected");
+    const pathRelationProposalPort = createPathRelationProposalPort();
+    const router = new MaterializationRouter({ ...deps, pathRelationProposalPort });
+
+    const result = await router.materializeSignal(
+      factSignal({
+        source_memory_refs: ["mem-foreign"],
+        raw_payload: {
+          excerpt: "Fact referencing a foreign/missing memory.",
+          distilled_fact: "Fact referencing a foreign/missing memory."
+        }
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(deps.pathCandidateSinkPort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathRelationProposalPort.createPathRelationProposal).not.toHaveBeenCalled();
+  });
+
+  it("defers post-create signal-ref transient failures to enrich_pending instead of duplicating proposal handoffs", async () => {
+    const deps = createDeps();
+    deps.pathCandidateSinkPort.submitCandidate.mockResolvedValue("failed");
+    const pathRelationProposalPort = {
+      assertPathRelationProposalAvailable: vi.fn(async () => undefined),
+      createPathRelationProposal: vi.fn<MockPathRelationProposalFn>(async () => {
+        throw new Error("should not create inline proposal when enrich_pending can retry");
+      })
+    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const router = new MaterializationRouter({
+      ...deps,
+      pathRelationProposalPort,
+      enrichPendingPort
+    });
+
+    try {
+      const result = await router.materializeSignal(
+        factSignal({
+          source_memory_refs: ["mem-transient"],
+          raw_payload: {
+            excerpt: "Fact whose fallback proposal write fails after memory create.",
+            distilled_fact: "Fact whose fallback proposal write fails after memory create."
+          }
+        })
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.created_objects).toContainEqual({
+        object_kind: "memory_entry",
+        object_id: "memory-1"
+      });
+      expect(enrichPendingPort.enqueue).toHaveBeenCalledWith({
+        memoryId: "memory-1",
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1"
+      });
+      expect(pathRelationProposalPort.createPathRelationProposal).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        "materialization-router: signal-ref path candidate deferred to enrich_pending retry",
+        expect.objectContaining({
+          sourceMemoryId: "memory-1",
+          targetMemoryIds: ["mem-transient"],
+          signalId: "signal-1",
+          error: expect.stringContaining("source_memory_refs path_relation candidate derives_from")
+        })
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("replaySignalRefs throws transient failures for claim retry without creating fallback proposals", async () => {
+    const deps = createDeps();
+    deps.pathCandidateSinkPort.submitCandidate.mockResolvedValue("failed");
+    const pathRelationProposalPort = createPathRelationProposalPort();
+    const router = new MaterializationRouter({ ...deps, pathRelationProposalPort });
+
+    await expect(
+      router.replaySignalRefs({
+        newObjectId: "memory-1",
+        signal: factSignal({ source_memory_refs: ["mem-transient"] })
+      })
+    ).rejects.toThrow("source_memory_refs path_relation candidate derives_from");
+    expect(pathRelationProposalPort.createPathRelationProposal).not.toHaveBeenCalled();
+  });
+
+  it("returns unsuccessful before memory creation when refs need a fallback but no durable proposal port exists", async () => {
+    const deps = createDeps();
+    deps.pathCandidateSinkPort.submitCandidate.mockResolvedValue("failed");
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(
+      factSignal({
+        source_memory_refs: ["mem-transient"],
+        raw_payload: {
+          excerpt: "Fact whose fallback proposal port is absent.",
+          distilled_fact: "Fact whose fallback proposal port is absent."
+        }
+      })
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("PathRelationProposalPort unavailable before materializing");
+    expect(result.created_objects).toEqual([]);
+    expect(deps.evidenceService.create).not.toHaveBeenCalled();
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.pathCandidateSinkPort.submitCandidate).not.toHaveBeenCalled();
+  });
+
+  it("preflights the durable fallback before memory_and_claim side effects when refs are present", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(
+      createSignal({
+        source_memory_refs: ["mem-transient"],
+        raw_payload: {
+          excerpt: "Claim whose fallback proposal port is absent."
+        }
+      })
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.created_objects).toEqual([]);
+    expect(deps.evidenceService.create).not.toHaveBeenCalled();
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.claimService.create).not.toHaveBeenCalled();
+    expect(deps.pathCandidateSinkPort.submitCandidate).not.toHaveBeenCalled();
+  });
+
+  it("returns unsuccessful before memory creation when the durable proposal fallback preflight throws", async () => {
+    const deps = createDeps();
+    deps.pathCandidateSinkPort.submitCandidate.mockResolvedValue("failed");
+    const pathRelationProposalPort = {
+      assertPathRelationProposalAvailable: vi.fn(async () => {
+        throw new Error("proposal repo down");
+      }),
+      createPathRelationProposal: vi.fn<MockPathRelationProposalFn>(async () => {
+        throw new Error("should not create a proposal after failed preflight");
+      })
+    };
+    const router = new MaterializationRouter({ ...deps, pathRelationProposalPort });
+
+    const result = await router.materializeSignal(
+      factSignal({
+        source_memory_refs: ["mem-transient"],
+        raw_payload: {
+          excerpt: "Fact whose fallback proposal write fails.",
+          distilled_fact: "Fact whose fallback proposal write fails."
+        }
+      })
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("proposal repo down");
+    expect(result.created_objects).toEqual([]);
+    expect(pathRelationProposalPort.assertPathRelationProposalAvailable).toHaveBeenCalledTimes(1);
+    expect(pathRelationProposalPort.createPathRelationProposal).not.toHaveBeenCalled();
+    expect(deps.evidenceService.create).not.toHaveBeenCalled();
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.pathCandidateSinkPort.submitCandidate).not.toHaveBeenCalled();
   });
 
   it("ADD verdict (reconciled path) also creates derives_from edges from source_memory_refs", async () => {
@@ -975,7 +1498,11 @@ describe("MaterializationRouter ingest reconciliation", () => {
     // NOOP do not mint a new memory_entry and intentionally skip edges.
     const deps = createDeps();
     const { reconciliationPort } = fakeReconciliationPort({ kind: "add" });
-    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+    const router = new MaterializationRouter({
+      ...deps,
+      reconciliationPort,
+      pathRelationProposalPort: createPathRelationProposalPort()
+    });
 
     await router.materializeSignal(
       factSignal({
@@ -987,35 +1514,71 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    const derivesFromEdges = calls.filter((edge) => edge.edgeType === "derives_from");
-    expect(derivesFromEdges).toHaveLength(1);
-    expect(derivesFromEdges[0]).toMatchObject({
-      sourceMemoryId: "memory-1",
-      targetMemoryId: "mem-prior-r1"
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    const derivesFrom = calls.filter((candidate) => candidate.relationKind === "derives_from");
+    expect(derivesFrom).toHaveLength(1);
+    expect(derivesFrom[0]).toMatchObject({
+      sourceAnchor: { kind: "object", object_id: "memory-1" },
+      targetAnchor: { kind: "object", object_id: "mem-prior-r1" }
     });
   });
 
-  it("ADD verdict (reconciled path) calls the edge auto producer for the appended memory", async () => {
+  it("ADD verdict (reconciled path) enqueues enrichment for the appended memory", async () => {
     const deps = createDeps();
     const { reconciliationPort } = fakeReconciliationPort({ kind: "add" });
-    const edgeAutoProducerPort = {
-      produceForNewMemory: vi.fn(async () => undefined)
-    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
     const router = new MaterializationRouter({
       ...deps,
       reconciliationPort,
-      edgeAutoProducerPort
+      enrichPendingPort
     });
 
     await router.materializeSignal(factSignal());
 
-    expect(edgeAutoProducerPort.produceForNewMemory).toHaveBeenCalledWith({
-      newMemoryId: "memory-1",
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledWith({
+      memoryId: "memory-1",
       workspaceId: "workspace-1",
       runId: "run-1",
       sourceSignalId: "signal-1"
     });
+  });
+
+  it("ADD verdict keeps the memory enriched when the time_concern proposal throws", async () => {
+    // invariant (codex spine-review B6): on the reconciled-ADD branch the
+    // enrich_pending marker is enqueued for the appended memory BEFORE the
+    // optional time_concern proposal, so a proposal throw cannot strand the
+    // memory or flip the branch to terminally-FAILED success: false.
+    const deps = createDeps();
+    const { reconciliationPort } = fakeReconciliationPort({ kind: "add" });
+    const pathRelationProposalPort = {
+      createPathRelationProposal: vi.fn(async () => {
+        throw new Error("path relation proposal port unavailable");
+      })
+    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+    const router = new MaterializationRouter({
+      ...deps,
+      reconciliationPort,
+      pathRelationProposalPort,
+      enrichPendingPort
+    });
+
+    const result = await router.materializeSignal(
+      factSignal({
+        domain_tags: ["time_concern"],
+        raw_payload: {
+          excerpt: "We shipped it yesterday.",
+          distilled_fact: "We shipped it yesterday.",
+          time_concern: { window_digest: "yesterday", matched_text: "yesterday" }
+        }
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
   });
 
   it("UPDATE verdict (reconciled path) does not create derives_from edges", async () => {
@@ -1039,28 +1602,26 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    expect(calls.filter((edge) => edge.edgeType === "derives_from")).toEqual([]);
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    expect(calls.filter((candidate) => candidate.relationKind === "derives_from")).toEqual([]);
   });
 
-  it("UPDATE verdict (reconciled path) does not call the edge auto producer", async () => {
+  it("UPDATE verdict (reconciled path) does not enqueue enrichment", async () => {
     const deps = createDeps();
     const { reconciliationPort } = fakeReconciliationPort({
       kind: "update",
       survivingObjectId: "memory-existing"
     });
-    const edgeAutoProducerPort = {
-      produceForNewMemory: vi.fn(async () => undefined)
-    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
     const router = new MaterializationRouter({
       ...deps,
       reconciliationPort,
-      edgeAutoProducerPort
+      enrichPendingPort
     });
 
     await router.materializeSignal(factSignal());
 
-    expect(edgeAutoProducerPort.produceForNewMemory).not.toHaveBeenCalled();
+    expect(enrichPendingPort.enqueue).not.toHaveBeenCalled();
   });
 
   it("NOOP verdict (reconciled path) does not create derives_from edges", async () => {
@@ -1083,28 +1644,26 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
-    expect(calls.filter((edge) => edge.edgeType === "derives_from")).toEqual([]);
+    const calls = deps.pathCandidateSinkPort.submitCandidate.mock.calls.map((args) => args[0]);
+    expect(calls.filter((candidate) => candidate.relationKind === "derives_from")).toEqual([]);
   });
 
-  it("NOOP verdict (reconciled path) does not call the edge auto producer", async () => {
+  it("NOOP verdict (reconciled path) does not enqueue enrichment", async () => {
     const deps = createDeps();
     const { reconciliationPort } = fakeReconciliationPort({
       kind: "noop",
       survivingObjectId: "memory-existing"
     });
-    const edgeAutoProducerPort = {
-      produceForNewMemory: vi.fn(async () => undefined)
-    };
+    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
     const router = new MaterializationRouter({
       ...deps,
       reconciliationPort,
-      edgeAutoProducerPort
+      enrichPendingPort
     });
 
     await router.materializeSignal(factSignal());
 
-    expect(edgeAutoProducerPort.produceForNewMemory).not.toHaveBeenCalled();
+    expect(enrichPendingPort.enqueue).not.toHaveBeenCalled();
   });
 
   it("ADD verdict creates the evidence capsule then the memory entry", async () => {
@@ -1128,37 +1687,31 @@ describe("MaterializationRouter ingest reconciliation", () => {
     ]);
   });
 
-  it("ADD verdict runs the conflict scan when flagged", async () => {
-    const deps = createDeps();
-    const { reconciliationPort } = fakeReconciliationPort({ kind: "add", runConflictScan: true });
-    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
-    const router = new MaterializationRouter({
-      ...deps,
-      reconciliationPort,
-      conflictDetectionPort: { detectAndLinkConflicts }
-    });
+  it("ADD verdict enqueues enrichment and never runs conflict detection inline (regardless of the old runConflictScan flag)", async () => {
+    // invariant: the reconciliation runConflictScan flag no longer gates inline
+    // work — every ADD-minted memory is enqueued and the BULK_ENRICH worker
+    // runs both governed services. The write-path must not call
+    // detectAndLinkConflicts inline for either flag value.
+    for (const runConflictScan of [true, false]) {
+      const deps = createDeps();
+      const { reconciliationPort } = fakeReconciliationPort({ kind: "add", runConflictScan });
+      const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+      const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
+      const router = new MaterializationRouter({
+        ...deps,
+        reconciliationPort,
+        conflictDetectionPort: { detectAndLinkConflicts },
+        enrichPendingPort
+      });
 
-    const result = await router.materializeSignal(factSignal());
+      const result = await router.materializeSignal(factSignal());
 
-    expect(result.success).toBe(true);
-    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
-    expect(detectAndLinkConflicts).toHaveBeenCalledTimes(1);
-    expect(detectAndLinkConflicts.mock.calls[0][0].newMemoryId).toBe("memory-1");
-  });
-
-  it("ADD verdict without the conflict-scan flag does not run the scan", async () => {
-    const deps = createDeps();
-    const { reconciliationPort } = fakeReconciliationPort({ kind: "add", runConflictScan: false });
-    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
-    const router = new MaterializationRouter({
-      ...deps,
-      reconciliationPort,
-      conflictDetectionPort: { detectAndLinkConflicts }
-    });
-
-    await router.materializeSignal(factSignal());
-
-    expect(detectAndLinkConflicts).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
+      expect(detectAndLinkConflicts).not.toHaveBeenCalled();
+      expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
+      expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    }
   });
 
   it("NOOP verdict creates nothing — no evidence capsule, no memory entry", async () => {
@@ -1258,12 +1811,47 @@ interface MockCreatedObject {
   readonly object_kind: string;
   readonly object_id: string;
 }
+// invariant: mirrors MemoryMaterializationCreatedObject — the memory-create port
+// optionally reports whether the enrich_pending marker committed atomically.
+interface MockCreatedObjectWithEnrich extends MockCreatedObject {
+  readonly enrichmentEnqueued?: boolean;
+}
 type MockServiceInput = Record<string, unknown>;
-type MockEdgeInput = {
-  readonly sourceMemoryId: string;
-  readonly targetMemoryId: string;
-  readonly edgeType: string;
+type MockPathCandidateInput = {
+  readonly workspaceId: string;
+  readonly sourceAnchor: { readonly kind: "object"; readonly object_id: string };
+  readonly targetAnchor: { readonly kind: "object"; readonly object_id: string };
+  readonly relationKind: string;
+  readonly recallBiasSign: 1 | 0 | -1;
+  readonly governanceClass: string;
+  readonly initialStrength: number;
 };
+type MockPathRelationProposalInput = {
+  readonly workspaceId: string;
+  readonly runId: string;
+  readonly sourceSignalId: string;
+  readonly targetObjectId: string;
+  readonly reason: string;
+  readonly proposedPathRelation: PathRelationProposalPayload;
+};
+type MockPathRelationProposalFn = (
+  input: MockPathRelationProposalInput
+) => Promise<MockCreatedObject>;
+
+function createPathRelationProposalPort() {
+  let proposalCounter = 0;
+
+  return {
+    assertPathRelationProposalAvailable: vi.fn(async () => undefined),
+    createPathRelationProposal: vi.fn<MockPathRelationProposalFn>(async () => {
+      proposalCounter += 1;
+      return {
+        object_kind: "proposal",
+        object_id: `proposal-${proposalCounter}`
+      };
+    })
+  };
+}
 
 function createDeps() {
   let evidenceCounter = 0;
@@ -1296,8 +1884,10 @@ function createDeps() {
         object_id: "claim-1"
       }))
     },
-    graphEdgePort: {
-      createEdge: vi.fn<(input: MockEdgeInput) => Promise<void>>(async () => undefined)
+    pathCandidateSinkPort: {
+      submitCandidate: vi.fn<(input: MockPathCandidateInput) => Promise<PathCandidateMintOutcome>>(
+        async () => "applied"
+      )
     },
     handoffGapHandler: new InMemoryHandoffGapHandler()
   };

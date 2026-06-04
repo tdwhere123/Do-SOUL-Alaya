@@ -54,11 +54,15 @@ describe("Phase C event registry", () => {
       "stance.policy_evaluated",
       "stance.resolution_changed",
       "path.relation_created",
+      "path.relation_rejected",
       "path.relation_legitimacy_updated",
       "path.relation_reinforced",
       "path.relation_weakened",
       "path.relation_redirected",
       "path.relation_retired",
+      "path.relation_dormant",
+      "path.relation_revived",
+      "path.relation_merged",
       "path.consolidation_completed",
       "path.consolidation_fused",
       "surface.drift_detected",
@@ -124,6 +128,14 @@ describe("Phase C event registry", () => {
       governance_class: "hint_only",
       created_at: validTimestamp
     } as const;
+    const pathRejectedPayload = {
+      workspace_id: "workspace-1",
+      relation_kind: "supports",
+      anchor_role: "target",
+      rejected_object_id: "mem-foreign-1",
+      rejection_reason: "object_foreign_workspace",
+      rejected_at: validTimestamp
+    } as const;
     const reinforcedPayload = {
       path_id: "path-1",
       previous_strength: 0.3,
@@ -152,6 +164,13 @@ describe("Phase C event registry", () => {
       retirement_reason: "cooldown_expired",
       final_strength: 0.05,
       retired_at: validTimestamp
+    } as const;
+    const mergedPayload = {
+      survivor_path_id: "path-survivor",
+      merged_path_ids: ["path-loser-a", "path-loser-b"],
+      relation_kind: "supports",
+      survivor_why_entry_count: 3,
+      merged_at: validTimestamp
     } as const;
     const redirectedPayload = {
       path_id: "path-1",
@@ -432,6 +451,9 @@ describe("Phase C event registry", () => {
       pathCreatedPayload
     );
     expect(
+      parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_REJECTED, pathRejectedPayload)
+    ).toEqual(pathRejectedPayload);
+    expect(
       parseRuntimeGovernanceEventPayload(
         RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
         legitimacyUpdatedPayload
@@ -448,6 +470,9 @@ describe("Phase C event registry", () => {
     );
     expect(parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_RETIRED, retiredPayload)).toEqual(
       retiredPayload
+    );
+    expect(parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_MERGED, mergedPayload)).toEqual(
+      mergedPayload
     );
     expect(
       parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED, driftDetectedPayload)

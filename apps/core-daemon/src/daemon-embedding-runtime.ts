@@ -117,7 +117,7 @@ export function createDaemonEmbeddingRuntime(input: {
   // The decorator is attached only when the provider exists AND embedding
   // recall is configured at all; per-call it re-reads `provider.isAvailable`
   // and degrades to a noop pass-through when the provider has gone offline.
-  // TODO: provider-switch runtime detection lives in doctor and runtime-status;
+  // provider-switch runtime detection lives in doctor and runtime-status.
   // see also: docs/handbook/runtime-status.md provider-switch handling.
   const embeddingPolicyConfigured =
     embeddingRecallService !== undefined && embeddingProvider !== null;

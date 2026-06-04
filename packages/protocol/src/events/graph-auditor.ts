@@ -16,6 +16,7 @@ const graphAuditorEventTypeValues = [
   "soul.graph.edge_created",
   "soul.graph.edge_proposal_created",
   "soul.graph.edge_proposal_reviewed",
+  "soul.graph.edge_proposal_path_mint_failed",
   "soul.graph.explore_completed",
   "soul.auditor.pointer_healed",
   "soul.orphan_radar.reported"
@@ -25,6 +26,13 @@ export const GraphAuditorEventType = {
   SOUL_GRAPH_EDGE_CREATED: "soul.graph.edge_created",
   SOUL_GRAPH_EDGE_PROPOSAL_CREATED: "soul.graph.edge_proposal_created",
   SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED: "soul.graph.edge_proposal_reviewed",
+  // invariant: emitted when an accepted/auto-accepted proposal's owed path
+  // mint fails. The reviewed row is already durable, so without this the
+  // accepted-owes-a-path obligation would only be findable by forensic
+  // cross-join (auditability invariant). Keyed on proposal_id so an operator
+  // can reconcile which accepted proposals are missing their minted path.
+  // see also: core/src/edge-proposal-service.ts acceptProposal mint-failure branch.
+  SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED: "soul.graph.edge_proposal_path_mint_failed",
   SOUL_GRAPH_EXPLORE_COMPLETED: "soul.graph.explore_completed",
   SOUL_AUDITOR_POINTER_HEALED: "soul.auditor.pointer_healed",
   SOUL_ORPHAN_RADAR_REPORTED: "soul.orphan_radar.reported"
@@ -66,6 +74,27 @@ export const SoulGraphEdgeProposalReviewedPayloadSchema = z
     status: EdgeProposalStatusSchema,
     reviewer_identity: NonEmptyStringSchema.nullable(),
     review_reason: BoundedReasonSchema.nullable(),
+    workspace_id: NonEmptyStringSchema,
+    occurred_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+// invariant: durable forensic record of an accepted/auto-accepted proposal
+// whose owed PathRelation mint failed. proposal_id keys the obligation so an
+// operator can reconcile accepted-but-unminted proposals without a forensic
+// cross-join of reviewed rows against PATH_RELATION_CREATED rows.
+export const SoulGraphEdgeProposalPathMintFailedPayloadSchema = z
+  .object({
+    proposal_id: NonEmptyStringSchema,
+    source_memory_id: NonEmptyStringSchema,
+    target_memory_id: NonEmptyStringSchema,
+    edge_type: MemoryGraphEdgeTypeSchema,
+    reviewer_identity: NonEmptyStringSchema.nullable(),
+    // failure_kind distinguishes a clean false return (submitCandidate caught
+    // its own materialize error) from a thrown error reaching acceptProposal.
+    failure_kind: z.enum(["submit_returned_false", "submit_threw"]),
+    failure_detail: BoundedReasonSchema.nullable(),
     workspace_id: NonEmptyStringSchema,
     occurred_at: IsoDatetimeStringSchema
   })
@@ -132,6 +161,8 @@ const graphAuditorPayloadSchemas = {
   [GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED]: SoulGraphEdgeCreatedPayloadSchema,
   [GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED]: SoulGraphEdgeProposalCreatedPayloadSchema,
   [GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED]: SoulGraphEdgeProposalReviewedPayloadSchema,
+  [GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED]:
+    SoulGraphEdgeProposalPathMintFailedPayloadSchema,
   [GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED]: SoulGraphExploreCompletedPayloadSchema,
   [GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED]: SoulAuditorPointerHealedPayloadSchema,
   [GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED]: SoulOrphanRadarReportedPayloadSchema
@@ -156,6 +187,10 @@ const SoulGraphEdgeProposalReviewedEventObjectSchema = createGraphAuditorEventOb
   GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED,
   SoulGraphEdgeProposalReviewedPayloadSchema
 );
+const SoulGraphEdgeProposalPathMintFailedEventObjectSchema = createGraphAuditorEventObjectSchema(
+  GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED,
+  SoulGraphEdgeProposalPathMintFailedPayloadSchema
+);
 const SoulGraphExploreCompletedEventObjectSchema = createGraphAuditorEventObjectSchema(
   GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
   SoulGraphExploreCompletedPayloadSchema
@@ -172,6 +207,8 @@ const SoulOrphanRadarReportedEventObjectSchema = createGraphAuditorEventObjectSc
 export const SoulGraphEdgeCreatedEventSchema = SoulGraphEdgeCreatedEventObjectSchema.readonly();
 export const SoulGraphEdgeProposalCreatedEventSchema = SoulGraphEdgeProposalCreatedEventObjectSchema.readonly();
 export const SoulGraphEdgeProposalReviewedEventSchema = SoulGraphEdgeProposalReviewedEventObjectSchema.readonly();
+export const SoulGraphEdgeProposalPathMintFailedEventSchema =
+  SoulGraphEdgeProposalPathMintFailedEventObjectSchema.readonly();
 export const SoulGraphExploreCompletedEventSchema = SoulGraphExploreCompletedEventObjectSchema.readonly();
 export const SoulAuditorPointerHealedEventSchema = SoulAuditorPointerHealedEventObjectSchema.readonly();
 export const SoulOrphanRadarReportedEventSchema = SoulOrphanRadarReportedEventObjectSchema.readonly();
@@ -181,6 +218,7 @@ export const GraphAuditorEventUnionSchema = z
     SoulGraphEdgeCreatedEventObjectSchema,
     SoulGraphEdgeProposalCreatedEventObjectSchema,
     SoulGraphEdgeProposalReviewedEventObjectSchema,
+    SoulGraphEdgeProposalPathMintFailedEventObjectSchema,
     SoulGraphExploreCompletedEventObjectSchema,
     SoulAuditorPointerHealedEventObjectSchema,
     SoulOrphanRadarReportedEventObjectSchema
@@ -207,6 +245,9 @@ export function parseGraphAuditorEventPayload<T extends keyof typeof graphAudito
 export type SoulGraphEdgeCreatedPayload = z.infer<typeof SoulGraphEdgeCreatedPayloadSchema>;
 export type SoulGraphEdgeProposalCreatedPayload = z.infer<typeof SoulGraphEdgeProposalCreatedPayloadSchema>;
 export type SoulGraphEdgeProposalReviewedPayload = z.infer<typeof SoulGraphEdgeProposalReviewedPayloadSchema>;
+export type SoulGraphEdgeProposalPathMintFailedPayload = z.infer<
+  typeof SoulGraphEdgeProposalPathMintFailedPayloadSchema
+>;
 export type SoulGraphNeighborExploreCompletedPayload = z.infer<
   typeof SoulGraphNeighborExploreCompletedPayloadSchema
 >;

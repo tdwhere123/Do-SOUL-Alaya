@@ -16,10 +16,8 @@ import {
   SourceDeliveryAnchorValidationError
 } from "../mcp-memory-proposal-workflow.js";
 
-// A1 fix-loop (finding-6): the original A1 work tested that the
-// workflow *passes* reviewer_identity into the resolution events
-// (governance test) and that the proposals row persists it (storage
-// test). Neither covered the audit-replay direction:
+// invariant: reviewer_identity must survive the full audit-replay
+// path:
 //
 //   create → review → query event_log → reconstruct review record →
 //   reviewer_identity intact?
@@ -40,7 +38,7 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)", () => {
+describe("mcp memory proposal workflow — event_log audit replay", () => {
   it("preserves reviewer_identity on every SOUL_REVIEW_* event_log row through real repos", async () => {
     const database = createDb();
     const proposalRepo = new SqliteProposalRepo(database);
@@ -61,7 +59,7 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
         proposed_changes: { content: "corrected" },
         reason: "operator correction"
       },
-      { workspaceId: "ws-replay", runId: "run-1", agentTarget: "codex" }
+      { workspaceId: "ws-replay", runId: "run-1", agentTarget: "codex", sessionId: "session-1" }
     );
 
     const reviewerIdentity = "user:alice";
@@ -72,7 +70,7 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
         reason: "looks right",
         reviewer_identity: reviewerIdentity
       },
-      { workspaceId: "ws-replay", runId: "run-1", agentTarget: "cli" }
+      { workspaceId: "ws-replay", runId: "run-1", agentTarget: "cli", sessionId: "session-1" }
     );
     expect(reviewed.resolution_state).toBe(ProposalResolutionState.REJECTED);
 
@@ -123,7 +121,7 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
         reason: "delivery-anchored proposal",
         source_delivery_ids: sourceDeliveryIds
       },
-      { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "codex" }
+      { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "codex", sessionId: "session-1" }
     );
 
     await expect(proposalRepo.findScopedById(created.proposal_id)).resolves.toMatchObject({
@@ -142,7 +140,7 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
         reason: "trace proof only",
         reviewer_identity: "user:trace-reviewer"
       },
-      { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "cli" }
+      { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "cli", sessionId: "session-1" }
     );
 
     const replayed = await eventLogRepo.queryByEntity("proposal", created.proposal_id);
@@ -174,7 +172,7 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
           reason: "direct workflow forged anchor",
           source_delivery_ids: ["delivery-forged"]
         },
-        { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "codex" }
+        { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "codex", sessionId: "session-1" }
       )
     ).rejects.toBeInstanceOf(SourceDeliveryAnchorValidationError);
     await expect(eventLogRepo.queryByEntity("proposal", "77777777-8888-4888-8888-999999999999")).resolves.toEqual([]);
@@ -200,7 +198,7 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
         proposed_changes: { content: "fix encoding" },
         reason: "utf-8 audit"
       },
-      { workspaceId: "ws-utf8", runId: "run-utf8", agentTarget: "codex" }
+      { workspaceId: "ws-utf8", runId: "run-utf8", agentTarget: "codex", sessionId: "session-1" }
     );
 
     // Mix of CJK + Latin extended + an internal quote. better-sqlite3
@@ -216,9 +214,9 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
         reason: "utf-8 reviewer",
         reviewer_identity: reviewerIdentity
       },
-      // Human-reviewer surface (runId: null) — also exercises the
-      // finding-1 loosened context check on a real repo.
-      { workspaceId: "ws-utf8", runId: null, agentTarget: "inspector" }
+      // Human-reviewer surface (runId: null) — exercises the loosened
+      // context check on a real repo (Inspector / `alaya review`).
+      { workspaceId: "ws-utf8", runId: null, agentTarget: "inspector", sessionId: "session-1" }
     );
 
     const replayed = await eventLogRepo.queryByEntity("proposal", created.proposal_id);

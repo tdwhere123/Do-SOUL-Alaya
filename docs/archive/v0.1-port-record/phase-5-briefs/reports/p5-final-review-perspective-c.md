@@ -23,7 +23,7 @@ negative paths, and graph-contract readiness claims.
 
 - `rtk pnpm build`
 - `rtk pnpm exec tsc --noEmit -p apps/core-daemon`
-- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon e2e gate4-attached-agent-mcp-proof cli-register operations mcp-memory-governance mcp-memory-tool-handler`
+- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon e2e attached-agent-mcp-proof cli-register operations mcp-memory-governance mcp-memory-tool-handler`
 - `rtk pnpm exec vitest run --project @do-soul/alaya-storage proposal-repo`
 - `rtk pnpm exec vitest run --project @do-soul/alaya-core graph-contract-service`
 - `rtk pnpm exec vitest run --project @do-soul/alaya-protocol soul-graph`

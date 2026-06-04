@@ -16,7 +16,7 @@ import { parseNonEmptyString, parseNullableString, parseTimestamp } from "./shar
 // in workspace-repo.ts; better-sqlite3's error format is library-version
 // coupled, so the cause walk handles eventual error-wrapping by upstream
 // layers. Used by enqueue() to surface PK collisions as the structured
-// DUPLICATE_KEY StorageError code that v0.1.0 commit aacb4f2 standardised.
+// DUPLICATE_KEY StorageError code.
 function isUniqueConstraintError(error: unknown, qualifiedColumn: string): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
@@ -92,6 +92,12 @@ export interface GardenTaskBacklogCount {
   readonly count: number;
 }
 
+export interface GardenTaskKindBacklogCount {
+  readonly kind: GardenTaskKindValue;
+  readonly pending: number;
+  readonly stale: number;
+}
+
 export interface GardenTaskCompletionResult {
   readonly status: "completed" | "failed";
   readonly completed_at: string;
@@ -102,6 +108,11 @@ export interface GardenTaskReclaimInput {
   readonly task_id: string;
   readonly claimed_by: string;
   readonly claimed_at: string;
+  readonly event: GardenTaskEventInput;
+}
+
+export interface GardenTaskExpiryInput {
+  readonly task_id: string;
   readonly event: GardenTaskEventInput;
 }
 
@@ -154,7 +165,36 @@ export interface GardenTaskRepoPort {
   ): Promise<void>;
   peekAbandonedClaims(now: string, staleAfterMs: number): readonly GardenTaskRow[];
   gcAbandonedClaims(reclaims: readonly GardenTaskReclaimInput[]): Promise<number>;
+  // invariant: never-claimed pending tasks of a host-worker-only kind
+  // (EDGE_CLASSIFY / POST_TURN_EXTRACT) accrete forever on a no-agent deployment
+  // — no worker claims them, so neither completeWithEvents nor gcAbandonedClaims
+  // (which only touches status='claimed') ever removes them. peek selects rows
+  // still status='pending' whose created_at is older than expiredBeforeIso,
+  // oldest-first and bounded by limit, so the daemon can build one audit event
+  // per task before the bounded delete. Read-only; no mutation.
+  // see also: expireUnclaimedTasks; apps/core-daemon/src/garden-runtime.ts.
+  peekExpiredUnclaimedTasks(
+    kind: GardenTaskKindValue,
+    expiredBeforeIso: string,
+    limit: number
+  ): readonly GardenTaskRow[];
+  // invariant: deletes the named pending tasks AND appends their expiry audit
+  // events in ONE SQLite transaction (mirrors gcAbandonedClaims). Each delete is
+  // CAS-gated on status='pending' so a task a worker claimed between peek and
+  // delete is left intact (changes===0 -> skipped, not an error). Returns the
+  // count actually removed.
+  expireUnclaimedTasks(expirations: readonly GardenTaskExpiryInput[]): Promise<number>;
   countBacklog(workspace_id?: string): readonly GardenTaskBacklogCount[];
+  // invariant: per-kind eventual-consistency diagnostic. pending = tasks not
+  // yet claimed by a host worker; stale = tasks claimed but whose claim is
+  // older than staleBeforeIso (a worker took the task but never completed).
+  // Used to observe the EDGE_CLASSIFY backlog: how many heuristic edges are
+  // still awaiting their LLM-quality refinement. Read-only count, no mutation.
+  countByKind(
+    kind: GardenTaskKindValue,
+    staleBeforeIso: string,
+    workspace_id?: string
+  ): GardenTaskKindBacklogCount;
 }
 
 interface GardenTaskDbRow {
@@ -191,6 +231,10 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   private readonly completeStatement;
   private readonly peekAbandonedClaimsStatement;
   private readonly gcAbandonedClaimStatement;
+  private readonly peekExpiredUnclaimedStatement;
+  private readonly expireUnclaimedStatement;
+  private readonly countByKindStatement;
+  private readonly countByKindByWorkspaceStatement;
   private readonly countByRoleStatusStatement;
 
   public constructor(
@@ -349,6 +393,32 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       SET status = 'pending', claimed_by = NULL, claimed_at = NULL
       WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND claimed_at = ?
     `);
+    this.peekExpiredUnclaimedStatement = connection.prepare(`
+      SELECT
+        id,
+        workspace_id,
+        role,
+        kind,
+        payload_json,
+        status,
+        claimed_by,
+        claimed_at,
+        created_at,
+        completed_at,
+        attempt_count,
+        last_error_text,
+        completion_envelope_json
+      FROM garden_tasks
+      WHERE status = 'pending' AND kind = ? AND created_at < ?
+      ORDER BY created_at ASC, id ASC
+      LIMIT ?
+    `);
+    // invariant: CAS-gated on status='pending' so a task a worker claimed
+    // between peek and this delete is left intact (changes===0, skipped).
+    this.expireUnclaimedStatement = connection.prepare(`
+      DELETE FROM garden_tasks
+      WHERE id = ? AND status = 'pending'
+    `);
     this.countByRoleStatusStatement = connection.prepare(`
       SELECT role, status, COUNT(*) AS count
       FROM garden_tasks
@@ -356,6 +426,23 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         AND (? IS NULL OR workspace_id = ?)
       GROUP BY role, status
       ORDER BY role ASC, status ASC
+    `);
+    // pending = unclaimed; stale = claimed with a claim older than the cutoff
+    // (a worker took the task but never completed it). Bind order: kind,
+    // stale-cutoff iso. The workspace-scoped variant adds a workspace_id bind.
+    this.countByKindStatement = connection.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+        SUM(CASE WHEN status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ? THEN 1 ELSE 0 END) AS stale
+      FROM garden_tasks
+      WHERE kind = ?
+    `);
+    this.countByKindByWorkspaceStatement = connection.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+        SUM(CASE WHEN status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ? THEN 1 ELSE 0 END) AS stale
+      FROM garden_tasks
+      WHERE kind = ? AND workspace_id = ?
     `);
   }
 
@@ -371,12 +458,11 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       this.enqueueStatement.run(id, workspaceId, role, kind, payloadJson, createdAt);
       return { task_id: id };
     } catch (error) {
-      // Wave-end M3: surface PK collisions as the structured DUPLICATE_KEY
-      // error code that v0.1.0 commit aacb4f2 already standardised for
-      // the workspace repo. Callers (notably H3's POST_TURN_EXTRACT
-      // dedupe path) use `error.code === "DUPLICATE_KEY"` instead of
-      // walking the SQLite error message string, which couples the dedupe
-      // contract to better-sqlite3's internal text format.
+      // Surface PK collisions as the structured DUPLICATE_KEY error code,
+      // matching the convention the workspace repo uses. Callers (notably the
+      // POST_TURN_EXTRACT dedupe path) use `error.code === "DUPLICATE_KEY"`
+      // instead of walking the SQLite error message string, which couples the
+      // dedupe contract to better-sqlite3's internal text format.
       if (isUniqueConstraintError(error, "garden_tasks.id")) {
         throw new StorageError(
           "DUPLICATE_KEY",
@@ -673,6 +759,63 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     }
   }
 
+  public peekExpiredUnclaimedTasks(
+    kind: GardenTaskKindValue,
+    expiredBeforeIso: string,
+    limit: number
+  ): readonly GardenTaskRow[] {
+    const parsedKind = GardenTaskKindSchema.parse(kind);
+    const cutoff = parseTimestamp(expiredBeforeIso);
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new StorageError(
+        "VALIDATION_FAILED",
+        `peekExpiredUnclaimedTasks limit must be a positive integer: ${limit}`
+      );
+    }
+    try {
+      const rows = this.peekExpiredUnclaimedStatement.all(parsedKind, cutoff, limit) as GardenTaskDbRow[];
+      return rows.map((row) => parseGardenTaskRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to read expired unclaimed Garden tasks for kind ${parsedKind}.`,
+        error
+      );
+    }
+  }
+
+  public async expireUnclaimedTasks(expirations: readonly GardenTaskExpiryInput[]): Promise<number> {
+    if (expirations.length === 0) {
+      return 0;
+    }
+    const parsedExpirations = expirations.map((expiration) => ({
+      task_id: parseNonEmptyString(expiration.task_id, "garden_task.id"),
+      event: expiration.event
+    }));
+    try {
+      return await this.eventPublisher.appendManyWithMutation(
+        parsedExpirations.map((expiration) => expiration.event),
+        () => {
+          let expired = 0;
+          for (const expiration of parsedExpirations) {
+            const result = this.expireUnclaimedStatement.run(expiration.task_id);
+            // CAS lost (a worker claimed it between peek and delete) -> skip,
+            // not an error: the task is now live work, not an orphan.
+            if (result.changes === 1) {
+              expired += 1;
+            }
+          }
+          return expired;
+        }
+      );
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      throw new StorageError("QUERY_FAILED", "Failed to expire unclaimed Garden tasks.", error);
+    }
+  }
+
   public countBacklog(workspace_id?: string): readonly GardenTaskBacklogCount[] {
     const workspaceId =
       workspace_id === undefined
@@ -686,6 +829,33 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       return rows.map((row) => parseBacklogCountRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to count Garden task backlog.", error);
+    }
+  }
+
+  public countByKind(
+    kind: GardenTaskKindValue,
+    staleBeforeIso: string,
+    workspace_id?: string
+  ): GardenTaskKindBacklogCount {
+    const parsedKind = GardenTaskKindSchema.parse(kind);
+    const staleBefore = parseTimestamp(staleBeforeIso);
+    try {
+      const row = (
+        workspace_id === undefined
+          ? this.countByKindStatement.get(staleBefore, parsedKind)
+          : this.countByKindByWorkspaceStatement.get(
+              staleBefore,
+              parsedKind,
+              parseNonEmptyString(workspace_id, "garden_task.workspace_id")
+            )
+      ) as { readonly pending: number | null; readonly stale: number | null } | undefined;
+      return {
+        kind: parsedKind,
+        pending: row?.pending ?? 0,
+        stale: row?.stale ?? 0
+      };
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to count Garden task backlog by kind.", error);
     }
   }
 

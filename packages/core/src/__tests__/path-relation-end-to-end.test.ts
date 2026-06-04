@@ -1,9 +1,11 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ControlPlaneObjectKind,
   FormationKind,
   MemoryDimension,
-  MemoryGraphEdgeType,
   RetentionPolicy,
   RunMode,
   RunState,
@@ -18,8 +20,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
+  SqliteCoUsageCounterRepo,
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
   SqlitePathRelationRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo,
@@ -39,12 +41,12 @@ afterEach(() => {
 
 const MEM_QUERY_HIT = "00000000-0000-4000-8000-000000000001";
 const MEM_LINKED = "00000000-0000-4000-8000-000000000002";
-const MEM_RECALLS_SRC = "00000000-0000-4000-8000-000000000003";
 const WS = "workspace-1";
 
 describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () => {
   it("writes PathRelation after 3 onCoUsage events and surfaces a path_expansion candidate", async () => {
-    const { database, memoryEntryRepo, graphEdgeRepo, pathRelationRepo } = await createRealStorage();
+    const { database, memoryEntryRepo, pathRelationRepo, coUsageCounterRepo } =
+      await createRealStorage();
 
     await memoryEntryRepo.create(createMemoryEntry({
       object_id: MEM_QUERY_HIT,
@@ -56,20 +58,6 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
       content: "distinct topic not lexically related",
       domain_tags: ["other"]
     }));
-    await memoryEntryRepo.create(createMemoryEntry({
-      object_id: MEM_RECALLS_SRC,
-      content: "earlier history anchor",
-      domain_tags: ["history"]
-    }));
-
-    await graphEdgeRepo.create({
-      edge_id: "edge-recalls-1",
-      source_memory_id: MEM_RECALLS_SRC,
-      target_memory_id: MEM_QUERY_HIT,
-      edge_type: MemoryGraphEdgeType.RECALLS,
-      workspace_id: WS,
-      created_at: "2026-05-13T00:00:00.000Z"
-    });
 
     const eventPublisher = {
       appendManyWithMutation: vi.fn(
@@ -91,6 +79,7 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
       repo: {
         create: (relation) => pathRelationRepo.create(relation)
       },
+      counterStore: coUsageCounterRepo,
       eventPublisher: eventPublisher as never,
       threshold: 3,
       generateId: () => "11111111-1111-4111-8111-aaaaaaaaaaaa",
@@ -139,9 +128,6 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
         append,
         queryByEntity: vi.fn(async () => [])
       },
-      graphExpansionPort: {
-        findByMemoryId: graphEdgeRepo.findByMemoryId.bind(graphEdgeRepo)
-      },
       pathExpansionPort: {
         findByAnchors: pathRelationRepo.findByAnchors.bind(pathRelationRepo)
       }
@@ -158,7 +144,7 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
     const linkedCandidate = result.candidates.find((c) => c.object_id === MEM_LINKED);
     expect(linkedCandidate, "MEM_LINKED should appear via path_expansion").toBeDefined();
     expect(
-      linkedCandidate?.source_channels.some((channel) => channel.includes("path_expansion"))
+      linkedCandidate?.source_channels?.some((channel) => channel.includes("path_expansion"))
     ).toBe(true);
 
     database.close();
@@ -272,6 +258,86 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
     database.close();
     databases.delete(database);
   });
+
+  it("preserves sub-threshold co-usage counts across a simulated daemon restart", async () => {
+    // The core purpose of the durable counter: a count accrued under one
+    // daemon process must survive into a fresh service rebuilt against the
+    // same database after the prior in-memory state is discarded.
+    const tmpDir = mkdtempSync(join(tmpdir(), "alaya-co-usage-"));
+    const filename = join(tmpDir, "co-usage.db");
+
+    const buildSession = () => {
+      const database = initDatabase({ filename });
+      const pathRelationRepo = new SqlitePathRelationRepo(database);
+      const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
+      const eventPublisher = {
+        appendManyWithMutation: vi.fn(
+          async <T,>(
+            eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+            mutate: (entries: readonly EventLogEntry[]) => T
+          ): Promise<T> => {
+            const persisted: EventLogEntry[] = eventInputs.map((entry, idx) => ({
+              event_id: `evt_restart_${idx}`,
+              created_at: "2026-05-16T00:00:00.000Z",
+              revision: 0,
+              ...entry
+            })) as EventLogEntry[];
+            return mutate(persisted);
+          }
+        )
+      };
+      const service = new PathRelationProposalService({
+        repo: {
+          create: (relation) => pathRelationRepo.create(relation),
+          findByAnchorMemoryId: async (memoryId, workspaceId) =>
+            await pathRelationRepo.findByAnchors(workspaceId, [
+              { kind: "object", object_id: memoryId }
+            ])
+        },
+        counterStore: coUsageCounterRepo,
+        eventPublisher: eventPublisher as never,
+        threshold: 3,
+        generateId: () => "33333333-3333-4333-8333-aaaaaaaaaaaa",
+        now: () => "2026-05-16T00:00:00.000Z"
+      });
+      return { database, pathRelationRepo, service };
+    };
+
+    try {
+      const first = buildSession();
+      const firstWorkspaceRepo = new SqliteWorkspaceRepo(first.database);
+      await firstWorkspaceRepo.create({
+        workspace_id: WS,
+        name: "workspace one",
+        root_path: "/tmp/ws-restart",
+        workspace_kind: WorkspaceKind.LOCAL_REPO,
+        default_engine_binding: null,
+        workspace_state: WorkspaceState.ACTIVE
+      });
+      // Two sub-threshold observations under the first process.
+      await first.service.onCoUsage([MEM_QUERY_HIT, MEM_LINKED], WS);
+      await first.service.onCoUsage([MEM_QUERY_HIT, MEM_LINKED], WS);
+      const beforeRestart = await first.pathRelationRepo.findByAnchors(WS, [
+        { kind: "object", object_id: MEM_QUERY_HIT }
+      ]);
+      expect(beforeRestart).toHaveLength(0);
+      // Discard in-memory state (close the connection, drop the service).
+      first.database.close();
+
+      // Fresh service + DB connection: the prior count (2) is read back from
+      // the durable table, so a single further co-usage reaches the K=3
+      // threshold and a PathRelation is minted.
+      const second = buildSession();
+      await second.service.onCoUsage([MEM_QUERY_HIT, MEM_LINKED], WS);
+      const afterRestart = await second.pathRelationRepo.findByAnchors(WS, [
+        { kind: "object", object_id: MEM_QUERY_HIT }
+      ]);
+      expect(afterRestart).toHaveLength(1);
+      second.database.close();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 async function createRealStorage() {
@@ -280,8 +346,8 @@ async function createRealStorage() {
   const workspaceRepo = new SqliteWorkspaceRepo(database);
   const runRepo = new SqliteRunRepo(database);
   const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
-  const graphEdgeRepo = new SqliteMemoryGraphEdgeRepo(database);
   const pathRelationRepo = new SqlitePathRelationRepo(database);
+  const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
 
   await workspaceRepo.create({
     workspace_id: WS,
@@ -303,7 +369,7 @@ async function createRealStorage() {
     current_surface_id: null
   });
 
-  return { database, memoryEntryRepo, graphEdgeRepo, pathRelationRepo };
+  return { database, memoryEntryRepo, pathRelationRepo, coUsageCounterRepo };
 }
 
 function createTaskSurface(displayName: string): TaskObjectSurface {

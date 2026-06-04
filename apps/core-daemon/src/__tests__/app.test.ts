@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.js";
+import type { AppConfigService } from "../services/config-service.js";
 
 describe("createApp", () => {
   it("requires a timing-safe request token for mutating routes", async () => {
@@ -60,7 +61,19 @@ describe("createApp", () => {
   });
 
   it("registers typed route service bags on the Hono app", async () => {
-    const patchRuntimeEmbeddingConfig = vi.fn(async (patch: unknown) => patch);
+    const patchRuntimeEmbeddingConfig = vi.fn(
+      async (patch: unknown): Promise<Readonly<{
+        embedding_enabled: boolean;
+        model_id: string | null;
+        provider_url: string | null;
+        secret_ref: string | null;
+      }>> => patch as Readonly<{
+        embedding_enabled: boolean;
+        model_id: string | null;
+        provider_url: string | null;
+        secret_ref: string | null;
+      }>
+    );
     const app = createApp({
       routes: {
         config: {
@@ -74,8 +87,8 @@ describe("createApp", () => {
             patchEnvironmentConfig: vi.fn(),
             getRuntimeEmbeddingConfig: vi.fn(),
             patchRuntimeEmbeddingConfig,
-            getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" }))
-          }
+            getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" as const }))
+          } as unknown as AppConfigService
         }
       }
     });

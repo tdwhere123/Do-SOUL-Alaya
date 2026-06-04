@@ -135,11 +135,17 @@ const SeedTruncationSchema = z
 // parse_dropped counts malformed single entries and over-64-cap signals
 // discarded inside parseOfficialApiSignals; compile_overflow_dropped counts
 // parsed drafts dropped inside compile() for raw_payload past the 16 KB cap.
-// A third, non-attributed source also rolls into signals_dropped: a whole
-// turn's signals lost when the seed-materialization batch throws (e.g. a
-// garden-task complete mismatch). So the invariant is
-// signals_dropped >= parse_dropped + compile_overflow_dropped, not a clean
-// equality. see also:
+// The remaining drops happen at the materialization seam and are now
+// attributed in signals_dropped_by_reason: candidate_absent (routed to
+// evidence_only / deferred, no memory_entry) and materialization_error (the
+// signal threw and was isolated PER SIGNAL, so one bad signal no longer drops
+// its whole turn batch — the fix for the silent 1963-signal whole-batch
+// swallow). So the invariant is
+// signals_dropped >= parse_dropped + compile_overflow_dropped
+//   + signals_dropped_by_reason.candidate_absent
+//   + signals_dropped_by_reason.materialization_error,
+// not a clean equality (the >= absorbs any defensive whole-batch backstop
+// drop, which is also attributed to materialization_error). see also:
 // apps/bench-runner/src/longmemeval/compile-seed.ts CompileSeedExtractionStats.
 const SeedExtractionPathSchema = z
   .object({
@@ -152,7 +158,23 @@ const SeedExtractionPathSchema = z
     facts_produced: z.number().int().nonnegative(),
     signals_dropped: z.number().int().nonnegative(),
     parse_dropped: z.number().int().nonnegative(),
-    compile_overflow_dropped: z.number().int().nonnegative()
+    compile_overflow_dropped: z.number().int().nonnegative(),
+    // Materialization-seam drops by reason (a SUBSET of signals_dropped):
+    //   - candidate_absent: routed to evidence_only / deferred (no
+    //     memory_entry materialized) — the seed-quality hole the bench surfaces.
+    //   - materialization_error: the signal threw and was isolated per-signal,
+    //     so one bad signal never drops its batch-mates.
+    // Optional with a zero default so archives written before this field shipped
+    // still parse; new runs always populate it.
+    // see also:
+    // apps/bench-runner/src/longmemeval/compile-seed.ts CompileSeedExtractionStats
+    signals_dropped_by_reason: z
+      .object({
+        candidate_absent: z.number().int().nonnegative(),
+        materialization_error: z.number().int().nonnegative()
+      })
+      .strict()
+      .default({ candidate_absent: 0, materialization_error: 0 })
   })
   .strict();
 export type SeedExtractionPath = z.infer<typeof SeedExtractionPathSchema>;
@@ -177,6 +199,51 @@ const PerPlaneRecallCoverageEntrySchema = z
     gold_count: z.number().int().nonnegative(),
     hit_at_5_count: z.number().int().nonnegative(),
     hit_at_5_rate: RatioSchema
+  })
+  .strict();
+
+// Cohort fan-in attribution split (codex I2). The session cohort plane surfaces
+// the most gold of any plane but historically flat-dumped it; this block splits
+// its contribution into the five classes codex defined so the fan-in promotion
+// is readable in the gate archive:
+//   - delivered_plane_count: delivered rows (any rank) carrying the cohort plane
+//   - gold_source_plane_count: gold whose source_planes include the cohort plane
+//   - gold_first_admitted_count: gold whose plane_first_admitted is the cohort plane
+//   - gold_winning_admission_count: gold whose plane_winning_admission is the cohort plane
+//   - hit_at_5_count / hit_at_5_rate: cohort-source gold that delivered in top-5
+// gold_winning_admission converting to hit@5 is the load-bearing signal that the
+// cohort representative promoted by merit rather than borrowing a co-admitted plane.
+const CohortAttributionSchema = z
+  .object({
+    delivered_plane_count: z.number().int().nonnegative(),
+    gold_source_plane_count: z.number().int().nonnegative(),
+    gold_first_admitted_count: z.number().int().nonnegative(),
+    gold_winning_admission_count: z.number().int().nonnegative(),
+    hit_at_5_count: z.number().int().nonnegative(),
+    hit_at_5_rate: RatioSchema
+  })
+  .strict();
+
+// Durable-edge fan-in proof instrument (R2). Splits path_expansion (direct
+// hop-1 co_recalled fan-in) vs graph_expansion (multi-hop) gold-bearing top-5
+// movement SEPARATELY, so the gate archive shows whether the durable
+// co_recalled PathRelation carrier — which replaced the retired
+// session_cohort_fanin heuristic — actually promotes gold siblings into top-5.
+//   - path_gold_*: gold bearing the path_expansion stream and its hit@5 share
+//   - graph_gold_*: gold bearing the graph_expansion stream and its hit@5 share
+//   - path_primary_hit_at_5_count: hit@5 gold attributed to path (the unified
+//     plane's double-count guard credits direct hop-1 before multi-hop)
+//   - graph_only_hit_at_5_count: hit@5 gold reached purely via multi-hop
+const PathVsGraphFaninSchema = z
+  .object({
+    path_gold_source_count: z.number().int().nonnegative(),
+    path_gold_hit_at_5_count: z.number().int().nonnegative(),
+    path_gold_hit_at_5_rate: RatioSchema,
+    graph_gold_source_count: z.number().int().nonnegative(),
+    graph_gold_hit_at_5_count: z.number().int().nonnegative(),
+    graph_gold_hit_at_5_rate: RatioSchema,
+    path_primary_hit_at_5_count: z.number().int().nonnegative(),
+    graph_only_hit_at_5_count: z.number().int().nonnegative()
   })
   .strict();
 
@@ -210,6 +277,12 @@ const QualityMetricsSchema = z
     per_plane_recall_coverage: z
       .record(PerPlaneRecallCoverageEntrySchema)
       .default({}),
+    // Cohort fan-in attribution (codex I2). Optional so pre-fan-in kpi.json
+    // records stay valid; new LongMemEval runs always populate it.
+    cohort_attribution: CohortAttributionSchema.optional(),
+    // Durable-edge path-vs-graph fan-in proof (R2). Optional so pre-R2 kpi.json
+    // records stay valid; new LongMemEval runs always populate it.
+    path_vs_graph_fanin: PathVsGraphFaninSchema.optional(),
     // @anchor longmemeval-abstention: calibrated-confidence scoring of the
     // LongMemEval-S abstention questions (`question_id` ending `_abs`).
     // Optional so pre-abstention-scoring kpi.json records stay valid; new
@@ -251,11 +324,11 @@ export type QualityMetrics = z.infer<typeof QualityMetricsSchema>;
 // call cost in token-shaped work — delivered tokens, pool sizes, evaluated
 // candidates, fusion-stream coverage, and embedding provider invocations.
 //
-// Wave 2 / Phase 7 (D5 decision): measure-only. The figures publish what
-// the recall pipeline ACTUALLY did, on every call, without setting a "must
-// pass" threshold. They feed honest release notes, not a marketing target;
-// the v0.3.10 "对标 95% data-driven design" anti-pattern is intentionally
-// avoided.
+// Measure-only. The figures publish what the recall pipeline ACTUALLY did,
+// on every call, without setting a "must pass" threshold. They feed honest
+// release notes, not a marketing target; the "对标 95% data-driven design"
+// anti-pattern (designing the system to hit a chosen headline number) is
+// intentionally avoided.
 //
 // @anchor recall-token-economy-token-units: every *_tokens / *_token_*
 // figure under this block is the chars/4 approximation produced by
@@ -292,9 +365,9 @@ const RecallTokenEconomySchema = z
     delivered_context_tokens_estimate: PerCallStatSchema,
     // Coarse-pool size — the candidate count flowing into fineAssess.
     coarse_pool_size: PerCallStatSchema,
-    // Fine-assess evaluated count — for now equals coarse pool size, so
-    // distributions match; the field exists separately for forward
-    // compatibility when fineAssess gains early-out paths.
+    // Fine-assess evaluated count — equals coarse pool size while fineAssess
+    // has no early-out paths, so distributions match; the field is separate
+    // for forward compatibility if fineAssess gains early-out paths.
     fine_evaluated: PerCallStatSchema,
     // Distinct fusion streams that contributed at least one non-null
     // per-stream rank across the pre-budget candidate set, per recall.
@@ -332,6 +405,79 @@ const TokenEconomySchema = z
   .strict();
 export type TokenEconomy = z.infer<typeof TokenEconomySchema>;
 
+// @anchor edge-proposal-rate: K3.2 KPI — edge proposals produced per
+// workspace-day across a bench run. Per-workspace-per-day stats let the
+// release gate detect the "edge auto-build rate 40-80 proposals /
+// workspace / day" target without re-aggregating from EventLog rows.
+// Optional so older kpi.json records stay schema-valid; new bench runs
+// always populate it when the bench-runner harness sources the edge
+// proposal aggregator. per_trigger_source maps the trigger_source enum
+// values to integer counts of SOUL_GRAPH_EDGE_PROPOSAL_CREATED events;
+// keys are strings so a future enum value flows through without a
+// schema migration.
+//
+// @anchor edge-proposal-rate-per-question: under the LongMemEval bench
+// harness every question runs against the same workspaceId
+// ("bench-workspace-1"), so per_workspace_per_day_* collapses to the
+// run total — K3.2's "40-80 proposals / workspace / day" target cannot
+// be interpreted directly off those fields under bench shape. The
+// optional per_question_* fields surface the row-level distribution
+// (one bucket per question) so the same KPI intent stays measurable
+// under the bench harness. Both blocks describe the same EventLog rows;
+// they differ only in how the rows are bucketed for the percentile.
+// see also: packages/eval/src/edge-proposal-kpi.ts
+// aggregateEdgeProposalRatePerQuestion.
+const EdgeProposalRateSchema = z
+  .object({
+    schema_version: z.literal("bench-edge-proposal-rate.v1"),
+    total_proposals: z.number().int().nonnegative(),
+    per_workspace_per_day_min: z.number().nonnegative(),
+    per_workspace_per_day_max: z.number().nonnegative(),
+    per_workspace_per_day_median: z.number().nonnegative(),
+    per_trigger_source: z.record(z.string(), z.number().int().nonnegative()),
+    // Optional per-question distribution: one bucket = one bench
+    // question's SOUL_GRAPH_EDGE_PROPOSAL_CREATED count. Absent when the
+    // aggregator caller does not pass per-question chunks (e.g. pre-Phase
+    // B archives, or non-bench runtime aggregations where "per question"
+    // is undefined). Populated by the bench-runner harness so K3.2's
+    // 40-80/workspace/day intent stays interpretable under the bench's
+    // single-workspaceId shape.
+    proposals_per_question: z
+      .object({
+        question_count: z.number().int().nonnegative(),
+        total_proposals: z.number().int().nonnegative(),
+        mean: z.number().nonnegative(),
+        p50: z.number().nonnegative(),
+        p95: z.number().nonnegative(),
+        max: z.number().nonnegative()
+      })
+      .strict()
+      .optional()
+  })
+  .strict();
+export type EdgeProposalRate = z.infer<typeof EdgeProposalRateSchema>;
+
+// @anchor edge-proposal-auto-accept: K3.4 KPI — fraction of reviewed
+// proposals decided by system-policy auto-accept. total_decided counts
+// SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED rows whose payload.status is one of
+// accepted / auto_accepted / rejected; auto_accepted is the numerator.
+// rate is auto_accepted / total_decided (0 when total_decided is 0).
+// per_trigger_source_rate is keyed by the originating proposal's
+// trigger_source — the aggregator joins reviewed events back to their
+// created counterparts; missing joins are dropped (the rate is
+// computed on the joined subset). Optional so pre-Phase-B kpi.json
+// records stay schema-valid.
+const EdgeProposalAutoAcceptSchema = z
+  .object({
+    schema_version: z.literal("bench-edge-proposal-auto-accept.v1"),
+    total_decided: z.number().int().nonnegative(),
+    auto_accepted: z.number().int().nonnegative(),
+    rate: RatioSchema,
+    per_trigger_source_rate: z.record(z.string(), RatioSchema)
+  })
+  .strict();
+export type EdgeProposalAutoAccept = z.infer<typeof EdgeProposalAutoAcceptSchema>;
+
 const KpiCoreSchema = z.object({
   r_at_1: RatioSchema,
   r_at_5: RatioSchema,
@@ -359,11 +505,12 @@ const KpiCoreSchema = z.object({
   latency_ms_p95: z.number().nonnegative(),
   latency_source: LatencySourceSchema,
   token_saved_ratio_vs_full_prompt: z.number(),
-  // Optional so pre-S6 kpi.json records stay schema-valid. When present,
-  // token_saved_ratio_vs_full_prompt is derived from this block.
+  // Optional so kpi.json records written before this block existed stay
+  // schema-valid. When present, token_saved_ratio_vs_full_prompt is derived
+  // from this block.
   token_economy: TokenEconomySchema.optional(),
-  // Optional so pre-phase-7 kpi.json records stay schema-valid; runs that
-  // collect per-recall diagnostics populate it.
+  // Optional so kpi.json records written before per-recall diagnostics
+  // existed stay schema-valid; runs that collect them populate it.
   // see also: @anchor recall-token-economy
   recall_token_economy: RecallTokenEconomySchema.optional(),
   tier_distribution: TierDistributionSchema,
@@ -373,6 +520,11 @@ const KpiCoreSchema = z.object({
   // stay schema-valid; new LongMemEval runs always populate it.
   seed_extraction_path: SeedExtractionPathSchema.optional(),
   quality_metrics: QualityMetricsSchema.optional(),
+  // Edge Proposal KPI blocks (K3.2 + K3.4). Optional so older kpi.json
+  // records stay schema-valid; new bench runs always populate them when
+  // the bench-runner sources the edge proposal aggregator.
+  edge_proposal_rate: EdgeProposalRateSchema.optional(),
+  edge_proposal_auto_accept: EdgeProposalAutoAcceptSchema.optional(),
   per_scenario: z.array(PerScenarioRowSchema)
 });
 export type KpiCore = z.infer<typeof KpiCoreSchema>;

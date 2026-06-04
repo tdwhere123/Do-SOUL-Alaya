@@ -314,7 +314,9 @@ describe("SoulApprovalService", () => {
   });
 });
 
-function createEventLogRepo(entries: readonly Record<string, unknown>[]) {
+function createEventLogRepo(
+  entries: readonly Record<string, unknown>[]
+): Parameters<typeof createSoulApprovalService>[0]["eventLogRepo"] {
   return {
     queryByRun: vi.fn(async () => entries),
     append: vi.fn(async (entry: Record<string, unknown>) => ({
@@ -322,7 +324,7 @@ function createEventLogRepo(entries: readonly Record<string, unknown>[]) {
       created_at: "2026-04-01T03:00:00.000Z",
       ...entry
     }))
-  };
+  } as unknown as Parameters<typeof createSoulApprovalService>[0]["eventLogRepo"];
 }
 
 function createApprovalRequestedEvent(options: {

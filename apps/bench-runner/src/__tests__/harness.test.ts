@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,6 +12,8 @@ import {
   GardenRole,
   GardenTaskKind,
   SignalSource,
+  isPathRecallEligible,
+  mapRelationKindToGraphEdgeType,
   type GardenClaimTaskResponse
 } from "@do-soul/alaya-protocol";
 import {
@@ -19,6 +21,11 @@ import {
   type BenchDaemonHandle,
   type BenchSignalSeedInput
 } from "../harness/daemon.js";
+import { BENCH_CO_RECALL_WARMUP_PAIR_CAP } from "../harness/co-recall-warmup.js";
+import {
+  BenchRecallDiagnosticsSchema,
+  type BenchRecallDiagnostics
+} from "../harness/recall-diagnostics-schema.js";
 import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
@@ -26,6 +33,102 @@ import {
 
 const handles: BenchDaemonHandle[] = [];
 const tmpRoots: string[] = [];
+
+type BenchDatabase = ReturnType<typeof initDatabase>;
+
+interface DerivesFromPathRow {
+  readonly relation_kind: string;
+  readonly source_object_id: string;
+  readonly target_object_id: string;
+  readonly recall_bias: number;
+}
+
+// invariant: signal-ref edges fold into governed path_relations rows.
+// These helpers read the path-candidate side (derives_from for
+// source_memory_refs) and confirm the old edge_proposals sink stays empty.
+function readDerivesFromPathRelation(
+  db: BenchDatabase,
+  sourceObjectId: string,
+  targetObjectId: string
+): DerivesFromPathRow | undefined {
+  return db.connection
+    .prepare(
+      `SELECT json_extract(constitution_json, '$.relation_kind')        AS relation_kind,
+              json_extract(anchors_json, '$.source_anchor.object_id')   AS source_object_id,
+              json_extract(anchors_json, '$.target_anchor.object_id')   AS target_object_id,
+              json_extract(effect_vector_json, '$.recall_bias')         AS recall_bias
+         FROM path_relations
+        WHERE json_extract(anchors_json, '$.source_anchor.object_id') = ?
+          AND json_extract(anchors_json, '$.target_anchor.object_id') = ?
+          AND json_extract(constitution_json, '$.relation_kind') = 'derives_from'`
+    )
+    .get(sourceObjectId, targetObjectId) as DerivesFromPathRow | undefined;
+}
+
+interface CoRecalledPathRow {
+  readonly source_object_id: string;
+  readonly target_object_id: string;
+  readonly recall_bias: number;
+  readonly lifecycle_status: string;
+  readonly governance_class: string;
+}
+
+// invariant: read the recalls-tier co_recalled paths the bench co-recall hub
+// mints. recall_bias + lifecycle_status are what isPathRecallEligible gates on
+// (active lifecycle AND recall_bias > 0), so the test asserts eligibility from
+// the durable row, not from a re-import of the predicate.
+// see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible
+function readCoRecalledPathRelations(
+  db: BenchDatabase,
+  workspaceId: string
+): readonly CoRecalledPathRow[] {
+  return db.connection
+    .prepare(
+      `SELECT json_extract(anchors_json, '$.source_anchor.object_id')   AS source_object_id,
+              json_extract(anchors_json, '$.target_anchor.object_id')   AS target_object_id,
+              json_extract(effect_vector_json, '$.recall_bias')         AS recall_bias,
+              json_extract(lifecycle_json, '$.status')                  AS lifecycle_status,
+              json_extract(legitimacy_json, '$.governance_class')       AS governance_class
+         FROM path_relations
+        WHERE workspace_id = ?
+          AND json_extract(constitution_json, '$.relation_kind') = 'co_recalled'`
+    )
+    .all(workspaceId) as readonly CoRecalledPathRow[];
+}
+
+function edgeProposalCount(
+  db: BenchDatabase,
+  sourceMemoryId: string,
+  targetMemoryId: string
+): number {
+  const row = db.connection
+    .prepare(
+      `SELECT COUNT(*) AS n
+         FROM edge_proposals
+        WHERE source_memory_id = ?
+          AND target_memory_id = ?`
+    )
+    .get(sourceMemoryId, targetMemoryId) as { readonly n: number };
+  return row.n;
+}
+
+// invariant: re-parse the recall handle's `diagnostics: unknown` field through
+// the SAME BenchRecallDiagnosticsSchema the harness already applied internally,
+// so the per-candidate admission-plane diagnostics are typed (no `as` cast).
+// admission_planes records WHY each candidate entered the recall pool:
+// "activation" / "domain_tag_cluster" = structural/content admission,
+// "path_expansion" / "graph_expansion" = the unified path plane (direct 1-hop
+// vs multi-hop), which exists for a candidate only when a path edge reaches it.
+function findCandidateDiagnostic(
+  diagnostics: unknown,
+  objectId: string
+): BenchRecallDiagnostics["candidates"][number] | undefined {
+  if (diagnostics === undefined) {
+    return undefined;
+  }
+  const parsed = BenchRecallDiagnosticsSchema.parse(diagnostics);
+  return parsed.candidates.find((candidate) => candidate.object_id === objectId);
+}
 
 const MANAGED_ENV_KEYS = [
   "DATA_DIR",
@@ -204,6 +307,38 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   );
 
   it(
+    "cleans up managed attachWorkspace roots without deleting the daemon data root",
+    async () => {
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-managed-root-default-ws",
+        runId: "harness-managed-root-default-run"
+      });
+      handles.push(daemon);
+      const workspace = await daemon.attachWorkspace({
+        workspaceId: "harness-managed-root-ws",
+        runId: "harness-managed-root-run"
+      });
+
+      const row = initDatabase({ filename: join(daemon.dataDir, "alaya.db") })
+        .connection.prepare(
+          `SELECT root_path AS rootPath
+             FROM workspaces
+            WHERE workspace_id = ?`
+        )
+        .get(workspace.workspaceId) as { readonly rootPath: string };
+
+      expect(row.rootPath).toContain(join(daemon.dataDir, "bench-workspaces"));
+      await expect(access(row.rootPath)).resolves.toBeUndefined();
+
+      await workspace.detach();
+
+      await expect(access(row.rootPath)).rejects.toThrow();
+      await expect(access(daemon.dataDir)).resolves.toBeUndefined();
+    },
+    60_000
+  );
+
+  it(
     "emit_candidate_signal -> propose_memory_update -> review_memory_proposal accept produces recallable memory",
     async () => {
       const daemon = await startBenchDaemon({
@@ -338,8 +473,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         }
       ];
 
-      const seeds = await daemon.proposeMemoriesFromCompileSignals(inputs);
+      const { seeds, dropped } = await daemon.proposeMemoriesFromCompileSignals(inputs);
 
+      expect(dropped).toHaveLength(0);
       expect(seeds).toHaveLength(2);
       expect(new Set(seeds.map((seed) => seed.memoryId)).size).toBe(2);
 
@@ -370,7 +506,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   );
 
   it(
-    "bench seed sourceMemoryRefs are first-class signal refs and create edge proposals",
+    "bench seed sourceMemoryRefs are first-class signal refs and submit derives_from path candidates",
     async () => {
       const daemon = await startBenchDaemon({
         workspaceId: "harness-first-class-ref-ws",
@@ -399,37 +535,22 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
       expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
 
-      const edgeProposal = db.connection
-        .prepare(
-          `SELECT source_memory_id, target_memory_id, edge_type, status, trigger_source
-             FROM edge_proposals
-            WHERE source_memory_id = ?
-              AND target_memory_id = ?
-              AND edge_type = 'derives_from'`
-        )
-        .get(child.memoryId, parent.memoryId) as
-        | {
-            readonly source_memory_id: string;
-            readonly target_memory_id: string;
-            readonly edge_type: string;
-            readonly status: string;
-            readonly trigger_source: string;
-          }
-        | undefined;
-
-      expect(edgeProposal).toEqual({
-        source_memory_id: child.memoryId,
-        target_memory_id: parent.memoryId,
-        edge_type: "derives_from",
-        status: "pending",
-        trigger_source: "candidate_signal_ref"
+      // sourceMemoryRefs fold into a governed derives_from path
+      // candidate (recall_bias +), not an edge_proposals row.
+      const pathRow = readDerivesFromPathRelation(db, child.memoryId, parent.memoryId);
+      expect(pathRow).toMatchObject({
+        relation_kind: "derives_from",
+        source_object_id: child.memoryId,
+        target_object_id: parent.memoryId
       });
+      expect(pathRow!.recall_bias).toBeGreaterThan(0);
+      expect(edgeProposalCount(db, child.memoryId, parent.memoryId)).toBe(0);
     },
     60_000
   );
 
   it(
-    "compile seed sourceMemoryRefs are first-class signal refs and create edge proposals",
+    "compile seed sourceMemoryRefs are first-class signal refs and submit derives_from path candidates",
     async () => {
       const daemon = await startBenchDaemon({
         workspaceId: "harness-compile-first-class-ref-ws",
@@ -457,7 +578,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         }
       ];
 
-      const seeds = await daemon.proposeMemoriesFromCompileSignals(inputs);
+      const { seeds } = await daemon.proposeMemoriesFromCompileSignals(inputs);
       const child = seeds[0];
       if (child === undefined) {
         throw new Error("compile seed did not materialize a child memory");
@@ -471,33 +592,308 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
       expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
 
-      const edgeProposal = db.connection
-        .prepare(
-          `SELECT source_memory_id, target_memory_id, edge_type, status, trigger_source
-             FROM edge_proposals
-            WHERE source_memory_id = ?
-              AND target_memory_id = ?
-              AND edge_type = 'derives_from'`
-        )
-        .get(child.memoryId, parent.memoryId) as
-        | {
-            readonly source_memory_id: string;
-            readonly target_memory_id: string;
-            readonly edge_type: string;
-            readonly status: string;
-            readonly trigger_source: string;
-          }
-        | undefined;
-
-      expect(edgeProposal).toEqual({
-        source_memory_id: child.memoryId,
-        target_memory_id: parent.memoryId,
-        edge_type: "derives_from",
-        status: "pending",
-        trigger_source: "candidate_signal_ref"
+      // sourceMemoryRefs fold into a governed derives_from path
+      // candidate (recall_bias +), not an edge_proposals row.
+      const pathRow = readDerivesFromPathRelation(db, child.memoryId, parent.memoryId);
+      expect(pathRow).toMatchObject({
+        relation_kind: "derives_from",
+        source_object_id: child.memoryId,
+        target_object_id: parent.memoryId
       });
+      expect(pathRow!.recall_bias).toBeGreaterThan(0);
+      expect(edgeProposalCount(db, child.memoryId, parent.memoryId)).toBe(0);
     },
     60_000
+  );
+
+  it(
+    "accrueSessionCoRecall EARNS sparse recall-eligible co_recalled paths through the production counter gate",
+    async () => {
+      const workspaceId = "harness-co-recall-ws";
+      const daemon = await startBenchDaemon({
+        workspaceId,
+        runId: "harness-co-recall-run"
+      });
+      handles.push(daemon);
+
+      // Seed five same-session members in seed order. Pair selection is
+      // positional (adjacent in seed order); NO gold/answer knowledge is
+      // consulted (the test never marks any member as the answer).
+      const seeded = [];
+      for (let i = 0; i < 5; i += 1) {
+        seeded.push(
+          await daemon.proposeMemory(
+            `Session member ${i}: ledger detail number ${i}.`,
+            `co-recall-m${i}`,
+            { objectKind: "fact" }
+          )
+        );
+      }
+      const members = seeded.map((s) => s.memoryId);
+
+      const summary = await daemon.accrueSessionCoRecall(members);
+
+      // EARNED: pairs reached the production co_usage_threshold and minted.
+      // SPARSE: at most BENCH_CO_RECALL_WARMUP_PAIR_CAP (3) pairs are observed,
+      // FAR below a same-session hub's N-1=4 spokes or a clique's C(5,2)=10
+      // edges. This is the sparseness contract.
+      expect(summary.pairsObserved).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
+      expect(summary.minted).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
+      expect(summary.belowThreshold).toBe(0);
+      expect(summary.minted).toBeLessThan(members.length - 1);
+
+      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+      const coRecalled = readCoRecalledPathRelations(db, workspaceId);
+
+      // NONZERO and SPARSE recalls-tier co_recalled paths earned (one per
+      // settled pair), not a saturated hub.
+      expect(coRecalled.length).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
+      expect(coRecalled.length).toBeLessThan(members.length - 1);
+
+      // The earned edges are the adjacent member pairs (chain), normalized to
+      // (low, high) to match the production counter key.
+      const sortedPair = (a: string, b: string): [string, string] =>
+        a < b ? [a, b] : [b, a];
+      const expectedPairs = new Set(
+        [0, 1, 2].map((i) => {
+          const [low, high] = sortedPair(members[i]!, members[i + 1]!);
+          return `${low} ${high}`;
+        })
+      );
+      const earnedPairs = new Set(
+        coRecalled.map((row) => `${row.source_object_id} ${row.target_object_id}`)
+      );
+      expect(earnedPairs).toEqual(expectedPairs);
+
+      for (const row of coRecalled) {
+        // Recall-eligibility at the born band: active lifecycle AND
+        // recall_bias > 0 — no plasticity reinforcement required.
+        expect(row.recall_bias).toBeGreaterThan(0);
+        expect(
+          isPathRecallEligible({
+            lifecycle: { status: row.lifecycle_status as "active" },
+            effect_vector: { recall_bias: row.recall_bias }
+          } as Parameters<typeof isPathRecallEligible>[0])
+        ).toBe(true);
+        // invariant: earned co_recalled is born at attention_only (the
+        // auto-build associative band), gating only the suppression lane.
+        expect(row.governance_class).toBe("attention_only");
+      }
+
+      // graph health groups by raw relation_kind; the runner folds each kind
+      // into its graph edge_type (mapRelationKindToGraphEdgeType) before
+      // summing recalls_edge_count. co_recalled folds into the "recalls" tier,
+      // so recalls_edge_count > 0.
+      // see also: apps/bench-runner/src/longmemeval/runner.ts
+      //   readLongMemEvalReportSideEffectSnapshot
+      const status =
+        await daemon.runtime.services.graphHealthService.getStatus(workspaceId);
+      let recallsCount = 0;
+      for (const [kind, count] of Object.entries(status.path_relations_by_kind)) {
+        if (mapRelationKindToGraphEdgeType(kind) === "recalls") {
+          recallsCount += count;
+        }
+      }
+      expect(recallsCount).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
+    },
+    60_000
+  );
+
+  it(
+    "a query hitting a NON-representative co-recall member fans into its sibling via graph_expansion at hop-2",
+    async () => {
+      // red-team Important 3: the mechanism R2 depends on. An earned co_recalled
+      // edge is minted with direction_bias=bidirectional_asymmetric, so
+      // graph_expansion (collectPathGraphNeighbors) traverses it in BOTH
+      // directions. A query that surfaces ONE member of an earned pair must
+      // fan into the other member through the path plane, even though that
+      // sibling is not a direct content/embedding hit for the query.
+      //
+      // Topology note (the actual earned shape, not a strict hub): earned
+      // accrual mints PAIRS (chain of adjacent members), each minted via
+      // proposeCoRecalled(low, high) where low<high — so the lexicographically
+      // SMALLER member id is the source and the LARGER is the target. The
+      // graph_support recall factor credits ONLY inbound/target paths
+      // (graph-explore-service.findInboundRecallEligiblePaths ->
+      // findByTargetAnchor), so of an earned pair only the LARGER-id member
+      // receives graph_support amplification. graph_expansion fan-in, by
+      // contrast, is bidirectional and reaches the sibling regardless of which
+      // id is larger — that is why R2 must rely on graph_expansion, not
+      // graph_support, for sibling fan-in.
+      // see also: packages/core/src/recall-service.ts collectPathGraphNeighbors
+      // see also: packages/core/src/graph-explore-service.ts findInboundRecallEligiblePaths
+      //
+      // NON-VACUOUS contract: the bench recall policy sets no relevance floor
+      // (min_activation_score=null) and MIN_RECALL_RESULTS=5 backfills the
+      // delivery from the candidate POOL. With only an anchor + sibling seeded
+      // and a generous budget, BOTH always deliver regardless of any edge, so
+      // the edge proves nothing — that is the vacuousness this test removes.
+      //
+      // Two design facts make the edge load-bearing:
+      //  (a) DECOY_COUNT=15 content-disjoint decoys that ARE query-relevant. The
+      //      recall budget is set BELOW the content-candidate count (decoys +
+      //      anchor = 16) so the content hits alone can fill it; the sibling
+      //      (zero query overlap) can never be a fused-rank or min-results
+      //      freebie above them.
+      //  (b) The bench seeds all carry the same domain_tags=["bench-seed"], so
+      //      the structural domain_tag_cluster plane sweeps the sibling into the
+      //      candidate POOL in BOTH cases. Pool entry is therefore NOT the
+      //      discriminator — DELIVERY under the tight budget is. Only the earned
+      //      co_recalled edge gives the sibling a path-plane admission
+      //      (path_expansion, the direct 1-hop pass of the unified path plane
+      //      graph_expansion's multi-hop traversal belongs to), and that
+      //      admission is what wins it a delivery slot above the content hits.
+      //
+      // Airtight both directions: WITH the edge the sibling is delivered, is
+      // within_budget, and carries the path_expansion admission + non-null
+      // path_expansion stream rank; WITHOUT the edge (negative control, same
+      // seed set) the sibling is ABSENT from the delivered top-N, is
+      // within_budget=false, and carries NO path_expansion admission.
+      // see also: packages/core/src/recall-service-helpers.ts MIN_RECALL_RESULTS
+      // see also: apps/bench-runner/src/harness/daemon.ts
+      //   buildBenchDiagnosticRecallPolicy (min_activation_score=null)
+
+      const DECOY_COUNT = 15;
+      // Budget below DECOY_COUNT + 1 (anchor) = 16 content candidates, so the
+      // content hits saturate the delivery and the sibling needs the edge's
+      // path-plane admission to claim a slot.
+      const FANIN_MAX_RESULTS = 12;
+      const QUERY = "quarterly ledger reconciliation runbook finance vault";
+      const ANCHOR_CONTENT =
+        "The quarterly ledger reconciliation runbook lives in the finance vault.";
+      // Content-disjoint from the query: no lexical/embedding overlap, so the
+      // ONLY query-relevant route to a DELIVERY slot is the path-plane edge.
+      const SIBLING_CONTENT =
+        "Aurora prefers oat milk in her espresso every morning.";
+
+      // Decoys share the query's finance/ledger vocabulary, so each is a
+      // stronger content hit than the sibling — they outrank it and fill the
+      // budget.
+      const decoyContents = Array.from(
+        { length: DECOY_COUNT },
+        (_unused, i) =>
+          `Ledger reconciliation note ${i}: the finance vault runbook records ` +
+          `quarterly variance entry ${i} for the reconciliation ledger.`
+      );
+
+      // Shared seeding so the positive case and the negative control run on
+      // byte-identical content; only edge minting differs.
+      const seedFaninWorld = async (
+        daemon: BenchDaemonHandle
+      ): Promise<{ anchorId: string; siblingId: string }> => {
+        const anchor = await daemon.proposeMemory(ANCHOR_CONTENT, "fanin-anchor", {
+          objectKind: "fact"
+        });
+        const sibling = await daemon.proposeMemory(
+          SIBLING_CONTENT,
+          "fanin-sibling",
+          { objectKind: "fact" }
+        );
+        for (let i = 0; i < decoyContents.length; i += 1) {
+          await daemon.proposeMemory(decoyContents[i]!, `fanin-decoy-${i}`, {
+            objectKind: "fact"
+          });
+        }
+        return { anchorId: anchor.memoryId, siblingId: sibling.memoryId };
+      };
+
+      // ---- POSITIVE: edge minted -> sibling delivered via the path plane ----
+      const positiveDaemon = await startBenchDaemon({
+        workspaceId: "harness-co-recall-fanin-ws",
+        runId: "harness-co-recall-fanin-run"
+      });
+      handles.push(positiveDaemon);
+      const positive = await seedFaninWorld(positiveDaemon);
+
+      // Earn the co_recalled edge between anchor and sibling through the
+      // production gate (decoys are NOT in the pair, so they grow no edges).
+      const summary = await positiveDaemon.accrueSessionCoRecall([
+        positive.anchorId,
+        positive.siblingId
+      ]);
+      expect(summary.minted).toBe(1);
+
+      // BUDGET below the decoy count (DECOY_COUNT=15 + anchor = 16 content
+      // candidates): the budget can hold all the query-relevant content hits
+      // but cannot also fit the content-irrelevant sibling on fused rank alone.
+      const positiveRecall = await positiveDaemon.recall(QUERY, {
+        maxResults: FANIN_MAX_RESULTS
+      });
+      const positiveIds = new Set(
+        positiveRecall.results.map((r) => r.object_id)
+      );
+
+      // The anchor is the direct content hit.
+      expect(positiveIds).toContain(positive.anchorId);
+      // The sibling is DELIVERED (within budget) only because the earned
+      // co_recalled edge fans it in across the unified path plane.
+      expect(positiveIds).toContain(positive.siblingId);
+      const positiveSiblingDiag = findCandidateDiagnostic(
+        positiveRecall.diagnostics,
+        positive.siblingId
+      );
+      expect(positiveSiblingDiag).toBeDefined();
+      expect(positiveSiblingDiag!.within_budget).toBe(true);
+      expect(positiveSiblingDiag!.final_rank).not.toBeNull();
+      // The edge's load-bearing signal: the sibling carries the path-plane
+      // admission (path_expansion is the direct 1-hop pass of the same unified
+      // path plane graph_expansion's multi-hop traversal belongs to). This
+      // plane and its non-null RRF stream rank CANNOT exist without the edge.
+      // see also: packages/core/src/recall-service.ts (path_expansion /
+      //   graph_expansion share the unified path plane; the double-count guard
+      //   credits path_expansion when the 1-hop pass already admitted a target)
+      expect(positiveSiblingDiag!.admission_planes).toContain("path_expansion");
+      expect(positiveSiblingDiag!.per_stream_rank.path_expansion).not.toBeNull();
+
+      // The harness allows only one active daemon per process, so shut the
+      // positive daemon down before the negative-control daemon starts.
+      await positiveDaemon.shutdown();
+      handles.splice(handles.indexOf(positiveDaemon), 1);
+
+      // ---- NEGATIVE CONTROL: NO edge -> sibling ABSENT from recall ----
+      const negativeDaemon = await startBenchDaemon({
+        workspaceId: "harness-co-recall-fanin-negctl-ws",
+        runId: "harness-co-recall-fanin-negctl-run"
+      });
+      handles.push(negativeDaemon);
+      const negative = await seedFaninWorld(negativeDaemon);
+      // Deliberately DO NOT call accrueSessionCoRecall: no co_recalled edge.
+
+      const negativeRecall = await negativeDaemon.recall(QUERY, {
+        maxResults: FANIN_MAX_RESULTS
+      });
+      const negativeIds = new Set(
+        negativeRecall.results.map((r) => r.object_id)
+      );
+
+      // The anchor still delivers (direct content hit) — the world is otherwise
+      // byte-identical, isolating the edge as the only difference.
+      expect(negativeIds).toContain(negative.anchorId);
+      // Without the edge the sibling is ABSENT from the delivered top-N. The
+      // query-relevant decoys outrank it on fused rank and the budget excludes
+      // it: with no path edge there is no path-plane admission to win it a
+      // delivery slot above the content hits.
+      expect(negativeIds).not.toContain(negative.siblingId);
+      const negativeSiblingDiag = findCandidateDiagnostic(
+        negativeRecall.diagnostics,
+        negative.siblingId
+      );
+      // The shared bench-seed domain_tag_cluster still admits the sibling to the
+      // candidate POOL (so a diagnostic row may exist), but with NO path edge it
+      // carries no path_expansion admission and is budget-dropped — proving the
+      // positive delivery was the edge's path-plane lift, not a content/floor
+      // freebie. (If the pool ejected it entirely there is no row, which is an
+      // even stronger absence — both outcomes satisfy the negative control.)
+      if (negativeSiblingDiag !== undefined) {
+        expect(negativeSiblingDiag.within_budget).toBe(false);
+        expect(negativeSiblingDiag.final_rank).toBeNull();
+        expect(negativeSiblingDiag.admission_planes).not.toContain(
+          "path_expansion"
+        );
+        expect(negativeSiblingDiag.per_stream_rank.path_expansion).toBeNull();
+      }
+    },
+    120_000
   );
 
   it(

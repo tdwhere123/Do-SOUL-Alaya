@@ -164,6 +164,6 @@ function createProvider(id: string): GardenComputeProvider {
         raw_payload: {},
         created_at: "2026-05-11T00:00:00.000Z"
       }
-    ])
+    ]) as unknown as GardenComputeProvider["compile"]
   };
 }

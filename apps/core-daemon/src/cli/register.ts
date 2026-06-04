@@ -138,14 +138,13 @@ export function registerAlayaCliCommands(
 }
 
 /**
- * C2: derive the Garden compute snapshot the doctor command reports.
+ * Derive the Garden compute snapshot the doctor command reports.
  *
  * Reading the saved RuntimeGardenComputeConfig (via configService) gives us
  * provider_kind / model_id / provider_url. The credential_source needs raw
- * env so we can distinguish the dedicated Garden key from the embedding
-   * fallback (deprecated for v0.1.1, removed in v0.2). routing_decision
-   * stays separate from provider_kind so official_api can degrade to
-   * local_heuristics when credentials are missing.
+ * env so we can distinguish the dedicated Garden key from an embedding key.
+ * routing_decision stays separate from provider_kind so official_api can
+ * degrade to local_heuristics when credentials are missing.
  */
 export async function resolveGardenComputeStatus(
   runtime: AlayaDaemonRuntime
@@ -169,7 +168,35 @@ export async function resolveGardenComputeStatus(
     provider_url: config.provider_url,
     credential_source: credential,
     routing_decision: deriveGardenRoutingDecision(config, resolved),
-    ...keychainCheckField(config.secret_ref, resolved)
+    ...keychainCheckField(config.secret_ref, resolved),
+    ...hostWorkerAdvisoryField(config.provider_kind, runtime)
+  };
+}
+
+// Under the host_worker product default, surface whether recall-driven
+// host-worker work (POST_TURN_EXTRACT and EDGE_CLASSIFY) is waiting for an
+// attached CLI agent (LLM quality) or being left to the zero-cloud heuristic
+// fallback. Omitted for every other provider_kind, and omitted when no garden
+// task repo is wired (non-sqlite harness).
+function hostWorkerAdvisoryField(
+  providerKind: GardenComputeStatus["provider_kind"],
+  runtime: AlayaDaemonRuntime
+): Pick<GardenComputeStatus, "host_worker_advisory"> {
+  if (providerKind !== "host_worker") {
+    return {};
+  }
+  const backlog = runtime.services.gardenStatus.getHostWorkerExtractBacklog();
+  if (backlog === null) {
+    return {};
+  }
+  return {
+    host_worker_advisory: {
+      pending_extract_tasks: backlog.pending,
+      stale_claimed_extract_tasks: backlog.stale,
+      pending_edge_classify_tasks: backlog.edgeClassifyPending,
+      stale_claimed_edge_classify_tasks: backlog.edgeClassifyStale,
+      attach_worker_recommended: backlog.pending > 0 || backlog.edgeClassifyPending > 0
+    }
   };
 }
 

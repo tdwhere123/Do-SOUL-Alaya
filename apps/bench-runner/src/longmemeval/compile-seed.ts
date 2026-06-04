@@ -8,16 +8,31 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Seed-extraction diagnostic instrument: default cwd-rooted dump dir,
+// shared with packages/soul/src/garden/compute-provider.ts so a preflight can
+// read provider-side and seed-side dumps from one place. data/* is gitignored.
+const DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL =
+  "data/diagnostics/seed-extraction-failures";
+const COMPILE_SEED_CACHE_KEY_PREFIX_CHARS = 12;
 import { resolveSecretRef } from "@do-soul/alaya";
 import {
-  OFFICIAL_API_GARDEN_MODEL,
+  OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider,
   parseOfficialApiSignals,
+  salvageRawSignalElements,
   type GardenCompileContext
 } from "@do-soul/alaya-soul";
+import {
+  computeSystemPromptSha256,
+  readExtractionCacheManifest,
+  type ExtractionCacheManifest
+} from "./extraction-cache-manifest.js";
 import type {
   BenchSignalSeedInput,
   BenchSynthesisSeedInput,
+  CompileSeedBatchResult,
+  CompileSeedDropReason,
   SeededMemoryResult,
   SeededSynthesisResult
 } from "../harness/daemon.js";
@@ -69,7 +84,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // fixture discipline used by the pinned dataset meta. The directory is
 // created lazily on the first credentialled run; it is empty (absent)
 // until then.
-const EXTRACTION_CACHE_ROOT = resolve(
+export const EXTRACTION_CACHE_ROOT = resolve(
   __dirname,
   "../../../../docs/bench-history/datasets/longmemeval-extraction-cache"
 );
@@ -77,15 +92,49 @@ const EXTRACTION_CACHE_ROOT = resolve(
 const GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
 const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
 const GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
+const ALLOW_LIVE_EXTRACTION_ENV = "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION";
+
+/**
+ * Single source for the operator opt-in that relaxes the run-start coverage
+ * gate so a run may deliberately live-extract the uncovered cache gap. Shared
+ * by the three LongMemEval entrypoints so the flag is resolved one way.
+ * Truthy values: "1" / "true" (case-insensitive).
+ */
+export function resolveBenchAllowLiveExtraction(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  const value = env[ALLOW_LIVE_EXTRACTION_ENV];
+  if (value === undefined) {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
+}
 
 const DEFAULT_GARDEN_PROVIDER_URL = "https://yunwu.ai/v1";
+// Run-start coverage threshold. A populated cache below this coverage means a
+// run would live-extract a large gap; the operator must pass an explicit
+// allow-live / fill flag rather than have a slow live run start silently.
+const EXTRACTION_CACHE_COVERAGE_THRESHOLD = 0.95;
 const EXTRACTION_REQUEST_TIMEOUT_MS = 60_000;
+// invariant: wall-clock tick guards against host suspend freezing the monotonic
+// setTimeout. setInterval also rides the monotonic clock, but libuv catches up
+// suppressed intervals on resume, so the wall-clock check fires within one
+// tick after wake.
+// see also: packages/soul/src/garden/wall-clock-timeout.ts WALL_CLOCK_TICK_MS
+const EXTRACTION_WALL_CLOCK_TICK_MS = 5_000;
 
 /**
  * The injectable `SignalExtractor` shape consumed by
  * `OfficialApiGardenProvider`. Declared structurally here so the bench does
  * not depend on a non-exported soul type; it matches the provider's
  * `extractor` constructor dependency.
+ *
+ * extractorMeta surfaces the retry observability the bench dump consumes —
+ * retryCount and retryClassification let dumpSeedExtractionFailureDiagnostic
+ * attribute a fallback to a specific terminal outcome of the retry loop. The
+ * field is optional so unit-test stubs that do not exercise retries stay
+ * minimal.
  */
 export interface BenchSignalExtractor {
   extract(input: {
@@ -93,7 +142,35 @@ export interface BenchSignalExtractor {
     readonly userPrompt: string;
     readonly abortSignal?: AbortSignal;
     readonly timeoutMs?: number;
-  }): Promise<{ readonly rawJson: string }>;
+  }): Promise<{
+    readonly rawJson: string;
+    readonly extractorMeta?: BenchSignalExtractorMeta;
+  }>;
+}
+
+// invariant: closed enum mirrored from
+// packages/soul/src/garden/pi-mono-extractor.ts RetryClassification so the
+// dump envelope is consistent across the production and bench transports.
+export type BenchRetryClassification =
+  | "success_first_try"
+  | "success_after_retry"
+  | "failure_max_retries"
+  | "failure_non_retryable_4xx"
+  | "failure_timeout"
+  | "failure_aborted";
+
+// invariant: BenchSignalExtractorMeta is structurally assignable to the
+// production SignalExtractorMeta in pi-mono-extractor.ts so the bench's
+// caching extractor can drop into OfficialApiGardenProvider.extractor without
+// a widening cast. recoveryKind is always "none" on the bench HTTP path —
+// JSON recovery happens inside parseOrRecoverJson, which only the pi-mono
+// loop reaches; the bench transport returns whatever content the gateway
+// emitted.
+// cross-file: packages/soul/src/garden/pi-mono-extractor.ts SignalExtractorMeta
+export interface BenchSignalExtractorMeta {
+  readonly recoveryKind: "none" | "markdown_strip" | "trailing_strip" | "balanced_close";
+  readonly retryCount: number;
+  readonly retryClassification: BenchRetryClassification;
 }
 
 export interface CompileSeedExtractionConfig {
@@ -129,6 +206,20 @@ export interface CompileSeedExtractionStats {
    */
   signalsDropped: number;
   /**
+   * Per-reason breakdown of signals lost AT THE MATERIALIZATION SEAM (the
+   * proposeMemoriesFromCompileSignals path), so a candidate-absent seed-quality
+   * miss is root-causable from the archive instead of only stderr:
+   *   - candidate_absent: received + triaged but the router produced no
+   *     memory_entry (evidence_only / deferred) — an expected sub-threshold
+   *     outcome, the signal-quality hole the bench must surface.
+   *   - materialization_error: the signal THREW (schema parse / receiveSignal /
+   *     accept). Isolated per-signal so one bad signal never drops its
+   *     batch-mates — the fix for the 1963-signal whole-batch swallow.
+   * These are a SUBSET of signalsDropped (the parse / compile-overflow drops
+   * happen earlier, before this seam, and are NOT counted here).
+   */
+  signalsDroppedByReason: Record<CompileSeedDropReason, number>;
+  /**
    * Signals discarded INSIDE parseOfficialApiSignals — a malformed single
    * entry rejected by parseOfficialApiSignalEntry, OR a signal past the
    * MAX_OFFICIAL_API_SIGNALS=64 slice cap. These never reach compile().
@@ -155,6 +246,14 @@ export interface CompileSeedExtractionStats {
    */
   lastTurnDraftCount: number;
   lastExtractionSource: "cache" | "live" | null;
+  /**
+   * Diagnostic instrument: cache key (or its 12-char prefix; see writers)
+   * for the most recent extract() call, so a subsequent extraction failure
+   * can dump the cache_key_prefix to the diagnostic envelope. Optional for
+   * backward compatibility with stats objects constructed by tests that
+   * predate the instrument.
+   */
+  lastCacheKey?: string | null;
 }
 
 /**
@@ -179,6 +278,18 @@ export interface SeedExtractionPathKpi {
   readonly parse_dropped: number;
   /** Signals dropped by compile() (raw_payload past the 16 KB cap). */
   readonly compile_overflow_dropped: number;
+  /**
+   * Materialization-seam drops by reason (a SUBSET of signals_dropped) so the
+   * archive discloses WHY a seeded fact never became a durable memory_entry:
+   *   - candidate_absent: routed to evidence_only / deferred (no memory_entry).
+   *   - materialization_error: the signal threw and was isolated per-signal.
+   * Persisted so candidate-absent / seed-quality misses are root-causable from
+   * the KPI archive, not just stderr.
+   */
+  readonly signals_dropped_by_reason: {
+    readonly candidate_absent: number;
+    readonly materialization_error: number;
+  };
 }
 
 export function toSeedExtractionPathKpi(
@@ -194,22 +305,56 @@ export function toSeedExtractionPathKpi(
     facts_produced: stats.factsProduced,
     signals_dropped: stats.signalsDropped,
     parse_dropped: stats.parseDropped,
-    compile_overflow_dropped: stats.compileOverflowDropped
+    compile_overflow_dropped: stats.compileOverflowDropped,
+    signals_dropped_by_reason: {
+      candidate_absent: stats.signalsDroppedByReason.candidate_absent,
+      materialization_error: stats.signalsDroppedByReason.materialization_error
+    }
   };
 }
 
 /**
- * Resolve garden LLM configuration from the process environment. When the
- * secret ref is absent or unresolvable, `apiKey` is null and the seed path
- * falls back to the deterministic no-LLM path.
+ * Resolve garden LLM configuration for the bench seed path. When the secret
+ * ref is absent or unresolvable, `apiKey` is null and the seed path falls back
+ * to the deterministic no-LLM path.
+ *
+ * Single-source extraction model — NO silent production-constant fallback.
+ * The model is resolved from ONE of, in order:
+ *   1. env `OFFICIAL_API_GARDEN_MODEL` (operator override at run time)
+ *   2. the cache's own `manifest.extraction_model` (the cache self-describes
+ *      what it was built with)
+ * If neither is present, this THROWS. The old behaviour silently fell back to
+ * the compile-time production constant `gpt-4.1-mini`; when the cache was
+ * built with a different model that fallback produced a 100% cache miss that
+ * looked like a slow run (466h live extraction) rather than an error. The
+ * same resolved `model` value is what the cache-key hash component consumes
+ * (createCachingSignalExtractor -> computeCacheKey), so the provider config
+ * and the cache key can never independently re-derive a disagreeing model.
+ *
+ * cross-file: apps/bench-runner/src/longmemeval/extraction-cache-manifest.ts
  */
 export function resolveCompileSeedExtractionConfig(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  manifest?: ExtractionCacheManifest | undefined
 ): CompileSeedExtractionConfig {
   const providerUrl = normalizeBaseUrl(
-    readNonEmpty(env[GARDEN_PROVIDER_URL_ENV]) ?? DEFAULT_GARDEN_PROVIDER_URL
+    readNonEmpty(env[GARDEN_PROVIDER_URL_ENV]) ??
+      manifest?.provider_url ??
+      DEFAULT_GARDEN_PROVIDER_URL
   );
-  const model = readNonEmpty(env[GARDEN_MODEL_ENV]) ?? OFFICIAL_API_GARDEN_MODEL;
+  const model =
+    readNonEmpty(env[GARDEN_MODEL_ENV]) ?? manifest?.extraction_model;
+  if (model === undefined || model.trim().length === 0) {
+    throw new Error(
+      "bench extraction model is unresolved: neither env " +
+        `${GARDEN_MODEL_ENV} is set nor does the extraction cache manifest ` +
+        "declare extraction_model. Source the bench env " +
+        "(set -a; . .do-it/bench-env/alaya-api.env; set +a) or build the " +
+        "cache manifest first. Refusing to fall back to a default model — a " +
+        "wrong default silently misses every cache key and degrades to a " +
+        "full live extraction."
+    );
+  }
   const secretRef = readNonEmpty(env[GARDEN_SECRET_REF_ENV]);
   if (secretRef === undefined) {
     return { providerUrl, model, apiKey: null };
@@ -261,6 +406,10 @@ export function createCachingSignalExtractor(options: {
       if (cached !== undefined) {
         if (stats !== undefined) {
           stats.lastExtractionSource = "cache";
+          // Full cache key recorded here; the diagnostic writer slices to
+          // the 12-char prefix so logs stay scannable without leaking
+          // enough hash to fingerprint a private fixture path.
+          stats.lastCacheKey = cacheKey;
           stats.cacheHits += 1;
           recordExtractionDraftCounts(stats, cached);
         }
@@ -268,6 +417,7 @@ export function createCachingSignalExtractor(options: {
       }
       if (stats !== undefined) {
         stats.lastExtractionSource = "live";
+        stats.lastCacheKey = cacheKey;
       }
       const result = await options.delegate.extract(input);
       writeCachedExtraction(cacheRoot, cacheKey, {
@@ -334,9 +484,15 @@ function recordExtractionDraftCounts(
 
 /**
  * Count the entries in the model envelope's raw `.signals` array, with no
- * cap and no per-entry validation. A malformed envelope (not an object, or
- * no `.signals` array) counts as 0 — parseOfficialApiSignals would throw on
- * it, which the seed path treats as a whole-turn extraction failure.
+ * cap and no per-entry validation. When the whole envelope parses cleanly,
+ * this is the array length. When the envelope is corrupt (parseOfficialApiSignals
+ * now salvages it element-wise), count the RAW salvageable `{...}` element
+ * population — including the corrupt element(s) — so the dropped corrupt
+ * entries land in parseDropped (raw - parsed) instead of vanishing from the
+ * attribution. A genuinely-degenerate envelope (no `.signals` region, or no
+ * complete element) counts as 0, matching the whole-turn fallback the seed
+ * path still applies when zero drafts survive.
+ * see also: packages/soul/src/garden/compute-provider.ts salvageRawSignalElements
  */
 function countRawEnvelopeSignals(rawJson: string): number {
   try {
@@ -347,7 +503,7 @@ function countRawEnvelopeSignals(rawJson: string): number {
     const signals = (parsed as { readonly signals?: unknown }).signals;
     return Array.isArray(signals) ? signals.length : 0;
   } catch {
-    return 0;
+    return salvageRawSignalElements(rawJson).length;
   }
 }
 
@@ -428,69 +584,446 @@ function writeCachedExtraction(
   renameSync(tmpPath, filePath);
 }
 
+// invariant: bench retry policy is parity with pi-mono-extractor.ts. Both
+// transports must spend up to 3 retries with jittered exponential backoff on
+// recoverable failure modes (5xx / 429 / empty body / unknown transport) so a
+// transient yunwu.ai burst does not silently demote the archive to the
+// no-credentials fallback path. Timeouts retry exactly once. 4xx-non-429 and
+// aborts never retry.
+const BENCH_HTTP_MAX_RETRIES = 3;
+const BENCH_HTTP_MAX_TIMEOUT_RETRIES = 1;
+const BENCH_HTTP_JITTER_BASE_MS = 250;
+const BENCH_HTTP_JITTER_MAX_MS = 1500;
+
+function computeBenchJitterMs(attempt: number, random: () => number): number {
+  const baseMs = Math.min(
+    BENCH_HTTP_JITTER_BASE_MS * Math.max(1, 2 ** Math.max(0, attempt)),
+    BENCH_HTTP_JITTER_MAX_MS
+  );
+  const upper = Math.min(baseMs * 2, BENCH_HTTP_JITTER_MAX_MS);
+  const span = upper - baseMs;
+  return baseMs + Math.floor(random() * (span + 1));
+}
+
+interface BenchHttpError {
+  readonly classification: BenchRetryClassification;
+  readonly retryable: boolean;
+  readonly isTimeout: boolean;
+  readonly cause: unknown;
+}
+
+function classifyBenchHttpError(
+  error: unknown,
+  status: number | null
+): BenchHttpError {
+  if (error instanceof Error && /abort/iu.test(error.name + error.message)) {
+    // AbortController fired — could be operator abort or our own timeout
+    // controller; the caller disambiguates via the timer flag.
+    return {
+      classification: "failure_aborted",
+      retryable: false,
+      isTimeout: false,
+      cause: error
+    };
+  }
+  if (status !== null) {
+    if (status === 429 || (status >= 500 && status < 600)) {
+      return {
+        classification: "failure_max_retries",
+        retryable: true,
+        isTimeout: false,
+        cause: error
+      };
+    }
+    if (status >= 400 && status < 500) {
+      return {
+        classification: "failure_non_retryable_4xx",
+        retryable: false,
+        isTimeout: false,
+        cause: error
+      };
+    }
+  }
+  // Unknown transport (DNS, connection reset, empty body): retry — the
+  // dominant unobserved failure here resolves on the next request.
+  return {
+    classification: "failure_max_retries",
+    retryable: true,
+    isTimeout: false,
+    cause: error
+  };
+}
+
 /**
  * Live garden LLM delegate: OpenAI-compatible POST /chat/completions with a
- * JSON-object response format, temperature 0. This is the same transport the
- * production `createPiMonoExtractor` uses; it is re-implemented here with
- * `fetch` (no new client dependency) because the bench harness drives the
- * provider through its injectable `extractor` seam and the production pi-mono
- * extractor is not on the soul package's public surface. The provider still
- * supplies the production `OFFICIAL_API_SYSTEM_PROMPT` and parses the
- * response with the production `parseOfficialApiSignals`, so extraction
- * semantics are production-faithful — only the chat-completions transport
- * shim is bench-local.
+ * JSON-object response format, temperature 0. Wraps the raw fetch in the same
+ * retry-with-jitter loop as `createPiMonoExtractor` (3 retries on recoverable
+ * failures, 1 retry on timeout, no retry on 4xx-non-429 / abort) so the
+ * bench transport does not silently degrade to the fallback path on a
+ * transient burst the production transport would have recovered from.
+ *
+ * `extractorMeta.retryCount` + `extractorMeta.retryClassification` surface
+ * on success; on failure the thrown Error carries the same classification
+ * in its `.cause` chain so dumpSeedExtractionFailureDiagnostic records the
+ * terminal outcome.
+ *
+ * `deps.sleep` / `deps.random` are test seams so unit tests can drive the
+ * jittered backoff without wall-clock sleeps.
  */
 export function createGardenHttpExtractor(
-  config: CompileSeedExtractionConfig
+  config: CompileSeedExtractionConfig,
+  deps?: {
+    readonly sleep?: (ms: number) => Promise<void>;
+    readonly random?: () => number;
+    readonly fetch?: typeof fetch;
+  }
 ): BenchSignalExtractor {
+  const sleepImpl =
+    deps?.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const randomImpl = deps?.random ?? Math.random;
+  const fetchImpl = deps?.fetch ?? fetch;
   return {
     async extract(input) {
       if (config.apiKey === null) {
         throw new Error("garden API key is unavailable");
       }
-      const controller = new AbortController();
-      const timer = setTimeout(
-        () => controller.abort(),
-        input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS
-      );
-      try {
-        const response = await fetch(`${config.providerUrl}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${config.apiKey}`
-          },
-          body: JSON.stringify({
-            model: config.model,
-            temperature: 0,
-            response_format: { type: "json_object" },
-            messages: [
-              { role: "system", content: input.systemPrompt },
-              { role: "user", content: input.userPrompt }
-            ]
-          }),
-          signal: controller.signal
+      let attempt = 0;
+      let timeoutRetries = 0;
+      let lastError: unknown = null;
+      let lastClassification: BenchRetryClassification = "failure_max_retries";
+      while (attempt <= BENCH_HTTP_MAX_RETRIES) {
+        const controller = new AbortController();
+        let timedOut = false;
+        const budgetMs = input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS;
+        const startedAt = Date.now();
+        // invariant: abort alone is NOT enough. On Node 24 a stalled undici
+        // socket does NOT honor controller.abort(): the timer fires, abort() is
+        // called, but `await fetchImpl(...)` never settles and the worker hangs
+        // forever (the repeated 500q extraction-fill wedge). `rejectOnTimeout`
+        // lets the timers REJECT a settlement promise that we race against the
+        // fetch, so the attempt settles within budget even when the fetch
+        // ignores the abort. abort() is still called so abort-aware fetches
+        // cancel cleanly and free the socket. The rejection carries `timedOut`
+        // so it routes through the existing failure_timeout classification
+        // below exactly as a real timer-driven abort would.
+        // cross-file: this MUST stay behaviorally identical in timeout
+        // *semantics* to packages/soul/src/garden/wall-clock-timeout.ts
+        // withWallClockTimeout (the two transports diverged once and that
+        // divergence caused this hang); the bench surfaces an untyped Error
+        // since classification keys on the `timedOut` flag, not the error type.
+        let rejectSettlement: ((error: Error) => void) | null = null;
+        const timeoutSettlement = new Promise<never>((_resolve, reject) => {
+          rejectSettlement = reject;
         });
-        if (!response.ok) {
-          throw new Error(
-            `garden extraction HTTP ${response.status} ${response.statusText}`
+        const fireTimeout = (): void => {
+          if (timedOut) {
+            return;
+          }
+          timedOut = true;
+          controller.abort();
+          rejectSettlement?.(
+            new Error(
+              `garden extraction transport stalled past ${budgetMs}ms budget`
+            )
           );
-        }
-        const payload = (await response.json()) as {
-          readonly choices?: readonly {
-            readonly message?: { readonly content?: unknown };
-          }[];
         };
-        const content = payload.choices?.[0]?.message?.content;
-        if (typeof content !== "string" || content.trim().length === 0) {
-          throw new Error("garden extraction returned no content");
+        // invariant: .unref?.() so a live backstop timer does not pin the
+        // event loop / block process exit mid-extract; finally-clear + the
+        // awaiting caller make it redundant on the happy path.
+        // see also: packages/core/src/embedding-recall-service.ts:1279,1366
+        const timer = setTimeout(fireTimeout, budgetMs);
+        timer.unref?.();
+        // invariant: wall-clock fallback. setTimeout is paused during host
+        // suspend; setInterval catches up on resume and the elapsed check
+        // detects budget overrun within one tick.
+        const wallClockTimer = setInterval(() => {
+          if (Date.now() - startedAt >= budgetMs) {
+            fireTimeout();
+          }
+        }, EXTRACTION_WALL_CLOCK_TICK_MS);
+        wallClockTimer.unref?.();
+        // invariant: an operator abort MUST settle the race too — abort() alone
+        // does not settle for an abort-ignoring stalled socket, so without this
+        // the attempt would wait the full budget and then misclassify as
+        // failure_timeout. We do NOT set `timedOut`, so the catch routes this
+        // through the failure_aborted branch (never retried), surfacing the
+        // cancel intent promptly. cross-file: withWallClockTimeout
+        // settleOperatorAbort.
+        const onOperatorAbort = (): void => {
+          controller.abort();
+          rejectSettlement?.(new Error("garden extraction operator aborted"));
+        };
+        if (input.abortSignal !== undefined) {
+          if (input.abortSignal.aborted) {
+            onOperatorAbort();
+          } else {
+            input.abortSignal.addEventListener("abort", onOperatorAbort);
+          }
         }
-        return { rawJson: content };
-      } finally {
-        clearTimeout(timer);
+        try {
+          const fetchPromise = fetchImpl(`${config.providerUrl}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${config.apiKey}`
+            },
+            body: JSON.stringify({
+              model: config.model,
+              temperature: 0,
+              // invariant: stream:true is REQUIRED, not an optimization. yunwu.ai
+              // + gpt-5.4-mini returns chat/completions content ONLY as an SSE
+              // delta stream when stream:true; a non-stream request answers with
+              // an EMPTY SSE body (`data: [DONE]\n\n` only), which permanently
+              // wedged the 500q extraction-fill. We parse the SSE body below.
+              // see: .do-it/findings/garden-sse-streaming-rootcause.md
+              stream: true,
+              response_format: { type: "json_object" },
+              messages: [
+                { role: "system", content: input.systemPrompt },
+                { role: "user", content: input.userPrompt }
+              ]
+            }),
+            signal: controller.signal
+          });
+          // invariant: if the timeout backstop wins the race the abandoned
+          // fetch may still reject later (socket finally errors); a no-op catch
+          // keeps that late rejection from surfacing as an unhandledRejection.
+          fetchPromise.catch(() => {});
+          const response = await Promise.race([fetchPromise, timeoutSettlement]);
+          if (!response.ok) {
+            const err = new Error(
+              `garden extraction HTTP ${response.status} ${response.statusText}`
+            );
+            (err as { status?: number }).status = response.status;
+            throw err;
+          }
+          // invariant: the body read MUST stay under the SAME wall-clock
+          // backstop as the fetch. `response.text()` on a mid-stream STALLED
+          // socket can hang exactly like the original abort-ignoring fetch
+          // hang (commits a2d3047 + 34645f1); racing it against
+          // timeoutSettlement keeps the attempt inside budget. The abandoned
+          // body-read promise gets a no-op catch so a late rejection does not
+          // surface as an unhandledRejection (same pattern as fetchPromise).
+          const bodyTextPromise = response.text();
+          bodyTextPromise.catch(() => {});
+          const bodyText = await Promise.race([
+            bodyTextPromise,
+            timeoutSettlement
+          ]);
+          const content = extractContentFromChatCompletionBody(
+            bodyText,
+            response.headers.get("content-type")
+          );
+          if (typeof content !== "string" || content.trim().length === 0) {
+            throw new Error("garden extraction returned no content");
+          }
+          // invariant: a NON-EMPTY but unparseable body must fail loud, NEVER
+          // cache. A provider/proxy that delivers a PARTIAL SSE body then
+          // cleanly closes the socket makes `response.text()` RESOLVE with the
+          // partial bytes (no stall -> the wall-clock backstop does not fire);
+          // the SSE parser keeps the valid early deltas and silently skips the
+          // truncated final frame, yielding non-empty-but-invalid content like
+          // `{"signals":[{"a"`. The empty-content guard passes (non-empty), so
+          // without this gate the poison body returns success and
+          // createCachingSignalExtractor writes it to a git-tracked cache shard
+          // as a permanent 0-seed "success". We validate through the SAME
+          // downstream consumer the seed path uses (parseOfficialApiSignals,
+          // which strict-parses then element-wise salvages a recoverable
+          // envelope and THROWS only on a genuinely unparseable one) so a
+          // merely-recoverable body is not spuriously rejected and validity
+          // stays consistent across paths. This mirrors production
+          // pi-mono-extractor's parseOrRecoverJson -> invalid_json throw. The
+          // throw routes through the catch below: no HTTP status -> unknown
+          // transport -> classifyBenchHttpError marks it retryable, so it
+          // retries then fails loud (never cached).
+          // see: .do-it/findings/garden-sse-streaming-rootcause.md
+          try {
+            parseOfficialApiSignals(content);
+          } catch (parseError) {
+            throw new Error(
+              `garden extraction returned unparseable content: ${
+                parseError instanceof Error
+                  ? parseError.message
+                  : String(parseError)
+              }`
+            );
+          }
+          return {
+            rawJson: content,
+            extractorMeta: {
+              recoveryKind: "none",
+              retryCount: attempt,
+              retryClassification:
+                attempt === 0 ? "success_first_try" : "success_after_retry"
+            }
+          };
+        } catch (error) {
+          lastError = error;
+          const status = readStatusFromBenchError(error);
+          // Operator abort: never retry.
+          if (
+            input.abortSignal?.aborted === true &&
+            !timedOut
+          ) {
+            lastClassification = "failure_aborted";
+            throw wrapBenchTransportError(error, lastClassification, attempt);
+          }
+          if (timedOut) {
+            // Timer-driven abort = timeout. Bounded retry — at most once.
+            lastClassification = "failure_timeout";
+            if (timeoutRetries >= BENCH_HTTP_MAX_TIMEOUT_RETRIES) {
+              throw wrapBenchTransportError(error, lastClassification, attempt);
+            }
+            timeoutRetries += 1;
+            if (attempt >= BENCH_HTTP_MAX_RETRIES) {
+              lastClassification = "failure_max_retries";
+              throw wrapBenchTransportError(error, lastClassification, attempt);
+            }
+            const jitterMs = computeBenchJitterMs(attempt, randomImpl);
+            attempt += 1;
+            await sleepImpl(jitterMs);
+            continue;
+          }
+          const classified = classifyBenchHttpError(error, status);
+          if (!classified.retryable) {
+            lastClassification = classified.classification;
+            throw wrapBenchTransportError(error, lastClassification, attempt);
+          }
+          if (attempt >= BENCH_HTTP_MAX_RETRIES) {
+            lastClassification = "failure_max_retries";
+            throw wrapBenchTransportError(error, lastClassification, attempt);
+          }
+          const jitterMs = computeBenchJitterMs(attempt, randomImpl);
+          attempt += 1;
+          await sleepImpl(jitterMs);
+        } finally {
+          clearTimeout(timer);
+          clearInterval(wallClockTimer);
+          if (input.abortSignal !== undefined) {
+            input.abortSignal.removeEventListener("abort", onOperatorAbort);
+          }
+        }
       }
+      // Defensive — loop always returns or throws.
+      throw wrapBenchTransportError(
+        lastError,
+        lastClassification,
+        attempt
+      );
     }
   };
+}
+
+// invariant: OpenAI-compatible chat/completions body parser shared by the
+// stream and back-compat non-stream shapes. Pure (no fetch) so it is unit
+// testable. yunwu.ai + gpt-5.4-mini now answers ONLY with SSE delta chunks
+// (`data: {...delta...}\n\n ... data: [DONE]\n\n`); a compliant provider may
+// still answer with plain JSON (`choices[0].message.content`). We accept
+// both. A blank line or SSE comment (`:`) is ignored; a chunk that fails
+// JSON.parse is skipped defensively (partial keep-alive noise) rather than
+// thrown — the empty-content guard in the caller still classifies a
+// content-free stream as a failure, so silent corruption cannot pass.
+// see: .do-it/findings/garden-sse-streaming-rootcause.md
+export function extractContentFromChatCompletionBody(
+  bodyText: string,
+  contentType: string | null
+): string {
+  const trimmedBody = bodyText.trim();
+  const isSse =
+    (contentType !== null &&
+      contentType.toLowerCase().includes("text/event-stream")) ||
+    trimmedBody.startsWith("data:");
+  if (!isSse) {
+    // Back-compat: a compliant provider returns plain JSON.
+    const payload = JSON.parse(bodyText) as {
+      readonly choices?: readonly {
+        readonly message?: { readonly content?: unknown };
+      }[];
+    };
+    const content = payload.choices?.[0]?.message?.content;
+    return typeof content === "string" ? content : "";
+  }
+  let accumulated = "";
+  for (const rawLine of bodyText.split("\n")) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith(":")) {
+      // Blank line (SSE event boundary) or comment / keep-alive ping.
+      continue;
+    }
+    if (!line.startsWith("data:")) {
+      continue;
+    }
+    const chunkText = line.slice("data:".length).trim();
+    if (chunkText === "[DONE]") {
+      break;
+    }
+    let chunk: {
+      readonly choices?: readonly {
+        readonly delta?: { readonly content?: unknown };
+        readonly message?: { readonly content?: unknown };
+      }[];
+    };
+    try {
+      chunk = JSON.parse(chunkText) as typeof chunk;
+    } catch {
+      // Partial / non-JSON keep-alive noise — skip defensively. The caller's
+      // empty-content guard is the real failure gate.
+      continue;
+    }
+    const choice = chunk.choices?.[0];
+    const deltaContent = choice?.delta?.content;
+    const messageContent = choice?.message?.content;
+    if (typeof deltaContent === "string") {
+      accumulated += deltaContent;
+    } else if (typeof messageContent === "string") {
+      // Tolerate a chunk carrying a full message.content (some providers emit
+      // the whole assistant message in a single SSE frame instead of deltas).
+      // Prefer delta when both are present in one frame so a provider that
+      // echoes the running message alongside each delta is not double-counted.
+      accumulated += messageContent;
+    }
+  }
+  return accumulated;
+}
+
+// invariant: surface retry_classification + retry_count via the .cause chain
+// so dumpSeedExtractionFailureDiagnostic can pluck them without re-deriving
+// from the message. Tests assert on `.benchRetry` for the dump shape.
+function wrapBenchTransportError(
+  cause: unknown,
+  classification: BenchRetryClassification,
+  retryCount: number
+): Error {
+  const message =
+    cause instanceof Error ? cause.message : `garden extraction failed: ${String(cause)}`;
+  const wrapped = new Error(message);
+  (wrapped as { cause?: unknown }).cause = cause;
+  (wrapped as { benchRetry?: unknown }).benchRetry = {
+    retryCount,
+    retryClassification: classification
+  };
+  return wrapped;
+}
+
+function readStatusFromBenchError(error: unknown): number | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+  const status = (error as { readonly status?: unknown }).status;
+  if (typeof status === "number" && Number.isFinite(status)) {
+    return status;
+  }
+  if (error instanceof Error) {
+    const match = /\bHTTP\s+(\d{3})\b/u.exec(error.message);
+    if (match !== null) {
+      const parsed = Number.parseInt(match[1]!, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return null;
 }
 
 /** Minimal daemon surface the compile seed path needs — test-stubbable. */
@@ -500,10 +1033,15 @@ export interface CompileSeedDaemon {
    * in-process signalService.receiveSignal — the same seam production
    * POST_TURN_EXTRACT completion uses — so they materialize with
    * source = garden_compile. Used for the credentialled compile path.
+   *
+   * Returns the materialized seeds AND a per-signal drop ledger
+   * (candidate_absent / materialization_error). Per-signal failure isolation
+   * lives in the daemon implementation — one bad signal never drops its
+   * batch-mates. see also: apps/bench-runner/src/harness/daemon.ts
    */
   proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
-  ): Promise<readonly SeededMemoryResult[]>;
+  ): Promise<CompileSeedBatchResult>;
   /**
    * Seeds one signal through soul.emit_candidate_signal (source =
    * model_tool). Used ONLY for the no-credentials / extraction-failure
@@ -558,6 +1096,204 @@ export interface CompileSeedResult {
 }
 
 /**
+ * Run-start fail-loud guard. Runs in ~1s (file read + sha256, zero LLM) and
+ * turns the otherwise-silent "wrong model / changed prompt / uncovered cache"
+ * failures — which today only surface as a 466h slow run — into an immediate,
+ * actionable throw.
+ *
+ * Behaviour by case:
+ *   - NO manifest (first-ever build, before any fill pass): allow live, log
+ *     loudly to stderr. This is the only path that may legitimately live-
+ *     extract from an empty cache.
+ *   - manifest present, `config.model !== manifest.extraction_model`: throw,
+ *     naming both values — the cache would 0-hit and the run would be a full
+ *     live extraction.
+ *   - manifest present, `sha256(systemPrompt) !== manifest.system_prompt_sha256`:
+ *     throw — the prompt drifted, so every key changed and the whole cache is
+ *     dead.
+ *   - manifest present, NO `coverage` field AND not an allow-live/fill run:
+ *     throw — a pre-fill manifest cannot prove the cache covers the dataset,
+ *     so it is a gap requiring `--allow-live-extraction`. extraction-fill
+ *     always writes coverage, so a coverage-less manifest means an unfilled
+ *     cache.
+ *   - manifest present, `coverage < threshold` AND not an allow-live/fill run:
+ *     throw, telling the operator to run extraction-fill or pass
+ *     `--allow-live-extraction`.
+ *
+ * cross-file: apps/bench-runner/src/longmemeval/extraction-cache-manifest.ts
+ */
+export function preflightExtractionCache(input: {
+  readonly cacheRoot: string;
+  readonly config: CompileSeedExtractionConfig;
+  readonly systemPrompt: string;
+  readonly allowLiveExtraction?: boolean;
+  // Whether THIS run can live-extract at all. The "uncovered window / coverage
+  // gap" guards below exist to stop a credentialled run from silently spending
+  // ~466h live-extracting an unfilled cache window. The no-credentials offline
+  // fallback (createCompileSeedRunner provider === null -> seedOfflineFallback)
+  // never makes an LLM call: a missing fixture is served by the deterministic
+  // full-turn fallback, not by live extraction. So when live extraction is
+  // impossible the coverage gap is a category error, not a silent-cost hole,
+  // and the guard must NOT fire. Defaults to `config.apiKey !== null` — the
+  // single source createCompileSeedRunner reads for its `credentialled` flag —
+  // so a direct caller that passes a credentialled config keeps the guard.
+  // invariant: this only relaxes the live-extraction-gap guards; the
+  // model/prompt-drift guards above always fire (cheap config-drift detection).
+  readonly liveExtractionPossible?: boolean;
+  readonly manifest?: ExtractionCacheManifest | undefined;
+  // The distinct turn contents THIS run will extract (its --limit/--offset
+  // question window flattened to rounds + dedup). When present, the gate is
+  // window-containment: every one of these turns must already have a fixture on
+  // disk, regardless of the manifest's coverage scalar (which is only
+  // denominated against whatever window the LAST extraction-fill recorded). A
+  // staged `extraction-fill --limit 100` writing coverage=1.0 therefore can no
+  // longer let a `longmemeval --limit 500` run silently live-extract the
+  // unfilled 400. When absent (callers that do not flatten a turn window),
+  // the gate falls back to the manifest coverage scalar below.
+  // cross-file: apps/bench-runner/src/longmemeval/extraction-fill.ts
+  //   collectDistinctTurnContents (the producer side of the same dedup)
+  readonly requiredTurnContents?: readonly string[];
+  readonly warn?: (message: string) => void;
+}): void {
+  const manifest =
+    input.manifest ?? readExtractionCacheManifest(input.cacheRoot);
+  const warn =
+    input.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
+  // Single source for "could this run live-extract?": explicit caller flag, else
+  // the credentials presence the runner derives `credentialled` from. Offline
+  // (apiKey null) -> no LLM call possible -> the coverage-gap guards are a
+  // category error and must be skipped (the offline fallback covers misses).
+  const liveExtractionPossible =
+    input.liveExtractionPossible ?? input.config.apiKey !== null;
+  if (manifest === undefined) {
+    warn(
+      "[longmemeval preflight] no extraction-cache manifest at " +
+        `${input.cacheRoot}; treating as first-ever build. The cache cannot ` +
+        "be validated and a credentialled run will live-extract every turn. " +
+        "After this run, build/commit the cache manifest so later runs fail " +
+        "loud on model/prompt drift instead of silently re-extracting."
+    );
+    return;
+  }
+  if (input.config.model !== manifest.extraction_model) {
+    throw new Error(
+      "[longmemeval preflight] extraction model mismatch: resolved model " +
+        `"${input.config.model}" != cache manifest extraction_model ` +
+        `"${manifest.extraction_model}". The cache would miss every key and ` +
+        "this run would be a full live extraction (~466h). Set " +
+        `${GARDEN_MODEL_ENV}=${manifest.extraction_model} (e.g. ` +
+        "set -a; . .do-it/bench-env/alaya-api.env; set +a) or rebuild the " +
+        "cache for the new model."
+    );
+  }
+  const systemPromptSha256 = computeSystemPromptSha256(input.systemPrompt);
+  if (systemPromptSha256 !== manifest.system_prompt_sha256) {
+    throw new Error(
+      "[longmemeval preflight] system prompt drift: sha256(systemPrompt) " +
+        `"${systemPromptSha256}" != cache manifest system_prompt_sha256 ` +
+        `"${manifest.system_prompt_sha256}". A prompt change invalidates ` +
+        "every cache key, so this run would re-extract the entire dataset " +
+        "live (~466h). Rebuild the cache for the new prompt or revert the " +
+        "prompt change."
+    );
+  }
+  // Window-containment gate. When the caller hands the actual run window's
+  // distinct turns, validate THIS run's window directly against on-disk
+  // fixtures instead of trusting the manifest's coverage scalar. The scalar is
+  // denominated against whatever window the last extraction-fill recorded
+  // (extraction-fill.ts coverage = (requested - failures)/requested over that
+  // fill's --limit/--offset window), so a staged 100Q fill writing coverage=1.0
+  // would otherwise let a 500Q run pass preflight and silently live-extract the
+  // unfilled 400. Containment closes that sub-channel by asserting every turn
+  // this run needs has a fixture, regardless of the scalar.
+  if (input.requiredTurnContents !== undefined) {
+    const missing = countMissingTurnFixtures(
+      input.cacheRoot,
+      input.config.model,
+      input.systemPrompt,
+      input.requiredTurnContents
+    );
+    if (
+      missing > 0 &&
+      input.allowLiveExtraction !== true &&
+      liveExtractionPossible
+    ) {
+      const total = input.requiredTurnContents.length;
+      throw new Error(
+        "[longmemeval preflight] extraction cache covers only part of this " +
+          `run's question window: ${missing} of ${total} distinct turns have ` +
+          "no fixture, so this run would live-extract the gap. The cache " +
+          "manifest's coverage scalar is relative to the window the last " +
+          "extraction-fill recorded, not this run's window. Run extraction-fill " +
+          "for the FULL --limit/--offset window of this run, or pass " +
+          "--allow-live-extraction to live-extract the gap on purpose."
+      );
+    }
+    return;
+  }
+  const coverage = manifest.coverage;
+  // A manifest WITHOUT a coverage field is itself a gap: a provenance-only
+  // manifest (built before any fill recorded a denominator) cannot prove the
+  // cache covers the dataset, so treating "coverage absent" as "coverage ok"
+  // would silently re-open the 466h live-run hole the guard exists to close.
+  // extraction-fill now always writes coverage, so a coverage-less manifest
+  // means the cache was never filled against a known denominator. Require the
+  // same explicit opt-in a low-coverage manifest requires.
+  // single source for the denominator: resolveCompileSeedExtractionConfig +
+  // ExtractionCacheManifest.coverage (extraction-fill.ts writes it).
+  if (coverage === undefined) {
+    if (input.allowLiveExtraction !== true && liveExtractionPossible) {
+      throw new Error(
+        "[longmemeval preflight] extraction cache manifest has no coverage " +
+          "field; the cache was never filled against a known dataset " +
+          "denominator, so this run could live-extract an unknown gap. Run " +
+          "extraction-fill (which writes coverage) to populate the cache, or " +
+          "pass --allow-live-extraction to live-extract on purpose."
+      );
+    }
+    return;
+  }
+  if (
+    coverage < EXTRACTION_CACHE_COVERAGE_THRESHOLD &&
+    input.allowLiveExtraction !== true &&
+    liveExtractionPossible
+  ) {
+    const coveragePct = (coverage * 100).toFixed(1);
+    throw new Error(
+      "[longmemeval preflight] extraction cache coverage " +
+        `${coveragePct}% is below the ${(
+          EXTRACTION_CACHE_COVERAGE_THRESHOLD * 100
+        ).toFixed(0)}% threshold; this run would live-extract the uncovered ` +
+        "gap. Run extraction-fill to populate the cache, or pass " +
+        "--allow-live-extraction to live-extract the gap on purpose."
+    );
+  }
+}
+
+/**
+ * Count, of `turnContents`, how many have NO fixture on disk under `cacheRoot`.
+ * Each turn's cache key is the same sha256(model\0systemPrompt\0turnContent)
+ * the caching extractor writes, so a present fixture proves a cache hit and a
+ * missing one proves a live extraction would be needed. Pure file stats, no
+ * LLM. cross-file: createCachingSignalExtractor (the writer of these fixtures).
+ */
+function countMissingTurnFixtures(
+  cacheRoot: string,
+  model: string,
+  systemPrompt: string,
+  turnContents: readonly string[]
+): number {
+  let missing = 0;
+  for (const turnContent of turnContents) {
+    const cacheKey = computeCacheKey(model, systemPrompt, turnContent);
+    if (!existsSync(cacheFilePath(cacheRoot, cacheKey))) {
+      missing += 1;
+    }
+  }
+  return missing;
+}
+
+/**
  * Build the compile-based seed runner for a whole bench run.
  *
  * When garden credentials are configured, it constructs the production
@@ -567,6 +1303,11 @@ export interface CompileSeedResult {
  * the degraded no-LLM fallback (the full turn becomes one candidate fact);
  * `stats.path` records which path ran so the bench report can disclose it.
  *
+ * At assembly time a run-start fail-loud guard (preflightExtractionCache)
+ * validates the resolved model + system prompt + cache coverage against the
+ * cache's self-describing manifest, so a model/prompt/coverage drift throws
+ * in ~1s instead of silently degrading to a 466h live run.
+ *
  * `options.extractorFactory` overrides the live LLM delegate for tests.
  */
 export function createCompileSeedRunner(options?: {
@@ -575,9 +1316,70 @@ export function createCompileSeedRunner(options?: {
   readonly extractorFactory?: (
     config: CompileSeedExtractionConfig
   ) => BenchSignalExtractor;
+  /**
+   * Opt out of the run-start coverage guard so the run may live-extract the
+   * uncovered cache gap on purpose (extraction-fill / explicit live re-run).
+   * The model + prompt guards still apply; only the coverage gate is relaxed.
+   */
+  readonly allowLiveExtraction?: boolean;
+  /**
+   * The distinct turn contents THIS run will extract. When provided, the
+   * run-start preflight switches from the manifest coverage scalar to
+   * window-containment: every one of these turns must already have a fixture on
+   * disk. The runner passes its flattened question window so a staged
+   * extraction-fill cannot let a wider run silently live-extract the gap.
+   * cross-file: apps/bench-runner/src/longmemeval/runner.ts (passes the window)
+   */
+  readonly requiredTurnContents?: readonly string[];
+  /**
+   * Skip the run-start preflight entirely. For unit tests that drive the
+   * runner with a hand-built config + temp cacheRoot and do not exercise the
+   * manifest guard. Production runner entrypoints never set this.
+   */
+  readonly skipPreflight?: boolean;
+  /**
+   * Override the directory the seed-side diagnostic dump writes failure
+   * envelopes to. Defaults to
+   * `<cwd>/data/diagnostics/seed-extraction-failures/`. Pass `null` to
+   * disable dumps entirely (read-only fs, unit tests that want zero side
+   * effects).
+   */
+  readonly diagnosticDir?: string | null;
 }): CompileSeedRunner {
-  const config = options?.config ?? resolveCompileSeedExtractionConfig();
+  const cacheRoot = options?.cacheRoot ?? EXTRACTION_CACHE_ROOT;
+  // The cache self-describes its build model/prompt/coverage. Read it once so
+  // both config resolution (env-absent -> manifest.extraction_model, never the
+  // production constant) and the run-start guard consume the same source.
+  const manifest = options?.config
+    ? undefined
+    : readExtractionCacheManifest(cacheRoot);
+  const config =
+    options?.config ?? resolveCompileSeedExtractionConfig(process.env, manifest);
+  // Single source for online-vs-offline: credentials presence. The offline
+  // (credentialled === false) path's provider is null, so a missing fixture is
+  // served by the deterministic full-turn fallback, never a live LLM call.
   const credentialled = config.apiKey !== null;
+  // Run-start fail-loud guard. Skipped only for unit tests that hand-build the
+  // config + a manifest-less temp cacheRoot; production entrypoints never skip.
+  // liveExtractionPossible threads `credentialled` so the coverage-gap guards
+  // fire only for credentialled runs (which CAN silently burn ~466h live);
+  // the offline path has nothing to live-extract, so the gap is a no-op.
+  // cross-file: preflightExtractionCache (consumes liveExtractionPossible)
+  if (options?.skipPreflight !== true) {
+    preflightExtractionCache({
+      cacheRoot,
+      config,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      liveExtractionPossible: credentialled,
+      ...(options?.allowLiveExtraction === undefined
+        ? {}
+        : { allowLiveExtraction: options.allowLiveExtraction }),
+      ...(options?.requiredTurnContents === undefined
+        ? {}
+        : { requiredTurnContents: options.requiredTurnContents }),
+      ...(manifest === undefined ? {} : { manifest })
+    });
+  }
   const stats: CompileSeedExtractionStats = {
     path: credentialled ? "official_api_compile" : "no_credentials_fallback",
     cacheHits: 0,
@@ -587,12 +1389,42 @@ export function createCompileSeedRunner(options?: {
     cachedExtractionFailures: 0,
     factsProduced: 0,
     signalsDropped: 0,
+    signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
     parseDropped: 0,
     compileOverflowDropped: 0,
     lastTurnRawSignalCount: 0,
     lastTurnDraftCount: 0,
-    lastExtractionSource: null
+    lastExtractionSource: null,
+    lastCacheKey: null
   };
+  // Per-runner diagnostic dump dir; null disables dumps. Resolution order:
+  //   1. explicit options.diagnosticDir (null => off, string => use as-is)
+  //   2. ALAYA_SEED_EXTRACTION_DIAG_DIR env (operator override at run time)
+  //   3. cwd-rooted DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL (default on)
+  // Co-resolved at runner construction (not lazily) so a later cwd change
+  // does not retarget mid-run.
+  const envDiagDir = normalizeEnvDiagDir(
+    process.env.ALAYA_SEED_EXTRACTION_DIAG_DIR
+  );
+  const diagnosticDir: string | null =
+    options?.diagnosticDir === null
+      ? null
+      : options?.diagnosticDir !== undefined
+        ? resolve(options.diagnosticDir)
+        : envDiagDir !== null
+          ? resolve(envDiagDir)
+          : resolve(process.cwd(), DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL);
+  // Pre-create the dump dir at runner construction (not first failure) so a
+  // bench run that triggers many concurrent failures does not race on mkdir.
+  // Best-effort — never block the bench start on fs failure.
+  if (diagnosticDir !== null) {
+    try {
+      mkdirSync(diagnosticDir, { recursive: true });
+    } catch {
+      // Dump path is read-only or the operator's filesystem rejected it;
+      // dumpSeedExtractionFailureDiagnostic logs the per-failure error.
+    }
+  }
 
   const provider =
     credentialled === false
@@ -608,12 +1440,16 @@ export function createCompileSeedRunner(options?: {
               options?.extractorFactory?.(config) ??
               createGardenHttpExtractor(config),
             model: config.model,
-            ...(options?.cacheRoot === undefined
-              ? {}
-              : { cacheRoot: options.cacheRoot }),
+            cacheRoot,
             stats
           }),
-          requestTimeoutMs: EXTRACTION_REQUEST_TIMEOUT_MS
+          requestTimeoutMs: EXTRACTION_REQUEST_TIMEOUT_MS,
+          // invariant: provider-side and seed-side dumps must land in the same
+          // dir so a single readdir surfaces every signal of a failure.
+          // ALAYA_SEED_EXTRACTION_DIAG_DIR / explicit options.diagnosticDir
+          // applies to both layers; explicit null disables the provider
+          // dump too.
+          diagnosticDir
         });
 
   async function seedTurn(input: {
@@ -641,7 +1477,14 @@ export function createCompileSeedRunner(options?: {
         run_id: input.runId,
         surface_id: input.surfaceId ?? null,
         turn_messages: []
-      }
+      },
+      diagnosticDir,
+      modelId: config.model,
+      // Bench seed always drives the official-API provider (or the no-creds
+      // fallback, which doesn't reach recordExtractionFailureSource). Recorded
+      // explicitly so the dump envelope shape is stable when a future
+      // host_worker / custom_api seed path lands.
+      providerKind: "official_api"
     });
 
     // invariant: every fact gets a distinct evidence_ref so the audit trail
@@ -673,26 +1516,43 @@ export function createCompileSeedRunner(options?: {
     // path uses soul.emit_candidate_signal, whose source = model_tool is the
     // honest label for an agent-style full-round proposal.
     if (signalInputs[0]?.extractionProvider === "official_api_compile") {
-      // A signal the MaterializationRouter routed to evidence_only / deferred
-      // (no memory_entry — e.g. a sub-0.5-confidence signal) is skipped
-      // per-signal by proposeMemoriesFromCompileSignals, so the round's other
-      // healthy facts still seed; that signal surfaces here as a shortfall
-      // between requested inputs and returned seeds. A harder failure (a
-      // schema-parse error) still throws and aborts the round batch.
+      // proposeMemoriesFromCompileSignals isolates failures PER SIGNAL: a
+      // signal routed to evidence_only / deferred (candidate_absent) and a
+      // signal that threw during materialization (materialization_error) are
+      // each recorded in the returned `dropped` ledger WITHOUT aborting the
+      // round's healthy batch-mates. The per-reason ledger is folded into the
+      // stats so candidate-absent / seed-quality is root-causable from the KPI
+      // archive. The outer try/catch is now a defensive backstop for a truly
+      // unexpected whole-batch failure (a daemon-level bug, not a per-signal
+      // one); the per-signal path no longer routes through it.
       try {
-        seeds = await input.daemon.proposeMemoriesFromCompileSignals(signalInputs);
-        const evidenceOnlySkipped = signalInputs.length - seeds.length;
-        if (evidenceOnlySkipped > 0) {
-          stats.signalsDropped += evidenceOnlySkipped;
+        const batch: CompileSeedBatchResult =
+          await input.daemon.proposeMemoriesFromCompileSignals(signalInputs);
+        seeds = batch.seeds;
+        if (batch.dropped.length > 0) {
+          stats.signalsDropped += batch.dropped.length;
+          for (const drop of batch.dropped) {
+            stats.signalsDroppedByReason[drop.reason] += 1;
+          }
+          const byReason = batch.dropped.reduce<Record<string, number>>(
+            (acc, drop) => {
+              acc[drop.reason] = (acc[drop.reason] ?? 0) + 1;
+              return acc;
+            },
+            {}
+          );
+          const breakdown = Object.entries(byReason)
+            .map(([reason, count]) => `${reason}=${count}`)
+            .join(" ");
           process.stderr.write(
-            `[longmemeval compile-seed] ${evidenceOnlySkipped} signal(s) of ` +
+            `[longmemeval compile-seed] ${batch.dropped.length} signal(s) of ` +
               `${signalInputs.length} did not materialize a memory_entry ` +
-              `(routed to evidence_only / deferred); the round's other facts ` +
-              `seeded normally\n`
+              `(${breakdown}); the round's other facts seeded normally\n`
           );
         }
       } catch (error) {
         stats.signalsDropped += signalInputs.length;
+        stats.signalsDroppedByReason.materialization_error += signalInputs.length;
         process.stderr.write(
           `[longmemeval compile-seed] dropped ${signalInputs.length} signal(s) during compile seed: ${stringifyError(error)}\n`
         );
@@ -742,6 +1602,10 @@ async function extractSeedInputs(input: {
   readonly turnContent: string;
   readonly seedIndex: number;
   readonly context: GardenCompileContext;
+  // Absolute path or null when diagnostic dumps are disabled.
+  readonly diagnosticDir?: string | null;
+  readonly modelId?: string;
+  readonly providerKind?: string;
 }): Promise<readonly SeedInputDraft[]> {
   // invariant: no garden credentials => deterministic no-LLM fallback. The
   // full turn becomes one candidate fact. This is honest (no fabricated
@@ -775,6 +1639,17 @@ async function extractSeedInputs(input: {
     // offline fallback so the bench report shows the live-extraction hole.
     input.stats.offlineFallbacks += 1;
     recordExtractionFailureSource(input.stats);
+    // Dump cache_key_prefix / model / provider / failure source so a
+    // bench preflight can attribute the failure to a specific cache
+    // shard or live call without re-running.
+    await dumpSeedExtractionFailureDiagnostic({
+      diagnosticDir: input.diagnosticDir ?? null,
+      stats: input.stats,
+      modelId: input.modelId ?? null,
+      providerKind: input.providerKind ?? null,
+      error,
+      context: input.context
+    });
     input.stats.factsProduced += 1;
     process.stderr.write(
       `[longmemeval compile-seed] extraction failed, using full-turn fallback: ${stringifyError(error)}\n`
@@ -900,6 +1775,137 @@ function recordExtractionFailureSource(stats: CompileSeedExtractionStats): void 
   }
 }
 
+// invariant: shape mirror of the `benchRetry` field createGardenHttpExtractor
+// attaches via wrapBenchTransportError. A SignalExtractorError surfaces the
+// same fields via direct properties (retryCount / retryClassification); we
+// read whichever is present so a future transport switch keeps the dump
+// shape stable.
+interface BenchRetrySnapshot {
+  readonly retryCount: number;
+  readonly retryClassification: BenchRetryClassification;
+}
+
+function readBenchRetryFromError(error: unknown): BenchRetrySnapshot | null {
+  // invariant: depth-limited walk over the .cause chain so a
+  // GardenProviderError wrapping the bench HTTP transport error (cause-chain
+  // depth 1) still surfaces retry meta to the dump envelope. Two shapes are
+  // accepted at each link: `.benchRetry` (the createGardenHttpExtractor
+  // wrapBenchTransportError convention) and direct `.retryCount` /
+  // `.retryClassification` properties (the SignalExtractorError shape from
+  // pi-mono-extractor.ts).
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current === null || current === undefined) return null;
+    if (typeof current !== "object") return null;
+    const benchRetry = (current as { benchRetry?: unknown }).benchRetry;
+    if (typeof benchRetry === "object" && benchRetry !== null) {
+      const retryCount = (benchRetry as { retryCount?: unknown }).retryCount;
+      const classification = (benchRetry as { retryClassification?: unknown })
+        .retryClassification;
+      if (
+        typeof retryCount === "number" &&
+        Number.isFinite(retryCount) &&
+        typeof classification === "string"
+      ) {
+        return {
+          retryCount,
+          retryClassification: classification as BenchRetryClassification
+        };
+      }
+    }
+    const retryCount = (current as { retryCount?: unknown }).retryCount;
+    const classification = (current as { retryClassification?: unknown })
+      .retryClassification;
+    if (
+      typeof retryCount === "number" &&
+      Number.isFinite(retryCount) &&
+      typeof classification === "string"
+    ) {
+      return {
+        retryCount,
+        retryClassification: classification as BenchRetryClassification
+      };
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
+/**
+ * Dump one seed-side extraction failure diagnostic to
+ * `<diagnosticDir>/compile-seed-<ISO-ts>-<uuid>.json`. Captures the cache
+ * key prefix, model id, provider kind, last-extraction-source classification,
+ * and the immediate failure message so a bench preflight can attribute
+ * the failure to a specific cache shard or live extraction call without
+ * re-running the bench. Observation only — failures inside the dump are
+ * caught and surfaced as a single warn so the seed loop continues.
+ *
+ * Co-located with the provider-side dump in
+ * packages/soul/src/garden/compute-provider.ts:dumpInvalidResponseDiagnostic
+ * so a single readdir + JSON pass surfaces every signal of the failure.
+ */
+async function dumpSeedExtractionFailureDiagnostic(input: {
+  readonly diagnosticDir: string | null;
+  readonly stats: CompileSeedExtractionStats;
+  readonly modelId: string | null;
+  readonly providerKind: string | null;
+  readonly error: unknown;
+  readonly context: GardenCompileContext;
+}): Promise<void> {
+  if (input.diagnosticDir === null) {
+    return;
+  }
+  try {
+    const timestamp = new Date().toISOString();
+    const cacheKey = input.stats.lastCacheKey ?? null;
+    const benchRetry = readBenchRetryFromError(input.error);
+    const envelope = {
+      captured_at: timestamp,
+      surface: "compile-seed",
+      provider_kind: input.providerKind,
+      model_id: input.modelId,
+      workspace_id: input.context.workspace_id,
+      run_id: input.context.run_id,
+      surface_id: input.context.surface_id,
+      cache_key_prefix:
+        cacheKey === null
+          ? null
+          : cacheKey.slice(0, COMPILE_SEED_CACHE_KEY_PREFIX_CHARS),
+      last_extraction_source: input.stats.lastExtractionSource,
+      // Counters AFTER this turn's recordExtractionFailureSource update so a
+      // dump file is self-describing: which classification bucket this
+      // failure landed in (live vs cached) is unambiguous.
+      live_extraction_failures: input.stats.liveExtractionFailures,
+      cached_extraction_failures: input.stats.cachedExtractionFailures,
+      // invariant: retry observability is parity with the provider-side dump
+      // (compute-provider.ts dumpInvalidResponseDiagnostic). retry_count and
+      // retry_classification let a dump consumer attribute the fallback to
+      // the terminal outcome of the retry loop (failure_max_retries vs
+      // failure_non_retryable_4xx vs failure_timeout) so a single readdir
+      // surfaces whether the bench is hitting a chronic 4xx or a transient
+      // burst that needs a higher retry budget. "unknown" only when the
+      // thrown error did not flow through createGardenHttpExtractor's
+      // wrapBenchTransportError (e.g. a non-HTTP path in a future
+      // transport).
+      retry_count: benchRetry?.retryCount ?? null,
+      retry_classification: benchRetry?.retryClassification ?? "unknown",
+      error_message: stringifyError(input.error)
+    };
+    const fileName = `compile-seed-${timestamp.replace(/[:.]/gu, "-")}-${randomUUID()}.json`;
+    const filePath = join(input.diagnosticDir, fileName);
+    mkdirSync(dirname(filePath), { recursive: true });
+    // Atomic write: tmp + rename guards against an interrupted dump leaving
+    // a torn file (WSL2 OOM is a known crash mode on the bench host).
+    const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+    writeFileSync(tmpPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
+    renameSync(tmpPath, filePath);
+  } catch (dumpError) {
+    process.stderr.write(
+      `[longmemeval compile-seed] diagnostic dump failed: ${stringifyError(dumpError)}\n`
+    );
+  }
+}
+
 /**
  * Strip the compile()-attached schema-grounding block from a raw_payload so
  * the bench seed signal can be re-grounded against a canonicalized
@@ -963,6 +1969,20 @@ function readNonEmpty(value: string | undefined): string | undefined {
 
 function stringifyError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+// invariant: normalize ALAYA_SEED_EXTRACTION_DIAG_DIR. Empty strings and
+// whitespace are equivalent to unset (the resolver then falls through
+// to the cwd-rooted default). A literal "null" / "off" / "disabled" is
+// NOT honored here — disabling the dump requires the explicit
+// options.diagnosticDir = null wiring, since env-driven disables on a
+// release-blocker instrument are too easy to mis-set.
+function normalizeEnvDiagDir(value: string | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
 }
 
 /** One seeded turn's content plus the real evidence_capsule id it materialized. */

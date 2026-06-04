@@ -16,6 +16,7 @@ type GardenRuntimeLifecycle = Readonly<{
   }>;
   setBacklogTelemetryObserver(observer: unknown | null): void;
   runBackgroundPass(): Promise<void>;
+  runEmbeddingBackfillPass(workspaceId: string): Promise<void>;
 }>;
 
 type GardenBacklogTelemetryLifecycle = Readonly<{
@@ -39,6 +40,7 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
 export function createDaemonLifecycleControls(input: CreateDaemonLifecycleControlsInput): Readonly<{
   startBackgroundServices(): void;
   runGardenBackgroundPass(): Promise<void>;
+  runGardenEmbeddingBackfillPass(workspaceId: string): Promise<void>;
   startHttpServer(options?: AlayaDaemonListenOptions): Promise<AlayaDaemonServer>;
   shutdown(): Promise<void>;
 }> {
@@ -130,6 +132,17 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
         await startupBackgroundPass;
       }
       await input.gardenRuntime.runBackgroundPass();
+    },
+    // invariant: targeted embedding-backfill drain (bench/warmup readiness),
+    // not a full Garden maintenance pass. Waits for any in-flight startup pass
+    // first (same ordering guard as runGardenBackgroundPass) so the drain sees
+    // a settled queue, then dispatches ONLY EMBEDDING_BACKFILL.
+    // see also: garden-runtime.ts runEmbeddingBackfillPass.
+    runGardenEmbeddingBackfillPass: async (workspaceId: string) => {
+      if (startupBackgroundPass !== null) {
+        await startupBackgroundPass;
+      }
+      await input.gardenRuntime.runEmbeddingBackfillPass(workspaceId);
     },
     startHttpServer: async (options: AlayaDaemonListenOptions = {}) => {
       startBackgroundServices();

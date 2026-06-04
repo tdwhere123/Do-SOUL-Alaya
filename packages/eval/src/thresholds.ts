@@ -22,9 +22,7 @@ export interface ThresholdConfig {
   // fail) rather than emitting a real regression alarm. Rationale: a
   // 5-question smoke that happens to all hit gives previous R@5 = 1.0;
   // diffing a 500-question full run against that produces a 20pp
-  // "drop" that is sample-size artefact, not a regression. See
-  // #BL-040 (LongMemEval-S confidence-interval scale-up) for the
-  // follow-up.
+  // "drop" that is sample-size artefact, not a regression.
   readonly min_sample_for_ratio_diff: number;
 }
 

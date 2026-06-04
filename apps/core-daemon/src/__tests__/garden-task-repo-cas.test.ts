@@ -62,17 +62,152 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     expect(["agent-target-a", "agent-target-b"]).toContain(row.claimed_by);
   });
 
-  // Wave-end M7 (Reviewer I6): better-sqlite3 is single-threaded
-  // synchronous, so this Promise.all does NOT exercise true OS-level
-  // concurrency — JavaScript serialises the 800 claim attempts on one
-  // thread. The test still proves something useful: the SQL CAS
-  // predicate `UPDATE garden_tasks SET status='claimed' WHERE
-  // status='pending'` is intrinsically self-atomic at the row level,
-  // and the overall invariant `every task ends with exactly one
-  // completed row + at most one claim winner` holds across whatever
-  // interleaving the runtime produces. We assert the invariant
-  // directly via SQL aggregation below so the test makes its claim
-  // explicit rather than relying on Promise.all to imply concurrency.
+  // B5(b): never-claimed host-worker tasks past their TTL are removed (audited),
+  // while a recent unclaimed task and any claimed task are left intact.
+  it("expires only never-claimed EDGE_CLASSIFY tasks older than the cutoff", async () => {
+    const { database, repo } = createHarness();
+    repo.enqueue({
+      id: "edge-old",
+      workspace_id: "workspace-1",
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.EDGE_CLASSIFY,
+      payload: { task_kind: GardenTaskKind.EDGE_CLASSIFY },
+      created_at: "2026-05-01T00:00:00.000Z"
+    });
+    repo.enqueue({
+      id: "edge-recent",
+      workspace_id: "workspace-1",
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.EDGE_CLASSIFY,
+      payload: { task_kind: GardenTaskKind.EDGE_CLASSIFY },
+      created_at: "2026-05-20T00:00:00.000Z"
+    });
+
+    const cutoffIso = "2026-05-10T00:00:00.000Z";
+    const expired = repo.peekExpiredUnclaimedTasks(GardenTaskKind.EDGE_CLASSIFY, cutoffIso, 64);
+    expect(expired.map((row) => row.id)).toEqual(["edge-old"]);
+
+    const removed = await repo.expireUnclaimedTasks(
+      expired.map((row) => ({
+        task_id: row.id,
+        event: {
+          event_type: GardenEventType.SOUL_GARDEN_TASK_EXPIRED,
+          entity_type: "garden_task",
+          entity_id: row.id,
+          workspace_id: row.workspace_id,
+          run_id: null,
+          caused_by: "garden-runtime",
+          payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_EXPIRED, {
+            task_id: row.id,
+            task_kind: row.kind,
+            role: row.role,
+            tier: GardenTier.TIER_2,
+            workspace_id: row.workspace_id,
+            run_id: null,
+            enqueued_at: row.created_at,
+            ttl_ms: 7 * 24 * 60 * 60 * 1000,
+            occurred_at: "2026-05-21T00:00:00.000Z"
+          })
+        }
+      }))
+    );
+    expect(removed).toBe(1);
+
+    // edge-old is gone; edge-recent remains pending.
+    expect(repo.findById("edge-old")).toBeNull();
+    expect(getGardenTask(database, "edge-recent").status).toBe("pending");
+  });
+
+  it("does not expire a claimed task even if its created_at is past the cutoff", async () => {
+    const { database, repo } = createHarness();
+    repo.enqueue({
+      id: "edge-claimed",
+      workspace_id: "workspace-1",
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.EDGE_CLASSIFY,
+      payload: { task_kind: GardenTaskKind.EDGE_CLASSIFY },
+      created_at: "2026-05-01T00:00:00.000Z"
+    });
+    expect(
+      repo.claimAtomic("edge-claimed", "agent-target-a", "2026-05-02T00:00:00.000Z")
+    ).toBe("claimed");
+
+    // peek selects only status='pending' rows, so a claimed task is never listed.
+    const expired = repo.peekExpiredUnclaimedTasks(
+      GardenTaskKind.EDGE_CLASSIFY,
+      "2026-05-10T00:00:00.000Z",
+      64
+    );
+    expect(expired).toHaveLength(0);
+    expect(getGardenTask(database, "edge-claimed").status).toBe("claimed");
+  });
+
+  it("lets the production scheduler dispatch persisted EMBEDDING_BACKFILL by workspace without draining other kinds", async () => {
+    const { eventPublisher, repo } = createHarness();
+    const scheduler = new GardenScheduler(
+      createSchedulerEventLogPort(eventPublisher),
+      {},
+      null,
+      repo
+    );
+    scheduler.enqueue(
+      createTask({
+        task_id: "task-backfill-a",
+        task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
+        required_tier: GardenTier.TIER_2,
+        workspace_id: "workspace-A",
+        target_object_refs: ["workspace-A"],
+        priority: 30
+      })
+    );
+    scheduler.enqueue(
+      createTask({
+        task_id: "task-bulk-a",
+        task_kind: GardenTaskKind.BULK_ENRICH,
+        required_tier: GardenTier.TIER_2,
+        workspace_id: "workspace-A",
+        target_object_refs: ["workspace-A"],
+        priority: 40
+      })
+    );
+    scheduler.enqueue(
+      createTask({
+        task_id: "task-backfill-b",
+        task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
+        required_tier: GardenTier.TIER_2,
+        workspace_id: "workspace-B",
+        target_object_refs: ["workspace-B"],
+        priority: 50
+      })
+    );
+
+    await expect(
+      scheduler.dispatchNextMatchingTaskKind(
+        GardenRole.LIBRARIAN,
+        [GardenTaskKind.EMBEDDING_BACKFILL],
+        "workspace-A"
+      )
+    ).resolves.toMatchObject({ task_id: "task-backfill-a", workspace_id: "workspace-A" });
+    await expect(
+      scheduler.dispatchNextMatchingTaskKind(
+        GardenRole.LIBRARIAN,
+        [GardenTaskKind.EMBEDDING_BACKFILL],
+        "workspace-A"
+      )
+    ).resolves.toBeNull();
+    await expect(
+      scheduler.dispatchNextMatchingTaskKind(GardenRole.LIBRARIAN, [
+        GardenTaskKind.EMBEDDING_BACKFILL
+      ])
+    ).resolves.toMatchObject({ task_id: "task-backfill-b", workspace_id: "workspace-B" });
+
+    expect(repo.peekPending(GardenRole.LIBRARIAN).map((task) => task.id)).toEqual(["task-bulk-a"]);
+  });
+
+  // invariant: Promise.all over these synchronous repo calls is a same-thread
+  // stress probe, not OS-level parallelism. The durable contract is the row-level
+  // SQL CAS: every task reaches exactly one completed row with at most one claim
+  // winner, verified below by SQL aggregation.
   it("completes 100 tasks once each under an 8-claimer race", async () => {
     const { database, eventLogRepo, repo } = createHarness();
     const taskIds = Array.from({ length: 100 }, (_, index) => `task-race-${index + 1}`);
@@ -133,13 +268,7 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     );
     expect(completionEvents).toHaveLength(100);
 
-    // M7 (with Codex re-review N1 calibration): the load-bearing
-    // invariant for "no double-claim" is the count of distinct
-    // entity_ids across SOUL_GARDEN_TASK_COMPLETED events — if two
-    // claimers had both succeeded for the same task, we would have
-    // appended two completion events with the same entity_id and
-    // either the count of distinct entity_ids would be < 100 OR the
-    // total completionEvents count would be > 100. We assert both.
+    // invariant: no double-claim means one completion event per task id.
     expect(new Set(completionEvents.map((event) => event.entity_id)).size).toBe(100);
     expect(completionEvents.length).toBe(100);
     // The garden_tasks row count grouped by id is a weaker smoke check
@@ -393,11 +522,8 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     expect(events[0]?.payload_json).toMatchObject({ success: false });
   });
 
-  // Wave-end M3: enqueue surfaces a structured StorageError with
-  // code === "DUPLICATE_KEY" on PK collision. Callers (H3 dedupe) walk
-  // the cause chain on the structured code instead of scanning
-  // better-sqlite3's error message text. Mirrors workspace-repo's
-  // I3 contract from commit aacb4f2.
+  // invariant: duplicate task ids surface as StorageError code
+  // "DUPLICATE_KEY"; callers must not parse better-sqlite3 message text.
   it("surfaces DUPLICATE_KEY when an explicit task_id is reused", () => {
     const { repo } = createHarness();
     const baseInput = {

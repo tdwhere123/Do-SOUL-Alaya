@@ -30,5 +30,5 @@ owned by later Gate-5F cards or the controller.
 ```bash
 rtk pnpm exec tsc --noEmit -p packages/core/tsconfig.json
 rtk pnpm exec vitest run --project @do-soul/alaya-core -- event-publisher event-publisher-atomic
-rtk pnpm exec vitest run --project @do-soul/alaya-soul -- auditor-4b
+rtk pnpm exec vitest run --project @do-soul/alaya-soul -- auditor-repair-orphan-detection
 ```

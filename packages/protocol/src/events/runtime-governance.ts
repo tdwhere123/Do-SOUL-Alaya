@@ -38,11 +38,15 @@ const runtimeGovernanceEventTypeValues = [
   "stance.policy_evaluated",
   "stance.resolution_changed",
   "path.relation_created",
+  "path.relation_rejected",
   "path.relation_legitimacy_updated",
   "path.relation_reinforced",
   "path.relation_weakened",
   "path.relation_redirected",
   "path.relation_retired",
+  "path.relation_dormant",
+  "path.relation_revived",
+  "path.relation_merged",
   "path.consolidation_completed",
   "path.consolidation_fused",
   "surface.drift_detected",
@@ -73,11 +77,27 @@ export const RuntimeGovernanceEventType = {
   STANCE_POLICY_EVALUATED: "stance.policy_evaluated",
   STANCE_RESOLUTION_CHANGED: "stance.resolution_changed",
   PATH_RELATION_CREATED: "path.relation_created",
+  // invariant: durable audit that an agent/Garden-proposed path candidate was
+  // refused at the mint sink because an object anchor it carries does not
+  // exist in, or is not owned by, the relation workspace. Agents PROPOSE;
+  // Alaya DECIDES — a rejected candidate never becomes durable graph topology,
+  // and this event is the only forensic trace that the refusal happened.
+  // see also: path-relation-proposal-service.ts materialize anchor gate.
+  PATH_RELATION_REJECTED: "path.relation_rejected",
   PATH_RELATION_LEGITIMACY_UPDATED: "path.relation_legitimacy_updated",
   PATH_RELATION_REINFORCED: "path.relation_reinforced",
   PATH_RELATION_WEAKENED: "path.relation_weakened",
   PATH_RELATION_REDIRECTED: "path.relation_redirected",
   PATH_RELATION_RETIRED: "path.relation_retired",
+  // invariant: dormant is the positive-associative-family decay landing
+  // point (reversible), distinct from terminal retired. revived reverses it.
+  PATH_RELATION_DORMANT: "path.relation_dormant",
+  PATH_RELATION_REVIVED: "path.relation_revived",
+  // invariant: a merge folds dormant duplicate paths into an evidence-richest
+  // survivor. The losers are deleted; the survivor absorbs their provenance.
+  // This is a SYSTEM consolidation decision (Alaya decides), audited so the
+  // deleted losers' evidence is never silently discarded.
+  PATH_RELATION_MERGED: "path.relation_merged",
   PATH_CONSOLIDATION_COMPLETED: "path.consolidation_completed",
   PATH_CONSOLIDATION_FUSED: "path.consolidation_fused",
   SURFACE_DRIFT_DETECTED: "surface.drift_detected",
@@ -190,6 +210,23 @@ export const PathRelationCreatedPayloadSchema = z
   .strict()
   .readonly();
 
+// invariant: rejection_reason distinguishes a missing object id from one that
+// exists but belongs to another workspace; both are refused, but the operator
+// needs to tell a stale ref from a cross-workspace leak attempt. anchor_role
+// names which side of the proposed relation failed. No path_id exists — the
+// path was never minted — so the rejected anchor's object id keys the record.
+export const PathRelationRejectedPayloadSchema = z
+  .object({
+    workspace_id: NonEmptyStringSchema,
+    relation_kind: NonEmptyStringSchema,
+    anchor_role: z.enum(["source", "target"]),
+    rejected_object_id: NonEmptyStringSchema,
+    rejection_reason: z.enum(["object_missing", "object_foreign_workspace"]),
+    rejected_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
 export const PathRelationLegitimacyUpdatedPayloadSchema = z
   .object({
     path_id: NonEmptyStringSchema,
@@ -251,6 +288,80 @@ export const PathRelationRetiredPayloadSchema = z
     retirement_reason: NonEmptyStringSchema,
     final_strength: z.number(),
     retired_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+// invariant: dormant clears effect_vector.salience to 0 and drops the path
+// out of recall while leaving the row in the DB; strength is preserved so a
+// revive can restore the path. active <-> dormant is reversible.
+export const PathRelationDormantPayloadSchema = z
+  .object({
+    path_id: NonEmptyStringSchema,
+    dormancy_reason: NonEmptyStringSchema,
+    dormant_strength: z.number(),
+    dormant_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+// invariant: revive resets strength to the configured revive floor and
+// returns the path to active. The trigger is recorded so an audit replayer
+// can distinguish a usage-driven revive from an explicit override.
+export const PathRelationRevivedPayloadSchema = z
+  .object({
+    path_id: NonEmptyStringSchema,
+    revive_trigger: NonEmptyStringSchema,
+    previous_strength: z.number(),
+    new_strength: z.number(),
+    revived_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+// invariant: the sign of a deleted loser's recall_bias. Positive paths amplify
+// recall; negative paths suppress (the contradicts / supersedes family); zero
+// is the recall-neutral topology marker (exception_to). Recorded so a deleted
+// loser's family is reconstructable from the append-only log even though the
+// survivor row keeps only its own effect_vector.
+// see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible.
+export const MergedLoserRecallBiasSignSchema = z.enum(["positive", "negative", "zero"]);
+
+// invariant: a merge DELETES the loser rows; this schema is the ONLY durable
+// record of the destroyed provenance. The survivor ROW absorbs only a bounded
+// subset of loser why/evidence (capped at consolidation_merge_why_max_entries),
+// so the dropped remainder lives nowhere except here. Each entry therefore
+// carries the loser's FULL why_this_relation_exists + evidence_basis plus an
+// effect_vector summary, so an audit replayer can fully reconstruct what was
+// destroyed (durable memory needs source + evidence).
+export const PathRelationMergedLoserSchema = z
+  .object({
+    path_id: NonEmptyStringSchema,
+    why_this_relation_exists: z.array(NonEmptyStringSchema).readonly(),
+    evidence_basis: z.array(NonEmptyStringSchema).readonly(),
+    recall_bias_sign: MergedLoserRecallBiasSignSchema,
+    recall_bias_magnitude: z.number(),
+    direction_bias: DirectionBiasSchema
+  })
+  .strict()
+  .readonly();
+
+// invariant: a merge deletes the loser paths and folds their provenance into
+// the survivor. merged_path_ids carries the deleted loser ids and merged_losers
+// carries each deleted loser's FULL destroyed why/evidence + effect summary, so
+// an audit replayer can reconstruct which paths were absorbed AND every why/
+// evidence entry dropped past the survivor row's bound — no loser provenance is
+// discarded silently (durable memory needs source + evidence). merged_losers is
+// optional so EventLog replay tolerates rows persisted before the field existed;
+// the consolidation executor (producer) MUST populate one entry per merged_path_id.
+export const PathRelationMergedPayloadSchema = z
+  .object({
+    survivor_path_id: NonEmptyStringSchema,
+    merged_path_ids: z.array(NonEmptyStringSchema).readonly(),
+    relation_kind: NonEmptyStringSchema,
+    survivor_why_entry_count: NonNegativeIntSchema,
+    merged_losers: z.array(PathRelationMergedLoserSchema).readonly().optional(),
+    merged_at: IsoDatetimeStringSchema
   })
   .strict()
   .readonly();
@@ -504,12 +615,16 @@ const runtimeGovernancePayloadSchemas = {
   [RuntimeGovernanceEventType.COMPUTE_PROVIDER_ROUTED]: ComputeProviderRoutedPayloadSchema,
   [RuntimeGovernanceEventType.BOOTSTRAPPING_PATHS_PLANTED]: BootstrappingPathsPlantedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_CREATED]: PathRelationCreatedPayloadSchema,
+  [RuntimeGovernanceEventType.PATH_RELATION_REJECTED]: PathRelationRejectedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED]:
     PathRelationLegitimacyUpdatedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_REINFORCED]: PathRelationReinforcedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_WEAKENED]: PathRelationWeakenedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED]: PathRelationRedirectedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_RETIRED]: PathRelationRetiredPayloadSchema,
+  [RuntimeGovernanceEventType.PATH_RELATION_DORMANT]: PathRelationDormantPayloadSchema,
+  [RuntimeGovernanceEventType.PATH_RELATION_REVIVED]: PathRelationRevivedPayloadSchema,
+  [RuntimeGovernanceEventType.PATH_RELATION_MERGED]: PathRelationMergedPayloadSchema,
   [RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED]: SurfaceDriftDetectedPayloadSchema,
   [RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_ACQUIRED]: SurfaceDriftLeaseAcquiredPayloadSchema,
   [RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASED]: SurfaceDriftLeaseReleasedPayloadSchema,
@@ -580,6 +695,10 @@ const PathRelationCreatedEventObjectSchema = createRuntimeGovernanceEventObjectS
   RuntimeGovernanceEventType.PATH_RELATION_CREATED,
   PathRelationCreatedPayloadSchema
 );
+const PathRelationRejectedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
+  RuntimeGovernanceEventType.PATH_RELATION_REJECTED,
+  PathRelationRejectedPayloadSchema
+);
 const PathRelationLegitimacyUpdatedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
   PathRelationLegitimacyUpdatedPayloadSchema
@@ -599,6 +718,18 @@ const PathRelationRedirectedEventObjectSchema = createRuntimeGovernanceEventObje
 const PathRelationRetiredEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
   PathRelationRetiredPayloadSchema
+);
+const PathRelationDormantEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
+  RuntimeGovernanceEventType.PATH_RELATION_DORMANT,
+  PathRelationDormantPayloadSchema
+);
+const PathRelationRevivedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
+  RuntimeGovernanceEventType.PATH_RELATION_REVIVED,
+  PathRelationRevivedPayloadSchema
+);
+const PathRelationMergedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
+  RuntimeGovernanceEventType.PATH_RELATION_MERGED,
+  PathRelationMergedPayloadSchema
 );
 const SurfaceDriftDetectedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED,
@@ -690,12 +821,16 @@ export const ComputeProviderRoutedEventSchema = ComputeProviderRoutedEventObject
 export const BootstrappingPathsPlantedEventSchema =
   BootstrappingPathsPlantedEventObjectSchema.readonly();
 export const PathRelationCreatedEventSchema = PathRelationCreatedEventObjectSchema.readonly();
+export const PathRelationRejectedEventSchema = PathRelationRejectedEventObjectSchema.readonly();
 export const PathRelationLegitimacyUpdatedEventSchema =
   PathRelationLegitimacyUpdatedEventObjectSchema.readonly();
 export const PathRelationReinforcedEventSchema = PathRelationReinforcedEventObjectSchema.readonly();
 export const PathRelationWeakenedEventSchema = PathRelationWeakenedEventObjectSchema.readonly();
 export const PathRelationRedirectedEventSchema = PathRelationRedirectedEventObjectSchema.readonly();
 export const PathRelationRetiredEventSchema = PathRelationRetiredEventObjectSchema.readonly();
+export const PathRelationDormantEventSchema = PathRelationDormantEventObjectSchema.readonly();
+export const PathRelationRevivedEventSchema = PathRelationRevivedEventObjectSchema.readonly();
+export const PathRelationMergedEventSchema = PathRelationMergedEventObjectSchema.readonly();
 export const SurfaceDriftDetectedEventSchema = SurfaceDriftDetectedEventObjectSchema.readonly();
 export const SurfaceDriftLeaseAcquiredEventSchema =
   SurfaceDriftLeaseAcquiredEventObjectSchema.readonly();
@@ -740,11 +875,15 @@ export const RuntimeGovernanceEventUnionSchema = z
     ComputeProviderRoutedEventObjectSchema,
     BootstrappingPathsPlantedEventObjectSchema,
     PathRelationCreatedEventObjectSchema,
+    PathRelationRejectedEventObjectSchema,
     PathRelationLegitimacyUpdatedEventObjectSchema,
     PathRelationReinforcedEventObjectSchema,
     PathRelationWeakenedEventObjectSchema,
     PathRelationRedirectedEventObjectSchema,
     PathRelationRetiredEventObjectSchema,
+    PathRelationDormantEventObjectSchema,
+    PathRelationRevivedEventObjectSchema,
+    PathRelationMergedEventObjectSchema,
     SurfaceDriftDetectedEventObjectSchema,
     SurfaceDriftLeaseAcquiredEventObjectSchema,
     SurfaceDriftLeaseReleasedEventObjectSchema,
@@ -797,6 +936,7 @@ export type BootstrappingPathsPlantedPayload = z.infer<
   typeof BootstrappingPathsPlantedPayloadSchema
 >;
 export type PathRelationCreatedPayload = z.infer<typeof PathRelationCreatedPayloadSchema>;
+export type PathRelationRejectedPayload = z.infer<typeof PathRelationRejectedPayloadSchema>;
 export type PathRelationLegitimacyUpdatedPayload = z.infer<
   typeof PathRelationLegitimacyUpdatedPayloadSchema
 >;
@@ -804,6 +944,11 @@ export type PathRelationReinforcedPayload = z.infer<typeof PathRelationReinforce
 export type PathRelationWeakenedPayload = z.infer<typeof PathRelationWeakenedPayloadSchema>;
 export type PathRelationRedirectedPayload = z.infer<typeof PathRelationRedirectedPayloadSchema>;
 export type PathRelationRetiredPayload = z.infer<typeof PathRelationRetiredPayloadSchema>;
+export type PathRelationDormantPayload = z.infer<typeof PathRelationDormantPayloadSchema>;
+export type PathRelationRevivedPayload = z.infer<typeof PathRelationRevivedPayloadSchema>;
+export type MergedLoserRecallBiasSign = z.infer<typeof MergedLoserRecallBiasSignSchema>;
+export type PathRelationMergedLoser = z.infer<typeof PathRelationMergedLoserSchema>;
+export type PathRelationMergedPayload = z.infer<typeof PathRelationMergedPayloadSchema>;
 export type SurfaceDriftDetectedPayload = z.infer<typeof SurfaceDriftDetectedPayloadSchema>;
 export type SurfaceDriftLeaseAcquiredPayload = z.infer<typeof SurfaceDriftLeaseAcquiredPayloadSchema>;
 export type SurfaceDriftLeaseReleasedPayload = z.infer<typeof SurfaceDriftLeaseReleasedPayloadSchema>;

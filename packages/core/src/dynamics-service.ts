@@ -53,6 +53,21 @@ export interface DynamicsServiceMemoryRepoPort {
     fields: DynamicsUpdateFields,
     updatedAt: string
   ): Promise<Readonly<MemoryEntry>>;
+  // invariant: REVERSIBLE revival path. Optional so narrow test fakes need not
+  // implement it; when present, a positive karma event on a dormant memory
+  // flips lifecycle_state dormant -> active so a used memory re-enters recall.
+  // see also: processKarmaEvent revival branch, lifecycle.ts dormant -> active.
+  transitionLifecycle?(
+    objectId: string,
+    lifecycleState: MemoryEntry["lifecycle_state"],
+    updatedAt: string
+  ): Promise<Readonly<MemoryEntry>>;
+  // invariant (N1): guarded revival. Returns the row when it transitioned
+  // dormant -> active, or null when the row was NOT dormant (no-op). The caller
+  // skips the revival audit event on null so an already-active row never emits a
+  // spurious from_state="dormant" transition. Optional; absent => fall back to
+  // the in-memory-guarded transitionLifecycle path.
+  reviveDormant?(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry> | null>;
 }
 
 export interface DynamicsServiceKarmaEventRepoPort {
@@ -106,6 +121,7 @@ export class DynamicsService {
     readonly objectId: string;
     readonly workspaceId: string;
     readonly amount?: number;
+    readonly runId?: string | null;
   }): Promise<void> {
     const amount = input.amount ?? DYNAMICS_CONSTANTS.karma[input.kind];
     await this.processKarmaEvent({
@@ -114,7 +130,8 @@ export class DynamicsService {
       object_id: input.objectId,
       amount,
       created_at: this.now(),
-      workspace_id: input.workspaceId
+      workspace_id: input.workspaceId,
+      run_id: input.runId ?? null
     });
   }
 
@@ -219,6 +236,56 @@ export class DynamicsService {
       now
     );
     const events: EventLogEntry[] = [];
+
+    // invariant: REVERSIBLE revival. A dormant memory that receives a positive
+    // karma event (use/reinforcement) is restored to lifecycle_state=active so
+    // it re-enters the recall candidate pool. Dormancy only ever silences; a
+    // fresh use revives. Penalties (amount <= 0) never revive. The lifecycle
+    // flip is best-effort: a missing transitionLifecycle port (narrow test
+    // fakes) or an active memory is a no-op. see also: lifecycle.ts dormant ->
+    // active transition; garden-data-ports.ts setLifecycleDormant.
+    // invariant (N1): only revive (and audit) when the row was ACTUALLY dormant.
+    // Prefer the SQL-guarded reviveDormant (atomic dormant -> active; returns null
+    // when not dormant) so a concurrent/duplicate revival of an already-active row
+    // emits no spurious from_state="dormant" event. Fall back to the in-memory
+    // guard (lifecycle_state==="dormant") + transitionLifecycle for narrow fakes.
+    const reviveDormant = this.dependencies.memoryRepo.reviveDormant;
+    let revived = false;
+    if (parsedEvent.amount > 0) {
+      if (reviveDormant !== undefined) {
+        const revivedRow = await reviveDormant(memory.object_id, now);
+        revived = revivedRow !== null;
+      } else if (
+        memory.lifecycle_state === "dormant" &&
+        this.dependencies.memoryRepo.transitionLifecycle !== undefined
+      ) {
+        await this.dependencies.memoryRepo.transitionLifecycle(memory.object_id, "active", now);
+        revived = true;
+      }
+    }
+    if (revived) {
+      const revivalEvent = await this.dependencies.eventLogRepo.append({
+        event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+        entity_type: "memory_entry",
+        entity_id: updated.object_id,
+        workspace_id: updated.workspace_id,
+        run_id: updated.run_id,
+        caused_by: TransitionCausedBy.SYSTEM,
+        payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+          object_id: updated.object_id,
+          object_kind: updated.object_kind,
+          workspace_id: updated.workspace_id,
+          run_id: updated.run_id,
+          from_state: "dormant",
+          to_state: "active",
+          reason_code: parsedEvent.kind,
+          caused_by: TransitionCausedBy.SYSTEM,
+          evidence_refs: null,
+          occurred_at: now
+        })
+      });
+      events.push(revivalEvent);
+    }
 
     if (hasScoreChanged(previousRetention, retentionScore)) {
       const retentionEvent = await this.dependencies.eventLogRepo.append({

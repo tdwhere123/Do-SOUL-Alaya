@@ -20,6 +20,7 @@ import {
 import {
   InMemoryHandoffGapHandler,
   MaterializationRouter,
+  type MaterializationRouterDeps,
   normalizeSchemaGroundedSignal
 } from "@do-soul/alaya-soul";
 
@@ -153,10 +154,13 @@ function createHarness(initialMemories: MemoryEntry[]) {
       }))
     },
     handoffGapHandler: new InMemoryHandoffGapHandler(),
+    // graphEdgePort is not a MaterializationRouterDeps member; the router
+    // ignores it. Cast the literal so the dead scaffolding does not trip the
+    // excess-property check.
     graphEdgePort: {
       createEdge: vi.fn(async () => {})
     }
-  });
+  } as unknown as MaterializationRouterDeps);
   const signalService = new SignalService({
     eventLogRepo: {
       append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({

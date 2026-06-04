@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   diffKpis,
@@ -115,9 +116,9 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
         }
       }
 
-      const recallStart = Date.now();
+      const recallStart = monotonicNowNs();
       const recallResult = await daemon.recall(scenario.probe, { maxResults: 10 });
-      const latencyMs = Date.now() - recallStart;
+      const latencyMs = monotonicElapsedMs(recallStart);
       latencies.push(latencyMs);
 
       const results = recallResult.results;

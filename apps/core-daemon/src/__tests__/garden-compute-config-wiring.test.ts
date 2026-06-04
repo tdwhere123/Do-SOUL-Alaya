@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV,
+  ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV,
   ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV,
-  OFFICIAL_API_GARDEN_MODEL_ENV,
-  OFFICIAL_API_GARDEN_PROVIDER_URL_ENV,
-  readOfficialGardenModelId,
-  readOfficialGardenProviderUrl,
+  resolveEdgeClassifyWiring,
   readOfficialGardenSecretRef
 } from "../daemon-runtime-support.js";
 import { resolveGardenOpenAiCredential } from "../garden-credential.js";
@@ -106,25 +105,74 @@ describe("Garden compute env readers (C1)", () => {
     ).toThrow("secret is empty");
   });
 
-  it("reads OFFICIAL_API_GARDEN_MODEL when the operator overrides the default model", () => {
-    const env = new Map([[OFFICIAL_API_GARDEN_MODEL_ENV, "gpt-4o-mini"]]);
-    expect(readOfficialGardenModelId(env)).toBe("gpt-4o-mini");
-  });
+});
 
-  it("returns null when OFFICIAL_API_GARDEN_MODEL is absent", () => {
-    expect(readOfficialGardenModelId(new Map())).toBeNull();
-  });
-
-  it("reads OFFICIAL_API_GARDEN_PROVIDER_URL when set", () => {
-    const env = new Map([
-      [OFFICIAL_API_GARDEN_PROVIDER_URL_ENV, "https://garden.example.test/v1"]
-    ]);
-    expect(readOfficialGardenProviderUrl(env)).toBe(
-      "https://garden.example.test/v1"
+// K4.5 zero-cloud-by-default regression: resolveEdgeClassifyWiring is the PURE
+// decision index.ts uses to choose cloud llmPort vs the host-worker EDGE_CLASSIFY
+// defer queue vs heuristic-only. A regression that flips the default back to a
+// synchronous cloud call changes this function's output and is caught here.
+// see also:
+//   apps/core-daemon/src/daemon-runtime-support.ts resolveEdgeClassifyWiring
+//   apps/core-daemon/src/index.ts edgeClassifyWiring consumption
+describe("resolveEdgeClassifyWiring (K4.5 zero-cloud default)", () => {
+  it("DEFAULT (no opt-in env, provider_kind=host_worker) -> host_worker_defer, no cloud llm", () => {
+    const wiring = resolveEdgeClassifyWiring(
+      {},
+      { provider_kind: "host_worker" }
     );
+    expect(wiring.mode).toBe("host_worker_defer");
+    // The cloud edge-LLM is NOT enabled — no synchronous cloud port intent.
+    expect(wiring.llmEnabled).toBe(false);
+    expect(wiring.hostWorkerEnabled).toBe(true);
   });
 
-  it("returns null when OFFICIAL_API_GARDEN_PROVIDER_URL is absent", () => {
-    expect(readOfficialGardenProviderUrl(new Map())).toBeNull();
+  it("explicit cloud opt-in only (provider_kind=official_api) -> cloud_llm", () => {
+    const wiring = resolveEdgeClassifyWiring(
+      { [ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV]: "1" },
+      { provider_kind: "official_api" }
+    );
+    expect(wiring.mode).toBe("cloud_llm");
+    expect(wiring.llmEnabled).toBe(true);
+    expect(wiring.hostWorkerEnabled).toBe(false);
+  });
+
+  it("host-worker defer WINS over a simultaneous cloud opt-in (mutual exclusion)", () => {
+    const wiring = resolveEdgeClassifyWiring(
+      { [ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV]: "true" },
+      { provider_kind: "host_worker" }
+    );
+    // Even with the cloud opt-in flag set, host_worker routing takes the pair
+    // verdict to the agent, never a cloud call.
+    expect(wiring.mode).toBe("host_worker_defer");
+    expect(wiring.hostWorkerEnabled).toBe(true);
+  });
+
+  it("neither opt-in nor host_worker -> heuristic_only (zero external call)", () => {
+    const wiring = resolveEdgeClassifyWiring(
+      {},
+      { provider_kind: "official_api" }
+    );
+    expect(wiring.mode).toBe("heuristic_only");
+    expect(wiring.llmEnabled).toBe(false);
+    expect(wiring.hostWorkerEnabled).toBe(false);
+  });
+
+  it("ALAYA_EDGE_CLASSIFY_HOST_WORKER=0 forces defer OFF even under provider_kind=host_worker", () => {
+    const wiring = resolveEdgeClassifyWiring(
+      { [ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV]: "0" },
+      { provider_kind: "host_worker" }
+    );
+    expect(wiring.hostWorkerEnabled).toBe(false);
+    // With defer forced off and no cloud opt-in, it falls to heuristic_only.
+    expect(wiring.mode).toBe("heuristic_only");
+  });
+
+  it("ALAYA_EDGE_CLASSIFY_HOST_WORKER=1 forces defer ON even under provider_kind=official_api", () => {
+    const wiring = resolveEdgeClassifyWiring(
+      { [ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV]: "1" },
+      { provider_kind: "official_api" }
+    );
+    expect(wiring.mode).toBe("host_worker_defer");
+    expect(wiring.hostWorkerEnabled).toBe(true);
   });
 });

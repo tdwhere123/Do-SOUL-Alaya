@@ -1,81 +1,52 @@
-import { randomUUID } from "node:crypto";
 import {
   GraphNeighborSchema,
-  MemoryGraphEdgeSchema,
   MemoryGraphEdgeTypeSchema,
+  EDGE_TYPE_RECALL_MODEL,
   GraphAuditorEventType,
-  SoulGraphEdgeCreatedPayloadSchema,
   SoulGraphExploreCompletedPayloadSchema,
+  isPathActiveForRecall,
+  isPathRecallEligible,
+  mapRelationKindToGraphEdgeType,
   type EventLogEntry,
   type GraphExploreDir,
   type GraphNeighbor,
-  type MemoryGraphEdge,
-  type MemoryGraphEdgeTypeValue
+  type MemoryGraphEdgeTypeValue,
+  type PathAnchorRef,
+  type PathRelation
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 import { parseObjectId } from "./shared/validators.js";
 
-export interface GraphExploreServiceMemoryRepoPort {
-  findById(objectId: string): Promise<{ readonly object_id: string; readonly workspace_id: string } | null>;
-}
-
-export interface GraphExploreServiceEdgeRepoPort {
-  // invariant: synchronous so addEdge can wrap row insert + audit event in
-  // one SQLite transaction (`packages/protocol/src/soul/memory-graph.ts`
-  // §43-54 atomicity gap closure).
-  create(edge: Readonly<MemoryGraphEdge>): Readonly<MemoryGraphEdge>;
-  findByMemoryId(
-    memoryId: string,
+// invariant: soul.explore_graph reads the unified path plane, not
+// memory_graph_edges. One-hop neighbors are PathRelation rows anchored on
+// the source memory; relation_kind projects to the strict GraphNeighbor
+// edge_type enum (mapRelationKindToGraphEdgeType) and path_id is the
+// edge_id. countInbound* below also read the path plane: they count
+// target-anchored recall-eligible paths (isPathRecallEligible) arriving at a
+// candidate memory and feed recall graph_support scoring
+// (RecallServiceGraphSupportPort). The result is positive-only: negative
+// paths (recall_bias < 0) never contribute here — active suppression is the
+// governance-gated recall-plane channel, not graph_support. This service is
+// path-only: it has no edge repo and exposes no edge-write surface.
+export interface GraphExploreServicePathRepoPort {
+  findByAnchors(
     workspaceId: string,
-    edgeTypes?: readonly MemoryGraphEdgeTypeValue[]
-  ): Promise<readonly Readonly<MemoryGraphEdge>[]>;
-  findBySourceAndTarget(
-    sourceMemoryId: string,
-    targetMemoryId: string,
-    edgeType: MemoryGraphEdgeTypeValue,
-    workspaceId: string
-  ): Promise<Readonly<MemoryGraphEdge> | null>;
-  /** @deprecated use `countInboundEdgesWeighted`. Retained for
-   * diagnostic surfaces that still need a raw supports-only count. */
-  countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
-  countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
-  countInboundRecalls?(memoryId: string, workspaceId: string): Promise<number>;
-  delete(edgeId: string): Promise<void>;
+    anchorRefs: readonly PathAnchorRef[]
+  ): Promise<readonly Readonly<PathRelation>[]>;
+  findByTargetAnchor(
+    workspaceId: string,
+    anchorRef: PathAnchorRef
+  ): Promise<readonly Readonly<PathRelation>[]>;
 }
 
 export interface GraphExploreServiceEventLogRepoPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
 }
 
-export interface GraphExploreServiceRuntimeNotifierPort {
-  notifyEntry(entry: EventLogEntry): void | Promise<void>;
-}
-
-export type GraphExploreEventPublisherPort = Pick<
-  EventPublisher,
-  "appendManyWithMutation"
->;
-
 export interface GraphExploreServiceDependencies {
-  readonly memoryRepo: GraphExploreServiceMemoryRepoPort;
-  readonly edgeRepo: GraphExploreServiceEdgeRepoPort;
+  readonly pathRepo: GraphExploreServicePathRepoPort;
   readonly eventLogRepo: GraphExploreServiceEventLogRepoPort;
-  readonly runtimeNotifier: GraphExploreServiceRuntimeNotifierPort;
-  // invariant: addEdge wraps row insert + audit event in one SQLite
-  // transaction via this port. Without it, a crash between EventLog append
-  // and edge row insert leaves an orphan audit row or a silent edge.
-  readonly eventPublisher: GraphExploreEventPublisherPort;
-  readonly generateId?: () => string;
   readonly now?: () => string;
-}
-
-export interface GraphExploreAddEdgeParams {
-  readonly sourceMemoryId: string;
-  readonly targetMemoryId: string;
-  readonly edgeType: MemoryGraphEdgeTypeValue;
-  readonly workspaceId: string;
-  readonly runId?: string | null;
 }
 
 export interface GraphExploreOptions {
@@ -85,69 +56,10 @@ export interface GraphExploreOptions {
 }
 
 export class GraphExploreService {
-  private readonly generateId: () => string;
   private readonly now: () => string;
 
   public constructor(private readonly dependencies: GraphExploreServiceDependencies) {
-    this.generateId = dependencies.generateId ?? randomUUID;
     this.now = dependencies.now ?? (() => new Date().toISOString());
-  }
-
-  public async addEdge(params: GraphExploreAddEdgeParams): Promise<Readonly<MemoryGraphEdge>> {
-    const sourceMemoryId = parseObjectId(params.sourceMemoryId);
-    const targetMemoryId = parseObjectId(params.targetMemoryId);
-    const workspaceId = parseObjectId(params.workspaceId);
-    const edgeType = parseMemoryGraphEdgeType(params.edgeType);
-
-    if (sourceMemoryId === targetMemoryId) {
-      throw new CoreError("VALIDATION", "Source and target memory must be different.");
-    }
-
-    await this.requireMemoryInWorkspace(sourceMemoryId, "Source", workspaceId);
-    await this.requireMemoryInWorkspace(targetMemoryId, "Target", workspaceId);
-
-    const existing = await this.dependencies.edgeRepo.findBySourceAndTarget(
-      sourceMemoryId,
-      targetMemoryId,
-      edgeType,
-      workspaceId
-    );
-
-    if (existing !== null) {
-      return existing;
-    }
-
-    const createdAt = this.now();
-    const edge = MemoryGraphEdgeSchema.parse({
-      edge_id: `edge_${this.generateId()}`,
-      source_memory_id: sourceMemoryId,
-      target_memory_id: targetMemoryId,
-      edge_type: edgeType,
-      workspace_id: workspaceId,
-      created_at: createdAt
-    });
-
-    const eventInput: EventPublisherInput = {
-      event_type: GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
-      entity_type: "memory_graph_edge",
-      entity_id: edge.edge_id,
-      workspace_id: workspaceId,
-      run_id: params.runId ?? null,
-      caused_by: "system",
-      payload_json: SoulGraphEdgeCreatedPayloadSchema.parse({
-        edge_id: edge.edge_id,
-        source_memory_id: sourceMemoryId,
-        target_memory_id: targetMemoryId,
-        edge_type: edgeType,
-        workspace_id: workspaceId,
-        occurred_at: createdAt
-      })
-    };
-
-    return await this.dependencies.eventPublisher.appendManyWithMutation(
-      [eventInput],
-      (_entries: readonly EventLogEntry[]) => this.dependencies.edgeRepo.create(edge)
-    );
   }
 
   public async exploreOneHop(
@@ -159,36 +71,45 @@ export class GraphExploreService {
     const parsedWorkspaceId = parseObjectId(workspaceId);
     const parsedDirection = options.direction ?? "both";
     const parsedEdgeTypes = options.edgeTypes?.map(parseMemoryGraphEdgeType);
+    const edgeTypeFilter = parsedEdgeTypes === undefined ? null : new Set(parsedEdgeTypes);
 
-    const edges = await this.dependencies.edgeRepo.findByMemoryId(
-      parsedMemoryId,
-      parsedWorkspaceId,
-      parsedEdgeTypes
-    );
+    const relations = await this.dependencies.pathRepo.findByAnchors(parsedWorkspaceId, [
+      { kind: "object", object_id: parsedMemoryId }
+    ]);
 
-    const neighbors = edges.flatMap((edge) => {
-      if (edge.source_memory_id === parsedMemoryId && (parsedDirection === "outbound" || parsedDirection === "both")) {
+    const neighbors = relations.flatMap((relation): GraphNeighbor[] => {
+      if (!isPathActiveForRecall(relation.lifecycle.status)) {
+        return [];
+      }
+      const sourceId = anchorObjectId(relation.anchors.source_anchor);
+      const targetId = anchorObjectId(relation.anchors.target_anchor);
+      if (sourceId === undefined || targetId === undefined || sourceId === targetId) {
+        return [];
+      }
+      const edgeType = mapRelationKindToGraphEdgeType(relation.constitution.relation_kind);
+      if (edgeTypeFilter !== null && !edgeTypeFilter.has(edgeType)) {
+        return [];
+      }
+      if (sourceId === parsedMemoryId && (parsedDirection === "outbound" || parsedDirection === "both")) {
         return [
           GraphNeighborSchema.parse({
-            memory_id: edge.target_memory_id,
-            edge_type: edge.edge_type,
+            memory_id: targetId,
+            edge_type: edgeType,
             direction: "outbound",
-            edge_id: edge.edge_id
+            edge_id: relation.path_id
           })
         ];
       }
-
-      if (edge.target_memory_id === parsedMemoryId && (parsedDirection === "inbound" || parsedDirection === "both")) {
+      if (targetId === parsedMemoryId && (parsedDirection === "inbound" || parsedDirection === "both")) {
         return [
           GraphNeighborSchema.parse({
-            memory_id: edge.source_memory_id,
-            edge_type: edge.edge_type,
+            memory_id: sourceId,
+            edge_type: edgeType,
             direction: "inbound",
-            edge_id: edge.edge_id
+            edge_id: relation.path_id
           })
         ];
       }
-
       return [];
     });
 
@@ -219,37 +140,66 @@ export class GraphExploreService {
   /** @deprecated use `countInboundEdgesWeighted` for recall scoring;
    * retained for diagnostic surfaces only. */
   public async countInboundSupports(memoryId: string, workspaceId: string): Promise<number> {
-    return await this.dependencies.edgeRepo.countInboundSupports(parseObjectId(memoryId), parseObjectId(workspaceId));
-  }
-
-  public async countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number> {
-    return await this.dependencies.edgeRepo.countInboundEdgesWeighted(
-      parseObjectId(memoryId),
-      parseObjectId(workspaceId)
+    const paths = await this.findInboundRecallEligiblePaths(memoryId, workspaceId);
+    return paths.reduce(
+      (count, path) =>
+        mapRelationKindToGraphEdgeType(path.constitution.relation_kind) === "supports" ? count + 1 : count,
+      0
     );
   }
 
+  // invariant: graph_support is 1:1 with the legacy edge world for the kinds
+  // that world carried, PLUS the associative positive path families
+  // (co_recalled / shares_entity / signal_graph_ref, which
+  // mapRelationKindToGraphEdgeType folds to the `recalls` tier, weight 0.3)
+  // now also count — the edge world never carried them. This is an intended
+  // unification, not a pure zero-drift replacement.
+  //
+  // invariant (deliberate asymmetry): graph_support (positive amplification)
+  // is intentionally NOT governance-gated — findInboundRecallEligiblePaths
+  // filters only on active + recall_bias > 0, never on governance_class —
+  // while negative-path suppression IS governance-gated (recall-service.ts).
+  // Rationale: suppression can ERASE a true memory (high harm, so gated);
+  // positive amplification only NUDGES and is self-limiting (the consuming
+  // factor is clamped by normalizeGraphSupport to [0,3]/3 = max 1.0, then
+  // scaled by a small graph_support weight), and is the intended Hebbian
+  // recall mechanism. The asymmetry is by design, not an oversight.
+  public async countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number> {
+    const paths = await this.findInboundRecallEligiblePaths(memoryId, workspaceId);
+    return paths.reduce((sum, path) => {
+      const edgeType = mapRelationKindToGraphEdgeType(path.constitution.relation_kind);
+      return sum + EDGE_TYPE_RECALL_MODEL[edgeType].contribution_weight;
+    }, 0);
+  }
+
+  // The edge world counted literal edge_type='recalls'; on the path plane this
+  // counts paths whose mapped edge_type === "recalls", so the recalls-tier
+  // associative kinds (co_recalled / shares_entity / signal_graph_ref) that
+  // mapRelationKindToGraphEdgeType folds to "recalls" now also count here. This
+  // is mapper-consistent with countInboundEdgesWeighted (one mapper, one
+  // semantic) and feeds the RECALLS_EDGE_COLD_THRESHOLD cold-start signal.
   public async countInboundRecalls(memoryId: string, workspaceId: string): Promise<number> {
-    return await (this.dependencies.edgeRepo.countInboundRecalls?.(
-      parseObjectId(memoryId),
-      parseObjectId(workspaceId)
-    ) ?? Promise.resolve(0));
+    const paths = await this.findInboundRecallEligiblePaths(memoryId, workspaceId);
+    return paths.reduce(
+      (count, path) =>
+        mapRelationKindToGraphEdgeType(path.constitution.relation_kind) === "recalls" ? count + 1 : count,
+      0
+    );
   }
 
-  public async deleteEdge(edgeId: string): Promise<void> {
-    await this.dependencies.edgeRepo.delete(parseObjectId(edgeId));
-  }
-
-  private async requireMemoryInWorkspace(memoryId: string, label: string, workspaceId: string): Promise<void> {
-    const memory = await this.dependencies.memoryRepo.findById(memoryId);
-
-    if (memory === null) {
-      throw new CoreError("NOT_FOUND", `${label} memory not found: ${memoryId}`);
-    }
-
-    if (memory.workspace_id !== workspaceId) {
-      throw new CoreError("VALIDATION", `${label} memory does not belong to workspace ${workspaceId}: ${memoryId}`);
-    }
+  // Inbound = paths whose TARGET anchor is the candidate memory. Filtered to
+  // recall-eligible (active lifecycle AND recall_bias > 0) so graph_support is
+  // positive-only; negative paths are handled solely by the governance-gated
+  // active-suppression channel in recall-service.ts.
+  private async findInboundRecallEligiblePaths(
+    memoryId: string,
+    workspaceId: string
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    const paths = await this.dependencies.pathRepo.findByTargetAnchor(parseObjectId(workspaceId), {
+      kind: "object",
+      object_id: parseObjectId(memoryId)
+    });
+    return paths.filter((path) => isPathRecallEligible(path));
   }
 }
 
@@ -261,4 +211,18 @@ function parseMemoryGraphEdgeType(value: MemoryGraphEdgeTypeValue): MemoryGraphE
   }
 
   return result.data;
+}
+
+function anchorObjectId(anchor: PathAnchorRef): string | undefined {
+  switch (anchor.kind) {
+    case "object":
+    case "object_facet":
+      return anchor.object_id;
+    case "obligation":
+    case "risk_concern":
+    case "time_concern":
+      return anchor.source_object_id;
+    default:
+      return undefined;
+  }
 }

@@ -26,7 +26,11 @@ export const KarmaEventSchema = z
     object_id: NonEmptyStringSchema,
     amount: z.number().finite(),
     created_at: IsoDatetimeStringSchema,
-    workspace_id: NonEmptyStringSchema
+    workspace_id: NonEmptyStringSchema,
+    // Nullable run attribution: many karma events fire with no run
+    // context (health-scan decay, evidence promotion). A run id is
+    // recorded only when the emitting producer holds one.
+    run_id: z.string().nullable().optional()
   })
   .readonly();
 

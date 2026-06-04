@@ -92,9 +92,7 @@ describe("SynthesisCapsuleSchema", () => {
   });
 
   it("accepts all legal synthesis status transitions", () => {
-    const validTransitions: ReadonlyArray<
-      readonly [typeof synthesisBase.synthesis_status, typeof synthesisBase.synthesis_status]
-    > = [
+    const validTransitions: ReadonlyArray<readonly [SynthesisStatus, SynthesisStatus]> = [
       ["working", "stable"],
       ["stable", "superseded"],
       ["superseded", "archived"]
@@ -106,9 +104,7 @@ describe("SynthesisCapsuleSchema", () => {
   });
 
   it("rejects illegal synthesis status transitions", () => {
-    const invalidTransitions: ReadonlyArray<
-      readonly [typeof synthesisBase.synthesis_status, typeof synthesisBase.synthesis_status]
-    > = [
+    const invalidTransitions: ReadonlyArray<readonly [SynthesisStatus, SynthesisStatus]> = [
       ["working", "superseded"],
       ["working", "archived"],
       ["stable", "working"],

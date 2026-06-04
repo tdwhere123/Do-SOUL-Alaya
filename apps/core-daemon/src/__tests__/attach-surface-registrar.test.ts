@@ -21,7 +21,9 @@ describe("createAttachSurfaceRegistrar", () => {
         return { object_id: "obj-" + created.length };
       })
     };
-    const registrar = createAttachSurfaceRegistrar({ surfaceService });
+    const registrar = createAttachSurfaceRegistrar({
+      surfaceService: surfaceService as unknown as Parameters<typeof createAttachSurfaceRegistrar>[0]["surfaceService"]
+    });
     await registrar.ensureAgentSurface({ workspaceId: "ws1", agentTarget: "codex" });
     await registrar.ensureAgentSurface({ workspaceId: "ws1", agentTarget: "codex" });
     expect(surfaceService.createSurface).toHaveBeenCalledTimes(1);
@@ -43,7 +45,9 @@ describe("createAttachSurfaceRegistrar", () => {
         return {};
       })
     };
-    const registrar = createAttachSurfaceRegistrar({ surfaceService });
+    const registrar = createAttachSurfaceRegistrar({
+      surfaceService: surfaceService as unknown as Parameters<typeof createAttachSurfaceRegistrar>[0]["surfaceService"]
+    });
     await registrar.ensureAgentSurface({ workspaceId: "ws1", agentTarget: "codex" });
     await registrar.ensureAgentSurface({ workspaceId: "ws1", agentTarget: "claude-code" });
     await registrar.ensureAgentSurface({ workspaceId: "ws2", agentTarget: "codex" });
@@ -58,7 +62,9 @@ describe("createAttachSurfaceRegistrar", () => {
         throw err;
       })
     };
-    const registrar = createAttachSurfaceRegistrar({ surfaceService });
+    const registrar = createAttachSurfaceRegistrar({
+      surfaceService: surfaceService as unknown as Parameters<typeof createAttachSurfaceRegistrar>[0]["surfaceService"]
+    });
     await expect(
       registrar.ensureAgentSurface({ workspaceId: "ws1", agentTarget: "codex" })
     ).resolves.toBeUndefined();

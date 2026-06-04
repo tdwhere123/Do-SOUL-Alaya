@@ -4,7 +4,13 @@ import { fileURLToPath } from "node:url";
 import {
   ComputeProviderPriority,
   ControlPlaneObjectKind,
+  GardenTaskKind,
   HealthEventKind,
+  HealthIssueCauseKind,
+  HealthIssueResolutionState,
+  HealthIssueSeverity,
+  HealthIssueSuggestedAction,
+  type HealthIssueGroup,
   MemoryGovernanceEventType,
   ProposalOptionKind,
   ProposalResolutionState,
@@ -13,7 +19,10 @@ import {
   RetentionPolicy,
   SoulActiveConstraintSchema,
   SoulProposalCreatedPayloadSchema,
-  type RuntimeGardenComputeConfig
+  isPathActiveForRecall,
+  type MemoryEntry,
+  type RuntimeGardenComputeConfig,
+  type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import {
   ArbitrationService,
@@ -32,6 +41,7 @@ import {
   type PathActivationCandidateProducerPathReaderPort,
   GardenBacklogTelemetryService,
   GovernanceLeaseService,
+  GraphContractService,
   GraphExploreService,
   GreenService,
   HealthJournalService,
@@ -39,10 +49,13 @@ import {
   ConflictDetectionService,
   DeferredObligationService,
   PathRelationProposalService,
+  type PathCandidateSink,
+  type PathFailureHealthInboxPort,
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   ProjectMappingService,
   ProposalService,
   ReconciliationService,
+  createRuleOnlyReconciliationDecisionPort,
   ResolutionService,
   type ConflictDetectionLlmPort,
   RecallService,
@@ -85,8 +98,9 @@ import {
   SqliteHandoffGapRepo,
   SqliteKarmaEventRepo,
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
   SqliteOrphanRadarRepo,
+  SqliteCoUsageCounterRepo,
+  SqliteEnrichPendingRepo,
   SqlitePathGraphSnapshotRepo,
   SqlitePathPlasticityWatermarkRepo,
   SqlitePathRelationRepo,
@@ -150,14 +164,19 @@ import {
   listServerHardConstraints,
   loadConfigEnv,
   patchArbitrationClaimService,
-  readOfficialGardenModelId,
-  readOfficialGardenProviderUrl,
   recordStartupStep,
-  resolveDatabasePath
+  resolveDatabasePath,
+  resolveEdgeClassifyWiring
 } from "./daemon-runtime-support.js";
 import { createReconciliationLlmDecisionPort } from "./reconciliation-llm-decision.js";
+import { createEdgeAutoProducerLlmPort } from "./edge-auto-producer-llm-adapter.js";
+import { createEdgeClassifyQueueAdapter } from "./edge-classify-queue-adapter.js";
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
+import {
+  createTombstoneDispositionSweepPort,
+  createTombstoneGcPort
+} from "./forget-disposition-ports.js";
 import { createGardenRuntime } from "./garden-runtime.js";
 import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
 import {
@@ -202,6 +221,11 @@ export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secr
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
 const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
+// doctor/status host_worker advisory: a POST_TURN_EXTRACT task claimed but not
+// completed within this window counts as a stale (abandoned) claim. Mirrors the
+// garden-runtime stale-claim TTL (10 min) so the advisory's "abandoned" count
+// agrees with what the scheduler will reclaim back to pending.
+const HOST_WORKER_EXTRACT_ADVISORY_STALE_MS = 10 * 60 * 1000;
 
 export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // anchor: warm jieba (CJK word segmenter) at daemon start so the first
@@ -249,10 +273,11 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const signalRepo = new SqliteSignalRepo(database);
   const edgeProposalRepo = new SqliteEdgeProposalRepo(database);
   const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
-  const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
+  const memoryEntryRepo = new SqliteMemoryEntryRepo(database, (message, meta) =>
+    warnLogger.warn(message, meta)
+  );
   const globalMemoryRepo = createOptionalGlobalMemoryRepo(database);
   const globalMemoryRecallCacheRepo = createOptionalGlobalMemoryRecallCacheRepo(database);
-  const memoryGraphEdgeRepo = new SqliteMemoryGraphEdgeRepo(database);
   const orphanDetectionEnabled = process.env.ORPHAN_DETECTION_ENABLED !== "false";
   const orphanRadarRepo = orphanDetectionEnabled ? new SqliteOrphanRadarRepo(database) : null;
   const projectMappingAnchorRepo = new SqliteProjectMappingAnchorRepo(database);
@@ -275,6 +300,24 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const trustStateRepo = new SqliteTrustStateRepo(database);
   const strongRefRepo = new SqliteStrongRefRepo(database);
   const pathRelationRepo = new SqlitePathRelationRepo(database);
+  const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
+  const enrichPendingRepo = new SqliteEnrichPendingRepo(database);
+  // invariant: single enrich_pending enqueue adapter shared by the atomic
+  // create+marker seam (core MemoryService.enrichPendingWriter) and the
+  // router's loud fallback port (enrichPendingPort). enqueuedAt is stamped here.
+  const enqueueEnrichPending = (params: {
+    readonly workspaceId: string;
+    readonly memoryId: string;
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  }): void =>
+    enrichPendingRepo.enqueue({
+      workspaceId: params.workspaceId,
+      memoryId: params.memoryId,
+      runId: params.runId,
+      sourceSignalId: params.sourceSignalId,
+      enqueuedAt: new Date().toISOString()
+    });
   const pathPlasticityWatermarkRepo = new SqlitePathPlasticityWatermarkRepo(database);
   const pathGraphSnapshotRepo = new SqlitePathGraphSnapshotRepo(database);
   const deferredObligationRepo = new SqliteDeferredObligationRepo(database);
@@ -337,7 +380,14 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // questionable -> verified does not require reordering. see also:
   // EvidenceService.emitEvidenceGainIfPromoted.
   const dynamicsServiceRef: {
-    current: { emitKarmaEvent(input: { kind: "evidence_gain"; objectId: string; workspaceId: string }): Promise<void> } | null;
+    current: {
+      emitKarmaEvent(input: {
+        kind: "evidence_gain";
+        objectId: string;
+        workspaceId: string;
+        runId?: string | null;
+      }): Promise<void>;
+    } | null;
   } = { current: null };
   const evidenceService = new EvidenceService({
     evidenceCapsuleRepo,
@@ -387,19 +437,43 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     eventLogRepo,
     runtimeNotifier,
     dynamicsService,
-    greenService
+    greenService,
+    // invariant (B1): the disposition-gated physical delete authority re-verifies
+    // a `compressed` member's preserving capsule at delete time (>=24h after
+    // marking) before any irreversible removal. see also:
+    // packages/core/src/memory-service.ts compressedPreservationStillValid
+    synthesisCapsuleLookup: {
+      findById: (objectId: string) => synthesisCapsuleRepo.findById(objectId)
+    },
+    // invariant: atomic create + enrich_pending no-drop marker. When a create
+    // input carries an enqueueEnrichment intent, the row insert and this enqueue
+    // commit in one storage transaction. see also:
+    // packages/core/src/memory-service.ts createRowMaybeAtomicallyEnqueued
+    enrichPendingWriter: { enqueue: enqueueEnrichPending }
   });
   const graphExploreService = new GraphExploreService({
-    memoryRepo: memoryEntryRepo,
-    edgeRepo: memoryGraphEdgeRepo,
-    eventLogRepo,
-    runtimeNotifier,
-    eventPublisher
+    // soul.explore_graph and recall graph_support counts both read the unified
+    // path plane via pathRelationRepo; this service is path-only.
+    pathRepo: pathRelationRepo,
+    eventLogRepo
   });
   const edgeProposalService = new EdgeProposalService({
     memoryRepo: memoryEntryRepo,
     proposalRepo: edgeProposalRepo,
-    graphPort: memoryGraphEdgeRepo,
+    // invariant: accept mints a governed PathRelation, not a
+    // memory_graph_edges row. The closure forward-references
+    // pathRelationProposalService (declared below); it is only invoked at
+    // accept time, long after init, so there is no use-before-assignment.
+    // see also: packages/core/src/edge-proposal-service.ts acceptProposal.
+    pathCandidatePort: {
+      submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
+    },
+    // invariant: D-EDGEAUDIT. Forward-references the health-inbox adapter
+    // (declared after healthIssueGroupRepo below); invoked only at accept-mint
+    // failure time, long after init. see also: pathFailureHealthInboxPort.
+    healthInboxPort: {
+      recordPathRelationFailure: (entry) => pathFailureHealthInboxPort.recordPathRelationFailure(entry)
+    },
     eventPublisher
   });
   const topologyService = new TopologyService({
@@ -410,15 +484,18 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const soulGraphService = createSoulGraphService({
     memoryEntryRepo,
-    memoryGraphEdgeRepo,
     pathRelationRepo,
     proposalRepo,
     eventLogRepo
   });
   const graphHealthService = createGraphHealthService({
-    memoryGraphEdgeRepo,
     pathRelationRepo,
     eventLogRepo
+  });
+  // Read-only path_relations projection for the Inspector Graph surface;
+  // pathRelationRepo.findActive supplies the unified path plane directly.
+  const graphContractService = new GraphContractService({
+    pathRelationRepo
   });
   const synthesisService = new SynthesisService({
     synthesisCapsuleRepo,
@@ -549,7 +626,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // invariant: PathActivationCandidateProducer reads PathRelation rows
   // anchored on the recall candidate memory ids. The reader port adapter
   // expands each memory id to an `object` PathAnchorRef, queries
-  // pathRelationRepo.findByAnchors, and filters retired rows.
+  // pathRelationRepo.findByAnchors, and filters out non-active rows
+  // (retired and dormant) so only recall-active paths reach activation.
   const pathActivationReaderPort: PathActivationCandidateProducerPathReaderPort = {
     async findActiveByAnchorObjectIds(workspaceId, memoryObjectIds) {
       if (memoryObjectIds.length === 0) {
@@ -560,7 +638,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         object_id: objectId
       }));
       const paths = await pathRelationRepo.findByAnchors(workspaceId, anchors);
-      return paths.filter((path) => path.lifecycle.status !== "retired");
+      return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
     }
   };
   const pathActivationCandidateProducer = new PathActivationCandidateProducer({
@@ -651,7 +729,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       const normalized = new Set(windowDigests.map(normalizeRecallTimeConcernWindowDigest));
       const paths = await pathRelationRepo.findByWorkspace(workspaceId);
       return paths.filter((path) =>
-        path.lifecycle.status !== "retired" &&
+        isPathActiveForRecall(path.lifecycle.status) &&
         [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
           anchor.kind === "time_concern" &&
           normalized.has(normalizeRecallTimeConcernWindowDigest(anchor.window_digest))
@@ -694,7 +772,6 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     slotRepo,
     eventLogRepo,
     graphSupportPort: graphExploreService,
-    graphExpansionPort: memoryGraphEdgeRepo,
     projectMappingPort: projectMappingService,
     pathPlasticityPort: recallPathPlasticityPort,
     pathExpansionPort: recallPathExpansionPort,
@@ -782,18 +859,156 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       await edgeProposalService.proposeEdge(params);
     }
   };
+  // invariant: the folded edge producers (EdgeAutoProducer,
+  // ConflictDetectionService, signal-ref router) submit governed path
+  // candidates here instead of writing memory_graph_edges. The closure
+  // forward-references pathRelationProposalService (declared below); it is
+  // only invoked at materialization time, long after init, so there is no
+  // use-before-assignment. governance is clamped to recall_allowed and
+  // plasticity decides promotion downstream.
+  // see also: packages/core/src/path-candidate-sink.ts PathCandidateSink.
+  const pathCandidatePort: PathCandidateSink = {
+    submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
+  };
+  // invariant: the product default is zero-own-LLM. The synchronous in-process
+  // edge-LLM pair-classifier (a direct cloud call from the daemon) is STRICT
+  // OPT-IN — it runs only when an operator sets ALAYA_EDGE_PRODUCER_LLM_ENABLED
+  // to 1/true. With host_worker the product default and this flag unset, B-2
+  // edge classification makes NO external call: the deterministic heuristic
+  // produces the edge inline and, under host_worker, the LLM-quality verdict is
+  // deferred to the attached CLI agent via the EDGE_CLASSIFY garden task. The
+  // garden compute config is read once and shared so the routing decision below
+  // (host_worker -> defer) and the opt-in cloud port use a single source of
+  // truth. invariant: no new cloud dependency may be introduced here; the cloud
+  // port runs on the operator's existing official_api garden compute config or
+  // is disabled.
+  const sharedGardenComputeConfig = await rawConfigService.getRuntimeGardenComputeConfig();
+  // invariant: the single B-2 edge-classify routing decision. resolveEdgeClassifyWiring
+  // is the PURE source of truth for cloud-llm vs host-worker-defer vs
+  // heuristic-only; index.ts must derive both branches from it so the
+  // zero-cloud-by-default guarantee cannot drift between the daemon and its
+  // regression test. see also: daemon-runtime-support.ts resolveEdgeClassifyWiring.
+  const edgeClassifyWiring = resolveEdgeClassifyWiring(
+    process.env,
+    sharedGardenComputeConfig
+  );
+  const edgeAutoProducerLlmEnabled = edgeClassifyWiring.llmEnabled;
+  const edgeAutoProducerGardenComputeConfig = edgeAutoProducerLlmEnabled
+    ? sharedGardenComputeConfig
+    : null;
+  const edgeAutoProducerGardenApiKey = ((): string | null => {
+    if (
+      edgeAutoProducerGardenComputeConfig === null ||
+      !canResolveOfficialGardenProvider(edgeAutoProducerGardenComputeConfig)
+    ) {
+      return null;
+    }
+    try {
+      return resolveGardenSecretRefValue(
+        edgeAutoProducerGardenComputeConfig.secret_ref as string
+      );
+    } catch {
+      return null;
+    }
+  })();
+  // The synchronous cloud port is created only when opt-in AND the official_api
+  // garden config resolves a real key AND that config carries an explicit
+  // provider_url. providerUrl/model come straight from that config — there is NO
+  // yunwu.ai default URL: an opt-in without a configured provider_url leaves the
+  // port null, so the service falls back to the deterministic heuristic instead
+  // of calling out to a hardcoded host.
+  const edgeAutoProducerProviderUrl =
+    edgeAutoProducerGardenComputeConfig?.provider_url ?? null;
+  const edgeAutoProducerLlmPort =
+    edgeAutoProducerLlmEnabled &&
+    edgeAutoProducerGardenApiKey !== null &&
+    edgeAutoProducerProviderUrl !== null
+      ? createEdgeAutoProducerLlmPort({
+          config: {
+            providerUrl: edgeAutoProducerProviderUrl,
+            model:
+              edgeAutoProducerGardenComputeConfig?.model_id ?? OFFICIAL_API_GARDEN_MODEL,
+            apiKey: edgeAutoProducerGardenApiKey
+          }
+        })
+      : null;
+  // invariant: host-worker defer for the B-2 LLM-quality verdict. When ON (mode
+  // == "host_worker_defer"), the EDGE_CLASSIFY garden task is enqueued for the
+  // attached CLI agent (the compute) instead of the synchronous in-process
+  // llmPort; the deterministic heuristic still produces the edge inline for
+  // strong-overlap pairs. Auto-ON whenever the resolved garden compute
+  // provider_kind is host_worker (the product default) so edge-classify routes
+  // to the agent rather than a cloud call; an operator can also force it with
+  // ALAYA_EDGE_CLASSIFY_HOST_WORKER=1/true regardless of provider_kind. The
+  // gardenTaskRepo the queue closure reads is created later in init; the closure
+  // is only invoked at materialization time, long after assignment, so there is
+  // no use-before-assignment. The branch is derived from the same pure
+  // resolveEdgeClassifyWiring decision as edgeAutoProducerLlmEnabled.
+  // see also: edge-classify-queue-adapter.ts.
+  const edgeClassifyHostWorkerEnabled = edgeClassifyWiring.hostWorkerEnabled;
+  let edgeClassifyQueueRepoHolder:
+    | { enqueue: typeof SqliteGardenTaskRepo.prototype.enqueue; findById: typeof SqliteGardenTaskRepo.prototype.findById }
+    | undefined;
+  const edgeClassifyQueue = edgeClassifyHostWorkerEnabled
+    ? createEdgeClassifyQueueAdapter({
+        gardenTaskRepo: {
+          enqueue: (input) => {
+            if (edgeClassifyQueueRepoHolder === undefined) {
+              throw new Error("EDGE_CLASSIFY queue used before the garden task repo was wired.");
+            }
+            return edgeClassifyQueueRepoHolder.enqueue(input);
+          },
+          findById: (taskId) => {
+            if (edgeClassifyQueueRepoHolder === undefined) {
+              return null;
+            }
+            const row = edgeClassifyQueueRepoHolder.findById(taskId);
+            return row === null ? null : { id: row.id };
+          }
+        },
+        now: () => new Date().toISOString(),
+        warn: warnLogger.warn
+      })
+    : null;
   const edgeAutoProducerService = new EdgeAutoProducerService({
     memoryRepo: memoryEntryRepo,
-    graphEdgePort
+    pathCandidatePort,
+    // invariant: directional-dedup read port. applyVerdict consults the path
+    // plane to collapse a heuristic+host-verdict family-swap (e.g. heuristic
+    // supports vs verdict derives_from on the SAME ordered pair) into one
+    // positive-associative slot, so an untrusted worker verdict cannot mint a
+    // SECOND parallel positive path and double the pair's recall-bias.
+    existingPathReader: {
+      findByBackingObjectId: (workspaceId, objectId) =>
+        pathRelationRepo.findByBackingObjectId(workspaceId, objectId)
+    },
+    // invariant: when the host-worker queue is wired the synchronous llmPort is
+    // NOT passed — the LLM-quality verdict is deferred. The service still runs
+    // the heuristic inline either way.
+    ...(edgeClassifyQueue !== null
+      ? { edgeClassifyQueue }
+      : edgeAutoProducerLlmPort === null
+        ? {}
+        : { llmPort: edgeAutoProducerLlmPort }),
+    warn: warnLogger.warn
   });
-  // invariant: ConflictDetectionService is opt-in. Each materialization
-  // pays O(workspace_size) for findByDimension + findByWorkspaceId;
-  // high-frequency seeding paths (bench harness, bulk import) cannot
-  // afford this. Operators enable conflict edge production through
-  // ALAYA_CONFLICT_DETECTION_ENABLED=1 (off by default).
-  const conflictDetectionEnabled =
-    process.env.ALAYA_CONFLICT_DETECTION_ENABLED === "1" ||
-    process.env.ALAYA_CONFLICT_DETECTION_ENABLED?.toLowerCase() === "true";
+  // invariant: ConflictDetectionService rule path is ON by default.
+  // Rule-path findings submit governed negative-family path candidates
+  // through pathCandidatePort (recall_bias -); durable truth is
+  // never mutated by this service alone, and no permanent edge is
+  // auto-accepted. The cost of findByDimension + findByWorkspaceId is
+  // paid per materialization; high-frequency seeding paths (bench
+  // harness, bulk import) opt OUT with ALAYA_CONFLICT_DETECTION_ENABLED=0.
+  // The LLM ambiguous-band path stays disabled by default (it would
+  // re-introduce a per-materialization cloud call) and is gated by the
+  // separate createConflictDetectionLlmPort credentials check.
+  const conflictDetectionEnabled = (() => {
+    const raw = process.env.ALAYA_CONFLICT_DETECTION_ENABLED?.toLowerCase();
+    if (raw === undefined || raw === "") {
+      return true;
+    }
+    return raw !== "0" && raw !== "false";
+  })();
   const conflictDetectionLlmPort = conflictDetectionEnabled
     ? createConflictDetectionLlmPort()
     : null;
@@ -809,10 +1024,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         memoryRepo: {
           findByDimension: async (workspaceId, dimension) =>
             await memoryEntryRepo.findByDimension(workspaceId, dimension),
-          findByWorkspaceId: async (workspaceId) =>
-            await memoryEntryRepo.findByWorkspaceId(workspaceId)
+          findBySharedDomainTags: async (workspaceId, tags) =>
+            await memoryEntryRepo.findBySharedDomainTags(workspaceId, tags)
         },
-        graphEdgePort,
+        pathCandidatePort,
         ...(conflictDetectionLlmPort === null ? {} : { llmPort: conflictDetectionLlmPort }),
         karmaEmitter: {
           emitKarmaEvent: (input) => dynamicsService.emitKarmaEvent(input)
@@ -821,25 +1036,27 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         warn: warnLogger.warn
       })
     : null;
-  // invariant: ingest reconciliation is opt-in and a deliberate,
-  // recorded v0.3.10 decision — the bench enables it via
-  // ALAYA_INGEST_RECONCILIATION_ENABLED to measure token economy; the
-  // production default is unchanged blind append. The two ingest
-  // behaviors diverging by flag is intentional for this release, not an
-  // oversight (recall-optimization §18a). It covers the
-  // materializeMemoryEntryOnly path (the bench `fact` kind);
-  // materialize_and_claim is intentionally not reconciled in v0.3.10.
-  // When enabled each fact pays one lexical FTS query, a findByIds
-  // fetch, and — only for an ambiguous-band neighbor — one disk-cached
-  // garden-LLM decision call. The LLM is the field-standard semantic
-  // judge of refines-vs-distinct; a token-superset heuristic wrongly
-  // merges distinct facts and erases answers. The DELETE / supersede
-  // path stays owned by ConflictDetectionService; reconciliation only
-  // flags it.
+  // invariant: ingest reconciliation is DEFAULT-ON. Blindly appending
+  // byte-identical facts is illogical, so dedup runs out of the box on a
+  // rule-only, zero-cloud basis (the identity NOOP + below-floor ADD need
+  // no LLM). The env var is a DISABLE switch for operators / measurement:
+  // ALAYA_INGEST_RECONCILIATION_ENABLED=0|false turns it off; anything
+  // else (including unset) leaves it on. It covers the
+  // materializeMemoryEntryOnly path; materialize_and_claim is
+  // intentionally not reconciled.
+  // Each fact pays one lexical FTS query and a findByIds fetch. The
+  // ambiguous "refines vs distinct" band resolves to ADD on the rule-only
+  // basis (never a rule-based UPDATE/NOOP — that erases answers, §18a);
+  // the cloud garden-LLM is the OPTIONAL upgrade that resolves that band
+  // to UPDATE/NOOP, and it is consulted only when actually configured AND
+  // enabled (R0 zero-cloud: cloud edge-LLM stays default-off). The DELETE
+  // / supersede path stays owned by ConflictDetectionService;
+  // reconciliation only flags it.
   // see also: packages/core/src/reconciliation-service.ts
-  const ingestReconciliationEnabled =
-    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED === "1" ||
-    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED?.toLowerCase() === "true";
+  const ingestReconciliationEnabled = (() => {
+    const raw = process.env.ALAYA_INGEST_RECONCILIATION_ENABLED?.trim().toLowerCase();
+    return raw !== "0" && raw !== "false";
+  })();
   // The ambiguous-band decision needs the garden LLM. The credential is
   // the canonical garden compute config's secret_ref — the same one the
   // garden compute provider resolves — RESOLVED here to the live key.
@@ -873,56 +1090,59 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       return null;
     }
   })();
-  // providerUrl + model are resolved as one unit from one source tier so
-  // a stale URL can never pair with a fresh model: when the garden
-  // compute config is present BOTH come from it (a missing field on that
-  // config takes the canonical default, never the configEnv tier);
-  // otherwise BOTH come from the configEnv tier with the canonical
-  // fallback. The two tiers are never mixed across the pair.
-  const reconciliationProviderPair = ((): { providerUrl: string; model: string } => {
-    if (reconciliationGardenComputeConfig !== null) {
-      return {
-        providerUrl: reconciliationGardenComputeConfig.provider_url ?? "https://yunwu.ai/v1",
-        model: reconciliationGardenComputeConfig.model_id ?? OFFICIAL_API_GARDEN_MODEL
-      };
-    }
-    return {
-      providerUrl: readOfficialGardenProviderUrl(configEnv) ?? "https://yunwu.ai/v1",
-      model: readOfficialGardenModelId(configEnv) ?? OFFICIAL_API_GARDEN_MODEL
-    };
-  })();
+  // invariant: the cloud garden-LLM is the OPTIONAL semantic-judge upgrade
+  // for reconciliation's refines-vs-distinct band — it routes through the
+  // SAME zero-own-LLM compute model as B-2, never operates a self-owned
+  // cloud LLM, and there is NO yunwu.ai default URL. The cloud decision
+  // port is created only when the official_api garden config resolves a
+  // real key (reconciliationGardenApiKey !== null, which already requires
+  // provider_kind=official_api + enabled) AND that config carries an
+  // explicit provider_url. Under the host_worker product default the key
+  // is null, so this cloud port is null and reconciliation falls back to
+  // the rule-only zero-cloud basis below — dedup still runs (R0
+  // zero-cloud: the cloud edge-LLM stays default-off).
+  // providerUrl + model are taken as one unit from the resolved garden config so
+  // a stale URL can never pair with a fresh model.
+  const reconciliationProviderUrl = reconciliationGardenComputeConfig?.provider_url ?? null;
   const reconciliationLlmDecisionPort =
-    ingestReconciliationEnabled
+    ingestReconciliationEnabled &&
+    reconciliationGardenApiKey !== null &&
+    reconciliationProviderUrl !== null
       ? createReconciliationLlmDecisionPort({
           config: {
-            providerUrl: reconciliationProviderPair.providerUrl,
-            model: reconciliationProviderPair.model,
+            providerUrl: reconciliationProviderUrl,
+            model: reconciliationGardenComputeConfig?.model_id ?? OFFICIAL_API_GARDEN_MODEL,
             apiKey: reconciliationGardenApiKey
           }
         })
       : null;
-  const reconciliationService =
-    ingestReconciliationEnabled && reconciliationLlmDecisionPort !== null
-      ? new ReconciliationService({
-          keywordSearch: {
-            searchByKeyword: async (workspaceId, queryText, limit) =>
-              await memoryEntryRepo.searchByKeyword(workspaceId, queryText, limit)
-          },
-          memoryRepo: {
-            findByIds: async (objectIds) => await memoryEntryRepo.findByIds(objectIds)
-          },
-          memoryUpdate: {
-            update: async (objectId, fields, reason) =>
-              await memoryService.update(objectId, fields, reason)
-          },
-          eventLog: {
-            append: (event) => eventLogRepo.append(event)
-          },
-          llmDecision: reconciliationLlmDecisionPort,
-          lease: reconciliationLeaseRepo,
-          warn: warnLogger.warn
-        })
-      : null;
+  // invariant: when enabled, the service is ALWAYS constructed — the
+  // rule-only zero-cloud port is the wired default so dedup runs without
+  // any cloud call, and the cloud garden-LLM (when configured + enabled
+  // and so non-null) replaces it as the ambiguous-band semantic judge.
+  // Reconciliation no longer requires an LLM port to exist.
+  const reconciliationService = ingestReconciliationEnabled
+    ? new ReconciliationService({
+        keywordSearch: {
+          searchByKeyword: async (workspaceId, queryText, limit) =>
+            await memoryEntryRepo.searchByKeyword(workspaceId, queryText, limit)
+        },
+        memoryRepo: {
+          findByIds: async (objectIds) => await memoryEntryRepo.findByIds(objectIds)
+        },
+        memoryUpdate: {
+          update: async (objectId, fields, reason) =>
+            await memoryService.update(objectId, fields, reason)
+        },
+        eventLog: {
+          append: (event) => eventLogRepo.append(event)
+        },
+        llmDecision:
+          reconciliationLlmDecisionPort ?? createRuleOnlyReconciliationDecisionPort(),
+        lease: reconciliationLeaseRepo,
+        warn: warnLogger.warn
+      })
+    : null;
   const pathRelationCounterTtlMs = (() => {
     const raw = process.env.ALAYA_PATHREL_COUNTER_TTL_MS;
     if (raw === undefined || raw === "") {
@@ -931,21 +1151,49 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     const parsed = Number(raw);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
   })();
+  // Override-capable co-usage threshold. Default (undefined) falls through to
+  // DYNAMICS_CONSTANTS.path_plasticity.co_usage_threshold inside the service;
+  // bench lowers it to surface paths early.
+  const pathRelationCoUsageThreshold = (() => {
+    const raw = process.env.ALAYA_PATHREL_CO_USAGE_THRESHOLD;
+    if (raw === undefined || raw === "") {
+      return undefined;
+    }
+    const parsed = Number(raw);
+    return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
+  })();
   const pathRelationProposalService = new PathRelationProposalService({
     repo: {
       create: (relation) => pathRelationRepo.create(relation),
       findByAnchorMemoryId: async (memoryId, workspaceId) =>
-        await pathRelationRepo.findByAnchors(workspaceId, [
-          { kind: "object", object_id: memoryId }
-        ])
+        await pathRelationRepo.findByBackingObjectId(workspaceId, memoryId)
+    },
+    counterStore: coUsageCounterRepo,
+    // invariant: object-anchor mints are gated by real memory existence +
+    // ownership at the durable sink. findById returns the owning workspace so
+    // an agent/Garden ref to a missing or cross-workspace object is refused
+    // before any path_relations row is written.
+    // see also: packages/core/src/path-relation-proposal-service.ts validateObjectAnchors
+    memoryExistence: {
+      workspaceOfObject: async (objectId) => {
+        const entry = await memoryEntryRepo.findById(objectId);
+        return entry === null ? null : entry.workspace_id;
+      }
     },
     eventPublisher,
+    // invariant: D-EDGEAUDIT. Forward-references the health-inbox adapter
+    // (declared after healthIssueGroupRepo below); invoked only at anchor-reject
+    // time, long after init. see also: pathFailureHealthInboxPort.
+    healthInboxPort: {
+      recordPathRelationFailure: (entry) => pathFailureHealthInboxPort.recordPathRelationFailure(entry)
+    },
     ...(pathRelationCounterTtlMs === undefined ? {} : { counterTtlMs: pathRelationCounterTtlMs }),
+    ...(pathRelationCoUsageThreshold === undefined ? {} : { threshold: pathRelationCoUsageThreshold }),
     warn: warnLogger.warn
   });
-  // invariant: counter Map is bounded by periodic eviction. The daemon
-  // sweeps once per TTL interval; sub-threshold pairs older than the TTL
-  // are discarded so long no-promote tails do not grow without bound.
+  // invariant: durable counter rows are bounded by periodic eviction. The
+  // daemon sweeps once per TTL interval; sub-threshold pairs whose updated_at
+  // is older than the TTL are DELETEd so long no-promote tails do not grow.
   // invariant: DeferredObligationService is the producer for path-anchor
   // `obligation` refs and the destination of soul.resolve `defer`
   // resolutions. Wired into the daemon so its create/fulfill/expire ports
@@ -970,10 +1218,17 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const pathRelationEvictionIntervalMs = pathRelationCounterTtlMs ?? PATH_RELATION_COUNTER_DEFAULT_TTL_MS;
   const pathRelationEvictionTimer = setInterval(() => {
-    pathRelationProposalService.evictExpired();
+    void pathRelationProposalService.evictExpired().catch((error: unknown) => {
+      warnLogger.warn("PathRelation counter eviction failed", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
   }, pathRelationEvictionIntervalMs);
   pathRelationEvictionTimer.unref?.();
   const pathRelationProposalPort: PathRelationProposalPort = {
+    assertPathRelationProposalAvailable: async (input) => {
+      await proposalRepo.countPending(input.workspaceId);
+    },
     createPathRelationProposal: async (input) => {
       const timestamp = new Date().toISOString();
       const proposalId = randomUUID();
@@ -1036,14 +1291,52 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       };
     }
   };
+  // invariant: write-path/enrich-path decouple (S3c). The router no longer runs
+  // edge auto-production / conflict detection inline; the enrich_pending marker
+  // per new memory drives the Garden BULK_ENRICH worker off-path. The marker is
+  // committed atomically with the memory row inside MemoryService.create (the
+  // create input carries the enqueueEnrichment intent); this port is the
+  // router's loud no-drop fallback for the case the create did not enqueue
+  // atomically. The conflictDetectionPort is still wired for the
+  // potential_conflict `evaluate` route (a raw signal with no memory yet).
+  // see also: garden-runtime.ts runBulkEnrichTask.
+  const enrichPendingPort = { enqueue: enqueueEnrichPending };
+  // invariant: the router needs to know whether MemoryService.create committed
+  // the enrich_pending marker atomically (so it skips its loud fallback). Core
+  // throws if an enqueueEnrichment intent is requested but the atomic seam is
+  // unwired, so a successful return WITH the intent means the marker landed
+  // atomically. see also: packages/soul/src/garden/materialization-router.ts
+  // MemoryMaterializationCreatedObject.enrichmentEnqueued
+  const materializationMemoryService = {
+    create: async (input: Parameters<typeof memoryService.create>[0]) => {
+      const created = await memoryService.create(input);
+      return {
+        object_kind: created.object_kind,
+        object_id: created.object_id,
+        enrichmentEnqueued: input.enqueueEnrichment !== undefined
+      };
+    }
+  };
   const materializationRouter = new MaterializationRouter({
     evidenceService,
-    memoryService,
+    memoryService: materializationMemoryService,
     synthesisService,
     claimService,
     pathRelationProposalPort,
-    graphEdgePort,
-    edgeAutoProducerPort: edgeAutoProducerService,
+    // invariant: the soul router's PathCandidateSinkPort mirrors core's
+    // PathMintOutcome as a literal union (PathCandidateMintOutcome) so the
+    // rejected/failed distinction survives this seam (@do-soul/alaya-soul cannot
+    // import @do-soul/alaya-core, invariants §6 — the four-state crosses
+    // structurally). core's submitCandidate already returns exactly that union,
+    // so we forward it untouched: applied / already_present mean the owed path
+    // exists; rejected is a decided B3 refusal (router drops it cleanly); failed
+    // is transient (router either records a durable proposal or defers the owed
+    // signal-ref path to BULK_ENRICH retry through enrich_pending).
+    // see also: packages/soul/src/garden/materialization-router.ts PathCandidateMintOutcome.
+    pathCandidateSinkPort: {
+      submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
+    },
+    enrichPendingPort,
     ...(conflictDetectionService === null
       ? {}
       : { conflictDetectionPort: conflictDetectionService }),
@@ -1144,12 +1437,96 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     eventPublisher
   });
   const healthIssueGroupRepo = new SqliteHealthIssueGroupRepo(database);
+  // invariant: D-EDGEAUDIT. Implements the core PathFailureHealthInboxPort once
+  // against SqliteHealthIssueGroupRepo. A path-relation creation/mint failure
+  // (mint-side anchor reject OR accept-owed mint failure) upserts a
+  // `path_relation_failure` group keyed on (workspace_id, target_object_id,
+  // cause_kind), incrementing count on repeat like the Auditor's orphan/evidence
+  // upserts. Best-effort projection: any throw is swallowed by the caller so the
+  // underlying mint/accept flow is never broken. The EdgeProposalService and
+  // PathRelationProposalService both forward-reference this via closures.
+  // see also: packages/core/src/path-failure-health-inbox.ts;
+  //   packages/soul/src/garden/auditor.ts upsertHealthIssueGroup.
+  const pathFailureHealthInboxPort: PathFailureHealthInboxPort = {
+    recordPathRelationFailure: (entry) => {
+      const existing = healthIssueGroupRepo.findByCompositeKey(
+        entry.workspaceId,
+        entry.targetObjectId,
+        HealthIssueCauseKind.PATH_RELATION_FAILURE
+      );
+      const next: HealthIssueGroup = {
+        group_id: existing?.group_id ?? randomUUID(),
+        workspace_id: entry.workspaceId,
+        target_object_id: entry.targetObjectId,
+        target_object_kind: "memory_entry",
+        cause_kind: HealthIssueCauseKind.PATH_RELATION_FAILURE,
+        severity: HealthIssueSeverity.WARN,
+        confidence: 1,
+        first_seen_at: existing?.first_seen_at ?? entry.observedAt,
+        last_seen_at: entry.observedAt,
+        count: (existing?.count ?? 0) + 1,
+        suggested_actions: [HealthIssueSuggestedAction.INSPECT_PATH_FAILURE],
+        resolution_state: HealthIssueResolutionState.PENDING,
+        resolved_at: null,
+        resolved_by: null
+      };
+      healthIssueGroupRepo.upsert(next);
+    }
+  };
+  // invariant: the R3d terminal-forgetting authority adapter. autonomousTombstone
+  // + autonomousHardDeleteTombstoned are the audited, disposition-gated service
+  // methods; findTombstonedMemoriesWithDisposition is the disposition-gated repo
+  // query. Both delete paths refuse a row lacking a non-null forget_disposition.
+  const forgetTombstoneAuthority = {
+    autonomousTombstone: (
+      objectId: string,
+      disposition: NonNullable<MemoryEntry["forget_disposition"]>,
+      dispositionRef: string | null,
+      reason: string,
+      causedBy: TransitionCausedBy
+    ) => memoryService.autonomousTombstone(objectId, disposition, dispositionRef, reason, causedBy),
+    autonomousHardDeleteTombstoned: (objectId: string, reason: string, causedBy: TransitionCausedBy) =>
+      memoryService.autonomousHardDeleteTombstoned(objectId, reason, causedBy),
+    findTombstonedMemoriesWithDisposition: (workspaceId: string) =>
+      memoryEntryRepo.findTombstonedMemoriesWithDisposition(workspaceId)
+  };
+  const gardenBackgroundDataPorts = createGardenBackgroundDataPorts(database);
+  // invariant: active -> dormant is a recall-visibility change (dormant rows are
+  // excluded from recall / list / FTS), so it MUST be audited like the
+  // delete/tombstone paths. The raw storage UPDATE is not audited, so route the
+  // demotion through the core transition authority, which appends
+  // SOUL_MEMORY_STATE_CHANGED ATOMICALLY with the guarded UPDATE (one transaction,
+  // via onTransition) and then notifies, while keeping the storage candidate query
+  // and the Janitor port boundary intact. causedBy mirrors the forget sweep's
+  // deterministic_rule attribution. see also:
+  // packages/core/src/memory-service.ts demoteActiveToDormantIfActive.
+  const auditedDormantDemotionPort = {
+    findLowActivityActiveMemories: (workspaceId: string) =>
+      gardenBackgroundDataPorts.dormantDemotionPort.findLowActivityActiveMemories(workspaceId),
+    // invariant: route through the race-tolerant guarded demotion. A candidate
+    // that left active between the snapshot and its turn (concurrent revival /
+    // overlapping sweep / Inspector retire) resolves "skipped" (no audit, no
+    // throw) so the Janitor sweep continues; an actually-demoted row gets its
+    // active->dormant audit appended atomically with the guarded UPDATE.
+    setLifecycleDormant: async (memoryId: string, taskId: string): Promise<"demoted" | "skipped"> => {
+      const outcome = await memoryService.demoteActiveToDormantIfActive(
+        memoryId,
+        `autonomous_dormant_demotion: ${taskId}`,
+        "deterministic_rule"
+      );
+      return outcome.status;
+    }
+  };
+  const gardenDataPorts = {
+    ...gardenBackgroundDataPorts,
+    dormantDemotionPort: auditedDormantDemotionPort
+  };
   const gardenRuntime = createGardenRuntime({
     databaseConnection: database.connection,
     backlogThresholds: gardenBacklogThresholds,
     eventLogRepo,
     eventPublisher,
-    gardenDataPorts: createGardenBackgroundDataPorts(database),
+    gardenDataPorts,
     healthJournalRepo,
     handoffGapRepo: sqliteHandoffGapRepo,
     orphanDetectionEnabled,
@@ -1166,12 +1543,69 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     signalReceiver: signalService,
     strongRefService,
     workspaceRepo,
+    // invariant: GATED terminal forgetting (R3d). The disposition sweep
+    // (dormant->tombstoned) and the physical GC both route their authority
+    // through memoryService (audited) + memoryEntryRepo (disposition-gated SQL),
+    // so an un-preserved/un-judged memory can never be autonomously removed.
+    tombstoneDispositionSweepPort: createTombstoneDispositionSweepPort({
+      memoryLookup: {
+        findDormantMemories: (workspaceId) => memoryEntryRepo.findDormantMemories(workspaceId),
+        findById: (objectId) => memoryEntryRepo.findById(objectId)
+      },
+      capsuleLookup: { findByWorkspaceId: (workspaceId) => synthesisCapsuleRepo.findByWorkspaceId(workspaceId) },
+      tombstoneAuthority: forgetTombstoneAuthority
+    }),
+    tombstoneGcPort: createTombstoneGcPort({ tombstoneAuthority: forgetTombstoneAuthority }),
+    // invariant: BULK_ENRICH drain wiring (S3c). The same governed services
+    // materialization used to run inline now run in the Garden worker, against
+    // memory rows fetched by id. enrichConflictDetectionPort is only wired when
+    // conflict detection is enabled (it has its own env gate).
+    enrichPendingRepo,
+    enrichMemoryLookup: {
+      findById: async (memoryId: string) => {
+        const memory = await memoryEntryRepo.findById(memoryId);
+        if (memory === null) {
+          return null;
+        }
+        return {
+          object_id: memory.object_id,
+          dimension: memory.dimension,
+          scope_class: memory.scope_class,
+          content: memory.content,
+          domain_tags: memory.domain_tags,
+          workspace_id: memory.workspace_id,
+          run_id: memory.run_id
+        };
+      }
+    },
+    enrichSourceSignalLookup: {
+      getById: async (signalId: string) => await signalRepo.getById(signalId)
+    },
+    enrichSignalRefReplayPort: {
+      replaySignalRefs: async ({ newMemoryId, signal }) => {
+        await materializationRouter.replaySignalRefs({ newObjectId: newMemoryId, signal });
+      }
+    },
+    enrichEdgeProducerPort: edgeAutoProducerService,
+    ...(conflictDetectionService === null
+      ? {}
+      : { enrichConflictDetectionPort: conflictDetectionService }),
+    // invariant: the ~60s GardenScheduler pass re-drives owed path mints for
+    // accept->mint crash-window orphans. see also: garden-runtime.ts
+    // reconcileStuckEdgeProposalAccepts; edge-proposal-service.ts reconcileStuckAccepts.
+    edgeProposalReconcile: edgeProposalService,
     warn: warnLogger.warn
   });
   const gardenTaskRepo =
     typeof (database.connection as { readonly prepare?: unknown }).prepare === "function"
       ? new SqliteGardenTaskRepo(database.connection, eventPublisher)
       : undefined;
+  // Resolve the forward-referenced EDGE_CLASSIFY enqueue holder now that the
+  // garden task repo exists. The defer closure declared above only fires at
+  // materialization time, so this assignment always precedes the first use.
+  if (gardenTaskRepo !== undefined) {
+    edgeClassifyQueueRepoHolder = gardenTaskRepo;
+  }
   const gardenBacklogTelemetryService = new GardenBacklogTelemetryService({
     scheduler: gardenRuntime.backlogTelemetrySource,
     eventLogRepo,
@@ -1226,6 +1660,47 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     memoryEntryRepo,
     evidenceService,
     pathRelationProposalService,
+    // invariant: route B3's object-anchor gate into the proposal accept-apply
+    // path so the second durable path-insert route is existence/ownership-
+    // checked before the storage insert.
+    objectAnchorGate: pathRelationProposalService,
+    // invariant: workspace-scoped evidence-gist reader for the synthesis-create
+    // accept-apply. Reuses EvidenceService.findByIdScoped so the deterministic
+    // summary and the evidence-existence gate run on the same scoped read the
+    // open_pointer path uses (no cross-workspace gist leakage).
+    synthesisEvidenceReader: {
+      findGistById: async (evidenceId: string, scopedWorkspaceId: string) => {
+        const evidence = await evidenceService.findByIdScoped(evidenceId, scopedWorkspaceId);
+        return evidence === null ? null : evidence.gist;
+      }
+    },
+    // invariant: resolves the synthesis cluster's member memories at capsule-build
+    // time so source_memory_refs is populated. findByEvidenceRefs returns the
+    // active, non-tombstoned memories whose evidence_refs INTERSECT the capsule's
+    // evidence_refs, workspace-scoped and bounded (id-set cap + row LIMIT). The
+    // intersection set is then narrowed to the SUBSET members — those whose
+    // evidence_refs are FULLY contained in the capsule's evidence set, i.e. the
+    // member has NO private evidence living outside the cluster. Only a fully
+    // consolidated member is eligible for source_memory_refs: the capsule
+    // preserves the cluster's shared evidence + a deterministic gist summary, so
+    // a member with private evidence outside the cluster is NOT preserved by it
+    // and must stay un-armed (fail-safe: it falls through to dormant /
+    // judged_useless, never compress-deleted on a partial-preservation claim).
+    // see also: forget-disposition-ports.ts computeForgetDisposition.
+    synthesisMemberResolver: {
+      findMemberObjectIdsByEvidenceRefs: async (
+        scopedWorkspaceId: string,
+        evidenceRefs: readonly string[]
+      ) => {
+        const capsuleEvidence = new Set(evidenceRefs);
+        const members = await memoryEntryRepo.findByEvidenceRefs(scopedWorkspaceId, evidenceRefs);
+        return members
+          .filter((member) =>
+            member.evidence_refs.every((ref) => capsuleEvidence.has(ref))
+          )
+          .map((member) => member.object_id);
+      }
+    },
     signalService,
     graphExploreService,
     edgeProposalService,
@@ -1234,6 +1709,13 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     trustStateRecorder,
     eventPublisher,
     ...(gardenTaskRepo === undefined ? {} : { gardenTaskRepo }),
+    // invariant: applies a host-worker EDGE_CLASSIFY verdict to the existing
+    // heuristic path. Wired to the same EdgeAutoProducerService that produced
+    // the inline edge so the verdict refinement goes through the identical
+    // governed PathCandidateSink. see also: edge-auto-producer-service.ts applyVerdict.
+    edgeVerdictApplier: {
+      applyVerdict: (verdictInput) => edgeAutoProducerService.applyVerdict(verdictInput)
+    },
     eventLogRepo,
     proposalRepo,
     runtimeNotifier,
@@ -1305,6 +1787,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     topologyService,
     soulApprovalService,
     soulGraphService,
+    graphContractService,
     projectMappingService,
     globalMemoryService,
     mcp: mcpTooling.daemonMcpCatalog,
@@ -1342,6 +1825,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       recallService,
       signalService,
       synthesisService,
+      pathRelationProposalService,
       recallUtilizationService,
       runService,
       trustStateRecorder,
@@ -1352,12 +1836,44 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
           return {
             last_pass_at: current.last_pass_at ?? initialGardenLastPassAt
           };
+        },
+        // doctor/status advisory under the host_worker product default: a
+        // recall-driven extract task that no attached CLI agent has claimed
+        // within HOST_WORKER_EXTRACT_ADVISORY_STALE_MS counts as "stale", i.e.
+        // aging toward the in-process zero-cloud heuristic fallback. Aggregated
+        // across workspaces. Returns null when no sqlite garden task repo is
+        // wired so the advisory is simply omitted rather than fabricated.
+        getHostWorkerExtractBacklog: () => {
+          if (gardenTaskRepo === undefined) {
+            return null;
+          }
+          const staleBefore = new Date(
+            Date.now() - HOST_WORKER_EXTRACT_ADVISORY_STALE_MS
+          ).toISOString();
+          const extract = gardenTaskRepo.countByKind(
+            GardenTaskKind.POST_TURN_EXTRACT,
+            staleBefore
+          );
+          // Also surface the EDGE_CLASSIFY backlog so a no-agent deployment's
+          // unrefined heuristic edges (the LLM-quality verdict that no host
+          // worker has rendered) are visible from doctor, not just extract work.
+          const edgeClassify = gardenTaskRepo.countByKind(
+            GardenTaskKind.EDGE_CLASSIFY,
+            staleBefore
+          );
+          return {
+            pending: extract.pending,
+            stale: extract.stale,
+            edgeClassifyPending: edgeClassify.pending,
+            edgeClassifyStale: edgeClassify.stale
+          };
         }
       },
       principalCodingEngineAvailable: principalCodingAvailability.available
     }),
     startBackgroundServices: lifecycleControls.startBackgroundServices,
     runGardenBackgroundPass: lifecycleControls.runGardenBackgroundPass,
+    runGardenEmbeddingBackfillPass: lifecycleControls.runGardenEmbeddingBackfillPass,
     startHttpServer: lifecycleControls.startHttpServer,
     shutdown: lifecycleControls.shutdown
   });

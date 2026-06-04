@@ -63,9 +63,9 @@ describe("alaya review (A1)", () => {
     );
     expect(output).toContain("prop-1");
     expect(output).toContain("user:local-reviewer\t-\topen");
-    // A1 fix-loop (finding-2): workspace_id no longer in the request
-    // payload; it is bound from the McpMemoryToolCallContext that the
-    // CLI builds from defaultWorkspaceId / env / overrides.
+    // invariant: workspace_id MUST NOT be in the request payload; it
+    // is bound from the McpMemoryToolCallContext that the CLI builds
+    // from defaultWorkspaceId / env / overrides.
     expect(handler.call).toHaveBeenCalledWith(
       expect.objectContaining({
         toolName: "soul.list_pending_proposals",

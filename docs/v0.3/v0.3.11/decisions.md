@@ -169,3 +169,184 @@ release evidence。
 
 **local_onnx note**：LoCoMo embedding-on gate 仍要求 local ONNX model cache；当前
 cache 缺失，必须由 parent supply/fetch 后再跑。
+
+## D16 — B-2 当前是 rule heuristic，Phase B 重做 LLM 真版（2026-05-26）
+
+**背景**：Phase 0 codex worktree audit 揭示
+`packages/core/src/edge-auto-producer-service.ts:224-238` 的 B-2 实现是
+rule-based confidence（`confidence(features, 0.55, ..., 0.85)`），不是
+`phase-6-graph-plan.md §B` + D8 / D11 锁定的 LLM pair classifier。
+finding B0-2 / I0-7 关联。
+
+**决定**：v0.3.11 Phase B 重新实施 B-2 LLM 真版，走 garden compute 本地
+路径（K4.5 零云保持，本地 ONNX pair classifier 或本地 LLM 作首选）；
+rule heuristic 降级为 LLM unavailable 时的 fallback，标位 `local_supports`
+trigger source（见 D20 编排）。
+
+**影响**：K3.3 `supports` 边生产者 ≥ 1 在 bench 跑前不可达，必须先完成
+LLM path；Phase B subagent 编排必须显式包含 B-2 LLM 子任务，不得只
+扩 heuristic。`decisions.md` 此前未记录此 silent downgrade——以本条
+为准。
+
+## D17 — commit `8bf07c8` 实际是 D-2/D-3/D-4 实施，不是 diagnostics-only（2026-05-26）
+
+**背景**：commit subject "add two-hop graph expansion diagnostics" 低
+估了 diff 实质。`packages/core/src/recall-service.ts:143,149,200,1449,1501-1503,1535`
+实际改动包括 `graph_expansion: 1 → 3` fusion weight、2-hop BFS scoring、
+per-edge-type hop_decay 表（`derives_from: 0.6, recalls: 0.3, supports: 0.5`）。
+finding B0-4 关联。
+
+**决定**：Phase 6 完成度表里把 `8bf07c8` 重标为 "D-2/D-3/D-4 code landed；
+常数为 `phase-6-graph-plan.md §D` decay-table 初始 prior；bench-validated
+calibration pending Phase E full bench + Phase F holistic tuning"。这
+**不是**违反 [feedback_no_benchmark_specific_patches]——是设计原则给的
+初始权重，Phase F 才允许基于 diagnostic 数据微调。
+
+**影响**：Phase D 不再重复实施 D-2/D-3/D-4（避免重复 land）；Phase D
+只做 D-5 multi-seed fan-in fuse；D-6 weight 校准延至 Phase F holistic
+tuning。
+
+## D18 — C 子工作流 v0.3.11 范围 = C1/C2/C7；C3 推 Phase C；C4 由 B-2 覆盖；C5/C6/C8/C9/C10 推 v0.3.12（2026-05-26）
+
+**背景**：finding C§G2 / N1 揭示 `phase-6-graph-plan.md §C` 子工作流并
+未全部 land。本条锁定 v0.3.11 实际范围。
+
+**决定**：
+
+- **v0.3.11 内做**：C1 entity 入口（已 land in `9dcfb09`）、C2 ref keys
+  first-class（已 land；I0-3 raw_payload 残留 FIX-0-6 收尾）、C7 文档化
+  trigger 边界。
+- **Phase C 内做**：C3 默认开 `ConflictDetectionService` rule path
+  （I0-4，依赖 B-4 proposal path）。
+- **由 B-2 覆盖**：C4 `supports` 自动建边 = D16 的 B-2 LLM 实施。
+- **推 v0.3.12**：C5（confidence floor 自适应）、C6（recall feedback
+  loop）、C8（auto-decay timer）、C9（cross-session edge dedupe）、
+  C10（admin review UI）。每项 close condition = v0.3.12 release
+  closeout 时由该 release 的 decisions.md 记录实施状态。
+
+**影响**：v0.3.11 Phase G closeout report 不可声明 C5/C6/C8/C9/C10 完成；
+读者引用 `phase-6-graph-plan.md` 时以本条为 v0.3.11 实际范围权威。
+
+## D19 — commit "Closes X" 措辞不构成 release evidence；以 docs 为权威（2026-05-26）
+
+**背景**：finding I0-8 揭示 commit messages 与 docs 状态不一致：例如
+`9dcfb09` "Closes the v0.3.11 phase-6 subworkflow A"、`3d07077` "Closes
+v0.3.11 Tier 2 KPI K2.1" vs `README.md` / `kpi-targets.md` 显式标
+"evidence pending"。
+
+**决定**：v0.3.11 及之后 release，acceptance 权威源 = `kpi-targets.md`
++ `bench-history` archive（full bench 实测 evidence），**不**以 commit
+message 的 "Closes" 措辞为权威。Phase G closeout report 必须以 evidence
+archive 重新声明 actually closed scope。未来 commits 应避免 "Closes" /
+"Resolves" 措辞，除非对应 evidence 已 archive；改用 "implement" /
+"land" 描述代码动作。
+
+**影响**：git log 历史不修改（避免风险）；读者引用 git log 推断完成度
+时需先回查 `kpi-targets.md` + archive。
+
+## D20 — Phase 0 audit fix 编排（2026-05-26）
+
+**背景**：Phase 0 三 reviewer 并行审 + 主线程合并去重得到
+`.do-it/findings/v0.3.11-codex-audit.md`，含 4 Blocking + 8 Important
++ 4 Nice-to-have。本条锁编排，防 Phase A 起跑前再次漂移。
+
+**决定**：
+
+- **Phase 0 fix-loop 内完成**：
+  - FIX-0-1 release-gate seed_extraction_path 评估（B0-1，typescript-pro
+    + test-automator）
+  - FIX-0-2 `decisions.md` D16-D20 追加（B0-2 / B0-4 / I0-8，本批
+    documentation-engineer）
+  - FIX-0-3 narrow `WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR` gate 至 abstention
+    candidates only（B0-3，typescript-pro）
+  - FIX-0-4 ~ FIX-0-7（I0-1 / I0-2 / I0-3 / I0-7，typescript-pro bundle）
+- **延 Phase B**：I0-5 K3.2 / K3.4 KPI schema instrument，与
+  `edge_proposals` 表聚合逻辑耦合。
+- **延 Phase C**：I0-4 `ConflictDetectionService` 默认开（依赖 B-4
+  proposal path 落地）。
+- **延 Phase G**：I0-6 attach/replay token_economy surface 增字段
+  （surface change，非 gating）。
+- **Nice-to-have**：A§N-1 / A§N-2 / A§N-3 / B§N1 在 typescript-pro
+  bundle 内顺带处理；A§N-4 不修历史 commit。
+
+**影响**：FIX-0-* 全部 land 后重派 reviewer + codex-rescue 复审；zero
+Blocking / Important 才放行 Phase A 启动。Phase B / C / G 启动前
+必须确认各自延期项已 enqueue。
+
+## D21 — C3 ConflictDetection 默认开提前在 Phase 0 fix-loop 落地（2026-05-27）
+
+**背景**：D18 声明 C3 "默认开 `ConflictDetectionService` rule path"
+属于 "Phase C 内做"。spec-compliance review §"Silent scope drift
+findings #2" 指出 commit `bc6152a` 已在 Phase 0 fix-loop carry-forward
+阶段就把默认翻转 land 了，时机早于 D18 描述。
+
+**决定**：以本条记录 C3 实际 landing 时机为 commit `bc6152a`
+（Phase 0 fix-loop carry-forward），不是 Phase C；D18 的范围归属
+（C3 在 v0.3.11 内做）不变，只是 landing 时机被提前。
+
+**rationale**：C3 始终在 v0.3.11 scope 内，未发生 silent scope drift；
+但 D14 / D15 honesty 要求所有 release 期内的实际 landing 时机
+必须 traceable，本条补齐 audit 链。后续 Phase G closeout report
+引用 C3 时直接用 `bc6152a`，不再用 "Phase C 内完成" 描述。
+
+**引用 finding**：spec-compliance review §"Silent scope drift
+findings #2"。
+
+## D22 — C7 health_inbox + EventLog audit 推 v0.3.12 release（2026-05-27）
+
+**背景**：`phase-6-graph-plan.md §C` C7 锁定 "edge 创建失败 →
+`health_inbox` 写入 + `SOUL_GRAPH_EDGE_REJECTED` EventLog 类型"
+作为 v0.3.11 范围。spec-compliance review §"Silent scope drift
+findings #1" 指出 v0.3.11 实际只完成 raw_payload normalize 删除
+（I0-3 收尾），未实现 health_inbox 写入和 audit event 落地。
+
+**决定**：明确推 v0.3.12 close condition：v0.3.12 release 必须实现
+（a）edge 创建失败时写入 `health_inbox`；（b）EventLog 增加
+`SOUL_GRAPH_EDGE_REJECTED` 类型并在失败路径发射。v0.3.11 范围内
+C7 只声明 "trigger 边界已文档化 + raw_payload normalize 已 land"，
+不声明 audit 链完整。
+
+**rationale**：v0.3.11 范围已经很大（Phase 6 graph 升级 + 多语
+BM25 + abstention + token measure）；C7 audit gap 不阻塞 K3.x KPI
+（K3.1 / K3.2 / K3.3 / K3.4 都是 edge 生产与召回度量，不依赖
+失败路径 audit）；edge 创建失败本身在当前实现里已经 throw +
+log，truth boundary 未受损——只是缺 governed audit surface。
+deferral 走 D14 / D15 honesty 原则记录，由 v0.3.12 decisions.md
+报告实施状态。
+
+**影响**：v0.3.11 Phase G closeout report 不可声明 C7 完成；只能
+声明 C7 子集 land；release notes 需点名 health_inbox + audit
+event 推 v0.3.12。
+
+**引用 finding**：spec-compliance review §"Silent scope drift
+findings #1"。
+
+## D23 — v0.3.11 release notes 必须显式声明两个默认-on 翻转（2026-05-27）
+
+**背景**：v0.3.11 涉及两个生产 daemon 行为翻转：
+（1）commit `bc6152a` 把 `ConflictDetectionService` 默认开
+（rule path）；（2）commit `06fd18f` 把
+`ALAYA_EDGE_PRODUCER_LLM_ENABLED` 默认 on。两者都是从 opt-in 翻成
+opt-out 的运维行为变化。reviewer review §"Important #3" 指出
+release notes 若不显式声明，下游 operator 升级到 v0.3.11 后会在
+不知情情况下触发新的 conflict propose / LLM edge produce 路径。
+
+**决定**：Phase G release notes 必须显式声明这两个翻转 + 各自
+opt-out env 名字：
+
+- `ConflictDetectionService` 默认开 → opt-out 环境变量
+  （Phase G 收尾时按 commit `bc6152a` 实际暴露的 env 名记录）；
+- `ALAYA_EDGE_PRODUCER_LLM_ENABLED` 默认 on → opt-out 时显式设为
+  `0` / `false`（commit `06fd18f`）。
+
+**rationale**：D14 / D15 honesty + 运维稳定性双重要求。默认翻转
+不显式声明等于 silent prod behavior change，违反 invariants §27
+（governance / configuration / import/export / backup / session
+trust changes are auditable）所导出的运维公平原则。
+
+**影响**：Phase G release notes worker 必须在产出 draft 时把这两
+段 opt-out 说明落到 release notes 第一屏；review 复检时把
+"两个 default-on 翻转是否在 release notes 显式声明" 列入
+Important 级 checklist。
+
+**引用 finding**：reviewer review §"Important #3"。

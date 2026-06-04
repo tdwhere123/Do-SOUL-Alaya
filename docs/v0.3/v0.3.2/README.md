@@ -145,7 +145,7 @@ See `release-notes.md` and `reports/v0.3.2-closeout.md`.
 ```bash
 rtk pnpm exec vitest run --project @do-soul/alaya-core -- recall-evidence-pack signal-service
 rtk pnpm exec vitest run --project @do-soul/alaya-soul -- schema-grounding garden-extraction-golden garden-extraction-parser-parity local-heuristics materialization-router
-rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon -- memory-quality-fixtures post-turn-extract-task garden-mcp-tools mcp-memory-tool-handler phase6-agent-use-protocol trustworthy-loop-trace
+rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon -- memory-quality-fixtures post-turn-extract-task garden-mcp-tools mcp-memory-tool-handler agent-use-protocol trustworthy-loop-trace
 rtk pnpm exec vitest run --project @do-soul/alaya-storage -- signal-repo proposal-repo memory-entry-repo
 rtk pnpm build
 rtk pnpm test

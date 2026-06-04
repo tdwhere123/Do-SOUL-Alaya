@@ -159,6 +159,34 @@ describe("Phase 4A protocol schemas", () => {
       parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED, rejectedPayload)
     ).toEqual(rejectedPayload);
 
+    const enrichAbandonedPayload = {
+      workspace_id: "workspace-1",
+      memory_id: "memory-poison",
+      source_signal_id: "signal-poison",
+      run_id: "run-1",
+      attempt_count: 5,
+      last_failure_kind: "transient path-mint failure",
+      occurred_at: validTimestamp
+    } as const;
+    expect(
+      parseGardenEventPayload(GardenEventType.SOUL_ENRICH_ABANDONED, enrichAbandonedPayload)
+    ).toEqual(enrichAbandonedPayload);
+
+    // The owed work may be edge-production / conflict-detection only (no signal
+    // ref); source_signal_id is nullable and run_id is nullable.
+    const enrichAbandonedNoSignalPayload = {
+      workspace_id: "workspace-1",
+      memory_id: "memory-poison-2",
+      source_signal_id: null,
+      run_id: null,
+      attempt_count: 5,
+      last_failure_kind: "conflict repo lookup failed",
+      occurred_at: validTimestamp
+    } as const;
+    expect(
+      parseGardenEventPayload(GardenEventType.SOUL_ENRICH_ABANDONED, enrichAbandonedNoSignalPayload)
+    ).toEqual(enrichAbandonedNoSignalPayload);
+
     const recordedPayload = {
       entry_id: "entry-1",
       event_kind: HealthEventKind.EVIDENCE_FAILURE,
@@ -238,7 +266,9 @@ describe("Phase 4A protocol schemas", () => {
       GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
       GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED,
+      GardenEventType.SOUL_GARDEN_TASK_EXPIRED,
       GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
+      GardenEventType.SOUL_ENRICH_ABANDONED,
       GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED
     ]);
   });
@@ -285,6 +315,9 @@ describe("Phase 4A protocol schemas", () => {
     );
     expect(EventTypeSchema.parse(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)).toBe(
       GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED
+    );
+    expect(EventTypeSchema.parse(GardenEventType.SOUL_ENRICH_ABANDONED)).toBe(
+      GardenEventType.SOUL_ENRICH_ABANDONED
     );
     expect(EventTypeSchema.parse(GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED)).toBe(
       GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED

@@ -1,4 +1,9 @@
-import { ClaimLifecycleState, canonicalGovernanceSubject, type ClaimForm } from "@do-soul/alaya-protocol";
+import {
+  ClaimLifecycleState,
+  canonicalGovernanceSubject,
+  type ClaimForm,
+  type ToolCategory
+} from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { SoulWorkerSafetyReader } from "../worker-safety-reader.js";
 
@@ -18,7 +23,9 @@ describe("SoulWorkerSafetyReader", () => {
         listActiveHazardObjectRefs: vi.fn(async () => ["hazard-1", "hazard-1", "hazard-2"])
       },
       policyProjectionReader: {
-        listGlobalDeniedToolCategories: vi.fn(async () => ["network", "network", "governance"]),
+        listGlobalDeniedToolCategories: vi.fn(
+          async (): Promise<readonly ToolCategory[]> => ["network", "network", "governance"]
+        ),
         listWorkspaceHardStopRefs: vi.fn(async () => ["stop-1", "stop-1", "stop-2"])
       }
     });
@@ -73,7 +80,9 @@ describe("SoulWorkerSafetyReader", () => {
         listActiveHazardObjectRefs: vi.fn(async () => ["hazard-1", " "])
       },
       policyProjectionReader: {
-        listGlobalDeniedToolCategories: vi.fn(async () => ["network"]),
+        listGlobalDeniedToolCategories: vi.fn(
+          async (): Promise<readonly ToolCategory[]> => ["network"]
+        ),
         listWorkspaceHardStopRefs: vi.fn(async () => ["stop-1"])
       }
     });
@@ -92,7 +101,9 @@ describe("SoulWorkerSafetyReader", () => {
         listActiveHazardObjectRefs: vi.fn(async () => ["hazard-1", 42 as unknown as string])
       },
       policyProjectionReader: {
-        listGlobalDeniedToolCategories: vi.fn(async () => ["network"]),
+        listGlobalDeniedToolCategories: vi.fn(
+          async (): Promise<readonly ToolCategory[]> => ["network"]
+        ),
         listWorkspaceHardStopRefs: vi.fn(async () => ["stop-1"])
       }
     });

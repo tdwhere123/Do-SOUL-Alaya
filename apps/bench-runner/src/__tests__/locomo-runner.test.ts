@@ -145,8 +145,13 @@ describe("LoCoMo runner", () => {
       last_error: "provider temporarily unreachable"
     }));
     const recall = vi.fn(async () => buildRecallResult());
+    const accrueSessionCoRecall = vi.fn(async () => ({
+      pairsObserved: 1,
+      minted: 1,
+      belowThreshold: 0
+    }));
     startBenchDaemonMock.mockResolvedValue(
-      buildMockDaemon({ recall, warmQueryEmbeddingCache })
+      buildMockDaemon({ recall, warmQueryEmbeddingCache, accrueSessionCoRecall })
     );
 
     const result = await runLocomo({
@@ -154,6 +159,8 @@ describe("LoCoMo runner", () => {
       historyRoot: tmpDir,
       embeddingMode: "env"
     });
+    // The LoCoMo seed loop drives the EARNED co-recall accrual once per session.
+    expect(accrueSessionCoRecall).toHaveBeenCalled();
     const kpi = JSON.parse(await readFile(result.kpiPath, "utf8")) as {
       readonly kpi: {
         readonly query_embedding_cache_ready_rate?: number;
@@ -274,6 +281,7 @@ function buildMockDaemon(overrides: {
   readonly recall?: ReturnType<typeof vi.fn>;
   readonly warmEmbeddingCache?: ReturnType<typeof vi.fn>;
   readonly warmQueryEmbeddingCache?: ReturnType<typeof vi.fn>;
+  readonly accrueSessionCoRecall?: ReturnType<typeof vi.fn>;
 }) {
   const recall = overrides.recall ?? vi.fn(async () => buildRecallResult());
   const warmEmbeddingCache =
@@ -300,20 +308,43 @@ function buildMockDaemon(overrides: {
       provider_kind: "openai",
       model_id: "text-embedding-3-small"
     }));
+  const proposeMemory = vi.fn(async (_content: string, evidenceRef: string) => {
+    const diaId = evidenceRef.split("-").at(-1) ?? "unknown";
+    return {
+      memoryId: `memory-${diaId}`,
+      signalId: `signal-${diaId}`,
+      proposalId: `proposal-${diaId}`,
+      truncated: false,
+      charsClipped: 0
+    };
+  });
+  // Stubbed earned co-recall accrual: the LoCoMo seed loop calls it once per
+  // session; the fake returns a settled summary (one pair minted) so the runner
+  // exercises the call without the real production counter gate.
+  // see also: apps/bench-runner/src/harness/co-recall-warmup.ts
+  const accrueSessionCoRecall =
+    overrides.accrueSessionCoRecall ??
+    vi.fn(async () => ({
+      pairsObserved: 1,
+      minted: 1,
+      belowThreshold: 0
+    }));
   return {
-    proposeMemory: vi.fn(async (_content: string, evidenceRef: string) => {
-      const diaId = evidenceRef.split("-").at(-1) ?? "unknown";
-      return {
-        memoryId: `memory-${diaId}`,
-        signalId: `signal-${diaId}`,
-        proposalId: `proposal-${diaId}`,
-        truncated: false,
-        charsClipped: 0
-      };
-    }),
+    proposeMemory,
     warmEmbeddingCache,
     warmQueryEmbeddingCache,
     recall,
+    accrueSessionCoRecall,
+    attachWorkspace: vi.fn(async (input: { workspaceId: string; runId: string }) => ({
+      workspaceId: input.workspaceId,
+      runId: input.runId,
+      proposeMemory,
+      warmEmbeddingCache,
+      warmQueryEmbeddingCache,
+      recall,
+      accrueSessionCoRecall,
+      detach: vi.fn(async () => undefined)
+    })),
     shutdown: vi.fn(async () => undefined)
   };
 }

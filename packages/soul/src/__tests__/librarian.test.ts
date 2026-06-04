@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import {
   GardenRole,
   GardenTaskKind,
@@ -342,7 +342,9 @@ describe("Librarian", () => {
           similarity_score: 0.95
         }
       ],
-      schedulerOverride: scheduler
+      schedulerOverride: scheduler as unknown as {
+        reportCompletion: Mock<(result: Awaited<ReturnType<Librarian["run"]>>) => Promise<void>>;
+      }
     }).librarian;
     scheduler.enqueue(createTask({ task_id: "task-librarian", task_kind: GardenTaskKind.MERGE_PROPOSAL }));
 
@@ -395,7 +397,9 @@ function createLibrarian(options: {
   readonly findMergeCandidates?: (workspaceId: string) => Promise<readonly MergeCandidate[]>;
   readonly pathPlasticityPort?: PathPlasticityComputePort;
   readonly clearPendingWorkspace?: (workspaceId: string) => Promise<void>;
-  readonly schedulerOverride?: { reportCompletion(result: Awaited<ReturnType<Librarian["run"]>>): Promise<void> };
+  readonly schedulerOverride?: {
+    reportCompletion: Mock<(result: Awaited<ReturnType<Librarian["run"]>>) => Promise<void>>;
+  };
 } = {}) {
   const mergePort = {
     findMergeCandidates:
@@ -432,7 +436,9 @@ function createLibrarian(options: {
     }))
   };
   const scheduler = options.schedulerOverride ?? {
-    reportCompletion: vi.fn(async () => undefined)
+    reportCompletion: vi.fn<(result: Awaited<ReturnType<Librarian["run"]>>) => Promise<void>>(
+      async () => undefined
+    )
   };
   const healthJournal = {
     record: vi.fn(async () => undefined)

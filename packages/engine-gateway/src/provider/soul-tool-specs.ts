@@ -70,19 +70,19 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.propose_edge",
     description:
-      "WHEN: a human or attached agent wants to propose a memory graph edge for review. This creates a pending edge proposal only; it does not write durable memory_graph_edges.",
+      "WHEN: a human or attached agent wants to propose a memory graph relation for review. This creates a pending edge proposal only; it does not write durable memory. Accepted proposals mint a governed path relation.",
     parametersSchema: SoulProposeEdgeRequestSchema
   },
   {
     name: "soul.list_pending_edge_proposals",
     description:
-      "WHEN: you need to inspect pending memory graph edge proposals before review. Read-only; filters by edge_type, confidence, trigger source, and time.",
+      "WHEN: you need to inspect pending memory graph relation proposals before review. Read-only; filters by edge_type, confidence, trigger source, and time.",
     parametersSchema: SoulListPendingEdgeProposalsRequestSchema
   },
   {
     name: "soul.batch_review_edge_proposals",
     description:
-      "WHEN: a reviewer has explicitly accepted or rejected pending edge proposals. Accepting applies the durable memory_graph_edges write through the governed graph service.",
+      "WHEN: a reviewer has explicitly accepted or rejected pending edge proposals. Accepting mints a governed path relation through the path-relation service.",
     parametersSchema: SoulBatchReviewEdgeProposalsRequestSchema
   },
   {
@@ -94,7 +94,7 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.explore_graph",
     description:
-      "WHEN: you need 1-hop graph neighbors of an existing memory entry to ground related context. Inspect memory graph neighbors. Read-only; does not create or mutate edges.",
+      "WHEN: you need 1-hop graph neighbors of an existing memory entry to ground related context. Inspect memory path-relation neighbors. Read-only; does not create or mutate relations.",
     parametersSchema: SoulExploreGraphRequestSchema
   },
   {

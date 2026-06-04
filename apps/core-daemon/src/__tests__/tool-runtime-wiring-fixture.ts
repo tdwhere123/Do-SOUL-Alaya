@@ -106,7 +106,23 @@ const hoisted = vi.hoisted(() => {
 
   const database = {
     filename: ":memory:",
-    connection: {},
+    // anchor: SqliteCoUsageCounterRepo (and the path-relation findByAnchors
+    // ad-hoc lookup) prepare statements at construction time, so the wiring
+    // fixture must expose a prepare() that returns inert statement handles.
+    // SqliteEnrichPendingRepo also wraps its claim batch in a
+    // connection.transaction() at construction, so transaction() must return a
+    // callable that runs the supplied function with its args (matching
+    // better-sqlite3's transaction wrapper contract).
+    connection: {
+      prepare: vi.fn(() => ({
+        run: vi.fn(() => ({ changes: 0 })),
+        get: vi.fn(() => undefined),
+        all: vi.fn(() => [])
+      })),
+      transaction: vi.fn(<Args extends readonly unknown[], Result>(fn: (...args: Args) => Result) => {
+        return (...args: Args): Result => fn(...args);
+      })
+    },
     close: vi.fn()
   };
 
@@ -601,7 +617,9 @@ vi.mock("../daemon-runtime-support.js", async () => {
     envPath: string
   ) => Promise<ReadonlyMap<string, string>>;
   hoisted.loadConfigEnvDefault = loadConfigEnvDefault;
-  hoisted.loadConfigEnv.mockImplementation(loadConfigEnvDefault);
+  hoisted.loadConfigEnv.mockImplementation(
+    loadConfigEnvDefault as unknown as () => Promise<Map<string, string>>
+  );
   return {
     ...actual,
     loadConfigEnv: hoisted.loadConfigEnv
@@ -651,9 +669,12 @@ vi.mock("../services/config-service.js", () => ({
       const secretRefCandidate = secretRefCandidates.find(([, value]) => value !== null);
       const secretRef = secretRefCandidate?.[1] ?? null;
       if (
+        // secretRefCandidate !== undefined implies its matched value is
+        // non-null (selected via value !== null), so secretRef is a string
+        // in this branch.
         secretRefCandidate !== undefined &&
-        !/^env:[A-Za-z_][A-Za-z0-9_]*$/u.test(secretRef) &&
-        !/^file:\/.+/u.test(secretRef)
+        !/^env:[A-Za-z_][A-Za-z0-9_]*$/u.test(secretRef!) &&
+        !/^file:\/.+/u.test(secretRef!)
       ) {
         throw new Error(`${secretRefCandidate[0]} secret_ref must use "env:NAME" or "file:/path".`);
       }
@@ -749,7 +770,6 @@ vi.mock("@do-soul/alaya-storage", async () => {
     SqliteEdgeProposalRepo: makeRepo(),
     SqliteEvidenceCapsuleRepo: makeRepo(),
     SqliteMemoryEntryRepo: makeRepo(),
-    SqliteMemoryGraphEdgeRepo: makeRepo(),
     SqliteOrphanRadarRepo: makeRepo(),
     SqliteProjectMappingAnchorRepo: makeRepo(),
     SqliteSynthesisCapsuleRepo: makeRepo(),
@@ -868,10 +888,21 @@ vi.mock("@do-soul/alaya-core", () => {
     ConflictDetectionService: makeClass({
       detectAndLinkConflicts: vi.fn(async () => undefined)
     }),
+    ConsolidationExecutor: makeClass({
+      runCycle: vi.fn(async () => ({
+        workspace_id: "workspace-1",
+        committed_at: "2026-04-12T10:00:00.000Z",
+        promotions_committed: 0,
+        retirements_committed: 0,
+        governance_changes_committed: 0,
+        direction_changes_committed: 0,
+        fuse_outcome: "ok"
+      }))
+    }),
     PathRelationProposalService: makeClass({
       onCoUsage: vi.fn(async () => undefined),
-      evictExpired: vi.fn(() => 0),
-      counterSize: vi.fn(() => 0)
+      evictExpired: vi.fn(async () => 0),
+      counterSize: vi.fn(async () => 0)
     }),
     PathActivationCandidateProducer: vi.fn().mockImplementation(function PathActivationCandidateProducer() {
       return {
@@ -897,7 +928,11 @@ vi.mock("@do-soul/alaya-core", () => {
       return {};
     }),
     createGlobalMemoryRecallPort: vi.fn().mockImplementation(() => ({
-      recall: vi.fn(async () => [])
+      recall: vi.fn(async () => []),
+      // anchor: index.ts createAlayaDaemonRuntime subscribes the recall port
+      // to invalidations and keeps the returned disposable; the wiring
+      // fixture exposes an inert subscription so bootstrap does not throw.
+      subscribeToInvalidations: vi.fn(() => ({ dispose: vi.fn() }))
     })),
     rebuildCountersFromEventLog: hoisted.rebuildCountersFromEventLog,
     // anchor: jieba warm-up call site lives in apps/core-daemon/src/index.ts
@@ -908,6 +943,20 @@ vi.mock("@do-soul/alaya-core", () => {
     ClaudeRuntimeAdapter: makeClass(),
     DynamicsService: makeClass(),
     DeferredObligationService: makeClass(),
+    // anchor: ingest reconciliation is default-ON, so createAlayaDaemonRuntime
+    // always constructs ReconciliationService with the rule-only zero-cloud
+    // decision port. see also: apps/core-daemon/src/index.ts.
+    ReconciliationService: makeClass({
+      runWithDecision: vi.fn(async () => ({
+        kind: "add",
+        runConflictScan: false,
+        reason: "mock",
+        bestSimilarity: 0
+      }))
+    }),
+    createRuleOnlyReconciliationDecisionPort: vi.fn(() => ({
+      decide: vi.fn(async () => ({ kind: "add", reason: "mock rule-only" }))
+    })),
     ResolutionService: makeClass(),
     DirtyStatePanicService: makeClass(),
     EngineBindingService: makeClass({
@@ -962,6 +1011,7 @@ vi.mock("@do-soul/alaya-core", () => {
     GovernanceLeaseService: makeClass(),
     SurfaceDriftService: makeClass(),
     GraphExploreService: makeClass(),
+    GraphContractService: makeClass({ derive: vi.fn(async () => ({})) }),
     GardenBacklogTelemetryService: vi.fn().mockImplementation(function GardenBacklogTelemetryService() {
       const instance = {
         start: vi.fn(() => undefined),
@@ -1014,7 +1064,9 @@ vi.mock("@do-soul/alaya-core", () => {
     }) {
       return {
         discoverAndRegister: vi.fn(async (servers: readonly { readonly server_name: string }[]) => {
-          await hoisted.mcpDiscoverAndRegister(servers);
+          await (hoisted.mcpDiscoverAndRegister as (servers: readonly { readonly server_name: string }[]) => Promise<unknown>)(
+            servers
+          );
           for (const server of servers) {
             const tools = await deps.mcpToolCatalog.listServerTools(server);
             if (tools.length === 0) {
@@ -1299,7 +1351,9 @@ export function resetToolRuntimeWiringState(): void {
   hoisted.storageWarmCjkSegmentation.mockImplementation(async () => false);
   hoisted.loadConfigEnv.mockReset();
   if (hoisted.loadConfigEnvDefault !== null) {
-    hoisted.loadConfigEnv.mockImplementation(hoisted.loadConfigEnvDefault);
+    hoisted.loadConfigEnv.mockImplementation(
+      hoisted.loadConfigEnvDefault as unknown as () => Promise<Map<string, string>>
+    );
   }
   hoisted.rebuildCountersFromEventLog.mockReset();
   hoisted.rebuildCountersFromEventLog.mockImplementation(async () => undefined);

@@ -3,22 +3,25 @@ import process from "node:process";
 import { ZodError } from "zod";
 import { diffKpis } from "./diff.js";
 import { listEntries, readEntry, readPrevious, type HistoryLayout } from "./history.js";
-import { runSelfBench } from "./self/runner.js";
-import { runLongMemEval } from "./longmemeval/runner.js";
 import { renderReport } from "./report.js";
 import { BenchName } from "./kpi-schema.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 
-const HELP_TEXT = `alaya-eval — reproducible recall benchmark harness
+// invariant: @do-soul/alaya-eval is the bench-history schema + threshold diff
+// engine, NOT a benchmark runner. The runnable harness lives in
+// apps/bench-runner. This bin exposes only read-side verbs (diff / list) over
+// an already-archived run.
+const HELP_TEXT = `alaya-eval — bench-history schema + threshold diff engine
 
 Usage:
-  alaya-eval self [--history-root <path>] [--out <path>]
-  alaya-eval longmemeval [--history-root <path>] [--out <path>]
   alaya-eval diff <bench-name> [--history-root <path>]
   alaya-eval list <bench-name> [--history-root <path>]
 
 bench-name = self | public | live
+
+To RUN a benchmark, use the harness in apps/bench-runner
+(e.g. \`pnpm --dir apps/bench-runner exec alaya-bench-runner …\`).
 
 Exit code 1 if a regression hits the ✗ threshold; 0 otherwise.
 `;
@@ -35,14 +38,20 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   };
 
   switch (command) {
-    case "self":
-      return await runSelfCommand(layout, opts);
-    case "longmemeval":
-      return await runLongMemEvalCommand(layout, opts);
     case "diff":
       return await runDiffCommand(layout, opts);
     case "list":
       return await runListCommand(layout, opts);
+    case "self":
+    case "longmemeval":
+      // invariant: the runnable harness lives in apps/bench-runner; these are
+      // not eval-package verbs. Fail loud (no false-green return 0).
+      process.stderr.write(
+        `alaya-eval: '${command}' is not an alaya-eval verb. Run benchmarks ` +
+          `with the harness in apps/bench-runner; alaya-eval only diffs / ` +
+          `lists archived runs.\n${HELP_TEXT}`
+      );
+      return 2;
     default:
       process.stderr.write(`alaya-eval: unknown command '${command}'\n${HELP_TEXT}`);
       return 2;
@@ -51,39 +60,21 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
 
 interface ParsedFlags {
   readonly historyRoot?: string;
-  readonly out?: string;
   readonly positional: readonly string[];
 }
 
 function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let historyRoot: string | undefined;
-  let out: string | undefined;
   const positional: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const token = args[i] ?? "";
     if (token === "--history-root") {
       historyRoot = args[++i];
-    } else if (token === "--out") {
-      out = args[++i];
     } else {
       positional.push(token);
     }
   }
-  return { historyRoot, out, positional };
-}
-
-async function runSelfCommand(
-  layout: HistoryLayout,
-  opts: ParsedFlags
-): Promise<number> {
-  return await runSelfBench(layout, opts.out);
-}
-
-async function runLongMemEvalCommand(
-  layout: HistoryLayout,
-  opts: ParsedFlags
-): Promise<number> {
-  return await runLongMemEval(layout, opts.out);
+  return { historyRoot, positional };
 }
 
 async function runDiffCommand(

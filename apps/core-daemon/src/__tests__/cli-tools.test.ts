@@ -68,7 +68,7 @@ describe("alaya tools", () => {
             output: { workspace_id: context.workspaceId }
           };
         }
-      },
+      } as McpMemoryToolHandler,
       ensureLocalWorkspace: { ensureLocalWorkspace }
     });
     const parsed = command.argsSchema.safeParse([

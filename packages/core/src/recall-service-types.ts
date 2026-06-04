@@ -2,10 +2,9 @@ import type {
   BudgetSnapshot,
   EventLogEntry,
   EvidenceCapsule,
+  ManifestationState,
   MemoryDimension as MemoryDimensionType,
   MemoryEntry,
-  MemoryGraphEdge,
-  MemoryGraphEdgeTypeValue,
   PathAnchorRef,
   PathRelation,
   ProjectMappingAnchor,
@@ -160,14 +159,6 @@ export interface RecallServicePathPlasticityPort {
   ): Promise<ReadonlyMap<string, number>>;
 }
 
-export interface RecallServiceGraphExpansionPort {
-  findByMemoryId(
-    memoryId: string,
-    workspaceId: string,
-    edgeTypes?: readonly MemoryGraphEdgeTypeValue[]
-  ): Promise<readonly Readonly<MemoryGraphEdge>[]>;
-}
-
 export interface RecallServicePathExpansionPort {
   findByAnchors(
     workspaceId: string,
@@ -306,7 +297,6 @@ export interface RecallServiceDependencies {
   readonly claimResolverPort?: RecallServiceClaimResolverPort;
   readonly embeddingRecallService?: RecallServiceEmbeddingRecallPort;
   readonly pathPlasticityPort?: RecallServicePathPlasticityPort;
-  readonly graphExpansionPort?: RecallServiceGraphExpansionPort;
   readonly pathExpansionPort?: RecallServicePathExpansionPort;
   readonly activeConstraintsPort?: RecallServiceActiveConstraintsPort;
   readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
@@ -374,6 +364,14 @@ export type RecallFusionStream =
   | "graph_expansion"
   // see also: scoreRecallFusionStream case "entity_seed"
   | "entity_seed"
+  // path_expansion is now the multi-session fan-in carrier: R1's earned sparse
+  // co_recalled PathRelations (production onCoUsage gate, threshold 3) fan a
+  // query that hits a non-representative cohort member into its same-session
+  // siblings via the unified path plane (direct hop-1 path_expansion +
+  // multi-hop graph_expansion). The retired session_cohort_fanin stream was a
+  // recall-time session-grouping HEURISTIC that nominated one representative
+  // per cohort; durable co_recalled edges replace it. see also:
+  // scoreRecallFusionStream case "path_expansion".
   | "path_expansion"
   | "temporal_recency"
   | "workspace_activation";
@@ -476,9 +474,28 @@ export type RecallGraphExpansionPlaneCountPerEdgeType = Readonly<
   Record<RecallGraphExpansionTrackedEdgeType, number>
 >;
 
+// invariant: multi-seed fan-in is measured per addGraphExpansionCandidates
+// call. When the entity_seed plane contributes 2+ distinct entity-derived
+// seeds, each seed expands independently and the per-seed candidate counts
+// are aggregated here so downstream tuning can read distribution shape
+// without re-deriving from raw graph events.
+// see also: recall-service.ts addGraphExpansionCandidates
+export interface RecallMultiSeedGraphFanInDiagnostics {
+  readonly distinct_seeds: number;
+  readonly candidates_per_seed_p50: number;
+  readonly candidates_per_seed_p95: number;
+  readonly dedup_collisions: number;
+}
+
 export interface RecallGraphExpansionDiagnostics {
   readonly graph_expansion_plane_count_per_hop: RecallGraphExpansionPlaneCountPerHop;
   readonly graph_expansion_plane_count_per_edge_type: RecallGraphExpansionPlaneCountPerEdgeType;
+  // Optional only when no entity-derived seeds were fanned in (distinct_seeds
+  // would be 0 in that case). Absence preserves the legacy
+  // RecallGraphExpansionDiagnostics shape so external readers that ignore
+  // the field stay binary-compatible. see also: recall-service.ts
+  // addGraphExpansionCandidates multi-seed fan-in path.
+  readonly multi_seed_graph_fan_in?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
 }
 
 export interface RecallDiagnostics {
@@ -509,6 +526,11 @@ export interface RecallDiagnostics {
   readonly provider_degradation_reason: string | null;
   readonly graph_expansion_plane_count_per_hop: RecallGraphExpansionPlaneCountPerHop;
   readonly graph_expansion_plane_count_per_edge_type: RecallGraphExpansionPlaneCountPerEdgeType;
+  // Optional. Only present when the entity_seed plane drove 1+ entity-derived
+  // seeds into graph fan-in for this recall. Absence means the recall's
+  // graph_expansion plane was content/structural-seed driven only and has
+  // no per-seed distribution to summarise.
+  readonly multi_seed_graph_fan_in?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
   readonly fusion_breakdown: readonly Readonly<RecallFusionBreakdown>[];
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
   // Per-recall structural token instrument. Optional only for legacy callers
@@ -547,6 +569,13 @@ export interface RecallSupplementaryData {
   // produced from the FTS rank of the strongest entity surface that hit.
   readonly entitySeedScores: Readonly<Record<string, number>>;
   readonly pathExpansionScores: Readonly<Record<string, number>>;
+  // Active sign-aware suppression deltas keyed by target memory id. A positive
+  // value is subtracted from that memory's fused recall score before final
+  // ranking, demoting targets that a reinforced negative path (recall_bias < 0)
+  // suppresses. Empty when no negative path anchored on an expansion seed.
+  // see also: recall-service.ts collectNegativePathSuppressions /
+  // applyPathSuppressionToFusionScores.
+  readonly pathSuppressionScores: Readonly<Record<string, number>>;
   readonly embeddingSimilarityScores: Readonly<Record<string, number>>;
   readonly graphSupportCounts: Readonly<Record<string, number>>;
   readonly budgetPenaltyFactor: number;
@@ -561,6 +590,16 @@ export interface RecallSupplementaryData {
   // promoted. Absent / empty string → rerank falls back to content-only,
   // bit-identical to the pre-B2 behavior.
   readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
+  // invariant: governance ceiling on recall manifestation, keyed by
+  // memory_entry.object_id. Derived from each candidate's inbound
+  // recall-eligible PathRelations (isPathRecallEligible) via
+  // memoryGovernanceCeiling. The fine-assess clamp lowers a candidate's
+  // strength tier to this ceiling (never elevates). A memory with no governing
+  // inbound path is ABSENT from this map; the clamp site defaults it to
+  // full_eligible (unrestricted). see also: path-manifestation-policy.ts
+  // memoryGovernanceCeiling / clampManifestationByGovernance,
+  // recall-candidate-builder.ts buildRecallCandidate.
+  readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
 }
 
 export interface CoarseRecallCandidate {
@@ -574,6 +613,19 @@ export interface CoarseRecallCandidate {
   readonly structuralScore?: number;
   readonly scoreMultiplier?: number;
   readonly pathExpansionSources?: readonly RecallPathExpansionSourceDiagnostic[];
+  // invariant: true when this candidate was admitted on the path_expansion plane
+  // by traversing an EARNED `co_recalled` PathRelation — the R1 sparse durable
+  // fan-in carrier (path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE,
+  // minted only after the threshold-3 co-usage counter gate). Gold-blind: it
+  // reads the path's earned relation_kind, never a gold label. The structural
+  // delivery reserve consumes this as the bounded exemption that lets a
+  // zero-relevance earned fan-in sibling claim a reserve slot (the multi-session
+  // fan-in mechanism) WITHOUT re-opening displacement to generic structural
+  // distractors. Internal-only: it never reaches the emitted RecallDiagnostics
+  // / bench path_expansion_sources surface.
+  // see also: recall-service.ts isStructuralRescueCandidate,
+  //   path-relation-proposal-service.ts (co_recalled accrual gate).
+  readonly reachedViaEarnedCoRecalledFanin?: boolean;
   // Set to "synthesis_capsule" when the candidate is sourced from an L2
   // synthesis row rather than an L1 memory_entry. The `entry` is then a
   // synthesis-shaped pseudo memory carrying the synthesis summary as content.

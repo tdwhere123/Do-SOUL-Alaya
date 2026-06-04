@@ -164,14 +164,15 @@ export function normalizeActivationScore(value: number | null): number {
 }
 
 export function normalizeGraphSupport(count: number): number {
-  // invariant: Clamp [count, 0, 3] / 3. The clamp at 0 matches the
-  // weighted-sum floor documented on MEMORY_GRAPH_EDGE_RECALL_WEIGHTS:
-  // signed weighted sums (e.g. dominated by SUPERSEDES / CONTRADICTS)
-  // collapse to 0 rather than pulling graph_support below baseline.
-  // Negative inbound edges therefore *suppress* graph_support that
-  // positive edges would have otherwise accumulated for the same memory,
-  // but cannot drag graph_support below zero. Lifting the floor needs
-  // a co-evaluated bench sweep. See the same invariant on the weights table.
+  // invariant: Clamp [count, 0, 3] / 3. The input is the positive-only inbound
+  // weighted sum: negative paths (recall_bias <= 0) are excluded upstream in
+  // graph-explore-service.ts before summing, so this only ever receives a
+  // NON-NEGATIVE count. The Math.max(count, 0) floor is therefore defensive
+  // only (never sees a negative offset to clamp), NOT a negative-offset clamp.
+  // Negative-path suppression is handled separately in the governance-gated
+  // active-suppression channel (recall-service.ts), not here. Lifting the upper
+  // cap needs a co-evaluated bench sweep.
+  // see also: packages/core/src/graph-explore-service.ts (countInbound* positive-only filter)
   return Math.min(Math.max(count, 0), 3) / 3;
 }
 

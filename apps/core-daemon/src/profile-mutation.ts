@@ -113,7 +113,7 @@ type AlayaLauncherRootInput =
  * Resolve the launcher pair (command, args) that attach writes into user
  * Codex / Claude profiles for spawning Alaya as an MCP stdio server.
  *
- * v0.1.0 default: node <repo-abs>/bin/alaya.mjs mcp stdio (always
+ * Default: node <repo-abs>/bin/alaya.mjs mcp stdio (always
  * spawnable; does not require `alaya` on PATH). The user can override
  * by exporting ALAYA_MCP_LAUNCHER=<command-or-path> before running
  * `alaya attach <target>` — useful after `pnpm link --global`.

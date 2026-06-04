@@ -59,10 +59,6 @@ export {
   type SynthesisCapsuleKeywordHit
 } from "./repos/synthesis-capsule-repo.js";
 export {
-  SqliteMemoryGraphEdgeRepo,
-  type MemoryGraphEdgeRepo
-} from "./repos/memory-graph-edge-repo.js";
-export {
   SqliteEdgeProposalRepo,
   type EdgeProposalCreateInput,
   type EdgeProposalRepo,
@@ -113,6 +109,17 @@ export {
   SqlitePathRelationRepo,
   type PathRelationRepo
 } from "./repos/path-relation-repo.js";
+export {
+  SqliteCoUsageCounterRepo,
+  type CoUsageCounterIncrementInput,
+  type CoUsageCounterRepo
+} from "./repos/co-usage-counter-repo.js";
+export {
+  SqliteEnrichPendingRepo,
+  type EnrichPendingClaim,
+  type EnrichPendingEnqueueInput,
+  type EnrichPendingRepo
+} from "./repos/enrich-pending-repo.js";
 export {
   SqlitePathPlasticityWatermarkRepo,
   type PathPlasticityWatermarkRecord,
@@ -200,6 +207,7 @@ export {
 export {
   SqliteMemoryEmbeddingRepo,
   type MemoryEmbeddingRecord,
+  type MemoryEmbeddingMetadata,
   type MemoryEmbeddingRepo
 } from "./repos/memory-embedding-repo.js";
 export {
@@ -234,11 +242,13 @@ export {
 export {
   SqliteGardenTaskRepo,
   type GardenTaskBacklogCount,
+  type GardenTaskKindBacklogCount,
   type GardenTaskClaimResult,
   type GardenTaskCompletionResult,
   type GardenTaskEnqueueInput,
   type GardenTaskEventInput,
   type GardenTaskEventPublisherPort,
+  type GardenTaskExpiryInput,
   type GardenTaskReclaimInput,
   type GardenTaskRepoPort,
   type GardenTaskRow,

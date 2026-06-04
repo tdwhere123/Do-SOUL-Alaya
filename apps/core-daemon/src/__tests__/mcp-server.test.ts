@@ -28,7 +28,7 @@ describe("mcp server", () => {
     const result = await callAlayaMcpMemoryTool(
       {
         memoryToolHandler: handler,
-        contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex" })
+        contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex", sessionId: "session-1" })
       },
       "soul.open_pointer",
       { object_id: "mem1" }
@@ -54,7 +54,7 @@ describe("mcp server", () => {
     const result = await callAlayaMcpMemoryTool(
       {
         memoryToolHandler: handler,
-        contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex" })
+        contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex", sessionId: "session-1" })
       },
       "memory.recall",
       {}
@@ -77,7 +77,7 @@ describe("mcp server", () => {
     };
     createAlayaMcpServer({
       memoryToolHandler: handler,
-      contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex" })
+      contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex", sessionId: "session-1" })
     });
 
     expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("tools only");

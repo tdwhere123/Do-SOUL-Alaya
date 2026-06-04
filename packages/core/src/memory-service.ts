@@ -21,9 +21,11 @@ import {
   type MemoryEntryMutableFields,
   type MemoryEntryRepoUpdateFields as ProtocolMemoryEntryRepoUpdateFields,
   type ScopeClass,
+  type SynthesisCapsule,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
+import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "./importance-gate.js";
 import { parseNonEmptyString, parseObjectId } from "./shared/validators.js";
 
 export type MemoryEntryInput = Omit<
@@ -48,6 +50,21 @@ export type MemoryEntryInput = Omit<
   | "superseded_by"
 > & {
   readonly storage_tier?: MemoryEntry["storage_tier"];
+  // invariant: atomic create + enrich_pending no-drop marker. When present, the
+  // memory row insert and the enrich_pending enqueue commit in ONE storage
+  // transaction (so a created memory ALWAYS carries its marker, or neither
+  // lands and the originating signal can replay). The caller (soul materializer)
+  // owns the enqueue DECISION — it sets this only on the branches that enqueue;
+  // run_id / source_signal_id are carried here, while workspace_id + memory_id
+  // are filled from the freshly created row inside core. Requires both the
+  // enrichPendingWriter dep and memoryEntryRepo.createWithinTransaction to be
+  // wired; otherwise create throws rather than silently dropping the marker.
+  // see also: packages/soul/src/garden/materialization-router.ts enqueueEnrichment
+  // see also: packages/storage/src/repos/enrich-pending-repo.ts enqueue
+  readonly enqueueEnrichment?: {
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  };
 };
 
 export type MemoryEntryUpdateFields = MemoryEntryMutableFields & {
@@ -66,6 +83,17 @@ export interface MemoryServiceEventLogRepoPort {
 
 export interface MemoryServiceMemoryEntryRepoPort {
   create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>>;
+  // see also: packages/storage/src/repos/memory-entry-repo.ts createWithinTransaction.
+  // The synchronous callbacks commit atomically with the row insert. `beforeCreate`
+  // is used for the EventLog-first audit row; `afterCreate` is used for the
+  // enrich_pending no-drop marker.
+  createWithinTransaction?(
+    entry: MemoryEntry,
+    callbacks: {
+      readonly beforeCreate?: () => void;
+      readonly afterCreate?: () => void;
+    }
+  ): Readonly<MemoryEntry>;
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
   findByWorkspaceId(
     workspaceId: string,
@@ -91,12 +119,53 @@ export interface MemoryServiceMemoryEntryRepoPort {
     lifecycleState: MemoryEntry["lifecycle_state"],
     updatedAt: string
   ): Promise<Readonly<MemoryEntry>>;
+  // invariant: guarded active -> dormant demotion. onTransition (the
+  // active->dormant audit append) commits atomically with the guarded UPDATE
+  // inside one transaction; resolves null on a 0-row benign race (row not active
+  // anymore) so the caller skips without a spurious audit and without throwing.
+  transitionToDormantIfActive?(
+    objectId: string,
+    updatedAt: string,
+    onTransition?: () => void
+  ): Promise<Readonly<MemoryEntry> | null>;
   archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>>;
   hardDeleteTombstoned?(objectId: string): Promise<void>;
+  // invariant: the GATED autonomous-tombstone authority (R3d). Writes the
+  // durable forget_disposition marker and terminalizes a DORMANT row only.
+  autonomousTombstone?(input: {
+    readonly objectId: string;
+    readonly disposition: MemoryEntry["forget_disposition"];
+    readonly dispositionRef: string | null;
+    readonly updatedAt: string;
+  }, options?: { readonly onTransition?: () => void }): Promise<Readonly<MemoryEntry>>;
+  // invariant: the GATED autonomous physical-delete authority (R3d). Removes a
+  // tombstoned + past-grace row ONLY when it carries a non-null disposition.
+  // requireLiveCapsuleRef makes the compressed-member preservation re-check
+  // (capsule liveness + membership) atomic with the physical delete; resolves
+  // false when that guard removed 0 rows (preservation revoked, fail-closed).
+  hardDeleteTombstonedWithDisposition?(
+    objectId: string,
+    options?: {
+      readonly requireLiveCapsuleRef?: boolean;
+      readonly requireJudgedUselessVerdict?: boolean;
+      readonly onDeleted?: () => void;
+    }
+  ): Promise<boolean>;
 }
 
 export interface MemoryServiceEvidenceServicePort {
   findById(objectId: string): Promise<unknown | null>;
+}
+
+// invariant (B1 delete-time TOCTOU backstop): the disposition-gated physical
+// delete authority re-verifies a `compressed` member's preserving capsule at
+// DELETE time, not just at marking time. A capsule can archive / tombstone /
+// drop the member / be cascade-deleted during the >=24h grace, which would make
+// the member's "preserved" rationale stale and turn the hard-delete into
+// permanent loss. This port lets the delete authority re-load the capsule by
+// forget_disposition_ref and re-assert liveness + membership before deleting.
+export interface MemoryServiceSynthesisCapsuleLookupPort {
+  findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null>;
 }
 
 export interface MemoryRuntimeNotifier {
@@ -120,6 +189,22 @@ export interface MemoryServiceDynamicsPort {
   };
 }
 
+// invariant: synchronous enrich_pending writer for the atomic create+enqueue
+// path. The enqueue runs INSIDE the memory-row create transaction, so it must be
+// synchronous (better-sqlite3 commits on return). memory_id + workspace_id come
+// from the freshly created row; run_id + source_signal_id from the create input.
+// Core depends on a storage abstraction here exactly as it does on
+// memoryEntryRepo — the daemon wires it to SqliteEnrichPendingRepo.enqueue.
+// see also: packages/storage/src/repos/enrich-pending-repo.ts enqueue
+export interface MemoryServiceEnrichPendingWriterPort {
+  enqueue(params: {
+    readonly workspaceId: string;
+    readonly memoryId: string;
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  }): void;
+}
+
 export interface MemoryServiceGreenPort {
   reevaluate(params: {
     readonly targetObjectId: string;
@@ -140,6 +225,17 @@ export interface MemoryServiceDependencies {
   readonly runtimeNotifier: MemoryRuntimeNotifier;
   readonly dynamicsService?: MemoryServiceDynamicsPort;
   readonly greenService?: MemoryServiceGreenPort;
+  // invariant (B1): the delete authority re-verifies a `compressed` member's
+  // preserving capsule at delete time. Optional so narrow test fakes that never
+  // exercise the compressed branch need not wire it — but a `compressed`
+  // tombstone whose capsule cannot be re-verified is REFUSED rather than
+  // silently deleted (fail-closed), so an absent port can never cause loss.
+  readonly synthesisCapsuleLookup?: MemoryServiceSynthesisCapsuleLookupPort;
+  // invariant: when wired alongside memoryEntryRepo.createWithinTransaction, a
+  // create whose input carries `enqueueEnrichment` commits the row + the
+  // enrich_pending marker atomically. Absent, an enqueueEnrichment intent throws
+  // (no silent no-drop violation) rather than dropping the marker.
+  readonly enrichPendingWriter?: MemoryServiceEnrichPendingWriterPort;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
 }
@@ -193,7 +289,7 @@ export class MemoryService {
     });
 
     await this.validateEvidenceRefs(memoryEntry.evidence_refs);
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_CREATED,
       entity_type: "memory_entry",
       entity_id: memoryEntry.object_id,
@@ -206,9 +302,13 @@ export class MemoryService {
         workspace_id: memoryEntry.workspace_id,
         run_id: memoryEntry.run_id
       })
-    });
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
-    const created = await this.dependencies.memoryEntryRepo.create(memoryEntry);
+    const { created, event } = await this.createRowMaybeAtomicallyEnqueued(
+      memoryEntry,
+      input.enqueueEnrichment,
+      eventInput
+    );
     await this.dependencies.runtimeNotifier.notifyEntry(event);
 
     if (
@@ -224,6 +324,82 @@ export class MemoryService {
     }
 
     return created;
+  }
+
+  // invariant: atomic audit + create + enrich_pending no-drop marker. When the
+  // storage transaction seam is available (production SQLite), the
+  // soul.memory.created event, memory row, and optional enrich_pending marker
+  // commit in ONE transaction and in EventLog-first order. A create failure
+  // rolls back the audit row; an audit/enqueue failure leaves no marker-less or
+  // audit-less memory row. The plain async fallback exists only for minimal test
+  // fakes that do not advertise the transaction seam.
+  // see also: packages/soul/src/garden/materialization-router.ts enqueueEnrichment
+  // see also: packages/core/src/signal-service.ts terminal-FAILED on success!=true
+  private async createRowMaybeAtomicallyEnqueued(
+    memoryEntry: Readonly<MemoryEntry>,
+    enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"],
+    createdEventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+  ): Promise<{
+    readonly created: Readonly<MemoryEntry>;
+    readonly event: EventLogEntry;
+  }> {
+    const createWithinTransaction = this.dependencies.memoryEntryRepo.createWithinTransaction;
+    if (createWithinTransaction !== undefined) {
+      const enrichPendingWriter = this.dependencies.enrichPendingWriter;
+      if (enqueueEnrichment !== undefined && enrichPendingWriter === undefined) {
+        throw new CoreError(
+          "CONFLICT",
+          "Atomic enrich_pending enqueue requested but the enrich-pending writer is not wired."
+        );
+      }
+
+      let event: EventLogEntry | undefined;
+      const created = createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, {
+        beforeCreate: () => {
+          event = this.appendCreatedEventSynchronously(createdEventInput);
+        },
+        afterCreate: () => {
+          if (enqueueEnrichment !== undefined) {
+            enrichPendingWriter?.enqueue({
+              workspaceId: memoryEntry.workspace_id,
+              memoryId: memoryEntry.object_id,
+              runId: enqueueEnrichment.runId,
+              sourceSignalId: enqueueEnrichment.sourceSignalId
+            });
+          }
+        }
+      });
+
+      if (event === undefined) {
+        throw new CoreError("CONFLICT", "Memory create transaction did not append its audit event.");
+      }
+
+      return { created, event };
+    }
+
+    if (enqueueEnrichment !== undefined) {
+      throw new CoreError(
+        "CONFLICT",
+        "Atomic enrich_pending enqueue requested but the storage transaction port is not wired."
+      );
+    }
+
+    const event = await this.dependencies.eventLogRepo.append(createdEventInput);
+    const created = await this.dependencies.memoryEntryRepo.create(memoryEntry);
+    return { created, event };
+  }
+
+  private appendCreatedEventSynchronously(
+    eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+  ): EventLogEntry {
+    const event = this.dependencies.eventLogRepo.append(eventInput);
+    if (isPromiseLike(event)) {
+      throw new CoreError(
+        "CONFLICT",
+        "Memory create transaction requires a synchronous EventLog append port."
+      );
+    }
+    return event;
   }
 
   public async update(
@@ -376,6 +552,84 @@ export class MemoryService {
     return updated;
   }
 
+  /**
+   * Audited, race-tolerant autonomous active -> dormant demotion (the Janitor
+   * dormant-demotion sweep). The candidate snapshot can go stale before a
+   * candidate's turn (concurrent revival / overlapping sweep / Inspector retire),
+   * so this never throws on the benign "no longer active" race: it resolves
+   * `{ status: "skipped" }` and the batch continues. A row that actually
+   * transitions gets its SOUL_MEMORY_STATE_CHANGED active->dormant audit appended
+   * ATOMICALLY with the guarded UPDATE (audit + UPDATE in one transaction); a
+   * 0-row guarded UPDATE rolls back so no spurious audit is written. A genuine
+   * storage error still rejects.
+   *
+   * see also: apps/core-daemon/src/index.ts auditedDormantDemotionPort
+   * see also: packages/soul/src/garden/janitor.ts executeDormantDemotion
+   */
+  public async demoteActiveToDormantIfActive(
+    objectId: string,
+    reason: string,
+    causedBy: TransitionCausedBy
+  ): Promise<{ readonly status: "demoted"; readonly entry: Readonly<MemoryEntry> } | { readonly status: "skipped" }> {
+    const parsedObjectId = parseObjectId(objectId);
+    const parsedReason = parseReason(reason);
+    const parsedCausedBy = parseTransitionCausedBy(causedBy);
+
+    const transitionToDormantIfActive = this.dependencies.memoryEntryRepo.transitionToDormantIfActive;
+    if (transitionToDormantIfActive === undefined) {
+      throw new CoreError("CONFLICT", "Guarded active->dormant demotion port is not available");
+    }
+
+    const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
+    // The row left existence entirely (e.g. autonomously deleted) between the
+    // candidate snapshot and this turn: a benign race for the demotion sweep.
+    if (existing === null) {
+      return { status: "skipped" };
+    }
+    if (existing.lifecycle_state !== "active") {
+      return { status: "skipped" };
+    }
+
+    const occurredAt = this.now();
+    const eventInput = {
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedCausedBy,
+      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        from_state: "active",
+        to_state: "dormant",
+        reason_code: parsedReason,
+        caused_by: parsedCausedBy,
+        evidence_refs: null,
+        occurred_at: occurredAt
+      })
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+    // invariant: the audit append is the onTransition callback, so it commits
+    // INSIDE the guarded-UPDATE transaction (EventLog-first audit atomic with the
+    // demotion). A 0-row guarded UPDATE (row no longer active) fires no callback
+    // and resolves null, so no spurious audit is written and the caller skips.
+    let event: EventLogEntry | undefined;
+    const demoted = await transitionToDormantIfActive(parsedObjectId, occurredAt, () => {
+      event = this.appendAuditEventSynchronously(eventInput);
+    });
+    if (demoted === null) {
+      return { status: "skipped" };
+    }
+    if (event === undefined) {
+      throw new CoreError("CONFLICT", "Active->dormant demotion transaction did not append its audit event.");
+    }
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
+    return { status: "demoted", entry: demoted };
+  }
+
   public async hardDeleteTombstoned(
     objectId: string,
     reason: string,
@@ -423,6 +677,393 @@ export class MemoryService {
 
     await hardDeleteTombstoned(parsedObjectId);
     await this.dependencies.runtimeNotifier.notifyEntry(event);
+  }
+
+  /**
+   * GATED autonomous tombstone (R3d): move a DORMANT memory to tombstoned with a
+   * durable forget_disposition marker, audited via SOUL_MEMORY_STATE_CHANGED.
+   *
+   * SAFE-BY-CONSTRUCTION: the caller (the Garden disposition sweep) has already
+   * verified the disposition — `compressed` means content is preserved in a live
+   * capsule that references this member (dispositionRef = capsule id);
+   * `judged_useless` means the mechanical importance gate cleared it. This method
+   * re-asserts the precondition shape (compressed requires a ref, judged_useless
+   * forbids one) and refuses to terminalize anything but a dormant row (the repo
+   * UPDATE is guarded on lifecycle_state='dormant'). A null/absent disposition is
+   * impossible to pass here.
+   */
+  public async autonomousTombstone(
+    objectId: string,
+    disposition: NonNullable<MemoryEntry["forget_disposition"]>,
+    dispositionRef: string | null,
+    reason: string,
+    causedBy: TransitionCausedBy
+  ): Promise<Readonly<MemoryEntry>> {
+    const parsedObjectId = parseObjectId(objectId);
+    const parsedReason = parseReason(reason);
+    const parsedCausedBy = parseTransitionCausedBy(causedBy);
+
+    if (disposition === "compressed" && (dispositionRef === null || dispositionRef.trim().length === 0)) {
+      throw new CoreError("VALIDATION", "compressed disposition requires a live synthesis-capsule ref");
+    }
+    if (disposition === "judged_useless" && dispositionRef !== null) {
+      throw new CoreError("VALIDATION", "judged_useless disposition must not carry a disposition ref");
+    }
+
+    const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
+    if (existing === null) {
+      throw new CoreError("NOT_FOUND", "Memory entry not found");
+    }
+    if (existing.lifecycle_state !== "dormant") {
+      throw new CoreError(
+        "VALIDATION",
+        "Only a dormant memory may be autonomously tombstoned"
+      );
+    }
+
+    // invariant (FIX-N1 defense in depth): the dormant demotion candidate query
+    // admits pinned/hazard/canon/consolidated rows, so computeForgetDisposition's
+    // isMemoryExplicitlyProtected check is the only barrier upstream. Re-assert it
+    // HERE at the tombstone authority so an explicitly-protected row can never be
+    // tombstoned even if a future caller bypasses computeForgetDisposition.
+    // Fail-closed: refuse (the row is never terminalized, stays dormant).
+    // see also: apps/core-daemon/src/forget-disposition-ports.ts computeForgetDisposition,
+    // packages/core/src/importance-gate.ts isMemoryExplicitlyProtected.
+    if (isMemoryExplicitlyProtected(existing)) {
+      throw new CoreError(
+        "VALIDATION",
+        "Autonomous tombstone refused: memory is explicitly protected (pinned/hazard/canon/consolidated)"
+      );
+    }
+
+    const autonomousTombstone = this.dependencies.memoryEntryRepo.autonomousTombstone;
+    if (autonomousTombstone === undefined) {
+      throw new CoreError("CONFLICT", "Autonomous tombstone port is not available");
+    }
+
+    const occurredAt = this.now();
+    const eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision"> = {
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedCausedBy,
+      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        from_state: existing.lifecycle_state,
+        to_state: "tombstone",
+        // reason_code carries the disposition + caller rationale so the durable
+        // EventLog row records WHY the autonomous tombstone was permitted.
+        reason_code: `forget_disposition=${disposition}: ${parsedReason}`,
+        caused_by: parsedCausedBy,
+        evidence_refs: dispositionRef === null ? null : [dispositionRef],
+        occurred_at: occurredAt
+      })
+    };
+    let event: EventLogEntry | undefined;
+
+    const updated = await autonomousTombstone(
+      {
+        objectId: parsedObjectId,
+        disposition,
+        dispositionRef,
+        updatedAt: occurredAt
+      },
+      {
+        onTransition: () => {
+          event = this.appendAuditEventSynchronously(eventInput);
+        }
+      }
+    );
+    if (event === undefined) {
+      throw new CoreError("CONFLICT", "Autonomous tombstone transaction did not append its audit event.");
+    }
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
+    return updated;
+  }
+
+  /**
+   * GATED autonomous physical removal (R3d, defense in depth): physically remove
+   * a tombstoned + past-grace row ONLY when it carries a non-null disposition.
+   * The repo restates the disposition gate in SQL; this method also re-asserts it
+   * on the loaded row so a no-disposition tombstone (e.g. human Inspector retire)
+   * can never be auto-GC'd. The human/legacy path stays on hardDeleteTombstoned.
+   *
+   * invariant: returns `true` only when the row was physically deleted; returns
+   * `false` on the B1 preservation_revoked fail-closed refuse path (row stays
+   * tombstoned). Callers count actually-deleted rows by this signal.
+   */
+  public async autonomousHardDeleteTombstoned(
+    objectId: string,
+    reason: string,
+    causedBy: TransitionCausedBy
+  ): Promise<boolean> {
+    const parsedObjectId = parseObjectId(objectId);
+    const parsedReason = parseReason(reason);
+    const parsedCausedBy = parseTransitionCausedBy(causedBy);
+    const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
+
+    if (existing === null) {
+      throw new CoreError("NOT_FOUND", "Memory entry not found");
+    }
+    if (existing.retention_state !== "tombstoned") {
+      throw new CoreError("VALIDATION", "Only tombstoned memories can be hard-deleted");
+    }
+    if (existing.forget_disposition === null || existing.forget_disposition === undefined) {
+      throw new CoreError(
+        "VALIDATION",
+        "Autonomous hard-delete refused: tombstoned row carries no forget disposition"
+      );
+    }
+
+    const isCompressed = existing.forget_disposition === "compressed";
+
+    // invariant (delete-time TOCTOU re-verify): a `compressed` member earned its
+    // terminal-removal right ONLY because a live capsule FULLY CONSOLIDATES it
+    // (subset membership: the capsule preserves the cluster's shared evidence as
+    // evidence_capsules + a deterministic gist summary; the member's distilled
+    // `content` is NOT byte-preserved). That right is re-checked HERE (T0+>=24h),
+    // not just at marking time (T0). If the capsule archived / tombstoned / dropped
+    // this member / was cascade-deleted during the grace window, the consolidation
+    // is gone, so physical deletion would be permanent loss. This pre-check fails
+    // fast with a precise reason; the physical delete below is ALSO guarded
+    // atomically so a capsule mutation racing between this check and the delete
+    // cannot leak.
+    // see also: apps/core-daemon/src/forget-disposition-ports.ts isCapsuleLive.
+    if (isCompressed) {
+      const preserved = await this.compressedPreservationStillValid(existing);
+      if (!preserved) {
+        await this.emitPreservationRevoked(existing, parsedReason, parsedCausedBy);
+        return false;
+      }
+    }
+
+    const hardDeleteWithDisposition = this.dependencies.memoryEntryRepo.hardDeleteTombstonedWithDisposition;
+    if (hardDeleteWithDisposition === undefined) {
+      throw new CoreError("CONFLICT", "Disposition-gated tombstone delete port is not available");
+    }
+
+    // invariant: a `compressed` member's physical delete restates capsule
+    // liveness + membership INSIDE the DELETE (requireLiveCapsuleRef), so the
+    // preservation re-check is atomic with the removal — no TOCTOU window. The
+    // guarded delete runs FIRST so a capsule revocation that raced past the
+    // fast pre-check (0 rows changed) is recorded as preservation_revoked
+    // instead of a spurious "deleted" audit. The judged_useless arm mirrors
+    // this shape with its own verdict-restating DELETE guard.
+    if (isCompressed) {
+      // invariant: the to_state=deleted audit append is the onDeleted callback,
+      // so it commits INSIDE the guarded-delete transaction (a crash cannot leave
+      // the row gone with no durable audit) and is skipped on a 0-row
+      // preservation-revoked race (no spurious "deleted" audit). The append joins
+      // the open SQLite txn synchronously, so a sync EventLog port is required.
+      const deleteEventInput = this.buildAutonomousDeleteEventInput(existing, parsedReason, parsedCausedBy);
+      let deletedEvent: EventLogEntry | undefined;
+      const deleted = await hardDeleteWithDisposition(parsedObjectId, {
+        requireLiveCapsuleRef: true,
+        onDeleted: () => {
+          deletedEvent = this.appendAuditEventSynchronously(deleteEventInput);
+        }
+      });
+      if (!deleted) {
+        await this.emitPreservationRevoked(existing, parsedReason, parsedCausedBy);
+        return false;
+      }
+      if (deletedEvent === undefined) {
+        throw new CoreError("CONFLICT", "Compressed tombstone delete transaction did not append its audit event.");
+      }
+      await this.dependencies.runtimeNotifier.notifyEntry(deletedEvent);
+      return true;
+    }
+
+    // invariant (delete-time verdict re-verify, symmetry with the `compressed`
+    // arm): a `judged_useless` row earned its terminal-removal right ONLY because
+    // the mechanical importance gate found it source-less AND never reinforced AND
+    // unprotected at marking time (T0). That verdict is re-checked HERE
+    // (T0+>=24h) on the FRESHLY-loaded row, not trusted blindly. If the row gained
+    // evidence / reinforcement / an explicit-keep protection during the grace
+    // window it no longer classifies judged_useless, so physical deletion would
+    // discard a now-durable memory. Fail-closed: emit a verdict_revoked skip event
+    // and leave the row tombstoned (recoverable).
+    // see also: packages/core/src/importance-gate.ts classifyMemoryImportance,
+    // apps/core-daemon/src/forget-disposition-ports.ts computeForgetDisposition.
+    if (classifyMemoryImportance(existing).disposition !== "judged_useless") {
+      await this.emitVerdictRevoked(existing, parsedReason, parsedCausedBy);
+      return false;
+    }
+
+    const deleteEventInput = this.buildAutonomousDeleteEventInput(existing, parsedReason, parsedCausedBy);
+    let deletedEvent: EventLogEntry | undefined;
+    const deleted = await hardDeleteWithDisposition(parsedObjectId, {
+      requireJudgedUselessVerdict: true,
+      onDeleted: () => {
+        deletedEvent = this.appendAuditEventSynchronously(deleteEventInput);
+      }
+    });
+    if (!deleted) {
+      await this.emitVerdictRevoked(existing, parsedReason, parsedCausedBy);
+      return false;
+    }
+    if (deletedEvent === undefined) {
+      throw new CoreError("CONFLICT", "Judged-useless tombstone delete transaction did not append its audit event.");
+    }
+    await this.dependencies.runtimeNotifier.notifyEntry(deletedEvent);
+    return true;
+  }
+
+  // invariant: the audited terminal-removal record (to_state=deleted). reason_code
+  // carries the disposition + caller rationale so the durable EventLog row records
+  // WHY the autonomous physical delete was permitted.
+  private buildAutonomousDeleteEventInput(
+    existing: Readonly<MemoryEntry>,
+    parsedReason: string,
+    parsedCausedBy: TransitionCausedBy
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+    return {
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedCausedBy,
+      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        from_state: existing.lifecycle_state,
+        to_state: "deleted",
+        reason_code: `forget_disposition=${existing.forget_disposition}: ${parsedReason}`,
+        caused_by: parsedCausedBy,
+        evidence_refs: null,
+        occurred_at: this.now()
+      })
+    };
+  }
+
+  // invariant: synchronous EventLog append for the audit-inside-transaction seams
+  // (dormant/tombstone transitions and compressed/judged terminal deletes).
+  // eventLogRepo.append
+  // joins the open SQLite txn (inTransaction) when called from a transaction
+  // callback; a Promise-returning port cannot, so reject it loudly rather than
+  // silently committing the storage mutation without an atomic audit.
+  private appendAuditEventSynchronously(
+    eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+  ): EventLogEntry {
+    const event = this.dependencies.eventLogRepo.append(eventInput);
+    if (isPromiseLike(event)) {
+      throw new CoreError(
+        "CONFLICT",
+        "Autonomous audit-inside-transaction requires a synchronous EventLog append port."
+      );
+    }
+    return event;
+  }
+
+  // invariant (delete-time fail-closed): a `compressed` member whose preserving
+  // capsule no longer preserves it (archived / tombstoned / member dropped /
+  // cascade-deleted) is NOT physically removed. The row stays tombstoned
+  // (recoverable) and this audited skip event records the revocation. Emitted
+  // both by the fast pre-check and by the atomic guarded delete returning 0 rows.
+  private async emitPreservationRevoked(
+    existing: Readonly<MemoryEntry>,
+    parsedReason: string,
+    parsedCausedBy: TransitionCausedBy
+  ): Promise<void> {
+    const skipEvent = await this.dependencies.eventLogRepo.append({
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedCausedBy,
+      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        // The row is NOT deleted: tombstone -> tombstone, preservation_revoked.
+        from_state: existing.lifecycle_state,
+        to_state: existing.lifecycle_state,
+        reason_code: `preservation_revoked: compressed capsule ${
+          existing.forget_disposition_ref ?? "<null>"
+        } no longer preserves this member; physical delete refused: ${parsedReason}`,
+        caused_by: parsedCausedBy,
+        evidence_refs:
+          existing.forget_disposition_ref === null ||
+          existing.forget_disposition_ref === undefined
+            ? null
+            : [existing.forget_disposition_ref],
+        occurred_at: this.now()
+      })
+    });
+    await this.dependencies.runtimeNotifier.notifyEntry(skipEvent);
+  }
+
+  // invariant (delete-time fail-closed, symmetry with emitPreservationRevoked): a
+  // `judged_useless` row whose verdict no longer holds at delete time (it gained
+  // evidence / reinforcement / an explicit-keep protection during the grace
+  // window) is NOT physically removed. The row stays tombstoned (recoverable) and
+  // this audited skip event records that the marking-time verdict was revoked.
+  private async emitVerdictRevoked(
+    existing: Readonly<MemoryEntry>,
+    parsedReason: string,
+    parsedCausedBy: TransitionCausedBy
+  ): Promise<void> {
+    const skipEvent = await this.dependencies.eventLogRepo.append({
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedCausedBy,
+      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        // The row is NOT deleted: tombstone -> tombstone, verdict_revoked.
+        from_state: existing.lifecycle_state,
+        to_state: existing.lifecycle_state,
+        reason_code: `verdict_revoked: judged_useless no longer holds (gained evidence/reinforcement/protection); physical delete refused: ${parsedReason}`,
+        caused_by: parsedCausedBy,
+        evidence_refs: existing.evidence_refs.length === 0 ? null : [...existing.evidence_refs],
+        occurred_at: this.now()
+      })
+    });
+    await this.dependencies.runtimeNotifier.notifyEntry(skipEvent);
+  }
+
+  // invariant (B1): re-verify that a `compressed` member is STILL preserved by a
+  // live capsule that STILL references it, at delete time. Fail-closed: a null
+  // ref, an unwired capsule-lookup port, a missing/archived/tombstoned capsule,
+  // or a capsule that no longer lists this member all return false -> the caller
+  // REFUSES the physical delete. Mirrors the marking-time liveness + membership
+  // check in forget-disposition-ports.ts (isCapsuleLive + source_memory_refs).
+  private async compressedPreservationStillValid(
+    existing: Readonly<MemoryEntry>
+  ): Promise<boolean> {
+    const ref = existing.forget_disposition_ref;
+    if (ref === null || ref === undefined) {
+      return false;
+    }
+    const capsuleLookup = this.dependencies.synthesisCapsuleLookup;
+    if (capsuleLookup === undefined) {
+      return false;
+    }
+    const capsule = await capsuleLookup.findById(ref);
+    if (capsule === null) {
+      return false;
+    }
+    const isLive =
+      capsule.lifecycle_state !== "tombstone" && capsule.synthesis_status !== "archived";
+    if (!isLive) {
+      return false;
+    }
+    return capsule.source_memory_refs.includes(existing.object_id);
   }
 
   public findById(objectId: string): Promise<Readonly<MemoryEntry> | null> {
@@ -743,4 +1384,8 @@ function ensureAllowedLifecycleTransition(
   if (!isValidLifecycleTransition(from, to)) {
     throw new CoreError("VALIDATION", `Invalid memory lifecycle transition: ${from} -> ${to}`);
   }
+}
+
+function isPromiseLike(value: unknown): value is Promise<unknown> {
+  return value instanceof Promise || typeof (value as { readonly then?: unknown })?.then === "function";
 }

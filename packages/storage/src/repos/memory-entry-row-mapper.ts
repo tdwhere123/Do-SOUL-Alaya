@@ -1,9 +1,11 @@
 import {
+  ForgetDispositionSchema,
   MemoryDimensionSchema,
   MemoryEntrySchema,
   ObjectLifecycleStateSchema,
   ScopeClassSchema,
   StorageTierSchema,
+  type ForgetDisposition,
   type MemoryDimension,
   type MemoryEntry,
   type ScopeClass,
@@ -43,7 +45,9 @@ export const MEMORY_ENTRY_SELECT_COLUMNS = `
         last_hit_at,
         reinforcement_count,
         contradiction_count,
-        superseded_by
+        superseded_by,
+        forget_disposition,
+        forget_disposition_ref
 `;
 export interface MemoryEntryRow {
   readonly object_id: string;
@@ -75,6 +79,8 @@ export interface MemoryEntryRow {
   readonly reinforcement_count: number | null;
   readonly contradiction_count: number | null;
   readonly superseded_by: string | null;
+  readonly forget_disposition: string | null;
+  readonly forget_disposition_ref: string | null;
 }
 
 export function parseMemoryEntry(value: MemoryEntry): Readonly<MemoryEntry> {
@@ -117,7 +123,9 @@ export function parseMemoryEntryRow(row: MemoryEntryRow): Readonly<MemoryEntry> 
         last_hit_at: row.last_hit_at,
         reinforcement_count: row.reinforcement_count,
         contradiction_count: row.contradiction_count,
-        superseded_by: row.superseded_by
+        superseded_by: row.superseded_by,
+        forget_disposition: row.forget_disposition,
+        forget_disposition_ref: row.forget_disposition_ref
       })
     );
   } catch (error) {
@@ -262,6 +270,16 @@ function parseRetentionState(value: NonNullable<MemoryEntry["retention_state"]>)
   }
 
   throw new StorageError("VALIDATION_FAILED", "Failed to validate retention_state.");
+}
+
+export function parseForgetDisposition(
+  value: MemoryEntry["forget_disposition"]
+): ForgetDisposition {
+  try {
+    return ForgetDispositionSchema.parse(value);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate forget_disposition.", error);
+  }
 }
 
 function parseStringArray(value: readonly string[], field: "domain_tags" | "evidence_refs"): void {

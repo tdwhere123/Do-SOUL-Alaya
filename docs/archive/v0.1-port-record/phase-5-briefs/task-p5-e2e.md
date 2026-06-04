@@ -5,7 +5,7 @@
 > - **Card ID**: P5-e2e
 > - **Port mode**: requires-redesign
 > - **Source**: `n/a`
-> - **Target**: `apps/core-daemon/src/__tests__/e2e/v0.1-release-loop.test.ts`, `docs/v0.1/phase-5-briefs/reports/task-p5-e2e.md`
+> - **Target**: `apps/core-daemon/src/__tests__/e2e/release-loop.test.ts`, `docs/v0.1/phase-5-briefs/reports/task-p5-e2e.md`
 > - **Size**: M
 > - **Prerequisite**: Gate-4 passed, P4-mcp-memory-tools, P5-graph-contract
 > - **Blocks**: P5-final-review
@@ -30,7 +30,7 @@ attached-agent proof of the first-party MCP memory tools.
 
 | Source | Target | Port requirement |
 |---|---|---|
-| `n/a` | `apps/core-daemon/src/__tests__/e2e/v0.1-release-loop.test.ts` | Alaya-specific redesign; tests must prove each behavior listed below. |
+| `n/a` | `apps/core-daemon/src/__tests__/e2e/release-loop.test.ts` | Alaya-specific redesign; tests must prove each behavior listed below. |
 | `n/a` | `docs/v0.1/phase-5-briefs/reports/task-p5-e2e.md` | Alaya-specific redesign; tests must prove each behavior listed below. |
 
 ### 2.2 Port Rules

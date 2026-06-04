@@ -620,7 +620,7 @@ export class Auditor {
         continue;
       }
 
-      // D8: hazard dimensions stay on the explicit user_reconfirm path in Phase 4A.
+      // Hazard dimensions stay on the explicit user_reconfirm path.
       if (status.dimension === MemoryDimension.HAZARD) {
         continue;
       }

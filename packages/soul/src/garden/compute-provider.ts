@@ -7,6 +7,8 @@ import {
   type CandidateMemorySignal,
   type ConversationMessage
 } from "@do-soul/alaya-protocol";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   SignalExtractorError,
@@ -15,6 +17,10 @@ import {
 } from "./pi-mono-extractor.js";
 import { buildSchemaGroundedRawPayload } from "./schema-grounding.js";
 import { DISTILLED_FACT_MAX_CHARS } from "./materialization-router.js";
+import {
+  WallClockTimeoutError,
+  withWallClockTimeout
+} from "./wall-clock-timeout.js";
 
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;
@@ -38,10 +44,28 @@ interface OfficialApiGardenProviderDependencies {
   readonly model?: string | null;
   readonly endpoint?: string | null;
   readonly requestTimeoutMs?: number;
+  // invariant: outer wall-clock budget. Defaults to readTimeoutMs + 30s.
+  // Test seam.
+  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  readonly wallClockBudgetMs?: number;
   readonly extractor?: SignalExtractor;
   readonly now?: () => string;
   readonly generateSignalId?: () => string;
+  // When set, a requestSignals invalid_response failure dumps a diagnostic
+  // JSON envelope to <diagnosticDir>/<ISO-ts>-<uuid>.json
+  // BEFORE the exception is rethrown. The dump is observation-only — it does
+  // not alter blocker logic or recover the failed call. Leave undefined to
+  // disable (no fs writes). Defaults to the cwd-rooted directory
+  // data/diagnostics/seed-extraction-failures/ so the bench preflight can
+  // read what the live extraction returned without bypassing the blocker.
+  readonly diagnosticDir?: string | null;
 }
+
+// Default cwd-rooted diagnostic directory used when no diagnosticDir override
+// is supplied. Generated path (data/* is gitignored); never treat as source.
+const DEFAULT_DIAGNOSTIC_DIR_REL = "data/diagnostics/seed-extraction-failures";
+const DIAGNOSTIC_BODY_PREFIX_MAX_CHARS = 4_096;
+const DIAGNOSTIC_PROMPT_PREFIX_MAX_CHARS = 512;
 
 // One parsed signal from the official-API extractor JSON. distilled_fact is
 // absent when the model omits it (or supplies a non-string / empty value);
@@ -68,6 +92,14 @@ export class GardenProviderError extends Error {
 }
 
 const DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS = 10_000;
+// invariant: outer wall-clock budget = read timeout + grace. Read timeout
+// drives the inner SDK abort; wall-clock catches stale sockets the monotonic
+// timer cannot detect after host suspend.
+// see also: packages/soul/src/garden/wall-clock-timeout.ts
+const WALL_CLOCK_OUTER_GRACE_MS = 30_000;
+function wallClockBudgetFor(readTimeoutMs: number): number {
+  return readTimeoutMs + WALL_CLOCK_OUTER_GRACE_MS;
+}
 export const OFFICIAL_API_GARDEN_MODEL = "gpt-4.1-mini";
 
 // The distilled_fact contract below is the field-standard atomic-fact
@@ -96,15 +128,23 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   private readonly model: string;
   private readonly endpoint: string | null;
   private readonly requestTimeoutMs: number;
+  private readonly wallClockBudgetMs: number;
   private readonly extractor: SignalExtractor | null;
   private readonly now: () => string;
   private readonly generateSignalId: () => string;
+  // Absolute directory for invalid_response diagnostic dumps, or null when
+  // dumps are disabled. Resolved once at construction so
+  // a later cwd change does not retarget the dump file mid-run.
+  private readonly diagnosticDir: string | null;
 
   public constructor(deps: OfficialApiGardenProviderDependencies = {}) {
     this.apiKey = normalizeOptionalString(deps.apiKey ?? null);
     this.model = normalizeOptionalString(deps.model) ?? OFFICIAL_API_GARDEN_MODEL;
     this.endpoint = normalizeOptionalString(deps.endpoint);
     this.requestTimeoutMs = normalizePositiveTimeoutMs(deps.requestTimeoutMs) ?? DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS;
+    this.wallClockBudgetMs =
+      normalizePositiveTimeoutMs(deps.wallClockBudgetMs) ??
+      wallClockBudgetFor(this.requestTimeoutMs);
     this.extractor = deps.extractor ?? (this.apiKey === null
       ? null
       : createPiMonoExtractor({
@@ -114,6 +154,15 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         }));
     this.now = deps.now ?? (() => new Date().toISOString());
     this.generateSignalId = deps.generateSignalId ?? (() => randomUUID());
+    // null sentinel ("disabled") vs undefined ("use default cwd path"). A null
+    // override is honoured exactly — production wiring that intentionally
+    // turns dumps off (e.g. read-only fs) gets no fs writes.
+    this.diagnosticDir =
+      deps.diagnosticDir === null
+        ? null
+        : deps.diagnosticDir === undefined
+          ? resolve(process.cwd(), DEFAULT_DIAGNOSTIC_DIR_REL)
+          : resolve(deps.diagnosticDir);
   }
 
   public async compile(
@@ -215,20 +264,70 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
 
+    const userPrompt = JSON.stringify({
+      workspace_id: context.workspace_id,
+      run_id: context.run_id,
+      surface_id: context.surface_id,
+      turn_content: turnContent,
+      turn_messages: context.turn_messages
+    });
+    let rawJson: string | null = null;
+    let extractorMeta:
+      | {
+          readonly recoveryKind: string;
+          readonly retryCount: number;
+          readonly retryClassification?: string;
+        }
+      | null = null;
     try {
-      const response = await this.extractor.extract({
-        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-        userPrompt: JSON.stringify({
-          workspace_id: context.workspace_id,
-          run_id: context.run_id,
-          surface_id: context.surface_id,
-          turn_content: turnContent,
-          turn_messages: context.turn_messages
-        }),
-        timeoutMs: this.requestTimeoutMs
-      });
-      return parseOfficialApiSignals(response.rawJson);
+      // invariant: outer wall-clock guard. Inner timeoutMs drives the SDK's
+      // monotonic-clock abort; wall-clock fires after suspend-aware grace if
+      // the inner timer was frozen by host suspend.
+      // see also: packages/soul/src/garden/wall-clock-timeout.ts withWallClockTimeout
+      const extractor = this.extractor;
+      const requestTimeoutMs = this.requestTimeoutMs;
+      const response = await withWallClockTimeout(
+        async (signal) =>
+          extractor.extract({
+            systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+            userPrompt,
+            timeoutMs: requestTimeoutMs,
+            abortSignal: signal
+          }),
+        { budgetMs: this.wallClockBudgetMs }
+      );
+      rawJson = response.rawJson;
+      extractorMeta = response.extractorMeta ?? null;
+      return parseOfficialApiSignals(rawJson);
     } catch (error) {
+      // Only the invalid_response branch — JSON shape failure on the body the
+      // extractor returned, OR a SignalExtractorError of kind "invalid_json"
+      // (empty/oversized/non-JSON content). Both are what the bench preflight
+      // blocker rejects as `invalid_response`; the dump tells the diagnostic
+      // reader whether the model truncated, the provider returned chat noise,
+      // or the cache shard was torn. Network/timeout errors
+      // skip the dump — they are observable from the bench log already
+      // and the body is empty by definition.
+      // invariant: wall-clock timeout is a network-class failure, not an
+      // invalid_response. Body was never read; skip the diagnostic dump.
+      if (error instanceof WallClockTimeoutError) {
+        throw new GardenProviderError(error.message, "network", { cause: error });
+      }
+      const isInvalidResponse =
+        !(error instanceof SignalExtractorError) ||
+        error.kind === "invalid_json";
+      if (isInvalidResponse) {
+        // await so a preflight reading the dump immediately after sees the
+        // file — but a dump that itself throws (e.g. read-only fs)
+        // must not mask the real provider error.
+        await this.dumpInvalidResponseDiagnostic({
+          error,
+          rawJson,
+          userPrompt,
+          context,
+          extractorMeta
+        });
+      }
       if (error instanceof SignalExtractorError) {
         throw new GardenProviderError(
           error.kind === "invalid_json"
@@ -243,27 +342,96 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       });
     }
   }
-}
 
-export class CustomApiGardenProvider implements GardenComputeProvider {
-  public readonly provider_kind = GardenProviderKind.CUSTOM_API;
-
-  public async compile(): Promise<readonly CandidateMemorySignal[]> {
-    throw new GardenProviderError(
-      "CustomApiGardenProvider is not implemented in Phase 0.5.",
-      "provider_failure"
-    );
-  }
-}
-
-export class LocalModelGardenProvider implements GardenComputeProvider {
-  public readonly provider_kind = GardenProviderKind.LOCAL_MODEL;
-
-  public async compile(): Promise<readonly CandidateMemorySignal[]> {
-    throw new GardenProviderError(
-      "LocalModelGardenProvider is not implemented in Phase 0.5.",
-      "provider_failure"
-    );
+  /**
+   * Best-effort diagnostic dump of one invalid_response failure. Writes
+   * status (if surfaced via the cause chain) / response body
+   * prefix / SignalExtractorError kind+message / user-prompt prefix / model /
+   * provider kind / timestamp to a per-failure JSON file. Atomic (tmp + rename
+   * on the same filesystem). Returns even if writing fails — observation must
+   * never destabilize the production failure path.
+   */
+  private async dumpInvalidResponseDiagnostic(input: {
+    readonly error: unknown;
+    readonly rawJson: string | null;
+    readonly userPrompt: string;
+    readonly context: GardenCompileContext;
+    // invariant: surfaces tryRecoverJson branch + extractor retry attempt
+    // count + retry terminal classification when the body parsed but the
+    // post-extract envelope shape was wrong. Null when extract() threw
+    // before returning meta.
+    readonly extractorMeta:
+      | {
+          readonly recoveryKind: string;
+          readonly retryCount: number;
+          readonly retryClassification?: string;
+        }
+      | null;
+  }): Promise<void> {
+    if (this.diagnosticDir === null) {
+      return;
+    }
+    try {
+      const timestamp = this.now();
+      const envelope = {
+        captured_at: timestamp,
+        provider_kind: this.provider_kind,
+        model_id: this.model,
+        endpoint: this.endpoint,
+        workspace_id: input.context.workspace_id,
+        run_id: input.context.run_id,
+        surface_id: input.context.surface_id,
+        signal_extractor_error: extractSignalErrorDiagnostic(input.error),
+        // HTTP status / headers are not surfaced through SignalExtractorError;
+        // the pi-mono extractor swallows them. We capture whatever the cause
+        // chain exposes (status, statusText, headers if present) so a future
+        // transport wrapper that does pass them through gets recorded
+        // automatically — the dump shape is forward-compatible.
+        response_status: extractStatusFromCauseChain(input.error),
+        response_headers: extractHeadersFromCauseChain(input.error),
+        response_body_prefix:
+          input.rawJson === null
+            ? null
+            : input.rawJson.slice(0, DIAGNOSTIC_BODY_PREFIX_MAX_CHARS),
+        response_body_total_chars: input.rawJson === null ? null : input.rawJson.length,
+        user_prompt_prefix: input.userPrompt.slice(
+          0,
+          DIAGNOSTIC_PROMPT_PREFIX_MAX_CHARS
+        ),
+        // invariant: recovery branch + retry attempts + retry classification.
+        // recovery_kind is "none" when strict JSON parsed first try;
+        // "markdown_strip" / "trailing_strip" / "balanced_close" when the
+        // body was salvaged. extractor_retry_count is the count of
+        // additional attempts beyond the first (0 = no retry, N = retried N
+        // times). retry_classification labels the terminal outcome of the
+        // retry loop (success_first_try / success_after_retry /
+        // failure_max_retries / failure_non_retryable_4xx / failure_timeout
+        // / failure_aborted) so a dump consumer can distinguish a partial
+        // recovery from a chronic failure without re-deriving from
+        // retry_count + error kind. Pulled from extractorMeta when the
+        // extract() call succeeded; else from SignalExtractorError when the
+        // typed error surfaced.
+        recovery_kind: extractRecoveryKindFromInputs(input.extractorMeta, input.error),
+        extractor_retry_count: extractRetryCountFromInputs(input.extractorMeta, input.error),
+        retry_classification: extractRetryClassificationFromInputs(input.extractorMeta, input.error)
+      };
+      const fileName = `${timestamp.replace(/[:.]/gu, "-")}-${randomUUID()}.json`;
+      const filePath = join(this.diagnosticDir, fileName);
+      mkdirSync(dirname(filePath), { recursive: true });
+      // Atomic write: tmp + rename guards against an interrupted dump
+      // (WSL2 OOM is a known crash mode in this env) leaving a torn file
+      // a reader would mis-parse.
+      const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+      writeFileSync(tmpPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
+      renameSync(tmpPath, filePath);
+    } catch (dumpError) {
+      // observation-only — never mask the real exception by throwing here.
+      // A single warn is enough; a chronically-failing dump path is the
+      // operator's problem, not the extraction caller's.
+      console.warn("garden/compute-provider: diagnostic dump failed", {
+        error: readErrorMessage(dumpError)
+      });
+    }
   }
 }
 
@@ -277,7 +445,21 @@ const MAX_OFFICIAL_API_REASON_CHARS = 400;
 // copy.
 // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
 export function parseOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
-  const parsed = JSON.parse(content) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content) as unknown;
+  } catch {
+    // The whole envelope did not parse. One corrupt `signals[]` entry (a bad
+    // `\'` escape, a stray `,""}` empty key, an unescaped inner quote, a
+    // malformed key missing `":"`, or a max_tokens-truncated final element)
+    // otherwise nukes every clean sibling signal. Degrade element-wise: walk
+    // the `signals` array, JSON.parse each `{...}` independently, keep the
+    // valid entries, drop the corrupt one(s), and tolerate a truncated final
+    // element. This is the array-level analogue of the per-entry drop policy
+    // applied below after a successful parse — a sibling's corruption is not
+    // allowed to abort the turn's good signals.
+    return salvageOfficialApiSignals(content);
+  }
   // invariant: a malformed *envelope* (response is not an object, or has no
   // signals array) is a genuine total failure of the extraction call, so it
   // still throws hard. A malformed single *entry* is one bad fact among
@@ -302,6 +484,116 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
     }
   }
   return Object.freeze(drafts);
+}
+
+// Element-wise salvage for a `{"signals":[...]}` envelope whose strict
+// JSON.parse threw. Reuses parseOfficialApiSignalEntry so every salvaged
+// element passes the SAME per-entry validation/drop as the strict path — the
+// downstream draft shape is byte-identical. THROWS when zero valid elements
+// are recoverable (a degenerate envelope: no `signals` region, or only a
+// truncated first/only element) so the caller's existing failure attribution
+// (offline_fallbacks + recordExtractionFailureSource) still fires — a corrupt
+// degenerate body must NOT masquerade as an empty `{"signals":[]}` extraction.
+// see also: salvageRawSignalElements (string-aware balanced-brace walk).
+function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
+  const drafts: OfficialApiSignalDraft[] = [];
+  for (const element of salvageRawSignalElements(content)) {
+    if (drafts.length >= MAX_OFFICIAL_API_SIGNALS) {
+      break;
+    }
+    let candidate: unknown;
+    try {
+      candidate = JSON.parse(element) as unknown;
+    } catch {
+      // A single corrupt element (bad escape / unescaped quote / malformed
+      // key) — skip it, keep walking the clean siblings.
+      continue;
+    }
+    const draft = parseOfficialApiSignalEntry(candidate);
+    if (draft !== null) {
+      drafts.push(draft);
+    }
+  }
+  if (drafts.length === 0) {
+    throw new Error("signals envelope unparseable and no element recoverable");
+  }
+  return Object.freeze(drafts);
+}
+
+// Walk the `signals` array region of an envelope and return each top-level
+// `{...}` element as an independent substring. String-aware (braces inside a
+// JSON string literal do not change depth; `\` escapes the next char) so a
+// `}` inside `matched_text` never miscounts. A truncated/incomplete FINAL
+// element (the array ends before its closing `}`) is dropped — only complete
+// balanced elements are returned. Returns [] when no `signals` array region
+// is found, so the caller degrades to zero signals (existing fallback).
+//
+// Exported so the LongMemEval bench seed path can count the RAW salvageable
+// element population (lastTurnRawSignalCount) when the strict envelope parse
+// fails — otherwise the dropped corrupt entries would vanish from the
+// parse-drop attribution instead of landing in parseDropped.
+// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+//   countRawEnvelopeSignals
+export function salvageRawSignalElements(content: string): readonly string[] {
+  const signalsKeyIndex = findSignalsArrayStart(content);
+  if (signalsKeyIndex < 0) {
+    return [];
+  }
+  const elements: string[] = [];
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let elementStart = -1;
+  for (let i = signalsKeyIndex; i < content.length; i += 1) {
+    const ch = content[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\" && inString) {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) {
+        elementStart = i;
+      }
+      depth += 1;
+    } else if (ch === "}") {
+      if (depth > 0) {
+        depth -= 1;
+        if (depth === 0 && elementStart >= 0) {
+          elements.push(content.slice(elementStart, i + 1));
+          elementStart = -1;
+        }
+      }
+    } else if (ch === "]" && depth === 0) {
+      // Closing the signals array at top level — no in-flight element.
+      break;
+    }
+  }
+  // An element still open (depth > 0 / elementStart set) at end-of-buffer is
+  // the truncated final element — intentionally NOT pushed.
+  return elements;
+}
+
+// Find the index of the `[` that opens the `signals` array, scanning past the
+// `"signals"` key. String-aware so a `"signals"` substring inside an earlier
+// string value is not mistaken for the key. Returns -1 when not found.
+function findSignalsArrayStart(content: string): number {
+  const keyMatch = /"signals"\s*:\s*\[/u.exec(content);
+  if (keyMatch === null) {
+    return -1;
+  }
+  // Position the walk at the `[` so the first `{` after it starts element 0.
+  return keyMatch.index + keyMatch[0].length - 1;
 }
 
 // Parse one entry of the official-API {"signals":[...]} envelope. Returns
@@ -394,4 +686,182 @@ function buildTurnExcerpt(turnContent: string, matchedText: string): string {
   const start = Math.max(0, index - 40);
   const end = Math.min(turnContent.length, index + matchedText.length + 40);
   return turnContent.slice(start, end).trim();
+}
+
+interface SignalErrorDiagnostic {
+  readonly is_signal_extractor_error: boolean;
+  readonly kind: string | null;
+  readonly name: string;
+  readonly message: string;
+  readonly cause_message: string | null;
+}
+
+type ExtractorMetaSnapshot = {
+  readonly recoveryKind: string;
+  readonly retryCount: number;
+  readonly retryClassification?: string;
+};
+
+function extractRecoveryKindFromInputs(
+  meta: ExtractorMetaSnapshot | null,
+  _error: unknown
+): string {
+  if (meta !== null) {
+    return meta.recoveryKind;
+  }
+  // No meta available — the extract() call threw before returning. The
+  // recovery branch is unknowable in that case; emit "none" so the dump
+  // shape stays stable for diagnostic readers.
+  return "none";
+}
+
+function extractRetryCountFromInputs(
+  meta: ExtractorMetaSnapshot | null,
+  error: unknown
+): number {
+  if (meta !== null) {
+    return meta.retryCount;
+  }
+  if (error instanceof SignalExtractorError) {
+    return error.retryCount;
+  }
+  return 0;
+}
+
+// invariant: the dump envelope's retry_classification field is "unknown"
+// only when neither extractorMeta nor a typed SignalExtractorError carries
+// the label — happens when a transport error fires before the extractor
+// loop even started. The closed enum branches stay in sync with
+// RetryClassification in pi-mono-extractor.ts.
+function extractRetryClassificationFromInputs(
+  meta: ExtractorMetaSnapshot | null,
+  error: unknown
+): string {
+  if (meta?.retryClassification !== undefined) {
+    return meta.retryClassification;
+  }
+  if (error instanceof SignalExtractorError) {
+    return error.retryClassification;
+  }
+  return "unknown";
+}
+
+function extractSignalErrorDiagnostic(error: unknown): SignalErrorDiagnostic {
+  if (error instanceof SignalExtractorError) {
+    const cause = (error as { readonly cause?: unknown }).cause;
+    return {
+      is_signal_extractor_error: true,
+      kind: error.kind,
+      name: error.name,
+      message: error.message,
+      cause_message: cause instanceof Error ? cause.message : null
+    };
+  }
+  if (error instanceof Error) {
+    const cause = (error as { readonly cause?: unknown }).cause;
+    return {
+      is_signal_extractor_error: false,
+      kind: null,
+      name: error.name,
+      message: error.message,
+      cause_message: cause instanceof Error ? cause.message : null
+    };
+  }
+  return {
+    is_signal_extractor_error: false,
+    kind: null,
+    name: "UnknownError",
+    message: String(error),
+    cause_message: null
+  };
+}
+
+// Walk the .cause chain and surface any numeric HTTP status the transport
+// happened to attach. The pi-mono extractor currently does not, but
+// createGardenHttpExtractor (bench-runner) throws an Error whose .message
+// embeds the status — we read both shapes so the dump captures whichever
+// transport raised the failure.
+function extractStatusFromCauseChain(error: unknown): number | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current === null || current === undefined) {
+      return null;
+    }
+    if (typeof current === "object") {
+      const candidate = (current as { readonly status?: unknown }).status;
+      if (typeof candidate === "number" && Number.isFinite(candidate)) {
+        return candidate;
+      }
+      const messageStatus = readStatusFromMessage(current);
+      if (messageStatus !== null) {
+        return messageStatus;
+      }
+      current = (current as { readonly cause?: unknown }).cause;
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
+
+function readStatusFromMessage(value: object): number | null {
+  if (!(value instanceof Error)) {
+    return null;
+  }
+  const match = /\bHTTP\s+(\d{3})\b/u.exec(value.message);
+  if (match === null) {
+    return null;
+  }
+  const parsed = Number.parseInt(match[1]!, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractHeadersFromCauseChain(error: unknown): Record<string, string> | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current === null || current === undefined) {
+      return null;
+    }
+    if (typeof current === "object") {
+      const candidate = (current as { readonly headers?: unknown }).headers;
+      const normalized = normalizeHeadersValue(candidate);
+      if (normalized !== null) {
+        return normalized;
+      }
+      current = (current as { readonly cause?: unknown }).cause;
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
+
+function normalizeHeadersValue(value: unknown): Record<string, string> | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  // Web Headers / Node Headers expose .entries(); plain Records expose keys.
+  if (typeof value === "object" && typeof (value as { entries?: unknown }).entries === "function") {
+    const out: Record<string, string> = {};
+    try {
+      for (const [key, val] of (value as Iterable<[string, string]>)) {
+        if (typeof key === "string" && typeof val === "string") {
+          out[key.toLowerCase()] = val;
+        }
+      }
+      return out;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object") {
+    const out: Record<string, string> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof val === "string") {
+        out[key.toLowerCase()] = val;
+      }
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  }
+  return null;
 }

@@ -60,7 +60,7 @@ proposal review route has a broader multi-state transaction risk tracked by
 - `rtk pnpm build` - passed.
 - `rtk pnpm exec tsc --noEmit -p apps/core-daemon` - passed.
 - `rtk pnpm exec tsc --noEmit -p packages/storage` - passed.
-- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon mcp-memory-governance e2e gate4-attached-agent-mcp-proof` - passed.
+- `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon mcp-memory-governance e2e attached-agent-mcp-proof` - passed.
 - `rtk pnpm exec vitest run --project @do-soul/alaya-storage proposal-repo event-log-repo` - passed.
 - `rtk git diff --check` - passed.
 

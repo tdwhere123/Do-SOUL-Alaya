@@ -29,21 +29,18 @@ if (!KNOWN_BENCHES.has(benchName)) {
 
 const latest = readLatestPayload(historyRoot, benchName);
 if (latest === null) {
-  console.log(JSON.stringify({ action: "noop", reason: "latest_payload_missing" }));
-  process.exit(0);
+  emitJsonAndExit({ action: "noop", reason: "latest_payload_missing" });
 }
 
 const delta = readNumber(latest.payload.diff_vs_previous?.r_at_5_delta_pp);
 if (delta === null || delta > -thresholdPp) {
-  console.log(JSON.stringify({ action: "noop", reason: "threshold_not_met", slug: latest.slug, delta }));
-  process.exit(0);
+  emitJsonAndExit({ action: "noop", reason: "threshold_not_met", slug: latest.slug, delta });
 }
 
 const marker = `bench-degradation:auto ${benchName}/${latest.slug}`;
 const original = readFileSync(backlogPath, "utf8");
 if (original.includes(marker)) {
-  console.log(JSON.stringify({ action: "noop", reason: "already_recorded", slug: latest.slug, delta }));
-  process.exit(0);
+  emitJsonAndExit({ action: "noop", reason: "already_recorded", slug: latest.slug, delta });
 }
 
 const issueNumber = readNextIssueNumber(original);
@@ -66,7 +63,12 @@ let updated = original.replace(
 );
 updated = insertOpenIssue(updated, issue);
 writeFileSync(backlogPath, updated, "utf8");
-console.log(JSON.stringify({ action: "opened", issue: issueId, slug: latest.slug, delta }));
+emitJsonAndExit({ action: "opened", issue: issueId, slug: latest.slug, delta });
+
+function emitJsonAndExit(payload) {
+  writeFileSync(1, `${JSON.stringify(payload)}\n`, "utf8");
+  process.exit(0);
+}
 
 function parseArgs(argv) {
   const out = {};

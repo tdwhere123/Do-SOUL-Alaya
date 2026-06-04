@@ -10,9 +10,9 @@
 
 ### *给 CLI 编码 agent 的本地优先记忆平面。*
 
-[![status](https://img.shields.io/badge/status-v0.3.11--release--gate--ready-informational?style=flat-square)](#接下来的方向)
+[![status](https://img.shields.io/badge/status-v0.3.11--implementation--checkpoint-informational?style=flat-square)](#接下来的方向)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-2839%20passing-success?style=flat-square)](#接下来的方向)
+[![evidence](https://img.shields.io/badge/evidence-full--bench--pending-yellow?style=flat-square)](#接下来的方向)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#快速开始)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#快速开始)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#架构总览)
@@ -106,6 +106,14 @@ apps/bench-runner/scripts/run-full-locomo-bench.sh --variant locomo10
 node apps/bench-runner/bin/alaya-bench-runner.mjs self
 node apps/bench-runner/bin/alaya-bench-runner.mjs live --help
 ```
+
+检查点说明（2026-06-04）：v0.3.11 实现已完成，但全量公开 bench **没有**
+在当前 HEAD 重跑 —— 500q gate 在本地 7.6GB 机器上会 OOM，已 defer 到更大的
+主机（即 R5 gate）。**R@5 → 90% 没被宣称达成。** 当前跟踪的
+`latest-baseline*` 是遗留/陈旧 baseline，不是 v0.3.11 release evidence。
+诚实的 fan-in 前 500q-OFF baseline 是 R@1=52.0% / R@5=81.6% / R@10=83.6%
+（clean，`llm_calls=0`）；早先 90%@50q 是小样本伪迹。每个新的全量 release
+bench 都必须包含 `recall_token_economy`。
 
 赌注的形状没有变：retrieval 数字只有在 agent 行动所依据的 durable claim
 有审计、可回滚、能追到原始证据时才真正有价值。
@@ -317,9 +325,24 @@ Garden，先跑一次启动清理 pass，然后按 tier 周期调度四个角色
 Garden 清理都落在你打开的这个项目上。
 
 - **Auditor** —— 证据陈旧检查、pointer 健康度、孤儿检测。
-- **Janitor** —— TTL 清理、热/温分层降级、休眠标记、墓碑 GC。
-- **Librarian** —— 合并检测、模板聚类、邻居发现、path 压缩。
+- **Janitor** —— TTL 清理、热/温分层降级，以及自主遗忘生命周期：可逆休眠
+  降级（一次有审计的 `active → dormant` 状态迁移，召回静默，下次使用即复活）
+  → 墓碑（+disposition）→ 物理 GC，全部由周期性 Janitor pass 入队。两条删除臂
+  喂给它，都过删除授权 disposition 闸 + capsule 复核。*判无用* 臂只删无来源、
+  从未被强化的行。*压缩* 臂只在某个 live synthesis capsule 完全合并某成员时
+  才删它（该成员证据是 capsule 证据的子集）—— capsule 保留聚类的共享证据加
+  一份确定性 gist 摘要，故这是可接受的有损合并；pinned / hazard / canon /
+  consolidated 记忆永不被压缩删除。
+- **Librarian** —— 合并检测、模板聚类、邻居发现、path 压缩，以及 accept
+  即创建 capsule 的 synthesis proposal。
 - **Scheduler** —— 拥有队列、tier 优先级、冷却期、任务记账。
+
+Garden compute 默认走 **`host_worker`**（零云）：由 attach 的 CLI agent
+跑 `POST_TURN_EXTRACT` 和 `EDGE_CLASSIFY`；配了 Garden secret 才读成显式的
+`official_api` 选择。云端 edge-LLM 默认关闭。host-worker 工作超过有界窗口
+仍未被领取时，进程内会回退到零云的本地启发式抽取，保证捕获不卡死，
+`alaya doctor` 会告警。写入后立即召回可能早于 host-worker 边分类完成；
+此时确定性规则启发式是即时回退（最终一致性）。
 
 **这一步不这么做会出什么问题。** 一个直接写 durable 的维护系统，
 等于绕过了治理；一个和召回同步跑的维护系统，等数据集长大就会把召
@@ -452,6 +475,15 @@ schema-bounded（`maxLength` / `maxItems` /
 / status / inspect / update / tools / review / backup / export /
 import / mcp stdio）；每个会修改的动词都支持先 preview 再写，
 attach / detach 原子，审计日志在 `~/.config/alaya/audit/`。
+`review` 是一个 CLI 动词带四个子命令：`review
+pending|accept|reject` 处理 memory proposal，v0.3.11 新增
+`review edges pending|accept|reject` 处理 edge proposal 治理——
+edges 子命令属于现有 `review` 动词的子面扩展，不是新增顶层
+动词，所以顶层动词数仍是 13。新增的三个边提案 MCP 工具
+（`soul.propose_edge`、`soul.list_pending_edge_proposals`、
+`soul.batch_review_edge_proposals`）已经计入上面列出的 live MCP
+目录；13 个 `soul.*` + 3 个 `garden.*` = 16 个工具的口径已经
+反映这三个新工具。
 
 ---
 
@@ -573,9 +605,13 @@ pnpm alaya tools call soul.recall \
 
 ## 接下来的方向
 
-### 当前状态（2026-05-25）
+### 当前状态（2026-06-04）
 
-v0.3.11 是当前 release-gate readiness checkpoint；v0.3.4 是 v0.3.x 这条线第一次正式对外发布。
+v0.3.11 **实现已完成，但大机器 500q KPI gate 仍未跑** —— 本次 completion
+的所有代码都已落地并过 code-review，但 LongMemEval / LoCoMo 全量 bench 还
+没在更大的主机上重跑（本地 7.6GB WSL2 在 500q 会 OOM），所以它 **不是
+release-closed，"R@5 → 90%" 这个目标也没被宣称达成。** v0.3.4 是 v0.3.x
+这条线第一次正式对外发布。
 从 v0.3.0 起累积下来：真实的 Codex 和 Claude Code MCP 会话已经
 被观察到在正常对话里自主调 `soul.recall` → `soul.report_context_usage`，
 真实 live-usage EventLog witness 落档在 `docs/v0.3/v0.3.0/`
@@ -596,9 +632,24 @@ live MCP catalog 是 **16 个工具**（13 个 `soul.*` + 3 个 `garden.*`）。
 GitHub Release source tarball + `SHA256SUMS`，由 `scripts/install.sh`
 本地校验；npm 是有意不做的。
 
-v0.3.11 仍处在 completion/fix-loop：只有每个 phase fix-loop 都干净、
-LongMemEval / LoCoMo full bench gates 都归档后，才能把它描述成 full
-release-ready。
+**v0.3.11** 把 Garden compute 改成 **默认零云** —— `host_worker`（由 attach
+的 CLI agent 计算）是产品默认，云端 edge-LLM 默认关闭，B-2 边分类作为
+host-worker `EDGE_CLASSIFY` 任务运行并带确定性规则启发式回退；用持久的
+accepted member→representative 共现边取代临时的召回 fan-in 启发式；激活了
+自主遗忘-压缩生命周期（decay → dormant → 墓碑（+disposition）→ 物理 GC，全部
+由周期性 Janitor pass 入队，行离开召回前有一次有审计的 `active → dormant`
+状态迁移，并过删除授权 disposition 闸 + capsule 复核）；并接上 production
+synthesis review accept → 创建 capsule。两条删除臂都已武装：*判无用* 臂（只删
+无来源、从未被强化的行，删除时再核 verdict）与 *压缩* 臂（只在某个 live capsule
+完全合并某成员时才删它，该成员证据是 capsule 证据的子集 —— capsule 保留聚类
+共享证据加一份确定性 gist 摘要，故是可接受的有损合并；pinned / hazard / canon /
+consolidated 永不被压缩删除）（`docs/handbook/backlog.md` `#BL-049`，已关闭）。
+
+v0.3.11 **实现已完成，但大机器 500q gate 仍未跑。** 只有该 gate 在更大的
+主机上跑过、LongMemEval / LoCoMo 全量 bench 归档通过后，才能把它描述成
+full release-ready。**R@5 → 90% 没被宣称达成** —— 召回 fan-in 已实现并过
+code-review，但 R@5 这个数字在本地未测量，已 defer 到那个 gate。见
+`docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`。
 
 ### 下一步要走的方向
 

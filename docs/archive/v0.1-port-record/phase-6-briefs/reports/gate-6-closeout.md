@@ -78,7 +78,7 @@ Targeted verification:
 - Round-3 red-team verification also passed:
   `cli-tools.test.ts`, `cli-review.test.ts`, and `cli-register.test.ts`
   at 3 files / 25 tests; `mcp-memory-tool-handler.test.ts` and
-  `phase6-agent-use-protocol.test.ts` at 2 files / 9 tests.
+  `agent-use-protocol.test.ts` at 2 files / 9 tests.
 
 Isolated CLI/profile smoke used fresh `/tmp` paths:
 
@@ -116,7 +116,7 @@ Docs verification:
 
 ## Acceptance Mapping
 
-- MCP/CLI agent-use loop: `phase6-agent-use-protocol` proof, MCP memory
+- MCP/CLI agent-use loop: `agent-use-protocol` proof, MCP memory
   handler tests, tools list smoke, and CLI fallback tests.
 - Recall delivery / usage receipt / proposal / review / apply /
   post-apply recall: Phase 6 proof plus governance tests.

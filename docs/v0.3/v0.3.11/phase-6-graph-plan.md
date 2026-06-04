@@ -26,7 +26,7 @@
 | 子流 | 内容 | 不动 truth | 用户决策 |
 |---|---|---|---|
 | **A** query-side entity 自动入口 | query → 抽 entity → entity-bearing memory 作 graph seed | ✅ query-time only | 推荐方案 |
-| **B** 自动建边 | 4 类 auto-trigger 产生 edge proposal | ✅ 走 propose | **4 类全做** |
+| **B** 自动建边 | 4 类 auto-trigger（B-1 → `edge_proposals` review 队列；B-2/B-3/B-4 → PathCandidateSink 直接物化 `attention_only` 弱 path） | ✅ 两入口都 governed | **4 类全做** |
 | **C** 降手动门槛 | 新 verb / first-class refs / digest / backfill | ✅ proposal 路径 | 推荐方案 |
 | **D** 召回路径 + 权重 | bench fixture 注入 + weight + 2-hop + hop_decay | ✅ 仅 recall scoring | 推荐方案 |
 
@@ -34,8 +34,9 @@
 
 当前分支已经从方案阶段进入 implementation checkpoint：
 
-- `621fcec` 落地 governance/edge proposal checkpoint，修正自动边必须走 governed
-  proposal/acceptance 语义的 release surface；
+- `621fcec` 落地 governance/edge proposal checkpoint：B-1 自动边经 governed
+  proposal/acceptance；B-2/B-3/B-4 经 governed direct-materialize（出生
+  `attention_only`）的 release surface；
 - `8bf07c8` 落地 two-hop graph expansion diagnostics；
 - staged artifact-hygiene cleanup 删除旧 full diagnostics，不删除 KPI/report/pointer；
 - full public bench evidence 仍未在 HEAD `96e9bb9` 生成。
@@ -88,20 +89,27 @@ edge_proposals(
 -- status ∈ {pending, accepted, rejected, expired, auto_accepted}
 ```
 
-**4 类 trigger（用户 2026-05-24 锁定：全做）**：
+**4 类 trigger（用户 2026-05-24 锁定：全做）**——分两条 governed 入口落地（#19
+single-plane cutover 的有意结果）：
 
-| Trigger | 触发条件 | confidence | Auto-accept floor |
+| Trigger | 触发条件 | confidence | Landing / governance |
 |---|---|---|---|
-| **B-1 改造 cross-link → recalls proposal** | 同 delivery 内 ≥ 2 次共现 | `min(1, occurrence_count/3)` | ≥ 0.8 |
-| **B-2 LLM 推 supports/derives_from** | 新 memory accept 后对同 dimension top-5 邻居跑 LLM pair classifier | LLM logprob | ≥ 0.85 |
-| **B-3 时间-topic supersedes** | 新 memory 与同 (dim, scope, top-2 tag) 旧 memory token-Jaccard ≥ 0.5 + 否定/取代标记词 | 0.55-0.85（rule） | ≥ 0.9 |
-| **B-4 ConflictDetection 改写 proposal** | rule path tag overlap ≥ 0.35 + LLM fallback | rule 0.6 / LLM 自报 | ≥ 0.9 |
+| **B-1 cross-link → recalls** | 同 delivery 内 ≥ 2 次共现 | 0.5（`RECALL_CROSS_LINK`，< 0.8 floor 故停在 pending） | review-gated：`graphEdgePort.createEdge` → `proposeEdge` → `edge_proposals`（pending；auto-accept floor 0.8） |
+| **B-2 LLM 推 supports/derives_from** | 新 memory accept 后对同 dimension top-5 邻居跑 LLM pair classifier | LLM logprob（≥ 0.85 floor 进队） | direct-materialize：`pathCandidatePort.submitCandidate`，出生 `attention_only`（不进 `edge_proposals`，无 propose/accept） |
+| **B-3 时间-topic supersedes** | 新 memory 与同 (dim, scope, top-2 tag) 旧 memory token-Jaccard ≥ 0.5 + 否定/取代标记词 | 0.55-0.85（rule） | direct-materialize：`pathCandidatePort.submitCandidate`，出生 `attention_only`（local 弱负 path，不进 `edge_proposals`） |
+| **B-4 ConflictDetection** | rule path tag overlap ≥ 0.35 + LLM fallback | rule 0.6 / LLM 自报 | direct-materialize：`pathCandidatePort.submitCandidate`；rule 路径出生 `attention_only`，LLM-verdict 路径出生 `recall_allowed/0.9`（system-computed 负判，不进 `edge_proposals`） |
 
 **红线**：
+- 两入口都 governed，无 ungoverned durable truth：B-1 经 review/auto-accept
+  governance gate；B-2/B-3/B-4 出生即 `attention_only`（出生不可召回，召回靠
+  PathPlasticityService 自挣），受 auto-build governance ceiling + anchor 校验
+  约束，无未审计压制、无 `strictly_governed` 出生。
 - Auto-accept 阈值 = **system policy**（不接受 agent self-report
-  confidence；agent 报的一律 clamp ≤ 0.5）防 prompt inject
-- 自动只产生 proposal；accept 仍是显式 system action（类比现有
-  `ProposalResolutionState.AUTO_APPLIED`）
+  confidence；agent 报的一律 clamp ≤ 0.5）防 prompt inject；floor 表当前仅
+  `RECALL_CROSS_LINK`（B-1）reachable。
+- B-1 只产生 proposal；accept（含 auto-accept）是显式 system action（类比现有
+  `ProposalResolutionState.AUTO_APPLIED`）。B-2/B-3/B-4 不经 propose/accept，直接
+  物化弱 path，全程 EventLog `PATH_RELATION_CREATED` 审计。
 
 **新 MCP verb（13 → 16）**：
 - `soul.propose_edge`
@@ -110,8 +118,10 @@ edge_proposals(
 
 **CLI**：`alaya review edges [accept|reject] --type --min-conf --since`
 
-**预算**：每 workspace 40-80 pending edge proposal/day，auto-accept 卷走
-30-50%，剩 25-50 进 batch 队列。一周 ≤ 350，用户接受。
+**预算**：仅 B-1（`RECALL_CROSS_LINK`）进 `edge_proposals` review 队列——每
+workspace 40-80 pending edge proposal/day（floor 0.8 之下停 pending），剩进
+batch 队列，一周 ≤ 350，用户接受；B-2/B-3/B-4 不进该队列（direct-materialize 弱
+path），不计入此预算。
 
 ## 子工作流 C — 降手动门槛
 
@@ -130,7 +140,7 @@ edge_proposals(
 |---|---|---|---|
 | C1 | 新增 `soul.propose_edge` MCP verb + CLI（与 B 共用 `edge_proposals` 表） | M | +200% 显式建边 |
 | C2 | raw_payload 5 个 ref key → first-class `CandidateMemorySignal` 字段（**不考虑反向兼容老 signal，产品未上线**） | S | +50% LLM 主动建边 |
-| C3 | 默认开 ConflictDetectionService rule path（走 propose 后安全）+ 放宽阈值 | S | +30 contradicts/incompatible 提案/day |
+| C3 | 默认开 ConflictDetectionService rule path（direct-materialize 出生 `attention_only`，出生不可召回故安全）+ 放宽阈值 | S | +30 contradicts/incompatible direct-materialized path/day |
 | C4 | 加 B-2 自动 LLM 推 supports/derives_from（填零生产洞） | M | 0 → ~15 supports proposal/day |
 | C5 | batch_review_edge_proposals + daily digest（health-inbox 已有底座） | S | accept rate 5× |
 | C6 | edge_proposal accept 也对 warm-tier 开放（只在 proposal path 改 hot-only invariant） | M | +40% 跨 tier edge 覆盖 |
@@ -209,7 +219,7 @@ parent review。
 | 子流 | 验收 |
 |---|---|
 | A | LongMemEval / LoCoMo 全集回归无退化；新增 `entity_seed` plane 在 bench 显示 non-zero 命中；entity_seed 候选不进 propose/accept 路径（unit + e2e 守护）|
-| B | edge_proposal 4 trigger 每个 unit + integration test；auto-accept policy 不被 agent self-report 突破；走 propose 不污染 truth |
+| B | 4 trigger 每个 unit + integration test；两入口 lock test：B-1 → `edge_proposals` review 队列（auto-accept policy 不被 agent self-report 突破），B-2/B-3/B-4 → PathCandidateSink 出生 `attention_only`（无 `edge_proposals` 行、无 `strictly_governed` 出生）；两入口都不污染 truth |
 | C | `soul.propose_edge` MCP verb 三档（propose/list/batch-review）unit + e2e；CLI 子命令 e2e；ConflictDetection 默认开后 truth 仍未被污染（关键回归） |
 | D | D-1 后 graph_expansion plane non-zero（bench 健康度）；D-2/3/4 后 LongMemEval-S R@5 ≥ 90% / multiturn ≥ 90% / crossquestion ≥ 90%；LoCoMo embedding-off ≥ 55% / embedding-on ≥ 90% |
 | 整体 | per-hop / per-edge-type diagnostic 字段齐全；四 bench 全集对比；Alaya-native invariants 0 回归 |

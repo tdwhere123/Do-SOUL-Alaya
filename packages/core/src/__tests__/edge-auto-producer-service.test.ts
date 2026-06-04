@@ -1,12 +1,41 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  EdgeProposalTriggerSource,
   MemoryDimension,
-  MemoryGraphEdgeType,
   ScopeClass,
-  type MemoryEntry
+  type MemoryEntry,
+  type PathRelation
 } from "@do-soul/alaya-protocol";
 import { EdgeAutoProducerService } from "../edge-auto-producer-service.js";
+import type { PathMintOutcome } from "../path-relation-proposal-service.js";
+
+// Minimal active positive-associative PathRelation for the applyVerdict
+// directional-dedup tests; only the fields the dedup guard reads
+// (anchors, effect_vector.recall_bias, lifecycle.status) are load-bearing.
+function makePositiveAssociativePath(
+  relationKind: string,
+  sourceObjectId: string,
+  targetObjectId: string
+): Readonly<PathRelation> {
+  return {
+    anchors: {
+      source_anchor: { kind: "object", object_id: sourceObjectId },
+      target_anchor: { kind: "object", object_id: targetObjectId }
+    },
+    constitution: { relation_kind: relationKind },
+    effect_vector: { recall_bias: 0.5 },
+    lifecycle: { status: "active" }
+  } as unknown as Readonly<PathRelation>;
+}
+
+// Structural shape the assertions read off the submitCandidate fake; the
+// full SubmitCandidateInput is wider but these are the fields under test.
+interface SubmittedCandidate {
+  readonly relationKind: string;
+  readonly recallBiasSign: 1 | 0 | -1;
+  readonly governanceClass?: string;
+  readonly initialStrength?: number;
+  readonly why?: readonly string[];
+}
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
@@ -60,18 +89,18 @@ function createDeps(memories: readonly MemoryEntry[]) {
     })
   );
   const findById = vi.fn(async (objectId: string) => byId.get(objectId) ?? null);
-  const graphEdgePort = {
-    createEdge: vi.fn(async () => undefined)
+  const pathCandidatePort = {
+    submitCandidate: vi.fn(async (_input: SubmittedCandidate): Promise<PathMintOutcome> => "applied")
   };
   return {
     deps: {
       memoryRepo: { findById, searchByKeyword, findByIds },
-      graphEdgePort
+      pathCandidatePort
     },
     findById,
     searchByKeyword,
     findByIds,
-    graphEdgePort
+    pathCandidatePort
   };
 }
 
@@ -85,7 +114,7 @@ describe("EdgeAutoProducerService", () => {
       content: "Repository shell commands must use the RTK wrapper.",
       domain_tags: ["rtk", "workflow"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const service = new EdgeAutoProducerService(deps);
 
     await service.produceForNewMemory({
@@ -95,17 +124,76 @@ describe("EdgeAutoProducerService", () => {
       sourceSignalId: "signal-1"
     });
 
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+    // The producer no longer writes memory_graph_edges; it submits a
+    // governed SUPPORTS-profile path candidate (recall_bias +).
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceMemoryId: "memory-new",
-        targetMemoryId: "memory-existing",
-        edgeType: MemoryGraphEdgeType.SUPPORTS,
         workspaceId: "workspace-1",
-        runId: "run-1",
-        sourceSignalId: "signal-1",
-        triggerSource: EdgeProposalTriggerSource.SYSTEM
+        sourceAnchor: { kind: "object", object_id: "memory-new" },
+        targetAnchor: { kind: "object", object_id: "memory-existing" },
+        relationKind: "supports",
+        governanceClass: "attention_only",
+        recallBiasSign: 1,
+        initialStrength: 0.5
       })
     );
+    const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+    expect(submitArgs.why?.some((line) => line.includes("source_signal=signal-1"))).toBe(true);
+  });
+
+  // invariant (codex spine-review B5): a TRANSIENT "failed" outcome on any
+  // candidate must surface as a throw so the bulk-enrich worker keeps the row
+  // pending and a later cycle retries. Swallowing it would let the worker
+  // markProcessed an owed path away.
+  it("B5: throws when a path candidate returns the transient failed outcome", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      created_at: "2026-05-24T10:00:00.000Z",
+      updated_at: "2026-05-24T10:00:00.000Z",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "failed");
+    const service = new EdgeAutoProducerService(deps);
+
+    await expect(
+      service.produceForNewMemory({
+        newMemoryId: newMemory.object_id,
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1"
+      })
+    ).rejects.toMatchObject({ name: "CoreError", code: "OBLIGATION_VIOLATION" });
+  });
+
+  // invariant (codex spine-review B5 x B3): a PERMANENT "rejected" outcome is a
+  // decided no (bad anchor) — retrying cannot help — so it must NOT throw. The
+  // worker then markProcessed the row instead of looping on a poison pill.
+  it("B5xB3: does NOT throw when a path candidate is permanently rejected", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      created_at: "2026-05-24T10:00:00.000Z",
+      updated_at: "2026-05-24T10:00:00.000Z",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "rejected");
+    const service = new EdgeAutoProducerService(deps);
+
+    await expect(
+      service.produceForNewMemory({
+        newMemoryId: newMemory.object_id,
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1"
+      })
+    ).resolves.toBeUndefined();
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
   });
 
   it("B-2 proposes derives_from for deterministic derivation cues", async () => {
@@ -119,7 +207,7 @@ describe("EdgeAutoProducerService", () => {
       content: "The repository workflow requires rtk for shell commands.",
       domain_tags: ["rtk", "workflow"]
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const service = new EdgeAutoProducerService(deps);
 
     await service.produceForNewMemory({
@@ -129,12 +217,12 @@ describe("EdgeAutoProducerService", () => {
       sourceSignalId: "signal-1"
     });
 
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceMemoryId: "memory-new",
-        targetMemoryId: "memory-source",
-        edgeType: MemoryGraphEdgeType.DERIVES_FROM,
-        confidence: expect.any(Number)
+        sourceAnchor: { kind: "object", object_id: "memory-new" },
+        targetAnchor: { kind: "object", object_id: "memory-source" },
+        relationKind: "derives_from",
+        recallBiasSign: 1
       })
     );
   });
@@ -151,7 +239,7 @@ describe("EdgeAutoProducerService", () => {
       domain_tags: ["package-manager", "workflow"],
       created_at: "2026-05-23T12:00:00.000Z"
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, oldMemory]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, oldMemory]);
     const service = new EdgeAutoProducerService(deps);
 
     await service.produceForNewMemory({
@@ -161,17 +249,87 @@ describe("EdgeAutoProducerService", () => {
       sourceSignalId: "signal-1"
     });
 
-    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+    // A local supersedes verdict is a weak claim: it folds into a weak
+    // negative path (recall_bias -, attention_only), not a recall_allowed
+    // negative edge. The recall_allowed/0.9 band is reserved for
+    // SYSTEM-derived negatives from ConflictDetectionService.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceMemoryId: "memory-new",
-        targetMemoryId: "memory-old",
-        edgeType: MemoryGraphEdgeType.SUPERSEDES,
-        confidence: expect.any(Number)
+        sourceAnchor: { kind: "object", object_id: "memory-new" },
+        targetAnchor: { kind: "object", object_id: "memory-old" },
+        relationKind: "supersedes",
+        recallBiasSign: -1,
+        governanceClass: "attention_only",
+        initialStrength: 0.5
       })
     );
-    const confidence = graphEdgePort.createEdge.mock.calls[0][0].confidence;
-    expect(confidence).toBeGreaterThanOrEqual(0.55);
-    expect(confidence).toBeLessThanOrEqual(0.85);
+  });
+
+  // B7: the local contradicts heuristic — a high-overlap neighbor with an
+  // explicit contradiction cue folds into a weak negative `contradicts` path
+  // (attention_only, recall_bias -0.4), the sibling of the supersedes lane.
+  it("B7 proposes contradicts for a high-overlap neighbor carrying a contradiction cue", async () => {
+    const newMemory = createMemoryEntry({
+      content:
+        "The claim that the repo uses npm commands through rtk for package scripts is not true.",
+      domain_tags: ["package-manager", "workflow"],
+      created_at: "2026-05-24T12:00:00.000Z"
+    });
+    const neighbor = createMemoryEntry({
+      object_id: "memory-claim",
+      content: "The repo uses npm commands through rtk for package scripts.",
+      domain_tags: ["package-manager", "workflow"],
+      created_at: "2026-05-23T12:00:00.000Z"
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const service = new EdgeAutoProducerService(deps);
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceAnchor: { kind: "object", object_id: "memory-new" },
+        targetAnchor: { kind: "object", object_id: "memory-claim" },
+        relationKind: "contradicts",
+        recallBiasSign: -1,
+        governanceClass: "attention_only",
+        initialStrength: 0.5
+      })
+    );
+  });
+
+  it("does not propose contradicts when the high-overlap neighbor carries no contradiction cue", async () => {
+    const newMemory = createMemoryEntry({
+      content: "The repo uses npm commands through rtk for package scripts in detail.",
+      domain_tags: ["package-manager", "workflow"],
+      created_at: "2026-05-24T12:00:00.000Z"
+    });
+    const neighbor = createMemoryEntry({
+      object_id: "memory-claim",
+      content: "The repo uses npm commands through rtk for package scripts.",
+      domain_tags: ["package-manager", "workflow"],
+      created_at: "2026-05-23T12:00:00.000Z"
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const service = new EdgeAutoProducerService(deps);
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // No contradiction cue -> not a contradicts edge (it may fold into a
+    // positive supports/derives_from path instead, but never contradicts).
+    for (const call of pathCandidatePort.submitCandidate.mock.calls) {
+      expect(call[0].relationKind).not.toBe("contradicts");
+    }
   });
 
   it("does not propose edges for weak, cross-scope, or cross-dimension neighbors", async () => {
@@ -194,7 +352,7 @@ describe("EdgeAutoProducerService", () => {
       content: newMemory.content,
       domain_tags: newMemory.domain_tags
     });
-    const { deps, graphEdgePort } = createDeps([newMemory, weak, crossDimension, crossScope]);
+    const { deps, pathCandidatePort } = createDeps([newMemory, weak, crossDimension, crossScope]);
     const service = new EdgeAutoProducerService(deps);
 
     await service.produceForNewMemory({
@@ -204,7 +362,700 @@ describe("EdgeAutoProducerService", () => {
       sourceSignalId: "signal-1"
     });
 
-    expect(graphEdgePort.createEdge).not.toHaveBeenCalled();
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+  });
+
+  it("B-2 LLM supports verdict above floor folds into the SUPPORTS path profile", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "supports" as const,
+        confidence: 0.92,
+        rationale: "both rows assert the same RTK rule"
+      }))
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(llmPort.classifyPair).toHaveBeenCalledWith({ newMemory, neighbor });
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceAnchor: { kind: "object", object_id: "memory-new" },
+        targetAnchor: { kind: "object", object_id: "memory-existing" },
+        relationKind: "supports",
+        recallBiasSign: 1
+      })
+    );
+    // The LLM trigger + rationale provenance survives in why_this_relation_exists.
+    const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+    expect(submitArgs.why?.some((line) => line.includes("llm pair classifier"))).toBe(true);
+  });
+
+  it("B-2 LLM derives_from verdict folds into the DERIVES_FROM path profile", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-source",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "derives_from" as const,
+        confidence: 0.88,
+        rationale: ""
+      }))
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        relationKind: "derives_from",
+        recallBiasSign: 1
+      })
+    );
+  });
+
+  it("B-2 LLM below 0.85 floor falls back to the local supports profile", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "supports" as const,
+        confidence: 0.7, // below floor
+        rationale: "uncertain"
+      }))
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // Falls back to the local supports heuristic — same supports profile,
+    // but the why provenance names the local rule bucket.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ relationKind: "supports", recallBiasSign: 1 })
+    );
+    const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+    expect(submitArgs.why?.some((line) => line.includes("local_supports"))).toBe(true);
+  });
+
+  it("B-2 LLM null verdict falls back to the local supports profile", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => null)
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(llmPort.classifyPair).toHaveBeenCalled();
+    const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+    expect(submitArgs.relationKind).toBe("supports");
+    expect(submitArgs.why?.some((line) => line.includes("local_supports"))).toBe(true);
+  });
+
+  // invariant: the LLM port can return `null` either because the model
+  // explicitly judged "no relationship" OR because the adapter failed and
+  // degraded to null. Both paths fall through to the local heuristic and
+  // a local-heuristic proposal may still be emitted (with trigger_source
+  // = local_*). This is the intended design: the LLM is advisory, never
+  // a veto. Adapter failures additionally emit a single warn event;
+  // verdict-null does not (an explicit model "no" is not an error).
+  it("LLM-rejected verdict (null) still allows a local-heuristic proposal to be emitted with no warn", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      // Simulates the model explicitly judging "no relationship" — the
+      // adapter parsed a well-formed verdict whose edge_type was "none",
+      // and createEdgeAutoProducerLlmPort.classifyPair returned null
+      // (see apps/core-daemon/src/edge-auto-producer-llm-adapter.ts
+      // materializeDecision). This is NOT an adapter failure.
+      classifyPair: vi.fn(async () => null)
+    };
+    const warn = vi.fn();
+    const service = new EdgeAutoProducerService({ ...deps, llmPort, warn });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // The local heuristic still gets to fire on the same neighbor and
+    // submits a local supports-profile candidate. The LLM rejection is
+    // silent: it is not an adapter error, so no warn fires.
+    expect(llmPort.classifyPair).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ relationKind: "supports", recallBiasSign: 1 })
+    );
+    // Verdict-null must NOT emit a warn — only adapter exceptions do.
+    // see also: B-2 LLM throwing port test above (warns + falls back).
+    const adapterWarnCalls = warn.mock.calls.filter(([message]) =>
+      typeof message === "string" && message.includes("edge auto producer llm port classify failed")
+    );
+    expect(adapterWarnCalls).toEqual([]);
+  });
+
+  it("B-2 LLM throwing port is non-fatal: falls back, warns, never aborts other neighbors", async () => {
+    const newMemory = createMemoryEntry();
+    const neighborA = createMemoryEntry({
+      object_id: "memory-A",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const neighborB = createMemoryEntry({
+      object_id: "memory-B",
+      content: "RTK is required for shell commands in repository scripts.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighborA, neighborB]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => {
+        throw new Error("garden timed out");
+      })
+    };
+    const warn = vi.fn();
+    const service = new EdgeAutoProducerService({ ...deps, llmPort, warn });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // Both neighbors still submit local supports-profile candidates.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(2);
+    for (const call of pathCandidatePort.submitCandidate.mock.calls) {
+      expect(call[0].relationKind).toBe("supports");
+    }
+    expect(warn).toHaveBeenCalled();
+    const warnArgs = warn.mock.calls[0]!;
+    expect(warnArgs[0]).toContain("edge auto producer llm port classify failed");
+    expect(warnArgs[1]).toMatchObject({
+      new_memory_id: "memory-new",
+      error: "garden timed out"
+    });
+  });
+
+  // invariant (FIX-3): the per-memory MAX_EDGE_PROPOSALS budget counts only
+  // "applied" outcomes. already_present (an equivalent link already exists) and
+  // failed (retried later) must NOT consume budget — otherwise already-linked or
+  // transiently-failed neighbors starve genuinely-new neighbors past the cap.
+  // With 7 eligible neighbors all returning already_present, every neighbor is
+  // still attempted because budget never increments.
+  it("FIX-3 already_present / failed outcomes do not consume the per-memory proposal budget", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbors = Array.from({ length: 7 }, (_unused, index) =>
+      createMemoryEntry({
+        object_id: `memory-${index}`,
+        content: "Repository shell commands must use the RTK wrapper for scripts.",
+        domain_tags: ["rtk", "workflow"]
+      })
+    );
+    const { deps, pathCandidatePort } = createDeps([newMemory, ...neighbors]);
+    // Every candidate reports the link already exists (a no-op mint).
+    pathCandidatePort.submitCandidate.mockImplementation(
+      async (): Promise<PathMintOutcome> => "already_present"
+    );
+    const service = new EdgeAutoProducerService({ ...deps });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // All 7 neighbors are attempted: already_present never burns budget, so the
+    // MAX_EDGE_PROPOSALS=5 cap is not falsely tripped by no-op outcomes.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(7);
+  });
+
+  // invariant (FIX-3): the cap still bounds genuinely-applied proposals. With 7
+  // eligible neighbors all applying, the loop stops at MAX_EDGE_PROPOSALS=5.
+  it("FIX-3 caps genuinely-applied proposals at MAX_EDGE_PROPOSALS", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbors = Array.from({ length: 7 }, (_unused, index) =>
+      createMemoryEntry({
+        object_id: `memory-${index}`,
+        content: "Repository shell commands must use the RTK wrapper for scripts.",
+        domain_tags: ["rtk", "workflow"]
+      })
+    );
+    const { deps, pathCandidatePort } = createDeps([newMemory, ...neighbors]);
+    pathCandidatePort.submitCandidate.mockImplementation(
+      async (): Promise<PathMintOutcome> => "applied"
+    );
+    const service = new EdgeAutoProducerService({ ...deps });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(5);
+  });
+
+  it("B-2 pregate skips the LLM port for structurally eligible but unrelated pairs", async () => {
+    // Same workspace + dimension + scope as the new memory so the
+    // structural eligibility check passes, but zero shared content
+    // tokens and zero shared tags. This is the "obvious non-pair" the
+    // LLM cost pregate is designed to drop.
+    const newMemory = createMemoryEntry({
+      content: "RTK wrapper is required for shell commands in this repository.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const unrelatedNeighbor = createMemoryEntry({
+      object_id: "memory-unrelated",
+      content: "Friday afternoon deployment window starts at 1500 UTC.",
+      domain_tags: ["release", "operations"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, unrelatedNeighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "supports" as const,
+        confidence: 0.95,
+        rationale: "should never be called"
+      }))
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // LLM port MUST NOT be consulted for the unrelated neighbor — that is
+    // the whole point of the pregate (full bench would otherwise fire
+    // NEIGHBOR_SEARCH_LIMIT garden round-trips per new memory).
+    expect(llmPort.classifyPair).not.toHaveBeenCalled();
+    // The local heuristic also rejects this pair (no strong tag overlap),
+    // so no candidate is submitted — the pregate's only job is to skip the
+    // LLM, not to short-circuit the heuristic fallback.
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+  });
+
+  it("B-2 pregate routes related pairs to the LLM port as before", async () => {
+    // High token-Jaccard pair — pregate passes, LLM verdict propagates.
+    const newMemory = createMemoryEntry({
+      content: "RTK wrapper is required for shell commands in this repository.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const relatedNeighbor = createMemoryEntry({
+      object_id: "memory-related",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, relatedNeighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "supports" as const,
+        confidence: 0.92,
+        rationale: "shared RTK rule"
+      }))
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(llmPort.classifyPair).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ relationKind: "supports", recallBiasSign: 1 })
+    );
+  });
+
+  it("B-2 pregate still allows tag-overlap-only pairs through to the LLM", async () => {
+    // Zero content token overlap (different topics in text) but a shared
+    // domain tag — the LLM should still get a chance to judge, because
+    // tag overlap is an independent relatedness signal.
+    const newMemory = createMemoryEntry({
+      content: "Database connection pool is sized at thirty-two slots.",
+      domain_tags: ["rtk", "platform"]
+    });
+    const tagOverlapNeighbor = createMemoryEntry({
+      object_id: "memory-tag-overlap",
+      content: "Shell logging follows a structured json line format.",
+      domain_tags: ["rtk", "platform"]
+    });
+    const { deps } = createDeps([newMemory, tagOverlapNeighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => null)
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // LLM gets the call (tag overlap is a real relatedness signal); a
+    // null verdict then falls back to the local heuristic which (lacking
+    // strong tag overlap and token Jaccard) rejects the pair.
+    expect(llmPort.classifyPair).toHaveBeenCalledTimes(1);
+  });
+
+  // R0-B host-worker defer: when the edgeClassifyQueue is wired, the
+  // LLM-quality verdict is ENQUEUED (not called synchronously) and the
+  // deterministic heuristic still produces the edge inline.
+  it("host-worker defer: enqueues EDGE_CLASSIFY AND still submits the inline heuristic edge", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const edgeClassifyQueue = {
+      enqueueEdgeClassify: vi.fn(async () => undefined)
+    };
+    const service = new EdgeAutoProducerService({ ...deps, edgeClassifyQueue });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // The LLM-quality verdict was DEFERRED to the host worker.
+    expect(edgeClassifyQueue.enqueueEdgeClassify).toHaveBeenCalledTimes(1);
+    expect(edgeClassifyQueue.enqueueEdgeClassify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        source: expect.objectContaining({ object_id: "memory-new" }),
+        neighbor: expect.objectContaining({ object_id: "memory-existing" })
+      })
+    );
+    // The inline heuristic edge still landed (eventual consistency: the edge
+    // exists now; the LLM verdict refines it later).
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ relationKind: "supports", recallBiasSign: 1 })
+    );
+    const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+    expect(submitArgs.why?.some((line) => line.includes("local_supports"))).toBe(true);
+  });
+
+  it("host-worker defer: a queue enqueue failure is non-fatal — the heuristic edge still stands", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
+    const edgeClassifyQueue = {
+      enqueueEdgeClassify: vi.fn(async () => {
+        throw new Error("queue is down");
+      })
+    };
+    const warn = vi.fn();
+    const service = new EdgeAutoProducerService({ ...deps, edgeClassifyQueue, warn });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // Enqueue threw, but the inline heuristic edge still landed and the call
+    // did not abort. A single observable warn fires for the operator.
+    expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls[0]![0]).toContain("edge-classify enqueue failed");
+  });
+
+  it("host-worker defer: bypasses the synchronous llmPort entirely", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "supports" as const,
+        confidence: 0.95,
+        rationale: "should never be consulted when the queue is wired"
+      }))
+    };
+    const edgeClassifyQueue = {
+      enqueueEdgeClassify: vi.fn(async () => undefined)
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort, edgeClassifyQueue });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // The in-process llmPort is NOT consulted: the verdict is deferred.
+    expect(llmPort.classifyPair).not.toHaveBeenCalled();
+    expect(edgeClassifyQueue.enqueueEdgeClassify).toHaveBeenCalledTimes(1);
+  });
+
+  describe("applyVerdict (host-worker verdict upgrade)", () => {
+    it("applies a supports verdict above floor through the path candidate sink", async () => {
+      const { deps, pathCandidatePort } = createDeps([]);
+      const service = new EdgeAutoProducerService(deps);
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "supports",
+          confidence: 0.93,
+          rationale: "both rows assert the same rule"
+        }
+      });
+
+      expect(outcome).toBe("applied");
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceAnchor: { kind: "object", object_id: "memory-new" },
+          targetAnchor: { kind: "object", object_id: "memory-existing" },
+          relationKind: "supports",
+          recallBiasSign: 1
+        })
+      );
+      const submitArgs = pathCandidatePort.submitCandidate.mock.calls[0]![0];
+      expect(submitArgs.why?.some((line) => line.includes("host-worker pair classifier"))).toBe(true);
+      expect(submitArgs.why?.some((line) => line.includes("llm_supports"))).toBe(true);
+    });
+
+    it("applies a derives_from verdict into the DERIVES_FROM profile", async () => {
+      const { deps, pathCandidatePort } = createDeps([]);
+      const service = new EdgeAutoProducerService(deps);
+
+      await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: null,
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-source",
+          edge_type: "derives_from",
+          confidence: 0.9,
+          rationale: ""
+        }
+      });
+
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+        expect.objectContaining({ relationKind: "derives_from", recallBiasSign: 1 })
+      );
+    });
+
+    it("a none verdict is a no-op — the heuristic edge is never touched", async () => {
+      const { deps, pathCandidatePort } = createDeps([]);
+      const service = new EdgeAutoProducerService(deps);
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "none",
+          confidence: 0.99,
+          rationale: "no relationship"
+        }
+      });
+
+      expect(outcome).toBeNull();
+      expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+    });
+
+    it("a below-floor verdict is a no-op (heuristic edge stands)", async () => {
+      const { deps, pathCandidatePort } = createDeps([]);
+      const service = new EdgeAutoProducerService(deps);
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "supports",
+          confidence: 0.5,
+          rationale: "uncertain"
+        }
+      });
+
+      expect(outcome).toBeNull();
+      expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+    });
+
+    it("directional-dedup: a family-swap verdict does NOT mint a second positive path", async () => {
+      // The inline heuristic already minted a positive associative `supports`
+      // path for the exact ordered pair. A host verdict of a DIFFERENT positive
+      // family (derives_from) on the SAME ordered pair must NOT mint a parallel
+      // positive path (that would double the pair's recall-bias from untrusted
+      // worker input); it is a no-op refinement instead.
+      const { deps, pathCandidatePort } = createDeps([]);
+      const existingPathReader = {
+        findByBackingObjectId: vi.fn(async (_workspaceId: string, objectId: string) => {
+          if (objectId !== "memory-new") {
+            return [];
+          }
+          return [
+            makePositiveAssociativePath("supports", "memory-new", "memory-existing")
+          ];
+        })
+      };
+      const service = new EdgeAutoProducerService({ ...deps, existingPathReader });
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "derives_from",
+          confidence: 0.95,
+          rationale: "host worker says derives_from"
+        }
+      });
+
+      // Exactly ONE positive path on the pair: the verdict refined nothing, so
+      // submitCandidate was never invoked a second time.
+      expect(outcome).toBe("already_present");
+      expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+      expect(existingPathReader.findByBackingObjectId).toHaveBeenCalledWith(
+        "workspace-1",
+        "memory-new"
+      );
+    });
+
+    it("directional-dedup: a verdict for a pair with NO existing positive path still mints", async () => {
+      // The legitimate weak-overlap / first-edge case: no inline heuristic edge
+      // exists for the pair, so the host verdict is the first (and only) edge.
+      const { deps, pathCandidatePort } = createDeps([]);
+      const existingPathReader = {
+        findByBackingObjectId: vi.fn(async () => [])
+      };
+      const service = new EdgeAutoProducerService({ ...deps, existingPathReader });
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "derives_from",
+          confidence: 0.95,
+          rationale: "host worker says derives_from"
+        }
+      });
+
+      expect(outcome).toBe("applied");
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledWith(
+        expect.objectContaining({ relationKind: "derives_from", recallBiasSign: 1 })
+      );
+    });
+
+    it("directional-dedup: an existing path on a DIFFERENT pair does not block the mint", async () => {
+      // A positive path exists from memory-new to memory-other; the verdict pair
+      // is memory-new -> memory-existing. Different ordered pair, so the verdict
+      // still mints its own first edge.
+      const { deps, pathCandidatePort } = createDeps([]);
+      const existingPathReader = {
+        findByBackingObjectId: vi.fn(async () => [
+          makePositiveAssociativePath("supports", "memory-new", "memory-other")
+        ])
+      };
+      const service = new EdgeAutoProducerService({ ...deps, existingPathReader });
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "supports",
+          confidence: 0.95,
+          rationale: "host worker says supports"
+        }
+      });
+
+      expect(outcome).toBe("applied");
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("uses bounded local search only and has no external provider dependency", async () => {

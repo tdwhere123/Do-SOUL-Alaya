@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,8 @@ import {
   computeNextTurnSeedRefs,
   createCachingSignalExtractor,
   createCompileSeedRunner,
+  createGardenHttpExtractor,
+  extractContentFromChatCompletionBody,
   resolveCompileSeedExtractionConfig,
   toSeedExtractionPathKpi,
   type BenchSignalExtractor,
@@ -30,7 +32,16 @@ function buildCompileSeedDaemon(
 ): CompileSeedDaemon {
   return {
     proposeMemoryFromSignal: async (input) => onSignal(input),
-    proposeMemoriesFromCompileSignals: async (inputs) => inputs.map(onSignal)
+    proposeMemoriesFromCompileSignals: async (inputs) => ({
+      seeds: inputs.map(onSignal),
+      dropped: []
+    }),
+    // The compile-seed tests do not exercise the session-level L2 synthesis
+    // emission seam (covered by harness/daemon tests); the stub keeps the
+    // CompileSeedDaemon contract satisfied and returns a null synthesisId
+    // mirroring the no-op path the real daemon takes when no synthesis
+    // capsule is created.
+    proposeSynthesis: async () => ({ synthesisId: null })
   };
 }
 
@@ -84,6 +95,7 @@ describe("createCachingSignalExtractor", () => {
       cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
+      signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
@@ -124,6 +136,7 @@ describe("createCachingSignalExtractor", () => {
       cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
+      signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
@@ -149,6 +162,7 @@ describe("createCachingSignalExtractor", () => {
       cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
+      signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
@@ -199,8 +213,37 @@ describe("createCachingSignalExtractor", () => {
 
 describe("resolveCompileSeedExtractionConfig", () => {
   it("resolves a null key when no garden secret ref is set", () => {
-    const config = resolveCompileSeedExtractionConfig({});
+    const config = resolveCompileSeedExtractionConfig({
+      OFFICIAL_API_GARDEN_MODEL: "gpt-5.4-mini"
+    });
     expect(config.apiKey).toBeNull();
+    expect(config.model).toBe("gpt-5.4-mini");
+    expect(config.providerUrl).toBe("https://yunwu.ai/v1");
+  });
+
+  it("throws when neither env model nor manifest can resolve the model", () => {
+    expect(() => resolveCompileSeedExtractionConfig({})).toThrow(
+      /extraction model is unresolved/u
+    );
+  });
+
+  it("falls back to the manifest extraction_model when env is unset", () => {
+    const config = resolveCompileSeedExtractionConfig(
+      {},
+      {
+        schema_version: 1,
+        extraction_model: "gpt-5.4-mini",
+        provider_url: "https://yunwu.ai/v1",
+        system_prompt_sha256: "deadbeef",
+        cache_key_algo: "sha256(model\\0systemPrompt\\0turnContent)",
+        dataset: "longmemeval-s",
+        dataset_revision: "rev",
+        storage: "git-tracked",
+        built_at: "2026-05-27T00:00:00Z",
+        builder: "test"
+      }
+    );
+    expect(config.model).toBe("gpt-5.4-mini");
     expect(config.providerUrl).toBe("https://yunwu.ai/v1");
   });
 });
@@ -225,6 +268,11 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       memoryId,
       signalId: `signal-${memoryId}`,
       proposalId: `proposal-${memoryId}`,
+      // The bench seeders attach a real evidence_capsule per durable memory;
+      // synthesizing one here mirrors the production row the materializer
+      // would have created. Tests that need the null-evidence branch can
+      // pass it explicitly via the helper at module bottom (makeSeed).
+      evidenceId: `evidence-${memoryId}`,
       truncated: false,
       charsClipped: 0
     };
@@ -289,6 +337,118 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(runner.stats.factsProduced).toBe(2);
     expect(runner.stats.llmCalls).toBe(1);
     expect(runner.stats.liveExtractionFailures).toBe(0);
+    expect(runner.stats.cachedExtractionFailures).toBe(0);
+  });
+
+  it("salvages valid signals when one envelope entry is corrupt — recovered, not a fallback", async () => {
+    // Two clean entries straddle one corrupt entry (bad `\'` escape) so the
+    // whole-envelope JSON.parse throws. Element-wise salvage recovers the
+    // two clean siblings; the corrupt entry is dropped to parseDropped, and
+    // NEITHER the cached/live failure counters NOR offline_fallbacks bump —
+    // the turn is a successful extraction, so the release blocker still sees
+    // a clean offline_fallbacks / failure count.
+    const corruptEnvelope =
+      `{"signals":[` +
+      `{"signal_kind":"potential_preference","object_kind":"user_preference",` +
+      `"confidence":0.9,"matched_text":"moved to Berlin","distilled_fact":"Alice lives in Berlin."},` +
+      `{"signal_kind":"potential_preference","object_kind":"user_preference",` +
+      `"confidence":0.8,"matched_text":"I\\'ll bring my dog","distilled_fact":"bad"},` +
+      `{"signal_kind":"potential_preference","object_kind":"user_preference",` +
+      `"confidence":0.9,"matched_text":"started my job","distilled_fact":"Alice started her job."}` +
+      `]}`;
+    expect(() => JSON.parse(corruptEnvelope)).toThrow();
+
+    const seeded: BenchSignalSeedInput[] = [];
+    let counter = 0;
+    const daemon = buildCompileSeedDaemon((input) => {
+      seeded.push(input);
+      counter += 1;
+      return buildSeed(`memory-${counter}`);
+    });
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      extractorFactory: () => ({
+        extract: async () => ({ rawJson: corruptEnvelope })
+      })
+    });
+
+    const result = await runner.seedTurn({
+      daemon,
+      turnContent: "I moved to Berlin and I started my job.",
+      evidenceRefBase: "q1-s0-t0",
+      seedIndex: 0,
+      ...SEED_CONTEXT
+    });
+
+    // Two salvaged facts seeded — NOT one degraded full-turn fact.
+    expect(result.seeds.map((seed) => seed.memoryId)).toEqual([
+      "memory-1",
+      "memory-2"
+    ]);
+    expect(seeded.map((input) => input.distilledFact)).toEqual([
+      "Alice lives in Berlin.",
+      "Alice started her job."
+    ]);
+    expect(
+      seeded.every((input) => input.extractionProvider === "official_api_compile")
+    ).toBe(true);
+    // Recovered turn is a success: no failure-bucket increments.
+    expect(runner.stats.cachedExtractionFailures).toBe(0);
+    expect(runner.stats.liveExtractionFailures).toBe(0);
+    expect(runner.stats.offlineFallbacks).toBe(0);
+    expect(runner.stats.factsProduced).toBe(2);
+    // The one dropped corrupt entry is attributed to parseDropped (raw=3,
+    // parsed=2), so nothing is silently lost.
+    expect(runner.stats.parseDropped).toBe(1);
+    expect(runner.stats.signalsDropped).toBe(1);
+    // The release blocker reads these stats; a recovered run is releasable on
+    // the seed-extraction dimension (path stays official_api_compile, zero
+    // offline fallbacks / failures).
+    const kpi = toSeedExtractionPathKpi(runner.stats);
+    expect(kpi.path).toBe("official_api_compile");
+    expect(kpi.offline_fallbacks).toBe(0);
+    expect(kpi.cached_extraction_failures).toBe(0);
+    expect(kpi.parse_dropped).toBe(1);
+  });
+
+  it("falls back to the full turn when the envelope is degenerate (no complete entry)", async () => {
+    // The only entry is truncated mid-string (max_tokens) — no complete
+    // element survives salvage, so the turn correctly degrades to the
+    // full-turn fallback and is NOT counted as a successful extraction.
+    const degenerate =
+      `{"signals":[{"signal_kind":"potential_preference","object_kind":"user_preference",` +
+      `"confidence":0.9,"matched_text":"`;
+    expect(() => JSON.parse(degenerate)).toThrow();
+
+    const seeded: BenchSignalSeedInput[] = [];
+    const daemon = buildCompileSeedDaemon((input) => {
+      seeded.push(input);
+      return buildSeed("memory-1");
+    });
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      extractorFactory: () => ({
+        extract: async () => ({ rawJson: degenerate })
+      })
+    });
+
+    const result = await runner.seedTurn({
+      daemon,
+      turnContent: "I moved to Berlin.",
+      evidenceRefBase: "q1-s0-t0",
+      seedIndex: 0,
+      ...SEED_CONTEXT
+    });
+
+    // One degraded full-turn fact; the failure is counted (live source here,
+    // since a fresh seedTurn live-extracts on cache miss).
+    expect(result.seeds).toHaveLength(1);
+    expect(seeded[0]?.distilledFact).toBe("I moved to Berlin.");
+    expect(seeded[0]?.extractionProvider).toBe("no_credentials_fallback");
+    expect(runner.stats.offlineFallbacks).toBe(1);
+    expect(runner.stats.liveExtractionFailures).toBe(1);
     expect(runner.stats.cachedExtractionFailures).toBe(0);
   });
 
@@ -522,6 +682,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
       cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
+      signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
@@ -553,6 +714,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
       cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
+      signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
@@ -619,6 +781,7 @@ describe("bench evidence capsule — production-faithful span", () => {
         memoryId: "memory-1",
         signalId: "signal-1",
         proposalId: "proposal-1",
+        evidenceId: "evidence-1",
         truncated: false,
         charsClipped: 0
       };
@@ -675,6 +838,7 @@ describe("bench evidence capsule — production-faithful span", () => {
         memoryId: "memory-1",
         signalId: "signal-1",
         proposalId: "proposal-1",
+        evidenceId: "evidence-1",
         truncated: false,
         charsClipped: 0
       };
@@ -717,6 +881,7 @@ describe("compile() signal-drop count is observable", () => {
         memoryId: `memory-${counter}`,
         signalId: `signal-${counter}`,
         proposalId: `proposal-${counter}`,
+        evidenceId: `evidence-${counter}`,
         truncated: false,
         charsClipped: 0
       };
@@ -795,6 +960,7 @@ describe("compile() signal-drop count is observable", () => {
         memoryId: `memory-${counter}`,
         signalId: `signal-${counter}`,
         proposalId: `proposal-${counter}`,
+        evidenceId: `evidence-${counter}`,
         truncated: false,
         charsClipped: 0
       };
@@ -852,6 +1018,87 @@ describe("compile() signal-drop count is observable", () => {
     expect(runner.stats.compileOverflowDropped).toBe(0);
     expect(runner.stats.signalsDropped).toBe(1);
     expect(runner.stats.factsProduced).toBe(2);
+  });
+
+  it("isolates per-signal materialization drops by reason and keeps healthy batch-mates", async () => {
+    // Regression for the 1963-signal whole-batch drop: when some signals of a
+    // turn fail to materialize a memory_entry (candidate_absent) or threw and
+    // were isolated per-signal (materialization_error), the turn's HEALTHY
+    // batch-mates must still seed, and each drop must be attributed by reason
+    // in the stats so candidate-absent / seed-quality is root-causable from the
+    // KPI archive — not just stderr.
+    const daemon: CompileSeedDaemon = {
+      proposeMemoryFromSignal: async () => ({
+        memoryId: "memory-fallback",
+        signalId: "signal-fallback",
+        proposalId: "proposal-fallback",
+        evidenceId: "evidence-fallback",
+        truncated: false,
+        charsClipped: 0
+      }),
+      // Three clean facts arrive; the daemon seeds the first, drops the second
+      // as candidate_absent, drops the third as materialization_error.
+      proposeMemoriesFromCompileSignals: async () => ({
+        seeds: [
+          {
+            memoryId: "memory-1",
+            signalId: "signal-1",
+            proposalId: "proposal-1",
+            evidenceId: "evidence-1",
+            truncated: false,
+            charsClipped: 0
+          }
+        ],
+        dropped: [
+          { reason: "candidate_absent", detail: "triage=accepted routing=evidence archival" },
+          { reason: "materialization_error", detail: "boom" }
+        ]
+      }),
+      proposeSynthesis: async () => ({ synthesisId: null })
+    };
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      extractorFactory: () => ({
+        extract: async () => ({
+          rawJson: signalsEnvelope([
+            { distilled: "Survivor.", matched: "Intro span" },
+            { distilled: "Absent.", matched: "Middle span" },
+            { distilled: "Threw.", matched: "Closing span" }
+          ])
+        })
+      })
+    });
+
+    const result = await runner.seedTurn({
+      daemon,
+      turnContent: "Intro span. Middle span. Closing span.",
+      evidenceRefBase: "q1-s0-t0",
+      seedIndex: 0,
+      workspaceId: "ws-test",
+      runId: "run-test"
+    });
+
+    // The one healthy fact seeded — the two failures did NOT drop it.
+    expect(result.seeds).toHaveLength(1);
+    expect(result.seeds[0]?.memoryId).toBe("memory-1");
+    // Both materialization-seam drops are counted, attributed by reason.
+    expect(runner.stats.signalsDropped).toBe(2);
+    expect(runner.stats.signalsDroppedByReason).toEqual({
+      candidate_absent: 1,
+      materialization_error: 1
+    });
+    // No extraction-stage drops on this clean envelope.
+    expect(runner.stats.parseDropped).toBe(0);
+    expect(runner.stats.compileOverflowDropped).toBe(0);
+
+    // The per-reason ledger surfaces in the persisted KPI.
+    const kpi = toSeedExtractionPathKpi(runner.stats);
+    expect(kpi.signals_dropped_by_reason).toEqual({
+      candidate_absent: 1,
+      materialization_error: 1
+    });
+    expect(kpi.signals_dropped).toBe(2);
   });
 });
 
@@ -1016,7 +1263,9 @@ function makeSeed(memoryId: string): SeededMemoryResult {
     memoryId,
     signalId: `signal-${memoryId}`,
     proposalId: `proposal-${memoryId}`,
-    evidenceId: `evidence-${memoryId}`
+    evidenceId: `evidence-${memoryId}`,
+    truncated: false,
+    charsClipped: 0
   };
 }
 
@@ -1105,5 +1354,849 @@ describe("computeNextTurnSeedRefs — D-1 single-id fan-out invariant", () => {
       ? ({} as { sourceMemoryRefs?: readonly string[] })
       : { sourceMemoryRefs: session2Prev };
     expect(session2EmitSpread.sourceMemoryRefs).toBeUndefined();
+  });
+});
+
+// Phase A.1 instrument coverage: a seed-side extraction failure must drop one
+// diagnostic JSON file carrying cache_key_prefix / model / provider so a
+// Phase A.2 preflight reader can attribute the failure to a specific cache
+// shard or live call without re-running the bench.
+describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
+  let cacheRoot: string;
+  let diagnosticDir: string;
+
+  beforeEach(async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-diag-cache-"));
+    diagnosticDir = await mkdtemp(join(tmpdir(), "compile-seed-diag-"));
+  });
+
+  afterEach(async () => {
+    await rm(cacheRoot, { recursive: true, force: true });
+    await rm(diagnosticDir, { recursive: true, force: true });
+  });
+
+  it("writes a compile-seed-*.json dump carrying cache_key_prefix when live extraction fails", async () => {
+    const config: CompileSeedExtractionConfig = {
+      providerUrl: "https://example.test/v1",
+      model: "gpt-test-mini",
+      apiKey: "test-key"
+    };
+    const daemon: CompileSeedDaemon = {
+      proposeMemoryFromSignal: async (_input) => ({
+        memoryId: "memory-1",
+        signalId: "signal-memory-1",
+        proposalId: "proposal-memory-1",
+        evidenceId: "evidence-memory-1",
+        truncated: false,
+        charsClipped: 0
+      }),
+      proposeMemoriesFromCompileSignals: async () => ({ seeds: [], dropped: [] }),
+      proposeSynthesis: async () => ({ synthesisId: null })
+    };
+    const runner = createCompileSeedRunner({
+      config,
+      cacheRoot,
+      diagnosticDir,
+      extractorFactory: () => ({
+        extract: async () => {
+          throw new Error("garden extraction HTTP 500 from provider");
+        }
+      })
+    });
+
+    await runner.seedTurn({
+      daemon,
+      turnContent: "Turn whose extraction blows up.",
+      evidenceRefBase: "q1-s0-t0",
+      seedIndex: 0,
+      workspaceId: "ws-test",
+      runId: "run-test"
+    });
+
+    const dumpFiles = readdirSync(diagnosticDir).filter(
+      (f) => f.startsWith("compile-seed-") && f.endsWith(".json")
+    );
+    expect(dumpFiles).toHaveLength(1);
+    const dump = JSON.parse(
+      readFileSync(join(diagnosticDir, dumpFiles[0]!), "utf8")
+    ) as Record<string, unknown>;
+
+    expect(dump).toMatchObject({
+      surface: "compile-seed",
+      provider_kind: "official_api",
+      model_id: "gpt-test-mini",
+      workspace_id: "ws-test",
+      run_id: "run-test",
+      last_extraction_source: "live",
+      live_extraction_failures: 1,
+      cached_extraction_failures: 0
+    });
+    // cache_key_prefix is the 12-char SHA-256 prefix the caching extractor
+    // recorded onto stats.lastCacheKey before the delegate threw.
+    expect(typeof dump.cache_key_prefix).toBe("string");
+    expect((dump.cache_key_prefix as string).length).toBe(12);
+    expect((dump.cache_key_prefix as string)).toMatch(/^[0-9a-f]{12}$/u);
+    expect(typeof dump.error_message).toBe("string");
+    // The seed-side dump receives the wrapped GardenProviderError (the
+    // OfficialApiGardenProvider maps the transport HTTP 500 onto
+    // "invalid_response"). The underlying HTTP 500 is in the provider-side
+    // dump's `response_status` field, not in the bench-side error_message
+    // string.
+    expect((dump.error_message as string)).toContain(
+      "Official garden provider returned an invalid response."
+    );
+  });
+
+  it("does not write a dump when diagnosticDir is null (instrument disabled)", async () => {
+    const config: CompileSeedExtractionConfig = {
+      providerUrl: "https://example.test/v1",
+      model: "gpt-test-mini",
+      apiKey: "test-key"
+    };
+    const daemon: CompileSeedDaemon = {
+      proposeMemoryFromSignal: async () => ({
+        memoryId: "memory-1",
+        signalId: "signal-memory-1",
+        proposalId: "proposal-memory-1",
+        evidenceId: "evidence-memory-1",
+        truncated: false,
+        charsClipped: 0
+      }),
+      proposeMemoriesFromCompileSignals: async () => ({ seeds: [], dropped: [] }),
+      proposeSynthesis: async () => ({ synthesisId: null })
+    };
+    const runner = createCompileSeedRunner({
+      config,
+      cacheRoot,
+      diagnosticDir: null,
+      extractorFactory: () => ({
+        extract: async () => {
+          throw new Error("garden extraction HTTP 502");
+        }
+      })
+    });
+
+    await runner.seedTurn({
+      daemon,
+      turnContent: "Another failing turn.",
+      evidenceRefBase: "q2-s0-t0",
+      seedIndex: 0,
+      workspaceId: "ws-test",
+      runId: "run-test"
+    });
+
+    // diagnosticDir was created by beforeEach but never written to.
+    const dumpFiles = readdirSync(diagnosticDir).filter(
+      (f) => f.startsWith("compile-seed-") && f.endsWith(".json")
+    );
+    expect(dumpFiles).toHaveLength(0);
+    // The classification path still ran so liveExtractionFailures is bumped.
+    expect(runner.stats.liveExtractionFailures).toBe(1);
+  });
+});
+
+// invariant: the bench HTTP transport (createGardenHttpExtractor) must mirror
+// the production pi-mono-extractor retry policy — 3 retries on 5xx / 429 /
+// unknown transport, 1 retry on timeout, no retry on 4xx-non-429. Before
+// v0.3.11 this layer had ZERO retries, so a transient yunwu.ai burst that the
+// production transport would recover silently demoted the bench archive to
+// the no-credentials fallback path.
+// cross-file: packages/soul/src/garden/pi-mono-extractor.ts MAX_EXTRACTOR_RETRIES
+describe("createGardenHttpExtractor retry policy", () => {
+  const HTTP_CONFIG: CompileSeedExtractionConfig = {
+    providerUrl: "https://example.test/v1",
+    model: "test-model",
+    apiKey: "sk-test"
+  };
+
+  function makeJsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" }
+    });
+  }
+
+  it("retries 3 times on HTTP 5xx then succeeds with retryClassification=success_after_retry", async () => {
+    // Models the dominant yunwu.ai outage shape: a brief 503 storm followed
+    // by recovery. The 1-retry policy bench shipped with would have given up
+    // after attempt 2 and demoted the turn to the fallback path; the 3-retry
+    // budget gets it through.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("svc unavailable", { status: 503 }))
+      .mockResolvedValueOnce(new Response("svc unavailable", { status: 503 }))
+      .mockResolvedValueOnce(new Response("svc unavailable", { status: 503 }))
+      .mockResolvedValueOnce(
+        makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+      );
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    const result = await extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "turn"
+    });
+    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+    expect(result.extractorMeta).toEqual({
+      recoveryKind: "none",
+      retryCount: 3,
+      retryClassification: "success_after_retry"
+    });
+    // 4 = first attempt + 3 retries.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(sleep).toHaveBeenCalledTimes(3);
+  });
+
+  it("does NOT retry on HTTP 401 (auth) and surfaces failure_non_retryable_4xx", async () => {
+    // Auth / 4xx-non-429 is deterministic; retrying spends quota with no
+    // chance of success. The thrown error carries the classification so
+    // dumpSeedExtractionFailureDiagnostic can surface it in the archive
+    // without re-deriving from the message.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const benchRetry = (thrown as { benchRetry?: { retryCount: number; retryClassification: string } })
+      .benchRetry;
+    expect(benchRetry).toEqual({
+      retryCount: 0,
+      retryClassification: "failure_non_retryable_4xx"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("retries 429 (rate limit) and succeeds on the next attempt", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+      .mockResolvedValueOnce(
+        makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+      );
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0.5
+    });
+    const result = await extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t"
+    });
+    expect(result.extractorMeta?.retryClassification).toBe("success_after_retry");
+    expect(result.extractorMeta?.retryCount).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("caps the 5xx retry budget at MAX_RETRIES extra attempts (failure_max_retries)", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("svc unavailable", { status: 502 }));
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+    } catch (error) {
+      thrown = error;
+    }
+    const benchRetry = (thrown as { benchRetry?: { retryCount: number; retryClassification: string } })
+      .benchRetry;
+    expect(benchRetry).toEqual({
+      retryCount: 3,
+      retryClassification: "failure_max_retries"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  // invariant: the wall-clock guard inside createGardenHttpExtractor must
+  // abort a hanging fetch even if the monotonic setTimeout has not yet fired.
+  // Models the bench-runner host-suspend hang: fetch never resolves and the
+  // operator-supplied timeoutMs is large enough that without the wall-clock
+  // tick the test would time out.
+  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  it("aborts a hanging fetch via AbortController so timeout retry classification fires", async () => {
+    // Fetch that resolves only when the abort signal fires. timeoutMs=20ms
+    // ensures the per-attempt timer triggers fast; the goal is to prove the
+    // abort path WIRES through to the fetch signal and exits the await.
+    // First attempt times out, then second attempt times out — exhausts the
+    // 1-timeout-retry budget and surfaces failure_timeout.
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_, reject) => {
+          const signal = (init as RequestInit | undefined)?.signal as
+            | AbortSignal
+            | undefined;
+          signal?.addEventListener("abort", () => {
+            reject(new Error("The user aborted a request."));
+          });
+        })
+    );
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({
+        systemPrompt: "s",
+        userPrompt: "t",
+        timeoutMs: 20
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const benchRetry = (thrown as {
+      benchRetry?: { retryCount: number; retryClassification: string };
+    }).benchRetry;
+    expect(benchRetry?.retryClassification).toBe("failure_timeout");
+    // 2 = first attempt + 1 timeout retry (BENCH_HTTP_MAX_TIMEOUT_RETRIES).
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // invariant: root-cause regression. The previous test's fetch rejects when
+  // its abort signal fires — i.e. it is abort-AWARE. The real wedge was a
+  // STALLED undici socket that ignores controller.abort() on Node 24: the
+  // timer fires, abort() is called, but the fetch promise never settles, so
+  // `await fetchImpl(...)` hangs forever and the worker pool wedges with
+  // failures=0. The Promise.race backstop must reject the attempt on the
+  // timer even though this fetch ignores its signal. WITHOUT the fix this
+  // test hangs until the vitest timeout; WITH the fix it surfaces
+  // failure_timeout within budget.
+  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  it("settles a never-resolving fetch that ignores its abort signal via the timeout backstop", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      // Never settles and never reads the signal — the stalled-socket shape.
+      .mockImplementation(() => new Promise<Response>(() => {}));
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({
+        systemPrompt: "s",
+        userPrompt: "t",
+        timeoutMs: 20
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const benchRetry = (thrown as {
+      benchRetry?: { retryCount: number; retryClassification: string };
+    }).benchRetry;
+    expect(benchRetry?.retryClassification).toBe("failure_timeout");
+    // 2 = first attempt + 1 timeout retry (BENCH_HTTP_MAX_TIMEOUT_RETRIES);
+    // each attempt is forced to settle by the backstop rather than hanging.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // invariant: an operator abort (input.abortSignal) must settle the attempt
+  // PROMPTLY and classify failure_aborted (never retried) even when the fetch
+  // ignores its abort signal and never settles. abort() alone does not settle
+  // for that stalled-socket shape, so without the settlement reject the attempt
+  // would wait the full budget and then misclassify as failure_timeout.
+  // cross-file: packages/soul/src/garden/wall-clock-timeout.ts settleOperatorAbort.
+  it("settles failure_aborted (no retry) on operator abort even when the fetch ignores its signal", async () => {
+    const operator = new AbortController();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      // Never settles and never reads the signal — the abort-ignoring stalled
+      // socket. Without the operator-abort settlement this hangs to the full
+      // budget; with it the race settles as soon as the operator aborts.
+      .mockImplementation(() => {
+        // Abort mid-flight, after the attempt has wired its listener.
+        queueMicrotask(() => operator.abort());
+        return new Promise<Response>(() => {});
+      });
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({
+        systemPrompt: "s",
+        userPrompt: "t",
+        // Large budget so a failure_timeout would only appear after 60s; the
+        // test settling promptly proves the operator-abort settlement fired.
+        timeoutMs: 60_000,
+        abortSignal: operator.signal
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const benchRetry = (thrown as {
+      benchRetry?: { retryCount: number; retryClassification: string };
+    }).benchRetry;
+    expect(benchRetry?.retryClassification).toBe("failure_aborted");
+    // Operator abort is never retried: exactly one attempt, no backoff sleep.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("does NOT abort a fetch that resolves within the timeout budget", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+    );
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    const result = await extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t",
+      timeoutMs: 60_000
+    });
+    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+    expect(result.extractorMeta?.retryClassification).toBe("success_first_try");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+});
+
+// invariant: yunwu.ai + gpt-5.4-mini answers chat/completions content ONLY as
+// an SSE delta stream (`stream:true`); a non-stream request returns an empty
+// `data: [DONE]\n\n` body. The extractor sends `stream:true` and parses the
+// SSE body; a compliant provider's plain JSON body must still work
+// (back-compat). The body read stays under the same wall-clock backstop as the
+// fetch so a mid-stream stalled socket settles as a timeout, not a hang.
+// see: .do-it/findings/garden-sse-streaming-rootcause.md
+describe("createGardenHttpExtractor — SSE streaming body parse", () => {
+  const HTTP_CONFIG: CompileSeedExtractionConfig = {
+    providerUrl: "https://example.test/v1",
+    model: "test-model",
+    apiKey: "sk-test"
+  };
+
+  function makeSseResponse(body: string): Response {
+    return new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" }
+    });
+  }
+
+  function makeJsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" }
+    });
+  }
+
+  it("sends stream:true in the request body", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        makeSseResponse(
+          'data: {"choices":[{"delta":{"content":"{\\"signals\\":[]}"}}]}\n\ndata: [DONE]\n\n'
+        )
+      );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+    await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const sentBody = JSON.parse(String(init?.body)) as { stream?: unknown };
+    expect(sentBody.stream).toBe(true);
+  });
+
+  it("concatenates two SSE delta chunks before [DONE] into rawJson", async () => {
+    // The dominant yunwu shape: the JSON object the extractor must recover is
+    // delivered split across delta frames; only the concatenation parses.
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      makeSseResponse(
+        'data: {"choices":[{"delta":{"content":"{\\"sig"}}]}\n\n' +
+          'data: {"choices":[{"delta":{"content":"nals\\":[]}"}}]}\n\n' +
+          "data: [DONE]\n\n"
+      )
+    );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+    const result = await extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t"
+    });
+    expect(result.rawJson).toBe('{"signals":[]}');
+    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+    expect(result.extractorMeta?.retryClassification).toBe("success_first_try");
+  });
+
+  it("classifies a [DONE]-only empty SSE stream as no-content (NOT a hang)", async () => {
+    // yunwu's non-stream / empty answer shape. The empty-content guard must
+    // throw so the run blocks on a real content failure instead of silently
+    // recording an empty extraction. A non-retryable content error surfaces.
+    // A fresh Response per call: an empty-content error has no HTTP status so
+    // the retry loop treats it as an unknown-transport failure and retries;
+    // each attempt must read a fresh (unconsumed) body. The terminal wrapped
+    // error preserves the "no content" cause message.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => makeSseResponse("data: [DONE]\n\n"));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain(
+      "garden extraction returned no content"
+    );
+  });
+
+  it("skips a malformed mid-stream chunk but keeps surrounding content", async () => {
+    // Partial keep-alive noise must not throw; a defensively-skipped bad frame
+    // still yields the real content from the good frames.
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      makeSseResponse(
+        ": keep-alive ping\n\n" +
+          'data: {"choices":[{"delta":{"content":"{\\"signals"}}]}\n\n' +
+          "data: {not valid json\n\n" +
+          'data: {"choices":[{"delta":{"content":"\\":[]}"}}]}\n\n' +
+          "data: [DONE]\n\n"
+      )
+    );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+    const result = await extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t"
+    });
+    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+  });
+
+  it("throws on a truncated SSE stream (non-empty but unparseable) so it is never cached", async () => {
+    // B1 regression: a provider/proxy delivers a PARTIAL SSE body then cleanly
+    // closes the socket -> `response.text()` RESOLVES with partial bytes (no
+    // stall, so the wall-clock backstop does NOT fire). The SSE parser keeps
+    // the valid early delta and silently skips the truncated final frame,
+    // accumulating `{"signals":[{"a"` — non-empty (passes the empty-content
+    // guard) but unparseable. Pre-fix this returned success and the poison
+    // shard was written to cache as a permanent 0-seed "success". The validity
+    // gate (parseOfficialApiSignals, the same downstream consumer) must THROW
+    // so the attempt routes to retry then a content/invalid terminal failure —
+    // the extractor throws, so createCachingSignalExtractor never writes it.
+    // A fresh Response per call: a content error has no HTTP status so the
+    // retry loop treats it as unknown-transport and retries; each attempt
+    // reads a fresh (unconsumed) body.
+    // see: .do-it/findings/garden-sse-streaming-rootcause.md
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      makeSseResponse(
+        'data: {"choices":[{"delta":{"content":"{\\"signals\\":[{\\"a"}}]}\n\n' +
+          "data: {\"choices\":[{\"delta\":{\"content\":\"\\\":\\\"trunc"
+      )
+    );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    let result: unknown = null;
+    try {
+      result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+    } catch (error) {
+      thrown = error;
+    }
+    // The extractor threw — it did NOT return a success_* result, so the
+    // caching extractor never receives a rawJson to write.
+    expect(result).toBeNull();
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain(
+      "garden extraction returned unparseable content"
+    );
+    // Terminal classification is a retryable content failure that exhausts
+    // retries (mirrors the no-content style), NOT a hang or silent success.
+    const benchRetry = (thrown as {
+      benchRetry?: { retryCount: number; retryClassification: string };
+    }).benchRetry;
+    expect(benchRetry?.retryClassification).toBe("failure_max_retries");
+    // 4 = first attempt + BENCH_HTTP_MAX_RETRIES (3); each settles on the
+    // resolved poison bytes, never hangs.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("extracts a full message.content carried in a single SSE frame", async () => {
+    // Some OpenAI-compatible providers emit the whole assistant message in one
+    // frame as choices[0].message.content rather than streamed deltas.
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      makeSseResponse(
+        'data: {"choices":[{"message":{"content":"{\\"signals\\":[]}"}}]}\n\n' +
+          "data: [DONE]\n\n"
+      )
+    );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+    const result = await extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t"
+    });
+    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+  });
+
+  it("still extracts a compliant plain-JSON body (application/json back-compat)", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          choices: [{ message: { content: '{"signals":[]}' } }]
+        })
+      );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+    const result = await extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t"
+    });
+    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+    expect(result.extractorMeta?.retryClassification).toBe("success_first_try");
+  });
+
+  // invariant: body-read backstop regression. A response whose body read
+  // (`.text()`) NEVER settles and ignores abort is the post-fetch analogue of
+  // the stalled-socket wedge. Racing the body read against the wall-clock
+  // backstop must settle the attempt as failure_timeout within budget rather
+  // than hanging until the vitest timeout. Mirrors the never-settling-fetch
+  // regression but for the body read. WITHOUT the body-read race this hangs.
+  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  it("settles a never-resolving body read via the timeout backstop (not a hang)", async () => {
+    // A real 200 OK response whose `.text()` never resolves and ignores abort.
+    const stalledBodyResponse = {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers({ "content-type": "text/event-stream" }),
+      // Never settles — the mid-stream stalled-socket shape on the body read.
+      text: () => new Promise<string>(() => {})
+    } as unknown as Response;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(stalledBodyResponse);
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({
+        systemPrompt: "s",
+        userPrompt: "t",
+        timeoutMs: 20
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const benchRetry = (thrown as {
+      benchRetry?: { retryCount: number; retryClassification: string };
+    }).benchRetry;
+    expect(benchRetry?.retryClassification).toBe("failure_timeout");
+    // 2 = first attempt + 1 timeout retry; each settles via the backstop.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+// invariant: the SSE-or-JSON content extraction is a pure helper so it is unit
+// testable without a live fetch. Same parse the transport uses; covers the
+// shapes the integration tests above exercise plus edge framing.
+describe("extractContentFromChatCompletionBody", () => {
+  it("concatenates delta content across data: frames up to [DONE]", () => {
+    const body =
+      'data: {"choices":[{"delta":{"content":"ab"}}]}\n\n' +
+      'data: {"choices":[{"delta":{"content":"cd"}}]}\n\n' +
+      "data: [DONE]\n\n";
+    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
+      "abcd"
+    );
+  });
+
+  it("detects SSE by leading data: even without an event-stream content-type", () => {
+    const body = 'data: {"choices":[{"delta":{"content":"x"}}]}\n\ndata: [DONE]\n\n';
+    expect(extractContentFromChatCompletionBody(body, null)).toBe("x");
+  });
+
+  it("returns empty string for a [DONE]-only stream", () => {
+    expect(
+      extractContentFromChatCompletionBody("data: [DONE]\n\n", "text/event-stream")
+    ).toBe("");
+  });
+
+  it("ignores blank lines and comment lines", () => {
+    const body =
+      ": ping\n\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n";
+    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
+      "ok"
+    );
+  });
+
+  it("reads message.content from a compliant plain-JSON body", () => {
+    const body = JSON.stringify({
+      choices: [{ message: { content: "json-content" } }]
+    });
+    expect(extractContentFromChatCompletionBody(body, "application/json")).toBe(
+      "json-content"
+    );
+  });
+
+  it("skips a malformed chunk without throwing", () => {
+    const body =
+      "data: {bad\n\n" +
+      'data: {"choices":[{"delta":{"content":"good"}}]}\n\n' +
+      "data: [DONE]\n\n";
+    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
+      "good"
+    );
+  });
+
+  it("N1: takes content ONCE when a frame carries both delta.content and message.content", () => {
+    // A provider that echoes the running message.content alongside each delta
+    // would double-count if both branches appended. The message.content branch
+    // is an `else if` of the delta branch, so delta wins and content is taken
+    // once — not "xx".
+    const body =
+      'data: {"choices":[{"delta":{"content":"x"},"message":{"content":"x"}}]}\n\n' +
+      "data: [DONE]\n\n";
+    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
+      "x"
+    );
+  });
+});
+
+// invariant: a full-bench seed-extraction failure must (a) bump
+// liveExtractionFailures, (b) drop a diagnostic dump whose
+// retry_classification field surfaces the terminal outcome, (c) end up
+// blocked via seedExtractionReleaseBlocker because
+// live_extraction_failures > 0.
+// cross-file: packages/eval/src/seed-extraction-blocker.ts
+//   evaluateSeedExtractionReleaseBlocker checks live_extraction_failures.
+describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", () => {
+  let cacheRoot: string;
+  let diagnosticDir: string;
+
+  beforeEach(async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-cache-"));
+    diagnosticDir = await mkdtemp(join(tmpdir(), "compile-seed-diag-"));
+  });
+
+  afterEach(async () => {
+    await rm(cacheRoot, { recursive: true, force: true });
+    await rm(diagnosticDir, { recursive: true, force: true });
+  });
+
+  it("dumps retry_classification=failure_non_retryable_4xx when a live extraction hits HTTP 401", async () => {
+    // The extractor delegate models a chronic 401 — the retry loop must
+    // bail on the first attempt and propagate the classification. The dump
+    // file captured under diagnosticDir then carries retry_classification
+    // so a Phase-F dump reader can attribute the fallback without re-running.
+    const failingDelegate: BenchSignalExtractor = {
+      async extract() {
+        const err = new Error("garden extraction HTTP 401 unauthorized");
+        (err as { status?: number }).status = 401;
+        (err as { benchRetry?: unknown }).benchRetry = {
+          retryCount: 0,
+          retryClassification: "failure_non_retryable_4xx"
+        };
+        throw err;
+      }
+    };
+
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      extractorFactory: () => failingDelegate,
+      diagnosticDir
+    });
+
+    const daemon = buildCompileSeedDaemon((input) => ({
+      memoryId: `memory-${input.distilledFact.slice(0, 4)}`,
+      signalId: "signal-x",
+      proposalId: "proposal-x",
+      evidenceId: "evidence-x",
+      truncated: false,
+      charsClipped: 0
+    }));
+
+    await runner.seedTurn({
+      daemon,
+      turnContent: "the user prefers tea over coffee",
+      evidenceRefBase: "evidence-1",
+      seedIndex: 0,
+      workspaceId: "ws-test",
+      runId: "run-test"
+    });
+
+    // (a) liveExtractionFailures bumped — the blocker depends on this.
+    expect(runner.stats.liveExtractionFailures).toBe(1);
+    expect(runner.stats.offlineFallbacks).toBe(1);
+
+    // (b) dump file written and carries retry_classification.
+    const dumpFiles = readdirSync(diagnosticDir).filter(
+      (f) => f.startsWith("compile-seed-") && f.endsWith(".json")
+    );
+    expect(dumpFiles).toHaveLength(1);
+    const envelope = JSON.parse(
+      readFileSync(join(diagnosticDir, dumpFiles[0]!), "utf8")
+    ) as {
+      retry_classification: string;
+      retry_count: number | null;
+      live_extraction_failures: number;
+      last_extraction_source: string;
+    };
+    expect(envelope.retry_classification).toBe("failure_non_retryable_4xx");
+    expect(envelope.retry_count).toBe(0);
+    expect(envelope.live_extraction_failures).toBe(1);
+    expect(envelope.last_extraction_source).toBe("live");
   });
 });

@@ -1,5 +1,6 @@
 import {
   RecallCandidateSchema,
+  type ManifestationState,
   type MemoryDimension as MemoryDimensionType,
   type MemoryEntry,
   type FineAssessmentConfig,
@@ -15,6 +16,7 @@ import {
   estimateTokens,
   normalizeActivationScore
 } from "./recall-service-helpers.js";
+import { clampManifestationByGovernance } from "./path-manifestation-policy.js";
 import type { CoarseRecallCandidate, TokenEstimator } from "./recall-service-types.js";
 
 export interface BuildRecallCandidateInput {
@@ -27,12 +29,21 @@ export interface BuildRecallCandidateInput {
   readonly index: number;
   readonly usedTokensBeforeCandidate: number;
   readonly extraSourceChannel?: string;
+  // invariant: governance ceiling on manifestation derived from the memory's
+  // inbound recall-eligible PathRelations. Absent => unrestricted
+  // (full_eligible). The ceiling only LOWERS the strength tier, never elevates.
+  // see also: path-manifestation-policy.ts memoryGovernanceCeiling.
+  readonly governanceCeiling?: ManifestationState;
 }
 
 export function buildRecallCandidate(input: BuildRecallCandidateInput): Readonly<RecallCandidate> {
   const entry = input.candidate.entry;
   const activationScore = normalizeActivationScore(entry.activation_score);
-  const manifestation = assignManifestation(activationScore);
+  const strengthTier = assignManifestation(activationScore);
+  const manifestation = clampManifestationByGovernance(
+    strengthTier,
+    input.governanceCeiling ?? "full_eligible"
+  );
   const tokenEstimate = input.tokenEstimate ?? estimateTokens(entry.content, input.tokenEstimator);
 
   return RecallCandidateSchema.parse({

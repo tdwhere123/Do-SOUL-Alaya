@@ -11,6 +11,7 @@ import {
   writeFile
 } from "node:fs/promises";
 import path from "node:path";
+import { ZodError } from "zod";
 import {
   KpiPayloadSchema,
   type BenchName,
@@ -20,6 +21,7 @@ import {
   type KpiPayload
 } from "./kpi-schema.js";
 import { releaseHardGateAllowsLatestPassing } from "./release-gates.js";
+import { evaluateSeedExtractionReleaseBlocker } from "./seed-extraction-blocker.js";
 
 export interface HistoryLayout {
   readonly historyRoot: string;
@@ -245,6 +247,48 @@ export async function readEntry(
 }
 
 /**
+ * @anchor read-entry-for-diff-lenient — the advisory baseline-diff read must
+ * not be held hostage to historical archives. Tightening KpiPayloadSchema can
+ * retroactively invalidate a pre-existing archive (e.g. a negative
+ * per_scenario[].latency_ms written by an old pre-monotonic-clock run). A diff
+ * is advisory: when a historical archive is unparseable or fails schema
+ * validation, treat it as "no comparable baseline" (return null + warn) so the
+ * current run still completes and writes its own archive. The strict readEntry
+ * above is preserved for integrity-critical callers (e.g. the standalone diff
+ * CLI reading the CURRENT entry-under-diff) and merge-longmemeval's direct
+ * KpiPayloadSchema.parse stays strict on freshly-produced shard payloads.
+ * cross-file: apps/bench-runner/src/longmemeval/recall-eval-archive.ts
+ * cross-file: apps/bench-runner/src/longmemeval/archive-evidence.ts
+ */
+export async function readEntryForDiff(
+  layout: HistoryLayout,
+  benchName: BenchName,
+  slug: string
+): Promise<KpiPayload | null> {
+  try {
+    return await readEntry(layout, benchName, slug);
+  } catch (error) {
+    const benchRoot = path.join(layout.historyRoot, benchName);
+    const kpiPath = path.join(benchRoot, slug, KPI_FILENAME);
+    if (error instanceof ZodError) {
+      console.warn(
+        `[bench-history] skipping baseline diff: archive '${kpiPath}' fails KpiPayloadSchema; ${error.issues
+          .map((issue) => `[${issue.path.join(".")}] ${issue.message}`)
+          .join("; ")}`
+      );
+      return null;
+    }
+    if (error instanceof SyntaxError) {
+      console.warn(
+        `[bench-history] skipping baseline diff: archive '${kpiPath}' is not valid JSON; ${error.message}`
+      );
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
  * @anchor read-latest-split-aware — diff must be apple-to-apple
  *
  * Without the `split` filter, the diff engine would compare Oracle (filter
@@ -280,7 +324,7 @@ export async function readLatest(
     for (let i = slugs.length - 1; i >= 0; i--) {
       const slug = slugs[i];
       if (slug === undefined) continue;
-      const entry = await readEntry(layout, benchName, slug);
+      const entry = await readEntryForDiff(layout, benchName, slug);
       if (
         entry !== null &&
         (opts.split === undefined || entry.split === opts.split) &&
@@ -305,7 +349,7 @@ export async function readLatest(
       : latestProviderPointerFilename(pointerKind, opts.embeddingProvider);
   const pointerSlug = await readLatestPointerSlug(layout, benchName, pointerFilename);
   if (pointerSlug !== null) {
-    const pointed = await readEntry(layout, benchName, pointerSlug);
+    const pointed = await readEntryForDiff(layout, benchName, pointerSlug);
     if (
       pointed !== null &&
       (opts.embeddingProvider === undefined ||
@@ -321,7 +365,7 @@ export async function readLatest(
       ? await readLatestPointerSlug(layout, benchName, LATEST_BASELINE_FILENAME)
       : null;
   if (legacyPointer !== null) {
-    const pointed = await readEntry(layout, benchName, legacyPointer);
+    const pointed = await readEntryForDiff(layout, benchName, legacyPointer);
     if (
       pointed !== null &&
       (await entryIsPassing(layout, benchName, legacyPointer, pointed))
@@ -334,7 +378,7 @@ export async function readLatest(
   for (let i = slugs.length - 1; i >= 0; i -= 1) {
     const slug = slugs[i];
     if (slug === undefined) continue;
-    const entry = await readEntry(layout, benchName, slug);
+    const entry = await readEntryForDiff(layout, benchName, slug);
     if (
       entry !== null &&
       (opts.embeddingProvider === undefined ||
@@ -391,6 +435,15 @@ async function entryAllowsLatestPassing(
   slug: string,
   payload: KpiPayload
 ): Promise<boolean> {
+  // @anchor seed-extraction-release-blocker
+  // Evaluate the seed-extraction blocker before any branch so degraded
+  // provenance (no_credentials_fallback, offline_fallbacks > 0, or missing
+  // path on LongMemEval) cannot reach latest_passing through the
+  // live-strict-real sidecar branch, which would otherwise short-circuit
+  // releaseHardGateAllowsLatestPassing.
+  if (evaluateSeedExtractionReleaseBlocker(payload) !== null) {
+    return false;
+  }
   if (payload.bench_name === "live" && payload.split === "strict-real") {
     return await liveGatesSidecarAllowsLatestPassing(layout, benchName, slug);
   }
@@ -489,7 +542,7 @@ export async function readPrevious(
   if (currentIndex <= 0) return null;
   const previousSlug = slugs[currentIndex - 1];
   if (previousSlug === undefined) return null;
-  return await readEntry(layout, benchName, previousSlug);
+  return await readEntryForDiff(layout, benchName, previousSlug);
 }
 
 function isNotFound(error: unknown): boolean {

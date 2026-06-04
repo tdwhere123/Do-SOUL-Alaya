@@ -1,10 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import {
   InMemoryHandoffGapHandler,
   MaterializationRouter,
+  type MaterializationRouterDeps,
   type RouteTarget
 } from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+
+type ConflictDetectionPort = NonNullable<MaterializationRouterDeps["conflictDetectionPort"]>;
+type EvidenceCreate = MaterializationRouterDeps["evidenceService"]["create"];
+type MemoryCreate = MaterializationRouterDeps["memoryService"]["create"];
+type SynthesisCreate = MaterializationRouterDeps["synthesisService"]["create"];
+type ClaimCreate = MaterializationRouterDeps["claimService"]["create"];
 
 // invariant: routes-by-object_kind suite. Asserts MaterializationRouter
 // diversifies the producer-side so the live ontology no longer collapses
@@ -202,8 +209,10 @@ describe("MaterializationRouter routing-by-object_kind", () => {
 describe("MaterializationRouter potential_conflict routing", () => {
   it("routes potential_conflict to ConflictDetectionPort.evaluate (not questionable-evidence fallback)", async () => {
     const deps = createDeps();
-    const evaluate = vi.fn(async () => undefined);
-    const detectAndLinkConflicts = vi.fn(async () => undefined);
+    const evaluate = vi.fn<NonNullable<ConflictDetectionPort["evaluate"]>>(async () => undefined);
+    const detectAndLinkConflicts = vi.fn<ConflictDetectionPort["detectAndLinkConflicts"]>(
+      async () => undefined
+    );
     const router = new MaterializationRouter({
       ...deps,
       conflictDetectionPort: { detectAndLinkConflicts, evaluate }
@@ -582,11 +591,10 @@ describe("MaterializationRouter claim_status draft lock", () => {
 });
 
 interface TestDeps {
-  readonly evidenceService: { create: ReturnType<typeof vi.fn> };
-  readonly memoryService: { create: ReturnType<typeof vi.fn> };
-  readonly synthesisService: { create: ReturnType<typeof vi.fn> };
-  readonly claimService: { create: ReturnType<typeof vi.fn> };
-  readonly graphEdgePort: { createEdge: ReturnType<typeof vi.fn> };
+  readonly evidenceService: { create: Mock<EvidenceCreate> };
+  readonly memoryService: { create: Mock<MemoryCreate> };
+  readonly synthesisService: { create: Mock<SynthesisCreate> };
+  readonly claimService: { create: Mock<ClaimCreate> };
   readonly handoffGapHandler: InMemoryHandoffGapHandler;
   claimServiceLastStatus(): string | undefined;
 }
@@ -596,7 +604,7 @@ function createDeps(): TestDeps {
   let lastClaimStatus: string | undefined;
 
   const evidenceService = {
-    create: vi.fn(async () => {
+    create: vi.fn<EvidenceCreate>(async () => {
       evidenceCounter += 1;
       return {
         object_kind: "evidence_capsule",
@@ -605,7 +613,7 @@ function createDeps(): TestDeps {
     })
   };
   const memoryService = {
-    create: vi.fn(async () =>
+    create: vi.fn<MemoryCreate>(async () =>
       ({
         object_kind: "memory_entry",
         object_id: "memory-1"
@@ -613,7 +621,7 @@ function createDeps(): TestDeps {
     )
   };
   const synthesisService = {
-    create: vi.fn(async () =>
+    create: vi.fn<SynthesisCreate>(async () =>
       ({
         object_kind: "synthesis_capsule",
         object_id: "synthesis-1"
@@ -621,7 +629,7 @@ function createDeps(): TestDeps {
     )
   };
   const claimService = {
-    create: vi.fn(async () => {
+    create: vi.fn<ClaimCreate>(async () => {
       // mirror ClaimService.create real default; see
       // packages/core/src/claim-service.ts:123 (ClaimLifecycleState.DRAFT).
       lastClaimStatus = "draft";
@@ -632,16 +640,11 @@ function createDeps(): TestDeps {
       } as never;
     })
   };
-  const graphEdgePort = {
-    createEdge: vi.fn(async () => undefined)
-  };
-
   return {
     evidenceService,
     memoryService,
     synthesisService,
     claimService,
-    graphEdgePort,
     handoffGapHandler: new InMemoryHandoffGapHandler(),
     claimServiceLastStatus: () => lastClaimStatus
   };

@@ -29,6 +29,11 @@ describe("controlled replay runner", () => {
           readonly label: string;
           readonly metrics: {
             readonly expected_rank_by_question: Record<string, number | null>;
+            readonly path_stream_top10: {
+              readonly count: number;
+              readonly denominator: number;
+              readonly rate: number;
+            };
           };
           readonly pre_report_metrics?: {
             readonly expected_rank_by_question: Record<string, number | null>;

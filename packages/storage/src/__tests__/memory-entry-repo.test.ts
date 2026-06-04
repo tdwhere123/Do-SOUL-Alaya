@@ -1,22 +1,33 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FormationKind,
   MemoryDimension,
+  MemoryGovernanceEventType,
   RunMode,
   RunState,
   ScopeClass,
   SourceKind,
   StorageTier,
+  SynthesisStatus,
   WorkspaceKind,
   WorkspaceState,
-  type MemoryEntry
+  type MemoryEntry,
+  type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../db.js";
-import { SqliteMemoryEntryRepo } from "../repos/memory-entry-repo.js";
+import { StorageError } from "../errors.js";
+import { SqliteEnrichPendingRepo } from "../repos/enrich-pending-repo.js";
+import { SqliteEventLogRepo } from "../repos/event-log-repo.js";
+import {
+  FIND_BY_EVIDENCE_REFS_INPUT_CAP,
+  SqliteMemoryEntryRepo,
+  type MemoryEntryRepoDiagnosticSink
+} from "../repos/memory-entry-repo.js";
 import { SqliteRunRepo } from "../repos/run-repo.js";
+import { SqliteSynthesisCapsuleRepo } from "../repos/synthesis-capsule-repo.js";
 import { SqliteWorkspaceRepo } from "../repos/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
@@ -60,7 +71,28 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     reinforcement_count: null,
     contradiction_count: null,
     superseded_by: null,
+    forget_disposition: null,
+    forget_disposition_ref: null,
     ...overrides
+  };
+}
+
+function createMemoryCreatedEventInput(
+  entry: MemoryEntry
+): Parameters<SqliteEventLogRepo["append"]>[0] {
+  return {
+    event_type: MemoryGovernanceEventType.SOUL_MEMORY_CREATED,
+    entity_type: "memory_entry",
+    entity_id: entry.object_id,
+    workspace_id: entry.workspace_id,
+    run_id: entry.run_id,
+    caused_by: entry.created_by,
+    payload_json: {
+      object_id: entry.object_id,
+      object_kind: entry.object_kind,
+      workspace_id: entry.workspace_id,
+      run_id: entry.run_id
+    }
   };
 }
 
@@ -71,6 +103,96 @@ describe("SqliteMemoryEntryRepo", () => {
 
     await expect(repo.create(entry)).resolves.toEqual(entry);
     await expect(repo.findById(entry.object_id)).resolves.toEqual(entry);
+  });
+
+  it("createWithinTransaction commits EventLog-first, row, and co-write atomically", async () => {
+    const { repo, database } = await createRepo();
+    const enrichRepo = new SqliteEnrichPendingRepo(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const entry = createMemoryEntry();
+    const order: string[] = [];
+
+    const returned = repo.createWithinTransaction(entry, {
+      beforeCreate: () => {
+        order.push("event_log");
+        eventLogRepo.append(createMemoryCreatedEventInput(entry));
+      },
+      afterCreate: () => {
+        order.push("enqueue");
+        enrichRepo.enqueue({
+          workspaceId: entry.workspace_id,
+          memoryId: entry.object_id,
+          runId: entry.run_id,
+          sourceSignalId: "signal-1",
+          enqueuedAt: "2026-03-21T00:00:00.000Z"
+        });
+      }
+    });
+
+    expect(returned).toEqual(entry);
+    expect(order).toEqual(["event_log", "enqueue"]);
+    await expect(repo.findById(entry.object_id)).resolves.toEqual(entry);
+    await expect(eventLogRepo.queryByEntity("memory_entry", entry.object_id)).resolves.toHaveLength(1);
+    expect(enrichRepo.countPending(entry.workspace_id)).toBe(1);
+  });
+
+  it("createWithinTransaction rolls back the EventLog row and memory row when the co-write throws", async () => {
+    // invariant pinned: a created memory ALWAYS carries its enrich_pending
+    // marker and audit row, or NONE land. A throw in the co-write rolls the
+    // EventLog row and memory row back, so the originating signal can replay
+    // rather than leave durable truth with no enrichment marker.
+    const { repo, database } = await createRepo();
+    const enrichRepo = new SqliteEnrichPendingRepo(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const entry = createMemoryEntry();
+
+    expect(() =>
+      repo.createWithinTransaction(entry, {
+        beforeCreate: () => {
+          eventLogRepo.append(createMemoryCreatedEventInput(entry));
+        },
+        afterCreate: () => {
+          enrichRepo.enqueue({
+            workspaceId: entry.workspace_id,
+            memoryId: entry.object_id,
+            runId: entry.run_id,
+            sourceSignalId: "signal-1",
+            enqueuedAt: "2026-03-21T00:00:00.000Z"
+          });
+          throw new Error("co-write failed");
+        }
+      })
+    ).toThrow("co-write failed");
+
+    await expect(repo.findById(entry.object_id)).resolves.toBeNull();
+    await expect(eventLogRepo.queryByEntity("memory_entry", entry.object_id)).resolves.toEqual([]);
+    expect(enrichRepo.countPending(entry.workspace_id)).toBe(0);
+  });
+
+  it("createWithinTransaction does not insert the row or marker when the EventLog-first callback throws", async () => {
+    const { repo, database } = await createRepo();
+    const enrichRepo = new SqliteEnrichPendingRepo(database);
+    const entry = createMemoryEntry();
+
+    expect(() =>
+      repo.createWithinTransaction(entry, {
+        beforeCreate: () => {
+          throw new Error("event append failed");
+        },
+        afterCreate: () => {
+          enrichRepo.enqueue({
+            workspaceId: entry.workspace_id,
+            memoryId: entry.object_id,
+            runId: entry.run_id,
+            sourceSignalId: "signal-1",
+            enqueuedAt: "2026-03-21T00:00:00.000Z"
+          });
+        }
+      })
+    ).toThrow("event append failed");
+
+    await expect(repo.findById(entry.object_id)).resolves.toBeNull();
+    expect(enrichRepo.countPending(entry.workspace_id)).toBe(0);
   });
 
   it("finds memory entries by ids without duplicates and skips missing ids", async () => {
@@ -219,6 +341,79 @@ describe("SqliteMemoryEntryRepo", () => {
     const coldRows = await repo.findByWorkspaceId("workspace-1", StorageTier.COLD);
     expect(warmRows.map((row) => row.object_id)).toEqual(["4a2f07c4-371f-41eb-a9cb-6e842e2c2ca9"]);
     expect(coldRows).toEqual([]);
+  });
+
+  it("excludes dormant rows from the recall candidate load but keeps them fetchable by id (REVERSIBLE)", async () => {
+    const { repo } = await createRepo();
+
+    await repo.create(
+      createMemoryEntry({
+        object_id: "7ab81ca8-9425-4e18-ad4a-81ab6406db55",
+        storage_tier: StorageTier.HOT,
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        lifecycle_state: "active"
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "ca648194-c03c-4932-b103-3ec4d318732a",
+        storage_tier: StorageTier.HOT,
+        workspace_id: "workspace-1",
+        run_id: "run-2",
+        lifecycle_state: "dormant"
+      })
+    );
+
+    // invariant: dormant drops out of the recall candidate load (recall-silent).
+    const rows = await repo.findByWorkspaceId("workspace-1", StorageTier.HOT);
+    expect(rows.map((row) => row.object_id)).toEqual(["7ab81ca8-9425-4e18-ad4a-81ab6406db55"]);
+
+    // invariant: dormant is NOT deleted — findById still returns it and it
+    // transitions back to active (reversible).
+    const dormant = await repo.findById("ca648194-c03c-4932-b103-3ec4d318732a");
+    expect(dormant?.lifecycle_state).toBe("dormant");
+    const revived = await repo.transitionLifecycle(
+      "ca648194-c03c-4932-b103-3ec4d318732a",
+      "active",
+      new Date().toISOString()
+    );
+    expect(revived.lifecycle_state).toBe("active");
+    const afterRevival = await repo.findByWorkspaceId("workspace-1", StorageTier.HOT);
+    expect(afterRevival.map((row) => row.object_id).sort()).toEqual([
+      "7ab81ca8-9425-4e18-ad4a-81ab6406db55",
+      "ca648194-c03c-4932-b103-3ec4d318732a"
+    ]);
+  });
+
+  it("excludes dormant rows from keyword (FTS) recall search", async () => {
+    const { repo } = await createRepo();
+
+    await repo.create(
+      createMemoryEntry({
+        object_id: "7ab81ca8-9425-4e18-ad4a-81ab6406db55",
+        storage_tier: StorageTier.HOT,
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        content: "alpha bravo charlie keyword match",
+        lifecycle_state: "active"
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "ca648194-c03c-4932-b103-3ec4d318732a",
+        storage_tier: StorageTier.HOT,
+        workspace_id: "workspace-1",
+        run_id: "run-2",
+        content: "alpha bravo charlie keyword match",
+        lifecycle_state: "dormant"
+      })
+    );
+
+    const results = await repo.searchByKeyword("workspace-1", "keyword", 10);
+    expect(results.map((result) => result.object_id)).toEqual([
+      "7ab81ca8-9425-4e18-ad4a-81ab6406db55"
+    ]);
   });
 
   it("lists entries by run id across both tiers", async () => {
@@ -791,6 +986,505 @@ describe("SqliteMemoryEntryRepo", () => {
     await expect(repo.findById("55555555-5555-4555-8555-555555555555")).resolves.toBeNull();
   });
 
+  it("autonomousTombstone only fires on a dormant row and writes the durable disposition", async () => {
+    const { repo } = await createRepo();
+    const dormant = createMemoryEntry({
+      object_id: "aaaaaaaa-0000-4000-8000-000000000001",
+      lifecycle_state: "dormant"
+    });
+    await repo.create(dormant);
+
+    const tombstoned = await repo.autonomousTombstone({
+      objectId: dormant.object_id,
+      disposition: "judged_useless",
+      dispositionRef: null,
+      updatedAt: "2026-03-22T00:00:00.000Z"
+    });
+    expect(tombstoned.forget_disposition).toBe("judged_useless");
+    expect(tombstoned.forget_disposition_ref).toBeNull();
+    expect(tombstoned.retention_state).toBe("tombstoned");
+    expect(tombstoned.lifecycle_state).toBe("tombstone");
+  });
+
+  it("autonomousTombstone rolls the tombstone update back when the transition audit callback throws", async () => {
+    const { repo } = await createRepo();
+    const dormant = createMemoryEntry({
+      object_id: "aaaaaaaa-0000-4000-8000-000000000004",
+      lifecycle_state: "dormant"
+    });
+    await repo.create(dormant);
+    const onTransition = vi.fn(() => {
+      throw new Error("audit append failed mid-transaction");
+    });
+
+    await expect(
+      repo.autonomousTombstone(
+        {
+          objectId: dormant.object_id,
+          disposition: "judged_useless",
+          dispositionRef: null,
+          updatedAt: "2026-03-22T00:00:00.000Z"
+        },
+        { onTransition }
+      )
+    ).rejects.toThrow(StorageError);
+    expect(onTransition).toHaveBeenCalledTimes(1);
+    await expect(repo.findById(dormant.object_id)).resolves.toEqual(
+      expect.objectContaining({
+        lifecycle_state: "dormant",
+        retention_state: null,
+        forget_disposition: null,
+        forget_disposition_ref: null
+      })
+    );
+  });
+
+  it("autonomousTombstone refuses a non-dormant (active) row — recallable memory is never silently tombstoned", async () => {
+    const { repo } = await createRepo();
+    const active = createMemoryEntry({
+      object_id: "aaaaaaaa-0000-4000-8000-000000000002",
+      lifecycle_state: "active"
+    });
+    await repo.create(active);
+
+    await expect(
+      repo.autonomousTombstone({
+        objectId: active.object_id,
+        disposition: "judged_useless",
+        dispositionRef: null,
+        updatedAt: "2026-03-22T00:00:00.000Z"
+      })
+    ).rejects.toMatchObject({ name: "StorageError", code: "NOT_FOUND" });
+
+    const reloaded = await repo.findById(active.object_id);
+    expect(reloaded?.lifecycle_state).toBe("active");
+    expect(reloaded?.forget_disposition ?? null).toBeNull();
+  });
+
+  it("autonomousTombstone rejects a malformed compressed marker without a capsule ref", async () => {
+    const { repo } = await createRepo();
+    const dormant = createMemoryEntry({
+      object_id: "aaaaaaaa-0000-4000-8000-000000000003",
+      lifecycle_state: "dormant"
+    });
+    await repo.create(dormant);
+
+    await expect(
+      repo.autonomousTombstone({
+        objectId: dormant.object_id,
+        disposition: "compressed",
+        dispositionRef: null,
+        updatedAt: "2026-03-22T00:00:00.000Z"
+      })
+    ).rejects.toMatchObject({ name: "StorageError", code: "VALIDATION_FAILED" });
+  });
+
+  it("hardDeleteTombstonedWithDisposition refuses a tombstoned row that has NO disposition (defense in depth)", async () => {
+    const { repo } = await createRepo();
+    // A human-Inspector-style tombstone: retention_state tombstoned, past grace,
+    // but no forget_disposition. The autonomous GC authority must refuse it.
+    const humanTombstoned = createMemoryEntry({
+      object_id: "bbbbbbbb-0000-4000-8000-000000000001",
+      retention_state: "tombstoned",
+      lifecycle_state: "tombstone"
+    });
+    await repo.create(humanTombstoned);
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(humanTombstoned.object_id)
+    ).rejects.toMatchObject({ name: "StorageError", code: "NOT_FOUND" });
+    await expect(repo.findById(humanTombstoned.object_id)).resolves.not.toBeNull();
+  });
+
+  it("hardDeleteTombstonedWithDisposition removes a tombstoned+past-grace row that carries a disposition", async () => {
+    const { repo } = await createRepo();
+    const disposed = createMemoryEntry({
+      object_id: "bbbbbbbb-0000-4000-8000-000000000002",
+      retention_state: "tombstoned",
+      lifecycle_state: "tombstone",
+      forget_disposition: "judged_useless",
+      forget_disposition_ref: null
+    });
+    await repo.create(disposed);
+
+    await expect(
+      repo.findTombstonedMemoriesWithDisposition("workspace-1")
+    ).resolves.toEqual([expect.objectContaining({ object_id: disposed.object_id })]);
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(disposed.object_id)
+    ).resolves.toBe(true);
+    await expect(repo.findById(disposed.object_id)).resolves.toBeNull();
+  });
+
+  it("hardDeleteTombstonedWithDisposition (judged_useless-guarded) deletes only while the verdict still holds", async () => {
+    const { repo } = await createRepo();
+    const disposed = createMemoryEntry({
+      object_id: "bbbbbbbb-0000-4000-8000-000000000003",
+      retention_state: "tombstoned",
+      lifecycle_state: "tombstone",
+      forget_disposition: "judged_useless",
+      forget_disposition_ref: null,
+      evidence_refs: [],
+      reinforcement_count: 0,
+      decay_profile: null
+    });
+    await repo.create(disposed);
+    const onDeleted = vi.fn();
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(disposed.object_id, {
+        requireJudgedUselessVerdict: true,
+        onDeleted
+      })
+    ).resolves.toBe(true);
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+    await expect(repo.findById(disposed.object_id)).resolves.toBeNull();
+  });
+
+  it.each([
+    ["gained evidence", { evidence_refs: ["late-evidence"] } satisfies Partial<MemoryEntry>],
+    ["gained reinforcement", { reinforcement_count: 1 } satisfies Partial<MemoryEntry>],
+    ["became pinned", { decay_profile: "pinned" } satisfies Partial<MemoryEntry>],
+    ["became hazard", { decay_profile: "hazard" } satisfies Partial<MemoryEntry>]
+  ])(
+    "hardDeleteTombstonedWithDisposition (judged_useless-guarded) atomically REFUSES when the row %s",
+    async (_label, overrides) => {
+      const { repo } = await createRepo();
+      const disposed = createMemoryEntry({
+        object_id: "bbbbbbbb-0000-4000-8000-000000000004",
+        retention_state: "tombstoned",
+        lifecycle_state: "tombstone",
+        forget_disposition: "judged_useless",
+        forget_disposition_ref: null,
+        evidence_refs: [],
+        reinforcement_count: 0,
+        decay_profile: null,
+        ...overrides
+      });
+      await repo.create(disposed);
+      const onDeleted = vi.fn();
+
+      await expect(
+        repo.hardDeleteTombstonedWithDisposition(disposed.object_id, {
+          requireJudgedUselessVerdict: true,
+          onDeleted
+        })
+      ).resolves.toBe(false);
+      expect(onDeleted).not.toHaveBeenCalled();
+      await expect(repo.findById(disposed.object_id)).resolves.not.toBeNull();
+    }
+  );
+
+  it("hardDeleteTombstonedWithDisposition (judged_useless-guarded) rolls back the physical delete when onDeleted throws", async () => {
+    const { repo } = await createRepo();
+    const disposed = createMemoryEntry({
+      object_id: "bbbbbbbb-0000-4000-8000-000000000005",
+      retention_state: "tombstoned",
+      lifecycle_state: "tombstone",
+      forget_disposition: "judged_useless",
+      forget_disposition_ref: null,
+      evidence_refs: [],
+      reinforcement_count: 0,
+      decay_profile: null
+    });
+    await repo.create(disposed);
+    const onDeleted = vi.fn(() => {
+      throw new Error("audit append failed mid-transaction");
+    });
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(disposed.object_id, {
+        requireJudgedUselessVerdict: true,
+        onDeleted
+      })
+    ).rejects.toThrow(StorageError);
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+    await expect(repo.findById(disposed.object_id)).resolves.not.toBeNull();
+  });
+
+  // invariant: the compressed delete (requireLiveCapsuleRef) re-asserts capsule
+  // liveness + membership ATOMICALLY in the DELETE statement, so there is no
+  // window between a re-check and the physical removal. A capsule that archived /
+  // tombstoned / dropped the member / was deleted makes the guard match 0 rows,
+  // and the member survives (recoverable). see also:
+  // packages/core/src/memory-service.ts autonomousHardDeleteTombstoned.
+  async function seedCompressedMember(input: {
+    readonly memoryId: string;
+    readonly capsule: Partial<SynthesisCapsule> | null;
+    readonly capsuleId: string;
+  }): Promise<{ readonly repo: SqliteMemoryEntryRepo }> {
+    const { repo, database } = await createRepo();
+    if (input.capsule !== null) {
+      const capsuleRepo = new SqliteSynthesisCapsuleRepo(database);
+      await capsuleRepo.create({
+        object_id: input.capsuleId,
+        object_kind: "synthesis_capsule",
+        schema_version: 1,
+        lifecycle_state: "active",
+        created_at: "2026-03-21T00:00:00.000Z",
+        updated_at: "2026-03-21T00:00:00.000Z",
+        created_by: "consolidation-executor",
+        topic_key: "tooling/pnpm",
+        synthesis_type: "phase_synthesis",
+        summary: "Use pnpm for workspace commands.",
+        evidence_refs: ["evidence-1"],
+        source_memory_refs: [input.memoryId],
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        synthesis_status: SynthesisStatus.STABLE,
+        ...input.capsule
+      });
+    }
+    await repo.create(
+      createMemoryEntry({
+        object_id: input.memoryId,
+        retention_state: "tombstoned",
+        lifecycle_state: "tombstone",
+        forget_disposition: "compressed",
+        forget_disposition_ref: input.capsuleId
+      })
+    );
+    return { repo };
+  }
+
+  it("hardDeleteTombstonedWithDisposition (compressed-guarded) removes the member only when a live capsule STILL references it", async () => {
+    const memoryId = "dddddddd-0000-4000-8000-000000000001";
+    const capsuleId = "dddddddd-1111-4000-8000-000000000001";
+    const { repo } = await seedCompressedMember({ memoryId, capsuleId, capsule: {} });
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true })
+    ).resolves.toBe(true);
+    await expect(repo.findById(memoryId)).resolves.toBeNull();
+  });
+
+  it.each([
+    ["capsule archived", { synthesis_status: SynthesisStatus.ARCHIVED } satisfies Partial<SynthesisCapsule>],
+    ["capsule tombstoned/superseded", { lifecycle_state: "tombstone" } satisfies Partial<SynthesisCapsule>],
+    ["capsule dropped the member", { source_memory_refs: [] } satisfies Partial<SynthesisCapsule>]
+  ])(
+    "hardDeleteTombstonedWithDisposition (compressed-guarded) atomically REFUSES (0 rows, member survives) when %s",
+    async (_label, capsule) => {
+      const memoryId = "dddddddd-0000-4000-8000-000000000002";
+      const capsuleId = "dddddddd-1111-4000-8000-000000000002";
+      const { repo } = await seedCompressedMember({ memoryId, capsuleId, capsule });
+
+      await expect(
+        repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true })
+      ).resolves.toBe(false);
+      await expect(repo.findById(memoryId)).resolves.not.toBeNull();
+    }
+  );
+
+  it("hardDeleteTombstonedWithDisposition (compressed-guarded) atomically REFUSES when the preserving capsule was cascade-deleted", async () => {
+    const memoryId = "dddddddd-0000-4000-8000-000000000003";
+    const capsuleId = "dddddddd-1111-4000-8000-000000000003";
+    const { repo } = await seedCompressedMember({ memoryId, capsuleId, capsule: null });
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true })
+    ).resolves.toBe(false);
+    await expect(repo.findById(memoryId)).resolves.not.toBeNull();
+  });
+
+  // invariant (I-2): the caller's deleted-audit append (onDeleted) shares the
+  // delete transaction, so the physical removal and the audit commit or roll
+  // back together. onDeleted runs ONLY on changes>0 and a throw inside it undoes
+  // the physical delete.
+  it("hardDeleteTombstonedWithDisposition (compressed-guarded) fires onDeleted exactly once when a row is removed", async () => {
+    const memoryId = "dddddddd-0000-4000-8000-000000000004";
+    const capsuleId = "dddddddd-1111-4000-8000-000000000004";
+    const { repo } = await seedCompressedMember({ memoryId, capsuleId, capsule: {} });
+    const onDeleted = vi.fn();
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true, onDeleted })
+    ).resolves.toBe(true);
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+    await expect(repo.findById(memoryId)).resolves.toBeNull();
+  });
+
+  it("hardDeleteTombstonedWithDisposition (compressed-guarded) does NOT fire onDeleted on a 0-row preservation-revoked race", async () => {
+    const memoryId = "dddddddd-0000-4000-8000-000000000005";
+    const capsuleId = "dddddddd-1111-4000-8000-000000000005";
+    const { repo } = await seedCompressedMember({
+      memoryId,
+      capsuleId,
+      capsule: { source_memory_refs: [] }
+    });
+    const onDeleted = vi.fn();
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true, onDeleted })
+    ).resolves.toBe(false);
+    expect(onDeleted).not.toHaveBeenCalled();
+    await expect(repo.findById(memoryId)).resolves.not.toBeNull();
+  });
+
+  it("hardDeleteTombstonedWithDisposition (compressed-guarded) rolls the physical delete back when onDeleted throws (one transaction)", async () => {
+    const memoryId = "dddddddd-0000-4000-8000-000000000006";
+    const capsuleId = "dddddddd-1111-4000-8000-000000000006";
+    const { repo } = await seedCompressedMember({ memoryId, capsuleId, capsule: {} });
+    const onDeleted = vi.fn(() => {
+      throw new Error("audit append failed mid-transaction");
+    });
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true, onDeleted })
+    ).rejects.toThrow(StorageError);
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+    // The audit-append throw rolled the whole transaction back: the row survives.
+    await expect(repo.findById(memoryId)).resolves.not.toBeNull();
+  });
+
+  it("findTombstonedMemoriesWithDisposition excludes tombstoned rows lacking a disposition", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createMemoryEntry({
+        object_id: "cccccccc-0000-4000-8000-000000000001",
+        retention_state: "tombstoned",
+        lifecycle_state: "tombstone"
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "cccccccc-0000-4000-8000-000000000002",
+        retention_state: "tombstoned",
+        lifecycle_state: "tombstone",
+        forget_disposition: "compressed",
+        forget_disposition_ref: "capsule-9"
+      })
+    );
+
+    await expect(
+      repo.findTombstonedMemoriesWithDisposition("workspace-1")
+    ).resolves.toEqual([
+      expect.objectContaining({ object_id: "cccccccc-0000-4000-8000-000000000002" })
+    ]);
+  });
+
+  it("I3: transitionLifecycle to a NON-tombstone state clears the forget marker", async () => {
+    const { repo } = await createRepo();
+    // A row that carries a stale terminal-removal marker (e.g. import-carried, or
+    // tombstoned then revived). Any non-tombstone transition must strip it so the
+    // autonomous GC can never physically delete a revived/active row.
+    const marked = createMemoryEntry({
+      object_id: "dddddddd-0000-4000-8000-000000000001",
+      lifecycle_state: "dormant",
+      forget_disposition: "compressed",
+      forget_disposition_ref: "capsule-stale"
+    });
+    await repo.create(marked);
+
+    const revived = await repo.transitionLifecycle(marked.object_id, "active", "2026-03-22T00:00:00.000Z");
+    expect(revived.lifecycle_state).toBe("active");
+    expect(revived.forget_disposition).toBeNull();
+    expect(revived.forget_disposition_ref).toBeNull();
+  });
+
+  it("I3: transitionLifecycle to tombstone KEEPS the forget marker (GC authorization)", async () => {
+    const { repo } = await createRepo();
+    const marked = createMemoryEntry({
+      object_id: "dddddddd-0000-4000-8000-000000000002",
+      lifecycle_state: "dormant",
+      forget_disposition: "judged_useless",
+      forget_disposition_ref: null
+    });
+    await repo.create(marked);
+
+    const tombstoned = await repo.transitionLifecycle(marked.object_id, "tombstone", "2026-03-22T00:00:00.000Z");
+    expect(tombstoned.lifecycle_state).toBe("tombstone");
+    expect(tombstoned.forget_disposition).toBe("judged_useless");
+  });
+
+  it("N1: reviveDormant flips a dormant row to active and clears the forget marker", async () => {
+    const { repo } = await createRepo();
+    const dormant = createMemoryEntry({
+      object_id: "eeeeeeee-0000-4000-8000-000000000001",
+      lifecycle_state: "dormant",
+      forget_disposition: "compressed",
+      forget_disposition_ref: "capsule-y"
+    });
+    await repo.create(dormant);
+
+    const revived = await repo.reviveDormant(dormant.object_id, "2026-03-22T00:00:00.000Z");
+    expect(revived?.lifecycle_state).toBe("active");
+    expect(revived?.forget_disposition).toBeNull();
+    expect(revived?.forget_disposition_ref).toBeNull();
+  });
+
+  it("N1: reviveDormant is a guarded no-op (returns null) for an already-active row", async () => {
+    const { repo } = await createRepo();
+    const active = createMemoryEntry({
+      object_id: "eeeeeeee-0000-4000-8000-000000000002",
+      lifecycle_state: "active"
+    });
+    await repo.create(active);
+
+    await expect(repo.reviveDormant(active.object_id, "2026-03-22T00:00:00.000Z")).resolves.toBeNull();
+    expect((await repo.findById(active.object_id))?.lifecycle_state).toBe("active");
+  });
+
+  // invariant (I-1): guarded active -> dormant demotion. onTransition (the
+  // active->dormant audit append) shares the UPDATE transaction; a 0-row guard
+  // (row not active) is a benign no-op skip, never an audit and never a throw.
+  it("transitionToDormantIfActive demotes an active row, clears the forget marker, and fires onTransition once", async () => {
+    const { repo } = await createRepo();
+    const active = createMemoryEntry({
+      object_id: "ffffffff-0000-4000-8000-000000000001",
+      lifecycle_state: "active",
+      forget_disposition: "compressed",
+      forget_disposition_ref: "capsule-z"
+    });
+    await repo.create(active);
+    const onTransition = vi.fn();
+
+    const demoted = await repo.transitionToDormantIfActive(
+      active.object_id,
+      "2026-03-22T00:00:00.000Z",
+      onTransition
+    );
+    expect(onTransition).toHaveBeenCalledTimes(1);
+    expect(demoted?.lifecycle_state).toBe("dormant");
+    expect(demoted?.forget_disposition).toBeNull();
+    expect(demoted?.forget_disposition_ref).toBeNull();
+  });
+
+  it("transitionToDormantIfActive is a guarded no-op (null, no onTransition) for a row that is not active", async () => {
+    const { repo } = await createRepo();
+    const dormant = createMemoryEntry({
+      object_id: "ffffffff-0000-4000-8000-000000000002",
+      lifecycle_state: "dormant"
+    });
+    await repo.create(dormant);
+    const onTransition = vi.fn();
+
+    await expect(
+      repo.transitionToDormantIfActive(dormant.object_id, "2026-03-22T00:00:00.000Z", onTransition)
+    ).resolves.toBeNull();
+    expect(onTransition).not.toHaveBeenCalled();
+    expect((await repo.findById(dormant.object_id))?.lifecycle_state).toBe("dormant");
+  });
+
+  it("transitionToDormantIfActive rolls the demotion back when onTransition throws (one transaction)", async () => {
+    const { repo } = await createRepo();
+    const active = createMemoryEntry({
+      object_id: "ffffffff-0000-4000-8000-000000000003",
+      lifecycle_state: "active"
+    });
+    await repo.create(active);
+    const onTransition = vi.fn(() => {
+      throw new Error("active->dormant audit append failed mid-transaction");
+    });
+
+    await expect(
+      repo.transitionToDormantIfActive(active.object_id, "2026-03-22T00:00:00.000Z", onTransition)
+    ).rejects.toThrow(StorageError);
+    expect(onTransition).toHaveBeenCalledTimes(1);
+    // The audit-append throw rolled the UPDATE back: the row stays active.
+    expect((await repo.findById(active.object_id))?.lifecycle_state).toBe("active");
+  });
+
 
   it("throws NOT_FOUND when updating dynamics for a missing entry", async () => {
     const { repo } = await createRepo();
@@ -1016,6 +1710,123 @@ describe("SqliteMemoryEntryRepo", () => {
       .prepare("DELETE FROM memory_entries WHERE object_id = ?")
       .run("b9999999-2222-4222-8222-222222222222");
     expect(porterMatch("cach")).toEqual([]);
+  });
+
+  it("findBySharedDomainTags returns memories sharing >=1 tag, excludes zero-shared, is workspace-scoped, and dedupes", async () => {
+    const { repo } = await createRepo();
+
+    // shares one tag ("coffee") with the query.
+    const sharesOne = createMemoryEntry({
+      object_id: "11111111-1111-4111-8111-111111111111",
+      domain_tags: ["coffee", "beans"]
+    });
+    // shares two tags -- must still appear exactly once (dedupe across the
+    // json_each expansion).
+    const sharesTwo = createMemoryEntry({
+      object_id: "22222222-2222-4222-8222-222222222222",
+      run_id: "run-2",
+      domain_tags: ["coffee", "tea"]
+    });
+    // shares zero tags -- excluded.
+    const sharesNone = createMemoryEntry({
+      object_id: "33333333-3333-4333-8333-333333333333",
+      run_id: "run-2",
+      domain_tags: ["kettle", "mug"]
+    });
+    // empty tag array -- json_each yields no rows, so excluded.
+    const noTags = createMemoryEntry({
+      object_id: "44444444-4444-4444-8444-444444444444",
+      run_id: "run-1",
+      domain_tags: []
+    });
+    // matching tag but a DIFFERENT workspace -- must not leak across scope.
+    const otherWorkspace = createMemoryEntry({
+      object_id: "55555555-5555-4555-8555-555555555555",
+      workspace_id: "workspace-2",
+      run_id: "run-3",
+      domain_tags: ["coffee"]
+    });
+
+    await repo.create(sharesOne);
+    await repo.create(sharesTwo);
+    await repo.create(sharesNone);
+    await repo.create(noTags);
+    await repo.create(otherWorkspace);
+
+    const rows = await repo.findBySharedDomainTags("workspace-1", ["coffee", "tea"]);
+    const ids = rows.map((row) => row.object_id);
+
+    // sharesOne + sharesTwo only; each once; no zero-shared, no empty-tag,
+    // no cross-workspace leak.
+    expect(ids).toEqual([sharesOne.object_id, sharesTwo.object_id]);
+  });
+
+  it("findBySharedDomainTags returns empty for an empty tag query", async () => {
+    const { repo } = await createRepo();
+    await repo.create(createMemoryEntry({ domain_tags: ["coffee"] }));
+
+    await expect(repo.findBySharedDomainTags("workspace-1", [])).resolves.toEqual([]);
+  });
+
+  it("findBySharedDomainTags excludes cold-tier and tombstoned rows (matches findByWorkspaceId hot scope)", async () => {
+    const { repo } = await createRepo();
+
+    const hot = createMemoryEntry({
+      object_id: "1a111111-1111-4111-8111-111111111111",
+      storage_tier: StorageTier.HOT,
+      domain_tags: ["coffee"]
+    });
+    const cold = createMemoryEntry({
+      object_id: "2a222222-2222-4222-8222-222222222222",
+      run_id: "run-2",
+      storage_tier: StorageTier.COLD,
+      domain_tags: ["coffee"]
+    });
+    const tombstoned = createMemoryEntry({
+      object_id: "3a333333-3333-4333-8333-333333333333",
+      run_id: "run-2",
+      storage_tier: StorageTier.HOT,
+      retention_state: "tombstoned",
+      domain_tags: ["coffee"]
+    });
+
+    await repo.create(hot);
+    await repo.create(cold);
+    await repo.create(tombstoned);
+
+    const rows = await repo.findBySharedDomainTags("workspace-1", ["coffee"]);
+    expect(rows.map((row) => row.object_id)).toEqual([hot.object_id]);
+  });
+
+  it("findByEvidenceRefs warns at the input cap and stays fail-safe", async () => {
+    const { database } = await createRepo();
+    const diagnostics = vi.fn<MemoryEntryRepoDiagnosticSink>();
+    const repo = new SqliteMemoryEntryRepo(database, diagnostics);
+
+    // input over the cap -> ids beyond the cap are never queried (fail-safe),
+    // and the warn-level diagnostic surfaces the over-cap input to operators.
+    const overCap = Array.from(
+      { length: FIND_BY_EVIDENCE_REFS_INPUT_CAP + 5 },
+      (_unused, index) => `evidence-${index}`
+    );
+    await repo.findByEvidenceRefs("workspace-1", overCap);
+
+    expect(diagnostics).toHaveBeenCalledTimes(1);
+    expect(diagnostics).toHaveBeenCalledWith("memory evidence-ref lookup input truncated", {
+      workspace_id: "workspace-1",
+      input_count: FIND_BY_EVIDENCE_REFS_INPUT_CAP + 5,
+      capped_count: FIND_BY_EVIDENCE_REFS_INPUT_CAP
+    });
+  });
+
+  it("findByEvidenceRefs does not warn when the input is within the cap", async () => {
+    const { database } = await createRepo();
+    const diagnostics = vi.fn<MemoryEntryRepoDiagnosticSink>();
+    const repo = new SqliteMemoryEntryRepo(database, diagnostics);
+
+    await repo.findByEvidenceRefs("workspace-1", ["evidence-1", "evidence-2"]);
+
+    expect(diagnostics).not.toHaveBeenCalled();
   });
 });
 

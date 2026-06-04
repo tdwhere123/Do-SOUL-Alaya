@@ -249,6 +249,69 @@ describe("context lens assembler", () => {
     );
   });
 
+  it("renders a hint-manifestation memory as a bare ref but an excerpt as body content — the over-surface gap a fail-closed ceiling must not cross", async () => {
+    // invariant: at the lens surface hint = `[memory ref: <id>]` (zero body) and
+    // excerpt = a body fragment. This is WHY the governance-read failsafe must cap
+    // to hint, not excerpt: capping a true-hint ceiling to excerpt over-surfaces a
+    // body fragment for a memory whose true ceiling is a bare ref.
+    // see also: context-lens-assembler.ts resolveContentSnapshot,
+    //   path-manifestation-policy.ts GOVERNANCE_CEILING_FAILSAFE_BAND.
+    const longBody =
+      "Sensitive deployment rollback body that a bare hint ref must never expose, ".repeat(4).trim();
+    const memory = createMemoryEntry({
+      object_id: GLOBAL_MEMORY_ID,
+      scope_class: ScopeClass.GLOBAL_DOMAIN,
+      content: longBody,
+      evidence_refs: [],
+      activation_score: 0.95,
+      manifestation_state: "full_eligible"
+    });
+    const candidateAt = (manifestation: "hint" | "excerpt"): Readonly<RecallCandidate> =>
+      Object.freeze({
+        object_id: GLOBAL_MEMORY_ID,
+        object_kind: "memory_entry" as const,
+        activation_score: 0.95,
+        relevance_score: 0.95,
+        // content_preview is the excerpt-band body fragment served at the lens;
+        // for the hint band the lens ignores it and emits a bare ref.
+        content_preview: longBody.slice(0, 157) + "...",
+        token_estimate: Math.ceil(longBody.length / 4),
+        manifestation,
+        dimension: MemoryDimension.PREFERENCE,
+        scope_class: ScopeClass.GLOBAL_DOMAIN,
+        origin_plane: "global" as const
+      });
+    const snapshotFor = async (manifestation: "hint" | "excerpt"): Promise<string | undefined> => {
+      const dependencies = createDependencies({
+        memoryRepo: {
+          findById: vi.fn(async (objectId: string) => (objectId === GLOBAL_MEMORY_ID ? memory : null))
+        },
+        recallService: {
+          recall: vi.fn(async () => createRecallResult([candidateAt(manifestation)])),
+          buildDefaultPolicy: vi.fn((strategy: "chat" | "analyze" | "build" | "govern", taskSurfaceRef: string) =>
+            createRecallPolicy(taskSurfaceRef, strategy)
+          )
+        }
+      });
+      const assembler = new ContextLensAssembler(dependencies);
+      const result = await assembler.assemble({
+        run: { run_id: `run-${manifestation}`, workspace_id: "workspace-1", run_mode: "chat", title: "Surface test" },
+        surfaceId: "surface://chat/main",
+        displayName: "Surface a governed memory"
+      });
+      return result.workingProjection.entries.find((entry) => entry.object_id === GLOBAL_MEMORY_ID)?.content_snapshot;
+    };
+
+    const hintSnapshot = await snapshotFor("hint");
+    const excerptSnapshot = await snapshotFor("excerpt");
+    // hint: a bare ref, ZERO body — never an over-surface for any governance class.
+    expect(hintSnapshot).toBe(`[memory ref: ${GLOBAL_MEMORY_ID}]`);
+    expect(hintSnapshot).not.toContain("Sensitive deployment rollback body");
+    // excerpt: a body fragment — over-surfaces a memory whose true ceiling is hint.
+    expect(excerptSnapshot).toContain("Sensitive deployment rollback body");
+    expect(excerptSnapshot).not.toBe(`[memory ref: ${GLOBAL_MEMORY_ID}]`);
+  });
+
   it("warns once when overrideService is omitted", async () => {
     const warn = vi.fn();
     const assembler = new ContextLensAssembler(

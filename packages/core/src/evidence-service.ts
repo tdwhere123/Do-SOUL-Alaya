@@ -56,6 +56,10 @@ export interface EvidenceServiceKarmaEmitterPort {
     readonly kind: "evidence_gain";
     readonly objectId: string;
     readonly workspaceId: string;
+    // evidence promotion fires from transitionHealth with no run
+    // context in hand, so this stays unset; the field exists to keep
+    // the emitter contract uniform with the run-bearing producers.
+    readonly runId?: string | null;
   }): Promise<void>;
 }
 

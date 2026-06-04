@@ -248,7 +248,7 @@ type LiveWrapperSource = {
   metrics: {
     samples: unknown;
     provider_health: unknown;
-    modes: unknown[];
+    modes: Array<{ mode: string; recall_metrics: { top5_rate: number } }>;
     garden: unknown;
     security: unknown;
   };

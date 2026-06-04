@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DecayProfile,
   FactualPolicyConditionSchema,
+  ForgetDisposition,
   FORMATION_CONFIDENCE_MAP,
   FormationKind,
   ManifestationState,
@@ -75,6 +76,40 @@ describe("MemoryEntrySchema", () => {
     } as const;
 
     expect(MemoryEntrySchema.parse(value)).toEqual(value);
+  });
+
+  it("treats an omitted forget_disposition as no disposition (undefined, not present)", () => {
+    const parsed = MemoryEntrySchema.parse(memoryEntryBase);
+    expect(parsed.forget_disposition).toBeUndefined();
+    expect(parsed.forget_disposition_ref).toBeUndefined();
+  });
+
+  it("round-trips a compressed forget_disposition with a capsule ref", () => {
+    const value = {
+      ...memoryEntryBase,
+      forget_disposition: ForgetDisposition.COMPRESSED,
+      forget_disposition_ref: "capsule-1"
+    } as const;
+    const parsed = MemoryEntrySchema.parse(value);
+    expect(parsed.forget_disposition).toBe(ForgetDisposition.COMPRESSED);
+    expect(parsed.forget_disposition_ref).toBe("capsule-1");
+  });
+
+  it("round-trips a judged_useless forget_disposition with a null ref", () => {
+    const value = {
+      ...memoryEntryBase,
+      forget_disposition: ForgetDisposition.JUDGED_USELESS,
+      forget_disposition_ref: null
+    } as const;
+    const parsed = MemoryEntrySchema.parse(value);
+    expect(parsed.forget_disposition).toBe(ForgetDisposition.JUDGED_USELESS);
+    expect(parsed.forget_disposition_ref).toBeNull();
+  });
+
+  it("rejects an unknown forget_disposition value", () => {
+    expect(() =>
+      MemoryEntrySchema.parse({ ...memoryEntryBase, forget_disposition: "purged" })
+    ).toThrow();
   });
 
   it("accepts partially populated dynamics fields", () => {

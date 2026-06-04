@@ -39,7 +39,9 @@ describe("Phase C extension protocol schemas", () => {
       "embedding_backfill",
       "path_plasticity_update",
       "post_turn_extract",
-      "consolidation_cycle"
+      "consolidation_cycle",
+      "bulk_enrich",
+      "edge_classify"
     ]);
     expect(GardenTaskKindSchema.parse("embedding_backfill")).toBe("embedding_backfill");
     expect(GardenTaskKind.EMBEDDING_BACKFILL).toBe("embedding_backfill");
@@ -92,6 +94,36 @@ describe("Phase C extension protocol schemas", () => {
     expect(
       GARDEN_ROLE_PERMISSIONS[GardenRole.JANITOR].allowed_task_kinds
     ).not.toContain(GardenTaskKind.CONSOLIDATION_CYCLE);
+
+    // bulk_enrich drains the enrich_pending side table and runs the governed
+    // ConflictDetection + EdgeAutoProducer enrichment off the write-path — a
+    // TIER_2 Librarian task, not Auditor or Janitor.
+    expect(GardenTaskKindSchema.parse("bulk_enrich")).toBe("bulk_enrich");
+    expect(GardenTaskKind.BULK_ENRICH).toBe("bulk_enrich");
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.LIBRARIAN].allowed_task_kinds
+    ).toContain(GardenTaskKind.BULK_ENRICH);
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.AUDITOR].allowed_task_kinds
+    ).not.toContain(GardenTaskKind.BULK_ENRICH);
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.JANITOR].allowed_task_kinds
+    ).not.toContain(GardenTaskKind.BULK_ENRICH);
+
+    // edge_classify is the host-worker form of the B-2 LLM-quality pair
+    // verdict. Like post_turn_extract it is host-worker-only: absent from every
+    // in-process role permission set (the attached CLI agent is the compute).
+    expect(GardenTaskKindSchema.parse("edge_classify")).toBe("edge_classify");
+    expect(GardenTaskKind.EDGE_CLASSIFY).toBe("edge_classify");
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.LIBRARIAN].allowed_task_kinds
+    ).not.toContain(GardenTaskKind.EDGE_CLASSIFY);
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.AUDITOR].allowed_task_kinds
+    ).not.toContain(GardenTaskKind.EDGE_CLASSIFY);
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.JANITOR].allowed_task_kinds
+    ).not.toContain(GardenTaskKind.EDGE_CLASSIFY);
 
     expect(Object.values(HealthEventKind)).toEqual([
       "bankruptcy",

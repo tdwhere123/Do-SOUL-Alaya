@@ -102,12 +102,17 @@ describe("mcp memory tool handler", () => {
     expect(deps.recallService.recall).toHaveBeenCalledWith(expect.objectContaining({
       activeConstraintsCap: 5
     }));
-    expect(result.output.results.map((entry) => entry.object_id)).toEqual(["mem2"]);
-    expect(result.output.active_constraints.map((entry) => entry.object_id)).toEqual([
+    const output = result.output as {
+      readonly results: ReadonlyArray<{ readonly object_id: string }>;
+      readonly active_constraints: ReadonlyArray<{ readonly object_id: string }>;
+      readonly active_constraints_count: number;
+    };
+    expect(output.results.map((entry) => entry.object_id)).toEqual(["mem2"]);
+    expect(output.active_constraints.map((entry) => entry.object_id)).toEqual([
       "mem1",
       "constraint-2"
     ]);
-    expect(result.output.active_constraints_count).toBe(2);
+    expect(output.active_constraints_count).toBe(2);
     expect(deps.trustStateRecorder.recordDelivery).toHaveBeenCalledWith(expect.objectContaining({
       delivered_object_ids: ["mem2", "mem1", "constraint-2"],
       delivered_objects: [
@@ -411,7 +416,7 @@ describe("mcp memory tool handler", () => {
       coarse_filter_count: 1,
       fine_assessment_count: 1,
       degradation_reason: "cold_cascade_engaged"
-    }));
+    })) as typeof deps.recallService.recall;
     const handler = createMcpMemoryToolHandler(deps);
 
     const result = await handler.call({
@@ -556,8 +561,57 @@ describe("mcp memory tool handler", () => {
     });
 
     expect(result.ok).toBe(true);
-    const [recordedUsage] = deps.trustStateRecorder.recordUsage.mock.calls[0]!;
+    const [recordedUsage] = (deps.trustStateRecorder.recordUsage as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(recordedUsage.trust_mode).toBe("automatic");
+  });
+
+  it("feeds co-usage path reinforcement only when the report has a resolvable delivery", async () => {
+    // SECURITY: co-usage reinforcement (onCoUsage) requires a server-side
+    // delivery witness. A report whose delivery cannot be resolved skips the
+    // delivered_object_ids subset gate, so feeding its used ids into onCoUsage
+    // would let a caller pump path support/strength between arbitrary memories.
+    // A legitimate report (delivery resolves, used ids subset the delivery)
+    // still reinforces. see also: mcp-memory-tool-handler.ts reportContextUsage.
+    const onCoUsage = vi.fn(async () => undefined);
+    const baseDeps = createDeps();
+    const deps: McpMemoryToolHandlerDependencies = {
+      ...baseDeps,
+      pathRelationProposalService: { onCoUsage }
+    };
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) => ({
+      ...createDeliveryRecord(deliveryId),
+      delivered_object_ids: ["mem1", "mem2"]
+    }));
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const legitimate = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        used_object_ids: ["mem1", "mem2"],
+        reason: "both cited"
+      },
+      context
+    });
+    expect(legitimate.ok).toBe(true);
+    expect(onCoUsage).toHaveBeenCalledTimes(1);
+    expect(onCoUsage).toHaveBeenCalledWith(["mem1", "mem2"], context.workspaceId);
+
+    onCoUsage.mockClear();
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async () => null);
+    const unresolved = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_unknown",
+        usage_state: "used",
+        used_object_ids: ["mem1", "mem2"],
+        reason: "no resolvable delivery"
+      },
+      context
+    });
+    expect(unresolved.ok).toBe(true);
+    expect(onCoUsage).not.toHaveBeenCalled();
   });
 
   it("uses delivered_objects as the canonical used object list", async () => {
@@ -672,6 +726,37 @@ describe("mcp memory tool handler", () => {
           { object_id: "mem1", usage_status: "used" }
         ],
         reason: "contradictory ids"
+      },
+      context
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION" }
+    });
+    expect(deps.trustStateRecorder.recordUsage).not.toHaveBeenCalled();
+    expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
+  });
+
+  it("rejects report_context_usage when a used id was not part of the linked delivery", async () => {
+    // SECURITY: the linked delivery carries only mem1; a caller reporting mem2
+    // (never delivered) would fabricate co-usage between mem1 and a memory it
+    // was never served. The server-side delivered_object_ids gate rejects it
+    // even when no spoofable delivered_objects array is supplied.
+    const deps = createDeps();
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) => ({
+      ...createDeliveryRecord(deliveryId),
+      delivered_object_ids: ["mem1"]
+    }));
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        used_object_ids: ["mem1", "mem2"],
+        reason: "fabricated co-usage"
       },
       context
     });
@@ -807,7 +892,7 @@ describe("mcp memory tool handler", () => {
     const proposalWorkflow: NonNullable<McpMemoryToolHandlerDependencies["proposalWorkflow"]> = {
       proposeMemoryUpdate: vi.fn(async () => ({
         proposal_id: "proposal-1",
-        status: "created"
+        status: "created" as const
       })),
       reviewMemoryProposal: vi.fn(async () => ({
         proposal_id: "proposal-1",
@@ -895,8 +980,13 @@ describe("mcp memory tool handler", () => {
     );
   });
 
-  it("promotes raw_payload-only graph refs to first-class emit_candidate_signal fields", async () => {
-    const deps = createDeps();
+  // invariant: graph-edge ref hints in raw_payload are NOT promoted to
+  // first-class signal fields. The 5 ref keys are first-class on
+  // `CandidateMemorySignal`; raw_payload occurrences are logged and
+  // left in raw_payload unchanged (warn-and-keep).
+  it("ignores raw_payload graph-edge ref keys and warns; first-class fields are the only entry", async () => {
+    const warn = vi.fn();
+    const deps = { ...createDeps(), warn };
     const handler = createMcpMemoryToolHandler(deps);
 
     const result = await handler.call({
@@ -918,17 +1008,104 @@ describe("mcp memory tool handler", () => {
     });
 
     expect(result).toMatchObject({ ok: true });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("raw_payload contains graph-edge ref keys"),
+      expect.objectContaining({
+        offending_keys: expect.arrayContaining(["source_memory_refs", "contradicts_refs"])
+      })
+    );
     expect(deps.signalService.receiveSignal).toHaveBeenCalledWith(
       expect.objectContaining({
-        source_memory_refs: ["memory-parent"],
-        contradicts_refs: ["memory-conflict"],
-        raw_payload: { observation: "Use pnpm." }
+        // first-class fields default to [] because the request did not
+        // supply them; raw_payload entries do NOT promote.
+        source_memory_refs: [],
+        contradicts_refs: [],
+        raw_payload: {
+          observation: "Use pnpm.",
+          source_memory_refs: ["memory-parent"],
+          contradicts_refs: ["memory-conflict"]
+        }
       })
     );
   });
 
-  it("preserves invalid raw_payload graph ref keys for emit_candidate_signal", async () => {
-    const deps = createDeps();
+  // invariant: warn-and-keep regression for all 5 graph-ref keys at once.
+  // The normalizer never PROMOTES raw_payload ref keys to first-class
+  // fields (silent double-entry was the audit risk), but it must also
+  // leave raw_payload UNCHANGED — downstream subscribers may still want
+  // to read the raw envelope for diagnostics. The single warn must list
+  // every offending key so an operator gets one event per signal, not
+  // one per key. see also: apps/core-daemon/src/mcp-memory-tool-handler.ts
+  // normalizeCandidateSignalGraphRefs.
+  it("warn-and-keep: all 5 raw_payload ref keys are preserved + reported in one warn", async () => {
+    const warn = vi.fn();
+    const deps = { ...createDeps(), warn };
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const rawPayloadWithAllFiveKeys = {
+      observation: "Use pnpm.",
+      source_memory_refs: ["memory-source"],
+      supersedes_refs: ["memory-superseded"],
+      exception_to_refs: ["memory-exception"],
+      contradicts_refs: ["memory-conflict"],
+      incompatible_with_refs: ["memory-incompat"]
+    };
+    const result = await handler.call({
+      toolName: "soul.emit_candidate_signal",
+      arguments: {
+        signal_kind: "potential_preference",
+        object_kind: "memory_entry",
+        scope_hint: "project",
+        domain_tags: ["tooling"],
+        confidence: 0.9,
+        evidence_refs: ["memory-1"],
+        raw_payload: rawPayloadWithAllFiveKeys
+      },
+      context
+    });
+
+    expect(result).toMatchObject({ ok: true });
+
+    // One warn fires per signal, listing every offending key.
+    const refKeyWarnCalls = warn.mock.calls.filter(([message]) =>
+      typeof message === "string" && message.includes("raw_payload contains graph-edge ref keys")
+    );
+    expect(refKeyWarnCalls).toHaveLength(1);
+    const offendingKeys = (refKeyWarnCalls[0]![1] as { offending_keys: readonly string[] })
+      .offending_keys;
+    expect(new Set(offendingKeys)).toEqual(
+      new Set([
+        "source_memory_refs",
+        "supersedes_refs",
+        "exception_to_refs",
+        "contradicts_refs",
+        "incompatible_with_refs"
+      ])
+    );
+
+    // First-class fields stay empty (NOT promoted from raw_payload), and
+    // raw_payload itself is forwarded verbatim — the keep half of the
+    // warn-and-keep contract.
+    expect(deps.signalService.receiveSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_memory_refs: [],
+        supersedes_refs: [],
+        exception_to_refs: [],
+        contradicts_refs: [],
+        incompatible_with_refs: [],
+        raw_payload: rawPayloadWithAllFiveKeys
+      })
+    );
+  });
+
+  // First-class ref fields supplied via the request body still flow
+  // through. raw_payload remains a free-form bag with no ref-key magic.
+  it("accepts first-class graph-edge ref fields on emit_candidate_signal", async () => {
+    const warn = vi.fn();
+    const deps = { ...createDeps(), warn };
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) =>
+      createDeliveryRecord(deliveryId)
+    );
     const handler = createMcpMemoryToolHandler(deps);
 
     const result = await handler.call({
@@ -940,22 +1117,27 @@ describe("mcp memory tool handler", () => {
         domain_tags: ["tooling"],
         confidence: 0.9,
         evidence_refs: ["memory-1"],
-        raw_payload: {
-          observation: "Use pnpm.",
-          source_memory_refs: "legacy metadata, not a graph hint"
-        }
+        source_memory_refs: ["memory-parent"],
+        contradicts_refs: ["memory-conflict"],
+        raw_payload: { observation: "Use pnpm." },
+        source_delivery_ids: ["delivery-1"]
       },
       context
     });
 
     expect(result).toMatchObject({ ok: true });
+    // raw_payload contained no ref keys; the graph-ref normalizer must
+    // not emit a warning. Other unrelated warn paths are checked
+    // separately above (missing source_delivery_ids).
+    const refKeyWarnCalls = warn.mock.calls.filter(([message]) =>
+      typeof message === "string" && message.includes("raw_payload contains graph-edge ref keys")
+    );
+    expect(refKeyWarnCalls).toEqual([]);
     expect(deps.signalService.receiveSignal).toHaveBeenCalledWith(
       expect.objectContaining({
-        source_memory_refs: [],
-        raw_payload: {
-          observation: "Use pnpm.",
-          source_memory_refs: "legacy metadata, not a graph hint"
-        }
+        source_memory_refs: ["memory-parent"],
+        contradicts_refs: ["memory-conflict"],
+        raw_payload: { observation: "Use pnpm." }
       })
     );
   });
@@ -1175,7 +1357,7 @@ function createDeps(): McpMemoryToolHandlerDependencies {
         total_scanned: 1,
         coarse_filter_count: 1,
         fine_assessment_count: 1
-      }))
+      })) as McpMemoryToolHandlerDependencies["recallService"]["recall"]
     },
     memoryService: {
       findById: vi.fn(async () => createMemory()),
@@ -1214,7 +1396,7 @@ function createDeps(): McpMemoryToolHandlerDependencies {
           }
         ],
         total_count: 1
-      })),
+      })) as NonNullable<McpMemoryToolHandlerDependencies["edgeProposalService"]>["listPending"],
       batchReview: vi.fn(async () => ({
         accepted_count: 1,
         rejected_count: 0,

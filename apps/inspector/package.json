@@ -19,7 +19,8 @@
   },
   "scripts": {
     "build": "tsc -b && pnpm --dir web build",
-    "test": "pnpm exec vitest run --project @do-soul/alaya-inspector"
+    "test": "pnpm exec vitest run --project @do-soul/alaya-inspector",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "@do-soul/alaya-eval": "workspace:*",

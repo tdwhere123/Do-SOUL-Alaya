@@ -3,15 +3,12 @@ import {
   EdgeProposalService,
   EventPublisher,
   MemoryService,
-  RecallService,
-  type RecallServiceDependencies,
+  PathRelationProposalService,
   type RuntimeNotifier
 } from "@do-soul/alaya-core";
 import {
-  ControlPlaneObjectKind,
   FormationKind,
   MemoryDimension,
-  RetentionPolicy,
   RunMode,
   RunState,
   ScopeClass,
@@ -19,15 +16,15 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
-  type MemoryEntry,
-  type TaskObjectSurface
+  type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
+  SqliteCoUsageCounterRepo,
   SqliteEdgeProposalRepo,
   SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
-  SqliteMemoryGraphEdgeRepo,
+  SqlitePathRelationRepo,
   SqliteRunRepo,
   SqliteTrustStateRepo,
   SqliteWorkspaceRepo,
@@ -121,12 +118,13 @@ describe("recall cross-link: report_context_usage(used) proposes RECALLS edges",
     );
   });
 
-  it("keeps RECALLS proposals pending until explicit accept writes graph edges", async () => {
+  it("keeps RECALLS proposals pending until explicit accept mints a governed path relation", async () => {
     const harness = await createHarness([MEM_A, MEM_B, MEM_C], { realEdgeProposals: true });
 
     await reportUsed(harness, [MEM_A, MEM_B]);
 
-    expect(await harness.graphEdgeRepo.findByWorkspace("workspace-1")).toEqual([]);
+    // Proposals are pending; no path minted yet.
+    expect(await harness.pathRelationRepo.findByWorkspace("workspace-1")).toEqual([]);
     expect(harness.edgeProposalRepo.listPending("workspace-1").map((proposal) => ({
       source: proposal.source_memory_id,
       target: proposal.target_memory_id,
@@ -156,38 +154,27 @@ describe("recall cross-link: report_context_usage(used) proposes RECALLS edges",
     });
     expect(reviewResult).toMatchObject({ ok: true });
 
-    const persistedEdges = await harness.graphEdgeRepo.findByWorkspace("workspace-1");
-    expect(persistedEdges).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          source_memory_id: MEM_A,
-          target_memory_id: MEM_B,
-          edge_type: "recalls"
-        }),
-        expect.objectContaining({
-          source_memory_id: MEM_B,
-          target_memory_id: MEM_A,
-          edge_type: "recalls"
-        })
-      ])
+    // invariant (accept->path, DB-level): accept mints governed path relations.
+    // A->B and B->A dedup to one undirected path.
+    const paths = await harness.pathRelationRepo.findByWorkspace("workspace-1");
+    expect(paths.length).toBeGreaterThanOrEqual(1);
+    for (const path of paths) {
+      expect(path.constitution.relation_kind).toBe("recalls");
+      expect(path.legitimacy.governance_class).toBe("recall_allowed");
+      expect(path.effect_vector.recall_bias).toBeGreaterThan(0);
+    }
+    const pathEndpoints = paths.map((path) => {
+      const source = path.anchors.source_anchor;
+      const target = path.anchors.target_anchor;
+      return {
+        source: source.kind === "object" ? source.object_id : null,
+        target: target.kind === "object" ? target.object_id : null
+      };
+    });
+    expect(pathEndpoints).toEqual(
+      expect.arrayContaining([{ source: MEM_A, target: MEM_B }])
     );
     expect(harness.edgeProposalRepo.listPending("workspace-1")).toEqual([]);
-
-    const recallService = createRecallServiceWithPersistedGraph(harness);
-    const result = await recallService.recall({
-      taskSurface: createTaskSurface("seed memory"),
-      workspaceId: "workspace-1",
-      runId: "run-1",
-      strategy: "build"
-    });
-
-    const candidateA = result.candidates.find((candidate) => candidate.object_id === MEM_A);
-    const candidateB = result.candidates.find((candidate) => candidate.object_id === MEM_B);
-    const candidateC = result.candidates.find((candidate) => candidate.object_id === MEM_C);
-
-    expect(candidateA?.score_factors?.graph_support).toBeGreaterThan(0);
-    expect(candidateB?.score_factors?.graph_support).toBeGreaterThan(0);
-    expect(candidateC?.score_factors?.graph_support ?? 0).toBe(0);
   });
 
   it("never fails the report when the graph edge port throws", async () => {
@@ -213,7 +200,8 @@ async function createHarness(
   const eventLogRepo = new SqliteEventLogRepo(database);
   const edgeProposalRepo = new SqliteEdgeProposalRepo(database);
   const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
-  const graphEdgeRepo = new SqliteMemoryGraphEdgeRepo(database);
+  const pathRelationRepo = new SqlitePathRelationRepo(database);
+  const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
   const runRepo = new SqliteRunRepo(database);
   const trustStateRepo = new SqliteTrustStateRepo(database);
   const workspaceRepo = new SqliteWorkspaceRepo(database);
@@ -273,10 +261,24 @@ async function createHarness(
   });
 
   let edgeCounter = 0;
+  // invariant: accept mints a governed PathRelation via the real path service
+  // (not memory_graph_edges). The path service dedups + governance-clamps.
+  const pathRelationProposalService = new PathRelationProposalService({
+    repo: {
+      create: (relation) => pathRelationRepo.create(relation),
+      findByAnchorMemoryId: async (memoryId, workspaceId) =>
+        await pathRelationRepo.findByAnchors(workspaceId, [{ kind: "object", object_id: memoryId }])
+    },
+    counterStore: coUsageCounterRepo,
+    eventPublisher,
+    generateId: () => `00000000-0000-4000-9000-${(++edgeCounter).toString().padStart(12, "0")}`
+  });
   const edgeProposalService = new EdgeProposalService({
     memoryRepo: memoryEntryRepo,
     proposalRepo: edgeProposalRepo,
-    graphPort: graphEdgeRepo,
+    pathCandidatePort: {
+      submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
+    },
     eventPublisher,
     now: () => "2026-05-07T00:00:01.000Z",
     generateId: () => `00000000-0000-4000-8000-${(++edgeCounter).toString().padStart(12, "0")}`
@@ -326,7 +328,14 @@ async function createHarness(
     ...(options.warn === undefined ? {} : { warn: options.warn })
   });
 
-  return { edgeProposalRepo, eventLogRepo, graphEdgePort, graphEdgeRepo, handler, memoryEntryRepo };
+  return {
+    edgeProposalRepo,
+    eventLogRepo,
+    graphEdgePort,
+    pathRelationRepo,
+    handler,
+    memoryEntryRepo
+  };
 }
 
 type ReportHarness = Pick<Awaited<ReturnType<typeof createHarness>>, "handler">;
@@ -358,43 +367,6 @@ async function reportUsage(
       sessionId: "recall-cross-link-session"
     }
   });
-}
-
-function createRecallServiceWithPersistedGraph(
-  harness: Pick<Awaited<ReturnType<typeof createHarness>>, "eventLogRepo" | "graphEdgeRepo" | "memoryEntryRepo">
-): RecallService {
-  const deps: RecallServiceDependencies = {
-    now: () => "2026-05-07T00:00:02.000Z",
-    generateRuntimeId: () => "00000000-0000-4000-8000-000000000099",
-    memoryRepo: harness.memoryEntryRepo,
-    slotRepo: {
-      findByWorkspace: vi.fn(async () => [])
-    },
-    eventLogRepo: {
-      append: harness.eventLogRepo.append.bind(harness.eventLogRepo),
-      queryByEntity: vi.fn(async () => [])
-    },
-    graphSupportPort: {
-      countInboundSupports: harness.graphEdgeRepo.countInboundSupports.bind(harness.graphEdgeRepo),
-      countInboundEdgesWeighted: harness.graphEdgeRepo.countInboundEdgesWeighted.bind(harness.graphEdgeRepo)
-    }
-  };
-
-  return new RecallService(deps);
-}
-
-function createTaskSurface(displayName: string): TaskObjectSurface {
-  return {
-    runtime_id: "00000000-0000-4000-8000-000000000098",
-    object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
-    task_surface_ref: null,
-    expires_at: "2026-05-07T00:30:00.000Z",
-    derived_from: null,
-    retention_policy: RetentionPolicy.SESSION_ONLY,
-    surface_kind: "build",
-    display_name: displayName,
-    context_refs: []
-  };
 }
 
 function createMemoryEntry(objectId: string): MemoryEntry {

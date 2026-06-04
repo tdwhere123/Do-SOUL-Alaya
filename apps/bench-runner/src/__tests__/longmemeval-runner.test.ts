@@ -26,9 +26,15 @@ let tmpDir: string;
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "lme-test-"));
+  // These runs take the no-credentials offline seed path; the model value is
+  // never used for a live call, but resolveCompileSeedExtractionConfig now
+  // requires an explicit extraction model (no silent production-constant
+  // fallback), so set it for the run-start preflight/config resolution.
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-mini");
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -94,6 +100,19 @@ function buildLongMemEvalArchivePayload(
         seed_turns_truncated: 0,
         answer_turns_truncated: 0,
         seed_chars_clipped: 0
+      },
+      seed_extraction_path: {
+        path: "official_api_compile",
+        cache_hits: 0,
+        llm_calls: 1,
+        offline_fallbacks: 0,
+        live_extraction_failures: 0,
+        cached_extraction_failures: 0,
+        facts_produced: 5,
+        signals_dropped: 0,
+        parse_dropped: 0,
+        compile_overflow_dropped: 0,
+        signals_dropped_by_reason: { candidate_absent: 0, materialization_error: 0 }
       },
       per_scenario: [
         { id: "q001", version: 1, hit_at_5: false, tier: "cold" },
@@ -998,6 +1017,32 @@ describe("LongMemEval runner", () => {
     expect(result.scoredRecallResult.delivery_id).toBe("delivery-scored");
     expect(result.reportUsageStats.reportsAttempted).toBe(0);
   });
+
+  // Guards KpiPayloadSchema's latency_ms* nonnegative() invariant: a
+  // monotonic recall clock can never report a negative duration even when
+  // recall resolves instantly. see also: packages/eval/src/kpi-schema.ts.
+  it.each(["none", "mixed"] as const)(
+    "reports a non-negative finite scoredRecallLatencyMs for simulate_report=%s",
+    async (simulateReport) => {
+      const recall = vi
+        .fn()
+        .mockResolvedValue(buildRecallResult("delivery-scored", ["gold"]));
+      const reportContextUsage = vi.fn().mockResolvedValue(undefined);
+
+      const result = await runLongMemEvalRecallCycle({
+        daemon: { recall, reportContextUsage },
+        query: "Which memory was used?",
+        recallOptions: { maxResults: 10, conflictAwareness: true },
+        simulateReport,
+        goldMemoryIds: ["gold"],
+        turnIndex: 9,
+        questionText: "Which memory was used?"
+      });
+
+      expect(Number.isFinite(result.scoredRecallLatencyMs)).toBe(true);
+      expect(result.scoredRecallLatencyMs).toBeGreaterThanOrEqual(0);
+    }
+  );
 
   it(
     "runs 2-question mock dataset through the real MCP propose+review chain and produces a valid kpi.json with mcp_propose_review harness_mode",

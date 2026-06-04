@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-// RED: RunRenameInputSchema does not exist yet in ../run — import will fail at
-// runtime (or compile time if tsc is strict) until the implementation card lands.
-// @ts-expect-error symbol does not exist yet
 import { RunRenameInputSchema } from "../run.js";
-// RED: RunRenamedPayloadSchema does not exist yet in ../events/workspace-run
-// @ts-expect-error symbol does not exist yet
 import { RunRenamedPayloadSchema } from "../events/workspace-run.js";
 
 describe("RunRenameInputSchema", () => {

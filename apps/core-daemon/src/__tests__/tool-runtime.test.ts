@@ -1009,7 +1009,7 @@ describe("tool-runtime relative path handling", () => {
         listServerTools: async () => [],
         hasTool: () => enrolled,
         executeTool: executeTool
-      },
+      } as Parameters<typeof createExternalConversationToolExecutor>[0]["catalog"],
       now: () => 0,
       refreshTools,
       refreshTtlMs: 1_000
@@ -1151,7 +1151,7 @@ describe("tool-runtime relative path handling", () => {
         listServerTools: async () => [],
         hasTool: () => false,
         executeTool: async () => ({ ok: true })
-      },
+      } as Parameters<typeof createExternalConversationToolExecutor>[0]["catalog"],
       now: () => nowMs,
       refreshTools,
       refreshTtlMs: 1_000
@@ -1202,7 +1202,7 @@ describe("tool-runtime relative path handling", () => {
         listServerTools: async () => [],
         hasTool: () => false,
         executeTool: async () => ({ ok: true })
-      },
+      } as Parameters<typeof createExternalConversationToolExecutor>[0]["catalog"],
       now: () => nowMs,
       refreshTools,
       refreshTtlMs: 1_000,
@@ -1237,7 +1237,7 @@ describe("tool-runtime relative path handling", () => {
         listServerTools: async () => [],
         hasTool: () => false,
         executeTool: catalogExecuteTool
-      },
+      } as Parameters<typeof createExternalConversationToolExecutor>[0]["catalog"],
       refreshTools: async () => undefined
     });
 
@@ -1404,7 +1404,7 @@ function createRecordingConversationToolExecutor(toolSpec: ToolSpec): {
           started_at: "2026-04-20T00:00:00.000Z",
           completed_at: "2026-04-20T00:00:01.000Z",
           affected_paths: affectedPaths
-        } as ToolExecutionRecord);
+        } as unknown as ToolExecutionRecord);
         appendedEntries.push({
           event_id: `event-${appendedEntries.length + 1}`,
           event_type: "tool_call.completed",

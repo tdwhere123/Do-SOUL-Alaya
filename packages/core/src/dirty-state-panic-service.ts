@@ -19,7 +19,7 @@ import type { EventPublisher } from "./event-publisher.js";
 import { assertWorkerTransition } from "./worker-run-state-machine.js";
 
 export interface DirtyStateDossierRepoPort {
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  /** Sync sibling for atomic publish + mutation. */
   create(dossier: DirtyStateDossier): Readonly<DirtyStateDossier>;
   deleteById(dossierId: string): Promise<void>;
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<DirtyStateDossier>[]>;
@@ -29,8 +29,8 @@ export interface DirtyStateDossierRepoPort {
 export interface DirtyStatePanicWorkerRunRepoPort {
   getById(workerRunId: string): Promise<Readonly<DelegatedWorkerRun> | null>;
   /**
-   * Sync sibling for atomic publish + mutation (#BL-022). The dirty-state
-   * panic transitions the worker_run to `frozen` inside the same SQLite
+   * Sync sibling for atomic publish + mutation. The dirty-state panic
+   * transitions the worker_run to `frozen` inside the same SQLite
    * transaction as the dossier insert and both EventLog rows
    * (panic + worker.state_changed).
    */
@@ -70,11 +70,11 @@ export class DirtyStatePanicService {
     const stateChangedEvent = this.buildWorkerStateChangedEvent(workerRun, dossier);
     const updatedAt = dossier.created_at;
 
-    // Atomic: panic + worker.state_changed EventLog rows, dossier INSERT,
-    // and worker_run state UPDATE all commit (or roll back) as one SQLite
-    // transaction (see #BL-022 closure). Replaces the prior nested
-    // legacy-publish pattern flagged by A2 finding-2 — nested publish
-    // broke the single-transaction guarantee.
+    // invariant: panic + worker.state_changed EventLog rows, dossier
+    // INSERT, and worker_run state UPDATE all commit (or roll back) as
+    // one SQLite transaction. A nested-publish shape would break the
+    // single-transaction guarantee, so callers MUST keep all mutations
+    // inside the appendManyWithMutation callback.
     return await this.deps.eventPublisher.appendManyWithMutation(
       [panicEvent, stateChangedEvent],
       () => {

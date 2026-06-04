@@ -338,7 +338,18 @@ describe("RecallService global project-mapping filter", () => {
     expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(
       expectedDynamicGap
     );
-    expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(0.1143348);
+    // R3e single-count freshness: the accepted-vs-advisory gap is the sum of two
+    // sub-term deltas (everything else is identical between the two candidates):
+    //   Delta weighted_activation             = 0.085783808
+    //   Delta weighted_query_evidence_transfer = 0.021970000
+    //   total                                  = 0.107753808
+    // The shared freshness factor decays ONLY the freshness band of the activation
+    // (nonFreshnessFloor + freshnessWeight * factor), NOT the whole composite, and
+    // the query-evidence-transfer half of the gap is freshness-independent (it
+    // scales with base_weight, not activation). The pre-R3e value (0.0866254)
+    // assumed the WHOLE un-decayed gap (0.1143348) scaled by a single freshness
+    // factor; that double-counting model is what R3e retired.
+    expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(0.107753808);
     expect(accepted?.is_advisory).toBe(false);
     expect(advisory?.is_advisory).toBe(true);
   });

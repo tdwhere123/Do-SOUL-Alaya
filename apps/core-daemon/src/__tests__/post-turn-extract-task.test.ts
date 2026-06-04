@@ -356,17 +356,23 @@ describe("post-turn extract Garden task", () => {
     });
   });
 
-  it("host_worker routing leaves the task pending for MCP workers", async () => {
+  it("host_worker routing leaves a freshly-enqueued task pending for MCP workers", async () => {
     const officialCompile = vi.fn(async () => [createSignal()]);
+    const localCompile = vi.fn(async () => [createSignal()]);
     const harness = await createRoutingHarness({
       provider_kind: "host_worker",
-      officialCompile
+      officialCompile,
+      localCompile
     });
+    // Just enqueued (default created_at = now) -> within the host-worker wait
+    // window, so the in-process runtime leaves it for an attached agent and
+    // does NOT run any provider inline.
     harness.enqueuePostTurnTask();
 
     await harness.runScheduler();
 
     expect(officialCompile).not.toHaveBeenCalled();
+    expect(localCompile).not.toHaveBeenCalled();
     expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
       status: "pending",
       claimed_by: null
@@ -386,6 +392,38 @@ describe("post-turn extract Garden task", () => {
         kind: GardenTaskKind.POST_TURN_EXTRACT
       })
     ]);
+  });
+
+  it("host_worker routing falls back to the zero-cloud local heuristic after the wait window with no claim", async () => {
+    const officialCompile = vi.fn(async () => [createSignal()]);
+    const localCompile = vi.fn(async () => [createSignal({ signal_id: "signal-fallback" })]);
+    const harness = await createRoutingHarness({
+      provider_kind: "host_worker",
+      officialCompile,
+      localCompile
+    });
+    // Enqueued well before the host-worker fallback window (created_at aged 1h)
+    // with no agent claim. The in-process runtime must claim it and run the
+    // deterministic localHeuristicsProvider so the extract never stalls — and
+    // must NOT touch the official (cloud) provider.
+    harness.enqueuePostTurnTask({
+      created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    });
+
+    await harness.runScheduler();
+
+    expect(officialCompile).not.toHaveBeenCalled();
+    expect(localCompile).toHaveBeenCalledTimes(1);
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "completed",
+      claimed_by: "in-process"
+    });
+    await expect(
+      harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))
+    ).resolves.toMatchObject({
+      signal_id: gardenTaskSignalId("post-turn-task-1", 0),
+      workspace_id: "workspace-1"
+    });
   });
 
   it("local_heuristics routing claims, compiles, and completes inline", async () => {
@@ -507,10 +545,13 @@ describe("post-turn extract Garden task", () => {
                 domain_tags: ["preference"],
                 confidence: 0.78,
                 evidence_refs: ["evidence-1"],
+                // invariant: graph-edge ref hints are first-class on
+                // CandidateMemorySignal (see candidate-memory-signal.ts §79-84).
+                // raw_payload is not a back-door for them.
+                source_memory_refs: ["memory-a"],
+                incompatible_with_refs: ["memory-b"],
                 raw_payload: {
-                  observation: "user prefers vitest watch mode",
-                  source_memory_refs: ["memory-a"],
-                  incompatible_with_refs: ["memory-b"]
+                  observation: "user prefers vitest watch mode"
                 }
               }
             ]
@@ -534,7 +575,7 @@ describe("post-turn extract Garden task", () => {
     });
   });
 
-  it("preserves invalid raw_payload graph ref keys when completing Garden tasks", async () => {
+  it("ignores raw_payload graph ref keys when completing Garden tasks (first-class fields only)", async () => {
     const harness = await createRoutingHarness({ provider_kind: "host_worker" });
     harness.enqueuePostTurnTask();
     await harness.runScheduler();
@@ -673,6 +714,7 @@ interface RoutingHarness extends ClosableHarness {
   enqueuePostTurnTask(overrides?: {
     readonly id?: string;
     readonly payload?: PostTurnPayload;
+    readonly created_at?: string;
   }): void;
   runScheduler(): Promise<void>;
 }
@@ -743,7 +785,8 @@ async function createRoutingHarness(options: {
     databaseConnection: base.database.connection,
     backlogThresholds: {
       warning_queue_depth: 100,
-      warning_rearm_depth: 50
+      warning_rearm_depth: 50,
+      snapshot_interval_ms: 1000
     },
     eventLogRepo: base.eventLogRepo,
     eventPublisher: base.eventPublisher,
@@ -782,7 +825,11 @@ async function createRoutingHarness(options: {
         role: GardenRole.LIBRARIAN,
         kind: GardenTaskKind.POST_TURN_EXTRACT,
         payload: overrides.payload ?? createPostTurnPayload(),
-        created_at: "2026-05-07T00:00:00.000Z"
+        // Default to "just enqueued" so host_worker rows stay within the
+        // in-process fallback wait window — the host worker gets first claim.
+        // The bounded-fallback test below enqueues with an explicitly aged
+        // created_at to exercise the zero-cloud heuristic fallback path.
+        created_at: overrides.created_at ?? new Date().toISOString()
       });
     },
     async runScheduler() {
@@ -1043,7 +1090,9 @@ function createMemoryEntry(overrides: Partial<ReturnType<typeof createMemoryEntr
 
 function createMemoryEntryBase() {
   return {
-    object_id: "memory-a",
+    // Widened from the "memory-a" literal so callers can override with a
+    // dynamic object_id (e.g. findByIdScoped echoing its argument).
+    object_id: "memory-a" as string,
     object_kind: "memory_entry",
     schema_version: 1,
     lifecycle_state: "active",
@@ -1081,7 +1130,10 @@ function createDeliveryRecord(overrides: Partial<ContextDeliveryRecord> = {}): C
     agent_target: "codex",
     workspace_id: "workspace-1",
     run_id: "run-1",
-    delivered_object_ids: ["memory-a"],
+    // Both memory-a and memory-b are served by this delivery so a usage report
+    // that cites either id stays a subset of the server-side delivered set.
+    // see also: mcp-memory-tool-handler.ts validateReportedRecallHits.
+    delivered_object_ids: ["memory-a", "memory-b"],
     delivered_at: "2026-05-07T00:00:00.000Z",
     audit_event_id: "event-delivery",
     ...overrides

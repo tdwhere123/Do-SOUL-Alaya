@@ -557,15 +557,9 @@ describe("GardenScheduler", () => {
     expect(scheduler.peekBacklogWarningTransition()).toBeNull();
   });
 
-  // Reviewer-final F1 (refines Codex re-review I3): the snapshot-based
-  // rollback in InMemoryGardenTaskRepo.claimAtomicWithEvents must
-  // restore attempt_count to its pre-claim value, not just status. The
-  // earlier I3 regression test only checked that a retry succeeded —
-  // pre-fix releaseClaim path also let retries succeed (it only failed
-  // to revert attempt_count, not status). This test exposes the
-  // pre-fix bug by reading attempt_count via the new findById port and
-  // asserting it never drifts above 1 across multiple failed dispatches.
-  it("restores attempt_count on dispatch-append rollback (I3 + F1)", async () => {
+  // invariant: rollback restores attempt_count with status/claim fields so
+  // repeated failed dispatch appends do not make retries appear older.
+  it("restores attempt_count on dispatch-append rollback", async () => {
     const eventLog = {
       append: vi
         .fn(async () => undefined)

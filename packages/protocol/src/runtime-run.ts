@@ -7,16 +7,12 @@ export const ClaimModeSchema = z.enum(["STRICT", "PREFERRED"]);
 export const WorkerRunStateSchema = z.enum(["init", "active", "completed", "suspended", "aborted", "frozen"]);
 export const GardenProviderKindSchema = z.enum([
   "local_heuristics",
-  "official_api",
-  "custom_api",
-  "local_model"
+  "official_api"
 ]);
 
 export const GardenProviderKind = {
   LOCAL_HEURISTICS: "local_heuristics",
-  OFFICIAL_API: "official_api",
-  CUSTOM_API: "custom_api",
-  LOCAL_MODEL: "local_model"
+  OFFICIAL_API: "official_api"
 } as const;
 
 export const PrincipalRunSchema = z

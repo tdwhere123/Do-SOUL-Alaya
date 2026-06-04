@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   buildDiffVsPrevious,
   diffKpis,
@@ -18,13 +15,16 @@ import {
   resolveBenchCommitSha7,
   resolveBenchRunnerVersion
 } from "../version.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   startBenchDaemon,
+  type BenchDaemonHandle,
   type BenchEmbeddingMode,
   type BenchEmbeddingProviderKind,
   type BenchEmbeddingWarmupSummary,
-  type BenchQueryEmbeddingWarmupSummary
+  type BenchQueryEmbeddingWarmupSummary,
+  type BenchWorkspaceHandle
 } from "../harness/daemon.js";
 import {
   buildLongMemEvalQualityMetrics,
@@ -113,10 +113,22 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   let totalQa = 0;
   const conversationResults: ConversationResult[] = [];
 
+  // @anchor locomo-daemon-per-run: one bench daemon spans the run; per-
+  // conversation isolation is via daemon.attachWorkspace.
+  const benchRunId = `locomo-bench-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const daemon = await startBenchDaemon({
+    workspaceId: `${benchRunId}-default`,
+    runId: `${benchRunId}-default-run`,
+    embeddingMode,
+    ...(opts.embeddingProviderKind === undefined
+      ? {}
+      : { embeddingProviderKind: opts.embeddingProviderKind })
+  });
+  try {
   for (let i = 0; i < window.length; i++) {
     const conversation = window[i];
     if (conversation === undefined) continue;
-    const convResult = await runOneConversation(conversation, opts);
+    const convResult = await runOneConversation(daemon, conversation, opts);
     conversationResults.push(convResult);
     totalQa += convResult.qaCount;
     totalHitAt1 += convResult.hitAt1;
@@ -144,6 +156,9 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
         `qa=${convResult.qaCount} R@5=${(convResult.hitAt5 / Math.max(1, convResult.qaCount) * 100).toFixed(1)}%\n`
     );
   }
+  } finally {
+    await daemon.shutdown();
+  }
 
   const rAt1 = totalQa === 0 ? 0 : totalHitAt1 / totalQa;
   const rAt5 = totalQa === 0 ? 0 : totalHitAt5 / totalQa;
@@ -160,8 +175,8 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       result.queryEmbeddingWarmup === null ? [] : [result.queryEmbeddingWarmup]
     )
   );
-  // Phase 7: aggregate per-recall structural samples across every QA in
-  // every conversation; one sample per recall call.
+  // Aggregate per-recall structural samples across every QA in every
+  // conversation; one sample per recall call.
   const recallTokenEconomy = aggregateRecallTokenEconomy(
     conversationResults.flatMap((result) => result.recallTokenEconomySamples)
   );
@@ -315,8 +330,8 @@ interface ConversationResult {
   readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
   readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
   readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
-  // Phase 7: one per-recall token-economy sample per QA in this
-  // conversation. Degraded recalls (any non-null degradation_reason from
+  // One per-recall token-economy sample per QA in this conversation.
+  // Degraded recalls (any non-null degradation_reason from
   // RecallService) emit no token_economy block, so the bench extractor
   // returns null and those samples are skipped (not pushed) — the
   // conversation-level array length therefore matches the number of
@@ -327,17 +342,14 @@ interface ConversationResult {
 }
 
 async function runOneConversation(
+  daemon: BenchDaemonHandle,
   conversation: LocomoSample,
   opts: LocomoRunOptions
 ): Promise<ConversationResult> {
   const embeddingMode = opts.embeddingMode ?? "disabled";
-  const daemon = await startBenchDaemon({
+  const workspace: BenchWorkspaceHandle = await daemon.attachWorkspace({
     workspaceId: `locomo-${conversation.sample_id}`,
-    runId: `run-${conversation.sample_id}`,
-    embeddingMode,
-    ...(opts.embeddingProviderKind === undefined
-      ? {}
-      : { embeddingProviderKind: opts.embeddingProviderKind })
+    runId: `run-${conversation.sample_id}`
   });
   try {
     const diaIdByMemoryId = new Map<string, string>();
@@ -352,10 +364,13 @@ async function runOneConversation(
     for (const session of sessions) {
       // see also: longmemeval/runner.ts session-adjacent derives_from anchor
       let previousTurnSeedMemoryIds: readonly string[] = [];
+      // anchor: same-session co-recall members, seed order. see also:
+      //   apps/bench-runner/src/longmemeval/runner.ts sessionMemberMemoryIds
+      const sessionMemberMemoryIds: string[] = [];
       for (const turn of session.turns) {
         const seedContent = `${turn.speaker}: ${turn.text}`;
         const evidenceRef = `${conversation.sample_id}-${turn.dia_id}`;
-        const seed = await daemon.proposeMemory(seedContent, evidenceRef, {
+        const seed = await workspace.proposeMemory(seedContent, evidenceRef, {
           objectKind: rotatingSeedObjectKind(seedIndex),
           ...(previousTurnSeedMemoryIds.length === 0
             ? {}
@@ -365,17 +380,25 @@ async function runOneConversation(
         memoryIdByDiaId.set(turn.dia_id, seed.memoryId);
         seedIndex += 1;
         previousTurnSeedMemoryIds = [seed.memoryId];
+        sessionMemberMemoryIds.push(seed.memoryId);
       }
+      // invariant: same-session EARNED co-recall accrual. Mirror of the
+      // LongMemEval seed path so LoCoMo's graph/path plane earns the production
+      // recalls-tier topology (co_recalled) through the onCoUsage counter gate.
+      // The earned set is SPARSE (at most BENCH_CO_RECALL_WARMUP_PAIR_CAP per
+      // session); pair selection uses session membership (seed order) only.
+      // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
+      await workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
     }
 
     const embeddingWarmup =
       opts.embeddingMode === "env"
-        ? await daemon.warmEmbeddingCache([...memoryIdByDiaId.values()])
+        ? await workspace.warmEmbeddingCache([...memoryIdByDiaId.values()])
         : null;
     const scoredQuestions = conversation.qa.filter((qa) => qa.evidence.length > 0);
     const queryEmbeddingWarmup =
       opts.embeddingMode === "env"
-        ? await daemon.warmQueryEmbeddingCache(scoredQuestions.map((qa) => qa.question))
+        ? await workspace.warmQueryEmbeddingCache(scoredQuestions.map((qa) => qa.question))
         : null;
 
     let hitAt1 = 0;
@@ -400,7 +423,7 @@ async function runOneConversation(
         continue;
       }
       scoredCount += 1;
-      const result = await runQuestion(daemon, qa);
+      const result = await runQuestion(workspace, qa);
       latencies.push(result.latencyMs);
       const ranked = result.pointers
         .slice(0, 10)
@@ -457,7 +480,7 @@ async function runOneConversation(
       recallTokenEconomySamples
     };
   } finally {
-    await daemon.shutdown();
+    await workspace.detach();
   }
 }
 
@@ -469,12 +492,12 @@ interface QaResult {
 }
 
 async function runQuestion(
-  daemon: Awaited<ReturnType<typeof startBenchDaemon>>,
+  workspace: BenchWorkspaceHandle,
   qa: LocomoQa
 ): Promise<QaResult> {
-  const recallStart = Date.now();
-  const recallResult = await daemon.recall(qa.question, { maxResults: 10 });
-  const latencyMs = Date.now() - recallStart;
+  const recallStart = monotonicNowNs();
+  const recallResult = await workspace.recall(qa.question, { maxResults: 10 });
+  const latencyMs = monotonicElapsedMs(recallStart);
   const pointers = recallResult.results.slice(0, 10).map((pointer) => ({
     object_id: pointer.object_id,
     relevance_score: pointer.relevance_score

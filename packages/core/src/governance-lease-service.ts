@@ -50,7 +50,7 @@ export interface GovernanceLeaseServiceDependencies {
 }
 
 /**
- * Governance leases are ephemeral control-plane objects in Phase 3B.
+ * Governance leases are ephemeral control-plane objects.
  * The in-memory store is a cache over EventLog-backed truth so leases can be
  * reconstructed after daemon restart.
  */

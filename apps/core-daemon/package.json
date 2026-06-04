@@ -47,7 +47,8 @@
   "scripts": {
     "dev": "node ../../scripts/dev-core-daemon.mjs",
     "build": "tsc -b",
-    "test": "pnpm exec vitest run --project @do-soul/alaya-core-daemon"
+    "test": "pnpm exec vitest run --project @do-soul/alaya-core-daemon",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "@do-soul/alaya-core": "workspace:*",

@@ -60,6 +60,7 @@ function makeShardKpi(overrides: Partial<KpiPayload> = {}): KpiPayload {
         seed_chars_clipped: 0
       },
       quality_metrics: makeQualityMetrics(),
+      seed_extraction_path: makeSeedExtractionPath(),
       per_scenario: [
         { id: "q-shard-default-1", version: 1, hit_at_5: true, tier: "warm" }
       ]
@@ -105,6 +106,10 @@ function makeQualityMetrics(
     path_stream_top10_rate: 0.2,
     path_stream_top10_count: Math.ceil(denominator * 0.2),
     path_stream_top10_denominator: denominator,
+    // Synthetic shard fixture: no per-plane gold candidates were exposed, so
+    // the per-plane recall coverage map is honestly empty. The zod schema
+    // defaults this to {} on parse; the type-level shape requires the key.
+    per_plane_recall_coverage: {},
     miss_distribution: {
       budget_dropped: budgetDropped,
       candidate_absent: candidateAbsent
@@ -126,6 +131,7 @@ function makeSeedExtractionPath(
     signals_dropped: 0,
     parse_dropped: 0,
     compile_overflow_dropped: 0,
+    signals_dropped_by_reason: { candidate_absent: 0, materialization_error: 0 },
     ...input
   };
 }
@@ -1396,7 +1402,12 @@ describe("merge-longmemeval validations", () => {
       facts_produced: 12,
       signals_dropped: 2,
       parse_dropped: 1,
-      compile_overflow_dropped: 0
+      compile_overflow_dropped: 0,
+      // Per-signal drop attribution (seed materialization failure isolation):
+      // both shard inputs default to zero on each reason, so the summed merge is
+      // zero on each. The field is preserved through the merge (cli.ts sums each
+      // reason across shards); the expected literal omitted it before this gate.
+      signals_dropped_by_reason: { candidate_absent: 0, materialization_error: 0 }
     });
     expect(report).toContain("Seed extraction path: no_credentials_fallback");
     expect(report).toContain("Release evidence blockers");
@@ -1498,8 +1509,14 @@ describe("merge-longmemeval validations", () => {
     });
     expect(report).toContain("Seed extraction path: official_api_compile");
     expect(report).toContain("Release evidence blockers");
-    expect(findings).toContain("seed_extraction_path offline_fallbacks");
+    // invariant: when live_extraction_failures > 0 the more specific
+    // blocker id fires (it dominates the dual counter increment in
+    // recordExtractionFailureSource). The dump consumer still sees
+    // offline_fallbacks=1 inside the formatted detail so the counter trail
+    // remains visible.
+    expect(findings).toContain("seed_extraction_path live_extraction_failures");
     expect(findings).toContain("offline_fallbacks=1");
+    expect(findings).toContain("live_failures=1");
   });
 
   it("does not block merged official seed extraction when offline fallbacks are zero", async () => {

@@ -9,10 +9,10 @@ This backfill maps the delivered scope to active Phase 6 card `P6-agent-use-prot
 
 ## Build and test evidence
 
-- Integration proof test added in delivered commit: `apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts`.
-- Supporting end-to-end continuity: `apps/core-daemon/src/__tests__/e2e/v0.1-release-loop.test.ts`.
+- Integration proof test added in delivered commit: `apps/core-daemon/src/__tests__/agent-use-protocol.test.ts`.
+- Supporting end-to-end continuity: `apps/core-daemon/src/__tests__/e2e/release-loop.test.ts`.
 - Backfill verification command:
-  - `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts`
+  - `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon apps/core-daemon/src/__tests__/agent-use-protocol.test.ts`
 
 ## Closeout review/fix evidence (2026-05-06)
 

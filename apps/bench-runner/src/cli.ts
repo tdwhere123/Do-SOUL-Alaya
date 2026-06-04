@@ -48,6 +48,8 @@ import {
 import { writeExternalDiagnosticsArtifact } from "./longmemeval/diagnostics-artifacts.js";
 import { runLiveBench } from "./live/runner.js";
 import { runLongMemEval } from "./longmemeval/runner.js";
+import { runExtractionFill } from "./longmemeval/extraction-fill.js";
+import { runRecallEval } from "./longmemeval/recall-eval.js";
 import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport,
@@ -72,7 +74,7 @@ const HELP_TEXT = `alaya-bench-runner — daemon-attached benchmark harness
 
 Usage:
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m] [--data-dir <path>] [--force]
-  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir <path>] [--snapshot-out <db>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
   alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner fetch-locomo [--data-dir <path>] [--force]
@@ -81,6 +83,8 @@ Usage:
   alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
   alaya-bench-runner controlled-replay [--history-root <path>]
   alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path>
+  alaya-bench-runner extraction-fill [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--data-dir <path>]
+  alaya-bench-runner recall-eval --snapshot <db> [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--history-root <path>]
   alaya-bench-runner --help
 
 Variants:
@@ -138,6 +142,10 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
       return runControlledReplayCommand(opts);
     case "merge-longmemeval":
       return runMergeLongMemEvalCommand(opts);
+    case "extraction-fill":
+      return runExtractionFillCommand(opts);
+    case "recall-eval":
+      return runRecallEvalCommand(opts);
     default:
       process.stderr.write(
         `alaya-bench-runner: unknown command '${command ?? ""}'\n${HELP_TEXT}`
@@ -161,6 +169,11 @@ interface ParsedFlags {
   readonly weightOverridesJson?: string;
   readonly rounds?: number;
   readonly force: boolean;
+  readonly snapshot?: string;
+  readonly snapshotOut?: string;
+  readonly dataDirRoot?: string;
+  readonly pinnedMetaRoot?: string;
+  readonly concurrency?: number;
 }
 
 function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
@@ -177,6 +190,11 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let weightOverridesJson: string | undefined;
   let rounds: number | undefined;
   let force = false;
+  let snapshot: string | undefined;
+  let snapshotOut: string | undefined;
+  let dataDirRoot: string | undefined;
+  let pinnedMetaRoot: string | undefined;
+  let concurrency: number | undefined;
   const shards: string[] = [];
   let collectingShards = false;
 
@@ -262,6 +280,35 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     } else if (token === "--data-dir") {
       dataDir = args[++i];
       collectingShards = false;
+    } else if (token === "--snapshot-out" || token.startsWith("--snapshot-out=")) {
+      snapshotOut = token.startsWith("--snapshot-out=")
+        ? token.slice("--snapshot-out=".length)
+        : args[++i];
+      collectingShards = false;
+    } else if (token === "--data-dir-root" || token.startsWith("--data-dir-root=")) {
+      dataDirRoot = token.startsWith("--data-dir-root=")
+        ? token.slice("--data-dir-root=".length)
+        : args[++i];
+      collectingShards = false;
+    } else if (token === "--pinned-meta-root" || token.startsWith("--pinned-meta-root=")) {
+      pinnedMetaRoot = token.startsWith("--pinned-meta-root=")
+        ? token.slice("--pinned-meta-root=".length)
+        : args[++i];
+      collectingShards = false;
+    } else if (token === "--snapshot" || token.startsWith("--snapshot=")) {
+      snapshot = token.startsWith("--snapshot=")
+        ? token.slice("--snapshot=".length)
+        : args[++i];
+      collectingShards = false;
+    } else if (token === "--concurrency" || token.startsWith("--concurrency=")) {
+      const raw = token.startsWith("--concurrency=")
+        ? token.slice("--concurrency=".length)
+        : args[++i];
+      if (raw !== undefined) {
+        const parsed = parseInt(raw, 10);
+        if (!Number.isNaN(parsed) && parsed > 0) concurrency = parsed;
+      }
+      collectingShards = false;
     } else if (token === "--force") {
       force = true;
       collectingShards = false;
@@ -300,7 +347,12 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     simulateReport,
     weightOverridesJson,
     rounds,
-    force
+    force,
+    snapshot,
+    snapshotOut,
+    dataDirRoot,
+    pinnedMetaRoot,
+    concurrency
   };
 }
 
@@ -347,7 +399,16 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
       embeddingProviderKind: opts.embeddingProviderKind,
       policyShape: opts.policyShape,
       simulateReport: opts.simulateReport,
-      weightOverridesJson: opts.weightOverridesJson
+      weightOverridesJson: opts.weightOverridesJson,
+      // @anchor longmemeval-snapshot-out-cli: producer half of the recall-eval
+      // fast loop. When set, runLongMemEval pins the seeded DB and writes
+      // <db> + .manifest.json + .sidecar.json, which recall-eval --snapshot
+      // consumes. cross-file: longmemeval/runner.ts (snapshotOut/dataDirRoot)
+      ...(opts.snapshotOut === undefined ? {} : { snapshotOut: opts.snapshotOut }),
+      ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),
+      ...(opts.pinnedMetaRoot === undefined
+        ? {}
+        : { pinnedMetaRoot: opts.pinnedMetaRoot })
     });
     const kpi = result.payload.kpi;
     process.stdout.write(
@@ -647,7 +708,18 @@ function mergeSeedExtractionPath(
     compile_overflow_dropped: present.reduce(
       (sum, path) => sum + path.compile_overflow_dropped,
       0
-    )
+    ),
+    signals_dropped_by_reason: {
+      candidate_absent: present.reduce(
+        (sum, path) => sum + path.signals_dropped_by_reason.candidate_absent,
+        0
+      ),
+      materialization_error: present.reduce(
+        (sum, path) =>
+          sum + path.signals_dropped_by_reason.materialization_error,
+        0
+      )
+    }
   };
 }
 
@@ -1253,7 +1325,7 @@ async function runMergeLongMemEvalCommand(
         ...(mergedTokenEconomy === undefined
           ? {}
           : { token_economy: mergedTokenEconomy }),
-        // @anchor merged-recall-token-economy: phase 7 per-recall structural
+        // @anchor merged-recall-token-economy: per-recall structural
         // distributions live in each shard's KPI. The honest cross-shard
         // distribution would require the raw per-recall samples (not just
         // the shard summaries); since we do not persist samples, the merged
@@ -1425,6 +1497,90 @@ async function runMergeLongMemEvalCommand(
   }
 }
 
+/**
+ * @anchor extraction-fill-command — Layer 1 (slow, one-time, daemon-free).
+ * Fills the extraction cache + writes the cache manifest (incl. coverage).
+ * see also: apps/bench-runner/src/longmemeval/extraction-fill.ts
+ */
+async function runExtractionFillCommand(opts: ParsedFlags): Promise<number> {
+  try {
+    process.stdout.write(
+      `Filling extraction cache for ${opts.variant}` +
+        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
+        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
+        (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
+        "...\n"
+    );
+    const result = await runExtractionFill({
+      variant: opts.variant,
+      ...(opts.limit === undefined ? {} : { limit: opts.limit }),
+      ...(opts.offset === undefined ? {} : { offset: opts.offset }),
+      ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
+      ...(opts.dataDir === undefined ? {} : { dataDir: opts.dataDir })
+    });
+    process.stdout.write(
+      `Done. requested_turns=${result.requestedTurns} ` +
+        `cache_hits=${result.cacheHits} newly_extracted=${result.newlyExtracted} ` +
+        `failures=${result.failures} coverage=${pct(result.coverage)}\n`
+    );
+    return result.failures > 0 ? 1 : 0;
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner extraction-fill: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
+}
+
+/**
+ * @anchor recall-eval-command — Layers 2+3 (fast, every iteration). Recall-only
+ * against a seeded-DB snapshot; no LLM, no materialization.
+ * see also: apps/bench-runner/src/longmemeval/recall-eval.ts
+ */
+async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
+  if (opts.snapshot === undefined) {
+    process.stderr.write(
+      "alaya-bench-runner recall-eval: --snapshot <db> required\n"
+    );
+    return 2;
+  }
+  try {
+    process.stdout.write(
+      `Running recall-eval against snapshot ${opts.snapshot}` +
+        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
+        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
+        ` policy_shape=${opts.policyShape}` +
+        (opts.weightOverridesJson !== undefined ? " weights=cli" : "") +
+        "...\n"
+    );
+    const result = await runRecallEval({
+      snapshotDbPath: opts.snapshot,
+      variant: opts.variant,
+      ...(opts.limit === undefined ? {} : { limit: opts.limit }),
+      ...(opts.offset === undefined ? {} : { offset: opts.offset }),
+      historyRoot: opts.historyRoot,
+      policyShape: opts.policyShape,
+      simulateReport: opts.simulateReport,
+      ...(opts.weightOverridesJson === undefined
+        ? {}
+        : { weightOverridesJson: opts.weightOverridesJson })
+    });
+    const kpi = result.payload.kpi;
+    process.stdout.write(
+      `Done. Slug: ${result.slug}\n` +
+        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
+        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
+        `  KPI: ${result.kpiPath}\n`
+    );
+    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner recall-eval: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
+}
+
 function mergeQualityMetrics(
   shards: readonly KpiPayload[]
 ): QualityMetrics | undefined {
@@ -1449,6 +1605,23 @@ function mergeQualityMetrics(
   const missDistribution: Record<string, number> = {};
   const planeGoldCounts = new Map<string, number>();
   const planeHitAt5Counts = new Map<string, number>();
+  // Cohort fan-in attribution (codex I2): additive across shards; rate is
+  // recomputed from the merged counts. Present only when a shard carried it.
+  let anyCohortAttribution = false;
+  let cohortDeliveredPlaneCount = 0;
+  let cohortGoldSourcePlaneCount = 0;
+  let cohortGoldFirstAdmittedCount = 0;
+  let cohortGoldWinningAdmissionCount = 0;
+  let cohortGoldHitAt5Count = 0;
+  // Durable-edge path-vs-graph fan-in proof (R2): additive across shards; rates
+  // recomputed from the merged counts. Present only when a shard carried it.
+  let anyPathVsGraphFanin = false;
+  let pathFaninGoldSourceCount = 0;
+  let pathFaninGoldHitAt5Count = 0;
+  let graphFaninGoldSourceCount = 0;
+  let graphFaninGoldHitAt5Count = 0;
+  let pathPrimaryGoldHitAt5Count = 0;
+  let graphOnlyGoldHitAt5Count = 0;
 
   for (const metric of metrics) {
     if (metric === undefined) continue;
@@ -1485,6 +1658,23 @@ function mergeQualityMetrics(
     }
     for (const [key, count] of Object.entries(metric.miss_distribution)) {
       missDistribution[key] = (missDistribution[key] ?? 0) + count;
+    }
+    if (metric.cohort_attribution !== undefined) {
+      anyCohortAttribution = true;
+      cohortDeliveredPlaneCount += metric.cohort_attribution.delivered_plane_count;
+      cohortGoldSourcePlaneCount += metric.cohort_attribution.gold_source_plane_count;
+      cohortGoldFirstAdmittedCount += metric.cohort_attribution.gold_first_admitted_count;
+      cohortGoldWinningAdmissionCount += metric.cohort_attribution.gold_winning_admission_count;
+      cohortGoldHitAt5Count += metric.cohort_attribution.hit_at_5_count;
+    }
+    if (metric.path_vs_graph_fanin !== undefined) {
+      anyPathVsGraphFanin = true;
+      pathFaninGoldSourceCount += metric.path_vs_graph_fanin.path_gold_source_count;
+      pathFaninGoldHitAt5Count += metric.path_vs_graph_fanin.path_gold_hit_at_5_count;
+      graphFaninGoldSourceCount += metric.path_vs_graph_fanin.graph_gold_source_count;
+      graphFaninGoldHitAt5Count += metric.path_vs_graph_fanin.graph_gold_hit_at_5_count;
+      pathPrimaryGoldHitAt5Count += metric.path_vs_graph_fanin.path_primary_hit_at_5_count;
+      graphOnlyGoldHitAt5Count += metric.path_vs_graph_fanin.graph_only_hit_at_5_count;
     }
   }
 
@@ -1530,6 +1720,32 @@ function mergeQualityMetrics(
       planeGoldCounts,
       planeHitAt5Counts
     ),
+    ...(anyCohortAttribution
+      ? {
+          cohort_attribution: {
+            delivered_plane_count: cohortDeliveredPlaneCount,
+            gold_source_plane_count: cohortGoldSourcePlaneCount,
+            gold_first_admitted_count: cohortGoldFirstAdmittedCount,
+            gold_winning_admission_count: cohortGoldWinningAdmissionCount,
+            hit_at_5_count: cohortGoldHitAt5Count,
+            hit_at_5_rate: ratio(cohortGoldHitAt5Count, cohortGoldSourcePlaneCount)
+          }
+        }
+      : {}),
+    ...(anyPathVsGraphFanin
+      ? {
+          path_vs_graph_fanin: {
+            path_gold_source_count: pathFaninGoldSourceCount,
+            path_gold_hit_at_5_count: pathFaninGoldHitAt5Count,
+            path_gold_hit_at_5_rate: ratio(pathFaninGoldHitAt5Count, pathFaninGoldSourceCount),
+            graph_gold_source_count: graphFaninGoldSourceCount,
+            graph_gold_hit_at_5_count: graphFaninGoldHitAt5Count,
+            graph_gold_hit_at_5_rate: ratio(graphFaninGoldHitAt5Count, graphFaninGoldSourceCount),
+            path_primary_hit_at_5_count: pathPrimaryGoldHitAt5Count,
+            graph_only_hit_at_5_count: graphOnlyGoldHitAt5Count
+          }
+        }
+      : {}),
     miss_distribution: missDistribution
   };
 }

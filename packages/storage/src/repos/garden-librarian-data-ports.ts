@@ -215,20 +215,35 @@ export function createNeighborPort(context: GardenDataPortFactoryContext): Garde
 }
 
 export function createCompressionPort(context: GardenDataPortFactoryContext): GardenLibrarianPathCompressionPort {
+  // anchor object_id / relation_kind / recall_bias / lifecycle.status live in the
+  // path_relations JSON columns; see packages/protocol/src/soul/path-relation.ts.
+  // recall-eligible chain link = relation_kind 'recalls' AND active lifecycle AND
+  // recall_bias > 0 (mirrors isPathRecallEligible in the protocol).
   const chainStatement = context.database.connection.prepare(`
+    WITH recalls_links AS (
+      SELECT
+        json_extract(anchors_json, '$.source_anchor.object_id') AS source_object_id,
+        json_extract(anchors_json, '$.target_anchor.object_id') AS target_object_id
+      FROM path_relations
+      WHERE workspace_id = ?
+        AND json_valid(constitution_json) = 1
+        AND json_valid(effect_vector_json) = 1
+        AND json_valid(lifecycle_json) = 1
+        AND json_extract(constitution_json, '$.relation_kind') = 'recalls'
+        AND COALESCE(json_extract(lifecycle_json, '$.status'), 'active') = 'active'
+        AND json_extract(effect_vector_json, '$.recall_bias') > 0
+        AND json_extract(anchors_json, '$.source_anchor.object_id') IS NOT NULL
+        AND json_extract(anchors_json, '$.target_anchor.object_id') IS NOT NULL
+    )
     SELECT
-      e1.source_memory_id AS chain_start,
-      e2.target_memory_id AS chain_end,
-      e1.target_memory_id AS intermediate_id
-    FROM memory_graph_edges e1
-    JOIN memory_graph_edges e2
-      ON e1.workspace_id = e2.workspace_id
-     AND e1.target_memory_id = e2.source_memory_id
-    WHERE e1.workspace_id = ?
-      AND e1.edge_type = 'recalls'
-      AND e2.edge_type = 'recalls'
-      AND e1.source_memory_id <> e2.target_memory_id
-    ORDER BY e1.source_memory_id ASC, e2.target_memory_id ASC, e1.target_memory_id ASC
+      l1.source_object_id AS chain_start,
+      l2.target_object_id AS chain_end,
+      l1.target_object_id AS intermediate_id
+    FROM recalls_links l1
+    JOIN recalls_links l2
+      ON l1.target_object_id = l2.source_object_id
+    WHERE l1.source_object_id <> l2.target_object_id
+    ORDER BY chain_start ASC, chain_end ASC, intermediate_id ASC
     LIMIT ${COMPRESSION_CHAIN_LIMIT}
   `);
 

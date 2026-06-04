@@ -228,6 +228,27 @@ describe("createGlobalMemoryRecallPort", () => {
       })
     ]);
   });
+
+  it("bounds the query cache with an LRU cap and recomputes evicted keys", async () => {
+    const list = vi.fn(async () => [createSourceEntry({ global_object_id: "g" })]);
+    const port = createGlobalMemoryRecallPort({ globalMemorySource: { list } });
+
+    // Cap is 512. One recall per distinct workspace key (each unique because
+    // each bench question is a new workspace), enough to overflow the cap.
+    const cap = 512;
+    for (let i = 0; i < cap + 1; i++) {
+      await port.recall({ workspaceId: `ws-${i}`, queryText: "q", limit: 1 });
+    }
+    expect(list).toHaveBeenCalledTimes(cap + 1);
+
+    // The newest key is still cached (no recompute).
+    await port.recall({ workspaceId: `ws-${cap}`, queryText: "q", limit: 1 });
+    expect(list).toHaveBeenCalledTimes(cap + 1);
+
+    // The oldest key (ws-0) was evicted, so it recomputes (one more list call).
+    await port.recall({ workspaceId: "ws-0", queryText: "q", limit: 1 });
+    expect(list).toHaveBeenCalledTimes(cap + 2);
+  });
 });
 
 function createSourceEntry(

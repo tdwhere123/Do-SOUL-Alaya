@@ -4,14 +4,12 @@ import {
   ALAYA_SYSEXITS,
   DuplicateSubcommandError,
   type AlayaCliArgsSchema,
+  type AlayaCliDaemonRuntime,
   createAlayaCliBridge,
   type AlayaCliResult
 } from "../cli/bridge.js";
-import {
-  createAlayaCliModuleLoaders,
-  loadAlayaCliModules,
-  runAlayaCli
-} from "../../../../bin/alaya.mjs";
+// @ts-expect-error bin/alaya.mjs is plain JS with no .d.ts; typed via usage here.
+import { createAlayaCliModuleLoaders, loadAlayaCliModules, runAlayaCli } from "../../../../bin/alaya.mjs";
 
 function createTextSink(): { readonly stream: PassThrough; readonly readText: () => string } {
   const stream = new PassThrough();
@@ -36,7 +34,7 @@ function createBridgeHarness(params: {
     startupSteps: params.startupSteps ?? [{ step: "http-app" }]
   };
 
-  const bridge = createAlayaCliBridge(daemon, {
+  const bridge = createAlayaCliBridge(daemon as unknown as AlayaCliDaemonRuntime, {
     cwd: "/tmp/alaya",
     env: params.env ?? {},
     stdin: new PassThrough(),

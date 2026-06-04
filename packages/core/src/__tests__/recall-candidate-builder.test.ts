@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ManifestationState,
   MemoryDimension,
   ScopeClass,
   SynthesisStatus,
@@ -11,7 +12,16 @@ import {
   buildRecallCandidate,
   buildSynthesisCoarseRecallCandidate
 } from "../recall-candidate-builder.js";
+import { assignManifestation } from "../recall-service-helpers.js";
 import type { CoarseRecallCandidate, TokenEstimator } from "../recall-service-types.js";
+
+// A body over the 160-char createContentPreview cap so a non-full_eligible
+// manifestation truncates the delivered content_preview, proving the cap
+// reached delivery. see also: recall-service-helpers.ts createContentPreview.
+const LONG_BODY =
+  "This memory body is intentionally written to exceed the one hundred and sixty " +
+  "character preview cap so that a hint or excerpt manifestation visibly truncates " +
+  "the delivered content_preview field.";
 
 const tokenEstimator: TokenEstimator = {
   estimate: (text) => Math.ceil(text.length / 4)
@@ -138,6 +148,86 @@ describe("recall-candidate-builder", () => {
       normalizedRank: 0.5
     });
     expect(shortCandidate.entry.content).toBe("Short synthesis.");
+  });
+});
+
+describe("recall-candidate-builder governance ceiling clamp (TRUTH BOUNDARY)", () => {
+  function buildWith(params: {
+    readonly activationScore: number;
+    readonly governanceCeiling?: ManifestationState;
+    readonly content?: string;
+  }) {
+    return buildRecallCandidate({
+      candidate: createCoarseCandidate({
+        entry: createMemoryEntry({
+          activation_score: params.activationScore,
+          content: params.content ?? LONG_BODY
+        })
+      }),
+      relevanceScore: 0.6,
+      scoreFactors: createScoreFactors(),
+      tokenEstimator,
+      budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} },
+      index: 0,
+      usedTokensBeforeCandidate: 0,
+      ...(params.governanceCeiling === undefined
+        ? {}
+        : { governanceCeiling: params.governanceCeiling })
+    });
+  }
+
+  it("ceiling caps strength: full_eligible strength + hint ceiling => hint, preview truncated", () => {
+    // activation_score 0.95 lands in the full_eligible band; a hint ceiling
+    // (from a hint_only inbound governing path) must cap delivery to hint.
+    const candidate = buildWith({
+      activationScore: 0.95,
+      governanceCeiling: ManifestationState.HINT
+    });
+    expect(candidate.manifestation).toBe(ManifestationState.HINT);
+    // The cap reached delivery: a hint preview truncates the over-160-char body
+    // rather than delivering it whole the way full_eligible would.
+    expect(candidate.content_preview.endsWith("...")).toBe(true);
+    expect(candidate.content_preview.length).toBeLessThan(LONG_BODY.length);
+    expect(candidate.content_preview).not.toBe(LONG_BODY);
+  });
+
+  it("ceiling only LOWERS, never elevates: hidden strength + full ceiling stays hidden", () => {
+    // activation_score 0.05 is in the hidden band; a full_eligible ceiling
+    // (recall_allowed inbound path) must not elevate it.
+    const candidate = buildWith({
+      activationScore: 0.05,
+      governanceCeiling: ManifestationState.FULL_ELIGIBLE
+    });
+    expect(candidate.manifestation).toBe(ManifestationState.HIDDEN);
+  });
+
+  it("no governing path => unrestricted: manifestation equals the pure strength tier", () => {
+    // No governanceCeiling supplied (no inbound governing path). Manifestation
+    // must equal assignManifestation(activation_score) with no suppression.
+    for (const score of [0.05, 0.15, 0.45, 0.75, 0.95]) {
+      const candidate = buildWith({ activationScore: score });
+      expect(candidate.manifestation).toBe(assignManifestation(score));
+    }
+  });
+
+  it("full_eligible explicit ceiling is identical to no ceiling (default)", () => {
+    const score = 0.95;
+    const withDefault = buildWith({ activationScore: score });
+    const withFull = buildWith({
+      activationScore: score,
+      governanceCeiling: ManifestationState.FULL_ELIGIBLE
+    });
+    expect(withFull.manifestation).toBe(withDefault.manifestation);
+    expect(withDefault.manifestation).toBe(ManifestationState.FULL_ELIGIBLE);
+  });
+});
+
+describe("assignManifestation threshold regression guard (DESIGN-LOCKED 0.1/0.3/0.6)", () => {
+  it("returns the existing bands at the locked threshold sample points", () => {
+    expect(assignManifestation(0.05)).toBe(ManifestationState.HIDDEN);
+    expect(assignManifestation(0.15)).toBe(ManifestationState.HINT);
+    expect(assignManifestation(0.45)).toBe(ManifestationState.EXCERPT);
+    expect(assignManifestation(0.75)).toBe(ManifestationState.FULL_ELIGIBLE);
   });
 });
 

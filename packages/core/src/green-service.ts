@@ -107,7 +107,7 @@ export interface GreenServiceDependencies {
 }
 
 /**
- * Green verification retry counters are process-local only in Phase 3B.
+ * Green verification retry counters are process-local only.
  * Restarting the daemon resets consecutive `no_go` tracking for every object.
  */
 export class GreenService {

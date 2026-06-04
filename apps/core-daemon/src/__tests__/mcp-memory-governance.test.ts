@@ -31,6 +31,12 @@ describe("mcp memory governance", () => {
           const entry = {
             event_id: `event-${++eventCounter}`,
             created_at: "2026-04-30T00:00:00.000Z",
+            revision:
+              events.filter(
+                (existingEvent) =>
+                  existingEvent.entity_type === input.entity_type &&
+                  existingEvent.entity_id === input.entity_id
+              ).length + 1,
             ...input
           } satisfies EventLogEntry;
           events.push(entry);
@@ -77,6 +83,7 @@ describe("mcp memory governance", () => {
         },
         findById: async (proposalId) => proposals.get(proposalId)?.proposal ?? null,
         findScopedById: async (proposalId) => proposals.get(proposalId) ?? null,
+        findPendingSummaries: async () => [],
         acceptPendingMemoryUpdateWithEvents: async (proposalId, updatedAt, resolutionEvents, _memoryUpdate, options) => {
           order.push("repo:acceptPendingMemoryUpdateWithEvents");
           const existing = proposals.get(proposalId);
@@ -150,7 +157,7 @@ describe("mcp memory governance", () => {
         proposed_changes: { content: "corrected" },
         reason: "operator correction"
       },
-      { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+      { workspaceId: "ws1", runId: "run1", agentTarget: "codex", sessionId: "session-1" }
     );
 
     expect(created).toEqual({
@@ -171,7 +178,7 @@ describe("mcp memory governance", () => {
         reason: "confirmed",
         reviewer_identity: "user:reviewer-1"
       },
-      { workspaceId: "ws1", runId: "run1", agentTarget: "cli" }
+      { workspaceId: "ws1", runId: "run1", agentTarget: "cli", sessionId: "session-1" }
     );
 
     expect(reviewed).toEqual({
@@ -204,6 +211,12 @@ describe("mcp memory governance", () => {
           const entry = {
             event_id: `event-${++eventCounter}`,
             created_at: "2026-04-30T00:00:00.000Z",
+            revision:
+              events.filter(
+                (existingEvent) =>
+                  existingEvent.entity_type === input.entity_type &&
+                  existingEvent.entity_id === input.entity_id
+              ).length + 1,
             ...input
           } satisfies EventLogEntry;
           events.push(entry);
@@ -238,6 +251,7 @@ describe("mcp memory governance", () => {
           run_id: "run1",
           proposed_changes: { content: "corrected" }
         }),
+        findPendingSummaries: async () => [],
         acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, resolutionEvents) => {
           if (storedProposal.resolution_state !== ProposalResolutionState.PENDING) {
             throw Object.assign(new Error(`Proposal is already ${storedProposal.resolution_state}.`), {
@@ -307,7 +321,7 @@ describe("mcp memory governance", () => {
           reason: "first reviewer",
           reviewer_identity: "user:first"
         },
-        { workspaceId: "ws1", runId: "run1", agentTarget: "cli" }
+        { workspaceId: "ws1", runId: "run1", agentTarget: "cli", sessionId: "session-1" }
       ),
       workflow.reviewMemoryProposal(
         {
@@ -316,7 +330,7 @@ describe("mcp memory governance", () => {
           reason: "duplicate reviewer",
           reviewer_identity: "user:second"
         },
-        { workspaceId: "ws1", runId: "run1", agentTarget: "cli" }
+        { workspaceId: "ws1", runId: "run1", agentTarget: "cli", sessionId: "session-1" }
       )
     ]);
 
@@ -372,7 +386,7 @@ describe("mcp memory governance", () => {
         proposed_changes: { content: "corrected" },
         reason: "operator correction"
       },
-      { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+      { workspaceId: "ws1", runId: "run1", agentTarget: "codex", sessionId: "session-1" }
     );
 
     expect(capturedAssignment).toEqual({
@@ -384,13 +398,14 @@ describe("mcp memory governance", () => {
     });
   });
 
-  it("allows human reviewer (runId: null) to review a proposal stored with a non-null run_id (A1 finding-1)", async () => {
-    // A1 fix-loop (finding-1): the Inspector POST and `alaya review`
-    // CLI always pass runId: null. Before the fix, assertProposalContext
-    // rejected this with NOT_FOUND because the stored proposal carried
-    // the agent's run_id (e.g. "run-1") and strict equality required
-    // null === "run-1" → false. Locking the loosened semantics here so
-    // a regression of the strict check fails this assertion.
+  it("allows human reviewer (runId: null) to review a proposal stored with a non-null run_id", async () => {
+    // invariant: the Inspector POST and `alaya review` CLI always pass
+    // runId: null. assertProposalContext MUST accept the human-reviewer
+    // (runId: null) case even when the stored proposal carries an
+    // agent's run_id; otherwise the human reviewer surface cannot
+    // review any agent-scoped proposal. Locking the loosened semantics
+    // here so a regression to strict run_id equality fails this
+    // assertion.
     const events: EventLogEntry[] = [];
     const proposal = createProposal();
     let storedProposal = proposal;
@@ -418,6 +433,7 @@ describe("mcp memory governance", () => {
           run_id: "run-agent",
           proposed_changes: { content: "corrected" }
         }),
+        findPendingSummaries: async () => [],
         acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, resolutionEvents) => {
           const storedEvents = resolutionEvents.map((event) => {
             const entry = {
@@ -467,14 +483,14 @@ describe("mcp memory governance", () => {
         reviewer_identity: "user:alice"
       },
       // Human-reviewer surface: runId === null. Workspace matches.
-      { workspaceId: "ws1", runId: null, agentTarget: "inspector" }
+      { workspaceId: "ws1", runId: null, agentTarget: "inspector", sessionId: "session-1" }
     );
 
     expect(reviewed.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
     expect(events).toHaveLength(3);
   });
 
-  it("still rejects human reviewer when workspace does not match (finding-1 — workspace check stays strict)", async () => {
+  it("still rejects human reviewer when workspace does not match (workspace check stays strict)", async () => {
     const proposal = createProposal();
     const workflow = createMcpMemoryProposalWorkflow({
       now: () => "2026-04-30T00:00:00.000Z",
@@ -496,6 +512,7 @@ describe("mcp memory governance", () => {
           workspace_id: "ws-other",
           run_id: "run-agent"
         }),
+        findPendingSummaries: async () => [],
         updatePendingResolutionWithEvents: async () => {
           throw new Error("update should not run for workspace mismatch");
         }
@@ -511,12 +528,12 @@ describe("mcp memory governance", () => {
           reason: "wrong ws",
           reviewer_identity: "user:bob"
         },
-        { workspaceId: "ws1", runId: null, agentTarget: "inspector" }
+        { workspaceId: "ws1", runId: null, agentTarget: "inspector", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("still requires run match when call context carries a non-null runId (finding-1 — agent context stays strict)", async () => {
+  it("still requires run match when call context carries a non-null runId (agent context stays strict)", async () => {
     // When an attached agent itself drives the review call, runId is
     // non-null and strict equality must still hold so an agent in run A
     // cannot review a proposal scoped to run B.
@@ -541,6 +558,7 @@ describe("mcp memory governance", () => {
           workspace_id: "ws1",
           run_id: "run-stored"
         }),
+        findPendingSummaries: async () => [],
         updatePendingResolutionWithEvents: async () => {
           throw new Error("update should not run for run mismatch");
         }
@@ -556,7 +574,7 @@ describe("mcp memory governance", () => {
           reason: "wrong run",
           reviewer_identity: "user:agent"
         },
-        { workspaceId: "ws1", runId: "run-other", agentTarget: "codex" }
+        { workspaceId: "ws1", runId: "run-other", agentTarget: "codex", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
@@ -601,7 +619,7 @@ describe("mcp memory governance", () => {
           reason: "self accept",
           reviewer_identity: "user:agent"
         },
-        { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+        { workspaceId: "ws1", runId: "run1", agentTarget: "codex", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({ code: "VALIDATION" });
   });
@@ -656,7 +674,7 @@ describe("mcp memory governance", () => {
           reason: "bad evidence",
           reviewer_identity: "user:alice"
         },
-        { workspaceId: "ws1", runId: "run1", agentTarget: "cli" }
+        { workspaceId: "ws1", runId: "run1", agentTarget: "cli", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({ code: "VALIDATION" });
     expect(acceptWrite).not.toHaveBeenCalled();
@@ -673,6 +691,7 @@ describe("mcp memory governance", () => {
           const entry = {
             event_id: `event-${events.length + 1}`,
             created_at: "2026-04-30T00:00:00.000Z",
+            revision: events.length + 1,
             ...input
           } satisfies EventLogEntry;
           events.push(entry);
@@ -691,6 +710,7 @@ describe("mcp memory governance", () => {
           workspace_id: "ws2",
           run_id: "run2"
         }),
+        findPendingSummaries: async () => [],
         updatePendingResolutionWithEvents: async () => {
           throw new Error("update should not run for a scope mismatch");
         }
@@ -710,7 +730,7 @@ describe("mcp memory governance", () => {
           reason: "wrong workspace",
           reviewer_identity: "user:wrong-ws"
         },
-        { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+        { workspaceId: "ws1", runId: "run1", agentTarget: "codex", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(events).toEqual([]);
@@ -760,10 +780,10 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
     });
 
     const result = await workflow.listPendingProposals(
-      // A1 fix-loop (finding-2): workspace_id no longer in the request
-      // payload; sourced from the trusted MCP call context.
+      // invariant: workspace_id MUST NOT be in the request payload;
+      // it is sourced from the trusted MCP call context.
       { since: "2026-04-30T00:00:00.000Z", limit: 10 },
-      { workspaceId: "ws1", runId: null, agentTarget: "cli" }
+      { workspaceId: "ws1", runId: null, agentTarget: "cli", sessionId: "session-1" }
     );
 
     expect(result.total_count).toBe(1);
@@ -831,7 +851,7 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
         reason: "looks right",
         reviewer_identity: "user:alice"
       },
-      { workspaceId: "ws1", runId: "run1", agentTarget: "cli" }
+      { workspaceId: "ws1", runId: "run1", agentTarget: "cli", sessionId: "session-1" }
     );
 
     expect(captureReviewerIdentity).toBe("user:alice");
@@ -905,7 +925,7 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
           reviewer_identity: "user:payload",
           reviewer_token: "review-token"
         },
-        { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+        { workspaceId: "ws1", runId: "run1", agentTarget: "codex", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({ code: "VALIDATION" });
     expect(updateCalls).toBe(0);
@@ -918,7 +938,7 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
         reviewer_identity: "user:server-reviewer",
         reviewer_token: "review-token"
       },
-      { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+      { workspaceId: "ws1", runId: "run1", agentTarget: "codex", sessionId: "session-1" }
     );
 
     expect(captureReviewerIdentity).toBe("user:server-reviewer");

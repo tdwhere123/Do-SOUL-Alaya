@@ -24,7 +24,7 @@ import { useI18n } from "../i18n/Locale";
 import type { DictKey } from "../i18n/dict";
 import {
   EDGE_TYPE_BASE_COLOR,
-  ORIGIN_KIND_COLOR,
+  NODE_KIND_BASE_COLOR,
   STABILITY_DASH,
   extractId,
   formatRelativeTime,
@@ -37,11 +37,18 @@ import {
   recencyAlpha,
   rgba
 } from "../utils/graph";
-import type { SoulGraph } from "@do-soul/alaya-protocol";
+import type { SoulPathGraphContract } from "@do-soul/alaya-protocol";
 
-interface SoulGraphEnvelope {
+// The Graph surface is served from the unified path_relations plane via the
+// daemon's read-only path-graph projection (BuiltPathGraph =
+// SoulPathGraphContract). The force-graph component still consumes the local
+// GraphNode/GraphLink shape, so this page maps the contract nodes/edges onto
+// those props rather than changing the renderer.
+// see also: packages/core/src/graph-contract-service.ts
+//           apps/core-daemon/src/routes/path-graph.ts
+interface PathGraphEnvelope {
   readonly success: boolean;
-  readonly data: SoulGraph;
+  readonly data: SoulPathGraphContract;
 }
 
 interface ProposalCreateEnvelope {
@@ -158,22 +165,13 @@ export default function GraphPage() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const result = await apiFetch<SoulGraph | SoulGraphEnvelope>(
+        const result = await apiFetch<SoulPathGraphContract | PathGraphEnvelope>(
           `/graph/${workspaceId}`
         );
         if (cancelled) return;
-        const graph = unwrapSoulGraph(result);
-        const nodes: GraphNode[] = (graph.nodes ?? []).map((n) => ({ ...n }));
-        const links: GraphLink[] = (graph.edges ?? []).map((e) => ({
-          id: e.id,
-          kind: e.kind,
-          source: e.source_id,
-          target: e.target_id,
-          weight: e.weight,
-          strength_normalized: e.strength_normalized,
-          stability_class: e.stability_class,
-          last_reinforced_at: e.last_reinforced_at
-        }));
+        const graph = unwrapPathGraph(result);
+        const nodes: GraphNode[] = (graph.nodes ?? []).map(mapPathGraphNode);
+        const links: GraphLink[] = (graph.edges ?? []).map(mapPathGraphEdge);
         const degreeBy = new Map<string, number>();
         links.forEach((l) => {
           degreeBy.set(extractId(l.source), (degreeBy.get(extractId(l.source)) ?? 0) + 1);
@@ -186,9 +184,11 @@ export default function GraphPage() {
           nodes,
           links,
           meta: {
-            truncated: graph.truncated,
-            nodeTotal: graph.node_total,
-            edgeTotal: graph.edge_total
+            // The path-graph projection returns the full active path plane;
+            // it is not truncated/sampled, so totals equal the rendered set.
+            truncated: false,
+            nodeTotal: graph.topology.total_nodes,
+            edgeTotal: graph.topology.total_edges
           }
         });
       } catch (err) {
@@ -547,10 +547,10 @@ export default function GraphPage() {
 
   const computeNodeColor = useCallback(
     (node: GraphNode): string => {
-      const baseHex =
-        ORIGIN_KIND_COLOR[node.origin_kind ?? ""] ??
-        ORIGIN_KIND_COLOR.system ??
-        DEFAULT_NODE_FALLBACK_COLOR;
+      // Path-plane node hue is keyed by anchor-derived node.kind (memory vs
+      // scope); origin_kind is not carried on the path plane.
+      // see also: NodeKindLegend below.
+      const baseHex = NODE_KIND_BASE_COLOR[node.kind] ?? DEFAULT_NODE_FALLBACK_COLOR;
       const rgb = hexToRgb(baseHex);
       const recency = recencyAlpha(node.last_used_at, now);
       const state = nodeSpotlightState(node.id);
@@ -798,7 +798,7 @@ export default function GraphPage() {
         </div>
       ) : null}
 
-      {data ? <OriginLegend /> : null}
+      {data ? <GraphLegend /> : null}
 
       {data && effectiveMode === "3d" ? (
         <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-ink-700/55 shadow-sm">
@@ -931,37 +931,74 @@ function ViewModeToggle({ mode, webglSupported, onChange }: ViewModeToggleProps)
   );
 }
 
-function OriginLegend() {
+// On the path plane the legend decodes the colours actually rendered:
+//   - node hue = anchor-derived node.kind (NODE_KIND_BASE_COLOR)
+//   - edge hue = relation_kind family (EDGE_TYPE_BASE_COLOR), collapsed to the
+//     representative kind of each family so the legend stays compact.
+// No entry decodes a colour that no node/edge uses.
+// see also: ../utils/graph.ts NODE_KIND_BASE_COLOR / EDGE_TYPE_BASE_COLOR.
+function GraphLegend() {
   const { t } = useI18n();
-  const items: ReadonlyArray<{
+  const nodeItems: ReadonlyArray<{
     readonly kind: string;
     readonly labelKey: DictKey;
     readonly tipKey: DictKey;
     readonly glyph: string;
   }> = [
-    { kind: "user_memory", labelKey: "graph:legend.user_memory", tipKey: "graph:legend.user_memory.tip", glyph: "U" },
-    { kind: "engineering_chunk", labelKey: "graph:legend.engineering_chunk", tipKey: "graph:legend.engineering_chunk.tip", glyph: "E" },
-    { kind: "reviewed_engineering_chunk", labelKey: "graph:legend.reviewed_engineering_chunk", tipKey: "graph:legend.reviewed_engineering_chunk.tip", glyph: "R" },
-    { kind: "proposal_pending", labelKey: "graph:legend.proposal_pending", tipKey: "graph:legend.proposal_pending.tip", glyph: "P" },
-    { kind: "system", labelKey: "graph:legend.system", tipKey: "graph:legend.system.tip", glyph: "S" }
+    { kind: "memory", labelKey: "graph:legend.node.memory", tipKey: "graph:legend.node.memory.tip", glyph: "M" },
+    { kind: "scope", labelKey: "graph:legend.node.scope", tipKey: "graph:legend.node.scope.tip", glyph: "S" }
+  ];
+  // representativeKind is the EDGE_TYPE_BASE_COLOR key whose hue stands in for
+  // the whole family in the legend swatch.
+  const edgeItems: ReadonlyArray<{
+    readonly family: string;
+    readonly representativeKind: string;
+    readonly labelKey: DictKey;
+    readonly tipKey: DictKey;
+  }> = [
+    { family: "supports", representativeKind: "supports", labelKey: "graph:legend.edge.supports", tipKey: "graph:legend.edge.supports.tip" },
+    { family: "derives_from", representativeKind: "derives_from", labelKey: "graph:legend.edge.derives_from", tipKey: "graph:legend.edge.derives_from.tip" },
+    { family: "recalls", representativeKind: "recalls", labelKey: "graph:legend.edge.associative", tipKey: "graph:legend.edge.associative.tip" },
+    { family: "contradicts", representativeKind: "contradicts", labelKey: "graph:legend.edge.negative", tipKey: "graph:legend.edge.negative.tip" },
+    { family: "exception_to", representativeKind: "exception_to", labelKey: "graph:legend.edge.exception_to", tipKey: "graph:legend.edge.exception_to.tip" }
   ];
   return (
-    <div className="absolute bottom-4 right-4 z-20 flex flex-col gap-1 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-2 text-[10px] font-mono uppercase text-ink-700/65 shadow-sm">
-      {items.map((item) => {
-        const label = t(item.labelKey);
-        return (
-          <div key={item.kind} className="flex items-center gap-2" title={t(item.tipKey)}>
-            <span
-              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-bold text-beige-50"
-              style={{ backgroundColor: ORIGIN_KIND_COLOR[item.kind] }}
-              aria-label={`${label} (${item.glyph})`}
-            >
-              {item.glyph}
-            </span>
-            <span>{label}</span>
-          </div>
-        );
-      })}
+    <div className="absolute bottom-4 right-4 z-20 flex flex-col gap-2 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-2 text-[10px] font-mono uppercase text-ink-700/65 shadow-sm">
+      <div className="flex flex-col gap-1" data-testid="graph-legend-nodes">
+        <span className="text-ink-700/40">{t("graph:legend.nodes.heading")}</span>
+        {nodeItems.map((item) => {
+          const label = t(item.labelKey);
+          return (
+            <div key={item.kind} className="flex items-center gap-2" title={t(item.tipKey)}>
+              <span
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-bold text-beige-50"
+                style={{ backgroundColor: NODE_KIND_BASE_COLOR[item.kind] ?? DEFAULT_NODE_FALLBACK_COLOR }}
+                aria-label={`${label} (${item.glyph})`}
+              >
+                {item.glyph}
+              </span>
+              <span>{label}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex flex-col gap-1" data-testid="graph-legend-edges">
+        <span className="text-ink-700/40">{t("graph:legend.edges.heading")}</span>
+        {edgeItems.map((item) => {
+          const label = t(item.labelKey);
+          const rgb = EDGE_TYPE_BASE_COLOR[item.representativeKind] ?? [147, 161, 161];
+          return (
+            <div key={item.family} className="flex items-center gap-2" title={t(item.tipKey)}>
+              <span
+                className="inline-block h-1 w-4 rounded-full"
+                style={{ backgroundColor: rgba(rgb, 0.95) }}
+                aria-label={label}
+              />
+              <span>{label}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1046,15 +1083,19 @@ function probeWebgl(): boolean {
   }
 }
 
-function unwrapSoulGraph(value: SoulGraph | SoulGraphEnvelope): SoulGraph {
-  if (isSoulGraphEnvelope(value)) {
+function unwrapPathGraph(
+  value: SoulPathGraphContract | PathGraphEnvelope
+): SoulPathGraphContract {
+  if (isPathGraphEnvelope(value)) {
     return value.data;
   }
 
   return value;
 }
 
-function isSoulGraphEnvelope(value: SoulGraph | SoulGraphEnvelope): value is SoulGraphEnvelope {
+function isPathGraphEnvelope(
+  value: SoulPathGraphContract | PathGraphEnvelope
+): value is PathGraphEnvelope {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -1062,4 +1103,62 @@ function isSoulGraphEnvelope(value: SoulGraph | SoulGraphEnvelope): value is Sou
     typeof value.data === "object" &&
     value.data !== null
   );
+}
+
+// Path-graph anchors are typed by their PathAnchorRef.kind. The renderer's
+// node-shape switch only knows scope/signal/projection/memory, so anchors map
+// onto that closed glyph set: object/object_facet → memory (the dominant
+// memory anchor), and the concern/obligation anchors → scope (a distinct
+// non-circular glyph). origin_kind is left undefined — the path plane does not
+// carry the legacy SoulGraph origin classification; computeNodeColor keys the
+// node hue off this anchor-derived node.kind via NODE_KIND_BASE_COLOR instead.
+function mapPathGraphNode(node: SoulPathGraphContract["nodes"][number]): GraphNode {
+  const anchor = node.anchor;
+  const objectId =
+    anchor.kind === "object" || anchor.kind === "object_facet" ? anchor.object_id : undefined;
+  return {
+    id: node.id,
+    kind: anchorKindToNodeKind(anchor.kind),
+    label: node.label,
+    ...(objectId === undefined ? {} : { object_id: objectId }),
+    // influence is degree-driven on the path plane; total degree drives the
+    // node-size encoding in nodeInfluenceSize.
+    influence_count: node.out_degree + node.in_degree
+  };
+}
+
+function anchorKindToNodeKind(anchorKind: SoulPathGraphContract["nodes"][number]["anchor"]["kind"]): string {
+  switch (anchorKind) {
+    case "object":
+    case "object_facet":
+      return "memory";
+    case "obligation":
+    case "risk_concern":
+    case "time_concern":
+      return "scope";
+    default:
+      return "memory";
+  }
+}
+
+function mapPathGraphEdge(edge: SoulPathGraphContract["edges"][number]): GraphLink {
+  return {
+    id: edge.id,
+    // relation_kind (supports / contradicts / co_usage / …) drives the edge
+    // colour palette; unknown kinds fall back to the neutral hue in
+    // computeLinkColor / EDGE_TYPE_BASE_COLOR.
+    kind: edge.relation_kind,
+    source: edge.source_id,
+    target: edge.target_id,
+    // path strength is already a normalized plasticity strength; clamp defends
+    // against any out-of-range persisted value feeding the alpha/width maps.
+    strength_normalized: clampStrength(edge.strength),
+    stability_class: edge.stability_class,
+    last_reinforced_at: edge.relation.plasticity_state.last_reinforced_at
+  };
+}
+
+function clampStrength(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }

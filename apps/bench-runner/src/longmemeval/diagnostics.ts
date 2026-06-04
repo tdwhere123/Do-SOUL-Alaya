@@ -94,6 +94,12 @@ export interface LongMemEvalReportUsageSummary {
 export interface LongMemEvalReportSideEffectSnapshot {
   readonly question_id: string;
   readonly workspace_id: string;
+  // invariant: `memory_graph_edges_*` are COMPATIBILITY ALIASES of the
+  // unified `path_relations` (path-plane) counts, NOT a live
+  // `memory_graph_edges` table — that table is retired (migration 085).
+  // Names are kept verbatim so historical bench-archive schemas stay stable;
+  // do not rename. Populated from path-plane counts in runner.ts
+  // (readLongMemEvalReportSideEffectSnapshot); see graph-health-service.ts.
   readonly memory_graph_edges_total: number;
   readonly memory_graph_edges_by_type: Readonly<Record<string, number>>;
   readonly recalls_edge_count: number;
@@ -235,6 +241,12 @@ const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "path_expansion",
   "semantic_supplement"
 ] as const);
+
+// Recall admission-plane label for the multi-session cohort plane. The cohort
+// fan-in attribution split (codex I2) keys on this plane to measure how the
+// session cohort representative converts to delivered top-5 gold.
+// see also: packages/core/src/recall-service.ts addContentDerivedExpansionCandidates.
+const COHORT_PLANE = "session_surface_cohort";
 
 const DIAGNOSTIC_SOURCE_LABELS = new Set<string>([
   ...DIAGNOSTIC_ADMISSION_PLANES,
@@ -459,6 +471,27 @@ export function buildLongMemEvalQualityMetrics(
   // candidates' source_planes, never a hardcoded plane list.
   const planeGoldCounts = new Map<string, number>();
   const planeHitAt5Counts = new Map<string, number>();
+  // Cohort fan-in attribution (codex I2). Five classes splitting how the session
+  // cohort plane participates in gold delivery; see CohortAttributionSchema.
+  let cohortDeliveredPlaneCount = 0;
+  let cohortGoldSourcePlaneCount = 0;
+  let cohortGoldFirstAdmittedCount = 0;
+  let cohortGoldWinningAdmissionCount = 0;
+  let cohortGoldHitAt5Count = 0;
+  // Durable-edge fan-in proof instrument: how the path_expansion (direct hop-1
+  // co_recalled fan-in) vs graph_expansion (multi-hop) streams carry gold into
+  // top-5 SEPARATELY. The unified path plane's double-count guard credits a
+  // direct 1-hop path_expansion term before any multi-hop graph_expansion term,
+  // so a gold bearing both is attributed path-primary. graph_only isolates gold
+  // that reached top-5 purely via multi-hop. This is the load-bearing signal
+  // that the retired session_cohort_fanin heuristic was replaced by the durable
+  // co_recalled PathRelation carrier. see also: PathVsGraphFaninSchema.
+  let pathFaninGoldSourceCount = 0;
+  let pathFaninGoldHitAt5Count = 0;
+  let graphFaninGoldSourceCount = 0;
+  let graphFaninGoldHitAt5Count = 0;
+  let pathPrimaryGoldHitAt5Count = 0;
+  let graphOnlyGoldHitAt5Count = 0;
 
   for (const question of diagnostics) {
     missDistribution[question.miss_classification] =
@@ -488,6 +521,12 @@ export function buildLongMemEvalQualityMetrics(
       if (hasPathStreamContribution(delivered)) {
         pathStreamTop10Count++;
       }
+      if (
+        delivered.plane_first_admitted === COHORT_PLANE ||
+        delivered.plane_winning_admission === COHORT_PLANE
+      ) {
+        cohortDeliveredPlaneCount++;
+      }
     }
 
     for (const gold of question.gold) {
@@ -500,6 +539,38 @@ export function buildLongMemEvalQualityMetrics(
             plane,
             (planeHitAt5Counts.get(plane) ?? 0) + 1
           );
+        }
+      }
+      if (gold.source_planes.includes(COHORT_PLANE)) {
+        cohortGoldSourcePlaneCount++;
+        if (goldHitAt5) {
+          cohortGoldHitAt5Count++;
+        }
+      }
+      if (gold.plane_first_admitted === COHORT_PLANE) {
+        cohortGoldFirstAdmittedCount++;
+      }
+      if (gold.plane_winning_admission === COHORT_PLANE) {
+        cohortGoldWinningAdmissionCount++;
+      }
+      const bearsPathFanin = hasGoldPathExpansionStream(gold);
+      const bearsGraphFanin = hasGoldGraphExpansionStream(gold);
+      if (bearsPathFanin) {
+        pathFaninGoldSourceCount++;
+        if (goldHitAt5) {
+          pathFaninGoldHitAt5Count++;
+          // Double-count guard: a gold bearing the direct hop-1 path_expansion
+          // term is attributed path-primary even if it also bears graph_expansion.
+          pathPrimaryGoldHitAt5Count++;
+        }
+      }
+      if (bearsGraphFanin) {
+        graphFaninGoldSourceCount++;
+        if (goldHitAt5) {
+          graphFaninGoldHitAt5Count++;
+          if (!bearsPathFanin) {
+            graphOnlyGoldHitAt5Count++;
+          }
         }
       }
       if (isDeliveryBudgetLoss(gold)) {
@@ -569,6 +640,33 @@ export function buildLongMemEvalQualityMetrics(
       planeGoldCounts,
       planeHitAt5Counts
     ),
+    cohort_attribution: {
+      delivered_plane_count: cohortDeliveredPlaneCount,
+      gold_source_plane_count: cohortGoldSourcePlaneCount,
+      gold_first_admitted_count: cohortGoldFirstAdmittedCount,
+      gold_winning_admission_count: cohortGoldWinningAdmissionCount,
+      hit_at_5_count: cohortGoldHitAt5Count,
+      hit_at_5_rate: ratio(cohortGoldHitAt5Count, cohortGoldSourcePlaneCount)
+    },
+    // path_*  = golds bearing the direct hop-1 path_expansion stream.
+    // graph_* = golds admitted on the MULTI-HOP graph_expansion plane only
+    //   (hasGoldGraphExpansionStream restricts to admission-plane membership; the
+    //   hop-1-polluted per_stream_rank.graph_expansion term is excluded so hop-1
+    //   path golds are NOT over-reported as graph-bearing).
+    // path_primary_hit_at_5_count / graph_only_hit_at_5_count are the disjoint
+    //   partition: a gold bearing both is credited path-primary; graph_only is the
+    //   genuine multi-hop-only metric. graph_gold_* can still overlap path_* when a
+    //   gold reached top-5 by both a direct hop-1 path AND a multi-hop graph admit.
+    path_vs_graph_fanin: {
+      path_gold_source_count: pathFaninGoldSourceCount,
+      path_gold_hit_at_5_count: pathFaninGoldHitAt5Count,
+      path_gold_hit_at_5_rate: ratio(pathFaninGoldHitAt5Count, pathFaninGoldSourceCount),
+      graph_gold_source_count: graphFaninGoldSourceCount,
+      graph_gold_hit_at_5_count: graphFaninGoldHitAt5Count,
+      graph_gold_hit_at_5_rate: ratio(graphFaninGoldHitAt5Count, graphFaninGoldSourceCount),
+      path_primary_hit_at_5_count: pathPrimaryGoldHitAt5Count,
+      graph_only_hit_at_5_count: graphOnlyGoldHitAt5Count
+    },
     // Calibrated-confidence audit block: how many `_abs` questions were
     // scored, how many stayed appropriately unconfident at each k, and the
     // false-confident threshold the verdict used. A future benchmark swap
@@ -605,6 +703,43 @@ function hasPathStreamContribution(delivered: DiagnosticRecallResult): boolean {
     delivered.plane_first_admitted === "path_expansion" ||
     delivered.plane_winning_admission === "path_expansion" ||
     (delivered.per_stream_rank?.path_expansion ?? null) !== null
+  );
+}
+
+// Durable-edge fan-in proof: a gold candidate bears the path_expansion stream
+// (direct hop-1 co_recalled fan-in) when it was admitted on the path plane or
+// fired the path_expansion fusion stream. see also: buildLongMemEvalQualityMetrics.
+function hasGoldPathExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
+  return (
+    gold.source_planes.includes("path_expansion") ||
+    gold.plane_first_admitted === "path_expansion" ||
+    gold.plane_winning_admission === "path_expansion" ||
+    (gold.per_stream_rank?.path_expansion ?? null) !== null
+  );
+}
+
+// Durable-edge fan-in proof: a gold candidate bears genuine MULTI-HOP
+// graph_expansion fan-in when it was admitted on the graph_expansion plane. The
+// graph_expansion admission carries a double-count guard (it skips any target
+// path_expansion already admitted as a direct hop-1 neighbor, see
+// recall-service.ts addGraphExpansionCandidates), so plane membership isolates
+// the hop-2+ reach the direct path pass never produced.
+//
+// invariant: the per_stream_rank.graph_expansion term is DELIBERATELY NOT a
+// multi-hop signal here. The production graph_expansion fusion STREAM score is
+// max(graphExpansionScores, normalizeGraphSupport(graphSupportCounts)) — the
+// graphSupport aggregate counts the hop-1 co_recalled inbound edge, so a direct
+// hop-1 path gold fires a nonzero graph_expansion per_stream_rank too. Counting
+// it would mis-attribute hop-1 path golds as graph-bearing and over-report
+// graph_gold_*. We rely on the admission plane (true multi-hop) instead; the
+// path-primary partition (hasGoldPathExpansionStream) still credits the direct
+// hop-1 term, and graph_only_hit_at_5_count remains the clean multi-hop metric.
+// see also: buildLongMemEvalQualityMetrics, recall-service.ts scoreRecallFusionStream "graph_expansion".
+function hasGoldGraphExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
+  return (
+    gold.source_planes.includes("graph_expansion") ||
+    gold.plane_first_admitted === "graph_expansion" ||
+    gold.plane_winning_admission === "graph_expansion"
   );
 }
 

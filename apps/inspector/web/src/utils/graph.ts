@@ -20,13 +20,47 @@ export const ORIGIN_KIND_COLOR: Record<string, string> = {
   system: "#6F4E5B" // wine — bootstrap / install / runtime-derived
 };
 
-// Edge type palette — references / belongs_to / derived_from each get a
-// distinct base hue; alpha is then driven by strength_normalized so weak
-// paths fade and strong paths stay solid.
+// Edge palette keyed by path-plane relation_kind (link.kind on the path plane
+// is the raw PathRelation.constitution.relation_kind, a free string). Hues are
+// grouped by semantic family so the topology reads at a glance:
+//   - positive structural (supports / derives_from): warm green + orange
+//   - positive associative (recalls + its auto-build siblings co_recalled /
+//     shares_entity / signal_graph_ref / co_usage): cool blue family
+//   - negative (contradicts / supersedes / incompatible_with): wine / red
+//   - neutral topology marker (exception_to): muted amber
+// The legacy SoulGraph edge kinds are kept so a mixed payload still colours.
+// Unknown free-string kinds fall back to the neutral grey in computeLinkColor.
+// see also: packages/protocol/src/soul/memory-graph.ts RELATION_KIND_TO_GRAPH_EDGE_TYPE
+//           apps/inspector/web/src/pages/Graph.tsx EdgeRelationLegend
 export const EDGE_TYPE_BASE_COLOR: Record<string, [number, number, number]> = {
+  // positive structural
+  supports: [126, 168, 132], // sage green — strongest positive contribution
+  derives_from: [192, 128, 64], // soft orange — derivation lineage
+  // positive associative family (recalls + auto-build siblings)
+  recalls: [125, 159, 187], // light blue
+  co_recalled: [125, 159, 187],
+  shares_entity: [125, 159, 187],
+  signal_graph_ref: [125, 159, 187],
+  co_usage: [125, 159, 187],
+  // negative family (suppression / conflict)
+  contradicts: [180, 90, 95], // muted red
+  supersedes: [150, 78, 110], // wine
+  incompatible_with: [196, 110, 120], // soft rose
+  // neutral topology marker
+  exception_to: [196, 160, 96], // muted amber
+  // legacy SoulGraph edge kinds (kept for mixed payloads)
   references: [125, 159, 187], // light blue
   belongs_to: [126, 168, 132], // sage green
   derived_from: [192, 128, 64] // soft orange
+};
+
+// Node hue basis on the path plane. The path plane carries no origin_kind, so
+// nodes are coloured by their anchor-derived node.kind (memory vs scope) rather
+// than the retired origin classification. Keyed by GraphNode.kind.
+// see also: apps/inspector/web/src/pages/Graph.tsx anchorKindToNodeKind / NodeKindLegend
+export const NODE_KIND_BASE_COLOR: Record<string, string> = {
+  memory: "#92A8B3", // calm blue-grey — object / object_facet anchors
+  scope: "#C9ADA7" // warm clay — obligation / risk_concern / time_concern anchors
 };
 
 // see also: packages/protocol/src/soul/path-relation.ts:StabilityClassSchema

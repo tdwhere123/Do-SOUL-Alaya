@@ -38,9 +38,8 @@ export {
   OFFICIAL_API_GARDEN_MODEL,
   OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider,
-  CustomApiGardenProvider,
-  LocalModelGardenProvider,
   parseOfficialApiSignals,
+  salvageRawSignalElements,
   type GardenCompileContext,
   type GardenComputeProvider,
   type OfficialApiSignalDraft
@@ -53,6 +52,12 @@ export {
   type SignalExtractorErrorKind
 } from "./pi-mono-extractor.js";
 export {
+  WallClockTimeoutError,
+  withWallClockTimeout,
+  type WallClockTimeoutDeps,
+  type WallClockTimeoutOptions
+} from "./wall-clock-timeout.js";
+export {
   DEGRADATION_CONSTANTS,
   DegradationPipeline,
   type DegradationAssessParams,
@@ -64,12 +69,17 @@ export {
   Janitor,
   type ExpiredControlPlaneObject,
   type HotDemotionCandidate,
+  type DispositionSweepOutcome,
+  type DormantDispositionCandidate,
   type JanitorControlPlaneCleanupPort,
   type JanitorDependencies,
+  type JanitorDispositionSweepPort,
   type JanitorHotDemotionCriteria,
   type JanitorMemoryTieringPort,
   type JanitorStrongRefProtectionPort,
-  type JanitorSchedulerPort
+  type JanitorSchedulerPort,
+  type JanitorTombstoneGcPort,
+  type TombstonedMemoryRecord
 } from "./janitor.js";
 export {
   LIBRARIAN_CONSTANTS,
@@ -103,13 +113,17 @@ export {
 export {
   MaterializationRouter,
   DISTILLED_FACT_MAX_CHARS,
+  SIGNAL_REF_SEED_SPECS,
   type MaterializationResult,
   type MaterializationRouterDeps,
   type MaterializationTarget,
   type PathRelationProposalPayload,
   type PathRelationProposalPort,
+  type PathCandidateSinkPort,
+  type PathCandidateMintOutcome,
   type RouteTarget,
-  type GraphEdgeCreationPort
+  type GraphEdgeCreationPort,
+  type SignalRefSeedSpec
 } from "./materialization-router.js";
 export {
   buildSchemaGroundedRawPayload,

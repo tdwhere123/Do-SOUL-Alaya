@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { EventLogEntry } from "@do-soul/alaya-protocol";
 import { createRuntimeNotifier } from "../runtime-notifier.js";
 
 describe("RuntimeNotifier", () => {
@@ -11,7 +12,7 @@ describe("RuntimeNotifier", () => {
 
     await notifier.notifyEntry({
       event_id: "event-1",
-      event_type: "memory.created",
+      event_type: "memory.created" as EventLogEntry["event_type"],
       entity_type: "memory_entry",
       entity_id: "memory-1",
       workspace_id: "ws-1",
@@ -41,7 +42,7 @@ describe("RuntimeNotifier", () => {
     await expect(
       notifier.notifyEntry({
         event_id: "event-iso-1",
-        event_type: "memory.created",
+        event_type: "memory.created" as EventLogEntry["event_type"],
         entity_type: "memory_entry",
         entity_id: "memory-iso-1",
         workspace_id: "ws-iso",
@@ -101,7 +102,7 @@ describe("RuntimeNotifier", () => {
 
     await notifier.notifyEntry({
       event_id: "event-1",
-      event_type: "memory.created",
+      event_type: "memory.created" as EventLogEntry["event_type"],
       entity_type: "memory_entry",
       entity_id: "memory-1",
       workspace_id: "ws-1",

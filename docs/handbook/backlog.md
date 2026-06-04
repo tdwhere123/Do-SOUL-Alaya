@@ -6,7 +6,7 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-047` (`#BL-022` was opened by
+sequence. **Next available number**: `#BL-056` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
@@ -22,12 +22,183 @@ v0.3.8 closes `#BL-039` / `#BL-040` / `#BL-041` / `#BL-042` /
 For v0.3.10 planning, keep `docs/v0.3/v0.3.9/reports/v0.3.9-closeout.md`
 as the canonical carry-forward tracker (24 items) until v0.3.10
 closeout republishes the consolidated open/closed list.
+v0.3.11 opens `#BL-049` through `#BL-055` for the genuinely-deferred
+items surfaced during the completion effort (see
+`docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`). The v0.3.11
+closeout fix-loop then CLOSED `#BL-049` (compress-arm activation) and
+`#BL-050` (ingest reconciliation default-ON) once their close conditions
+were met in code — see the resolved entries below for commit refs.
 
 ## Open Issues
 
-No open `#BL-*` issues at this time. During v0.3.10 plan-stage, open
-work is tracked in the v0.3.9 closeout carry-forward list (24 items)
-rather than as BL tickets.
+### #BL-049 — Resolved (forgetting-lifecycle compress arm activated)
+
+**Status**: Resolved (closed in the v0.3.11 closeout fix-loop, 2026-06-04;
+opened v0.3.11; mirrored `.do-it/` task #64).
+
+The compress arm is now ARMED. All three activation gates were met. (1) The
+`source_memory_refs` producer is wired: synthesis accept resolves the cluster's
+member set into the capsule's `source_memory_refs`, so the capsule -> member
+relationship exists for compress to prove preservation (`5ab7f768`). (2)
+Compress-vs-protection ordering is fixed: explicit-keep protection
+(pinned / hazard / canon / consolidated) is evaluated BEFORE the compressed arm,
+so a protected member is never compress-deleted (`fe49ad98`); the arm earns
+`compressed` ONLY for a FULLY-CONSOLIDATED member whose `evidence_refs` are a
+subset of the capsule's (`e874f0a9`). (3) The lossy-summary-preservation product
+call is recorded and documented honestly: the capsule preserves the cluster's
+shared evidence (surviving independently as `evidence_capsules`) plus a
+deterministic gist summary, and does NOT byte-preserve the member's distilled
+`content` — acceptable lossy consolidation, eligible only for fully-consolidated
+members (`e874f0a9`).
+
+The data-safety hardening accompanying activation: the autonomous lifecycle is
+now scheduled — the Janitor pass enqueues `TOMBSTONE_GC` (`3155cf1d`); the
+compressed-member physical delete is atomic with its preservation re-check and
+its deleted-audit commits in the same transaction (`d1217b24`, `dcc970bb`);
+`active -> dormant` demotion emits a per-memory `SOUL_MEMORY_STATE_CHANGED`
+audited transition (`61d585a1`); benign no-longer-active demotion races are
+tolerated idempotent-silently (`c9953080`).
+
+**Close evidence**: `5ab7f768`, `fe49ad98`, `3155cf1d`, `e874f0a9`, plus the
+data-safety fix-loop (`d1217b24`, `dcc970bb`, `61d585a1`, `c9953080`,
+`7bdd1c58`, `c0fcc595`, `5e40c492`, `7bb0483c`). Tests pin explicit-keep-before-
+compress ordering and the subset eligibility filter. The physical removal still
+needs a live workspace witness (R5 / a real accepted synthesis capsule), tracked
+generically with the other v0.3.11 readiness rows in
+`docs/handbook/runtime-status.md`.
+
+### #BL-050 — Resolved (ingest reconciliation default-ON under zero-own-LLM)
+
+**Status**: Resolved (closed in the v0.3.11 closeout fix-loop, 2026-06-04;
+opened v0.3.11; mirrored `.do-it/` task #41).
+
+The zero-own-LLM reconcile-decision basis was built and the default flipped ON.
+D-F1 ingest reconciliation now runs out of the box on a rule-only, zero-cloud
+basis: a byte-equal duplicate resolves to an identity-key NOOP, and the ambiguous
+"refines vs distinct" band resolves to ADD — never a rule-based UPDATE/NOOP, which
+would erase answers (`d57ace8a`). The cloud garden-LLM remains the OPTIONAL
+ambiguous-band upgrade (UPDATE/NOOP) and stays default-OFF, preserving R0
+zero-cloud; operators turn the whole feature off with
+`ALAYA_INGEST_RECONCILIATION_ENABLED=0` / `=false` (`90ba64a9`). It covers the
+`materializeMemoryEntryOnly` path; `materialize_and_claim` is intentionally not
+reconciled, and the DELETE / supersede path stays owned by
+`ConflictDetectionService`.
+
+**Close evidence**: `d57ace8a` (rule-only zero-cloud reconciliation decision
+basis), `90ba64a9` (default-ON with the operator off-switch). The
+token-economy / dedup-quality witness on the full corpus rides the R5 500q gate;
+no separate backlog item is kept open for it.
+
+### #BL-051 — Abstention calibration re-test on 500q data
+
+**Status**: Open (deferred to R5 data; opened v0.3.11, 2026-06-04; mirrors `.do-it/`
+task #30). **Due**: after the R5 big-machine 500q gate produces archives.
+
+**Context**: `abstain_false_confident=9` misses are a calibration question, NOT a
+threshold-bump. The prior verdict (`abstention-calibration-design.md`) found
+grader-level calibration inert (OFF) / gaming (ON). The re-test needs the real 500q
+data, which is gated on the big-machine R5 run; it may route to a product
+evidence-strength signal rather than a grader threshold.
+
+**Why deferred (not hidden debt)**: the input data does not exist until R5; testing
+on the wrong (offline-fallback / small-sample) corpus is what produced the earlier
+invalid finding.
+
+**Close condition**: re-evaluate against the R5 500q cached archive; either land a
+calibrated evidence-strength signal with before/after miss-bucket deltas, or record a
+written "calibration inert on real corpus" verdict.
+
+### #BL-052 — Scale LongMemEval CI sample-floor (was #BL-040)
+
+**Status**: Open (re-opened as a scale-up; opened v0.3.11, 2026-06-04).
+**Due**: after a larger CI host is available.
+
+**Context**: `#BL-040` shipped a confidence-interval sample for the LongMemEval-S
+smoke. The CI sample-floor still runs small because the 500q full bench OOMs on the
+7.6 GB WSL2 box. Scaling the CI floor up requires a larger CI host (the same
+constraint that defers the R5 gate off-box).
+
+**Why deferred (not hidden debt)**: this is an infrastructure capacity item, not a
+recall-quality gap; the full gate runs on the big machine in R5 regardless.
+
+**Close condition**: a larger CI host runs a category-balanced sample-floor at or
+above the confidence-interval threshold without OOM, wired into the CI gate.
+
+### #BL-053 — Edge `llm_supports` LOCAL pair-classifier (host-worker / ONNX)
+
+**Status**: Open (deferred; opened v0.3.11, 2026-06-04).
+**Due**: revisit alongside the local ONNX cache work.
+
+**Context**: `EdgeAutoProducerService` accepts an optional in-process pair-classifier
+port and the host-worker LLM-verdict path mints with `trigger_source = llm_supports`,
+but a LOCAL (host-worker / ONNX) classifier producing `llm_supports` is not yet built.
+Until then the local rule heuristic tags `local_*` trigger sources only.
+
+**Why deferred (not hidden debt)**: the port + the host-worker verdict path are wired;
+the missing piece is a local model classifier, which is net-new and depends on the
+local ONNX cache infrastructure (same dependency as the embedding-ON LoCoMo gate).
+
+**Close condition**: a local pair-classifier (host-worker or ONNX) produces
+confidence-floor-clearing `llm_supports` verdicts offline, with a no-network
+regression.
+
+### #BL-054 — Lease-pierce governance-cache hot-path hook
+
+**Status**: Open (deferred; opened v0.3.11, 2026-06-04). **Due**: revisit if the
+governance cache moves onto the production recall hot path.
+
+**Context**: A lease-pierce invalidation hook for the governance cache was scoped
+during D-LEASE. The governance cache is **not** on the production recall hot path
+today, so the hook is moot in the current wiring — but if a future change puts the
+cache on the hot path, lease piercing must invalidate it.
+
+**Why deferred (not hidden debt)**: the codex completeness pass confirmed the cache is
+off the hot path, so the hook is genuinely not load-bearing now; opening it here keeps
+the dependency visible instead of silently dropping it.
+
+**Close condition**: close as not-needed if the governance cache stays off the recall
+hot path through v0.3.12; otherwise land the lease-pierce invalidation hook with a
+test that a pierced lease invalidates a cached governance verdict.
+
+### #BL-055 — Inspector web UI label/filter for `path_relation_failure`
+
+**Status**: Open (deferred; opened v0.3.11, 2026-06-04). **Due**: next Inspector UI
+pass.
+
+**Context**: D-EDGEAUDIT surfaces path-relation / edge-proposal failures as a new
+`path_relation_failure` health cause in the Health Inbox projection. The Inspector web
+UI renders the grouped Health Inbox but does not yet carry a dedicated label/filter
+for this new cause kind, so an operator cannot filter to it directly.
+
+**Why deferred (not hidden debt)**: the producer + projection are live and auditable
+via the daemon; this is a UI affordance on top of an already-surfaced cause, not a
+missing capability.
+
+**Close condition**: the Inspector Health Inbox renders a human label for
+`path_relation_failure` and offers a cause-kind filter that includes it, covered by a
+component test.
+
+### #BL-047 — `multi_hop_path` as a dedicated recall fusion stream
+
+**Status**: Open (deferred by explicit operator decision, v0.3.11, 2026-06-03).
+
+**Context**: Multi-hop graph traversal capability ALREADY exists — `MAX_GRAPH_HOPS=2`
+2-hop BFS (phase-6-graph-plan.md D-3) folds multi-hop-reached candidates into the
+`graph_expansion` fusion stream, and the v0.3.11 cohort fan-in (member→representative
+hub edges) rides that same path. `multi_hop_path` (D-7) would give multi-hop-reached
+candidates their OWN dedicated fusion lane with independent weight instead of folding
+them into `graph_expansion`. Estimated +0–2pt, L effort.
+
+**Why deferred (not hidden debt)**: this is a scoring-topology refinement, NOT a missing
+capability — the multi-hop traversal it would serve is already load-bearing via
+`graph_expansion`. Lowest-ROI item in the D-series.
+
+**Close condition**: revisit if a 500q LongMemEval root-cause diagnostic shows multi-hop
+-reached gold drowned inside the `graph_expansion` stream and needing a separate weighted
+lane to surface. Otherwise leave folded into `graph_expansion`.
+
+(The broader backlog-as-authoritative-deferral-list rebuild is tracked as D-BACKLOG in
+`.do-it/plans/v0.3.11-completion-masterplan.md`, to be done at Phase G closeout.)
 
 ## Resolved in v0.3.8 (2026-05-16)
 
@@ -187,7 +358,7 @@ Opened by v0.1.1 Slice L1 (Codex diagnostic finding B-PL2 in
 `.do-it/product-logic/agent-use-garden-config-diagnostic.md`).
 
 **Why:** Today `mcp-callable` is proven only by an SDK-driven
-deterministic harness (`apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts`).
+deterministic harness (`apps/core-daemon/src/__tests__/agent-use-protocol.test.ts`).
 That proves the daemon can serve calls when something invokes them.
 It does NOT prove a real Codex or Claude Code session, with the
 attach-written `operator_instructions`, autonomously selects
@@ -218,7 +389,7 @@ during a normal user conversation.
 
 Open work for v0.2.2 task card: items 1-3 (real Codex/Claude session
 capture) and item 6 (offline replay fixture). Items 4-5 are now
-testable via `phase6-agent-use-protocol.test.ts` + the new metering
+testable via `agent-use-protocol.test.ts` + the new metering
 service, but the live-host autonomous selection proof still requires
 a recorded transcript.
 
@@ -637,7 +808,7 @@ The payload includes `prior_green_state`, `prior_valid_until`, and
 ### #BL-018 — attached-agent MCP proof harness
 
 Resolved by
-`apps/core-daemon/src/__tests__/gate4-attached-agent-mcp-proof.test.ts`.
+`apps/core-daemon/src/__tests__/attached-agent-mcp-proof.test.ts`.
 The harness keeps one daemon runtime alive for install, attach, MCP
 `tools/list`, recall, pointer open, usage report, candidate signal,
 proposal, governance reject, Garden background pass, status, and doctor.

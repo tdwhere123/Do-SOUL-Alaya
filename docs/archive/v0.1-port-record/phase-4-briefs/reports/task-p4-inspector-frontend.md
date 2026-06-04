@@ -88,7 +88,7 @@ proof harness**; that is OUT OF SCOPE for this card per §2.5 (forbids
 new server-side routes / harnesses).
 
 2026-05-01 update: `#BL-018` is resolved by
-`gate4-attached-agent-mcp-proof.test.ts`.
+`attached-agent-mcp-proof.test.ts`.
 
 ## Deviations from card §2.3 prompt
 

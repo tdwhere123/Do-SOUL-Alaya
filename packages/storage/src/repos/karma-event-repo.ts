@@ -9,6 +9,7 @@ export type { KarmaEvent, KarmaEventKind } from "@do-soul/alaya-protocol";
 export interface KarmaEventRepo {
   create(event: Readonly<KarmaEvent>): Promise<Readonly<KarmaEvent>>;
   findByObjectId(objectId: string): Promise<readonly Readonly<KarmaEvent>[]>;
+  findByObjectIdSync(objectId: string): readonly Readonly<KarmaEvent>[];
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<KarmaEvent>[]>;
   sumByObjectId(objectId: string): Promise<number>;
   sumByObjectIds(objectIds: readonly string[]): Promise<Readonly<Record<string, number>>>;
@@ -21,6 +22,7 @@ interface KarmaEventRow {
   readonly amount: number;
   readonly created_at: string;
   readonly workspace_id: string;
+  readonly run_id: string | null;
 }
 
 interface KarmaEventSumRow {
@@ -42,8 +44,9 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
         object_id,
         amount,
         created_at,
-        workspace_id
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        workspace_id,
+        run_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.findByObjectIdStatement = db.connection.prepare(`
@@ -53,7 +56,8 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
         object_id,
         amount,
         created_at,
-        workspace_id
+        workspace_id,
+        run_id
       FROM karma_events
       WHERE object_id = ?
       ORDER BY created_at ASC, event_id ASC
@@ -66,7 +70,8 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
         object_id,
         amount,
         created_at,
-        workspace_id
+        workspace_id,
+        run_id
       FROM karma_events
       WHERE workspace_id = ?
       ORDER BY created_at ASC, event_id ASC
@@ -89,7 +94,8 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
         parsed.object_id,
         parsed.amount,
         parsed.created_at,
-        parsed.workspace_id
+        parsed.workspace_id,
+        parsed.run_id ?? null
       );
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to create karma event ${parsed.event_id}.`, error);
@@ -99,6 +105,13 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
   }
 
   public async findByObjectId(objectId: string): Promise<readonly Readonly<KarmaEvent>[]> {
+    return this.findByObjectIdSync(objectId);
+  }
+
+  // Synchronous read shared with the async wrapper; better-sqlite3 statements
+  // execute synchronously, so the sync KarmaEventStore contract can read here
+  // without retaining an in-memory event mirror.
+  public findByObjectIdSync(objectId: string): readonly Readonly<KarmaEvent>[] {
     const parsedObjectId = parseNonEmptyString(objectId, "object id");
 
     try {
@@ -216,6 +229,7 @@ function parseKarmaEventRow(row: KarmaEventRow): Readonly<KarmaEvent> {
     object_id: row.object_id,
     amount: row.amount,
     created_at: row.created_at,
-    workspace_id: row.workspace_id
+    workspace_id: row.workspace_id,
+    run_id: row.run_id
   });
 }

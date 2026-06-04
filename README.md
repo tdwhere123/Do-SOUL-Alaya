@@ -119,12 +119,14 @@ node apps/bench-runner/bin/alaya-bench-runner.mjs self
 node apps/bench-runner/bin/alaya-bench-runner.mjs live --help
 ```
 
-Checkpoint note (2026-05-25): HEAD `96e9bb9` has not rerun the full public
-release benches yet. Current tracked `latest-baseline*` pointers are
-legacy/stale baselines, not v0.3.11 HEAD release evidence. The staged
-artifact-hygiene cleanup removes old full diagnostics only; it does not delete
-KPI, report, or pointer evidence. Every new full release bench must include
-`recall_token_economy`.
+Checkpoint note (2026-06-04): v0.3.11 is implementation complete but the full
+public release benches have **not** rerun on the current HEAD — the 500q gate
+OOMs on the local 7.6 GB box and is deferred to a larger host (the R5 gate).
+**R@5 → 90% is not claimed as achieved.** Current tracked `latest-baseline*`
+pointers are legacy/stale baselines, not v0.3.11 release evidence. The honest
+pre-fan-in 500q-OFF baseline is R@1=52.0% / R@5=81.6% / R@10=83.6% (clean,
+`llm_calls=0`); the earlier 90%@50q was a small-sample artifact. Every new full
+release bench must include `recall_token_economy`.
 
 The shape of the bet is unchanged: a retrieval number is useful only
 when the durable claims an agent acts on are audited, reversible, and
@@ -209,27 +211,36 @@ no evidence → deferred; otherwise → may flow into the proposal pipeline.
 The built-in extractor (`LocalHeuristics`) is deliberately conservative
 — pattern matching for forms like *"I always use X"* / *"we decided …"*
 in English and Chinese, plus Chinese self-introduction (*"请叫我 …"*) —
-so it catches the obvious durable facts and misses nuanced ones;
-pointing Garden compute at an `official_api` model widens that. The
-explicit `soul.emit_candidate_signal` channel stays available for facts
-the agent judges worth recording that the heuristics won't see.
+so it catches the obvious durable facts and misses nuanced ones; an
+attached CLI agent running as `host_worker` (the default) or pointing
+Garden compute at an `official_api` model widens that. The explicit
+`soul.emit_candidate_signal` channel stays available for facts the agent
+judges worth recording that the heuristics won't see.
 
-**Garden compute mode** is one of three: `local_heuristics` (the
-default — no external calls), `official_api` (an OpenAI-compatible
-model), or `host_worker` (the attached CLI agent itself drains the
-extract queue via `garden.list_pending_tasks` / `garden.claim_task` /
-`garden.complete_task`). The default is inferred from whether a Garden
-credential is configured; to pick it explicitly — `host_worker` in
-particular can't be inferred — set `ALAYA_GARDEN_PROVIDER_KIND` in
-`~/.config/alaya/.env` or pass `garden_provider_kind` to `alaya install
---non-interactive` for a fresh setup, or use the Garden Compute form in
-`alaya inspect --open` (which writes the persisted runtime config and,
-once saved, takes precedence over the env default). `alaya doctor` prints
-the live mode on its `garden compute:` line. The official-API endpoint
-and model are the non-secret `OFFICIAL_API_GARDEN_PROVIDER_URL` /
-`OFFICIAL_API_GARDEN_MODEL` (plain `.env` or the same Inspector form);
-only the API key is a secret — store it with `alaya install --keychain`
-(or `env:` / `file:` refs).
+**Garden compute mode** is one of three: `host_worker` (the default —
+the attached CLI agent itself is the compute, draining the extract queue
+via `garden.list_pending_tasks` / `garden.claim_task` /
+`garden.complete_task`, so Alaya owns no LLM and makes no external call
+out of the box), `local_heuristics` (the deterministic in-process
+extractor, no external calls), or `official_api` (an OpenAI-compatible
+model — an explicit opt-in). On a fresh install with no Garden
+credential the mode is `host_worker`; if a Garden/embedding secret is
+present the mode is inferred as `official_api` (configuring a key is
+read as opting into cloud). Under `host_worker`, recall-driven extract
+work waits for an attached agent for LLM-quality extraction; if no agent
+claims it within a bounded window, the in-process `local_heuristics`
+extractor runs it (zero-cloud) so memory capture never stalls — `alaya
+doctor` warns when extract work is sitting unclaimed so you know to
+attach an agent. To pick a mode explicitly, set
+`ALAYA_GARDEN_PROVIDER_KIND` in `~/.config/alaya/.env` or pass
+`garden_provider_kind` to `alaya install --non-interactive`, or use the
+Garden Compute form in `alaya inspect --open` (which writes the persisted
+runtime config and, once saved, takes precedence over the env default).
+`alaya doctor` prints the live mode on its `garden compute:` line. The
+official-API endpoint and model are the non-secret
+`OFFICIAL_API_GARDEN_PROVIDER_URL` / `OFFICIAL_API_GARDEN_MODEL` (plain
+`.env` or the same Inspector form); only the API key is a secret — store
+it with `alaya install --keychain` (or `env:` / `file:` refs).
 
 **Failure mode this prevents.** If the agent could write durable
 truth at perception, every fluent-but-wrong assertion would become
@@ -391,9 +402,29 @@ recall, proposals, usage receipts, and Garden cleanup stay scoped to the
 project you opened.
 
 - **Auditor** — evidence staleness check, pointer health, orphan detection.
-- **Janitor** — TTL cleanup, hot/warm tier demotion, dormant marking, tombstone GC.
-- **Librarian** — merge detection, template clustering, neighbour discovery, path compression.
+- **Janitor** — TTL cleanup, hot/warm tier demotion, and the autonomous
+  forgetting lifecycle: reversible dormant demotion (an audited
+  `active → dormant` state transition; recall-silent, revived on next use) →
+  tombstone (+disposition) → physical GC, all enqueued on the periodic Janitor
+  pass. Two delete arms feed it, both behind a delete-authority disposition gate
+  + capsule re-verify. The *judged-useless* arm deletes only sourceless,
+  never-reinforced rows. The *compress* arm deletes a consolidated member only
+  when a live synthesis capsule fully consolidates it (its evidence is a subset
+  of the capsule's) — the capsule keeps the cluster's shared evidence plus a
+  deterministic gist summary, so this is acceptable lossy consolidation;
+  pinned / hazard / canon / consolidated memories are never compress-deleted.
+- **Librarian** — merge detection, template clustering, neighbour discovery,
+  path compression, and synthesis proposals whose `accept` creates a capsule.
 - **Scheduler** — owns the queue, tier prioritisation, cooling periods, task accounting.
+
+Garden compute defaults to **`host_worker`** (zero-cloud): the attached CLI
+agent runs `POST_TURN_EXTRACT` and `EDGE_CLASSIFY` work; a configured Garden
+secret is read as an explicit `official_api` opt-in. The cloud edge-LLM is
+default-off. When host-worker work sits unclaimed past a bounded window, a
+zero-cloud local-heuristic fallback runs in-process so capture never stalls,
+and `alaya doctor` warns. Recall right after a write may run before
+host-worker edge classification completes; the deterministic rule heuristic is
+the immediate fallback (eventual consistency).
 
 **Failure mode this prevents.** A maintenance system that writes
 durable directly bypasses governance. A maintenance system that
@@ -530,7 +561,16 @@ catalog of 13 verbs (doctor / install / attach / detach / status /
 inspect / update / tools / review / backup / export / import / mcp
 stdio); every mutating verb supports preview before write, attach
 / detach are atomic, and the audit log lives at
-`~/.config/alaya/audit/`.
+`~/.config/alaya/audit/`. The `review` verb is one CLI verb with
+four subcommands: `review pending|accept|reject` cover memory
+proposals, and v0.3.11 adds `review edges pending|accept|reject`
+for edge-proposal governance — the new edge subcommand surface
+does not change the top-level verb count (still 13). The new
+edge-proposal MCP tools (`soul.propose_edge`,
+`soul.list_pending_edge_proposals`,
+`soul.batch_review_edge_proposals`) extend the live MCP catalog
+listed above; the 13 `soul.*` + 3 `garden.*` = 16 tools count
+already reflects them.
 
 ---
 
@@ -565,6 +605,16 @@ alaya doctor
 alaya install --non-interactive "$(printf '{"db_path":"%s/.config/alaya/alaya.db","embedding_enabled":false}' "$HOME")"
 alaya attach claude-code
 ```
+
+`alaya install` takes its answers **as a JSON object** —
+`--non-interactive '<answers-json>'` is the supported form (there is no
+free-text TTY wizard). Bare `alaya install` prints this usage with a
+runnable example. The optional `--keychain` flag adds a single guided
+secret prompt for OS-keychain key storage. Answer fields (`db_path`,
+`embedding_enabled`, `model_id`, `provider_base_url`, `api_key_source`
+= `env`/`file`/`paste`, `key_file_path`, `default_workspace`,
+`garden_provider_kind`, …) are all optional and merge over any existing
+config.
 
 Pipe-to-bash shortcut (faster, but you execute the downloaded
 installer directly; the release tarball is still checksum-verified by
@@ -657,10 +707,14 @@ place to look. The full project layout is documented in
 
 ## Where this is going
 
-### Current state (2026-05-25)
+### Current state (2026-06-04)
 
-v0.3.11 is the current implementation checkpoint with release evidence still
-pending; v0.3.4 was the first publicly released v0.3.x line. Cumulative since
+v0.3.11 is **implementation complete with the big-machine 500q KPI gate
+pending** — all completion-effort code is landed and code-reviewed, but the
+full LongMemEval / LoCoMo benches have not been rerun on a larger host (the
+local 7.6 GB WSL2 box OOMs at 500q), so it is **not release-closed and the
+"R@5 -> 90%" target is not claimed as achieved.** v0.3.4 was the first
+publicly released v0.3.x line. Cumulative since
 v0.3.0: real Codex and Claude
 Code MCP sessions autonomously run `soul.recall` →
 `soul.report_context_usage` during normal conversations, with a
@@ -687,9 +741,31 @@ operator actions; and `SynthesisCapsule.promotion` is retired now
 that a replacement exists. The live MCP catalog is **16 tools** (13
 `soul.*` + 3 `garden.*`).
 
-v0.3.11 is under completion/fix-loop. It is not full release-ready
-until every phase fix-loop is clean and the LongMemEval / LoCoMo full
-bench gates are archived.
+**v0.3.11** makes Garden compute **zero-cloud by default** — `host_worker`
+(the attached CLI agent computes) is the product default, the cloud edge-LLM
+is default-off, and B-2 edge classification runs as a host-worker
+`EDGE_CLASSIFY` task with a deterministic rule-heuristic fallback. It retires
+the temporary recall fan-in heuristic in favour of durable accepted
+member→representative co-occurrence edges; activates the autonomous
+forgetting-compression lifecycle (decay → dormant → tombstone(+disposition) →
+physical GC, all enqueued on the periodic Janitor pass, with an audited
+`active → dormant` state transition before a row leaves recall and a
+delete-authority disposition gate + capsule re-verify); and wires production
+synthesis review accept → capsule create. Both forgetting delete arms are now
+armed: the *judged-useless* arm (sourceless, never-reinforced rows only, with a
+delete-time verdict re-verify) and the *compress* arm — delete a consolidated
+member only when a live capsule fully consolidates it (its evidence is a subset of
+the capsule's). The capsule keeps the cluster's shared evidence + a deterministic
+gist summary, so this is acceptable lossy consolidation; pinned / hazard / canon /
+consolidated memories are never compress-deleted (`docs/handbook/backlog.md`
+`#BL-049`, resolved).
+
+v0.3.11 is **implementation complete with the big-machine 500q gate
+pending.** It is not full release-ready until that gate runs on a larger host
+and the LongMemEval / LoCoMo full-bench archives pass. **R@5 → 90% is not
+claimed as achieved** — the recall fan-in is implemented and code-reviewed,
+but the R@5 number is unmeasured locally and deferred to that gate. See
+`docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`.
 
 `keychain:` secret refs are code-reviewed across Linux / macOS /
 Windows adapters (runtime cross-platform write→read still deferred —

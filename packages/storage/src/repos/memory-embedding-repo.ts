@@ -16,6 +16,24 @@ export interface MemoryEmbeddingRecord {
   readonly updated_at: string;
 }
 
+// Metadata-only projection of a memory_embeddings row: every column EXCEPT the
+// embedding blob. The backfill cache-hit/stale decision needs only these fields
+// (content_hash + provider/model/schema match, created_at preservation on
+// upsert), so reading metadata avoids both per-row blob hydration and the
+// finite-check scan over the full vector.
+// see also: packages/core/src/embedding-backfill-handler.ts EmbeddingBackfillRepoPort
+export interface MemoryEmbeddingMetadata {
+  readonly object_id: string;
+  readonly workspace_id: string;
+  readonly content_hash: string;
+  readonly provider_kind: string;
+  readonly model_id: string;
+  readonly schema_version: number;
+  readonly dimensions: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
 export interface MemoryEmbeddingListByWorkspaceOptions {
   // Optional storage-tier whitelist. Applied at the SQL JOIN to drop WARM /
   // COLD memories before they enter the embedding candidate pool (see also
@@ -37,6 +55,16 @@ export interface MemoryEmbeddingRepo {
     record: MemoryEmbeddingRecord
   ): Promise<Readonly<MemoryEmbeddingRecord> | null>;
   findByObjectId(objectId: string): Promise<Readonly<MemoryEmbeddingRecord> | null>;
+  // Batch metadata-only lookup (no embedding blob). Implementations may chunk
+  // large id sets to stay below storage bind limits; the backfill handler uses
+  // this for its cache-hit/stale decision so it pays neither n per-id round-trips
+  // nor full-vector hydration. Returns the row for every matched object_id
+  // regardless of provider/model/schema — the
+  // provider/model/schema equality check and created_at preservation belong in
+  // the handler.
+  findMetadataByObjectIds(
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEmbeddingMetadata>[]>;
   listByWorkspace(
     workspaceId: string,
     options?: MemoryEmbeddingListByWorkspaceOptions
@@ -60,6 +88,8 @@ interface MemoryEmbeddingRow {
   readonly updated_at: string;
 }
 
+type MemoryEmbeddingMetadataRow = Omit<MemoryEmbeddingRow, "embedding_blob">;
+
 const MEMORY_EMBEDDING_SELECT_COLUMNS = `
       object_id,
       workspace_id,
@@ -72,6 +102,21 @@ const MEMORY_EMBEDDING_SELECT_COLUMNS = `
       created_at,
       updated_at
 `;
+
+// Metadata column list: every column EXCEPT embedding_blob, so a metadata read
+// never touches the vector payload.
+const MEMORY_EMBEDDING_METADATA_COLUMNS = `
+      object_id,
+      workspace_id,
+      content_hash,
+      provider_kind,
+      model_id,
+      schema_version,
+      dimensions,
+      created_at,
+      updated_at
+`;
+const MEMORY_EMBEDDING_OBJECT_ID_CHUNK_SIZE = 900;
 
 export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
   private readonly upsertStatement;
@@ -223,6 +268,43 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     }
   }
 
+  public async findMetadataByObjectIds(
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEmbeddingMetadata>[]> {
+    const parsedObjectIds = Array.from(new Set(objectIds.map((objectId) => parseObjectId(objectId))));
+    if (parsedObjectIds.length === 0) {
+      return Object.freeze([]);
+    }
+
+    try {
+      const rows: MemoryEmbeddingMetadataRow[] = [];
+      for (const chunk of chunkObjectIds(parsedObjectIds)) {
+        const placeholders = chunk.map(() => "?").join(", ");
+        const statement = this.db.connection.prepare(`
+          SELECT${MEMORY_EMBEDDING_METADATA_COLUMNS}
+          FROM memory_embeddings
+          WHERE object_id IN (${placeholders})
+        `);
+        rows.push(...(statement.all(...chunk) as MemoryEmbeddingMetadataRow[]));
+      }
+      return Object.freeze(
+        rows
+          .map((row) => parseMemoryEmbeddingMetadataRow(row))
+          .sort((left, right) => left.object_id.localeCompare(right.object_id))
+      );
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        "Failed to load memory embedding metadata.",
+        error
+      );
+    }
+  }
+
   public async listByWorkspace(
     workspaceId: string,
     options?: MemoryEmbeddingListByWorkspaceOptions
@@ -309,18 +391,23 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
       return Object.freeze([]);
     }
 
-    const placeholders = parsedObjectIds.map(() => "?").join(", ");
-    const statement = this.db.connection.prepare(`
-      SELECT${MEMORY_EMBEDDING_SELECT_COLUMNS}
-      FROM memory_embeddings
-      WHERE workspace_id = ?
-        AND object_id IN (${placeholders})
-      ORDER BY object_id ASC
-    `);
-
     try {
-      const rows = statement.all(parsedWorkspaceId, ...parsedObjectIds) as MemoryEmbeddingRow[];
-      return Object.freeze(rows.map((row) => parseMemoryEmbeddingRow(row)));
+      const rows: MemoryEmbeddingRow[] = [];
+      for (const chunk of chunkObjectIds(parsedObjectIds)) {
+        const placeholders = chunk.map(() => "?").join(", ");
+        const statement = this.db.connection.prepare(`
+          SELECT${MEMORY_EMBEDDING_SELECT_COLUMNS}
+          FROM memory_embeddings
+          WHERE workspace_id = ?
+            AND object_id IN (${placeholders})
+        `);
+        rows.push(...(statement.all(parsedWorkspaceId, ...chunk) as MemoryEmbeddingRow[]));
+      }
+      return Object.freeze(
+        rows
+          .map((row) => parseMemoryEmbeddingRow(row))
+          .sort((left, right) => left.object_id.localeCompare(right.object_id))
+      );
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -333,6 +420,14 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
       );
     }
   }
+}
+
+function chunkObjectIds(objectIds: readonly string[]): readonly (readonly string[])[] {
+  const chunks: string[][] = [];
+  for (let offset = 0; offset < objectIds.length; offset += MEMORY_EMBEDDING_OBJECT_ID_CHUNK_SIZE) {
+    chunks.push(objectIds.slice(offset, offset + MEMORY_EMBEDDING_OBJECT_ID_CHUNK_SIZE));
+  }
+  return chunks;
 }
 
 function hashMemoryContent(content: string): string {
@@ -404,6 +499,22 @@ function parseMemoryEmbeddingRow(row: MemoryEmbeddingRow): Readonly<MemoryEmbedd
     embedding,
     created_at: row.created_at,
     updated_at: row.updated_at
+  });
+}
+
+function parseMemoryEmbeddingMetadataRow(
+  row: MemoryEmbeddingMetadataRow
+): Readonly<MemoryEmbeddingMetadata> {
+  return Object.freeze({
+    object_id: parseObjectId(row.object_id),
+    workspace_id: parseWorkspaceId(row.workspace_id),
+    content_hash: parseContentHash(row.content_hash),
+    provider_kind: parseProviderKind(row.provider_kind),
+    model_id: parseModelId(row.model_id),
+    schema_version: parseSchemaVersion(row.schema_version),
+    dimensions: parseDimensions(row.dimensions),
+    created_at: parseTimestamp(row.created_at),
+    updated_at: parseTimestamp(row.updated_at)
   });
 }
 

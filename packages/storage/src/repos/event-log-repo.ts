@@ -17,8 +17,7 @@ export interface EventLogRepo {
    * Run `fn` inside a single SQLite `connection.transaction(...)`. The
    * callback must be synchronous because better-sqlite3 transactions
    * commit immediately on return; awaiting inside `fn` would commit before
-   * the awaited work completes. See #BL-022 close condition in
-   * `docs/handbook/backlog.md`.
+   * the awaited work completes.
    */
   transactional<T>(fn: () => T): T;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;

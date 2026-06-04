@@ -190,7 +190,7 @@ describe("install keychain migration", () => {
     expect(persisted.provider_kind).toBe("official_api");
     expect(persisted.enabled).toBe(true);
 
-    const resolved = resolveSecretRef(persisted.secret_ref, {
+    const resolved = resolveSecretRef(persisted.secret_ref!, {
       readEnv: () => undefined,
       readFile: () => {
         throw new Error("file ref should not be read after keychain migration");

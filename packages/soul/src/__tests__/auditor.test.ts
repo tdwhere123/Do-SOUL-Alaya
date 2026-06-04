@@ -1,22 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
+import type { AuditorDependencies } from "../garden/auditor.js";
 import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
   HealthEventKind,
   MemoryDimension,
-  type GardenTaskDescriptor
-} from "@do-soul/alaya-protocol";
-import {
-  AUDITOR_CONSTANTS,
-  Auditor,
   type BrokenPointerRecord,
   type ColdStartAssessment,
   type DraftCandidate,
   type ExpiringGreenStatus,
+  type GardenTaskDescriptor,
   type HighFrequencyPattern,
   type StaleMemoryEntry
-} from "../garden/auditor.js";
+} from "@do-soul/alaya-protocol";
+import { AUDITOR_CONSTANTS, Auditor } from "../garden/auditor.js";
 
 describe("Auditor", () => {
   it("exposes the auditor role and tier", () => {
@@ -83,7 +81,7 @@ describe("Auditor", () => {
     const eventLogRepo = {
       append: vi.fn(),
       appendManyWithMutation
-    } as unknown as { readonly appendManyWithMutation: ReturnType<typeof vi.fn> };
+    } as unknown as NonNullable<AuditorDependencies["eventLogRepo"]>;
     const { auditor, greenMaintenancePort } = createAuditor({
       staleEntries: [{ memory_entry_id: "memory-1", stale_evidence_refs: ["evidence-1"] }],
       eventLogRepo
@@ -126,7 +124,7 @@ describe("Auditor", () => {
     const eventLogRepo = {
       append: vi.fn(),
       appendManyWithMutation
-    } as unknown as { readonly appendManyWithMutation: ReturnType<typeof vi.fn> };
+    } as unknown as NonNullable<AuditorDependencies["eventLogRepo"]>;
     const { auditor, greenMaintenancePort } = createAuditor({
       expiringStatuses: [
         createExpiringGreenStatus("g1", MemoryDimension.PREFERENCE),
@@ -516,7 +514,7 @@ function createAuditor(options: {
   readonly patterns?: readonly HighFrequencyPattern[];
   readonly pendingPatternKeys?: readonly string[];
   readonly findBrokenPointers?: (workspaceId: string) => Promise<readonly BrokenPointerRecord[]>;
-  readonly eventLogRepo?: { readonly appendManyWithMutation: ReturnType<typeof vi.fn> };
+  readonly eventLogRepo?: AuditorDependencies["eventLogRepo"];
   readonly revokeAffected?: number;
 } = {}) {
   const evidenceCheckPort = {
@@ -553,7 +551,9 @@ function createAuditor(options: {
     )
   };
   const scheduler = {
-    reportCompletion: vi.fn(async () => undefined)
+    reportCompletion: vi.fn<AuditorDependencies["scheduler"]["reportCompletion"]>(
+      async () => undefined
+    )
   };
   const healthJournal = {
     record: vi.fn(async () => undefined)

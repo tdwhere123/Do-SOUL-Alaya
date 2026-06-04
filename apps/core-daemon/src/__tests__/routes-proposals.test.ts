@@ -1,11 +1,18 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ControlPlaneObjectKind,
   FormationKind,
   MemoryDimension,
+  ProposalOptionKind,
+  ProposalResolutionState,
+  ProposalSchema,
+  RetentionPolicy,
   ScopeClass,
+  SoulProposalCreatedPayloadSchema,
   SourceKind,
   StorageTier,
+  MemoryGovernanceEventType,
   RuntimeGovernanceEventType,
   WorkspaceKind,
   WorkspaceState,
@@ -13,13 +20,16 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
+  SqliteCoUsageCounterRepo,
   SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
   SqlitePathRelationRepo,
   SqliteProposalRepo,
   SqliteWorkspaceRepo,
+  type PathRelationProposalPayload,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { EventPublisher, PathRelationProposalService } from "@do-soul/alaya-core";
 import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
 import { registerProposalRoutes } from "../routes/proposals.js";
 
@@ -245,7 +255,15 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = await response.json();
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        status: string;
+        target_object_kind: string;
+        requested_governance_class: string;
+        target_object_id: string;
+      };
+    };
     expect(body.success).toBe(true);
     expect(body.data.status).toBe("created");
     expect(body.data.target_object_kind).toBe("path_relation");
@@ -253,7 +271,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     expect(body.data.target_object_id).toBe("mem-1");
 
     expect(createProposalWithEvents).toHaveBeenCalledTimes(1);
-    const callInput = createProposalWithEvents.mock.calls[0][0] as {
+    const callInput = createProposalWithEvents.mock.calls[0][0] as unknown as {
       target_object_kind: string;
       proposed_change_summary: string;
       proposal: { derived_from: string; resolution_state: string };
@@ -308,7 +326,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       { method: "POST" }
     );
     expect(createdResponse.status).toBe(200);
-    const createdBody = await createdResponse.json();
+    const createdBody = (await createdResponse.json()) as { data: { proposal_id: string } };
     const proposalId = createdBody.data.proposal_id as string;
 
     const workflow = createMcpMemoryProposalWorkflow({
@@ -357,7 +375,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       { method: "POST" }
     );
     expect(secondCreatedResponse.status).toBe(200);
-    const secondCreatedBody = await secondCreatedResponse.json();
+    const secondCreatedBody = (await secondCreatedResponse.json()) as { data: { proposal_id: string } };
     const secondProposalId = secondCreatedBody.data.proposal_id as string;
 
     await expect(
@@ -400,6 +418,196 @@ describe("proposal routes (HTTP surface narrowed)", () => {
           `proposal_accept:${proposalId}`,
           `proposal_accept:${secondProposalId}`
         ])
+      }
+    });
+  });
+
+  it("rejects accept-apply of a path_relation proposal whose object target anchor names a foreign memory", async () => {
+    const governedMemoryId = "11111111-1111-4111-8111-111111111111";
+    // An object anchor naming a memory that does not exist in this workspace —
+    // the latent bypass NR-7 targets: the storage accept-apply would insert it
+    // into the durable path plane without the B3 existence/ownership gate.
+    const foreignTargetMemoryId = "99999999-9999-4999-8999-999999999999";
+    const database = initDatabase({ filename: ":memory:" });
+    databases.add(database);
+    const proposalRepo = new SqliteProposalRepo(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const workspaceRepo = new SqliteWorkspaceRepo(database);
+    const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
+    const pathRelationRepo = new SqlitePathRelationRepo(database);
+    const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
+    await workspaceRepo.create({
+      workspace_id: "ws-1",
+      name: "workspace one",
+      root_path: "/tmp/workspace-one",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      default_engine_binding: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+    await memoryEntryRepo.create(createMemoryEntry(governedMemoryId, "ws-1"));
+
+    const eventPublisher = new EventPublisher({
+      eventLogRepo,
+      runHotStateService: { apply: () => {} },
+      runtimeNotifier: { notify: () => {}, notifyEntry: () => {} }
+    });
+    // The REAL B3 gate, backed by the same memory existence/ownership lookup the
+    // daemon wires. Reused, not duplicated.
+    const objectAnchorGate = new PathRelationProposalService({
+      repo: {
+        create: (relation) => pathRelationRepo.create(relation),
+        findByAnchorMemoryId: async (memoryId, workspaceId) =>
+          await pathRelationRepo.findByAnchors(workspaceId, [{ kind: "object", object_id: memoryId }])
+      },
+      counterStore: coUsageCounterRepo,
+      memoryExistence: {
+        workspaceOfObject: async (objectId) => {
+          const entry = await memoryEntryRepo.findById(objectId);
+          return entry === null ? null : entry.workspace_id;
+        }
+      },
+      eventPublisher,
+      now: () => "2026-05-18T00:00:00.000Z"
+    });
+
+    // A path_relation proposal whose proposed target anchor is an OBJECT anchor
+    // aimed at a memory absent from this workspace.
+    const foreignObjectProposal: PathRelationProposalPayload = {
+      target_anchor: { kind: "object", object_id: foreignTargetMemoryId },
+      constitution: {
+        relation_kind: "supports",
+        why_this_relation_exists: ["inspector requested associative link"]
+      },
+      effect_vector: {
+        salience: 0.5,
+        recall_bias: 0.5,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "lens_entry"
+      },
+      plasticity_state: {
+        strength: 0.5,
+        direction_bias: "source_to_target",
+        stability_class: "stable",
+        support_events_count: 1,
+        contradiction_events_count: 0
+      },
+      lifecycle: { status: "active", retirement_rule: "manual" },
+      legitimacy: {
+        evidence_basis: ["inspector:object-anchor-proposal"],
+        governance_class: "recall_allowed"
+      }
+    };
+
+    const proposalId = "22222222-2222-4222-8222-222222222222";
+    const proposal = ProposalSchema.parse({
+      runtime_id: proposalId,
+      object_kind: ControlPlaneObjectKind.PROPOSAL,
+      task_surface_ref: null,
+      expires_at: null,
+      derived_from: governedMemoryId,
+      retention_policy: RetentionPolicy.SESSION_ONLY,
+      proposal_id: proposalId,
+      dossier_ref: null,
+      recommended_option_id: null,
+      proposal_options: [
+        {
+          option_id: `path_relation_${proposalId}`,
+          option_kind: ProposalOptionKind.REQUEST_CONFIRMATION,
+          preserves_protected_constraints: true,
+          dropped_candidates: [],
+          unresolved_after_apply: [],
+          requires_confirmation: true
+        }
+      ],
+      resolution_state: ProposalResolutionState.PENDING,
+      last_updated_at: "2026-05-18T00:00:00.000Z"
+    });
+    await proposalRepo.createProposalWithEvents(
+      {
+        proposal,
+        workspace_id: "ws-1",
+        run_id: null,
+        target_object_kind: "path_relation",
+        proposed_change_summary: "associate governed memory with a foreign object",
+        proposed_path_relation: foreignObjectProposal,
+        created_at: "2026-05-18T00:00:00.000Z"
+      },
+      [
+        {
+          event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
+          entity_type: "proposal",
+          entity_id: proposalId,
+          workspace_id: "ws-1",
+          run_id: null,
+          caused_by: "inspector",
+          payload_json: SoulProposalCreatedPayloadSchema.parse({
+            object_id: proposalId,
+            object_kind: ControlPlaneObjectKind.PROPOSAL,
+            workspace_id: "ws-1",
+            run_id: null
+          })
+        }
+      ]
+    );
+
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-05-18T00:00:00.000Z",
+      generateObjectId: () => "path-foreign-1",
+      eventLogRepo,
+      proposalRepo,
+      runtimeNotifier: { notifyEntry: vi.fn() },
+      memoryService: {
+        findByIdScoped: async (objectId, workspaceId) => {
+          const memory = await memoryEntryRepo.findById(objectId);
+          return memory !== null && memory.workspace_id === workspaceId ? memory : null;
+        },
+        update: async () => {
+          throw new Error("memory update must not be used for path_relation proposal accept");
+        }
+      },
+      objectAnchorGate
+    });
+
+    await expect(
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: proposalId,
+          verdict: "accept",
+          reason: "approved associative link",
+          reviewer_identity: "user:inspector"
+        },
+        {
+          workspaceId: "ws-1",
+          runId: null,
+          agentTarget: "inspector",
+          sessionId: "inspector-foreign-anchor-review"
+        }
+      )
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+
+    // No durable path landed for either endpoint.
+    await expect(
+      pathRelationRepo.findByAnchor("ws-1", { kind: "object", object_id: governedMemoryId })
+    ).resolves.toEqual([]);
+    await expect(
+      pathRelationRepo.findByAnchor("ws-1", { kind: "object", object_id: foreignTargetMemoryId })
+    ).resolves.toEqual([]);
+    // The proposal is NOT accepted (stays pending; the storage transaction never ran).
+    const after = await proposalRepo.findById(proposalId);
+    expect(after?.resolution_state).toBe("pending");
+    // The same path.relation_rejected audit the mint sink uses was emitted.
+    const rejectionEvents = await eventLogRepo.queryByWorkspaceAndType(
+      "ws-1",
+      RuntimeGovernanceEventType.PATH_RELATION_REJECTED
+    );
+    expect(rejectionEvents).toHaveLength(1);
+    expect(rejectionEvents[0]).toMatchObject({
+      entity_type: "path_relation",
+      workspace_id: "ws-1",
+      payload_json: {
+        rejected_object_id: foreignTargetMemoryId,
+        rejection_reason: "object_missing"
       }
     });
   });

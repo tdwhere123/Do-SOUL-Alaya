@@ -3,15 +3,11 @@ import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primiti
 
 const computeProviderPriorityValues = [
   "official_api",
-  "custom_api",
-  "local_model",
   "stub"
 ] as const;
 
 export const ComputeProviderPriority = {
   OFFICIAL_API: "official_api",
-  CUSTOM_API: "custom_api",
-  LOCAL_MODEL: "local_model",
   STUB: "stub"
 } as const;
 

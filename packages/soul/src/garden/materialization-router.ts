@@ -1,9 +1,8 @@
 import {
-  EdgeProposalTriggerSource,
   EvidenceHealthState,
   MemoryDimension,
-  MemoryGraphEdgeType,
   PathGovernanceClass,
+  type PathGovernanceClass as PathGovernanceClassValue,
   ScopeClass,
   SourceKind,
   StorageTier,
@@ -73,7 +72,7 @@ export interface MaterializationResult {
   readonly error?: string;
 }
 
-interface MaterializationCreatedObject {
+export interface MaterializationCreatedObject {
   readonly object_kind: string;
   readonly object_id: string;
 }
@@ -105,6 +104,19 @@ type MemoryMaterializationInput = Omit<
   | "superseded_by"
 > & {
   readonly storage_tier?: MemoryEntry["storage_tier"];
+  // invariant: atomic create + enrich_pending no-drop marker. When set, the
+  // memory-create port commits the row + the enrich_pending marker in ONE
+  // transaction (or neither, so the originating signal can replay). The router
+  // sets this ONLY on memory-creating branches that owe enrichment; the port
+  // reports back via MaterializationCreatedObject.enrichmentEnqueued. When the
+  // port does not honor the atomic seam the router falls back to a loud (not
+  // swallowed) separate enqueue. workspace_id + memory_id are filled by the
+  // truth boundary from the created row.
+  // see also: packages/core/src/memory-service.ts MemoryService.create.
+  readonly enqueueEnrichment?: {
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  };
 };
 
 type SynthesisMaterializationInput = Omit<
@@ -137,8 +149,18 @@ interface EvidenceMaterializationPort {
   create(input: EvidenceMaterializationInput): Promise<MaterializationCreatedObject>;
 }
 
+// invariant: the memory-create port reports whether the enrich_pending no-drop
+// marker was enqueued atomically with the row (see MemoryMaterializationInput
+// .enqueueEnrichment). enrichmentEnqueued === true means the row + marker
+// committed together; otherwise the router must enqueue the marker itself (loud
+// on failure — it is the mandatory no-drop handoff, never warn-and-continue).
+// see also: packages/core/src/memory-service.ts MemoryService.create.
+export type MemoryMaterializationCreatedObject = MaterializationCreatedObject & {
+  readonly enrichmentEnqueued?: boolean;
+};
+
 interface MemoryMaterializationPort {
-  create(input: MemoryMaterializationInput): Promise<MaterializationCreatedObject>;
+  create(input: MemoryMaterializationInput): Promise<MemoryMaterializationCreatedObject>;
 }
 
 interface SynthesisMaterializationPort {
@@ -159,6 +181,11 @@ export interface PathRelationProposalPayload {
 }
 
 export interface PathRelationProposalPort {
+  assertPathRelationProposalAvailable?(input: {
+    readonly workspaceId: string;
+    readonly runId: string;
+    readonly sourceSignalId: string;
+  }): Promise<void>;
   createPathRelationProposal(input: {
     readonly workspaceId: string;
     readonly runId: string;
@@ -183,13 +210,165 @@ export interface GraphEdgeCreationPort {
   }): Promise<void>;
 }
 
-export interface EdgeAutoProducerPort {
-  produceForNewMemory(params: {
-    readonly newMemoryId: string;
+// invariant: signal-ref sink. The router no longer writes
+// memory_graph_edges for a signal's first-class *_refs; it submits a
+// governed path candidate through PathRelationProposalService.submitCandidate
+// (the daemon wires this port to it). source_memory_refs seed a positive
+// derives_from path; supersedes/contradicts/incompatible_with seed weak
+// negative lifecycle paths (recallBiasSign -1, attention_only) that must
+// earn recall eligibility through plasticity reinforcement — an
+// agent-asserted ref never mints a recall_allowed negative path;
+// exception_to seeds a neutral marker (recallBiasSign 0). @do-soul/alaya-soul
+// cannot import @do-soul/alaya-core (invariants §6), so the seed shape
+// crosses the port boundary structurally. governanceClass is clamped to the
+// auto-build ceiling by submitCandidate downstream.
+// see also: packages/core/src/path-candidate-sink.ts PathCandidateSink.
+// see also: packages/core/src/path-relation-proposal-service.ts seed profiles.
+
+// invariant: structural mirror of core's PathMintOutcome (@do-soul/alaya-soul
+// cannot import @do-soul/alaya-core, invariants §6, so the four-state crosses
+// the port boundary as a literal union, like the seed shape above). The router
+// MUST preserve the rejected/failed distinction the sink decides: "rejected" is
+// a PERMANENT B3 anchor refusal (clean silent drop, already audited downstream),
+// "failed" is a TRANSIENT mint error. The synchronous write path first tries to
+// persist a durable path_relation proposal for failed refs; when that post-create
+// write is unavailable, the already-durable enrich_pending marker makes the
+// failure retryable in the BULK_ENRICH worker instead of terminally failing a
+// partially materialized signal.
+// see also: packages/core/src/path-relation-proposal-service.ts PathMintOutcome.
+export type PathCandidateMintOutcome = "applied" | "already_present" | "rejected" | "failed";
+type SignalRefTransientFailureMode = "durable_proposal" | "throw_for_retry";
+
+export interface PathCandidateSinkPort {
+  submitCandidate(input: {
     readonly workspaceId: string;
-    readonly runId: string;
-    readonly sourceSignalId: string;
-  }): Promise<void>;
+    readonly sourceAnchor: { readonly kind: "object"; readonly object_id: string };
+    readonly targetAnchor: { readonly kind: "object"; readonly object_id: string };
+    readonly relationKind: string;
+    readonly initialStrength: number;
+    readonly governanceClass: PathGovernanceClassValue;
+    readonly evidenceBasis: readonly string[];
+    readonly recallBiasSign: 1 | 0 | -1;
+    readonly recallBiasMagnitude?: number;
+    readonly why?: readonly string[];
+    readonly runId?: string | null;
+  }): Promise<PathCandidateMintOutcome>;
+}
+
+export interface SignalRefSeedSpec {
+  readonly signalRefsKey:
+    | "source_memory_refs"
+    | "supersedes_refs"
+    | "exception_to_refs"
+    | "contradicts_refs"
+    | "incompatible_with_refs";
+  readonly relationKind: string;
+  readonly initialStrength: number;
+  readonly governanceClass: PathGovernanceClassValue;
+  readonly recallBiasSign: 1 | 0 | -1;
+  readonly recallBiasMagnitude: number;
+  readonly evidenceBasis: readonly string[];
+}
+
+// invariant: the signal-ref seed table, keyed by producer trust. These
+// are agent-asserted refs on a candidate signal — the agent (or a local
+// heuristic) claims the relation, so every family seeds attention_only.
+// Recall eligibility is decided by recall_bias SIGN, not by
+// governance_class:
+//   - positive families (derives_from, recall_bias > 0) are recall-eligible
+//     at birth even at attention_only — governance_class only adds the
+//     +0.15 boost in scorePathRelationExpansion, it is NOT a binary recall
+//     gate;
+//   - negative families (supersedes / contradicts / incompatible_with,
+//     recall_bias < 0) are excluded from positive expansion by their sign,
+//     not by plasticity — they record suppression and only contribute once
+//     a sign-aware recall pass exists;
+//   - the recall-neutral exception_to marker (recall_bias == 0) is excluded
+//     from positive expansion by isPathRecallEligible's strict-positive
+//     gate.
+// attention_only here is the trust floor: it withholds the recall_allowed
+// expansion boost and the higher 0.9 strength reserved for the core seed
+// profiles. recall_allowed/0.9 negatives are produced ONLY by
+// ConflictDetectionService's LLM-verdict path (the system computed the
+// verdict); its Jaccard rule path now also seeds attention_only because
+// rule-hit conditions are agent-controllable content.
+// governanceClass is further clamped to the auto-build ceiling by
+// submitCandidate downstream.
+// see also: packages/core/src/path-relation-proposal-service.ts seed profiles.
+// see also: packages/core/src/conflict-detection-service.ts — LLM-verdict negatives.
+// see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible.
+// see also: signal-ref-seed-parity.test.ts — pins this live table.
+const AGENT_ASSERTED_NEGATIVE_SEED_STRENGTH = 0.5;
+
+export const SIGNAL_REF_SEED_SPECS: readonly SignalRefSeedSpec[] = [
+  {
+    signalRefsKey: "source_memory_refs",
+    relationKind: "derives_from",
+    initialStrength: 0.5,
+    governanceClass: PathGovernanceClass.ATTENTION_ONLY,
+    recallBiasSign: 1,
+    recallBiasMagnitude: 0.5,
+    evidenceBasis: ["llm_derives_inference"]
+  },
+  {
+    signalRefsKey: "supersedes_refs",
+    relationKind: "supersedes",
+    initialStrength: AGENT_ASSERTED_NEGATIVE_SEED_STRENGTH,
+    governanceClass: PathGovernanceClass.ATTENTION_ONLY,
+    recallBiasSign: -1,
+    recallBiasMagnitude: 0.5,
+    evidenceBasis: ["supersession_evidence"]
+  },
+  {
+    signalRefsKey: "exception_to_refs",
+    relationKind: "exception_to",
+    initialStrength: 0.9,
+    // invariant: agent-asserted exception_to refs seed attention_only, not
+    // recall_allowed. The ref is attacker-controllable, so it must not be
+    // born recall-eligible-governance; it earns governance through
+    // plasticity like the other agent-asserted families. recallBiasSign 0 /
+    // magnitude 0 keep the recall-neutral marker semantics.
+    governanceClass: PathGovernanceClass.ATTENTION_ONLY,
+    recallBiasSign: 0,
+    recallBiasMagnitude: 0,
+    evidenceBasis: ["exception_evidence"]
+  },
+  {
+    signalRefsKey: "contradicts_refs",
+    relationKind: "contradicts",
+    initialStrength: AGENT_ASSERTED_NEGATIVE_SEED_STRENGTH,
+    governanceClass: PathGovernanceClass.ATTENTION_ONLY,
+    recallBiasSign: -1,
+    recallBiasMagnitude: 0.4,
+    evidenceBasis: ["contradiction_evidence"]
+  },
+  {
+    signalRefsKey: "incompatible_with_refs",
+    relationKind: "incompatible_with",
+    initialStrength: AGENT_ASSERTED_NEGATIVE_SEED_STRENGTH,
+    governanceClass: PathGovernanceClass.ATTENTION_ONLY,
+    recallBiasSign: -1,
+    recallBiasMagnitude: 0.3,
+    evidenceBasis: ["incompatibility_evidence"]
+  }
+];
+
+// invariant: write-path/enrich-path decouple (S3c). Conflict detection +
+// edge auto-production are O(enrichment) and must NOT run inline on the
+// synchronous write-path. The router enqueues one durable enrich_pending
+// marker per freshly materialized memory and acks; the Garden BULK_ENRICH
+// Librarian task drains the markers and runs the governed enrichment
+// services off-path. enqueue is an idempotent upsert downstream, so a
+// re-materialize of the same memory never duplicates enrichment.
+// see also: packages/storage/src/repos/enrich-pending-repo.ts
+// see also: apps/core-daemon/src/garden-runtime.ts — BULK_ENRICH drain worker.
+export interface EnrichPendingPort {
+  enqueue(params: {
+    readonly workspaceId: string;
+    readonly memoryId: string;
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  }): void;
 }
 
 // invariant: detectAndLinkConflicts runs at memory materialization time
@@ -273,9 +452,18 @@ export interface MaterializationRouterDeps {
   readonly synthesisService: SynthesisMaterializationPort;
   readonly claimService: ClaimMaterializationPort;
   readonly pathRelationProposalPort?: PathRelationProposalPort;
+  readonly pathCandidateSinkPort?: PathCandidateSinkPort;
   readonly handoffGapHandler: HandoffGapHandler;
-  readonly graphEdgePort?: GraphEdgeCreationPort;
-  readonly edgeAutoProducerPort?: EdgeAutoProducerPort;
+  // invariant: post-materialization enrichment (edge auto-production +
+  // conflict detection's detectAndLinkConflicts) no longer runs inline.
+  // When enrichPendingPort is wired the write-path enqueues a durable marker
+  // per new memory; the Garden BULK_ENRICH worker runs the governed
+  // enrichment services off-path. When it is absent no enrichment is
+  // enqueued — the same "enrichment disabled" behavior as an absent service.
+  readonly enrichPendingPort?: EnrichPendingPort;
+  // conflictDetectionPort is retained for the potential_conflict `evaluate`
+  // route (a raw signal with no memory yet); detectAndLinkConflicts has moved
+  // to the BULK_ENRICH worker. see also: materializeConflictEvaluation.
   readonly conflictDetectionPort?: ConflictDetectionPort;
   readonly reconciliationPort?: ReconciliationPort;
 }
@@ -285,6 +473,23 @@ export class MaterializationRouter {
 
   public constructor(private readonly dependencies: MaterializationRouterDeps) {
     this.handoffGapHandler = dependencies.handoffGapHandler;
+  }
+
+  public async replaySignalRefs(input: {
+    readonly newObjectId: string;
+    readonly signal: CandidateMemorySignal;
+  }): Promise<readonly MaterializationCreatedObject[]> {
+    if (
+      this.dependencies.pathCandidateSinkPort === undefined &&
+      hasMaterializableSignalMemoryRefs(input.signal)
+    ) {
+      throw new Error("PathCandidateSinkPort unavailable during signal-ref replay.");
+    }
+    return await this.createAllMemoryRefEdges(
+      input.newObjectId,
+      input.signal,
+      "throw_for_retry"
+    );
   }
 
   public route(signal: CandidateMemorySignal): MaterializationTarget {
@@ -433,7 +638,7 @@ export class MaterializationRouter {
 
   // invariant: ingest reconciliation covers the materializeMemoryEntryOnly
   // path only (the bench `fact` object_kind). materialize_and_claim is
-  // intentionally NOT reconciled in v0.3.10 — a claim-bearing signal
+  // intentionally NOT reconciled — a claim-bearing signal
   // carries governance structure whose dedup is the conflict / claim
   // surface's job, not the lexical ingest gate.
   private async materializeMemoryAndClaim(
@@ -443,10 +648,14 @@ export class MaterializationRouter {
     const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
 
     try {
+      await this.preflightSignalRefFallback(signal);
+
       const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
       createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
-      const memory = await this.dependencies.memoryService.create(buildMemoryInput(signal, [evidence.object_id]));
+      const memory = await this.dependencies.memoryService.create(
+        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal))
+      );
       createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
 
       const claim = await this.dependencies.claimService.create(
@@ -454,18 +663,29 @@ export class MaterializationRouter {
       );
       createdObjects.push({ object_kind: claim.object_kind, object_id: claim.object_id });
 
-      await this.createAllMemoryRefEdges(memory.object_id, signal);
-      await this.runEdgeAutoProducer(memory.object_id, signal);
-      const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+      // invariant: enqueue-not-inline + no-drop. The durable enrich_pending
+      // marker is committed atomically with the memory row (enrichmentIntent on
+      // the create input); this loud fallback only fires when the wired port did
+      // not honor the atomic seam, and it precedes every optional, throw-capable
+      // side effect below so a freshly materialized memory is never stranded
+      // without enrichment. Edge auto-production + conflict detection run
+      // off-path in the BULK_ENRICH worker. see enqueueEnrichmentAfterCreate.
+      this.enqueueEnrichmentAfterCreate(memory, signal);
+
+      createdObjects.push(
+        ...(await this.createAllMemoryRefEdgesBestEffort(
+          memory.object_id,
+          signal,
+          this.isSignalRefRetryAvailable(memory)
+        ))
+      );
+      const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
         memory.object_id,
         signal
       );
       if (timeConcernProposal !== null) {
         createdObjects.push(timeConcernProposal);
       }
-      // Edges created by the conflict scan complement the caller-explicit
-      // hints above. see also: runConflictScan.
-      await this.runConflictScan(memory.object_id, signal);
 
       return {
         signal_id: signal.signal_id,
@@ -514,12 +734,11 @@ export class MaterializationRouter {
       );
       createdObjects.push({ object_kind: synthesis.object_kind, object_id: synthesis.object_id });
 
-      // No graph edge here: memory_graph_edges constrains both source and target
-      // to memory_entries(object_id) (migration 025). A synthesis_capsule id
-      // cannot be an edge endpoint. The synthesis↔memory relation is carried by
-      // synthesis.evidence_refs (which point at evidence ids) and by claim
-      // resolution downstream. If a synthesis-to-memory provenance edge is
-      // wanted later, it needs a schema change to widen the FK domain.
+      // No graph relation here: the path plane anchors on memory_entries, and a
+      // synthesis_capsule id is not a memory endpoint. The synthesis↔memory
+      // relation is carried by synthesis.evidence_refs (which point at evidence
+      // ids) and by claim resolution downstream. A synthesis-to-memory
+      // provenance relation would need a deliberate anchor-domain change.
 
       return {
         signal_id: signal.signal_id,
@@ -619,18 +838,32 @@ export class MaterializationRouter {
   ): Promise<MaterializationResult> {
     const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
     try {
+      await this.preflightSignalRefFallback(signal);
+
       const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
       createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
       const memory = await this.dependencies.memoryService.create(
-        buildMemoryInput(signal, [evidence.object_id])
+        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal))
       );
       createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
 
-      await this.createAllMemoryRefEdges(memory.object_id, signal);
-      await this.runEdgeAutoProducer(memory.object_id, signal);
+      // invariant: enqueue-not-inline + no-drop. The durable enrich_pending
+      // marker is committed atomically with the memory row; this loud fallback
+      // only fires when the wired port did not honor the atomic seam, and it
+      // precedes every optional, throw-capable side effect below.
+      // see enqueueEnrichmentAfterCreate.
+      this.enqueueEnrichmentAfterCreate(memory, signal);
 
-      const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+      createdObjects.push(
+        ...(await this.createAllMemoryRefEdgesBestEffort(
+          memory.object_id,
+          signal,
+          this.isSignalRefRetryAvailable(memory)
+        ))
+      );
+
+      const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
         memory.object_id,
         signal
       );
@@ -682,8 +915,7 @@ export class MaterializationRouter {
   ): Promise<MaterializationResult> {
     const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
     let evidenceId: string | undefined;
-    let appendedMemoryId: string | undefined;
-    let conflictScanMemoryId: string | undefined;
+    let appendedMemory: MemoryMaterializationCreatedObject | undefined;
 
     const ensureEvidence = async (): Promise<string> => {
       if (evidenceId === undefined) {
@@ -709,43 +941,52 @@ export class MaterializationRouter {
             // memory_entry. There is no orphan to relink.
             return {};
           }
-          const evidenceRef = await ensureEvidence();
           if (verdict.kind === "update") {
             // The core service rewrites the target row and relinks this
             // ref; the router creates no memory_entry on this branch.
+            const evidenceRef = await ensureEvidence();
             return { incomingEvidenceRef: evidenceRef };
           }
-          // ADD: append the memory_entry against the fresh evidence.
+          await this.preflightSignalRefFallback(signal);
+          const evidenceRef = await ensureEvidence();
+          // ADD: append the memory_entry against the fresh evidence. The
+          // enrich_pending marker commits atomically with the row.
           const memory = await this.dependencies.memoryService.create(
-            buildMemoryInput(signal, [evidenceRef])
+            buildMemoryInput(signal, [evidenceRef], this.enrichmentIntent(signal))
           );
-          appendedMemoryId = memory.object_id;
+          appendedMemory = memory;
           createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
-          if (verdict.runConflictScan) {
-            conflictScanMemoryId = memory.object_id;
-          }
           return { incomingEvidenceRef: evidenceRef };
         }
       );
 
-      if (appendedMemoryId !== undefined) {
-        await this.createAllMemoryRefEdges(appendedMemoryId, signal);
-        await this.runEdgeAutoProducer(appendedMemoryId, signal);
-        const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+      // invariant: DELETE / supersede is the ConflictDetectionService's job —
+      // its detectAndLinkConflicts now runs in the BULK_ENRICH worker, not
+      // inline. Only an ADD mints a new memory_entry endpoint; UPDATE / NOOP
+      // reuse an existing row and enqueue nothing (no fresh enrichment target).
+      if (appendedMemory !== undefined) {
+        const appendedMemoryId = appendedMemory.object_id;
+        // invariant: enqueue-not-inline + no-drop. The durable enrich_pending
+        // marker is committed atomically with the memory row; this loud fallback
+        // only fires when the wired port did not honor the atomic seam, and it
+        // precedes every optional, throw-capable side effect below.
+        // see enqueueEnrichmentAfterCreate.
+        this.enqueueEnrichmentAfterCreate(appendedMemory, signal);
+
+        createdObjects.push(
+          ...(await this.createAllMemoryRefEdgesBestEffort(
+            appendedMemoryId,
+            signal,
+            this.isSignalRefRetryAvailable(appendedMemory)
+          ))
+        );
+        const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
           appendedMemoryId,
           signal
         );
         if (timeConcernProposal !== null) {
           createdObjects.push(timeConcernProposal);
         }
-      }
-
-      // invariant: DELETE / supersede is the ConflictDetectionService's
-      // job. Reconciliation only flags that the new fact has a same-topic
-      // divergent neighbor; the contradicts / superseded_by edge + karma
-      // are produced by the existing conflict scan, not a new path.
-      if (conflictScanMemoryId !== undefined) {
-        await this.runConflictScan(conflictScanMemoryId, signal);
       }
 
       const reconciledObjects =
@@ -781,59 +1022,65 @@ export class MaterializationRouter {
     }
   }
 
-  // ConflictDetectionService: rule-based + optional LLM scan for memories
-  // in the same workspace that contradict / are incompatible with the
-  // freshly materialized one. Detection failure must not break a
-  // successful memory creation.
-  private async runConflictScan(
-    memoryId: string,
+  // invariant: write-path/enrich-path decouple (S3c). The durable enrich_pending
+  // marker is the mandatory no-drop handoff between the synchronous write-path
+  // and the Garden BULK_ENRICH worker (which reconstructs the conflict-scan
+  // params from the persisted memory row — content/dimension/scope/domain_tags
+  // match buildMemoryInput exactly — and runs ConflictDetectionService
+  // .detectAndLinkConflicts + EdgeAutoProducer off-path). The PREFERRED enqueue
+  // path is atomic: the memory-create port commits the row + the marker in one
+  // transaction (enrichmentIntent on the create input), so a created memory
+  // ALWAYS carries its marker. enrichmentIntent returns undefined only when no
+  // enrichPendingPort is wired (enrichment disabled, same as an absent service).
+  // invariant: conflict suppression (contradicts/supersedes edges) is now
+  // best-effort-eventual, not synchronous-at-materialize. A freshly materialized
+  // memory is recallable before its not-yet-detected contradiction/supersession
+  // edges form — surfaced != conflict-checked within that window. The Garden
+  // drains every BULK_ENRICH queued in a ~60s GardenScheduler pass (up to a
+  // bounded per-pass cap), so the upper bound is ~1 min per workspace up to the
+  // cap, and O(workspaces / cap) * ~1 min beyond it.
+  // see also: packages/storage/src/repos/enrich-pending-repo.ts
+  // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask.
+  private enrichmentIntent(
     signal: CandidateMemorySignal
-  ): Promise<void> {
-    const port = this.dependencies.conflictDetectionPort;
-    if (port === undefined) {
-      return;
+  ): MemoryMaterializationInput["enqueueEnrichment"] {
+    if (this.dependencies.enrichPendingPort === undefined) {
+      return undefined;
     }
-    try {
-      await port.detectAndLinkConflicts({
-        newMemoryId: memoryId,
-        newMemoryDimension: toMemoryDimension(signal.object_kind),
-        newMemoryScopeClass: toScopeClass(signal.scope_hint),
-        newMemoryContent: buildDistilledFact(signal),
-        newMemoryDomainTags: signal.domain_tags,
-        workspaceId: signal.workspace_id,
-        runId: signal.run_id
-      });
-    } catch (err) {
-      console.warn("materialization-router: conflict detection failed", {
-        memoryId,
-        signalId: signal.signal_id,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
+    return buildEnrichmentIntent(signal);
   }
 
-  private async runEdgeAutoProducer(
-    memoryId: string,
+  // invariant: loud no-drop fallback. The atomic create+enqueue is the primary
+  // path (enrichmentIntent). This fires ONLY when the wired memory-create port
+  // did not honor the atomic seam (enrichmentEnqueued !== true) yet an
+  // enrichPendingPort is wired — the marker is mandatory, so a failure here
+  // must surface (the caller's catch flips the branch to success:false → the
+  // signal is marked FAILED rather than leaving a memory stranded with no
+  // marker). NOT warn-and-continue: that swallow is the bug B6's intent must
+  // not reintroduce. The genuinely-optional time_concern proposal keeps its
+  // warn-and-continue (createTimeConcernProposalBestEffort) — this does not.
+  // see also: packages/core/src/signal-service.ts terminal-FAILED on success!=true
+  private enqueueEnrichmentAfterCreate(
+    memory: MemoryMaterializationCreatedObject,
     signal: CandidateMemorySignal
-  ): Promise<void> {
-    const port = this.dependencies.edgeAutoProducerPort;
+  ): void {
+    if (memory.enrichmentEnqueued === true) {
+      return;
+    }
+    const port = this.dependencies.enrichPendingPort;
     if (port === undefined) {
       return;
     }
-    try {
-      await port.produceForNewMemory({
-        newMemoryId: memoryId,
-        workspaceId: signal.workspace_id,
-        runId: signal.run_id,
-        sourceSignalId: signal.signal_id
-      });
-    } catch (err) {
-      console.warn("materialization-router: edge auto-producer failed", {
-        memoryId,
-        signalId: signal.signal_id,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
+    port.enqueue({
+      workspaceId: signal.workspace_id,
+      memoryId: memory.object_id,
+      runId: signal.run_id,
+      sourceSignalId: signal.signal_id
+    });
+  }
+
+  private isSignalRefRetryAvailable(memory: MemoryMaterializationCreatedObject): boolean {
+    return memory.enrichmentEnqueued === true || this.dependencies.enrichPendingPort !== undefined;
   }
 
   private async materializePathRelationProposal(
@@ -863,6 +1110,28 @@ export class MaterializationRouter {
     };
   }
 
+  // invariant: optional-side-effect isolation. On a memory-creating branch the
+  // memory row + its enrich_pending marker are already durable before this
+  // runs, so a time_concern proposal failure must warn-and-continue: a throw
+  // here may never flip the branch to success: false (which SignalService would
+  // mark terminally FAILED) nor strand the memory without enrichment.
+  // see also: packages/core/src/signal-service.ts terminal-FAILED on success!=true
+  private async createTimeConcernProposalBestEffort(
+    targetObjectId: string,
+    signal: CandidateMemorySignal
+  ): Promise<MaterializationCreatedObject | null> {
+    try {
+      return await this.createTimeConcernPathRelationProposal(targetObjectId, signal);
+    } catch (err) {
+      console.warn("materialization-router: time_concern proposal failed", {
+        targetObjectId,
+        signalId: signal.signal_id,
+        error: err instanceof Error ? err.message : String(err)
+      });
+      return null;
+    }
+  }
+
   private async createTimeConcernPathRelationProposal(
     targetObjectId: string,
     signal: CandidateMemorySignal
@@ -882,6 +1151,29 @@ export class MaterializationRouter {
       targetObjectId,
       reason: `Create time_concern PathRelation for ${timeConcern.matched_text}.`,
       proposedPathRelation: buildTimeConcernPathRelationProposal(targetObjectId, timeConcern)
+    });
+  }
+
+  private async preflightSignalRefFallback(signal: CandidateMemorySignal): Promise<void> {
+    if (
+      this.dependencies.pathCandidateSinkPort === undefined ||
+      !hasMaterializableSignalMemoryRefs(signal)
+    ) {
+      return;
+    }
+    if (this.dependencies.enrichPendingPort !== undefined) {
+      return;
+    }
+    const port = this.dependencies.pathRelationProposalPort;
+    if (port === undefined) {
+      throw new Error(
+        "PathRelationProposalPort unavailable before materializing a signal with first-class memory refs"
+      );
+    }
+    await port.assertPathRelationProposalAvailable?.({
+      workspaceId: signal.workspace_id,
+      runId: signal.run_id,
+      sourceSignalId: signal.signal_id
     });
   }
 
@@ -940,62 +1232,50 @@ export class MaterializationRouter {
   }
 
   /**
-   * Creates graph proposals for every first-class memory ref carried by
-   * a memory-creating signal. Errors are swallowed per edge: proposal
-   * creation must never block materialization of the memory itself.
+   * Submits a governed path candidate for every first-class memory ref
+   * carried by a memory-creating signal. A permanent "rejected" never blocks
+   * materialization of the memory itself. A transient "failed" or thrown sink
+   * must either leave a durable proposal record or remain retryable through the
+   * enrich_pending marker. This also activates the historically dormant
+   * signal-ref edge source — the refs now flow through PathRelationProposalService.
    */
   private async createAllMemoryRefEdges(
     newObjectId: string,
-    signal: CandidateMemorySignal
-  ): Promise<void> {
-    await this.createEdgesFromSignalRefs(
-      newObjectId,
-      signal,
-      "source_memory_refs",
-      MemoryGraphEdgeType.DERIVES_FROM
-    );
-    await this.createEdgesFromSignalRefs(
-      newObjectId,
-      signal,
-      "supersedes_refs",
-      MemoryGraphEdgeType.SUPERSEDES
-    );
-    await this.createEdgesFromSignalRefs(
-      newObjectId,
-      signal,
-      "exception_to_refs",
-      MemoryGraphEdgeType.EXCEPTION_TO
-    );
-    await this.createEdgesFromSignalRefs(
-      newObjectId,
-      signal,
-      "contradicts_refs",
-      MemoryGraphEdgeType.CONTRADICTS
-    );
-    await this.createEdgesFromSignalRefs(
-      newObjectId,
-      signal,
-      "incompatible_with_refs",
-      MemoryGraphEdgeType.INCOMPATIBLE_WITH
-    );
+    signal: CandidateMemorySignal,
+    transientFailureMode: SignalRefTransientFailureMode = "durable_proposal"
+  ): Promise<readonly MaterializationCreatedObject[]> {
+    const createdObjects: MaterializationCreatedObject[] = [];
+    for (const spec of SIGNAL_REF_SEED_SPECS) {
+      createdObjects.push(
+        ...(await this.submitCandidatesFromSignalRefs(
+          newObjectId,
+          signal,
+          spec,
+          transientFailureMode
+        ))
+      );
+    }
+    return createdObjects;
   }
 
-  // see also: createAllMemoryRefEdges — same shape for each signal key
-  // and edge type. First-class *_refs are proposal inputs, not raw_payload
+  // see also: createAllMemoryRefEdges — drives one spec per signal key.
+  // First-class *_refs are governed path candidates, not raw_payload
   // conventions.
-  private async createEdgesFromSignalRefs(
+  private async submitCandidatesFromSignalRefs(
     newObjectId: string,
     signal: CandidateMemorySignal,
-    signalRefsKey: "source_memory_refs" | "supersedes_refs" | "exception_to_refs" | "contradicts_refs" | "incompatible_with_refs",
-    edgeType: MemoryGraphEdgeTypeValue
-  ): Promise<void> {
-    if (this.dependencies.graphEdgePort === undefined) {
-      return;
+    spec: SignalRefSeedSpec,
+    transientFailureMode: SignalRefTransientFailureMode
+  ): Promise<readonly MaterializationCreatedObject[]> {
+    const createdObjects: MaterializationCreatedObject[] = [];
+    const port = this.dependencies.pathCandidateSinkPort;
+    if (port === undefined) {
+      return createdObjects;
     }
 
-    const refs = signal[signalRefsKey];
+    const refs = signal[spec.signalRefsKey];
     if (refs.length === 0) {
-      return;
+      return createdObjects;
     }
 
     for (const ref of refs) {
@@ -1003,28 +1283,114 @@ export class MaterializationRouter {
         continue;
       }
 
+      let outcome: PathCandidateMintOutcome;
+      // A thrown sink (port wiring fault, not a decided outcome) folds into the
+      // same durable fallback treatment as a returned "failed" — the error
+      // text is threaded into the failed proposal so a thrown ref produces
+      // exactly ONE durable record when the proposal port is healthy.
+      let thrownError: string | null = null;
       try {
-        await this.dependencies.graphEdgePort.createEdge({
-          sourceMemoryId: newObjectId,
-          targetMemoryId: ref,
-          edgeType,
+        outcome = await port.submitCandidate({
           workspaceId: signal.workspace_id,
-          runId: signal.run_id,
-          triggerSource: EdgeProposalTriggerSource.CANDIDATE_SIGNAL_REF,
-          confidence: Math.min(signal.confidence, 0.5),
-          reason: `${signalRefsKey} on candidate signal ${signal.signal_id}`,
-          sourceSignalId: signal.signal_id
+          sourceAnchor: { kind: "object", object_id: newObjectId },
+          targetAnchor: { kind: "object", object_id: ref },
+          relationKind: spec.relationKind,
+          initialStrength: spec.initialStrength,
+          governanceClass: spec.governanceClass,
+          evidenceBasis: spec.evidenceBasis,
+          recallBiasSign: spec.recallBiasSign,
+          recallBiasMagnitude: spec.recallBiasMagnitude,
+          why: [
+            `${spec.signalRefsKey} on candidate signal ${signal.signal_id}`,
+            `run=${signal.run_id}`
+          ],
+          runId: signal.run_id
         });
       } catch (err) {
-        console.warn("materialization-router: graph edge creation failed", {
-          sourceMemoryId: newObjectId,
-          targetMemoryId: ref,
-          edgeType,
-          signalId: signal.signal_id,
-          error: err instanceof Error ? err.message : String(err)
-        });
+        outcome = "failed";
+        thrownError = err instanceof Error ? err.message : String(err);
+      }
+
+      // invariant: only "failed" gets the durable fallback treatment. The
+      // signal-ref edge is derived by this helper both inline and in the
+      // BULK_ENRICH retry lane, so a transient "failed" must either create a
+      // durable proposal or throw while the retry marker remains pending.
+      // A permanent "rejected" stays
+      // a CLEAN, quiet drop — the sink already audited the B3 refusal and retry
+      // cannot help. applied / already_present settle silently (the owed path
+      // exists). A thrown sink and a returned "failed" both land here and must
+      // either persist exactly one durable proposal for the failed ref or throw
+      // for the enrich_pending retry lane.
+      // see also: packages/core/src/path-relation-proposal-service.ts PathMintOutcome.
+      // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask.
+      if (outcome === "failed") {
+        const failedParams = {
+          newObjectId,
+          failedRef: ref,
+          signal,
+          spec,
+          thrownError
+        };
+        if (transientFailureMode === "throw_for_retry") {
+          throw new Error(buildFailedSignalRefPathRelationProposalReason(failedParams));
+        }
+        createdObjects.push(
+          await this.createFailedSignalRefPathRelationProposal(failedParams)
+        );
       }
     }
+
+    return createdObjects;
+  }
+
+  private async createAllMemoryRefEdgesBestEffort(
+    newObjectId: string,
+    signal: CandidateMemorySignal,
+    retryAvailable: boolean
+  ): Promise<readonly MaterializationCreatedObject[]> {
+    try {
+      return await this.createAllMemoryRefEdges(
+        newObjectId,
+        signal,
+        retryAvailable ? "throw_for_retry" : "durable_proposal"
+      );
+    } catch (error) {
+      if (!retryAvailable || !hasMaterializableSignalMemoryRefs(signal)) {
+        throw error;
+      }
+      console.warn("materialization-router: signal-ref path candidate deferred to enrich_pending retry", {
+        sourceMemoryId: newObjectId,
+        targetMemoryIds: collectMaterializableSignalMemoryRefs(signal),
+        signalId: signal.signal_id,
+        runId: signal.run_id,
+        error: readErrorMessage(error)
+      });
+      return [];
+    }
+  }
+
+  private async createFailedSignalRefPathRelationProposal(params: {
+    readonly newObjectId: string;
+    readonly failedRef: string;
+    readonly signal: CandidateMemorySignal;
+    readonly spec: SignalRefSeedSpec;
+    readonly thrownError: string | null;
+  }): Promise<MaterializationCreatedObject> {
+    const port = this.dependencies.pathRelationProposalPort;
+    if (port === undefined) {
+      throw new Error(
+        `PathRelationProposalPort unavailable after failed ${params.spec.signalRefsKey} path candidate for ${params.failedRef}`
+      );
+    }
+
+    return await port.createPathRelationProposal({
+      workspaceId: params.signal.workspace_id,
+      runId: params.signal.run_id,
+      sourceSignalId: params.signal.signal_id,
+      targetObjectId: params.newObjectId,
+      reason: buildFailedSignalRefPathRelationProposalReason(params),
+      proposedPathRelation: buildFailedSignalRefPathRelationProposal(params)
+    });
   }
 
   private async materializeEvidenceOnly(
@@ -1188,6 +1554,86 @@ function buildTimeConcernPathRelationProposal(
   };
 }
 
+function buildFailedSignalRefPathRelationProposal(params: {
+  readonly newObjectId: string;
+  readonly failedRef: string;
+  readonly signal: CandidateMemorySignal;
+  readonly spec: SignalRefSeedSpec;
+  readonly thrownError: string | null;
+}): PathRelationProposalPayload {
+  const recallBias = params.spec.recallBiasSign * params.spec.recallBiasMagnitude;
+  const why = [
+    `${params.spec.signalRefsKey} on candidate signal ${params.signal.signal_id}`,
+    `run=${params.signal.run_id}`,
+    `path candidate mint failed for target_anchor=${params.failedRef}`
+  ];
+  if (params.thrownError !== null) {
+    why.push(`submitCandidate threw: ${params.thrownError}`);
+  }
+
+  return {
+    target_anchor: {
+      kind: "object",
+      object_id: params.failedRef
+    },
+    constitution: {
+      relation_kind: params.spec.relationKind,
+      why_this_relation_exists: why
+    },
+    effect_vector: {
+      salience: params.spec.initialStrength,
+      recall_bias: recallBias,
+      verification_bias: 0,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "lens_entry"
+    },
+    plasticity_state: {
+      strength: params.spec.initialStrength,
+      direction_bias: "source_to_target",
+      stability_class: "volatile",
+      support_events_count: 1,
+      contradiction_events_count: 0
+    },
+    lifecycle: {
+      status: "active",
+      retirement_rule: "governance_reject_or_low_strength"
+    },
+    legitimacy: {
+      evidence_basis: params.spec.evidenceBasis,
+      governance_class: params.spec.governanceClass
+    }
+  };
+}
+
+function buildFailedSignalRefPathRelationProposalReason(params: {
+  readonly newObjectId: string;
+  readonly failedRef: string;
+  readonly signal: CandidateMemorySignal;
+  readonly spec: SignalRefSeedSpec;
+  readonly thrownError: string | null;
+}): string {
+  const base =
+    `Persist failed ${params.spec.signalRefsKey} path_relation candidate ` +
+    `${params.spec.relationKind} from ${params.newObjectId} to ${params.failedRef}. ` +
+    `Source signal: ${params.signal.signal_id}.`;
+  if (params.thrownError === null) {
+    return base;
+  }
+  return `${base} submitCandidate error: ${params.thrownError}.`;
+}
+
+function hasMaterializableSignalMemoryRefs(signal: CandidateMemorySignal): boolean {
+  return SIGNAL_REF_SEED_SPECS.some((spec) =>
+    signal[spec.signalRefsKey].some((ref) => typeof ref === "string" && ref.trim().length > 0)
+  );
+}
+
+function collectMaterializableSignalMemoryRefs(signal: CandidateMemorySignal): readonly string[] {
+  return SIGNAL_REF_SEED_SPECS.flatMap((spec) =>
+    signal[spec.signalRefsKey].filter((ref) => typeof ref === "string" && ref.trim().length > 0)
+  );
+}
+
 function computeEvidenceHealthState(signal: CandidateMemorySignal): EvidenceHealthStateValue {
   // Invariant #16: objects without evidence_refs must default to questionable,
   // not verified. Signals from local heuristics carry no supporting evidence.
@@ -1258,7 +1704,8 @@ function buildSignalPhysicalAnchor(signal: CandidateMemorySignal): EvidenceCapsu
 
 function buildMemoryInput(
   signal: CandidateMemorySignal,
-  evidenceRefs: readonly string[]
+  evidenceRefs: readonly string[],
+  enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"]
 ): MemoryMaterializationInput {
   return {
     created_by: signal.source,
@@ -1276,8 +1723,18 @@ function buildMemoryInput(
     workspace_id: signal.workspace_id,
     run_id: signal.run_id,
     surface_id: signal.surface_id,
-    storage_tier: StorageTier.HOT
+    storage_tier: StorageTier.HOT,
+    ...(enqueueEnrichment === undefined ? {} : { enqueueEnrichment })
   };
+}
+
+// invariant: the enrich_pending no-drop intent carried into a memory-creating
+// branch's create input — the truth boundary commits the row + marker
+// atomically. see also: MaterializationRouter enqueueEnrichmentAfterCreate.
+function buildEnrichmentIntent(
+  signal: CandidateMemorySignal
+): NonNullable<MemoryMaterializationInput["enqueueEnrichment"]> {
+  return { runId: signal.run_id, sourceSignalId: signal.signal_id };
 }
 
 function buildClaimInput(

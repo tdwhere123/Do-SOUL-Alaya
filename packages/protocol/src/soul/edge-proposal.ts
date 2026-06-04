@@ -16,12 +16,23 @@ const edgeProposalStatusValues = [
   "auto_accepted"
 ] as const;
 
+// invariant: trigger_source values map 1:1 to the edge producers +
+// governance entrypoints. `llm_supports` is reserved for the LLM
+// pair-classifier path; the rule-based local fallbacks tag themselves with
+// `local_supports` / `local_supersedes` / `local_derives_from` so KPI K3.2
+// per-trigger breakdown stays unambiguous (do not collapse local heuristics
+// back onto `system`).
 const edgeProposalTriggerSourceValues = [
   "explicit",
   "candidate_signal_ref",
   "conflict_detection",
   "recall_cross_link",
   "bench_seed",
+  "llm_supports",
+  "local_supports",
+  "local_supersedes",
+  "local_contradicts",
+  "local_derives_from",
   "system"
 ] as const;
 
@@ -39,6 +50,11 @@ export const EdgeProposalTriggerSource = {
   CONFLICT_DETECTION: "conflict_detection",
   RECALL_CROSS_LINK: "recall_cross_link",
   BENCH_SEED: "bench_seed",
+  LLM_SUPPORTS: "llm_supports",
+  LOCAL_SUPPORTS: "local_supports",
+  LOCAL_SUPERSEDES: "local_supersedes",
+  LOCAL_CONTRADICTS: "local_contradicts",
+  LOCAL_DERIVES_FROM: "local_derives_from",
   SYSTEM: "system"
 } as const;
 

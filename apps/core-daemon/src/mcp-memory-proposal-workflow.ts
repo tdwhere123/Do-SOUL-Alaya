@@ -12,14 +12,18 @@ import {
   SoulProposalResolvedPayloadSchema,
   SoulReviewCompletedPayloadSchema,
   SoulReviewCreatedPayloadSchema,
+  SynthesisCapsuleSchema,
+  SynthesisType,
   TransitionCausedBy,
   type MemoryEntryMutableFields,
   type EventLogEntry,
+  type PathAnchorRef,
   type Proposal,
   type SoulListPendingProposalsRequest,
   type SoulPendingProposalSummary,
   type SoulProposeMemoryUpdateRequest,
-  type SoulReviewMemoryProposalRequest
+  type SoulReviewMemoryProposalRequest,
+  type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import type {
   McpMemoryToolCallContext,
@@ -57,7 +61,36 @@ type AcceptedProposalApply =
         readonly path_id_on_create: string;
         readonly caused_by: string;
       }>;
+    }>
+  | Readonly<{
+      readonly kind: "synthesis_create";
+      readonly synthesisCreate: Readonly<{
+        readonly workspace_id: string;
+        readonly capsule: SynthesisCapsule;
+        readonly caused_by: string;
+      }>;
     }>;
+
+// invariant: the dossier_ref values that route a pending review proposal to the
+// MEMORY-COMPRESSION synthesis-create accept-apply. Librarian clusters and
+// auditor pattern synthesis carry no distinguishing target_object_kind (it
+// falls through to the migration default), so accept selection branches on
+// dossier_ref. see also: packages/storage/src/repos/garden-librarian-data-ports.ts
+// createSynthesisReviewCandidate, packages/storage/src/repos/garden-data-ports.ts
+// createSynthesisCandidate
+const SYNTHESIS_CREATE_DOSSIER_REFS: ReadonlySet<string> = new Set([
+  "librarian.synthesis",
+  "bootstrapping.synthesis_candidate"
+]);
+
+// The `derived_from` prefixes the librarian/auditor candidate factories mint.
+// Stripping the prefix recovers a human topic_key for the synthesis capsule.
+// see also: garden-data-port-shared.ts buildDerivedKey
+const SYNTHESIS_TOPIC_PREFIXES: readonly string[] = ["synthesis-subject:", "bootstrapping:"];
+
+// Bound on how much evidence-gist text the deterministic summary distiller
+// folds in, so a large cluster cannot mint an unbounded summary blob.
+const SYNTHESIS_SUMMARY_MAX_LENGTH = 600;
 
 export interface McpMemoryProposalWorkflowProposalRepo {
   create(input: {
@@ -107,12 +140,19 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     // test fakes that omit it remain compatible via the optional shape.
     readonly reviewer_identity?: string | null;
     readonly reviewer_assignment?: Readonly<{ readonly reviewer_identity: string }> | null;
-    // Phase 6 MCP/runtime patch is expected to add durable apply context.
-    // Keep optional for compatibility with legacy storage fakes; accept
-    // path returns NEEDS_CONTEXT when unavailable.
+    // Durable apply context. Optional for compatibility with legacy storage
+    // fakes; the accept path returns NEEDS_CONTEXT when unavailable.
     readonly target_object_id?: string | null;
     readonly target_object_kind?: string | null;
     readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
+    // Scoped path-relation governance payload. The accept-apply path reads the
+    // target anchor to gate it through the object-anchor existence/ownership
+    // check before the durable insert. Optional for compatibility with legacy
+    // storage fakes that predate path_relation proposals.
+    readonly proposed_path_relation?: Readonly<{
+      readonly target_anchor: PathAnchorRef;
+      readonly constitution?: Readonly<{ readonly relation_kind?: string | null }> | null;
+    }> | null;
     readonly target_baseline_updated_at?: string | null;
     readonly source_delivery_ids?: readonly string[] | null;
   }> | null>;
@@ -156,6 +196,20 @@ export interface McpMemoryProposalWorkflowProposalRepo {
       readonly workspace_id: string;
       readonly path_id_on_create: string;
       readonly updated_at: string;
+      readonly caused_by: string;
+    },
+    options?: { readonly reviewerIdentity?: string }
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
+  acceptPendingSynthesisCreateWithEvents?(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    synthesisCreate: {
+      readonly workspace_id: string;
+      readonly capsule: SynthesisCapsule;
       readonly caused_by: string;
     },
     options?: { readonly reviewerIdentity?: string }
@@ -212,12 +266,61 @@ export interface McpMemoryProposalWorkflowDependencies {
       fields: MemoryEntryMutableFields
     ): Promise<void>;
   }>;
+  // invariant: the MEMORY-COMPRESSION synthesis-create accept-apply reads member
+  // evidence gists to distill a deterministic, NO-LLM summary and to validate
+  // that every recovered evidence ref exists before the durable insert (the same
+  // EventLog-first reference gate SynthesisService.create runs). Wired by the
+  // daemon to EvidenceService; left undefined in unit tests that do not exercise
+  // synthesis review proposals. A null gist read is treated as a missing ref.
+  // see also: packages/core/src/synthesis-service.ts validateEvidenceRefs
+  readonly synthesisEvidenceReader?: {
+    findGistById(
+      evidenceId: string,
+      workspaceId: string
+    ): Promise<string | null>;
+  };
+  // invariant: resolves the synthesis cluster's member memories at capsule-build
+  // time so source_memory_refs is populated, not hard-coded empty. An eligible
+  // member is a workspace-scoped memory whose evidence_refs are a SUBSET of the
+  // capsule's evidence_refs (the member is FULLY consolidated by the cluster the
+  // librarian/auditor summarized — it has no private evidence living outside the
+  // cluster). The compress arm of autonomous forgetting earns the `compressed`
+  // disposition ONLY for a member listed here, so an unpopulated set leaves the
+  // arm inert. The lookup is mechanical (no LLM) and BOUNDED by the repo (caps
+  // the id set + LIMITs the row scan). Wired by the daemon to
+  // memoryEntryRepo.findByEvidenceRefs (intersection candidates) then narrowed to
+  // the subset members; left undefined in unit tests that do not exercise member
+  // resolution (capsule then builds with an empty member set).
+  // see also: packages/storage/src/repos/memory-entry-repo.ts findByEvidenceRefs,
+  // apps/core-daemon/src/forget-disposition-ports.ts buildLiveCapsuleMemberIndex
+  readonly synthesisMemberResolver?: {
+    findMemberObjectIdsByEvidenceRefs(
+      workspaceId: string,
+      evidenceRefs: readonly string[]
+    ): Promise<readonly string[]>;
+  };
   readonly reviewerIdentityBinding?: ReviewerIdentityBinding;
   readonly sourceDeliveryAnchorValidator?: {
     validate(
       sourceDeliveryIds: readonly string[],
       context: McpMemoryToolCallContext
     ): Promise<void> | void;
+  };
+  // invariant: the SAME object-anchor existence + ownership gate the path mint
+  // sink runs. The accept-apply path inserts a stored proposed_path_relation
+  // into the durable path plane through the storage transaction (which cannot
+  // import the core service), so this seam routes that second insert through
+  // B3's gate before it lands. Wired by the daemon to
+  // PathRelationProposalService.validateProposedObjectAnchors; left undefined
+  // only in unit tests that do not exercise path_relation proposals.
+  // see also: packages/core/src/path-relation-proposal-service.ts validateProposedObjectAnchors
+  readonly objectAnchorGate?: {
+    validateProposedObjectAnchors(input: {
+      readonly workspaceId: string;
+      readonly relationKind: string;
+      readonly sourceAnchor: PathAnchorRef;
+      readonly targetAnchor: PathAnchorRef;
+    }): Promise<"accepted" | "rejected">;
   };
   readonly now?: () => string;
   readonly generateObjectId?: () => string;
@@ -439,13 +542,21 @@ export function createMcpMemoryProposalWorkflow(
                 acceptedMemoryUpdate.memoryUpdate,
                 reviewerIdentity
               )
-            : await acceptProposalWithDurablePathRelationGovernance(
-                proposal.proposal_id,
-                reviewedAt,
-                reviewEvents,
-                acceptedMemoryUpdate.pathRelationGovernance,
-                reviewerIdentity
-              );
+            : acceptedMemoryUpdate.kind === "path_relation_governance"
+              ? await acceptProposalWithDurablePathRelationGovernance(
+                  proposal.proposal_id,
+                  reviewedAt,
+                  reviewEvents,
+                  acceptedMemoryUpdate.pathRelationGovernance,
+                  reviewerIdentity
+                )
+              : await acceptProposalWithDurableSynthesisCreate(
+                  proposal.proposal_id,
+                  reviewedAt,
+                  reviewEvents,
+                  acceptedMemoryUpdate.synthesisCreate,
+                  reviewerIdentity
+                );
     } catch (error) {
       throw normalizeResolutionError(error);
     }
@@ -487,10 +598,22 @@ export function createMcpMemoryProposalWorkflow(
       readonly target_object_kind?: string | null;
       readonly target_object_id?: string | null;
       readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
+      readonly proposed_path_relation?: Readonly<{
+        readonly target_anchor: PathAnchorRef;
+        readonly constitution?: Readonly<{ readonly relation_kind?: string | null }> | null;
+      }> | null;
       readonly target_baseline_updated_at?: string | null;
     }>,
     context: McpMemoryToolCallContext
   ): Promise<AcceptedProposalApply> {
+    // Branch on dossier_ref first: librarian/auditor synthesis proposals carry
+    // no distinguishing target_object_kind, so without this they would fall
+    // through to the memory_entry default and throw NOT_FOUND on the synthetic
+    // synthesis-subject:<subject> derived_from target.
+    const dossierRef = scopedProposal.proposal.dossier_ref;
+    if (dossierRef !== null && SYNTHESIS_CREATE_DOSSIER_REFS.has(dossierRef)) {
+      return await prepareAcceptedSynthesisCreate(scopedProposal, context);
+    }
     const targetObjectKind = scopedProposal.target_object_kind ?? "memory_entry";
     if (targetObjectKind === "path_relation") {
       return await prepareAcceptedPathRelationGovernance(scopedProposal, context);
@@ -545,6 +668,10 @@ export function createMcpMemoryProposalWorkflow(
       readonly proposal: Readonly<Proposal>;
       readonly workspace_id: string;
       readonly target_object_id?: string | null;
+      readonly proposed_path_relation?: Readonly<{
+        readonly target_anchor: PathAnchorRef;
+        readonly constitution?: Readonly<{ readonly relation_kind?: string | null }> | null;
+      }> | null;
     }>,
     context: McpMemoryToolCallContext
   ): Promise<AcceptedProposalApply> {
@@ -564,6 +691,18 @@ export function createMcpMemoryProposalWorkflow(
         `Target memory object not found in workspace: ${targetObjectId}`
       );
     }
+
+    // invariant: this is the second durable path-insert route; gate its object
+    // anchors through B3's existence + ownership check before the storage
+    // accept-apply commits a path_relations row. The storage layer builds the
+    // source anchor as {kind:object, object_id: targetObjectId} and the target
+    // anchor from proposed_path_relation.target_anchor (the only field an
+    // untrusted producer could aim at a foreign/missing object). A rejection
+    // emits the same path.relation_rejected audit the mint sink uses and stops
+    // the accept-apply before any durable insert.
+    // see also: packages/storage/src/repos/proposal-repo.ts createPathRelationFromProposalPayload
+    await assertProposedPathAnchorsValid(scopedProposal, context.workspaceId, targetObjectId);
+
     return {
       kind: "path_relation_governance",
       pathRelationGovernance: {
@@ -573,6 +712,163 @@ export function createMcpMemoryProposalWorkflow(
         caused_by: `proposal_accept:${proposalId}`
       }
     };
+  }
+
+  async function prepareAcceptedSynthesisCreate(
+    scopedProposal: Readonly<{
+      readonly proposal: Readonly<Proposal>;
+      readonly workspace_id: string;
+    }>,
+    context: McpMemoryToolCallContext
+  ): Promise<AcceptedProposalApply> {
+    const proposal = scopedProposal.proposal;
+    const proposalId = proposal.proposal_id;
+    // Cluster evidence ids are stashed in the first option's dropped_candidates
+    // by the librarian/auditor candidate factories. The auditor pattern path
+    // carries none, so an empty evidence set is valid (a topic-only synthesis).
+    const evidenceRefs = proposal.proposal_options[0]?.dropped_candidates ?? [];
+    const topicKey = deriveSynthesisTopicKey(proposal.derived_from, proposalId);
+
+    // EventLog-first reference gate: every recovered evidence ref must resolve
+    // (and yields its gist) before the durable insert, matching
+    // SynthesisService.create's validateEvidenceRefs. A null gist == missing ref.
+    const gists = await resolveSynthesisEvidenceGists(evidenceRefs, context.workspaceId, proposalId);
+    const summary = buildDeterministicSynthesisSummary(topicKey, gists);
+
+    // invariant: populate source_memory_refs with the cluster's FULLY-consolidated
+    // member memories (those whose evidence_refs are a SUBSET of the capsule's) so
+    // the autonomous compress arm can earn each such member the `compressed`
+    // disposition. The capsule preserves the cluster's SHARED EVIDENCE (which
+    // survives independently as evidence_capsules) plus a deterministic gist-level
+    // summary — it does NOT byte-preserve a member's distilled `content`. A member
+    // with private evidence outside the cluster is NOT a subset member and is left
+    // un-armed, because the capsule does not consolidate its full evidence basis.
+    // A topic-only capsule (no evidence) has no members.
+    // see also: forget-disposition-ports.ts buildLiveCapsuleMemberIndex.
+    const sourceMemoryRefs = await resolveSynthesisMemberRefs(evidenceRefs, context.workspaceId);
+
+    const timestamp = now();
+    const capsule = parseSynthesisCapsuleForAccept({
+      object_id: generateObjectId(),
+      object_kind: "synthesis_capsule",
+      schema_version: 1,
+      lifecycle_state: "active",
+      created_at: timestamp,
+      updated_at: timestamp,
+      created_by: `proposal_accept:${proposalId}`,
+      topic_key: topicKey,
+      synthesis_type: SynthesisType.CROSS_EVIDENCE,
+      summary,
+      evidence_refs: [...evidenceRefs],
+      source_memory_refs: sourceMemoryRefs,
+      workspace_id: context.workspaceId,
+      // Synthesis proposals are run-scoped null; the capsule schema requires a
+      // non-empty run_id. Bind a deterministic, clock-free workspace sentinel so
+      // the capsule is reproducible and attributable to the accepting workspace.
+      run_id: `synthesis-accept:${context.workspaceId}`,
+      synthesis_status: "working"
+    });
+
+    return {
+      kind: "synthesis_create",
+      synthesisCreate: {
+        workspace_id: context.workspaceId,
+        capsule,
+        caused_by: `proposal_accept:${proposalId}`
+      }
+    };
+  }
+
+  async function resolveSynthesisEvidenceGists(
+    evidenceRefs: readonly string[],
+    workspaceId: string,
+    proposalId: string
+  ): Promise<readonly string[]> {
+    if (evidenceRefs.length === 0) {
+      return [];
+    }
+    const reader = deps.synthesisEvidenceReader;
+    if (reader === undefined) {
+      throw createWorkflowError(
+        "NEEDS_CONTEXT",
+        "Synthesis evidence reader is unavailable; wire synthesisEvidenceReader into MCP proposal workflow."
+      );
+    }
+    const gists: string[] = [];
+    for (const evidenceRef of evidenceRefs) {
+      const gist = await reader.findGistById(evidenceRef, workspaceId);
+      if (gist === null) {
+        throw createWorkflowError(
+          "NOT_FOUND",
+          `Synthesis proposal ${proposalId} references evidence not found in workspace: ${evidenceRef}`
+        );
+      }
+      gists.push(gist);
+    }
+    return gists;
+  }
+
+  // Resolves the member memory object_ids that are FULLY consolidated by the
+  // capsule's evidence set: workspace-scoped memories whose evidence_refs are a
+  // SUBSET of evidenceRefs (subset narrowing is applied by the wired resolver,
+  // which fetches intersection candidates then keeps only the fully-contained
+  // ones). The resolver is bounded by the repo (caps the id set + LIMITs the row
+  // scan) and mechanical (no LLM). Returns a sorted, de-duplicated list so two
+  // accepts over identical input produce identical source_memory_refs
+  // (deterministic). When the resolver is unwired (unit tests) or there is no
+  // evidence, the member set is empty and the capsule arms no members.
+  async function resolveSynthesisMemberRefs(
+    evidenceRefs: readonly string[],
+    workspaceId: string
+  ): Promise<readonly string[]> {
+    if (evidenceRefs.length === 0) {
+      return [];
+    }
+    const resolver = deps.synthesisMemberResolver;
+    if (resolver === undefined) {
+      return [];
+    }
+    const memberIds = await resolver.findMemberObjectIdsByEvidenceRefs(workspaceId, evidenceRefs);
+    return [...new Set(memberIds.filter((id) => typeof id === "string" && id.length > 0))].sort();
+  }
+
+  async function assertProposedPathAnchorsValid(
+    scopedProposal: Readonly<{
+      readonly proposed_path_relation?: Readonly<{
+        readonly target_anchor: PathAnchorRef;
+        readonly constitution?: Readonly<{ readonly relation_kind?: string | null }> | null;
+      }> | null;
+    }>,
+    workspaceId: string,
+    targetObjectId: string
+  ): Promise<void> {
+    if (deps.objectAnchorGate === undefined) {
+      return;
+    }
+    const payload = scopedProposal.proposed_path_relation ?? null;
+    // The storage insert always mints the source as an object anchor on the
+    // (already existence/ownership-checked) target memory; the target anchor is
+    // the payload's when present, else a synthetic object_facet on the same
+    // memory. Both are passed to the gate, which resolves the backing memory
+    // object id of every anchor variant and checks its existence + ownership.
+    const sourceAnchor: PathAnchorRef = { kind: "object", object_id: targetObjectId };
+    const targetAnchor: PathAnchorRef =
+      payload === null
+        ? { kind: "object_facet", object_id: targetObjectId, facet_key: "strictly_governed_constraint" }
+        : payload.target_anchor;
+    const relationKind = payload?.constitution?.relation_kind ?? "governance_constraint";
+    const outcome = await deps.objectAnchorGate.validateProposedObjectAnchors({
+      workspaceId,
+      relationKind,
+      sourceAnchor,
+      targetAnchor
+    });
+    if (outcome === "rejected") {
+      throw createWorkflowError(
+        "VALIDATION",
+        "Proposed path relation names an object anchor that is missing or owned by another workspace."
+      );
+    }
   }
 
   async function acceptProposalWithDurableMemoryUpdate(
@@ -640,6 +936,36 @@ export function createMcpMemoryProposalWorkflow(
         ...pathRelationGovernance,
         updated_at: reviewedAt
       },
+      { reviewerIdentity }
+    );
+  }
+
+  async function acceptProposalWithDurableSynthesisCreate(
+    proposalId: string,
+    reviewedAt: string,
+    reviewEvents: readonly ProposalResolutionEventInput[],
+    synthesisCreate: Readonly<{
+      readonly workspace_id: string;
+      readonly capsule: SynthesisCapsule;
+      readonly caused_by: string;
+    }>,
+    reviewerIdentity: string
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>> {
+    if (deps.proposalRepo.acceptPendingSynthesisCreateWithEvents === undefined) {
+      throw createWorkflowError(
+        "NEEDS_CONTEXT",
+        "Atomic proposal accept + synthesis create port is unavailable."
+      );
+    }
+
+    return await deps.proposalRepo.acceptPendingSynthesisCreateWithEvents(
+      proposalId,
+      reviewedAt,
+      reviewEvents,
+      synthesisCreate,
       { reviewerIdentity }
     );
   }
@@ -825,6 +1151,49 @@ function resolveProposalChanges(
     );
   }
   return PublicMemoryEntryMutableFieldsSchema.parse(scopedProposal.proposed_changes);
+}
+
+function deriveSynthesisTopicKey(derivedFrom: string | null, proposalId: string): string {
+  const raw = derivedFrom ?? "";
+  for (const prefix of SYNTHESIS_TOPIC_PREFIXES) {
+    if (raw.startsWith(prefix)) {
+      const stripped = raw.slice(prefix.length).trim();
+      if (stripped.length > 0) {
+        return stripped;
+      }
+    }
+  }
+  const trimmed = raw.trim();
+  // topic_key is a NonEmptyString; fall back to the proposal id when the
+  // derived_from carries no usable subject so the capsule still parses.
+  return trimmed.length > 0 ? trimmed : `synthesis:${proposalId}`;
+}
+
+// invariant: deterministic, NO-LLM, no-network summary distiller. Concatenates
+// the ordered member evidence gists under the topic header and clips to a
+// bounded length. Same input -> same output (no clock, no randomness, no
+// cloud/garden compute), so the capsule summary is reproducible. Matches the
+// rule-distiller posture: structure over generation.
+function buildDeterministicSynthesisSummary(
+  topicKey: string,
+  gists: readonly string[]
+): string {
+  const cleanedGists = gists
+    .map((gist) => gist.trim())
+    .filter((gist) => gist.length > 0);
+  const body =
+    cleanedGists.length === 0
+      ? "no member evidence"
+      : cleanedGists.join("; ");
+  const summary = `Synthesis of ${topicKey}: ${body}`;
+  if (summary.length <= SYNTHESIS_SUMMARY_MAX_LENGTH) {
+    return summary;
+  }
+  return summary.slice(0, SYNTHESIS_SUMMARY_MAX_LENGTH);
+}
+
+function parseSynthesisCapsuleForAccept(value: unknown): SynthesisCapsule {
+  return SynthesisCapsuleSchema.parse(value);
 }
 
 function normalizeResolutionError(error: unknown): unknown {

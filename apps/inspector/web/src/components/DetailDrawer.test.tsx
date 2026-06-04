@@ -88,6 +88,79 @@ describe("DetailDrawer", () => {
     expect(onCreateProposal).toHaveBeenNthCalledWith(2, "downgrade", "memory-1", undefined);
     expect(onCreateProposal).toHaveBeenNthCalledWith(3, "retire", "memory-1", undefined);
   });
+
+  // On the path plane node.id is a serialized PathAnchorRef (e.g.
+  // '["object","mem-1"]') and node.object_id is the bare memory object id
+  // ("mem-1"). Both the proposal flow and the open_pointer CLI string must
+  // address the bare object id, NOT the serialized anchor. This fixture has
+  // object_id !== id so a regression to node.id would fail (the NODE fixture
+  // above has no object_id and only exercises the id===object_id fallback).
+  it("uses node.object_id, not the serialized anchor id, for proposals and the CLI string", async () => {
+    const onCreateProposal = vi.fn(async () => undefined);
+    const onCopyCli = vi.fn();
+    const serializedAnchor = '["object","mem-1"]';
+    renderDrawer({
+      node: {
+        id: serializedAnchor,
+        object_id: "mem-1",
+        kind: "memory",
+        label: "Prefer rtk commands",
+        summary: "Use rtk for repository shell commands.",
+        degree: 1
+      },
+      onCreateProposal,
+      onCopyCli
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /keep/i }));
+    await waitFor(() => {
+      expect(onCreateProposal).toHaveBeenCalledWith("keep", "mem-1", undefined);
+    });
+    // The proposal target must be the bare object id, never the anchor.
+    expect(onCreateProposal).not.toHaveBeenCalledWith("keep", serializedAnchor, undefined);
+
+    await userEvent.click(screen.getByRole("button", { name: /delete/i }));
+    await waitFor(() => {
+      expect(onCreateProposal).toHaveBeenCalledWith("retire", "mem-1", undefined);
+    });
+
+    // The open-in-CLI command targets the bare object id via pointer_id, not
+    // the serialized anchor.
+    await userEvent.click(screen.getByRole("button", { name: /open in cli/i }));
+    await waitFor(() => {
+      expect(onCopyCli).toHaveBeenCalled();
+    });
+    const cliCall = onCopyCli.mock.calls.find(([text]) =>
+      typeof text === "string" && text.includes("open_pointer")
+    );
+    expect(cliCall).toBeDefined();
+    expect(cliCall?.[0]).toContain('"pointer_id":"mem-1"');
+    expect(cliCall?.[0]).not.toContain(serializedAnchor);
+  });
+
+  // canAct is gated on node.kind === "memory". A scope/concern anchor (no
+  // object_id) must never render the Actions section, so it can never trigger
+  // a memory proposal.
+  it("hides the Actions section for a non-memory (scope) node so it cannot trigger a proposal", () => {
+    const onCreateProposal = vi.fn(async () => undefined);
+    renderDrawer({
+      node: {
+        id: '["risk_concern","mem-2","digest-abc"]',
+        kind: "scope",
+        label: "Risk concern anchor",
+        summary: "A path-plane concern anchor.",
+        degree: 2
+      },
+      onCreateProposal
+    });
+
+    expect(screen.queryByText("Actions")).toBeNull();
+    expect(screen.queryByRole("button", { name: /keep/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /delete/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /downgrade/i })).toBeNull();
+    expect(screen.queryByLabelText("Rewrite content")).toBeNull();
+    expect(onCreateProposal).not.toHaveBeenCalled();
+  });
 });
 
 function renderDrawer(

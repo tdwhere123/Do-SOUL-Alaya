@@ -87,21 +87,10 @@ export interface GardenTaskRepoPort {
     workspace_id?: string,
     limit?: number
   ): readonly GardenTaskRow[];
-  /**
-   * Reviewer-final F1: read-only single-row lookup. Used by tests that
-   * need to verify post-rollback state (e.g., that attempt_count was
-   * restored to its pre-claim value, distinguishing the I3 fix from
-   * the pre-fix releaseClaim-only path which left attempt_count
-   * silently bumped).
-   */
   findById(taskId: string): GardenTaskRow | null;
   claimAtomic(taskId: string, claimedBy: string, claimedAt: string): GardenTaskClaimResult;
   /**
-   * Wave-end M6: claim a task and append the dispatched audit event(s)
-   * in one storage transaction. Eliminates the prior partial-state
-   * window between claimAtomic and a separate eventLog.append where a
-   * daemon crash would leave a `claimed` row without a matching
-   * SOUL_GARDEN_TASK_DISPATCHED event row.
+   * Claim a task and append the dispatch audit event in one atomic mutation.
    */
   claimAtomicWithEvents(
     taskId: string,
@@ -191,14 +180,22 @@ export class GardenScheduler {
     });
   }
 
+  // workspaceId is OPTIONAL. When undefined the pending peek is workspace-wide
+  // (the production background pass dispatch — unchanged kind-only fairness).
+  // When set, the peek is scoped to that workspace_id so a targeted readiness
+  // drain dispatches only its own workspace's same-kind tasks and never another
+  // workspace's pending task of the same kind.
+  // see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
   public async dispatchNextMatchingTaskKind(
     role: GardenRoleValue,
-    taskKinds: readonly GardenTaskDescriptor["task_kind"][]
+    taskKinds: readonly GardenTaskDescriptor["task_kind"][],
+    workspaceId?: string
   ): Promise<GardenTaskDescriptor | null> {
     const allowedTaskKinds = new Set<GardenTaskDescriptor["task_kind"]>(taskKinds);
     return await this.dispatchNextInternal(role, {
       matchesTaskKind: (task) => allowedTaskKinds.has(task.task_kind),
-      rejectTierViolations: false
+      rejectTierViolations: false,
+      workspaceId
     });
   }
 
@@ -207,13 +204,14 @@ export class GardenScheduler {
     options: {
       readonly matchesTaskKind: (task: GardenTaskDescriptor) => boolean;
       readonly rejectTierViolations: boolean;
+      readonly workspaceId?: string;
     }
   ): Promise<GardenTaskDescriptor | null> {
     const roleTier = GARDEN_ROLE_TIER_MAP[role];
     const nowIso = this.now();
     this.pruneExpiredCoolingEntries(nowIso);
 
-    const candidates = this.taskRepo.peekPending(role, undefined, Math.max(1, this.queueDepth));
+    const candidates = this.taskRepo.peekPending(role, options.workspaceId, Math.max(1, this.queueDepth));
 
     for (const candidate of candidates) {
       const task = parseTaskDescriptorFromRow(candidate);
@@ -259,17 +257,12 @@ export class GardenScheduler {
         return null;
       }
 
-      // Cooling is intentionally Tier 1 only per the Phase 4A-1 brief.
+      // invariant: only Tier 1 work cools between repeated object-level passes.
       if (task.required_tier === GardenTier.TIER_1 && this.isCooling(task, nowIso)) {
         continue;
       }
 
-      // Wave-end M6: claim AND append the dispatched event in the
-      // same SQLite transaction. Pre-fix, claimAtomic committed first
-      // and the event append happened in a separate tx — a daemon
-      // crash between the two left a `claimed` row with no audit
-      // trail (recovery only via gcAbandonedClaims). Now both
-      // commit-or-roll together.
+      // invariant: claim state and dispatch audit commit or roll back together.
       const dispatchedEvent: GardenTaskEventInput = {
         event_type: GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
         entity_type: "garden_task",
@@ -543,14 +536,7 @@ function countByStatus(
     .reduce((total, count) => total + count.count, 0);
 }
 
-/**
- * Default in-process queue used when callers don't provide their own
- * GardenTaskRepoPort. Exported to enable tests that need to inspect
- * rollback state via findById (Reviewer-final F1: distinguishing
- * I3-fix from pre-fix requires reading attempt_count after a failed
- * dispatch, which the production GardenScheduler API correctly does
- * not expose).
- */
+/** Default in-process queue used when callers do not provide a GardenTaskRepoPort. */
 export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
   private readonly rows: GardenTaskRow[] = [];
 
@@ -621,24 +607,9 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
     return "claimed";
   }
 
-  // Wave-end M6 + Codex re-review I3: in-memory impl matches the
-  // SQLite-backed contract — claim and append commit-or-roll together.
-  // SQLite handles this via appendManyWithMutation's tx; the in-memory
-  // event log has no transaction, so we apply the rollback by hand:
-  //
-  // 1. Snapshot the full row state BEFORE claim (including attempt_count).
-  // 2. claimAtomic. If CAS loses, return early without appending.
-  // 3. Try event appends one by one.
-  // 4. On any throw, restore the row from the snapshot — this reverts
-  //    status, claimed_by, claimed_at AND attempt_count, which the prior
-  //    naive releaseClaim left bumped (Codex re-review I3).
-  //
-  // We cannot undo events that already appended successfully before the
-  // throw (the port has no truncate). The scheduler today only appends
-  // one event per claim (SOUL_GARDEN_TASK_DISPATCHED), so the multi-event
-  // partial-append window does not exist in production. If a future
-  // caller passes multiple events we keep the row consistent and rely on
-  // the SQLite repo for true atomicity.
+  // invariant: the in-memory repo restores the full row snapshot when dispatch
+  // audit append fails. Production scheduler use passes one dispatch event per
+  // claim; true multi-event atomicity belongs to the SQLite repo.
   public async claimAtomicWithEvents(
     taskId: string,
     claimedBy: string,

@@ -15,7 +15,8 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "zod": "^3.24.2"

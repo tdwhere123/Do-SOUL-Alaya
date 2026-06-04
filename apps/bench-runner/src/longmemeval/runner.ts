@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   RECALL_PIPELINE_VERSION,
@@ -7,11 +9,12 @@ import {
   resolveBenchRunnerVersion
 } from "../version.js";
 import {
+  aggregateEdgeProposalAutoAccept,
+  aggregateEdgeProposalRate,
   benchArchiveDiscriminator,
   buildDiffVsPrevious,
   diffKpis,
   entrySlug,
-  readLatest,
   renderFindings,
   renderReport,
   writeEntry,
@@ -20,6 +23,7 @@ import {
   type BenchSplit,
   buildTokenEconomy,
   computeTokenSavedRatio,
+  type EdgeProposalKpiEventRow,
   type HistoryLayout,
   type KpiPayload,
   type PerScenarioRow
@@ -33,8 +37,10 @@ import {
   type BenchQueryEmbeddingWarmupSummary,
   type BenchRecallOptions,
   type BenchReportContextUsageInput,
-  type BenchTokenMetrics
+  type BenchTokenMetrics,
+  type BenchWorkspaceHandle
 } from "../harness/daemon.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
 import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
   aggregateRecallTokenEconomy,
@@ -62,6 +68,10 @@ import {
 } from "./diagnostics.js";
 import { writeExternalDiagnosticsArtifact } from "./diagnostics-artifacts.js";
 import {
+  MemoryGraphEdgeType,
+  mapRelationKindToGraphEdgeType
+} from "@do-soul/alaya-protocol";
+import {
   buildLongMemEvalColdWarmComparisonSidecar,
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   LONGMEMEVAL_DIAGNOSTICS_FILENAME,
@@ -74,10 +84,13 @@ import {
 } from "./abstention.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
+import { collectDistinctTurnContents } from "./extraction-fill.js";
+import { selectFullRunBaseline } from "./recall-eval-archive.js";
 import {
   buildSessionSynthesisInput,
   computeNextTurnSeedRefs,
   createCompileSeedRunner,
+  resolveBenchAllowLiveExtraction,
   toSeedExtractionPathKpi,
   type CompileSeedRunner,
   type SessionSeededTurn
@@ -86,6 +99,18 @@ import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
 } from "./seed-extraction-release-blocker.js";
+import {
+  BENCH_DAEMON_DB_FILENAME,
+  RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
+  checkpointAndCopyBenchDb,
+  readSchemaMigrationVersion,
+  writeSnapshotManifest,
+  writeSnapshotSidecar,
+  type LongMemEvalSnapshotQuestion,
+  type SnapshotExtractionProvenance
+} from "./snapshot.js";
+import { readExtractionCacheManifest } from "./extraction-cache-manifest.js";
+import { EXTRACTION_CACHE_ROOT } from "./compile-seed.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
@@ -120,6 +145,19 @@ export interface LongMemEvalRunOptions {
   // `limit`. Pairs with process-level sharding in
   // apps/bench-runner/scripts/run-full-public-bench.sh.
   readonly offset?: number;
+  // @anchor longmemeval-datadir-root: pin the bench daemon's DB to a fixed
+  // directory instead of a throwaway mkdtemp, so the seeded DB can be
+  // snapshotted for the recall-eval fast loop. Defaults to undefined (the
+  // daemon allocates its own mkdtemp), preserving existing behaviour.
+  // see also: apps/bench-runner/src/harness/daemon.ts startBenchDaemon
+  //   (dataDirRoot)
+  readonly dataDirRoot?: string;
+  // @anchor longmemeval-snapshot-out: when set, after the run completes the
+  // seeded DB is WAL-checkpointed + copied to this path, and the per-question
+  // scoring sidecar + a version-binding manifest are written beside it, so a
+  // later recall-eval --snapshot run skips both extraction and
+  // materialization. see also: apps/bench-runner/src/longmemeval/snapshot.ts
+  readonly snapshotOut?: string;
 }
 
 export interface LongMemEvalRunResult {
@@ -182,7 +220,7 @@ export interface LongMemEvalHitScoringResult {
  * extracted fact of the answer turn surface") and is NOT directly
  * comparable to the pre-extraction 110623Z baseline. The first
  * post-extraction full run is the reference baseline for later
- * recall-optimization slices.
+ * recall-optimization runs.
  *
  * `active_constraints[]` is an independent governance channel and is
  * recorded in diagnostics only; it is never counted toward R@K.
@@ -192,6 +230,42 @@ export interface LongMemEvalHitScoringResult {
  *   section; its LongMemEval-S text must mirror this measurement-basis
  *   note (the report.md prose lives there, not in this package).
  */
+
+// @anchor BENCH_PROFILE_TIMER: env-gated per-question phase timer. Default
+// OFF; set ALAYA_BENCH_PROFILE=1 to emit one [bench_profile] line per
+// question on stderr. Consumed by smoke runs that need to diff per-phase
+// distribution (e.g. before/after SQLite tuning). The timer uses
+// hrtime.bigint() (ns); rendering converts to ms with one-decimal
+// precision. Phases are optional — only those `record`-ed appear in
+// the line.
+const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
+
+function isBenchProfileEnabled(): boolean {
+  const raw = process.env[BENCH_PROFILE_ENV];
+  if (raw === undefined) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "off" && normalized !== "no";
+}
+
+interface PhaseTimer {
+  readonly tick: () => bigint;
+  readonly record: (name: string, started: bigint) => void;
+  readonly format: () => string;
+}
+
+function createPhaseTimer(): PhaseTimer {
+  const samples: Array<{ name: string; ms: number }> = [];
+  return {
+    tick: () => process.hrtime.bigint(),
+    record: (name: string, started: bigint) => {
+      const elapsedNs = process.hrtime.bigint() - started;
+      const ms = Number(elapsedNs) / 1_000_000;
+      samples.push({ name, ms });
+    },
+    format: () => samples.map((s) => `${s.name}=${s.ms.toFixed(1)}ms`).join(" ")
+  };
+}
+
 export async function runLongMemEval(
   opts: LongMemEvalRunOptions
 ): Promise<LongMemEvalRunResult> {
@@ -248,23 +322,35 @@ export async function runLongMemEval(
     // and the run-level aggregator drops the sample before computing
     // distribution stats.
     recallTokenEconomy: BenchRecallTokenEconomy | null;
+    // Per-question EventLog rows for the K3.2 / K3.4 edge proposal
+    // KPI: SOUL_GRAPH_EDGE_PROPOSAL_CREATED + _REVIEWED. Empty when
+    // the run produced no proposals; the aggregator still returns
+    // undefined in that case so the KPI omits the block.
+    edgeProposalKpiRows: readonly EdgeProposalKpiEventRow[];
+    // @anchor longmemeval-snapshot-capture: per-question persisted scoring
+    // sidecar, populated only when opts.snapshotOut is set. Undefined on a
+    // normal run so the snapshot path adds zero cost.
+    snapshotQuestion?: LongMemEvalSnapshotQuestion;
   };
 
   async function runOneQuestion(
+    daemon: BenchDaemonHandle,
     question: typeof window[number],
     turnIndex: number,
     seedRunner: CompileSeedRunner
   ): Promise<WorkerResult> {
-    const daemon = await startBenchDaemon({
+    // @anchor bench-profile-instrumentation: per-question phase timing,
+    // gated by ALAYA_BENCH_PROFILE.
+    const profileEnabled = isBenchProfileEnabled();
+    const phase = createPhaseTimer();
+    const tAttach = phase.tick();
+    const workspace: BenchWorkspaceHandle = await daemon.attachWorkspace({
       workspaceId: `lme-${question.question_id.slice(0, 8)}`,
-      runId: `run-${question.question_id.slice(0, 8)}`,
-      embeddingMode: opts.embeddingMode ?? "disabled",
-      ...(opts.embeddingProviderKind === undefined
-        ? {}
-        : { embeddingProviderKind: opts.embeddingProviderKind }),
-      recallWeightOverrides
+      runId: `run-${question.question_id.slice(0, 8)}`
     });
+    phase.record("workspace_attach", tAttach);
     try {
+      const tSeedLoop = phase.tick();
       const sidecar = new Map<string, LongMemEvalSidecarEntry>();
       const answerSessionSet = new Set(question.answer_session_ids);
       let seedTurnsTruncated = 0;
@@ -286,6 +372,12 @@ export async function runLongMemEval(
         const rounds = pairSessionIntoRounds(session);
         // Per-session turns collected for the L2 synthesis seed below.
         const sessionTurns: SessionSeededTurn[] = [];
+        // anchor: same-session co-recall members. Collects every seeded
+        // memory_entry id of THIS session in seed order so the post-loop
+        // earned co-recall accrual selects co-occurring pairs. Order is
+        // session-deterministic (seed order), never gold-derived.
+        // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
+        const sessionMemberMemoryIds: string[] = [];
         let sessionHasAnswer = false;
         // anchor: session-adjacent derives_from. Carries the prior turn's
         // seeded memory_entry ids so the next turn's signal carries
@@ -299,12 +391,12 @@ export async function runLongMemEval(
 
           const evidenceRef = `${question.question_id}-s${si}-r${ri}`;
           const seedResult = await seedRunner.seedTurn({
-            daemon,
+            daemon: workspace,
             turnContent: round.content,
             evidenceRefBase: evidenceRef,
             seedIndex,
-            workspaceId: daemon.workspaceId,
-            runId: daemon.runId,
+            workspaceId: workspace.workspaceId,
+            runId: workspace.runId,
             ...(previousTurnSeedMemoryIds.length === 0
               ? {}
               : { sourceMemoryRefs: previousTurnSeedMemoryIds })
@@ -331,12 +423,24 @@ export async function runLongMemEval(
               turnContent: round.content,
               evidenceId: seed.evidenceId
             });
+            sessionMemberMemoryIds.push(seed.memoryId);
           }
           // invariant: single-id D-1 fan-out. see also:
           //   apps/bench-runner/src/longmemeval/compile-seed.ts computeNextTurnSeedRefs
           //   apps/bench-runner/src/locomo/runner.ts previousTurnSeedMemoryIds
           previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
         }
+
+        // invariant: same-session EARNED co-recall accrual. Drives the
+        // production onCoUsage counter gate over a bounded gold-blind pair set
+        // so THIS session earns a SPARSE set of recalls-tier co_recalled
+        // PathRelations (at most BENCH_CO_RECALL_WARMUP_PAIR_CAP), mirroring
+        // what production grows from B-1 cross-link over live
+        // report_context_usage co-usage (which the bench cannot exercise — no
+        // attached agent reports usage). Session membership (seed order) is the
+        // ONLY pair-selection signal; no gold turn is consulted.
+        // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
+        await workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
 
         // L2 synthesis seed: emit ONE session-level synthesis capsule pointing
         // at this session's real evidence_capsule ids. It is sidecar-tracked
@@ -346,7 +450,7 @@ export async function runLongMemEval(
           turns: sessionTurns
         });
         if (synthesisInput !== null) {
-          const synthesisResult = await daemon.proposeSynthesis(synthesisInput);
+          const synthesisResult = await workspace.proposeSynthesis(synthesisInput);
           if (synthesisResult.synthesisId !== null) {
             sidecar.set(buildLongMemEvalSidecarKey("synthesis_capsule", synthesisResult.synthesisId), {
               objectId: synthesisResult.synthesisId,
@@ -358,19 +462,24 @@ export async function runLongMemEval(
         }
       }
 
+      phase.record("seed_loop", tSeedLoop);
+
+      const tEmbeddingWarmup = phase.tick();
       const embeddingWarmup =
         opts.embeddingMode === "env"
-          ? await daemon.warmEmbeddingCache(deriveLongMemEvalMemoryObjectIds(sidecar))
+          ? await workspace.warmEmbeddingCache(deriveLongMemEvalMemoryObjectIds(sidecar))
           : null;
       const queryEmbeddingWarmup =
         opts.embeddingMode === "env"
-          ? await daemon.warmQueryEmbeddingCache([question.question])
+          ? await workspace.warmQueryEmbeddingCache([question.question])
           : null;
+      phase.record("embedding_warmup", tEmbeddingWarmup);
 
       const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
 
+      const tRecall = phase.tick();
       const recallCycle = await runLongMemEvalRecallCycle({
-        daemon,
+        daemon: workspace,
         query: question.question,
         recallOptions,
         simulateReport,
@@ -378,6 +487,7 @@ export async function runLongMemEval(
         turnIndex,
         questionText: question.question
       });
+      phase.record("recall", tRecall);
       const recallResult = recallCycle.scoredRecallResult;
       const latencyMs = recallCycle.scoredRecallLatencyMs;
       const results = recallResult.results;
@@ -418,23 +528,35 @@ export async function runLongMemEval(
         recallResult,
         embeddingMode: opts.embeddingMode ?? "disabled"
       });
+      const tKpiQuery = phase.tick();
       const reportSideEffectSnapshot =
-        await readLongMemEvalReportSideEffectSnapshot(question.question_id, daemon);
+        await readLongMemEvalReportSideEffectSnapshot(
+          question.question_id,
+          daemon,
+          workspace.workspaceId
+        );
       // Event-sourced token-economy figures for this question's run: read
       // back from the EventLog after the seed loop and every recall, so
       // each contributing SOUL_SIGNAL_EMITTED / SOUL_CONTEXT_LENS_ASSEMBLED
       // row is already persisted. Must run before the finally-shutdown.
-      const tokenMetrics = await daemon.queryTokenMetrics();
-      // Phase 7 per-recall STRUCTURAL token-economy sample. Pulled
-      // directly off the already-parsed BenchRecallDiagnostics. A null
-      // here means RecallService skipped the instrument because the
-      // recall was degraded (any non-null degradation_reason — warm/cold
-      // cascade or recall_explainability_partial), so diagnostics carry
-      // no token_economy block. The aggregator drops nulls before the
+      const tokenMetrics = await workspace.queryTokenMetrics();
+      // Per-recall STRUCTURAL token-economy sample. Pulled directly off
+      // the already-parsed BenchRecallDiagnostics. A null here means
+      // RecallService skipped the instrument because the recall was
+      // degraded (any non-null degradation_reason — warm/cold cascade
+      // or recall_explainability_partial), so diagnostics carry no
+      // token_economy block. The aggregator drops nulls before the
       // distribution stats so degraded recalls don't dilute the run.
       // see also: packages/core/src/recall-service.ts
       // (computeRecallTokenEconomy call site).
       const recallTokenEconomy = extractRecallTokenEconomy(recallResult);
+      // K3.2 / K3.4 edge proposal KPI rows for this question's run:
+      // SOUL_GRAPH_EDGE_PROPOSAL_CREATED + _REVIEWED EventLog rows.
+      // Read back after seeding + recall so every auto-accept policy
+      // decision is durably persisted before aggregation.
+      // see also: packages/eval/src/edge-proposal-kpi.ts
+      const edgeProposalKpiRows = await workspace.queryEdgeProposalKpiRows();
+      phase.record("kpi_query", tKpiQuery);
 
       return {
         questionId: question.question_id,
@@ -453,10 +575,35 @@ export async function runLongMemEval(
         reportUsageStats: recallCycle.reportUsageStats,
         reportSideEffectSnapshot,
         tokenMetrics,
-        recallTokenEconomy
+        recallTokenEconomy,
+        edgeProposalKpiRows,
+        ...(opts.snapshotOut === undefined
+          ? {}
+          : {
+              snapshotQuestion: {
+                questionId: question.question_id,
+                question: question.question,
+                answerSessionIds: [...question.answer_session_ids],
+                workspaceId: workspace.workspaceId,
+                runId: workspace.runId,
+                sidecar: [...sidecar.values()].map((entry) => ({
+                  objectId: entry.objectId,
+                  objectKind: entry.objectKind,
+                  sessionId: entry.sessionId,
+                  hasAnswer: entry.hasAnswer
+                }))
+              }
+            })
       };
     } finally {
-      await daemon.shutdown();
+      const tDetach = phase.tick();
+      await workspace.detach();
+      phase.record("workspace_detach", tDetach);
+      if (profileEnabled) {
+        process.stderr.write(
+          `[bench_profile] question=${question.question_id} ${phase.format()}\n`
+        );
+      }
     }
   }
 
@@ -468,17 +615,87 @@ export async function runLongMemEval(
   // invariant: one seed runner for the whole run so the on-disk extraction
   // cache and stats accumulate across every question. Extraction happens at
   // seed time only — never on the recall path below.
-  const seedRunner = createCompileSeedRunner();
+  // @anchor longmemeval-daemon-per-run: one bench daemon spans the run;
+  // per-question isolation is via daemon.attachWorkspace (BenchDaemonHandle).
+  // createCompileSeedRunner() runs a ~1s run-start fail-loud preflight against
+  // the extraction cache manifest (model / prompt-sha / coverage); a mismatch
+  // throws here instead of silently degrading to a 466h live run.
+  // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+  //   preflightExtractionCache
+  // @anchor longmemeval-window-containment-preflight: hand the preflight THIS
+  // run's flattened question window so it validates window-containment (every
+  // turn this run needs has an on-disk fixture) rather than trusting the
+  // manifest coverage scalar, which is only relative to the last
+  // extraction-fill's window. cross-file: compile-seed.ts preflightExtractionCache
+  const requiredTurnContents = collectDistinctTurnContents(window);
+  const seedRunner = createCompileSeedRunner({
+    requiredTurnContents,
+    ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
+  });
   const collected: WorkerResult[] = [];
-  for (let i = 0; i < window.length; i++) {
-    const q = window[i];
-    if (q === undefined) continue;
-    const res = await runOneQuestion(q, i + 1, seedRunner);
-    collected.push(res);
-    process.stdout.write(
-      `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
-        `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
-    );
+  // @anchor longmemeval-snapshot-capture: when seeding for a recall-eval
+  // snapshot, capture each question's scoring sidecar + workspace ids so they
+  // can be persisted beside the DB (the seed loop otherwise discards them).
+  const snapshotQuestions: LongMemEvalSnapshotQuestion[] = [];
+  const captureSnapshot = opts.snapshotOut !== undefined;
+  const benchRunId = `lme-bench-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // dataDirRoot is pinned (not the daemon's throwaway mkdtemp) when a fixed
+  // dataDirRoot is requested OR a snapshot is being produced, so the seeded DB
+  // lands at a known path to checkpoint + copy.
+  const seedDataDirRoot =
+    opts.dataDirRoot ??
+    (captureSnapshot
+      ? await mkdtemp(join(tmpdir(), "alaya-bench-seed-"))
+      : undefined);
+  const removeSeedDataDirRoot = opts.dataDirRoot === undefined && captureSnapshot;
+  let daemon: BenchDaemonHandle | undefined;
+  try {
+    daemon = await startBenchDaemon({
+      workspaceId: `${benchRunId}-default`,
+      runId: `${benchRunId}-default-run`,
+      embeddingMode: opts.embeddingMode ?? "disabled",
+      ...(opts.embeddingProviderKind === undefined
+        ? {}
+        : { embeddingProviderKind: opts.embeddingProviderKind }),
+      ...(seedDataDirRoot === undefined ? {} : { dataDirRoot: seedDataDirRoot }),
+      recallWeightOverrides
+    });
+    for (let i = 0; i < window.length; i++) {
+      const q = window[i];
+      if (q === undefined) continue;
+      const res = await runOneQuestion(daemon, q, i + 1, seedRunner);
+      collected.push(res);
+      if (captureSnapshot && res.snapshotQuestion !== undefined) {
+        snapshotQuestions.push(res.snapshotQuestion);
+      }
+      process.stdout.write(
+        `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
+          `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
+      );
+    }
+    // @anchor longmemeval-seed-then-snapshot: emit the recall-eval snapshot
+    // while the daemon DB connection is still open, so wal_checkpoint flushes
+    // every committed frame before the file copy. Runs only with --snapshot-out.
+    if (opts.snapshotOut !== undefined && seedDataDirRoot !== undefined) {
+      writeRecallEvalSnapshot({
+        snapshotOut: opts.snapshotOut,
+        seedDataDirRoot,
+        variant: opts.variant,
+        commitSha7,
+        snapshotQuestions
+      });
+      process.stdout.write(
+        `[longmemeval snapshot] wrote ${snapshotQuestions.length} questions -> ${opts.snapshotOut}\n`
+      );
+    }
+  } finally {
+    try {
+      await daemon?.shutdown();
+    } finally {
+      if (removeSeedDataDirRoot && seedDataDirRoot !== undefined) {
+        await rm(seedDataDirRoot, { recursive: true, force: true });
+      }
+    }
   }
   const extractionStats = seedRunner.stats;
   // Disclose which seed path ran: official_api_compile (production garden
@@ -516,6 +733,14 @@ export async function runLongMemEval(
   const reportSideEffectSnapshots: LongMemEvalReportSideEffectSnapshot[] = [];
   const embeddingWarmups: BenchEmbeddingWarmupSummary[] = [];
   const queryEmbeddingWarmups: BenchQueryEmbeddingWarmupSummary[] = [];
+  // @anchor edge-proposal-rate-per-question: keep per-question row chunks
+  // so aggregateEdgeProposalRate can emit the proposals_per_question
+  // distribution. K3.2's "40-80/workspace/day" target is uninterpretable
+  // off per_workspace_per_day_* alone because the bench harness uses
+  // one workspaceId per run. see also: packages/eval/src/kpi-schema.ts.
+  // The flat across-questions list is derived by flattening these chunks at
+  // the aggregator call site rather than stored a second time.
+  const edgeProposalKpiRowsPerQuestion: EdgeProposalKpiEventRow[][] = [];
 
   for (let i = 0; i < collected.length; i++) {
     const res = collected[i];
@@ -549,6 +774,7 @@ export async function runLongMemEval(
     if (res.recallTokenEconomy !== null) {
       recallTokenEconomySamples.push(res.recallTokenEconomy);
     }
+    edgeProposalKpiRowsPerQuestion.push([...res.edgeProposalKpiRows]);
     perScenario.push({
       id: res.questionId,
       version: 1,
@@ -590,12 +816,24 @@ export async function runLongMemEval(
   const tokenEconomyInput = aggregateBenchTokenMetrics(tokenMetricsPerQuestion);
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
-  // Phase 7 per-recall STRUCTURAL token-economy distribution (p50/p95/mean
+  // Per-recall STRUCTURAL token-economy distribution (p50/p95/mean
   // across all recall calls in the run). Null when no question produced
   // diagnostics — the KPI omits the block in that case so consumers do
   // not see a zero-filled section that looks like real data.
   const recallTokenEconomy = aggregateRecallTokenEconomy(
     recallTokenEconomySamples
+  );
+  // K3.2 / K3.4: aggregate edge proposal create/review EventLog rows
+  // collected from every per-question bench daemon into one run total.
+  // Each aggregator returns undefined when no events were observed —
+  // the KPI omits the block in that case (honest reporting).
+  const edgeProposalKpiRowsAcrossQuestions = edgeProposalKpiRowsPerQuestion.flat();
+  const edgeProposalRate = aggregateEdgeProposalRate(
+    edgeProposalKpiRowsAcrossQuestions,
+    edgeProposalKpiRowsPerQuestion
+  );
+  const edgeProposalAutoAccept = aggregateEdgeProposalAutoAccept(
+    edgeProposalKpiRowsAcrossQuestions
   );
 
   const payload: KpiPayload = {
@@ -674,21 +912,29 @@ export async function runLongMemEval(
       },
       seed_extraction_path: toSeedExtractionPathKpi(extractionStats),
       quality_metrics: buildLongMemEvalQualityMetrics(questionDiagnostics),
+      ...(edgeProposalRate === undefined
+        ? {}
+        : { edge_proposal_rate: edgeProposalRate }),
+      ...(edgeProposalAutoAccept === undefined
+        ? {}
+        : { edge_proposal_auto_accept: edgeProposalAutoAccept }),
       per_scenario: perScenario
     }
   };
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
-  // Diff against the latest entry of the SAME split. Oracle vs S are
-  // not comparable retrieval evaluations (Oracle's session filter is
+  // Diff against the latest PASSING full-run entry of the SAME split. Oracle vs
+  // S are not comparable retrieval evaluations (Oracle's session filter is
   // no-op, S's is meaningful). See packages/eval/src/history.ts
-  // @anchor read-latest-split-aware.
-  const previous = await readLatest(layout, "public", {
+  // @anchor read-latest-split-aware. selectFullRunBaseline additionally
+  // excludes fast-loop recall-eval archives, which share this public/ bucket +
+  // passing pointer but never paid extraction/materialization.
+  // cross-file: apps/bench-runner/src/longmemeval/recall-eval-archive.ts
+  const previous = await selectFullRunBaseline(layout, "public", {
     split: payload.split,
     policyShape,
     simulateReport,
-    embeddingProvider: payload.embedding_provider,
-    pointerKind: "passing"
+    embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
   payload.diff_vs_previous = buildDiffVsPrevious(
@@ -823,14 +1069,14 @@ export async function runLongMemEvalRecallCycle(input: {
   readonly questionText: string;
 }): Promise<LongMemEvalRecallCycleResult> {
   if (input.simulateReport === "none") {
-    const recallStart = Date.now();
+    const recallStart = monotonicNowNs();
     const scoredRecallResult = await input.daemon.recall(
       input.query,
       input.recallOptions
     );
     return {
       scoredRecallResult,
-      scoredRecallLatencyMs: Date.now() - recallStart,
+      scoredRecallLatencyMs: monotonicElapsedMs(recallStart),
       reportUsageStats: {
         reportsAttempted: 0,
         reportsUsed: 0,
@@ -856,32 +1102,53 @@ export async function runLongMemEvalRecallCycle(input: {
     await input.daemon.reportContextUsage(reportUsage.reportInput);
   }
 
-  const recallStart = Date.now();
+  const recallStart = monotonicNowNs();
   const scoredRecallResult = await input.daemon.recall(
     input.query,
     input.recallOptions
   );
   return {
     scoredRecallResult,
-    scoredRecallLatencyMs: Date.now() - recallStart,
+    scoredRecallLatencyMs: monotonicElapsedMs(recallStart),
     reportUsageStats: reportUsage.stats
   };
 }
 
 async function readLongMemEvalReportSideEffectSnapshot(
   questionId: string,
-  daemon: Pick<BenchDaemonHandle, "runtime" | "workspaceId">
+  daemon: Pick<BenchDaemonHandle, "runtime">,
+  workspaceId: string
 ): Promise<LongMemEvalReportSideEffectSnapshot> {
   const status = await daemon.runtime.services.graphHealthService.getStatus(
-    daemon.workspaceId
+    workspaceId
   );
-  const byType = { ...status.memory_graph_edges_by_type };
+  // invariant: memory_graph_edges_by_type aliases the unified path plane
+  // (path_relations_by_kind / _total) and must carry every canonical
+  // edge_type key (defaulting to 0) so historical-archive deltas keep a stable
+  // key set. graphHealthService groups by raw constitution.relation_kind, so
+  // a recalls-tier kind (co_recalled / shares_entity / signal_graph_ref) lands
+  // under its own key, NOT under "recalls". mapRelationKindToGraphEdgeType folds
+  // each kind into its canonical graph edge_type bucket — the SAME fold
+  // graph-explore-service applies when it counts inbound recalls — so the
+  // archive's recalls_edge_count reflects the recalls TIER (what production
+  // grows from B-1 cross-link as co_recalled), not just literal "recalls".
+  // Without the fold, the bench co-recall hub's co_recalled paths would be
+  // invisible to recalls_edge_count and the plane would read dead again.
+  // canonical key set: @do-soul/alaya-protocol MemoryGraphEdgeType.
+  // see also: packages/core/src/graph-explore-service.ts (recalls-tier count)
+  const byKind: Record<string, number> = Object.fromEntries(
+    Object.values(MemoryGraphEdgeType).map((edgeType) => [edgeType, 0])
+  );
+  for (const [kind, count] of Object.entries(status.path_relations_by_kind)) {
+    const edgeType = mapRelationKindToGraphEdgeType(kind);
+    byKind[edgeType] = (byKind[edgeType] ?? 0) + count;
+  }
   return {
     question_id: questionId,
     workspace_id: status.workspace_id,
-    memory_graph_edges_total: status.memory_graph_edges_total,
-    memory_graph_edges_by_type: byType,
-    recalls_edge_count: byType.recalls ?? 0,
+    memory_graph_edges_total: status.path_relations_total,
+    memory_graph_edges_by_type: byKind,
+    recalls_edge_count: byKind.recalls ?? 0,
     path_relations_total: status.path_relations_total,
     latest_path_event_at: status.latest_path_event_at,
     warnings: status.warnings
@@ -1024,6 +1291,71 @@ function recallOptionsForPolicyShape(
     maxResults: 10,
     conflictAwareness: policyShape === "stress"
   };
+}
+
+/**
+ * @anchor longmemeval-seed-then-snapshot — produce a recall-eval snapshot.
+ *
+ * Checkpoints + copies the seeded daemon DB to `snapshotOut`, then writes the
+ * per-question scoring sidecar + a version-binding manifest beside it. Reads
+ * the schema migration version off the live DB and the extraction-cache
+ * manifest's provenance so recall-eval can bind the snapshot and inherit
+ * gate-only fields. MUST be called before daemon.shutdown() (the DB connection
+ * must be open for the checkpoint).
+ *
+ * see also: apps/bench-runner/src/longmemeval/snapshot.ts
+ * see also: apps/bench-runner/src/longmemeval/recall-eval.ts (consumer)
+ */
+function writeRecallEvalSnapshot(input: {
+  readonly snapshotOut: string;
+  readonly seedDataDirRoot: string;
+  readonly variant: LongMemEvalVariant;
+  readonly commitSha7: string;
+  readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
+}): void {
+  const liveDbPath = resolve(input.seedDataDirRoot, BENCH_DAEMON_DB_FILENAME);
+  const schemaMigrationVersion = readSchemaMigrationVersion(liveDbPath);
+  checkpointAndCopyBenchDb(liveDbPath, input.snapshotOut);
+
+  const extractionManifest = readExtractionCacheManifest(EXTRACTION_CACHE_ROOT);
+  const extractionProvenance: SnapshotExtractionProvenance | null =
+    extractionManifest === undefined
+      ? null
+      : {
+          extraction_model: extractionManifest.extraction_model,
+          provider_url: extractionManifest.provider_url,
+          system_prompt_sha256: extractionManifest.system_prompt_sha256,
+          dataset: extractionManifest.dataset,
+          dataset_revision: extractionManifest.dataset_revision,
+          ...(extractionManifest.coverage === undefined
+            ? {}
+            : { coverage: extractionManifest.coverage }),
+          ...(extractionManifest.cached_turns === undefined
+            ? {}
+            : { cached_turns: extractionManifest.cached_turns }),
+          ...(extractionManifest.requested_turns === undefined
+            ? {}
+            : { requested_turns: extractionManifest.requested_turns })
+        };
+
+  writeSnapshotSidecar(input.snapshotOut, {
+    schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
+    variant: input.variant,
+    questions: input.snapshotQuestions
+  });
+  writeSnapshotManifest(input.snapshotOut, {
+    schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
+    variant: input.variant,
+    question_count: input.snapshotQuestions.length,
+    recall_pipeline_version: RECALL_PIPELINE_VERSION,
+    schema_migration_version: schemaMigrationVersion,
+    bench_runner_version: resolveBenchRunnerVersion(),
+    alaya_commit: input.commitSha7,
+    db_filename: basename(input.snapshotOut),
+    sidecar_filename: `${basename(input.snapshotOut)}.sidecar.json`,
+    built_at: new Date().toISOString(),
+    extraction_provenance: extractionProvenance
+  });
 }
 
 /**

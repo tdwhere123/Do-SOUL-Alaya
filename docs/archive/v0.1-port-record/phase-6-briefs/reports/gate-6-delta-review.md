@@ -325,7 +325,7 @@ foot-gun (someone forgets to override after the spread).
   `packages/protocol/src/soul/mcp-types.ts:103-109,180-194`
   (deliberately omits workspace_id).
 - The Phase-6 proof at
-  `apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts:172-175`
+  `apps/core-daemon/src/__tests__/agent-use-protocol.test.ts:172-175`
   sends matching values rather than proving mismatched payload scope is
   ignored.
 

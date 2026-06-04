@@ -42,6 +42,19 @@ const retentionStateValues = ["working", "consolidated", "canon", "archived", "t
 
 const storageTierValues = ["hot", "warm", "cold"] as const;
 
+// invariant: durable forgetting-disposition marker. A memory is eligible for
+// AUTONOMOUS terminal removal ONLY when this is non-null; null is never
+// autonomously removed. The precondition is enforced at BOTH the
+// autonomous-tombstone step and the physical-delete authority (defense in
+// depth). Set only by an audited dormant->tombstoned transition emitting a
+// SOUL_MEMORY_STATE_CHANGED EventLog row, never implicitly.
+//   compressed     — content preserved in a live synthesis capsule that
+//                    references this memory; forget_disposition_ref = capsule id.
+//   judged_useless — the mechanical memory importance gate cleared it for drop;
+//                    forget_disposition_ref is null.
+// see also: packages/core/src/importance-gate.ts classifyMemoryImportance.
+const forgetDispositionValues = ["compressed", "judged_useless"] as const;
+
 export const MemoryDimension = {
   PREFERENCE: "preference",
   CONSTRAINT: "constraint",
@@ -98,6 +111,11 @@ export const StorageTier = {
   COLD: "cold"
 } as const;
 
+export const ForgetDisposition = {
+  COMPRESSED: "compressed",
+  JUDGED_USELESS: "judged_useless"
+} as const;
+
 export const MemoryDimensionSchema = z.enum(memoryDimensionValues);
 export const SourceKindSchema = z.enum(sourceKindValues);
 export const FormationKindSchema = z.enum(formationKindValues);
@@ -105,6 +123,7 @@ export const DecayProfileSchema = z.enum(decayProfileValues);
 export const ManifestationStateSchema = z.enum(manifestationStateValues);
 export const RetentionStateSchema = z.enum(retentionStateValues);
 export const StorageTierSchema = z.enum(storageTierValues);
+export const ForgetDispositionSchema = z.enum(forgetDispositionValues);
 const MemoryEntryMutableFieldsBaseSchema = z.object({
   // Bound `content` plus each `domain_tags` / `evidence_refs` element so
   // a single MCP call cannot pin the daemon with a 100MB string field.
@@ -164,7 +183,13 @@ export const MemoryEntrySchema = PersistentObjectEnvelopeSchema.unwrap()
     last_hit_at: IsoDatetimeStringSchema.nullable(),
     reinforcement_count: NonNegativeIntSchema.nullable(),
     contradiction_count: NonNegativeIntSchema.nullable(),
-    superseded_by: NonEmptyStringSchema.nullable()
+    superseded_by: NonEmptyStringSchema.nullable(),
+    // invariant: optional on the wire (legacy rows + most constructors omit it),
+    // but the storage layer always materializes it as null|value. Safety treats
+    // undefined and null identically as "no disposition" — non-null/defined is
+    // the hard precondition for autonomous terminal removal.
+    forget_disposition: ForgetDispositionSchema.nullable().optional(),
+    forget_disposition_ref: NonEmptyStringSchema.nullable().optional()
   })
   .readonly();
 
@@ -175,6 +200,7 @@ export type DecayProfile = z.infer<typeof DecayProfileSchema>;
 export type ManifestationState = z.infer<typeof ManifestationStateSchema>;
 export type RetentionState = z.infer<typeof RetentionStateSchema>;
 export type StorageTier = z.infer<typeof StorageTierSchema>;
+export type ForgetDisposition = z.infer<typeof ForgetDispositionSchema>;
 export type MemoryEntryMutableFields = z.infer<typeof MemoryEntryMutableFieldsSchema>;
 export type MemoryEntryRepoUpdateFields = z.infer<typeof MemoryEntryRepoUpdateFieldsSchema>;
 export type MemoryEntry = z.infer<typeof MemoryEntrySchema>;

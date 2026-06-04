@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -11,6 +11,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   CandidateMemorySignalSchema,
   ControlPlaneObjectKind,
+  GraphAuditorEventType,
   RecallContextEventType,
   RunMode,
   RunState,
@@ -38,7 +39,13 @@ import {
   type SoulReportContextUsageResponse,
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
+import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
+import { PATH_RELATION_PROPOSE_THRESHOLD } from "@do-soul/alaya-core";
 import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
+import {
+  planSessionCoRecallWarmup,
+  type CoRecallWarmupSummary
+} from "./co-recall-warmup.js";
 import {
   initDatabase,
   SqliteEventLogRepo,
@@ -121,6 +128,47 @@ export interface BenchSynthesisSeedInput {
 export interface SeededSynthesisResult {
   /** Durable synthesis_capsule object_id created by SynthesisService.create. */
   readonly synthesisId: string | null;
+}
+
+/**
+ * Why one compile-seed signal failed to produce a durable memory_entry.
+ *
+ * - `candidate_absent`: the signal was received and triaged, but the
+ *   MaterializationRouter routed it to evidence_only / deferred — no
+ *   memory_entry was created. This is an expected sub-threshold outcome, not
+ *   an error; it surfaces a seed-quality (candidate-absent) signal.
+ * - `materialization_error`: the signal THREW during receiveSignal / schema
+ *   parse / acceptSeededMemory. Historically this aborted the whole turn batch
+ *   (its healthy batch-mates were lost too — the 1963-signal archive drop);
+ *   it is now isolated per-signal so one bad signal never drops its mates.
+ */
+export type CompileSeedDropReason = "candidate_absent" | "materialization_error";
+
+/**
+ * One per-signal drop record from proposeMemoriesFromCompileSignals. `detail`
+ * carries the routing_reason (candidate_absent) or the error message
+ * (materialization_error) so the caller can persist a root-causable reason
+ * into the run KPI instead of only logging to stderr.
+ */
+export interface CompileSeedSignalDrop {
+  readonly reason: CompileSeedDropReason;
+  readonly detail: string;
+}
+
+/**
+ * Result of seeding ONE turn's batch of compile-extracted signals. Carries the
+ * materialized seeds AND a per-signal drop ledger so the caller no longer
+ * infers drops from a `inputs.length - seeds.length` subtraction (which could
+ * not distinguish an expected candidate_absent skip from a thrown
+ * materialization error, and which silently lost an entire batch when any one
+ * signal threw).
+ *
+ * invariant: seeds.length + dropped.length === inputs.length. Every input is
+ * accounted for exactly once.
+ */
+export interface CompileSeedBatchResult {
+  readonly seeds: readonly SeededMemoryResult[];
+  readonly dropped: readonly CompileSeedSignalDrop[];
 }
 
 /**
@@ -266,6 +314,69 @@ export interface BenchEmbeddingWarmupSummary {
   readonly model_id: string | null;
 }
 
+export interface DrainEmbeddingWarmupPassesInput {
+  readonly maxPasses: number;
+  readonly maxStallPasses: number;
+  readonly runPass: () => Promise<void>;
+  readonly readSummary: (passCount: number) => Promise<BenchEmbeddingWarmupSummary>;
+}
+
+export interface DrainEmbeddingWarmupPassesResult {
+  readonly summary: BenchEmbeddingWarmupSummary;
+  readonly lastPassError: string | null;
+}
+
+export function formatEmbeddingWarmupNotReadyError(
+  summary: BenchEmbeddingWarmupSummary,
+  lastPassError: string | null
+): string {
+  const preview = summary.missing_object_ids.slice(0, 5).join(", ");
+  return (
+    `embedding warm cache not ready after ${summary.pass_count} pass(es): ` +
+    `ready=${summary.ready_count} expected=${summary.expected_count} ` +
+    `missing=${summary.missing_object_ids.length}` +
+    (preview.length === 0 ? "" : ` first_missing=${preview}`) +
+    (lastPassError === null ? "" : ` last_error=${lastPassError}`)
+  );
+}
+
+// invariant: drains by progress against an injected runPass(). For embedding
+// warmup, runPass() is runGardenEmbeddingBackfillPass — a targeted
+// EMBEDDING_BACKFILL-only drain whose O(n) handler embeds the whole workspace
+// hot corpus in one productive pass (no single-Librarian-slot competition with
+// other Garden kinds). A pass that raises ready_count resets the stall budget;
+// a pass that does not (a stuck or failing embedding) spends one stall unit.
+// Exits when ready_count === expected_count, or the stall budget / maxPasses
+// ceiling is hit; both guarantee termination on a stuck embedding.
+// see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
+export async function drainEmbeddingWarmupPasses(
+  input: DrainEmbeddingWarmupPassesInput
+): Promise<DrainEmbeddingWarmupPassesResult> {
+  let passCount = 0;
+  let stallPasses = 0;
+  let lastPassError: string | null = null;
+  let summary = await input.readSummary(passCount);
+
+  while (
+    summary.ready_count < summary.expected_count &&
+    passCount < input.maxPasses &&
+    stallPasses < input.maxStallPasses
+  ) {
+    const readyBefore = summary.ready_count;
+    try {
+      await input.runPass();
+      lastPassError = null;
+    } catch (error) {
+      lastPassError = toErrorMessage(error);
+    }
+    passCount++;
+    summary = await input.readSummary(passCount);
+    stallPasses = summary.ready_count > readyBefore ? 0 : stallPasses + 1;
+  }
+
+  return { summary, lastPassError };
+}
+
 export interface BenchQueryEmbeddingWarmupSummary {
   readonly status: "not_requested" | "ready";
   readonly requested_count: number;
@@ -390,16 +501,21 @@ export interface BenchDaemonHandle {
    * straight from the result with no event-log scan.
    *
    * Returns one SeededMemoryResult per signal that materialized a durable
-   * memory_entry. A signal the MaterializationRouter routed to evidence_only
-   * / deferred (no memory_entry) is skipped, so the returned list may be
-   * SHORTER than `inputs`; the shortfall is the caller's drop count.
+   * memory_entry PLUS a per-signal drop ledger for every signal that did not.
+   * A signal the MaterializationRouter routed to evidence_only / deferred (no
+   * memory_entry) is recorded with reason=candidate_absent; a signal that
+   * THREW during receiveSignal / schema parse / accept is isolated per-signal
+   * and recorded with reason=materialization_error — one bad signal never
+   * aborts its healthy batch-mates.
+   *
+   * invariant: seeds.length + dropped.length === inputs.length.
    *
    * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
    * see also: apps/core-daemon/src/garden-runtime.ts processPostTurnExtractTask
    */
   proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
-  ): Promise<readonly SeededMemoryResult[]>;
+  ): Promise<CompileSeedBatchResult>;
   /**
    * @anchor proposeSynthesis — session-level L2 synthesis seed
    *
@@ -418,6 +534,31 @@ export interface BenchDaemonHandle {
    */
   proposeSynthesis(input: BenchSynthesisSeedInput): Promise<SeededSynthesisResult>;
   /**
+   * @anchor accrueSessionCoRecall — same-session EARNED co-recall accrual
+   *
+   * EARNS recalls-tier co_recalled PathRelations among ONE session's member
+   * memory ids by driving the PRODUCTION counter gate
+   * (PathRelationProposalService.onCoUsage -> accrueCoOccurrence ->
+   * co_usage_threshold -> proposeCoRecalled with CO_RECALLED_SEED_PROFILE). A
+   * bounded, gold-blind set of adjacent member pairs (planSessionCoRecallWarmup)
+   * is replayed `threshold` times so each pair clears the production threshold
+   * and mints exactly one co_recalled edge — earned, not minted on sight. The
+   * resulting topology is SPARSE: at most BENCH_CO_RECALL_WARMUP_PAIR_CAP edges
+   * per session. Faithfully approximates B-1 cross-link's live
+   * report_context_usage co-usage, which the bench cannot grow (no attached
+   * agent reports usage). The earned edges are ACCEPTED/materialized and
+   * recall-eligible at the born band (recall_bias +0.5, active lifecycle).
+   *
+   * Pair selection uses ONLY session membership in seed order — never
+   * gold/answer knowledge.
+   *
+   * see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
+   * see also: packages/core/src/path-relation-proposal-service.ts onCoUsage
+   */
+  accrueSessionCoRecall(
+    memberMemoryIds: readonly string[]
+  ): Promise<CoRecallWarmupSummary>;
+  /**
    * @anchor queryTokenMetrics — event-sourced token-economy reader.
    *
    * Re-reads the bench run's EventLog (the SAME read pattern as
@@ -426,7 +567,60 @@ export interface BenchDaemonHandle {
    * the seed loop and all recalls so every contributing event is present.
    */
   queryTokenMetrics(): Promise<BenchTokenMetrics>;
+  /**
+   * @anchor queryEdgeProposalKpiRows — event-sourced edge proposal reader
+   * for K3.2 / K3.4 aggregation.
+   *
+   * Re-reads SOUL_GRAPH_EDGE_PROPOSAL_CREATED + SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED
+   * rows from the bench DB. Returns the minimal row shape the aggregator
+   * in @do-soul/alaya-eval needs; the bench-runner aggregates them into
+   * KpiCore.edge_proposal_rate and KpiCore.edge_proposal_auto_accept.
+   *
+   * Call after the run completes so every contributing event is durably
+   * written.
+   *
+   * see also: packages/eval/src/edge-proposal-kpi.ts
+   */
+  queryEdgeProposalKpiRows(): Promise<readonly EdgeProposalKpiEventRow[]>;
+  /**
+   * @anchor attachWorkspace — bind the daemon's active workspace/run pair.
+   *
+   * The bench daemon is long-running across a full bench; per-question
+   * isolation is achieved by switching workspaces, not restarting the
+   * daemon. Returned handle exposes the same per-workspace method surface
+   * (recall, propose*, warm*, query*) as the daemon handle, bound to the
+   * workspace it was attached for. Call detach() before binding another
+   * workspace.
+   *
+   * see also: packages/core/src/recall-service.ts (workspace_id filter)
+   */
+  attachWorkspace(input: {
+    readonly workspaceId: string;
+    readonly runId: string;
+  }): Promise<BenchWorkspaceHandle>;
   shutdown(): Promise<void>;
+}
+
+/**
+ * @anchor BenchWorkspaceHandle — per-question / per-conversation workspace
+ * scoped view of an already-running bench daemon. Calls route through the
+ * same daemon resources but read activeContext for workspace_id / run_id.
+ */
+export interface BenchWorkspaceHandle {
+  readonly workspaceId: string;
+  readonly runId: string;
+  recall: BenchDaemonHandle["recall"];
+  warmEmbeddingCache: BenchDaemonHandle["warmEmbeddingCache"];
+  warmQueryEmbeddingCache: BenchDaemonHandle["warmQueryEmbeddingCache"];
+  reportContextUsage: BenchDaemonHandle["reportContextUsage"];
+  proposeMemory: BenchDaemonHandle["proposeMemory"];
+  proposeMemoryFromSignal: BenchDaemonHandle["proposeMemoryFromSignal"];
+  proposeMemoriesFromCompileSignals: BenchDaemonHandle["proposeMemoriesFromCompileSignals"];
+  proposeSynthesis: BenchDaemonHandle["proposeSynthesis"];
+  accrueSessionCoRecall: BenchDaemonHandle["accrueSessionCoRecall"];
+  queryTokenMetrics: BenchDaemonHandle["queryTokenMetrics"];
+  queryEdgeProposalKpiRows: BenchDaemonHandle["queryEdgeProposalKpiRows"];
+  detach(): Promise<void>;
 }
 
 const MANAGED_ENV_KEYS = [
@@ -455,13 +649,28 @@ const DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL = "Xenova/paraphrase-multilingual-MiniL
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
 const BENCH_EMBEDDING_SCHEMA_VERSION = 1;
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 10;
+// invariant: bounds the no-progress passes warmup tolerates before giving up,
+// large enough to outlast the per-pass Librarian slot competition (the runtime
+// dispatches one Librarian task per pass) so EMBEDDING_BACKFILL eventually wins
+// the slot, small enough that a genuinely stuck embedding terminates.
+// see also: apps/core-daemon/src/garden-runtime.ts LIBRARIAN_RUNTIME_TASK_KINDS
+const EMBEDDING_WARMUP_MAX_STALL_PASSES = 10;
 let activeBenchDaemonCount = 0;
 
 export async function startBenchDaemon(
   opts: BenchDaemonOptions = {}
 ): Promise<BenchDaemonHandle> {
-  const workspaceId = opts.workspaceId ?? "bench-workspace-1";
-  const runId = opts.runId ?? "bench-run-1";
+  const defaultWorkspaceId = opts.workspaceId ?? "bench-workspace-1";
+  const defaultRunId = opts.runId ?? "bench-run-1";
+  // @anchor bench-active-context: the workspace/run identity bench tool
+  // calls bind. Per-call workspace switching (attachWorkspace) mutates the
+  // same cell so the MCP contextProvider, recall(), proposeMemoryFromSignal()
+  // etc all observe the current workspace without re-emitting the daemon.
+  const activeContext: { workspaceId: string; runId: string } = {
+    workspaceId: defaultWorkspaceId,
+    runId: defaultRunId
+  };
+  const knownWorkspaces = new Set<string>([defaultWorkspaceId]);
   const embeddingMode = opts.embeddingMode ?? "disabled";
   const embeddingProviderKind: BenchEmbeddingProviderKind =
     opts.embeddingProviderKind ?? DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND;
@@ -482,6 +691,7 @@ export async function startBenchDaemon(
 
   const dataDir =
     opts.dataDirRoot ?? (await mkdtemp(join(tmpdir(), "alaya-bench-")));
+  const managedWorkspaceRoots = new Map<string, string>();
 
   const savedEnv: Partial<Record<ManagedEnvKey, string | undefined>> = {};
   for (const key of MANAGED_ENV_KEYS) {
@@ -570,18 +780,26 @@ export async function startBenchDaemon(
     // plus a startup pass), which peekPendings POST_TURN_EXTRACT tasks across all
     // workspaces and would fire mid-seed-loop — racing the bench's explicit
     // in-process compile-signal seed path. A benchmark needs deterministic
-    // Garden control: the bench drives
-    // every garden task explicitly, and runs an explicit garden background pass
-    // via runtime.runGardenBackgroundPass() (e.g. for embedding warmup) after the
-    // seed loop completes, when no bench-enqueued task is in flight.
-    // runGardenBackgroundPass() does not depend on startBackgroundServices() having
-    // run, so suppressing the autonomous interval keeps the explicit path intact.
+    // Garden control: the bench drives every garden task explicitly.
+    //
+    // Embedding readiness (ON-only) uses the TARGETED
+    // runtime.runGardenEmbeddingBackfillPass(workspaceId), NOT the full
+    // runGardenBackgroundPass(). The ~156k auto-edges are produced by the
+    // BULK_ENRICH worker (EdgeAutoProducer + ConflictDetectionService run there,
+    // OFF the materialization path — MaterializationRouter does not run them
+    // inline), which only the full background pass drains. embedding-OFF never
+    // runs any of that, so the targeted backfill keeps ON's seeded corpus
+    // identical to OFF (comparability) while skipping the CPU-heavy edge work.
+    // Neither pass depends on startBackgroundServices() having run, so
+    // suppressing the autonomous interval keeps the explicit path intact.
+    // see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass;
+    //   packages/soul/src/garden/materialization-router.ts (EdgeAutoProducer off-path)
 
     server = createAlayaMcpServer({
       memoryToolHandler: runtime.services.mcpMemoryToolHandler,
       contextProvider: () => ({
-        workspaceId,
-        runId,
+        workspaceId: activeContext.workspaceId,
+        runId: activeContext.runId,
         agentTarget: "bench-runner",
         sessionId: `bench-session-${Date.now()}`,
         surfaceId: "bench"
@@ -605,7 +823,7 @@ export async function startBenchDaemon(
       JSON.stringify({
         db_path: join(dataDir, "alaya.db"),
         embedding_enabled: embeddingMode === "env",
-        default_workspace: workspaceId,
+        default_workspace: defaultWorkspaceId,
         worktree_enabled: false
       }),
       "--json"
@@ -625,13 +843,28 @@ export async function startBenchDaemon(
     // those tables. Seed the bench workspace + run directly so the MCP
     // call context (which binds these ids from the trusted context provider)
     // resolves to existing FK rows.
-    // see also: apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts
+    // see also: apps/core-daemon/src/__tests__/agent-use-protocol.test.ts
     //   workspace + run seeding fixture using the same repos.
-    await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId);
+    await seedBenchWorkspaceAndRun(
+      dataDir,
+      defaultWorkspaceId,
+      defaultRunId,
+      await createManagedWorkspaceRoot(defaultWorkspaceId)
+    );
+    // Apply bench-only SQLite tuning. The DB has now been opened by install +
+    // seedBenchWorkspaceAndRun, so initDatabase's cache returns the daemon's
+    // live connection. Production daemon (apps/core-daemon) never calls this.
+    const pragmaResult = applyBenchFastPragmaIfRequested(dataDir);
+    if (pragmaResult.applied) {
+      process.stderr.write(
+        `[bench fast-pragma] applied: ${pragmaResult.pragmas.join(", ")}\n`
+      );
+    }
   } catch (err) {
     try {
       await closeBenchDaemonResources({ mcpClient, server, runtime });
     } finally {
+      await cleanupManagedWorkspaceRoots();
       restoreEnv(savedEnv);
       releaseActive();
     }
@@ -715,9 +948,9 @@ export async function startBenchDaemon(
     };
     const recallResult = await diagnosticRuntime.services.recallService.recall({
       taskSurface,
-      workspaceId,
+      workspaceId: activeContext.workspaceId,
       strategy: "chat",
-      runId,
+      runId: activeContext.runId,
       policyOverride: policy
     });
     // usedTokens (the lens event's total_token_estimate) sums only the
@@ -748,8 +981,8 @@ export async function startBenchDaemon(
     await diagnosticRuntime.services.trustStateRecorder.recordDelivery({
       delivery_id: deliveryId,
       agent_target: "bench-runner",
-      workspace_id: workspaceId,
-      run_id: runId,
+      workspace_id: activeContext.workspaceId,
+      run_id: activeContext.runId,
       delivered_object_ids: [...new Set(deliveredObjects.map((object) => object.object_id))],
       delivered_objects: [...new Map(
         deliveredObjects.map((object) => [`${object.object_kind}\0${object.object_id}`, object])
@@ -773,8 +1006,8 @@ export async function startBenchDaemon(
       taskSurfaceRef: taskSurface.runtime_id,
       lensEntryCount: results.length,
       totalTokenEstimate: usedTokens,
-      runId,
-      workspaceId
+      runId: activeContext.runId,
+      workspaceId: activeContext.workspaceId
     });
     const response = SoulMemorySearchResponseSchema.parse({
       delivery_id: deliveryId,
@@ -855,46 +1088,35 @@ export async function startBenchDaemon(
       1,
       options.maxPasses ?? DEFAULT_EMBEDDING_WARMUP_PASSES
     );
-    let passCount = 0;
-    let lastPassError: string | null = null;
-    let summary = await readEmbeddingWarmupSummary({
-      dataDir,
-      workspaceId,
-      objectIds: uniqueObjectIds,
-      providerKind: embeddingProviderKind,
-      modelId,
-      schemaVersion: BENCH_EMBEDDING_SCHEMA_VERSION,
-      passCount
-    });
-
-    while (summary.ready_count < summary.expected_count && passCount < maxPasses) {
-      try {
-        await activeRuntime.runGardenBackgroundPass();
-        lastPassError = null;
-      } catch (error) {
-        lastPassError = toErrorMessage(error);
-      }
-      passCount++;
-      summary = await readEmbeddingWarmupSummary({
+    const readSummary = (passCount: number): Promise<BenchEmbeddingWarmupSummary> =>
+      readEmbeddingWarmupSummary({
         dataDir,
-        workspaceId,
+        workspaceId: activeContext.workspaceId,
         objectIds: uniqueObjectIds,
         providerKind: embeddingProviderKind,
         modelId,
         schemaVersion: BENCH_EMBEDDING_SCHEMA_VERSION,
         passCount
       });
-    }
+
+    const drain = await drainEmbeddingWarmupPasses({
+      maxPasses,
+      maxStallPasses: EMBEDDING_WARMUP_MAX_STALL_PASSES,
+      // invariant: embedding readiness drains ONLY EMBEDDING_BACKFILL, not the
+      // full Garden background pass. runGardenBackgroundPass would also drain
+      // BULK_ENRICH conflict-detection/edge-production, path snapshot, merge
+      // proposal, consolidation, etc. — CPU-heavy maintenance that embedding
+      // OFF never runs, so coupling it to warmup both slowed ON ~15x and broke
+      // OFF/ON corpus comparability. The targeted drain reaches the same
+      // all-ready state via the O(n) backfill handler.
+      // see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
+      runPass: () => activeRuntime.runGardenEmbeddingBackfillPass(activeContext.workspaceId),
+      readSummary
+    });
+    const summary = drain.summary;
 
     if (summary.ready_count !== summary.expected_count) {
-      const preview = summary.missing_object_ids.slice(0, 5).join(", ");
-      throw new Error(
-        `embedding warm cache not ready after ${summary.pass_count} pass(es): ` +
-          `ready=${summary.ready_count} expected=${summary.expected_count} ` +
-          `missing=${summary.missing_object_ids.length}` +
-          (preview.length === 0 ? "" : ` first_missing=${preview}`) +
-          (lastPassError === null ? "" : ` last_error=${lastPassError}`)
-      );
+      throw new Error(formatEmbeddingWarmupNotReadyError(summary, drain.lastPassError));
     }
 
     return summary;
@@ -920,8 +1142,8 @@ export async function startBenchDaemon(
       throw new Error("embedding query warm cache unavailable: embedding recall service is not configured");
     }
     const summary = await embeddingRecallService.warmQueryEmbeddings({
-      workspaceId,
-      runId,
+      workspaceId: activeContext.workspaceId,
+      runId: activeContext.runId,
       queryTexts
     });
     return summary;
@@ -1220,9 +1442,9 @@ export async function startBenchDaemon(
 
   async function proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
-  ): Promise<readonly SeededMemoryResult[]> {
+  ): Promise<CompileSeedBatchResult> {
     if (inputs.length === 0) {
-      return [];
+      return { seeds: [], dropped: [] };
     }
 
     // Seed each compile()-extracted signal through the daemon's in-process
@@ -1240,88 +1462,138 @@ export async function startBenchDaemon(
     //
     // receiveSignal's return carries materialization.created_objects directly,
     // so the memory_entry object_id is read from the result — no event-log
-    // scan. A signal the MaterializationRouter routed to evidence_only /
-    // deferred (no memory_entry — e.g. a sub-0.5-confidence signal) is SKIPPED
-    // per-signal, not fatal: the turn's other healthy facts still seed. The
-    // returned list may be SHORTER than `inputs`; the shortfall is the caller's
-    // drop count.
+    // scan.
+    //
+    // invariant: PER-SIGNAL failure isolation. Each signal's materialization is
+    // wrapped so one bad signal NEVER aborts its batch-mates:
+    //   - routed to evidence_only / deferred (no memory_entry — e.g. a
+    //     sub-0.5-confidence signal): recorded as reason=candidate_absent and
+    //     skipped; the turn's other healthy facts still seed.
+    //   - a thrown error (schema parse / receiveSignal / accept): caught,
+    //     recorded as reason=materialization_error, the loop continues.
+    // A prior version let a single throw propagate out of this loop, which the
+    // caller's batch-level catch turned into a whole-turn drop — the regression
+    // that silently lost 1963 signals (and their healthy batch-mates) in the
+    // 500q archive, logged only to stderr. The structured drop ledger persists
+    // the reason so candidate-absent / seed-quality is root-causable from the
+    // archive KPI, not just stderr.
     // see also: apps/bench-runner/src/longmemeval/compile-seed.ts seedTurn
     const results: SeededMemoryResult[] = [];
+    const dropped: CompileSeedSignalDrop[] = [];
     for (const input of inputs) {
-      const clip = clipSeedContent(input.turnContent);
-      const safeDistilledFact =
-        input.distilledFact.length > SEED_CONTENT_MAX
-          ? `${input.distilledFact.slice(0, SEED_CONTENT_MAX)} [truncated at ${SEED_CONTENT_MAX} chars]`
-          : input.distilledFact;
-      // Event-sourced token-economy KPI block (S6) — see proposeMemoryFromSignal.
-      const tokenEconomy = benchTokenEconomyPayload({
-        fullTurnContent: clip.safe,
-        storedContent: safeDistilledFact,
-        turnSeedIndex: input.turnSeedIndex,
-        ...(input.productionRawPayload === undefined
-          ? { excerptSibling: clip.safe, distilledFactSibling: safeDistilledFact }
-          : {})
-      });
-      const rawPayload: Record<string, unknown> =
-        input.productionRawPayload === undefined
-          ? {
-              excerpt: clip.safe,
-              distilled_fact: safeDistilledFact,
-              extraction_provider: input.extractionProvider,
-              ...tokenEconomy
-            }
-          : {
-              ...stripFirstClassMemoryRefsFromRawPayload(input.productionRawPayload),
-              extraction_provider: input.extractionProvider,
-              ...tokenEconomy
-            };
-
-      const signal: CandidateMemorySignal = normalizeSchemaGroundedSignal(
-        CandidateMemorySignalSchema.parse({
-          signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
-          workspace_id: workspaceId,
-          run_id: runId,
-          surface_id: null,
-          source: SignalSource.GARDEN_COMPILE,
-          signal_kind: input.signalKind,
-          object_kind: input.objectKind,
-          scope_hint: ScopeClass.PROJECT,
-          domain_tags: ["bench-seed"],
-          confidence: input.confidence,
-          evidence_refs: [input.evidenceRef],
-          ...buildSourceMemoryRefsField(input.sourceMemoryRefs),
-          raw_payload: rawPayload,
-          created_at: new Date().toISOString()
-        })
-      );
-
-      const received = await activeRuntime.services.signalService.receiveSignal(signal);
-      const memoryObject = received.materialization?.created_objects.find(
-        (obj) => obj.object_kind === "memory_entry"
-      );
-      if (memoryObject === undefined) {
+      try {
+        const seeded = await seedOneCompileSignal(input);
+        if (seeded.kind === "dropped") {
+          dropped.push(seeded.drop);
+          continue;
+        }
+        results.push(seeded.result);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        dropped.push({ reason: "materialization_error", detail });
         process.stderr.write(
-          `[bench compile-seed] signal ${received.signal.signal_id} ` +
-            `triage=${received.triage_result} ` +
-            `routing=${received.materialization?.routing_reason ?? "n/a"} ` +
-            `did not materialize a memory_entry — skipped, turn batch continues\n`
+          `[bench compile-seed] signal evidence_ref=${input.evidenceRef} ` +
+            `threw during materialization — isolated per-signal, turn batch ` +
+            `continues: ${detail}\n`
         );
-        continue;
       }
-      const evidenceObject = received.materialization?.created_objects.find(
-        (obj) => obj.object_kind === "evidence_capsule"
+    }
+    return { seeds: results, dropped };
+  }
+
+  // invariant: extracted from the proposeMemoriesFromCompileSignals loop body
+  // so the per-signal try/catch wraps a single, total unit of materialization
+  // work. Returns a tagged result (seeded vs dropped/candidate_absent) and
+  // THROWS only on an unexpected materialization error, which the caller
+  // isolates and records as reason=materialization_error.
+  async function seedOneCompileSignal(
+    input: BenchSignalSeedInput
+  ): Promise<
+    | { readonly kind: "seeded"; readonly result: SeededMemoryResult }
+    | { readonly kind: "dropped"; readonly drop: CompileSeedSignalDrop }
+  > {
+    const clip = clipSeedContent(input.turnContent);
+    const safeDistilledFact =
+      input.distilledFact.length > SEED_CONTENT_MAX
+        ? `${input.distilledFact.slice(0, SEED_CONTENT_MAX)} [truncated at ${SEED_CONTENT_MAX} chars]`
+        : input.distilledFact;
+    // Event-sourced token-economy KPI block (S6) — see proposeMemoryFromSignal.
+    const tokenEconomy = benchTokenEconomyPayload({
+      fullTurnContent: clip.safe,
+      storedContent: safeDistilledFact,
+      turnSeedIndex: input.turnSeedIndex,
+      ...(input.productionRawPayload === undefined
+        ? { excerptSibling: clip.safe, distilledFactSibling: safeDistilledFact }
+        : {})
+    });
+    const rawPayload: Record<string, unknown> =
+      input.productionRawPayload === undefined
+        ? {
+            excerpt: clip.safe,
+            distilled_fact: safeDistilledFact,
+            extraction_provider: input.extractionProvider,
+            ...tokenEconomy
+          }
+        : {
+            ...stripFirstClassMemoryRefsFromRawPayload(input.productionRawPayload),
+            extraction_provider: input.extractionProvider,
+            ...tokenEconomy
+          };
+
+    const signal: CandidateMemorySignal = normalizeSchemaGroundedSignal(
+      CandidateMemorySignalSchema.parse({
+        signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
+        workspace_id: activeContext.workspaceId,
+        run_id: activeContext.runId,
+        surface_id: null,
+        source: SignalSource.GARDEN_COMPILE,
+        signal_kind: input.signalKind,
+        object_kind: input.objectKind,
+        scope_hint: ScopeClass.PROJECT,
+        domain_tags: ["bench-seed"],
+        confidence: input.confidence,
+        evidence_refs: [input.evidenceRef],
+        ...buildSourceMemoryRefsField(input.sourceMemoryRefs),
+        raw_payload: rawPayload,
+        created_at: new Date().toISOString()
+      })
+    );
+
+    const received = await activeRuntime.services.signalService.receiveSignal(signal);
+    const memoryObject = received.materialization?.created_objects.find(
+      (obj) => obj.object_kind === "memory_entry"
+    );
+    if (memoryObject === undefined) {
+      const routingReason = received.materialization?.routing_reason ?? "n/a";
+      process.stderr.write(
+        `[bench compile-seed] signal ${received.signal.signal_id} ` +
+          `triage=${received.triage_result} ` +
+          `routing=${routingReason} ` +
+          `did not materialize a memory_entry — skipped, turn batch continues\n`
       );
-      const accepted = await acceptSeededMemory(memoryObject.object_id, input.evidenceRef);
-      results.push({
+      return {
+        kind: "dropped",
+        drop: {
+          reason: "candidate_absent",
+          detail: `triage=${received.triage_result} routing=${routingReason}`
+        }
+      };
+    }
+    const evidenceObject = received.materialization?.created_objects.find(
+      (obj) => obj.object_kind === "evidence_capsule"
+    );
+    const accepted = await acceptSeededMemory(memoryObject.object_id, input.evidenceRef);
+    return {
+      kind: "seeded",
+      result: {
         memoryId: memoryObject.object_id,
         signalId: received.signal.signal_id,
         proposalId: accepted.proposalId,
         evidenceId: evidenceObject?.object_id ?? null,
         truncated: clip.truncated,
         charsClipped: clip.charsClipped
-      });
-    }
-    return results;
+      }
+    };
   }
 
   // @anchor bench-synthesis-seed: create ONE session-level synthesis_capsule
@@ -1345,10 +1617,83 @@ export async function startBenchDaemon(
       summary: input.summary,
       evidence_refs: [...input.evidenceRefs],
       source_memory_refs: [],
-      workspace_id: workspaceId,
-      run_id: runId
+      workspace_id: activeContext.workspaceId,
+      run_id: activeContext.runId
     });
     return { synthesisId: synthesis.object_id };
+  }
+
+  // @anchor bench-co-recall-accrual: EARN same-session co-recall PathRelations
+  // through the production counter gate.
+  //
+  // invariant: production-faithful gate, bench-only trigger. A bounded,
+  // gold-blind set of adjacent session-member pairs (planSessionCoRecallWarmup)
+  // is replayed `PATH_RELATION_PROPOSE_THRESHOLD` times through the SAME
+  // production seam B-1 cross-link uses (PathRelationProposalService.onCoUsage),
+  // which accrues a durable counter per unordered pair and mints a co_recalled
+  // edge (CO_RECALLED_SEED_PROFILE) ONLY once a pair reaches the production
+  // co_usage_threshold. The bench has no attached agent reporting usage, so the
+  // fixed warm-up replay is the stand-in for live report_context_usage; the
+  // counter gate, threshold, seed profile, and materialize path are production.
+  // The earned topology is SPARSE — at most BENCH_CO_RECALL_WARMUP_PAIR_CAP
+  // edges per session — never a saturated hub/clique.
+  //
+  // invariant: drives onCoUsage directly (not via the soul.report_context_usage
+  // MCP wrapper) — the SAME established direct-seam pattern the bench uses for
+  // proposeMemoriesFromCompileSignals (signalService.receiveSignal). This skips
+  // the delivery-subset gate and recall non-determinism without changing the
+  // EARNED/SPARSE property: the production co_usage_threshold gate still decides
+  // every mint.
+  //
+  // invariant: gold-blind. planSessionCoRecallWarmup selects pairs by SEED
+  // ORDER only; no gold/answer id is consulted.
+  //
+  // Recall-eligibility: proposeCoRecalled seeds recall_bias = +0.5 and
+  // materialize() sets lifecycle.status="active", so isPathRecallEligible
+  // (active AND recall_bias > 0) holds at the born band — no plasticity
+  // reinforcement needed. attention_only governance gates only the suppression
+  // lane (isPathGovernedForSuppression), not positive recall eligibility.
+  //
+  // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
+  // see also: packages/core/src/path-relation-proposal-service.ts onCoUsage / CO_RECALLED_SEED_PROFILE
+  // see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible
+  async function accrueSessionCoRecall(
+    memberMemoryIds: readonly string[]
+  ): Promise<CoRecallWarmupSummary> {
+    const plan = planSessionCoRecallWarmup(
+      memberMemoryIds,
+      PATH_RELATION_PROPOSE_THRESHOLD
+    );
+    if (plan === null) {
+      return { pairsObserved: 0, minted: 0, belowThreshold: 0 };
+    }
+    const service = activeRuntime.services.pathRelationProposalService;
+    // invariant: replayCount === production threshold, so each unordered pair's
+    // durable counter reaches the threshold during this replay and mints exactly
+    // once (then accrueCoOccurrence DELETEs the counter row). counterSize is the
+    // GLOBAL pending-counter size; its delta across this replay isolates pairs
+    // that did NOT settle (a transient mint failure leaves the row). On the
+    // happy path the delta is 0 and every observed pair is minted.
+    // invariant: the global-delta accounting assumes SERIALIZED accrual (true
+    // for the bench's single serial seed loop); concurrent accrual would let
+    // another session's counter churn the global size and MISATTRIBUTE the delta.
+    const beforeCounter = await service.counterSize();
+    for (let replay = 0; replay < plan.replayCount; replay += 1) {
+      for (const pair of plan.pairs) {
+        await service.onCoUsage(
+          [pair.lowMemoryId, pair.highMemoryId],
+          activeContext.workspaceId
+        );
+      }
+    }
+    const afterCounter = await service.counterSize();
+    const residualPending = Math.max(0, afterCounter - beforeCounter);
+    const minted = Math.max(0, plan.pairs.length - residualPending);
+    return {
+      pairsObserved: plan.pairs.length,
+      minted,
+      belowThreshold: residualPending
+    };
   }
 
   async function shutdown(): Promise<void> {
@@ -1359,16 +1704,110 @@ export async function startBenchDaemon(
         runtime: activeRuntime
       });
     } finally {
+      await cleanupManagedWorkspaceRoots();
       restoreEnv(savedEnv);
       releaseActive();
     }
   }
 
+  async function createManagedWorkspaceRoot(workspaceId: string): Promise<string> {
+    const workspaceRoot = join(
+      dataDir,
+      "bench-workspaces",
+      encodeURIComponent(workspaceId)
+    );
+    await mkdir(workspaceRoot, { recursive: true });
+    managedWorkspaceRoots.set(workspaceId, workspaceRoot);
+    return workspaceRoot;
+  }
+
+  async function cleanupManagedWorkspaceRoot(workspaceId: string): Promise<void> {
+    const workspaceRoot = managedWorkspaceRoots.get(workspaceId);
+    if (workspaceRoot === undefined) return;
+    managedWorkspaceRoots.delete(workspaceId);
+    await rm(workspaceRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+
+  async function cleanupManagedWorkspaceRoots(): Promise<void> {
+    const workspaceIds = [...managedWorkspaceRoots.keys()];
+    await Promise.all(
+      workspaceIds.map(async (workspaceId) => {
+        await cleanupManagedWorkspaceRoot(workspaceId);
+      })
+    );
+  }
+
+  // @anchor bench-workspace-attach: bind activeContext to a workspace/run
+  // pair for subsequent tool calls. FK seed for signals.workspace_id /
+  // signals.run_id (migration 003-signals.sql) happens once per workspaceId.
+  // invariant: only one workspace is bound to activeContext at a time.
+  // see also: seedBenchWorkspaceAndRun, seedBenchRunOnly, BenchWorkspaceHandle
+  async function attachWorkspace(
+    input: { readonly workspaceId: string; readonly runId: string }
+  ): Promise<BenchWorkspaceHandle> {
+    const managedWorkspaceRoot = await createManagedWorkspaceRoot(input.workspaceId);
+    if (!knownWorkspaces.has(input.workspaceId)) {
+      // @anchor recall-eval-snapshot-restore: a restored snapshot DB already
+      // carries the seeded workspace rows; the daemon's in-memory
+      // knownWorkspaces Set starts empty, so probe the DB and seed only the run
+      // when the workspace row already exists (recreating it would violate the
+      // workspaces.workspace_id UNIQUE constraint). see also:
+      // apps/bench-runner/src/longmemeval/recall-eval.ts
+      await seedBenchWorkspaceIfAbsent(
+        dataDir,
+        input.workspaceId,
+        input.runId,
+        managedWorkspaceRoot
+      );
+      knownWorkspaces.add(input.workspaceId);
+    } else {
+      await seedBenchRunOnly(dataDir, input.workspaceId, input.runId);
+    }
+    const previous: { workspaceId: string; runId: string } = {
+      workspaceId: activeContext.workspaceId,
+      runId: activeContext.runId
+    };
+    activeContext.workspaceId = input.workspaceId;
+    activeContext.runId = input.runId;
+    let detached = false;
+    return {
+      workspaceId: input.workspaceId,
+      runId: input.runId,
+      recall,
+      warmEmbeddingCache,
+      warmQueryEmbeddingCache,
+      reportContextUsage,
+      proposeMemory,
+      proposeMemoryFromSignal,
+      proposeMemoriesFromCompileSignals,
+      proposeSynthesis,
+      accrueSessionCoRecall,
+      queryTokenMetrics: () => queryTokenMetrics(dataDir, input.workspaceId),
+      queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir, input.workspaceId),
+      detach: async () => {
+        if (detached) return;
+        detached = true;
+        if (
+          activeContext.workspaceId === input.workspaceId &&
+          activeContext.runId === input.runId
+        ) {
+          activeContext.workspaceId = previous.workspaceId;
+          activeContext.runId = previous.runId;
+        }
+        await cleanupManagedWorkspaceRoot(input.workspaceId);
+      }
+    };
+  }
+
   return {
     runtime: activeRuntime,
     mcpClient: activeMcpClient,
-    workspaceId,
-    runId,
+    get workspaceId() {
+      return activeContext.workspaceId;
+    },
+    get runId() {
+      return activeContext.runId;
+    },
     dataDir,
     dispatchCli: activeDispatchCli,
     recall,
@@ -1379,12 +1818,15 @@ export async function startBenchDaemon(
     proposeMemoryFromSignal,
     proposeMemoriesFromCompileSignals,
     proposeSynthesis,
-    queryTokenMetrics: () => queryTokenMetrics(dataDir),
+    accrueSessionCoRecall,
+    queryTokenMetrics: () => queryTokenMetrics(dataDir, activeContext.workspaceId),
+    queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir, activeContext.workspaceId),
+    attachWorkspace,
     shutdown
   };
 }
 
-async function readEmbeddingWarmupSummary(input: {
+export async function readEmbeddingWarmupSummary(input: {
   readonly dataDir: string;
   readonly workspaceId: string;
   readonly objectIds: readonly string[];
@@ -1409,14 +1851,12 @@ async function readEmbeddingWarmupSummary(input: {
 
   const db = initDatabase({ filename: join(input.dataDir, "alaya.db") });
   const embeddingRepo = new SqliteMemoryEmbeddingRepo(db);
-  const records = await embeddingRepo.listByObjectIds(
-    input.workspaceId,
-    expectedIds
-  );
+  const records = await embeddingRepo.findMetadataByObjectIds(expectedIds);
   const readyIds = new Set(
     records
       .filter(
         (record) =>
+          record.workspace_id === input.workspaceId &&
           record.provider_kind === input.providerKind &&
           record.model_id === input.modelId &&
           record.schema_version === input.schemaVersion
@@ -1824,22 +2264,163 @@ function emitBenchContextLensAssembledEvent(
 // metrics fold lives in longmemeval/token-economy.ts deriveBenchTokenMetrics
 // so it is unit-testable against a stubbed EventLog. The connection is NOT
 // closed here.
-async function queryTokenMetrics(dataDir: string): Promise<BenchTokenMetrics> {
+// invariant: scope the event read to the question's workspace. The bench
+// daemon-per-run model shares ONE alaya.db across every attached workspace,
+// so an unscoped queryByType returns every prior question's events too —
+// turning each per-question fold into an O(all-prior-questions) scan AND
+// double-counting every earlier question into this question's token metrics
+// (the run-level aggregateBenchTokenMetrics then SUMS those cumulative
+// snapshots). queryByWorkspaceAndType uses idx_event_log_workspace_type_created
+// so the read stays bounded to this workspace's own emitted/lens events.
+// see also: packages/storage/src/repos/event-log-repo.ts queryByWorkspaceAndType
+async function queryTokenMetrics(
+  dataDir: string,
+  workspaceId: string
+): Promise<BenchTokenMetrics> {
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   const eventLogRepo = new SqliteEventLogRepo(db);
-  const emittedEvents = await eventLogRepo.queryByType(
+  const emittedEvents = await eventLogRepo.queryByWorkspaceAndType(
+    workspaceId,
     SignalEventType.SOUL_SIGNAL_EMITTED
   );
-  const lensEvents = await eventLogRepo.queryByType(
+  const lensEvents = await eventLogRepo.queryByWorkspaceAndType(
+    workspaceId,
     RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED
   );
   return deriveBenchTokenMetrics(emittedEvents, lensEvents);
 }
 
+// @anchor queryEdgeProposalKpiRows: event-sourced edge proposal KPI reader.
+// Same shape as queryTokenMetrics — opens the bench DB and reads the two
+// proposal event types, returning the minimal structural row shape the
+// aggregator in @do-soul/alaya-eval consumes. The aggregator is pure so it
+// stays unit-testable without standing up storage.
+// see also: packages/eval/src/edge-proposal-kpi.ts
+// invariant: scope to the question's workspace, for the same reason
+// queryTokenMetrics does — the shared daemon-per-run DB would otherwise
+// re-deliver every prior question's edge-proposal events on each call,
+// duplicating them into edgeProposalKpiRowsAcrossQuestions and growing the
+// scan with the question index.
+async function queryEdgeProposalKpiRows(
+  dataDir: string,
+  workspaceId: string
+): Promise<readonly EdgeProposalKpiEventRow[]> {
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const eventLogRepo = new SqliteEventLogRepo(db);
+  const createdEvents = await eventLogRepo.queryByWorkspaceAndType(
+    workspaceId,
+    GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED
+  );
+  const reviewedEvents = await eventLogRepo.queryByWorkspaceAndType(
+    workspaceId,
+    GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED
+  );
+  const rows: EdgeProposalKpiEventRow[] = [];
+  for (const event of createdEvents) {
+    rows.push({
+      event_type: event.event_type,
+      workspace_id: event.workspace_id,
+      created_at: event.created_at,
+      payload_json: event.payload_json
+    });
+  }
+  for (const event of reviewedEvents) {
+    rows.push({
+      event_type: event.event_type,
+      workspace_id: event.workspace_id,
+      created_at: event.created_at,
+      payload_json: event.payload_json
+    });
+  }
+  return rows;
+}
+
+// @anchor BENCH_FAST_PRAGMA: bench-only SQLite tuning layered on top of the
+// production storage hardening (packages/storage/src/db.ts already sets
+// journal_mode=WAL + synchronous=NORMAL + foreign_keys + busy_timeout). The
+// bench harness adds two pragmas that production deliberately leaves at
+// default because they change the durability vs throughput tradeoff:
+//
+//   temp_store=FILE         — FTS/sort/GROUP BY temp B-trees spill to disk.
+//                             temp_store=MEMORY forces them into RAM that is
+//                             off the Node heap and so invisible to
+//                             --max-old-space-size; over a long single-process
+//                             500-question run that RAM climbs monotonically
+//                             and feeds the OS OOM-killer (a silent SIGKILL,
+//                             not a recoverable Node OOM). FILE trades latency
+//                             for headroom and is the safe default for full
+//                             runs. Override with ALAYA_BENCH_TEMP_STORE=memory
+//                             for short throughput-bound runs that fit in RAM.
+//   cache_size=-65536       — 64 MiB page cache (negative = KiB). Default is
+//                             ~2 MiB which is too small for the bench
+//                             hot-set; production leaves it small for
+//                             desktop multi-process coexistence.
+//
+// Gated by ALAYA_BENCH_FAST_PRAGMA env (default: ON for bench harness; set
+// "0"/"false" to opt out). Production `apps/core-daemon` does not call this
+// helper, so no production runtime is affected.
+//
+// invariant: EventLog rows are still appended via the same SqliteEventLogRepo
+// path; only the SQLite write batching/fsync timing changes. WAL still
+// guarantees atomic per-statement commit; synchronous=NORMAL guarantees
+// system-crash recovery on the WAL frame boundary (only power-loss within
+// the last few ms of WAL flush is at risk, which bench fixtures can replay).
+const BENCH_FAST_PRAGMA_ENV = "ALAYA_BENCH_FAST_PRAGMA";
+const BENCH_TEMP_STORE_ENV = "ALAYA_BENCH_TEMP_STORE";
+
+function isBenchFastPragmaEnabled(): boolean {
+  const raw = process.env[BENCH_FAST_PRAGMA_ENV];
+  if (raw === undefined) return true;
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== "0" && normalized !== "false" && normalized !== "off" && normalized !== "no";
+}
+
+// FILE by default so temp B-trees spill to disk and do not feed RSS toward the
+// OS OOM-killer on long single-process runs. ALAYA_BENCH_TEMP_STORE=memory opts
+// back into the throughput-favoring RAM temp store for short runs.
+function resolveBenchTempStore(): "FILE" | "MEMORY" {
+  const raw = process.env[BENCH_TEMP_STORE_ENV];
+  return raw !== undefined && raw.trim().toLowerCase() === "memory" ? "MEMORY" : "FILE";
+}
+
+export interface BenchFastPragmaResult {
+  readonly applied: boolean;
+  readonly pragmas: readonly string[];
+}
+
+export function applyBenchFastPragmaIfRequested(dataDir: string): BenchFastPragmaResult {
+  if (!isBenchFastPragmaEnabled()) {
+    return Object.freeze({ applied: false, pragmas: Object.freeze([]) });
+  }
+  // initDatabase caches by path, so this returns the same connection the
+  // daemon runtime is already using. The pragmas are session-scoped except
+  // journal_mode (file-scoped + persisted) — re-issuing the production set
+  // here is a no-op and documents the bench layering.
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const conn = db.connection;
+  // Production-set pragmas (re-asserted defensively; safe no-op when already on).
+  conn.pragma("journal_mode = WAL");
+  conn.pragma("synchronous = NORMAL");
+  // Bench-only adds.
+  const tempStore = resolveBenchTempStore();
+  conn.pragma(`temp_store = ${tempStore}`);
+  conn.pragma("cache_size = -65536");
+  return Object.freeze({
+    applied: true,
+    pragmas: Object.freeze([
+      "journal_mode=WAL",
+      "synchronous=NORMAL",
+      `temp_store=${tempStore}`,
+      "cache_size=-65536"
+    ])
+  });
+}
+
 async function seedBenchWorkspaceAndRun(
   dataDir: string,
   workspaceId: string,
-  runId: string
+  runId: string,
+  workspaceRoot: string
 ): Promise<void> {
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   const workspaceRepo = new SqliteWorkspaceRepo(db);
@@ -1847,11 +2428,70 @@ async function seedBenchWorkspaceAndRun(
   workspaceRepo.create({
     workspace_id: workspaceId,
     name: workspaceId,
-    root_path: join(dataDir, "bench-workspace-root"),
+    root_path: workspaceRoot,
     workspace_kind: WorkspaceKind.LOCAL_REPO,
     default_engine_binding: null,
     workspace_state: WorkspaceState.ACTIVE
   });
+  runRepo.create({
+    run_id: runId,
+    workspace_id: workspaceId,
+    title: `bench run ${runId}`,
+    goal: null,
+    run_mode: RunMode.CHAT,
+    engine_binding_id: null,
+    engine_class: null,
+    run_state: RunState.IDLE,
+    current_surface_id: null
+  });
+}
+
+// @anchor seedBenchWorkspaceIfAbsent — first-attach seed that tolerates a
+// workspace row already present in a restored recall-eval snapshot DB. Probes
+// the workspace by id: absent -> create workspace + run (normal first attach);
+// present -> seed only the run, idempotently, since the snapshot already holds
+// the materialized workspace. see also: seedBenchWorkspaceAndRun, seedBenchRunOnly
+async function seedBenchWorkspaceIfAbsent(
+  dataDir: string,
+  workspaceId: string,
+  runId: string,
+  workspaceRoot: string
+): Promise<void> {
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const workspaceRepo = new SqliteWorkspaceRepo(db);
+  const existing = await workspaceRepo.getById(workspaceId);
+  if (existing === null) {
+    await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId, workspaceRoot);
+    return;
+  }
+  await seedBenchRunIfAbsent(dataDir, workspaceId, runId);
+}
+
+// @anchor seedBenchRunOnly — extend an already-created workspace with a
+// fresh run row; bench attachWorkspace path when the workspaceId is reused
+// across rebinds. see also: seedBenchWorkspaceAndRun
+async function seedBenchRunOnly(
+  dataDir: string,
+  workspaceId: string,
+  runId: string
+): Promise<void> {
+  await seedBenchRunIfAbsent(dataDir, workspaceId, runId);
+}
+
+// Idempotent run seed: a restored snapshot already carries the run row keyed by
+// the same runId the sidecar persisted, so a duplicate create would violate the
+// runs.run_id constraint. Skip when the run already exists.
+async function seedBenchRunIfAbsent(
+  dataDir: string,
+  workspaceId: string,
+  runId: string
+): Promise<void> {
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const runRepo = new SqliteRunRepo(db);
+  const existing = await runRepo.getById(runId);
+  if (existing !== null) {
+    return;
+  }
   runRepo.create({
     run_id: runId,
     workspace_id: workspaceId,
