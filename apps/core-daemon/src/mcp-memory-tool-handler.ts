@@ -1043,6 +1043,18 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     if (deps.gardenTaskRepo === undefined) {
       throw new ToolUnavailableError("Garden task queue is not available.");
     }
+    // invariant: a successfully-completed EDGE_CLASSIFY task MUST carry a
+    // well-formed edge_verdict — edge_type "none" is the valid explicit "no
+    // edge" no-op, so absence of a verdict is not a successful no-op but a
+    // false success (the edge silently never gets classified). A worker that
+    // cannot produce a verdict completes with status="failed". The verdict's
+    // well-formedness is enforced by EdgeClassifyVerdictSchema at request parse;
+    // this guard closes only the missing-verdict gap.
+    if (verdict === undefined && request.status === "completed") {
+      throw new ToolValidationError(
+        `Garden task ${row.id} is an edge_classify task completed without a result_envelope.edge_verdict; report edge_type "none" for an explicit no-edge decision, or complete with status "failed" if no verdict can be produced.`
+      );
+    }
     const payloadPair = readEdgeClassifyPayloadPair(row.payload);
     if (
       verdict !== undefined &&

@@ -1217,6 +1217,92 @@ describe("Garden MCP tools", () => {
       expect(harness.getGardenTask("edge-classify-wrong-shape")).toMatchObject({ status: "claimed" });
     });
 
+    it("rejects a completed EDGE_CLASSIFY task with no edge_verdict (false-success guard)", async () => {
+      const applyVerdict = vi.fn(async () => "applied");
+      const harness = await createGardenMcpHarness({ applyVerdict });
+      enqueueEdgeClassify(harness, "edge-classify-missing-verdict");
+      await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+        task_id: "edge-classify-missing-verdict"
+      });
+
+      await expect(
+        harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+          task_id: "edge-classify-missing-verdict",
+          status: "completed"
+        })
+      ).rejects.toThrow("completed without a result_envelope.edge_verdict");
+      // No verdict applied, no false success recorded — the task stays claimed
+      // for a correct retry (verdict, or status="failed").
+      expect(applyVerdict).not.toHaveBeenCalled();
+      expect(harness.getGardenTask("edge-classify-missing-verdict")).toMatchObject({
+        status: "claimed"
+      });
+      const completed = await harness.eventLogRepo.queryByType(
+        GardenEventType.SOUL_GARDEN_TASK_COMPLETED
+      );
+      expect(
+        completed.some(
+          (event) =>
+            (event.payload_json as { readonly task_id?: string }).task_id ===
+            "edge-classify-missing-verdict"
+        )
+      ).toBe(false);
+    });
+
+    it("rejects a completed EDGE_CLASSIFY task with an empty result_envelope (no verdict)", async () => {
+      const applyVerdict = vi.fn(async () => "applied");
+      const harness = await createGardenMcpHarness({ applyVerdict });
+      enqueueEdgeClassify(harness, "edge-classify-empty-envelope");
+      await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+        task_id: "edge-classify-empty-envelope"
+      });
+
+      await expect(
+        harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+          task_id: "edge-classify-empty-envelope",
+          status: "completed",
+          result_envelope: {}
+        })
+      ).rejects.toThrow("completed without a result_envelope.edge_verdict");
+      expect(applyVerdict).not.toHaveBeenCalled();
+      expect(harness.getGardenTask("edge-classify-empty-envelope")).toMatchObject({
+        status: "claimed"
+      });
+    });
+
+    it("allows a failed EDGE_CLASSIFY task with no verdict (failure path unchanged)", async () => {
+      const applyVerdict = vi.fn(async () => "applied");
+      const harness = await createGardenMcpHarness({ applyVerdict });
+      enqueueEdgeClassify(harness, "edge-classify-failed");
+      await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+        task_id: "edge-classify-failed"
+      });
+
+      const response = await harness.callTool<GardenCompleteTaskResponse>(
+        "garden.complete_task",
+        {
+          task_id: "edge-classify-failed",
+          status: "failed",
+          last_error_text: "host worker could not produce a verdict"
+        }
+      );
+
+      expect(response).toMatchObject({ task_id: "edge-classify-failed", status: "failed" });
+      // A failure refines nothing; the inline heuristic edge stands.
+      expect(applyVerdict).not.toHaveBeenCalled();
+      expect(harness.getGardenTask("edge-classify-failed")).toMatchObject({ status: "failed" });
+      const completed = await harness.eventLogRepo.queryByType(
+        GardenEventType.SOUL_GARDEN_TASK_COMPLETED
+      );
+      expect(
+        completed.find(
+          (event) =>
+            (event.payload_json as { readonly task_id?: string }).task_id ===
+            "edge-classify-failed"
+        )?.payload_json
+      ).toMatchObject({ success: false });
+    });
+
     it("rejects an edge_verdict on a non-EDGE_CLASSIFY task (envelope discrimination)", async () => {
       const harness = await createGardenMcpHarness();
       harness.enqueueTask("post-turn-wrong-shape", {
