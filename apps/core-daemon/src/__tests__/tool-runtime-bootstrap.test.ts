@@ -852,6 +852,40 @@ describe("daemon tool runtime bootstrap", () => {
     await expectBootstrapWaitsForBothCjkWarmups("storage");
   });
 
+  it("constructs ingest reconciliation by default with the rule-only zero-cloud decision port", async () => {
+    // No garden secret + no reconciliation env var -> reconciliation is
+    // DEFAULT-ON on the rule-only basis: the cloud garden-LLM is absent so
+    // the wired decision port is the rule-only one (zero cloud), and dedup
+    // runs out of the box.
+    delete process.env.ALAYA_INGEST_RECONCILIATION_ENABLED;
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+    delete process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF;
+    delete process.env.ALAYA_GARDEN_OPENAI_SECRET_REF;
+
+    await bootDaemonRuntime();
+
+    const core = (await import("@do-soul/alaya-core")) as Record<string, any>;
+    expect(core.ReconciliationService).toHaveBeenCalledTimes(1);
+    // The wired LLM-decision port is the rule-only one (no cloud configured).
+    expect(core.createRuleOnlyReconciliationDecisionPort).toHaveBeenCalledTimes(1);
+    const ruleOnlyPort = core.createRuleOnlyReconciliationDecisionPort.mock.results[0]?.value;
+    expect(core.ReconciliationService.mock.calls[0]?.[0]).toMatchObject({
+      llmDecision: ruleOnlyPort
+    });
+  });
+
+  it("leaves an operator off-switch: ALAYA_INGEST_RECONCILIATION_ENABLED=0 skips reconciliation construction", async () => {
+    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = "0";
+
+    await bootDaemonRuntime();
+
+    const core = (await import("@do-soul/alaya-core")) as Record<string, any>;
+    expect(core.ReconciliationService).not.toHaveBeenCalled();
+    expect(core.createRuleOnlyReconciliationDecisionPort).not.toHaveBeenCalled();
+
+    delete process.env.ALAYA_INGEST_RECONCILIATION_ENABLED;
+  });
+
   it("marks principal coding unavailable when a required sandbox tool is missing", async () => {
     const appModule = await import("../app.js");
 

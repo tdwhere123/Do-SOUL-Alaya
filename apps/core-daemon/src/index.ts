@@ -55,6 +55,7 @@ import {
   ProjectMappingService,
   ProposalService,
   ReconciliationService,
+  createRuleOnlyReconciliationDecisionPort,
   ResolutionService,
   type ConflictDetectionLlmPort,
   RecallService,
@@ -1035,23 +1036,27 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         warn: warnLogger.warn
       })
     : null;
-  // invariant: ingest reconciliation is opt-in — the bench enables it via
-  // ALAYA_INGEST_RECONCILIATION_ENABLED to measure token economy; the
-  // production default is blind append. The two ingest behaviors diverging
-  // by flag is intentional, not an oversight (recall-optimization §18a). It
-  // covers the materializeMemoryEntryOnly path (the bench `fact` kind);
-  // materialize_and_claim is intentionally not reconciled.
-  // When enabled each fact pays one lexical FTS query, a findByIds
-  // fetch, and — only for an ambiguous-band neighbor — one disk-cached
-  // garden-LLM decision call. The LLM is the field-standard semantic
-  // judge of refines-vs-distinct; a token-superset heuristic wrongly
-  // merges distinct facts and erases answers. The DELETE / supersede
-  // path stays owned by ConflictDetectionService; reconciliation only
-  // flags it.
+  // invariant: ingest reconciliation is DEFAULT-ON. Blindly appending
+  // byte-identical facts is illogical, so dedup runs out of the box on a
+  // rule-only, zero-cloud basis (the identity NOOP + below-floor ADD need
+  // no LLM). The env var is a DISABLE switch for operators / measurement:
+  // ALAYA_INGEST_RECONCILIATION_ENABLED=0|false turns it off; anything
+  // else (including unset) leaves it on. It covers the
+  // materializeMemoryEntryOnly path; materialize_and_claim is
+  // intentionally not reconciled.
+  // Each fact pays one lexical FTS query and a findByIds fetch. The
+  // ambiguous "refines vs distinct" band resolves to ADD on the rule-only
+  // basis (never a rule-based UPDATE/NOOP — that erases answers, §18a);
+  // the cloud garden-LLM is the OPTIONAL upgrade that resolves that band
+  // to UPDATE/NOOP, and it is consulted only when actually configured AND
+  // enabled (R0 zero-cloud: cloud edge-LLM stays default-off). The DELETE
+  // / supersede path stays owned by ConflictDetectionService;
+  // reconciliation only flags it.
   // see also: packages/core/src/reconciliation-service.ts
-  const ingestReconciliationEnabled =
-    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED === "1" ||
-    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED?.toLowerCase() === "true";
+  const ingestReconciliationEnabled = (() => {
+    const raw = process.env.ALAYA_INGEST_RECONCILIATION_ENABLED?.trim().toLowerCase();
+    return raw !== "0" && raw !== "false";
+  })();
   // The ambiguous-band decision needs the garden LLM. The credential is
   // the canonical garden compute config's secret_ref — the same one the
   // garden compute provider resolves — RESOLVED here to the live key.
@@ -1085,15 +1090,17 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       return null;
     }
   })();
-  // invariant: reconciliation's per-fact refines-vs-distinct decision routes
-  // through the SAME zero-own-LLM compute model as B-2 — it never operates a
-  // self-owned cloud LLM and there is NO yunwu.ai default URL. The cloud
-  // decision port is created only when the official_api garden config resolves
-  // a real key (reconciliationGardenApiKey !== null, which already requires
-  // provider_kind=official_api + enabled) AND that config carries an explicit
-  // provider_url. Under the host_worker product default the key is null, so the
-  // port is null and reconciliation cleanly stays off (an honest no-op — the
-  // host-worker / rule path owns the decision, not a daemon-operated LLM).
+  // invariant: the cloud garden-LLM is the OPTIONAL semantic-judge upgrade
+  // for reconciliation's refines-vs-distinct band — it routes through the
+  // SAME zero-own-LLM compute model as B-2, never operates a self-owned
+  // cloud LLM, and there is NO yunwu.ai default URL. The cloud decision
+  // port is created only when the official_api garden config resolves a
+  // real key (reconciliationGardenApiKey !== null, which already requires
+  // provider_kind=official_api + enabled) AND that config carries an
+  // explicit provider_url. Under the host_worker product default the key
+  // is null, so this cloud port is null and reconciliation falls back to
+  // the rule-only zero-cloud basis below — dedup still runs (R0
+  // zero-cloud: the cloud edge-LLM stays default-off).
   // providerUrl + model are taken as one unit from the resolved garden config so
   // a stale URL can never pair with a fresh model.
   const reconciliationProviderUrl = reconciliationGardenComputeConfig?.provider_url ?? null;
@@ -1109,28 +1116,33 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
           }
         })
       : null;
-  const reconciliationService =
-    ingestReconciliationEnabled && reconciliationLlmDecisionPort !== null
-      ? new ReconciliationService({
-          keywordSearch: {
-            searchByKeyword: async (workspaceId, queryText, limit) =>
-              await memoryEntryRepo.searchByKeyword(workspaceId, queryText, limit)
-          },
-          memoryRepo: {
-            findByIds: async (objectIds) => await memoryEntryRepo.findByIds(objectIds)
-          },
-          memoryUpdate: {
-            update: async (objectId, fields, reason) =>
-              await memoryService.update(objectId, fields, reason)
-          },
-          eventLog: {
-            append: (event) => eventLogRepo.append(event)
-          },
-          llmDecision: reconciliationLlmDecisionPort,
-          lease: reconciliationLeaseRepo,
-          warn: warnLogger.warn
-        })
-      : null;
+  // invariant: when enabled, the service is ALWAYS constructed — the
+  // rule-only zero-cloud port is the wired default so dedup runs without
+  // any cloud call, and the cloud garden-LLM (when configured + enabled
+  // and so non-null) replaces it as the ambiguous-band semantic judge.
+  // Reconciliation no longer requires an LLM port to exist.
+  const reconciliationService = ingestReconciliationEnabled
+    ? new ReconciliationService({
+        keywordSearch: {
+          searchByKeyword: async (workspaceId, queryText, limit) =>
+            await memoryEntryRepo.searchByKeyword(workspaceId, queryText, limit)
+        },
+        memoryRepo: {
+          findByIds: async (objectIds) => await memoryEntryRepo.findByIds(objectIds)
+        },
+        memoryUpdate: {
+          update: async (objectId, fields, reason) =>
+            await memoryService.update(objectId, fields, reason)
+        },
+        eventLog: {
+          append: (event) => eventLogRepo.append(event)
+        },
+        llmDecision:
+          reconciliationLlmDecisionPort ?? createRuleOnlyReconciliationDecisionPort(),
+        lease: reconciliationLeaseRepo,
+        warn: warnLogger.warn
+      })
+    : null;
   const pathRelationCounterTtlMs = (() => {
     const raw = process.env.ALAYA_PATHREL_COUNTER_TTL_MS;
     if (raw === undefined || raw === "") {

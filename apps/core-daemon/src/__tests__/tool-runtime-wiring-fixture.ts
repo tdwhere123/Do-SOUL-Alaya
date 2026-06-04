@@ -943,6 +943,20 @@ vi.mock("@do-soul/alaya-core", () => {
     ClaudeRuntimeAdapter: makeClass(),
     DynamicsService: makeClass(),
     DeferredObligationService: makeClass(),
+    // anchor: ingest reconciliation is default-ON, so createAlayaDaemonRuntime
+    // always constructs ReconciliationService with the rule-only zero-cloud
+    // decision port. see also: apps/core-daemon/src/index.ts.
+    ReconciliationService: makeClass({
+      runWithDecision: vi.fn(async () => ({
+        kind: "add",
+        runConflictScan: false,
+        reason: "mock",
+        bestSimilarity: 0
+      }))
+    }),
+    createRuleOnlyReconciliationDecisionPort: vi.fn(() => ({
+      decide: vi.fn(async () => ({ kind: "add", reason: "mock rule-only" }))
+    })),
     ResolutionService: makeClass(),
     DirtyStatePanicService: makeClass(),
     EngineBindingService: makeClass({
