@@ -1174,7 +1174,11 @@ describe("MemoryService", () => {
             lifecycle_state: "tombstone",
             retention_state: "tombstoned",
             forget_disposition: "judged_useless",
-            forget_disposition_ref: null
+            forget_disposition_ref: null,
+            // judged_useless still holds at delete time: source-less + never
+            // reinforced, so the importance gate clears it for terminal removal.
+            evidence_refs: [],
+            reinforcement_count: 0
           })
         ),
         findByWorkspaceId: vi.fn(async () => []),
@@ -1200,6 +1204,63 @@ describe("MemoryService", () => {
 
     expect(hardDeleteSpy).toHaveBeenCalledTimes(1);
     expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(notifySpy).toHaveBeenCalledTimes(1);
+  });
+
+  // invariant (delete-time verdict re-verify): a `judged_useless` tombstone that
+  // GAINED evidence during the grace window no longer classifies judged_useless,
+  // so the physical delete is REFUSED fail-closed — the row survives (stays
+  // tombstoned) and a verdict_revoked skip event is audited.
+  it("autonomousHardDeleteTombstoned REFUSES a judged_useless row that gained evidence + audits verdict_revoked", async () => {
+    const hardDeleteSpy = vi.fn(async () => true);
+    const { dependencies, appendSpy, notifySpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () =>
+          createMemoryEntry({
+            lifecycle_state: "tombstone",
+            retention_state: "tombstoned",
+            forget_disposition: "judged_useless",
+            forget_disposition_ref: null,
+            // gained evidence after marking -> importance gate now classifies
+            // this as keep (evidence_basis), so the verdict no longer holds.
+            evidence_refs: ["evidence-gained-during-grace"],
+            reinforcement_count: 0
+          })
+        ),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        hardDeleteTombstonedWithDisposition: hardDeleteSpy
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    const deleted = await service.autonomousHardDeleteTombstoned(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "autonomous_tombstone_gc",
+      TransitionCausedBy.DETERMINISTIC_RULE
+    );
+
+    expect(deleted).toBe(false);
+    expect(hardDeleteSpy).not.toHaveBeenCalled();
+    // the audited event is the verdict_revoked skip, NOT a "deleted" audit.
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(appendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload_json: expect.objectContaining({
+          to_state: "tombstone",
+          reason_code: expect.stringContaining("verdict_revoked")
+        })
+      })
+    );
     expect(notifySpy).toHaveBeenCalledTimes(1);
   });
 

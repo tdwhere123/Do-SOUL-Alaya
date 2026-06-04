@@ -25,6 +25,7 @@ import {
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
+import { classifyMemoryImportance } from "./importance-gate.js";
 import { parseNonEmptyString, parseObjectId } from "./shared/validators.js";
 
 export type MemoryEntryInput = Omit<
@@ -848,6 +849,22 @@ export class MemoryService {
       return true;
     }
 
+    // invariant (delete-time verdict re-verify, symmetry with the `compressed`
+    // arm): a `judged_useless` row earned its terminal-removal right ONLY because
+    // the mechanical importance gate found it source-less AND never reinforced AND
+    // unprotected at marking time (T0). That verdict is re-checked HERE
+    // (T0+>=24h) on the FRESHLY-loaded row, not trusted blindly. If the row gained
+    // evidence / reinforcement / an explicit-keep protection during the grace
+    // window it no longer classifies judged_useless, so physical deletion would
+    // discard a now-durable memory. Fail-closed: emit a verdict_revoked skip event
+    // and leave the row tombstoned (recoverable).
+    // see also: packages/core/src/importance-gate.ts classifyMemoryImportance,
+    // apps/core-daemon/src/forget-disposition-ports.ts computeForgetDisposition.
+    if (classifyMemoryImportance(existing).disposition !== "judged_useless") {
+      await this.emitVerdictRevoked(existing, parsedReason, parsedCausedBy);
+      return false;
+    }
+
     const event = await this.appendAutonomousDeleteEvent(existing, parsedReason, parsedCausedBy);
     await hardDeleteWithDisposition(parsedObjectId);
     await this.dependencies.runtimeNotifier.notifyEntry(event);
@@ -946,6 +963,40 @@ export class MemoryService {
           existing.forget_disposition_ref === undefined
             ? null
             : [existing.forget_disposition_ref],
+        occurred_at: this.now()
+      })
+    });
+    await this.dependencies.runtimeNotifier.notifyEntry(skipEvent);
+  }
+
+  // invariant (delete-time fail-closed, symmetry with emitPreservationRevoked): a
+  // `judged_useless` row whose verdict no longer holds at delete time (it gained
+  // evidence / reinforcement / an explicit-keep protection during the grace
+  // window) is NOT physically removed. The row stays tombstoned (recoverable) and
+  // this audited skip event records that the marking-time verdict was revoked.
+  private async emitVerdictRevoked(
+    existing: Readonly<MemoryEntry>,
+    parsedReason: string,
+    parsedCausedBy: TransitionCausedBy
+  ): Promise<void> {
+    const skipEvent = await this.dependencies.eventLogRepo.append({
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedCausedBy,
+      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        // The row is NOT deleted: tombstone -> tombstone, verdict_revoked.
+        from_state: existing.lifecycle_state,
+        to_state: existing.lifecycle_state,
+        reason_code: `verdict_revoked: judged_useless no longer holds (gained evidence/reinforcement/protection); physical delete refused: ${parsedReason}`,
+        caused_by: parsedCausedBy,
+        evidence_refs: existing.evidence_refs.length === 0 ? null : [...existing.evidence_refs],
         occurred_at: this.now()
       })
     });
