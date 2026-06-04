@@ -1,6 +1,17 @@
 import { z } from "zod";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
 
+// invariant: `co_recalled` is intentionally EXCLUDED from this enum. It is a
+// PathRelation relation_kind (the auto-build associative carrier) that projects
+// to the display edge_type `recalls` via mapRelationKindToGraphEdgeType — it is
+// NOT a graph edge_type itself. The exclusion is LOAD-BEARING for the recall
+// earned-co_recalled fan-in reserve exemption: that exemption discriminates on
+// relation_kind === "co_recalled", a value that no graph edge_type ever takes,
+// so adding co_recalled here would let a generic graph edge masquerade as the
+// earned fan-in carrier. A future edit that adds it trips the contract test.
+// see also: mapRelationKindToGraphEdgeType, recall-service.ts
+//   EARNED_CO_RECALLED_FANIN_RELATION_KIND;
+//   packages/protocol/src/__tests__/memory-graph-co-recalled-invariant.test.ts.
 const memoryGraphEdgeTypeValues = [
   "supports",
   "derives_from",
