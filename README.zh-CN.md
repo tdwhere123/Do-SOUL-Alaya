@@ -325,11 +325,14 @@ Garden，先跑一次启动清理 pass，然后按 tier 周期调度四个角色
 Garden 清理都落在你打开的这个项目上。
 
 - **Auditor** —— 证据陈旧检查、pointer 健康度、孤儿检测。
-- **Janitor** —— TTL 清理、热/温分层降级、可逆休眠降级、墓碑 GC，以及
-  遗忘生命周期的 *判无用*-删除臂（decay → dormant → 仅删无来源、从未被
-  强化的行，且必须过删除授权 disposition 闸 + capsule 复核）。该生命周期
-  的 *压缩* 臂（删除被 capsule 保留的合并成员）已建成但 **休眠中，等运维
-  决策**。
+- **Janitor** —— TTL 清理、热/温分层降级，以及自主遗忘生命周期：可逆休眠
+  降级（一次有审计的 `active → dormant` 状态迁移，召回静默，下次使用即复活）
+  → 墓碑（+disposition）→ 物理 GC，全部由周期性 Janitor pass 入队。两条删除臂
+  喂给它，都过删除授权 disposition 闸 + capsule 复核。*判无用* 臂只删无来源、
+  从未被强化的行。*压缩* 臂只在某个 live synthesis capsule 完全合并某成员时
+  才删它（该成员证据是 capsule 证据的子集）—— capsule 保留聚类的共享证据加
+  一份确定性 gist 摘要，故这是可接受的有损合并；pinned / hazard / canon /
+  consolidated 记忆永不被压缩删除。
 - **Librarian** —— 合并检测、模板聚类、邻居发现、path 压缩，以及 accept
   即创建 capsule 的 synthesis proposal。
 - **Scheduler** —— 拥有队列、tier 优先级、冷却期、任务记账。
@@ -632,12 +635,15 @@ GitHub Release source tarball + `SHA256SUMS`，由 `scripts/install.sh`
 **v0.3.11** 把 Garden compute 改成 **默认零云** —— `host_worker`（由 attach
 的 CLI agent 计算）是产品默认，云端 edge-LLM 默认关闭，B-2 边分类作为
 host-worker `EDGE_CLASSIFY` 任务运行并带确定性规则启发式回退；用持久的
-accepted member→representative 共现边取代临时的召回 fan-in 启发式；补完
-遗忘-压缩生命周期的 *判无用*-删除臂（decay → dormant → 仅删无来源、从未被
-强化的行，且过删除授权 disposition 闸 + capsule 复核）；并接上 production
-synthesis review accept → 创建 capsule。该生命周期的 *压缩* 臂已建成但
-**休眠中，等运维决策**（`docs/handbook/backlog.md` `#BL-049`）；在激活之前
-它不会删除任何记忆。
+accepted member→representative 共现边取代临时的召回 fan-in 启发式；激活了
+自主遗忘-压缩生命周期（decay → dormant → 墓碑（+disposition）→ 物理 GC，全部
+由周期性 Janitor pass 入队，行离开召回前有一次有审计的 `active → dormant`
+状态迁移，并过删除授权 disposition 闸 + capsule 复核）；并接上 production
+synthesis review accept → 创建 capsule。两条删除臂都已武装：*判无用* 臂（只删
+无来源、从未被强化的行，删除时再核 verdict）与 *压缩* 臂（只在某个 live capsule
+完全合并某成员时才删它，该成员证据是 capsule 证据的子集 —— capsule 保留聚类
+共享证据加一份确定性 gist 摘要，故是可接受的有损合并；pinned / hazard / canon /
+consolidated 永不被压缩删除）（`docs/handbook/backlog.md` `#BL-049`，已关闭）。
 
 v0.3.11 **实现已完成，但大机器 500q gate 仍未跑。** 只有该 gate 在更大的
 主机上跑过、LongMemEval / LoCoMo 全量 bench 归档通过后，才能把它描述成

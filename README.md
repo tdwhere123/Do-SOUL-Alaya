@@ -402,12 +402,17 @@ recall, proposals, usage receipts, and Garden cleanup stay scoped to the
 project you opened.
 
 - **Auditor** — evidence staleness check, pointer health, orphan detection.
-- **Janitor** — TTL cleanup, hot/warm tier demotion, reversible dormant
-  demotion, tombstone GC, and the *judged-useless*-delete arm of the
-  forgetting lifecycle (decay → dormant → delete of sourceless,
-  never-reinforced rows only, behind a delete-authority disposition gate +
-  capsule re-verify). The *compress* arm — delete consolidated members
-  preserved in a capsule — is built but dormant pending an operator decision.
+- **Janitor** — TTL cleanup, hot/warm tier demotion, and the autonomous
+  forgetting lifecycle: reversible dormant demotion (an audited
+  `active → dormant` state transition; recall-silent, revived on next use) →
+  tombstone (+disposition) → physical GC, all enqueued on the periodic Janitor
+  pass. Two delete arms feed it, both behind a delete-authority disposition gate
+  + capsule re-verify. The *judged-useless* arm deletes only sourceless,
+  never-reinforced rows. The *compress* arm deletes a consolidated member only
+  when a live synthesis capsule fully consolidates it (its evidence is a subset
+  of the capsule's) — the capsule keeps the cluster's shared evidence plus a
+  deterministic gist summary, so this is acceptable lossy consolidation;
+  pinned / hazard / canon / consolidated memories are never compress-deleted.
 - **Librarian** — merge detection, template clustering, neighbour discovery,
   path compression, and synthesis proposals whose `accept` creates a capsule.
 - **Scheduler** — owns the queue, tier prioritisation, cooling periods, task accounting.
@@ -741,13 +746,19 @@ that a replacement exists. The live MCP catalog is **16 tools** (13
 is default-off, and B-2 edge classification runs as a host-worker
 `EDGE_CLASSIFY` task with a deterministic rule-heuristic fallback. It retires
 the temporary recall fan-in heuristic in favour of durable accepted
-member→representative co-occurrence edges; completes the
-forgetting-compression lifecycle's *judged-useless*-delete arm
-(decay → dormant → delete of sourceless, never-reinforced rows only, with a
+member→representative co-occurrence edges; activates the autonomous
+forgetting-compression lifecycle (decay → dormant → tombstone(+disposition) →
+physical GC, all enqueued on the periodic Janitor pass, with an audited
+`active → dormant` state transition before a row leaves recall and a
 delete-authority disposition gate + capsule re-verify); and wires production
-synthesis review accept → capsule create. The *compress* arm of that lifecycle
-is built but **dormant pending an operator decision** (`docs/handbook/backlog.md`
-`#BL-049`); no memory is deleted by it until activated.
+synthesis review accept → capsule create. Both forgetting delete arms are now
+armed: the *judged-useless* arm (sourceless, never-reinforced rows only, with a
+delete-time verdict re-verify) and the *compress* arm — delete a consolidated
+member only when a live capsule fully consolidates it (its evidence is a subset of
+the capsule's). The capsule keeps the cluster's shared evidence + a deterministic
+gist summary, so this is acceptable lossy consolidation; pinned / hazard / canon /
+consolidated memories are never compress-deleted (`docs/handbook/backlog.md`
+`#BL-049`, resolved).
 
 v0.3.11 is **implementation complete with the big-machine 500q gate
 pending.** It is not full release-ready until that gate runs on a larger host
