@@ -25,7 +25,7 @@ import {
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import { classifyMemoryImportance } from "./importance-gate.js";
+import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "./importance-gate.js";
 import { parseNonEmptyString, parseObjectId } from "./shared/validators.js";
 
 export type MemoryEntryInput = Omit<
@@ -714,6 +714,21 @@ export class MemoryService {
       throw new CoreError(
         "VALIDATION",
         "Only a dormant memory may be autonomously tombstoned"
+      );
+    }
+
+    // invariant (FIX-N1 defense in depth): the dormant demotion candidate query
+    // admits pinned/hazard/canon/consolidated rows, so computeForgetDisposition's
+    // isMemoryExplicitlyProtected check is the only barrier upstream. Re-assert it
+    // HERE at the tombstone authority so an explicitly-protected row can never be
+    // tombstoned even if a future caller bypasses computeForgetDisposition.
+    // Fail-closed: refuse (the row is never terminalized, stays dormant).
+    // see also: apps/core-daemon/src/forget-disposition-ports.ts computeForgetDisposition,
+    // packages/core/src/importance-gate.ts isMemoryExplicitlyProtected.
+    if (isMemoryExplicitlyProtected(existing)) {
+      throw new CoreError(
+        "VALIDATION",
+        "Autonomous tombstone refused: memory is explicitly protected (pinned/hazard/canon/consolidated)"
       );
     }
 

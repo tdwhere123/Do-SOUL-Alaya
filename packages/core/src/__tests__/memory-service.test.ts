@@ -1595,6 +1595,52 @@ describe("MemoryService", () => {
     });
   });
 
+  // invariant (FIX-N1 defense in depth): a protected dormant row that reaches the
+  // tombstone authority (e.g. a future caller bypasses computeForgetDisposition)
+  // is REFUSED fail-closed — the repo tombstone port is never called.
+  it("autonomousTombstone refuses an explicitly-protected dormant row (defense in depth)", async () => {
+    const tombstoneSpy = vi.fn(async () =>
+      createMemoryEntry({ lifecycle_state: "tombstone", retention_state: "tombstoned" })
+    );
+    const { dependencies, appendSpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () =>
+          createMemoryEntry({ lifecycle_state: "dormant", decay_profile: "pinned" })
+        ),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        autonomousTombstone: tombstoneSpy
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.autonomousTombstone(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "judged_useless",
+        null,
+        "autonomous_forget_sweep",
+        TransitionCausedBy.DETERMINISTIC_RULE
+      )
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "VALIDATION",
+      message: "Autonomous tombstone refused: memory is explicitly protected (pinned/hazard/canon/consolidated)"
+    });
+
+    expect(tombstoneSpy).not.toHaveBeenCalled();
+    expect(appendSpy).not.toHaveBeenCalled();
+  });
+
   it("writes archive and state_changed events before persistence with consecutive revisions", async () => {
     const order: string[] = [];
     const revisions: number[] = [];
