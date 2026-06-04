@@ -95,6 +95,19 @@ export interface DormantDispositionCandidate {
   readonly disposition_ref: string | null;
 }
 
+// invariant: a dormant disposition candidate can go stale between candidate
+// selection and its tombstone turn (concurrent revival / overlapping sweep /
+// Inspector pin). The tombstone authority refuses such a row (no longer dormant,
+// or became explicitly protected) as a benign concurrent-mutation race, which the
+// daemon adapter resolves "skipped" so one racy candidate cannot abort the batch.
+// A genuine error (shape precondition / missing port / storage fault) is NOT a
+// skip and still rejects loud. Mirrors DormantDemotionOutcome.
+// see also: apps/core-daemon/src/forget-disposition-ports.ts createTombstoneDispositionSweepPort,
+// packages/core/src/memory-service.ts autonomousTombstone.
+export type DispositionSweepOutcome =
+  | { readonly status: "tombstoned" }
+  | { readonly status: "skipped"; readonly reason: string };
+
 // invariant: the GATED autonomous dormant -> tombstoned producer. The daemon's
 // implementation computes each dormant memory's disposition (compressed = live
 // capsule membership, judged_useless = mechanical importance gate) and only
@@ -103,7 +116,7 @@ export interface DormantDispositionCandidate {
 // see also: packages/core/src/importance-gate.ts classifyMemoryImportance.
 export interface JanitorDispositionSweepPort {
   findDormantDispositionCandidates(workspaceId: string): Promise<readonly DormantDispositionCandidate[]>;
-  autonomousTombstone(candidate: DormantDispositionCandidate, taskId: string): Promise<void>;
+  autonomousTombstone(candidate: DormantDispositionCandidate, taskId: string): Promise<DispositionSweepOutcome>;
 }
 
 export interface JanitorStrongRefProtectionPort {
@@ -390,8 +403,20 @@ export class Janitor {
           continue;
         }
       }
-      await this.dispositionSweepPort.autonomousTombstone(candidate, task.task_id);
-      tombstoned.push(candidate.memory_id);
+      // invariant: a candidate that left dormant OR became explicitly protected
+      // between selection and its turn resolves "skipped" (the tombstone authority
+      // refused it as a benign concurrent-mutation race). The loop CONTINUES so one
+      // racy candidate cannot abort the batch nor erase the in-batch audit trail of
+      // candidates already tombstoned this pass; only actually-tombstoned rows enter
+      // objects_affected. A genuine error still rejects to run()'s failure path.
+      // Mirrors executeDormantDemotion / executeTombstoneGc skip-and-continue.
+      const outcome = await this.dispositionSweepPort.autonomousTombstone(candidate, task.task_id);
+      if (outcome.status === "tombstoned") {
+        tombstoned.push(candidate.memory_id);
+      } else {
+        auditEntries.push(`[SKIPPED] disposition_sweep: ${candidate.memory_id} ${outcome.reason}`);
+        skipped += 1;
+      }
     }
 
     auditEntries.push(

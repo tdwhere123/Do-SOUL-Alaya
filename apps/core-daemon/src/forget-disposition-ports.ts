@@ -1,4 +1,4 @@
-import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "@do-soul/alaya-core";
+import { classifyMemoryImportance, CoreError, isMemoryExplicitlyProtected } from "@do-soul/alaya-core";
 import type {
   ForgetDisposition,
   MemoryEntry,
@@ -6,6 +6,7 @@ import type {
   TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import type {
+  DispositionSweepOutcome,
   DormantDispositionCandidate,
   JanitorDispositionSweepPort,
   JanitorTombstoneGcPort,
@@ -26,6 +27,11 @@ function isCapsuleLive(capsule: Readonly<SynthesisCapsule>): boolean {
 
 export interface ForgetDispositionMemoryLookupPort {
   findDormantMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
+  // invariant: single-row re-load used ONLY to confirm a benign concurrent-mutation
+  // race when the tombstone authority refuses a candidate (row no longer dormant /
+  // became explicitly protected). It is not a recall path. Resolves null when the
+  // row left existence entirely (also a benign race for the sweep).
+  findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
 }
 
 export interface ForgetDispositionCapsuleLookupPort {
@@ -163,21 +169,68 @@ export function createTombstoneDispositionSweepPort(input: {
     autonomousTombstone: async (
       candidate: DormantDispositionCandidate,
       _taskId: string
-    ): Promise<void> => {
+    ): Promise<DispositionSweepOutcome> => {
       // The Janitor only calls this for non-null dispositions; re-assert here so a
       // mis-wired caller can never tombstone an undisposed memory.
       if (candidate.disposition === null) {
-        return;
+        return { status: "skipped", reason: "null disposition (kept)" };
       }
-      await input.tombstoneAuthority.autonomousTombstone(
-        candidate.memory_id,
-        candidate.disposition,
-        candidate.disposition_ref,
-        "autonomous_forget_sweep",
-        causedBy
-      );
+      try {
+        await input.tombstoneAuthority.autonomousTombstone(
+          candidate.memory_id,
+          candidate.disposition,
+          candidate.disposition_ref,
+          "autonomous_forget_sweep",
+          causedBy
+        );
+        return { status: "tombstoned" };
+      } catch (error) {
+        // invariant: the candidate snapshot can go stale between disposition
+        // selection and this turn (concurrent revival / overlapping sweep /
+        // Inspector pin). The authority then refuses with a VALIDATION CoreError —
+        // either "no longer dormant" (memory-service.ts ~:713) or the FIX-N1
+        // explicitly-protected backstop (~:728). Discriminate by CODE (not message
+        // strings) AND a structural row-state re-check: only a confirmed benign
+        // concurrent-mutation race resolves "skipped" so one racy candidate cannot
+        // abort the batch. EVERYTHING ELSE (shape-precondition VALIDATION on a
+        // still-eligible row, NOT_FOUND, CONFLICT, storage faults, non-CoreError)
+        // rethrows loud to the Janitor run() failure path.
+        // see also: packages/core/src/memory-service.ts autonomousTombstone,
+        // packages/core/src/memory-service.ts demoteActiveToDormantIfActive.
+        if (!(error instanceof CoreError) || error.code !== "VALIDATION") {
+          throw error;
+        }
+        const benignReason = await classifyTombstoneRefusal(input.memoryLookup, candidate.memory_id);
+        if (benignReason === null) {
+          throw error;
+        }
+        return { status: "skipped", reason: benignReason };
+      }
     }
   };
+}
+
+// invariant: re-loads the refused row to confirm whether the refusal is a benign
+// concurrent-mutation race. Returns the skip reason ONLY for the two TOCTOU
+// conditions the tombstone authority guards (row gone / no longer dormant / became
+// explicitly protected); returns null for any state where the row was still a
+// valid tombstone target (i.e. the VALIDATION came from a genuine shape
+// precondition, not a race), so the caller rethrows loud.
+async function classifyTombstoneRefusal(
+  memoryLookup: ForgetDispositionMemoryLookupPort,
+  objectId: string
+): Promise<string | null> {
+  const current = await memoryLookup.findById(objectId);
+  if (current === null) {
+    return "no longer present (concurrent removal)";
+  }
+  if (current.lifecycle_state !== "dormant") {
+    return "no longer dormant (concurrent revival)";
+  }
+  if (isMemoryExplicitlyProtected(current)) {
+    return "became explicitly protected (pinned/hazard/canon/consolidated)";
+  }
+  return null;
 }
 
 /**

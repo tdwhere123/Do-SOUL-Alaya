@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { CoreError } from "@do-soul/alaya-core";
 import type { MemoryEntry, SynthesisCapsule } from "@do-soul/alaya-protocol";
 import {
   buildLiveCapsuleMemberIndex,
@@ -164,7 +165,8 @@ describe("createTombstoneDispositionSweepPort", () => {
         memory({ object_id: "mem-compressed" }),
         memory({ object_id: "mem-useless" }),
         memory({ object_id: "mem-kept", evidence_refs: ["e1", "e2"] })
-      ])
+      ]),
+      findById: vi.fn(async () => null)
     };
     const capsuleLookup = {
       findByWorkspaceId: vi.fn(async () => [capsule({ object_id: "cap", source_memory_refs: ["mem-compressed"] })])
@@ -192,16 +194,17 @@ describe("createTombstoneDispositionSweepPort", () => {
       findTombstonedMemoriesWithDisposition: vi.fn(async () => [])
     };
     const port = createTombstoneDispositionSweepPort({
-      memoryLookup: { findDormantMemories: vi.fn(async () => []) },
+      memoryLookup: { findDormantMemories: vi.fn(async () => []), findById: vi.fn(async () => null) },
       capsuleLookup: { findByWorkspaceId: vi.fn(async () => []) },
       tombstoneAuthority
     });
 
-    await port.autonomousTombstone(
+    const outcome = await port.autonomousTombstone(
       { memory_id: "mem-kept", disposition: null, disposition_ref: null },
       "task-1"
     );
 
+    expect(outcome).toEqual({ status: "skipped", reason: "null disposition (kept)" });
     expect(tombstoneAuthority.autonomousTombstone).not.toHaveBeenCalled();
   });
 
@@ -212,16 +215,17 @@ describe("createTombstoneDispositionSweepPort", () => {
       findTombstonedMemoriesWithDisposition: vi.fn(async () => [])
     };
     const port = createTombstoneDispositionSweepPort({
-      memoryLookup: { findDormantMemories: vi.fn(async () => []) },
+      memoryLookup: { findDormantMemories: vi.fn(async () => []), findById: vi.fn(async () => null) },
       capsuleLookup: { findByWorkspaceId: vi.fn(async () => []) },
       tombstoneAuthority
     });
 
-    await port.autonomousTombstone(
+    const outcome = await port.autonomousTombstone(
       { memory_id: "mem-useless", disposition: "judged_useless", disposition_ref: null },
       "task-1"
     );
 
+    expect(outcome).toEqual({ status: "tombstoned" });
     expect(tombstoneAuthority.autonomousTombstone).toHaveBeenCalledWith(
       "mem-useless",
       "judged_useless",
@@ -229,5 +233,124 @@ describe("createTombstoneDispositionSweepPort", () => {
       "autonomous_forget_sweep",
       "deterministic_rule"
     );
+  });
+
+  // invariant: the candidate left dormant between selection and its turn. The
+  // authority throws VALIDATION; the adapter confirms the benign race via a row
+  // re-read (no longer dormant) and resolves "skipped" so the batch continues.
+  it("autonomousTombstone resolves skipped when a refused row is no longer dormant (benign race)", async () => {
+    const tombstoneAuthority = {
+      autonomousTombstone: vi.fn(async () => {
+        throw new CoreError("VALIDATION", "Only a dormant memory may be autonomously tombstoned");
+      }),
+      autonomousHardDeleteTombstoned: vi.fn(async () => true),
+      findTombstonedMemoriesWithDisposition: vi.fn(async () => [])
+    };
+    const port = createTombstoneDispositionSweepPort({
+      memoryLookup: {
+        findDormantMemories: vi.fn(async () => []),
+        findById: vi.fn(async () => memory({ object_id: "mem-revived", lifecycle_state: "active" }))
+      },
+      capsuleLookup: { findByWorkspaceId: vi.fn(async () => []) },
+      tombstoneAuthority
+    });
+
+    const outcome = await port.autonomousTombstone(
+      { memory_id: "mem-revived", disposition: "judged_useless", disposition_ref: null },
+      "task-1"
+    );
+
+    expect(outcome).toEqual({ status: "skipped", reason: "no longer dormant (concurrent revival)" });
+  });
+
+  // invariant: the row became explicitly protected (pinned) between selection and
+  // its turn. The authority's FIX-N1 backstop throws VALIDATION; the adapter
+  // confirms the benign race via the row re-read and resolves "skipped".
+  it("autonomousTombstone resolves skipped when a refused row became explicitly protected (benign race)", async () => {
+    const tombstoneAuthority = {
+      autonomousTombstone: vi.fn(async () => {
+        throw new CoreError(
+          "VALIDATION",
+          "Autonomous tombstone refused: memory is explicitly protected (pinned/hazard/canon/consolidated)"
+        );
+      }),
+      autonomousHardDeleteTombstoned: vi.fn(async () => true),
+      findTombstonedMemoriesWithDisposition: vi.fn(async () => [])
+    };
+    const port = createTombstoneDispositionSweepPort({
+      memoryLookup: {
+        findDormantMemories: vi.fn(async () => []),
+        findById: vi.fn(async () => memory({ object_id: "mem-pinned", decay_profile: "pinned" }))
+      },
+      capsuleLookup: { findByWorkspaceId: vi.fn(async () => []) },
+      tombstoneAuthority
+    });
+
+    const outcome = await port.autonomousTombstone(
+      { memory_id: "mem-pinned", disposition: "judged_useless", disposition_ref: null },
+      "task-1"
+    );
+
+    expect(outcome).toEqual({
+      status: "skipped",
+      reason: "became explicitly protected (pinned/hazard/canon/consolidated)"
+    });
+  });
+
+  // invariant: a VALIDATION error whose row is STILL a valid tombstone target
+  // (dormant, unprotected) is NOT a benign race — it is a genuine shape/precondition
+  // fault and must rethrow loud. The row re-read confirms eligibility, so the
+  // adapter does not swallow it.
+  it("autonomousTombstone rethrows a VALIDATION error when the row is still an eligible target", async () => {
+    const validationError = new CoreError("VALIDATION", "compressed disposition requires a live synthesis-capsule ref");
+    const tombstoneAuthority = {
+      autonomousTombstone: vi.fn(async () => {
+        throw validationError;
+      }),
+      autonomousHardDeleteTombstoned: vi.fn(async () => true),
+      findTombstonedMemoriesWithDisposition: vi.fn(async () => [])
+    };
+    const port = createTombstoneDispositionSweepPort({
+      memoryLookup: {
+        findDormantMemories: vi.fn(async () => []),
+        findById: vi.fn(async () => memory({ object_id: "mem-eligible", lifecycle_state: "dormant" }))
+      },
+      capsuleLookup: { findByWorkspaceId: vi.fn(async () => []) },
+      tombstoneAuthority
+    });
+
+    await expect(
+      port.autonomousTombstone(
+        { memory_id: "mem-eligible", disposition: "compressed", disposition_ref: null },
+        "task-1"
+      )
+    ).rejects.toBe(validationError);
+  });
+
+  // invariant: a non-VALIDATION CoreError (NOT_FOUND / CONFLICT) and any
+  // non-CoreError are never benign races — they rethrow loud WITHOUT a row re-read.
+  it("autonomousTombstone rethrows a non-VALIDATION error without re-reading the row", async () => {
+    const conflictError = new CoreError("CONFLICT", "Autonomous tombstone port is not available");
+    const findById = vi.fn(async () => memory());
+    const tombstoneAuthority = {
+      autonomousTombstone: vi.fn(async () => {
+        throw conflictError;
+      }),
+      autonomousHardDeleteTombstoned: vi.fn(async () => true),
+      findTombstonedMemoriesWithDisposition: vi.fn(async () => [])
+    };
+    const port = createTombstoneDispositionSweepPort({
+      memoryLookup: { findDormantMemories: vi.fn(async () => []), findById },
+      capsuleLookup: { findByWorkspaceId: vi.fn(async () => []) },
+      tombstoneAuthority
+    });
+
+    await expect(
+      port.autonomousTombstone(
+        { memory_id: "mem-1", disposition: "judged_useless", disposition_ref: null },
+        "task-1"
+      )
+    ).rejects.toBe(conflictError);
+    expect(findById).not.toHaveBeenCalled();
   });
 });

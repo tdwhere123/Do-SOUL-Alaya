@@ -1536,7 +1536,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     // through memoryService (audited) + memoryEntryRepo (disposition-gated SQL),
     // so an un-preserved/un-judged memory can never be autonomously removed.
     tombstoneDispositionSweepPort: createTombstoneDispositionSweepPort({
-      memoryLookup: { findDormantMemories: (workspaceId) => memoryEntryRepo.findDormantMemories(workspaceId) },
+      memoryLookup: {
+        findDormantMemories: (workspaceId) => memoryEntryRepo.findDormantMemories(workspaceId),
+        findById: (objectId) => memoryEntryRepo.findById(objectId)
+      },
       capsuleLookup: { findByWorkspaceId: (workspaceId) => synthesisCapsuleRepo.findByWorkspaceId(workspaceId) },
       tombstoneAuthority: forgetTombstoneAuthority
     }),

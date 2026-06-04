@@ -69,6 +69,7 @@ export {
   Janitor,
   type ExpiredControlPlaneObject,
   type HotDemotionCandidate,
+  type DispositionSweepOutcome,
   type DormantDispositionCandidate,
   type JanitorControlPlaneCleanupPort,
   type JanitorDependencies,

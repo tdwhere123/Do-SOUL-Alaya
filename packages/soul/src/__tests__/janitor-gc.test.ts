@@ -196,7 +196,7 @@ describe("Janitor GC task kinds", () => {
         // No disposition: preserved-or-judged gate failed. MUST be retained.
         { memory_id: "memory-kept", disposition: null, disposition_ref: null }
       ]),
-      autonomousTombstone: vi.fn(async () => undefined)
+      autonomousTombstone: vi.fn(async () => ({ status: "tombstoned" }) as const)
     };
     const tombstoneGcPort = {
       findTombstonedMemories: vi.fn(async () => []),
@@ -237,7 +237,7 @@ describe("Janitor GC task kinds", () => {
         { memory_id: "memory-a", disposition: null, disposition_ref: null },
         { memory_id: "memory-b", disposition: null, disposition_ref: null }
       ]),
-      autonomousTombstone: vi.fn(async () => undefined)
+      autonomousTombstone: vi.fn(async () => ({ status: "tombstoned" }) as const)
     };
     const janitor = new Janitor({
       cleanupPort: {
@@ -273,7 +273,7 @@ describe("Janitor GC task kinds", () => {
         { memory_id: "memory-protected", disposition: "judged_useless" as const, disposition_ref: null },
         { memory_id: "memory-free", disposition: "judged_useless" as const, disposition_ref: null }
       ]),
-      autonomousTombstone: vi.fn(async () => undefined)
+      autonomousTombstone: vi.fn(async () => ({ status: "tombstoned" }) as const)
     };
     const strongRefProtectionPort = {
       isProtected: vi.fn(
@@ -313,6 +313,104 @@ describe("Janitor GC task kinds", () => {
       "disposition_sweep: 1 dormant memories autonomously tombstoned (1 retained, no disposition or strong ref)",
       "tombstone_gc: 0 tombstoned memories hard-deleted"
     ]);
+  });
+
+  // invariant: a disposition candidate can go stale between selection and its turn
+  // (concurrent revival / Inspector pin). The tombstone authority refuses such a
+  // row as a benign concurrent-mutation race, which the daemon adapter resolves as
+  // { status: "skipped" }. The sweep must CONTINUE so one racy candidate cannot
+  // abort the batch nor erase the in-batch audit trail of rows already tombstoned.
+  it("disposition sweep tolerates a candidate the authority refuses as a benign race without aborting the batch", async () => {
+    const autonomousTombstone = vi
+      .fn<(candidate: { memory_id: string }, taskId: string) => Promise<{ status: "tombstoned" } | { status: "skipped"; reason: string }>>()
+      .mockResolvedValueOnce({ status: "tombstoned" })
+      .mockResolvedValueOnce({ status: "skipped", reason: "no longer dormant (concurrent revival)" });
+    const dispositionSweepPort = {
+      findDormantDispositionCandidates: vi.fn(async () => [
+        { memory_id: "memory-1", disposition: "judged_useless" as const, disposition_ref: null },
+        { memory_id: "memory-2", disposition: "judged_useless" as const, disposition_ref: null }
+      ]),
+      autonomousTombstone
+    };
+    const scheduler = { reportCompletion: vi.fn(async () => undefined) };
+    const janitor = new Janitor({
+      cleanupPort: {
+        findExpiredObjects: vi.fn(async () => []),
+        removeExpiredObjects: vi.fn(async () => undefined)
+      },
+      tieringPort: {
+        findHotDemotionCandidates: vi.fn(async () => []),
+        demoteToWarm: vi.fn(async () => undefined)
+      },
+      tombstoneGcPort: {
+        findTombstonedMemories: vi.fn(async () => []),
+        hardDelete: vi.fn(async () => true)
+      },
+      dispositionSweepPort,
+      scheduler,
+      now: () => "2026-03-28T00:00:00.000Z"
+    } as ConstructorParameters<typeof Janitor>[0]);
+
+    const result = await janitor.run(createTask("tombstone_gc"));
+
+    // The batch COMPLETES as a success: the 1st candidate is still tombstoned, the
+    // racy 2nd is recorded skipped (its in-batch audit trail survives), and the
+    // result is not a failure.
+    expect(autonomousTombstone).toHaveBeenCalledTimes(2);
+    expect(result.success).toBe(true);
+    expect(result.error_message).toBeNull();
+    expect(result.objects_affected).toEqual(["memory-1"]);
+    expect(result.audit_entries).toEqual([
+      "[SKIPPED] disposition_sweep: memory-2 no longer dormant (concurrent revival)",
+      "disposition_sweep: 1 dormant memories autonomously tombstoned (1 retained, no disposition or strong ref)",
+      "tombstone_gc: 0 tombstoned memories hard-deleted"
+    ]);
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+  });
+
+  // invariant: a GENUINE (non-TOCTOU) error from the tombstone authority is NOT a
+  // skip. It must propagate loud to run()'s failure path, aborting the batch — the
+  // skip-and-continue path is strictly the benign concurrent-mutation race.
+  it("disposition sweep lets a genuine tombstone error fail the batch loud", async () => {
+    const dispositionSweepPort = {
+      findDormantDispositionCandidates: vi.fn(async () => [
+        { memory_id: "memory-1", disposition: "judged_useless" as const, disposition_ref: null },
+        { memory_id: "memory-2", disposition: "judged_useless" as const, disposition_ref: null }
+      ]),
+      autonomousTombstone: vi
+        .fn<(candidate: { memory_id: string }, taskId: string) => Promise<{ status: "tombstoned" }>>()
+        .mockResolvedValueOnce({ status: "tombstoned" })
+        .mockRejectedValueOnce(new Error("storage write failed"))
+    };
+    const scheduler = { reportCompletion: vi.fn(async () => undefined) };
+    const janitor = new Janitor({
+      cleanupPort: {
+        findExpiredObjects: vi.fn(async () => []),
+        removeExpiredObjects: vi.fn(async () => undefined)
+      },
+      tieringPort: {
+        findHotDemotionCandidates: vi.fn(async () => []),
+        demoteToWarm: vi.fn(async () => undefined)
+      },
+      tombstoneGcPort: {
+        findTombstonedMemories: vi.fn(async () => []),
+        hardDelete: vi.fn(async () => true)
+      },
+      dispositionSweepPort,
+      scheduler,
+      now: () => "2026-03-28T00:00:00.000Z"
+    } as ConstructorParameters<typeof Janitor>[0]);
+
+    const result = await janitor.run(createTask("tombstone_gc"));
+
+    // The genuine error aborts the batch: a failure result, empty objects_affected
+    // and audit_entries (the partial in-batch audit is discarded on the failure
+    // path), and the error surfaced in error_message.
+    expect(result.success).toBe(false);
+    expect(result.error_message).toBe("storage write failed");
+    expect(result.objects_affected).toEqual([]);
+    expect(result.audit_entries).toEqual([]);
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 });
 

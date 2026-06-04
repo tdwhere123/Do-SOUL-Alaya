@@ -93,6 +93,7 @@ export {
   type HandoffGapHandler,
   type HotDemotionCandidate,
   type OrphanedMemoryRecord,
+  type DispositionSweepOutcome,
   type DormantDispositionCandidate,
   type JanitorControlPlaneCleanupPort,
   type JanitorDependencies,
