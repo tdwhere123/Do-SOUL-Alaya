@@ -319,7 +319,7 @@ describe("garden runtime path plasticity queue", () => {
   });
 
   it("enqueues DORMANT_DEMOTION on the Janitor pass and demotes faded+idle memories (reversible, never tombstoned)", async () => {
-    const setLifecycleDormant = vi.fn(async () => undefined);
+    const setLifecycleDormant = vi.fn(async () => "demoted" as const);
     const findLowActivityActiveMemories = vi.fn(async () => [{ memory_id: "memory-faded" }]);
     const gardenDataPorts = createGardenDataPorts({
       dormantDemotionPort: {
@@ -1084,7 +1084,7 @@ function createGardenDataPorts(
     },
     dormantDemotionPort: {
       findLowActivityActiveMemories: vi.fn(async () => []),
-      setLifecycleDormant: vi.fn(async () => undefined),
+      setLifecycleDormant: vi.fn(async () => "skipped" as const),
       ...(overrides.dormantDemotionPort ?? {})
     },
     mergePort: {

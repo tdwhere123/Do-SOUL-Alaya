@@ -1302,6 +1302,66 @@ describe("SqliteMemoryEntryRepo", () => {
     expect((await repo.findById(active.object_id))?.lifecycle_state).toBe("active");
   });
 
+  // invariant (I-1): guarded active -> dormant demotion. onTransition (the
+  // active->dormant audit append) shares the UPDATE transaction; a 0-row guard
+  // (row not active) is a benign no-op skip, never an audit and never a throw.
+  it("transitionToDormantIfActive demotes an active row, clears the forget marker, and fires onTransition once", async () => {
+    const { repo } = await createRepo();
+    const active = createMemoryEntry({
+      object_id: "ffffffff-0000-4000-8000-000000000001",
+      lifecycle_state: "active",
+      forget_disposition: "compressed",
+      forget_disposition_ref: "capsule-z"
+    });
+    await repo.create(active);
+    const onTransition = vi.fn();
+
+    const demoted = await repo.transitionToDormantIfActive(
+      active.object_id,
+      "2026-03-22T00:00:00.000Z",
+      onTransition
+    );
+    expect(onTransition).toHaveBeenCalledTimes(1);
+    expect(demoted?.lifecycle_state).toBe("dormant");
+    expect(demoted?.forget_disposition).toBeNull();
+    expect(demoted?.forget_disposition_ref).toBeNull();
+  });
+
+  it("transitionToDormantIfActive is a guarded no-op (null, no onTransition) for a row that is not active", async () => {
+    const { repo } = await createRepo();
+    const dormant = createMemoryEntry({
+      object_id: "ffffffff-0000-4000-8000-000000000002",
+      lifecycle_state: "dormant"
+    });
+    await repo.create(dormant);
+    const onTransition = vi.fn();
+
+    await expect(
+      repo.transitionToDormantIfActive(dormant.object_id, "2026-03-22T00:00:00.000Z", onTransition)
+    ).resolves.toBeNull();
+    expect(onTransition).not.toHaveBeenCalled();
+    expect((await repo.findById(dormant.object_id))?.lifecycle_state).toBe("dormant");
+  });
+
+  it("transitionToDormantIfActive rolls the demotion back when onTransition throws (one transaction)", async () => {
+    const { repo } = await createRepo();
+    const active = createMemoryEntry({
+      object_id: "ffffffff-0000-4000-8000-000000000003",
+      lifecycle_state: "active"
+    });
+    await repo.create(active);
+    const onTransition = vi.fn(() => {
+      throw new Error("active->dormant audit append failed mid-transaction");
+    });
+
+    await expect(
+      repo.transitionToDormantIfActive(active.object_id, "2026-03-22T00:00:00.000Z", onTransition)
+    ).rejects.toThrow(StorageError);
+    expect(onTransition).toHaveBeenCalledTimes(1);
+    // The audit-append throw rolled the UPDATE back: the row stays active.
+    expect((await repo.findById(active.object_id))?.lifecycle_state).toBe("active");
+  });
+
 
   it("throws NOT_FOUND when updating dynamics for a missing entry", async () => {
     const { repo } = await createRepo();

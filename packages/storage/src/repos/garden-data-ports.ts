@@ -76,9 +76,16 @@ export interface GardenLowActivityMemoryRecord {
 // (manifestation_thresholds.hint_max = 0.3) AND that has been idle long
 // enough drops out of recall but stays restorable.
 // see also: packages/soul/src/garden/janitor.ts executeDormantDemotion.
+// invariant: setLifecycleDormant resolves "skipped" (not a throw) when the row
+// is not active anymore (guarded UPDATE matched 0 rows), so the Janitor sweep
+// continues past a benign race and counts only actually-demoted rows. The
+// production wiring overrides this port with an audited core transition (the raw
+// UPDATE here is unaudited); this storage port stays guard-consistent.
+export type GardenDormantDemotionOutcome = "demoted" | "skipped";
+
 export interface GardenJanitorDormantDemotionPort {
   findLowActivityActiveMemories(workspaceId: string): Promise<readonly GardenLowActivityMemoryRecord[]>;
-  setLifecycleDormant(memoryId: string, taskId: string): Promise<void>;
+  setLifecycleDormant(memoryId: string, taskId: string): Promise<GardenDormantDemotionOutcome>;
 }
 
 export interface GardenMergeCandidate {
@@ -337,7 +344,8 @@ function createDormantDemotionPort(context: BaseFactoryContext): GardenJanitorDo
       ) as readonly GardenLowActivityMemoryRecord[];
     },
     setLifecycleDormant: async (memoryId) => {
-      setDormantStatement.run(context.now(), memoryId);
+      const result = setDormantStatement.run(context.now(), memoryId);
+      return result.changes === 0 ? "skipped" : "demoted";
     }
   };
 }

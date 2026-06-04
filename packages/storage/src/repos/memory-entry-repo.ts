@@ -155,6 +155,18 @@ export interface MemoryEntryRepo {
   ): Promise<Readonly<MemoryEntry>>;
   // invariant (N1): guarded reversible revival; null when the row was not dormant.
   reviveDormant(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry> | null>;
+  // invariant: guarded active -> dormant demotion mirroring reviveDormant. Returns
+  // the demoted row when the row was active; returns null (no-op skip) when it was
+  // NOT active (changes=0) so the caller skips a spurious from_state="active"
+  // audit instead of throwing. onTransition runs synchronously INSIDE the
+  // transaction and ONLY when changes>0, so the active->dormant audit append
+  // commits atomically with the UPDATE (or rolls back with it). A genuine DB
+  // error still surfaces as StorageError.
+  transitionToDormantIfActive(
+    objectId: string,
+    updatedAt: string,
+    onTransition?: () => void
+  ): Promise<Readonly<MemoryEntry> | null>;
   archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>>;
   hardDeleteTombstoned(objectId: string): Promise<void>;
   // invariant: dormant memories whose decay already silenced them, eligible for
@@ -224,6 +236,10 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   private readonly transitionLifecycleClearForgetStatement;
   // invariant (N1): guarded dormant -> active revival; changes=0 when not dormant.
   private readonly reviveDormantStatement;
+  // invariant: guarded active -> dormant demotion; changes=0 when not active so a
+  // candidate that left active between snapshot and turn is a benign no-op skip,
+  // not an aborting throw. Clears the forget marker (I3): dormant is non-tombstone.
+  private readonly demoteActiveToDormantStatement;
   private readonly archiveStatement;
   private readonly hardDeleteTombstonedStatement;
   private readonly findDormantMemoriesStatement;
@@ -437,6 +453,21 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
           forget_disposition_ref = NULL
       WHERE object_id = ?
         AND lifecycle_state = 'dormant'
+    `);
+    // invariant: guarded reversible demotion mirroring reviveDormant (N1). Flip a
+    // memory active -> dormant ONLY when it is currently active, so a concurrent
+    // revival / overlapping sweep / Inspector retire that already moved the row
+    // reports changes=0 and the caller skips (no spurious from_state="active"
+    // audit, no aborting throw). Clears the forget marker (I3): dormant is not a
+    // tombstone state.
+    this.demoteActiveToDormantStatement = db.connection.prepare(`
+      UPDATE memory_entries
+      SET lifecycle_state = 'dormant',
+          updated_at = ?,
+          forget_disposition = NULL,
+          forget_disposition_ref = NULL
+      WHERE object_id = ?
+        AND lifecycle_state = 'active'
     `);
     this.archiveStatement = db.connection.prepare(`
       UPDATE memory_entries
@@ -1313,6 +1344,48 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         throw error;
       }
       throw new StorageError("QUERY_FAILED", `Failed to revive dormant memory entry ${objectId}.`, error);
+    }
+  }
+
+  // invariant: guarded reversible demotion. Returns the demoted row when the
+  // memory was active and is now dormant; returns null when the row was NOT
+  // active (changes=0) so the caller skips emitting a spurious from_state="active"
+  // audit for a row a concurrent revival / overlapping sweep / Inspector retire
+  // already moved. onTransition (the active->dormant audit append) runs INSIDE
+  // this transaction and ONLY on changes>0, so it commits atomically with the
+  // UPDATE and never fires on the benign no-op skip.
+  public async transitionToDormantIfActive(
+    objectId: string,
+    updatedAt: string,
+    onTransition?: () => void
+  ): Promise<Readonly<MemoryEntry> | null> {
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+    try {
+      const demoted = this.db.connection.transaction(() => {
+        const result = this.demoteActiveToDormantStatement.run(parsedUpdatedAt, objectId);
+        if (result.changes === 0) {
+          return false;
+        }
+        onTransition?.();
+        return true;
+      })();
+      if (!demoted) {
+        return null;
+      }
+      const updated = await this.findById(objectId);
+      if (updated === null) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after dormant demotion.`);
+      }
+      return updated;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to demote active memory entry ${objectId} to dormant.`,
+        error
+      );
     }
   }
 

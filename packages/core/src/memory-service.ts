@@ -118,6 +118,15 @@ export interface MemoryServiceMemoryEntryRepoPort {
     lifecycleState: MemoryEntry["lifecycle_state"],
     updatedAt: string
   ): Promise<Readonly<MemoryEntry>>;
+  // invariant: guarded active -> dormant demotion. onTransition (the
+  // active->dormant audit append) commits atomically with the guarded UPDATE
+  // inside one transaction; resolves null on a 0-row benign race (row not active
+  // anymore) so the caller skips without a spurious audit and without throwing.
+  transitionToDormantIfActive?(
+    objectId: string,
+    updatedAt: string,
+    onTransition?: () => void
+  ): Promise<Readonly<MemoryEntry> | null>;
   archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>>;
   hardDeleteTombstoned?(objectId: string): Promise<void>;
   // invariant: the GATED autonomous-tombstone authority (R3d). Writes the
@@ -538,6 +547,84 @@ export class MemoryService {
     return updated;
   }
 
+  /**
+   * Audited, race-tolerant autonomous active -> dormant demotion (the Janitor
+   * dormant-demotion sweep). The candidate snapshot can go stale before a
+   * candidate's turn (concurrent revival / overlapping sweep / Inspector retire),
+   * so this never throws on the benign "no longer active" race: it resolves
+   * `{ status: "skipped" }` and the batch continues. A row that actually
+   * transitions gets its SOUL_MEMORY_STATE_CHANGED active->dormant audit appended
+   * ATOMICALLY with the guarded UPDATE (audit + UPDATE in one transaction); a
+   * 0-row guarded UPDATE rolls back so no spurious audit is written. A genuine
+   * storage error still rejects.
+   *
+   * see also: apps/core-daemon/src/index.ts auditedDormantDemotionPort
+   * see also: packages/soul/src/garden/janitor.ts executeDormantDemotion
+   */
+  public async demoteActiveToDormantIfActive(
+    objectId: string,
+    reason: string,
+    causedBy: TransitionCausedBy
+  ): Promise<{ readonly status: "demoted"; readonly entry: Readonly<MemoryEntry> } | { readonly status: "skipped" }> {
+    const parsedObjectId = parseObjectId(objectId);
+    const parsedReason = parseReason(reason);
+    const parsedCausedBy = parseTransitionCausedBy(causedBy);
+
+    const transitionToDormantIfActive = this.dependencies.memoryEntryRepo.transitionToDormantIfActive;
+    if (transitionToDormantIfActive === undefined) {
+      throw new CoreError("CONFLICT", "Guarded active->dormant demotion port is not available");
+    }
+
+    const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
+    // The row left existence entirely (e.g. autonomously deleted) between the
+    // candidate snapshot and this turn: a benign race for the demotion sweep.
+    if (existing === null) {
+      return { status: "skipped" };
+    }
+    if (existing.lifecycle_state !== "active") {
+      return { status: "skipped" };
+    }
+
+    const occurredAt = this.now();
+    const eventInput = {
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedCausedBy,
+      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        from_state: "active",
+        to_state: "dormant",
+        reason_code: parsedReason,
+        caused_by: parsedCausedBy,
+        evidence_refs: null,
+        occurred_at: occurredAt
+      })
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+    // invariant: the audit append is the onTransition callback, so it commits
+    // INSIDE the guarded-UPDATE transaction (EventLog-first audit atomic with the
+    // demotion). A 0-row guarded UPDATE (row no longer active) fires no callback
+    // and resolves null, so no spurious audit is written and the caller skips.
+    let event: EventLogEntry | undefined;
+    const demoted = await transitionToDormantIfActive(parsedObjectId, occurredAt, () => {
+      event = this.appendAuditEventSynchronously(eventInput);
+    });
+    if (demoted === null) {
+      return { status: "skipped" };
+    }
+    if (event === undefined) {
+      throw new CoreError("CONFLICT", "Active->dormant demotion transaction did not append its audit event.");
+    }
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
+    return { status: "demoted", entry: demoted };
+  }
+
   public async hardDeleteTombstoned(
     objectId: string,
     reason: string,
@@ -744,7 +831,7 @@ export class MemoryService {
       const deleted = await hardDeleteWithDisposition(parsedObjectId, {
         requireLiveCapsuleRef: true,
         onDeleted: () => {
-          deletedEvent = this.appendDeleteEventSynchronously(deleteEventInput);
+          deletedEvent = this.appendAuditEventSynchronously(deleteEventInput);
         }
       });
       if (!deleted) {
@@ -804,18 +891,19 @@ export class MemoryService {
     );
   }
 
-  // invariant: synchronous EventLog append for the audit-inside-transaction seam.
-  // eventLogRepo.append joins the open SQLite txn (inTransaction) when called from
-  // a transaction callback; a Promise-returning port cannot, so reject it loudly
-  // rather than silently committing the delete without an atomic audit.
-  private appendDeleteEventSynchronously(
+  // invariant: synchronous EventLog append for the audit-inside-transaction seams
+  // (compressed delete onDeleted, active->dormant onTransition). eventLogRepo.append
+  // joins the open SQLite txn (inTransaction) when called from a transaction
+  // callback; a Promise-returning port cannot, so reject it loudly rather than
+  // silently committing the storage mutation without an atomic audit.
+  private appendAuditEventSynchronously(
     eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
   ): EventLogEntry {
     const event = this.dependencies.eventLogRepo.append(eventInput);
     if (isPromiseLike(event)) {
       throw new CoreError(
         "CONFLICT",
-        "Autonomous compressed delete requires a synchronous EventLog append port."
+        "Autonomous audit-inside-transaction requires a synchronous EventLog append port."
       );
     }
     return event;

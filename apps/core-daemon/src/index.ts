@@ -1488,13 +1488,18 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const auditedDormantDemotionPort = {
     findLowActivityActiveMemories: (workspaceId: string) =>
       gardenBackgroundDataPorts.dormantDemotionPort.findLowActivityActiveMemories(workspaceId),
-    setLifecycleDormant: async (memoryId: string, taskId: string): Promise<void> => {
-      await memoryService.transitionLifecycle(
+    // invariant: route through the race-tolerant guarded demotion. A candidate
+    // that left active between the snapshot and its turn (concurrent revival /
+    // overlapping sweep / Inspector retire) resolves "skipped" (no audit, no
+    // throw) so the Janitor sweep continues; an actually-demoted row gets its
+    // active->dormant audit appended atomically with the guarded UPDATE.
+    setLifecycleDormant: async (memoryId: string, taskId: string): Promise<"demoted" | "skipped"> => {
+      const outcome = await memoryService.demoteActiveToDormantIfActive(
         memoryId,
-        "dormant",
         `autonomous_dormant_demotion: ${taskId}`,
         "deterministic_rule"
       );
+      return outcome.status;
     }
   };
   const gardenDataPorts = {

@@ -55,9 +55,17 @@ export interface LowActivityMemoryRecord {
   readonly memory_id: string;
 }
 
+// invariant: setLifecycleDormant tolerates the benign "no longer active" race.
+// The candidate snapshot can go stale before a candidate's turn (concurrent
+// revival / overlapping sweep / Inspector retire), so the audited demotion is a
+// guarded active->dormant transition that resolves "skipped" (no audit, no
+// throw) when the row is not active anymore. The sweep counts only "demoted"
+// rows and CONTINUES past a skip so one racy candidate cannot abort the batch.
+export type DormantDemotionOutcome = "demoted" | "skipped";
+
 export interface JanitorDormantDemotionPort {
   findLowActivityActiveMemories(workspaceId: string): Promise<readonly LowActivityMemoryRecord[]>;
-  setLifecycleDormant(memoryId: string, taskId: string): Promise<void>;
+  setLifecycleDormant(memoryId: string, taskId: string): Promise<DormantDemotionOutcome>;
 }
 
 export interface TombstonedMemoryRecord {
@@ -264,15 +272,26 @@ export class Janitor {
     const candidates = await this.dormantDemotionPort.findLowActivityActiveMemories(task.workspace_id);
     const batch = candidates.slice(0, JANITOR_CONSTANTS.BATCH_SIZE);
     const objectIds: string[] = [];
+    let skipped = 0;
 
     for (const candidate of batch) {
-      await this.dormantDemotionPort.setLifecycleDormant(candidate.memory_id, task.task_id);
-      objectIds.push(candidate.memory_id);
+      // invariant: a candidate that left active between the snapshot and its turn
+      // resolves "skipped" (no audit emitted, no throw). The loop CONTINUES so one
+      // racy candidate cannot abort the batch, and only actually-demoted rows are
+      // counted in objects_affected (a skip-lying empty result is impossible).
+      const outcome = await this.dormantDemotionPort.setLifecycleDormant(candidate.memory_id, task.task_id);
+      if (outcome === "demoted") {
+        objectIds.push(candidate.memory_id);
+      } else {
+        skipped += 1;
+      }
     }
 
-    const result = this.createSuccessResult(task, completedAt, objectIds, [
-      `dormant_demotion: ${objectIds.length} memories transitioned to lifecycle_state=dormant`
-    ]);
+    const auditEntry =
+      skipped === 0
+        ? `dormant_demotion: ${objectIds.length} memories transitioned to lifecycle_state=dormant`
+        : `dormant_demotion: ${objectIds.length} memories transitioned to lifecycle_state=dormant (${skipped} skipped: no longer active)`;
+    const result = this.createSuccessResult(task, completedAt, objectIds, [auditEntry]);
     await this.scheduler.reportCompletion(result);
     return result;
   }

@@ -941,6 +941,122 @@ describe("MemoryService", () => {
     });
   });
 
+  // invariant (I-1): the audited active->dormant demotion is race-tolerant. A
+  // candidate that left active between snapshot and turn resolves "skipped" (no
+  // audit, no throw); a row that actually transitions gets its active->dormant
+  // audit appended atomically via onTransition.
+  it("demoteActiveToDormantIfActive: appends the active->dormant audit (via onTransition) and notifies on demote", async () => {
+    const { dependencies, appendSpy, notifySpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () => createMemoryEntry({ lifecycle_state: "active" })),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        transitionToDormantIfActive: vi.fn(
+          async (_objectId: string, updatedAt: string, onTransition?: () => void) => {
+            onTransition?.();
+            return Object.freeze(createMemoryEntry({ lifecycle_state: "dormant", updated_at: updatedAt }));
+          }
+        )
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    const result = await service.demoteActiveToDormantIfActive(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "autonomous_dormant_demotion: task-1",
+      TransitionCausedBy.DETERMINISTIC_RULE
+    );
+
+    expect(result.status).toBe("demoted");
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(appendSpy.mock.calls[0]?.[0]).toMatchObject({
+      payload_json: expect.objectContaining({ from_state: "active", to_state: "dormant" })
+    });
+    expect(notifySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("demoteActiveToDormantIfActive: SKIPS (no audit, no throw) when the guarded transition reports 0 rows (row no longer active)", async () => {
+    const transitionToDormantIfActive = vi.fn(
+      async (_objectId: string, _updatedAt: string, _onTransition?: () => void) => null
+    );
+    const { dependencies, appendSpy, notifySpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () => createMemoryEntry({ lifecycle_state: "active" })),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        transitionToDormantIfActive
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    const result = await service.demoteActiveToDormantIfActive(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "autonomous_dormant_demotion: task-1",
+      TransitionCausedBy.DETERMINISTIC_RULE
+    );
+
+    expect(result.status).toBe("skipped");
+    expect(transitionToDormantIfActive).toHaveBeenCalledTimes(1);
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(notifySpy).not.toHaveBeenCalled();
+  });
+
+  it("demoteActiveToDormantIfActive: SKIPS (no audit, no transition call) when the row is no longer active at load", async () => {
+    const transitionToDormantIfActive = vi.fn(
+      async (_objectId: string, _updatedAt: string, _onTransition?: () => void) =>
+        Object.freeze(createMemoryEntry({ lifecycle_state: "dormant" }))
+    );
+    const { dependencies, appendSpy, notifySpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        // The candidate already left active (concurrent revival was reverted, or
+        // an overlapping sweep moved it) by the time this turn loads it.
+        findById: vi.fn(async () => createMemoryEntry({ lifecycle_state: "dormant" })),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        transitionToDormantIfActive
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    const result = await service.demoteActiveToDormantIfActive(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "autonomous_dormant_demotion: task-1",
+      TransitionCausedBy.DETERMINISTIC_RULE
+    );
+
+    expect(result.status).toBe("skipped");
+    expect(transitionToDormantIfActive).not.toHaveBeenCalled();
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(notifySpy).not.toHaveBeenCalled();
+  });
+
   it("rejects hard delete when retention_state is not tombstoned", async () => {
     const hardDeleteSpy = vi.fn(async () => undefined);
     const { dependencies, appendSpy, notifySpy } = createDependencies({

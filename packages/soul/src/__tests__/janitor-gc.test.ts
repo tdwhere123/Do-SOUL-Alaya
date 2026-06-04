@@ -11,7 +11,7 @@ describe("Janitor GC task kinds", () => {
   it("runs dormant demotion through its port and reports completion", async () => {
     const dormantDemotionPort = {
       findLowActivityActiveMemories: vi.fn(async () => [{ memory_id: "memory-1" }, { memory_id: "memory-2" }]),
-      setLifecycleDormant: vi.fn(async () => undefined)
+      setLifecycleDormant: vi.fn(async () => "demoted" as const)
     };
     const scheduler = {
       reportCompletion: vi.fn(async () => undefined)
@@ -35,6 +35,50 @@ describe("Janitor GC task kinds", () => {
     expect(dormantDemotionPort.findLowActivityActiveMemories).toHaveBeenCalledWith("workspace-1");
     expect(dormantDemotionPort.setLifecycleDormant).toHaveBeenCalledTimes(2);
     expect(result.audit_entries).toEqual(["dormant_demotion: 2 memories transitioned to lifecycle_state=dormant"]);
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+  });
+
+  // invariant (I-1): the candidate snapshot can go stale before a candidate's
+  // turn (concurrent revival / overlapping sweep / Inspector retire). A "skipped"
+  // outcome (guarded 0-row, no audit, no throw) must NOT abort the batch and must
+  // NOT be counted in objects_affected, so the result stays a truthful success.
+  it("dormant demotion tolerates a candidate that is no longer active without aborting the batch", async () => {
+    const setLifecycleDormant = vi
+      .fn<(memoryId: string, taskId: string) => Promise<"demoted" | "skipped">>()
+      .mockResolvedValueOnce("demoted")
+      .mockResolvedValueOnce("skipped");
+    const dormantDemotionPort = {
+      findLowActivityActiveMemories: vi.fn(async () => [{ memory_id: "memory-1" }, { memory_id: "memory-2" }]),
+      setLifecycleDormant
+    };
+    const scheduler = {
+      reportCompletion: vi.fn(async () => undefined)
+    };
+    const janitor = new Janitor({
+      cleanupPort: {
+        findExpiredObjects: vi.fn(async () => []),
+        removeExpiredObjects: vi.fn(async () => undefined)
+      },
+      tieringPort: {
+        findHotDemotionCandidates: vi.fn(async () => []),
+        demoteToWarm: vi.fn(async () => undefined)
+      },
+      dormantDemotionPort,
+      scheduler,
+      now: () => "2026-03-28T00:00:00.000Z"
+    } as ConstructorParameters<typeof Janitor>[0]);
+
+    const result = await janitor.run(createTask(GardenTaskKind.DORMANT_DEMOTION));
+
+    expect(setLifecycleDormant).toHaveBeenCalledTimes(2);
+    // The batch COMPLETES as a success: it reports ONLY the demoted candidate in
+    // objects_affected, not the racy one, and is not a failure result.
+    expect(result.success).toBe(true);
+    expect(result.error_message).toBeNull();
+    expect(result.objects_affected).toEqual(["memory-1"]);
+    expect(result.audit_entries).toEqual([
+      "dormant_demotion: 1 memories transitioned to lifecycle_state=dormant (1 skipped: no longer active)"
+    ]);
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
