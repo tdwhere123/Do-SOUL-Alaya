@@ -175,9 +175,13 @@ export interface MemoryEntryRepo {
   // requireLiveCapsuleRef additionally re-asserts the preserving capsule's
   // liveness + membership atomically (compressed path); resolves false when that
   // guard matches 0 rows (preservation revoked), true when a row was deleted.
+  // invariant: onDeleted runs synchronously INSIDE the delete transaction and
+  // ONLY when changes>0, so the caller's terminal-removal audit append commits
+  // atomically with the physical delete (no audit-less deleted row) and never
+  // fires on a 0-row preservation-revoked race (no spurious "deleted" audit).
   hardDeleteTombstonedWithDisposition(
     objectId: string,
-    options?: { readonly requireLiveCapsuleRef?: boolean }
+    options?: { readonly requireLiveCapsuleRef?: boolean; readonly onDeleted?: () => void }
   ): Promise<boolean>;
   // invariant: tombstoned + past-grace + non-null-disposition rows — the only
   // rows the autonomous TOMBSTONE_GC may physically remove.
@@ -947,9 +951,10 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
 
   public async hardDeleteTombstonedWithDisposition(
     objectId: string,
-    options?: { readonly requireLiveCapsuleRef?: boolean }
+    options?: { readonly requireLiveCapsuleRef?: boolean; readonly onDeleted?: () => void }
   ): Promise<boolean> {
     const requireLiveCapsuleRef = options?.requireLiveCapsuleRef === true;
+    const onDeleted = options?.onDeleted;
     try {
       return this.db.connection.transaction(() => {
         // invariant: a `compressed` member earned terminal removal ONLY because a
@@ -963,6 +968,11 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
           if (guarded.changes === 0) {
             return false;
           }
+          // invariant: the terminal-removal audit append shares THIS transaction
+          // (onDeleted -> eventLogRepo.append joins the open SQLite txn), so the
+          // physical delete and its "deleted" audit commit or roll back together;
+          // it runs only after changes>0 so a 0-row race emits no spurious audit.
+          onDeleted?.();
           this.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
           this.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
           return true;

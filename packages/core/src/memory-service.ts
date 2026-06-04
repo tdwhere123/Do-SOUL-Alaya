@@ -135,7 +135,7 @@ export interface MemoryServiceMemoryEntryRepoPort {
   // false when that guard removed 0 rows (preservation revoked, fail-closed).
   hardDeleteTombstonedWithDisposition?(
     objectId: string,
-    options?: { readonly requireLiveCapsuleRef?: boolean }
+    options?: { readonly requireLiveCapsuleRef?: boolean; readonly onDeleted?: () => void }
   ): Promise<boolean>;
 }
 
@@ -734,12 +734,26 @@ export class MemoryService {
     // instead of a spurious "deleted" audit. The judged_useless path has no
     // capsule dependency and keeps strict EventLog-first (append -> delete).
     if (isCompressed) {
-      const deleted = await hardDeleteWithDisposition(parsedObjectId, { requireLiveCapsuleRef: true });
+      // invariant: the to_state=deleted audit append is the onDeleted callback,
+      // so it commits INSIDE the guarded-delete transaction (a crash cannot leave
+      // the row gone with no durable audit) and is skipped on a 0-row
+      // preservation-revoked race (no spurious "deleted" audit). The append joins
+      // the open SQLite txn synchronously, so a sync EventLog port is required.
+      const deleteEventInput = this.buildAutonomousDeleteEventInput(existing, parsedReason, parsedCausedBy);
+      let deletedEvent: EventLogEntry | undefined;
+      const deleted = await hardDeleteWithDisposition(parsedObjectId, {
+        requireLiveCapsuleRef: true,
+        onDeleted: () => {
+          deletedEvent = this.appendDeleteEventSynchronously(deleteEventInput);
+        }
+      });
       if (!deleted) {
         await this.emitPreservationRevoked(existing, parsedReason, parsedCausedBy);
         return false;
       }
-      const deletedEvent = await this.appendAutonomousDeleteEvent(existing, parsedReason, parsedCausedBy);
+      if (deletedEvent === undefined) {
+        throw new CoreError("CONFLICT", "Compressed tombstone delete transaction did not append its audit event.");
+      }
       await this.dependencies.runtimeNotifier.notifyEntry(deletedEvent);
       return true;
     }
@@ -753,12 +767,12 @@ export class MemoryService {
   // invariant: the audited terminal-removal record (to_state=deleted). reason_code
   // carries the disposition + caller rationale so the durable EventLog row records
   // WHY the autonomous physical delete was permitted.
-  private async appendAutonomousDeleteEvent(
+  private buildAutonomousDeleteEventInput(
     existing: Readonly<MemoryEntry>,
     parsedReason: string,
     parsedCausedBy: TransitionCausedBy
-  ): Promise<EventLogEntry> {
-    return await this.dependencies.eventLogRepo.append({
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+    return {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -777,7 +791,34 @@ export class MemoryService {
         evidence_refs: null,
         occurred_at: this.now()
       })
-    });
+    };
+  }
+
+  private async appendAutonomousDeleteEvent(
+    existing: Readonly<MemoryEntry>,
+    parsedReason: string,
+    parsedCausedBy: TransitionCausedBy
+  ): Promise<EventLogEntry> {
+    return await this.dependencies.eventLogRepo.append(
+      this.buildAutonomousDeleteEventInput(existing, parsedReason, parsedCausedBy)
+    );
+  }
+
+  // invariant: synchronous EventLog append for the audit-inside-transaction seam.
+  // eventLogRepo.append joins the open SQLite txn (inTransaction) when called from
+  // a transaction callback; a Promise-returning port cannot, so reject it loudly
+  // rather than silently committing the delete without an atomic audit.
+  private appendDeleteEventSynchronously(
+    eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+  ): EventLogEntry {
+    const event = this.dependencies.eventLogRepo.append(eventInput);
+    if (isPromiseLike(event)) {
+      throw new CoreError(
+        "CONFLICT",
+        "Autonomous compressed delete requires a synchronous EventLog append port."
+      );
+    }
+    return event;
   }
 
   // invariant (delete-time fail-closed): a `compressed` member whose preserving

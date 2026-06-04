@@ -1148,9 +1148,21 @@ describe("MemoryService", () => {
     };
   }
 
+  // invariant: a real disposition-gated repo runs the caller's onDeleted INSIDE
+  // the delete transaction when it removes a row, so the to_state=deleted audit
+  // append commits atomically with the physical delete. A success fake MUST honor
+  // that contract (fire onDeleted) or the service refuses (CONFLICT: an
+  // audit-less compressed delete is a forbidden crash-gap).
+  function compressedHardDeleteSuccessSpy(): TestMock {
+    return vi.fn(async (_objectId: string, options?: { readonly onDeleted?: () => void }) => {
+      options?.onDeleted?.();
+      return true;
+    });
+  }
+
   it("B1: hard-deletes a compressed member only when the capsule is STILL live + references it", async () => {
-    const hardDeleteSpy = vi.fn(async () => true);
-    const { dependencies } = compressedDeps({
+    const hardDeleteSpy = compressedHardDeleteSuccessSpy();
+    const { dependencies, appendSpy, notifySpy } = compressedDeps({
       capsuleFindById: async () => liveCapsule(),
       hardDeleteSpy
     });
@@ -1167,8 +1179,51 @@ describe("MemoryService", () => {
     // the preservation re-check and the physical removal are one statement.
     expect(hardDeleteSpy).toHaveBeenCalledWith(
       "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
-      { requireLiveCapsuleRef: true }
+      expect.objectContaining({ requireLiveCapsuleRef: true })
     );
+    // I-2: exactly ONE "deleted" audit, appended via onDeleted (atomic with the
+    // physical delete), then notified post-commit.
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(appendSpy.mock.calls[0]?.[0]).toMatchObject({
+      payload_json: expect.objectContaining({ to_state: "deleted" })
+    });
+    expect(notifySpy).toHaveBeenCalledTimes(1);
+    expect(notifySpy.mock.calls[0]?.[0]).toMatchObject({
+      payload_json: expect.objectContaining({ to_state: "deleted" })
+    });
+  });
+
+  it("I-2: the deleted-audit append runs INSIDE the delete (onDeleted) so an append failure fails the delete loud and never notifies", async () => {
+    // The audit append is the onDeleted callback, so it runs inside the guarded
+    // delete transaction. If it throws, the real repo rolls the physical delete
+    // back with it; the service must surface the failure and never notify a
+    // "deleted" event for a delete that did not durably commit its audit.
+    const appendBoom = new Error("event log append failed mid-transaction");
+    const hardDeleteSpy = vi.fn(
+      async (_objectId: string, options?: { readonly onDeleted?: () => void }) => {
+        options?.onDeleted?.();
+        return true;
+      }
+    );
+    const { dependencies, appendSpy, notifySpy } = compressedDeps({
+      capsuleFindById: async () => liveCapsule(),
+      hardDeleteSpy
+    });
+    appendSpy.mockImplementationOnce(() => {
+      throw appendBoom;
+    });
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.autonomousHardDeleteTombstoned(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "autonomous_tombstone_gc",
+        TransitionCausedBy.DETERMINISTIC_RULE
+      )
+    ).rejects.toThrow(appendBoom);
+
+    expect(hardDeleteSpy).toHaveBeenCalledTimes(1);
+    expect(notifySpy).not.toHaveBeenCalled();
   });
 
   it("B5: REFUSES the delete (memory survives) when the capsule is revoked AFTER the pre-check but the atomic guarded delete removes 0 rows", async () => {
@@ -1192,11 +1247,11 @@ describe("MemoryService", () => {
     expect(deleted).toBe(false);
     expect(hardDeleteSpy).toHaveBeenCalledWith(
       "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
-      { requireLiveCapsuleRef: true }
+      expect.objectContaining({ requireLiveCapsuleRef: true })
     );
-    // The guarded delete runs before any audit append, so the ONLY emitted event
-    // is the preservation_revoked skip (no spurious "deleted" audit). The memory
-    // is never notified as deleted.
+    // The guarded delete returns 0 rows so onDeleted never fires, so the ONLY
+    // emitted event is the preservation_revoked skip (no spurious "deleted"
+    // audit). The memory is never notified as deleted.
     expect(appendSpy).toHaveBeenCalledTimes(1);
     expect(appendSpy.mock.calls[0]?.[0]).toMatchObject({
       payload_json: expect.objectContaining({

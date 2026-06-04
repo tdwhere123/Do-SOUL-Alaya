@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FormationKind,
   MemoryDimension,
@@ -18,6 +18,7 @@ import {
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../db.js";
+import { StorageError } from "../errors.js";
 import { SqliteEnrichPendingRepo } from "../repos/enrich-pending-repo.js";
 import { SqliteEventLogRepo } from "../repos/event-log-repo.js";
 import { SqliteMemoryEntryRepo } from "../repos/memory-entry-repo.js";
@@ -1160,6 +1161,56 @@ describe("SqliteMemoryEntryRepo", () => {
     await expect(
       repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true })
     ).resolves.toBe(false);
+    await expect(repo.findById(memoryId)).resolves.not.toBeNull();
+  });
+
+  // invariant (I-2): the caller's deleted-audit append (onDeleted) shares the
+  // delete transaction, so the physical removal and the audit commit or roll
+  // back together. onDeleted runs ONLY on changes>0 and a throw inside it undoes
+  // the physical delete.
+  it("hardDeleteTombstonedWithDisposition (compressed-guarded) fires onDeleted exactly once when a row is removed", async () => {
+    const memoryId = "dddddddd-0000-4000-8000-000000000004";
+    const capsuleId = "dddddddd-1111-4000-8000-000000000004";
+    const { repo } = await seedCompressedMember({ memoryId, capsuleId, capsule: {} });
+    const onDeleted = vi.fn();
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true, onDeleted })
+    ).resolves.toBe(true);
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+    await expect(repo.findById(memoryId)).resolves.toBeNull();
+  });
+
+  it("hardDeleteTombstonedWithDisposition (compressed-guarded) does NOT fire onDeleted on a 0-row preservation-revoked race", async () => {
+    const memoryId = "dddddddd-0000-4000-8000-000000000005";
+    const capsuleId = "dddddddd-1111-4000-8000-000000000005";
+    const { repo } = await seedCompressedMember({
+      memoryId,
+      capsuleId,
+      capsule: { source_memory_refs: [] }
+    });
+    const onDeleted = vi.fn();
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true, onDeleted })
+    ).resolves.toBe(false);
+    expect(onDeleted).not.toHaveBeenCalled();
+    await expect(repo.findById(memoryId)).resolves.not.toBeNull();
+  });
+
+  it("hardDeleteTombstonedWithDisposition (compressed-guarded) rolls the physical delete back when onDeleted throws (one transaction)", async () => {
+    const memoryId = "dddddddd-0000-4000-8000-000000000006";
+    const capsuleId = "dddddddd-1111-4000-8000-000000000006";
+    const { repo } = await seedCompressedMember({ memoryId, capsuleId, capsule: {} });
+    const onDeleted = vi.fn(() => {
+      throw new Error("audit append failed mid-transaction");
+    });
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true, onDeleted })
+    ).rejects.toThrow(StorageError);
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+    // The audit-append throw rolled the whole transaction back: the row survives.
     await expect(repo.findById(memoryId)).resolves.not.toBeNull();
   });
 
