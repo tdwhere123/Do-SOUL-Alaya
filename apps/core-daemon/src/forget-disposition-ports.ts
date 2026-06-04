@@ -1,4 +1,4 @@
-import { classifyMemoryImportance } from "@do-soul/alaya-core";
+import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "@do-soul/alaya-core";
 import type {
   ForgetDisposition,
   MemoryEntry,
@@ -51,22 +51,33 @@ export interface ForgetDispositionTombstoneAuthorityPort {
 /**
  * Computes the durable disposition for a single dormant memory, mechanically and
  * without an LLM. Returns:
- *   - { disposition: 'compressed', ref } when a LIVE capsule references this
- *     member in source_memory_refs (content preserved — R3a output).
+ *   - { disposition: null } when the memory is EXPLICITLY PROTECTED (pinned /
+ *     hazard / canon / consolidated): it stays dormant (reversible) and is NEVER
+ *     autonomously removed, even when it is also a live-capsule member.
+ *   - { disposition: 'compressed', ref } when a LIVE capsule references a
+ *     NON-protected member in source_memory_refs (content preserved — R3a output).
  *   - { disposition: 'judged_useless', ref: null } when the mechanical importance
  *     gate finds the memory safe to drop (failed ALL keep-criteria).
- *   - { disposition: null } when the memory is preserved-or-kept and MUST remain
- *     dormant (reversible) rather than be autonomously tombstoned.
+ *   - { disposition: null } otherwise (preserved-or-kept): stays dormant.
  *
- * The `compressed` branch is checked FIRST: preservation is the strongest reason
- * to allow removal, and it does not depend on the importance gate's verdict.
+ * invariant (protection-before-compressed): explicit-keep is evaluated BEFORE the
+ * `compressed` arm. Compression OVERRIDES ordinary value signals (evidence
+ * richness, reinforcement_count — the importance gate's `keep` disposition) but
+ * must NEVER override an explicit-keep category, so a pinned/canon/hazard/
+ * consolidated memory that happens to sit in a live capsule is left dormant and
+ * recoverable rather than marked deletable.
  *
- * see also: packages/core/src/importance-gate.ts classifyMemoryImportance.
+ * see also: packages/core/src/importance-gate.ts isMemoryExplicitlyProtected,
+ * classifyMemoryImportance.
  */
 export function computeForgetDisposition(
   memory: Readonly<MemoryEntry>,
   liveCapsuleMemberRefs: ReadonlySet<string>
 ): { readonly disposition: ForgetDisposition | null; readonly ref: string | null } {
+  if (isMemoryExplicitlyProtected(memory)) {
+    return { disposition: null, ref: null };
+  }
+
   const capsuleRef = liveCapsuleMemberRefs.has(memory.object_id) ? memory.object_id : null;
   if (capsuleRef !== null) {
     // The ref stored is the member's own id resolved against the live capsule.

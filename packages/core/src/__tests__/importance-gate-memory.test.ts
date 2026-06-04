@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import { classifyMemoryImportance, isMemoryJudgedUseless } from "../importance-gate.js";
+import {
+  classifyMemoryImportance,
+  isMemoryExplicitlyProtected,
+  isMemoryJudgedUseless
+} from "../importance-gate.js";
 
 function memory(overrides: Partial<MemoryEntry> = {}): Readonly<MemoryEntry> {
   return Object.freeze({
@@ -108,5 +112,27 @@ describe("classifyMemoryImportance keep-criteria", () => {
       reinforcement_count: 0
     });
     expect(classifyMemoryImportance(candidate).disposition).toBe("protected");
+  });
+});
+
+describe("isMemoryExplicitlyProtected", () => {
+  // invariant: the explicit-keep predicate the forget disposition sweep checks
+  // BEFORE compression. Pinned / hazard / canon / consolidated are protected;
+  // ordinary value signals (evidence richness, reinforcement) are NOT.
+  it("is true for pinned, hazard, canon, consolidated", () => {
+    expect(isMemoryExplicitlyProtected(memory({ decay_profile: "pinned" }))).toBe(true);
+    expect(isMemoryExplicitlyProtected(memory({ decay_profile: "hazard" }))).toBe(true);
+    expect(isMemoryExplicitlyProtected(memory({ retention_state: "canon" }))).toBe(true);
+    expect(isMemoryExplicitlyProtected(memory({ retention_state: "consolidated" }))).toBe(true);
+  });
+
+  it("is false for evidence-rich / reinforced / useless (ordinary value signals compression may override)", () => {
+    expect(isMemoryExplicitlyProtected(memory({ evidence_refs: ["e1", "e2"] }))).toBe(false);
+    expect(isMemoryExplicitlyProtected(memory({ reinforcement_count: 5 }))).toBe(false);
+    expect(
+      isMemoryExplicitlyProtected(
+        memory({ retention_state: "working", evidence_refs: [], reinforcement_count: 0 })
+      )
+    ).toBe(false);
   });
 });

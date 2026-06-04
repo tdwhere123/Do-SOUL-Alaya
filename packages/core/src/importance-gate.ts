@@ -201,3 +201,26 @@ export function classifyMemoryImportance(
 export function isMemoryJudgedUseless(memory: Readonly<MemoryEntry>): boolean {
   return classifyMemoryImportance(memory).disposition === "judged_useless";
 }
+
+/**
+ * True when a memory carries an EXPLICIT-KEEP protection: an override anchor
+ * (decay_profile pinned/hazard) or a strictly-governed durable tier
+ * (retention_state canon/consolidated). This is the precise predicate the
+ * autonomous-forgetting disposition sweep checks BEFORE the `compressed` arm:
+ * compression may override ordinary value signals (evidence-richness,
+ * reinforcement) but must NEVER override an explicit-keep, because a
+ * compressed member is deletable once a live capsule preserves its content,
+ * and an explicitly-protected memory must not be deletable at all.
+ *
+ * It maps onto the strongest two importance dispositions (`protected` and
+ * `report_only`) rather than the value-signal `keep` disposition, so it does
+ * NOT shield an ordinary evidence-rich/reinforced memory from compression.
+ * `consolidated` is treated as protected here (via isMemoryStrictlyGoverned):
+ * a consolidated memory is itself higher-order durable truth and must not be
+ * compress-deleted.
+ *
+ * see also: apps/core-daemon/src/forget-disposition-ports.ts computeForgetDisposition.
+ */
+export function isMemoryExplicitlyProtected(memory: Readonly<MemoryEntry>): boolean {
+  return isMemoryOverrideProtected(memory) || isMemoryStrictlyGoverned(memory);
+}

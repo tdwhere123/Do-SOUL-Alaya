@@ -83,11 +83,59 @@ describe("computeForgetDisposition", () => {
     expect(result.disposition).toBeNull();
   });
 
-  it("prefers compressed over the importance gate when a live capsule preserves the member", () => {
-    // A kept (evidence-rich) memory that is ALSO in a live capsule resolves to
-    // compressed — preservation is the strongest reason to allow removal.
+  it("compresses an evidence-rich (non-protected) member in a live capsule", () => {
+    // invariant (protection-before-compressed): evidence richness is an ordinary
+    // value signal (the `keep` disposition), which compression OVERRIDES — so an
+    // evidence-rich but non-explicitly-protected member in a live capsule is
+    // compressed (its content is preserved by the capsule).
     const result = computeForgetDisposition(memory({ evidence_refs: ["e1", "e2"] }), new Set(["mem-1"]));
     expect(result.disposition).toBe("compressed");
+  });
+
+  it("compresses a reinforced (non-protected) member in a live capsule", () => {
+    // reinforcement_count is also an ordinary value signal that compression
+    // overrides when a live capsule preserves the content.
+    const result = computeForgetDisposition(
+      memory({ reinforcement_count: 5 }),
+      new Set(["mem-1"])
+    );
+    expect(result.disposition).toBe("compressed");
+  });
+
+  it("leaves a PINNED member in a live capsule dormant, NOT compressed", () => {
+    // invariant (protection-before-compressed): explicit-keep overrides compress.
+    const result = computeForgetDisposition(
+      memory({ decay_profile: "pinned" }),
+      new Set(["mem-1"])
+    );
+    expect(result.disposition).toBeNull();
+    expect(result.ref).toBeNull();
+  });
+
+  it("leaves a HAZARD member in a live capsule dormant, NOT compressed", () => {
+    const result = computeForgetDisposition(
+      memory({ decay_profile: "hazard" }),
+      new Set(["mem-1"])
+    );
+    expect(result.disposition).toBeNull();
+  });
+
+  it("leaves a CANON member in a live capsule dormant, NOT compressed", () => {
+    const result = computeForgetDisposition(
+      memory({ retention_state: "canon" }),
+      new Set(["mem-1"])
+    );
+    expect(result.disposition).toBeNull();
+  });
+
+  it("leaves a CONSOLIDATED member in a live capsule dormant, NOT compressed", () => {
+    // A consolidated memory is itself higher-order durable truth; it is treated
+    // as explicit-keep and must not be compress-deleted.
+    const result = computeForgetDisposition(
+      memory({ retention_state: "consolidated" }),
+      new Set(["mem-1"])
+    );
+    expect(result.disposition).toBeNull();
   });
 });
 
