@@ -400,6 +400,10 @@ interface MutableGraphExpansionDiagnostics {
 interface GraphExpansionFrontierNode {
   readonly memoryId: string;
   readonly pathScore: number;
+  // The transitive edge_type traversed to REACH this node (null for seed roots).
+  // hop >= 2 admission drops a neighbor reached by this same edge_type to gate
+  // single-edge-type lineage walks that would otherwise flood the candidate pool.
+  readonly arrivalEdgeType: RecallGraphExpansionTrackedEdgeType | null;
 }
 
 interface GraphExpansionCandidateDraft {
@@ -1785,7 +1789,8 @@ export class RecallService {
     const expandedIds = new Set<string>();
     let frontier: readonly GraphExpansionFrontierNode[] = params.seedEntries.map((entry) => ({
       memoryId: entry.object_id,
-      pathScore: 1
+      pathScore: 1,
+      arrivalEdgeType: null
     }));
 
     for (let hop = 1; hop <= MAX_GRAPH_HOPS && frontier.length > 0; hop += 1) {
@@ -1842,6 +1847,19 @@ export class RecallService {
           if (entry === undefined) {
             continue;
           }
+          // Same-edge-type chain-extension gate: at hop >= 2, drop a neighbor
+          // reached by the SAME transitive edge_type as its parent. Such single
+          // -type lineage walks (e.g. a long derives_from chain) flood the pool
+          // with near-gold-free neighbours that demote genuine lexical / path
+          // gold under fusion. Multi-type reach (A -> B) is healthy convergence
+          // and stays admitted; hop-1 (arrivalEdgeType null) is never gated.
+          if (
+            hop > 1 &&
+            node.arrivalEdgeType !== null &&
+            neighbor.edgeType === node.arrivalEdgeType
+          ) {
+            continue;
+          }
           const candidateScore = hop === 1
             ? edgeScore
             : clamp01(node.pathScore * EDGE_TYPE_HOP_DECAY[neighbor.edgeType] * edgeScore);
@@ -1859,7 +1877,8 @@ export class RecallService {
             if (queued === undefined || candidateScore > queued.pathScore) {
               nextFrontier.set(neighborId, {
                 memoryId: neighborId,
-                pathScore: candidateScore
+                pathScore: candidateScore,
+                arrivalEdgeType: neighbor.edgeType
               });
             }
           }
