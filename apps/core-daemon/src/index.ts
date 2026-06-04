@@ -272,7 +272,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const signalRepo = new SqliteSignalRepo(database);
   const edgeProposalRepo = new SqliteEdgeProposalRepo(database);
   const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
-  const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
+  const memoryEntryRepo = new SqliteMemoryEntryRepo(database, (message, meta) =>
+    warnLogger.warn(message, meta)
+  );
   const globalMemoryRepo = createOptionalGlobalMemoryRepo(database);
   const globalMemoryRecallCacheRepo = createOptionalGlobalMemoryRecallCacheRepo(database);
   const orphanDetectionEnabled = process.env.ORPHAN_DETECTION_ENABLED !== "false";

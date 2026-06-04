@@ -213,6 +213,21 @@ export interface AutonomousTombstoneInput {
   readonly updatedAt: string;
 }
 
+// invariant: findByEvidenceRefs is BOUNDED (input id-set capped, row scan
+// LIMITed) so a pathological evidence set cannot run an unbounded query. The cap
+// is fail-safe: a member omitted by truncation is simply never resolved, so it
+// is never compress-deleted (the missing-member case falls through to dormant).
+// But silent truncation hides a real over-cap input from operators, so the repo
+// surfaces a warn-level structured diagnostic AT the boundary (input over cap OR
+// output hitting the row LIMIT). Default sink is a no-op so unit tests and
+// non-daemon callers stay quiet; the daemon wires it to its warn logger.
+export const FIND_BY_EVIDENCE_REFS_INPUT_CAP = 256;
+export const FIND_BY_EVIDENCE_REFS_ROW_LIMIT = 512;
+export type MemoryEntryRepoDiagnosticSink = (
+  message: string,
+  meta: Record<string, unknown>
+) => void;
+
 export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   private readonly createStatement;
   private readonly findByIdStatement;
@@ -256,7 +271,12 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   private readonly deleteOrphanedPathRelationsStatement;
   private readonly deleteOrphanedCoUsageCountersStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  // diagnostics: warn sink for bounded-query truncation. Defaults to a no-op so
+  // unit tests and non-daemon callers stay quiet; the daemon wires it.
+  public constructor(
+    private readonly db: StorageDatabase,
+    private readonly diagnostics: MemoryEntryRepoDiagnosticSink = () => {}
+  ) {
     this.createStatement = db.connection.prepare(`
       INSERT INTO memory_entries (
         object_id,
@@ -780,7 +800,16 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     if (unique.length === 0) {
       return Object.freeze([]);
     }
-    const cappedIds = unique.slice(0, 256);
+    const cappedIds = unique.slice(0, FIND_BY_EVIDENCE_REFS_INPUT_CAP);
+    if (unique.length > FIND_BY_EVIDENCE_REFS_INPUT_CAP) {
+      // invariant: input over cap -> some evidence ids are not even queried, so
+      // their members can never be resolved (fail-safe, but operator-visible).
+      this.diagnostics("memory evidence-ref lookup input truncated", {
+        workspace_id: workspaceId,
+        input_count: unique.length,
+        capped_count: FIND_BY_EVIDENCE_REFS_INPUT_CAP
+      });
+    }
     // invariant: evidence_refs is stored as a JSON array literal (e.g.
     // ["uuid-a","uuid-b"]). We match each candidate id as a JSON-quoted
     // substring so a partial-match on a non-UUID id cannot collide with
@@ -805,9 +834,19 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
              AND COALESCE(lifecycle_state, '') != 'dormant'
              AND (${likePatterns.join(" OR ")})
            ORDER BY object_id ASC
-           LIMIT 512`
+           LIMIT ${FIND_BY_EVIDENCE_REFS_ROW_LIMIT}`
         )
         .all(workspaceId, ...likeValues) as MemoryEntryRow[];
+      if (rows.length >= FIND_BY_EVIDENCE_REFS_ROW_LIMIT) {
+        // invariant: row scan hit the LIMIT -> members beyond it are omitted
+        // (fail-safe: never compressed), but the omission is operator-visible.
+        this.diagnostics("memory evidence-ref lookup rows hit LIMIT", {
+          workspace_id: workspaceId,
+          input_count: cappedIds.length,
+          row_limit: FIND_BY_EVIDENCE_REFS_ROW_LIMIT,
+          returned_count: rows.length
+        });
+      }
       return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
     } catch (error) {
       throw new StorageError(

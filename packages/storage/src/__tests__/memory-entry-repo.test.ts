@@ -21,7 +21,11 @@ import { initDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
 import { SqliteEnrichPendingRepo } from "../repos/enrich-pending-repo.js";
 import { SqliteEventLogRepo } from "../repos/event-log-repo.js";
-import { SqliteMemoryEntryRepo } from "../repos/memory-entry-repo.js";
+import {
+  FIND_BY_EVIDENCE_REFS_INPUT_CAP,
+  SqliteMemoryEntryRepo,
+  type MemoryEntryRepoDiagnosticSink
+} from "../repos/memory-entry-repo.js";
 import { SqliteRunRepo } from "../repos/run-repo.js";
 import { SqliteSynthesisCapsuleRepo } from "../repos/synthesis-capsule-repo.js";
 import { SqliteWorkspaceRepo } from "../repos/workspace-repo.js";
@@ -1673,6 +1677,37 @@ describe("SqliteMemoryEntryRepo", () => {
 
     const rows = await repo.findBySharedDomainTags("workspace-1", ["coffee"]);
     expect(rows.map((row) => row.object_id)).toEqual([hot.object_id]);
+  });
+
+  it("findByEvidenceRefs warns at the input cap and stays fail-safe", async () => {
+    const { database } = await createRepo();
+    const diagnostics = vi.fn<MemoryEntryRepoDiagnosticSink>();
+    const repo = new SqliteMemoryEntryRepo(database, diagnostics);
+
+    // input over the cap -> ids beyond the cap are never queried (fail-safe),
+    // and the warn-level diagnostic surfaces the over-cap input to operators.
+    const overCap = Array.from(
+      { length: FIND_BY_EVIDENCE_REFS_INPUT_CAP + 5 },
+      (_unused, index) => `evidence-${index}`
+    );
+    await repo.findByEvidenceRefs("workspace-1", overCap);
+
+    expect(diagnostics).toHaveBeenCalledTimes(1);
+    expect(diagnostics).toHaveBeenCalledWith("memory evidence-ref lookup input truncated", {
+      workspace_id: "workspace-1",
+      input_count: FIND_BY_EVIDENCE_REFS_INPUT_CAP + 5,
+      capped_count: FIND_BY_EVIDENCE_REFS_INPUT_CAP
+    });
+  });
+
+  it("findByEvidenceRefs does not warn when the input is within the cap", async () => {
+    const { database } = await createRepo();
+    const diagnostics = vi.fn<MemoryEntryRepoDiagnosticSink>();
+    const repo = new SqliteMemoryEntryRepo(database, diagnostics);
+
+    await repo.findByEvidenceRefs("workspace-1", ["evidence-1", "evidence-2"]);
+
+    expect(diagnostics).not.toHaveBeenCalled();
   });
 });
 
