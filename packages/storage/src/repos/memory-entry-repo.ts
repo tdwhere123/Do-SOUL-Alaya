@@ -172,7 +172,13 @@ export interface MemoryEntryRepo {
   // grace age AND carries a non-null forget_disposition. A tombstoned row
   // lacking a disposition (e.g. human Inspector retire) is refused here, never
   // auto-GC'd. The human/legacy path stays on hardDeleteTombstoned.
-  hardDeleteTombstonedWithDisposition(objectId: string): Promise<void>;
+  // requireLiveCapsuleRef additionally re-asserts the preserving capsule's
+  // liveness + membership atomically (compressed path); resolves false when that
+  // guard matches 0 rows (preservation revoked), true when a row was deleted.
+  hardDeleteTombstonedWithDisposition(
+    objectId: string,
+    options?: { readonly requireLiveCapsuleRef?: boolean }
+  ): Promise<boolean>;
   // invariant: tombstoned + past-grace + non-null-disposition rows — the only
   // rows the autonomous TOMBSTONE_GC may physically remove.
   findTombstonedMemoriesWithDisposition(
@@ -220,6 +226,10 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   private readonly autonomousTombstoneStatement;
   private readonly findTombstonedWithDispositionStatement;
   private readonly hardDeleteTombstonedWithDispositionStatement;
+  // invariant: the compressed-disposition delete restates capsule liveness +
+  // membership inside the DELETE so the preservation re-check is atomic with the
+  // physical removal (no TOCTOU window). 0 rows changed == preservation revoked.
+  private readonly hardDeleteTombstonedCompressedGuardedStatement;
   // invariant: path topology endpoints reference memory ids only via JSON
   // anchors / plain text (no FK), so hard-delete must prune them explicitly in
   // the same transaction. cross-file ref: cascade-delete.ts pruneOrphanedPathTopology
@@ -480,6 +490,31 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         AND retention_state = 'tombstoned'
         AND forget_disposition IS NOT NULL
         AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
+    `);
+    // invariant: the `compressed`-disposition delete re-asserts the preserving
+    // capsule's liveness + membership ATOMICALLY in the same DELETE statement, so
+    // there is no TOCTOU window between a service-side re-check and the physical
+    // removal. The correlated EXISTS subquery deletes the member ONLY while a live
+    // capsule (lifecycle_state != 'tombstone' AND synthesis_status != 'archived')
+    // STILL lists this object_id in source_memory_refs. A concurrent capsule
+    // archive / tombstone / member-drop / cascade-delete makes EXISTS false, so the
+    // statement removes 0 rows and the row stays tombstoned (recoverable).
+    // see also: packages/core/src/memory-service.ts compressedPreservationStillValid.
+    this.hardDeleteTombstonedCompressedGuardedStatement = db.connection.prepare(`
+      DELETE FROM memory_entries
+      WHERE object_id = ?
+        AND retention_state = 'tombstoned'
+        AND forget_disposition = 'compressed'
+        AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
+        AND EXISTS (
+          SELECT 1
+          FROM synthesis_capsules AS capsule,
+               json_each(capsule.source_memory_refs) AS member
+          WHERE capsule.object_id = memory_entries.forget_disposition_ref
+            AND COALESCE(capsule.lifecycle_state, '') != 'tombstone'
+            AND COALESCE(capsule.synthesis_status, '') != 'archived'
+            AND member.value = memory_entries.object_id
+        )
     `);
     this.deleteOrphanedPathRelationsStatement = db.connection.prepare(`
       DELETE FROM path_relations
@@ -910,9 +945,29 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     }
   }
 
-  public async hardDeleteTombstonedWithDisposition(objectId: string): Promise<void> {
+  public async hardDeleteTombstonedWithDisposition(
+    objectId: string,
+    options?: { readonly requireLiveCapsuleRef?: boolean }
+  ): Promise<boolean> {
+    const requireLiveCapsuleRef = options?.requireLiveCapsuleRef === true;
     try {
-      this.db.connection.transaction(() => {
+      return this.db.connection.transaction(() => {
+        // invariant: a `compressed` member earned terminal removal ONLY because a
+        // live capsule preserved its content. requireLiveCapsuleRef routes the
+        // delete through the guarded statement that re-asserts that capsule's
+        // liveness + membership atomically. 0 rows changed is the legitimate
+        // preservation_revoked outcome (the capsule changed during the grace
+        // window), NOT an error: the row stays tombstoned and the caller skips.
+        if (requireLiveCapsuleRef) {
+          const guarded = this.hardDeleteTombstonedCompressedGuardedStatement.run(objectId);
+          if (guarded.changes === 0) {
+            return false;
+          }
+          this.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
+          this.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
+          return true;
+        }
+
         const result = this.hardDeleteTombstonedWithDispositionStatement.run(objectId);
 
         if (result.changes === 0) {
@@ -926,6 +981,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         // actually deleted, so a no-disposition row never strips its live paths.
         this.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
         this.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
+        return true;
       })();
     } catch (error) {
       if (error instanceof StorageError) {

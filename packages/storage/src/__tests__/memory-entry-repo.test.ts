@@ -11,15 +11,18 @@ import {
   ScopeClass,
   SourceKind,
   StorageTier,
+  SynthesisStatus,
   WorkspaceKind,
   WorkspaceState,
-  type MemoryEntry
+  type MemoryEntry,
+  type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../db.js";
 import { SqliteEnrichPendingRepo } from "../repos/enrich-pending-repo.js";
 import { SqliteEventLogRepo } from "../repos/event-log-repo.js";
 import { SqliteMemoryEntryRepo } from "../repos/memory-entry-repo.js";
 import { SqliteRunRepo } from "../repos/run-repo.js";
+import { SqliteSynthesisCapsuleRepo } from "../repos/synthesis-capsule-repo.js";
 import { SqliteWorkspaceRepo } from "../repos/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
@@ -1071,8 +1074,93 @@ describe("SqliteMemoryEntryRepo", () => {
     ).resolves.toEqual([expect.objectContaining({ object_id: disposed.object_id })]);
     await expect(
       repo.hardDeleteTombstonedWithDisposition(disposed.object_id)
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(true);
     await expect(repo.findById(disposed.object_id)).resolves.toBeNull();
+  });
+
+  // invariant: the compressed delete (requireLiveCapsuleRef) re-asserts capsule
+  // liveness + membership ATOMICALLY in the DELETE statement, so there is no
+  // window between a re-check and the physical removal. A capsule that archived /
+  // tombstoned / dropped the member / was deleted makes the guard match 0 rows,
+  // and the member survives (recoverable). see also:
+  // packages/core/src/memory-service.ts autonomousHardDeleteTombstoned.
+  async function seedCompressedMember(input: {
+    readonly memoryId: string;
+    readonly capsule: Partial<SynthesisCapsule> | null;
+    readonly capsuleId: string;
+  }): Promise<{ readonly repo: SqliteMemoryEntryRepo }> {
+    const { repo, database } = await createRepo();
+    if (input.capsule !== null) {
+      const capsuleRepo = new SqliteSynthesisCapsuleRepo(database);
+      await capsuleRepo.create({
+        object_id: input.capsuleId,
+        object_kind: "synthesis_capsule",
+        schema_version: 1,
+        lifecycle_state: "active",
+        created_at: "2026-03-21T00:00:00.000Z",
+        updated_at: "2026-03-21T00:00:00.000Z",
+        created_by: "consolidation-executor",
+        topic_key: "tooling/pnpm",
+        synthesis_type: "phase_synthesis",
+        summary: "Use pnpm for workspace commands.",
+        evidence_refs: ["evidence-1"],
+        source_memory_refs: [input.memoryId],
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        synthesis_status: SynthesisStatus.STABLE,
+        ...input.capsule
+      });
+    }
+    await repo.create(
+      createMemoryEntry({
+        object_id: input.memoryId,
+        retention_state: "tombstoned",
+        lifecycle_state: "tombstone",
+        forget_disposition: "compressed",
+        forget_disposition_ref: input.capsuleId
+      })
+    );
+    return { repo };
+  }
+
+  it("hardDeleteTombstonedWithDisposition (compressed-guarded) removes the member only when a live capsule STILL references it", async () => {
+    const memoryId = "dddddddd-0000-4000-8000-000000000001";
+    const capsuleId = "dddddddd-1111-4000-8000-000000000001";
+    const { repo } = await seedCompressedMember({ memoryId, capsuleId, capsule: {} });
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true })
+    ).resolves.toBe(true);
+    await expect(repo.findById(memoryId)).resolves.toBeNull();
+  });
+
+  it.each([
+    ["capsule archived", { synthesis_status: SynthesisStatus.ARCHIVED } satisfies Partial<SynthesisCapsule>],
+    ["capsule tombstoned/superseded", { lifecycle_state: "tombstone" } satisfies Partial<SynthesisCapsule>],
+    ["capsule dropped the member", { source_memory_refs: [] } satisfies Partial<SynthesisCapsule>]
+  ])(
+    "hardDeleteTombstonedWithDisposition (compressed-guarded) atomically REFUSES (0 rows, member survives) when %s",
+    async (_label, capsule) => {
+      const memoryId = "dddddddd-0000-4000-8000-000000000002";
+      const capsuleId = "dddddddd-1111-4000-8000-000000000002";
+      const { repo } = await seedCompressedMember({ memoryId, capsuleId, capsule });
+
+      await expect(
+        repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true })
+      ).resolves.toBe(false);
+      await expect(repo.findById(memoryId)).resolves.not.toBeNull();
+    }
+  );
+
+  it("hardDeleteTombstonedWithDisposition (compressed-guarded) atomically REFUSES when the preserving capsule was cascade-deleted", async () => {
+    const memoryId = "dddddddd-0000-4000-8000-000000000003";
+    const capsuleId = "dddddddd-1111-4000-8000-000000000003";
+    const { repo } = await seedCompressedMember({ memoryId, capsuleId, capsule: null });
+
+    await expect(
+      repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true })
+    ).resolves.toBe(false);
+    await expect(repo.findById(memoryId)).resolves.not.toBeNull();
   });
 
   it("findTombstonedMemoriesWithDisposition excludes tombstoned rows lacking a disposition", async () => {

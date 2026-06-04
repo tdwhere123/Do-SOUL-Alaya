@@ -942,7 +942,7 @@ describe("MemoryService", () => {
   });
 
   it("autonomousHardDeleteTombstoned REFUSES a tombstoned row that has NO disposition (defense in depth)", async () => {
-    const hardDeleteSpy = vi.fn(async () => undefined);
+    const hardDeleteSpy = vi.fn(async () => true);
     const { dependencies, appendSpy, notifySpy } = createDependencies({
       memoryEntryRepo: {
         create: vi.fn(async (entry) => entry),
@@ -983,7 +983,7 @@ describe("MemoryService", () => {
   });
 
   it("autonomousHardDeleteTombstoned removes a tombstoned row that carries a disposition + audits the deletion", async () => {
-    const hardDeleteSpy = vi.fn(async () => undefined);
+    const hardDeleteSpy = vi.fn(async () => true);
     const { dependencies, appendSpy, notifySpy } = createDependencies({
       memoryEntryRepo: {
         create: vi.fn(async (entry) => entry),
@@ -1083,7 +1083,7 @@ describe("MemoryService", () => {
   }
 
   it("B1: hard-deletes a compressed member only when the capsule is STILL live + references it", async () => {
-    const hardDeleteSpy = vi.fn(async () => undefined);
+    const hardDeleteSpy = vi.fn(async () => true);
     const { dependencies } = compressedDeps({
       capsuleFindById: async () => liveCapsule(),
       hardDeleteSpy
@@ -1097,6 +1097,53 @@ describe("MemoryService", () => {
     );
 
     expect(hardDeleteSpy).toHaveBeenCalledTimes(1);
+    // The compressed delete is routed through the atomic capsule-guarded path so
+    // the preservation re-check and the physical removal are one statement.
+    expect(hardDeleteSpy).toHaveBeenCalledWith(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      { requireLiveCapsuleRef: true }
+    );
+  });
+
+  it("B5: REFUSES the delete (memory survives) when the capsule is revoked AFTER the pre-check but the atomic guarded delete removes 0 rows", async () => {
+    // The lookup port reports the capsule LIVE (pre-check passes), but the atomic
+    // guarded delete matches 0 rows — a concurrent capsule archive/tombstone/
+    // member-drop that raced past the pre-check. The row must survive (recoverable)
+    // and a preservation_revoked skip event must be audited, fail-closed.
+    const hardDeleteSpy = vi.fn(async () => false);
+    const { dependencies, appendSpy, notifySpy } = compressedDeps({
+      capsuleFindById: async () => liveCapsule(),
+      hardDeleteSpy
+    });
+    const service = new MemoryService(dependencies);
+
+    const deleted = await service.autonomousHardDeleteTombstoned(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "autonomous_tombstone_gc",
+      TransitionCausedBy.DETERMINISTIC_RULE
+    );
+
+    expect(deleted).toBe(false);
+    expect(hardDeleteSpy).toHaveBeenCalledWith(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      { requireLiveCapsuleRef: true }
+    );
+    // The guarded delete runs before any audit append, so the ONLY emitted event
+    // is the preservation_revoked skip (no spurious "deleted" audit). The memory
+    // is never notified as deleted.
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(appendSpy.mock.calls[0]?.[0]).toMatchObject({
+      payload_json: expect.objectContaining({
+        to_state: "tombstone",
+        reason_code: expect.stringContaining("preservation_revoked")
+      })
+    });
+    expect(notifySpy).toHaveBeenCalledTimes(1);
+    expect(notifySpy.mock.calls[0]?.[0]).toMatchObject({
+      payload_json: expect.objectContaining({
+        reason_code: expect.stringContaining("preservation_revoked")
+      })
+    });
   });
 
   it.each([
@@ -1107,7 +1154,7 @@ describe("MemoryService", () => {
   ])(
     "B1: REFUSES the physical delete (memory survives, recoverable) when %s",
     async (_label, capsuleFindById) => {
-      const hardDeleteSpy = vi.fn(async () => undefined);
+      const hardDeleteSpy = vi.fn(async () => true);
       const { dependencies, appendSpy, notifySpy } = compressedDeps({
         capsuleFindById,
         hardDeleteSpy
@@ -1135,7 +1182,7 @@ describe("MemoryService", () => {
   );
 
   it("B1: REFUSES the delete when the capsule-lookup port is unwired (fail-closed)", async () => {
-    const hardDeleteSpy = vi.fn(async () => undefined);
+    const hardDeleteSpy = vi.fn(async () => true);
     const { dependencies } = createDependencies({
       memoryEntryRepo: {
         create: vi.fn(async (entry) => entry),

@@ -130,7 +130,13 @@ export interface MemoryServiceMemoryEntryRepoPort {
   }): Promise<Readonly<MemoryEntry>>;
   // invariant: the GATED autonomous physical-delete authority (R3d). Removes a
   // tombstoned + past-grace row ONLY when it carries a non-null disposition.
-  hardDeleteTombstonedWithDisposition?(objectId: string): Promise<void>;
+  // requireLiveCapsuleRef makes the compressed-member preservation re-check
+  // (capsule liveness + membership) atomic with the physical delete; resolves
+  // false when that guard removed 0 rows (preservation revoked, fail-closed).
+  hardDeleteTombstonedWithDisposition?(
+    objectId: string,
+    options?: { readonly requireLiveCapsuleRef?: boolean }
+  ): Promise<boolean>;
 }
 
 export interface MemoryServiceEvidenceServicePort {
@@ -696,45 +702,21 @@ export class MemoryService {
       );
     }
 
-    // invariant (B1 delete-time TOCTOU re-verify): a `compressed` member earned
-    // its terminal-removal right ONLY because a live capsule preserved its
-    // content. That right is re-checked HERE (T0+>=24h), not just at marking
-    // time (T0). If the capsule archived / tombstoned / dropped this member /
-    // was cascade-deleted during the grace window, the preservation is gone, so
-    // physical deletion would be permanent loss. We REFUSE: the row stays
-    // tombstoned (recoverable) and an audited skip event records the revocation.
+    const isCompressed = existing.forget_disposition === "compressed";
+
+    // invariant (delete-time TOCTOU re-verify): a `compressed` member earned its
+    // terminal-removal right ONLY because a live capsule preserved its content.
+    // That right is re-checked HERE (T0+>=24h), not just at marking time (T0). If
+    // the capsule archived / tombstoned / dropped this member / was
+    // cascade-deleted during the grace window, the preservation is gone, so
+    // physical deletion would be permanent loss. This pre-check fails fast with a
+    // precise reason; the physical delete below is ALSO guarded atomically so a
+    // capsule mutation racing between this check and the delete cannot leak.
     // see also: apps/core-daemon/src/forget-disposition-ports.ts isCapsuleLive.
-    if (existing.forget_disposition === "compressed") {
+    if (isCompressed) {
       const preserved = await this.compressedPreservationStillValid(existing);
       if (!preserved) {
-        const skipEvent = await this.dependencies.eventLogRepo.append({
-          event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
-          entity_type: "memory_entry",
-          entity_id: existing.object_id,
-          workspace_id: existing.workspace_id,
-          run_id: existing.run_id,
-          caused_by: parsedCausedBy,
-          payload_json: SoulMemoryStateChangedPayloadSchema.parse({
-            object_id: existing.object_id,
-            object_kind: existing.object_kind,
-            workspace_id: existing.workspace_id,
-            run_id: existing.run_id,
-            // The row is NOT deleted: tombstone -> tombstone, preservation_revoked.
-            from_state: existing.lifecycle_state,
-            to_state: existing.lifecycle_state,
-            reason_code: `preservation_revoked: compressed capsule ${
-              existing.forget_disposition_ref ?? "<null>"
-            } no longer preserves this member; physical delete refused: ${parsedReason}`,
-            caused_by: parsedCausedBy,
-            evidence_refs:
-              existing.forget_disposition_ref === null ||
-              existing.forget_disposition_ref === undefined
-                ? null
-                : [existing.forget_disposition_ref],
-            occurred_at: this.now()
-          })
-        });
-        await this.dependencies.runtimeNotifier.notifyEntry(skipEvent);
+        await this.emitPreservationRevoked(existing, parsedReason, parsedCausedBy);
         return false;
       }
     }
@@ -744,8 +726,39 @@ export class MemoryService {
       throw new CoreError("CONFLICT", "Disposition-gated tombstone delete port is not available");
     }
 
-    const occurredAt = this.now();
-    const event = await this.dependencies.eventLogRepo.append({
+    // invariant: a `compressed` member's physical delete restates capsule
+    // liveness + membership INSIDE the DELETE (requireLiveCapsuleRef), so the
+    // preservation re-check is atomic with the removal — no TOCTOU window. The
+    // guarded delete runs FIRST so a capsule revocation that raced past the
+    // fast pre-check (0 rows changed) is recorded as preservation_revoked
+    // instead of a spurious "deleted" audit. The judged_useless path has no
+    // capsule dependency and keeps strict EventLog-first (append -> delete).
+    if (isCompressed) {
+      const deleted = await hardDeleteWithDisposition(parsedObjectId, { requireLiveCapsuleRef: true });
+      if (!deleted) {
+        await this.emitPreservationRevoked(existing, parsedReason, parsedCausedBy);
+        return false;
+      }
+      const deletedEvent = await this.appendAutonomousDeleteEvent(existing, parsedReason, parsedCausedBy);
+      await this.dependencies.runtimeNotifier.notifyEntry(deletedEvent);
+      return true;
+    }
+
+    const event = await this.appendAutonomousDeleteEvent(existing, parsedReason, parsedCausedBy);
+    await hardDeleteWithDisposition(parsedObjectId);
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
+    return true;
+  }
+
+  // invariant: the audited terminal-removal record (to_state=deleted). reason_code
+  // carries the disposition + caller rationale so the durable EventLog row records
+  // WHY the autonomous physical delete was permitted.
+  private async appendAutonomousDeleteEvent(
+    existing: Readonly<MemoryEntry>,
+    parsedReason: string,
+    parsedCausedBy: TransitionCausedBy
+  ): Promise<EventLogEntry> {
+    return await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -762,13 +775,49 @@ export class MemoryService {
         reason_code: `forget_disposition=${existing.forget_disposition}: ${parsedReason}`,
         caused_by: parsedCausedBy,
         evidence_refs: null,
-        occurred_at: occurredAt
+        occurred_at: this.now()
       })
     });
+  }
 
-    await hardDeleteWithDisposition(parsedObjectId);
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-    return true;
+  // invariant (delete-time fail-closed): a `compressed` member whose preserving
+  // capsule no longer preserves it (archived / tombstoned / member dropped /
+  // cascade-deleted) is NOT physically removed. The row stays tombstoned
+  // (recoverable) and this audited skip event records the revocation. Emitted
+  // both by the fast pre-check and by the atomic guarded delete returning 0 rows.
+  private async emitPreservationRevoked(
+    existing: Readonly<MemoryEntry>,
+    parsedReason: string,
+    parsedCausedBy: TransitionCausedBy
+  ): Promise<void> {
+    const skipEvent = await this.dependencies.eventLogRepo.append({
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedCausedBy,
+      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        // The row is NOT deleted: tombstone -> tombstone, preservation_revoked.
+        from_state: existing.lifecycle_state,
+        to_state: existing.lifecycle_state,
+        reason_code: `preservation_revoked: compressed capsule ${
+          existing.forget_disposition_ref ?? "<null>"
+        } no longer preserves this member; physical delete refused: ${parsedReason}`,
+        caused_by: parsedCausedBy,
+        evidence_refs:
+          existing.forget_disposition_ref === null ||
+          existing.forget_disposition_ref === undefined
+            ? null
+            : [existing.forget_disposition_ref],
+        occurred_at: this.now()
+      })
+    });
+    await this.dependencies.runtimeNotifier.notifyEntry(skipEvent);
   }
 
   // invariant (B1): re-verify that a `compressed` member is STILL preserved by a
