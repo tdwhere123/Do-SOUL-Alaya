@@ -279,6 +279,24 @@ export interface McpMemoryProposalWorkflowDependencies {
       workspaceId: string
     ): Promise<string | null>;
   };
+  // invariant: resolves the synthesis cluster's member memories at capsule-build
+  // time so source_memory_refs is populated, not hard-coded empty. A member is a
+  // workspace-scoped memory whose evidence_refs intersect the capsule's
+  // evidence_refs (the cluster the librarian/auditor summarized). The compress arm
+  // of autonomous forgetting earns the `compressed` disposition ONLY for a member
+  // listed here, so an unpopulated set leaves the arm inert. The lookup is
+  // mechanical (no LLM) and BOUNDED by the repo (caps the id set + LIMITs the
+  // row scan). Wired by the daemon to memoryEntryRepo.findByEvidenceRefs; left
+  // undefined in unit tests that do not exercise member resolution (capsule then
+  // builds with an empty member set, as before).
+  // see also: packages/storage/src/repos/memory-entry-repo.ts findByEvidenceRefs,
+  // apps/core-daemon/src/forget-disposition-ports.ts buildLiveCapsuleMemberIndex
+  readonly synthesisMemberResolver?: {
+    findMemberObjectIdsByEvidenceRefs(
+      workspaceId: string,
+      evidenceRefs: readonly string[]
+    ): Promise<readonly string[]>;
+  };
   readonly reviewerIdentityBinding?: ReviewerIdentityBinding;
   readonly sourceDeliveryAnchorValidator?: {
     validate(
@@ -715,6 +733,13 @@ export function createMcpMemoryProposalWorkflow(
     const gists = await resolveSynthesisEvidenceGists(evidenceRefs, context.workspaceId, proposalId);
     const summary = buildDeterministicSynthesisSummary(topicKey, gists);
 
+    // invariant: populate source_memory_refs with the cluster's member memories
+    // (those whose evidence_refs intersect the capsule's) so the live capsule
+    // preserves their content and the autonomous compress arm can earn each member
+    // the `compressed` disposition. A topic-only capsule (no evidence) has no
+    // members. see also: forget-disposition-ports.ts buildLiveCapsuleMemberIndex.
+    const sourceMemoryRefs = await resolveSynthesisMemberRefs(evidenceRefs, context.workspaceId);
+
     const timestamp = now();
     const capsule = parseSynthesisCapsuleForAccept({
       object_id: generateObjectId(),
@@ -728,7 +753,7 @@ export function createMcpMemoryProposalWorkflow(
       synthesis_type: SynthesisType.CROSS_EVIDENCE,
       summary,
       evidence_refs: [...evidenceRefs],
-      source_memory_refs: [],
+      source_memory_refs: sourceMemoryRefs,
       workspace_id: context.workspaceId,
       // Synthesis proposals are run-scoped null; the capsule schema requires a
       // non-empty run_id. Bind a deterministic, clock-free workspace sentinel so
@@ -774,6 +799,28 @@ export function createMcpMemoryProposalWorkflow(
       gists.push(gist);
     }
     return gists;
+  }
+
+  // Resolves the member memory object_ids that back the capsule's evidence set:
+  // workspace-scoped memories whose evidence_refs intersect evidenceRefs. The
+  // resolver is bounded by the repo (caps the id set + LIMITs the row scan) and
+  // mechanical (no LLM). Returns a sorted, de-duplicated list so two accepts over
+  // identical input produce identical source_memory_refs (deterministic). When the
+  // resolver is unwired (unit tests) or there is no evidence, the member set is
+  // empty and the capsule preserves no members (the prior posture).
+  async function resolveSynthesisMemberRefs(
+    evidenceRefs: readonly string[],
+    workspaceId: string
+  ): Promise<readonly string[]> {
+    if (evidenceRefs.length === 0) {
+      return [];
+    }
+    const resolver = deps.synthesisMemberResolver;
+    if (resolver === undefined) {
+      return [];
+    }
+    const memberIds = await resolver.findMemberObjectIdsByEvidenceRefs(workspaceId, evidenceRefs);
+    return [...new Set(memberIds.filter((id) => typeof id === "string" && id.length > 0))].sort();
   }
 
   async function assertProposedPathAnchorsValid(

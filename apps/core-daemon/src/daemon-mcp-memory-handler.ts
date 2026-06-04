@@ -33,6 +33,11 @@ export function createDaemonMcpMemoryToolHandler(input: {
   // exists before the durable insert. Wired from EvidenceService.findByIdScoped.
   // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts synthesisEvidenceReader
   readonly synthesisEvidenceReader?: McpMemoryProposalWorkflowDependencies["synthesisEvidenceReader"];
+  // invariant: resolves the cluster's member memories at capsule-build time so
+  // source_memory_refs is populated (the compress arm earns the `compressed`
+  // disposition only for a listed member). Wired from memoryEntryRepo.findByEvidenceRefs.
+  // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts synthesisMemberResolver
+  readonly synthesisMemberResolver?: McpMemoryProposalWorkflowDependencies["synthesisMemberResolver"];
   readonly signalService: McpMemoryToolHandlerDependencies["signalService"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
   readonly edgeProposalService?: McpMemoryToolHandlerDependencies["edgeProposalService"];
@@ -137,6 +142,9 @@ export function createDaemonMcpMemoryToolHandler(input: {
       ...(input.synthesisEvidenceReader === undefined
         ? {}
         : { synthesisEvidenceReader: input.synthesisEvidenceReader }),
+      ...(input.synthesisMemberResolver === undefined
+        ? {}
+        : { synthesisMemberResolver: input.synthesisMemberResolver }),
       ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding })
     })
   });

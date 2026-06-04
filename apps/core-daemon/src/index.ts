@@ -1656,6 +1656,21 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         return evidence === null ? null : evidence.gist;
       }
     },
+    // invariant: resolves the synthesis cluster's member memories at capsule-build
+    // time so source_memory_refs is populated. findByEvidenceRefs returns the
+    // active, non-tombstoned memories whose evidence_refs intersect the capsule's
+    // evidence_refs, workspace-scoped and bounded (id-set cap + row LIMIT). A
+    // populated member set is what lets the autonomous compress arm earn each
+    // member the `compressed` disposition while a live capsule preserves it.
+    synthesisMemberResolver: {
+      findMemberObjectIdsByEvidenceRefs: async (
+        scopedWorkspaceId: string,
+        evidenceRefs: readonly string[]
+      ) => {
+        const members = await memoryEntryRepo.findByEvidenceRefs(scopedWorkspaceId, evidenceRefs);
+        return members.map((member) => member.object_id);
+      }
+    },
     signalService,
     graphExploreService,
     edgeProposalService,

@@ -56,6 +56,9 @@ interface Harness {
 function createHarness(options: {
   readonly proposal: Proposal;
   readonly gistsByEvidence: Readonly<Record<string, string | null>>;
+  // The member object_ids the resolver returns for the capsule's evidence_refs.
+  // Defaults to none (the resolver-unwired posture: empty source_memory_refs).
+  readonly memberObjectIdsByEvidence?: Readonly<Record<string, readonly string[]>>;
 }): Harness {
   const events: EventLogEntry[] = [];
   const order: string[] = [];
@@ -168,6 +171,20 @@ function createHarness(options: {
     },
     synthesisEvidenceReader: {
       findGistById: async (evidenceId) => options.gistsByEvidence[evidenceId] ?? null
+    },
+    synthesisMemberResolver: {
+      // Mirrors memoryEntryRepo.findByEvidenceRefs: returns the member object_ids
+      // for every memory whose evidence_refs intersect the queried evidence set.
+      findMemberObjectIdsByEvidenceRefs: async (_workspaceId, evidenceRefs) => {
+        const map = options.memberObjectIdsByEvidence ?? {};
+        const members = new Set<string>();
+        for (const evidenceRef of evidenceRefs) {
+          for (const memberId of map[evidenceRef] ?? []) {
+            members.add(memberId);
+          }
+        }
+        return [...members];
+      }
     }
   });
 
@@ -182,6 +199,12 @@ describe("mcp synthesis create accept", () => {
       gistsByEvidence: {
         "ev-1": "prefer pnpm for workspace commands",
         "ev-2": "npm is deprecated for this repo"
+      },
+      // ev-1 backs member mem-a; ev-2 backs members mem-a (again) + mem-b. The
+      // resolved member set is de-duplicated and sorted deterministically.
+      memberObjectIdsByEvidence: {
+        "ev-1": ["mem-a"],
+        "ev-2": ["mem-a", "mem-b"]
       }
     });
 
@@ -204,7 +227,10 @@ describe("mcp synthesis create accept", () => {
     expect(capsule.topic_key).toBe("tooling/package-manager");
     expect(capsule.synthesis_type).toBe("cross_evidence");
     expect(capsule.evidence_refs).toEqual(["ev-1", "ev-2"]);
-    expect(capsule.source_memory_refs).toEqual([]);
+    // invariant: source_memory_refs is populated with the cluster's member
+    // memories (resolved via evidence-ref intersection), de-duplicated + sorted —
+    // this is what arms the autonomous compress disposition for each member.
+    expect(capsule.source_memory_refs).toEqual(["mem-a", "mem-b"]);
     expect(capsule.workspace_id).toBe("ws1");
     expect(capsule.run_id).toBe("synthesis-accept:ws1");
     expect(capsule.summary.length).toBeGreaterThan(0);
@@ -251,6 +277,28 @@ describe("mcp synthesis create accept", () => {
     expect(first).toBe(second);
   });
 
+  it("lands a member whose evidence intersects the capsule in source_memory_refs", async () => {
+    const proposal = createSynthesisProposal("librarian.synthesis", ["ev-1"]);
+    const harness = createHarness({
+      proposal,
+      gistsByEvidence: { "ev-1": "prefer pnpm" },
+      memberObjectIdsByEvidence: { "ev-1": ["mem-intersecting"] }
+    });
+
+    await harness.workflow.reviewMemoryProposal(
+      {
+        proposal_id: proposal.proposal_id,
+        verdict: "accept",
+        reason: "confirmed",
+        reviewer_identity: "user:reviewer-1"
+      },
+      { workspaceId: "ws1", runId: null, agentTarget: "cli", sessionId: "session-1" }
+    );
+
+    expect(harness.capsules).toHaveLength(1);
+    expect(harness.capsules[0]!.source_memory_refs).toEqual(["mem-intersecting"]);
+  });
+
   it("creates a topic-only capsule for a bootstrapping synthesis_candidate (no evidence)", async () => {
     const proposal = createSynthesisProposal("bootstrapping.synthesis_candidate", []);
     const harness = createHarness({ proposal, gistsByEvidence: {} });
@@ -269,6 +317,9 @@ describe("mcp synthesis create accept", () => {
     const capsule = harness.capsules[0]!;
     expect(capsule.topic_key).toBe("tooling-pattern");
     expect(capsule.evidence_refs).toEqual([]);
+    // No evidence => no cluster members to preserve; the compress arm has nothing
+    // to earn against (the resolver is never even queried).
+    expect(capsule.source_memory_refs).toEqual([]);
     expect(capsule.summary).toBe("Synthesis of tooling-pattern: no member evidence");
   });
 
