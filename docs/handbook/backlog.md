@@ -24,56 +24,70 @@ as the canonical carry-forward tracker (24 items) until v0.3.10
 closeout republishes the consolidated open/closed list.
 v0.3.11 opens `#BL-049` through `#BL-055` for the genuinely-deferred
 items surfaced during the completion effort (see
-`docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`).
+`docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`). The v0.3.11
+closeout fix-loop then CLOSED `#BL-049` (compress-arm activation) and
+`#BL-050` (ingest reconciliation default-ON) once their close conditions
+were met in code — see the resolved entries below for commit refs.
 
 ## Open Issues
 
-### #BL-049 — Activate the forgetting-lifecycle compress arm
+### #BL-049 — Resolved (forgetting-lifecycle compress arm activated)
 
-**Status**: Open (DORMANT pending an operator decision; opened v0.3.11, 2026-06-04;
-mirrors `.do-it/` task #64). **Due**: operator morning-decision queue.
+**Status**: Resolved (closed in the v0.3.11 closeout fix-loop, 2026-06-04;
+opened v0.3.11; mirrored `.do-it/` task #64).
 
-**Context**: The forgetting lifecycle (`decay -> dormant -> [compress | judge-useless]
--> retire/delete`) ships with the `judged_useless`-delete arm LIVE and
-B1-data-loss-safe. The **compress arm** — delete consolidated members that are
-preserved in a capsule — is BUILT and safe (delete-time re-verify) but **NOT
-activated**. Three things gate activation: (1) a `source_memory_refs` producer must
-wire the capsule -> member relationship so compress can prove preservation; (2) the
-compress-vs-protection ordering must be decided (a member protected by another path
-must not be deleted out from under it); (3) a lossy-summary-preservation product
-decision — whether a deterministic summary capsule is an acceptable terminal form for
-the members it absorbs.
+The compress arm is now ARMED. All three activation gates were met. (1) The
+`source_memory_refs` producer is wired: synthesis accept resolves the cluster's
+member set into the capsule's `source_memory_refs`, so the capsule -> member
+relationship exists for compress to prove preservation (`5ab7f768`). (2)
+Compress-vs-protection ordering is fixed: explicit-keep protection
+(pinned / hazard / canon / consolidated) is evaluated BEFORE the compressed arm,
+so a protected member is never compress-deleted (`fe49ad98`); the arm earns
+`compressed` ONLY for a FULLY-CONSOLIDATED member whose `evidence_refs` are a
+subset of the capsule's (`e874f0a9`). (3) The lossy-summary-preservation product
+call is recorded and documented honestly: the capsule preserves the cluster's
+shared evidence (surviving independently as `evidence_capsules`) plus a
+deterministic gist summary, and does NOT byte-preserve the member's distilled
+`content` — acceptable lossy consolidation, eligible only for fully-consolidated
+members (`e874f0a9`).
 
-**Why deferred (not hidden debt)**: the `judged_useless`-delete arm is the
-data-loss-safe terminal path and is LIVE today; the compress arm is a net-new
-preservation-then-delete capability that needs the producer wiring + a product call,
-not a half-built shortcut. No memory is deleted by the compress arm until activated.
+The data-safety hardening accompanying activation: the autonomous lifecycle is
+now scheduled — the Janitor pass enqueues `TOMBSTONE_GC` (`3155cf1d`); the
+compressed-member physical delete is atomic with its preservation re-check and
+its deleted-audit commits in the same transaction (`d1217b24`, `dcc970bb`);
+`active -> dormant` demotion emits a per-memory `SOUL_MEMORY_STATE_CHANGED`
+audited transition (`61d585a1`); benign no-longer-active demotion races are
+tolerated idempotent-silently (`c9953080`).
 
-**Close condition**: `source_memory_refs` producer wired; compress-vs-protection
-ordering documented + tested ("no compress-delete of a member protected by another
-path"); operator decision recorded on lossy-summary preservation; a "no tombstone
-before compression/disposition" enforcement test covers the compress arm.
+**Close evidence**: `5ab7f768`, `fe49ad98`, `3155cf1d`, `e874f0a9`, plus the
+data-safety fix-loop (`d1217b24`, `dcc970bb`, `61d585a1`, `c9953080`,
+`7bdd1c58`, `c0fcc595`, `5e40c492`, `7bb0483c`). Tests pin explicit-keep-before-
+compress ordering and the subset eligibility filter. The physical removal still
+needs a live workspace witness (R5 / a real accepted synthesis capsule), tracked
+generically with the other v0.3.11 readiness rows in
+`docs/handbook/runtime-status.md`.
 
-### #BL-050 — Ingest reconciliation default-ON under zero-own-LLM
+### #BL-050 — Resolved (ingest reconciliation default-ON under zero-own-LLM)
 
-**Status**: Open (deferred; opened v0.3.11, 2026-06-04; mirrors `.do-it/` task #41).
-**Due**: revisit at v0.3.12 planning.
+**Status**: Resolved (closed in the v0.3.11 closeout fix-loop, 2026-06-04;
+opened v0.3.11; mirrored `.do-it/` task #41).
 
-**Context**: D-F1 ingest reconciliation routes the per-fact reconcile decision through
-the same agent/rule path (not a self-cloud LLM), gated by
-`ALAYA_INGEST_RECONCILIATION_ENABLED`. It is **default-OFF**, so production currently
-appends new facts without reconciling against existing rows (duplicate risk). Turning
-it default-ON needs a reconcile-decision-basis that holds under the zero-own-LLM
-default (`host_worker` / rule heuristic), not a cloud reconcile call.
+The zero-own-LLM reconcile-decision basis was built and the default flipped ON.
+D-F1 ingest reconciliation now runs out of the box on a rule-only, zero-cloud
+basis: a byte-equal duplicate resolves to an identity-key NOOP, and the ambiguous
+"refines vs distinct" band resolves to ADD — never a rule-based UPDATE/NOOP, which
+would erase answers (`d57ace8a`). The cloud garden-LLM remains the OPTIONAL
+ambiguous-band upgrade (UPDATE/NOOP) and stays default-OFF, preserving R0
+zero-cloud; operators turn the whole feature off with
+`ALAYA_INGEST_RECONCILIATION_ENABLED=0` / `=false` (`90ba64a9`). It covers the
+`materializeMemoryEntryOnly` path; `materialize_and_claim` is intentionally not
+reconciled, and the DELETE / supersede path stays owned by
+`ConflictDetectionService`.
 
-**Why deferred (not hidden debt)**: the routing exists and is opt-in-exercisable; the
-blocker is the decision basis under zero-own-LLM, which interacts with the
-host-worker compute contract (R0). Defaulting it ON before that basis is settled would
-either degrade every fact through a weak rule or quietly route to cloud.
-
-**Close condition**: a zero-own-LLM reconcile-decision basis (rule heuristic and/or
-host-worker `EDGE_CLASSIFY`-style task) proven adequate on bench, then flip the
-default to ON with token-economy evidence.
+**Close evidence**: `d57ace8a` (rule-only zero-cloud reconciliation decision
+basis), `90ba64a9` (default-ON with the operator off-switch). The
+token-economy / dedup-quality witness on the full corpus rides the R5 500q gate;
+no separate backlog item is kept open for it.
 
 ### #BL-051 — Abstention calibration re-test on 500q data
 
