@@ -2675,6 +2675,146 @@ describe("RecallService", () => {
     expect(anchoredIds).not.toContain("superseded-target");
   });
 
+  it("gates same-relation hop-2 chain extension while keeping heterogeneous associative reach", async () => {
+    // The hop>=2 chain gate keys on the RAW relation_kind: a neighbor reached by
+    // the same relation_kind as its parent (a single-relation lineage walk, e.g.
+    // a derives_from provenance chain) is dropped from graph_expansion, while a
+    // reach whose two hops use DIFFERENT relation_kinds that merely fold onto the
+    // same tracked edge_type (co_recalled -> shares_entity, both -> `recalls`)
+    // stays admitted as healthy heterogeneous convergence.
+    const memories = [
+      createMemoryEntry({
+        object_id: "seed-memory",
+        content: "Deployment recall seed.",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "hop1-derived",
+        content: "First hop derived neighbor.",
+        activation_score: 0.1,
+        domain_tags: ["graph-hop"]
+      }),
+      createMemoryEntry({
+        object_id: "hop2-same-chain",
+        content: "Second hop same-relation chain extension.",
+        activation_score: 0.1,
+        domain_tags: ["graph-hop"]
+      }),
+      createMemoryEntry({
+        object_id: "hop1-corecalled",
+        content: "First hop co-recalled neighbor.",
+        activation_score: 0.1,
+        domain_tags: ["graph-hop"]
+      }),
+      createMemoryEntry({
+        object_id: "hop2-heterogeneous",
+        content: "Second hop heterogeneous associative reach.",
+        activation_score: 0.1,
+        domain_tags: ["graph-hop"]
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    // Chain A (same raw relation_kind twice -> hop-2 GATED):
+    //   seed --derives_from--> hop1-derived --derives_from--> hop2-same-chain
+    const seedToHop1Derived = createPathRelation({
+      path_id: "p-chain-1",
+      sourceId: "seed-memory",
+      targetId: "hop1-derived",
+      relationKind: "derives_from",
+      strength: 1
+    });
+    const hop1ToSameChain = createPathRelation({
+      path_id: "p-chain-2",
+      sourceId: "hop1-derived",
+      targetId: "hop2-same-chain",
+      relationKind: "derives_from",
+      strength: 1
+    });
+    // Chain B (different raw relation_kinds that both fold to `recalls` -> hop-2
+    // ADMITTED): seed --co_recalled--> hop1-corecalled --shares_entity--> hop2-heterogeneous
+    const seedToCorecalled = createPathRelation({
+      path_id: "p-hetero-1",
+      sourceId: "seed-memory",
+      targetId: "hop1-corecalled",
+      relationKind: "co_recalled",
+      strength: 1
+    });
+    const corecalledToHetero = createPathRelation({
+      path_id: "p-hetero-2",
+      sourceId: "hop1-corecalled",
+      targetId: "hop2-heterogeneous",
+      relationKind: "shares_entity",
+      strength: 1
+    });
+    const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+      const ids = new Set(
+        anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+      );
+      const out: PathRelation[] = [];
+      if (ids.has("seed-memory")) {
+        out.push(seedToHop1Derived, seedToCorecalled);
+      }
+      if (ids.has("hop1-derived")) {
+        out.push(hop1ToSameChain);
+      }
+      if (ids.has("hop1-corecalled")) {
+        out.push(corecalledToHetero);
+      }
+      return out;
+    });
+    const service = new RecallService({
+      ...dependencies,
+      pathExpansionPort: { findByAnchors }
+    });
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        precomputed_rank: {
+          ...basePolicy.coarse_filter.precomputed_rank,
+          max_candidates: 1
+        },
+        semantic_supplement: {
+          enabled: false,
+          max_supplement: 0
+        }
+      },
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          max_total_tokens: 1000,
+          max_entries: 5,
+          per_dimension_limits: null
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    // hop-1 neighbors land on path_expansion; hop-1 is never gated.
+    expect(
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "hop1-derived")
+        ?.admission_planes
+    ).toContain("path_expansion");
+    // Same-relation hop-2 chain extension (derives_from -> derives_from) is gated
+    // out of graph_expansion.
+    expect(
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "hop2-same-chain")
+        ?.admission_planes ?? []
+    ).not.toContain("graph_expansion");
+    // Heterogeneous associative reach (co_recalled -> shares_entity) stays on
+    // graph_expansion even though both relation_kinds fold to `recalls`.
+    expect(
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "hop2-heterogeneous")
+        ?.admission_planes
+    ).toContain("graph_expansion");
+  });
+
   it("does not count graph diagnostics for neighbors rejected by deterministic filters", async () => {
     // invariant: a path-backed neighbor whose dimension fails the deterministic
     // filter is never admitted to byId, so expandGraphFrontier (which only
