@@ -19,8 +19,9 @@ import type { ReconciliationLlmDecisionPort } from "@do-soul/alaya-core";
  * a hash of (model + incoming fact + neighbor contents) — exactly the
  * caching discipline of the LongMemEval compile-seed extraction cache. A
  * cached decision re-runs with zero LLM calls. The cache directory lives
- * beside the extraction cache under docs/bench-history/datasets so a
- * credentialled run can populate and commit it.
+ * beside the extraction cache under docs/bench-history/datasets and is
+ * git-ignored like it: both are regenerable, model-keyed, and not source
+ * truth, so a fresh checkout re-populates them from a credentialled run.
  *
  * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
  *   (the extraction cache whose shape this mirrors)
@@ -30,10 +31,11 @@ import type { ReconciliationLlmDecisionPort } from "@do-soul/alaya-core";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Beside the LongMemEval atomic-fact cache so the same repeatable-
-// fixture discipline applies — a credentialled run populates it, then it
-// is committed and later runs reuse it with zero LLM calls. Created
-// lazily on the first credentialled decision.
+// Beside the LongMemEval atomic-fact cache, sharing its caching discipline
+// and its git-ignore: a credentialled run populates it, later runs in the
+// same checkout reuse it with zero LLM calls, and it is not committed
+// (regenerable, model-keyed). Created lazily on the first credentialled
+// decision.
 const RECONCILIATION_DECISION_CACHE_ROOT = resolve(
   __dirname,
   "../../../docs/bench-history/datasets/reconciliation-decisions"
