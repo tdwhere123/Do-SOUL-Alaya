@@ -53,6 +53,7 @@ import {
   buildSessionSynthesisInput,
   computeNextTurnSeedRefs,
   createCompileSeedRunner,
+  EXTRACTION_CACHE_ROOT,
   resolveBenchAllowLiveExtraction,
   toSeedExtractionPathKpi,
   type CompileSeedRunner,
@@ -79,6 +80,11 @@ export interface LongMemEvalMultiturnRunOptions {
   readonly pinnedMetaRoot?: string;
   readonly offset?: number;
   readonly rounds?: number;
+  // Override the extraction-cache root the run-start preflight validates
+  // against (test-only). Production callers leave undefined for the canonical
+  // EXTRACTION_CACHE_ROOT; tests point it at an isolated dir to decouple from
+  // the committed production manifest model.
+  readonly extractionCacheRoot?: string;
 }
 
 export interface LongMemEvalMultiturnRunResult {
@@ -403,11 +409,10 @@ export async function runLongMemEvalMultiturn(
   // silent live run.
   // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
   //   preflightExtractionCache
-  const seedRunner = createCompileSeedRunner(
-    resolveBenchAllowLiveExtraction()
-      ? { allowLiveExtraction: true }
-      : undefined
-  );
+  const seedRunner = createCompileSeedRunner({
+    cacheRoot: opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT,
+    ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
+  });
   const collected: QuestionResult[] = [];
   const embeddingReadiness = new EmbeddingReadinessTracker();
   for (let i = 0; i < window.length; i++) {

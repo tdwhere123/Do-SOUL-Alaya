@@ -173,6 +173,7 @@ interface ParsedFlags {
   readonly snapshotOut?: string;
   readonly dataDirRoot?: string;
   readonly pinnedMetaRoot?: string;
+  readonly extractionCacheRoot?: string;
   readonly concurrency?: number;
 }
 
@@ -194,6 +195,7 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let snapshotOut: string | undefined;
   let dataDirRoot: string | undefined;
   let pinnedMetaRoot: string | undefined;
+  let extractionCacheRoot: string | undefined;
   let concurrency: number | undefined;
   const shards: string[] = [];
   let collectingShards = false;
@@ -295,6 +297,18 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
         ? token.slice("--pinned-meta-root=".length)
         : args[++i];
       collectingShards = false;
+    } else if (
+      token === "--extraction-cache-root" ||
+      token.startsWith("--extraction-cache-root=")
+    ) {
+      // Override the longmemeval extraction-cache root the run-start preflight
+      // validates against and the snapshot records provenance from. Operators
+      // can point a run at an alternate cache; integration tests point it at an
+      // isolated dir so they do not couple to the committed production manifest.
+      extractionCacheRoot = token.startsWith("--extraction-cache-root=")
+        ? token.slice("--extraction-cache-root=".length)
+        : args[++i];
+      collectingShards = false;
     } else if (token === "--snapshot" || token.startsWith("--snapshot=")) {
       snapshot = token.startsWith("--snapshot=")
         ? token.slice("--snapshot=".length)
@@ -352,6 +366,7 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     snapshotOut,
     dataDirRoot,
     pinnedMetaRoot,
+    extractionCacheRoot,
     concurrency
   };
 }
@@ -408,7 +423,10 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
       ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),
       ...(opts.pinnedMetaRoot === undefined
         ? {}
-        : { pinnedMetaRoot: opts.pinnedMetaRoot })
+        : { pinnedMetaRoot: opts.pinnedMetaRoot }),
+      ...(opts.extractionCacheRoot === undefined
+        ? {}
+        : { extractionCacheRoot: opts.extractionCacheRoot })
     });
     const kpi = result.payload.kpi;
     process.stdout.write(

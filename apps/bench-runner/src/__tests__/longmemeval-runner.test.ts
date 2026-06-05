@@ -27,10 +27,11 @@ let tmpDir: string;
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "lme-test-"));
   // These runs take the no-credentials offline seed path; the model value is
-  // never used for a live call, but resolveCompileSeedExtractionConfig now
-  // requires an explicit extraction model (no silent production-constant
-  // fallback), so set it for the run-start preflight/config resolution.
-  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-nano");
+  // never used for a live call. Each run below passes an isolated
+  // extractionCacheRoot (no manifest -> first-ever-build preflight), so this
+  // model is arbitrary and the tests are decoupled from the production
+  // extraction-cache manifest's model.
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "test-extraction-model");
 });
 
 afterEach(async () => {
@@ -1176,7 +1177,8 @@ describe("LongMemEval runner", () => {
         pinnedMetaRoot,
         policyShape: "chat",
         simulateReport: "mixed",
-        weightOverridesJson
+        weightOverridesJson,
+        extractionCacheRoot: join(tmpDir, "extraction-cache")
       });
 
       // Slug format must match SLUG_PATTERN
@@ -1453,7 +1455,8 @@ describe("LongMemEval runner", () => {
         rounds: 2,
         historyRoot,
         dataDir,
-        pinnedMetaRoot
+        pinnedMetaRoot,
+        extractionCacheRoot: join(tmpDir, "extraction-cache")
       });
 
       expect(result.payload.bench_name).toBe("public-multiturn");
@@ -1551,7 +1554,8 @@ describe("LongMemEval runner", () => {
         limit: 1,
         historyRoot,
         dataDir,
-        pinnedMetaRoot
+        pinnedMetaRoot,
+        extractionCacheRoot: join(tmpDir, "extraction-cache")
       });
 
       expect(result.payload.bench_name).toBe("public-crossquestion");

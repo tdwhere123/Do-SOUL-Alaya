@@ -158,6 +158,13 @@ export interface LongMemEvalRunOptions {
   // later recall-eval --snapshot run skips both extraction and
   // materialization. see also: apps/bench-runner/src/longmemeval/snapshot.ts
   readonly snapshotOut?: string;
+  // Override the extraction-cache root the run-start preflight validates and
+  // the snapshot sidecar records provenance from (test-only). Production
+  // callers leave this undefined so the canonical EXTRACTION_CACHE_ROOT is
+  // used. Tests point it at an isolated dir so the run validates a hand-built
+  // cache + arbitrary model instead of the committed production manifest,
+  // decoupling the integration tests from the live extraction model.
+  readonly extractionCacheRoot?: string;
 }
 
 export interface LongMemEvalRunResult {
@@ -283,6 +290,10 @@ export async function runLongMemEval(
     dataDir: opts.dataDir,
     pinnedMetaRoot: opts.pinnedMetaRoot
   });
+  // The run-start preflight (createCompileSeedRunner) and the snapshot sidecar
+  // provenance both read this cache root. Default to the canonical production
+  // cache; a test override points it at an isolated dir.
+  const extractionCacheRoot = opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT;
   const offset = Math.max(0, opts.offset ?? 0);
   const sliceEnd =
     opts.limit !== undefined ? offset + opts.limit : questions.length;
@@ -630,6 +641,7 @@ export async function runLongMemEval(
   const requiredTurnContents = collectDistinctTurnContents(window);
   const seedRunner = createCompileSeedRunner({
     requiredTurnContents,
+    cacheRoot: extractionCacheRoot,
     ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
   });
   const collected: WorkerResult[] = [];
@@ -682,7 +694,8 @@ export async function runLongMemEval(
         seedDataDirRoot,
         variant: opts.variant,
         commitSha7,
-        snapshotQuestions
+        snapshotQuestions,
+        extractionCacheRoot
       });
       process.stdout.write(
         `[longmemeval snapshot] wrote ${snapshotQuestions.length} questions -> ${opts.snapshotOut}\n`
@@ -1312,12 +1325,13 @@ function writeRecallEvalSnapshot(input: {
   readonly variant: LongMemEvalVariant;
   readonly commitSha7: string;
   readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
+  readonly extractionCacheRoot: string;
 }): void {
   const liveDbPath = resolve(input.seedDataDirRoot, BENCH_DAEMON_DB_FILENAME);
   const schemaMigrationVersion = readSchemaMigrationVersion(liveDbPath);
   checkpointAndCopyBenchDb(liveDbPath, input.snapshotOut);
 
-  const extractionManifest = readExtractionCacheManifest(EXTRACTION_CACHE_ROOT);
+  const extractionManifest = readExtractionCacheManifest(input.extractionCacheRoot);
   const extractionProvenance: SnapshotExtractionProvenance | null =
     extractionManifest === undefined
       ? null

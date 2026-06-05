@@ -43,9 +43,11 @@ beforeEach(async () => {
   pinnedMetaRoot = join(tmpDir, "pinned");
   await mkdir(dataDir, { recursive: true });
   await mkdir(pinnedMetaRoot, { recursive: true });
-  // No-credentials offline seed path; model is never used for a live call but
-  // the single-source resolver requires it set.
-  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-nano");
+  // No-credentials offline seed path; the model is never used for a live call.
+  // Paired with an isolated extractionCacheRoot (no manifest -> first-ever-build
+  // preflight), this model is arbitrary: the test is decoupled from the
+  // production extraction-cache manifest's model.
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "test-extraction-model");
 });
 
 afterEach(async () => {
@@ -69,7 +71,8 @@ describe("recall-eval against a seeded-DB snapshot", () => {
         historyRoot: seedHistoryRoot,
         dataDir,
         pinnedMetaRoot,
-        snapshotOut: snapshotDbPath
+        snapshotOut: snapshotDbPath,
+        extractionCacheRoot: join(tmpDir, "extraction-cache")
       });
       expect(seedResult.payload.evaluated_count).toBe(2);
       expect(existsSync(snapshotDbPath)).toBe(true);
@@ -113,7 +116,8 @@ describe("recall-eval against a seeded-DB snapshot", () => {
         historyRoot: join(tmpDir, "seed-history"),
         dataDir,
         pinnedMetaRoot,
-        snapshotOut: snapshotDbPath
+        snapshotOut: snapshotDbPath,
+        extractionCacheRoot: join(tmpDir, "extraction-cache")
       });
 
       const firstRun = await runRecallEval({

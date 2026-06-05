@@ -47,6 +47,7 @@ import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
 import {
   computeNextTurnSeedRefs,
   createCompileSeedRunner,
+  EXTRACTION_CACHE_ROOT,
   resolveBenchAllowLiveExtraction,
   toSeedExtractionPathKpi
 } from "./compile-seed.js";
@@ -70,6 +71,11 @@ export interface LongMemEvalCrossQuestionRunOptions {
   readonly embeddingMode?: BenchEmbeddingMode;
   readonly pinnedMetaRoot?: string;
   readonly offset?: number;
+  // Override the extraction-cache root the run-start preflight validates
+  // against (test-only). Production callers leave undefined for the canonical
+  // EXTRACTION_CACHE_ROOT; tests point it at an isolated dir to decouple from
+  // the committed production manifest model.
+  readonly extractionCacheRoot?: string;
 }
 
 export interface LongMemEvalCrossQuestionRunResult {
@@ -154,11 +160,10 @@ export async function runLongMemEvalCrossQuestion(
   // silent live run.
   // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
   //   preflightExtractionCache
-  const seedRunner = createCompileSeedRunner(
-    resolveBenchAllowLiveExtraction()
-      ? { allowLiveExtraction: true }
-      : undefined
-  );
+  const seedRunner = createCompileSeedRunner({
+    cacheRoot: opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT,
+    ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
+  });
   const embeddingReadiness = new EmbeddingReadinessTracker();
 
   try {
