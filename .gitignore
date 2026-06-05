@@ -48,3 +48,4 @@ Thumbs.db
 
 # do-it plugin internal artifacts (per-worktree plan stub for grill hook)
 .do-it/
+.gitnexus
