@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "comparison": "cold-none-vs-warm-mixed",
+  "bench_name": "public",
+  "split": "longmemeval-s",
+  "policy_shape": "chat",
+  "current": {
+    "slug": "2026-06-05T030942Z-8174da4-policy-chat",
+    "run_at": "2026-06-05T03:09:42.454Z",
+    "simulate_report": "none",
+    "r_at_1": 0.494,
+    "r_at_5": 0.816,
+    "r_at_10": 0.842,
+    "tier_distribution": {
+      "hot": 500,
+      "warm": 0,
+      "cold": 0
+    },
+    "degradation_reasons": {
+      "none": 500,
+      "warm_cascade_engaged": 0,
+      "cold_cascade_engaged": 0,
+      "recall_explainability_partial": 0
+    },
+    "report_side_effects": {
+      "mode": "none",
+      "workspaces_observed": 500,
+      "memory_graph_edges_total": 275316,
+      "memory_graph_edges_by_type": {
+        "supports": 0,
+        "derives_from": 206584,
+        "contradicts": 0,
+        "supersedes": 0,
+        "recalls": 68732,
+        "exception_to": 0,
+        "incompatible_with": 0
+      },
+      "recalls_edge_count": 68732,
+      "path_relations_total": 275316,
+      "latest_path_event_at": "2026-06-05T03:08:22.102Z",
+      "snapshots": []
+    },
+    "scored_recall_evidence": {
+      "delivered_result_count": 5000,
+      "graph_support_gold_count": 0,
+      "path_plasticity_gold_count": 0,
+      "graph_expansion_plane_count": 51,
+      "path_expansion_plane_count": 2141,
+      "graph_expansion_plane_count_per_hop": [
+        132,
+        8523
+      ],
+      "graph_expansion_plane_count_per_edge_type": {
+        "derives_from": 3380,
+        "recalls": 5275,
+        "supports": 0
+      },
+      "delivered_plane_counts": {
+        "first_admitted": {
+          "lexical": 3391,
+          "activation": 1370,
+          "path_expansion": 210,
+          "session_surface_cohort": 12,
+          "object_probe": 17
+        },
+        "winning_admission": {
+          "lexical": 4278,
+          "path_expansion": 722
+        }
+      },
+      "gold_source_channel_counts": {
+        "workspace_local": 1949,
+        "lexical": 1341,
+        "lexical_expanded": 1258,
+        "evidence_fts": 1235,
+        "query_probe_lexical": 1098,
+        "evidence_anchor": 1232,
+        "plane:lexical": 1482,
+        "plane:evidence_anchor": 1232,
+        "activation": 392,
+        "plane:activation": 392,
+        "path_expansion": 1419,
+        "plane:path_expansion": 1419,
+        "graph_expansion": 51,
+        "plane:graph_expansion": 51,
+        "session_surface_cohort": 48,
+        "plane:session_surface_cohort": 48,
+        "object_probe": 7,
+        "plane:object_probe": 7
+      },
+      "gold_source_plane_counts": {
+        "lexical": 1482,
+        "evidence_anchor": 1232,
+        "activation": 392,
+        "path_expansion": 1419,
+        "graph_expansion": 51,
+        "session_surface_cohort": 48,
+        "object_probe": 7
+      }
+    }
+  },
+  "opposite": null,
+  "delta_current_minus_opposite": null,
+  "note": "No prior same split/policy/embedding_provider simulate_report=mixed archive found"
+}
