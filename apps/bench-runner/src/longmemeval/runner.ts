@@ -114,6 +114,12 @@ import { EXTRACTION_CACHE_ROOT } from "./compile-seed.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
+// Mirrors apps/bench-runner/src/harness/daemon.ts DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL
+// so the kpi provider label reflects the on-device model when
+// --embedding-provider local_onnx is used (the OPENAI_* env vars describe a
+// remote endpoint and do not apply to a local_onnx run).
+const DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL =
+  "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
 const PINNED_META_ROOT = resolve(
   __dirname,
   "../../../../docs/bench-history/datasets"
@@ -303,7 +309,9 @@ export async function runLongMemEval(
   const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
   const embeddingProviderLabel = resolveBenchEmbeddingProviderLabel(
-    opts.embeddingMode ?? "disabled"
+    opts.embeddingMode ?? "disabled",
+    process.env,
+    opts.embeddingProviderKind ?? "openai"
   );
   const policyShape = opts.policyShape ?? "stress";
   const simulateReport = opts.simulateReport ?? "none";
@@ -1269,10 +1277,19 @@ export function buildLongMemEvalReportContextUsage(input: {
 
 export function resolveBenchEmbeddingProviderLabel(
   embeddingMode: BenchEmbeddingMode,
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  providerKind: BenchEmbeddingProviderKind = "openai"
 ): string {
   if (embeddingMode === "disabled") {
     return "none";
+  }
+
+  // local_onnx is an on-device provider; the OPENAI_* env vars describe a
+  // remote endpoint and do not apply. Label it by the resolved local model.
+  if (providerKind === "local_onnx") {
+    const localModel =
+      env.ALAYA_LOCAL_EMBEDDING_MODEL?.trim() || DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL;
+    return `local_onnx:${localModel}`;
   }
 
   const model = env.OPENAI_EMBEDDING_MODEL?.trim() || DEFAULT_BENCH_EMBEDDING_MODEL;

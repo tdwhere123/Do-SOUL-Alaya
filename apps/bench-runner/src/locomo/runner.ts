@@ -37,6 +37,7 @@ import {
   type LongMemEvalQuestionDiagnostic
 } from "../longmemeval/diagnostics.js";
 import { writeExternalDiagnosticsArtifact } from "../longmemeval/diagnostics-artifacts.js";
+import { resolveBenchEmbeddingProviderLabel } from "../longmemeval/runner.js";
 import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
@@ -99,7 +100,11 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
   const embeddingMode = opts.embeddingMode ?? "disabled";
-  const embeddingProvider = embeddingMode === "env" ? "yunwu:text-embedding-3-small" : "none";
+  const embeddingProvider = resolveBenchEmbeddingProviderLabel(
+    embeddingMode,
+    process.env,
+    opts.embeddingProviderKind ?? "openai"
+  );
 
   const perScenario: PerScenarioRow[] = [];
   const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];

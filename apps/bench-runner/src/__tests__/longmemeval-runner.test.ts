@@ -836,6 +836,21 @@ describe("LongMemEval runner", () => {
       "openai:text-embedding-3-small"
     );
     expect(resolveBenchEmbeddingProviderLabel("disabled", {})).toBe("none");
+    // local_onnx is an on-device provider: labeled by the resolved local model,
+    // never the OPENAI_* remote-endpoint env vars (which do not describe it).
+    expect(resolveBenchEmbeddingProviderLabel("env", {}, "local_onnx")).toBe(
+      "local_onnx:Xenova/paraphrase-multilingual-MiniLM-L12-v2"
+    );
+    expect(
+      resolveBenchEmbeddingProviderLabel(
+        "env",
+        {
+          ALAYA_LOCAL_EMBEDDING_MODEL: "Xenova/custom-model",
+          OPENAI_EMBEDDING_MODEL: "ignored-for-local"
+        },
+        "local_onnx"
+      )
+    ).toBe("local_onnx:Xenova/custom-model");
   });
 
   it("builds simulate-report usage from delivered results only", () => {
