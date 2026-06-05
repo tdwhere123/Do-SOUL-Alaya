@@ -30,7 +30,7 @@ beforeEach(async () => {
   // never used for a live call, but resolveCompileSeedExtractionConfig now
   // requires an explicit extraction model (no silent production-constant
   // fallback), so set it for the run-start preflight/config resolution.
-  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-mini");
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-nano");
 });
 
 afterEach(async () => {

@@ -40,7 +40,12 @@ export function resolveBenchCommitSha7(
     return fromEnv.slice(0, 7);
   }
   try {
-    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+    // git --short is adaptive (>= 7 chars when a 7-char prefix is ambiguous);
+    // slice to the 7-char contract this function name and the env path above
+    // both guarantee, so the result is always exactly 7 hex chars.
+    return execSync("git rev-parse --short=7 HEAD", { encoding: "utf8" })
+      .trim()
+      .slice(0, 7);
   } catch {
     return "0000000";
   }

@@ -45,7 +45,7 @@ beforeEach(async () => {
   await mkdir(pinnedMetaRoot, { recursive: true });
   // No-credentials offline seed path; model is never used for a live call but
   // the single-source resolver requires it set.
-  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-mini");
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-nano");
 });
 
 afterEach(async () => {
