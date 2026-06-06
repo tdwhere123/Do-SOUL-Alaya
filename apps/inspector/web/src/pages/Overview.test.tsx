@@ -147,11 +147,18 @@ describe("OverviewPage", () => {
 
   it("renders all Latest Bench cards with an empty placeholder when no entries exist", async () => {
     renderOverview();
-    expect(await screen.findByTestId("overview-bench-self-empty")).toBeTruthy();
-    expect(screen.getByTestId("overview-bench-public-empty")).toBeTruthy();
-    expect(screen.getByTestId("overview-bench-public-multiturn-empty")).toBeTruthy();
-    expect(screen.getByTestId("overview-bench-live-empty")).toBeTruthy();
-    expect(screen.getByTestId("overview-bench-self-empty").textContent).toMatch(
+    await waitFor(() =>
+      expect(screen.getByTestId("overview-bench-self-empty").textContent).toMatch(
+        /no benchmark entries yet/i
+      )
+    );
+    expect(screen.getByTestId("overview-bench-public-empty").textContent).toMatch(
+      /no benchmark entries yet/i
+    );
+    expect(screen.getByTestId("overview-bench-public-multiturn-empty").textContent).toMatch(
+      /no benchmark entries yet/i
+    );
+    expect(screen.getByTestId("overview-bench-live-empty").textContent).toMatch(
       /no benchmark entries yet/i
     );
   });
@@ -224,7 +231,10 @@ describe("OverviewPage", () => {
     });
 
     renderOverview();
-    const selfCard = await screen.findByTestId("overview-bench-self");
+    await waitFor(() =>
+      expect(screen.getByTestId("overview-bench-self").textContent).toContain("91.2%")
+    );
+    const selfCard = screen.getByTestId("overview-bench-self");
     expect(selfCard.textContent).toContain("91.2%");
     expect(selfCard.textContent).toMatch(/-2.1pp/);
     expect(selfCard.textContent).toContain("3 historical entries");
