@@ -1143,6 +1143,43 @@ describe("compile() signal-drop count is observable", () => {
       materialization_error: 0
     });
   });
+
+  it("fails closed in no-credentials fallback when a seed memory materializes but accept fails", async () => {
+    const daemon: CompileSeedDaemon = {
+      proposeMemoryFromSignal: async () => {
+        throw createUnscoredMaterializedSeedError({
+          memoryId: "fallback-memory-created-before-accept-failed",
+          evidenceRef: "q1-s0-t0",
+          cause: new Error("fallback review tail failed")
+        });
+      },
+      proposeMemoriesFromCompileSignals: async () => {
+        throw new Error("credentialled compile path should not run");
+      },
+      proposeSynthesis: async () => ({ synthesisId: null })
+    };
+    const runner = createCompileSeedRunner({
+      config: OFFLINE_CONFIG,
+      cacheRoot
+    });
+
+    await expect(
+      runner.seedTurn({
+        daemon,
+        turnContent: "Intro span.",
+        evidenceRefBase: "q1-s0-t0",
+        seedIndex: 0,
+        workspaceId: "ws-test",
+        runId: "run-test"
+      })
+    ).rejects.toThrow(/recallable unscored seed memory/);
+
+    expect(runner.stats.signalsDropped).toBe(0);
+    expect(runner.stats.signalsDroppedByReason).toEqual({
+      candidate_absent: 0,
+      materialization_error: 0
+    });
+  });
 });
 
 describe("extraction cache write is atomic", () => {

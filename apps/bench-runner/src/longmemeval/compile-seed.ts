@@ -1582,6 +1582,9 @@ export function createCompileSeedRunner(options?: {
             await input.daemon.proposeMemoryFromSignal(signalInput)
           );
         } catch (error) {
+          if (isUnscoredMaterializedSeedError(error)) {
+            throw error;
+          }
           stats.signalsDropped += 1;
           process.stderr.write(
             `[longmemeval compile-seed] dropped one signal during seed: ${stringifyError(error)}\n`
