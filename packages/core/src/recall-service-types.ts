@@ -362,16 +362,13 @@ export type RecallFusionStream =
   | "existing_score"
   | "embedding_similarity"
   | "graph_expansion"
-  // see also: scoreRecallFusionStream case "entity_seed"
+  // see also: packages/core/src/recall-service.ts scoreRecallFusionStream
   | "entity_seed"
-  // path_expansion is now the multi-session fan-in carrier: R1's earned sparse
-  // co_recalled PathRelations (production onCoUsage gate, threshold 3) fan a
-  // query that hits a non-representative cohort member into its same-session
-  // siblings via the unified path plane (direct hop-1 path_expansion +
-  // multi-hop graph_expansion). The retired session_cohort_fanin stream was a
-  // recall-time session-grouping HEURISTIC that nominated one representative
-  // per cohort; durable co_recalled edges replace it. see also:
-  // scoreRecallFusionStream case "path_expansion".
+  // invariant: path_expansion is the direct multi-session fan-in carrier.
+  // Earned sparse co_recalled PathRelations fan a query that hits a
+  // non-representative cohort member into same-session siblings via the unified
+  // path plane.
+  // see also: packages/core/src/recall-service.ts scoreRecallFusionStream
   | "path_expansion"
   | "temporal_recency"
   | "workspace_activation";

@@ -294,12 +294,10 @@ export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "temporal_recency",
   "workspace_activation"
 ];
-// NOTE: session_cohort_fanin was a recall-time session-grouping fusion stream
-// (one nominated representative per cohort) that is now retired. The multi-
-// session fan-in carrier is the durable co_recalled PathRelation: a query that
-// hits a non-representative same-session member fans into its siblings via the
-// unified path plane (direct hop-1 path_expansion + multi-hop graph_expansion).
-// see also: scoreRecallFusionStream case "path_expansion".
+// invariant: multi-session fan-in is carried by durable positive PathRelations
+// through the unified path plane (direct hop-1 path_expansion + multi-hop
+// graph_expansion); no separate cohort stream participates in fusion.
+// see also: packages/core/src/recall-service.ts scoreRecallFusionStream
 const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
   lexical_fts: 1,
   // trigram_fts rescues substring / spelling-variant / CJK matches the
@@ -3421,14 +3419,12 @@ export class RecallService {
     const isGlobalCandidate = originPlane === "global";
     const isSynthesisCandidate = objectKind === "synthesis_capsule";
     const canUseMemorySupplement = !isGlobalCandidate && !isSynthesisCandidate;
-    // D-DECAY-2 lazy time/idle decay (read-time, no full-table sweep): the
-    // stored activation fades by elapsed time since last reinforcement.
-    // invariant (reviewer-I1): freshness is counted ONCE. The stored
-    // activation_score ALREADY bakes a freshness sub-term (weight
+    // invariant: freshness is counted ONCE. The stored activation_score
+    // already bakes a freshness sub-term (weight
     // activation_weights_phase1b.freshness, computed at store time). Multiplying
-    // the WHOLE composite by a read-time freshness factor double-counts freshness
-    // AND wrongly decays the scope/domain/retention sub-terms. Instead we decay
-    // ONLY the freshness band: the non-freshness floor (stored minus at-most the
+    // the whole composite by a read-time freshness factor double-counts
+    // freshness and wrongly decays the scope/domain/retention sub-terms. Instead
+    // decay only the freshness band: the non-freshness floor (stored minus at-most the
     // freshness weight) is preserved, and the freshness band is re-weighted by
     // the read-time factor. last_used_at is the "last reinforced" proxy; created_at
     // floors a never-used memory's age at birth. Bounded: the result is <= stored

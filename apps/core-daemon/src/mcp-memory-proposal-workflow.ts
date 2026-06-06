@@ -85,7 +85,7 @@ const SYNTHESIS_CREATE_DOSSIER_REFS: ReadonlySet<string> = new Set([
 
 // The `derived_from` prefixes the librarian/auditor candidate factories mint.
 // Stripping the prefix recovers a human topic_key for the synthesis capsule.
-// see also: garden-data-port-shared.ts buildDerivedKey
+// see also: packages/storage/src/repos/garden-data-port-shared.ts buildDerivedKey
 const SYNTHESIS_TOPIC_PREFIXES: readonly string[] = ["synthesis-subject:", "bootstrapping:"];
 
 // Bound on how much evidence-gist text the deterministic summary distiller

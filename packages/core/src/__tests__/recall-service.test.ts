@@ -3966,8 +3966,8 @@ describe("RecallService", () => {
 
   it("fades ONLY the freshness band of a long-idle memory at recall read; a recently-used memory keeps full strength (R3e single-count lazy time-decay)", async () => {
     // Identical stored activation_score; only the last-reinforced timestamp
-    // differs. invariant (reviewer-I1): freshness is counted ONCE. The recently-
-    // used memory keeps its full stored activation. The long-idle memory loses
+    // differs. invariant: freshness is counted ONCE. The recently-used memory
+    // keeps its full stored activation. The long-idle memory loses
     // ONLY the freshness band (weight activation_weights_phase1b.freshness ===
     // 0.19), NOT the whole composite — its scope/domain/retention contributions
     // are preserved. now = 2026-03-23.
@@ -4017,8 +4017,8 @@ describe("RecallService", () => {
   });
 
   it("does NOT double-penalize a freshly-used high-scope memory's activation at recall read (R3e single-count bound)", async () => {
-    // invariant (reviewer-I1): the stored activation already bakes a freshness
-    // sub-term. A freshly-used memory's read-time freshness factor is ~1, so the
+    // invariant: the stored activation already bakes a freshness sub-term. A
+    // freshly-used memory's read-time freshness factor is ~1, so the
     // re-weighted freshness band equals the baked band — the EFFECTIVE activation
     // must equal the stored score exactly, never a doubly-decayed value.
     const memories = [

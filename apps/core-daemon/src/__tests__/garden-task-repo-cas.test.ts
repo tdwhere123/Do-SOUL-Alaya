@@ -62,8 +62,8 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     expect(["agent-target-a", "agent-target-b"]).toContain(row.claimed_by);
   });
 
-  // B5(b): never-claimed host-worker tasks past their TTL are removed (audited),
-  // while a recent unclaimed task and any claimed task are left intact.
+  // invariant: never-claimed host-worker tasks past their TTL are removed
+  // (audited), while a recent unclaimed task and any claimed task are left intact.
   it("expires only never-claimed EDGE_CLASSIFY tasks older than the cutoff", async () => {
     const { database, repo } = createHarness();
     repo.enqueue({

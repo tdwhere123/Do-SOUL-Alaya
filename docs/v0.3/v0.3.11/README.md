@@ -33,6 +33,14 @@ the tracked status of record is this README plus the closeout report.
   ref-hints (B7), path-relation failure -> Health Inbox (D-EDGEAUDIT).
 - **Truth-boundary doc alignment** (B3) + debt cleanup.
 
+## Protocol SemVer step (§25)
+
+SemVer step: **Minor**. v0.3.11 moves the public protocol surface only through
+additive fields / enum values / events: `local_contradicts`,
+`GardenTaskResultEnvelopeSchema.edge_verdict`, and
+`SoulGardenTaskExpiredPayloadSchema`. No covered MCP/EventLog/config field is
+removed, renamed, newly required, or narrowed.
+
 ## I4 — bench synthesis is a diagnostic sidecar, NOT production coverage
 
 The bench harness synthesizes edges/paths for fidelity measurement; that synthesis

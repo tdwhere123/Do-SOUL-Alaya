@@ -151,12 +151,12 @@ const EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS = 8;
 // to O(stranded / cap) passes; oldest-first ordering keeps it FIFO-fair.
 // see also: packages/core/src/edge-proposal-service.ts reconcileStuckAccepts.
 const EDGE_PROPOSAL_RECONCILE_CAP_PER_PASS = 32;
-// invariant: B5(a) per ~60s pass, expire at most this many past-TTL pending edge
-// proposals per workspace so the TTL sweep shares the pass without starving the
+// invariant: per ~60s pass, expire at most this many past-TTL pending edge
+// proposals per workspace so the TTL sweep shares the pass without starving
 // other reclaim work. Beyond the cap the bound degrades to O(expired / cap)
-// passes; oldest-expiry-first keeps it FIFO-fair.
+// passes; oldest-expiry-first keeps the sweep FIFO-fair.
 const EDGE_PROPOSAL_EXPIRY_CAP_PER_PASS = 64;
-// invariant: B5(b) never-claimed host-worker tasks (EDGE_CLASSIFY /
+// invariant: never-claimed host-worker tasks (EDGE_CLASSIFY /
 // POST_TURN_EXTRACT) outlive their usefulness on a no-agent deployment — the
 // heuristic edge / extract already stands, and a stale unclaimed LLM-refinement
 // task just grows garden_tasks unbounded. 7 days is conservative: far beyond the
@@ -1716,15 +1716,16 @@ export function createGardenRuntime(input: {
     await repo.gcAbandonedClaims(reclaims);
   };
 
-  // invariant: B5(b) TTL sweep for never-claimed host-worker tasks. Removes
-  // EDGE_CLASSIFY / POST_TURN_EXTRACT pending rows older than HOST_WORKER_TASK_TTL_MS
-  // so a no-agent deployment's host-worker queue cannot grow unbounded (the
+  // invariant: removes EDGE_CLASSIFY / POST_TURN_EXTRACT pending rows older
+  // than HOST_WORKER_TASK_TTL_MS so a no-agent deployment's host-worker queue
+  // cannot grow unbounded (the
   // heuristic edge / extract already stands; the stale LLM-refinement task is
   // dead weight). Each removal emits a SOUL_GARDEN_TASK_EXPIRED audit so the
   // delete is never silent. CAS-gated on status='pending' in the repo, so a task
   // a worker claimed between peek and delete is left intact. Runs on the same
   // ~60s pass as reclaimAbandonedGardenClaims; bounded per kind.
-  // see also: storage garden-task-repo.ts peekExpiredUnclaimedTasks / expireUnclaimedTasks.
+  // see also: packages/storage/src/repos/garden-task-repo.ts peekExpiredUnclaimedTasks
+  // see also: packages/storage/src/repos/garden-task-repo.ts expireUnclaimedTasks
   const expireUnclaimedHostWorkerTasks = async (repo: SqliteGardenTaskRepo): Promise<void> => {
     const occurredAt = new Date().toISOString();
     const expiredBeforeIso = new Date(Date.now() - HOST_WORKER_TASK_TTL_MS).toISOString();
@@ -1930,8 +1931,6 @@ export function createGardenRuntime(input: {
       task: async () => {
         if (gardenTaskRepo !== undefined) {
           await reclaimAbandonedGardenClaims(gardenTaskRepo);
-          // B5(b): expire never-claimed host-worker tasks past their TTL so a
-          // no-agent deployment's garden_tasks queue cannot grow unbounded.
           await expireUnclaimedHostWorkerTasks(gardenTaskRepo);
         }
         reclaimStaleEnrichClaims();

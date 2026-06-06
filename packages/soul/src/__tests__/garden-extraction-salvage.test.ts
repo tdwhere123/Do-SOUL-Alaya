@@ -9,7 +9,7 @@ import {
 // the same content corruptions observed in the LongMemEval extraction cache
 // (bad escape, stray empty key, unescaped inner quote, malformed key, and a
 // max_tokens-truncated final element).
-// see also: .do-it/findings/cached-extraction-failure-recoverability.md
+// see also: packages/soul/src/garden/compute-provider.ts salvageOfficialApiSignals
 
 function validEntry(matchedText: string, objectKind = "user_preference"): string {
   return JSON.stringify({

@@ -87,8 +87,8 @@ export interface EdgeProposalRepo {
   // these and flips each to `expired` through updateReview (CAS-gated on
   // status='pending'). A null expires_at is never selected — only proposals
   // born with a TTL are sweepable, so legacy/null-TTL rows are untouched.
-  // see also: core/src/edge-proposal-service.ts sweepExpired;
-  //   apps/core-daemon/src/garden-runtime.ts sweepExpiredEdgeProposals.
+  // see also: packages/core/src/edge-proposal-service.ts sweepExpired
+  // see also: apps/core-daemon/src/garden-runtime.ts sweepExpiredEdgeProposals
   listExpiredPending(workspaceId: string, nowIso: string, limit: number): readonly EdgeProposal[];
   // invariant: returns ONLY accepted / auto_accepted proposals that still owe a
   // path — a crash after the accept review row committed but before the mint
