@@ -1361,6 +1361,56 @@ describe("Garden MCP tools", () => {
       expect(applyVerdict).not.toHaveBeenCalled();
     });
 
+    it("rejects a completed EDGE_CLASSIFY verdict when the stored task payload is malformed", async () => {
+      const applyVerdict = vi.fn(async () => "applied");
+      const harness = await createGardenMcpHarness({ applyVerdict });
+      harness.gardenTaskRepo.enqueue({
+        id: "edge-classify-malformed-payload",
+        workspace_id: "workspace-a",
+        role: GardenRole.LIBRARIAN,
+        kind: GardenTaskKind.EDGE_CLASSIFY,
+        payload: {
+          task_kind: GardenTaskKind.EDGE_CLASSIFY,
+          source_memory: { object_id: "memory-source" },
+          neighbor_memory: { content: "missing object id" }
+        },
+        created_at: "2026-05-07T00:00:00.000Z"
+      });
+      await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+        task_id: "edge-classify-malformed-payload"
+      });
+
+      await expect(
+        harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+          task_id: "edge-classify-malformed-payload",
+          status: "completed",
+          result_envelope: {
+            edge_verdict: {
+              source_object_id: "memory-source",
+              neighbor_object_id: "memory-neighbor",
+              edge_type: "supports",
+              confidence: 0.92,
+              rationale: "must not apply without a valid stored pair binding"
+            }
+          }
+        })
+      ).rejects.toThrow("has malformed EDGE_CLASSIFY payload");
+      expect(applyVerdict).not.toHaveBeenCalled();
+      expect(harness.getGardenTask("edge-classify-malformed-payload")).toMatchObject({
+        status: "claimed"
+      });
+      const completed = await harness.eventLogRepo.queryByType(
+        GardenEventType.SOUL_GARDEN_TASK_COMPLETED
+      );
+      expect(
+        completed.some(
+          (event) =>
+            (event.payload_json as { readonly task_id?: string }).task_id ===
+            "edge-classify-malformed-payload"
+        )
+      ).toBe(false);
+    });
+
     it("only the claimant may complete an EDGE_CLASSIFY task", async () => {
       const applyVerdict = vi.fn(async () => "applied");
       const harness = await createGardenMcpHarness({ applyVerdict });

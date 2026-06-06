@@ -3,6 +3,7 @@ import {
   CandidateMemorySignalSchema,
   CandidateMemorySignalMemoryRefKeys,
   ControlPlaneObjectKind,
+  EdgeClassifyTaskPayloadSchema,
   EdgeProposalTriggerSource,
   GARDEN_ROLE_TIER_MAP,
   GardenClaimTaskRequestSchema,
@@ -1043,33 +1044,30 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     if (deps.gardenTaskRepo === undefined) {
       throw new ToolUnavailableError("Garden task queue is not available.");
     }
-    // invariant: a successfully-completed EDGE_CLASSIFY task MUST carry a
-    // well-formed edge_verdict — edge_type "none" is the valid explicit "no
-    // edge" no-op, so absence of a verdict is not a successful no-op but a
-    // false success (the edge silently never gets classified). A worker that
-    // cannot produce a verdict completes with status="failed". The verdict's
-    // well-formedness is enforced by EdgeClassifyVerdictSchema at request parse;
-    // this guard closes only the missing-verdict gap.
-    if (verdict === undefined && request.status === "completed") {
-      throw new ToolValidationError(
-        `Garden task ${row.id} is an edge_classify task completed without a result_envelope.edge_verdict; report edge_type "none" for an explicit no-edge decision, or complete with status "failed" if no verdict can be produced.`
-      );
-    }
-    const payloadPair = readEdgeClassifyPayloadPair(row.payload);
-    if (
-      verdict !== undefined &&
-      request.status === "completed" &&
-      payloadPair !== null &&
-      (verdict.source_object_id !== payloadPair.sourceObjectId ||
-        verdict.neighbor_object_id !== payloadPair.neighborObjectId)
-    ) {
-      throw new ToolValidationError(
-        `Garden task ${row.id} edge_verdict pair does not match the claimed task's source/neighbor memory pair.`
-      );
-    }
 
     let objectsAffected: readonly string[] = [];
-    if (verdict !== undefined && request.status === "completed") {
+    if (request.status === "completed") {
+      const payloadPair = readEdgeClassifyPayloadPair(row.id, row.payload);
+      // invariant: a successfully-completed EDGE_CLASSIFY task MUST carry a
+      // well-formed edge_verdict — edge_type "none" is the valid explicit "no
+      // edge" no-op, so absence of a verdict is not a successful no-op but a
+      // false success (the edge silently never gets classified). A worker that
+      // cannot produce a verdict completes with status="failed". The verdict's
+      // well-formedness is enforced by EdgeClassifyVerdictSchema at request parse;
+      // this guard closes only the missing-verdict gap.
+      if (verdict === undefined) {
+        throw new ToolValidationError(
+          `Garden task ${row.id} is an edge_classify task completed without a result_envelope.edge_verdict; report edge_type "none" for an explicit no-edge decision, or complete with status "failed" if no verdict can be produced.`
+        );
+      }
+      if (
+        verdict.source_object_id !== payloadPair.sourceObjectId ||
+        verdict.neighbor_object_id !== payloadPair.neighborObjectId
+      ) {
+        throw new ToolValidationError(
+          `Garden task ${row.id} edge_verdict pair does not match the claimed task's source/neighbor memory pair.`
+        );
+      }
       if (deps.edgeVerdictApplier === undefined) {
         throw new ToolUnavailableError(
           "garden.complete_task received an edge_verdict but no edge-classification applier is wired."
@@ -1078,13 +1076,13 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       const outcome = await deps.edgeVerdictApplier.applyVerdict({
         workspaceId: context.workspaceId,
         runId: resolvedRunId,
-        sourceSignalId: payloadPair?.sourceSignalId ?? null,
+        sourceSignalId: payloadPair.sourceSignalId,
         verdict
       });
       // outcome is null when the verdict was a no-op (none / below floor) and a
       // PathMintOutcome string when a relation was submitted. Surface the
       // applied pair only when a relation actually landed.
-      if (outcome === "applied" && payloadPair !== null) {
+      if (outcome === "applied") {
         objectsAffected = [payloadPair.sourceObjectId, payloadPair.neighborObjectId];
       }
     }
@@ -2173,30 +2171,23 @@ function publicGardenTaskPayload(row: GardenTaskRow): unknown {
   return row.payload;
 }
 
-// invariant: reads the source/neighbor pair refs + source_signal provenance
-// from an EDGE_CLASSIFY task payload. Returns null when the payload is not the
-// expected shape so a malformed row cannot crash completion (the verdict simply
-// cannot be pair-validated, which the caller treats as "do not redirect").
-function readEdgeClassifyPayloadPair(payload: unknown): {
+// invariant: completed EDGE_CLASSIFY tasks must be bound to a schema-valid
+// stored payload before any worker verdict can apply to a memory pair.
+function readEdgeClassifyPayloadPair(taskId: string, payload: unknown): {
   readonly sourceObjectId: string;
   readonly neighborObjectId: string;
   readonly sourceSignalId: string | null;
-} | null {
-  if (!isUnknownRecord(payload)) {
-    return null;
-  }
-  const source = payload.source_memory;
-  const neighbor = payload.neighbor_memory;
-  if (!isUnknownRecord(source) || !isUnknownRecord(neighbor)) {
-    return null;
-  }
-  if (typeof source.object_id !== "string" || typeof neighbor.object_id !== "string") {
-    return null;
+} {
+  const parsed = EdgeClassifyTaskPayloadSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new ToolValidationError(
+      `Garden task ${taskId} has malformed EDGE_CLASSIFY payload; cannot validate edge_verdict pair.`
+    );
   }
   return {
-    sourceObjectId: source.object_id,
-    neighborObjectId: neighbor.object_id,
-    sourceSignalId: typeof payload.source_signal_id === "string" ? payload.source_signal_id : null
+    sourceObjectId: parsed.data.source_memory.object_id,
+    neighborObjectId: parsed.data.neighbor_memory.object_id,
+    sourceSignalId: parsed.data.source_signal_id ?? null
   };
 }
 
