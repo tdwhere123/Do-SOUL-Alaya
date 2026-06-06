@@ -1631,7 +1631,7 @@ function mergeQualityMetrics(
   let cohortGoldFirstAdmittedCount = 0;
   let cohortGoldWinningAdmissionCount = 0;
   let cohortGoldHitAt5Count = 0;
-  // Durable-edge path-vs-graph fan-in proof (R2): additive across shards; rates
+  // Path-vs-graph fan-in diagnostic: additive across shards; rates
   // recomputed from the merged counts. Present only when a shard carried it.
   let anyPathVsGraphFanin = false;
   let pathFaninGoldSourceCount = 0;

@@ -7,6 +7,7 @@ import { renderReport } from "./report.js";
 import { BenchName } from "./kpi-schema.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
+const SUPPORTED_BENCH_NAMES = BenchName.options.join(" | ");
 
 // invariant: @do-soul/alaya-eval is the bench-history schema + threshold diff
 // engine, NOT a benchmark runner. The runnable harness lives in
@@ -18,7 +19,7 @@ Usage:
   alaya-eval diff <bench-name> [--history-root <path>]
   alaya-eval list <bench-name> [--history-root <path>]
 
-bench-name = self | public | live
+bench-name = ${SUPPORTED_BENCH_NAMES}
 
 To RUN a benchmark, use the harness in apps/bench-runner
 (e.g. \`pnpm --dir apps/bench-runner exec alaya-bench-runner …\`).
@@ -89,7 +90,8 @@ async function runDiffCommand(
   const parsed = BenchName.safeParse(benchNameRaw);
   if (!parsed.success) {
     process.stderr.write(
-      `alaya-eval diff: invalid bench-name '${benchNameRaw}' (expected self|public|live)\n`
+      `alaya-eval diff: invalid bench-name '${benchNameRaw}' ` +
+        `(expected ${SUPPORTED_BENCH_NAMES})\n`
     );
     return 2;
   }
@@ -131,7 +133,8 @@ async function runListCommand(
   const parsed = BenchName.safeParse(benchNameRaw);
   if (!parsed.success) {
     process.stderr.write(
-      `alaya-eval list: invalid bench-name '${benchNameRaw}' (expected self|public|live)\n`
+      `alaya-eval list: invalid bench-name '${benchNameRaw}' ` +
+        `(expected ${SUPPORTED_BENCH_NAMES})\n`
     );
     return 2;
   }

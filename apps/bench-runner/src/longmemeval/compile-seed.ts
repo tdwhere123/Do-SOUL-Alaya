@@ -40,6 +40,7 @@ import {
   canonicalizeSeedObjectKind,
   rotatingSeedObjectKind
 } from "../harness/seed-rotation.js";
+import { isUnscoredMaterializedSeedError } from "../harness/seed-errors.js";
 
 /**
  * @anchor longmemeval-compile-seed
@@ -212,9 +213,12 @@ export interface CompileSeedExtractionStats {
    *   - candidate_absent: received + triaged but the router produced no
    *     memory_entry (evidence_only / deferred) — an expected sub-threshold
    *     outcome, the signal-quality hole the bench must surface.
-   *   - materialization_error: the signal THREW (schema parse / receiveSignal /
-   *     accept). Isolated per-signal so one bad signal never drops its
-   *     batch-mates — the fix for the 1963-signal whole-batch swallow.
+   *   - materialization_error: the signal THREW before materializing a
+   *     memory_entry. Isolated per-signal so one bad pre-materialization signal
+   *     never drops its batch-mates — the fix for the 1963-signal whole-batch
+   *     swallow.
+   * A post-materialization accept/review failure is not a drop; it aborts the
+   * bench so a recallable memory cannot be omitted from the seed sidecar.
    * These are a SUBSET of signalsDropped (the parse / compile-overflow drops
    * happen earlier, before this seam, and are NOT counted here).
    */
@@ -282,7 +286,10 @@ export interface SeedExtractionPathKpi {
    * Materialization-seam drops by reason (a SUBSET of signals_dropped) so the
    * archive discloses WHY a seeded fact never became a durable memory_entry:
    *   - candidate_absent: routed to evidence_only / deferred (no memory_entry).
-   *   - materialization_error: the signal threw and was isolated per-signal.
+   *   - materialization_error: the signal threw before memory_entry creation
+   *     and was isolated per-signal.
+   * Post-materialization accept/review failures fail the bench closed instead
+   * of entering this ledger.
    * Persisted so candidate-absent / seed-quality misses are root-causable from
    * the KPI archive, not just stderr.
    */
@@ -1034,10 +1041,12 @@ export interface CompileSeedDaemon {
    * POST_TURN_EXTRACT completion uses — so they materialize with
    * source = garden_compile. Used for the credentialled compile path.
    *
-   * Returns the materialized seeds AND a per-signal drop ledger
-   * (candidate_absent / materialization_error). Per-signal failure isolation
-   * lives in the daemon implementation — one bad signal never drops its
-   * batch-mates. see also: apps/bench-runner/src/harness/daemon.ts
+   * Returns the materialized seeds AND a per-signal pre-memory-entry drop
+   * ledger (candidate_absent / materialization_error). Per-signal failure
+   * isolation lives in the daemon implementation — one bad pre-materialization
+   * signal never drops its batch-mates. Post-materialization accept failures
+   * throw and abort scoring.
+   * see also: apps/bench-runner/src/harness/daemon.ts proposeMemoriesFromCompileSignals
    */
   proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
@@ -1518,13 +1527,15 @@ export function createCompileSeedRunner(options?: {
     if (signalInputs[0]?.extractionProvider === "official_api_compile") {
       // proposeMemoriesFromCompileSignals isolates failures PER SIGNAL: a
       // signal routed to evidence_only / deferred (candidate_absent) and a
-      // signal that threw during materialization (materialization_error) are
-      // each recorded in the returned `dropped` ledger WITHOUT aborting the
-      // round's healthy batch-mates. The per-reason ledger is folded into the
-      // stats so candidate-absent / seed-quality is root-causable from the KPI
-      // archive. The outer try/catch is now a defensive backstop for a truly
-      // unexpected whole-batch failure (a daemon-level bug, not a per-signal
-      // one); the per-signal path no longer routes through it.
+      // signal that threw before memory_entry creation (materialization_error)
+      // are each recorded in the returned `dropped` ledger WITHOUT aborting the
+      // round's healthy batch-mates. A post-materialization accept/review error
+      // rethrows from this block so scoring cannot proceed with a recallable
+      // memory missing from seedResult.seeds. The per-reason ledger is folded
+      // into the stats so candidate-absent / seed-quality is root-causable from
+      // the KPI archive. The outer try/catch remains a defensive backstop for a
+      // truly unexpected whole-batch failure (a daemon-level bug, not a
+      // per-signal one); the per-signal path no longer routes through it.
       try {
         const batch: CompileSeedBatchResult =
           await input.daemon.proposeMemoriesFromCompileSignals(signalInputs);
@@ -1551,6 +1562,9 @@ export function createCompileSeedRunner(options?: {
           );
         }
       } catch (error) {
+        if (isUnscoredMaterializedSeedError(error)) {
+          throw error;
+        }
         stats.signalsDropped += signalInputs.length;
         stats.signalsDroppedByReason.materialization_error += signalInputs.length;
         process.stderr.write(

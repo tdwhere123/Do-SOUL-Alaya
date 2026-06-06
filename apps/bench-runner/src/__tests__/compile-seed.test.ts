@@ -19,6 +19,7 @@ import {
   type CompileSeedExtractionStats
 } from "../longmemeval/compile-seed.js";
 import type { BenchSignalSeedInput, SeededMemoryResult } from "../harness/daemon.js";
+import { createUnscoredMaterializedSeedError } from "../harness/seed-errors.js";
 
 /**
  * A test CompileSeedDaemon stub. The compile (credentialled) seed path
@@ -1022,11 +1023,11 @@ describe("compile() signal-drop count is observable", () => {
 
   it("isolates per-signal materialization drops by reason and keeps healthy batch-mates", async () => {
     // Regression for the 1963-signal whole-batch drop: when some signals of a
-    // turn fail to materialize a memory_entry (candidate_absent) or threw and
-    // were isolated per-signal (materialization_error), the turn's HEALTHY
-    // batch-mates must still seed, and each drop must be attributed by reason
-    // in the stats so candidate-absent / seed-quality is root-causable from the
-    // KPI archive — not just stderr.
+    // turn fail to materialize a memory_entry (candidate_absent) or throw before
+    // memory_entry creation and are isolated per-signal (materialization_error),
+    // the turn's HEALTHY batch-mates must still seed, and each drop must be
+    // attributed by reason in the stats so candidate-absent / seed-quality is
+    // root-causable from the KPI archive — not just stderr.
     const daemon: CompileSeedDaemon = {
       proposeMemoryFromSignal: async () => ({
         memoryId: "memory-fallback",
@@ -1099,6 +1100,48 @@ describe("compile() signal-drop count is observable", () => {
       materialization_error: 1
     });
     expect(kpi.signals_dropped).toBe(2);
+  });
+
+  it("fails closed when a compile seed memory materializes but accept fails", async () => {
+    const daemon: CompileSeedDaemon = {
+      proposeMemoryFromSignal: async () => {
+        throw new Error("fallback path should not run");
+      },
+      proposeMemoriesFromCompileSignals: async () => {
+        throw createUnscoredMaterializedSeedError({
+          memoryId: "memory-created-before-accept-failed",
+          evidenceRef: "q1-s0-t0",
+          cause: new Error("review tail failed")
+        });
+      },
+      proposeSynthesis: async () => ({ synthesisId: null })
+    };
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      extractorFactory: () => ({
+        extract: async () => ({
+          rawJson: signalsEnvelope([{ distilled: "Created but unaccepted.", matched: "Intro span" }])
+        })
+      })
+    });
+
+    await expect(
+      runner.seedTurn({
+        daemon,
+        turnContent: "Intro span.",
+        evidenceRefBase: "q1-s0-t0",
+        seedIndex: 0,
+        workspaceId: "ws-test",
+        runId: "run-test"
+      })
+    ).rejects.toThrow(/recallable unscored seed memory/);
+
+    expect(runner.stats.signalsDropped).toBe(0);
+    expect(runner.stats.signalsDroppedByReason).toEqual({
+      candidate_absent: 0,
+      materialization_error: 0
+    });
   });
 });
 

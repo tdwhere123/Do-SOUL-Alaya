@@ -354,9 +354,9 @@ describe("LongMemEval recall diagnostics", () => {
 
     it("counts a hop-1 path gold (path plane + graphSupport-polluted per_stream_rank) as path-primary, NOT graph", () => {
       // The hop-1 path gold fired a nonzero graph_expansion per_stream_rank purely
-      // from the graphSupport inbound aggregate (its hop-1 co_recalled inbound
-      // edge), but it was admitted on the path_expansion plane. It must be counted
-      // path-primary and NOT in graph_gold_*.
+      // from the graphSupport inbound aggregate, but it was admitted on the
+      // path_expansion plane. It must be counted path-primary and NOT in
+      // graph_gold_*.
       const hop1PathGold = buildGold({
         object_id: "gold-hop1-path",
         final_rank: 3,

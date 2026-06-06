@@ -478,14 +478,14 @@ export function buildLongMemEvalQualityMetrics(
   let cohortGoldFirstAdmittedCount = 0;
   let cohortGoldWinningAdmissionCount = 0;
   let cohortGoldHitAt5Count = 0;
-  // Durable-edge fan-in proof instrument: how the path_expansion (direct hop-1
-  // co_recalled fan-in) vs graph_expansion (multi-hop) streams carry gold into
-  // top-5 SEPARATELY. The unified path plane's double-count guard credits a
+  // Path-vs-graph fan-in diagnostic: how generic path_expansion (direct hop-1
+  // path fan-in) vs graph_expansion (multi-hop) streams carry gold into top-5
+  // SEPARATELY. The unified path plane's double-count guard credits a
   // direct 1-hop path_expansion term before any multi-hop graph_expansion term,
   // so a gold bearing both is attributed path-primary. graph_only isolates gold
-  // that reached top-5 purely via multi-hop. This is the load-bearing signal
-  // that the retired session_cohort_fanin heuristic was replaced by the durable
-  // co_recalled PathRelation carrier. see also: PathVsGraphFaninSchema.
+  // that reached top-5 purely via multi-hop. This block proves stream/plane
+  // attribution only; relation-kind provenance is not present in recall
+  // diagnostics. see also: packages/eval/src/kpi-schema.ts PathVsGraphFaninSchema.
   let pathFaninGoldSourceCount = 0;
   let pathFaninGoldHitAt5Count = 0;
   let graphFaninGoldSourceCount = 0;
@@ -706,9 +706,10 @@ function hasPathStreamContribution(delivered: DiagnosticRecallResult): boolean {
   );
 }
 
-// Durable-edge fan-in proof: a gold candidate bears the path_expansion stream
-// (direct hop-1 co_recalled fan-in) when it was admitted on the path plane or
-// fired the path_expansion fusion stream. see also: buildLongMemEvalQualityMetrics.
+// Path fan-in diagnostic: a gold candidate bears the path_expansion stream when
+// it was admitted on the path plane or fired the path_expansion fusion stream.
+// The diagnostic does not prove a specific relation_kind.
+// see also: apps/bench-runner/src/longmemeval/diagnostics.ts buildLongMemEvalQualityMetrics
 function hasGoldPathExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
   return (
     gold.source_planes.includes("path_expansion") ||
@@ -718,8 +719,8 @@ function hasGoldPathExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
   );
 }
 
-// Durable-edge fan-in proof: a gold candidate bears genuine MULTI-HOP
-// graph_expansion fan-in when it was admitted on the graph_expansion plane. The
+// Graph fan-in diagnostic: a gold candidate bears genuine MULTI-HOP
+// graph_expansion reach when it was admitted on the graph_expansion plane. The
 // graph_expansion admission carries a double-count guard (it skips any target
 // path_expansion already admitted as a direct hop-1 neighbor, see
 // recall-service.ts addGraphExpansionCandidates), so plane membership isolates
@@ -728,13 +729,14 @@ function hasGoldPathExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
 // invariant: the per_stream_rank.graph_expansion term is DELIBERATELY NOT a
 // multi-hop signal here. The production graph_expansion fusion STREAM score is
 // max(graphExpansionScores, normalizeGraphSupport(graphSupportCounts)) — the
-// graphSupport aggregate counts the hop-1 co_recalled inbound edge, so a direct
-// hop-1 path gold fires a nonzero graph_expansion per_stream_rank too. Counting
+// graphSupport aggregate can count hop-1 inbound support, so a direct hop-1 path
+// gold fires a nonzero graph_expansion per_stream_rank too. Counting
 // it would mis-attribute hop-1 path golds as graph-bearing and over-report
 // graph_gold_*. We rely on the admission plane (true multi-hop) instead; the
 // path-primary partition (hasGoldPathExpansionStream) still credits the direct
 // hop-1 term, and graph_only_hit_at_5_count remains the clean multi-hop metric.
-// see also: buildLongMemEvalQualityMetrics, recall-service.ts scoreRecallFusionStream "graph_expansion".
+// see also: apps/bench-runner/src/longmemeval/diagnostics.ts buildLongMemEvalQualityMetrics
+// see also: packages/core/src/recall-service.ts scoreRecallFusionStream
 function hasGoldGraphExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
   return (
     gold.source_planes.includes("graph_expansion") ||

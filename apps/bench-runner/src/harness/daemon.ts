@@ -74,6 +74,10 @@ import {
   BENCH_TURN_SEED_INDEX_KEY,
   deriveBenchTokenMetrics
 } from "../longmemeval/token-economy.js";
+import {
+  createUnscoredMaterializedSeedError,
+  isUnscoredMaterializedSeedError
+} from "./seed-errors.js";
 
 export interface BenchDaemonOptions {
   readonly dataDirRoot?: string;
@@ -137,10 +141,12 @@ export interface SeededSynthesisResult {
  *   MaterializationRouter routed it to evidence_only / deferred — no
  *   memory_entry was created. This is an expected sub-threshold outcome, not
  *   an error; it surfaces a seed-quality (candidate-absent) signal.
- * - `materialization_error`: the signal THREW during receiveSignal / schema
- *   parse / acceptSeededMemory. Historically this aborted the whole turn batch
- *   (its healthy batch-mates were lost too — the 1963-signal archive drop);
- *   it is now isolated per-signal so one bad signal never drops its mates.
+ * - `materialization_error`: the signal THREW before materializing a
+ *   memory_entry. Historically this aborted the whole turn batch (its healthy
+ *   batch-mates were lost too — the 1963-signal archive drop); it is now
+ *   isolated per-signal so one bad pre-materialization signal never drops its
+ *   mates. A failure after memory_entry creation is not a drop: the bench fails
+ *   closed so scoring cannot include recallable but unscored seed memories.
  */
 export type CompileSeedDropReason = "candidate_absent" | "materialization_error";
 
@@ -148,7 +154,8 @@ export type CompileSeedDropReason = "candidate_absent" | "materialization_error"
  * One per-signal drop record from proposeMemoriesFromCompileSignals. `detail`
  * carries the routing_reason (candidate_absent) or the error message
  * (materialization_error) so the caller can persist a root-causable reason
- * into the run KPI instead of only logging to stderr.
+ * into the run KPI instead of only logging to stderr. Post-materialization
+ * accept/review failures throw and abort scoring instead.
  */
 export interface CompileSeedSignalDrop {
   readonly reason: CompileSeedDropReason;
@@ -504,9 +511,11 @@ export interface BenchDaemonHandle {
    * memory_entry PLUS a per-signal drop ledger for every signal that did not.
    * A signal the MaterializationRouter routed to evidence_only / deferred (no
    * memory_entry) is recorded with reason=candidate_absent; a signal that
-   * THREW during receiveSignal / schema parse / accept is isolated per-signal
-   * and recorded with reason=materialization_error — one bad signal never
-   * aborts its healthy batch-mates.
+   * THREW before creating memory_entry is isolated per-signal and recorded with
+   * reason=materialization_error — one bad pre-materialization signal never
+   * aborts its healthy batch-mates. If accept/review fails after memory_entry
+   * creation, the harness fails closed because that memory is recallable but
+   * absent from the seed sidecar.
    *
    * invariant: seeds.length + dropped.length === inputs.length.
    *
@@ -1262,7 +1271,16 @@ export async function startBenchDaemon(
     // daemon's event log directly (read-only) — an implementation-of-record
     // lookup, not a bypass of governance.
     const materialized = await readMaterializedObjects(dataDir, signalId);
-    const accepted = await acceptSeededMemory(materialized.memoryId, evidenceRef);
+    let accepted: { readonly proposalId: string };
+    try {
+      accepted = await acceptSeededMemory(materialized.memoryId, evidenceRef);
+    } catch (error) {
+      throw createUnscoredMaterializedSeedError({
+        memoryId: materialized.memoryId,
+        evidenceRef,
+        cause: error
+      });
+    }
     return {
       memoryId: materialized.memoryId,
       proposalId: accepted.proposalId,
@@ -1469,8 +1487,11 @@ export async function startBenchDaemon(
     //   - routed to evidence_only / deferred (no memory_entry — e.g. a
     //     sub-0.5-confidence signal): recorded as reason=candidate_absent and
     //     skipped; the turn's other healthy facts still seed.
-    //   - a thrown error (schema parse / receiveSignal / accept): caught,
-    //     recorded as reason=materialization_error, the loop continues.
+    //   - a thrown error before memory_entry creation (schema parse /
+    //     receiveSignal): caught, recorded as reason=materialization_error, the
+    //     loop continues.
+    //   - a thrown error after memory_entry creation: re-thrown so the bench
+    //     fails closed instead of scoring with recallable unscored seed memory.
     // A prior version let a single throw propagate out of this loop, which the
     // caller's batch-level catch turned into a whole-turn drop — the regression
     // that silently lost 1963 signals (and their healthy batch-mates) in the
@@ -1489,11 +1510,14 @@ export async function startBenchDaemon(
         }
         results.push(seeded.result);
       } catch (error) {
+        if (isUnscoredMaterializedSeedError(error)) {
+          throw error;
+        }
         const detail = error instanceof Error ? error.message : String(error);
         dropped.push({ reason: "materialization_error", detail });
         process.stderr.write(
           `[bench compile-seed] signal evidence_ref=${input.evidenceRef} ` +
-            `threw during materialization — isolated per-signal, turn batch ` +
+            `threw before memory_entry creation — isolated per-signal, turn batch ` +
             `continues: ${detail}\n`
         );
       }
@@ -1504,8 +1528,9 @@ export async function startBenchDaemon(
   // invariant: extracted from the proposeMemoriesFromCompileSignals loop body
   // so the per-signal try/catch wraps a single, total unit of materialization
   // work. Returns a tagged result (seeded vs dropped/candidate_absent) and
-  // THROWS only on an unexpected materialization error, which the caller
-  // isolates and records as reason=materialization_error.
+  // THROWS only on an unexpected pre-materialization error, which the caller
+  // isolates and records as reason=materialization_error, or on a
+  // post-materialization accept failure, which aborts scoring.
   async function seedOneCompileSignal(
     input: BenchSignalSeedInput
   ): Promise<
@@ -1582,7 +1607,16 @@ export async function startBenchDaemon(
     const evidenceObject = received.materialization?.created_objects.find(
       (obj) => obj.object_kind === "evidence_capsule"
     );
-    const accepted = await acceptSeededMemory(memoryObject.object_id, input.evidenceRef);
+    let accepted: { readonly proposalId: string };
+    try {
+      accepted = await acceptSeededMemory(memoryObject.object_id, input.evidenceRef);
+    } catch (error) {
+      throw createUnscoredMaterializedSeedError({
+        memoryId: memoryObject.object_id,
+        evidenceRef: input.evidenceRef,
+        cause: error
+      });
+    }
     return {
       kind: "seeded",
       result: {

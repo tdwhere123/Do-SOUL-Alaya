@@ -138,14 +138,17 @@ const SeedTruncationSchema = z
 // The remaining drops happen at the materialization seam and are now
 // attributed in signals_dropped_by_reason: candidate_absent (routed to
 // evidence_only / deferred, no memory_entry) and materialization_error (the
-// signal threw and was isolated PER SIGNAL, so one bad signal no longer drops
-// its whole turn batch — the fix for the silent 1963-signal whole-batch
-// swallow). So the invariant is
+// signal threw before memory_entry creation and was isolated PER SIGNAL, so one
+// bad pre-materialization signal no longer drops its whole turn batch — the fix
+// for the silent 1963-signal whole-batch swallow). Post-memory-entry accept /
+// review failures fail the bench closed instead of entering this ledger. So the
+// invariant is
 // signals_dropped >= parse_dropped + compile_overflow_dropped
 //   + signals_dropped_by_reason.candidate_absent
 //   + signals_dropped_by_reason.materialization_error,
-// not a clean equality (the >= absorbs any defensive whole-batch backstop
-// drop, which is also attributed to materialization_error). see also:
+// not a clean equality (the >= absorbs any defensive whole-batch backstop drop,
+// which is also attributed to materialization_error only when no materialized
+// memory_entry could contaminate scoring). see also:
 // apps/bench-runner/src/longmemeval/compile-seed.ts CompileSeedExtractionStats.
 const SeedExtractionPathSchema = z
   .object({
@@ -162,8 +165,10 @@ const SeedExtractionPathSchema = z
     // Materialization-seam drops by reason (a SUBSET of signals_dropped):
     //   - candidate_absent: routed to evidence_only / deferred (no
     //     memory_entry materialized) — the seed-quality hole the bench surfaces.
-    //   - materialization_error: the signal threw and was isolated per-signal,
-    //     so one bad signal never drops its batch-mates.
+    //   - materialization_error: the signal threw before memory_entry creation
+    //     and was isolated per-signal, so one bad pre-materialization signal
+    //     never drops its batch-mates.
+    // Post-memory-entry accept / review failures fail closed before scoring.
     // Optional with a zero default so archives written before this field shipped
     // still parse; new runs always populate it.
     // see also:
@@ -224,11 +229,10 @@ const CohortAttributionSchema = z
   })
   .strict();
 
-// Durable-edge fan-in proof instrument (R2). Splits path_expansion (direct
-// hop-1 co_recalled fan-in) vs graph_expansion (multi-hop) gold-bearing top-5
-// movement SEPARATELY, so the gate archive shows whether the durable
-// co_recalled PathRelation carrier — which replaced the retired
-// session_cohort_fanin heuristic — actually promotes gold siblings into top-5.
+// Path-vs-graph fan-in diagnostic. Splits generic path_expansion (direct
+// hop-1 path fan-in) vs graph_expansion (multi-hop) gold-bearing top-5
+// movement SEPARATELY. The archive proves stream/plane attribution only; it
+// does not certify a specific PathRelation relation_kind such as co_recalled.
 //   - path_gold_*: gold bearing the path_expansion stream and its hit@5 share
 //   - graph_gold_*: gold bearing the graph_expansion stream and its hit@5 share
 //   - path_primary_hit_at_5_count: hit@5 gold attributed to path (the unified
@@ -280,7 +284,7 @@ const QualityMetricsSchema = z
     // Cohort fan-in attribution (codex I2). Optional so pre-fan-in kpi.json
     // records stay valid; new LongMemEval runs always populate it.
     cohort_attribution: CohortAttributionSchema.optional(),
-    // Durable-edge path-vs-graph fan-in proof (R2). Optional so pre-R2 kpi.json
+    // Path-vs-graph fan-in diagnostic. Optional so pre-R2 kpi.json
     // records stay valid; new LongMemEval runs always populate it.
     path_vs_graph_fanin: PathVsGraphFaninSchema.optional(),
     // @anchor longmemeval-abstention: calibrated-confidence scoring of the
