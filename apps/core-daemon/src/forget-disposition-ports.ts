@@ -65,8 +65,9 @@ export interface ForgetDispositionTombstoneAuthorityPort {
  *     hazard / canon / consolidated): it stays dormant (reversible) and is NEVER
  *     autonomously removed, even when it is also a live-capsule member.
  *   - { disposition: 'compressed', ref } when a LIVE capsule lists a NON-protected
- *     member in source_memory_refs (the member is FULLY consolidated by the
- *     capsule: its evidence is the shared cluster evidence preserved as
+ *     member in source_memory_refs; ref is the capsule id stored in
+ *     forget_disposition_ref (the member is FULLY consolidated by the capsule:
+ *     its evidence is the shared cluster evidence preserved as
  *     evidence_capsules + a deterministic gist summary; the member's distilled
  *     `content` is NOT byte-preserved — R3a output).
  *   - { disposition: 'judged_useless', ref: null } when the mechanical importance
@@ -85,15 +86,14 @@ export interface ForgetDispositionTombstoneAuthorityPort {
  */
 export function computeForgetDisposition(
   memory: Readonly<MemoryEntry>,
-  liveCapsuleMemberRefs: ReadonlySet<string>
+  liveCapsuleMemberIndex: ReadonlyMap<string, string>
 ): { readonly disposition: ForgetDisposition | null; readonly ref: string | null } {
   if (isMemoryExplicitlyProtected(memory)) {
     return { disposition: null, ref: null };
   }
 
-  const capsuleRef = liveCapsuleMemberRefs.has(memory.object_id) ? memory.object_id : null;
+  const capsuleRef = liveCapsuleMemberIndex.get(memory.object_id) ?? null;
   if (capsuleRef !== null) {
-    // The ref stored is the member's own id resolved against the live capsule.
     return { disposition: "compressed", ref: capsuleRef };
   }
 
@@ -152,17 +152,12 @@ export function createTombstoneDispositionSweepPort(input: {
         input.memoryLookup.findDormantMemories(workspaceId),
         buildLiveCapsuleMemberIndex(workspaceId, input.capsuleLookup)
       ]);
-      const liveCapsuleMembers = new Set(memberIndex.keys());
       return dormant.map((memory) => {
-        const verdict = computeForgetDisposition(memory, liveCapsuleMembers);
-        const ref =
-          verdict.disposition === "compressed"
-            ? (memberIndex.get(memory.object_id) ?? null)
-            : verdict.ref;
+        const verdict = computeForgetDisposition(memory, memberIndex);
         return {
           memory_id: memory.object_id,
           disposition: verdict.disposition,
-          disposition_ref: ref
+          disposition_ref: verdict.ref
         };
       });
     },
@@ -188,9 +183,9 @@ export function createTombstoneDispositionSweepPort(input: {
         // invariant: the candidate snapshot can go stale between disposition
         // selection and this turn (concurrent revival / overlapping sweep /
         // Inspector pin). The authority then refuses with a VALIDATION CoreError —
-        // either "no longer dormant" (memory-service.ts ~:713) or the FIX-N1
-        // explicitly-protected backstop (~:728). Discriminate by CODE (not message
-        // strings) AND a structural row-state re-check: only a confirmed benign
+        // either "no longer dormant" or the explicitly-protected backstop.
+        // Discriminate by CODE (not message strings) AND a structural row-state
+        // re-check: only a confirmed benign
         // concurrent-mutation race resolves "skipped" so one racy candidate cannot
         // abort the batch. EVERYTHING ELSE (shape-precondition VALIDATION on a
         // still-eligible row, NOT_FOUND, CONFLICT, storage faults, non-CoreError)

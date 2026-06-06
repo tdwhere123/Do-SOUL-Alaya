@@ -354,6 +354,8 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
       WHERE run_id = ?
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
       ORDER BY created_at ASC, object_id ASC
     `);
     this.findByDimensionHotStatement = db.connection.prepare(`
@@ -525,7 +527,10 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     // invariant: GATED autonomous tombstone. Writes the durable disposition
     // marker and terminalizes the row in one UPDATE, but ONLY when the row is
     // currently dormant — refuses (changes=0) an active/archived/already-tombstoned
-    // row so a recallable memory can never be silently tombstoned.
+    // row so a recallable memory can never be silently tombstoned. The explicit
+    // keep predicates mirror isMemoryExplicitlyProtected at the SQL authority
+    // boundary so a concurrent pin / hazard / canon / consolidated promotion
+    // between service precheck and UPDATE resolves changes=0.
     this.autonomousTombstoneStatement = db.connection.prepare(`
       UPDATE memory_entries
       SET forget_disposition = ?,
@@ -536,6 +541,8 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       WHERE object_id = ?
         AND lifecycle_state = 'dormant'
         AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(decay_profile, '') NOT IN ('pinned', 'hazard')
+        AND COALESCE(retention_state, '') NOT IN ('canon', 'consolidated')
     `);
     this.findTombstonedWithDispositionStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
@@ -572,6 +579,8 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         AND retention_state = 'tombstoned'
         AND forget_disposition = 'compressed'
         AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
+        AND COALESCE(decay_profile, '') NOT IN ('pinned', 'hazard')
+        AND COALESCE(retention_state, '') NOT IN ('canon', 'consolidated')
         AND EXISTS (
           SELECT 1
           FROM synthesis_capsules AS capsule,
@@ -584,7 +593,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     `);
     // invariant: the `judged_useless` disposition is not trusted just because it
     // was written at tombstone time. The DELETE replays the local-only verdict
-    // shape atomically: no evidence refs, no reinforcement, and no pinned/hazard
+    // shape atomically: no evidence refs, no reinforcement, and no explicit-keep
     // protection. A row that gained any of those during grace matches 0 rows and
     // remains tombstoned/recoverable.
     this.hardDeleteTombstonedJudgedUselessGuardedStatement = db.connection.prepare(`
@@ -596,6 +605,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         AND json_array_length(COALESCE(evidence_refs, '[]')) = 0
         AND COALESCE(reinforcement_count, 0) = 0
         AND COALESCE(decay_profile, '') NOT IN ('pinned', 'hazard')
+        AND COALESCE(retention_state, '') NOT IN ('canon', 'consolidated')
         AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
     `);
     this.deleteOrphanedPathRelationsStatement = db.connection.prepare(`

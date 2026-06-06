@@ -416,7 +416,7 @@ describe("SqliteMemoryEntryRepo", () => {
     ]);
   });
 
-  it("lists entries by run id across both tiers", async () => {
+  it("lists entries by run id across both tiers while excluding dormant and tombstoned rows", async () => {
     const { repo } = await createRepo();
 
     await repo.create(
@@ -433,6 +433,26 @@ describe("SqliteMemoryEntryRepo", () => {
         storage_tier: StorageTier.COLD,
         created_at: "2026-03-21T00:00:01.000Z",
         updated_at: "2026-03-21T00:00:01.000Z"
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "b1e2d23b-7afb-4817-bf8e-fac7ed5ee854",
+        run_id: "run-1",
+        storage_tier: StorageTier.HOT,
+        lifecycle_state: "dormant",
+        created_at: "2026-03-21T00:00:02.000Z",
+        updated_at: "2026-03-21T00:00:02.000Z"
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "2d6bbf09-a1d1-4262-9495-8317a3781b44",
+        run_id: "run-1",
+        storage_tier: StorageTier.HOT,
+        retention_state: "tombstoned",
+        created_at: "2026-03-21T00:00:03.000Z",
+        updated_at: "2026-03-21T00:00:03.000Z"
       })
     );
 
@@ -1006,6 +1026,45 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(tombstoned.lifecycle_state).toBe("tombstone");
   });
 
+  it.each([
+    ["became pinned", { decay_profile: "pinned" } satisfies Partial<MemoryEntry>],
+    ["became hazard", { decay_profile: "hazard" } satisfies Partial<MemoryEntry>],
+    ["became canon", { retention_state: "canon" } satisfies Partial<MemoryEntry>],
+    ["became consolidated", { retention_state: "consolidated" } satisfies Partial<MemoryEntry>]
+  ])("autonomousTombstone atomically REFUSES when a dormant row %s", async (_label, overrides) => {
+    const { repo } = await createRepo();
+    const protectedDormant = createMemoryEntry({
+      object_id: "aaaaaaaa-0000-4000-8000-000000000005",
+      lifecycle_state: "dormant",
+      evidence_refs: [],
+      reinforcement_count: 0,
+      ...overrides
+    });
+    await repo.create(protectedDormant);
+    const onTransition = vi.fn();
+
+    await expect(
+      repo.autonomousTombstone(
+        {
+          objectId: protectedDormant.object_id,
+          disposition: "judged_useless",
+          dispositionRef: null,
+          updatedAt: "2026-03-22T00:00:00.000Z"
+        },
+        { onTransition }
+      )
+    ).rejects.toMatchObject({ name: "StorageError", code: "NOT_FOUND" });
+    expect(onTransition).not.toHaveBeenCalled();
+    await expect(repo.findById(protectedDormant.object_id)).resolves.toEqual(
+      expect.objectContaining({
+        lifecycle_state: "dormant",
+        forget_disposition: null,
+        forget_disposition_ref: null,
+        ...overrides
+      })
+    );
+  });
+
   it("autonomousTombstone rolls the tombstone update back when the transition audit callback throws", async () => {
     const { repo } = await createRepo();
     const dormant = createMemoryEntry({
@@ -1145,7 +1204,9 @@ describe("SqliteMemoryEntryRepo", () => {
     ["gained evidence", { evidence_refs: ["late-evidence"] } satisfies Partial<MemoryEntry>],
     ["gained reinforcement", { reinforcement_count: 1 } satisfies Partial<MemoryEntry>],
     ["became pinned", { decay_profile: "pinned" } satisfies Partial<MemoryEntry>],
-    ["became hazard", { decay_profile: "hazard" } satisfies Partial<MemoryEntry>]
+    ["became hazard", { decay_profile: "hazard" } satisfies Partial<MemoryEntry>],
+    ["became canon", { retention_state: "canon" } satisfies Partial<MemoryEntry>],
+    ["became consolidated", { retention_state: "consolidated" } satisfies Partial<MemoryEntry>]
   ])(
     "hardDeleteTombstonedWithDisposition (judged_useless-guarded) atomically REFUSES when the row %s",
     async (_label, overrides) => {
@@ -1212,6 +1273,7 @@ describe("SqliteMemoryEntryRepo", () => {
     readonly memoryId: string;
     readonly capsule: Partial<SynthesisCapsule> | null;
     readonly capsuleId: string;
+    readonly memory?: Partial<MemoryEntry>;
   }): Promise<{ readonly repo: SqliteMemoryEntryRepo }> {
     const { repo, database } = await createRepo();
     if (input.capsule !== null) {
@@ -1241,7 +1303,8 @@ describe("SqliteMemoryEntryRepo", () => {
         retention_state: "tombstoned",
         lifecycle_state: "tombstone",
         forget_disposition: "compressed",
-        forget_disposition_ref: input.capsuleId
+        forget_disposition_ref: input.capsuleId,
+        ...input.memory
       })
     );
     return { repo };
@@ -1286,6 +1349,25 @@ describe("SqliteMemoryEntryRepo", () => {
     ).resolves.toBe(false);
     await expect(repo.findById(memoryId)).resolves.not.toBeNull();
   });
+
+  it.each([
+    ["member became pinned", { decay_profile: "pinned" } satisfies Partial<MemoryEntry>],
+    ["member became hazard", { decay_profile: "hazard" } satisfies Partial<MemoryEntry>],
+    ["member became canon", { retention_state: "canon" } satisfies Partial<MemoryEntry>],
+    ["member became consolidated", { retention_state: "consolidated" } satisfies Partial<MemoryEntry>]
+  ])(
+    "hardDeleteTombstonedWithDisposition (compressed-guarded) atomically REFUSES when %s",
+    async (_label, memory) => {
+      const memoryId = "dddddddd-0000-4000-8000-000000000007";
+      const capsuleId = "dddddddd-1111-4000-8000-000000000007";
+      const { repo } = await seedCompressedMember({ memoryId, capsuleId, capsule: {}, memory });
+
+      await expect(
+        repo.hardDeleteTombstonedWithDisposition(memoryId, { requireLiveCapsuleRef: true })
+      ).resolves.toBe(false);
+      await expect(repo.findById(memoryId)).resolves.not.toBeNull();
+    }
+  );
 
   // invariant (I-2): the caller's deleted-audit append (onDeleted) shares the
   // delete transaction, so the physical removal and the audit commit or roll

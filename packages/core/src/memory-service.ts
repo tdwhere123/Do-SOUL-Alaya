@@ -721,12 +721,9 @@ export class MemoryService {
       );
     }
 
-    // invariant (FIX-N1 defense in depth): the dormant demotion candidate query
-    // admits pinned/hazard/canon/consolidated rows, so computeForgetDisposition's
-    // isMemoryExplicitlyProtected check is the only barrier upstream. Re-assert it
-    // HERE at the tombstone authority so an explicitly-protected row can never be
-    // tombstoned even if a future caller bypasses computeForgetDisposition.
-    // Fail-closed: refuse (the row is never terminalized, stays dormant).
+    // invariant: explicitly-protected rows remain recoverable even if a caller
+    // bypasses computeForgetDisposition. Re-assert protection at the service
+    // authority before the storage CAS restates the same gate atomically.
     // see also: apps/core-daemon/src/forget-disposition-ports.ts computeForgetDisposition,
     // packages/core/src/importance-gate.ts isMemoryExplicitlyProtected.
     if (isMemoryExplicitlyProtected(existing)) {
@@ -766,24 +763,59 @@ export class MemoryService {
     };
     let event: EventLogEntry | undefined;
 
-    const updated = await autonomousTombstone(
-      {
-        objectId: parsedObjectId,
-        disposition,
-        dispositionRef,
-        updatedAt: occurredAt
-      },
-      {
-        onTransition: () => {
-          event = this.appendAuditEventSynchronously(eventInput);
+    let updated: Readonly<MemoryEntry>;
+    try {
+      updated = await autonomousTombstone(
+        {
+          objectId: parsedObjectId,
+          disposition,
+          dispositionRef,
+          updatedAt: occurredAt
+        },
+        {
+          onTransition: () => {
+            event = this.appendAuditEventSynchronously(eventInput);
+          }
         }
+      );
+    } catch (error) {
+      const benignRace = await this.classifyAutonomousTombstoneRepoRefusal(parsedObjectId, error);
+      if (benignRace !== null) {
+        throw benignRace;
       }
-    );
+      throw error;
+    }
     if (event === undefined) {
       throw new CoreError("CONFLICT", "Autonomous tombstone transaction did not append its audit event.");
     }
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return updated;
+  }
+
+  private async classifyAutonomousTombstoneRepoRefusal(
+    objectId: string,
+    error: unknown
+  ): Promise<CoreError | null> {
+    if (!isRepoGuardRefusal(error)) {
+      return null;
+    }
+
+    const current = await this.dependencies.memoryEntryRepo.findById(objectId);
+    if (current === null || current.lifecycle_state !== "dormant") {
+      return new CoreError(
+        "VALIDATION",
+        "Only a dormant memory may be autonomously tombstoned",
+        { cause: error }
+      );
+    }
+    if (isMemoryExplicitlyProtected(current)) {
+      return new CoreError(
+        "VALIDATION",
+        "Autonomous tombstone refused: memory is explicitly protected (pinned/hazard/canon/consolidated)",
+        { cause: error }
+      );
+    }
+    return null;
   }
 
   /**
@@ -1267,6 +1299,14 @@ function parseReason(value: string): string {
   }
 
   return value;
+}
+
+function isRepoGuardRefusal(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const code = (error as { readonly code?: unknown }).code;
+  return code === "NOT_FOUND" || code === "VALIDATION_FAILED";
 }
 
 function parseTransitionCausedBy(value: TransitionCausedBy): TransitionCausedBy {

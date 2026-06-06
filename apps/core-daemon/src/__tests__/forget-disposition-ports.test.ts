@@ -68,19 +68,19 @@ function capsule(overrides: Partial<SynthesisCapsule> = {}): Readonly<SynthesisC
 
 describe("computeForgetDisposition", () => {
   it("marks a member preserved in a live capsule as compressed", () => {
-    const result = computeForgetDisposition(memory(), new Set(["mem-1"]));
+    const result = computeForgetDisposition(memory(), new Map([["mem-1", "capsule-1"]]));
     expect(result.disposition).toBe("compressed");
-    expect(result.ref).toBe("mem-1");
+    expect(result.ref).toBe("capsule-1");
   });
 
   it("marks a gate-failing memory with no live capsule as judged_useless", () => {
-    const result = computeForgetDisposition(memory(), new Set());
+    const result = computeForgetDisposition(memory(), new Map());
     expect(result.disposition).toBe("judged_useless");
     expect(result.ref).toBeNull();
   });
 
   it("leaves an evidence-rich memory with no capsule as NULL (kept, never removable)", () => {
-    const result = computeForgetDisposition(memory({ evidence_refs: ["e1", "e2"] }), new Set());
+    const result = computeForgetDisposition(memory({ evidence_refs: ["e1", "e2"] }), new Map());
     expect(result.disposition).toBeNull();
   });
 
@@ -89,8 +89,12 @@ describe("computeForgetDisposition", () => {
     // value signal (the `keep` disposition), which compression OVERRIDES — so an
     // evidence-rich but non-explicitly-protected member in a live capsule is
     // compressed (its content is preserved by the capsule).
-    const result = computeForgetDisposition(memory({ evidence_refs: ["e1", "e2"] }), new Set(["mem-1"]));
+    const result = computeForgetDisposition(
+      memory({ evidence_refs: ["e1", "e2"] }),
+      new Map([["mem-1", "capsule-1"]])
+    );
     expect(result.disposition).toBe("compressed");
+    expect(result.ref).toBe("capsule-1");
   });
 
   it("compresses a reinforced (non-protected) member in a live capsule", () => {
@@ -98,16 +102,17 @@ describe("computeForgetDisposition", () => {
     // overrides when a live capsule preserves the content.
     const result = computeForgetDisposition(
       memory({ reinforcement_count: 5 }),
-      new Set(["mem-1"])
+      new Map([["mem-1", "capsule-1"]])
     );
     expect(result.disposition).toBe("compressed");
+    expect(result.ref).toBe("capsule-1");
   });
 
   it("leaves a PINNED member in a live capsule dormant, NOT compressed", () => {
     // invariant (protection-before-compressed): explicit-keep overrides compress.
     const result = computeForgetDisposition(
       memory({ decay_profile: "pinned" }),
-      new Set(["mem-1"])
+      new Map([["mem-1", "capsule-1"]])
     );
     expect(result.disposition).toBeNull();
     expect(result.ref).toBeNull();
@@ -116,7 +121,7 @@ describe("computeForgetDisposition", () => {
   it("leaves a HAZARD member in a live capsule dormant, NOT compressed", () => {
     const result = computeForgetDisposition(
       memory({ decay_profile: "hazard" }),
-      new Set(["mem-1"])
+      new Map([["mem-1", "capsule-1"]])
     );
     expect(result.disposition).toBeNull();
   });
@@ -124,7 +129,7 @@ describe("computeForgetDisposition", () => {
   it("leaves a CANON member in a live capsule dormant, NOT compressed", () => {
     const result = computeForgetDisposition(
       memory({ retention_state: "canon" }),
-      new Set(["mem-1"])
+      new Map([["mem-1", "capsule-1"]])
     );
     expect(result.disposition).toBeNull();
   });
@@ -134,7 +139,7 @@ describe("computeForgetDisposition", () => {
     // as explicit-keep and must not be compress-deleted.
     const result = computeForgetDisposition(
       memory({ retention_state: "consolidated" }),
-      new Set(["mem-1"])
+      new Map([["mem-1", "capsule-1"]])
     );
     expect(result.disposition).toBeNull();
   });
@@ -264,8 +269,8 @@ describe("createTombstoneDispositionSweepPort", () => {
   });
 
   // invariant: the row became explicitly protected (pinned) between selection and
-  // its turn. The authority's FIX-N1 backstop throws VALIDATION; the adapter
-  // confirms the benign race via the row re-read and resolves "skipped".
+  // its turn. The authority throws VALIDATION; the adapter confirms the benign
+  // race via the row re-read and resolves "skipped".
   it("autonomousTombstone resolves skipped when a refused row became explicitly protected (benign race)", async () => {
     const tombstoneAuthority = {
       autonomousTombstone: vi.fn(async () => {
