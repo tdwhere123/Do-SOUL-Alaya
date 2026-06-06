@@ -25,6 +25,11 @@ const COMPACT_DIAGNOSTIC_FILENAMES = new Set([
 ]);
 const POINTER_PATTERN = /^latest-(run|passing)(?:-[a-z0-9-]+)?\.json$/;
 const COMPACT_DIAGNOSTIC_MAX_BYTES = 30 * 1024;
+const GENERATED_DATASET_CACHE_ROOTS = new Set([
+  "datasets/edge-auto-producer-decisions",
+  "datasets/longmemeval-extraction-cache",
+  "datasets/reconciliation-decisions"
+]);
 
 const args = parseArgs(process.argv.slice(2));
 const errors = [];
@@ -242,7 +247,10 @@ async function checkLiveLatestPassing(pointerLabel, archiveRoot) {
 }
 
 async function checkDiagnostics(historyRoot) {
-  const files = await walk(historyRoot);
+  const files = await walk(historyRoot, {
+    skipDirectory: (directoryPath) =>
+      GENERATED_DATASET_CACHE_ROOTS.has(relativeKey(historyRoot, directoryPath))
+  });
   for (const filePath of files) {
     const filename = path.basename(filePath);
     if (!COMPACT_DIAGNOSTIC_FILENAMES.has(filename)) continue;
@@ -267,18 +275,29 @@ async function checkDiagnostics(historyRoot) {
   }
 }
 
-async function walk(root) {
+async function walk(root, options = {}) {
+  const { skipDirectory = () => false } = options;
   const files = [];
-  const entries = await readdir(root, { withFileTypes: true });
-  for (const entry of entries) {
-    const entryPath = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await walk(entryPath)));
-    } else if (entry.isFile()) {
-      files.push(entryPath);
+  const directories = [root];
+  while (directories.length > 0) {
+    const current = directories.pop();
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!skipDirectory(entryPath)) {
+          directories.push(entryPath);
+        }
+      } else if (entry.isFile()) {
+        files.push(entryPath);
+      }
     }
   }
   return files;
+}
+
+function relativeKey(root, entryPath) {
+  return path.relative(root, entryPath).split(/[\\/]+/).join("/");
 }
 
 async function readJson(filePath, label = filePath) {

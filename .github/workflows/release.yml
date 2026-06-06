@@ -177,6 +177,16 @@ jobs:
         with:
           ref: ${{ needs.package.outputs.tag }}
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
       - uses: actions/download-artifact@v4
         with:
           name: release-assets
