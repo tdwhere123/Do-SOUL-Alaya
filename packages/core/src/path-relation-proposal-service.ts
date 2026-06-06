@@ -359,12 +359,24 @@ export class PathRelationProposalService {
   // the recall-side hook that calls it is owned by the recall delivery path,
   // not this file. Shares one counter space and the co_recalled seed profile
   // with onCoUsage, so both signals reinforce one count toward the threshold.
-  // see also: recall-service co-recall delivery hook (caller, owned elsewhere)
+  //
+  // `allowedPairKeys`, when provided, restricts accrual to the listed
+  // unordered pairs (canonical `${low}|${high}` keys, low/high = sorted
+  // object_ids — the same ordering accrueCoOccurrence derives internally). The
+  // recall delivery path computes this set from object-to-object semantic
+  // endpoint coherence so only genuinely-related deliveries strengthen a path;
+  // the embedding math stays on the recall/embedding side and never enters this
+  // truth-boundary service. When undefined, every unordered pair accrues — the
+  // unchanged behavior the bench-harness co-recall warmup and the unit tests
+  // depend on.
+  // see also: apps/core-daemon/src/mcp-memory-tool-handler.ts accrueCoRecallPlasticity (production caller)
+  // see also: apps/core-daemon/src/index.ts CO_RECALL_COHERENCE_FLOOR (gate floor)
   public async onCoRecall(
     recalledObjectIds: readonly string[],
-    workspaceId: string
+    workspaceId: string,
+    allowedPairKeys?: ReadonlySet<string>
   ): Promise<void> {
-    await this.accrueCoOccurrence(recalledObjectIds, workspaceId);
+    await this.accrueCoOccurrence(recalledObjectIds, workspaceId, allowedPairKeys);
   }
 
   // Generalized candidate intake. Non-counter producers submit a fully
@@ -464,10 +476,13 @@ export class PathRelationProposalService {
   // Shared counter-gated accrual for co-usage and co-recall. Each unordered
   // pair increments the durable counter; on reaching the threshold it mints
   // a co_recalled-family path via the same materialize path submitCandidate
-  // uses.
+  // uses. When `allowedPairKeys` is provided, only the listed unordered pairs
+  // accrue (semantic-coherence gate, computed on the recall/embedding side);
+  // an undefined set keeps the all-pairs behavior every other caller relies on.
   private async accrueCoOccurrence(
     objectIds: readonly string[],
-    workspaceId: string
+    workspaceId: string,
+    allowedPairKeys?: ReadonlySet<string>
   ): Promise<void> {
     if (objectIds.length < 2) {
       return;
@@ -478,6 +493,12 @@ export class PathRelationProposalService {
       for (let j = i + 1; j < unique.length; j += 1) {
         const low = unique[i]!;
         const high = unique[j]!;
+        // Coherence gate: skip any pair the caller did not mark as a
+        // semantically-related endpoint. `low`/`high` are already sorted, so
+        // the key matches the canonical `${low}|${high}` the caller built.
+        if (allowedPairKeys !== undefined && !allowedPairKeys.has(`${low}|${high}`)) {
+          continue;
+        }
         const count = await this.counterStore.increment({
           workspaceId,
           lowMemoryId: low,

@@ -134,6 +134,18 @@ const MIN_AUTO_EXTRACT_TURN_CHARS = 24;
 // background pass) and piling on cannot help. Coarse backpressure —
 // over-counting only makes Alaya more conservative.
 const RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD = 128;
+// Co-recall plasticity gate (ARC 3). A delivered pair only accrues co-recall
+// co-occurrence — the durable signal that mints a co_recalled PathRelation at
+// the counter threshold — when its two endpoints are genuinely related, i.e.
+// their stored embedding vectors have cosine similarity at or above the
+// coherence floor (CO_RECALL_COHERENCE_FLOOR = 0.5). The cosine math + vector
+// fetch + the floor itself live behind coRecallCoherenceGate on the embedding
+// side (wired in apps/core-daemon/src/index.ts; the floor is owned there so this
+// truth-boundary handler carries no embedding-math constant). When embedding is
+// off or vectors are missing the gate returns no coherent pairs, so onCoRecall
+// accrues nothing and embedding-off behavior is unchanged. see also:
+// packages/core/src/path-relation-proposal-service.ts onCoRecall allowedPairKeys,
+// packages/core/src/embedding-recall-service.ts coherentPairKeys.
 
 export interface McpMemoryToolCallContext {
   readonly workspaceId: string;
@@ -229,6 +241,34 @@ export interface McpMemoryToolHandlerDependencies {
       usedObjectIds: readonly string[],
       workspaceId: string
     ): Promise<void>;
+    // invariant: co-recall plasticity primitive. Called fire-and-forget at
+    // recall delivery with the delivered top-K ids. `allowedPairKeys` carries
+    // the semantic-coherence gate (canonical `${low}|${high}` pair keys) so
+    // only related endpoints strengthen a path; an absent gate accrues every
+    // pair. see also: path-relation-proposal-service.ts onCoRecall.
+    onCoRecall(
+      recalledObjectIds: readonly string[],
+      workspaceId: string,
+      allowedPairKeys?: ReadonlySet<string>
+    ): Promise<void>;
+  };
+  // invariant: endpoint-coherence gate for the co-recall plasticity loop
+  // (ARC 3). Given the delivered object ids, returns the canonical
+  // `${low}|${high}` keys of the unordered pairs whose stored embedding vectors
+  // are semantically coherent (cosine >= CO_RECALL_COHERENCE_FLOOR). The vector
+  // fetch (MemoryEmbeddingRepo.listByObjectIds) and cosine math live in this
+  // port's wiring on the embedding side, keeping embedding math out of the
+  // truth-boundary path service. Optional: when embedding is off (no provider /
+  // no stored vectors / provider-or-hash mismatch) the gate is either unwired or
+  // returns an empty set, so onCoRecall accrues nothing and embedding-off
+  // behavior is unchanged. see also: daemon-embedding-runtime.ts
+  // EmbeddingRecallService, packages/core/src/embedding-recall-service.ts
+  // cosineSimilarity.
+  readonly coRecallCoherenceGate?: {
+    coherentPairKeys(
+      workspaceId: string,
+      deliveredObjectIds: readonly string[]
+    ): Promise<ReadonlySet<string>>;
   };
   readonly signalService: {
     receiveSignal(signal: CandidateMemorySignal): Promise<Readonly<{
@@ -580,6 +620,12 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       delivered_at: now()
     });
 
+    // Intentionally detached (no await): plasticity accrual is fire-and-forget,
+    // so its DB fetch + cosine work never adds latency to recall delivery. The
+    // .catch guards against unhandled rejections (the function already swallows
+    // internally, this is belt-and-suspenders).
+    void accrueCoRecallPlasticity(deliveredObjectIds, context.workspaceId).catch(() => {});
+
     enqueueRecallExtractTask(request, context, deliveredObjectIds);
 
     await emitRecallDeliveredTelemetry({
@@ -602,6 +648,47 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       strategy_mix: buildRecallStrategyMix(policyOverride, results),
       degradation_reason: degradationReason
     });
+  }
+
+  // invariant: the summoning -> plasticity loop (ARC 3). Fire-and-forget at
+  // recall delivery: accrue co-recall co-occurrence for the delivered top-K so
+  // a repeatedly co-delivered, semantically-coherent pair earns a durable
+  // co_recalled PathRelation at the counter threshold. Mirrors the onCoUsage
+  // hook on report_context_usage — try/catch warns only, never blocks or breaks
+  // recall delivery. Bounded to the DELIVERED ids (not the coarse pool), and
+  // gated by endpoint coherence: only pairs whose embeddings clear
+  // CO_RECALL_COHERENCE_FLOOR accrue. When embedding is off or the gate is
+  // unwired no pairs are coherent, so nothing accrues (embedding-off behavior
+  // is unchanged). see also: path-relation-proposal-service.ts onCoRecall.
+  async function accrueCoRecallPlasticity(
+    deliveredObjectIds: readonly string[],
+    workspaceId: string
+  ): Promise<void> {
+    if (deps.pathRelationProposalService === undefined || deliveredObjectIds.length < 2) {
+      return;
+    }
+    try {
+      // The coherence gate owns the embedding math (vector fetch + cosine). No
+      // gate wired (embedding off) means no coherent pairs -> onCoRecall accrues
+      // nothing, leaving the all-pairs default untouched for the bench harness.
+      const allowedPairKeys =
+        deps.coRecallCoherenceGate === undefined
+          ? new Set<string>()
+          : await deps.coRecallCoherenceGate.coherentPairKeys(workspaceId, deliveredObjectIds);
+      if (allowedPairKeys.size === 0) {
+        return;
+      }
+      await deps.pathRelationProposalService.onCoRecall(
+        deliveredObjectIds,
+        workspaceId,
+        allowedPairKeys
+      );
+    } catch (err) {
+      warn("co-recall plasticity accrual failed", {
+        workspace_id: workspaceId,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
   }
 
   async function emitRecallDeliveredTelemetry(input: {

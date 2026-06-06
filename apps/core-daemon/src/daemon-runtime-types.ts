@@ -90,7 +90,7 @@ export interface AlayaDaemonRuntimeServices {
   // see also: apps/bench-runner/src/harness/daemon.ts accrueSessionCoRecall
   readonly pathRelationProposalService: Pick<
     PathRelationProposalService,
-    "submitCandidate" | "onCoUsage" | "counterSize"
+    "submitCandidate" | "onCoUsage" | "onCoRecall" | "counterSize"
   >;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;

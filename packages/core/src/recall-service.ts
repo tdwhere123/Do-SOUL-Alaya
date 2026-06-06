@@ -42,7 +42,6 @@ import {
 import { computeFreshnessFactor } from "./dynamics-constants-runtime.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
 import {
-  EMBEDDING_SIMILARITY_WEIGHT,
   COLD_CASCADE_DECAY,
   MIN_RECALL_RESULTS,
   PATH_PLASTICITY_WEIGHT,
@@ -265,6 +264,16 @@ const PATH_SUPPRESSION_MAX_PER_TARGET = 0.27;
 // see also: applyPathSuppressionToFusionScores.
 const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
+// Injected pool-external semantic neighbors must clear this query cosine floor
+// AND are hard-capped, so the semantic facet never floods delivery with
+// low-relevance distractors (the embedding-on<off regression cause).
+const EMBEDDING_INJECTION_SIMILARITY_FLOOR = 0.5;
+const EMBEDDING_MAX_INJECTED_DELIVERY = 2;
+// Boost-only gain for the semantic facet's modulation of learned-path firing.
+// A path contribution is scaled by at most +GAIN; coherence at/below neutral
+// is a no-op (never damps), so reasoning-located gold with low query cosine is
+// never pushed down.
+const EMBEDDING_PATH_MODULATION_GAIN = 0.25;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
 const QUERY_EVIDENCE_BASE_WEIGHT_FLOOR = 0.35;
@@ -2920,13 +2929,25 @@ export class RecallService {
     }
 
     const poolObjectIdSet = new Set(poolObjectIds);
+    // Gate the injected neighbors on the query cosine floor and hard-cap the
+    // count: the semantic facet contributes at most EMBEDDING_MAX_INJECTED_DELIVERY
+    // pool-external objects, each clearing EMBEDDING_INJECTION_SIMILARITY_FLOOR.
+    // The cosine floor IS the relevance gate — these are pure-semantic objects
+    // with zero lexical overlap, so no lexical/deterministic filter applies.
     const candidates = neighborEntries
       .filter(
         (entry) =>
           entry.workspace_id === params.workspaceId &&
           !poolObjectIdSet.has(entry.object_id) &&
-          similarityByObjectId.has(entry.object_id)
+          (similarityByObjectId.get(entry.object_id) ?? 0) >=
+            EMBEDDING_INJECTION_SIMILARITY_FLOOR
       )
+      .sort(
+        (left, right) =>
+          (similarityByObjectId.get(right.object_id) ?? 0) -
+          (similarityByObjectId.get(left.object_id) ?? 0)
+      )
+      .slice(0, EMBEDDING_MAX_INJECTED_DELIVERY)
       .map((entry) =>
         Object.freeze({
           entry,
@@ -3532,13 +3553,12 @@ export class RecallService {
       calibratedRelevanceFactor * additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT;
     const weightedQueryEvidenceTransfer = calibratedRelevanceFactor * queryEvidenceTransfer;
     const weightedGraphSupport = graphSupportFactor * weights.graph_support;
-    // EMBEDDING_SIMILARITY_WEIGHT is the mode-invariant additive sub-weight: a
-    // small, clamped boost applied here regardless of embedding-on / off so the
-    // base lexical / activation rank still dominates close ties. Embedding-on
-    // strengthens recall through two SEPARATE channels — candidate injection
-    // (collectEmbeddingCoarseInjection) and the RRF fusion weight override
-    // (resolveRrfFusionWeights) — neither of which goes through this term.
-    const weightedEmbeddingSimilarity = embeddingSimilarityFactor * EMBEDDING_SIMILARITY_WEIGHT;
+    // Embedding adds no flat additive term here: its signal enters exactly once
+    // through the rank-bounded `embedding_similarity` RRF stream, and the facet
+    // additionally modulates path/graph firing (boost-only, see
+    // buildRecallFusionDetails). The `embeddingSimilarityFactor` is retained only
+    // as the `embedding_similarity` diagnostic factor below — it no longer
+    // double-counts into rawScore.
     const weightedPathPlasticity = plasticityFactor * pathPlasticityWeight;
     const weightedConfidence =
       confidenceFactor * additiveWeights.CONFIDENCE_DIRECT_WEIGHT * priorEvidenceCalibration;
@@ -3551,7 +3571,6 @@ export class RecallService {
         weightedRelevanceDirect +
         weightedQueryEvidenceTransfer +
         weightedGraphSupport +
-        weightedEmbeddingSimilarity +
         weightedPathPlasticity +
         weightedConfidence -
         weightedBudgetPenalty -
@@ -3678,7 +3697,20 @@ function buildRecallFusionDetails(params: Readonly<{
       const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
       perStreamRank[stream] = rank;
       if (rank !== null) {
-        const contribution = resolved.weights[stream] / (resolved.k + rank);
+        let contribution = resolved.weights[stream] / (resolved.k + rank);
+        // Semantic-facet modulation: for learned-path firing only, scale the
+        // contribution by a boost-only coherence multiplier derived from the
+        // candidate's already-computed query cosine. Boost-only (cos<=0.5 or
+        // missing → m=1, exact no-op) so a reasoning-located gold with low query
+        // cosine is never pushed down, and so embedding never overrides
+        // deterministic lexical truth. Off-mode: embeddingSimilarityScores is
+        // empty → cos defaults to 0.5 → m=1 → fused scores byte-identical.
+        if (stream === "path_expansion" || stream === "graph_expansion") {
+          // reuse the precomputed per-candidate query cosine — zero new model pass / zero latency
+          const cos = clamp01(params.supplementaryData.embeddingSimilarityScores?.[candidate.entry.object_id] ?? 0.5);
+          const m = 1 + EMBEDDING_PATH_MODULATION_GAIN * Math.max(0, 2 * cos - 1);
+          contribution *= m;
+        }
         contributions[stream] = contribution;
         fusedScore += contribution;
       }

@@ -3,10 +3,8 @@ import {
   DYNAMICS_CONSTANTS,
   MemoryDimension,
   ProjectMappingState,
-  RecallCandidateSchema,
   ScopeClass,
   type BudgetSnapshot,
-  type FineAssessmentConfig,
   type ManifestationState,
   type MemoryDimension as MemoryDimensionType,
   type MemoryEntry,
@@ -30,15 +28,6 @@ export const MIN_RECALL_RESULTS = 5;
 export const WARM_CASCADE_DECAY = 0.7;
 // COLD memories are cold-start fallback only and receive a stronger freshness penalty.
 export const COLD_CASCADE_DECAY = 0.45;
-// Mode-invariant additive sub-weight: applied to embedding_similarity inside
-// fine-assessment scoring regardless of embedding-on / off, kept small so a
-// semantic hint can break close ties without overpowering lexical / activation
-// evidence. Embedding-on additionally (1) widens the candidate pool via
-// coarse injection (collectEmbeddingCoarseInjection) and (2) raises the
-// RRF fusion weight on the embedding_similarity stream
-// (resolveRrfFusionWeights / scoring_weight_overrides.fusion_weights),
-// neither of which is funnelled through this constant.
-export const EMBEDDING_SIMILARITY_WEIGHT = 0.15;
 export const BUDGET_PRESSURE_SOFT_THRESHOLD = 0.5;
 export const BUDGET_PRESSURE_HARD_THRESHOLD = 1;
 /**
@@ -116,47 +105,6 @@ export function compareRecallCandidates(
   }
 
   return left.object_id.localeCompare(right.object_id);
-}
-
-export function applySimilarityBoost(
-  candidate: Readonly<RecallCandidate>,
-  similarityHint: Readonly<{
-    readonly normalized_similarity: number;
-  }> | undefined
-): Readonly<RecallCandidate> {
-  if (similarityHint === undefined) {
-    return candidate;
-  }
-
-  const normalizedSimilarity = clamp01(similarityHint.normalized_similarity);
-  const relevanceScore = clamp01(
-    candidate.relevance_score +
-      normalizedSimilarity * EMBEDDING_SIMILARITY_WEIGHT
-  );
-  const previousFactors = candidate.score_factors ?? {
-    activation: candidate.activation_score,
-    relevance: candidate.relevance_score
-  };
-  const sourceChannels = new Set(candidate.source_channels ?? [
-    "ranked_recall",
-    candidate.origin_plane
-  ]);
-  sourceChannels.add("semantic_supplement");
-
-  return RecallCandidateSchema.parse({
-    ...candidate,
-    relevance_score: relevanceScore,
-    score_factors: {
-      ...previousFactors,
-      relevance: relevanceScore,
-      embedding_similarity: normalizedSimilarity
-    },
-    source_channels: [...sourceChannels],
-    selection_reason:
-      candidate.selection_reason === undefined
-        ? undefined
-        : `${candidate.selection_reason.replace(/\.$/, "")}; embedding similarity ${normalizedSimilarity.toFixed(3)}.`
-  });
 }
 
 export function normalizeActivationScore(value: number | null): number {

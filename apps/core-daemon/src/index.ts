@@ -1651,6 +1651,31 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     surfaceService,
     warn: warnLogger.warn
   });
+  // Co-recall plasticity coherence floor (ARC 3). A delivered pair only accrues
+  // co-recall co-occurrence — the durable signal that mints a co_recalled
+  // PathRelation at the counter threshold — when its two endpoints' stored
+  // embedding vectors have cosine similarity at or above this floor. The gate is
+  // wired only when embedding is on (embeddingRecallService present); when
+  // embedding is off the gate stays undefined, so onCoRecall accrues nothing and
+  // embedding-off behavior is unchanged. see also:
+  // packages/core/src/embedding-recall-service.ts coherentPairKeys,
+  // mcp-memory-tool-handler.ts accrueCoRecallPlasticity.
+  const CO_RECALL_COHERENCE_FLOOR = 0.5;
+  const coRecallCoherenceGate =
+    embeddingRecallService === undefined
+      ? undefined
+      : {
+          coherentPairKeys: (
+            workspaceId: string,
+            deliveredObjectIds: readonly string[]
+          ): Promise<ReadonlySet<string>> =>
+            embeddingRecallService.coherentPairKeys({
+              workspaceId,
+              runId: null,
+              objectIds: deliveredObjectIds,
+              floor: CO_RECALL_COHERENCE_FLOOR
+            })
+        };
   const mcpMemoryToolHandler = createDaemonMcpMemoryToolHandler({
     recallService,
     memoryService,
@@ -1660,6 +1685,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     memoryEntryRepo,
     evidenceService,
     pathRelationProposalService,
+    // invariant: endpoint-coherence gate for the co-recall plasticity loop
+    // (ARC 3). Undefined when embedding is off, so the handler's early-return
+    // keeps embedding-off accrual byte-identical.
+    ...(coRecallCoherenceGate === undefined ? {} : { coRecallCoherenceGate }),
     // invariant: route B3's object-anchor gate into the proposal accept-apply
     // path so the second durable path-insert route is existence/ownership-
     // checked before the storage insert.

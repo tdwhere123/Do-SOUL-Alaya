@@ -546,6 +546,85 @@ export class EmbeddingRecallService {
     });
   }
 
+  /**
+   * Endpoint-coherence gate for the co-recall plasticity loop (ARC 3). Fetches
+   * the stored embedding vectors for the delivered object ids, restricts to the
+   * active (provider_kind, model_id, schema_version) cosine space and drops
+   * self-inconsistent records (dimensions !== embedding length); cosineSimilarity's
+   * length guard handles any residual width disagreement (returns 0). Returns the
+   * canonical `${low}|${high}` keys (object_ids sorted ascending)
+   * of every unordered pair whose cosine similarity is at or above `floor`.
+   *
+   * Gold-blind: only object-vs-object cosine, never gold/answer knowledge. A pair
+   * with a missing or mismatched vector is simply absent from the result. Never
+   * throws — a repo failure warns and returns an empty set, so the fire-and-forget
+   * caller treats it as "no coherent pairs" (embedding-off behavior is unchanged).
+   */
+  public async coherentPairKeys(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly objectIds: readonly string[];
+    readonly floor: number;
+  }): Promise<ReadonlySet<string>> {
+    const empty: ReadonlySet<string> = new Set<string>();
+    if (params.objectIds.length < 2) {
+      return empty;
+    }
+
+    let storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
+    try {
+      storedVectors = await this.dependencies.embeddingRepo.listByObjectIds(
+        params.workspaceId,
+        params.objectIds
+      );
+    } catch (error) {
+      this.warn("co-recall coherence gate degraded", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        reason: "local_vector_lookup_failed",
+        error: toErrorMessage(error)
+      });
+      return empty;
+    }
+
+    // Restrict to the active (provider_kind, model_id, schema_version) cosine
+    // space and drop self-inconsistent records (dimensions !== embedding length);
+    // cosineSimilarity's length guard handles any residual width disagreement
+    // (returns 0), so a mismatched pair is simply not coherent.
+    const vectorsByObjectId = new Map<string, Float32Array>();
+    for (const record of storedVectors) {
+      if (
+        record.provider_kind === this.dependencies.provider.providerKind &&
+        record.model_id === this.dependencies.provider.modelId &&
+        record.schema_version === this.dependencies.provider.schemaVersion &&
+        record.dimensions === record.embedding.length
+      ) {
+        vectorsByObjectId.set(record.object_id, record.embedding);
+      }
+    }
+
+    const coherent = new Set<string>();
+    const ids = params.objectIds;
+    for (let i = 0; i < ids.length; i += 1) {
+      const vecA = vectorsByObjectId.get(ids[i]!);
+      if (vecA === undefined) {
+        continue;
+      }
+      for (let j = i + 1; j < ids.length; j += 1) {
+        const vecB = vectorsByObjectId.get(ids[j]!);
+        if (vecB === undefined) {
+          continue;
+        }
+        if (cosineSimilarity(vecA, vecB) >= params.floor) {
+          const [low, high] = ids[i]! < ids[j]! ? [ids[i]!, ids[j]!] : [ids[j]!, ids[i]!];
+          coherent.add(`${low}|${high}`);
+        }
+      }
+    }
+
+    return coherent;
+  }
+
   private queryCacheKey(queryText: string): string {
     return `sha256:${createHash("sha256").update(queryText.trim()).digest("hex")}`;
   }

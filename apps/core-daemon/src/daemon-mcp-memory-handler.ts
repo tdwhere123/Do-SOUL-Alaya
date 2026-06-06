@@ -23,6 +23,12 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly memoryEntryRepo: NonNullable<McpMemoryToolHandlerDependencies["memoryEntryRepo"]>;
   readonly evidenceService?: McpMemoryToolHandlerDependencies["evidenceService"];
   readonly pathRelationProposalService?: McpMemoryToolHandlerDependencies["pathRelationProposalService"];
+  // invariant: endpoint-coherence gate for the co-recall plasticity loop
+  // (ARC 3). Wired only when embedding is on; threaded through to the handler so
+  // onCoRecall accrues only semantically-coherent delivered pairs. Absent when
+  // embedding is off, leaving embedding-off accrual behavior unchanged.
+  // see also: mcp-memory-tool-handler.ts coRecallCoherenceGate.
+  readonly coRecallCoherenceGate?: McpMemoryToolHandlerDependencies["coRecallCoherenceGate"];
   // invariant: B3's object-anchor existence + ownership gate, routed into the
   // proposal accept-apply path so the second durable path-insert route is
   // validated before the storage insert. Wired from PathRelationProposalService.
@@ -102,6 +108,9 @@ export function createDaemonMcpMemoryToolHandler(input: {
     ...(input.pathRelationProposalService === undefined
       ? {}
       : { pathRelationProposalService: input.pathRelationProposalService }),
+    ...(input.coRecallCoherenceGate === undefined
+      ? {}
+      : { coRecallCoherenceGate: input.coRecallCoherenceGate }),
     signalService: input.signalService,
     graphExploreService: input.graphExploreService,
     ...(input.edgeProposalService === undefined ? {} : { edgeProposalService: input.edgeProposalService }),
