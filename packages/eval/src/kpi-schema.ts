@@ -482,6 +482,23 @@ const EdgeProposalAutoAcceptSchema = z
   .strict();
 export type EdgeProposalAutoAccept = z.infer<typeof EdgeProposalAutoAcceptSchema>;
 
+// @anchor qa-metrics: end-to-end QA accuracy (LLM-judge over delivered recall),
+// the SOTA-comparable口径 vs retrieval R@5. Optional + only emitted under the
+// --qa flag, so a normal recall run stays schema-valid and byte-identical.
+// abstention_* count the `_abs` subset (abstain = correct).
+const QaMetricsSchema = z
+  .object({
+    qa_total: z.number().int().nonnegative(),
+    qa_correct: z.number().int().nonnegative(),
+    qa_accuracy: RatioSchema,
+    qa_abstention_total: z.number().int().nonnegative(),
+    qa_abstention_correct: z.number().int().nonnegative(),
+    answer_model: z.string().min(1),
+    judge_model: z.string().min(1)
+  })
+  .strict();
+export type QaMetrics = z.infer<typeof QaMetricsSchema>;
+
 const KpiCoreSchema = z.object({
   r_at_1: RatioSchema,
   r_at_5: RatioSchema,
@@ -529,6 +546,8 @@ const KpiCoreSchema = z.object({
   // the bench-runner sources the edge proposal aggregator.
   edge_proposal_rate: EdgeProposalRateSchema.optional(),
   edge_proposal_auto_accept: EdgeProposalAutoAcceptSchema.optional(),
+  // Optional: only present on --qa runs (end-to-end LLM-judge QA accuracy).
+  qa_metrics: QaMetricsSchema.optional(),
   per_scenario: z.array(PerScenarioRowSchema)
 });
 export type KpiCore = z.infer<typeof KpiCoreSchema>;

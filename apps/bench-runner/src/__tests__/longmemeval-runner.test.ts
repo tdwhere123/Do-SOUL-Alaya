@@ -1398,6 +1398,87 @@ describe("LongMemEval runner", () => {
   );
 
   it(
+    "scores end-to-end QA over delivered recall when --qa is injected",
+    async () => {
+      // Integration: a real runLongMemEval pass (offline seed + MCP recall) with
+      // a mock qa.chat. Mock answer LLM echoes a non-empty answer; mock judge
+      // returns CORRECT — exercising scoreQaQuestion + aggregateQaVerdicts wiring
+      // through the runner with zero network / zero cost. Asserts the kpi gains a
+      // qa_metrics block with qa_total > 0 (the B1.f end-to-end coverage).
+      const dataDir = join(tmpDir, "longmemeval-qa");
+      await mkdir(dataDir, { recursive: true });
+      const historyRoot = join(tmpDir, "history-qa");
+
+      const mockQuestions: LongMemEvalQuestion[] = [
+        buildMockQuestion("q001", "session-a"),
+        buildMockQuestion("q002", "session-b")
+      ];
+
+      const variant = "longmemeval_oracle";
+      const datasetRaw = JSON.stringify(mockQuestions);
+      const datasetSha = createHash("sha256").update(datasetRaw, "utf8").digest("hex");
+      await writeFile(join(dataDir, `${variant}.json`), datasetRaw, "utf8");
+      await writeFile(
+        join(dataDir, `${variant}.meta.json`),
+        JSON.stringify({ variant, sha256: datasetSha, questionCount: 2 }),
+        "utf8"
+      );
+
+      const pinnedMetaRoot = join(tmpDir, "pinned-meta-qa");
+      await mkdir(pinnedMetaRoot, { recursive: true });
+      await writeFile(
+        join(pinnedMetaRoot, `${variant}.meta.json`),
+        JSON.stringify({
+          name: variant,
+          sha256: datasetSha,
+          question_count: 2,
+          first_pinned_at: "2026-05-14T00:00:00Z",
+          pinned_by_commit: "test"
+        }),
+        "utf8"
+      );
+
+      // Mock chat: system carrying the strict-grader prompt -> CORRECT;
+      // otherwise an arbitrary non-empty answer. Both calls stay in-process.
+      const chatCalls: Array<{ system: string; user: string }> = [];
+      const mockChat = async (system: string, user: string): Promise<string> => {
+        chatCalls.push({ system, user });
+        return /grader/iu.test(system) ? "CORRECT" : "The stored fact answers this.";
+      };
+
+      const result = await runLongMemEval({
+        variant,
+        limit: 2,
+        historyRoot,
+        dataDir,
+        pinnedMetaRoot,
+        policyShape: "chat",
+        qa: {
+          chat: mockChat,
+          answerModel: "mock-answer-model",
+          judgeModel: "mock-judge-model"
+        },
+        extractionCacheRoot: join(tmpDir, "extraction-cache-qa")
+      });
+
+      const parseResult = KpiPayloadSchema.safeParse(result.payload);
+      expect(parseResult.success).toBe(true);
+
+      const qaMetrics = result.payload.kpi.qa_metrics;
+      expect(qaMetrics).toBeDefined();
+      expect(qaMetrics?.qa_total).toBeGreaterThan(0);
+      expect(qaMetrics?.qa_total).toBe(2);
+      expect(qaMetrics?.qa_correct).toBe(2);
+      expect(qaMetrics?.qa_accuracy).toBe(1);
+      expect(qaMetrics?.answer_model).toBe("mock-answer-model");
+      expect(qaMetrics?.judge_model).toBe("mock-judge-model");
+      // 2 questions × (1 answer call + 1 judge call), all in-process.
+      expect(chatCalls.length).toBe(4);
+    },
+    180_000
+  );
+
+  it(
     "archives public-multiturn runs with round KPIs and diagnostics sidecar",
     async () => {
       const dataDir = join(tmpDir, "longmemeval-multiturn");

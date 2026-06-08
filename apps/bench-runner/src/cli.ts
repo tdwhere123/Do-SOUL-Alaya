@@ -48,6 +48,10 @@ import {
 import { writeExternalDiagnosticsArtifact } from "./longmemeval/diagnostics-artifacts.js";
 import { runLiveBench } from "./live/runner.js";
 import { runLongMemEval } from "./longmemeval/runner.js";
+import {
+  createGardenChatFn,
+  resolveQaChatConfig
+} from "./longmemeval/qa-chat.js";
 import { runExtractionFill } from "./longmemeval/extraction-fill.js";
 import { runRecallEval } from "./longmemeval/recall-eval.js";
 import {
@@ -74,7 +78,8 @@ const HELP_TEXT = `alaya-bench-runner — daemon-attached benchmark harness
 
 Usage:
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m] [--data-dir <path>] [--force]
-  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir <path>] [--snapshot-out <db>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
+  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--qa] [--data-dir <path>] [--snapshot-out <db>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
+    --qa  end-to-end QA accuracy (answer-LLM + LLM-judge over delivered recall). OFF by default. ON => 2 garden chat calls/question (costs money). Needs OFFICIAL_API_GARDEN_PROVIDER_URL / ALAYA_OFFICIAL_GARDEN_API_KEY / OFFICIAL_API_GARDEN_MODEL.
   alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner fetch-locomo [--data-dir <path>] [--force]
@@ -175,6 +180,9 @@ interface ParsedFlags {
   readonly pinnedMetaRoot?: string;
   readonly extractionCacheRoot?: string;
   readonly concurrency?: number;
+  // --qa: gate the end-to-end QA harness (answer-LLM + LLM-judge). Default off
+  // => zero LLM calls, zero cost, recall path + kpi bytes unchanged.
+  readonly qa: boolean;
 }
 
 function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
@@ -197,6 +205,7 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let pinnedMetaRoot: string | undefined;
   let extractionCacheRoot: string | undefined;
   let concurrency: number | undefined;
+  let qa = false;
   const shards: string[] = [];
   let collectingShards = false;
 
@@ -326,6 +335,9 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     } else if (token === "--force") {
       force = true;
       collectingShards = false;
+    } else if (token === "--qa" || token === "--answer-judge") {
+      qa = true;
+      collectingShards = false;
     } else if (token === "--source") {
       source = args[++i];
       collectingShards = false;
@@ -367,7 +379,8 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     dataDirRoot,
     pinnedMetaRoot,
     extractionCacheRoot,
-    concurrency
+    concurrency,
+    qa
   };
 }
 
@@ -394,6 +407,19 @@ async function runFetchLongMemEval(opts: ParsedFlags): Promise<number> {
 
 async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
   try {
+    // --qa: construct the garden chat fn from env (fail-loud on missing creds).
+    // Off => qaOption undefined => runner makes zero LLM calls. Each --qa
+    // question costs 2 chat calls (answer + judge) — real money.
+    const qaOption = opts.qa
+      ? (() => {
+          const config = resolveQaChatConfig();
+          return {
+            chat: createGardenChatFn(config),
+            answerModel: config.model,
+            judgeModel: config.model
+          };
+        })()
+      : undefined;
     process.stdout.write(
       `Running LongMemEval ${opts.variant}` +
         (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
@@ -402,6 +428,7 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
         ` policy_shape=${opts.policyShape}` +
         (opts.simulateReport !== "none" ? ` simulate_report=${opts.simulateReport}` : "") +
         (opts.weightOverridesJson !== undefined ? " weights=cli" : "") +
+        (qaOption !== undefined ? " qa=on" : "") +
         "...\n"
     );
     const result = await runLongMemEval({
@@ -415,6 +442,7 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
       policyShape: opts.policyShape,
       simulateReport: opts.simulateReport,
       weightOverridesJson: opts.weightOverridesJson,
+      ...(qaOption === undefined ? {} : { qa: qaOption }),
       // @anchor longmemeval-snapshot-out-cli: producer half of the recall-eval
       // fast loop. When set, runLongMemEval pins the seeded DB and writes
       // <db> + .manifest.json + .sidecar.json, which recall-eval --snapshot
@@ -434,6 +462,10 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
         `  Policy shape: ${result.payload.policy_shape ?? "stress"}\n` +
         `  Simulate report: ${result.payload.simulate_report ?? "none"}\n` +
         `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
+        (kpi.qa_metrics === undefined
+          ? ""
+          : `  QA accuracy=${pct(kpi.qa_metrics.qa_accuracy)} ` +
+            `(${kpi.qa_metrics.qa_correct}/${kpi.qa_metrics.qa_total})\n`) +
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
     );

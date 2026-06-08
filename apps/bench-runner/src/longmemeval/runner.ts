@@ -114,6 +114,13 @@ import {
 } from "./snapshot.js";
 import { readExtractionCacheManifest } from "./extraction-cache-manifest.js";
 import { EXTRACTION_CACHE_ROOT } from "./compile-seed.js";
+import {
+  aggregateQaVerdicts,
+  scoreQaQuestion,
+  type QaDeliveredCandidate,
+  type QaQuestionVerdict
+} from "./qa-harness.js";
+import type { QaChatFn } from "./qa-chat.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
@@ -134,6 +141,13 @@ const LONGMEMEVAL_SEED_POLICY = Object.freeze({
   description:
     "LongMemEval public recall evaluation seeds every haystack turn as a factual memory; has_answer labels are used only for scoring sidecars."
 });
+
+// End-to-end QA option, shape mirrors cli.ts qaOption (chat fn + model labels).
+export interface LongMemEvalQaRunOption {
+  readonly chat: QaChatFn;
+  readonly answerModel: string;
+  readonly judgeModel: string;
+}
 
 export interface LongMemEvalRunOptions {
   readonly variant: LongMemEvalVariant;
@@ -174,6 +188,9 @@ export interface LongMemEvalRunOptions {
   // cache + arbitrary model instead of the committed production manifest,
   // decoupling the integration tests from the live extraction model.
   readonly extractionCacheRoot?: string;
+  // @anchor longmemeval-qa: end-to-end QA scoring (answer-LLM + LLM-judge over
+  // delivered recall). Undefined => zero LLM calls and byte-identical kpi/sidecar.
+  readonly qa?: LongMemEvalQaRunOption;
 }
 
 export interface LongMemEvalRunResult {
@@ -190,6 +207,9 @@ export interface LongMemEvalSidecarEntry {
   readonly objectKind: "memory_entry" | "synthesis_capsule";
   readonly sessionId: string;
   readonly hasAnswer: boolean;
+  // Seeded turn content, carried only when opts.qa is set so the QA harness can
+  // stitch delivered recall into answer-model context; off => omitted (no bytes).
+  readonly content?: string;
 }
 
 export interface LongMemEvalHitScoringInput {
@@ -353,6 +373,8 @@ export async function runLongMemEval(
     // sidecar, populated only when opts.snapshotOut is set. Undefined on a
     // normal run so the snapshot path adds zero cost.
     snapshotQuestion?: LongMemEvalSnapshotQuestion;
+    // End-to-end QA verdict, present only when opts.qa is set (else no LLM call).
+    qaVerdict?: QaQuestionVerdict;
   };
 
   async function runOneQuestion(
@@ -444,7 +466,10 @@ export async function runLongMemEval(
               objectId: seed.memoryId,
               objectKind: "memory_entry",
               sessionId,
-              hasAnswer: round.hasAnswer
+              hasAnswer: round.hasAnswer,
+              // QA-only: carry the seeded turn content so delivered recall can be
+              // stitched into answer-model context. Off => omitted (byte-identical).
+              ...(opts.qa === undefined ? {} : { content: round.content })
             });
             sessionTurns.push({
               turnContent: round.content,
@@ -556,6 +581,31 @@ export async function runLongMemEval(
         score_factors: pointer.score_factors ?? null
       }));
 
+      // End-to-end QA scoring: answer-LLM over delivered recall content, then
+      // LLM-judge vs gold. Gated on opts.qa so a normal run makes zero LLM calls.
+      // Build candidates from delivered top-k memory_entry results in rank order,
+      // resolving each id back to its seeded content via the sidecar.
+      let qaVerdict: QaQuestionVerdict | undefined;
+      if (opts.qa !== undefined) {
+        const delivered: QaDeliveredCandidate[] = deliveredResults
+          .filter((result) => (result.object_kind ?? "memory_entry") === "memory_entry")
+          .map((result) => ({
+            objectId: result.object_id,
+            content:
+              sidecar.get(buildLongMemEvalSidecarKey("memory_entry", result.object_id))
+                ?.content ?? ""
+          }));
+        qaVerdict = await scoreQaQuestion(
+          {
+            questionId: question.question_id,
+            question: question.question,
+            goldAnswer: question.answer,
+            delivered
+          },
+          opts.qa.chat
+        );
+      }
+
       // Numerator rule: answerable questions score by id-equality hits;
       // abstention (`_abs`) questions score by calibrated confidence — the
       // top-k must stay below the false-confident threshold. The recall@k
@@ -630,6 +680,7 @@ export async function runLongMemEval(
         tokenMetrics,
         recallTokenEconomy,
         edgeProposalKpiRows,
+        ...(qaVerdict === undefined ? {} : { qaVerdict }),
         ...(opts.snapshotOut === undefined
           ? {}
           : {
@@ -796,6 +847,8 @@ export async function runLongMemEval(
   // The flat across-questions list is derived by flattening these chunks at
   // the aggregator call site rather than stored a second time.
   const edgeProposalKpiRowsPerQuestion: EdgeProposalKpiEventRow[][] = [];
+  // QA verdicts collected only when opts.qa is set; empty otherwise.
+  const qaVerdicts: QaQuestionVerdict[] = [];
 
   for (let i = 0; i < collected.length; i++) {
     const res = collected[i];
@@ -830,6 +883,9 @@ export async function runLongMemEval(
       recallTokenEconomySamples.push(res.recallTokenEconomy);
     }
     edgeProposalKpiRowsPerQuestion.push([...res.edgeProposalKpiRows]);
+    if (res.qaVerdict !== undefined) {
+      qaVerdicts.push(res.qaVerdict);
+    }
     perScenario.push({
       id: res.questionId,
       version: 1,
@@ -893,6 +949,17 @@ export async function runLongMemEval(
   const edgeProposalAutoAccept = aggregateEdgeProposalAutoAccept(
     edgeProposalKpiRowsAcrossQuestions
   );
+
+  // QA accuracy block: emitted only when --qa ran and produced verdicts, so a
+  // normal recall run leaves kpi.qa_metrics absent (byte-identical).
+  const qaMetrics =
+    opts.qa !== undefined && qaVerdicts.length > 0
+      ? {
+          ...aggregateQaVerdicts(qaVerdicts),
+          answer_model: opts.qa.answerModel,
+          judge_model: opts.qa.judgeModel
+        }
+      : undefined;
 
   const payload: KpiPayload = {
     bench_name: "public",
@@ -976,6 +1043,7 @@ export async function runLongMemEval(
       ...(edgeProposalAutoAccept === undefined
         ? {}
         : { edge_proposal_auto_accept: edgeProposalAutoAccept }),
+      ...(qaMetrics === undefined ? {} : { qa_metrics: qaMetrics }),
       per_scenario: perScenario
     }
   };
