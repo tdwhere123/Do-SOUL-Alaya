@@ -1,5 +1,7 @@
 import {
   buildDiffVsPrevious,
+  buildTokenEconomy,
+  computeTokenSavedRatio,
   diffKpis,
   entrySlug,
   readLatest,
@@ -42,6 +44,11 @@ import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
 } from "../longmemeval/recall-token-economy.js";
+import {
+  aggregateBenchTokenMetrics,
+  assertBenchTokenEconomyContract
+} from "../harness/token-economy.js";
+import type { BenchTokenMetrics } from "../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
 import { extractSessions, type LocomoQa, type LocomoSample, type LocomoVariant } from "./dataset.js";
 import { loadLocomo, type LocomoFetchResult } from "./fetch.js";
@@ -185,6 +192,16 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const recallTokenEconomy = aggregateRecallTokenEconomy(
     conversationResults.flatMap((result) => result.recallTokenEconomySamples)
   );
+  // Event-sourced token economy: aggregate each conversation's EventLog fold
+  // into one run total, then derive the headline saved ratio. The contract
+  // gate fails closed when a seeded run emitted no full-turn marker.
+  // see also: apps/bench-runner/src/harness/token-economy.ts assertBenchTokenEconomyContract
+  const tokenEconomyInput = aggregateBenchTokenMetrics(
+    conversationResults.map((result) => result.tokenMetrics)
+  );
+  assertBenchTokenEconomyContract("public-locomo", tokenEconomyInput);
+  const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
+  const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
 
   const payload: KpiPayload = {
     bench_name: "public-locomo",
@@ -237,7 +254,8 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       latency_ms_p50: computePercentile(latencies, 50),
       latency_ms_p95: computePercentile(latencies, 95),
       latency_source: "exact",
-      token_saved_ratio_vs_full_prompt: 0,
+      token_saved_ratio_vs_full_prompt: tokenSavedRatio,
+      token_economy: tokenEconomy,
       ...(recallTokenEconomy === null
         ? {}
         : { recall_token_economy: recallTokenEconomy }),
@@ -344,6 +362,9 @@ interface ConversationResult {
   // see also: packages/core/src/recall-service.ts
   // (computeRecallTokenEconomy call site).
   readonly recallTokenEconomySamples: readonly BenchRecallTokenEconomy[];
+  // Event-sourced token-economy fold for this conversation's own bench DB —
+  // one per workspace, aggregated across conversations at the run level.
+  readonly tokenMetrics: BenchTokenMetrics;
 }
 
 async function runOneConversation(
@@ -470,6 +491,10 @@ async function runOneConversation(
       }
     }
 
+    // Read the EventLog-derived token economy after seeding + every recall, so
+    // all seed signals and context-lens events are persisted. Before detach.
+    const tokenMetrics = await workspace.queryTokenMetrics();
+
     return {
       qaCount: scoredCount,
       hitAt1,
@@ -482,7 +507,8 @@ async function runOneConversation(
       questionDiagnostics,
       embeddingWarmup,
       queryEmbeddingWarmup,
-      recallTokenEconomySamples
+      recallTokenEconomySamples,
+      tokenMetrics
     };
   } finally {
     await workspace.detach();

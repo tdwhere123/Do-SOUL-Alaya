@@ -21,7 +21,10 @@ import {
   type BenchEmbeddingMode,
   type BenchTokenMetrics
 } from "../harness/daemon.js";
-import { aggregateBenchTokenMetrics } from "./token-economy.js";
+import {
+  aggregateBenchTokenMetrics,
+  assertBenchTokenEconomyContract
+} from "../harness/token-economy.js";
 import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
@@ -401,6 +404,8 @@ export async function runLongMemEvalCrossQuestion(
   } finally {
     await daemon.shutdown();
   }
+  // see also: apps/bench-runner/src/harness/token-economy.ts assertBenchTokenEconomyContract
+  assertBenchTokenEconomyContract("public", tokenEconomyInput);
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
   // Per-recall structural distribution across the shared-workspace question

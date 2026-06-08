@@ -73,7 +73,7 @@ import {
   BENCH_STORED_CONTENT_KEY,
   BENCH_TURN_SEED_INDEX_KEY,
   deriveBenchTokenMetrics
-} from "../longmemeval/token-economy.js";
+} from "./token-economy.js";
 import {
   createUnscoredMaterializedSeedError,
   isUnscoredMaterializedSeedError
@@ -2365,7 +2365,7 @@ function emitBenchContextLensAssembledEvent(
 // @anchor queryTokenMetrics: event-sourced token-economy reader. Mirrors
 // readMaterializedMemoryId — opens the bench DB via the cached connection
 // and reads EventLog rows, never in-memory bench state. The pure event ->
-// metrics fold lives in longmemeval/token-economy.ts deriveBenchTokenMetrics
+// metrics fold lives in harness/token-economy.ts deriveBenchTokenMetrics
 // so it is unit-testable against a stubbed EventLog. The connection is NOT
 // closed here.
 // invariant: scope the event read to the question's workspace. The bench
@@ -2644,7 +2644,7 @@ function toErrorMessage(error: unknown): string {
 // distilled fact is supplied the seeded content itself is the durable fact.
 // On the credentialled path `excerpt` carries only a narrow
 // turn_content_excerpt window, so the keys differ and ARE stamped.
-// see also: apps/bench-runner/src/longmemeval/token-economy.ts
+// see also: apps/bench-runner/src/harness/token-economy.ts
 function benchTokenEconomyPayload(input: {
   readonly fullTurnContent: string;
   readonly storedContent: string;

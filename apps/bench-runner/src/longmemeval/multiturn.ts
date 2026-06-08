@@ -21,7 +21,10 @@ import {
   type BenchEmbeddingMode,
   type BenchTokenMetrics
 } from "../harness/daemon.js";
-import { aggregateBenchTokenMetrics } from "./token-economy.js";
+import {
+  aggregateBenchTokenMetrics,
+  assertBenchTokenEconomyContract
+} from "../harness/token-economy.js";
 import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
@@ -482,6 +485,8 @@ export async function runLongMemEvalMultiturn(
   const tokenEconomyInput = aggregateBenchTokenMetrics(
     collected.map((result) => result.tokenMetrics)
   );
+  // see also: apps/bench-runner/src/harness/token-economy.ts assertBenchTokenEconomyContract
+  assertBenchTokenEconomyContract("public", tokenEconomyInput);
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
   // Aggregate across EVERY round of every question so the distribution

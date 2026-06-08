@@ -1,17 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildTokenEconomy,
+  computeTokenSavedRatio
+} from "@do-soul/alaya-eval";
+import {
   RecallContextEventType,
   SignalEventType
 } from "@do-soul/alaya-protocol";
 import {
   aggregateBenchTokenMetrics,
+  assertBenchTokenEconomyContract,
   deriveBenchTokenMetrics,
   BENCH_FULL_TURN_CONTENT_KEY,
   BENCH_SEED_MARKER_KEY,
   BENCH_STORED_CONTENT_KEY,
   BENCH_TURN_SEED_INDEX_KEY,
   type TokenEconomyEventRow
-} from "../longmemeval/token-economy.js";
+} from "../harness/token-economy.js";
 
 function emittedRow(rawPayload: Record<string, unknown>): TokenEconomyEventRow {
   return {
@@ -354,5 +359,112 @@ describe("aggregateBenchTokenMetrics", () => {
     // weighted mean: 1000 total / 4 events = 250, NOT (100+700)/2 = 400.
     expect(aggregate.recalled_context_tokens_mean).toBe(250);
     expect(aggregate.seed_event_count).toBe(30);
+  });
+});
+
+describe("assertBenchTokenEconomyContract", () => {
+  it("throws when a seeded run emitted no full-turn marker", () => {
+    // raw_history_tokens===0 with seeds present = the seed path forgot the
+    // marker, so token_saved_ratio cannot be derived: fail closed.
+    expect(() =>
+      assertBenchTokenEconomyContract("public-locomo", {
+        raw_history_tokens: 0,
+        stored_memory_tokens: 0,
+        recalled_context_tokens_total: 100,
+        recall_event_count: 1,
+        recalled_context_tokens_mean: 100,
+        seed_event_count: 5
+      })
+    ).toThrow(/raw_history_tokens===0/);
+  });
+
+  it("passes a healthy run that carries a full-turn baseline", () => {
+    expect(() =>
+      assertBenchTokenEconomyContract("public-locomo", {
+        raw_history_tokens: 1_000,
+        stored_memory_tokens: 100,
+        recalled_context_tokens_total: 50,
+        recall_event_count: 1,
+        recalled_context_tokens_mean: 50,
+        seed_event_count: 5
+      })
+    ).not.toThrow();
+  });
+
+  it("exempts a run that seeded nothing (no history to save against)", () => {
+    expect(() =>
+      assertBenchTokenEconomyContract("public-locomo", {
+        raw_history_tokens: 0,
+        stored_memory_tokens: 0,
+        recalled_context_tokens_total: 0,
+        recall_event_count: 0,
+        recalled_context_tokens_mean: 0,
+        seed_event_count: 0
+      })
+    ).not.toThrow();
+  });
+});
+
+/**
+ * LoCoMo seeds each turn through workspace.proposeMemory, whose raw_payload
+ * is the no-credentials shape: bench_seed marker + excerpt (the full turn),
+ * no distilled_fact, no turn-seed index. This pins the LoCoMo path end to
+ * end: fold -> aggregate -> contract -> token_economy + saved ratio.
+ * see also: apps/bench-runner/src/locomo/runner.ts runOneConversation
+ */
+describe("LoCoMo proposeMemory seed -> kpi token economy", () => {
+  function locomoSeedRow(speakerTurn: string): TokenEconomyEventRow {
+    return emittedRow({
+      [BENCH_SEED_MARKER_KEY]: true,
+      excerpt: speakerTurn
+    });
+  }
+
+  it("derives raw_history + a saved ratio from no-creds proposeMemory seeds", () => {
+    // Two LoCoMo turns (each its own self-contained turn: no turn-seed index)
+    // plus one recall delivering a small context window.
+    const turnA = "Caroline: ".padEnd(200, "x"); // 50 tokens
+    const turnB = "Melanie: ".padEnd(120, "y"); // 30 tokens
+    const metrics = deriveBenchTokenMetrics(
+      [locomoSeedRow(turnA), locomoSeedRow(turnB)],
+      [lensRow(40)]
+    );
+    expect(metrics.raw_history_tokens).toBe(80); // 50 + 30, each turn once
+    expect(metrics.stored_memory_tokens).toBe(80); // excerpt is the durable fact
+    expect(metrics.seed_event_count).toBe(2);
+
+    const input = aggregateBenchTokenMetrics([metrics]);
+    // Contract holds: a seeded LoCoMo run carries a full-turn baseline.
+    expect(() =>
+      assertBenchTokenEconomyContract("public-locomo", input)
+    ).not.toThrow();
+
+    const economy = buildTokenEconomy(input);
+    expect(economy.raw_history_tokens).toBe(80);
+    const ratio = computeTokenSavedRatio(input);
+    // 1 - 40/80 = 0.5 saved vs re-reading the full history.
+    expect(ratio).toBeCloseTo(0.5, 10);
+  });
+
+  it("contract fails a LoCoMo-shape run whose seeds never stamped the marker", () => {
+    // A regression where proposeMemory dropped benchTokenEconomyPayload: the
+    // seed signals carry only production fields, the fold skips them, and the
+    // aggregate has zero raw_history despite real recalls.
+    const metrics = deriveBenchTokenMetrics(
+      [emittedRow({ excerpt: "Caroline: hi", turn_content_excerpt: "hi" })],
+      [lensRow(40)]
+    );
+    expect(metrics.seed_event_count).toBe(0);
+    const input = aggregateBenchTokenMetrics([metrics]);
+    expect(() =>
+      assertBenchTokenEconomyContract("public-locomo", input)
+    ).not.toThrow(); // seed_event_count===0 is exempt (honest empty)
+    // But a run that DID seed yet folded to zero raw_history must fail:
+    expect(() =>
+      assertBenchTokenEconomyContract("public-locomo", {
+        ...input,
+        seed_event_count: 3
+      })
+    ).toThrow(/full-turn marker/);
   });
 });

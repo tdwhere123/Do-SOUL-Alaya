@@ -329,12 +329,24 @@ function buildMockDaemon(overrides: {
       minted: 1,
       belowThreshold: 0
     }));
+  // Stubbed event-sourced fold: a non-zero full-turn baseline so the harness
+  // token-economy contract passes and the kpi carries a real token_economy.
+  // see also: apps/bench-runner/src/harness/token-economy.ts deriveBenchTokenMetrics
+  const queryTokenMetrics = vi.fn(async () => ({
+    raw_history_tokens: 1_000,
+    stored_memory_tokens: 200,
+    recalled_context_tokens_total: 100,
+    recall_event_count: 2,
+    recalled_context_tokens_mean: 50,
+    seed_event_count: 4
+  }));
   return {
     proposeMemory,
     warmEmbeddingCache,
     warmQueryEmbeddingCache,
     recall,
     accrueSessionCoRecall,
+    queryTokenMetrics,
     attachWorkspace: vi.fn(async (input: { workspaceId: string; runId: string }) => ({
       workspaceId: input.workspaceId,
       runId: input.runId,
@@ -343,6 +355,7 @@ function buildMockDaemon(overrides: {
       warmQueryEmbeddingCache,
       recall,
       accrueSessionCoRecall,
+      queryTokenMetrics,
       detach: vi.fn(async () => undefined)
     })),
     shutdown: vi.fn(async () => undefined)

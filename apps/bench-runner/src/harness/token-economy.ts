@@ -4,8 +4,8 @@ import {
   SoulContextLensAssembledPayloadSchema,
   SoulSignalEmittedPayloadSchema
 } from "@do-soul/alaya-protocol";
-import type { TokenEconomyInput } from "@do-soul/alaya-eval";
-import type { BenchTokenMetrics } from "../harness/daemon.js";
+import { computeTokenSavedRatio, type TokenEconomyInput } from "@do-soul/alaya-eval";
+import type { BenchTokenMetrics } from "./daemon.js";
 
 // @anchor bench-token-chars-per-token: the bench token-economy KPI is a
 // coarse heuristic, not a native tokenizer. 4 chars/token mirrors the
@@ -213,4 +213,31 @@ export function aggregateBenchTokenMetrics(
         : recalledContextTokensTotal / recallEventCount,
     seed_event_count: seedEventCount
   };
+}
+
+/**
+ * @anchor assertBenchTokenEconomyContract — harness-level contract gate.
+ *
+ * token_saved_ratio_vs_full_prompt is a required output for EVERY integrated
+ * benchmark: a benchmark that seeded turns but emitted no full-turn marker
+ * folds to raw_history_tokens === 0, so no savings ratio can be derived and
+ * its kpi would silently carry a 0 baseline. We fail closed here rather than
+ * publish a meaningless 0 — any new benchmark must wire the seed-side marker
+ * (benchTokenEconomyPayload) or this throws. A benchmark that truly seeds
+ * nothing (seed_event_count === 0) is exempt: no history to save against, so
+ * a 0 ratio is honest, not a missing marker.
+ * see also: apps/bench-runner/src/harness/daemon.ts benchTokenEconomyPayload
+ */
+export function assertBenchTokenEconomyContract(
+  benchName: string,
+  input: TokenEconomyInput
+): void {
+  if (input.seed_event_count > 0 && input.raw_history_tokens === 0) {
+    throw new Error(
+      `[token-economy contract] ${benchName}: seeded ${input.seed_event_count} ` +
+        `turn(s) but raw_history_tokens===0 — the seed path emitted no ` +
+        `full-turn marker, so token_saved_ratio_vs_full_prompt cannot be ` +
+        `derived. Wire benchTokenEconomyPayload on the seed signal.`
+    );
+  }
 }

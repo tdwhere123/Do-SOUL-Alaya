@@ -6,7 +6,7 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-056` (`#BL-022` was opened by
+sequence. **Next available number**: `#BL-057` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
@@ -196,6 +196,43 @@ capability — the multi-hop traversal it would serve is already load-bearing vi
 **Close condition**: revisit if a 500q LongMemEval root-cause diagnostic shows multi-hop
 -reached gold drowned inside the `graph_expansion` stream and needing a separate weighted
 lane to surface. Otherwise leave folded into `graph_expansion`.
+
+### #BL-056 — Token-savings ratio as a benchmark-harness contract (LoCoMo gap)
+
+**Status**: Resolved (LoCoMo bench verified 2026-06-08; opened v0.3.11, surfaced by
+card C token quantification). Implementation: fold moved to
+`apps/bench-runner/src/harness/token-economy.ts`, LoCoMo runner wired,
+`assertBenchTokenEconomyContract` gate added across both runners. Verified: a LoCoMo
+run now emits `token_saved_ratio_vs_full_prompt=0.9958` + `raw_history_tokens=50890`
+(`seed_event_count=1451`) in `kpi.json`.
+
+**Context**: `token_saved_ratio_vs_full_prompt` (savings vs a no-memory full-history
+re-read) was computed for LongMemEval only — its seed path emits the
+`bench_full_turn_content` marker on `SOUL_SIGNAL_EMITTED`, which `deriveBenchTokenMetrics`
+folds into `raw_history_tokens`. The fold now lives at harness level
+(`apps/bench-runner/src/harness/token-economy.ts`). LoCoMo seeds through the same
+`workspace.proposeMemory` helper, which already stamped the marker (no-creds shape:
+`bench_seed` + `excerpt`); the gap was that the LoCoMo runner never read it back. The
+token-economy savings metric is now a harness-level contract every integrated benchmark
+satisfies (including future ones), not a LongMemEval-only path.
+
+**Why deferred (not hidden debt)**: the LongMemEval savings number (~99.98%) is real and
+the instrumentation exists; this is extending the same marker/derive contract to LoCoMo
+and generalizing it so cross-benchmark token economy is uniformly measurable.
+
+**Close condition**: the LoCoMo seed path emits a full-turn-content baseline marker (or
+equivalent), `token_saved_ratio_vs_full_prompt` + `raw_history_tokens` appear in LoCoMo
+`kpi.json`, and savings-ratio is documented + harness-checked as a required output for any
+newly integrated benchmark (a benchmark omitting it should fail the check).
+
+**Harness contract**: `assertBenchTokenEconomyContract`
+(`apps/bench-runner/src/harness/token-economy.ts`) is called by every runner
+(longmemeval + locomo + multiturn/recall-eval/crossquestion) before writing `kpi.json`.
+It throws when a run seeded turns (`seed_event_count > 0`) yet folded to
+`raw_history_tokens === 0` — i.e. the seed path emitted no full-turn marker, so the
+savings ratio cannot be derived. A run that seeds nothing is exempt (no history to save
+against). Any newly integrated benchmark inherits the check the moment its runner calls
+the shared fold + gate.
 
 (The broader backlog-as-authoritative-deferral-list rebuild is tracked as D-BACKLOG in
 `.do-it/plans/v0.3.11-completion-masterplan.md`, to be done at Phase G closeout.)

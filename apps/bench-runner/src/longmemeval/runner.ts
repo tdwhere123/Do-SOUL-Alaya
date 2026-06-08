@@ -41,7 +41,10 @@ import {
   type BenchWorkspaceHandle
 } from "../harness/daemon.js";
 import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
-import { aggregateBenchTokenMetrics } from "./token-economy.js";
+import {
+  aggregateBenchTokenMetrics,
+  assertBenchTokenEconomyContract
+} from "../harness/token-economy.js";
 import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
@@ -866,6 +869,9 @@ export async function runLongMemEval(
   // Event-sourced token economy: aggregate the per-question EventLog-derived
   // figures into one run total, then derive the headline saved ratio.
   const tokenEconomyInput = aggregateBenchTokenMetrics(tokenMetricsPerQuestion);
+  // Harness-level contract: a seeded run with no full-turn marker fails closed.
+  // see also: apps/bench-runner/src/harness/token-economy.ts assertBenchTokenEconomyContract
+  assertBenchTokenEconomyContract("public", tokenEconomyInput);
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
   // Per-recall STRUCTURAL token-economy distribution (p50/p95/mean

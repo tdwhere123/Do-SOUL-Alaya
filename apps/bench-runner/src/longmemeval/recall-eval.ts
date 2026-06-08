@@ -33,7 +33,10 @@ import {
   type BenchTokenMetrics,
   type BenchWorkspaceHandle
 } from "../harness/daemon.js";
-import { aggregateBenchTokenMetrics } from "./token-economy.js";
+import {
+  aggregateBenchTokenMetrics,
+  assertBenchTokenEconomyContract
+} from "../harness/token-economy.js";
 import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
@@ -438,6 +441,8 @@ function assembleRecallEvalKpi(input: {
   const latencyP95 = computePercentile(latencies, 95);
 
   const tokenEconomyInput = aggregateBenchTokenMetrics(tokenMetricsPerQuestion);
+  // see also: apps/bench-runner/src/harness/token-economy.ts assertBenchTokenEconomyContract
+  assertBenchTokenEconomyContract("public", tokenEconomyInput);
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
   const recallTokenEconomy = aggregateRecallTokenEconomy(recallTokenEconomySamples);

@@ -5,7 +5,7 @@ import { z } from "zod";
  * K3.2 (edge_proposal_rate) and K3.4 (edge_proposal_auto_accept).
  *
  * The fold is structurally identical to the token-economy reader pattern
- * in apps/bench-runner/src/longmemeval/token-economy.ts: it accepts plain
+ * in apps/bench-runner/src/harness/token-economy.ts: it accepts plain
  * EventLog row shapes (event_type / workspace_id / created_at /
  * payload_json) so a unit test can stub them without standing up the
  * full storage layer. The bench-runner wires real EventLog rows into the

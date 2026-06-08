@@ -65,7 +65,7 @@ import type {
   BenchEmbeddingProviderKind,
   BenchTokenMetrics
 } from "./harness/daemon.js";
-import { aggregateBenchTokenMetrics } from "./longmemeval/token-economy.js";
+import { aggregateBenchTokenMetrics } from "./harness/token-economy.js";
 import type { LongMemEvalVariant } from "./longmemeval/dataset.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
