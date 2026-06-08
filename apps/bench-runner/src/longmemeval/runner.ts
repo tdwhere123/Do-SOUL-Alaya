@@ -377,6 +377,11 @@ export async function runLongMemEval(
       let seedCharsClipped = 0;
 
       let seedIndex = 0;
+      // anchor: question-level coherence members. Collects every seeded
+      // memory_entry id + its session across ALL sessions, for the
+      // experimental ingestion-time coheres_with crystallization
+      // (ALAYA_EXP_COHERENCE_EDGES) — cross-session pairs need the full set.
+      const coherenceMembers: { memoryId: string; sessionId: string }[] = [];
       for (let si = 0; si < question.haystack_sessions.length; si++) {
         const session = question.haystack_sessions[si];
         const sessionId = question.haystack_session_ids[si] ?? `session-${si}`;
@@ -443,6 +448,7 @@ export async function runLongMemEval(
               evidenceId: seed.evidenceId
             });
             sessionMemberMemoryIds.push(seed.memoryId);
+            coherenceMembers.push({ memoryId: seed.memoryId, sessionId });
           }
           // invariant: single-id D-1 fan-out. see also:
           //   apps/bench-runner/src/longmemeval/compile-seed.ts computeNextTurnSeedRefs
@@ -493,6 +499,31 @@ export async function runLongMemEval(
           ? await workspace.warmQueryEmbeddingCache([question.question])
           : null;
       phase.record("embedding_warmup", tEmbeddingWarmup);
+
+      // EXPERIMENT (design S, ALAYA_EXP_COHERENCE_EDGES): ingestion-time
+      // coheres_with crystallization. After embedding vectors are warm,
+      // crystallize a SPARSE set of cross-session high-cosine edges (co_recalled
+      // carrier prototype) so path_expansion can bridge paraphrased
+      // cross-session gold. Default OFF => bit-identical. Reverted before merge
+      // unless positive on K1.1 AND K4.
+      if (
+        opts.embeddingMode === "env" &&
+        process.env.ALAYA_EXP_COHERENCE_EDGES === "1"
+      ) {
+        const coherenceSummary = await workspace.accrueCoherenceCoRecall(
+          coherenceMembers,
+          {
+            floor: Number(process.env.ALAYA_EXP_COHERENCE_FLOOR ?? "0.6"),
+            capPerNode: Number(process.env.ALAYA_EXP_COHERENCE_CAP ?? "3"),
+            crossSessionOnly: process.env.ALAYA_EXP_COHERENCE_XSESSION !== "0"
+          }
+        );
+        console.error(
+          `[coherence-edges] q=${question.question_id} ` +
+            `coherent=${coherenceSummary.coherentPairs} ` +
+            `kept=${coherenceSummary.keptPairs} minted=${coherenceSummary.minted}`
+        );
+      }
 
       const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
 

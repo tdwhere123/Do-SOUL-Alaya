@@ -40,7 +40,7 @@ import {
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
-import { PATH_RELATION_PROPOSE_THRESHOLD } from "@do-soul/alaya-core";
+import { CoherenceEdgeProducerService, PATH_RELATION_PROPOSE_THRESHOLD } from "@do-soul/alaya-core";
 import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
 import {
   planSessionCoRecallWarmup,
@@ -568,6 +568,38 @@ export interface BenchDaemonHandle {
     memberMemoryIds: readonly string[]
   ): Promise<CoRecallWarmupSummary>;
   /**
+   * @anchor accrueCoherenceCoRecall — EXPERIMENT (design S): ingestion-time
+   * coheres_with crystallization (ALAYA_EXP_COHERENCE_EDGES).
+   *
+   * After embedding vectors are warm, crystallizes a SPARSE set of
+   * embedding-coherent edges among the question's seeded memory_entry ids by
+   * driving the SAME production counter gate as accrueSessionCoRecall
+   * (onCoUsage -> co_recalled carrier). Unlike session co-recall, pairs are
+   * selected by OBJECT-vs-OBJECT cosine (>= floor) — the gold-blind coherence
+   * signal — and (by default) restricted to CROSS-SESSION pairs, so
+   * path_expansion can bridge paraphrased cross-session gold the lexical/
+   * adjacency topology cannot reach. Sparsified by a per-node cap so the
+   * topology stays few-and-high-quality, not a dense vector graph.
+   *
+   * This is the prototype carrier for a future first-class coheres_with edge
+   * kind; recall-side behavior (attention_only, recall_bias +0.5, born-weak)
+   * is identical, so the KPI faithfully measures the mechanism.
+   *
+   * see also: packages/core/src/embedding-recall-service.ts coherentPairKeys
+   */
+  accrueCoherenceCoRecall(
+    members: readonly { readonly memoryId: string; readonly sessionId: string }[],
+    options: {
+      readonly floor: number;
+      readonly capPerNode: number;
+      readonly crossSessionOnly: boolean;
+    }
+  ): Promise<{
+    readonly coherentPairs: number;
+    readonly keptPairs: number;
+    readonly minted: number;
+  }>;
+  /**
    * @anchor queryTokenMetrics — event-sourced token-economy reader.
    *
    * Re-reads the bench run's EventLog (the SAME read pattern as
@@ -627,6 +659,7 @@ export interface BenchWorkspaceHandle {
   proposeMemoriesFromCompileSignals: BenchDaemonHandle["proposeMemoriesFromCompileSignals"];
   proposeSynthesis: BenchDaemonHandle["proposeSynthesis"];
   accrueSessionCoRecall: BenchDaemonHandle["accrueSessionCoRecall"];
+  accrueCoherenceCoRecall: BenchDaemonHandle["accrueCoherenceCoRecall"];
   queryTokenMetrics: BenchDaemonHandle["queryTokenMetrics"];
   queryEdgeProposalKpiRows: BenchDaemonHandle["queryEdgeProposalKpiRows"];
   detach(): Promise<void>;
@@ -1730,6 +1763,41 @@ export async function startBenchDaemon(
     };
   }
 
+  // EXPERIMENT (design S): ingestion-time coheres_with crystallization.
+  // see also: BenchDaemonHandle.accrueCoherenceCoRecall (doc/anchor)
+  async function accrueCoherenceCoRecall(
+    members: readonly { readonly memoryId: string; readonly sessionId: string }[],
+    options: {
+      readonly floor: number;
+      readonly capPerNode: number;
+      readonly crossSessionOnly: boolean;
+    }
+  ): Promise<{
+    readonly coherentPairs: number;
+    readonly keptPairs: number;
+    readonly minted: number;
+  }> {
+    const embeddingRecallService = activeRuntime.services.embeddingRecallService;
+    if (embeddingRecallService === undefined || members.length < 2) {
+      return { coherentPairs: 0, keptPairs: 0, minted: 0 };
+    }
+    // Crystallize via the shared production service: same coherentPairKeys signal,
+    // sparsification, and submitCandidate(coheres_with) mint the prod hook will use.
+    const producer = new CoherenceEdgeProducerService({
+      pairSource: embeddingRecallService,
+      mintPort: activeRuntime.services.pathRelationProposalService,
+      warn: (message, meta) => console.error(`[coherence] ${message}`, meta)
+    });
+    return producer.crystallize({
+      workspaceId: activeContext.workspaceId,
+      runId: activeContext.runId,
+      objects: members.map((m) => ({ objectId: m.memoryId, sessionId: m.sessionId })),
+      floor: options.floor,
+      capPerNode: options.capPerNode,
+      crossSessionOnly: options.crossSessionOnly
+    });
+  }
+
   async function shutdown(): Promise<void> {
     try {
       await closeBenchDaemonResources({
@@ -1816,6 +1884,7 @@ export async function startBenchDaemon(
       proposeMemoriesFromCompileSignals,
       proposeSynthesis,
       accrueSessionCoRecall,
+      accrueCoherenceCoRecall,
       queryTokenMetrics: () => queryTokenMetrics(dataDir, input.workspaceId),
       queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir, input.workspaceId),
       detach: async () => {
@@ -1853,6 +1922,7 @@ export async function startBenchDaemon(
     proposeMemoriesFromCompileSignals,
     proposeSynthesis,
     accrueSessionCoRecall,
+    accrueCoherenceCoRecall,
     queryTokenMetrics: () => queryTokenMetrics(dataDir, activeContext.workspaceId),
     queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir, activeContext.workspaceId),
     attachWorkspace,

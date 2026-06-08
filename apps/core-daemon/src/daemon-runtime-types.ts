@@ -61,7 +61,10 @@ export interface AlayaDaemonRuntimeServices {
   }>;
   readonly environmentStatusService: EnvironmentStatusService;
   readonly embeddingStatusService: EmbeddingStatusService;
-  readonly embeddingRecallService?: Pick<EmbeddingRecallService, "warmQueryEmbeddings">;
+  readonly embeddingRecallService?: Pick<
+    EmbeddingRecallService,
+    "warmQueryEmbeddings" | "coherentPairKeys"
+  >;
   readonly graphHealthService: GraphHealthService;
   readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig">;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;

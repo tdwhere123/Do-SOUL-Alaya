@@ -72,6 +72,7 @@ import {
   TaskSurfaceBuilder,
   ToolSpecService,
   ZeroDaySecurityLayer,
+  CoherenceEdgeProducerService,
   rebuildCountersFromEventLog,
   warmCjkSegmentation,
   type ConversationServiceDependencies,
@@ -1521,6 +1522,18 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     ...gardenBackgroundDataPorts,
     dormantDemotionPort: auditedDormantDemotionPort
   };
+  // Coheres_with crystallization (design S): built only when embedding is on, so
+  // embedding-off behavior is unchanged.
+  const COHERENCE_CRYSTALLIZE_FLOOR = 0.6;
+  const COHERENCE_CRYSTALLIZE_CAP_PER_NODE = 3;
+  const coherenceCrystallizer =
+    embeddingRecallService === undefined
+      ? undefined
+      : new CoherenceEdgeProducerService({
+          pairSource: embeddingRecallService,
+          mintPort: pathRelationProposalService,
+          warn: (message: string, meta: Record<string, unknown>) => console.warn(message, meta)
+        });
   const gardenRuntime = createGardenRuntime({
     databaseConnection: database.connection,
     backlogThresholds: gardenBacklogThresholds,
@@ -1587,6 +1600,25 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       }
     },
     enrichEdgeProducerPort: edgeAutoProducerService,
+    ...(coherenceCrystallizer === undefined
+      ? {}
+      : {
+          coherenceEdgeProducerPort: {
+            crystallizeForBackfill: (params: {
+              readonly workspaceId: string;
+              readonly runId: string | null;
+              readonly objectIds: readonly string[];
+            }) =>
+              coherenceCrystallizer.crystallize({
+                workspaceId: params.workspaceId,
+                runId: params.runId,
+                objects: params.objectIds.map((objectId) => ({ objectId, sessionId: null })),
+                floor: COHERENCE_CRYSTALLIZE_FLOOR,
+                capPerNode: COHERENCE_CRYSTALLIZE_CAP_PER_NODE,
+                crossSessionOnly: false
+              })
+          }
+        }),
     ...(conflictDetectionService === null
       ? {}
       : { enrichConflictDetectionPort: conflictDetectionService }),

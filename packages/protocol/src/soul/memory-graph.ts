@@ -161,8 +161,8 @@ export const GraphNeighborSchema = z
 // / recalls / supersedes / contradicts / incompatible_with / exception_to,
 // minted by edge-proposal accept and conflict detection) project to
 // themselves; auto-build associative kinds (co_recalled / shares_entity /
-// signal_graph_ref) project to `recalls`, the associative default. This is
-// a display projection only — it never feeds recall scoring.
+// signal_graph_ref / coheres_with) project to `recalls`, the associative
+// default. This is a display projection only — it never feeds recall scoring.
 // see also: path-relation-proposal-service.ts seed-profile catalog.
 const RELATION_KIND_TO_GRAPH_EDGE_TYPE: Readonly<Record<string, MemoryGraphEdgeTypeValue>> = Object.freeze({
   supports: "supports",
@@ -174,7 +174,8 @@ const RELATION_KIND_TO_GRAPH_EDGE_TYPE: Readonly<Record<string, MemoryGraphEdgeT
   exception_to: "exception_to",
   co_recalled: "recalls",
   shares_entity: "recalls",
-  signal_graph_ref: "recalls"
+  signal_graph_ref: "recalls",
+  coheres_with: "recalls"
 });
 
 export function mapRelationKindToGraphEdgeType(relationKind: string): MemoryGraphEdgeTypeValue {

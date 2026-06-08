@@ -3,6 +3,7 @@ export * from "./auditor-scheduling-advisor.js";
 export * from "./budget-bankruptcy-service.js";
 export * from "./canonical-alias-service.js";
 export * from "./claim-service.js";
+export * from "./coherence-edge-producer-service.js";
 export * from "./constitutional-fragment-service.js";
 export * from "./constraint-proxy.js";
 export * from "./context-lens-assembler.js";

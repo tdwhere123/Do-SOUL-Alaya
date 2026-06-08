@@ -390,6 +390,16 @@ interface BulkEnrichEdgeProducerPort {
   }): Promise<void>;
 }
 
+// Crystallize coheres_with edges among the objects a backfill pass just embedded
+// (design S). Fail-soft: a throw must never block backfill completion.
+interface BulkEmbeddingCoherencePort {
+  crystallizeForBackfill(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly objectIds: readonly string[];
+  }): Promise<{ readonly minted: number }>;
+}
+
 interface BulkEnrichSourceSignalLookupPort {
   getById(signalId: string): Promise<CandidateMemorySignal | null>;
 }
@@ -459,6 +469,9 @@ export function createGardenRuntime(input: {
   readonly pathPlasticityWatermarkRepo?: PathPlasticityWatermarkRepo;
   readonly pathPlasticityService?: Pick<PathPlasticityService, "computeAndApplyPlasticity">;
   readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
+  // When wired, a backfill pass crystallizes coheres_with edges among the objects
+  // it just embedded (design S). Optional + fail-soft, like the enrich ports.
+  readonly coherenceEdgeProducerPort?: BulkEmbeddingCoherencePort;
   readonly configService?: {
     getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;
     getSoulConfig?(workspaceId: string): Promise<SoulConfig>;
@@ -1103,6 +1116,23 @@ export function createGardenRuntime(input: {
               auditEntries: ["embedding_backfill_skipped:handler_unconfigured"] as readonly string[]
             }
           : await input.embeddingBackfillHandler.handle(task);
+
+      // Formation-side coheres_with crystallization over the just-embedded objects
+      // (design S). Fail-soft: coherence is supplementary, never blocks backfill.
+      if (input.coherenceEdgeProducerPort !== undefined && result.objectsAffected.length >= 2) {
+        try {
+          await input.coherenceEdgeProducerPort.crystallizeForBackfill({
+            workspaceId: task.workspace_id,
+            runId: null,
+            objectIds: result.objectsAffected
+          });
+        } catch (coherenceError) {
+          warn("coherence crystallization failed after embedding backfill", {
+            workspace_id: task.workspace_id,
+            error: coherenceError instanceof Error ? coherenceError.message : String(coherenceError)
+          });
+        }
+      }
 
       await gardenScheduler.reportCompletion({
         task_id: task.task_id,

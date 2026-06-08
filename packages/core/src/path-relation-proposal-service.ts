@@ -136,6 +136,19 @@ export const SIGNAL_GRAPH_REF_SEED_PROFILE: PathSeedProfile = Object.freeze({
   evidenceBasis: Object.freeze(["signal_graph_reference"]) as readonly string[]
 });
 
+// Embedding-coherence edge, crystallized at formation from object↔object cosine
+// (design S), not earned via co-recall. Own evidence_basis keeps provenance
+// auditable; hint_only = biases recall only, never decides truth (§18). Projects
+// to the recalls tier for scoring. see also: coherence-edge-producer-service.ts.
+export const COHERES_WITH_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "coheres_with",
+  initialStrength: 0.3,
+  governanceClass: "hint_only",
+  recallBiasSign: 1,
+  recallBiasMagnitude: 0.5,
+  evidenceBasis: Object.freeze(["embedding_cosine_coherence"]) as readonly string[]
+});
+
 // Neutral marker family. recall_bias is exactly 0: exception_to records a
 // scoped-exception edge in the topology without biasing recall up or down.
 // Carries evidence_basis >= 1 and governance recall_allowed like the
