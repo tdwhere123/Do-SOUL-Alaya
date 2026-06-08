@@ -6,7 +6,7 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-057` (`#BL-022` was opened by
+sequence. **Next available number**: `#BL-058` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
@@ -233,6 +233,32 @@ It throws when a run seeded turns (`seed_event_count > 0`) yet folded to
 savings ratio cannot be derived. A run that seeds nothing is exempt (no history to save
 against). Any newly integrated benchmark inherits the check the moment its runner calls
 the shared fold + gate.
+
+### #BL-057 — Warm-workspace witness for base-weight recall priors
+
+**Status**: Open (opened v0.3.11, 2026-06-09; residual from the B2 fusion-prior
+correction, flagged by the B2 reviewer pass as Important I1).
+
+**Context**: B2 subordinated two non-evidence fusion streams to base weight in
+`RECALL_FUSION_DEFAULT_WEIGHTS` (`existing_score` 8→1, removing a stream+tiebreaker
+double-count; `synthesis_fts` 8→1, matching its own "inert for delivery" contract).
+The activation/confidence prior reaches fused ranking ONLY via
+`existing_score`/`effectiveScore` (the `workspace_activation` stream is weight 0), so a
+pure high-activation memory with ZERO query evidence (no lexical / embedding / structural
+/ graph) is now intentionally subordinated rather than surfaced by the prior. The bench
+seeds offline-fallback cold, so a true warm-workspace A/B is not covered.
+
+**Why deferred (not hidden debt)**: subordinating a zero-relevance prior is the intended
+design (a prior amplifies evidence, it does not substitute for it). The realistic warm
+case — a high-activation gold that also carries any evidence, including embedding — is
+covered by the embedding-ON positive-on-both bench (s126 R@5 +3.1 / K4 +1.7 / s0 flat)
+plus a unit witness that the prior still discriminates by activation on equal evidence
+(`recall-8factor.test.ts`, warmer-twin-ranks-ahead). A warm-seeding A/B harness does not
+exist (same constraint that defers the R5 gate / #BL-052).
+
+**Close condition**: a warm-seeding A/B (or a high-activation / low-lexical gold delivery
+test) confirms no warm recall regression from the base-weight priors; or a written
+"warm-neutral on real corpus" verdict is recorded against the R5 archive.
 
 (The broader backlog-as-authoritative-deferral-list rebuild is tracked as D-BACKLOG in
 `.do-it/plans/v0.3.11-completion-masterplan.md`, to be done at Phase G closeout.)

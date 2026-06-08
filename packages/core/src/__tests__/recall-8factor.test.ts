@@ -491,6 +491,38 @@ describe("RecallService 8-factor scoring", () => {
     expect(withTransfer.candidates[0]?.score_factors?.weighted_query_evidence_transfer).toBeCloseTo(0.25);
   });
 
+  // Warm-regression witness for base-weight existing_score: with identical query
+  // evidence, the warmer (higher-activation) memory still ranks ahead — the prior
+  // keeps its tiebreak discrimination at base weight, it is not silenced.
+  it("ranks a warmer memory ahead of an identical-evidence colder twin under base-weight existing_score", async () => {
+    const memories = [
+      createMemoryEntry({ object_id: "cold-twin", content: "Shared evidence needle", activation_score: 0.3, confidence: 0.9 }),
+      createMemoryEntry({ object_id: "warm-twin", content: "Shared evidence needle", activation_score: 1, confidence: 0.9 })
+    ];
+    const { dependencies, searchByKeyword } = createDependencies(
+      memories,
+      [],
+      {},
+      {
+        graphSupportByMemoryId: { "cold-twin": 0, "warm-twin": 0 },
+        recallsEdgeCountByMemoryId: { "cold-twin": 50, "warm-twin": 50 }
+      }
+    );
+    searchByKeyword.mockResolvedValue([
+      { object_id: "cold-twin", normalized_rank: 1 },
+      { object_id: "warm-twin", normalized_rank: 1 }
+    ]);
+    const service = new RecallService(dependencies);
+    const taskSurface = createTaskSurface("needle");
+    const result = await service.recall({
+      taskSurface,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build"
+    });
+    expect(result.candidates[0]?.object_id).toBe("warm-twin");
+  });
+
   it("keeps weak or absent evidence below false-confident recall confidence", async () => {
     const { dependencies: noEvidenceDependencies, searchByKeyword: noEvidenceSearch } = createDependencies([
       createMemoryEntry({

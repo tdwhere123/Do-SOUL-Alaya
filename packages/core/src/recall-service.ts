@@ -312,19 +312,18 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   // trigram_fts rescues substring / spelling-variant / CJK matches the
   // word-level lexical lane misses.
   trigram_fts: 1,
-  // synthesis_fts no longer drives cross-kind fusion: a synthesis candidate
-  // cannot out-RRF a multi-stream memory_entry, so delivery is handled by
-  // reserveSynthesisDeliverySlots, not this weight. The weight is retained
-  // only to rank synthesis rows among themselves; its value is inert for
-  // delivery. see also: reserveSynthesisDeliverySlots.
-  synthesis_fts: 8,
+  // synthesis_fts ranks synthesis rows among themselves only; base weight keeps it
+  // from out-RRF-ing a multi-stream memory_entry. Delivery: reserveSynthesisDeliverySlots.
+  synthesis_fts: 1,
   evidence_fts: 3,
   evidence_structural_agreement: 6,
   source_proximity: 1,
   source_evidence_agreement: 1,
   subject_alignment: 1,
   structural: 1,
-  existing_score: 8,
+  // existing_score is a carried-forward prior (effectiveScore), not query evidence;
+  // base weight nudges — its tiebreak role lives in the final ranked.sort, not here.
+  existing_score: 1,
   embedding_similarity: 1,
   graph_expansion: 3,
   // anchor: entity_seed parity with lexical_fts so entity-bearing memories
@@ -4209,9 +4208,9 @@ const STRUCTURAL_FUSION_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
 // structural, existing_score, temporal_recency, and workspace_activation are
 // EXCLUDED from both sides as neutral: "structural" is the generic
 // structuralScore carried by several admission planes (so it is neither pure
-// topology nor lexical); existing_score is the baseline effectiveScore carried
-// by every admitted candidate (weight 8, see RECALL_FUSION_DEFAULT_WEIGHTS) so
-// it would swamp the topology term for genuine structural golds too;
+// topology nor lexical); existing_score is the baseline effectiveScore carried by
+// every admitted candidate (a dense base-weight prior whose discriminating role is
+// the final-sort tiebreak), so it is a neutral baseline, not a lexical-lane discriminator;
 // temporal_recency and workspace_activation carry weight 0. Excluding the
 // neutral lanes makes the dominance test "graph/path topology streams vs
 // lexical-lane streams", which is exactly the filler-vs-gold discriminator.
