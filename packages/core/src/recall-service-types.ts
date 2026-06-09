@@ -410,6 +410,17 @@ export interface RecallCandidateDiagnostic {
   readonly score_factors: Readonly<RecallScoreFactors>;
   readonly source_channels: readonly string[];
   readonly path_expansion_sources: readonly RecallPathExpansionSourceDiagnostic[];
+  // Per-stage delivery rank trajectory through fineAssess (1-based). Lets
+  // diagnostics see WHERE a candidate fell out of the top-k delivery window:
+  // natural fusion ordering vs feature rerank vs lexical priority vs a reserve
+  // displacing it. reserved_by names the stage that pulled THIS candidate into
+  // the window. Optional — provenance only, never feeds ranking.
+  readonly rank_after_fusion?: number;
+  readonly rank_after_feature_rerank?: number;
+  readonly rank_after_lexical_priority?: number;
+  readonly rank_after_synthesis_reserve?: number;
+  readonly rank_after_structural_reserve?: number;
+  readonly reserved_by?: "none" | "synthesis" | "structural";
 }
 
 export interface RecallPathExpansionSourceDiagnostic {
@@ -418,6 +429,12 @@ export interface RecallPathExpansionSourceDiagnostic {
   readonly seed_kind: "memory" | "time_concern";
   readonly target_object_id: string;
   readonly source_channel: "path_expansion" | "time_concern";
+  // Which relation carried the candidate (constitution.relation_kind) and, when
+  // the path is anchored on a specific object facet, which facet_key fired.
+  // Provenance only — lets diagnostics attribute gold delivery to a relation/
+  // facet instead of a flat "path_expansion" stream label.
+  readonly relation_kind: string;
+  readonly facet_key: string | null;
 }
 
 // invariant: per-recall token economy is measure-only instrumentation.

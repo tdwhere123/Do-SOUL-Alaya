@@ -2086,7 +2086,9 @@ export class RecallService {
             seed_id: target.seedId,
             seed_kind: "memory",
             target_object_id: target.targetId,
-            source_channel: "path_expansion"
+            source_channel: "path_expansion",
+            relation_kind: path.constitution.relation_kind,
+            facet_key: pathAnchorFacetKey(path)
           },
           undefined,
           reachedViaEarnedCoRecalledFanin
@@ -2159,7 +2161,9 @@ export class RecallService {
             seed_id: firstTimeConcernSeedId(path, windowDigests),
             seed_kind: "time_concern",
             target_object_id: targetId,
-            source_channel: "time_concern"
+            source_channel: "time_concern",
+            relation_kind: path.constitution.relation_kind,
+            facet_key: pathAnchorFacetKey(path)
           }
         );
         added += 1;
@@ -3249,16 +3253,35 @@ export class RecallService {
       supplementaryData,
       config.budgets.max_entries
     );
+    const synthesisReservedCandidates = reserveSynthesisDeliverySlots(
+      prioritizedCandidates,
+      supplementaryData,
+      config.budgets.max_entries
+    );
     const deliveryOrderedCandidates = reserveStructuralDeliverySlots(
-      reserveSynthesisDeliverySlots(
-        prioritizedCandidates,
-        supplementaryData,
-        config.budgets.max_entries
-      ),
+      synthesisReservedCandidates,
       supplementaryData,
       config.budgets.max_entries,
       synthesisReserveCount(prioritizedCandidates, config.budgets.max_entries)
     );
+
+    // Per-stage delivery-rank capture (1-based). Each fineAssess stage reorders
+    // the full set without dropping, so a candidate's index per stage shows the
+    // step at which it left the top-k window. Diagnostic-only.
+    const buildStageRankMap = (
+      ordered: readonly Readonly<CoarseRecallCandidate>[]
+    ): ReadonlyMap<string, number> => {
+      const ranks = new Map<string, number>();
+      ordered.forEach((item, index) => {
+        ranks.set(buildRecallCandidateDedupeKey(item), index + 1);
+      });
+      return ranks;
+    };
+    const rankAfterFusion = buildStageRankMap(rankedCandidates);
+    const rankAfterFeatureRerank = buildStageRankMap(featureRerankedCandidates);
+    const rankAfterLexicalPriority = buildStageRankMap(prioritizedCandidates);
+    const rankAfterSynthesisReserve = buildStageRankMap(synthesisReservedCandidates);
+    const rankAfterStructuralReserve = buildStageRankMap(deliveryOrderedCandidates);
 
     type FineAssessmentAccumulator = {
       readonly selected: readonly Readonly<RecallCandidate>[];
@@ -3299,6 +3322,20 @@ export class RecallService {
           admissionPlanes,
           candidate.firstAdmissionPlane
         );
+        const maxEntries = config.budgets.max_entries;
+        const rankAfterLex = rankAfterLexicalPriority.get(candidateKey);
+        const rankAfterSyn = rankAfterSynthesisReserve.get(candidateKey);
+        const rankAfterStruct = rankAfterStructuralReserve.get(candidateKey);
+        // A candidate is "reserved" by the stage that first pulled it inside the
+        // top-k window it was outside of after lexical priority.
+        const reservedBy: "none" | "synthesis" | "structural" =
+          rankAfterSyn !== undefined && rankAfterSyn <= maxEntries &&
+          (rankAfterLex === undefined || rankAfterLex > maxEntries)
+            ? "synthesis"
+            : rankAfterStruct !== undefined && rankAfterStruct <= maxEntries &&
+              (rankAfterSyn === undefined || rankAfterSyn > maxEntries)
+              ? "structural"
+              : "none";
         return Object.freeze({
           candidate_key: candidateKey,
           object_id: entry.object_id,
@@ -3329,7 +3366,13 @@ export class RecallService {
             ...((scoreFactors.embedding_similarity ?? 0) > 0 ? ["semantic_supplement"] : []),
             ...(admissionPlanes).map((plane) => `plane:${plane}`)
           ].filter((channel) => channel.length > 0))),
-          path_expansion_sources: Object.freeze([...(candidate.pathExpansionSources ?? [])])
+          path_expansion_sources: Object.freeze([...(candidate.pathExpansionSources ?? [])]),
+          rank_after_fusion: rankAfterFusion.get(candidateKey),
+          rank_after_feature_rerank: rankAfterFeatureRerank.get(candidateKey),
+          rank_after_lexical_priority: rankAfterLex,
+          rank_after_synthesis_reserve: rankAfterSyn,
+          rank_after_structural_reserve: rankAfterStruct,
+          reserved_by: reservedBy
         });
       };
 
@@ -5645,6 +5688,16 @@ function pathRelationMemoryIds(path: Readonly<PathRelation>): readonly string[] 
     anchorMemoryId(path.anchors.source_anchor),
     anchorMemoryId(path.anchors.target_anchor)
   ].filter((value): value is string => value !== undefined));
+}
+
+// Provenance helper: the facet_key the path is anchored on, if either endpoint
+// is an object_facet anchor (source preferred — it is the matched side). null
+// for plain object/obligation/risk/time anchors.
+function pathAnchorFacetKey(path: Readonly<PathRelation>): string | null {
+  const { source_anchor, target_anchor } = path.anchors;
+  if (source_anchor.kind === "object_facet") return source_anchor.facet_key;
+  if (target_anchor.kind === "object_facet") return target_anchor.facet_key;
+  return null;
 }
 
 function pathMatchesTimeConcernWindowDigest(

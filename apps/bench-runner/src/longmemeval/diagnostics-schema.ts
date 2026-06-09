@@ -93,7 +93,13 @@ export const LongMemEvalGoldDiagnosticSchema = z
     structural_score: z.number().nullable(),
     score_factors: DiagnosticScoreFactorsSchema.nullable(),
     source_channels: z.array(z.string()).readonly(),
-    budget_drop_reason: z.string().nullable()
+    budget_drop_reason: z.string().nullable(),
+    rank_after_fusion: z.number().nullable().default(null),
+    rank_after_feature_rerank: z.number().nullable().default(null),
+    rank_after_lexical_priority: z.number().nullable().default(null),
+    rank_after_synthesis_reserve: z.number().nullable().default(null),
+    rank_after_structural_reserve: z.number().nullable().default(null),
+    reserved_by: z.string().nullable().default(null)
   })
   .readonly();
 

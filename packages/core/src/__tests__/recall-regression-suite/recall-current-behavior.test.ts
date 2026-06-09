@@ -105,7 +105,9 @@ describe("recall regression suite", () => {
         seed_id: "seed",
         seed_kind: "memory",
         target_object_id: "linked",
-        source_channel: "path_expansion"
+        source_channel: "path_expansion",
+        relation_kind: "co_usage",
+        facet_key: null
       }
     ]);
   });

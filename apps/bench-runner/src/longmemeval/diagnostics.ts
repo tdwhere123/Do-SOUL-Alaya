@@ -219,6 +219,12 @@ interface CandidateDiagnostic {
   readonly scoreFactors: DiagnosticScoreFactors | null;
   readonly sourceChannels: readonly string[];
   readonly budgetDropReason: string | null;
+  readonly rankAfterFusion: number | null;
+  readonly rankAfterFeatureRerank: number | null;
+  readonly rankAfterLexicalPriority: number | null;
+  readonly rankAfterSynthesisReserve: number | null;
+  readonly rankAfterStructuralReserve: number | null;
+  readonly reservedBy: string | null;
 }
 
 interface ReadCandidateDiagnosticsResult {
@@ -341,7 +347,13 @@ export function buildQuestionDiagnostic(input: {
       structural_score: candidate?.structuralScore ?? null,
       score_factors: candidate?.scoreFactors ?? null,
       source_channels: candidate?.sourceChannels ?? [],
-      budget_drop_reason: candidate?.budgetDropReason ?? null
+      budget_drop_reason: candidate?.budgetDropReason ?? null,
+      rank_after_fusion: candidate?.rankAfterFusion ?? null,
+      rank_after_feature_rerank: candidate?.rankAfterFeatureRerank ?? null,
+      rank_after_lexical_priority: candidate?.rankAfterLexicalPriority ?? null,
+      rank_after_synthesis_reserve: candidate?.rankAfterSynthesisReserve ?? null,
+      rank_after_structural_reserve: candidate?.rankAfterStructuralReserve ?? null,
+      reserved_by: candidate?.reservedBy ?? null
     };
   });
 
@@ -492,6 +504,32 @@ export function buildLongMemEvalQualityMetrics(
   let graphFaninGoldHitAt5Count = 0;
   let pathPrimaryGoldHitAt5Count = 0;
   let graphOnlyGoldHitAt5Count = 0;
+  // @anchor longmemeval-gold-rank-buckets: best-gold rank distribution over
+  // answerable questions (abstention + no-gold excluded). MECE — every
+  // counted question lands in exactly one bucket.
+  const goldRankBuckets = {
+    delivered_top5: 0,
+    pre_budget_6_10: 0,
+    pre_budget_11_25: 0,
+    pre_budget_26_50: 0,
+    pre_budget_51_100: 0,
+    pre_budget_gt_100: 0,
+    candidate_absent: 0
+  };
+  // @anchor longmemeval-top-distractor-breakdown / object-kind-delivery
+  const topDistractorBreakdown = {
+    existing_score_dominant: 0,
+    synthesis_reserved: 0,
+    source_proximity_local_only: 0,
+    path_or_graph_dominant: 0,
+    lexical_topic_neighbor: 0,
+    unknown: 0
+  };
+  const objectKindDelivery = {
+    memory_entry: 0,
+    synthesis_capsule: 0,
+    total_delivered: 0
+  };
 
   for (const question of diagnostics) {
     missDistribution[question.miss_classification] =
@@ -518,6 +556,12 @@ export function buildLongMemEvalQualityMetrics(
 
     for (const delivered of question.delivered_results) {
       pathStreamTop10Denominator++;
+      objectKindDelivery.total_delivered++;
+      if (delivered.object_kind === "synthesis_capsule") {
+        objectKindDelivery.synthesis_capsule++;
+      } else {
+        objectKindDelivery.memory_entry++;
+      }
       if (hasPathStreamContribution(delivered)) {
         pathStreamTop10Count++;
       }
@@ -591,6 +635,43 @@ export function buildLongMemEvalQualityMetrics(
         evidenceStreamGoldDeliveryDenominator++;
         if (hasEvidenceStreamContribution(gold)) {
           evidenceStreamGoldDeliveryCount++;
+        }
+      }
+    }
+
+    // Best-gold rank bucket: hit@5 delivers; otherwise place the best gold's
+    // pre-budget rank (fused_rank fallback) to expose rerank headroom vs a
+    // structural pool wall. Abstention/no-gold carry no gold rank.
+    if (!isAbstentionQuestionId(question.question_id) && question.gold.length > 0) {
+      if (question.hit_at_5) {
+        goldRankBuckets.delivered_top5++;
+      } else {
+        let bestRank: number | null = null;
+        for (const gold of question.gold) {
+          const rank = gold.pre_budget_rank ?? gold.fused_rank;
+          if (rank !== null && (bestRank === null || rank < bestRank)) {
+            bestRank = rank;
+          }
+        }
+        if (bestRank === null) {
+          goldRankBuckets.candidate_absent++;
+        } else if (bestRank <= 10) {
+          goldRankBuckets.pre_budget_6_10++;
+        } else if (bestRank <= 25) {
+          goldRankBuckets.pre_budget_11_25++;
+        } else if (bestRank <= 50) {
+          goldRankBuckets.pre_budget_26_50++;
+        } else if (bestRank <= 100) {
+          goldRankBuckets.pre_budget_51_100++;
+        } else {
+          goldRankBuckets.pre_budget_gt_100++;
+        }
+        // The top-5 delivered results occupy the slots the missed gold should
+        // have had. Attribute each to the stream/kind that carried it.
+        for (const delivered of question.delivered_results) {
+          if (delivered.rank <= 5) {
+            topDistractorBreakdown[classifyTopDistractor(delivered)]++;
+          }
         }
       }
     }
@@ -682,8 +763,60 @@ export function buildLongMemEvalQualityMetrics(
       false_confident_at_5: abstentionTotal - abstentionCorrectAt5,
       false_confident_at_10: abstentionTotal - abstentionCorrectAt10
     },
+    gold_rank_buckets: goldRankBuckets,
+    top_distractor_breakdown: topDistractorBreakdown,
+    object_kind_delivery: objectKindDelivery,
     miss_distribution: missDistribution
   };
+}
+
+type TopDistractorBucket =
+  | "existing_score_dominant"
+  | "synthesis_reserved"
+  | "source_proximity_local_only"
+  | "path_or_graph_dominant"
+  | "lexical_topic_neighbor"
+  | "unknown";
+
+// Attribute a top-5 distractor (a result occupying a slot a missed gold wanted)
+// to the dominant force that put it there: a synthesis reserve, the scalar
+// existing_score prior, source proximity, path/graph fan-in, or a lexical/
+// semantic topic neighbor — by its largest fused-rank stream contribution.
+function classifyTopDistractor(
+  delivered: DiagnosticRecallResult
+): TopDistractorBucket {
+  if (delivered.object_kind === "synthesis_capsule") {
+    return "synthesis_reserved";
+  }
+  const contributions = delivered.fused_rank_contribution_per_stream;
+  if (contributions === null) {
+    return "unknown";
+  }
+  let bestStream: string | null = null;
+  let bestValue = 0;
+  for (const [stream, value] of Object.entries(contributions)) {
+    if (typeof value === "number" && value > bestValue) {
+      bestValue = value;
+      bestStream = stream;
+    }
+  }
+  if (bestStream === null) {
+    return "unknown";
+  }
+  if (bestStream === "existing_score") {
+    return "existing_score_dominant";
+  }
+  if (bestStream === "source_proximity" || bestStream === "source_evidence_agreement") {
+    return "source_proximity_local_only";
+  }
+  if (
+    bestStream === "path_expansion" ||
+    bestStream === "graph_expansion" ||
+    bestStream === "entity_seed"
+  ) {
+    return "path_or_graph_dominant";
+  }
+  return "lexical_topic_neighbor";
 }
 
 function hasEvidenceStreamContribution(gold: LongMemEvalGoldDiagnostic): boolean {
@@ -1059,7 +1192,13 @@ function readCandidates(
       budgetDropReason:
         readString(record.budget_drop_reason) ??
         readString(record.drop_reason) ??
-        readString(record.dropped_reason)
+        readString(record.dropped_reason),
+      rankAfterFusion: readNumber(record.rank_after_fusion),
+      rankAfterFeatureRerank: readNumber(record.rank_after_feature_rerank),
+      rankAfterLexicalPriority: readNumber(record.rank_after_lexical_priority),
+      rankAfterSynthesisReserve: readNumber(record.rank_after_synthesis_reserve),
+      rankAfterStructuralReserve: readNumber(record.rank_after_structural_reserve),
+      reservedBy: readString(record.reserved_by)
     };
     const objectIdentityKey = buildObjectIdentityKey(candidate.objectKind, candidate.objectId);
     byCandidateKey.set(candidate.candidateKey, candidate);

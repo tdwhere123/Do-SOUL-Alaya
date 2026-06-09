@@ -251,6 +251,49 @@ const PathVsGraphFaninSchema = z
   })
   .strict();
 
+// @anchor longmemeval-gold-rank-buckets: per-answerable-question best-gold
+// rank distribution. delivered_top5 == hit@5; the pre_budget_* buckets place
+// the best gold's pre-budget rank for misses. Heavy 6-25 mass = rerank
+// headroom; heavy 100+/absent mass = pool/segment structure is the wall.
+const GoldRankBucketsSchema = z
+  .object({
+    delivered_top5: z.number().int().nonnegative(),
+    pre_budget_6_10: z.number().int().nonnegative(),
+    pre_budget_11_25: z.number().int().nonnegative(),
+    pre_budget_26_50: z.number().int().nonnegative(),
+    pre_budget_51_100: z.number().int().nonnegative(),
+    pre_budget_gt_100: z.number().int().nonnegative(),
+    candidate_absent: z.number().int().nonnegative()
+  })
+  .strict();
+
+// @anchor longmemeval-top-distractor-breakdown: for miss questions, what kind
+// of candidate occupies the top-5 slots gold should have had. existing_score /
+// synthesis-reserved dominance is direct evidence the scalar prior or a reserve
+// is beating relevant gold; lexical/path dominance points at the fusion streams.
+const TopDistractorBreakdownSchema = z
+  .object({
+    existing_score_dominant: z.number().int().nonnegative(),
+    synthesis_reserved: z.number().int().nonnegative(),
+    source_proximity_local_only: z.number().int().nonnegative(),
+    path_or_graph_dominant: z.number().int().nonnegative(),
+    lexical_topic_neighbor: z.number().int().nonnegative(),
+    unknown: z.number().int().nonnegative()
+  })
+  .strict();
+
+// @anchor longmemeval-object-kind-delivery: how often the L2 synthesis-capsule
+// apex actually reaches the delivered top-k vs flat memory_entry facts. A near-
+// zero synthesis share means the sparse apex is created at ingest but inert at
+// recall.
+const ObjectKindDeliverySchema = z
+  .object({
+    memory_entry: z.number().int().nonnegative(),
+    synthesis_capsule: z.number().int().nonnegative(),
+    total_delivered: z.number().int().nonnegative()
+  })
+  .strict();
+
 const QualityMetricsSchema = z
   .object({
     schema_version: z.literal("bench-quality-metrics.v1"),
@@ -287,6 +330,12 @@ const QualityMetricsSchema = z
     // Path-vs-graph fan-in diagnostic. Optional so pre-R2 kpi.json
     // records stay valid; new LongMemEval runs always populate it.
     path_vs_graph_fanin: PathVsGraphFaninSchema.optional(),
+    // Best-gold rank buckets. Optional so pre-R6 kpi.json records stay
+    // valid; new LongMemEval runs always populate it.
+    gold_rank_buckets: GoldRankBucketsSchema.optional(),
+    // Top-distractor attribution + apex delivery. Optional for pre-R6 records.
+    top_distractor_breakdown: TopDistractorBreakdownSchema.optional(),
+    object_kind_delivery: ObjectKindDeliverySchema.optional(),
     // @anchor longmemeval-abstention: calibrated-confidence scoring of the
     // LongMemEval-S abstention questions (`question_id` ending `_abs`).
     // Optional so pre-abstention-scoring kpi.json records stay valid; new

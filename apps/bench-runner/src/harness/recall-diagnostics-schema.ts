@@ -50,7 +50,9 @@ const RecallDiagnosticPathExpansionSourceSchema = z
     seed_id: z.string().min(1),
     seed_kind: z.enum(["memory", "time_concern"]),
     target_object_id: z.string().min(1),
-    source_channel: z.enum(["path_expansion", "time_concern"])
+    source_channel: z.enum(["path_expansion", "time_concern"]),
+    relation_kind: z.string().min(1),
+    facet_key: z.string().min(1).nullable()
   })
   .strict()
   .readonly();
@@ -78,7 +80,13 @@ const RecallCandidateDiagnosticSchema = z
     structural_score: z.number().min(0).max(1),
     score_factors: z.record(z.unknown()).readonly(),
     source_channels: z.array(z.string().min(1)).readonly(),
-    path_expansion_sources: z.array(RecallDiagnosticPathExpansionSourceSchema).readonly()
+    path_expansion_sources: z.array(RecallDiagnosticPathExpansionSourceSchema).readonly(),
+    rank_after_fusion: z.number().int().positive().optional(),
+    rank_after_feature_rerank: z.number().int().positive().optional(),
+    rank_after_lexical_priority: z.number().int().positive().optional(),
+    rank_after_synthesis_reserve: z.number().int().positive().optional(),
+    rank_after_structural_reserve: z.number().int().positive().optional(),
+    reserved_by: z.enum(["none", "synthesis", "structural"]).optional()
   })
   .strict()
   .readonly();
