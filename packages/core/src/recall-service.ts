@@ -308,7 +308,9 @@ export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
 // graph_expansion); no separate cohort stream participates in fusion.
 // see also: packages/core/src/recall-service.ts scoreRecallFusionStream
 const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
-  lexical_fts: 1,
+  // parity with evidence_fts: a distilled-content match must not rank below
+  // a raw-excerpt match of the same query.
+  lexical_fts: 3,
   // trigram_fts rescues substring / spelling-variant / CJK matches the
   // word-level lexical lane misses.
   trigram_fts: 1,
@@ -326,9 +328,9 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   existing_score: 1,
   embedding_similarity: 1,
   graph_expansion: 3,
-  // anchor: entity_seed parity with lexical_fts so entity-bearing memories
-  // can compete on the same RRF axis as direct surface-term hits without
-  // out-weighting the existing lexical lane.
+  // entity_seed sits at the floor; it is hard-zeroed when a memory also hits
+  // lexical_fts (scoreRecallFusionStream dedup), so entity-only memories rank
+  // below the lexical lane and never double-count against it.
   entity_seed: 1,
   path_expansion: 3,
   temporal_recency: 0,
