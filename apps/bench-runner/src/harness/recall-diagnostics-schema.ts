@@ -62,6 +62,7 @@ const RecallCandidateDiagnosticSchema = z
     candidate_key: z.string().min(1),
     object_id: z.string().min(1),
     object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+    dimension: z.string().min(1).optional(),
     origin_plane: z.enum(["workspace_local", "global"]),
     admission_planes: z.array(z.string().min(1)).readonly(),
     plane_first_admitted: z.string().min(1),

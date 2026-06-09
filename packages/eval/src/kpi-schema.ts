@@ -294,6 +294,17 @@ const ObjectKindDeliverySchema = z
   })
   .strict();
 
+// @anchor longmemeval-gold-facet-separation: per-miss, is the gold's dimension
+// disjoint from its top-5 distractors' (could a dimension pre-filter separate it).
+const GoldFacetSeparationSchema = z
+  .object({
+    separable: z.number().int().nonnegative(),
+    overlapping: z.number().int().nonnegative(),
+    indeterminate: z.number().int().nonnegative(),
+    gold_dimension_counts: z.record(z.number().int().nonnegative())
+  })
+  .strict();
+
 const QualityMetricsSchema = z
   .object({
     schema_version: z.literal("bench-quality-metrics.v1"),
@@ -336,6 +347,7 @@ const QualityMetricsSchema = z
     // Top-distractor attribution + apex delivery. Optional for pre-R6 records.
     top_distractor_breakdown: TopDistractorBreakdownSchema.optional(),
     object_kind_delivery: ObjectKindDeliverySchema.optional(),
+    gold_facet_separation: GoldFacetSeparationSchema.optional(),
     // @anchor longmemeval-abstention: calibrated-confidence scoring of the
     // LongMemEval-S abstention questions (`question_id` ending `_abs`).
     // Optional so pre-abstention-scoring kpi.json records stay valid; new

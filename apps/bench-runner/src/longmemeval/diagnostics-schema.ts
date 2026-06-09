@@ -44,6 +44,7 @@ export const DiagnosticRecallResultSchema = z
   .object({
     object_id: z.string(),
     object_kind: z.string().optional(),
+    dimension: z.string().nullable().default(null),
     rank: z.number(),
     relevance_score: z.number(),
     fused_rank: z.number().nullable(),
@@ -77,6 +78,7 @@ export const LongMemEvalGoldDiagnosticSchema = z
       "candidate_absent",
       "unknown"
     ]),
+    dimension: z.string().nullable().default(null),
     final_rank: z.number().nullable(),
     active_constraint_rank: z.number().nullable(),
     pre_budget_rank: z.number().nullable(),

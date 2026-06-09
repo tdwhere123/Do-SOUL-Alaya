@@ -3340,6 +3340,7 @@ export class RecallService {
           candidate_key: candidateKey,
           object_id: entry.object_id,
           object_kind: objectKind,
+          dimension: entry.dimension,
           origin_plane: originPlane,
           admission_planes: admissionPlanes,
           plane_first_admitted: candidate.firstAdmissionPlane ?? admissionPlanes[0] ?? "activation",

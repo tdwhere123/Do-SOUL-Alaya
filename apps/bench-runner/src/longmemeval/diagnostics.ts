@@ -203,6 +203,7 @@ interface CandidateDiagnostic {
   readonly candidateKey: string;
   readonly objectId: string;
   readonly objectKind: string;
+  readonly dimension: string | null;
   readonly originPlane: string;
   readonly preBudgetRank: number | null;
   readonly selectionOrder: number | null;
@@ -331,6 +332,7 @@ export function buildQuestionDiagnostic(input: {
     return {
       object_id: objectId,
       candidate_status: candidateStatus,
+      dimension: candidate?.dimension ?? null,
       final_rank: deliveredRank,
       active_constraint_rank: activeConstraintRank,
       pre_budget_rank: candidate?.preBudgetRank ?? null,
@@ -410,6 +412,7 @@ function normalizeDeliveredResults(
     return {
       object_id: result.object_id,
       ...(objectKind === "memory_entry" ? {} : { object_kind: objectKind }),
+      dimension: candidate?.dimension ?? null,
       rank: result.rank,
       relevance_score: result.relevance_score,
       fused_rank: result.fused_rank ?? candidate?.fusedRank ?? null,
@@ -530,6 +533,14 @@ export function buildLongMemEvalQualityMetrics(
     synthesis_capsule: 0,
     total_delivered: 0
   };
+  // @anchor longmemeval-gold-facet-separation: per-miss, gold dimension disjoint
+  // from top-5 distractors' (separable) vs shared (overlapping).
+  const goldFacetSeparation = {
+    separable: 0,
+    overlapping: 0,
+    indeterminate: 0
+  };
+  const goldDimensionCounts: Record<string, number> = {};
 
   for (const question of diagnostics) {
     missDistribution[question.miss_classification] =
@@ -673,6 +684,29 @@ export function buildLongMemEvalQualityMetrics(
             topDistractorBreakdown[classifyTopDistractor(delivered)]++;
           }
         }
+        // Would a dimension sieve separate gold from the top-5 distractors?
+        const goldDims = new Set(
+          question.gold
+            .map((g) => g.dimension)
+            .filter((d): d is string => d !== null)
+        );
+        for (const dim of goldDims) {
+          goldDimensionCounts[dim] = (goldDimensionCounts[dim] ?? 0) + 1;
+        }
+        const distractorDims = new Set(
+          question.delivered_results
+            // synthesis_capsule dimension is a schema placeholder, not real.
+            .filter((d) => d.rank <= 5 && d.object_kind !== "synthesis_capsule")
+            .map((d) => d.dimension)
+            .filter((d): d is string => d !== null)
+        );
+        if (goldDims.size === 0 || distractorDims.size === 0) {
+          goldFacetSeparation.indeterminate++;
+        } else if ([...goldDims].some((d) => distractorDims.has(d))) {
+          goldFacetSeparation.overlapping++;
+        } else {
+          goldFacetSeparation.separable++;
+        }
       }
     }
   }
@@ -766,6 +800,10 @@ export function buildLongMemEvalQualityMetrics(
     gold_rank_buckets: goldRankBuckets,
     top_distractor_breakdown: topDistractorBreakdown,
     object_kind_delivery: objectKindDelivery,
+    gold_facet_separation: {
+      ...goldFacetSeparation,
+      gold_dimension_counts: goldDimensionCounts
+    },
     miss_distribution: missDistribution
   };
 }
@@ -1166,6 +1204,7 @@ function readCandidates(
       candidateKey: readString(record.candidate_key) ?? `${originPlane}:${objectKind}:${objectId}`,
       objectId,
       objectKind,
+      dimension: readString(record.dimension),
       originPlane,
       preBudgetRank:
         readNumber(record.pre_budget_rank) ?? readNumber(record.internal_rank),
