@@ -493,6 +493,17 @@ const QaMetricsSchema = z
     qa_accuracy: RatioSchema,
     qa_abstention_total: z.number().int().nonnegative(),
     qa_abstention_correct: z.number().int().nonnegative(),
+    // Per question_type accuracy — how SOTA tables report; surfaces a category
+    // (e.g. preference) silently scoring zero.
+    qa_by_type: z.record(
+      z.string(),
+      z
+        .object({
+          total: z.number().int().nonnegative(),
+          correct: z.number().int().nonnegative()
+        })
+        .strict()
+    ),
     answer_model: z.string().min(1),
     judge_model: z.string().min(1)
   })

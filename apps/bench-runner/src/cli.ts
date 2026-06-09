@@ -465,7 +465,13 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
         (kpi.qa_metrics === undefined
           ? ""
           : `  QA accuracy=${pct(kpi.qa_metrics.qa_accuracy)} ` +
-            `(${kpi.qa_metrics.qa_correct}/${kpi.qa_metrics.qa_total})\n`) +
+            `(${kpi.qa_metrics.qa_correct}/${kpi.qa_metrics.qa_total})` +
+            ` | abstention ${kpi.qa_metrics.qa_abstention_correct}/${kpi.qa_metrics.qa_abstention_total}\n` +
+            Object.entries(kpi.qa_metrics.qa_by_type)
+              .map(
+                ([type, t]) => `    ${type}: ${t.correct}/${t.total}\n`
+              )
+              .join("")) +
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
     );

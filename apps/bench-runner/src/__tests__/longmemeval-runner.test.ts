@@ -1402,7 +1402,7 @@ describe("LongMemEval runner", () => {
     async () => {
       // Integration: a real runLongMemEval pass (offline seed + MCP recall) with
       // a mock qa.chat. Mock answer LLM echoes a non-empty answer; mock judge
-      // returns CORRECT — exercising scoreQaQuestion + aggregateQaVerdicts wiring
+      // returns yes — exercising scoreQaQuestion + aggregateQaVerdicts wiring
       // through the runner with zero network / zero cost. Asserts the kpi gains a
       // qa_metrics block with qa_total > 0 (the B1.f end-to-end coverage).
       const dataDir = join(tmpDir, "longmemeval-qa");
@@ -1438,12 +1438,12 @@ describe("LongMemEval runner", () => {
         "utf8"
       );
 
-      // Mock chat: system carrying the strict-grader prompt -> CORRECT;
-      // otherwise an arbitrary non-empty answer. Both calls stay in-process.
+      // Mock chat: system carrying the strict-grader prompt -> yes (one-word
+      // anscheck verdict); otherwise an arbitrary non-empty answer. In-process.
       const chatCalls: Array<{ system: string; user: string }> = [];
       const mockChat = async (system: string, user: string): Promise<string> => {
         chatCalls.push({ system, user });
-        return /grader/iu.test(system) ? "CORRECT" : "The stored fact answers this.";
+        return /grader/iu.test(system) ? "yes" : "The stored fact answers this.";
       };
 
       const result = await runLongMemEval({

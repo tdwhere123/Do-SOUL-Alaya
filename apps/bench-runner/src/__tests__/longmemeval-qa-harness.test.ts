@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateQaVerdicts,
-  answerAbstains,
   buildQaAnswerContext,
   judgeIsCorrect,
   scoreQaQuestion,
@@ -49,28 +48,23 @@ describe("qa-harness context stitching", () => {
   });
 });
 
-describe("qa-harness judge + abstention predicates", () => {
-  it("treats CORRECT-only verdict as correct, CORRECT+WRONG as wrong", () => {
-    expect(judgeIsCorrect("CORRECT")).toBe(true);
-    expect(judgeIsCorrect("correct.")).toBe(true);
-    expect(judgeIsCorrect("WRONG")).toBe(false);
-    // probe parity: any WRONG token disqualifies even if CORRECT also appears.
-    expect(judgeIsCorrect("CORRECT but actually WRONG")).toBe(false);
-  });
-
-  it("detects abstention phrasings", () => {
-    expect(answerAbstains("I don't know")).toBe(true);
-    expect(answerAbstains("That is not mentioned in the context.")).toBe(true);
-    expect(answerAbstains("The user lives in Berlin.")).toBe(false);
+describe("qa-harness judge verdict (one-word yes/no)", () => {
+  it("treats yes-only as correct, no or yes+no as wrong", () => {
+    expect(judgeIsCorrect("yes")).toBe(true);
+    expect(judgeIsCorrect("Yes.")).toBe(true);
+    expect(judgeIsCorrect("no")).toBe(false);
+    // any no token disqualifies even if yes also appears.
+    expect(judgeIsCorrect("yes but actually no")).toBe(false);
   });
 });
 
-describe("scoreQaQuestion (answerable)", () => {
+describe("scoreQaQuestion (answerable, factual)", () => {
   it("answers over stitched context then judges against gold", async () => {
-    const { chat, calls } = fakeChat(["Berlin", "CORRECT"]);
+    const { chat, calls } = fakeChat(["Berlin", "yes"]);
     const verdict = await scoreQaQuestion(
       {
         questionId: "q1",
+        questionType: "single-session-user",
         question: "Where does the user live?",
         goldAnswer: "Berlin",
         delivered: [
@@ -82,23 +76,25 @@ describe("scoreQaQuestion (answerable)", () => {
     );
     expect(verdict.correct).toBe(true);
     expect(verdict.isAbstention).toBe(false);
+    expect(verdict.questionType).toBe("single-session-user");
     expect(verdict.modelAnswer).toBe("Berlin");
-    expect(verdict.judgeVerdict).toBe("CORRECT");
+    expect(verdict.judgeVerdict).toBe("yes");
     // 2 calls: answer then judge.
     expect(calls).toHaveLength(2);
     // answer prompt carries the stitched delivered content + the question.
     expect(calls[0]?.user).toContain("user: I live in Berlin.");
     expect(calls[0]?.user).toContain("Where does the user live?");
-    // judge prompt carries gold + model answer.
-    expect(calls[1]?.user).toContain("Gold answer: Berlin");
-    expect(calls[1]?.user).toContain("Model answer: Berlin");
+    // factual judge template carries the correct answer + model response.
+    expect(calls[1]?.user).toContain("Correct Answer: Berlin");
+    expect(calls[1]?.user).toContain("Model Response: Berlin");
   });
 
-  it("scores WRONG when the judge disagrees", async () => {
-    const { chat } = fakeChat(["Paris", "WRONG"]);
+  it("scores wrong when the judge disagrees", async () => {
+    const { chat } = fakeChat(["Paris", "no"]);
     const verdict = await scoreQaQuestion(
       {
         questionId: "q2",
+        questionType: "multi-session",
         question: "Where does the user live?",
         goldAnswer: "Berlin",
         delivered: [{ objectId: "m1", content: "user: I live in Berlin." }]
@@ -106,52 +102,78 @@ describe("scoreQaQuestion (answerable)", () => {
       chat
     );
     expect(verdict.correct).toBe(false);
-    expect(verdict.judgeVerdict).toBe("WRONG");
+    expect(verdict.judgeVerdict).toBe("no");
   });
 });
 
-describe("scoreQaQuestion (abstention _abs)", () => {
-  it("is correct when the model abstains, with NO judge call", async () => {
-    const { chat, calls } = fakeChat(["I don't know."]);
+describe("scoreQaQuestion (preference uses rubric template)", () => {
+  it("picks the preference answer prompt and grades against a rubric", async () => {
+    const { chat, calls } = fakeChat(["Try Adobe Premiere Pro tutorials.", "yes"]);
+    const verdict = await scoreQaQuestion(
+      {
+        questionId: "p1",
+        questionType: "single-session-preference",
+        question: "Recommend some video editing resources.",
+        goldAnswer: "The user would prefer Adobe Premiere Pro resources.",
+        delivered: [{ objectId: "m1", content: "user: I edit in Premiere Pro." }]
+      },
+      chat
+    );
+    expect(verdict.correct).toBe(true);
+    expect(verdict.questionType).toBe("single-session-preference");
+    // answer side uses the personalization prompt, not the abstain-friendly one.
+    expect(calls[0]?.system).toContain("personalizing");
+    // judge side frames gold as a Rubric, not a Correct Answer.
+    expect(calls[1]?.user).toContain("Rubric: The user would prefer");
+  });
+});
+
+describe("scoreQaQuestion (abstention _abs uses the abstention judge)", () => {
+  it("is correct when the judge agrees the model abstained", async () => {
+    const { chat, calls } = fakeChat(["I don't know.", "yes"]);
     const verdict = await scoreQaQuestion(
       {
         questionId: "topic_abs",
+        questionType: "single-session-user",
         question: "What is the user's PIN?",
-        goldAnswer: "",
+        goldAnswer: "The information provided is not enough.",
         delivered: [{ objectId: "m1", content: "unrelated fact" }]
       },
       chat
     );
     expect(verdict.isAbstention).toBe(true);
     expect(verdict.correct).toBe(true);
-    expect(verdict.judgeVerdict).toBeNull();
-    // only the answer call — abstention never spends a judge call.
-    expect(calls).toHaveLength(1);
+    expect(verdict.judgeVerdict).toBe("yes");
+    // abstention judge template frames gold as an Explanation.
+    expect(calls[1]?.user).toContain("Explanation: The information provided");
+    expect(calls).toHaveLength(2);
   });
 
   it("is wrong when the model confidently fabricates on an _abs question", async () => {
-    const { chat, calls } = fakeChat(["Your PIN is 1234."]);
+    const { chat, calls } = fakeChat(["Your PIN is 1234.", "no"]);
     const verdict = await scoreQaQuestion(
       {
         questionId: "topic_abs",
+        questionType: "single-session-user",
         question: "What is the user's PIN?",
-        goldAnswer: "",
+        goldAnswer: "The information provided is not enough.",
         delivered: []
       },
       chat
     );
+    expect(verdict.isAbstention).toBe(true);
     expect(verdict.correct).toBe(false);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
   });
 });
 
 describe("aggregateQaVerdicts", () => {
-  it("aggregates accuracy and the abstention subset", () => {
+  it("aggregates accuracy, the abstention subset, and per-type tallies", () => {
     const verdicts: QaQuestionVerdict[] = [
-      { questionId: "q1", isAbstention: false, correct: true, modelAnswer: "", judgeVerdict: "CORRECT", contextChars: 0 },
-      { questionId: "q2", isAbstention: false, correct: false, modelAnswer: "", judgeVerdict: "WRONG", contextChars: 0 },
-      { questionId: "a_abs", isAbstention: true, correct: true, modelAnswer: "", judgeVerdict: null, contextChars: 0 },
-      { questionId: "b_abs", isAbstention: true, correct: false, modelAnswer: "", judgeVerdict: null, contextChars: 0 }
+      { questionId: "q1", questionType: "multi-session", isAbstention: false, correct: true, modelAnswer: "", judgeVerdict: "yes", contextChars: 0 },
+      { questionId: "q2", questionType: "multi-session", isAbstention: false, correct: false, modelAnswer: "", judgeVerdict: "no", contextChars: 0 },
+      { questionId: "a_abs", questionType: "single-session-user", isAbstention: true, correct: true, modelAnswer: "", judgeVerdict: "yes", contextChars: 0 },
+      { questionId: "b_abs", questionType: "single-session-user", isAbstention: true, correct: false, modelAnswer: "", judgeVerdict: "no", contextChars: 0 }
     ];
     const agg = aggregateQaVerdicts(verdicts);
     expect(agg.qa_total).toBe(4);
@@ -159,12 +181,15 @@ describe("aggregateQaVerdicts", () => {
     expect(agg.qa_accuracy).toBe(0.5);
     expect(agg.qa_abstention_total).toBe(2);
     expect(agg.qa_abstention_correct).toBe(1);
+    expect(agg.qa_by_type["multi-session"]).toEqual({ total: 2, correct: 1 });
+    expect(agg.qa_by_type["single-session-user"]).toEqual({ total: 2, correct: 1 });
   });
 
   it("reports zero accuracy for an empty run without dividing by zero", () => {
     const agg = aggregateQaVerdicts([]);
     expect(agg.qa_total).toBe(0);
     expect(agg.qa_accuracy).toBe(0);
+    expect(agg.qa_by_type).toEqual({});
   });
 });
 

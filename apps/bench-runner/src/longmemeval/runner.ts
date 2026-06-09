@@ -598,6 +598,7 @@ export async function runLongMemEval(
         qaVerdict = await scoreQaQuestion(
           {
             questionId: question.question_id,
+            questionType: question.question_type,
             question: question.question,
             goldAnswer: question.answer,
             delivered
