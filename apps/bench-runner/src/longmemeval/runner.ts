@@ -600,6 +600,7 @@ export async function runLongMemEval(
             questionId: question.question_id,
             questionType: question.question_type,
             question: question.question,
+            questionDate: question.question_date,
             goldAnswer: question.answer,
             delivered
           },

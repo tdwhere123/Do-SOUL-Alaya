@@ -66,6 +66,7 @@ describe("scoreQaQuestion (answerable, factual)", () => {
         questionId: "q1",
         questionType: "single-session-user",
         question: "Where does the user live?",
+        questionDate: "2023/05/10 (Wed) 09:00",
         goldAnswer: "Berlin",
         delivered: [
           { objectId: "m1", content: "user: I live in Berlin." },
@@ -81,7 +82,8 @@ describe("scoreQaQuestion (answerable, factual)", () => {
     expect(verdict.judgeVerdict).toBe("yes");
     // 2 calls: answer then judge.
     expect(calls).toHaveLength(2);
-    // answer prompt carries the stitched delivered content + the question.
+    // answer prompt carries the current date (now), stitched content + question.
+    expect(calls[0]?.user).toContain("Current date: 2023/05/10");
     expect(calls[0]?.user).toContain("user: I live in Berlin.");
     expect(calls[0]?.user).toContain("Where does the user live?");
     // factual judge template carries the correct answer + model response.
@@ -96,6 +98,7 @@ describe("scoreQaQuestion (answerable, factual)", () => {
         questionId: "q2",
         questionType: "multi-session",
         question: "Where does the user live?",
+        questionDate: "2023/05/10 (Wed) 09:00",
         goldAnswer: "Berlin",
         delivered: [{ objectId: "m1", content: "user: I live in Berlin." }]
       },
@@ -114,6 +117,7 @@ describe("scoreQaQuestion (preference uses rubric template)", () => {
         questionId: "p1",
         questionType: "single-session-preference",
         question: "Recommend some video editing resources.",
+        questionDate: "2023/05/10 (Wed) 09:00",
         goldAnswer: "The user would prefer Adobe Premiere Pro resources.",
         delivered: [{ objectId: "m1", content: "user: I edit in Premiere Pro." }]
       },
@@ -136,6 +140,7 @@ describe("scoreQaQuestion (abstention _abs uses the abstention judge)", () => {
         questionId: "topic_abs",
         questionType: "single-session-user",
         question: "What is the user's PIN?",
+        questionDate: "2023/05/10 (Wed) 09:00",
         goldAnswer: "The information provided is not enough.",
         delivered: [{ objectId: "m1", content: "unrelated fact" }]
       },
@@ -156,6 +161,7 @@ describe("scoreQaQuestion (abstention _abs uses the abstention judge)", () => {
         questionId: "topic_abs",
         questionType: "single-session-user",
         question: "What is the user's PIN?",
+        questionDate: "2023/05/10 (Wed) 09:00",
         goldAnswer: "The information provided is not enough.",
         delivered: []
       },

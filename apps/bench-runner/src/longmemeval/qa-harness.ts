@@ -57,6 +57,12 @@ export interface QaQuestionInput {
   /** LongMemEval `question_type`; selects the answer + judge template. */
   readonly questionType: string;
   readonly question: string;
+  /**
+   * LongMemEval `question_date` — when the question is asked, i.e. "now".
+   * Temporal questions ("how many days ago…", "between X and today") are
+   * unanswerable without it; passed to the answer model as the current date.
+   */
+  readonly questionDate: string;
   /** Gold answer / preference rubric / abstention explanation. */
   readonly goldAnswer: string;
   /** Delivered top-k candidates (rank order) with content. */
@@ -187,7 +193,8 @@ export async function scoreQaQuestion(
   const isAbstention = isAbstentionQuestionId(input.questionId);
   const modelAnswer = await chat(
     answerSystemFor(input.questionType, isAbstention),
-    `Memory context:\n${context}\n\nQuestion: ${input.question}\nAnswer:`
+    // question date = "now"; temporal Qs anchor elapsed-day math against it.
+    `Current date: ${input.questionDate}\n\nMemory context:\n${context}\n\nQuestion: ${input.question}\nAnswer:`
   );
   const judgeVerdict = await chat(
     JUDGE_SYSTEM,
