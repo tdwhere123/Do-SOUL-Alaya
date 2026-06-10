@@ -45,7 +45,7 @@ Other axes may reference it but must not silently replace it.
 apps/core-daemon         Hono HTTP/MCP daemon and wiring layer
 
 packages/protocol        zod schemas and shared domain types, grouped by schema domain
-packages/storage         SQLite migrations and repos
+packages/storage         SQLite migrations and domainized repos
 packages/core            business logic, state transitions, EventLog
                          publishing, runtime adapters, ConversationService,
                          RecallService, GreenService, governance services

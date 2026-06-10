@@ -700,7 +700,7 @@ export function createMcpMemoryProposalWorkflow(
     // untrusted producer could aim at a foreign/missing object). A rejection
     // emits the same path.relation_rejected audit the mint sink uses and stops
     // the accept-apply before any durable insert.
-    // see also: packages/storage/src/repos/proposal-repo.ts createPathRelationFromProposalPayload
+    // see also: packages/storage/src/repos/proposal/path-relations.ts createPathRelationFromProposalPayload
     await assertProposedPathAnchorsValid(scopedProposal, context.workspaceId, targetObjectId);
 
     return {

@@ -458,7 +458,7 @@ export class PathRelationProposalService {
   // emitting the audit — on the first failure. This is decided, never transient:
   // a rejected accept-apply must NOT retry.
   // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts accept path
-  // see also: packages/storage/src/repos/proposal-repo.ts acceptPendingPathRelationGovernanceWithEvents
+  // see also: packages/storage/src/repos/proposal/accept-workflows.ts acceptPendingPathRelationGovernanceWithEvents
   public async validateProposedObjectAnchors(input: {
     readonly workspaceId: string;
     readonly relationKind: string;
