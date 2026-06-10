@@ -1,3 +1,4 @@
+import { pino, type Logger, type LoggerOptions } from "pino";
 import {
   ManifestationBudgetConfigSchema,
   type ManifestationBudgetConfig
@@ -20,10 +21,82 @@ export type WarnLogger = Readonly<{
   warn(message: string, meta: Record<string, unknown>): void;
 }>;
 
+// Defense-in-depth field redaction. pino paths only match a single level
+// (`token` = top-level, `*.token` = one nested level); there is no recursive
+// `**`. The summarizers in middleware/error-handler.ts remain the first line —
+// this is the belt-and-suspenders second line for secrets that slip through.
+const REDACT_PATHS: readonly string[] = [
+  // tokens / api keys / secrets / credentials (top-level + one nested level)
+  "token",
+  "*.token",
+  "request_token",
+  "*.request_token",
+  "reviewer_token",
+  "*.reviewer_token",
+  "apiKey",
+  "*.apiKey",
+  "api_key",
+  "*.api_key",
+  "secret",
+  "*.secret",
+  "credential",
+  "*.credential",
+  "password",
+  "*.password",
+  // auth headers
+  "authorization",
+  "*.authorization",
+  "headers.authorization",
+  // keychain secrets
+  "keychainSecret",
+  "*.keychainSecret",
+  // DB / engine connection strings
+  "connectionString",
+  "*.connectionString",
+  // raw error messages (already stripped by the summarizers; redact here too)
+  "*.message",
+  "err.message",
+  "error.message",
+  "cause.message"
+];
+
+function resolveLogLevel(): LoggerOptions["level"] {
+  // ALAYA_-prefixed per the project env convention; bare LOG_LEVEL kept as fallback.
+  const raw = (process.env.ALAYA_LOG_LEVEL ?? process.env.LOG_LEVEL)?.trim().toLowerCase();
+  const allowed = ["trace", "debug", "info", "warn", "error", "fatal", "silent"];
+  return raw !== undefined && allowed.includes(raw) ? (raw as LoggerOptions["level"]) : "info";
+}
+
+function createBasePinoLogger(): Logger {
+  const options: LoggerOptions = {
+    level: resolveLogLevel(),
+    redact: { paths: [...REDACT_PATHS], censor: "[Redacted]" }
+  };
+  // Human-readable transport for interactive (TTY) sessions only; the daemon's
+  // non-TTY prod path stays raw NDJSON. pino-pretty is a devDependency, so this
+  // branch must never run in a deployed daemon (no TTY there).
+  if (process.stdout.isTTY === true) {
+    options.transport = { target: "pino-pretty", options: { colorize: true } };
+  }
+  return pino(options);
+}
+
+// Reuse a single base logger across createWarnLogger() calls (pino transports
+// spin up worker threads; one is enough for the whole daemon process).
+let sharedPinoLogger: Logger | null = null;
+
+function getSharedPinoLogger(): Logger {
+  sharedPinoLogger ??= createBasePinoLogger();
+  return sharedPinoLogger;
+}
+
 export function createWarnLogger(): WarnLogger {
+  const logger = getSharedPinoLogger();
   return Object.freeze({
+    // pino is object-first: warn(meta, message). The WarnLogger port is
+    // message-first, so swap the argument order at the boundary.
     warn: (message: string, meta: Record<string, unknown>) => {
-      console.warn(message, meta);
+      logger.warn(meta, message);
     }
   });
 }
