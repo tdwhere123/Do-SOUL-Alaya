@@ -50,6 +50,12 @@ export interface QaDeliveredCandidate {
   readonly objectId: string;
   /** Full seeded content for this object_id (empty when unmapped). */
   readonly content: string;
+  /**
+   * Session date this memory is from (LongMemEval `haystack_dates`). Prefixed
+   * into the answer context so temporal Qs have the "then" to pair with the
+   * "now"; the conversation text itself never carries an absolute date.
+   */
+  readonly eventDate?: string;
 }
 
 export interface QaQuestionInput {
@@ -102,8 +108,12 @@ export function buildQaAnswerContext(
   delivered: readonly QaDeliveredCandidate[]
 ): string {
   const text = delivered
-    .map((candidate) => candidate.content)
-    .filter((content) => content.length > 0)
+    .filter((candidate) => candidate.content.length > 0)
+    .map((candidate) =>
+      candidate.eventDate !== undefined && candidate.eventDate.length > 0
+        ? `[Recorded on ${candidate.eventDate}]\n${candidate.content}`
+        : candidate.content
+    )
     .join("\n\n");
   return text.slice(0, QA_CONTEXT_CHAR_CAP);
 }

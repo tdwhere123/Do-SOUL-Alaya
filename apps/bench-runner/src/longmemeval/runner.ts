@@ -210,6 +210,9 @@ export interface LongMemEvalSidecarEntry {
   // Seeded turn content, carried only when opts.qa is set so the QA harness can
   // stitch delivered recall into answer-model context; off => omitted (no bytes).
   readonly content?: string;
+  // Session date (haystack_dates) this turn is from, QA-only. Lets the answer
+  // model anchor temporal day-math; recall never reads it.
+  readonly eventDate?: string;
 }
 
 export interface LongMemEvalHitScoringInput {
@@ -467,9 +470,17 @@ export async function runLongMemEval(
               objectKind: "memory_entry",
               sessionId,
               hasAnswer: round.hasAnswer,
-              // QA-only: carry the seeded turn content so delivered recall can be
-              // stitched into answer-model context. Off => omitted (byte-identical).
-              ...(opts.qa === undefined ? {} : { content: round.content })
+              // QA-only: carry the seeded turn content + its session date so
+              // delivered recall can be stitched into answer-model context with a
+              // temporal anchor. Off => omitted (byte-identical).
+              ...(opts.qa === undefined
+                ? {}
+                : {
+                    content: round.content,
+                    ...(question.haystack_dates[si] === undefined
+                      ? {}
+                      : { eventDate: question.haystack_dates[si] })
+                  })
             });
             sessionTurns.push({
               turnContent: round.content,
@@ -589,12 +600,16 @@ export async function runLongMemEval(
       if (opts.qa !== undefined) {
         const delivered: QaDeliveredCandidate[] = deliveredResults
           .filter((result) => (result.object_kind ?? "memory_entry") === "memory_entry")
-          .map((result) => ({
-            objectId: result.object_id,
-            content:
-              sidecar.get(buildLongMemEvalSidecarKey("memory_entry", result.object_id))
-                ?.content ?? ""
-          }));
+          .map((result) => {
+            const entry = sidecar.get(
+              buildLongMemEvalSidecarKey("memory_entry", result.object_id)
+            );
+            return {
+              objectId: result.object_id,
+              content: entry?.content ?? "",
+              ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+            };
+          });
         qaVerdict = await scoreQaQuestion(
           {
             questionId: question.question_id,
