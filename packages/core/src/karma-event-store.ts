@@ -20,11 +20,18 @@ export interface KarmaEventStoreWarnPort {
   warn(message: string, meta: Record<string, unknown>): void;
 }
 
+// Hard cap so a long-lived in-memory store cannot grow without bound; it
+// retains only the most recent MAX_RETAINED_EVENTS, evicting oldest-first.
+const MAX_RETAINED_EVENTS = 10000;
+
 export class InMemoryKarmaEventStore implements KarmaEventStore {
   protected readonly events: KarmaEvent[] = [];
 
   public record(event: KarmaEvent): void {
     const parsed = parseKarmaEvent(event);
+    if (this.events.length >= MAX_RETAINED_EVENTS) {
+      this.events.shift();
+    }
     this.events.push(parsed);
   }
 

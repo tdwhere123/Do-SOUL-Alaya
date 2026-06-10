@@ -77,4 +77,21 @@ describe("SqliteKarmaEventStore", () => {
       "evt-x2"
     ]);
   });
+
+  it("InMemoryKarmaEventStore caps retained events, evicting oldest-first", () => {
+    const store = new InMemoryKarmaEventStore();
+    const cap = (store as unknown as { events: KarmaEvent[] }).events;
+    // Push well past the 10000-event cap.
+    for (let i = 0; i < 10005; i++) {
+      store.record(makeEvent("obj-cap", `evt-${i}`));
+    }
+    expect(cap).toHaveLength(10000);
+    // Oldest five (evt-0..evt-4) evicted; newest retained.
+    const ids = store.findByObjectId("obj-cap").map((event) => event.event_id);
+    expect(ids).toHaveLength(10000);
+    expect(ids[0]).toBe("evt-5");
+    expect(ids[ids.length - 1]).toBe("evt-10004");
+    expect(ids).not.toContain("evt-0");
+    expect(ids).not.toContain("evt-4");
+  });
 });
