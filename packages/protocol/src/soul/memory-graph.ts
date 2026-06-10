@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
 
 // invariant: `co_recalled` is intentionally EXCLUDED from this enum. It is a
 // PathRelation relation_kind (the auto-build associative carrier) that projects

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
 import { PersistentObjectEnvelopeSchema } from "./envelope.js";
 import { MemoryDimension as MemoryDimensionValue } from "./memory-entry.js";
 import type { MemoryDimension } from "./memory-entry.js";

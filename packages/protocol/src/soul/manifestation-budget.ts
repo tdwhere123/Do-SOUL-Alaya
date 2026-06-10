@@ -3,7 +3,7 @@ import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 
 const manifestationLevelValues = ["stance_bias", "dialogue_nudge", "lens_entry"] as const;
 

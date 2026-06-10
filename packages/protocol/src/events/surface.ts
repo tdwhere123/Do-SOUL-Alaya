@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { TransitionCausedBySchema } from "./memory-governance.js";
 import { BindingStateSchema, SurfaceAnchorKindSchema, SurfaceStatusSchema } from "../soul/surface.js";
 import { CrossCuttingStateSchema } from "../soul/cross-cutting.js";

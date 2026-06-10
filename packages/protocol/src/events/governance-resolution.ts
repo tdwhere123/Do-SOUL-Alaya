@@ -4,7 +4,7 @@ import {
   BoundedReasonSchema,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 import { GovernanceResolutionPolicyClassificationSchema } from "../soul/governance-policy-classification.js";
 import { SoulResolutionKindSchema } from "../soul/resolution.js";
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
 import { BankruptcyActionSchema, BankruptcyKindSchema, BankruptcyTriggerKindSchema, RuntimeModeSchema } from "./bankruptcy.js";
 import { ProposalOptionKindSchema, ProposalResolutionStateSchema } from "./proposal.js";
 

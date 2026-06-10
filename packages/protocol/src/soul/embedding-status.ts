@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
 
 export const EmbeddingEffectiveModeSchema = z.enum([
   "keyword_only",

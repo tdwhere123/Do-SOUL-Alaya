@@ -6,7 +6,7 @@ import {
   BoundedReasonSchema,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 import { type StagedWarningResolutionOption } from "./staged-warning.js";
 
 // invariant: closed set of resolution kinds soul.resolve accepts.

@@ -4,7 +4,7 @@ import {
   BoundedLabelSchema,
   BoundedReasonSchema,
   NonEmptyStringSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 
 // invariant: each value names a distinct reason a memory pointer is
 // staged. The set is closed so consumers (soul.resolve, Inspector

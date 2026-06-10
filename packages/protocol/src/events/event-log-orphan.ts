@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
 
 export const SoulGardenEventLogOrphanDetectedEventType = {
   SOUL_GARDEN_EVENT_LOG_ORPHAN_DETECTED: "soul.garden.event_log_orphan_detected"

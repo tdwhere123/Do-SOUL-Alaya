@@ -5,7 +5,7 @@ import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 import { MemoryGraphEdgeTypeSchema } from "./memory-graph.js";
 
 const edgeProposalStatusValues = [

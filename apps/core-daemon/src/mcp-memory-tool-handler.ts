@@ -2357,7 +2357,7 @@ type CandidateSignalGraphRefInput = {
 // `supersedes_refs`, `exception_to_refs`, `contradicts_refs`,
 // `incompatible_with_refs`) are first-class fields on
 // `CandidateMemorySignal` (see
-// `packages/protocol/src/candidate-memory-signal.ts`
+// `packages/protocol/src/signals/candidate-memory-signal.ts`
 // CandidateMemorySignalMemoryRefKeys). The daemon does not accept
 // these keys via `raw_payload`; any occurrence is logged and left in
 // raw_payload unchanged. Closes the "silent double-entry" path —

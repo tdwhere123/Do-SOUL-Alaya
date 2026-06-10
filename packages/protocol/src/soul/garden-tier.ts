@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 
 const gardenRoleValues = ["janitor", "auditor", "librarian"] as const;
 const gardenTierValues = ["tier_0", "tier_1", "tier_2"] as const;

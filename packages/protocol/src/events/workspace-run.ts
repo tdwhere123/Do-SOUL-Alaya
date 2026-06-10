@@ -1,14 +1,14 @@
 import { z } from "zod";
-import { WorkspaceRunEventType } from "../event-log.js";
-import { EngineFinishReasonSchema } from "../engine-port.js";
-import { RunModeSchema } from "../run.js";
-import { EngineClassSchema } from "../runtime-run.js";
+import { WorkspaceRunEventType } from "./event-log.js";
+import { EngineFinishReasonSchema } from "../engine/engine-port.js";
+import { RunModeSchema } from "../runtime/run.js";
+import { EngineClassSchema } from "../runtime/runtime-run.js";
 import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
-import { WorkspaceKindSchema } from "../workspace.js";
+} from "../shared/schema-primitives.js";
+import { WorkspaceKindSchema } from "../workspace/workspace.js";
 
 const messageRoleValues = ["user", "assistant"] as const;
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NonEmptyStringSchema, NonNegativeIntSchema, IsoDatetimeStringSchema } from "../schema-primitives.js";
+import { NonEmptyStringSchema, NonNegativeIntSchema, IsoDatetimeStringSchema } from "../shared/schema-primitives.js";
 import { ClaimKindSchema } from "../soul/claim-form.js";
 import { ConflictEdgeTypeSchema } from "../soul/conflict-matrix.js";
 import { GovernanceSubjectSchema } from "../soul/governance-subject.js";

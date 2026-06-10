@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { DeferredObligationKindSchema } from "../deferred-obligation.js";
-import { DirtyStatePanicTriggerSchema } from "../dirty-state-dossier.js";
+import { DeferredObligationKindSchema } from "../runtime/deferred-obligation.js";
+import { DirtyStatePanicTriggerSchema } from "../runtime/dirty-state-dossier.js";
 import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
-import { TrustAssessmentFactorSchema, WorkerTrustLevelSchema } from "../worker-trust.js";
+} from "../shared/schema-primitives.js";
+import { TrustAssessmentFactorSchema, WorkerTrustLevelSchema } from "../workers/worker-trust.js";
 
 const obligationTrustNarrativeEventTypeValues = [
   "obligation.created",

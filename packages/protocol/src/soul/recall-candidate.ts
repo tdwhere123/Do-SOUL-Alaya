@@ -5,7 +5,7 @@ import {
   BoundedReasonSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 import { ManifestationStateSchema, MemoryDimensionSchema } from "./memory-entry.js";
 import { ScopeClassSchema } from "./object-kind.js";
 import { ActivationWeightsSchema } from "./recall-policy.js";

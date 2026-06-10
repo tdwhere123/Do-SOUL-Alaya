@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
 import { ClaimKindSchema } from "./claim-form.js";
 import { PersistentObjectEnvelopeSchema } from "./envelope.js";
 import { GovernanceSubjectSchema } from "./governance-subject.js";

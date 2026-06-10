@@ -8,7 +8,7 @@ import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 import { PersistentObjectEnvelopeSchema } from "./envelope.js";
 import { ScopeClassSchema } from "./object-kind.js";
 

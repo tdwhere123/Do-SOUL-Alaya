@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
 import { ControlPlaneEnvelopeSchema } from "./envelope.js";
 import { ControlPlaneObjectKind } from "./object-kind.js";
 

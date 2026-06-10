@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 import {
   PathAnchorRefSchema,
   PathEffectVectorSchema,

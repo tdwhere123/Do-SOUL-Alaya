@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import { NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { ControlPlaneEnvelopeSchema } from "./envelope.js";
 import { ControlPlaneObjectKind } from "./object-kind.js";
 

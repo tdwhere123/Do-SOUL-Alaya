@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NonEmptyStringSchema } from "../schema-primitives.js";
+import { NonEmptyStringSchema } from "../shared/schema-primitives.js";
 
 const canonicalAliasDomainPrefix = "governance_subject.qualifier." as const;
 
