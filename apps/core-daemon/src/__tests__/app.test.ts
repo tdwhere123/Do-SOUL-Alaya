@@ -60,6 +60,34 @@ describe("createApp", () => {
     });
   });
 
+  it("serves an unauthenticated liveness probe at GET /health", async () => {
+    const app = createApp({
+      requestProtection: {
+        allowedOrigin: "http://localhost:5173",
+        requestToken: "secret-token"
+      }
+    });
+
+    const response = await app.request("/health");
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.status).toBe("ok");
+    expect(body.service).toBe("alaya-core-daemon");
+    expect(typeof body.version).toBe("string");
+    expect(typeof body.uptime_s).toBe("number");
+  });
+
+  it("keeps liveness green while the daemon is draining", async () => {
+    const drainState = { isDraining: true };
+    const app = createApp({}, { drainState, inFlight: { count: 0 } });
+
+    const response = await app.request("/health");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ status: "ok" });
+  });
+
   it("registers typed route service bags on the Hono app", async () => {
     const patchRuntimeEmbeddingConfig = vi.fn(
       async (patch: unknown): Promise<Readonly<{

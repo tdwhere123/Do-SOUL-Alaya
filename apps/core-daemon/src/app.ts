@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
+import { readBuildInfo } from "./build-info.js";
 import { registerErrorHandler } from "./middleware/error-handler.js";
 import { registerBudgetRoutes, type BudgetRouteServices } from "./routes/budget.js";
 import { registerClaimRoutes, type ClaimRouteServices } from "./routes/claims.js";
@@ -129,6 +130,12 @@ export function createApp(
 
   if (lifecycle !== undefined) {
     app.use("*", async (context, next) => {
+      // Liveness must stay green during graceful drain so the orchestrator
+      // does not force-kill the process while it finishes in-flight work.
+      if (context.req.path === LIVENESS_PATH) {
+        await next();
+        return;
+      }
       if (lifecycle.drainState.isDraining) {
         return context.json(
           { success: false, error: "daemon is draining" },
@@ -259,9 +266,23 @@ export function createApp(
   });
 
   registerErrorHandler(app);
+  registerLivenessRoute(app);
   registerConfiguredRoutes(app, services.routes);
 
   return app;
+}
+
+// Standard unauthenticated liveness probe for deployment health checks.
+// GETs are already exempt from the request-token gate (isProtectedRequest),
+// and the drain middleware skips LIVENESS_PATH, so this stays cheap and never
+// touches the DB or any provider — liveness means "process is up".
+const LIVENESS_PATH = "/health";
+
+function registerLivenessRoute(app: Hono): void {
+  const { version } = readBuildInfo();
+  app.get(LIVENESS_PATH, (context) =>
+    context.json({ status: "ok", service: "alaya-core-daemon", version, uptime_s: process.uptime() }, 200)
+  );
 }
 
 function registerConfiguredRoutes(app: Hono, routes: CoreDaemonRouteServices | undefined): void {
