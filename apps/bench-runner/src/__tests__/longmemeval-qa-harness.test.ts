@@ -219,6 +219,16 @@ describe("resolveQaChatConfig (env gating)", () => {
     expect(config.model).toBe("gpt-5.4-nano");
   });
 
+  it("prefers the QA model override over the base model (extraction stays on base)", () => {
+    const config = resolveQaChatConfig({
+      [QA_ENV_PROVIDER_URL]: "https://yunwu.ai/v1",
+      [QA_ENV_API_KEY]: "sk-test",
+      [QA_ENV_MODEL]: "gpt-5.4-nano",
+      OFFICIAL_API_GARDEN_QA_MODEL: "gpt-4.1"
+    } as NodeJS.ProcessEnv);
+    expect(config.model).toBe("gpt-4.1");
+  });
+
   it("throws when url or key is missing (fail-loud, no silent degrade)", () => {
     expect(() =>
       resolveQaChatConfig({ [QA_ENV_API_KEY]: "sk-test" } as NodeJS.ProcessEnv)

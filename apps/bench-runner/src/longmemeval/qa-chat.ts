@@ -29,6 +29,11 @@ export interface QaChatConfig {
 export const QA_ENV_PROVIDER_URL = "OFFICIAL_API_GARDEN_PROVIDER_URL";
 export const QA_ENV_API_KEY = "ALAYA_OFFICIAL_GARDEN_API_KEY";
 export const QA_ENV_MODEL = "OFFICIAL_API_GARDEN_MODEL";
+// QA answer/judge model override, independent of the extraction model. Lets a
+// run keep OFFICIAL_API_GARDEN_MODEL=<seed model> (extraction cache hit) while
+// answering/judging with a stronger model — extraction resolves its own model
+// elsewhere and is unaffected by this override.
+const QA_ENV_MODEL_OVERRIDE = "OFFICIAL_API_GARDEN_QA_MODEL";
 const QA_DEFAULT_MODEL = "gpt-5.4-nano";
 
 /**
@@ -40,7 +45,8 @@ export function resolveQaChatConfig(
 ): QaChatConfig {
   const url = env[QA_ENV_PROVIDER_URL]?.trim();
   const apiKey = env[QA_ENV_API_KEY]?.trim();
-  const model = env[QA_ENV_MODEL]?.trim() || QA_DEFAULT_MODEL;
+  const model =
+    env[QA_ENV_MODEL_OVERRIDE]?.trim() || env[QA_ENV_MODEL]?.trim() || QA_DEFAULT_MODEL;
   if (url === undefined || url.length === 0) {
     throw new Error(
       `--qa requires ${QA_ENV_PROVIDER_URL} (garden chat provider base URL)`
