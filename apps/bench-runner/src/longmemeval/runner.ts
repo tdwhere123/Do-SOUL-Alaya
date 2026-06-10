@@ -431,7 +431,7 @@ export async function runLongMemEval(
         // anchor: session-adjacent derives_from. Carries the prior turn's
         // seeded memory_entry ids so the next turn's signal carries
         // top-level source_memory_refs.
-        // see also: packages/soul/src/garden/materialization-router.ts
+        // see also: packages/soul/src/garden/materialization-router/router.ts
         //   createAllMemoryRefEdges
         let previousTurnSeedMemoryIds: readonly string[] = [];
         for (let ri = 0; ri < rounds.length; ri++) {

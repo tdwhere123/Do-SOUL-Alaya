@@ -320,7 +320,7 @@ interface PostTurnExtractTaskPayload {
 // the governed enrichment services owned by materialization. These narrow
 // shapes keep the wiring decoupled from concrete storage/core types.
 // see also: packages/storage/src/repos/enrich-pending-repo.ts
-// see also: packages/soul/src/garden/materialization-router.ts EnrichPendingPort
+// see also: packages/soul/src/garden/materialization-router/contracts.ts EnrichPendingPort
 interface BulkEnrichPendingPort {
   claimBatch(
     workspaceId: string,
@@ -1288,7 +1288,7 @@ export function createGardenRuntime(input: {
   // releases the claim so a later cycle retries — no enrichment is dropped. When
   // the enrichment ports are unwired the task is a no-op so the queue is inert.
   // see also: packages/storage/src/repos/enrich-pending-repo.ts
-  // see also: packages/soul/src/garden/materialization-router.ts enqueueEnrichment
+  // see also: packages/soul/src/garden/materialization-router/router.ts enqueueEnrichment
   const runBulkEnrichTask = async (task: Readonly<GardenTaskDescriptor>): Promise<void> => {
     const completedAt = new Date().toISOString();
     const enrichPendingRepo = input.enrichPendingRepo;

@@ -43,7 +43,7 @@ import { KeyedMutex } from "./shared/keyed-mutex.js";
 // production at materialization time. Reconciliation only reports
 // whether the caller should run that conflict scan.
 //
-// see also: packages/soul/src/garden/materialization-router.ts
+// see also: packages/soul/src/garden/materialization-router/router.ts
 //   (ReconciliationPort consumer)
 // see also: packages/core/src/conflict-detection-service.ts
 //   (DELETE / supersede machinery)
@@ -694,7 +694,7 @@ export class ReconciliationService {
         // directly from the signal's domain_tags (buildMemoryInput); an
         // in-place refine mirrors that so the row's tags track its
         // current content. see also:
-        // packages/soul/src/garden/materialization-router.ts buildMemoryInput
+        // packages/soul/src/garden/materialization-router/inputs.ts buildMemoryInput
         domain_tags: incomingDomainTags
       };
       if (incomingEvidenceRef !== undefined && incomingEvidenceRef.trim().length > 0) {
@@ -812,13 +812,13 @@ function jaccardIndex(left: ReadonlySet<string>, right: ReadonlySet<string>): nu
 // long fact cannot bloat the audit row unboundedly.
 //
 // invariant: this cap MUST stay >= DISTILLED_FACT_MAX_CHARS (500) in
-// packages/soul/src/garden/materialization-router.ts. Every fact that
+// packages/soul/src/garden/materialization-router/router.ts. Every fact that
 // reaches reconciliation is a distilled fact already capped at that
 // value, so 500 >= 500 guarantees the audit content is never truncated
 // and a dropped fact stays fully reconstructable from the event log. If
 // the distilled-fact cap is ever raised above 500, this cap must be
 // raised in lockstep or the audit silently truncates.
-// see also: packages/soul/src/garden/materialization-router.ts
+// see also: packages/soul/src/garden/materialization-router/router.ts
 //   buildDistilledFact (DISTILLED_FACT_MAX_CHARS)
 export const AUDIT_DROPPED_CONTENT_MAX_CHARS = 500;
 

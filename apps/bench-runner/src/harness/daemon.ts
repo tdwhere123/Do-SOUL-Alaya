@@ -229,7 +229,7 @@ export interface BenchSignalSeedInput {
    *
    * Memory-entry object_ids whose previous-turn seed this signal derives
    * from. The harness stamps top-level `source_memory_refs = [...]` so
-   * materialization-router.ts createAllMemoryRefEdges builds derives_from
+   * materialization-router/router.ts createAllMemoryRefEdges builds derives_from
    * proposals between adjacent turns of the same session. The rule is
    * holistic: any conversational memory system should treat adjacent
    * turns within one session as derives_from neighbors. Empty / absent
@@ -238,7 +238,7 @@ export interface BenchSignalSeedInput {
    * These refs are first-class CandidateMemorySignal fields, not
    * raw_payload conventions; every memory-creating materialization branch
    * consumes them.
-   * see also: packages/soul/src/garden/materialization-router.ts
+   * see also: packages/soul/src/garden/materialization-router/router.ts
    *   createAllMemoryRefEdges
    */
   readonly sourceMemoryRefs?: readonly string[];
@@ -427,7 +427,7 @@ export interface BenchDaemonHandle {
    *   1. soul.emit_candidate_signal — signal_kind=potential_preference,
    *      confidence=0.9, raw_payload.excerpt=content. The daemon's
    *      MaterializationRouter synchronously routes by object_kind
-   *      (see packages/soul/src/garden/materialization-router.ts
+   *      (see packages/soul/src/garden/materialization-router/inputs.ts
    *      routeByObjectKind): claim-capable kinds (preference / decision /
    *      constraint / etc.) land in memory_and_claim_draft and persist
    *      both a memory_entry AND a draft claim_form; non-claim kinds
@@ -532,7 +532,7 @@ export interface BenchDaemonHandle {
    * synthesis_capsule layer is exercised on the no-LLM bench path. The
    * MaterializationRouter routes a potential_synthesis signal with
    * evidence_refs.length >= 2 to synthesisService.create (see
-   * packages/soul/src/garden/materialization-router.ts route /
+   * packages/soul/src/garden/materialization-router/router.ts route /
    * materializeSynthesis). raw_payload.distilled_fact becomes the synthesis
    * summary via buildDistilledFact.
    *
@@ -835,7 +835,7 @@ export async function startBenchDaemon(
     // Neither pass depends on startBackgroundServices() having run, so
     // suppressing the autonomous interval keeps the explicit path intact.
     // see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass;
-    //   packages/soul/src/garden/materialization-router.ts (EdgeAutoProducer off-path)
+    //   packages/soul/src/garden/materialization-router/router.ts (EdgeAutoProducer off-path)
 
     server = createAlayaMcpServer({
       memoryToolHandler: runtime.services.mcpMemoryToolHandler,
@@ -1226,7 +1226,7 @@ export async function startBenchDaemon(
 
     // Step 1: emit candidate signal. signal_kind=potential_preference at
     // confidence 0.9 with evidence_refs >= 1 routes per object_kind
-    // (see materialization-router.ts routeByObjectKind): claim-capable
+    // (see materialization-router/inputs.ts routeByObjectKind): claim-capable
     // kinds land in memory_and_claim_draft; fact / outcome land in
     // memory_entry_only. raw_payload.distilled_fact, when supplied,
     // becomes memory_entry.content; raw_payload.excerpt remains the
@@ -1433,7 +1433,7 @@ export async function startBenchDaemon(
             ...tokenEconomy
           };
 
-    // see also: materialization-router.ts createAllMemoryRefEdges
+    // see also: materialization-router/router.ts createAllMemoryRefEdges
     const sourceMemoryRefsField = buildSourceMemoryRefsField(input.sourceMemoryRefs);
     const signalResponse = await callMcpTool<SoulEmitCandidateSignalResponse>(
       activeMcpClient,
@@ -2673,7 +2673,7 @@ function benchTokenEconomyPayload(input: {
 }
 
 // @anchor buildSourceMemoryRefsField: derives_from edge proposal injection
-// see also: packages/soul/src/garden/materialization-router.ts
+// see also: packages/soul/src/garden/materialization-router/router.ts
 //   createAllMemoryRefEdges
 // see also: apps/bench-runner/src/longmemeval/compile-seed.ts seedTurn
 function buildSourceMemoryRefsField(

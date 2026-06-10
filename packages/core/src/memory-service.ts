@@ -59,7 +59,7 @@ export type MemoryEntryInput = Omit<
   // are filled from the freshly created row inside core. Requires both the
   // enrichPendingWriter dep and memoryEntryRepo.createWithinTransaction to be
   // wired; otherwise create throws rather than silently dropping the marker.
-  // see also: packages/soul/src/garden/materialization-router.ts enqueueEnrichment
+  // see also: packages/soul/src/garden/materialization-router/router.ts enqueueEnrichment
   // see also: packages/storage/src/repos/enrich-pending-repo.ts enqueue
   readonly enqueueEnrichment?: {
     readonly runId: string | null;
@@ -333,7 +333,7 @@ export class MemoryService {
   // rolls back the audit row; an audit/enqueue failure leaves no marker-less or
   // audit-less memory row. The plain async fallback exists only for minimal test
   // fakes that do not advertise the transaction seam.
-  // see also: packages/soul/src/garden/materialization-router.ts enqueueEnrichment
+  // see also: packages/soul/src/garden/materialization-router/router.ts enqueueEnrichment
   // see also: packages/core/src/signal-service.ts terminal-FAILED on success!=true
   private async createRowMaybeAtomicallyEnqueued(
     memoryEntry: Readonly<MemoryEntry>,

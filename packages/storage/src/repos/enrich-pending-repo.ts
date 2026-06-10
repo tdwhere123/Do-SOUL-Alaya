@@ -15,7 +15,7 @@ import { StorageError } from "../errors.js";
 // see also: migrations/086-enrich-pending.sql — base schema
 // see also: migrations/088-enrich-pending-attempt-bound.sql — attempt cap + dead-letter
 // see also: apps/core-daemon/src/garden-runtime.ts — drain worker
-// see also: packages/soul/src/garden/materialization-router.ts — enqueue producer
+// see also: packages/soul/src/garden/materialization-router/router.ts — enqueue producer
 
 export interface EnrichPendingEnqueueInput {
   readonly workspaceId: string;

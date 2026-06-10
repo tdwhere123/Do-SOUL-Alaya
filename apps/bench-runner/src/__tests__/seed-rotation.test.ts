@@ -33,7 +33,7 @@ describe("rotatingSeedObjectKind", () => {
   // invariant: the rotation MUST cover both router branches. claim-
   // capable kinds (preference / decision / constraint) exercise
   // memory_and_claim_draft; fact / outcome exercise memory_entry_only.
-  // see also: packages/soul/src/garden/materialization-router.ts
+  // see also: packages/soul/src/garden/materialization-router/inputs.ts
   it("includes at least one claim-capable kind and one memory-only kind", () => {
     const set = new Set<SeedObjectKind>(BENCH_SEED_ROTATION);
     const claimCapable: ReadonlySet<SeedObjectKind> = new Set([
@@ -55,7 +55,7 @@ describe("canonicalizeSeedObjectKind", () => {
   // potential_claim / potential_preference signal routes to evidence_only
   // (no memory_entry). The bench seed needs a durable memory_entry per turn
   // fact, so a free-form extracted kind must be canonicalized.
-  // see also: packages/soul/src/garden/materialization-router.ts
+  // see also: packages/soul/src/garden/materialization-router/inputs.ts
   //   routeByObjectKind
   it("maps a free-form extracted object_kind onto the fact route", () => {
     for (const freeForm of [

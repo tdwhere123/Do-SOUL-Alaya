@@ -47,7 +47,7 @@ export type ClaimFormInput = Omit<
 // score boost; slot-service.evaluateSameScopeElection short-circuits to
 // auto-win when the challenger carries user_override; the other three
 // values are governance metadata for downstream review/audit.
-// see also: packages/soul/src/garden/materialization-router.ts buildClaimInput
+// see also: packages/soul/src/garden/materialization-router/inputs.ts buildClaimInput
 // see also: packages/soul/src/garden/session-override-remediation.ts (USER_OVERRIDE)
 export interface PrecedenceBasisDecisionInput {
   readonly source: string;

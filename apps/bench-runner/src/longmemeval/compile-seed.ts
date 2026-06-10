@@ -1733,7 +1733,7 @@ async function extractSeedInputs(input: {
     // raw_payload.extracted_object_kind for audit fidelity.
     // see also: apps/bench-runner/src/harness/seed-rotation.ts
     //   canonicalizeSeedObjectKind
-    // see also: packages/soul/src/garden/materialization-router.ts
+    // see also: packages/soul/src/garden/materialization-router/inputs.ts
     //   routeByObjectKind
     const seedObjectKind = canonicalizeSeedObjectKind(signal.object_kind);
     drafts.push({
@@ -2029,7 +2029,7 @@ const SYNTHESIS_PER_TURN_MAX_CHARS = 400;
  * id — the MaterializationRouter only routes potential_synthesis with
  * evidence_refs.length >= 2 to synthesisService.create.
  *
- * see also: packages/soul/src/garden/materialization-router.ts materializeSynthesis
+ * see also: packages/soul/src/garden/materialization-router/router.ts materializeSynthesis
  */
 export function buildSessionSynthesisInput(input: {
   readonly topicKey: string;

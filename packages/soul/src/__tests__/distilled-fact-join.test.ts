@@ -12,7 +12,7 @@ import {
 // official-API garden provider must carry a resolved one-assertion fact
 // that materialization's buildDistilledFact uses verbatim, instead of
 // re-distilling the raw span. see also: garden/compute-provider.ts and
-// garden/materialization-router.ts buildDistilledFact.
+// garden/materialization-router/inputs.ts buildDistilledFact.
 
 function createContext() {
   return {

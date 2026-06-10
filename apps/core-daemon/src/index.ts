@@ -1306,7 +1306,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // the enrich_pending marker atomically (so it skips its loud fallback). Core
   // throws if an enqueueEnrichment intent is requested but the atomic seam is
   // unwired, so a successful return WITH the intent means the marker landed
-  // atomically. see also: packages/soul/src/garden/materialization-router.ts
+  // atomically. see also: packages/soul/src/garden/materialization-router/router.ts
   // MemoryMaterializationCreatedObject.enrichmentEnqueued
   const materializationMemoryService = {
     create: async (input: Parameters<typeof memoryService.create>[0]) => {
@@ -1333,7 +1333,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     // exists; rejected is a decided B3 refusal (router drops it cleanly); failed
     // is transient (router either records a durable proposal or defers the owed
     // signal-ref path to BULK_ENRICH retry through enrich_pending).
-    // see also: packages/soul/src/garden/materialization-router.ts PathCandidateMintOutcome.
+    // see also: packages/soul/src/garden/materialization-router/contracts.ts PathCandidateMintOutcome.
     pathCandidateSinkPort: {
       submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
     },
