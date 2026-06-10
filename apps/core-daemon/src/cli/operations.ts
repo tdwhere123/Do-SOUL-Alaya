@@ -156,12 +156,14 @@ function parseOperationArgs(
   }
 
   if (command === "import") {
-    if (positionals.length !== 1) {
+    const bundlePath = positionals[0];
+    // Guard instead of `positionals[0]!`: a null/undefined here means no bundle path.
+    if (positionals.length !== 1 || bundlePath === undefined) {
       return { ok: false, message: "import requires exactly one bundle path." };
     }
     return {
       ok: true,
-      args: { outputPath: null, bundlePath: positionals[0]!, preview, yes }
+      args: { outputPath: null, bundlePath, preview, yes }
     };
   }
 
