@@ -620,7 +620,7 @@ export interface BenchDaemonHandle {
    * Call after the run completes so every contributing event is durably
    * written.
    *
-   * see also: packages/eval/src/edge-proposal-kpi.ts
+   * see also: packages/eval/src/metrics/edge-proposal-kpi.ts
    */
   queryEdgeProposalKpiRows(): Promise<readonly EdgeProposalKpiEventRow[]>;
   /**
@@ -2399,7 +2399,7 @@ async function queryTokenMetrics(
 // proposal event types, returning the minimal structural row shape the
 // aggregator in @do-soul/alaya-eval consumes. The aggregator is pure so it
 // stays unit-testable without standing up storage.
-// see also: packages/eval/src/edge-proposal-kpi.ts
+// see also: packages/eval/src/metrics/edge-proposal-kpi.ts
 // invariant: scope to the question's workspace, for the same reason
 // queryTokenMetrics does — the shared daemon-per-run DB would otherwise
 // re-deliver every prior question's edge-proposal events on each call,

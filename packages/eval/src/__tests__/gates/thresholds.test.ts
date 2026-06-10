@@ -5,7 +5,7 @@ import {
   classifyLatencyGrowth,
   classifyRatioDrop,
   rollupWorstVerdict
-} from "../thresholds.js";
+} from "../../gates/thresholds.js";
 
 describe("classifyRatioDrop", () => {
   it("returns ok when the drop is below the warn threshold", () => {

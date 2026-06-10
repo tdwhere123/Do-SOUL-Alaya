@@ -19,9 +19,9 @@ import {
   type BenchSimulateReportMode,
   type BenchSplit,
   type KpiPayload
-} from "./kpi-schema.js";
-import { releaseHardGateAllowsLatestPassing } from "./release-gates.js";
-import { evaluateSeedExtractionReleaseBlocker } from "./seed-extraction-blocker.js";
+} from "../schema/kpi-schema.js";
+import { releaseHardGateAllowsLatestPassing } from "../gates/release-gates.js";
+import { evaluateSeedExtractionReleaseBlocker } from "../gates/seed-extraction-blocker.js";
 
 export interface HistoryLayout {
   readonly historyRoot: string;

@@ -2,7 +2,7 @@
 // in percentage points at 95% confidence. The Wilson interval is preferred
 // over the normal (Wald) approximation for small samples and proportions
 // near 0 or 1 because it does not over-extend below 0 or above 1.
-// see also: packages/eval/src/diff.ts. Ratio diff uses this to gate
+// see also: packages/eval/src/history/diff.ts. Ratio diff uses this to gate
 // regression verdicts on small-N runs.
 
 export const WILSON_Z_95 = 1.96;
@@ -46,7 +46,7 @@ export function wilsonHalfWidthPp(
 // returned. For small samples the band widens to max(raw, ci_half_width)
 // so a noise-level delta does not trip a regression alarm.
 //
-// Asymmetry note: the caller (packages/eval/src/diff.ts) drives the
+// Asymmetry note: the caller (packages/eval/src/history/diff.ts) drives the
 // band from the *current* run's evaluated_count and observed
 // proportion only. When the previous baseline is also undersampled,
 // the previous run's wider CI is not blended into the current band;

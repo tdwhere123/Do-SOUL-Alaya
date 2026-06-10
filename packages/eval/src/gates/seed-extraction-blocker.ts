@@ -7,7 +7,7 @@
 // consumer, future automation, Inspector).
 // cross-file: apps/bench-runner/src/longmemeval/seed-extraction-release-blocker.ts
 //   wraps this judgment with bench-runner-specific report/finding rendering.
-import type { KpiPayload, SeedExtractionPath } from "./kpi-schema.js";
+import type { KpiPayload, SeedExtractionPath } from "../schema/kpi-schema.js";
 
 export interface SeedExtractionReleaseBlocker {
   readonly id: string;

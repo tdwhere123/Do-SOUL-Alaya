@@ -1,4 +1,4 @@
-import type { TokenEconomy } from "./kpi-schema.js";
+import type { TokenEconomy } from "../schema/kpi-schema.js";
 
 /**
  * Raw event-sourced token counts a bench run derives from its EventLog.

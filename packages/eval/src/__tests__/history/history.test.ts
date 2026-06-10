@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
-import { diffKpis } from "../diff.js";
+import { diffKpis } from "../../history/diff.js";
 import {
   entrySlug,
   listEntries,
@@ -14,10 +14,10 @@ import {
   readPrevious,
   writeEntry,
   type HistoryLayout
-} from "../history.js";
-import { KpiPayloadSchema, type KpiPayload } from "../kpi-schema.js";
-import { renderFindings, renderReport } from "../report.js";
-import { collectReleaseHardGates, releaseHardGateAllowsLatestPassing } from "../release-gates.js";
+} from "../../history/history.js";
+import { KpiPayloadSchema, type KpiPayload } from "../../schema/kpi-schema.js";
+import { renderFindings, renderReport } from "../../reporting/report.js";
+import { collectReleaseHardGates, releaseHardGateAllowsLatestPassing } from "../../gates/release-gates.js";
 
 function buildPayload(commit: string): KpiPayload {
   return {

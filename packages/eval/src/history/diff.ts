@@ -3,7 +3,7 @@ import type {
   KpiPayload,
   PerScenarioRow,
   Verdict
-} from "./kpi-schema.js";
+} from "../schema/kpi-schema.js";
 import {
   DEFAULT_THRESHOLDS,
   classifyHotShareDrop,
@@ -14,8 +14,8 @@ import {
   type KpiDiffResult,
   type RatioBand,
   type ThresholdConfig
-} from "./thresholds.js";
-import { ciAwareBand } from "./wilson-ci.js";
+} from "../gates/thresholds.js";
+import { ciAwareBand } from "../metrics/wilson-ci.js";
 
 export function diffKpis(
   current: KpiPayload,

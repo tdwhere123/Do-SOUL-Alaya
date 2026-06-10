@@ -76,7 +76,7 @@ export function extractRecallTokenEconomy(
  * see also:
  *   packages/core/src/recall-service.ts (computeRecallTokenEconomy)
  *   apps/bench-runner/src/harness/recall-diagnostics-schema.ts
- *   packages/eval/src/kpi-schema.ts (RecallTokenEconomy KPI block)
+ *   packages/eval/src/schema/kpi-schema.ts (RecallTokenEconomy KPI block)
  */
 
 const RECALL_TOKEN_ECONOMY_SCHEMA_VERSION =

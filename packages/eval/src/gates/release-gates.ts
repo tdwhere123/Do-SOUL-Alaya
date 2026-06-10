@@ -1,4 +1,4 @@
-import type { KpiPayload, QualityMetrics, Verdict } from "./kpi-schema.js";
+import type { KpiPayload, QualityMetrics, Verdict } from "../schema/kpi-schema.js";
 import { evaluateSeedExtractionReleaseBlocker } from "./seed-extraction-blocker.js";
 import { rollupWorstVerdict } from "./thresholds.js";
 

@@ -22,7 +22,7 @@ export {
   type TierDistribution,
   type TokenEconomy,
   type RecallTokenEconomy
-} from "./kpi-schema.js";
+} from "./schema/kpi-schema.js";
 
 export {
   aggregateEdgeProposalAutoAccept,
@@ -30,13 +30,13 @@ export {
   aggregateEdgeProposalRatePerQuestion,
   type EdgeProposalKpiEventRow,
   type ProposalsPerQuestionRollup
-} from "./edge-proposal-kpi.js";
+} from "./metrics/edge-proposal-kpi.js";
 
 export {
   buildTokenEconomy,
   computeTokenSavedRatio,
   type TokenEconomyInput
-} from "./token-economy.js";
+} from "./metrics/token-economy.js";
 
 export {
   collectReleaseHardGates,
@@ -44,7 +44,7 @@ export {
   releaseHardGateAllowsLatestPassing,
   releaseHardGateVerdict,
   type BenchmarkHardGate
-} from "./release-gates.js";
+} from "./gates/release-gates.js";
 
 export {
   evaluateSeedExtractionReleaseBlocker,
@@ -52,7 +52,7 @@ export {
   hasSeedExtractionReleaseBlocker,
   isLongMemEvalBenchName,
   type SeedExtractionReleaseBlocker
-} from "./seed-extraction-blocker.js";
+} from "./gates/seed-extraction-blocker.js";
 
 export {
   DEFAULT_THRESHOLDS,
@@ -65,9 +65,9 @@ export {
   type RatioBand,
   type RatioGrowthBand,
   type ThresholdConfig
-} from "./thresholds.js";
+} from "./gates/thresholds.js";
 
-export { buildDiffVsPrevious, diffKpis, verdictBadge } from "./diff.js";
+export { buildDiffVsPrevious, diffKpis, verdictBadge } from "./history/diff.js";
 
 export {
   benchArchiveDiscriminator,
@@ -82,9 +82,9 @@ export {
   writeEntry,
   type HistoryEntry,
   type HistoryLayout
-} from "./history.js";
+} from "./history/history.js";
 
-export { renderFindings, renderReport } from "./report.js";
+export { renderFindings, renderReport } from "./reporting/report.js";
 
 export {
   SAMPLE_SIZE_LABEL_THRESHOLDS,
@@ -94,7 +94,7 @@ export {
   wilsonHalfWidthPp,
   wilsonInterval,
   type SampleSizeLabel
-} from "./wilson-ci.js";
+} from "./metrics/wilson-ci.js";
 
 export { runCli } from "./cli.js";
 
@@ -114,7 +114,7 @@ export {
   type UtilizationBucketReport,
   type UtilizationBucketCounts,
   type UtilizationBucketCohortRow
-} from "./utilization-buckets.js";
+} from "./metrics/utilization-buckets.js";
 
 export {
   PlaneAttributionRowSchema,
@@ -124,4 +124,4 @@ export {
   type PlaneAttributionRow,
   type PlaneAttributionShare,
   type PlaneAttributionResult
-} from "./cohort-attribution.js";
+} from "./metrics/cohort-attribution.js";

@@ -490,7 +490,7 @@ export type TokenEconomy = z.infer<typeof TokenEconomySchema>;
 // (one bucket per question) so the same KPI intent stays measurable
 // under the bench harness. Both blocks describe the same EventLog rows;
 // they differ only in how the rows are bucketed for the percentile.
-// see also: packages/eval/src/edge-proposal-kpi.ts
+// see also: packages/eval/src/metrics/edge-proposal-kpi.ts
 // aggregateEdgeProposalRatePerQuestion.
 const EdgeProposalRateSchema = z
   .object({

@@ -5,7 +5,7 @@ import {
   rollUpUtilizationBucketsByCohort,
   type UtilizationBucketDelivery,
   type UtilizationBucketReport
-} from "../utilization-buckets.js";
+} from "../../metrics/utilization-buckets.js";
 
 function delivery(input: Partial<UtilizationBucketDelivery>): UtilizationBucketDelivery {
   return {

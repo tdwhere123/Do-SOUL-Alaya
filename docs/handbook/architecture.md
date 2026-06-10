@@ -53,6 +53,8 @@ packages/soul            SOUL kernel, Garden, heuristics, maintenance
                          roles (Auditor / Janitor / Librarian / Scheduler)
 packages/engine-gateway  provider adapters (OpenAI / Anthropic / custom)
                          and MCP bridge (routing only)
+packages/eval            benchmark KPI schemas, history diff/report utilities,
+                         release gates, and metric helpers grouped by domain
 ```
 
 Dependency direction:

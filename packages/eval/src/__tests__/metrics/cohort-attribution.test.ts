@@ -4,7 +4,7 @@ import {
   extractPlaneAttributionRows,
   shareOfPlane,
   type PlaneAttributionRow
-} from "../cohort-attribution.js";
+} from "../../metrics/cohort-attribution.js";
 
 describe("computePlaneAttribution", () => {
   it("returns empty result when no rows hit", () => {

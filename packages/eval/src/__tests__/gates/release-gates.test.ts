@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { KpiPayload } from "../kpi-schema.js";
+import type { KpiPayload } from "../../schema/kpi-schema.js";
 import {
   collectReleaseHardGates,
   releaseHardGateAllowsLatestPassing,
   releaseHardGateVerdict
-} from "../release-gates.js";
+} from "../../gates/release-gates.js";
 
 function makeSeedExtractionPath(
   input: Partial<NonNullable<KpiPayload["kpi"]["seed_extraction_path"]>> = {}

@@ -285,11 +285,11 @@ embedding-on-500 archive pairs under
 
 **Status**: Resolved in v0.3.8.
 
-**Resolution**: `packages/eval/src/wilson-ci.ts` (new) computes the
-95% Wilson interval. `packages/eval/src/report.ts` annotates R@K
+**Resolution**: `packages/eval/src/metrics/wilson-ci.ts` (new) computes the
+95% Wilson interval. `packages/eval/src/reporting/report.ts` annotates R@K
 with the half-width and explicit lo/hi bounds; the header line
 emits a sample-size label (smoke / shard_merged / full).
-`packages/eval/src/diff.ts` widens the ratio-KPI band to
+`packages/eval/src/history/diff.ts` widens the ratio-KPI band to
 `max(raw_band, ci_half_width)` when `evaluated_count < 100`, so
 small-N runs cannot trip the fail/warn alarm on noise. Eight new
 `wilson-ci.test.ts` cases + two reframed `diff.test.ts` cases pin

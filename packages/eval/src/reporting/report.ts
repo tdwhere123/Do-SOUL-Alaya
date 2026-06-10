@@ -1,11 +1,11 @@
-import type { KpiPayload } from "./kpi-schema.js";
-import { verdictBadge } from "./diff.js";
-import type { KpiDiffResult } from "./thresholds.js";
-import { deriveSampleSizeLabel, wilsonInterval } from "./wilson-ci.js";
+import type { KpiPayload } from "../schema/kpi-schema.js";
+import { verdictBadge } from "../history/diff.js";
+import type { KpiDiffResult } from "../gates/thresholds.js";
+import { deriveSampleSizeLabel, wilsonInterval } from "../metrics/wilson-ci.js";
 import {
   collectReleaseHardGates,
   combineVerdicts
-} from "./release-gates.js";
+} from "../gates/release-gates.js";
 
 export function renderReport(
   current: KpiPayload,

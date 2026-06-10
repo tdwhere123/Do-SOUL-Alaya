@@ -223,7 +223,7 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
     // conversations. The R@K denominator is `totalQa` (questions
     // actually scored across all conversations in the window); the
     // dataset-wide upper bound is the QA total of the full LoCoMo set.
-    // see also: packages/eval/src/wilson-ci.ts (label cascade reads
+    // see also: packages/eval/src/metrics/wilson-ci.ts (label cascade reads
     // evaluatedCount in question units).
     sample_size: resolveLocomoSampleSize(conversations),
     evaluated_count: totalQa,

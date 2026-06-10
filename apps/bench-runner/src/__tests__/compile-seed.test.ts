@@ -1581,7 +1581,7 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
 // v0.3.11 this layer had ZERO retries, so a transient yunwu.ai burst that the
 // production transport would recover silently demoted the bench archive to
 // the no-credentials fallback path.
-// cross-file: packages/soul/src/garden/pi-mono-extractor.ts MAX_EXTRACTOR_RETRIES
+// see also: packages/soul/src/garden/pi-mono-extractor.ts MAX_EXTRACTOR_RETRIES
 describe("createGardenHttpExtractor retry policy", () => {
   const HTTP_CONFIG: CompileSeedExtractionConfig = {
     providerUrl: "https://example.test/v1",
@@ -1802,7 +1802,7 @@ describe("createGardenHttpExtractor retry policy", () => {
   // ignores its abort signal and never settles. abort() alone does not settle
   // for that stalled-socket shape, so without the settlement reject the attempt
   // would wait the full budget and then misclassify as failure_timeout.
-  // cross-file: packages/soul/src/garden/wall-clock-timeout.ts settleOperatorAbort.
+  // see also: packages/soul/src/garden/wall-clock-timeout.ts settleOperatorAbort.
   it("settles failure_aborted (no retry) on operator abort even when the fetch ignores its signal", async () => {
     const operator = new AbortController();
     const fetchMock = vi
@@ -2199,8 +2199,8 @@ describe("extractContentFromChatCompletionBody", () => {
 // retry_classification field surfaces the terminal outcome, (c) end up
 // blocked via seedExtractionReleaseBlocker because
 // live_extraction_failures > 0.
-// cross-file: packages/eval/src/seed-extraction-blocker.ts
-//   evaluateSeedExtractionReleaseBlocker checks live_extraction_failures.
+// see also: packages/eval/src/gates/seed-extraction-blocker.ts —
+// evaluateSeedExtractionReleaseBlocker checks live_extraction_failures.
 describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", () => {
   let cacheRoot: string;
   let diagnosticDir: string;

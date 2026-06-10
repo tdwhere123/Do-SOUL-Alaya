@@ -3,7 +3,7 @@
 // >= 0. Wall-clock (Date.now()) can jump backward on NTP resync/host suspend,
 // producing a negative duration that fails KpiPayloadSchema's
 // latency_ms / latency_ms_p50 / latency_ms_p95 nonnegative() guard.
-// see also: packages/eval/src/kpi-schema.ts (latency_ms* constraints).
+// see also: packages/eval/src/schema/kpi-schema.ts (latency_ms* constraints).
 // Date.now() is still correct for IDs and archive timestamps; only measured
 // durations must use this monotonic source.
 

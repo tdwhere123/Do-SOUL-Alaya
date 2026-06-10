@@ -82,7 +82,7 @@ interface CreatedRecord {
 import type {
   EdgeProposalAutoAccept,
   EdgeProposalRate
-} from "./kpi-schema.js";
+} from "../schema/kpi-schema.js";
 
 /**
  * @anchor edge-proposal-rate-per-question — under the

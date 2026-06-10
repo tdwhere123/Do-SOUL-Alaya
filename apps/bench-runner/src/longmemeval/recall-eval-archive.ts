@@ -26,8 +26,8 @@ import {
  * on round-trip by the non-strict schema). selectFullRunBaseline excludes any
  * archive whose checksum_source starts with this prefix; the recall-eval slug
  * also carries it for audit distinguishability.
- * cross-file: apps/bench-runner/src/longmemeval/recall-eval.ts (writes it)
- * cross-file: apps/bench-runner/src/longmemeval/runner.ts (full-run baseline)
+ * see also: apps/bench-runner/src/longmemeval/recall-eval.ts (writes it)
+ * see also: apps/bench-runner/src/longmemeval/runner.ts (full-run baseline)
  */
 export const RECALL_EVAL_ARCHIVE_MARKER = "recall-eval-snapshot";
 
@@ -53,7 +53,7 @@ const FINDINGS_FILENAME = "findings.md";
  * scan that skips recall-eval archives and re-applies the same passing gate
  * (no findings.md regression file + release hard gate + no seed-extraction
  * blocker) the eval package uses for latest_passing.
- * cross-file: packages/eval/src/history.ts entryAllowsLatestPassing
+ * see also: packages/eval/src/history/history.ts — entryAllowsLatestPassing
  */
 export async function selectFullRunBaseline(
   layout: HistoryLayout,

@@ -1114,7 +1114,7 @@ async function runMergeLongMemEvalCommand(
     // Scalar identity branches expressed as a table; dataset composite
     // and duplicate-id / over-eval guards remain inline below because
     // they don't reduce to a single-field equality.
-    // see also: packages/eval/src/kpi-schema.ts §harness_mode for the
+    // see also: packages/eval/src/schema/kpi-schema.ts §harness_mode for the
     // mcp_propose_review vs direct_db_seed audit-distinguishability
     // contract.
     // @anchor scalar-identity-field-narrowing: the union literal

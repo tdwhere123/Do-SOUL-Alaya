@@ -262,7 +262,7 @@ export interface LongMemEvalHitScoringResult {
  * recorded in diagnostics only; it is never counted toward R@K.
  *
  * see also: apps/bench-runner/src/harness/daemon.ts — proposeMemoryFromSignal
- * see also: packages/eval/src/report.ts — report.md "Scoring contract"
+ * see also: packages/eval/src/reporting/report.ts — report.md "Scoring contract"
  *   section; its LongMemEval-S text must mirror this measurement-basis
  *   note (the report.md prose lives there, not in this package).
  */
@@ -659,7 +659,7 @@ export async function runLongMemEval(
       // SOUL_GRAPH_EDGE_PROPOSAL_CREATED + _REVIEWED EventLog rows.
       // Read back after seeding + recall so every auto-accept policy
       // decision is durably persisted before aggregation.
-      // see also: packages/eval/src/edge-proposal-kpi.ts
+      // see also: packages/eval/src/metrics/edge-proposal-kpi.ts
       const edgeProposalKpiRows = await workspace.queryEdgeProposalKpiRows();
       phase.record("kpi_query", tKpiQuery);
 
@@ -845,7 +845,7 @@ export async function runLongMemEval(
   // so aggregateEdgeProposalRate can emit the proposals_per_question
   // distribution. K3.2's "40-80/workspace/day" target is uninterpretable
   // off per_workspace_per_day_* alone because the bench harness uses
-  // one workspaceId per run. see also: packages/eval/src/kpi-schema.ts.
+  // one workspaceId per run. see also: packages/eval/src/schema/kpi-schema.ts.
   // The flat across-questions list is derived by flattening these chunks at
   // the aggregator call site rather than stored a second time.
   const edgeProposalKpiRowsPerQuestion: EdgeProposalKpiEventRow[][] = [];
@@ -916,7 +916,7 @@ export async function runLongMemEval(
 
   // @anchor variant-to-split: exhaustive Record so a new
   // LongMemEvalVariant without a split mapping is a compile error.
-  // see also: packages/eval/src/kpi-schema.ts BenchSplit enum.
+  // see also: packages/eval/src/schema/kpi-schema.ts BenchSplit enum.
   const VARIANT_TO_SPLIT: Record<typeof opts.variant, BenchSplit> = {
     longmemeval_oracle: "longmemeval-oracle",
     longmemeval_s: "longmemeval-s",
@@ -1053,7 +1053,7 @@ export async function runLongMemEval(
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
   // Diff against the latest PASSING full-run entry of the SAME split. Oracle vs
   // S are not comparable retrieval evaluations (Oracle's session filter is
-  // no-op, S's is meaningful). See packages/eval/src/history.ts
+  // no-op, S's is meaningful). see also: packages/eval/src/history/history.ts
   // @anchor read-latest-split-aware. selectFullRunBaseline additionally
   // excludes fast-loop recall-eval archives, which share this public/ bucket +
   // passing pointer but never paid extraction/materialization.

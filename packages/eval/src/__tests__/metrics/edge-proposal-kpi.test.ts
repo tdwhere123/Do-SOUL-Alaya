@@ -11,7 +11,7 @@ import {
   aggregateEdgeProposalRate,
   aggregateEdgeProposalRatePerQuestion,
   type EdgeProposalKpiEventRow
-} from "../edge-proposal-kpi.js";
+} from "../../metrics/edge-proposal-kpi.js";
 
 const WORKSPACE_A = "11111111-1111-4111-8111-aaaaaaaaaaaa";
 const WORKSPACE_B = "22222222-2222-4222-8222-bbbbbbbbbbbb";

@@ -500,7 +500,7 @@ export function buildLongMemEvalQualityMetrics(
   // so a gold bearing both is attributed path-primary. graph_only isolates gold
   // that reached top-5 purely via multi-hop. This block proves stream/plane
   // attribution only; relation-kind provenance is not present in recall
-  // diagnostics. see also: packages/eval/src/kpi-schema.ts PathVsGraphFaninSchema.
+  // diagnostics. see also: packages/eval/src/schema/kpi-schema.ts PathVsGraphFaninSchema.
   let pathFaninGoldSourceCount = 0;
   let pathFaninGoldHitAt5Count = 0;
   let graphFaninGoldSourceCount = 0;

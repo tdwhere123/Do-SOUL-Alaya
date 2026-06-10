@@ -4,7 +4,7 @@ import {
   deriveSampleSizeLabel,
   wilsonHalfWidthPp,
   wilsonInterval
-} from "../wilson-ci.js";
+} from "../../metrics/wilson-ci.js";
 
 describe("wilsonInterval", () => {
   it("returns zero interval for total = 0", () => {

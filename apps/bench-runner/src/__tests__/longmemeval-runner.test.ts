@@ -1038,7 +1038,7 @@ describe("LongMemEval runner", () => {
 
   // Guards KpiPayloadSchema's latency_ms* nonnegative() invariant: a
   // monotonic recall clock can never report a negative duration even when
-  // recall resolves instantly. see also: packages/eval/src/kpi-schema.ts.
+  // recall resolves instantly. see also: packages/eval/src/schema/kpi-schema.ts.
   it.each(["none", "mixed"] as const)(
     "reports a non-negative finite scoredRecallLatencyMs for simulate_report=%s",
     async (simulateReport) => {
