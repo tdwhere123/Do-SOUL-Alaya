@@ -8,6 +8,7 @@ coverage/
 .next/
 .cache/
 .claude/
+.vscode/
 
 # Local runtime data
 var/
