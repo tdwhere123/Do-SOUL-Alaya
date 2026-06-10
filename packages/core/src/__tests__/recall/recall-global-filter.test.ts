@@ -13,7 +13,7 @@ import {
   type Slot,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import { RecallService, type RecallServiceDependencies } from "../recall-service.js";
+import { RecallService, type RecallServiceDependencies } from "../../recall-service.js";
 
 function createTaskSurface(): TaskObjectSurface {
   return {

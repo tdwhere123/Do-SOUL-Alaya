@@ -7,7 +7,7 @@ import {
   type MemoryAnchorExistencePort,
   type PathRelationProposalEventPublisherPort,
   type SubmitCandidateInput
-} from "../path-relation-proposal-service.js";
+} from "../../path-relation-proposal-service.js";
 
 // invariant (codex spine-review B3): an agent/Garden candidate may PROPOSE a
 // path, but Alaya DECIDES durable truth. A path object anchor naming a memory

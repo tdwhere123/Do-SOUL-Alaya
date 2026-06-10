@@ -16,8 +16,8 @@ import {
   type Slot,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import { RecallService, type RecallServiceDependencies } from "../recall-service.js";
-import { mapBudgetPenalty, PATH_PLASTICITY_WEIGHT } from "../recall-service-helpers.js";
+import { RecallService, type RecallServiceDependencies } from "../../recall-service.js";
+import { mapBudgetPenalty, PATH_PLASTICITY_WEIGHT } from "../../recall-service-helpers.js";
 
 const FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD = 0.91;
 

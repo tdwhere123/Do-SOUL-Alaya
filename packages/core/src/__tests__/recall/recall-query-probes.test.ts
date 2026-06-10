@@ -1,10 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
-import { compileRecallQueryProbes, expandLexicalTerms, splitLexicalTokens } from "../recall-query-probes.js";
+import { compileRecallQueryProbes, expandLexicalTerms, splitLexicalTokens } from "../../recall-query-probes.js";
 import {
   __resetCjkSegmentationStateForTests,
   warmCjkSegmentation
-} from "../cjk-segmentation.js";
+} from "../../cjk-segmentation.js";
 
 describe("compileRecallQueryProbes", () => {
   it("extracts multilingual structural probes without a provider", () => {

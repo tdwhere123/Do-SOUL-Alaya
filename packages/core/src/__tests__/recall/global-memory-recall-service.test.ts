@@ -7,11 +7,11 @@ import {
   ScopeClass,
   type ProjectMappingAnchor
 } from "@do-soul/alaya-protocol";
-import type { GlobalMemoryRecallEntry } from "../global-memory-recall-port.js";
+import type { GlobalMemoryRecallEntry } from "../../global-memory-recall-port.js";
 import {
   createGlobalMemoryRecallPort,
   loadGlobalRecallCandidates
-} from "../global-memory-recall-service.js";
+} from "../../global-memory-recall-service.js";
 function classifyGlobalCandidate(
   entry: { readonly global_object_id: string },
   anchorMap: ReadonlyMap<string, Readonly<ProjectMappingAnchor>>

@@ -14,8 +14,8 @@ import {
   EmbeddingRecallService,
   OpenAIEmbeddingClient,
   type EmbeddingVectorRecord
-} from "../embedding-recall-service.js";
-import type { TestMock } from "./mock-types.js";
+} from "../../embedding-recall-service.js";
+import type { TestMock } from "../mock-types.js";
 
 describe("EmbeddingRecallService", () => {
   it("queries the local vector table, emits telemetry, and returns additive candidates plus similarity hints", async () => {

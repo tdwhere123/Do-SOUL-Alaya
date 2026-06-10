@@ -19,7 +19,7 @@ import {
   manifestationAuthorityFor,
   memoryGovernanceCeiling,
   planPromotion
-} from "../path-manifestation-policy.js";
+} from "../../path-manifestation-policy.js";
 
 describe("path-manifestation-policy authority matrix", () => {
   it("hint_only authorises no manifestation levels", () => {

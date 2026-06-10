@@ -26,8 +26,8 @@ import {
   WorkspaceState,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { GraphExploreService } from "../graph-explore-service.js";
-import { RecallService, type RecallServiceDependencies } from "../recall-service.js";
+import { GraphExploreService } from "../../graph-explore-service.js";
+import { RecallService, type RecallServiceDependencies } from "../../recall-service.js";
 
 // Recall scoring must read per-memory inbound graph support from SQLite (the
 // unified path plane), not from a constant or process-local cache.

@@ -11,9 +11,9 @@ import {
 import {
   buildRecallCandidate,
   buildSynthesisCoarseRecallCandidate
-} from "../recall-candidate-builder.js";
-import { assignManifestation } from "../recall-service-helpers.js";
-import type { CoarseRecallCandidate, TokenEstimator } from "../recall-service-types.js";
+} from "../../recall-candidate-builder.js";
+import { assignManifestation } from "../../recall-service-helpers.js";
+import type { CoarseRecallCandidate, TokenEstimator } from "../../recall-service-types.js";
 
 // A body over the 160-char createContentPreview cap so a non-full_eligible
 // manifestation truncates the delivered content_preview, proving the cap

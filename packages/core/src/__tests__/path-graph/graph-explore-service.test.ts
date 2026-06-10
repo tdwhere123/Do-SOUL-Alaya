@@ -5,7 +5,7 @@ import {
   type MemoryGraphEdgeTypeValue,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { GraphExploreService } from "../graph-explore-service.js";
+import { GraphExploreService } from "../../graph-explore-service.js";
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {

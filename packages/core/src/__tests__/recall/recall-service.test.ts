@@ -27,13 +27,13 @@ import {
   classifyGlobalCandidate,
   computeRecallTokenEconomy,
   type RecallServiceDependencies
-} from "../recall-service.js";
+} from "../../recall-service.js";
 import type {
   RecallServiceEmbeddingRecallPort,
   RecallServiceMemoryRepoPort,
   RecallServicePathExpansionPort
-} from "../recall-service-types.js";
-import type { EmbeddingVectorRecord } from "../embedding-recall-service.js";
+} from "../../recall-service-types.js";
+import type { EmbeddingVectorRecord } from "../../embedding-recall-service.js";
 
 function createTaskSurface(): TaskObjectSurface {
   return {

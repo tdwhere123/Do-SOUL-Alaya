@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry, GlobalMemoryEntry } from "@do-soul/alaya-protocol";
-import { EventPublisher } from "../event-publisher.js";
+import { EventPublisher } from "../../event-publisher.js";
 import {
   createGlobalMemoryRecallPort,
   type GlobalMemoryRecallInvalidationNotifier
-} from "../global-memory-recall-service.js";
+} from "../../global-memory-recall-service.js";
 
 describe("GlobalMemoryRecallService cross-workspace invalidation", () => {
   it("invalidates cached recall entries in another workspace view via notifier delivery", async () => {

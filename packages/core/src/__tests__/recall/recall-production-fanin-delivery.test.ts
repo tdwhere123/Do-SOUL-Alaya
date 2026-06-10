@@ -25,7 +25,7 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { RecallService, type RecallServiceDependencies } from "../recall-service.js";
+import { RecallService, type RecallServiceDependencies } from "../../recall-service.js";
 
 // anchor: PRODUCTION-PATH proof for the earned-co_recalled fan-in reserve
 // exemption. The sibling suite recall-durable-fanin-delivery.test.ts injects
