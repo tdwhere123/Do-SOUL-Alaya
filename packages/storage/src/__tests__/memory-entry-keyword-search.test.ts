@@ -4,7 +4,7 @@ import {
   tokenizeFtsQuery,
   type ExactKeywordSearchRow,
   type FtsKeywordSearchRow
-} from "../repos/memory-entry-keyword-search.js";
+} from "../repos/memory-entry/keyword-search.js";
 import {
   __resetCjkSegmentationStateForTests,
   warmCjkSegmentation

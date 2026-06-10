@@ -11,10 +11,10 @@ import {
   type ScopeClass,
   type StorageTier
 } from "@do-soul/alaya-protocol";
-import { StorageError } from "../errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
-import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
-import type { MemoryEntryRepoDynamicsUpdateFields, MemoryEntryRepoUpdateFields } from "./memory-entry-repo.js";
+import { StorageError } from "../../errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
+import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
+import type { MemoryEntryRepoDynamicsUpdateFields, MemoryEntryRepoUpdateFields } from "./types.js";
 
 export const MEMORY_ENTRY_SELECT_COLUMNS = `
         object_id,

@@ -17,7 +17,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../db.js";
 import { StorageError } from "../../errors.js";
-import { parseMemoryEntryRow, type MemoryEntryRow } from "../memory-entry-row-mapper.js";
+import { parseMemoryEntryRow, type MemoryEntryRow } from "../memory-entry/row-mapper.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { insertEventLogEntry } from "../shared/event-log-writer.js";
 import { parseNonEmptyString } from "../shared/validators.js";

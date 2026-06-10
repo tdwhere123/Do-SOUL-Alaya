@@ -1,8 +1,8 @@
-import type { MemoryEntryKeywordSearchResult } from "./memory-entry-repo.js";
+import type { MemoryEntryKeywordSearchResult } from "./types.js";
 import {
   isCjkSegmentationCandidate,
   segmentCjkRun
-} from "./shared/cjk-segmentation.js";
+} from "../shared/cjk-segmentation.js";
 
 export interface ExactKeywordCandidateRow {
   readonly object_id: string;

@@ -83,7 +83,7 @@ export interface MemoryServiceEventLogRepoPort {
 
 export interface MemoryServiceMemoryEntryRepoPort {
   create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>>;
-  // see also: packages/storage/src/repos/memory-entry-repo.ts createWithinTransaction.
+  // see also: packages/storage/src/repos/memory-entry/sqlite-memory-entry-repo.ts:createWithinTransaction
   // The synchronous callbacks commit atomically with the row insert. `beforeCreate`
   // is used for the EventLog-first audit row; `afterCreate` is used for the
   // enrich_pending no-drop marker.
