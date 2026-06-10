@@ -6,6 +6,7 @@ import {
   ScopeClass,
   SourceKind,
   StorageTier,
+  readErrorMessage,
   type CandidateMemorySignal,
   type ClaimForm,
   type EdgeProposalTriggerSourceValue,
@@ -703,7 +704,7 @@ export class MaterializationRouter {
         routing_reason: target.routing_reason,
         created_objects: createdObjects,
         success: false,
-        error: readErrorMessage(error)
+        error: readErrorMessage(error, "Unknown materialization error")
       };
     }
   }
@@ -756,7 +757,7 @@ export class MaterializationRouter {
         routing_reason: target.routing_reason,
         created_objects: createdObjects,
         success: false,
-        error: readErrorMessage(error)
+        error: readErrorMessage(error, "Unknown materialization error")
       };
     }
   }
@@ -784,7 +785,7 @@ export class MaterializationRouter {
         routing_reason: target.routing_reason,
         created_objects: [],
         success: false,
-        error: readErrorMessage(error)
+        error: readErrorMessage(error, "Unknown materialization error")
       };
     }
   }
@@ -891,7 +892,7 @@ export class MaterializationRouter {
         routing_reason: target.routing_reason,
         created_objects: createdObjects,
         success: false,
-        error: readErrorMessage(error)
+        error: readErrorMessage(error, "Unknown materialization error")
       };
     }
   }
@@ -1226,7 +1227,7 @@ export class MaterializationRouter {
         routing_reason: target.routing_reason,
         created_objects: [],
         success: false,
-        error: readErrorMessage(error)
+        error: readErrorMessage(error, "Unknown materialization error")
       };
     }
   }
@@ -1363,7 +1364,7 @@ export class MaterializationRouter {
         targetMemoryIds: collectMaterializableSignalMemoryRefs(signal),
         signalId: signal.signal_id,
         runId: signal.run_id,
-        error: readErrorMessage(error)
+        error: readErrorMessage(error, "Unknown materialization error")
       });
       return [];
     }
@@ -1416,7 +1417,7 @@ export class MaterializationRouter {
         routing_reason: target.routing_reason,
         created_objects: [],
         success: false,
-        error: readErrorMessage(error)
+        error: readErrorMessage(error, "Unknown materialization error")
       };
     }
   }
@@ -2008,12 +2009,4 @@ function appendSummarySuffix(summary: string, suffix?: string): string {
   }
 
   return `${summary} ${suffix}`;
-}
-
-function readErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "Unknown materialization error";
 }

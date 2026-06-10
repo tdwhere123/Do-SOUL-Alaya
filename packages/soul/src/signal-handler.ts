@@ -8,6 +8,7 @@ import {
   SoulExploreGraphResponseSchema,
   EmitCandidateSignalResponseSchema,
   SignalSource,
+  readErrorMessage,
   type ConversationRuntimeContext,
   type CandidateMemorySignal,
   type SignalSource as SignalSourceValue,
@@ -159,7 +160,7 @@ export class SoulSignalHandler {
           return createErrorToolResult(toolUse.id, `Unsupported soul tool: ${toolUse.name}`);
       }
     } catch (error) {
-      return createErrorToolResult(toolUse.id, readErrorMessage(error));
+      return createErrorToolResult(toolUse.id, readErrorMessage(error, "Invalid candidate signal payload."));
     }
   }
 }
@@ -273,12 +274,4 @@ function requireRuntimeContext(
   }
 
   return runtimeContext;
-}
-
-function readErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "Invalid candidate signal payload.";
 }

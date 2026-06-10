@@ -117,6 +117,7 @@ export * from "./zero-day-security.js";
 export type { ToolGovernancePort } from "./tool-governance-port.js";
 export * from "./node-template.js";
 export * from "./auditor-ports.js";
+export * from "./read-error-message.js";
 export {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,

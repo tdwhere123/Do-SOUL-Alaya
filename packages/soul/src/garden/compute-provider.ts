@@ -4,6 +4,7 @@ import {
   type GardenProviderKind as GardenProviderKindValue,
   SignalKind,
   SignalSource,
+  readErrorMessage,
   type CandidateMemorySignal,
   type ConversationMessage
 } from "@do-soul/alaya-protocol";
@@ -240,7 +241,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
           signalKind: draft.signal_kind,
           matchedTextChars: draft.matched_text.length,
           distilledFactChars: draft.distilled_fact?.length ?? 0,
-          error: readErrorMessage(error)
+          error: readErrorMessage(error, "unknown error")
         });
       }
     }
@@ -429,7 +430,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       // A single warn is enough; a chronically-failing dump path is the
       // operator's problem, not the extraction caller's.
       console.warn("garden/compute-provider: diagnostic dump failed", {
-        error: readErrorMessage(dumpError)
+        error: readErrorMessage(dumpError, "unknown error")
       });
     }
   }
@@ -660,10 +661,6 @@ function normalizePositiveTimeoutMs(value: unknown): number | null {
 
 function clampConfidence(value: number): number {
   return Math.max(0, Math.min(1, value));
-}
-
-function readErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "unknown error";
 }
 
 function isSignalKind(value: string): value is CandidateMemorySignal["signal_kind"] {

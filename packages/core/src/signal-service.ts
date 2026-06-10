@@ -5,6 +5,7 @@ import {
   SoulSignalEmittedPayloadSchema,
   SoulSignalMaterializedPayloadSchema,
   SoulSignalTriagedPayloadSchema,
+  readErrorMessage,
   type CandidateMemorySignal,
   type EventLogEntry,
   type SignalState as SignalStateValue
@@ -218,7 +219,7 @@ export class SignalService {
         routing_reason: "materialization_exception",
         created_objects: [],
         success: false,
-        error: readErrorMessage(error)
+        error: readErrorMessage(error, "Unknown materialization error")
       } satisfies SignalMaterializationResult;
 
       this.warn("Signal materialization failed.", {
@@ -368,14 +369,6 @@ function mapTriageResultToSignalState(triageResult: SignalTriageResult): SignalS
       return exhaustiveCheck;
     }
   }
-}
-
-function readErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "Unknown materialization error";
 }
 
 function mapExistingSignalStateToTriage(state: SignalStateValue): SignalTriageResult {
