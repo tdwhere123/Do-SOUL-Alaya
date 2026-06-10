@@ -573,10 +573,11 @@ describe("mcp memory tool handler", () => {
     // A legitimate report (delivery resolves, used ids subset the delivery)
     // still reinforces. see also: mcp-memory-tool-handler.ts reportContextUsage.
     const onCoUsage = vi.fn(async () => undefined);
+    const onCoRecall = vi.fn(async () => undefined);
     const baseDeps = createDeps();
     const deps: McpMemoryToolHandlerDependencies = {
       ...baseDeps,
-      pathRelationProposalService: { onCoUsage }
+      pathRelationProposalService: { onCoUsage, onCoRecall }
     };
     deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) => ({
       ...createDeliveryRecord(deliveryId),
