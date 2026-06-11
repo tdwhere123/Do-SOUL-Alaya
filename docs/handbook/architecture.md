@@ -165,7 +165,7 @@ review finding:
    - HealthJournalService, EventPublisher, RuntimeEventNormalizer
    - EvidenceService, MemoryService, SignalService
    - GreenService, GovernanceLeaseService, SessionOverrideService
-   - RecallService (needs Memory + Embedding repos; fusion, delivery, and diagnostics helpers live under `packages/core/src/recall/`)
+   - RecallService (needs Memory + Embedding repos; fusion, delivery, graph-expansion, and diagnostics helpers live under `packages/core/src/recall/`)
    - OutputShapingService, NarrativeBudgetService, ManifestationResolver
    - SynthesisService, ProposalService
    - ConversationService (memory-orchestration only; chat-specific orchestration was removed during the v0.1 port — see invariant §20)

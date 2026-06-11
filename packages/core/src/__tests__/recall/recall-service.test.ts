@@ -108,7 +108,7 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
 // edge it replaces. strength 1 + the supports/derives_from/recalls relation
 // kinds reproduce the static contribution_weight basis so the merged plane is
 // zero-drift on the first pass.
-// see also: packages/core/src/recall-service.ts graphTraversalScoreFromPath
+// see also: packages/core/src/recall/graph-expansion.ts:graphTraversalScoreFromPath
 function createPathRelation(overrides: {
   readonly path_id?: string;
   readonly sourceId?: string;
@@ -2523,7 +2523,7 @@ describe("RecallService", () => {
     // onto the path_expansion plane, so it no longer counts in graph_expansion's
     // per_hop[0] / per_edge_type — the graph plane carries only the multi-hop
     // reach now.
-    // see also: recall-service.ts graphTraversalScoreFromPath.
+    // see also: packages/core/src/recall/graph-expansion.ts:graphTraversalScoreFromPath.
     const memories = [
       createMemoryEntry({
         object_id: "seed-memory",

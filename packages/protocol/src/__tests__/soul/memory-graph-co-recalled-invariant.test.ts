@@ -5,13 +5,13 @@ import {
 } from "../../soul/memory-graph.js";
 
 // anchor: pins the co_recalled exclusion that the recall earned-fan-in reserve
-// exemption depends on. The exemption (recall-service.ts
+// exemption depends on. The exemption (packages/core/src/recall/fusion-delivery.ts:
 // isStructuralRescueCandidate) is sound ONLY because `co_recalled` is a
 // PathRelation relation_kind, never a MemoryGraphEdgeType — so a generic graph
 // edge can never masquerade as the earned fan-in carrier. If a future edit adds
 // co_recalled to memoryGraphEdgeTypeValues, the first assertion trips here.
-// see also: memory-graph.ts memoryGraphEdgeTypeValues / MemoryGraphEdgeTypeSchema,
-//   recall-service.ts EARNED_CO_RECALLED_FANIN_RELATION_KIND.
+// see also: packages/protocol/src/soul/memory-graph.ts:memoryGraphEdgeTypeValues / MemoryGraphEdgeTypeSchema,
+//   packages/core/src/recall/graph-expansion.ts:EARNED_CO_RECALLED_FANIN_RELATION_KIND.
 describe("co_recalled enum invariant (recall earned-fan-in exemption guard)", () => {
   it("rejects co_recalled as a MemoryGraphEdgeType value", () => {
     expect(MemoryGraphEdgeTypeSchema.safeParse("co_recalled").success).toBe(false);

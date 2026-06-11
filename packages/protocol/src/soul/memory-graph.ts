@@ -9,9 +9,9 @@ import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-
 // relation_kind === "co_recalled", a value that no graph edge_type ever takes,
 // so adding co_recalled here would let a generic graph edge masquerade as the
 // earned fan-in carrier. A future edit that adds it trips the contract test.
-// see also: mapRelationKindToGraphEdgeType, recall-service.ts
-//   EARNED_CO_RECALLED_FANIN_RELATION_KIND;
-//   packages/protocol/src/__tests__/memory-graph-co-recalled-invariant.test.ts.
+// see also: packages/protocol/src/soul/memory-graph.ts:mapRelationKindToGraphEdgeType,
+//   packages/core/src/recall/graph-expansion.ts:EARNED_CO_RECALLED_FANIN_RELATION_KIND,
+//   packages/protocol/src/__tests__/soul/memory-graph-co-recalled-invariant.test.ts.
 const memoryGraphEdgeTypeValues = [
   "supports",
   "derives_from",

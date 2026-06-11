@@ -40,8 +40,9 @@ import { RecallService, type RecallServiceDependencies } from "../../recall-serv
 // exemption (isStructuralRescueCandidate) regresses. (Verified by mutation: with
 // the flag set point forced to false, the co_recalled sibling is no longer
 // delivered, matching the supports control.)
-// see also: recall-service.ts EARNED_CO_RECALLED_FANIN_RELATION_KIND, the flag
-//   set point in addPathExpansionCandidates, isStructuralRescueCandidate.
+// see also: packages/core/src/recall/graph-expansion.ts:EARNED_CO_RECALLED_FANIN_RELATION_KIND,
+//   packages/core/src/recall-service.ts:addPathExpansionCandidates,
+//   packages/core/src/recall/fusion-delivery.ts:isStructuralRescueCandidate.
 
 const databases = new Set<StorageDatabase>();
 

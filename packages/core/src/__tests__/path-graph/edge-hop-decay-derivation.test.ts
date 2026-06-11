@@ -32,7 +32,7 @@ describe("EDGE_TYPE_HOP_DECAY derivation", () => {
   it("single-edge admission score derives from contribution_weight floored at 0", () => {
     // graphTraversalScoreFromPath = clamp01(max(0, contribution_weight)); pin
     // that negatives floor to 0 in traversal while positives pass through.
-    // see also: recall-service.ts graphTraversalScoreFromPath.
+    // see also: packages/core/src/recall/graph-expansion.ts:graphTraversalScoreFromPath.
     expect(Math.max(0, EDGE_TYPE_RECALL_MODEL.supports.contribution_weight)).toBe(1.0);
     expect(Math.max(0, EDGE_TYPE_RECALL_MODEL.supersedes.contribution_weight)).toBe(0);
     expect(Math.max(0, EDGE_TYPE_RECALL_MODEL.contradicts.contribution_weight)).toBe(0);
