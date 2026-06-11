@@ -7,7 +7,7 @@ import {
   type GardenTaskDescriptor,
   type GardenTaskResult
 } from "@do-soul/alaya-protocol";
-import { GardenScheduler, InMemoryGardenTaskRepo } from "../garden/scheduler.js";
+import { GardenScheduler, InMemoryGardenTaskRepo } from "../../garden/scheduler.js";
 
 describe("GardenScheduler", () => {
   it("dispatches a tier-0 task for janitor and emits a dispatch event", async () => {

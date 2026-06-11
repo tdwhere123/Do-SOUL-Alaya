@@ -9,7 +9,7 @@ import {
   type OrphanRadar,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
-import { AUDITOR_CONSTANTS, Auditor, type AuditorDependencies } from "../garden/auditor.js";
+import { AUDITOR_CONSTANTS, Auditor, type AuditorDependencies } from "../../garden/auditor.js";
 
 type AuditorEventLogPort = NonNullable<AuditorDependencies["eventLogRepo"]>;
 type AuditorPointerHealPort = NonNullable<AuditorDependencies["pointerHealPort"]>;

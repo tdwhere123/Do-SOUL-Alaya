@@ -4,12 +4,12 @@ import {
   ExecutionStanceModelRefSchema,
   GardenProviderKind as ProtocolGardenProviderKind
 } from "@do-soul/alaya-protocol";
-import { ComputeRoutingService } from "../garden/compute-routing-service.js";
+import { ComputeRoutingService } from "../../garden/compute-routing-service.js";
 import {
   GardenProviderKind,
   type GardenCompileContext,
   type GardenComputeProvider
-} from "../garden/compute-provider.js";
+} from "../../garden/compute-provider.js";
 
 const NOW = "2026-04-17T10:20:30.000Z";
 

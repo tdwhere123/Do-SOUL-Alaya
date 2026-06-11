@@ -5,7 +5,7 @@ import {
   type GardenTaskDescriptor,
   type GardenTaskKindValue
 } from "@do-soul/alaya-protocol";
-import { JANITOR_CONSTANTS, Janitor } from "../garden/janitor.js";
+import { JANITOR_CONSTANTS, Janitor } from "../../garden/janitor.js";
 
 describe("Janitor GC task kinds", () => {
   it("runs dormant demotion through its port and reports completion", async () => {

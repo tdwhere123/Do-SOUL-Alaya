@@ -9,12 +9,12 @@ import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "@e
 import {
   createPiMonoExtractor,
   type PiMonoExtractorDependencies
-} from "../garden/pi-mono-extractor.js";
+} from "../../garden/pi-mono-extractor.js";
 
 type PiMonoComplete = NonNullable<PiMonoExtractorDependencies["complete"]>;
 
-const fixturesDir = fileURLToPath(new URL("./fixtures/garden-extraction-golden/", import.meta.url));
-const fixturesUrl = new URL("./fixtures/garden-extraction-golden/", import.meta.url);
+const fixturesDir = fileURLToPath(new URL("../fixtures/garden-extraction-golden/", import.meta.url));
+const fixturesUrl = new URL("../fixtures/garden-extraction-golden/", import.meta.url);
 
 describe("garden-extraction-golden", () => {
   it("keeps the fixture suite at twenty or more curated turns", async () => {

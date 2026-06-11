@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseOfficialApiSignals,
   salvageRawSignalElements
-} from "../garden/compute-provider.js";
+} from "../../garden/compute-provider.js";
 
 // Realistic {"signals":[...]} envelope shapes mirroring the production
 // gpt-5.4-mini extraction output, so the salvage path is exercised against

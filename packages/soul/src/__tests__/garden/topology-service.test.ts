@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PathGraphSnapshot, PathRelation } from "@do-soul/alaya-protocol";
-import { TopologyService } from "../garden/topology-service.js";
+import { TopologyService } from "../../garden/topology-service.js";
 
 describe("TopologyService", () => {
   it("returns an empty derived view without snapshot history", async () => {

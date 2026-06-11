@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import {
   OfficialApiGardenProvider
-} from "../garden/compute-provider.js";
+} from "../../garden/compute-provider.js";
 import {
   DISTILLED_FACT_MAX_CHARS,
   buildDistilledFact
-} from "../garden/materialization-router.js";
+} from "../../garden/materialization-router.js";
 
 // Producer -> consumer join: a CandidateMemorySignal emitted by the
 // official-API garden provider must carry a resolved one-assertion fact

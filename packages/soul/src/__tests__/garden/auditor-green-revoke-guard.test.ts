@@ -5,7 +5,7 @@ import {
   type EventLogEntry,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
-import { Auditor, GreenRevokeNoopError, type AuditorDependencies } from "../garden/auditor.js";
+import { Auditor, GreenRevokeNoopError, type AuditorDependencies } from "../../garden/auditor.js";
 
 type AuditorEventLogPort = NonNullable<AuditorDependencies["eventLogRepo"]>;
 type AuditorHealthJournalPort = NonNullable<AuditorDependencies["healthJournal"]>;

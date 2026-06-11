@@ -7,7 +7,7 @@ import {
   type ToolGovernanceQuery
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { SoulToolGovernanceAdapter } from "../index.js";
+import { SoulToolGovernanceAdapter } from "../../index.js";
 
 function createQuery(overrides: Partial<ToolGovernanceQuery> = {}): ToolGovernanceQuery {
   return {

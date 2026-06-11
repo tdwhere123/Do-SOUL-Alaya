@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   WallClockTimeoutError,
   withWallClockTimeout
-} from "../garden/wall-clock-timeout.js";
+} from "../../garden/wall-clock-timeout.js";
 
 // invariant: covers the bench-runner / production garden hang root cause —
 // a fetch that never resolves because the host suspended during the in-flight

@@ -3,7 +3,7 @@ import type { PathGraphSnapshot, PathRelation } from "@do-soul/alaya-protocol";
 import {
   PathGraphSnapshotter,
   reviewPathGraphSnapshotHistory
-} from "../garden/path-graph-snapshotter.js";
+} from "../../garden/path-graph-snapshotter.js";
 
 describe("PathGraphSnapshotter", () => {
   it("uses findActive and builds a zeroed snapshot for an empty workspace", async () => {

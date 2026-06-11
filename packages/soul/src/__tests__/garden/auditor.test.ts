@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AuditorDependencies } from "../garden/auditor.js";
+import type { AuditorDependencies } from "../../garden/auditor.js";
 import {
   GardenRole,
   GardenTaskKind,
@@ -14,7 +14,7 @@ import {
   type HighFrequencyPattern,
   type StaleMemoryEntry
 } from "@do-soul/alaya-protocol";
-import { AUDITOR_CONSTANTS, Auditor } from "../garden/auditor.js";
+import { AUDITOR_CONSTANTS, Auditor } from "../../garden/auditor.js";
 
 describe("Auditor", () => {
   it("exposes the auditor role and tier", () => {

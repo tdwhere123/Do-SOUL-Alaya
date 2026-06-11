@@ -3,7 +3,7 @@ import { MemoryDimension, GreenGovernanceEventType, RetentionPolicy, type EventL
 import {
   SessionOverrideRemediation,
   type SessionOverrideRemediationDependencies
-} from "../garden/session-override-remediation.js";
+} from "../../garden/session-override-remediation.js";
 
 type RemediationMemoryCreate = SessionOverrideRemediationDependencies["memoryService"]["create"];
 type RemediationClaimCreate = SessionOverrideRemediationDependencies["claimService"]["create"];

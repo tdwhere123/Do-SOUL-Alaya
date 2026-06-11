@@ -5,7 +5,7 @@ import {
   type ToolCategory
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { SoulWorkerSafetyReader } from "../worker-safety-reader.js";
+import { SoulWorkerSafetyReader } from "../../workers/worker-safety-reader.js";
 
 describe("SoulWorkerSafetyReader", () => {
   it("derives strict claim refs from read-only workspace claims and deduplicates read-side outputs", async () => {

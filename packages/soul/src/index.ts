@@ -10,18 +10,18 @@ export {
 export {
   SoulWorkerSafetyAdapter,
   type SoulWorkerSafetyAdapterDependencies
-} from "./worker-safety-adapter.js";
+} from "./workers/worker-safety-adapter.js";
 export {
   SoulWorkerSafetyReader,
   type SoulClaimRegistryReader,
   type SoulHazardProjectionReader,
   type SoulPolicyProjectionReader,
   type SoulWorkerSafetyReaderDependencies
-} from "./worker-safety-reader.js";
+} from "./workers/worker-safety-reader.js";
 export {
   SoulToolGovernanceAdapter,
   type SoulStructureRegistryReader
-} from "./tool-governance-adapter.js";
+} from "./tools/tool-governance-adapter.js";
 export {
   AUDITOR_CONSTANTS,
   Auditor,
@@ -145,7 +145,7 @@ export {
   materializeCandidateSignal,
   type SoulSignalHandlerDependencies,
   type ToolResultBlock
-} from "./signal-handler.js";
+} from "./signals/signal-handler.js";
 export {
   buildBootstrappingPathId,
   buildBootstrappingRecordId

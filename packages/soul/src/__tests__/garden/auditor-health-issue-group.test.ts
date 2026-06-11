@@ -10,7 +10,7 @@ import {
   type HealthIssueCauseKindValue,
   type HealthIssueGroup
 } from "@do-soul/alaya-protocol";
-import { Auditor, type AuditorHealthIssueGroupPort } from "../garden/index.js";
+import { Auditor, type AuditorHealthIssueGroupPort } from "../../garden/index.js";
 
 function createTask(overrides: Partial<GardenTaskDescriptor> = {}): GardenTaskDescriptor {
   return {

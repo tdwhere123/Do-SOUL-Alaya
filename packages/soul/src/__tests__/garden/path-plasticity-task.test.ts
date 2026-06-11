@@ -5,7 +5,7 @@ import {
   GardenTier,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
-import { Librarian } from "../garden/librarian.js";
+import { Librarian } from "../../garden/librarian.js";
 import {
   PATH_PLASTICITY_TASK_DEFAULTS,
   resolvePathPlasticitySinceIso,
@@ -13,7 +13,7 @@ import {
   type PathPlasticityComputePort,
   type PathPlasticityComputeResult,
   type PathPlasticityPendingPort
-} from "../garden/path-plasticity-task.js";
+} from "../../garden/path-plasticity-task.js";
 
 const NOW_ISO = "2026-05-04T12:00:00.000Z";
 

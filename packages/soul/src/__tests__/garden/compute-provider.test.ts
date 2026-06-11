@@ -7,13 +7,13 @@ import {
   GardenProviderKind,
   OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider
-} from "../garden/compute-provider.js";
+} from "../../garden/compute-provider.js";
 import {
   SignalExtractorError,
   type SignalExtractor,
   type SignalExtractorMeta
-} from "../garden/pi-mono-extractor.js";
-import { DISTILLED_FACT_MAX_CHARS } from "../garden/materialization-router.js";
+} from "../../garden/pi-mono-extractor.js";
+import { DISTILLED_FACT_MAX_CHARS } from "../../garden/materialization-router.js";
 
 describe("OfficialApiGardenProvider", () => {
   it("materializes candidate signals from a successful official API response", async () => {

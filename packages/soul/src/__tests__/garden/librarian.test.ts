@@ -7,19 +7,19 @@ import {
   GardenEventType,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
-import * as gardenExports from "../garden/index.js";
-import { Auditor } from "../garden/auditor.js";
-import { GardenScheduler } from "../garden/scheduler.js";
-import { Janitor } from "../garden/janitor.js";
+import * as gardenExports from "../../garden/index.js";
+import { Auditor } from "../../garden/auditor.js";
+import { GardenScheduler } from "../../garden/scheduler.js";
+import { Janitor } from "../../garden/janitor.js";
 import {
   LIBRARIAN_CONSTANTS,
   Librarian,
   type CompressionCandidate,
   type MergeCandidate,
   type NeighborGroup
-} from "../garden/librarian.js";
-import type { PathPlasticityComputePort } from "../garden/path-plasticity-task.js";
-import * as soulExports from "../index.js";
+} from "../../garden/librarian.js";
+import type { PathPlasticityComputePort } from "../../garden/path-plasticity-task.js";
+import * as soulExports from "../../index.js";
 
 describe("Librarian", () => {
   it("exposes the librarian role and tier", () => {

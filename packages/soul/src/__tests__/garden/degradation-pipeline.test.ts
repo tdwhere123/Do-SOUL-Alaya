@@ -9,7 +9,7 @@ import {
   type ProjectionEntry,
   type WorkingProjection
 } from "@do-soul/alaya-protocol";
-import { DegradationPipeline } from "../garden/degradation-pipeline.js";
+import { DegradationPipeline } from "../../garden/degradation-pipeline.js";
 
 const RUNTIME_ID = "00000000-0000-4000-8000-000000000001";
 const EXPIRES_AT = "2026-03-25T12:30:00.000Z";

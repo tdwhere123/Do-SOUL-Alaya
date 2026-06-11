@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CandidateMemorySignalSchema, SignalSource } from "@do-soul/alaya-protocol";
-import type { GardenCompileContext } from "../garden/compute-provider.js";
-import { LocalHeuristics } from "../garden/local-heuristics.js";
+import type { GardenCompileContext } from "../../garden/compute-provider.js";
+import { LocalHeuristics } from "../../garden/local-heuristics.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

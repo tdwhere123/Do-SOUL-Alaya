@@ -5,7 +5,7 @@ import {
   normalizeSchemaGroundedSignal,
   readSchemaGroundedContent,
   validateSchemaGroundingForSignal
-} from "../garden/schema-grounding.js";
+} from "../../garden/schema-grounding.js";
 
 function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
   return {

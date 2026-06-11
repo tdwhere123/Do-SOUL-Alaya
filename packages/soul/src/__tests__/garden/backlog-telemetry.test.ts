@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateBacklogPressure } from "../garden/backlog-telemetry.js";
+import { evaluateBacklogPressure } from "../../garden/backlog-telemetry.js";
 
 const thresholds = {
   warning_queue_depth: 10,

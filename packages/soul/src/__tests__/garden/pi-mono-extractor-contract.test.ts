@@ -3,8 +3,8 @@ import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "@e
 import {
   SignalExtractorError,
   createPiMonoExtractor
-} from "../garden/pi-mono-extractor.js";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "../garden/compute-provider.js";
+} from "../../garden/pi-mono-extractor.js";
+import { OFFICIAL_API_SYSTEM_PROMPT } from "../../garden/compute-provider.js";
 
 // The pi-ai `complete` seam shape — used as the explicit generic on vi.fn
 // so mock.calls[i] is typed as [Model<string>, Context, ProviderStreamOptions?]

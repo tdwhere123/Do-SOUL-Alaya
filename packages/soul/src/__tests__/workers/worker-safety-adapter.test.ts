@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { WorkerBaselineLockSchema, type ToolCategory } from "@do-soul/alaya-protocol";
-import { SoulWorkerSafetyAdapter } from "../worker-safety-adapter.js";
-import { SoulWorkerSafetyReader } from "../worker-safety-reader.js";
+import { SoulWorkerSafetyAdapter } from "../../workers/worker-safety-adapter.js";
+import { SoulWorkerSafetyReader } from "../../workers/worker-safety-reader.js";
 
 describe("SoulWorkerSafetyAdapter", () => {
   it("assembles a validated baseline lock from soul read-only projections", async () => {

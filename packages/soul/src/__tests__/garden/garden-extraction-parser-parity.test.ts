@@ -6,11 +6,11 @@ import {
   OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider,
   type GardenCompileContext
-} from "../garden/compute-provider.js";
-import type { SignalExtractor } from "../garden/pi-mono-extractor.js";
+} from "../../garden/compute-provider.js";
+import type { SignalExtractor } from "../../garden/pi-mono-extractor.js";
 
-const fixturesDir = fileURLToPath(new URL("./fixtures/garden-extraction-golden/", import.meta.url));
-const fixturesUrl = new URL("./fixtures/garden-extraction-golden/", import.meta.url);
+const fixturesDir = fileURLToPath(new URL("../fixtures/garden-extraction-golden/", import.meta.url));
+const fixturesUrl = new URL("../fixtures/garden-extraction-golden/", import.meta.url);
 
 describe("garden-extraction-parser-parity", () => {
   it("parses golden provider JSON into the expected signal kind, object kind, and confidence", async () => {

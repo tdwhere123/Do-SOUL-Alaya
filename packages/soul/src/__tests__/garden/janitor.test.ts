@@ -5,8 +5,8 @@ import {
   Janitor,
   type ExpiredControlPlaneObject,
   type HotDemotionCandidate
-} from "../garden/janitor.js";
-import { GardenScheduler } from "../garden/scheduler.js";
+} from "../../garden/janitor.js";
+import { GardenScheduler } from "../../garden/scheduler.js";
 
 describe("Janitor", () => {
   it("exposes the janitor role and tier", () => {

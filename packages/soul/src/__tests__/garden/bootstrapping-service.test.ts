@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BootstrappingPathTemplate } from "@do-soul/alaya-protocol";
-import { buildBootstrappingPathId, buildBootstrappingRecordId } from "../shared/bootstrapping-ids.js";
-import { BootstrappingService } from "../garden/bootstrapping-service.js";
+import { buildBootstrappingPathId, buildBootstrappingRecordId } from "../../shared/bootstrapping-ids.js";
+import { BootstrappingService } from "../../garden/bootstrapping-service.js";
 
 describe("BootstrappingService", () => {
   it("plans explicitly configured learned paths for a new workspace without writes", async () => {
