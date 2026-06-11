@@ -97,7 +97,7 @@ const RecallCandidateDiagnosticSchema = z
 // these per-recall figures so the longmemeval / locomo KPI summaries can
 // aggregate p50 / p95 / mean across questions. Measure-only — no field
 // gates ranking or admission.
-// see also: packages/core/src/recall-service.ts computeRecallTokenEconomy
+// see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy
 const RecallTokenEconomySchema = z
   .object({
     delivered_context_tokens_estimate: z.number().int().nonnegative(),
@@ -199,13 +199,12 @@ export const BenchRecallDiagnosticsSchema = z
       )
       .readonly(),
     candidates: z.array(RecallCandidateDiagnosticSchema).readonly(),
-    // Optional: degraded recall paths (any non-null degradation_reason from
-    // RecallResult — warm/cold cascade, recall_explainability_partial) emit
-    // diagnostics without this block so the bench aggregator can drop the
-    // sample rather than admit a `{0,0,0,0,0}` record that biases run-level
-    // mean / p50 distributions downward.
-    // see also: packages/core/src/recall-service.ts (computeRecallTokenEconomy
-    // call site) and packages/core/src/recall-service-types.ts
+    // Optional only for legacy/malformed diagnostics. Current RecallService
+    // emits token_economy on normal and degraded recall paths, and the bench
+    // aggregator drops absent blocks instead of admitting a `{0,0,0,0,0}`
+    // record that biases run-level mean / p50 distributions downward.
+    // see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy,
+    // packages/core/src/recall-service.ts (call site), and packages/core/src/recall-service-types.ts
     // (RecallDiagnostics.token_economy doc-comment).
     token_economy: RecallTokenEconomySchema.optional()
   })

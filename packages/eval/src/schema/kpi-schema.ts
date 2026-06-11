@@ -405,7 +405,7 @@ export type QualityMetrics = z.infer<typeof QualityMetricsSchema>;
 // mean / p95 figures from this block must carry the same caveat.
 // see also:
 //   packages/core/src/recall-service-types.ts RecallTokenEconomy
-//   packages/core/src/recall-service.ts computeRecallTokenEconomy
+//   packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy
 //   apps/bench-runner/src/harness/recall-diagnostics-schema.ts
 const PerCallStatSchema = z
   .object({

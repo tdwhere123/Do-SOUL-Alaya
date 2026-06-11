@@ -445,7 +445,7 @@ export interface RecallPathExpansionSourceDiagnostic {
 // the in-memory RecallDiagnostics sub-object that the bench harness
 // captures via BenchRecallDiagnosticsSchema.
 // see also:
-//   recall-service.ts (buildRecallDiagnostics, computeRecallTokenEconomy)
+//   packages/core/src/recall/diagnostics.ts:buildRecallDiagnostics, computeRecallTokenEconomy
 //   apps/bench-runner/src/harness/recall-diagnostics-schema.ts
 //   apps/bench-runner/src/longmemeval/diagnostics.ts (KPI aggregation)
 //

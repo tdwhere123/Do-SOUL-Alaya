@@ -55,7 +55,7 @@ function createPreparedQueryHandle(queryId: string) {
     // invariant: stubs mirror the cache-miss path so
     // RecallTokenEconomy.embedding_inference_calls reads as 1 when the
     // snapshot is `provider_returned`.
-    // see also: packages/core/src/recall-service.ts computeRecallTokenEconomy
+    // see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy
     cacheHit: false,
     getSnapshot: () =>
       ({
@@ -1329,7 +1329,7 @@ describe("RecallService", () => {
     });
   });
 
-  // see also: packages/core/src/recall-service.ts computeRecallTokenEconomy,
+  // see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy,
   // apps/bench-runner/src/longmemeval/recall-token-economy.ts.
   // invariant: this test exercises the non-degraded recall path, so the HOT
   // tier satisfies MIN_RECALL_RESULTS (= 5), so this pins the normal HOT
@@ -1535,8 +1535,8 @@ describe("RecallService", () => {
   // economy shape so bench coverage can prove every recall call was
   // instrumented. We exercise the cascade-engaged branch by giving the
   // harness empty HOT and WARM tiers and a single COLD candidate.
-  // see also: packages/core/src/recall-service.ts (computeRecallTokenEconomy
-  // call site, expandTierCascade).
+  // see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy,
+  // packages/core/src/recall-service.ts (call site, expandTierCascade).
   it("populates token_economy on degraded (cascade-engaged) recall paths", async () => {
     const coldOnlyMemory = createMemoryEntry({
       object_id: "11111111-1111-4111-8111-111111111111",

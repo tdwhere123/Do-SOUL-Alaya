@@ -60,7 +60,7 @@ export function extractRecallTokenEconomy(
 /**
  * @anchor recall-token-economy-aggregator — pure aggregation from the
  * BenchRecallDiagnostics.token_economy block (produced once per recall
- * by RecallService.computeRecallTokenEconomy) into the run-level KPI
+ * by computeRecallTokenEconomy) into the run-level KPI
  * shape consumed by kpi.json / report.md.
  *
  * The block is measure-only (D5 decision, phase 7): no field gates
@@ -74,7 +74,7 @@ export function extractRecallTokenEconomy(
  * count is zero.
  *
  * see also:
- *   packages/core/src/recall-service.ts (computeRecallTokenEconomy)
+ *   packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy
  *   apps/bench-runner/src/harness/recall-diagnostics-schema.ts
  *   packages/eval/src/schema/kpi-schema.ts (RecallTokenEconomy KPI block)
  */
