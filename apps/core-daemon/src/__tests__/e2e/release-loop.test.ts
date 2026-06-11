@@ -40,7 +40,7 @@ import {
   SqliteTrustStateRepo,
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
-import { ALAYA_MEMORY_TOOL_NAMES } from "../../mcp-memory-tool-catalog.js";
+import { ALAYA_MEMORY_TOOL_NAMES } from "../../mcp-memory/tool-catalog.js";
 import { createAlayaCliBridge } from "../../cli/bridge.js";
 import { registerAlayaCliCommands } from "../../cli/register.js";
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";

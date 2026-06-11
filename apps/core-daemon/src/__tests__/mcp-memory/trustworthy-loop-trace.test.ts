@@ -40,16 +40,16 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { createAlayaMcpServer } from "../mcp-server.js";
+import { createAlayaMcpServer } from "../../mcp-server.js";
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext
-} from "../mcp-memory-tool-handler.js";
+} from "../../mcp-memory/tool-handler.js";
 import {
   SourceDeliveryAnchorValidationError,
   createMcpMemoryProposalWorkflow
-} from "../mcp-memory-proposal-workflow.js";
-import { createTrustStateRecorder } from "../trust-state.js";
+} from "../../mcp-memory/proposal-workflow.js";
+import { createTrustStateRecorder } from "../../trust-state.js";
 
 const TRACE_SQL = `
 WITH delivered AS (

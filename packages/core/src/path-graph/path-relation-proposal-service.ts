@@ -382,7 +382,7 @@ export class PathRelationProposalService {
   // truth-boundary service. When undefined, every unordered pair accrues — the
   // unchanged behavior the bench-harness co-recall warmup and the unit tests
   // depend on.
-  // see also: apps/core-daemon/src/mcp-memory-tool-handler.ts accrueCoRecallPlasticity (production caller)
+  // see also: apps/core-daemon/src/mcp-memory/tool-handler.ts accrueCoRecallPlasticity (production caller)
   // see also: apps/core-daemon/src/index.ts CO_RECALL_COHERENCE_FLOOR (gate floor)
   public async onCoRecall(
     recalledObjectIds: readonly string[],
@@ -457,7 +457,7 @@ export class PathRelationProposalService {
   // objects pass (or the existence port is unwired) and "rejected" — after
   // emitting the audit — on the first failure. This is decided, never transient:
   // a rejected accept-apply must NOT retry.
-  // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts accept path
+  // see also: apps/core-daemon/src/mcp-memory/proposal-workflow.ts accept path
   // see also: packages/storage/src/repos/proposal/accept-workflows.ts acceptPendingPathRelationGovernanceWithEvents
   public async validateProposedObjectAnchors(input: {
     readonly workspaceId: string;

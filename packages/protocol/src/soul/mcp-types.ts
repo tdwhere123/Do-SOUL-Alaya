@@ -553,7 +553,7 @@ export type SoulReportContextUsageResponse = z.infer<typeof SoulReportContextUsa
  * source of truth: external MCP clients see the same constraints zod enforces
  * at parse time (maxLength / maxItems / strict additionalProperties / ...), so
  * a 100MB query is rejected by both the catalog-published shape and the
- * runtime parser. `apps/core-daemon/src/mcp-memory-tool-catalog.ts` consumes
+ * runtime parser. `apps/core-daemon/src/mcp-memory/tool-catalog.ts` consumes
  * this rather than carrying its own JSON Schema dictionary.
  */
 import { zodToJsonSchema } from "zod-to-json-schema";

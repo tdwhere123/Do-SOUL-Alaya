@@ -136,7 +136,7 @@ const librarianTaskKinds = Object.freeze([
 // every in-process role permission set (an in-process librarian must not claim
 // them). They are enqueued under the LIBRARIAN role for queue tiering but
 // surface as role "host_worker" to the MCP worker loop.
-// see also: apps/core-daemon/src/mcp-memory-tool-handler.ts gardenWorkerRoleForRow.
+// see also: apps/core-daemon/src/mcp-memory/tool-handler.ts gardenWorkerRoleForRow.
 
 export const GARDEN_ROLE_PERMISSIONS = Object.freeze({
   [GardenRole.JANITOR]: GardenPermissionSchema.parse({

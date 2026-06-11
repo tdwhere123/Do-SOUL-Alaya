@@ -14,7 +14,7 @@ import {
   type EventLogEntry,
   type Proposal
 } from "@do-soul/alaya-protocol";
-import type { McpMemoryToolHandler } from "../mcp-memory-tool-handler.js";
+import type { McpMemoryToolHandler } from "../mcp-memory/tool-handler.js";
 
 // invariant: governance_class promotion to strictly_governed is an
 // auditable change (handbook invariants §3) and therefore must travel

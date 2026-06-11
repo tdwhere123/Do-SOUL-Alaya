@@ -6,15 +6,15 @@ import {
   type McpMemoryProposalWorkflowProposalRepo,
   type McpMemoryProposalWorkflowRuntimeNotifier,
   type ReviewerIdentityBinding
-} from "./mcp-memory-proposal-workflow.js";
+} from "./proposal-workflow.js";
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolHandlerDependencies
-} from "./mcp-memory-tool-handler.js";
+} from "./tool-handler.js";
 import {
   createSoulResolveHandler,
   type SoulResolveHandlerDependencies
-} from "./mcp-memory-resolve-handler.js";
+} from "./resolve-handler.js";
 
 export function createDaemonMcpMemoryToolHandler(input: {
   readonly recallService: McpMemoryToolHandlerDependencies["recallService"];
@@ -23,26 +23,21 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly memoryEntryRepo: NonNullable<McpMemoryToolHandlerDependencies["memoryEntryRepo"]>;
   readonly evidenceService?: McpMemoryToolHandlerDependencies["evidenceService"];
   readonly pathRelationProposalService?: McpMemoryToolHandlerDependencies["pathRelationProposalService"];
-  // invariant: endpoint-coherence gate for the co-recall plasticity loop
-  // (ARC 3). Wired only when embedding is on; threaded through to the handler so
-  // onCoRecall accrues only semantically-coherent delivered pairs. Absent when
-  // embedding is off, leaving embedding-off accrual behavior unchanged.
-  // see also: mcp-memory-tool-handler.ts coRecallCoherenceGate.
+  // invariant: co-recall accrues only for semantically coherent delivered pairs.
+  // see also: mcp-memory/tool-handler.ts coRecallCoherenceGate.
   readonly coRecallCoherenceGate?: McpMemoryToolHandlerDependencies["coRecallCoherenceGate"];
-  // invariant: B3's object-anchor existence + ownership gate, routed into the
-  // proposal accept-apply path so the second durable path-insert route is
-  // validated before the storage insert. Wired from PathRelationProposalService.
-  // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts objectAnchorGate
+  // invariant: path-relation proposal accept must validate object anchors before the storage insert.
+  // see also: apps/core-daemon/src/mcp-memory/proposal-workflow.ts objectAnchorGate
   readonly objectAnchorGate?: McpMemoryProposalWorkflowDependencies["objectAnchorGate"];
   // invariant: reads member evidence gists so the synthesis-create accept-apply
   // can distill a deterministic NO-LLM summary and validate cluster evidence
   // exists before the durable insert. Wired from EvidenceService.findByIdScoped.
-  // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts synthesisEvidenceReader
+  // see also: apps/core-daemon/src/mcp-memory/proposal-workflow.ts synthesisEvidenceReader
   readonly synthesisEvidenceReader?: McpMemoryProposalWorkflowDependencies["synthesisEvidenceReader"];
   // invariant: resolves the cluster's member memories at capsule-build time so
   // source_memory_refs is populated (the compress arm earns the `compressed`
   // disposition only for a listed member). Wired from memoryEntryRepo.findByEvidenceRefs.
-  // see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts synthesisMemberResolver
+  // see also: apps/core-daemon/src/mcp-memory/proposal-workflow.ts synthesisMemberResolver
   readonly synthesisMemberResolver?: McpMemoryProposalWorkflowDependencies["synthesisMemberResolver"];
   readonly signalService: McpMemoryToolHandlerDependencies["signalService"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
@@ -53,7 +48,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly eventPublisher: NonNullable<McpMemoryToolHandlerDependencies["eventPublisher"]>;
   readonly gardenTaskRepo?: McpMemoryToolHandlerDependencies["gardenTaskRepo"];
   // invariant: applies a host-worker EDGE_CLASSIFY verdict to the existing
-  // heuristic path. see also: mcp-memory-tool-handler.ts completeEdgeClassifyTask.
+  // heuristic path. see also: mcp-memory/tool-handler.ts completeEdgeClassifyTask.
   readonly edgeVerdictApplier?: McpMemoryToolHandlerDependencies["edgeVerdictApplier"];
   readonly eventLogRepo: McpMemoryProposalWorkflowEventLogRepo;
   readonly proposalRepo: McpMemoryProposalWorkflowProposalRepo;
@@ -69,7 +64,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
   // source_object_refs so the resolve handler can authorise
   // claim_form resolutions through the memory_entry rows that recall
   // actually delivered.
-  // see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts
+  // see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts
   //   assertDeliveryInScope
   readonly claimSourceReader?: SoulResolveHandlerDependencies["claimSourceReader"];
 }) {

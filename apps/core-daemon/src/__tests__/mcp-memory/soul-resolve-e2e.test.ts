@@ -18,15 +18,15 @@ import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext,
   type McpMemoryToolHandlerDependencies
-} from "../mcp-memory-tool-handler.js";
-import { createSoulResolveHandler } from "../mcp-memory-resolve-handler.js";
+} from "../../mcp-memory/tool-handler.js";
+import { createSoulResolveHandler } from "../../mcp-memory/resolve-handler.js";
 
 // invariant: end-to-end coverage for soul.recall -> staged_warning ->
 // soul.resolve -> apply. The confirm path activates a draft
 // claim_form via ClaimService.transitionLifecycle(draft -> active);
 // the audit row records the activated_claim_id.
 // see also: packages/core/src/governance/resolution-service.ts (dispatcher)
-// see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts (binding)
+// see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts (binding)
 
 const FIXED_NOW = "2026-05-17T00:00:00.000Z";
 

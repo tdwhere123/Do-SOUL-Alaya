@@ -30,7 +30,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { EventPublisher, PathRelationProposalService } from "@do-soul/alaya-core";
-import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
+import { createMcpMemoryProposalWorkflow } from "../mcp-memory/proposal-workflow.js";
 import { registerProposalRoutes } from "../routes/proposals.js";
 
 const databases = new Set<StorageDatabase>();

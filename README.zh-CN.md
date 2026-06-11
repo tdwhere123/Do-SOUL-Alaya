@@ -231,7 +231,7 @@ Claim 生命周期、karma）落在 **Memory Ontology 层 / Object 轴**，
 但只通过 proposal-resolution 这条路径才会变。
 
 *代码锚点：*
-`apps/core-daemon/src/mcp-memory-proposal-workflow.ts`、
+`apps/core-daemon/src/mcp-memory/proposal-workflow.ts`、
 `packages/core/src/memory/memory-service.ts`、
 `packages/storage/src/migrations/063-proposal-memory-update-patch.sql`。
 

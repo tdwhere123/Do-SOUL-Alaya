@@ -28,16 +28,16 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import type { BackgroundServiceConfig } from "../background/bootstrap.js";
-import { createGardenRuntime } from "../garden-runtime.js";
-import { buildGardenTaskSignalId } from "../garden-task-signal-id.js";
+import type { BackgroundServiceConfig } from "../../background/bootstrap.js";
+import { createGardenRuntime } from "../../garden-runtime.js";
+import { buildGardenTaskSignalId } from "../../garden-task-signal-id.js";
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext,
   type McpMemoryToolHandler,
   type McpMemoryToolCallResult,
   type McpMemoryToolHandlerDependencies
-} from "../mcp-memory-tool-handler.js";
+} from "../../mcp-memory/tool-handler.js";
 
 const harnesses = new Set<ClosableHarness>();
 
@@ -1132,7 +1132,7 @@ function createDeliveryRecord(overrides: Partial<ContextDeliveryRecord> = {}): C
     run_id: "run-1",
     // Both memory-a and memory-b are served by this delivery so a usage report
     // that cites either id stays a subset of the server-side delivered set.
-    // see also: mcp-memory-tool-handler.ts validateReportedRecallHits.
+    // see also: mcp-memory/tool-handler.ts validateReportedRecallHits.
     delivered_object_ids: ["memory-a", "memory-b"],
     delivered_at: "2026-05-07T00:00:00.000Z",
     audit_event_id: "event-delivery",

@@ -14,7 +14,7 @@ import {
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolHandlerDependencies
-} from "../mcp-memory-tool-handler.js";
+} from "../../mcp-memory/tool-handler.js";
 
 const context = {
   workspaceId: "ws1",
@@ -571,7 +571,7 @@ describe("mcp memory tool handler", () => {
     // delivered_object_ids subset gate, so feeding its used ids into onCoUsage
     // would let a caller pump path support/strength between arbitrary memories.
     // A legitimate report (delivery resolves, used ids subset the delivery)
-    // still reinforces. see also: mcp-memory-tool-handler.ts reportContextUsage.
+    // still reinforces. see also: mcp-memory/tool-handler.ts reportContextUsage.
     const onCoUsage = vi.fn(async () => undefined);
     const onCoRecall = vi.fn(async () => undefined);
     const baseDeps = createDeps();
@@ -1036,7 +1036,7 @@ describe("mcp memory tool handler", () => {
   // leave raw_payload UNCHANGED — downstream subscribers may still want
   // to read the raw envelope for diagnostics. The single warn must list
   // every offending key so an operator gets one event per signal, not
-  // one per key. see also: apps/core-daemon/src/mcp-memory-tool-handler.ts
+  // one per key. see also: apps/core-daemon/src/mcp-memory/tool-handler.ts
   // normalizeCandidateSignalGraphRefs.
   it("warn-and-keep: all 5 raw_payload ref keys are preserved + reported in one warn", async () => {
     const warn = vi.fn();

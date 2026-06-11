@@ -20,8 +20,8 @@ import {
   SqliteTrustStateRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { createMcpMemoryToolHandler } from "../mcp-memory-tool-handler.js";
-import { createTrustStateRecorder } from "../trust-state.js";
+import { createMcpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
+import { createTrustStateRecorder } from "../../trust-state.js";
 
 const databases = new Set<StorageDatabase>();
 const RECALL_HIT_ACTIVATION_BUMP = 0.05;

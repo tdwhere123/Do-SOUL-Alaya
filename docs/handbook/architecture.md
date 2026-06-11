@@ -224,7 +224,7 @@ typed payload:
 | `defer` | Writes a `DeferredObligation` carrying the re-entry timestamp; replaces the retired `cooldown_until` field on `SynthesisCapsule`. |
 | `not_relevant` | Records that the warning was inspected but did not apply to the current task. |
 
-The handler is at `apps/core-daemon/src/mcp-memory-resolve-handler.ts`;
+The handler is at `apps/core-daemon/src/mcp-memory/resolve-handler.ts`;
 the typed dispatcher is `packages/core/src/governance/resolution-service.ts`.
 The `assertDeliveryInScope` check requires the `target_object_id` to
 be a direct member of the agent's delivered_object_ids or to be

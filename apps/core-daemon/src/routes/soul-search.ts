@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { WorkspaceService } from "@do-soul/alaya-core";
-import type { McpMemoryToolHandler } from "../mcp-memory-tool-handler.js";
+import type { McpMemoryToolHandler } from "../mcp-memory/tool-handler.js";
 
 export interface SoulSearchRouteServices {
   readonly workspaceService: WorkspaceService;

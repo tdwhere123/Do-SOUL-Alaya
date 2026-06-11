@@ -8,8 +8,8 @@ import type { ResolutionService } from "@do-soul/alaya-core";
 // invariant: trusted MCP call context fields the handler binds onto
 // the protocol-stripped agent-facing request before calling
 // ResolutionService.resolve. Mirrors the shape McpMemoryToolCallContext
-// uses elsewhere in apps/core-daemon/src/mcp-memory-tool-handler.ts.
-// see also: apps/core-daemon/src/mcp-memory-tool-handler.ts
+// uses elsewhere in apps/core-daemon/src/mcp-memory/tool-handler.ts.
+// see also: apps/core-daemon/src/mcp-memory/tool-handler.ts
 //   McpMemoryToolCallContext
 export interface SoulResolveCallContext {
   readonly workspaceId: string;

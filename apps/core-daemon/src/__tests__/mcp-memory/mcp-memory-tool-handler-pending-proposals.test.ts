@@ -13,7 +13,7 @@ import {
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolHandlerDependencies
-} from "../mcp-memory-tool-handler.js";
+} from "../../mcp-memory/tool-handler.js";
 
 const context = {
   workspaceId: "ws1",

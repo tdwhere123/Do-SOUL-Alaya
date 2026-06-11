@@ -6,7 +6,7 @@ import {
   type MemoryEntryMutableFields,
   type Proposal
 } from "@do-soul/alaya-protocol";
-import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
+import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal-workflow.js";
 
 describe("mcp memory governance", () => {
   it("creates and reviews memory proposals through EventLog and ProposalRepo", async () => {

@@ -10,7 +10,7 @@ export interface MemoryRouteServices {
 
 // HTTP route surface intentionally omits GET /memories/:id.
 // Per-memory reads must stay workspace-scoped per invariants §21 and §29:
-//   - MCP: soul.open_pointer (mcp-memory-tool-handler, workspace-scoped)
+//   - MCP: soul.open_pointer (mcp-memory/tool-handler, workspace-scoped)
 //   - CLI fallback: alaya tools call --json '{"name":"soul.open_pointer", ...}'
 //   - Inspector: GET /workspaces/:wsId/memories and scoped pointer routes
 export function registerMemoryRoutes(app: Hono, services: MemoryRouteServices): void {

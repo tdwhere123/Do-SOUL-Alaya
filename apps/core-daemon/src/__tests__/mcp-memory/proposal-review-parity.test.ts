@@ -14,19 +14,19 @@ import {
   type RecallPolicy,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
-import { createApp } from "../app.js";
-import type { ProposalRouteServices } from "../routes/proposals.js";
-import { ALAYA_SYSEXITS, type AlayaCliContext } from "../cli/bridge.js";
-import { createReviewCommand } from "../cli/review.js";
-import { callAlayaMcpMemoryTool } from "../mcp-server.js";
-import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
+import { createApp } from "../../app.js";
+import type { ProposalRouteServices } from "../../routes/proposals.js";
+import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../cli/bridge.js";
+import { createReviewCommand } from "../../cli/review.js";
+import { callAlayaMcpMemoryTool } from "../../mcp-server.js";
+import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal-workflow.js";
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext,
   type McpMemoryToolHandler,
   type McpMemoryToolHandlerDependencies
-} from "../mcp-memory-tool-handler.js";
-import { createInspectorApp } from "../../../inspector/src/app.js";
+} from "../../mcp-memory/tool-handler.js";
+import { createInspectorApp } from "../../../../inspector/src/app.js";
 
 const reviewerArgs = {
   proposal_id: "prop-1",

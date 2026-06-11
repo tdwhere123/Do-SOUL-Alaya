@@ -24,7 +24,7 @@ import type { GardenTaskEnqueueInput } from "@do-soul/alaya-storage";
  * EdgeAutoProducerService.deferEdgeClassify) swallows them as best-effort —
  * the inline heuristic edge already stands.
  * see also: packages/core/src/path-graph/edge-auto-producer-service.ts deferEdgeClassify.
- * see also: apps/core-daemon/src/mcp-memory-tool-handler.ts completeEdgeClassifyTask.
+ * see also: apps/core-daemon/src/mcp-memory/tool-handler.ts completeEdgeClassifyTask.
  */
 export interface EdgeClassifyQueueRepoPort {
   enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };

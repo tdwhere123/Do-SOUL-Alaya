@@ -169,7 +169,7 @@ export interface EdgeAutoProducerMemoryRepoPort {
 // is eventual (verdict-only). enqueueEdgeClassify is best-effort: a failure to
 // enqueue must not abort proposal production (any heuristic verdict already
 // stands), so the service swallows enqueue errors through the warn callback.
-// see also: apps/core-daemon/src/mcp-memory-tool-handler.ts EDGE_CLASSIFY surface.
+// see also: apps/core-daemon/src/mcp-memory/tool-handler.ts EDGE_CLASSIFY surface.
 export interface EdgeClassifyQueuePort {
   enqueueEdgeClassify(input: {
     readonly workspaceId: string;

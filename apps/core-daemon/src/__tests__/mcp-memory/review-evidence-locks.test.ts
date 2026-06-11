@@ -3,14 +3,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { soulToolJsonSchemas } from "@do-soul/alaya-protocol";
-import { ALAYA_MEMORY_TOOL_NAMES, listAlayaMemoryTools } from "../mcp-memory-tool-catalog.js";
+import { ALAYA_MEMORY_TOOL_NAMES, listAlayaMemoryTools } from "../../mcp-memory/tool-catalog.js";
 
 // Most cases lock historical closeout evidence across docs; the last
 // case is a behavior assertion that exercises real code paths so the
 // file is not pure docs prose.
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-const repositoryRoot = path.resolve(currentDirectory, "../../../..");
+const repositoryRoot = path.resolve(currentDirectory, "../../../../..");
 
 const expectedMemoryTools = [
   "soul.recall",

@@ -21,7 +21,7 @@ export interface ProposalCreateInput {
   // enforcement is cheaper than dropping the SQL default (SQLite has
   // no `ALTER COLUMN ... DROP DEFAULT`). Production callers pass it
   // explicitly: `'memory_entry'` for `soul.propose_memory_update`
-  // (mcp-memory-proposal-workflow.ts), `'path_relation'` for the
+  // (apps/core-daemon/src/mcp-memory/proposal-workflow.ts), `'path_relation'` for the
   // strictly_governed promote endpoint
   // (apps/core-daemon/src/routes/proposals.ts), and `'bankruptcy_dossier'`
   // for the budget bankruptcy path (budget-wiring.ts).
@@ -135,7 +135,7 @@ export interface AcceptedPathRelationGovernanceInput {
 // proposal-resolve scope so the storage layer flips the proposal to accepted,
 // inserts the capsule row, and appends SOUL_SYNTHESIS_CREATED in ONE
 // transaction. caused_by attributes the resolve to `proposal_accept:<id>`.
-// see also: apps/core-daemon/src/mcp-memory-proposal-workflow.ts synthesis_create branch
+// see also: apps/core-daemon/src/mcp-memory/proposal-workflow.ts synthesis_create branch
 export interface AcceptedSynthesisCreateInput {
   readonly workspace_id: string;
   readonly capsule: SynthesisCapsule;

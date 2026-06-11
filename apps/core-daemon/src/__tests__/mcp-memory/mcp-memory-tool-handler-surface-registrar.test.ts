@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolHandlerDependencies
-} from "../mcp-memory-tool-handler.js";
+} from "../../mcp-memory/tool-handler.js";
 
 // invariant: the registrar must be called once per
 // (workspace, agent_target) per process so the first MCP call from each

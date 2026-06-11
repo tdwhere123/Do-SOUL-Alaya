@@ -3,7 +3,7 @@ import {
   ALAYA_MEMORY_TOOL_NAMES,
   hasAlayaMemoryToolName,
   listAlayaMemoryTools
-} from "../mcp-memory-tool-catalog.js";
+} from "../../mcp-memory/tool-catalog.js";
 import { soulToolDefs } from "@do-soul/alaya-engine-gateway";
 
 describe("mcp memory tool catalog", () => {

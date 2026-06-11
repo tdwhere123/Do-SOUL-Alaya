@@ -28,7 +28,7 @@ import {
 import type {
   McpMemoryToolCallContext,
   McpMemoryToolHandlerDependencies
-} from "./mcp-memory-tool-handler.js";
+} from "./tool-handler.js";
 
 export interface McpMemoryProposalWorkflowEventLogRepo {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
@@ -306,13 +306,8 @@ export interface McpMemoryProposalWorkflowDependencies {
       context: McpMemoryToolCallContext
     ): Promise<void> | void;
   };
-  // invariant: the SAME object-anchor existence + ownership gate the path mint
-  // sink runs. The accept-apply path inserts a stored proposed_path_relation
-  // into the durable path plane through the storage transaction (which cannot
-  // import the core service), so this seam routes that second insert through
-  // B3's gate before it lands. Wired by the daemon to
-  // PathRelationProposalService.validateProposedObjectAnchors; left undefined
-  // only in unit tests that do not exercise path_relation proposals.
+  // invariant: accept-apply uses the same object-anchor existence + ownership
+  // gate as the path mint sink before storage writes a proposed_path_relation.
   // see also: packages/core/src/path-graph/path-relation-proposal-service.ts validateProposedObjectAnchors
   readonly objectAnchorGate?: {
     validateProposedObjectAnchors(input: {
@@ -692,12 +687,8 @@ export function createMcpMemoryProposalWorkflow(
       );
     }
 
-    // invariant: this is the second durable path-insert route; gate its object
-    // anchors through B3's existence + ownership check before the storage
-    // accept-apply commits a path_relations row. The storage layer builds the
-    // source anchor as {kind:object, object_id: targetObjectId} and the target
-    // anchor from proposed_path_relation.target_anchor (the only field an
-    // untrusted producer could aim at a foreign/missing object). A rejection
+    // invariant: untrusted proposed_path_relation anchors are validated before
+    // the storage accept-apply commits a path_relations row. A rejection
     // emits the same path.relation_rejected audit the mint sink uses and stops
     // the accept-apply before any durable insert.
     // see also: packages/storage/src/repos/proposal/path-relations.ts createPathRelationFromProposalPayload

@@ -23,7 +23,7 @@
 // times mints exactly those pairs and nothing else — earned, and bounded far
 // below a saturated hub/clique.
 //
-// see also: apps/core-daemon/src/mcp-memory-tool-handler.ts crossLinkRecalledMemories
+// see also: apps/core-daemon/src/mcp-memory/tool-handler.ts crossLinkRecalledMemories
 //   + onCoUsage (the live report_context_usage trigger this stands in for)
 // see also: packages/core/src/path-graph/path-relation-proposal-service.ts onCoUsage /
 //   accrueCoOccurrence / proposeCoRecalled / CO_RECALLED_SEED_PROFILE

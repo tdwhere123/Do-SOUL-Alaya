@@ -30,12 +30,12 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { createAlayaMcpServer } from "../mcp-server.js";
+import { createAlayaMcpServer } from "../../mcp-server.js";
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext,
   type McpMemoryToolHandlerDependencies
-} from "../mcp-memory-tool-handler.js";
+} from "../../mcp-memory/tool-handler.js";
 
 const harnesses = new Set<GardenMcpHarness>();
 

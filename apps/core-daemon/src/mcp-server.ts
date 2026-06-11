@@ -18,11 +18,11 @@ import {
 import {
   listAlayaMemoryTools,
   type AlayaMemoryToolDefinition
-} from "./mcp-memory-tool-catalog.js";
+} from "./mcp-memory/tool-catalog.js";
 import type {
   McpMemoryToolCallContext,
   McpMemoryToolHandler
-} from "./mcp-memory-tool-handler.js";
+} from "./mcp-memory/tool-handler.js";
 
 export interface AlayaMcpServerOptions {
   readonly memoryToolHandler: McpMemoryToolHandler;

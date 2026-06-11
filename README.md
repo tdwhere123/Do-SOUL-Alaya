@@ -294,8 +294,8 @@ lifecycle, karma) lives on the **Memory Ontology** layer and
 above.
 
 *Code anchors:*
-`apps/core-daemon/src/mcp-memory-proposal-workflow.ts`,
-`apps/core-daemon/src/mcp-memory-resolve-handler.ts`,
+`apps/core-daemon/src/mcp-memory/proposal-workflow.ts`,
+`apps/core-daemon/src/mcp-memory/resolve-handler.ts`,
 `packages/core/src/governance/resolution-service.ts`,
 `packages/core/src/memory/memory-service.ts`,
 `packages/storage/src/migrations/063-proposal-memory-update-patch.sql`.

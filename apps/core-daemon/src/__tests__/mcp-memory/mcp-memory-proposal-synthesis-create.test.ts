@@ -8,14 +8,14 @@ import {
   type Proposal,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
-import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
+import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal-workflow.js";
 
 // invariant: the librarian/auditor synthesis review proposal accept path.
 // Accepting must CREATE a SynthesisCapsule (MEMORY-COMPRESSION entry), not throw
 // NOT_FOUND. The capsule's summary is a deterministic, NO-LLM distillation of the
 // member evidence gists, so two runs over identical input produce identical
 // summaries. Rejecting creates no capsule.
-// see also: ../mcp-memory-proposal-workflow.ts prepareAcceptedSynthesisCreate
+// see also: ../../mcp-memory/proposal-workflow.ts prepareAcceptedSynthesisCreate
 
 function createSynthesisProposal(dossierRef: string, droppedCandidates: readonly string[]): Proposal {
   return {

@@ -14,7 +14,7 @@ import {
 import {
   createMcpMemoryProposalWorkflow,
   SourceDeliveryAnchorValidationError
-} from "../mcp-memory-proposal-workflow.js";
+} from "../../mcp-memory/proposal-workflow.js";
 
 // invariant: reviewer_identity must survive the full audit-replay
 // path:

@@ -141,7 +141,7 @@ import {
 } from "@do-soul/alaya-soul";
 import { createCoreDaemonApp } from "./daemon-app-composition.js";
 import { createDaemonEmbeddingRuntime } from "./daemon-embedding-runtime.js";
-import { createDaemonMcpMemoryToolHandler } from "./daemon-mcp-memory-handler.js";
+import { createDaemonMcpMemoryToolHandler } from "./mcp-memory/daemon-handler.js";
 import { createAttachSurfaceRegistrar } from "./attach-surface-registrar.js";
 import { createBudgetProposalPort } from "./budget-wiring.js";
 import { defaultBootstrappingTemplates, defaultCanonicalAliasMap } from "./daemon-defaults.js";
@@ -1208,7 +1208,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // obligations through DeferredObligationService; stale flips
   // memory_entry active -> dormant.
   // see also: packages/core/src/governance/resolution-service.ts
-  // see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts
+  // see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts
   const resolutionService = new ResolutionService({
     eventPublisher,
     claimRepo: claimFormRepo,
@@ -1691,7 +1691,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // embedding is off the gate stays undefined, so onCoRecall accrues nothing and
   // embedding-off behavior is unchanged.
   // see also: packages/core/src/embedding-recall/service.ts:EmbeddingRecallService.coherentPairKeys.
-  // see also: apps/core-daemon/src/mcp-memory-tool-handler.ts:accrueCoRecallPlasticity.
+  // see also: apps/core-daemon/src/mcp-memory/tool-handler.ts:accrueCoRecallPlasticity.
   const CO_RECALL_COHERENCE_FLOOR = 0.5;
   const coRecallCoherenceGate =
     embeddingRecallService === undefined

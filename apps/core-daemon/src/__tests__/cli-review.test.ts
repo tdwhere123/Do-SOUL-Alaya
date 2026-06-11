@@ -10,12 +10,12 @@ import {
 } from "@do-soul/alaya-protocol";
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../cli/bridge.js";
 import { createReviewCommand } from "../cli/review.js";
-import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
+import { createMcpMemoryProposalWorkflow } from "../mcp-memory/proposal-workflow.js";
 import type {
   McpMemoryToolCallContext,
   McpMemoryToolCallResult,
   McpMemoryToolHandler
-} from "../mcp-memory-tool-handler.js";
+} from "../mcp-memory/tool-handler.js";
 
 describe("alaya review (A1)", () => {
   it("lists pending proposals via soul.list_pending_proposals", async () => {

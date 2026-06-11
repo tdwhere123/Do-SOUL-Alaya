@@ -16,7 +16,7 @@ import {
   SqliteProposalRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
+import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal-workflow.js";
 
 // Cross-proposal lost-update guard. The accept-and-apply transaction
 // CAS-checks the memory entry's updated_at against a baseline captured

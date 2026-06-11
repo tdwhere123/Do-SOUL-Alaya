@@ -18,7 +18,7 @@ import type { DeferredObligationService } from "./deferred-obligation-service.js
 // invariant: producer-side input shape. workspace_id / run_id /
 // agent_target / delivery_id are bound from the trusted MCP call
 // context before calling resolve.
-// see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts
+// see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts
 //   (binding site)
 export interface ResolveInput {
   readonly targetObjectId: string;
