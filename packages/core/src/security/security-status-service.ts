@@ -5,9 +5,9 @@ import {
   type EventLogEntry,
   type SecurityStatusContract
 } from "@do-soul/alaya-protocol";
-import type { EventPublisher } from "./event-publisher.js";
-import { SYSTEM_ACTOR } from "./shared/actors.js";
-import { readNow } from "./shared/time.js";
+import type { EventPublisher } from "../event-publisher.js";
+import { SYSTEM_ACTOR } from "../shared/actors.js";
+import { readNow } from "../shared/time.js";
 import type {
   ZeroDaySecurityLayer,
   ZeroDaySecurityStatusEvaluationObserver

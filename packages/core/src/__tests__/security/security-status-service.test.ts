@@ -9,8 +9,8 @@ import {
   type ZeroDayPolicy
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { SecurityStatusService } from "../security-status-service.js";
-import { ZeroDaySecurityLayer } from "../zero-day-security-layer.js";
+import { SecurityStatusService } from "../../security/security-status-service.js";
+import { ZeroDaySecurityLayer } from "../../security/zero-day-security-layer.js";
 
 const FIXED_NOW = "2026-04-15T08:00:00.000Z";
 

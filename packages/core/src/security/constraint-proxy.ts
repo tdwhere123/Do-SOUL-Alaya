@@ -7,9 +7,9 @@ import {
   type DeferredObligation,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import type { EventPublisher } from "./event-publisher.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import type { EventPublisher } from "../event-publisher.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 export type ConstrainedOperation = ObligationBlockedOperation;
 

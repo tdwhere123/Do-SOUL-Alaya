@@ -5,7 +5,7 @@ import {
   type DelegatedWorkerRun
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { WorkerTrustAssessor, type TrustAssessmentContext } from "../worker-trust-assessor.js";
+import { WorkerTrustAssessor, type TrustAssessmentContext } from "../../security/worker-trust-assessor.js";
 
 const FIXED_NOW = "2026-04-15T10:00:00.000Z";
 

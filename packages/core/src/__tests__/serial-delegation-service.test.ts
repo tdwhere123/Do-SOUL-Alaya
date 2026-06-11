@@ -16,7 +16,7 @@ import { WorkerRunLifecycleService } from "../worker-run-lifecycle-service.js";
 import {
   IntegrationGatePublicationError,
   type IntegrationGateDecision
-} from "../integration-gate.js";
+} from "../security/integration-gate.js";
 import { SerialDelegationService, type DispatchWorkerInput } from "../serial-delegation-service.js";
 import { ScriptedRuntimeAdapter } from "../test-doubles/scripted-runtime-adapter.js";
 import type { TestMock } from "./mock-types.js";

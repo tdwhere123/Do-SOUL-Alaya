@@ -6,8 +6,8 @@ import type {
   ToolSpec
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
-import { resolvePermission } from "../permission-policy/index.js";
-import type { PermissionDecisionReasonCode, PermissionResolutionInput } from "../permission-policy/index.js";
+import { resolvePermission } from "../../permission-policy/index.js";
+import type { PermissionDecisionReasonCode, PermissionResolutionInput } from "../../permission-policy/index.js";
 
 describe("resolvePermission", () => {
   it("denies when the tool category is blocked by the worker security snapshot", () => {

@@ -5,14 +5,14 @@ import {
   type EventLogEntry,
   type RuntimeCapabilities
 } from "@do-soul/alaya-protocol";
-import { EventPublisherPropagationError } from "../event-publisher.js";
+import { EventPublisherPropagationError } from "../../event-publisher.js";
 import {
   IntegrationGate,
   IntegrationGatePublicationError,
   VERIFIED_CLAUDE_RUNTIME_CAPABILITY_PROFILE,
   WORKER_INTEGRATION_STATUS_EVENT_TYPE
-} from "../integration-gate.js";
-import type { TestMock } from "./mock-types.js";
+} from "../../security/integration-gate.js";
+import type { TestMock } from "../mock-types.js";
 
 const FIXED_NOW = "2026-04-14T06:00:00.000Z";
 

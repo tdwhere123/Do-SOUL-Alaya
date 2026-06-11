@@ -11,7 +11,7 @@ import {
   IntegrationGatePublicationError,
   type IntegrationGate,
   type IntegrationGateDecision
-} from "./integration-gate.js";
+} from "./security/integration-gate.js";
 import { SerialDelegationEventIntake } from "./serial-delegation-event-intake.js";
 import type {
   NormalizerContext,
@@ -21,12 +21,12 @@ import {
   SerialDelegationRecovery,
   type PreDispatchFreezeIntent
 } from "./serial-delegation-recovery.js";
-import type { ConstraintProxy } from "./constraint-proxy.js";
+import type { ConstraintProxy } from "./security/constraint-proxy.js";
 import type { DirtyStatePanicService } from "./dirty-state-panic-service.js";
 import type { StrongRefService } from "./strong-ref-service.js";
-import type { WorkerSafetyGate } from "./worker-safety-gate.js";
+import type { WorkerSafetyGate } from "./security/worker-safety-gate.js";
 import type { WorkerRunLifecycleService } from "./worker-run-lifecycle-service.js";
-import type { ZeroDaySecurityLayer } from "./zero-day-security-layer.js";
+import type { ZeroDaySecurityLayer } from "./security/zero-day-security-layer.js";
 
 export interface SerialDelegationWorkerRunRepoPort {
   getById(workerRunId: string): Promise<Readonly<DelegatedWorkerRun> | null>;

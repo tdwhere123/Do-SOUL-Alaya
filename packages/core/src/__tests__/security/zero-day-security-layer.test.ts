@@ -6,7 +6,7 @@ import {
   type ZeroDayPolicy
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { ZeroDaySecurityLayer } from "../zero-day-security-layer.js";
+import { ZeroDaySecurityLayer } from "../../security/zero-day-security-layer.js";
 
 function createLock(overrides: Partial<WorkerBaselineLock> = {}): WorkerBaselineLock {
   return WorkerBaselineLockSchema.parse({

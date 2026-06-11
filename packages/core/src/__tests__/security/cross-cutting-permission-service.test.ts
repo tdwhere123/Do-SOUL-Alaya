@@ -8,7 +8,7 @@ import {
 import {
   CrossCuttingPermissionService,
   type CrossCuttingPermissionServiceDependencies
-} from "../cross-cutting-permission-service.js";
+} from "../../security/cross-cutting-permission-service.js";
 
 const PERMISSION_ID_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 

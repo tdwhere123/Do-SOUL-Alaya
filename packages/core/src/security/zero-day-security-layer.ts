@@ -10,8 +10,8 @@ import {
   type WorkerBaselineLock,
   type ZeroDayPolicy
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import { readClockSnapshot } from "./shared/time.js";
+import { CoreError } from "../errors.js";
+import { readClockSnapshot } from "../shared/time.js";
 
 const {
   deny_category: ZERO_DAY_POLICY_KIND_DENY_CATEGORY,

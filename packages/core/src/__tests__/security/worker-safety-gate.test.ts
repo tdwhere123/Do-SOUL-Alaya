@@ -4,8 +4,8 @@ import {
   type WorkerSafetyPort
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { CoreError } from "../errors.js";
-import { WorkerSafetyGate } from "../worker-safety-gate.js";
+import { CoreError } from "../../errors.js";
+import { WorkerSafetyGate } from "../../security/worker-safety-gate.js";
 
 function createWorkerRun(overrides: Partial<DelegatedWorkerRun> = {}): DelegatedWorkerRun {
   return {
