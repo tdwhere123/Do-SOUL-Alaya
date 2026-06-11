@@ -584,13 +584,42 @@ export async function runLongMemEval(
         object_id: constraint.object_id,
         rank: index + 1
       }));
-      const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
+      const deliveredResults = results.slice(0, BENCH_RECALL_MAXK).map((pointer, index) => ({
         object_id: pointer.object_id,
         object_kind: pointer.object_kind,
         rank: index + 1,
         relevance_score: pointer.relevance_score,
         score_factors: pointer.score_factors ?? null
       }));
+
+      // Diagnostic: where do this question's gold memories rank in the full
+      // (maxK-capped) recall list? Distinguishes "gold just past rank 10"
+      // (coverage) from "gold missing entirely" (ranking miss). Default off.
+      if (process.env.ALAYA_BENCH_GOLD_RANK_DUMP !== undefined) {
+        const rankById = new Map(results.map((p, i) => [p.object_id, i + 1]));
+        const ranks = goldMemoryIds
+          .map((id) => rankById.get(id) ?? -1)
+          .sort((a, b) => (a < 0 ? 1 : b < 0 ? -1 : a - b));
+        const inK = ranks.filter((r) => r > 0).length;
+        // Per gold session: the BEST (min) rank among its gold members. A
+        // session with no ranked member (best=-1) has NO foothold in the
+        // candidate pool, so session-sibling expansion cannot bootstrap it.
+        const sessionBest = new Map<string, number>();
+        for (const id of goldMemoryIds) {
+          const sid =
+            sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id))?.sessionId ?? "?";
+          const r = rankById.get(id) ?? -1;
+          const cur = sessionBest.get(sid);
+          if (cur === undefined || (r > 0 && (cur < 0 || r < cur))) sessionBest.set(sid, r);
+        }
+        const footholds = [...sessionBest.values()].filter((r) => r > 0).length;
+        console.error(
+          `[gold-rank] q=${question.question_id} sess=${question.answer_session_ids.length} ` +
+            `gold=${goldMemoryIds.length} inK=${inK} ranks=[${ranks.join(",")}] ` +
+            `sessFootholds=${footholds}/${sessionBest.size} ` +
+            `sessBest=[${[...sessionBest.values()].sort((a, b) => (a < 0 ? 1 : b < 0 ? -1 : a - b)).join(",")}]`
+        );
+      }
 
       // End-to-end QA scoring: answer-LLM over delivered recall content, then
       // LLM-judge vs gold. Gated on opts.qa so a normal run makes zero LLM calls.
@@ -621,6 +650,23 @@ export async function runLongMemEval(
           },
           opts.qa.chat
         );
+        // Diagnostic: dump the actual QA context the answer model saw, to tell
+        // a date↔event binding failure (right dates present, wrong fact) from a
+        // pure model failure. Default off.
+        if (process.env.ALAYA_BENCH_QA_DUMP !== undefined) {
+          const ctx = delivered
+            .map(
+              (c, i) =>
+                `   [${i + 1}] date=${c.eventDate ?? "-"} :: ${c.content.replace(/\s+/gu, " ").slice(0, 140)}`
+            )
+            .join("\n");
+          console.error(
+            `\n[qa-dump] q=${question.question_id} type=${question.question_type} ` +
+              `correct=${qaVerdict.correct}\n  Q: ${question.question}\n  now: ${question.question_date}\n` +
+              `  GOLD: ${question.answer}\n  MODEL: ${qaVerdict.modelAnswer.replace(/\s+/gu, " ").slice(0, 240)}\n` +
+              `  ctx(${delivered.length}):\n${ctx}`
+          );
+        }
       }
 
       // Numerator rule: answerable questions score by id-equality hits;
@@ -1436,11 +1482,21 @@ function labelEmbeddingProviderUrl(providerUrl: string): string {
   return "openai-compatible";
 }
 
+/**
+ * Diagnostic-only delivery breadth. Default 10 reproduces production口径; an
+ * env override widens recall delivery + the QA context to test whether
+ * multi-fact (e.g. temporal) questions fail because the needed gold facts sit
+ * just past rank 10 (a coverage problem) vs a genuine ranking miss. Does NOT
+ * touch fusion weights.
+ */
+const BENCH_RECALL_MAXK =
+  Math.max(10, Math.floor(Number(process.env.ALAYA_BENCH_RECALL_MAXK ?? "10")) || 10);
+
 function recallOptionsForPolicyShape(
   policyShape: BenchPolicyShape
-): { readonly maxResults: 10; readonly conflictAwareness: boolean } {
+): { readonly maxResults: number; readonly conflictAwareness: boolean } {
   return {
-    maxResults: 10,
+    maxResults: BENCH_RECALL_MAXK,
     conflictAwareness: policyShape === "stress"
   };
 }
