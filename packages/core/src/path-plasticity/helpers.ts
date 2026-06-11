@@ -9,7 +9,7 @@ import {
   type StabilityClass,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
-import { classifyPathImportance } from "../importance-gate.js";
+import { classifyPathImportance } from "../manifestation/importance-gate.js";
 import type { PromotionPlan } from "../path-graph/path-manifestation-policy.js";
 import { PATH_PLASTICITY_CONSTANTS } from "./constants.js";
 import type {
@@ -103,7 +103,7 @@ export function isPositiveAssociativeFamily(path: Readonly<PathRelation>): boole
 }
 
 // invariant: only mergeable negative/neutral paths terminally retire; all others go dormant.
-// see also: packages/core/src/importance-gate.ts:classifyPathImportance
+// see also: packages/core/src/manifestation/importance-gate.ts:classifyPathImportance
 export function shouldRouteToDormant(path: Readonly<PathRelation>): boolean {
   if (isPositiveAssociativeFamily(path)) {
     return true;

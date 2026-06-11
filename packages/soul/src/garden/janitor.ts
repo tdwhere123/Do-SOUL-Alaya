@@ -113,7 +113,7 @@ export type DispositionSweepOutcome =
 // capsule membership, judged_useless = mechanical importance gate) and only
 // tombstones rows the gate cleared. A memory with a null disposition is left
 // dormant (reversible), never terminalized.
-// see also: packages/core/src/importance-gate.ts classifyMemoryImportance.
+// see also: packages/core/src/manifestation/importance-gate.ts classifyMemoryImportance.
 export interface JanitorDispositionSweepPort {
   findDormantDispositionCandidates(workspaceId: string): Promise<readonly DormantDispositionCandidate[]>;
   autonomousTombstone(candidate: DormantDispositionCandidate, taskId: string): Promise<DispositionSweepOutcome>;

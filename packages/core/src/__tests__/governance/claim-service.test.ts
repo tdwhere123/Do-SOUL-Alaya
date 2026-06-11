@@ -13,7 +13,7 @@ import {
   type ClaimFormInput,
   type ClaimServiceDependencies
 } from "../../governance/claim-service.js";
-import { CanonicalAliasService } from "../../canonical-alias-service.js";
+import { CanonicalAliasService } from "../../governance/canonical-alias-service.js";
 import type { SlotElectionResult } from "../../surfaces/slot-service.js";
 
 function createClaimInput(overrides: Partial<ClaimFormInput> = {}): ClaimFormInput {

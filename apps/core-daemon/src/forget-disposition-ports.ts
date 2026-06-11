@@ -81,7 +81,7 @@ export interface ForgetDispositionTombstoneAuthorityPort {
  * consolidated memory that happens to sit in a live capsule is left dormant and
  * recoverable rather than marked deletable.
  *
- * see also: packages/core/src/importance-gate.ts isMemoryExplicitlyProtected,
+ * see also: packages/core/src/manifestation/importance-gate.ts isMemoryExplicitlyProtected,
  * classifyMemoryImportance.
  */
 export function computeForgetDisposition(

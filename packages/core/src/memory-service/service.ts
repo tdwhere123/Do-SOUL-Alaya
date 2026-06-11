@@ -15,7 +15,7 @@ import {
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../errors.js";
-import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "../importance-gate.js";
+import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "../manifestation/importance-gate.js";
 import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 import type {
   MemoryEntryInput,
@@ -491,7 +491,7 @@ export class MemoryService {
 
     // invariant: explicitly-protected rows remain recoverable even when a
     // caller bypasses computeForgetDisposition.
-    // see also: packages/core/src/importance-gate.ts:isMemoryExplicitlyProtected.
+    // see also: packages/core/src/manifestation/importance-gate.ts:isMemoryExplicitlyProtected.
     if (isMemoryExplicitlyProtected(existing)) {
       throw new CoreError(
         "VALIDATION",
@@ -651,7 +651,7 @@ export class MemoryService {
 
     // invariant: judged_useless deletes re-check the importance verdict at
     // delete time and fail closed if evidence/reinforcement/protection changed.
-    // see also: packages/core/src/importance-gate.ts:classifyMemoryImportance.
+    // see also: packages/core/src/manifestation/importance-gate.ts:classifyMemoryImportance.
     if (classifyMemoryImportance(existing).disposition !== "judged_useless") {
       await this.emitVerdictRevoked(existing, parsedReason, parsedCausedBy);
       return false;

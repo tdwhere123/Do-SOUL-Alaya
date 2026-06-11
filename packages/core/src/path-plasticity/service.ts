@@ -7,7 +7,7 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import type { EventPublisherInput } from "../event-publisher.js";
-import { classifyPathImportance } from "../importance-gate.js";
+import { classifyPathImportance } from "../manifestation/importance-gate.js";
 import { planPromotion, type PromotionPlan } from "../path-graph/path-manifestation-policy.js";
 import { PATH_PLASTICITY_CONSTANTS } from "./constants.js";
 import {
@@ -686,7 +686,7 @@ export class PathPlasticityService {
     readonly occurredAt: string;
   }): PathPlasticityMutationPlan {
     // invariant: terminal retirement stamps the mechanical importance-gate verdict.
-    // see also: packages/core/src/importance-gate.ts:classifyPathImportance
+    // see also: packages/core/src/manifestation/importance-gate.ts:classifyPathImportance
     const gate = classifyPathImportance(params.path);
     const gatedReason =
       gate.disposition === "mergeable"

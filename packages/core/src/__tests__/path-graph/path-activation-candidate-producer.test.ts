@@ -18,7 +18,7 @@ import {
   AuditorSchedulingAdvisor,
   type PathVerificationBiasReaderPort
 } from "../../governance/auditor-scheduling-advisor.js";
-import { ManifestationResolver } from "../../manifestation-resolver.js";
+import { ManifestationResolver } from "../../manifestation/manifestation-resolver.js";
 import {
   PathActivationCandidateProducer,
   type PathActivationCandidateProducerPathReaderPort

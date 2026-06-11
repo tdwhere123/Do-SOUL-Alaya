@@ -519,7 +519,7 @@ export class RecallService {
       [...new Set(params.candidates.map((candidate) => candidate.object_id))]
     );
 
-    let sidecarEntries: readonly Readonly<import("../manifestation-resolver.js").ManifestationBiasSidecarEntry>[];
+    let sidecarEntries: readonly Readonly<import("../manifestation/manifestation-resolver.js").ManifestationBiasSidecarEntry>[];
     try {
       sidecarEntries = await sidecarPort.buildBiasSidecar({
         workspaceId: params.workspaceId,
@@ -542,7 +542,7 @@ export class RecallService {
 
     // Highest unfinishedness_bias wins per target memory; ties resolve
     // deterministically by candidate_id so repeated runs are stable.
-    const byMemoryId = new Map<string, Readonly<import("../manifestation-resolver.js").ManifestationBiasSidecarEntry>>();
+    const byMemoryId = new Map<string, Readonly<import("../manifestation/manifestation-resolver.js").ManifestationBiasSidecarEntry>>();
     const sortedEntries = [...sidecarEntries].sort((left, right) => {
       if (right.unfinishedness_bias !== left.unfinishedness_bias) {
         return right.unfinishedness_bias - left.unfinishedness_bias;

@@ -385,7 +385,7 @@ describe("ManifestationResolver", () => {
 });
 
 async function createService(deps: ReturnType<typeof createDependencies>) {
-  const serviceModulePath = new URL("../manifestation-resolver.js", import.meta.url).href;
+  const serviceModulePath = new URL("../../manifestation/manifestation-resolver.js", import.meta.url).href;
   const serviceModule = (await import(serviceModulePath)) as {
     ManifestationResolver: new (dependencies: Record<string, unknown>) => {
       resolve(params: {

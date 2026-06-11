@@ -11,7 +11,7 @@ import {
 // durable PathRelation rows into transient ActivationCandidate values.
 // Activation is runtime control, never durable truth — producer holds no
 // persistence and runs synchronously per recall trigger.
-// see also: manifestation-resolver.ts (downstream consumer).
+// see also: packages/core/src/manifestation/manifestation-resolver.ts (downstream consumer).
 // see also: path-relation-proposal-service.ts (PathRelation producer).
 
 export interface PathActivationCandidateProducerPathReaderPort {

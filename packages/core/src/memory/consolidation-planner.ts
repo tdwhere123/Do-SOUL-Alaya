@@ -8,7 +8,7 @@ import {
   classifyPathImportance,
   isConsolidationDeletable,
   isConsolidationSurvivorEligible
-} from "../importance-gate.js";
+} from "../manifestation/importance-gate.js";
 
 const CONSOLIDATION_DORMANT_AGE_MS =
   DYNAMICS_CONSTANTS.path_plasticity.consolidation_dormant_age_ms;
@@ -47,7 +47,7 @@ export interface ConsolidationPlannerDependencies {
  * state. Override-pinned and strictly-governed paths are never merged or
  * deleted (the importance gate enforces this).
  *
- * see also: packages/core/src/importance-gate.ts (the shared proxy gate spec).
+ * see also: packages/core/src/manifestation/importance-gate.ts (the shared proxy gate spec).
  * see also: packages/core/src/memory/consolidation-executor.ts (consumer of the plan).
  */
 export class ConsolidationPlanner {

@@ -21,7 +21,7 @@ import {
 //   - dialogue_nudge    -> agent dialogue context, medium bar
 //   - stance_bias       -> silently biases agent stance, highest bar
 //
-// see also: packages/core/src/manifestation-resolver.ts:ManifestationResolver.
+// see also: packages/core/src/manifestation/manifestation-resolver.ts:ManifestationResolver.
 // see also: packages/core/src/path-plasticity/service.ts:PathPlasticityService.
 
 const MANIFESTATION_AUTHORITY: Readonly<

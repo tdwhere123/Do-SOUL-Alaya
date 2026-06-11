@@ -52,7 +52,7 @@ const storageTierValues = ["hot", "warm", "cold"] as const;
 //                    references this memory; forget_disposition_ref = capsule id.
 //   judged_useless — the mechanical memory importance gate cleared it for drop;
 //                    forget_disposition_ref is null.
-// see also: packages/core/src/importance-gate.ts classifyMemoryImportance.
+// see also: packages/core/src/manifestation/importance-gate.ts classifyMemoryImportance.
 const forgetDispositionValues = ["compressed", "judged_useless"] as const;
 
 export const MemoryDimension = {

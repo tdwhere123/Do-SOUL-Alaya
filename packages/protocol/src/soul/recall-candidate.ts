@@ -60,7 +60,7 @@ export const RecallScoreFactorsSchema = z
 // annotations forwarded from PathRelation.effect_vector through the
 // ManifestationResolver sidecar. They do not enter activation_weights.
 // see also: path-activation-candidate-producer.ts (producer),
-// manifestation-resolver.ts (forwarder).
+// packages/core/src/manifestation/manifestation-resolver.ts (forwarder).
 const UnfinishednessBiasSchema = z.number().min(0).max(1);
 
 export const RecallBudgetStateSchema = z

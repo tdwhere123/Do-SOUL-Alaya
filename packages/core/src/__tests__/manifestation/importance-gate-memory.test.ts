@@ -4,7 +4,7 @@ import {
   classifyMemoryImportance,
   isMemoryExplicitlyProtected,
   isMemoryJudgedUseless
-} from "../importance-gate.js";
+} from "../../manifestation/importance-gate.js";
 
 function memory(overrides: Partial<MemoryEntry> = {}): Readonly<MemoryEntry> {
   return Object.freeze({

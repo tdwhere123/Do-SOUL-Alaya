@@ -19,7 +19,7 @@ import {
   type PrecedenceBasis as PrecedenceBasisType,
   type TransitionCausedBy as TransitionCausedByType
 } from "@do-soul/alaya-protocol";
-import type { CanonicalAliasService } from "../canonical-alias-service.js";
+import type { CanonicalAliasService } from "./canonical-alias-service.js";
 import { CoreError } from "../errors.js";
 import type { EventPublisher, EventPublisherInput } from "../event-publisher.js";
 import { parseObjectId } from "../shared/validators.js";

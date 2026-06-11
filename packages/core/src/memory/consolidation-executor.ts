@@ -14,7 +14,7 @@ import { EventPublisher, type EventPublisherInput } from "../event-publisher.js"
 import {
   isConsolidationDeletable,
   isConsolidationSurvivorEligible
-} from "../importance-gate.js";
+} from "../manifestation/importance-gate.js";
 
 const CONSOLIDATION_FUSE_MAX_RETRIES = DYNAMICS_CONSTANTS.path_plasticity.consolidation_fuse_max_retries;
 const CONSOLIDATION_FUSE_COOLDOWN_MS = DYNAMICS_CONSTANTS.path_plasticity.consolidation_fuse_cooldown_ms;
@@ -350,7 +350,7 @@ export class ConsolidationExecutor {
   // isConsolidationDeletable AND still be dormant-at-apply (closing the TOCTOU
   // window where a loser became pinned / strictly_governed / active between
   // plan emission and commit). A violation throws before the budget charge.
-  // see also: packages/core/src/importance-gate.ts (shared gate).
+  // see also: packages/core/src/manifestation/importance-gate.ts (shared gate).
   private async prepareMerges(
     plan: ConsolidationCyclePlan,
     occurredAt: string

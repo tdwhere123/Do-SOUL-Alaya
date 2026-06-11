@@ -4,7 +4,7 @@ import {
   normalizePathAnchorRef,
   PATH_ANCHOR_DIGEST_ALIAS_DOMAIN_BY_KIND
 } from "@do-soul/alaya-protocol";
-import { CanonicalAliasService } from "../canonical-alias-service.js";
+import { CanonicalAliasService } from "../../governance/canonical-alias-service.js";
 
 describe("CanonicalAliasService", () => {
   it("resolves registered aliases and falls back to normalized input", () => {
