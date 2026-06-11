@@ -8,7 +8,7 @@ import {
   type RecallPolicy,
   type RecallScoreFactors
 } from "@do-soul/alaya-protocol";
-import { computeFreshnessFactor } from "../dynamics-constants-runtime.js";
+import { computeFreshnessFactor } from "../dynamics/dynamics-constants-runtime.js";
 import {
   PATH_PLASTICITY_WEIGHT,
   assertActivationWeightsSumToOne,

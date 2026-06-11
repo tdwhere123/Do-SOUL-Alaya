@@ -1,6 +1,6 @@
 import { parseKarmaEvent as parseProtocolKarmaEvent, type KarmaEvent, type KarmaEventKind } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 export type { KarmaEvent, KarmaEventKind } from "@do-soul/alaya-protocol";
 

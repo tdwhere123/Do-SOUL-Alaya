@@ -18,7 +18,7 @@ import {
   type RetentionState,
   type ScopeClass
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
+import { CoreError } from "../errors.js";
 import {
   DIMENSION_DEFAULT_DECAY_PROFILE,
   INITIAL_ACTIVATION_FROM_CONFIDENCE_FACTOR,
@@ -27,7 +27,7 @@ import {
   computeRetentionFromProfile,
   determineManifestation
 } from "./dynamics-constants-runtime.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 const SCORE_CHANGE_EPSILON = 1e-9;
 const ACTIVATION_WEIGHT_SUM_EPSILON = 1e-6;

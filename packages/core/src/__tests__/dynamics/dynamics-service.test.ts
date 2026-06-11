@@ -9,7 +9,7 @@ import {
   type KarmaEvent,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
-import { DynamicsService, type DynamicsServiceDependencies } from "../dynamics-service.js";
+import { DynamicsService, type DynamicsServiceDependencies } from "../../dynamics/dynamics-service.js";
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {

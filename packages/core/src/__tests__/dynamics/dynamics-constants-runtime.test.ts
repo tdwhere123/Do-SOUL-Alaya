@@ -4,7 +4,7 @@ import {
   computeDecayedRetention,
   computeFreshnessFactor,
   determineManifestation
-} from "../dynamics-constants-runtime.js";
+} from "../../dynamics/dynamics-constants-runtime.js";
 
 describe("dynamics constants runtime", () => {
   it("maps dimensions to expected default decay profiles", () => {

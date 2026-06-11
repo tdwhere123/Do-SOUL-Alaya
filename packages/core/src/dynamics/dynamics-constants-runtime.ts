@@ -6,7 +6,7 @@ import {
   type ManifestationState,
   type MemoryDimension
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
+import { CoreError } from "../errors.js";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 export const FRESHNESS_DECAY_DAYS = 30;

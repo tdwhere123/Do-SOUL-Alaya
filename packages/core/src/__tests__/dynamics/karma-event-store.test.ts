@@ -4,7 +4,7 @@ import {
   InMemoryKarmaEventStore,
   SqliteKarmaEventStore,
   type KarmaEventStoreRepoPort
-} from "../karma-event-store.js";
+} from "../../dynamics/karma-event-store.js";
 
 function makeEvent(objectId: string, eventId: string): KarmaEvent {
   return {
