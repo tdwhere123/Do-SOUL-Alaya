@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ToolSpec } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../../errors.js";
 import {
   ToolSpecService,
   type ToolSpecServiceDependencies,
   type ToolSpecServiceRepoPort
-} from "../tool-spec-service.js";
+} from "../../tooling/tool-spec-service.js";
 
 function createToolSpec(overrides: Partial<ToolSpec> = {}): ToolSpec {
   return {

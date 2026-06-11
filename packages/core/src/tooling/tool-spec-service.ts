@@ -1,7 +1,7 @@
 import { ToolSpecSchema, type ToolSpec } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface ToolSpecServiceRepoPort {
   insert(spec: ToolSpec): Promise<Readonly<ToolSpec>>;

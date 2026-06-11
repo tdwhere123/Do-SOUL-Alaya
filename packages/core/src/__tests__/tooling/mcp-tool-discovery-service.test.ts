@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry, McpServerInfo, ToolProvider } from "@do-soul/alaya-protocol";
-import { McpToolDiscoveryService } from "../mcp-tool-discovery-service.js";
+import { McpToolDiscoveryService } from "../../tooling/mcp-tool-discovery-service.js";
 
 const validTimestamp = "2026-04-20T10:30:00.000Z";
 

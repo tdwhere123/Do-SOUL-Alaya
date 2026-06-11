@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { NodeTemplateResolver } from "../node-template-resolver.js";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../../errors.js";
+import { NodeTemplateResolver } from "../../tooling/node-template-resolver.js";
 
 describe("NodeTemplateResolver", () => {
   it("resolves all four frozen template contracts", () => {

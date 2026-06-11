@@ -10,15 +10,15 @@ import {
   type ToolProviderToolSpec,
   type ToolSpec
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
+import { CoreError } from "../errors.js";
 import type { ToolSpecService } from "./tool-spec-service.js";
-import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "./shared/actors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
+import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
 import {
   parseExtensionSkillPackage,
   parseExtensionToolProvider
-} from "./shared/extension-descriptor-parsers.js";
-import { readNow } from "./shared/time.js";
+} from "../shared/extension-descriptor-parsers.js";
+import { readNow } from "../shared/time.js";
 
 type ExtensionRegistryToolSpecPort = Pick<
   ToolSpecService,
