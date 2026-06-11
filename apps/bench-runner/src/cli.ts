@@ -591,7 +591,8 @@ async function runLocomoCommand(opts: ParsedFlags): Promise<number> {
       historyRoot: opts.historyRoot,
       dataDir: opts.dataDir,
       embeddingMode: opts.embeddingMode,
-      embeddingProviderKind: opts.embeddingProviderKind
+      embeddingProviderKind: opts.embeddingProviderKind,
+      ...(opts.qa ? { qa: { chat: createGardenChatFn(resolveQaChatConfig()) } } : {})
     });
     const kpi = result.payload.kpi;
     process.stdout.write(

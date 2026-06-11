@@ -41,6 +41,13 @@ import {
 import { writeExternalDiagnosticsArtifact } from "../longmemeval/diagnostics-artifacts.js";
 import { resolveBenchEmbeddingProviderLabel } from "../longmemeval/runner.js";
 import {
+  scoreQaQuestion,
+  aggregateQaVerdicts,
+  type QaQuestionVerdict,
+  type QaDeliveredCandidate
+} from "../longmemeval/qa-harness.js";
+import type { QaChatFn } from "../longmemeval/qa-chat.js";
+import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
 } from "../longmemeval/recall-token-economy.js";
@@ -65,6 +72,8 @@ export interface LocomoRunOptions {
   readonly embeddingProviderKind?: BenchEmbeddingProviderKind;
   readonly pinnedMetaRoot?: string;
   readonly offset?: number;
+  // End-to-end QA: present only with --qa. Supplies the answer-LLM/judge chat fn.
+  readonly qa?: { readonly chat: QaChatFn };
 }
 
 export interface LocomoRunResult {
@@ -175,6 +184,19 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const rAt1 = totalQa === 0 ? 0 : totalHitAt1 / totalQa;
   const rAt5 = totalQa === 0 ? 0 : totalHitAt5 / totalQa;
   const rAt10 = totalQa === 0 ? 0 : totalHitAt10 / totalQa;
+
+  // End-to-end QA aggregate (only when --qa ran). Printed for parity with the
+  // longmemeval harness; not persisted to the KPI schema.
+  const allQaVerdicts = conversationResults.flatMap((result) => result.qaVerdicts);
+  if (allQaVerdicts.length > 0) {
+    const qaAgg = aggregateQaVerdicts(allQaVerdicts);
+    process.stdout.write(
+      `LoCoMo QA accuracy=${qaAgg.qa_accuracy.toFixed(1)}% (${qaAgg.qa_correct}/${qaAgg.qa_total})\n`
+    );
+    for (const [type, tally] of Object.entries(qaAgg.qa_by_type)) {
+      process.stdout.write(`  ${type}: ${tally.correct}/${tally.total}\n`);
+    }
+  }
   const providerStateSummary = summarizeProviderStates(questionDiagnostics);
   const rAt5EmbeddingReturned = rAt5WithProviderReturned(questionDiagnostics);
   const embeddingVectorCache = summarizeEmbeddingVectorCache(
@@ -365,6 +387,7 @@ interface ConversationResult {
   // Event-sourced token-economy fold for this conversation's own bench DB —
   // one per workspace, aggregated across conversations at the run level.
   readonly tokenMetrics: BenchTokenMetrics;
+  readonly qaVerdicts: readonly QaQuestionVerdict[];
 }
 
 async function runOneConversation(
@@ -380,7 +403,14 @@ async function runOneConversation(
   try {
     const diaIdByMemoryId = new Map<string, string>();
     const memoryIdByDiaId = new Map<string, string>();
+    // QA-only: resolve delivered recall pointers back to seeded content + the
+    // session date. Populated always (cheap); consumed only when opts.qa is set.
+    const contentByMemoryId = new Map<string, string>();
+    const dateByMemoryId = new Map<string, string | null>();
     const sessions = extractSessions(conversation.conversation);
+    // Best-effort "now" for temporal QA: the latest session date in the convo.
+    const conversationNowDate =
+      sessions.reduce<string | null>((latest, s) => s.date_time ?? latest, null) ?? "";
     // invariant: rotate the seeded object_kind across each turn so the
     // archive witnesses both MaterializationRouter branches (memory-
     // only + memory-and-claim-draft). Recall surface is unchanged
@@ -404,6 +434,8 @@ async function runOneConversation(
         });
         diaIdByMemoryId.set(seed.memoryId, turn.dia_id);
         memoryIdByDiaId.set(turn.dia_id, seed.memoryId);
+        contentByMemoryId.set(seed.memoryId, seedContent);
+        dateByMemoryId.set(seed.memoryId, session.date_time);
         seedIndex += 1;
         previousTurnSeedMemoryIds = [seed.memoryId];
         sessionMemberMemoryIds.push(seed.memoryId);
@@ -437,6 +469,7 @@ async function runOneConversation(
     const latencies: number[] = [];
     const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
     const recallTokenEconomySamples: BenchRecallTokenEconomy[] = [];
+    const qaVerdicts: QaQuestionVerdict[] = [];
 
     // invariant: R@K denominator counts only QAs with non-empty evidence.
     // LoCoMo category-5 (adversarial) and some other rows carry no
@@ -489,6 +522,34 @@ async function runOneConversation(
       if (tokenEconomySample !== null) {
         recallTokenEconomySamples.push(tokenEconomySample);
       }
+
+      // End-to-end QA: answer-LLM over delivered recall + LLM-judge vs gold.
+      // Gated on opts.qa so a normal run makes zero LLM calls. Cat-5 adversarial
+      // rows carry no evidence and are already skipped above; remaining rows
+      // with a gold answer are scored (cat-2 → temporal judge, else factual).
+      if (opts.qa !== undefined && qa.answer !== null && qa.answer !== undefined) {
+        const delivered: QaDeliveredCandidate[] = result.pointers.map((pointer) => {
+          const date = dateByMemoryId.get(pointer.object_id);
+          return {
+            objectId: pointer.object_id,
+            content: contentByMemoryId.get(pointer.object_id) ?? "",
+            ...(date === undefined || date === null ? {} : { eventDate: date })
+          };
+        });
+        qaVerdicts.push(
+          await scoreQaQuestion(
+            {
+              questionId: `${conversation.sample_id}:${scoredCount}`,
+              questionType: qa.category === 2 ? "temporal-reasoning" : "locomo-factual",
+              question: qa.question,
+              questionDate: conversationNowDate,
+              goldAnswer: String(qa.answer),
+              delivered
+            },
+            opts.qa.chat
+          )
+        );
+      }
     }
 
     // Read the EventLog-derived token economy after seeding + every recall, so
@@ -508,7 +569,8 @@ async function runOneConversation(
       embeddingWarmup,
       queryEmbeddingWarmup,
       recallTokenEconomySamples,
-      tokenMetrics
+      tokenMetrics,
+      qaVerdicts
     };
   } finally {
     await workspace.detach();
