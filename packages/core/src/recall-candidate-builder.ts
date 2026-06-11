@@ -106,7 +106,7 @@ export function buildSynthesisCoarseRecallCandidate(
   // MUST branch on objectKind === "synthesis_capsule", never trust these
   // fields. scoreRecallFusionStream enforces this (synthesis scores only on
   // synthesis_fts); any new consumer of CoarseRecallCandidate.entry must do
-  // the same. see also: recall-service.ts scoreRecallFusionStream
+  // the same. see also: packages/core/src/recall/fusion-delivery.ts:scoreRecallFusionStream
   const entry: MemoryEntry = {
     object_id: input.synthesis.object_id,
     object_kind: "memory_entry",

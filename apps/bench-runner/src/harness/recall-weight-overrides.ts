@@ -21,8 +21,9 @@ const ADDITIVE_WEIGHT_KEYS = [
   "PATH_PLASTICITY_WEIGHT"
 ] as const;
 
-// see also: resolveRrfFusionWeights, resolveFusionScoringWeights (read these
-// non-stream knobs alongside per-stream weights)
+// see also: packages/core/src/recall/fusion-delivery.ts:resolveRrfFusionWeights and
+// packages/core/src/recall-service.ts:resolveFusionScoringWeights (read these non-stream knobs
+// alongside per-stream weights)
 const FUSION_NON_STREAM_KEYS = [
   "RRF_K",
   "rrf_k",

@@ -2126,7 +2126,7 @@ describe("RecallService", () => {
     // drive the victim to 0 and drop it out of the candidate set (erasure).
     // The floor keeps a positive pre-suppression candidate present as a tail
     // candidate: still ranked, fused_score > 0, but strictly demoted below its
-    // no-path baseline. see also: recall-service.ts applyPathSuppressionToFusionScores.
+    // no-path baseline. see also: packages/core/src/recall/fusion-delivery.ts:applyPathSuppressionToFusionScores.
     const memories = [
       createMemoryEntry({
         object_id: "seed-memory",

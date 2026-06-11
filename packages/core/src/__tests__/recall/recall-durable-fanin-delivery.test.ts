@@ -84,7 +84,7 @@ type FusedCandidate = Readonly<{
   // path_expansion plane via an EARNED co_recalled fan-in carrier (R1, the
   // sparse durable multi-session fan-in route). isStructuralRescueCandidate
   // reads it as the bounded exemption from the relevance gate. see also:
-  // recall-service.ts isStructuralRescueCandidate.
+  // packages/core/src/recall/fusion-delivery.ts:isStructuralRescueCandidate.
   readonly reachedViaEarnedCoRecalledFanin?: boolean;
   readonly fusion: Readonly<RecallFusionBreakdown>;
 }>;

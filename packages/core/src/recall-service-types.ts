@@ -362,13 +362,13 @@ export type RecallFusionStream =
   | "existing_score"
   | "embedding_similarity"
   | "graph_expansion"
-  // see also: packages/core/src/recall-service.ts scoreRecallFusionStream
+  // see also: packages/core/src/recall/fusion-delivery.ts:scoreRecallFusionStream
   | "entity_seed"
   // invariant: path_expansion is the direct multi-session fan-in carrier.
   // Earned sparse co_recalled PathRelations fan a query that hits a
   // non-representative cohort member into same-session siblings via the unified
   // path plane.
-  // see also: packages/core/src/recall-service.ts scoreRecallFusionStream
+  // see also: packages/core/src/recall/fusion-delivery.ts:scoreRecallFusionStream
   | "path_expansion"
   | "temporal_recency"
   | "workspace_activation";
@@ -639,7 +639,7 @@ export interface CoarseRecallCandidate {
   // fan-in mechanism) WITHOUT re-opening displacement to generic structural
   // distractors. Internal-only: it never reaches the emitted RecallDiagnostics
   // / bench path_expansion_sources surface.
-  // see also: recall-service.ts isStructuralRescueCandidate,
+  // see also: packages/core/src/recall/fusion-delivery.ts:isStructuralRescueCandidate,
   //   path-relation-proposal-service.ts (co_recalled accrual gate).
   readonly reachedViaEarnedCoRecalledFanin?: boolean;
   // Set to "synthesis_capsule" when the candidate is sourced from an L2

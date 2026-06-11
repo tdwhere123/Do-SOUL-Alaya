@@ -907,7 +907,7 @@ function hasGoldPathExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
 // path-primary partition (hasGoldPathExpansionStream) still credits the direct
 // hop-1 term, and graph_only_hit_at_5_count remains the clean multi-hop metric.
 // see also: apps/bench-runner/src/longmemeval/diagnostics.ts buildLongMemEvalQualityMetrics
-// see also: packages/core/src/recall-service.ts scoreRecallFusionStream
+// see also: packages/core/src/recall/fusion-delivery.ts:scoreRecallFusionStream
 function hasGoldGraphExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
   return (
     gold.source_planes.includes("graph_expansion") ||
