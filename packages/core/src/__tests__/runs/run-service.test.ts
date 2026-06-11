@@ -8,7 +8,7 @@ import {
   type Run,
   type Workspace
 } from "@do-soul/alaya-protocol";
-import { RunService } from "../run-service.js";
+import { RunService } from "../../runs/run-service.js";
 
 describe("RunService", () => {
   it("rejects create when principal engine_class cannot be resolved", async () => {

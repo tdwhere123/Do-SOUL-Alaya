@@ -9,7 +9,7 @@ import {
   type Run,
   type Workspace
 } from "@do-soul/alaya-protocol";
-import { EngineBindingService } from "../engine-binding-service.js";
+import { EngineBindingService } from "../../runs/engine-binding-service.js";
 
 // Helper: in-test publisher that simulates the appendManyWithMutation contract
 // (sync mutate, batch-array first arg) used by EngineBindingService after #BL-022.

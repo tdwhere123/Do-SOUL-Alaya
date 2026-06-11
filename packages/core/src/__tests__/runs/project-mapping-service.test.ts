@@ -15,7 +15,7 @@ import {
   ProjectMappingService,
   StrictConfirmationRequired,
   type ProjectMappingServiceDependencies
-} from "../project-mapping-service.js";
+} from "../../runs/project-mapping-service.js";
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {

@@ -6,7 +6,7 @@ import {
   type PathRelation,
   type Workspace
 } from "@do-soul/alaya-protocol";
-import { WorkspaceService } from "../workspace-service.js";
+import { WorkspaceService } from "../../runs/workspace-service.js";
 
 // Duck-typed shape that mirrors @do-soul/alaya-storage StorageError
 // without importing the storage package — core may not depend on

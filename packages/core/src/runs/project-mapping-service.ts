@@ -15,7 +15,7 @@ import {
   type ProjectMappingAnchor,
   type ProjectMappingState as ProjectMappingStateType
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
+import { CoreError } from "../errors.js";
 
 export interface ProjectMappingServiceEventLogRepoPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;

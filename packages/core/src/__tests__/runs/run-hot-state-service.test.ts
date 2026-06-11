@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { EngineStatus, WorkspaceRunEventType, StreamingEventType, type EventLogEntry, type Run } from "@do-soul/alaya-protocol";
-import { RunHotStateService } from "../run-hot-state-service.js";
+import { RunHotStateService } from "../../runs/run-hot-state-service.js";
 
 function createEvent(entry: Partial<EventLogEntry> & Pick<EventLogEntry, "event_type" | "entity_type" | "entity_id">): EventLogEntry {
   return {
