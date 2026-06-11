@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { RecallContextEventType, RunMode, type EventLogEntry } from "@do-soul/alaya-protocol";
-import { STRATEGY_RECALL_DEFAULTS, TaskSurfaceBuilder } from "../task-surface-builder.js";
+import { STRATEGY_RECALL_DEFAULTS, TaskSurfaceBuilder } from "../../conversation/task-surface-builder.js";
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {

@@ -245,14 +245,14 @@ function ceilingBandForContribution(
 // any class's true ceiling on a read failure. A higher failsafe (e.g. excerpt)
 // would over-surface a hint_only-governed memory: at the lens a hint renders a
 // bare `[memory ref: <id>]` (zero body) while excerpt serves a body fragment
-// (context-lens-assembler.ts resolveContentSnapshot), so excerpt-on-throw leaks
+// (conversation/context-lens-assembler.ts resolveContentSnapshot), so excerpt-on-throw leaks
 // preview content for a memory whose true ceiling is hint. Recall still
 // returns/scores/ranks every memory; only the delivered surface is conserved to
 // a bare ref until governance can be read — the correct conservative tradeoff
 // for a HARD ceiling. This is distinct from a missing pathExpansionPort
 // (governance plane not deployed) which legitimately stays open (full_eligible).
-// see also: recall-service.ts collectGovernanceCeilings (throw vs absent branch),
-//   context-lens-assembler.ts resolveContentSnapshot (hint = bare ref, excerpt = body).
+// see also: recall/recall-service.ts collectGovernanceCeilings (throw vs absent branch),
+//   conversation/context-lens-assembler.ts resolveContentSnapshot (hint = bare ref, excerpt = body).
 export const GOVERNANCE_CEILING_FAILSAFE_BAND: ManifestationStateValue =
   ManifestationState.HINT;
 

@@ -14,8 +14,11 @@ import {
   type Workspace,
   type WorkingProjection
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
-import { ConversationService, type ConversationServiceDependencies } from "../conversation-service.js";
+import { CoreError } from "../../errors.js";
+import {
+  ConversationService,
+  type ConversationServiceDependencies
+} from "../../conversation/conversation-service.js";
 
 describe("ConversationService", () => {
   it("conversation fails closed for chat execution surfaces and keeps interrupt unsupported", async () => {

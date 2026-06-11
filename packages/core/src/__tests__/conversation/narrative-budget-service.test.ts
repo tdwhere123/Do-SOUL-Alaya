@@ -1,6 +1,6 @@
 import { NarrativeBudgetConfigSchema, ObligationTrustNarrativeEventType } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { NarrativeBudgetService } from "../narrative-budget-service.js";
+import { NarrativeBudgetService } from "../../conversation/narrative-budget-service.js";
 
 const FIXED_NOW = "2026-04-15T11:00:00.000Z";
 

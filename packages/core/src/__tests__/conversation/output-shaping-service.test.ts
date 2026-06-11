@@ -7,7 +7,7 @@ import {
   OutputShapingService,
   type OutputShapingDecision,
   type ShapeableOutput
-} from "../output-shaping-service.js";
+} from "../../conversation/output-shaping-service.js";
 
 describe("OutputShapingService", () => {
   it("classifies clear tool and governance outputs into command classes", () => {

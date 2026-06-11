@@ -21,11 +21,11 @@ import {
   type Slot,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import type { RecallCandidate } from "../recall/recall-service.js";
+import type { RecallCandidate } from "../../recall/recall-service.js";
 import {
   ContextLensAssembler,
   type LensAssemblerDependencies
-} from "../context-lens-assembler.js";
+} from "../../conversation/context-lens-assembler.js";
 
 const NOW = "2026-03-23T10:00:00.000Z";
 const EXPIRY = "2026-03-23T10:30:00.000Z";
@@ -254,8 +254,8 @@ describe("context lens assembler", () => {
     // excerpt = a body fragment. This is WHY the governance-read failsafe must cap
     // to hint, not excerpt: capping a true-hint ceiling to excerpt over-surfaces a
     // body fragment for a memory whose true ceiling is a bare ref.
-    // see also: context-lens-assembler.ts resolveContentSnapshot,
-    //   path-manifestation-policy.ts GOVERNANCE_CEILING_FAILSAFE_BAND.
+    // see also: conversation/context-lens-assembler.ts resolveContentSnapshot,
+    //   path-graph/path-manifestation-policy.ts GOVERNANCE_CEILING_FAILSAFE_BAND.
     const longBody =
       "Sensitive deployment rollback body that a bare hint ref must never expose, ".repeat(4).trim();
     const memory = createMemoryEntry({

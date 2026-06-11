@@ -5,7 +5,7 @@ import {
   type EventLogEntry,
   type NarrativeBudgetConfig
 } from "@do-soul/alaya-protocol";
-import type { EventPublisher } from "./event-publisher.js";
+import type { EventPublisher } from "../event-publisher.js";
 
 export interface NarrativeBudgetRepoPort {
   countDigestsByRun(runId: string): Promise<number>;

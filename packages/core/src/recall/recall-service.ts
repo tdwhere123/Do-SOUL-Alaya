@@ -22,7 +22,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "./recall-query-probes.js";
-import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "../task-surface-builder.js";
+import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "../conversation/task-surface-builder.js";
 import {
   COLD_CASCADE_DECAY,
   MIN_RECALL_RESULTS,

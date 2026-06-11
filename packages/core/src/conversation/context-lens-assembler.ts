@@ -31,8 +31,8 @@ import {
   type TaskObjectSurface,
   type WorkingProjection
 } from "@do-soul/alaya-protocol";
-import type { RecallCandidate, RecallResult } from "./recall/recall-service.js";
-import { makeTokenEstimator, type TokenEstimator } from "./recall/recall-service-types.js";
+import type { RecallCandidate, RecallResult } from "../recall/recall-service.js";
+import { makeTokenEstimator, type TokenEstimator } from "../recall/recall-service-types.js";
 import type { NodeStrategy } from "./task-surface-builder.js";
 
 const MAX_LENS_STORE_SIZE = 200;

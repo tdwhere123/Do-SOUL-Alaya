@@ -15,7 +15,7 @@ import {
   type SurfaceIdentity,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
+import { CoreError } from "../errors.js";
 
 export type NodeStrategy = "chat" | "analyze" | "build" | "govern";
 
