@@ -26,10 +26,10 @@ import {
   type ResolutionServiceClaimServicePort,
   type ResolutionServiceMemoryRepoPort,
   type ResolutionServiceMemoryServicePort
-} from "../resolution-service.js";
-import { ClaimService } from "../claim-service.js";
-import { EventPublisher } from "../event-publisher.js";
-import type { DeferredObligationService } from "../deferred-obligation-service.js";
+} from "../../governance/resolution-service.js";
+import { ClaimService } from "../../governance/claim-service.js";
+import { EventPublisher } from "../../event-publisher.js";
+import type { DeferredObligationService } from "../../governance/deferred-obligation-service.js";
 
 const FIXED_NOW = "2026-05-17T00:00:00.000Z";
 
@@ -455,7 +455,7 @@ describe("ResolutionService dispatch", () => {
 // the claim_status change may survive. Mocking transitionLifecycle (the
 // dispatch tests above) cannot prove this — only a genuine SQLite
 // transaction can.
-// see also: packages/core/src/claim-service.ts applyLifecycleTransition
+// see also: packages/core/src/governance/claim-service.ts applyLifecycleTransition
 describe("ResolutionService confirm atomicity (real SQLite)", () => {
   const databases = new Set<ReturnType<typeof initDatabase>>();
 

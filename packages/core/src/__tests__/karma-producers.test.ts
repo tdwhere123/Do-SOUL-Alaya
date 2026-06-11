@@ -13,7 +13,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { DynamicsService, type DynamicsServiceDependencies } from "../dynamics-service.js";
 import { EvidenceService } from "../evidence-service.js";
-import { ConflictDetectionService } from "../conflict-detection-service.js";
+import { ConflictDetectionService } from "../governance/conflict-detection-service.js";
 import type { PathMintOutcome } from "../path-graph/path-relation-proposal-service.js";
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {

@@ -26,7 +26,7 @@ import { SIGNAL_REF_SEED_SPECS, type SignalRefSeedSpec } from "@do-soul/alaya-so
 //     the weak seed AND the divergence so neither regresses.
 // see also: packages/soul/src/garden/materialization-router/signal-ref-seeds.ts SIGNAL_REF_SEED_SPECS.
 // see also: packages/core/src/path-graph/path-relation-proposal-service.ts seed profiles.
-// see also: packages/core/src/conflict-detection-service.ts — SYSTEM negatives.
+// see also: packages/core/src/governance/conflict-detection-service.ts — SYSTEM negatives.
 interface SignalRefSeedExpectation {
   readonly relationKind: string;
   readonly initialStrength: number;

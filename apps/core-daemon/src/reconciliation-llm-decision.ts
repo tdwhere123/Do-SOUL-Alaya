@@ -25,7 +25,7 @@ import type { ReconciliationLlmDecisionPort } from "@do-soul/alaya-core";
  *
  * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
  *   (the extraction cache whose shape this mirrors)
- * see also: packages/core/src/reconciliation-service.ts
+ * see also: packages/core/src/governance/reconciliation-service.ts
  *   (ReconciliationLlmDecisionPort consumer)
  */
 

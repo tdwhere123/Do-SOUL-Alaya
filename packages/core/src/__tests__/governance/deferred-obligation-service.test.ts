@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { ObligationTrustNarrativeEventType, type DeferredObligation, type EventLogEntry } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../../errors.js";
 import {
   DeferredObligationService,
   type DeferredObligationRepoPort
-} from "../deferred-obligation-service.js";
-import type { EventPublisher } from "../event-publisher.js";
+} from "../../governance/deferred-obligation-service.js";
+import type { EventPublisher } from "../../event-publisher.js";
 
 const FIXED_NOW = "2026-04-15T12:00:00.000Z";
 

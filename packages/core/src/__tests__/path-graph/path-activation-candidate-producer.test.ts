@@ -17,7 +17,7 @@ import {
 import {
   AuditorSchedulingAdvisor,
   type PathVerificationBiasReaderPort
-} from "../../auditor-scheduling-advisor.js";
+} from "../../governance/auditor-scheduling-advisor.js";
 import { ManifestationResolver } from "../../manifestation-resolver.js";
 import {
   PathActivationCandidateProducer,

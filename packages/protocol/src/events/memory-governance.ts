@@ -130,7 +130,7 @@ export const SoulSynthesisStatusChangedPayloadSchema = TransitionEventPayloadObj
 // invariant: deprecated event type kept registered so historical
 // EventLog rows still parse cleanly under EventLog-as-public-contract.
 // No producer emits this anymore; consumers MUST treat it as inert.
-// see also: packages/core/src/resolution-service.ts (active replacement)
+// see also: packages/core/src/governance/resolution-service.ts (active replacement)
 export const SoulSynthesisPromotedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
 
 export const SoulClaimCreatedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.readonly();

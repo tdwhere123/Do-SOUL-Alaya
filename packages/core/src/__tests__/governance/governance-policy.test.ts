@@ -3,7 +3,7 @@ import type { StagedWarning } from "@do-soul/alaya-protocol";
 import {
   GovernancePolicy,
   GovernancePolicyOutcome
-} from "../governance-policy.js";
+} from "../../governance/governance-policy.js";
 
 function warning(
   overrides: Partial<StagedWarning> & Pick<StagedWarning, "kind" | "severity">

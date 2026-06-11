@@ -296,7 +296,7 @@ above.
 *Code anchors:*
 `apps/core-daemon/src/mcp-memory-proposal-workflow.ts`,
 `apps/core-daemon/src/mcp-memory-resolve-handler.ts`,
-`packages/core/src/resolution-service.ts`,
+`packages/core/src/governance/resolution-service.ts`,
 `packages/core/src/memory-service.ts`,
 `packages/storage/src/migrations/063-proposal-memory-update-patch.sql`.
 

@@ -5,7 +5,7 @@ import {
   type EventLogEntry,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
-import { KeyedMutex } from "./shared/keyed-mutex.js";
+import { KeyedMutex } from "../shared/keyed-mutex.js";
 
 // invariant: ingest-time reconciliation. Decides ADD / UPDATE / NOOP for
 // an incoming distilled fact against the top-k lexically-similar existing
@@ -45,7 +45,7 @@ import { KeyedMutex } from "./shared/keyed-mutex.js";
 //
 // see also: packages/soul/src/garden/materialization-router/router.ts
 //   (ReconciliationPort consumer)
-// see also: packages/core/src/conflict-detection-service.ts
+// see also: packages/core/src/governance/conflict-detection-service.ts
 //   (DELETE / supersede machinery)
 // see also: packages/core/src/memory-service/service.ts:MemoryService.update.
 // see also: apps/bench-runner/src/longmemeval/compile-seed.ts

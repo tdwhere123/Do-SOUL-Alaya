@@ -127,7 +127,7 @@ delivered on a recall payload. Six resolutions:
 | `not_relevant` | Records that the staged warning was inspected but did not apply to the current task. |
 
 The handler is in `apps/core-daemon/src/mcp-memory-resolve-handler.ts`;
-the typed dispatcher is `packages/core/src/resolution-service.ts`.
+the typed dispatcher is `packages/core/src/governance/resolution-service.ts`.
 Optimistic concurrency is enforced at the SQL boundary
 (`updateStatusStatement` adds `AND claim_status = ?`) so a concurrent
 confirm / reject race resolves to a single winner with a single audit

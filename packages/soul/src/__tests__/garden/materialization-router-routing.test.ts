@@ -19,7 +19,7 @@ type ClaimCreate = MaterializationRouterDeps["claimService"]["create"];
 // locks claim_status=draft at the wire boundary, and routes
 // potential_conflict to ConflictDetectionPort.evaluate.
 // see also: packages/soul/src/garden/materialization-router/router.ts route()
-// see also: packages/core/src/claim-service.ts create() (DRAFT default)
+// see also: packages/core/src/governance/claim-service.ts create() (DRAFT default)
 function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
   return {
     signal_id: "signal-1",
@@ -266,7 +266,7 @@ describe("MaterializationRouter potential_conflict routing", () => {
 
 describe("MaterializationRouter producer-side diversifiers", () => {
   // invariant: pickPrecedenceBasis lockstep with derivePrecedenceBasis in
-  // packages/core/src/claim-service.ts. Priority: user_override > authority
+  // packages/core/src/governance/claim-service.ts. Priority: user_override > authority
   // > recency > evidence_strength. Garden cannot import core, so the two
   // helpers must stay in sync through identical truth-table tests.
   const PRECEDENCE_TABLE: ReadonlyArray<{
@@ -513,7 +513,7 @@ describe("MaterializationRouter claim_status draft lock", () => {
     expect(result.success).toBe(true);
     expect(result.route_target).toBe("memory_and_claim_draft");
     expect(result.created_objects.some((obj) => obj.object_kind === "claim_form")).toBe(true);
-    // see also: packages/core/src/claim-service.ts create() — ClaimLifecycleState.DRAFT default
+    // see also: packages/core/src/governance/claim-service.ts create() — ClaimLifecycleState.DRAFT default
     expect(deps.claimServiceLastStatus()).toBe("draft");
   });
 
@@ -631,7 +631,7 @@ function createDeps(): TestDeps {
   const claimService = {
     create: vi.fn<ClaimCreate>(async () => {
       // mirror ClaimService.create real default; see
-      // packages/core/src/claim-service.ts:123 (ClaimLifecycleState.DRAFT).
+      // packages/core/src/governance/claim-service.ts ClaimLifecycleState.DRAFT default.
       lastClaimStatus = "draft";
       return {
         object_kind: "claim_form",

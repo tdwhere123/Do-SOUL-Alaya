@@ -280,8 +280,8 @@ Cat-G.
 
 - **Owner:** `typescript-pro`
 - **Write ownership:**
-  - `packages/core/src/claim-service.ts`
-  - `packages/core/src/__tests__/claim-service.test.ts`
+  - `packages/core/src/governance/claim-service.ts`
+  - `packages/core/src/__tests__/governance/claim-service.test.ts`
   - `packages/soul/src/garden/materialization-router.ts` — only
     `buildClaimInput()`, to thread the right `precedence_basis` from
     the signal
@@ -502,8 +502,8 @@ Closes Cat-A + Cat-C 5-bucket + Cat-E + Cat-H.5 completion +
   - `apps/core-daemon/src/mcp-memory-tool-catalog.ts` (register the 14th
     verb)
   - new handler `apps/core-daemon/src/mcp-memory-resolve-handler.ts`
-  - new `packages/core/src/resolution-service.ts` (typed dispatcher)
-  - new `packages/core/src/governance-policy.ts` (`classifyWarning`
+  - new `packages/core/src/governance/resolution-service.ts` (typed dispatcher)
+  - new `packages/core/src/governance/governance-policy.ts` (`classifyWarning`
     returns `ask_now` / `apply_silently` / `track_only` /
     `inspect_later`; per-turn `ask_now` budget)
   - `packages/engine-gateway/src/provider/soul-tool-specs.ts`

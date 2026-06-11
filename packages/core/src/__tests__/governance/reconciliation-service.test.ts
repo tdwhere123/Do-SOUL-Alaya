@@ -12,7 +12,7 @@ import {
   type ReconciliationLlmDecisionPort,
   type ReconciliationServiceDependencies,
   type ReconciliationVerdictApplier
-} from "../reconciliation-service.js";
+} from "../../governance/reconciliation-service.js";
 
 // invariant: covers the ingest-reconciliation decision contract — the
 // three-band gate (ADD below the floor, NOOP for a normalized-string-
@@ -22,7 +22,7 @@ import {
 // refresh on UPDATE, the NOOP audit-event emission, and the decide-then-
 // create discipline (NOOP creates no evidence_capsule; a re-seed of the
 // same fact does not grow the surviving row's evidence_refs).
-// see also: packages/core/src/reconciliation-service.ts
+// see also: packages/core/src/governance/reconciliation-service.ts
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
@@ -759,7 +759,7 @@ describe("ReconciliationService storage-level lease", () => {
 // tests wire the real rule-only port behind a spy whose `decide` does no
 // network I/O, so any spy invocation is the ambiguous-band path and the
 // absence of a real garden-LLM call is asserted by construction.
-// see also: packages/core/src/reconciliation-service.ts
+// see also: packages/core/src/governance/reconciliation-service.ts
 //   createRuleOnlyReconciliationDecisionPort
 describe("ReconciliationService rule-only (zero-cloud) basis", () => {
   function createRuleOnlyDeps(

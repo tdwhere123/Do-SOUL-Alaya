@@ -844,7 +844,7 @@ EventLog replay before recorder readiness.
 ### #BL-020 — Trust installed/configured/unverifiable counter persistence
 
 Resolved by EventLog-backed startup replay in
-`packages/core/src/trust-state-service.ts` and
+`packages/core/src/governance/trust-state-service.ts` and
 `apps/core-daemon/src/index.ts`. `recordInstalled`, `recordConfigured`,
 and `recordUnverifiable` remain runtime projections, but daemon startup
 replays their SQLite EventLog rows before the trust recorder is marked

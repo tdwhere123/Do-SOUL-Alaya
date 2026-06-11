@@ -316,7 +316,7 @@ export interface ConflictDetectionPort {
 // row. `survivingObjectId` is the row that ends up holding the fact for
 // UPDATE / NOOP — the bench scoring sidecar remaps object_id -> answer
 // turn through it.
-// see also: packages/core/src/reconciliation-service.ts
+// see also: packages/core/src/governance/reconciliation-service.ts
 export interface ReconciliationDecisionView {
   readonly kind: "add" | "update" | "noop";
   /** The row that ends up holding the fact for UPDATE / NOOP. */

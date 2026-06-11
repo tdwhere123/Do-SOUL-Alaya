@@ -4,8 +4,8 @@ import {
   ScopeClass,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
-import { ConflictDetectionService } from "../conflict-detection-service.js";
-import type { PathMintOutcome } from "../path-graph/path-relation-proposal-service.js";
+import { ConflictDetectionService } from "../../governance/conflict-detection-service.js";
+import type { PathMintOutcome } from "../../path-graph/path-relation-proposal-service.js";
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   const base: MemoryEntry = {

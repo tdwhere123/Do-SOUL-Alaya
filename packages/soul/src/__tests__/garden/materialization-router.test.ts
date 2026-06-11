@@ -1011,7 +1011,7 @@ describe("MaterializationRouter", () => {
 // only (the core service relinks it), NOOP creates nothing — keeping a
 // re-seed of the same fact idempotent. A runConflictScan flag drives the
 // existing ConflictDetectionService.
-// see also: packages/core/src/reconciliation-service.ts
+// see also: packages/core/src/governance/reconciliation-service.ts
 type RunWithDecisionFn = NonNullable<
   ConstructorParameters<typeof MaterializationRouter>[0]["reconciliationPort"]
 >["runWithDecision"];

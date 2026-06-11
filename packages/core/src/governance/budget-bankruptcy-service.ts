@@ -26,8 +26,8 @@ import {
   type ProposalResolutionState as ProposalResolutionStateValue,
   type RuntimeMode as RuntimeModeValue
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 type ActiveBankruptcyKind = Exclude<BankruptcyKindValue, "none">;
 

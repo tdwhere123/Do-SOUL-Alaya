@@ -5,7 +5,7 @@ import {
   type EventLogEntry,
   type Proposal
 } from "@do-soul/alaya-protocol";
-import { ProposalService, type ProposalServiceDependencies } from "../proposal-service.js";
+import { ProposalService, type ProposalServiceDependencies } from "../../governance/proposal-service.js";
 
 function createProposal(overrides: Partial<Proposal> = {}): Proposal {
   return {

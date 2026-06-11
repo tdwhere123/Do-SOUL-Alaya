@@ -15,7 +15,7 @@ export { GovernanceResolutionPolicyClassificationSchema };
 // can index by event_type without re-parsing the payload. The kind is
 // also carried in the payload so a single-type consumer can branch on
 // it, but the per-kind event types are the routing primitive.
-// see also: packages/core/src/resolution-service.ts (producer)
+// see also: packages/core/src/governance/resolution-service.ts (producer)
 const governanceResolutionEventTypeValues = [
   "soul.resolution.confirm_applied",
   "soul.resolution.reject_applied",

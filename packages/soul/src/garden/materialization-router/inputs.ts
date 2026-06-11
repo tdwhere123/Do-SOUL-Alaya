@@ -375,12 +375,12 @@ export function buildClaimInput(
 }
 
 // invariant: producer-side rule mirrors the canonical helper
-// `derivePrecedenceBasis` in packages/core/src/claim-service.ts. Priority
+// `derivePrecedenceBasis` in packages/core/src/governance/claim-service.ts. Priority
 // (highest wins): user_override > authority > recency > evidence_strength.
 // Garden cannot import from packages/core (invariant §6), so the rule is
 // duplicated here with the cross-file anchor below; both producers stay
 // in lockstep through identical truth-table tests.
-// see also: packages/core/src/claim-service.ts derivePrecedenceBasis
+// see also: packages/core/src/governance/claim-service.ts derivePrecedenceBasis
 function pickPrecedenceBasis(
   signal: CandidateMemorySignal,
   enforcementLevel: EnforcementLevelValue
@@ -561,7 +561,7 @@ function buildSignalSummary(signal: CandidateMemorySignal): string {
 // official-API garden provider clamps raw_payload.distilled_fact to this
 // same constant. see also: garden/compute-provider.ts.
 // invariant: kept <= AUDIT_DROPPED_CONTENT_MAX_CHARS (500) in
-// packages/core/src/reconciliation-service.ts so a dropped fact stays
+// packages/core/src/governance/reconciliation-service.ts so a dropped fact stays
 // fully reconstructable from the reconciliation audit row.
 export const DISTILLED_FACT_MAX_CHARS = 500;
 const DISTILLED_FACT_MAX_SENTENCES = 2;

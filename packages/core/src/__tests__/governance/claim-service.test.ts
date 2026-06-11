@@ -12,9 +12,9 @@ import {
   derivePrecedenceBasis,
   type ClaimFormInput,
   type ClaimServiceDependencies
-} from "../claim-service.js";
-import { CanonicalAliasService } from "../canonical-alias-service.js";
-import type { SlotElectionResult } from "../surfaces/slot-service.js";
+} from "../../governance/claim-service.js";
+import { CanonicalAliasService } from "../../canonical-alias-service.js";
+import type { SlotElectionResult } from "../../surfaces/slot-service.js";
 
 function createClaimInput(overrides: Partial<ClaimFormInput> = {}): ClaimFormInput {
   return {

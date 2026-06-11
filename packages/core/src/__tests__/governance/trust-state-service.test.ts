@@ -10,7 +10,7 @@ import {
   rebuildCountersFromEventLog,
   reduceTrustState,
   type SummaryCounts
-} from "../trust-state-service.js";
+} from "../../governance/trust-state-service.js";
 
 const baseCounts = (overrides: Partial<SummaryCounts> = {}): SummaryCounts => ({
   installed_count: 0,

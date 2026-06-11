@@ -9,8 +9,8 @@ import {
   type EventLogEntry,
   type Proposal
 } from "@do-soul/alaya-protocol";
-import { BudgetBankruptcyService } from "../budget-bankruptcy-service.js";
-import type { TestMock } from "./mock-types.js";
+import { BudgetBankruptcyService } from "../../governance/budget-bankruptcy-service.js";
+import type { TestMock } from "../mock-types.js";
 
 type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 type EventLogAppendMock = TestMock<(entry: EventLogDraft) => Promise<EventLogEntry>>;

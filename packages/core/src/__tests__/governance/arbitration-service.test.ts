@@ -9,7 +9,7 @@ import {
   type EventLogEntry,
   type Slot
 } from "@do-soul/alaya-protocol";
-import { ArbitrationService, type ArbitrationServiceDependencies } from "../arbitration-service.js";
+import { ArbitrationService, type ArbitrationServiceDependencies } from "../../governance/arbitration-service.js";
 
 const SLOT_ID = "33333333-3333-4333-8333-333333333333";
 const CLAIM_ID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

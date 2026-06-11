@@ -5,7 +5,7 @@
 // decision step makes a network call). The Garden runs fire-and-forget
 // in one process, so a process-local lock is sufficient — there is no
 // second writer process to coordinate with.
-// see also: packages/core/src/reconciliation-service.ts
+// see also: packages/core/src/governance/reconciliation-service.ts
 
 export class KeyedMutex {
   // Per key: the tail of the promise chain. A new acquirer awaits the

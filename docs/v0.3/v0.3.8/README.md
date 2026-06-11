@@ -162,7 +162,7 @@ materialization-router.
   `packages/core/src/recall-service-helpers.ts`.
 - Budget widening: `packages/core/src/task-surface-builder.ts`.
 - Edge producers: `packages/soul/src/garden/materialization-router.ts`
-  (caller-explicit) + `packages/core/src/conflict-detection-service.ts`
+  (caller-explicit) + `packages/core/src/governance/conflict-detection-service.ts`
   (rule-based + optional LLM).
 - PathRelation propose: `packages/core/src/path-graph/path-relation-proposal-service.ts`.
 - Evidence FTS:
@@ -172,7 +172,7 @@ materialization-router.
   (`findByEvidenceRefs`).
 - Codex-review wiring repair: `packages/core/src/recall-service.ts`
   (cohort + mandatory cap), `packages/core/src/path-graph/path-relation-proposal-service.ts`
-  (TTL eviction), `packages/core/src/conflict-detection-service.ts`
+  (TTL eviction), `packages/core/src/governance/conflict-detection-service.ts`
   (rule toggle), `packages/eval/src/wilson-ci.ts` (CI helper).
 - LoCoMo bench: `apps/bench-runner/src/locomo/` +
   `docs/bench-history/datasets/locomo10.meta.json` (pinned sha256).

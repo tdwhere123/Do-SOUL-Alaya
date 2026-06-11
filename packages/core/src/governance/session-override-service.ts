@@ -10,8 +10,8 @@ import {
   type EventLogEntry,
   type SessionOverride
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface SessionOverrideServiceEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;

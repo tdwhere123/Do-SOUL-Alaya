@@ -29,7 +29,7 @@ export interface ProposalServiceDependencies {
 // dispatch from soul.resolve verb). Strictly-governed path_relation
 // proposals are created by the daemon promote endpoint and applied by
 // the daemon's review handler.
-// see also: packages/core/src/resolution-service.ts
+// see also: packages/core/src/governance/resolution-service.ts
 export class ProposalService {
   public constructor(private readonly dependencies: ProposalServiceDependencies) {}
 

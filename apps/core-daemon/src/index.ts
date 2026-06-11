@@ -1053,7 +1053,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // enabled (R0 zero-cloud: cloud edge-LLM stays default-off). The DELETE
   // / supersede path stays owned by ConflictDetectionService;
   // reconciliation only flags it.
-  // see also: packages/core/src/reconciliation-service.ts
+  // see also: packages/core/src/governance/reconciliation-service.ts
   const ingestReconciliationEnabled = (() => {
     const raw = process.env.ALAYA_INGEST_RECONCILIATION_ENABLED?.trim().toLowerCase();
     return raw !== "0" && raw !== "false";
@@ -1207,7 +1207,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // soul.resolve. confirm activates draft claims; defer creates
   // obligations through DeferredObligationService; stale flips
   // memory_entry active -> dormant.
-  // see also: packages/core/src/resolution-service.ts
+  // see also: packages/core/src/governance/resolution-service.ts
   // see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts
   const resolutionService = new ResolutionService({
     eventPublisher,

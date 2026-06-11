@@ -671,7 +671,7 @@ export class EdgeAutoProducerService {
 // negative path. This deliberately diverges from the shared
 // SUPERSEDES_SEED_PROFILE (recall_allowed/0.9), which is reserved for
 // SYSTEM-derived negatives produced by ConflictDetectionService.
-// see also: packages/core/src/conflict-detection-service.ts — SYSTEM negatives.
+// see also: packages/core/src/governance/conflict-detection-service.ts — SYSTEM negatives.
 const LOCAL_SUPERSEDES_SEED_PROFILE: PathSeedProfile = Object.freeze({
   relationKind: "supersedes",
   initialStrength: 0.5,
@@ -691,7 +691,7 @@ const LOCAL_SUPERSEDES_SEED_PROFILE: PathSeedProfile = Object.freeze({
 // mirrors the contradicts entry in the SIGNAL_REF_SEED_SPECS / shared catalog so
 // a local-cue contradicts and an agent-asserted contradicts_ref carry the same
 // negative weight.
-// see also: packages/core/src/conflict-detection-service.ts — SYSTEM negatives;
+// see also: packages/core/src/governance/conflict-detection-service.ts — SYSTEM negatives;
 //   packages/soul/src/garden/materialization-router/signal-ref-seeds.ts SIGNAL_REF_SEED_SPECS.
 const LOCAL_CONTRADICTS_SEED_PROFILE: PathSeedProfile = Object.freeze({
   relationKind: "contradicts",
