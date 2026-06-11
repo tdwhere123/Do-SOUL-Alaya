@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "@do-soul/alaya-protocol";
-import { SerialDelegationEventIntake } from "../serial-delegation-event-intake.js";
+import { SerialDelegationEventIntake } from "../../runtime/serial-delegation-event-intake.js";
 
 describe("SerialDelegationEventIntake", () => {
   it("surfaces the current operation failure while allowing later enqueues to recover", async () => {

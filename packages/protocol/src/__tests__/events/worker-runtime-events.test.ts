@@ -72,7 +72,7 @@ describe("Phase A3 event registry", () => {
       sessionId: "session-1",
       emittedAt: validTimestamp,
       patchId: "patch-1",
-      pathHints: ["packages/core/src/runtime-event-normalizer.ts"]
+      pathHints: ["packages/core/src/runtime/runtime-event-normalizer.ts"]
     } as const;
     const runtimeErrorPayload = {
       sessionId: "session-1",

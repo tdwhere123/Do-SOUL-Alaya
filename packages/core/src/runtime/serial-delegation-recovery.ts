@@ -1,6 +1,6 @@
 import type { AgentRuntimePort, DelegatedWorkerRun, RuntimeEvent } from "@do-soul/alaya-protocol";
-import type { ConstraintProxy } from "./security/constraint-proxy.js";
-import { CoreError } from "./errors.js";
+import type { ConstraintProxy } from "../security/constraint-proxy.js";
+import { CoreError } from "../errors.js";
 import {
   isObligationViolationError,
   isTerminalWorkerState,
@@ -9,7 +9,7 @@ import {
   toErrorOptions
 } from "./serial-delegation-recovery-errors.js";
 import type { NormalizerContext, RuntimeEventNormalizer } from "./runtime-event-normalizer.js";
-import type { StrongRefService } from "./strong-ref-service.js";
+import type { StrongRefService } from "../strong-ref-service.js";
 import type { WorkerRunLifecycleService } from "./worker-run-lifecycle-service.js";
 
 export { summarizeError, toErrorOptions } from "./serial-delegation-recovery-errors.js";

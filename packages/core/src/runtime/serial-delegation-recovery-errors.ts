@@ -1,5 +1,5 @@
 import type { DelegatedWorkerRun, RuntimeEvent } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
+import { CoreError } from "../errors.js";
 
 export function summarizeError(error: unknown, fallback = "worker runtime failure"): string {
   if (error instanceof CoreError) {

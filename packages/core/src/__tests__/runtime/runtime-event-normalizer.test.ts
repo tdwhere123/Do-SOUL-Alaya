@@ -4,7 +4,7 @@ import {
   RuntimeEventNormalizer,
   RuntimeEventNormalizerPropagationError,
   type NormalizerContext
-} from "../runtime-event-normalizer.js";
+} from "../../runtime/runtime-event-normalizer.js";
 
 const context: NormalizerContext = {
   workspaceId: "ws-1",
@@ -530,14 +530,14 @@ describe("RuntimeEventNormalizer", () => {
         type: "patch_emitted",
         session_id: "session-1",
         patch_id: "patch-1",
-        path_hints: ["packages/core/src/runtime-event-normalizer.ts"]
+        path_hints: ["packages/core/src/runtime/runtime-event-normalizer.ts"]
       }),
       "worker.patch_emitted",
       {
         sessionId: "session-1",
         emittedAt: "2026-04-13T12:00:00.000Z",
         patchId: "patch-1",
-        pathHints: ["packages/core/src/runtime-event-normalizer.ts"]
+        pathHints: ["packages/core/src/runtime/runtime-event-normalizer.ts"]
       }
     ]
   ];

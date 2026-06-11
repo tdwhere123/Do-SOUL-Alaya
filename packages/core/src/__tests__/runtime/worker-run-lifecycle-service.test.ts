@@ -6,9 +6,9 @@ import {
   type WorkerRunState,
   type WorkerStateChangedSuspendReason
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
-import { WorkerRunLifecycleService, type WorkerRunRepoPort } from "../worker-run-lifecycle-service.js";
-import type { EventPublisher } from "../event-publisher.js";
+import { CoreError } from "../../errors.js";
+import { WorkerRunLifecycleService, type WorkerRunRepoPort } from "../../runtime/worker-run-lifecycle-service.js";
+import type { EventPublisher } from "../../event-publisher.js";
 
 const FIXED_NOW = "2026-04-10T12:00:00.000Z";
 

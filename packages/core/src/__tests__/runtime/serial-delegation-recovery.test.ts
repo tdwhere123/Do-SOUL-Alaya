@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentRuntimePort, DelegatedWorkerRun, RuntimeEvent } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
-import { SerialDelegationRecovery } from "../serial-delegation-recovery.js";
-import type { WorkerRunLifecycleService } from "../worker-run-lifecycle-service.js";
+import { CoreError } from "../../errors.js";
+import { SerialDelegationRecovery } from "../../runtime/serial-delegation-recovery.js";
+import type { WorkerRunLifecycleService } from "../../runtime/worker-run-lifecycle-service.js";
 
 const FIXED_NOW = "2026-04-15T12:00:00.000Z";
 

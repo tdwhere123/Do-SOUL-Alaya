@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkerRunState } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
-import { assertWorkerTransition } from "../worker-run-state-machine.js";
+import { CoreError } from "../../errors.js";
+import { assertWorkerTransition } from "../../runtime/worker-run-state-machine.js";
 
 describe("assertWorkerTransition", () => {
   it("accepts every legal transition from the A1-3 state graph", () => {
