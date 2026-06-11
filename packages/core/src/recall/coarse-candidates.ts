@@ -3,7 +3,6 @@ import type { EmbeddingRecallSupplementResult } from "../embedding-recall-servic
 import type { RecallQueryProbes } from "../recall-query-probes.js";
 import { clamp01, compareMemoryEntries } from "../recall-service-helpers.js";
 import type {
-  CoarseRecallCandidate,
   RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
   RecallSupplementaryData
@@ -55,23 +54,6 @@ export interface CoarseCandidateDraft {
 export interface SourceProximitySeedDraft {
   readonly draft: Readonly<CoarseCandidateDraft>;
   readonly strength: number;
-}
-
-export function emptyEmbeddingSupplementResult(): EmbeddingRecallSupplementResult {
-  return Object.freeze({
-    supplementaryEntries: Object.freeze([]),
-    similarityHintsByObjectId: Object.freeze({})
-  });
-}
-
-export function emptySynthesisCoarseFilter(): Readonly<{
-  readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
-  readonly synthesisFtsRanks: Readonly<Record<string, number>>;
-}> {
-  return Object.freeze({
-    candidates: Object.freeze([]),
-    synthesisFtsRanks: Object.freeze({})
-  });
 }
 
 export function withEmbeddingSimilarityScores(
@@ -477,7 +459,7 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   }
   // Semantic-supplement injections lack lexical / structural anchors; rank
   // them above raw activation-only candidates but below any plane that
-  // carries a real anchor. see also: packages/core/src/recall-service.ts:RecallService.collectEmbeddingCoarseInjection.
+  // carries a real anchor. see also: packages/core/src/recall/supplements.ts:collectEmbeddingCoarseInjection.
   if (draft.admissionPlanes.includes("semantic_supplement")) {
     return 2;
   }
