@@ -9,7 +9,7 @@ import type { SurfaceService } from "@do-soul/alaya-core";
 // surface_identities row + SOUL_SURFACE_CREATED audit event, and every
 // later call hits the in-memory dedupe in the MCP handler.
 // see also: apps/core-daemon/src/mcp-memory-tool-handler.ts
-// see also: packages/core/src/surface-service.ts SurfaceService.createSurface
+// see also: packages/core/src/surfaces/surface-service.ts SurfaceService.createSurface
 
 export interface AttachSurfaceRegistrar {
   ensureAgentSurface(input: {

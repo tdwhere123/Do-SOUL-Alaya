@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StrongRef } from "@do-soul/alaya-protocol";
-import { TargetRevalidateService } from "../target-revalidate-service.js";
-import type { TestMock } from "./mock-types.js";
+import { TargetRevalidateService } from "../../surfaces/target-revalidate-service.js";
+import type { TestMock } from "../mock-types.js";
 
 describe("TargetRevalidateService", () => {
   it("returns fresh when target currency has not changed", async () => {

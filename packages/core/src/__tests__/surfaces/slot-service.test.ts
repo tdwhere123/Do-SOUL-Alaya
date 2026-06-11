@@ -8,7 +8,7 @@ import {
   type EventLogEntry,
   type Slot
 } from "@do-soul/alaya-protocol";
-import { SlotService, type SlotServiceDependencies } from "../slot-service.js";
+import { SlotService, type SlotServiceDependencies } from "../../surfaces/slot-service.js";
 
 const CLAIM_ID_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CLAIM_ID_2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";

@@ -429,7 +429,7 @@ export interface McpMemoryToolHandlerDependencies {
   // process so the first MCP tool call from each attached agent
   // (codex / claude-code / mcp) lands one durable surface_identity row;
   // subsequent calls become idempotent in-memory hits.
-  // see also: packages/core/src/surface-service.ts SurfaceService.createSurface
+  // see also: packages/core/src/surfaces/surface-service.ts SurfaceService.createSurface
   readonly attachSurfaceRegistrar?: {
     ensureAgentSurface(input: {
       readonly workspaceId: string;

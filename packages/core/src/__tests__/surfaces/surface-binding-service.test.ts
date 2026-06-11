@@ -7,7 +7,7 @@ import {
   type GovernanceDriftLease,
   type SurfaceBinding
 } from "@do-soul/alaya-protocol";
-import { SurfaceBindingService, type SurfaceBindingServiceDependencies } from "../surface-binding-service.js";
+import { SurfaceBindingService, type SurfaceBindingServiceDependencies } from "../../surfaces/surface-binding-service.js";
 
 const BINDING_ID_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const BINDING_ID_2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";

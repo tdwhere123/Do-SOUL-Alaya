@@ -23,7 +23,7 @@ import type { CanonicalAliasService } from "./canonical-alias-service.js";
 import { CoreError } from "./errors.js";
 import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 import { parseObjectId } from "./shared/validators.js";
-import type { SlotElectionResult } from "./slot-service.js";
+import type { SlotElectionResult } from "./surfaces/slot-service.js";
 
 export type ClaimFormInput = Omit<
   ClaimForm,
@@ -44,7 +44,7 @@ export type ClaimFormInput = Omit<
 // newly minted claim. Priority order (highest wins):
 //   user_override  > authority > recency > evidence_strength
 // Consumers: arbitration-service.scoreClaim treats user_override as a
-// score boost; slot-service.evaluateSameScopeElection short-circuits to
+// score boost; surfaces/slot-service.evaluateSameScopeElection short-circuits to
 // auto-win when the challenger carries user_override; the other three
 // values are governance metadata for downstream review/audit.
 // see also: packages/soul/src/garden/materialization-router/inputs.ts buildClaimInput

@@ -19,11 +19,11 @@ import {
   type GovernanceDriftLease,
   type SurfaceDriftOperationType
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import { EventPublisherPropagationError } from "./event-publisher.js";
-import { SYSTEM_ACTOR } from "./shared/actors.js";
-import { addDuration, readNow } from "./shared/time.js";
-import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import { EventPublisherPropagationError } from "../event-publisher.js";
+import { SYSTEM_ACTOR } from "../shared/actors.js";
+import { addDuration, readNow } from "../shared/time.js";
+import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../shared/validators.js";
 
 export const DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS = 5 * 60 * 1000;
 

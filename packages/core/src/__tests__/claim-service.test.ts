@@ -14,7 +14,7 @@ import {
   type ClaimServiceDependencies
 } from "../claim-service.js";
 import { CanonicalAliasService } from "../canonical-alias-service.js";
-import type { SlotElectionResult } from "../slot-service.js";
+import type { SlotElectionResult } from "../surfaces/slot-service.js";
 
 function createClaimInput(overrides: Partial<ClaimFormInput> = {}): ClaimFormInput {
   return {

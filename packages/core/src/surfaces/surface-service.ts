@@ -24,9 +24,9 @@ import {
   type SurfaceStatus as SurfaceStatusType,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import { isUniqueConstraintError } from "./shared/event-utils.js";
-import { parseNonEmptyString, parseObjectId } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import { isUniqueConstraintError } from "../shared/event-utils.js";
+import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 import { DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS } from "./surface-drift-service.js";
 
 const SURFACE_STATUS_TRANSITIONS: Readonly<Record<SurfaceStatusType, readonly SurfaceStatusType[]>> = {

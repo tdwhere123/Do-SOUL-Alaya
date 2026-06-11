@@ -18,12 +18,12 @@ import {
   type SurfaceDriftOperationType,
   type SurfaceBinding
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import type { EventPublisher } from "./event-publisher.js";
-import { SYSTEM_ACTOR } from "./shared/actors.js";
-import { isUniqueConstraintError } from "./shared/event-utils.js";
-import { parseSurfaceUri } from "./shared/surface-uri.js";
-import { parseNonEmptyString, parseObjectId } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import type { EventPublisher } from "../event-publisher.js";
+import { SYSTEM_ACTOR } from "../shared/actors.js";
+import { isUniqueConstraintError } from "../shared/event-utils.js";
+import { parseSurfaceUri } from "../shared/surface-uri.js";
+import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 import { DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS } from "./surface-drift-service.js";
 
 const BINDING_STATE_TRANSITIONS: Readonly<Record<BindingStateType, readonly BindingStateType[]>> = {

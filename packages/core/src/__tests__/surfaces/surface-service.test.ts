@@ -9,8 +9,8 @@ import {
   type SurfaceAnchor,
   type SurfaceIdentity
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
-import { SurfaceService, type SurfaceServiceDependencies } from "../surface-service.js";
+import { CoreError } from "../../errors.js";
+import { SurfaceService, type SurfaceServiceDependencies } from "../../surfaces/surface-service.js";
 
 const SURFACE_OBJECT_ID = "11111111-1111-4111-8111-111111111111";
 const ANCHOR_OBJECT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
