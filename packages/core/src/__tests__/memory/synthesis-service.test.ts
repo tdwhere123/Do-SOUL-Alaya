@@ -9,7 +9,7 @@ import {
   SynthesisService,
   type SynthesisCapsuleInput,
   type SynthesisServiceDependencies
-} from "../synthesis-service.js";
+} from "../../memory/synthesis-service.js";
 
 function createSynthesisInput(overrides: Partial<SynthesisCapsuleInput> = {}): SynthesisCapsuleInput {
   return {

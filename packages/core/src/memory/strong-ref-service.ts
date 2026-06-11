@@ -5,9 +5,9 @@ import {
   type StrongRef,
   type StrongRefReason
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface StrongRefRepoPort {
   create(ref: StrongRef): Promise<Readonly<StrongRef>>;

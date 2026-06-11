@@ -272,7 +272,7 @@ export interface McpMemoryProposalWorkflowDependencies {
   // EventLog-first reference gate SynthesisService.create runs). Wired by the
   // daemon to EvidenceService; left undefined in unit tests that do not exercise
   // synthesis review proposals. A null gist read is treated as a missing ref.
-  // see also: packages/core/src/synthesis-service.ts validateEvidenceRefs
+  // see also: packages/core/src/memory/synthesis-service.ts validateEvidenceRefs
   readonly synthesisEvidenceReader?: {
     findGistById(
       evidenceId: string,

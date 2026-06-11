@@ -10,11 +10,11 @@ import {
   type PathRelation,
   type PathRelationMergedLoser
 } from "@do-soul/alaya-protocol";
-import { EventPublisher, type EventPublisherInput } from "./event-publisher.js";
+import { EventPublisher, type EventPublisherInput } from "../event-publisher.js";
 import {
   isConsolidationDeletable,
   isConsolidationSurvivorEligible
-} from "./importance-gate.js";
+} from "../importance-gate.js";
 
 const CONSOLIDATION_FUSE_MAX_RETRIES = DYNAMICS_CONSTANTS.path_plasticity.consolidation_fuse_max_retries;
 const CONSOLIDATION_FUSE_COOLDOWN_MS = DYNAMICS_CONSTANTS.path_plasticity.consolidation_fuse_cooldown_ms;

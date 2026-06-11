@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StrongRef } from "@do-soul/alaya-protocol";
-import { StrongRefService } from "../strong-ref-service.js";
+import { StrongRefService } from "../../memory/strong-ref-service.js";
 
 describe("StrongRefService", () => {
   it("protect() persists a strong ref and keeps it protected until release()", async () => {

@@ -127,7 +127,7 @@ export class MemoryService {
   // invariant: production create commits audit + memory row + optional
   // enrich_pending marker in one transaction, EventLog-first.
   // see also: packages/soul/src/garden/materialization-router/router.ts:enqueueEnrichment.
-  // see also: packages/core/src/signal-service.ts:SignalService.
+  // see also: packages/core/src/memory/signal-service.ts:SignalService.
   private async createRowMaybeAtomicallyEnqueued(
     memoryEntry: Readonly<MemoryEntry>,
     enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"],

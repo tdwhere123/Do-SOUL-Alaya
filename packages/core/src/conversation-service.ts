@@ -22,7 +22,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
 import { rebuildConversationMessages } from "./message-history.js";
-import type { SignalServiceReceiveResult } from "./signal-service.js";
+import type { SignalServiceReceiveResult } from "./memory/signal-service.js";
 
 export interface ConversationRunRepoPort {
   getById(id: string): Promise<Run | null>;

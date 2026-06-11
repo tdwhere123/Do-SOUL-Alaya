@@ -1,4 +1,4 @@
-export { MemoryService } from "./memory-service/service.js";
+export { MemoryService } from "../memory-service/service.js";
 export type {
   MemoryEntryInput,
   MemoryEntryRepoUpdateFields,
@@ -12,4 +12,4 @@ export type {
   MemoryServiceGreenPort,
   MemoryServiceMemoryEntryRepoPort,
   MemoryServiceSynthesisCapsuleLookupPort
-} from "./memory-service/types.js";
+} from "../memory-service/types.js";

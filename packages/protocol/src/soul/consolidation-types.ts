@@ -68,8 +68,8 @@ export const ConsolidationCyclePlanSchema = z
     // Optional (no default) so plans persisted or built before the merge
     // mutation existed still parse (backward compatibility); an absent field
     // means no merges.
-    // see also: packages/core/src/consolidation-executor.ts prepareMerges.
-    // see also: packages/core/src/consolidation-planner.ts (producer).
+    // see also: packages/core/src/memory/consolidation-executor.ts prepareMerges.
+    // see also: packages/core/src/memory/consolidation-planner.ts (producer).
     merges: z
       .array(
         z

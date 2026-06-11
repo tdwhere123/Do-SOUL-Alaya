@@ -5,8 +5,8 @@ import {
   type EvidenceCapsule,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
-import { EvidenceService, type EvidenceCapsuleInput } from "../evidence-service.js";
+import { CoreError } from "../../errors.js";
+import { EvidenceService, type EvidenceCapsuleInput } from "../../memory/evidence-service.js";
 
 function createEvidenceInput(overrides: Partial<EvidenceCapsuleInput> = {}): EvidenceCapsuleInput {
   return {
@@ -23,7 +23,7 @@ function createEvidenceInput(overrides: Partial<EvidenceCapsuleInput> = {}): Evi
       occurred_at: "2026-03-20T00:00:00.000Z"
     },
     physical_anchor: {
-      file_path: "packages/core/src/evidence-service.ts",
+      file_path: "packages/core/src/memory/evidence-service.ts",
       line_range: { start: 1, end: 20 },
       symbol_name: "EvidenceService",
       artifact_ref: null

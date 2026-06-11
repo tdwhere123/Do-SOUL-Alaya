@@ -20,7 +20,7 @@ import { type HandoffGapHandler } from "../handoff-gap-handler.js";
 // existing 5-value union for cross-package back-compat; the richer
 // RouteTarget is informational and surfaces through
 // MaterializationTarget.route_target.
-// see also: packages/core/src/signal-service.ts SignalMaterializationTargetKind
+// see also: packages/core/src/memory/signal-service.ts SignalMaterializationTargetKind
 export type RouteTarget =
   | "signal_only"
   | "evidence_only"

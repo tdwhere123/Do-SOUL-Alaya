@@ -67,7 +67,7 @@ function isOverridePinned(path: PathRelation): boolean {
  *   ③ supported+quiet-> plasticity_state.support_events_count >= WELL_SUPPORTED_EVENTS_THRESHOLD   => keep
  *   ④ strictly_gov   -> legitimacy.governance_class === "strictly_governed"                        => report_only
  *
- * see also: packages/core/src/consolidation-planner.ts (merge candidate filter).
+ * see also: packages/core/src/memory/consolidation-planner.ts (merge candidate filter).
  */
 export function classifyPathImportance(path: PathRelation): ImportanceClassification {
   if (isOverridePinned(path)) {

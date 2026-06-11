@@ -70,7 +70,7 @@ SynthesisCapsule health-aggregation use). Net likely small negative
 
 **Unified typed-resolution governance.** Garden's deterministic
 `SignalService.evaluateTriage`
-(`packages/core/src/signal-service.ts:341-349`) plus
+(`packages/core/src/memory/signal-service.ts:341-349`) plus
 `MaterializationRouter` route to `memory_and_claim`
 (`packages/soul/src/garden/materialization-router.ts:164-273`) remains
 the **low-trust durable producer**, but its **only legal claim

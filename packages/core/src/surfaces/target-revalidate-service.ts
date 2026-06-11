@@ -5,7 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
-import type { StrongRefRepoPort } from "../strong-ref-service.js";
+import type { StrongRefRepoPort } from "../memory/strong-ref-service.js";
 
 export interface TargetCurrencyCheckPort {
   checkCurrency(

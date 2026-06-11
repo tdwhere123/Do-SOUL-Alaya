@@ -210,8 +210,8 @@ runtime 配置，一旦保存就覆盖 env 默认值）。`alaya doctor` 的
 `OFFICIAL_API_GARDEN_MODEL`（明文 `.env` 或同一个表单）；只有 API key
 是密钥——用 `alaya install --keychain`（或 `env:` / `file:` 引用）存。
 
-*代码锚点：* `packages/core/src/signal-service.ts:80-130`、
-`packages/core/src/signal-service.ts:270-283`（分诊门）。
+*代码锚点：* `packages/core/src/memory/signal-service.ts:80-130`、
+`packages/core/src/memory/signal-service.ts:270-283`（分诊门）。
 
 ### 2. 治理 (Governance)
 
@@ -232,7 +232,7 @@ Claim 生命周期、karma）落在 **Memory Ontology 层 / Object 轴**，
 
 *代码锚点：*
 `apps/core-daemon/src/mcp-memory-proposal-workflow.ts`、
-`packages/core/src/memory-service.ts`、
+`packages/core/src/memory/memory-service.ts`、
 `packages/storage/src/migrations/063-proposal-memory-update-patch.sql`。
 
 ### 3. 沉淀 (Durability)

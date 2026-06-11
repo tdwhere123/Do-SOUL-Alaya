@@ -206,7 +206,7 @@ const LIBRARIAN_RUNTIME_TASK_KINDS = [
 
 // invariant: the executor charges every consolidation cycle against the
 // consolidation_trigger_budgets row for its trigger source (migration 035).
-// see also: packages/core/src/consolidation-executor.ts
+// see also: packages/core/src/memory/consolidation-executor.ts
 class SqliteConsolidationBudgetStore implements ConsolidationBudgetStorePort {
   private readonly findStatement;
   private readonly upsertStatement;

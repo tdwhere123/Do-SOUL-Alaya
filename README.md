@@ -251,8 +251,8 @@ Triage at the boundary, not at recall. The signal record is durable on the
 **Runtime Control** layer; ontology truth (Memory Ontology layer,
 Object / Evidence axes) is untouched until later phases say so.
 
-*Code anchors:* `packages/core/src/signal-service.ts:80-130`,
-`packages/core/src/signal-service.ts:270-283` (the triage gate).
+*Code anchors:* `packages/core/src/memory/signal-service.ts:80-130`,
+`packages/core/src/memory/signal-service.ts:270-283` (the triage gate).
 
 ### 2. Governance (治理)
 
@@ -297,7 +297,7 @@ above.
 `apps/core-daemon/src/mcp-memory-proposal-workflow.ts`,
 `apps/core-daemon/src/mcp-memory-resolve-handler.ts`,
 `packages/core/src/governance/resolution-service.ts`,
-`packages/core/src/memory-service.ts`,
+`packages/core/src/memory/memory-service.ts`,
 `packages/storage/src/migrations/063-proposal-memory-update-patch.sql`.
 
 ### 3. Durability (沉淀)

@@ -10,7 +10,7 @@ import {
   type EventLogEntry,
   type SignalState as SignalStateValue
 } from "@do-soul/alaya-protocol";
-import { stableStringify } from "./shared/stable-stringify.js";
+import { stableStringify } from "../shared/stable-stringify.js";
 
 export interface SignalServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;

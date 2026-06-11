@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SignalService } from "../signal-service.js";
+import { SignalService } from "../../memory/signal-service.js";
 import type { CandidateMemorySignal, EventLogEntry } from "@do-soul/alaya-protocol";
 
 function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {

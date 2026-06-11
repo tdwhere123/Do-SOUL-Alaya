@@ -3,7 +3,7 @@ import { DYNAMICS_CONSTANTS, type PathRelation } from "@do-soul/alaya-protocol";
 import {
   ConsolidationPlanner,
   type ConsolidationPlannerPathRelationPort
-} from "../consolidation-planner.js";
+} from "../../memory/consolidation-planner.js";
 
 const NOW_ISO = "2026-05-20T12:00:00.000Z";
 const WORKSPACE_ID = "workspace-1";

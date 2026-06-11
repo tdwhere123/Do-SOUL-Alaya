@@ -445,7 +445,7 @@ export class MaterializationRouter {
         // wire-level kind stays evidence_only so the cross-package
         // SignalMaterializationTargetKind union does not need to widen;
         // memory_entry_only is surfaced through route_target.
-        // see also: packages/core/src/signal-service.ts SignalMaterializationTargetKind
+        // see also: packages/core/src/memory/signal-service.ts SignalMaterializationTargetKind
         target_kind: "evidence_only",
         route_target: target.route_target,
         routing_reason: target.routing_reason,
@@ -628,7 +628,7 @@ export class MaterializationRouter {
   // marker). NOT warn-and-continue: that swallow is the bug B6's intent must
   // not reintroduce. The genuinely-optional time_concern proposal keeps its
   // warn-and-continue (createTimeConcernProposalBestEffort) — this does not.
-  // see also: packages/core/src/signal-service.ts terminal-FAILED on success!=true
+  // see also: packages/core/src/memory/signal-service.ts terminal-FAILED on success!=true
   private enqueueEnrichmentAfterCreate(
     memory: MemoryMaterializationCreatedObject,
     signal: CandidateMemorySignal
@@ -684,7 +684,7 @@ export class MaterializationRouter {
   // runs, so a time_concern proposal failure must warn-and-continue: a throw
   // here may never flip the branch to success: false (which SignalService would
   // mark terminally FAILED) nor strand the memory without enrichment.
-  // see also: packages/core/src/signal-service.ts terminal-FAILED on success!=true
+  // see also: packages/core/src/memory/signal-service.ts terminal-FAILED on success!=true
   private async createTimeConcernProposalBestEffort(
     targetObjectId: string,
     signal: CandidateMemorySignal

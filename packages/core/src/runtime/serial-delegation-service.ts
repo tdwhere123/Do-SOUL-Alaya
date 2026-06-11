@@ -23,7 +23,7 @@ import {
 } from "./serial-delegation-recovery.js";
 import type { ConstraintProxy } from "../security/constraint-proxy.js";
 import type { DirtyStatePanicService } from "../dirty-state-panic-service.js";
-import type { StrongRefService } from "../strong-ref-service.js";
+import type { StrongRefService } from "../memory/strong-ref-service.js";
 import type { WorkerSafetyGate } from "../security/worker-safety-gate.js";
 import type { WorkerRunLifecycleService } from "./worker-run-lifecycle-service.js";
 import type { ZeroDaySecurityLayer } from "../security/zero-day-security-layer.js";

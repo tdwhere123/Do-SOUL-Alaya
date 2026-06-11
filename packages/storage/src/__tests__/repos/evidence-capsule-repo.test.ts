@@ -43,7 +43,7 @@ function createEvidenceCapsule(overrides: Partial<EvidenceCapsule> = {}): Eviden
       occurred_at: "2026-03-20T00:00:00.000Z"
     },
     physical_anchor: {
-      file_path: "packages/core/src/evidence-service.ts",
+      file_path: "packages/core/src/memory/evidence-service.ts",
       line_range: { start: 1, end: 120 },
       symbol_name: "EvidenceService",
       artifact_ref: "artifact://evidence/1"

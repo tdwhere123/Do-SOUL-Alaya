@@ -46,7 +46,7 @@ export interface PathRelationRepo {
    * `olderThanIso`. The consolidation planner uses this to find merge/retire
    * candidates that have stayed dormant past the consolidation age window —
    * a path is never consolidated in the same window it went dormant.
-   * see also: packages/core/src/consolidation-planner.ts planCycle.
+   * see also: packages/core/src/memory/consolidation-planner.ts planCycle.
    */
   findDormant(
     workspaceId: string,
