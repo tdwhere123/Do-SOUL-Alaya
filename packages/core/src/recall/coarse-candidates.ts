@@ -15,7 +15,7 @@ export const DYNAMIC_RECALL_SEED_CAP = 50;
 // hits into graph_expansion seeds. The 0.85 cut admits quoted / code_ref /
 // path / package / task_ref signals (1.0 / 0.95 / 0.9 / 0.9 / 0.85) and
 // excludes proper_noun (0.7), cjk_phrase (0.6), and unknown_long (0.35).
-// see also: packages/core/src/entity-extraction-rules.ts:CONFIDENCE_TASK_REF.
+// see also: packages/core/src/shared/entity-extraction-rules.ts:CONFIDENCE_TASK_REF.
 export const ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR = 0.85;
 export const DYNAMIC_RECALL_SOURCE_PROXIMITY_RADIUS = 6;
 export const DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP = 12;

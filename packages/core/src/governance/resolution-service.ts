@@ -12,7 +12,7 @@ import {
   type SoulResolutionKind as SoulResolutionKindType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../errors.js";
-import type { EventPublisher, EventPublisherInput } from "../event-publisher.js";
+import type { EventPublisher, EventPublisherInput } from "../runtime/event-publisher.js";
 import type { DeferredObligationService } from "./deferred-obligation-service.js";
 
 // invariant: producer-side input shape. workspace_id / run_id /

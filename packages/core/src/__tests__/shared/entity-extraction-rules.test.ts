@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RuleBasedEntityExtractor } from "../entity-extraction-rules.js";
+import { RuleBasedEntityExtractor } from "../../shared/entity-extraction-rules.js";
 
 const extractor = new RuleBasedEntityExtractor();
 

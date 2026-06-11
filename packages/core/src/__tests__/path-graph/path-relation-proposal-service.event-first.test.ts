@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
-import { EventPublisherPropagationError } from "../../event-publisher.js";
+import { EventPublisherPropagationError } from "../../runtime/event-publisher.js";
 import {
   PathRelationProposalService,
   PATH_RELATION_PROPOSE_THRESHOLD,

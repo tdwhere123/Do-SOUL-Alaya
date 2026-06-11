@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceRunEventType, GreenGovernanceEventType, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { SessionOverrideService } from "../../governance/session-override-service.js";
-import type { TestMock } from "../mock-types.js";
+import type { TestMock } from "../shared/mock-types.js";
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {

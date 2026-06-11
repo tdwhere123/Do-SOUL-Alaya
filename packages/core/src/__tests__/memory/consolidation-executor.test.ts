@@ -12,7 +12,7 @@ import {
   type ConsolidationBudgetStorePort,
   type ConsolidationPathRelationPort
 } from "../../memory/consolidation-executor.js";
-import { EventPublisher, type RuntimeNotifier } from "../../event-publisher.js";
+import { EventPublisher, type RuntimeNotifier } from "../../runtime/event-publisher.js";
 
 const NOW_ISO = "2026-05-20T12:00:00.000Z";
 const MERGE_WHY_MAX_ENTRIES =

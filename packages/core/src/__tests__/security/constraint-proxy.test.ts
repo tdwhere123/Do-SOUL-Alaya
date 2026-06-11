@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ObligationTrustNarrativeEventType, type DeferredObligation, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { ConstraintProxy } from "../../security/constraint-proxy.js";
-import type { EventPublisher } from "../../event-publisher.js";
+import type { EventPublisher } from "../../runtime/event-publisher.js";
 
 const FIXED_NOW = "2026-04-15T12:00:00.000Z";
 

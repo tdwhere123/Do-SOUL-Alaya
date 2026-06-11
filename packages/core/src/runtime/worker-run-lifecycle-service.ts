@@ -10,7 +10,7 @@ import {
   type WorkerStateChangedSuspendReason
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../errors.js";
-import type { EventPublisher } from "../event-publisher.js";
+import type { EventPublisher } from "./event-publisher.js";
 import { assertWorkerTransition } from "./worker-run-state-machine.js";
 
 type WorkerStatePayloadExtras = Omit<WorkerStateChangedPayload, "workerId" | "state" | "previousState">;

@@ -13,11 +13,11 @@ import {
   type ConstitutionalFragmentRegistration,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import type { EventPublisher } from "./event-publisher.js";
-import { SYSTEM_ACTOR } from "./shared/actors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
-import { readNow } from "./shared/time.js";
+import { CoreError } from "../errors.js";
+import type { EventPublisher } from "../runtime/event-publisher.js";
+import { SYSTEM_ACTOR } from "../shared/actors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
+import { readNow } from "../shared/time.js";
 
 export interface ConstitutionalFragmentStorePort {
   findById(

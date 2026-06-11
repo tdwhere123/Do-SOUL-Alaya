@@ -20,7 +20,7 @@ import {
   type SurfaceDriftOperationType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../errors.js";
-import { EventPublisherPropagationError } from "../event-publisher.js";
+import { EventPublisherPropagationError } from "../runtime/event-publisher.js";
 import { SYSTEM_ACTOR } from "../shared/actors.js";
 import { addDuration, readNow } from "../shared/time.js";
 import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../shared/validators.js";

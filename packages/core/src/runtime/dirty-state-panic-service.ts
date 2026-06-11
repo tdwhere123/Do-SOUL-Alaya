@@ -14,9 +14,9 @@ import {
   type EventLogEntry,
   type WorkerRunState
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
+import { CoreError } from "../errors.js";
 import type { EventPublisher } from "./event-publisher.js";
-import { assertWorkerTransition } from "./runtime/worker-run-state-machine.js";
+import { assertWorkerTransition } from "./worker-run-state-machine.js";
 
 export interface DirtyStateDossierRepoPort {
   /** Sync sibling for atomic publish + mutation. */

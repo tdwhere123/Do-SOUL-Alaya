@@ -8,7 +8,7 @@ import {
   type EmbeddingBackfillMetadata
 } from "../../embedding-recall/embedding-backfill-handler.js";
 import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
-import type { TestMock } from "../mock-types.js";
+import type { TestMock } from "../shared/mock-types.js";
 
 // Mirrors hashMemoryContent in ../../embedding-recall/embedding-backfill-handler.ts so the test can
 // model the write-time content-hash guard's live re-check.

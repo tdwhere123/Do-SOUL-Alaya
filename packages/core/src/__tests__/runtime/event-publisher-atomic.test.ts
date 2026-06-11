@@ -4,7 +4,7 @@ import {
   WorkspaceRunEventType,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { EventPublisher, type EventPublisherEventLogRepoPort } from "../event-publisher.js";
+import { EventPublisher, type EventPublisherEventLogRepoPort } from "../../runtime/event-publisher.js";
 
 /**
  * In-memory fake repo that simulates better-sqlite3 transaction semantics:

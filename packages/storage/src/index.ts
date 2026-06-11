@@ -227,7 +227,7 @@ export { SqliteHandoffGapRepo } from "./repos/handoff-gap-repo.js";
 // Dependency Direction forbids importing core's copy). Daemon and bench-runner
 // MUST warm both core's and storage's segmenters at startup so the FTS query
 // path never hits the loading-state fallback on the user-visible hot path.
-// see also: packages/core/src/cjk-segmentation.ts, apps/core-daemon/src/index.ts.
+// see also: packages/core/src/shared/cjk-segmentation.ts, apps/core-daemon/src/index.ts.
 export {
   warmCjkSegmentation,
   segmentCjkRun,

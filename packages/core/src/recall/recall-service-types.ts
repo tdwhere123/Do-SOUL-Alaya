@@ -310,9 +310,9 @@ export interface RecallServiceDependencies {
   readonly defaultPolicyDecorator?: (
     policy: Readonly<import("@do-soul/alaya-protocol").RecallPolicy>
   ) => Readonly<import("@do-soul/alaya-protocol").RecallPolicy>;
-  // see also: packages/core/src/entity-extraction-port.ts
-  // see also: packages/core/src/entity-extraction-rules.ts RuleBasedEntityExtractor
-  readonly entityExtractionPort?: import("../entity-extraction-port.js").EntityExtractionPort;
+  // see also: packages/core/src/shared/entity-extraction-port.ts
+  // see also: packages/core/src/shared/entity-extraction-rules.ts RuleBasedEntityExtractor
+  readonly entityExtractionPort?: import("../shared/entity-extraction-port.js").EntityExtractionPort;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly warn?: RecallServiceWarnPort;

@@ -9,7 +9,7 @@ import {
   type WorkerTrustAssessment,
   type WorkerTrustLevel
 } from "@do-soul/alaya-protocol";
-import type { EventPublisher } from "../event-publisher.js";
+import type { EventPublisher } from "../runtime/event-publisher.js";
 
 export interface TrustAssessmentContext {
   readonly workerRun: Readonly<DelegatedWorkerRun>;

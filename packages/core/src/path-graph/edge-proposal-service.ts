@@ -19,7 +19,7 @@ import {
   type SoulProposeEdgeResponse
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../errors.js";
-import type { EventPublisher, EventPublisherInput } from "../event-publisher.js";
+import type { EventPublisher, EventPublisherInput } from "../runtime/event-publisher.js";
 import type { PathCandidateSink } from "./path-candidate-sink.js";
 import type { PathFailureHealthInboxPort } from "./path-failure-health-inbox.js";
 import type { PathMintOutcome } from "./path-relation-proposal-service.js";

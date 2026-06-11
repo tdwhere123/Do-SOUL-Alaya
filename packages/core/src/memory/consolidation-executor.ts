@@ -10,7 +10,7 @@ import {
   type PathRelation,
   type PathRelationMergedLoser
 } from "@do-soul/alaya-protocol";
-import { EventPublisher, type EventPublisherInput } from "../event-publisher.js";
+import { EventPublisher, type EventPublisherInput } from "../runtime/event-publisher.js";
 import {
   isConsolidationDeletable,
   isConsolidationSurvivorEligible

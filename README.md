@@ -321,7 +321,7 @@ mutation; consumers downstream subscribe to the notification, not to
 the DB. Lives on the **Memory Ontology** layer (durable truth) plus
 **Runtime Control** (the dispatch).
 
-*Code anchors:* `packages/core/src/event-publisher.ts:40-62`,
+*Code anchors:* `packages/core/src/runtime/event-publisher.ts:40-62`,
 `packages/storage/src/repos/event-log-repo.ts:69-118`.
 
 ### 4. Recall (召回)

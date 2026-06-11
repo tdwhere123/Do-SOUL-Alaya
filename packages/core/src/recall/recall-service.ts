@@ -1669,7 +1669,7 @@ export class RecallService {
   // if no port is wired, no query text is present, or the keyword search port
   // is missing, returns an empty list and the recall pipeline degrades
   // gracefully back to the pre-entity behavior.
-  // see also: packages/core/src/entity-extraction-port.ts EntityExtractionPort
+  // see also: packages/core/src/shared/entity-extraction-port.ts EntityExtractionPort
   private async collectEntityDerivedSeeds(params: Readonly<{
     readonly workspaceId: string;
     readonly queryText: string | null;

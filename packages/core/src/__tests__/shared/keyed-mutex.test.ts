@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KeyedMutex } from "../shared/keyed-mutex.js";
+import { KeyedMutex } from "../../shared/keyed-mutex.js";
 
 // invariant: covers the per-key in-process async mutex — strict
 // serialization per key, concurrency across distinct keys, lock release

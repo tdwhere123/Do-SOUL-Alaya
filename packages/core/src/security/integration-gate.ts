@@ -6,7 +6,7 @@ import {
   type EventLogEntry,
   type RuntimeCapabilities
 } from "@do-soul/alaya-protocol";
-import { EventPublisherPropagationError, type EventPublisher } from "../event-publisher.js";
+import { EventPublisherPropagationError, type EventPublisher } from "../runtime/event-publisher.js";
 
 export const WORKER_INTEGRATION_STATUS_EVENT_TYPE = WorkerRuntimeEventType.WORKER_INTEGRATION_STATUS;
 

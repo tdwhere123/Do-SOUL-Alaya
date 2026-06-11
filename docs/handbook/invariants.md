@@ -39,7 +39,7 @@ These rules always win over lower-level docs and task-card convenience.
     used SSE because it had GUI / TUI consumers; Alaya does not.
     Daemon-internal eventing is via in-process audit log +
     `RuntimeNotifier` notification only (interface in
-    `packages/core/src/event-publisher.ts`). Any new daemon code paths
+    `packages/core/src/runtime/event-publisher.ts`). Any new daemon code paths
     (e.g. `apps/core-daemon/src/sse/`, route streaming TransformStream,
     background bootstrap, event-publisher chain) must keep the SSE
     transport stripped while preserving the EventLog → audit ordering.

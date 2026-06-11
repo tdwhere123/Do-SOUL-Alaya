@@ -254,7 +254,7 @@ EventLog 行和 DB 修改成对出现；下游 consumer 订阅的是 notify，
 不是 DB。落在 **Memory Ontology 层（durable truth）+ Runtime
 Control（dispatch）**。
 
-*代码锚点：* `packages/core/src/event-publisher.ts:40-62`、
+*代码锚点：* `packages/core/src/runtime/event-publisher.ts:40-62`、
 `packages/storage/src/repos/event-log-repo.ts:69-118`。
 
 ### 4. 召回 (Recall)

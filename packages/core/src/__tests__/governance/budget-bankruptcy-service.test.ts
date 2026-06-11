@@ -10,7 +10,7 @@ import {
   type Proposal
 } from "@do-soul/alaya-protocol";
 import { BudgetBankruptcyService } from "../../governance/budget-bankruptcy-service.js";
-import type { TestMock } from "../mock-types.js";
+import type { TestMock } from "../shared/mock-types.js";
 
 type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 type EventLogAppendMock = TestMock<(entry: EventLogDraft) => Promise<EventLogEntry>>;

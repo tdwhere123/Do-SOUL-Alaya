@@ -19,7 +19,7 @@ import {
   type SurfaceBinding
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../errors.js";
-import type { EventPublisher } from "../event-publisher.js";
+import type { EventPublisher } from "../runtime/event-publisher.js";
 import { SYSTEM_ACTOR } from "../shared/actors.js";
 import { isUniqueConstraintError } from "../shared/event-utils.js";
 import { parseSurfaceUri } from "../shared/surface-uri.js";

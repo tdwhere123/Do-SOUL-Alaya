@@ -7,7 +7,7 @@
  * lexical FTS seeding and to seed graph_expansion; entity candidates do
  * not themselves enter propose/accept paths.
  *
- * see also: packages/core/src/entity-extraction-rules.ts RuleBasedEntityExtractor
+ * see also: packages/core/src/shared/entity-extraction-rules.ts RuleBasedEntityExtractor
  * see also: packages/core/src/recall/recall-service.ts collectEntityDerivedSeeds
  */
 

@@ -22,7 +22,7 @@ import {
   type WorkspaceEngineConfig
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../errors.js";
-import type { EventPublisher } from "../event-publisher.js";
+import type { EventPublisher } from "../runtime/event-publisher.js";
 
 export interface WorkspaceRepoPort {
   create(data: {

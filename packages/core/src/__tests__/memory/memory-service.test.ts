@@ -17,7 +17,7 @@ import {
   type MemoryEntryRepoUpdateFields,
   type MemoryServiceDependencies
 } from "../../memory/memory-service.js";
-import type { TestMock } from "../mock-types.js";
+import type { TestMock } from "../shared/mock-types.js";
 
 function createMemoryInput(overrides: Partial<MemoryEntryInput> = {}): MemoryEntryInput {
   return {

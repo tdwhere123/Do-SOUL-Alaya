@@ -10,8 +10,8 @@ import {
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { ConstitutionalFragmentService, type ConstitutionalFragmentStorePort } from "../constitutional-fragment-service.js";
-import { EventPublisher } from "../event-publisher.js";
+import { ConstitutionalFragmentService, type ConstitutionalFragmentStorePort } from "../../governance/constitutional-fragment-service.js";
+import { EventPublisher } from "../../runtime/event-publisher.js";
 
 const FIXED_NOW = "2026-04-17T02:00:00.000Z";
 const FIXED_LATER = "2026-04-17T08:45:00.000Z";

@@ -10,7 +10,7 @@ import {
   EdgeProposalService,
   type EdgeProposalRepoPort
 } from "../../path-graph/edge-proposal-service.js";
-import type { EventPublisher } from "../../event-publisher.js";
+import type { EventPublisher } from "../../runtime/event-publisher.js";
 import type { PathCandidateSink } from "../../path-graph/path-candidate-sink.js";
 import type { PathMintOutcome } from "../../path-graph/path-relation-proposal-service.js";
 

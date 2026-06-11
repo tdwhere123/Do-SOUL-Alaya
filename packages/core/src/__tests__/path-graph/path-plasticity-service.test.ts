@@ -12,7 +12,7 @@ import {
   type PathPlasticityRepoPort,
   type UsageProofReaderPort
 } from "../../path-plasticity/index.js";
-import { EventPublisher, type RuntimeNotifier } from "../../event-publisher.js";
+import { EventPublisher, type RuntimeNotifier } from "../../runtime/event-publisher.js";
 
 const NOW_ISO = "2026-05-04T12:00:00.000Z";
 const PAST_REINFORCED_ISO = "2026-04-01T12:00:00.000Z";

@@ -11,7 +11,7 @@ import type {
   WorkerBaselineLock
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../errors.js";
-import { EventPublisher } from "../../event-publisher.js";
+import { EventPublisher } from "../../runtime/event-publisher.js";
 import { WorkerRunLifecycleService } from "../../runtime/worker-run-lifecycle-service.js";
 import {
   IntegrationGatePublicationError,
@@ -19,7 +19,7 @@ import {
 } from "../../security/integration-gate.js";
 import { SerialDelegationService, type DispatchWorkerInput } from "../../runtime/serial-delegation-service.js";
 import { ScriptedRuntimeAdapter } from "../../test-doubles/scripted-runtime-adapter.js";
-import type { TestMock } from "../mock-types.js";
+import type { TestMock } from "../shared/mock-types.js";
 
 const FIXED_NOW = "2026-04-13T11:00:00.000Z";
 const FIXED_WORKER_RUN_ID = "worker-run-serial-1";

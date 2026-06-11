@@ -14,7 +14,7 @@ import {
   type Workspace
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../errors.js";
-import type { EventPublisher } from "../event-publisher.js";
+import type { EventPublisher } from "../runtime/event-publisher.js";
 
 export interface EngineBindingWorkspaceRepoPort {
   getById(id: string): Promise<Workspace | null>;

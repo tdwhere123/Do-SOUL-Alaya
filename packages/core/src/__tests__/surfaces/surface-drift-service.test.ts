@@ -5,7 +5,7 @@ import {
   type DriftClassification,
   type GovernanceDriftLease
 } from "@do-soul/alaya-protocol";
-import { EventPublisherPropagationError } from "../../event-publisher.js";
+import { EventPublisherPropagationError } from "../../runtime/event-publisher.js";
 import { SurfaceDriftService, type SurfaceDriftEventPublisherPort } from "../../surfaces/surface-drift-service.js";
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {

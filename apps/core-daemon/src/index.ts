@@ -242,7 +242,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // Boot pays ~200-500ms once for native binding + dict load; the
   // segmenters are fail-soft so a warm failure is silent and recall
   // still degrades to surface-only matching.
-  // see also: packages/core/src/cjk-segmentation.ts,
+  // see also: packages/core/src/shared/cjk-segmentation.ts,
   //          packages/storage/src/repos/shared/cjk-segmentation.ts.
   await Promise.all([
     warmCjkSegmentation(),
@@ -833,7 +833,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     ...(embeddingDefaultPolicyDecorator === undefined
       ? {}
       : { defaultPolicyDecorator: embeddingDefaultPolicyDecorator }),
-    // see also: packages/core/src/entity-extraction-rules.ts
+    // see also: packages/core/src/shared/entity-extraction-rules.ts
     entityExtractionPort: new RuleBasedEntityExtractor(),
     warn: warnLogger.warn
   });

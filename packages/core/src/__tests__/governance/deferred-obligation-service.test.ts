@@ -5,7 +5,7 @@ import {
   DeferredObligationService,
   type DeferredObligationRepoPort
 } from "../../governance/deferred-obligation-service.js";
-import type { EventPublisher } from "../../event-publisher.js";
+import type { EventPublisher } from "../../runtime/event-publisher.js";
 
 const FIXED_NOW = "2026-04-15T12:00:00.000Z";
 

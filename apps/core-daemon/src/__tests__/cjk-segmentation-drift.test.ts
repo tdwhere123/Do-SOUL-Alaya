@@ -19,7 +19,7 @@ import {
 // catches that divergence before it reaches production.
 //
 // The two source files live at:
-//   packages/core/src/cjk-segmentation.ts
+//   packages/core/src/shared/cjk-segmentation.ts
 //   packages/storage/src/repos/shared/cjk-segmentation.ts
 // Either may legitimately diverge ONE thing — its surface API — but
 // the actual segmentation output for CJK input must agree.

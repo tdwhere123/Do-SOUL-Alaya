@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDuration, ensureIsoDatetime, readClockSnapshot, readNow, systemNow } from "../shared/time.js";
+import { addDuration, ensureIsoDatetime, readClockSnapshot, readNow, systemNow } from "../../shared/time.js";
 
 describe("shared time helpers", () => {
   it("normalizes ISO datetimes and rejects invalid values", () => {

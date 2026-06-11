@@ -5359,7 +5359,7 @@ describe("RecallService", () => {
             // eligible to seed graph_expansion fan-in. Weak kinds
             // (proper_noun=0.7 / cjk_phrase=0.6 / unknown=0.35) are
             // covered by the dedicated isWeakEntityOnlyDraft tests below.
-            // see also: packages/core/src/entity-extraction-rules.ts CONFIDENCE_QUOTED
+            // see also: packages/core/src/shared/entity-extraction-rules.ts CONFIDENCE_QUOTED
             Object.freeze({
               surface: "MaterializationRouter",
               normalized: "materializationrouter",

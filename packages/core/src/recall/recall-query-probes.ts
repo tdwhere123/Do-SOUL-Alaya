@@ -1,5 +1,5 @@
 import { MemoryDimension, ScopeClass, type MemoryDimension as MemoryDimensionType, type ScopeClass as ScopeClassType } from "@do-soul/alaya-protocol";
-import { isCjkSegmentationCandidate, segmentCjkRun } from "../cjk-segmentation.js";
+import { isCjkSegmentationCandidate, segmentCjkRun } from "../shared/cjk-segmentation.js";
 
 export type RecallQuerySubjectHint = "self_reference";
 
@@ -153,7 +153,7 @@ function normalizeQuery(queryText: string | null): string | null {
  * original surface chunk is yielded first AND jieba word-level pieces are
  * appended (deduped). This preserves trigram-lane substring coverage on
  * the long form while also exposing word boundaries for BM25/phrase
- * adjacency on the short form. see also: cjk-segmentation.ts.
+ * adjacency on the short form. see also: packages/core/src/shared/cjk-segmentation.ts.
  */
 export function splitLexicalTokens(value: string): readonly string[] {
   const surfaceTokens = value

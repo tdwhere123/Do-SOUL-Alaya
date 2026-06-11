@@ -4,7 +4,7 @@ import { compileRecallQueryProbes, expandLexicalTerms, splitLexicalTokens } from
 import {
   __resetCjkSegmentationStateForTests,
   warmCjkSegmentation
-} from "../../cjk-segmentation.js";
+} from "../../shared/cjk-segmentation.js";
 
 describe("compileRecallQueryProbes", () => {
   it("extracts multilingual structural probes without a provider", () => {

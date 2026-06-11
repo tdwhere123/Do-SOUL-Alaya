@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry, GlobalMemoryEntry } from "@do-soul/alaya-protocol";
-import { EventPublisher } from "../../event-publisher.js";
+import { EventPublisher } from "../../runtime/event-publisher.js";
 import {
   createGlobalMemoryRecallPort,
   type GlobalMemoryRecallInvalidationNotifier

@@ -11,7 +11,7 @@ import {
   type PathGovernanceClass,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { EventPublisherPropagationError, type EventPublisher, type EventPublisherInput } from "../event-publisher.js";
+import { EventPublisherPropagationError, type EventPublisher, type EventPublisherInput } from "../runtime/event-publisher.js";
 import type { PathFailureHealthInboxPort } from "./path-failure-health-inbox.js";
 
 // invariant: PathRelationProposalService is the single producer of
@@ -427,7 +427,7 @@ export class PathRelationProposalService {
       // outcome — returning "failed" here would make a no-drop consumer record a
       // misleading PATH_MINT_FAILED audit and needlessly revert an accepted
       // proposal whose path is durable.
-      // see also: event-publisher.ts appendManyWithMutation (commit-then-propagate),
+      // see also: packages/core/src/runtime/event-publisher.ts:appendManyWithMutation,
       //   edge-proposal-service.ts handleMintFailure (the revert this avoids).
       if (err instanceof EventPublisherPropagationError) {
         this.warn("PathRelation submitCandidate committed but propagation failed", {

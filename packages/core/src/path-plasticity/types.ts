@@ -8,7 +8,7 @@ import type {
   SoulContextObjectIdentity,
   UsageProofRecord
 } from "@do-soul/alaya-protocol";
-import type { EventPublisher, EventPublisherInput } from "../event-publisher.js";
+import type { EventPublisher, EventPublisherInput } from "../runtime/event-publisher.js";
 import type { PromotionPlan } from "../path-graph/path-manifestation-policy.js";
 
 export interface UsageProofReaderPort {

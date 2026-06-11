@@ -28,7 +28,7 @@ import {
   type ResolutionServiceMemoryServicePort
 } from "../../governance/resolution-service.js";
 import { ClaimService } from "../../governance/claim-service.js";
-import { EventPublisher } from "../../event-publisher.js";
+import { EventPublisher } from "../../runtime/event-publisher.js";
 import type { DeferredObligationService } from "../../governance/deferred-obligation-service.js";
 
 const FIXED_NOW = "2026-05-17T00:00:00.000Z";

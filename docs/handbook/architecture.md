@@ -122,7 +122,7 @@ Audit precedes broadcast. Every state change records an audit row
 before any consumer can observe it.
 
 The in-process notification interface is **`RuntimeNotifier`**, exported
-from `packages/core/src/event-publisher.ts`:
+from `packages/core/src/runtime/event-publisher.ts`:
 
 ```ts
 export interface RuntimeNotifier {

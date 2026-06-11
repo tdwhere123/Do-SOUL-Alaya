@@ -11,7 +11,7 @@ import {
   EventPublisherPropagationError,
   type EventPublisherEventLogRepoPort,
   type EventPublisherInput
-} from "../event-publisher.js";
+} from "../../runtime/event-publisher.js";
 
 describe("EventPublisher", () => {
   it("publishes A1 worker lifecycle events without requiring Phase 0 parsing", async () => {

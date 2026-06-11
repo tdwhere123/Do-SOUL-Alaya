@@ -6,7 +6,7 @@ import {
   type PathRelation,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
-import type { EventPublisherInput } from "../event-publisher.js";
+import type { EventPublisherInput } from "../runtime/event-publisher.js";
 import { classifyPathImportance } from "../manifestation/importance-gate.js";
 import { planPromotion, type PromotionPlan } from "../path-graph/path-manifestation-policy.js";
 import { PATH_PLASTICITY_CONSTANTS } from "./constants.js";
