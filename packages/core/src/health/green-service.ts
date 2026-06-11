@@ -30,8 +30,8 @@ import {
   type VerificationVerdict as VerificationVerdictType,
   type VerifiedBy as VerifiedByType
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import { parseNonEmptyString, parseObjectId } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 
 const LOW_SIGNAL_REASONS = new Set<RevokeReasonType>([RevokeReason.REVIEW_OVERDUE, RevokeReason.NONE]);
 const ACTIVE_LIFECYCLE = "active";

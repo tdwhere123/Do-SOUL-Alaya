@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { HealthEventKind, GardenEventType, type EventLogEntry, type HealthJournalEntry } from "@do-soul/alaya-protocol";
-import { HealthJournalService } from "../health-journal-service.js";
+import { HealthJournalService } from "../../health/health-journal-service.js";
 
 describe("HealthJournalService", () => {
   it("appends the event before writing to the repo", async () => {

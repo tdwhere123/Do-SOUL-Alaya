@@ -8,8 +8,8 @@ import {
   type HealthJournalRecordInput,
   type HealthJournalRecordPort
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface HealthJournalServiceRepoPort {
   append(input: {

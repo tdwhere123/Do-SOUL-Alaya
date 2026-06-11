@@ -8,8 +8,8 @@ import {
   type GardenBacklogWarningTransition,
   type HealthJournalRecordPort
 } from "@do-soul/alaya-protocol";
-import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "./shared/actors.js";
-import type { RuntimeNotifier } from "./event-publisher.js";
+import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
+import type { RuntimeNotifier } from "../event-publisher.js";
 
 const GARDEN_BACKLOG_ENTITY_TYPE = "garden_backlog";
 const GARDEN_BACKLOG_ENTITY_ID = "global";

@@ -13,7 +13,7 @@ import {
   type GreenStatus,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
-import { GreenService, type GreenServiceDependencies } from "../green-service.js";
+import { GreenService, type GreenServiceDependencies } from "../../health/green-service.js";
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
