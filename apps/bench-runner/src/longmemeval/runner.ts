@@ -627,7 +627,7 @@ export async function runLongMemEval(
       // resolving each id back to its seeded content via the sidecar.
       let qaVerdict: QaQuestionVerdict | undefined;
       if (opts.qa !== undefined) {
-        const delivered: QaDeliveredCandidate[] = deliveredResults
+        let delivered: QaDeliveredCandidate[] = deliveredResults
           .filter((result) => (result.object_kind ?? "memory_entry") === "memory_entry")
           .map((result) => {
             const entry = sidecar.get(
@@ -639,6 +639,20 @@ export async function runLongMemEval(
               ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
             };
           });
+        // Diagnostic oracle: replace delivered recall with ONLY the materialized
+        // gold memories (no distractors), to test whether the materialized gold
+        // is sufficient for the answer model — isolates ingestion-drop from recall
+        // ranking/noise. Gold not materialized at ingestion is absent here too.
+        if (process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined) {
+          delivered = goldMemoryIds.map((id) => {
+            const entry = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id));
+            return {
+              objectId: id,
+              content: entry?.content ?? "",
+              ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+            };
+          });
+        }
         qaVerdict = await scoreQaQuestion(
           {
             questionId: question.question_id,
