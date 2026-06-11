@@ -585,7 +585,7 @@ export interface BenchDaemonHandle {
    * kind; recall-side behavior (attention_only, recall_bias +0.5, born-weak)
    * is identical, so the KPI faithfully measures the mechanism.
    *
-   * see also: packages/core/src/embedding-recall-service.ts coherentPairKeys
+   * see also: packages/core/src/embedding-recall/service.ts:EmbeddingRecallService.coherentPairKeys
    */
   accrueCoherenceCoRecall(
     members: readonly { readonly memoryId: string; readonly sessionId: string }[],

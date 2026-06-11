@@ -270,7 +270,7 @@ test) confirms no warm recall regression from the base-weight priors; or a writt
 **Status**: Resolved in v0.3.8.
 
 **Resolution**: `OpenAIEmbeddingClient` already accepted a baseUrl
-override (`packages/core/src/embedding-recall-service.ts`) and the
+override (`packages/core/src/embedding-recall/openai-client.ts`) and the
 bench-runner harness already exposed `--embedding env`
 (`apps/bench-runner/src/harness/daemon.ts:152-200` + MANAGED_ENV_KEYS
 listing `OPENAI_EMBEDDING_PROVIDER_URL` / `OPENAI_EMBEDDING_MODEL`).

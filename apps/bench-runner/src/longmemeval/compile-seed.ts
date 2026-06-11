@@ -738,7 +738,7 @@ export function createGardenHttpExtractor(
         // invariant: .unref?.() so a live backstop timer does not pin the
         // event loop / block process exit mid-extract; finally-clear + the
         // awaiting caller make it redundant on the happy path.
-        // see also: packages/core/src/embedding-recall-service.ts:1279,1366
+        // see also: packages/core/src/embedding-recall/openai-client.ts:OpenAIEmbeddingClient.fetchEmbeddingWithRetry
         const timer = setTimeout(fireTimeout, budgetMs);
         timer.unref?.();
         // invariant: wall-clock fallback. setTimeout is paused during host

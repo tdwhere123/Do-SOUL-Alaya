@@ -1689,9 +1689,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // embedding vectors have cosine similarity at or above this floor. The gate is
   // wired only when embedding is on (embeddingRecallService present); when
   // embedding is off the gate stays undefined, so onCoRecall accrues nothing and
-  // embedding-off behavior is unchanged. see also:
-  // packages/core/src/embedding-recall-service.ts coherentPairKeys,
-  // mcp-memory-tool-handler.ts accrueCoRecallPlasticity.
+  // embedding-off behavior is unchanged.
+  // see also: packages/core/src/embedding-recall/service.ts:EmbeddingRecallService.coherentPairKeys.
+  // see also: apps/core-daemon/src/mcp-memory-tool-handler.ts:accrueCoRecallPlasticity.
   const CO_RECALL_COHERENCE_FLOOR = 0.5;
   const coRecallCoherenceGate =
     embeddingRecallService === undefined

@@ -172,7 +172,7 @@ reflect the state at the time of the row's last update.
 | GlobalMemoryRecallService | `implementation-ready` | `live-event-ready` | P2-svc-global-recall |
 | TaskSurfaceBuilder | `implementation-ready` | `implementation-ready` | P2-svc-task-surface-builder-prelude |
 | RecallService | `live-event-ready`; v0.2.0 adds budget `pressure_ratio` scoring, per-call `host_context.tokenizer_hint` estimation, and deterministic `domain_weight_overrides` audit factors | `live-event-ready` | P2-svc-recall + v0.2.0-slice-5..7 |
-| EmbeddingRecallService | `implementation-ready` | `live-event-ready` | P2-svc-embedding-recall |
+| EmbeddingRecallService | `implementation-ready`; public barrel remains `packages/core/src/embedding-recall-service.ts`, implementation lives under `packages/core/src/embedding-recall/` | `live-event-ready` | P2-svc-embedding-recall |
 | EmbeddingBackfillHandler | `implementation-ready` | `live-event-ready` | P2-svc-embedding-pipeline |
 | ManifestationResolver | `implementation-ready` | `live-event-ready` | P2-svc-manifestation |
 | SynthesisService | `implementation-ready` | `live-event-ready` | P2-svc-synthesis |

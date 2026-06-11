@@ -44,7 +44,7 @@ export interface MemoryEmbeddingListByWorkspaceOptions {
   // invariant: cosine space is valid only within one (provider_kind, model_id).
   // SQL-level filter so the workspace scan cap admits only vectors that can
   // compete; cross-provider rows are dropped before the cap, not after.
-  // see also: packages/core/src/embedding-recall-service.ts EMBEDDING_WORKSPACE_SCAN_CAP
+  // see also: packages/core/src/embedding-recall/constants.ts:EMBEDDING_WORKSPACE_SCAN_CAP
   readonly providerKind?: string;
   readonly modelId?: string;
 }

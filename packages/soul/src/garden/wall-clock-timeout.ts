@@ -24,7 +24,7 @@
 // the inner fetch ignores the abort. abort() is still called (so abort-aware
 // fetches cancel cleanly and free the socket); the race is the safety net for
 // the transport phases where the abort cannot terminate the stall.
-// see also: packages/core/src/embedding-recall-service.ts raceFetchAgainstBackstop
+// see also: packages/core/src/embedding-recall/openai-client.ts:OpenAIEmbeddingClient.raceFetchAgainstBackstop
 
 const WALL_CLOCK_TICK_MS = 5_000;
 
@@ -174,7 +174,7 @@ export async function withWallClockTimeout<T>(
   // invariant: .unref?.() so a live backstop timer does not pin the event loop
   // and block process exit mid-extract. finally-clear + awaiting callers make
   // this redundant on the happy path; it is the safety margin for an abrupt
-  // exit. see also: packages/core/src/embedding-recall-service.ts:1279,1366
+  // exit. see also: packages/core/src/embedding-recall/openai-client.ts:OpenAIEmbeddingClient.fetchEmbeddingWithRetry
   monotonicHandle = setTimeoutFn(() => fire("monotonic"), options.budgetMs);
   monotonicHandle.unref?.();
   wallClockHandle = setIntervalFn(() => {

@@ -143,9 +143,9 @@ const RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD = 128;
 // side (wired in apps/core-daemon/src/index.ts; the floor is owned there so this
 // truth-boundary handler carries no embedding-math constant). When embedding is
 // off or vectors are missing the gate returns no coherent pairs, so onCoRecall
-// accrues nothing and embedding-off behavior is unchanged. see also:
-// packages/core/src/path-relation-proposal-service.ts onCoRecall allowedPairKeys,
-// packages/core/src/embedding-recall-service.ts coherentPairKeys.
+// accrues nothing and embedding-off behavior is unchanged.
+// see also: packages/core/src/path-relation-proposal-service.ts:onCoRecall allowedPairKeys.
+// see also: packages/core/src/embedding-recall/service.ts:EmbeddingRecallService.coherentPairKeys.
 
 export interface McpMemoryToolCallContext {
   readonly workspaceId: string;
@@ -261,9 +261,9 @@ export interface McpMemoryToolHandlerDependencies {
   // truth-boundary path service. Optional: when embedding is off (no provider /
   // no stored vectors / provider-or-hash mismatch) the gate is either unwired or
   // returns an empty set, so onCoRecall accrues nothing and embedding-off
-  // behavior is unchanged. see also: daemon-embedding-runtime.ts
-  // EmbeddingRecallService, packages/core/src/embedding-recall-service.ts
-  // cosineSimilarity.
+  // behavior is unchanged. see also:
+  // apps/core-daemon/src/daemon-embedding-runtime.ts:createDaemonEmbeddingRuntime,
+  // packages/core/src/embedding-recall/service.ts:EmbeddingRecallService.coherentPairKeys.
   readonly coRecallCoherenceGate?: {
     coherentPairKeys(
       workspaceId: string,

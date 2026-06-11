@@ -894,8 +894,8 @@ describe("OpenAIEmbeddingClient", () => {
   // resolves AND the abort signal is ignored (the undici half-open stall). Only
   // the wall-clock backstop guarantees this; without it the guard race below
   // observes "HANG".
-  // see also: packages/core/src/embedding-recall-service.ts
-  //   raceFetchAgainstBackstop / EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS
+  // see also: packages/core/src/embedding-recall/openai-client.ts:OpenAIEmbeddingClient.raceFetchAgainstBackstop
+  // see also: packages/core/src/embedding-recall/constants.ts:EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS
   it("rejects via the wall-clock backstop when the transport never settles and the abort is ignored", async () => {
     // seam: never-resolving fetch that ignores the abort signal == half-open
     // undici socket the AbortController cannot terminate.
@@ -943,8 +943,8 @@ describe("OpenAIEmbeddingClient", () => {
   // sleeping real seconds; onRetry proves the gaps are exponential. proof under
   // revert: a zero-backoff loop reports delayMs 0; a no-retry loop rejects on
   // the first transport error.
-  // see also: packages/core/src/embedding-recall-service.ts
-  //   computeEmbeddingBackoffMs / fetchEmbeddingWithRetry
+  // see also: packages/core/src/embedding-recall/openai-client.ts:computeEmbeddingBackoffMs
+  // see also: packages/core/src/embedding-recall/openai-client.ts:OpenAIEmbeddingClient.fetchEmbeddingWithRetry
   it("rides through transient transport blips with exponential jittered backoff", async () => {
     vi.useFakeTimers();
     try {
