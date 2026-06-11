@@ -14,7 +14,7 @@ import {
   EmbeddingRecallService,
   OpenAIEmbeddingClient,
   type EmbeddingVectorRecord
-} from "../../embedding-recall-service.js";
+} from "../../embedding-recall/embedding-recall-service.js";
 import type { TestMock } from "../mock-types.js";
 
 describe("EmbeddingRecallService", () => {

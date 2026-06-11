@@ -26,7 +26,7 @@ import type {
   EmbeddingRecallSupplementResult,
   PreparedEmbeddingSupplement,
   PreparedEmbeddingQueryHandle
-} from "../embedding-recall-service.js";
+} from "../embedding-recall/embedding-recall-service.js";
 import type {
   ManifestationBiasSidecarEntry
 } from "../manifestation-resolver.js";

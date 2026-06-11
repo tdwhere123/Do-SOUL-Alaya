@@ -1,5 +1,5 @@
 import type { RecallCandidate, RecallPolicy } from "@do-soul/alaya-protocol";
-import type { PreparedEmbeddingQueryHandle } from "../embedding-recall-service.js";
+import type { PreparedEmbeddingQueryHandle } from "../embedding-recall/embedding-recall-service.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import type {
   RecallCandidateDiagnostic,

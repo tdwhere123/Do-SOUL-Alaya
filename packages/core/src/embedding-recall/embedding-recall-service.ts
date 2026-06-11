@@ -3,9 +3,9 @@ export {
   EMBEDDING_WORKSPACE_SCAN_CAP,
   MAX_QUERY_TIMEOUT_MS,
   MIN_QUERY_TIMEOUT_MS
-} from "./embedding-recall/constants.js";
-export { OpenAIEmbeddingClient } from "./embedding-recall/openai-client.js";
-export { EmbeddingRecallService } from "./embedding-recall/service.js";
+} from "./constants.js";
+export { OpenAIEmbeddingClient } from "./openai-client.js";
+export { EmbeddingRecallService } from "./service.js";
 export type {
   EmbeddingNeighborHit,
   EmbeddingProviderPort,
@@ -21,8 +21,8 @@ export type {
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingQuerySnapshot,
   PreparedEmbeddingSupplement
-} from "./embedding-recall/types.js";
+} from "./types.js";
 export type {
   EmbeddingRetryEvent,
   OpenAIEmbeddingClientOptions
-} from "./embedding-recall/openai-client.js";
+} from "./openai-client.js";

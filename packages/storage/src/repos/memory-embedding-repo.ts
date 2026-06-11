@@ -21,7 +21,7 @@ export interface MemoryEmbeddingRecord {
 // (content_hash + provider/model/schema match, created_at preservation on
 // upsert), so reading metadata avoids both per-row blob hydration and the
 // finite-check scan over the full vector.
-// see also: packages/core/src/embedding-backfill-handler.ts EmbeddingBackfillRepoPort
+// see also: packages/core/src/embedding-recall/embedding-backfill-handler.ts EmbeddingBackfillRepoPort
 export interface MemoryEmbeddingMetadata {
   readonly object_id: string;
   readonly workspace_id: string;

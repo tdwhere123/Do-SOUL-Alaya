@@ -3,7 +3,7 @@ import type {
   EmbeddingRecallSupplementResult,
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingSupplement
-} from "../embedding-recall-service.js";
+} from "../embedding-recall/embedding-recall-service.js";
 import { buildSynthesisCoarseRecallCandidate } from "./recall-candidate-builder.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import {

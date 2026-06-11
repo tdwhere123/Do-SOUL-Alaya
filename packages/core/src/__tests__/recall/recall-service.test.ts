@@ -33,7 +33,7 @@ import type {
   RecallServiceMemoryRepoPort,
   RecallServicePathExpansionPort
 } from "../../recall/recall-service-types.js";
-import type { EmbeddingVectorRecord } from "../../embedding-recall-service.js";
+import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
 
 function createTaskSurface(): TaskObjectSurface {
   return {

@@ -6,11 +6,11 @@ import {
   isEmbeddingBackfillPartialFailureError,
   resolveBackfillBatchConcurrency,
   type EmbeddingBackfillMetadata
-} from "../embedding-backfill-handler.js";
-import type { EmbeddingVectorRecord } from "../embedding-recall-service.js";
-import type { TestMock } from "./mock-types.js";
+} from "../../embedding-recall/embedding-backfill-handler.js";
+import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
+import type { TestMock } from "../mock-types.js";
 
-// Mirrors hashMemoryContent in ../embedding-backfill-handler.ts so the test can
+// Mirrors hashMemoryContent in ../../embedding-recall/embedding-backfill-handler.ts so the test can
 // model the write-time content-hash guard's live re-check.
 function hashContent(content: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;

@@ -24,7 +24,7 @@ export const MAX_EMBEDDING_REQUEST_TOTAL_BACKOFF_MS = 8_000;
 // otherwise compound, and the backfill handler wraps this in its own item-level
 // retry on top).
 // see also: packages/core/src/embedding-recall/openai-client.ts:OpenAIEmbeddingClient.fetchEmbeddingWithRetry
-// see also: packages/core/src/embedding-backfill-handler.ts:EmbeddingBackfillHandler
+// see also: packages/core/src/embedding-recall/embedding-backfill-handler.ts:EmbeddingBackfillHandler
 export const MAX_EMBEDDING_REQUEST_TOTAL_WALLCLOCK_MS = 30_000;
 // invariant: the wall-clock transport backstop is a safety net that is STRICTLY
 // LATER than the request-level AbortController deadline (options.timeoutMs), so
@@ -36,7 +36,7 @@ export const MAX_EMBEDDING_REQUEST_TOTAL_WALLCLOCK_MS = 30_000;
 // catch as a real fetch rejection, so it surfaces as the existing
 // "Embedding request transport failed for host ..." error and the caller's
 // retry/split + swallow path degrade to keyword recall instead of hanging.
-// see also: packages/core/src/embedding-backfill-handler.ts:EmbeddingBackfillHandler.embedBatchWithFallback
+// see also: packages/core/src/embedding-recall/embedding-backfill-handler.ts:EmbeddingBackfillHandler.embedBatchWithFallback
 export const EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS = 2_000;
 export const QUERY_EMBEDDING_WARMUP_BATCH_SIZE = 16;
 // Hard cap on the workspace neighbor scan. The recall path drives this every

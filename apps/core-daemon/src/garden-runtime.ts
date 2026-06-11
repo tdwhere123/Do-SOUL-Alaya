@@ -2113,7 +2113,7 @@ export function createGardenRuntime(input: {
       // if they did, a duplicate EMBEDDING_BACKFILL task is idempotent (the
       // handler cache-hits every row via the content-hash CAS — no double-spend,
       // no corruption). No lock machinery is warranted for a window that cannot
-      // occur. see also: packages/core/src/embedding-backfill-handler.ts
+      // occur. see also: packages/core/src/embedding-recall/embedding-backfill-handler.ts
       if (dispatchedCount === 0 && !pendingEmbeddingBackfillWorkspaces.has(workspaceId)) {
         pendingEmbeddingBackfillWorkspaces.add(workspaceId);
         gardenScheduler.enqueue({

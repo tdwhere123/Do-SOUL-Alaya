@@ -8,7 +8,7 @@ import {
   LocalOnnxEmbeddingClient,
   defaultLocalOnnxCacheDir,
   type LocalOnnxFeatureExtractor
-} from "../local-onnx-embedding-client.js";
+} from "../../embedding-recall/local-onnx-embedding-client.js";
 
 function stubExtractor(
   rowsByCall: readonly (readonly (readonly number[])[])[]

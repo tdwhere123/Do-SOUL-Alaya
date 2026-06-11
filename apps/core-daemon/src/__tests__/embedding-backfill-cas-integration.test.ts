@@ -26,7 +26,7 @@ import { EmbeddingBackfillHandler } from "@do-soul/alaya-core";
 // SqliteMemoryEmbeddingRepo (storage) over an in-memory SQLite db, proving the
 // metadata-only cache-hit path (findMetadataByObjectIds) and the write-time CAS
 // stale-skip (upsertIfContentHashMatchesCurrentMemory) end-to-end, not mocked.
-// see also: packages/core/src/embedding-backfill-handler.ts handle
+// see also: packages/core/src/embedding-recall/embedding-backfill-handler.ts handle
 
 const MEMORY_ID = "11111111-1111-4111-8111-111111111111";
 

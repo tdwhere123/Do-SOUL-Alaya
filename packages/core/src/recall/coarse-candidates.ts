@@ -1,5 +1,5 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import type { EmbeddingRecallSupplementResult } from "../embedding-recall-service.js";
+import type { EmbeddingRecallSupplementResult } from "../embedding-recall/embedding-recall-service.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { clamp01, compareMemoryEntries } from "./recall-service-helpers.js";
 import type {
