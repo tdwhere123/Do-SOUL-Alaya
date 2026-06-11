@@ -11,7 +11,6 @@ import {
   isPathGovernedForSuppression,
   isPathRecallEligible,
   type FineAssessmentConfig,
-  type ManifestationState,
   type MemoryEntry,
   type PathAnchorRef,
   type PathRelation,
@@ -37,11 +36,9 @@ import {
   entryMatchesTimeFilter,
   filterMemoriesByTimeWindow,
   getGlobalRecallLimit,
-  mapBudgetPenalty,
   matchesConfiguredCoarseFilter,
   matchesDeterministicFilter,
   matchesPrecomputedRankFilter,
-  normalizeGraphSupport,
   normalizeQueryText,
   toErrorMessage,
   type RecallTimeFilter
@@ -66,11 +63,6 @@ import type {
   TokenEstimator
 } from "./recall-service-types.js";
 import { makeTokenEstimator } from "./recall-service-types.js";
-import {
-  GOVERNANCE_CEILING_FAILSAFE_BAND,
-  memoryGovernanceCeiling,
-  type PathGovernanceContribution
-} from "./path-manifestation-policy.js";
 import { parseRecallPolicy } from "./shared/recall-policy.js";
 import {
   scoreEvidenceAnchorMatch,
@@ -102,7 +94,6 @@ import {
 } from "./recall/graph-expansion.js";
 import {
   PATH_SUPPRESSION_MAX_PER_TARGET,
-  anchorMemoryId,
   collectPathGraphNeighbors,
   directionEligiblePathExpansionTargets,
   firstTimeConcernSeedId,
@@ -141,8 +132,8 @@ import {
   withEmbeddingSimilarityScores,
   type CoarseCandidateDraft
 } from "./recall/coarse-candidates.js";
-import { computeMaxWeightTransferAmount } from "./recall/scoring.js";
 import { fineAssess } from "./recall/fine-assessment.js";
+import { collectSupplementaryData } from "./recall/supplementary-data.js";
 import {
   collectEmbeddingCoarseInjection,
   collectEmbeddingSupplement,
@@ -187,11 +178,11 @@ const ENTITY_SEED_MIN_SURFACE_LENGTH = 2;
 const DYNAMIC_RECALL_COHORT_RADIUS = 8;
 const DYNAMIC_RECALL_EDGE_FANOUT = 12;
 const MAX_GRAPH_HOPS = 2;
+const RECALLS_EDGE_COLD_THRESHOLD = 50;
 // anchor: shared cap for entity_seed fan-in. Reuses DYNAMIC_RECALL_PLANE_CAP
 // so the per-plane admit ceiling is the structural truth and the multi-seed
 // path inherits the same bound. see also: DYNAMIC_RECALL_PLANE_CAP
 const MULTI_SEED_GRAPH_FAN_OUT_CAP = DYNAMIC_RECALL_PLANE_CAP;
-const RECALLS_EDGE_COLD_THRESHOLD = 50;
 
 type CoarseCandidateAdder = (
   entry: Readonly<MemoryEntry>,
@@ -662,7 +653,7 @@ export class RecallService {
     readonly trigramFtsRanks: Readonly<Record<string, number>>;
     readonly synthesisFtsRanks: Readonly<Record<string, number>>;
     readonly evidenceFtsRanks: Readonly<Record<string, number>>;
-    // see also: packages/core/src/recall-service.ts:RecallService.collectEvidenceGistsByMemoryId.
+    // see also: packages/core/src/recall/supplementary-data.ts:collectEvidenceGistsByMemoryId.
     readonly evidenceFtsRanksPerRef: Readonly<Record<string, number>>;
     readonly sourceProximityScores: Readonly<Record<string, number>>;
     readonly sourceCohortKeys: Readonly<Record<string, string>>;
@@ -705,7 +696,7 @@ export class RecallService {
     const ftsRanks = new Map<string, number>();
     const trigramFtsRanks = new Map<string, number>();
     const evidenceFtsRanks = new Map<string, number>();
-    // see also: packages/core/src/recall-service.ts:RecallService.collectEvidenceGistsByMemoryId.
+    // see also: packages/core/src/recall/supplementary-data.ts:collectEvidenceGistsByMemoryId.
     // The per-ref map preserves the best-rank ref; aggregated evidenceFtsRanks loses ref identity.
     const evidenceFtsRanksPerRef = new Map<string, number>();
     const sourceProximityScores = new Map<string, number>();
@@ -2098,7 +2089,9 @@ export class RecallService {
     readonly candidates: readonly Readonly<RecallCandidate>[];
     readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
   }>> {
-    const supplementaryData = await this.collectSupplementaryData({
+    const supplementaryData = await collectSupplementaryData({
+      dependencies: this.dependencies,
+      warn: this.warn,
       candidates: params.coarseFilter.candidates.map((candidate) => candidate.entry),
       workspaceId: params.workspaceId,
       runId: params.runId,
@@ -2216,353 +2209,6 @@ export class RecallService {
       }),
       degradation_reason: degradationReason
     });
-  }
-
-  private async collectSupplementaryData(params: {
-    readonly candidates: readonly Readonly<MemoryEntry>[];
-    readonly workspaceId: string;
-    readonly runId: string | null;
-    readonly queryText: string | null;
-    readonly queryProbes: Readonly<RecallQueryProbes>;
-    readonly policy: Readonly<RecallPolicy>;
-    readonly coarseFtsRanks: Readonly<Record<string, number>>;
-    readonly coarseTrigramFtsRanks: Readonly<Record<string, number>>;
-    readonly coarseSynthesisFtsRanks: Readonly<Record<string, number>>;
-    readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
-    readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
-    readonly coarseSourceProximityScores: Readonly<Record<string, number>>;
-    readonly coarseSourceCohortKeys: Readonly<Record<string, string>>;
-    readonly coarseStructuralScores: Readonly<Record<string, number>>;
-    readonly coarseGraphExpansionScores: Readonly<Record<string, number>>;
-    readonly coarseEntitySeedScores: Readonly<Record<string, number>>;
-    readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
-    readonly coarsePathSuppressionScores: Readonly<Record<string, number>>;
-  }): Promise<RecallSupplementaryData> {
-    // graph_support is a weighted inbound aggregate across edge types; the
-    // storage repo owns the concrete edge_type weight map.
-    const graphSupportCounts: Record<string, number> = Object.fromEntries(
-      await Promise.all(
-        params.candidates.map(async (candidate): Promise<readonly [string, number]> => {
-          const count =
-            this.dependencies.graphSupportPort === undefined
-              ? 0
-              : await this.dependencies.graphSupportPort.countInboundEdgesWeighted(
-                  candidate.object_id,
-                  params.workspaceId
-                );
-          return [
-            candidate.object_id,
-            count
-          ];
-        })
-      )
-    );
-    const recallEdgeCounts: Record<string, number> = Object.fromEntries(
-      await Promise.all(
-        params.candidates.map(async (candidate): Promise<readonly [string, number]> => {
-          const count =
-            this.dependencies.graphSupportPort?.countInboundRecalls === undefined
-              ? 0
-              : await this.dependencies.graphSupportPort.countInboundRecalls(
-                  candidate.object_id,
-                  params.workspaceId
-                );
-          return [
-            candidate.object_id,
-            count
-          ];
-        })
-      )
-    );
-
-    let budgetPenaltyFactor = 0;
-    if (params.runId !== null && this.dependencies.budgetPenaltyPort !== undefined) {
-      const snapshot = await this.dependencies.budgetPenaltyPort.getSnapshot(params.runId);
-      budgetPenaltyFactor = mapBudgetPenalty(snapshot);
-    }
-
-    let plasticityFactors: Readonly<Record<string, number>> = Object.freeze({});
-    if (this.dependencies.pathPlasticityPort !== undefined && params.candidates.length > 0) {
-      try {
-        const strengthMap = await this.dependencies.pathPlasticityPort.getStrengthByMemoryId(
-          params.workspaceId,
-          params.candidates.map((candidate) => candidate.object_id)
-        );
-        plasticityFactors = Object.freeze(
-          Object.fromEntries(
-            [...strengthMap.entries()].map(([memoryId, strength]) => [memoryId, clamp01(strength)])
-          )
-        );
-      } catch (error) {
-        // Plasticity is a recall supplement; a port failure must not block
-        // the recall request. Fall back to no plasticity boost.
-        this.warn("path plasticity port lookup failed", {
-          workspace_id: params.workspaceId,
-          candidate_count: params.candidates.length,
-          error: toErrorMessage(error)
-        });
-      }
-    }
-
-    const graphAndPathCold =
-      params.candidates.length > 0 &&
-      params.candidates.every(
-        (candidate) =>
-          normalizeGraphSupport(graphSupportCounts[candidate.object_id] ?? 0) === 0 &&
-          clamp01(plasticityFactors[candidate.object_id] ?? 0) === 0
-      );
-    const recallsEdgeCount = Object.values(recallEdgeCounts).reduce((sum, count) => sum + count, 0);
-    const recallsColdScore =
-      this.dependencies.graphSupportPort?.countInboundRecalls === undefined
-        ? (graphAndPathCold ? 1 : 0)
-        : clamp01(1 - recallsEdgeCount / RECALLS_EDGE_COLD_THRESHOLD);
-    const graphAndPathColdScore = graphAndPathCold ? recallsColdScore : 0;
-    const weightTransferAmount = computeMaxWeightTransferAmount({
-      candidates: params.candidates,
-      policy: params.policy,
-      graphAndPathColdScore,
-      warn: this.warn
-    });
-
-    // Evidence gist piggy-back: for the small subset of candidates whose
-    // entry into the pool came through an evidence FTS hit, fetch the
-    // associated evidence capsules so the feature rerank can score against
-    // the gist paraphrase. A missing findByIds port (or fetch failure) is
-    // fail-soft → empty map → rerank falls back to content-only.
-    const evidenceGistsByMemoryId = await this.collectEvidenceGistsByMemoryId(
-      params.workspaceId,
-      params.candidates,
-      params.coarseEvidenceFtsRanks,
-      params.coarseEvidenceFtsRanksPerRef
-    );
-
-    const governanceCeilingByMemoryId = await this.collectGovernanceCeilings(
-      params.workspaceId,
-      params.candidates
-    );
-
-    return Object.freeze({
-      queryProbes: params.queryProbes,
-      ftsRanks: params.coarseFtsRanks,
-      trigramFtsRanks: params.coarseTrigramFtsRanks,
-      synthesisFtsRanks: params.coarseSynthesisFtsRanks,
-      evidenceFtsRanks: params.coarseEvidenceFtsRanks,
-      sourceProximityScores: params.coarseSourceProximityScores,
-      sourceCohortKeys: params.coarseSourceCohortKeys,
-      structuralScores: params.coarseStructuralScores,
-      graphExpansionScores: params.coarseGraphExpansionScores,
-      entitySeedScores: params.coarseEntitySeedScores,
-      pathExpansionScores: params.coarsePathExpansionScores,
-      pathSuppressionScores: params.coarsePathSuppressionScores,
-      embeddingSimilarityScores: Object.freeze({}),
-      graphSupportCounts: Object.freeze(graphSupportCounts),
-      budgetPenaltyFactor,
-      plasticityFactors,
-      graphAndPathColdScore,
-      recallsEdgeCount,
-      weightTransferAmount,
-      evidenceGistsByMemoryId,
-      governanceCeilingByMemoryId
-    });
-  }
-
-  private async collectEvidenceGistsByMemoryId(
-    workspaceId: string,
-    candidates: readonly Readonly<MemoryEntry>[],
-    coarseEvidenceFtsRanks: Readonly<Record<string, number>>,
-    coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
-  ): Promise<Readonly<Record<string, string>>> {
-    const evidenceSearchPort = this.dependencies.evidenceSearchPort;
-    if (evidenceSearchPort?.findByIds === undefined) {
-      return Object.freeze({});
-    }
-    // Restrict to candidates that already landed in the pool through an
-    // evidence FTS hit — their gists are the ones whose paraphrase carries
-    // recall-relevant semantics. Avoids an unbounded findByIds over every
-    // memory's full evidence_refs set.
-    const relevantCandidates = candidates.filter(
-      (entry) =>
-        entry.evidence_refs.length > 0 &&
-        (coarseEvidenceFtsRanks[entry.object_id] ?? 0) > 0
-    );
-    if (relevantCandidates.length === 0) {
-      return Object.freeze({});
-    }
-    // invariant: findByIds payload bounded by evidence-FTS hit set, not the
-    // candidate's full evidence_refs cardinality. see also: P2-R2-E.
-    //
-    // invariant: per-memory evidence_refs cardinality is capped at
-    // MAX_REFS_PER_MEMORY before the findByIds payload is built. A typical
-    // memory carries 1-3 evidence_refs; an outlier with thousands of refs
-    // (whether legitimate aggregation or adversarial) would dominate the
-    // tokenizer / new Set fan-out inside the rerank loop. Cap reflects the
-    // semantic assumption "one memory should not need more than this many
-    // evidence anchors to recall well" — refs beyond the cap are sorted by
-    // per-ref evidence-FTS rank and only the top MAX_REFS_PER_MEMORY are
-    // forwarded; the best-rank ref (used by the gist picker below) is
-    // always preserved.
-    const MAX_REFS_PER_MEMORY = 8;
-    const evidenceIds = uniqueStrings(
-      relevantCandidates.flatMap((entry) => {
-        const hitRefs = entry.evidence_refs.filter(
-          (ref) => (coarseEvidenceFtsRanksPerRef[ref] ?? 0) > 0
-        );
-        if (hitRefs.length <= MAX_REFS_PER_MEMORY) {
-          return hitRefs;
-        }
-        return [...hitRefs]
-          .sort(
-            (left, right) =>
-              (coarseEvidenceFtsRanksPerRef[right] ?? 0) -
-              (coarseEvidenceFtsRanksPerRef[left] ?? 0)
-          )
-          .slice(0, MAX_REFS_PER_MEMORY);
-      })
-    );
-    if (evidenceIds.length === 0) {
-      return Object.freeze({});
-    }
-    try {
-      const evidenceCapsules = await evidenceSearchPort.findByIds(workspaceId, evidenceIds);
-      const gistById = new Map<string, string>();
-      for (const evidence of evidenceCapsules) {
-        if (evidence.workspace_id !== workspaceId) {
-          continue;
-        }
-        const gist = evidence.gist?.trim() ?? "";
-        if (gist.length > 0) {
-          gistById.set(evidence.object_id, gist);
-        }
-      }
-      const gistsByMemory: Record<string, string> = {};
-      for (const entry of relevantCandidates) {
-        // invariant: pick gist from the highest-ranked ref in evidence_refs
-        // (per coarseEvidenceFtsRanksPerRef); stable by evidence_refs order
-        // on ties. see also: P2-R2-B in collectEvidenceGistsByMemoryId callers.
-        const refsWithRank = entry.evidence_refs.map((ref) => Object.freeze({
-          ref,
-          rank: coarseEvidenceFtsRanksPerRef[ref] ?? 0
-        }));
-        const orderedRefs = [...refsWithRank].sort((left, right) => right.rank - left.rank);
-        for (const { ref } of orderedRefs) {
-          const gist = gistById.get(ref);
-          if (gist !== undefined && gist.length > 0) {
-            gistsByMemory[entry.object_id] = gist;
-            break;
-          }
-        }
-        // fallback: aggregated rank > 0 but no per-ref rank populated; mirrors
-        // legacy first-non-empty-gist rule so future producers that only
-        // populate the aggregate stay correct.
-        // unreachable under current producer (coarseEvidenceFtsRanksPerRef
-        // always populates every ref in evidence_refs); kept for forward-compat
-        // with future producers that only emit the aggregate rank.
-        if (gistsByMemory[entry.object_id] === undefined) {
-          for (const ref of entry.evidence_refs) {
-            const gist = gistById.get(ref);
-            if (gist !== undefined && gist.length > 0) {
-              gistsByMemory[entry.object_id] = gist;
-              break;
-            }
-          }
-        }
-      }
-      return Object.freeze(gistsByMemory);
-    } catch (error) {
-      this.warn("evidence gist lookup for rerank failed", {
-        workspace_id: workspaceId,
-        error: toErrorMessage(error)
-      });
-      return Object.freeze({});
-    }
-  }
-
-  // invariant: governance_class is a HARD CEILING on recall manifestation.
-  // For each candidate memory, collect its INBOUND recall-eligible
-  // PathRelations (isPathRecallEligible: active + recall_bias > 0) — the paths
-  // whose target_anchor resolves to that memory — and reduce their governance
-  // contributions through memoryGovernanceCeiling. A memory with no governing
-  // inbound path is ABSENT from the returned map; the clamp site defaults it to
-  // full_eligible (unrestricted), so the ceiling only LOWERS, never suppresses
-  // an ordinary ungoverned memory.
-  //
-  // invariant: the ceiling must not ride the agent-pumpable governance band. We
-  // pass each path's legitimacy.evidence_basis alongside its governance_class so
-  // memoryGovernanceCeiling can treat an auto-promoted recall_allowed (birth
-  // marker only) as at most excerpt; only a trusted-provenance recall_allowed
-  // contributes full_eligible. (The recall-WEIGHTING / plasticity use of the
-  // promoted band elsewhere is unchanged — only this ceiling's trust narrows.)
-  //
-  // invariant: fail-OPEN vs fail-CLOSED are distinct:
-  //   - pathExpansionPort ABSENT  => governance plane not deployed; empty map =>
-  //     full_eligible (open) is an acceptable deployment choice.
-  //   - findByAnchors THREW        => transient read failure; a hard ceiling that
-  //     vanishes on error is soft. Cap EVERY candidate to the safe band
-  //     (GOVERNANCE_CEILING_FAILSAFE_BAND = excerpt) via an explicit per-id map,
-  //     NOT an empty map. Recall still returns/scores/ranks; only preview DETAIL
-  //     is conservatively bounded until governance can be read.
-  // see also: path-manifestation-policy.ts memoryGovernanceCeiling,
-  //   path-manifestation-policy.ts GOVERNANCE_CEILING_FAILSAFE_BAND,
-  //   recall-candidate-builder.ts buildRecallCandidate (clamp site).
-  private async collectGovernanceCeilings(
-    workspaceId: string,
-    candidates: readonly Readonly<MemoryEntry>[]
-  ): Promise<Readonly<Record<string, ManifestationState>>> {
-    const pathExpansionPort = this.dependencies.pathExpansionPort;
-    if (pathExpansionPort === undefined || candidates.length === 0) {
-      return Object.freeze({});
-    }
-    const candidateIds = new Set(candidates.map((candidate) => candidate.object_id));
-    const anchors: PathAnchorRef[] = [...candidateIds].map((object_id) => ({
-      kind: "object",
-      object_id
-    }));
-    let paths: readonly Readonly<PathRelation>[];
-    try {
-      paths = await pathExpansionPort.findByAnchors(workspaceId, anchors);
-    } catch (error) {
-      this.warn("governance ceiling path lookup failed", {
-        workspace_id: workspaceId,
-        candidate_count: candidates.length,
-        error: toErrorMessage(error)
-      });
-      // fail-CLOSED: cap every candidate to the safe band so a transient read
-      // error cannot lift a governed memory to its full strength tier.
-      const failsafeCeilings: Record<string, ManifestationState> = {};
-      for (const object_id of candidateIds) {
-        failsafeCeilings[object_id] = GOVERNANCE_CEILING_FAILSAFE_BAND;
-      }
-      return Object.freeze(failsafeCeilings);
-    }
-    const contributionsByMemoryId = new Map<string, PathGovernanceContribution[]>();
-    for (const path of paths) {
-      if (!isPathRecallEligible(path)) {
-        continue;
-      }
-      // invariant: the ceiling is INBOUND — keyed on the path's target memory.
-      // findByAnchors also returns paths where the candidate is the SOURCE
-      // anchor; those govern the path's target, not the source, so they must
-      // not raise/lower the source memory's ceiling.
-      const targetMemoryId = anchorMemoryId(path.anchors.target_anchor);
-      if (targetMemoryId === undefined || !candidateIds.has(targetMemoryId)) {
-        continue;
-      }
-      const contribution: PathGovernanceContribution = {
-        governance_class: path.legitimacy.governance_class,
-        evidence_basis: path.legitimacy.evidence_basis
-      };
-      const contributions = contributionsByMemoryId.get(targetMemoryId);
-      if (contributions === undefined) {
-        contributionsByMemoryId.set(targetMemoryId, [contribution]);
-      } else {
-        contributions.push(contribution);
-      }
-    }
-    const ceilingByMemoryId: Record<string, ManifestationState> = {};
-    for (const [memoryId, contributions] of contributionsByMemoryId) {
-      ceilingByMemoryId[memoryId] = memoryGovernanceCeiling(contributions);
-    }
-    return Object.freeze(ceilingByMemoryId);
   }
 
   private async appendWeightTransferTelemetry(input: Readonly<{
