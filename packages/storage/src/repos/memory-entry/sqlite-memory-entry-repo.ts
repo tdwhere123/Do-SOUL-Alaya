@@ -343,7 +343,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
     `);
     // invariant: compressed GC deletes only while the preserving capsule is still live.
-    // see also: packages/core/src/memory-service/service.ts:MemoryService.compressedPreservationStillValid
+    // see also: packages/core/src/memory/memory-service/service.ts:MemoryService.compressedPreservationStillValid
     this.hardDeleteTombstonedCompressedGuardedStatement = db.connection.prepare(`
       DELETE FROM memory_entries
       WHERE object_id = ?

@@ -190,8 +190,8 @@ export function createTombstoneDispositionSweepPort(input: {
         // abort the batch. EVERYTHING ELSE (shape-precondition VALIDATION on a
         // still-eligible row, NOT_FOUND, CONFLICT, storage faults, non-CoreError)
         // rethrows loud to the Janitor run() failure path.
-        // see also: packages/core/src/memory-service/service.ts:MemoryService.autonomousTombstone,
-        // packages/core/src/memory-service/service.ts:MemoryService.demoteActiveToDormantIfActive.
+        // see also: packages/core/src/memory/memory-service/service.ts:MemoryService.autonomousTombstone,
+        // packages/core/src/memory/memory-service/service.ts:MemoryService.demoteActiveToDormantIfActive.
         if (!(error instanceof CoreError) || error.code !== "VALIDATION") {
           throw error;
         }

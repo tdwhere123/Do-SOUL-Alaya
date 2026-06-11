@@ -47,7 +47,7 @@ import { KeyedMutex } from "../shared/keyed-mutex.js";
 //   (ReconciliationPort consumer)
 // see also: packages/core/src/governance/conflict-detection-service.ts
 //   (DELETE / supersede machinery)
-// see also: packages/core/src/memory-service/service.ts:MemoryService.update.
+// see also: packages/core/src/memory/memory-service/service.ts:MemoryService.update.
 // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
 //   (the disk-cached garden-LLM transport this LLM port mirrors)
 

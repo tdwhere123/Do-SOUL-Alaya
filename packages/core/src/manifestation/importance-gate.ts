@@ -163,7 +163,7 @@ function isMemoryStrictlyGoverned(memory: Readonly<MemoryEntry>): boolean {
  * "durable memories require source AND evidence" makes a single evidence ref
  * sufficient to forbid autonomous deletion.
  *
- * see also: packages/core/src/memory-service/service.ts:MemoryService.autonomousTombstone,
+ * see also: packages/core/src/memory/memory-service/service.ts:MemoryService.autonomousTombstone,
  * packages/soul/src/garden/janitor.ts executeTombstoneGc.
  */
 export function classifyMemoryImportance(

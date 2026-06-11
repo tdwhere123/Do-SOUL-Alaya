@@ -89,7 +89,7 @@ export type MemoryMaterializationInput = Omit<
   // port does not honor the atomic seam the router falls back to a loud (not
   // swallowed) separate enqueue. workspace_id + memory_id are filled by the
   // truth boundary from the created row.
-  // see also: packages/core/src/memory-service/service.ts:MemoryService.create.
+  // see also: packages/core/src/memory/memory-service/service.ts:MemoryService.create.
   readonly enqueueEnrichment?: {
     readonly runId: string | null;
     readonly sourceSignalId: string | null;
@@ -131,7 +131,7 @@ export interface EvidenceMaterializationPort {
 // .enqueueEnrichment). enrichmentEnqueued === true means the row + marker
 // committed together; otherwise the router must enqueue the marker itself (loud
 // on failure — it is the mandatory no-drop handoff, never warn-and-continue).
-// see also: packages/core/src/memory-service/service.ts:MemoryService.create.
+// see also: packages/core/src/memory/memory-service/service.ts:MemoryService.create.
 export type MemoryMaterializationCreatedObject = MaterializationCreatedObject & {
   readonly enrichmentEnqueued?: boolean;
 };

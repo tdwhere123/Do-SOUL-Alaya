@@ -44,7 +44,7 @@ export interface MemoryEntryKeywordSearchResult {
 export interface MemoryEntryRepo {
   create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>>;
   // invariant: callbacks and row insert share one synchronous SQLite transaction.
-  // see also: packages/core/src/memory-service/service.ts:MemoryService.create
+  // see also: packages/core/src/memory/memory-service/service.ts:MemoryService.create
   // see also: packages/storage/src/repos/enrich-pending-repo.ts:SqliteEnrichPendingRepo.enqueue
   createWithinTransaction(
     entry: MemoryEntry,

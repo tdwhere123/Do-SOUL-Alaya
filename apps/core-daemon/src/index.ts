@@ -442,14 +442,14 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     // invariant (B1): the disposition-gated physical delete authority re-verifies
     // a `compressed` member's preserving capsule at delete time (>=24h after
     // marking) before any irreversible removal. see also:
-    // packages/core/src/memory-service/service.ts:MemoryService.compressedPreservationStillValid
+    // packages/core/src/memory/memory-service/service.ts:MemoryService.compressedPreservationStillValid
     synthesisCapsuleLookup: {
       findById: (objectId: string) => synthesisCapsuleRepo.findById(objectId)
     },
     // invariant: atomic create + enrich_pending no-drop marker. When a create
     // input carries an enqueueEnrichment intent, the row insert and this enqueue
     // commit in one storage transaction. see also:
-    // packages/core/src/memory-service/service.ts:MemoryService.createRowMaybeAtomicallyEnqueued
+    // packages/core/src/memory/memory-service/service.ts:MemoryService.createRowMaybeAtomicallyEnqueued
     enrichPendingWriter: { enqueue: enqueueEnrichPending }
   });
   const graphExploreService = new GraphExploreService({
@@ -1500,7 +1500,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // via onTransition) and then notifies, while keeping the storage candidate query
   // and the Janitor port boundary intact. causedBy mirrors the forget sweep's
   // deterministic_rule attribution. see also:
-  // packages/core/src/memory-service/service.ts:MemoryService.demoteActiveToDormantIfActive.
+  // packages/core/src/memory/memory-service/service.ts:MemoryService.demoteActiveToDormantIfActive.
   const auditedDormantDemotionPort = {
     findLowActivityActiveMemories: (workspaceId: string) =>
       gardenBackgroundDataPorts.dormantDemotionPort.findLowActivityActiveMemories(workspaceId),

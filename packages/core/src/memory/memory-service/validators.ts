@@ -10,7 +10,7 @@ import {
   type MemoryEntry,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../../errors.js";
 import type { MemoryEntryUpdateFields } from "./types.js";
 
 export function parseMemoryEntry(value: MemoryEntry): MemoryEntry {

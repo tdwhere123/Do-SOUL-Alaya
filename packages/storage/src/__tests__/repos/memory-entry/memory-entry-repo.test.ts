@@ -1268,7 +1268,7 @@ describe("SqliteMemoryEntryRepo", () => {
   // window between a re-check and the physical removal. A capsule that archived /
   // tombstoned / dropped the member / was deleted makes the guard match 0 rows,
   // and the member survives (recoverable). see also:
-  // packages/core/src/memory-service/service.ts:MemoryService.autonomousHardDeleteTombstoned.
+  // packages/core/src/memory/memory-service/service.ts:MemoryService.autonomousHardDeleteTombstoned.
   async function seedCompressedMember(input: {
     readonly memoryId: string;
     readonly capsule: Partial<SynthesisCapsule> | null;
