@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentRuntimePort, DelegatedWorkerRun, RuntimeEvent } from "@do-soul/alaya-protocol";
-import { CoreError } from "../../errors.js";
+import { CoreError } from "../../shared/errors.js";
 import { SerialDelegationRecovery } from "../../runtime/serial-delegation-recovery.js";
 import type { WorkerRunLifecycleService } from "../../runtime/worker-run-lifecycle-service.js";
 

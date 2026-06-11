@@ -6,7 +6,7 @@ import type {
   DirtyStatePanicTrigger
 } from "@do-soul/alaya-protocol";
 import { ObligationTrustNarrativeEventType } from "@do-soul/alaya-protocol";
-import { CoreError } from "../../errors.js";
+import { CoreError } from "../../shared/errors.js";
 import {
   DirtyStatePanicService,
   type DirtyStatePanicServiceDependencies

@@ -13,7 +13,7 @@ import {
   type Slot,
   type TransitionCausedBy as TransitionCausedByType
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
 
 export type SlotElectionDecision = "new_slot_created" | "auto_won" | "contested" | "no_change";

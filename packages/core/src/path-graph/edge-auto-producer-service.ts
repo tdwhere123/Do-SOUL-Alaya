@@ -18,7 +18,7 @@ import {
   type PathSeedProfile
 } from "./path-relation-proposal-service.js";
 import type { PathCandidateSink } from "./path-candidate-sink.js";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
 
 const NEIGHBOR_SEARCH_LIMIT = 12;

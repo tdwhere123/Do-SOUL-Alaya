@@ -7,7 +7,7 @@ import {
   type DeferredObligation,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import type { EventPublisher } from "../runtime/event-publisher.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 

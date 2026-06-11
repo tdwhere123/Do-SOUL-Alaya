@@ -15,7 +15,7 @@ import {
   type EventLogEntry,
   type Slot
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 
 export interface ArbitrationServiceSlotRepoPort {

@@ -14,7 +14,7 @@ import {
   type ScopeClass,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../../errors.js";
+import { CoreError } from "../../shared/errors.js";
 import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "../../manifestation/importance-gate.js";
 import { parseNonEmptyString, parseObjectId } from "../../shared/validators.js";
 import type {

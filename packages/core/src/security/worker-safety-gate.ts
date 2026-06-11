@@ -1,5 +1,5 @@
 import type { DelegatedWorkerRun, WorkerBaselineLock, WorkerSafetyPort } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 
 export interface WorkerSafetyGateDependencies {
   readonly safetyPort: WorkerSafetyPort;

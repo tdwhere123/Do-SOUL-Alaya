@@ -18,7 +18,7 @@ import {
   type SurfaceDriftOperationType,
   type SurfaceBinding
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import type { EventPublisher } from "../runtime/event-publisher.js";
 import { SYSTEM_ACTOR } from "../shared/actors.js";
 import { isUniqueConstraintError } from "../shared/event-utils.js";

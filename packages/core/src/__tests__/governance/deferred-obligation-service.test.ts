@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ObligationTrustNarrativeEventType, type DeferredObligation, type EventLogEntry } from "@do-soul/alaya-protocol";
-import { CoreError } from "../../errors.js";
+import { CoreError } from "../../shared/errors.js";
 import {
   DeferredObligationService,
   type DeferredObligationRepoPort

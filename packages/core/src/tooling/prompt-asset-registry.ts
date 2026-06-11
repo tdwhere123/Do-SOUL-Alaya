@@ -1,5 +1,5 @@
 import { PromptAssetSchema, type PromptAsset } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 
 const DEFAULT_MAX_PROMPT_ASSETS = 128;
 

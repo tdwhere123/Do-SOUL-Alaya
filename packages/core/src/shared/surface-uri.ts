@@ -1,4 +1,4 @@
-import { CoreError } from "../errors.js";
+import { CoreError } from "./errors.js";
 import { parseNonEmptyString } from "./validators.js";
 
 export const SURFACE_URI_PATTERN = /^surface:\/\/[\w\-.:/]+$/;

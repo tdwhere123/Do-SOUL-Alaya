@@ -10,7 +10,7 @@ import {
   type WorkerBaselineLock,
   type ZeroDayPolicy
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import { readClockSnapshot } from "../shared/time.js";
 
 const {

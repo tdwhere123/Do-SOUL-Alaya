@@ -6,7 +6,7 @@ import {
   type RuntimeSessionConfig,
   type WorkerBaselineLock
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import {
   IntegrationGatePublicationError,
   type IntegrationGate,

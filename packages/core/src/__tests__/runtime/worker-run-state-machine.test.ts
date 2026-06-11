@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkerRunState } from "@do-soul/alaya-protocol";
-import { CoreError } from "../../errors.js";
+import { CoreError } from "../../shared/errors.js";
 import { assertWorkerTransition } from "../../runtime/worker-run-state-machine.js";
 
 describe("assertWorkerTransition", () => {

@@ -15,7 +15,7 @@ import {
   type GreenGovernanceEventTypeValue,
   type PiercingCondition
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import { SYSTEM_ACTOR } from "../shared/actors.js";
 import { addDuration, readNow } from "../shared/time.js";
 import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../shared/validators.js";

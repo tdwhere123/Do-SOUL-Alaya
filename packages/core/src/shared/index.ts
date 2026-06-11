@@ -3,6 +3,7 @@ export * from "./cjk-segmentation.js";
 export * from "./deep-freeze.js";
 export * from "./entity-extraction-port.js";
 export * from "./entity-extraction-rules.js";
+export * from "./errors.js";
 export * from "./event-utils.js";
 export * from "./extension-descriptor-parsers.js";
 export * from "./file-path.js";

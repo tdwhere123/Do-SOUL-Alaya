@@ -13,7 +13,7 @@ import {
   type ConstitutionalFragmentRegistration,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import type { EventPublisher } from "../runtime/event-publisher.js";
 import { SYSTEM_ACTOR } from "../shared/actors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";

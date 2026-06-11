@@ -1,6 +1,6 @@
 import type { AgentRuntimePort, DelegatedWorkerRun, RuntimeEvent } from "@do-soul/alaya-protocol";
 import type { ConstraintProxy } from "../security/constraint-proxy.js";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import {
   isObligationViolationError,
   isTerminalWorkerState,

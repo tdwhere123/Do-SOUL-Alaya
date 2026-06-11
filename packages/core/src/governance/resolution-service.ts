@@ -11,7 +11,7 @@ import {
   type MemoryEntry,
   type SoulResolutionKind as SoulResolutionKindType
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import type { EventPublisher, EventPublisherInput } from "../runtime/event-publisher.js";
 import type { DeferredObligationService } from "./deferred-obligation-service.js";
 

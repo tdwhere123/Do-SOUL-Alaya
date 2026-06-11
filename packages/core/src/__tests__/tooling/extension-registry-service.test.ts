@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry, ToolProvider, ToolSpec } from "@do-soul/alaya-protocol";
-import { CoreError } from "../../errors.js";
+import { CoreError } from "../../shared/errors.js";
 import { ExtensionRegistryService } from "../../tooling/extension-registry-service.js";
 
 const validTimestamp = "2026-04-20T10:00:00.000Z";

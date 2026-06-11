@@ -18,7 +18,7 @@ import {
   type SoulListPendingEdgeProposalsResponse,
   type SoulProposeEdgeResponse
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import type { EventPublisher, EventPublisherInput } from "../runtime/event-publisher.js";
 import type { PathCandidateSink } from "./path-candidate-sink.js";
 import type { PathFailureHealthInboxPort } from "./path-failure-health-inbox.js";

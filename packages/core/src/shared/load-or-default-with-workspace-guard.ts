@@ -1,4 +1,4 @@
-import { CoreError } from "../errors.js";
+import { CoreError } from "./errors.js";
 
 interface WorkspaceScopedRecord {
   readonly workspace_id: string;

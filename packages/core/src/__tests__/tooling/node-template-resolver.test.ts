@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreError } from "../../errors.js";
+import { CoreError } from "../../shared/errors.js";
 import { NodeTemplateResolver } from "../../tooling/node-template-resolver.js";
 
 describe("NodeTemplateResolver", () => {

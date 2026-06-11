@@ -1,6 +1,6 @@
 import { PromptAssetSchema, type PromptAsset } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
-import { CoreError } from "../../errors.js";
+import { CoreError } from "../../shared/errors.js";
 import { PromptAssetRegistry } from "../../tooling/prompt-asset-registry.js";
 
 function createAsset(overrides: Partial<PromptAsset> = {}): PromptAsset {

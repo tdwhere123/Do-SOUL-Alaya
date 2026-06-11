@@ -19,7 +19,7 @@ import {
   type GovernanceDriftLease,
   type SurfaceDriftOperationType
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import { EventPublisherPropagationError } from "../runtime/event-publisher.js";
 import { SYSTEM_ACTOR } from "../shared/actors.js";
 import { addDuration, readNow } from "../shared/time.js";

@@ -20,7 +20,7 @@ import {
   type Workspace,
   type WorkingProjection
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import { rebuildConversationMessages } from "./message-history.js";
 import type { SignalServiceReceiveResult } from "../memory/signal-service.js";
 

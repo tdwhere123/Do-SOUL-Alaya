@@ -11,7 +11,7 @@ import {
   type EventLogEntry,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
 
 const evidenceHealthTransitions: Readonly<Record<EvidenceHealthState, readonly EvidenceHealthState[]>> = {

@@ -14,7 +14,7 @@ import {
   type RecallOriginPlane,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import { makeTokenEstimator, type CoarseRecallCandidate, type RecallServiceProjectMappingPort, type TokenEstimator } from "./recall-service-types.js";
 
 const CLAIM_LIKE_DIMENSIONS = new Set<MemoryDimensionType>([

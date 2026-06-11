@@ -13,7 +13,7 @@ import {
   type SynthesisStatus as SynthesisStatusType,
   type TransitionCausedBy as TransitionCausedByType
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
 
 export type SynthesisCapsuleInput = Omit<

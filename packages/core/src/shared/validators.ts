@@ -1,4 +1,4 @@
-import { CoreError } from "../errors.js";
+import { CoreError } from "./errors.js";
 
 export function normalizeOptionalNonEmptyString(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? "";

@@ -6,7 +6,7 @@ import {
   type WorkerRunState,
   type WorkerStateChangedSuspendReason
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../../errors.js";
+import { CoreError } from "../../shared/errors.js";
 import { WorkerRunLifecycleService, type WorkerRunRepoPort } from "../../runtime/worker-run-lifecycle-service.js";
 import type { EventPublisher } from "../../runtime/event-publisher.js";
 

@@ -1,5 +1,5 @@
 import { WorkerRunStateSchema, type WorkerRunState } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 
 const ALLOWED_TRANSITIONS: Readonly<Record<WorkerRunState, readonly WorkerRunState[]>> = {
   init: ["active", "frozen"],

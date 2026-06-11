@@ -10,7 +10,7 @@ import {
   type ToolProviderToolSpec,
   type ToolSpec
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import type { ToolSpecService } from "./tool-spec-service.js";
 import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";

@@ -27,7 +27,7 @@ export * from "./path-graph/edge-proposal-service.js";
 export * from "./embedding-recall/embedding-recall-service.js";
 export * from "./embedding-recall/local-onnx-embedding-client.js";
 export * from "./runs/engine-binding-service.js";
-export * from "./errors.js";
+export * from "./shared/errors.js";
 export * from "./runtime/event-publisher.js";
 export * from "./memory/evidence-service.js";
 export * from "./tooling/extension-registry-service.js";

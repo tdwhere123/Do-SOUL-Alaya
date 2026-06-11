@@ -14,7 +14,7 @@ import {
   type EventLogEntry,
   type WorkerRunState
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import type { EventPublisher } from "./event-publisher.js";
 import { assertWorkerTransition } from "./worker-run-state-machine.js";
 

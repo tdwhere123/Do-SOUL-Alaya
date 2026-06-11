@@ -18,7 +18,7 @@ import {
   type RetentionState,
   type ScopeClass
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import {
   DIMENSION_DEFAULT_DECAY_PROFILE,
   INITIAL_ACTIVATION_FROM_CONFIDENCE_FACTOR,

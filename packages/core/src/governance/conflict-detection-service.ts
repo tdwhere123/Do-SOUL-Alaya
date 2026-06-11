@@ -10,7 +10,7 @@ import {
   type PathSeedProfile
 } from "../path-graph/path-relation-proposal-service.js";
 import type { PathCandidateSink } from "../path-graph/path-candidate-sink.js";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 
 // invariant: the trust tier of a conflict verdict. "rule" is the
 // agent-controllable Jaccard heuristic (weak, attention_only, no karma);

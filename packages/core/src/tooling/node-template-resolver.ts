@@ -4,7 +4,7 @@ import {
   type NodeTemplateKind,
   type ToolCategory
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 
 export class NodeTemplateResolver {
   public resolve(kind: NodeTemplateKind): Readonly<NodeTemplateContract> {

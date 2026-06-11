@@ -10,7 +10,7 @@ import {
   type EventLogEntry,
   type SessionOverride
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "../shared/errors.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface SessionOverrideServiceEventLogPort {
