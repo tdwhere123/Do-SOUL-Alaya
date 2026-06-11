@@ -181,7 +181,7 @@ export function buildRecallFusionDetails(params: Readonly<{
 
 // invariant: path suppression demotes fused_score and re-ranks without adding diagnostics keys or dropping positive-score candidates.
 // see also: packages/core/src/recall-service.ts:collectNegativePathSuppressions,
-// packages/core/src/recall-service.ts:scorePathRelationSuppression,
+// packages/core/src/recall/path-relations.ts:scorePathRelationSuppression,
 // apps/bench-runner/src/harness/recall-diagnostics-schema.ts:BenchRecallDiagnosticsSchema.
 export function applyPathSuppressionToFusionScores(
   fusionByCandidateKey: ReadonlyMap<string, RecallFusionBreakdown>,

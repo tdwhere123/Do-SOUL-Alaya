@@ -128,8 +128,8 @@ export interface GraphExpansionCandidatesResult {
 // edge plane. Producer-seeded paths are minted bidirectional_asymmetric (see
 // path-relation-proposal-service.ts submitCandidate), so hop-2 reach narrows
 // only after plasticity redirects a path to an asymmetric direction.
-// see also: packages/core/src/recall-service.ts:collectPathGraphNeighbors,
-// packages/core/src/recall-service.ts:directionEligiblePathExpansionTargets.
+// see also: packages/core/src/recall/path-relations.ts:collectPathGraphNeighbors,
+// packages/core/src/recall/path-relations.ts:directionEligiblePathExpansionTargets.
 export function graphTraversalScoreFromPath(
   trackedEdgeType: RecallGraphExpansionTrackedEdgeType
 ): number {

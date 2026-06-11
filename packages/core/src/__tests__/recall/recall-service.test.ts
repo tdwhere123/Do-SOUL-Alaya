@@ -1674,7 +1674,7 @@ describe("RecallService", () => {
     // invariant: a negative path (recall_bias < 0) records suppression, so
     // its target is excluded from positive path_expansion candidates —
     // admitting it would amplify the suppressed memory.
-    // see also: recall-service.ts isPathExcludedFromRecall.
+    // see also: packages/core/src/recall/path-relations.ts:isPathExcludedFromRecall.
     const memories = [
       createMemoryEntry({
         object_id: "seed-memory",
@@ -1780,7 +1780,7 @@ describe("RecallService", () => {
     // is a topology marker, not a positive association — the strict-positive
     // isPathRecallEligible gate must keep it out of positive path_expansion
     // just like the negative families. Pre-fix the `< 0` test admitted it.
-    // see also: recall-service.ts isPathExcludedFromRecall.
+    // see also: packages/core/src/recall/path-relations.ts:isPathExcludedFromRecall.
     const memories = [
       createMemoryEntry({
         object_id: "seed-memory",
@@ -2024,8 +2024,9 @@ describe("RecallService", () => {
   });
 
   it("caps stacked recall_allowed negatives so ganging cannot deepen the demotion", async () => {
-    // invariant: PATH_SUPPRESSION_MAX_PER_TARGET. Multiple converging governed
-    // negatives compound only up to one reinforced-supersession delta (0.27), so
+    // invariant: multiple converging governed negatives compound only up to one
+    // reinforced-supersession delta (0.27). see also:
+    // packages/core/src/recall/path-relations.ts:PATH_SUPPRESSION_MAX_PER_TARGET.
     // ganging extra negatives onto the same victim cannot push its fused score
     // any lower than a single negative already does. Isolate the cap by running
     // the same corpus with three converging negatives vs one negative: the
