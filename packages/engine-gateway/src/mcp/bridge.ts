@@ -1,5 +1,5 @@
 import { type ConversationRuntimeContext, type ToolUseBlock } from "@do-soul/alaya-protocol";
-import { soulToolDefs } from "./provider/soul-tool-specs.js";
+import { soulToolDefs } from "../provider/soul-tool-specs.js";
 
 export interface McpToolResultBlock {
   readonly type: "tool_result";

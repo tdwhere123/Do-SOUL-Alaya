@@ -8,7 +8,7 @@ import {
 import {
   readApiKey,
   resolveApiKey
-} from "../provider/provider-registry.js";
+} from "../../provider/provider-registry.js";
 
 function createBinding(overrides: Partial<EngineBinding> = {}): EngineBinding {
   return {

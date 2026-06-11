@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { soulToolDefs } from "../provider/soul-tool-specs.js";
+import { soulToolDefs } from "../../provider/soul-tool-specs.js";
 
 describe("semver-tool-surface", () => {
   it("snapshots the public MCP tool names and description hashes", () => {

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationRuntimeContext, ToolSpec, ToolUseBlock } from "@do-soul/alaya-protocol";
-import { soulToolDefs } from "../provider/soul-tool-specs.js";
-import * as mcpBridgeModule from "../mcp-bridge.js";
-import { McpBridge } from "../mcp-bridge.js";
+import { soulToolDefs } from "../../provider/soul-tool-specs.js";
+import * as mcpBridgeModule from "../../mcp/bridge.js";
+import { McpBridge } from "../../mcp/bridge.js";
 
 // workspace_id / run_id / surface_id are bound server-side from the
 // trusted MCP context; they are not in the public
@@ -354,7 +354,7 @@ describe("McpBridge", () => {
     expect(result.tool_use_id).toBe("toolu_recall");
   });
 
-  it("no longer exports openAIMcpTools, anthropicMcpTools, or SOUL_TOOL_DEFS from mcp-bridge", () => {
+  it("no longer exports openAIMcpTools, anthropicMcpTools, or SOUL_TOOL_DEFS from the MCP bridge module", () => {
     expect("openAIMcpTools" in mcpBridgeModule).toBe(false);
     expect("anthropicMcpTools" in mcpBridgeModule).toBe(false);
     expect("SOUL_TOOL_DEFS" in mcpBridgeModule).toBe(false);
