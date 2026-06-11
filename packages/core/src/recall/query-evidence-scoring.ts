@@ -1,6 +1,6 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import type { RecallQueryProbes } from "../recall-query-probes.js";
-import { clamp01 } from "../recall-service-helpers.js";
+import type { RecallQueryProbes } from "./recall-query-probes.js";
+import { clamp01 } from "./recall-service-helpers.js";
 
 export function scoreQueryEvidenceMatch(
   entry: Readonly<MemoryEntry>,

@@ -1,5 +1,5 @@
 import { MemoryDimension, ScopeClass, type MemoryDimension as MemoryDimensionType, type ScopeClass as ScopeClassType } from "@do-soul/alaya-protocol";
-import { isCjkSegmentationCandidate, segmentCjkRun } from "./cjk-segmentation.js";
+import { isCjkSegmentationCandidate, segmentCjkRun } from "../cjk-segmentation.js";
 
 export type RecallQuerySubjectHint = "self_reference";
 

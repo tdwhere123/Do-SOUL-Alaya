@@ -40,7 +40,7 @@ live-data portrait §K.5):
    written but unread; `EvidenceCapsule.semantic_anchor` / `event_anchor`
    written as JSON but no deserialiser; `PathGraphSnapshot` 11 fields
    unread. Note: `direction_bias` is **not** discarded — recall path
-   expansion reads it (`packages/core/src/recall-service.ts:2038`) and
+   expansion reads it (`packages/core/src/recall/recall-service.ts:2038`) and
    plasticity uses it (`apps/core-daemon/src/path-plasticity-runtime.ts:398-418`).
 4. **21k+ pure sink** — `orphan_radar.reported`, `green.revoked`,
    `evidence_failure`.
@@ -306,8 +306,8 @@ Cat-G.
 
 - **Owner:** `typescript-pro`
 - **Write ownership:**
-  - `packages/core/src/recall-service.ts` (`computeEffectiveScoreDetails`)
-  - `packages/core/src/recall-candidate-builder.ts` (small wiring if
+  - `packages/core/src/recall/recall-service.ts` (`computeEffectiveScoreDetails`)
+  - `packages/core/src/recall/recall-candidate-builder.ts` (small wiring if
     needed)
   - `packages/protocol/src/soul/recall-candidate.ts` (only if a new
     factor needs a schema field; `contradiction_penalty` already exists)

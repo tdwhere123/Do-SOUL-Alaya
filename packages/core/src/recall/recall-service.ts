@@ -22,7 +22,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "./recall-query-probes.js";
-import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
+import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "../task-surface-builder.js";
 import {
   COLD_CASCADE_DECAY,
   MIN_RECALL_RESULTS,
@@ -63,18 +63,18 @@ import type {
   TokenEstimator
 } from "./recall-service-types.js";
 import { makeTokenEstimator } from "./recall-service-types.js";
-import { parseRecallPolicy } from "./shared/recall-policy.js";
+import { parseRecallPolicy } from "../shared/recall-policy.js";
 import {
   scoreEvidenceAnchorMatch,
   scoreQueryEvidenceMatch
-} from "./recall/query-evidence-scoring.js";
+} from "./query-evidence-scoring.js";
 import {
   buildRecallDiagnostics,
   computeRecallTokenEconomy,
   finalizeRecallCandidateDiagnostics,
   resolveEmbeddingProviderDegradationReason,
   resolveEmbeddingProviderStatus
-} from "./recall/diagnostics.js";
+} from "./diagnostics.js";
 import {
   EDGE_TYPE_HOP_DECAY,
   EARNED_CO_RECALLED_FANIN_RELATION_KIND,
@@ -91,7 +91,7 @@ import {
   type GraphExpansionCandidateSourceDiagnostic,
   type GraphExpansionCandidatesResult,
   type GraphExpansionFrontierNode
-} from "./recall/graph-expansion.js";
+} from "./graph-expansion.js";
 import {
   PATH_SUPPRESSION_MAX_PER_TARGET,
   collectPathGraphNeighbors,
@@ -106,7 +106,7 @@ import {
   scorePathRelationSuppression,
   uniquePathExpansionSources,
   uniqueStrings
-} from "./recall/path-relations.js";
+} from "./path-relations.js";
 import {
   DYNAMIC_RECALL_SEED_CAP,
   DYNAMIC_RECALL_SOURCE_PROXIMITY_NEIGHBORS_PER_SEED,
@@ -131,15 +131,15 @@ import {
   uniquePlanes,
   withEmbeddingSimilarityScores,
   type CoarseCandidateDraft
-} from "./recall/coarse-candidates.js";
-import { fineAssess } from "./recall/fine-assessment.js";
-import { collectSupplementaryData } from "./recall/supplementary-data.js";
+} from "./coarse-candidates.js";
+import { fineAssess } from "./fine-assessment.js";
+import { collectSupplementaryData } from "./supplementary-data.js";
 import {
   collectEmbeddingCoarseInjection,
   collectEmbeddingSupplement,
   collectSynthesisCoarseCandidates,
   prepareEmbeddingSupplementQuery
-} from "./recall/supplements.js";
+} from "./supplements.js";
 
 export { classifyGlobalCandidate } from "./recall-service-helpers.js";
 export type {
@@ -162,8 +162,8 @@ export type {
   TokenEstimator
 } from "./recall-service-types.js";
 export { makeTokenEstimator } from "./recall-service-types.js";
-export { computeRecallTokenEconomy } from "./recall/diagnostics.js";
-export { RECALL_FUSION_STREAMS, recallDeliveryReserveTestInternals } from "./recall/fusion-delivery.js";
+export { computeRecallTokenEconomy } from "./diagnostics.js";
+export { RECALL_FUSION_STREAMS, recallDeliveryReserveTestInternals } from "./fusion-delivery.js";
 
 const DYNAMIC_RECALL_PLANE_CAP = 240;
 const DYNAMIC_RECALL_TOTAL_CANDIDATE_CAP = 1000;
@@ -519,7 +519,7 @@ export class RecallService {
       [...new Set(params.candidates.map((candidate) => candidate.object_id))]
     );
 
-    let sidecarEntries: readonly Readonly<import("./manifestation-resolver.js").ManifestationBiasSidecarEntry>[];
+    let sidecarEntries: readonly Readonly<import("../manifestation-resolver.js").ManifestationBiasSidecarEntry>[];
     try {
       sidecarEntries = await sidecarPort.buildBiasSidecar({
         workspaceId: params.workspaceId,
@@ -542,7 +542,7 @@ export class RecallService {
 
     // Highest unfinishedness_bias wins per target memory; ties resolve
     // deterministically by candidate_id so repeated runs are stable.
-    const byMemoryId = new Map<string, Readonly<import("./manifestation-resolver.js").ManifestationBiasSidecarEntry>>();
+    const byMemoryId = new Map<string, Readonly<import("../manifestation-resolver.js").ManifestationBiasSidecarEntry>>();
     const sortedEntries = [...sidecarEntries].sort((left, right) => {
       if (right.unfinishedness_bias !== left.unfinishedness_bias) {
         return right.unfinishedness_bias - left.unfinishedness_bias;
@@ -661,11 +661,11 @@ export class RecallService {
     readonly graphExpansionScores: Readonly<Record<string, number>>;
     readonly graphExpansionDiagnostics: Readonly<RecallGraphExpansionDiagnostics>;
     readonly graphExpansionCandidateSources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
-    // see also: packages/core/src/recall-service.ts:RecallService.collectEntityDerivedSeeds.
+    // see also: packages/core/src/recall/recall-service.ts:RecallService.collectEntityDerivedSeeds.
     readonly entitySeedScores: Readonly<Record<string, number>>;
     readonly pathExpansionScores: Readonly<Record<string, number>>;
     // Negative-path active suppression deltas keyed by target memory id.
-    // see also: packages/core/src/recall-service.ts:RecallService.collectNegativePathSuppressions,
+    // see also: packages/core/src/recall/recall-service.ts:RecallService.collectNegativePathSuppressions,
     // packages/core/src/recall/fusion-delivery.ts:applyPathSuppressionToFusionScores.
     readonly pathSuppressionScores: Readonly<Record<string, number>>;
     readonly degradation_reason: RecallResult["degradation_reason"];
@@ -711,7 +711,7 @@ export class RecallService {
     // Active sign-aware suppression: target memory id -> accumulated demotion
     // delta sourced from negative (recall_bias < 0) paths anchored on the
     // expansion seeds. Applied to the fused score before sort.
-    // see also: packages/core/src/recall-service.ts:RecallService.collectNegativePathSuppressions,
+    // see also: packages/core/src/recall/recall-service.ts:RecallService.collectNegativePathSuppressions,
     // packages/core/src/recall/fusion-delivery.ts:applyPathSuppressionToFusionScores.
     const pathSuppressionScores = new Map<string, number>();
     const addCandidate = (
@@ -1015,14 +1015,14 @@ export class RecallService {
     // therefore skips any draft already carrying the path_expansion plane and
     // keeps only the propagation reach (hop-2 neighbors, plus hop-1 neighbors
     // of entity-derived seeds that path_expansion's draft-seed pass never
-    // visited). see also: packages/core/src/recall-service.ts:RecallService.addGraphExpansionCandidates.
+    // visited). see also: packages/core/src/recall/recall-service.ts:RecallService.addGraphExpansionCandidates.
     // Snapshot the Pool A draft seeds before path_expansion runs. Once
     // path_expansion admits a direct hop-1 neighbor, that neighbor becomes a
     // draft carrying the path_expansion plane and would otherwise qualify as a
     // graph BFS seed — collapsing genuine hop-2 reach into hop-1 and rooting
     // traversal at path-reached nodes rather than query anchors. Pinning the
     // seed set to the pre-path drafts keeps hop semantics stable across the
-    // ordering change. see also: packages/core/src/recall-service.ts:RecallService.addGraphExpansionCandidates.
+    // ordering change. see also: packages/core/src/recall/recall-service.ts:RecallService.addGraphExpansionCandidates.
     const prePathGraphSeedIds = selectExpansionSeedDrafts(drafts).map((draft) => draft.entry.object_id);
     await this.addPathExpansionCandidates({
       workspaceId,
@@ -1389,7 +1389,7 @@ export class RecallService {
     readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
     readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
     readonly addCandidate: CoarseCandidateAdder;
-    // see also: packages/core/src/recall-service.ts:RecallService.collectEntityDerivedSeeds.
+    // see also: packages/core/src/recall/recall-service.ts:RecallService.collectEntityDerivedSeeds.
     // Entity-bearing memory ids fan into graph_expansion as additional seeds
     // so the graph plane is reachable even when the query never hits a prior
     // expansion seed.
@@ -1415,7 +1415,7 @@ export class RecallService {
     // Filtering them out of the pooled draft seeds (Pool A) below avoids
     // double-traversing the same anchor while keeping the legacy
     // content/structural seed BFS intact for non-entity callers.
-    // see also: packages/core/src/recall-service.ts:RecallService.collectEntityDerivedSeeds.
+    // see also: packages/core/src/recall/recall-service.ts:RecallService.collectEntityDerivedSeeds.
     const entitySeedIdSet = new Set<string>();
     const entitySeedEntries: Readonly<MemoryEntry>[] = [];
     for (const id of params.extraSeedMemoryIds ?? []) {
@@ -1547,7 +1547,7 @@ export class RecallService {
   // draft-seed path and the per-seed entity fan-in path. expandedIds is
   // private to each invocation so a per-seed Pool B call cannot starve a
   // sibling seed by absorbing its 1-hop neighbors first.
-  // see also: packages/core/src/recall-service.ts:RecallService.addGraphExpansionCandidates.
+  // see also: packages/core/src/recall/recall-service.ts:RecallService.addGraphExpansionCandidates.
   private async expandGraphFrontier(params: Readonly<{
     readonly workspaceId: string;
     readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;

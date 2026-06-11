@@ -1,12 +1,12 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { EmbeddingRecallSupplementResult } from "../embedding-recall-service.js";
-import type { RecallQueryProbes } from "../recall-query-probes.js";
-import { clamp01, compareMemoryEntries } from "../recall-service-helpers.js";
+import type { RecallQueryProbes } from "./recall-query-probes.js";
+import { clamp01, compareMemoryEntries } from "./recall-service-helpers.js";
 import type {
   RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
   RecallSupplementaryData
-} from "../recall-service-types.js";
+} from "./recall-service-types.js";
 import { uniqueStrings } from "./path-relations.js";
 
 export const DYNAMIC_RECALL_SEED_CAP = 50;
@@ -40,7 +40,7 @@ export interface CoarseCandidateDraft {
   // entity_seed admission has occurred. selectExpansionSeedDrafts uses this
   // to gate entity-only drafts out of graph_expansion fan-in when the entity
   // confidence falls below ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR.
-  // see also: packages/core/src/recall-service.ts:RecallService.collectEntityDerivedSeeds.
+  // see also: packages/core/src/recall/recall-service.ts:RecallService.collectEntityDerivedSeeds.
   readonly entityConfidence?: number;
   // invariant: sticky-true once this draft is admitted on the path_expansion
   // plane via an EARNED `co_recalled` PathRelation (relation_kind === COG). This
@@ -105,7 +105,7 @@ export function buildEvidenceSearchQueries(
 
 // Deterministic OR-query of expanded lexical terms (morphology + synonym
 // variants). Returns null when there is nothing to expand so callers can skip
-// the extra FTS pass. see also: packages/core/src/recall-query-probes.ts:expandLexicalTerms.
+// the extra FTS pass. see also: packages/core/src/recall/recall-query-probes.ts:expandLexicalTerms.
 export function buildExpandedKeywordQuery(queryProbes: Readonly<RecallQueryProbes>): string | null {
   const expanded = uniqueStrings(
     queryProbes.expanded_terms.slice(0, 16).map((term) => term.trim()).filter((term) => term.length > 0)
@@ -290,7 +290,7 @@ export function selectPreferredExpansionSeedEntries(
   // invariant: mirrors the weak-entity-only filter that
   // seed selection mirrors selectExpansionSeedDrafts on the graph_expansion path. The
   // seeds returned here drive the evidence_anchor / domain_tag_cluster
-  // planes in packages/core/src/recall-service.ts:RecallService.addContentDerivedExpansionCandidates (evidence_refs and
+  // planes in packages/core/src/recall/recall-service.ts:RecallService.addContentDerivedExpansionCandidates (evidence_refs and
   // domain_tags of these seeds widen the per-plane match set). A weak
   // cjk_phrase / proper_noun / unknown surface (confidence below
   // ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR) admitted ONLY on
@@ -298,7 +298,7 @@ export function selectPreferredExpansionSeedEntries(
   // otherwise the same surface manipulation that the graph_expansion
   // floor blocks would leak through evidence/tag fan-out.
   // Defense-in-depth: today addContentDerivedExpansionCandidates is
-  // called before packages/core/src/recall-service.ts:RecallService.collectEntityDerivedSeeds, so no entity_seed draft
+  // called before packages/core/src/recall/recall-service.ts:RecallService.collectEntityDerivedSeeds, so no entity_seed draft
   // is present at the moment this seed pool is built. The filter is
   // applied anyway so any future reordering, or a follow-up caller
   // that runs after entity_seed admission, cannot silently bypass
@@ -325,13 +325,13 @@ export function selectExpansionSeedDrafts(
   // invariant: a draft whose ONLY non-activation admission is entity_seed,
   // and whose strongest observed entity confidence is below the floor, must
   // not seed graph_expansion. Mirrors the confidence gate in
-  // packages/core/src/recall-service.ts:RecallService.collectEntityDerivedSeeds on
+  // packages/core/src/recall/recall-service.ts:RecallService.collectEntityDerivedSeeds on
   // the extraSeedMemoryIds path — without this, a weak cjk_phrase /
   // proper_noun query surface (confidence 0.35-0.7) that hit only the
   // entity-FTS lane would still fan into the graph via path (1) and let
   // an attacker compound surface manipulation across 1-hop neighbors.
   // see also: packages/core/src/recall/coarse-candidates.ts:ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR,
-  // packages/core/src/recall-service.ts:RecallService.addGraphExpansionCandidates.
+  // packages/core/src/recall/recall-service.ts:RecallService.addGraphExpansionCandidates.
   const survivors = ranked.filter((draft) => !isWeakEntityOnlyDraft(draft));
   const preferred = survivors
     .filter((draft) =>

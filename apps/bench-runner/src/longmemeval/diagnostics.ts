@@ -252,7 +252,7 @@ const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
 // Recall admission-plane label for the multi-session cohort plane. The cohort
 // fan-in attribution split (codex I2) keys on this plane to measure how the
 // session cohort representative converts to delivered top-5 gold.
-// see also: packages/core/src/recall-service.ts addContentDerivedExpansionCandidates.
+// see also: packages/core/src/recall/recall-service.ts addContentDerivedExpansionCandidates.
 const COHORT_PLANE = "session_surface_cohort";
 
 const DIAGNOSTIC_SOURCE_LABELS = new Set<string>([

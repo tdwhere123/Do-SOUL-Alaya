@@ -18,12 +18,12 @@ import {
   normalizeGraphSupport,
   resolveActivationWeights,
   toErrorMessage
-} from "../recall-service-helpers.js";
+} from "./recall-service-helpers.js";
 import type {
   RecallAdmissionPlane,
   RecallServiceWarnPort,
   RecallSupplementaryData
-} from "../recall-service-types.js";
+} from "./recall-service-types.js";
 
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;

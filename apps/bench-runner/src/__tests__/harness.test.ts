@@ -720,7 +720,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       // contrast, is bidirectional and reaches the sibling regardless of which
       // id is larger — that is why R2 must rely on graph_expansion, not
       // graph_support, for sibling fan-in.
-      // see also: packages/core/src/recall-service.ts collectPathGraphNeighbors
+      // see also: packages/core/src/recall/path-relations.ts collectPathGraphNeighbors
       // see also: packages/core/src/graph-explore-service.ts findInboundRecallEligiblePaths
       //
       // NON-VACUOUS contract: the bench recall policy sets no relevance floor
@@ -749,7 +749,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       // path_expansion stream rank; WITHOUT the edge (negative control, same
       // seed set) the sibling is ABSENT from the delivered top-N, is
       // within_budget=false, and carries NO path_expansion admission.
-      // see also: packages/core/src/recall-service-helpers.ts MIN_RECALL_RESULTS
+      // see also: packages/core/src/recall/recall-service-helpers.ts MIN_RECALL_RESULTS
       // see also: apps/bench-runner/src/harness/daemon.ts
       //   buildBenchDiagnosticRecallPolicy (min_activation_score=null)
 
@@ -839,7 +839,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       // admission (path_expansion is the direct 1-hop pass of the same unified
       // path plane graph_expansion's multi-hop traversal belongs to). This
       // plane and its non-null RRF stream rank CANNOT exist without the edge.
-      // see also: packages/core/src/recall-service.ts (path_expansion /
+      // see also: packages/core/src/recall/recall-service.ts (path_expansion /
       //   graph_expansion share the unified path plane; the double-count guard
       //   credits path_expansion when the 1-hop pass already admitted a target)
       expect(positiveSiblingDiag!.admission_planes).toContain("path_expansion");

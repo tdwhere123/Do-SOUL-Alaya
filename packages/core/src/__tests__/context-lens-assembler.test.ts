@@ -21,7 +21,7 @@ import {
   type Slot,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import type { RecallCandidate } from "../recall-service.js";
+import type { RecallCandidate } from "../recall/recall-service.js";
 import {
   ContextLensAssembler,
   type LensAssemblerDependencies

@@ -117,7 +117,7 @@ interface QuestionResult {
   // (any non-null degradation_reason) omits the token_economy
   // block in core, so the bench extractor returns null and degraded
   // questions don't dilute the run-level distribution.
-  // see also: packages/core/src/recall-service.ts
+  // see also: packages/core/src/recall/recall-service.ts
   // (computeRecallTokenEconomy call site).
   readonly recallTokenEconomy: BenchRecallTokenEconomy | null;
 }

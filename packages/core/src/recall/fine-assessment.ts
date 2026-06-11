@@ -4,11 +4,11 @@ import type {
   RecallPolicy,
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
-import { buildRecallCandidate } from "../recall-candidate-builder.js";
+import { buildRecallCandidate } from "./recall-candidate-builder.js";
 import {
   buildRecallCandidateDedupeKey,
   clamp01
-} from "../recall-service-helpers.js";
+} from "./recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
   RecallCandidateDiagnostic,
@@ -17,7 +17,7 @@ import type {
   RecallServiceWarnPort,
   RecallSupplementaryData,
   TokenEstimator
-} from "../recall-service-types.js";
+} from "./recall-service-types.js";
 import {
   applyFeatureRerank,
   applyPathSuppressionToFusionScores,

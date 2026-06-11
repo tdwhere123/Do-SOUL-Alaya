@@ -6,18 +6,18 @@ import {
   type PathRelation,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
-import type { RecallQueryProbes } from "../recall-query-probes.js";
+import type { RecallQueryProbes } from "./recall-query-probes.js";
 import {
   clamp01,
   mapBudgetPenalty,
   normalizeGraphSupport,
   toErrorMessage
-} from "../recall-service-helpers.js";
+} from "./recall-service-helpers.js";
 import type {
   RecallServiceDependencies,
   RecallServiceWarnPort,
   RecallSupplementaryData
-} from "../recall-service-types.js";
+} from "./recall-service-types.js";
 import {
   GOVERNANCE_CEILING_FAILSAFE_BAND,
   memoryGovernanceCeiling,

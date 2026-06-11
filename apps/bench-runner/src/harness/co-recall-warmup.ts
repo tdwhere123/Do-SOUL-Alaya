@@ -50,7 +50,7 @@
 // NOT graph_support, for sibling fan-in: graph_support reaches only the target
 // member, while graph_expansion reaches both. Mis-designing R2 on graph_support
 // would silently miss every source-side sibling.
-// see also: packages/core/src/recall-service.ts collectPathGraphNeighbors
+// see also: packages/core/src/recall/path-relations.ts collectPathGraphNeighbors
 // see also: packages/core/src/path-graph/graph-explore-service.ts findInboundRecallEligiblePaths
 
 // anti-patterns-lint-allow: cap rationale, not a consumer-less constant.

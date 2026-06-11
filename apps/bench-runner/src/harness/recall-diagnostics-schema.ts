@@ -93,7 +93,7 @@ const RecallCandidateDiagnosticSchema = z
   .readonly();
 
 // invariant: mirrors RecallTokenEconomy from
-// packages/core/src/recall-service-types.ts. The bench harness captures
+// packages/core/src/recall/recall-service-types.ts. The bench harness captures
 // these per-recall figures so the longmemeval / locomo KPI summaries can
 // aggregate p50 / p95 / mean across questions. Measure-only — no field
 // gates ranking or admission.
@@ -125,7 +125,7 @@ const RecallGraphExpansionPlaneCountPerEdgeTypeSchema = z
   .strict()
   .readonly();
 
-// see also: packages/core/src/recall-service-types.ts
+// see also: packages/core/src/recall/recall-service-types.ts
 //   RecallMultiSeedGraphFanInDiagnostics
 const RecallMultiSeedGraphFanInDiagnosticsSchema = z
   .object({
@@ -177,7 +177,7 @@ export const BenchRecallDiagnosticsSchema = z
     graph_expansion_plane_count_per_edge_type:
       RecallGraphExpansionPlaneCountPerEdgeTypeSchema,
     // Optional. Present when entity-derived seeds drove graph fan-in for
-    // this recall. see also: packages/core/src/recall-service-types.ts
+    // this recall. see also: packages/core/src/recall/recall-service-types.ts
     //   RecallMultiSeedGraphFanInDiagnostics
     multi_seed_graph_fan_in:
       RecallMultiSeedGraphFanInDiagnosticsSchema.optional(),
@@ -204,7 +204,7 @@ export const BenchRecallDiagnosticsSchema = z
     // aggregator drops absent blocks instead of admitting a `{0,0,0,0,0}`
     // record that biases run-level mean / p50 distributions downward.
     // see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy,
-    // packages/core/src/recall-service.ts (call site), and packages/core/src/recall-service-types.ts
+    // packages/core/src/recall/recall-service.ts (call site), and packages/core/src/recall/recall-service-types.ts
     // (RecallDiagnostics.token_economy doc-comment).
     token_economy: RecallTokenEconomySchema.optional()
   })

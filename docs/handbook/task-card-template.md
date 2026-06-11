@@ -122,7 +122,7 @@ it next to the card as `reports/<card-id>.md` and include:
 ## Path Style
 
 All paths are repository-relative
-(e.g. `packages/core/src/recall-service.ts`), never absolute.
+(e.g. `packages/core/src/recall/recall-service.ts`), never absolute.
 
 ## Backlog Issue Numbering
 

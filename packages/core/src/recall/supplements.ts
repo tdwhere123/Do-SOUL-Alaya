@@ -4,19 +4,19 @@ import type {
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingSupplement
 } from "../embedding-recall-service.js";
-import { buildSynthesisCoarseRecallCandidate } from "../recall-candidate-builder.js";
-import type { RecallQueryProbes } from "../recall-query-probes.js";
+import { buildSynthesisCoarseRecallCandidate } from "./recall-candidate-builder.js";
+import type { RecallQueryProbes } from "./recall-query-probes.js";
 import {
   clamp01,
   compareMemoryEntries,
   parseEmbeddingPrecheckReason,
   toErrorMessage
-} from "../recall-service-helpers.js";
+} from "./recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
   RecallServiceDependencies,
   RecallServiceWarnPort
-} from "../recall-service-types.js";
+} from "./recall-service-types.js";
 import { buildEvidenceSearchQueries } from "./coarse-candidates.js";
 import { normalizeEmbeddingProviderDegradationReason } from "./diagnostics.js";
 

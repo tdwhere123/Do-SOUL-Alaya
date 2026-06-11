@@ -95,7 +95,7 @@ describe("BenchDaemon attachWorkspace contract", () => {
       });
       // invariant: workspace_id is the recall isolation boundary; a memory
       // seeded in workspace A must never surface in workspace B's recall.
-      // see also: packages/core/src/recall-service.ts (workspaceId filter)
+      // see also: packages/core/src/recall/recall-service.ts (workspaceId filter)
       expect(recallB.results.map((r: MemorySearchResult) => r.object_id)).not.toContain(
         seedA.memoryId
       );

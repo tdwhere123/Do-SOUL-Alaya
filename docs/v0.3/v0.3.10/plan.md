@@ -23,7 +23,7 @@ Phase A (3-4 天) — 测量基础设施前置
   └─ 没有它，融合 sweep 全是盲调
 
 Phase B (4-5 天) — β 融合公式 + budget cut 改造
-  └─ 真正改代码的只有 2 处：D1 (recall-service.ts:1721-1724) + G1 (recall-service.ts:1628)
+  └─ 真正改代码的只有 2 处：D1 (`fine-assessment.ts` / `fusion-delivery.ts`) + G1 (`fusion-delivery.ts`)
   └─ 出口验证 K1.1-off 至少能跑到 70%（融合本身的贡献）
 
 Phase X (3-4 天) — Cat-X Alaya-native retrieval expansion（修剪版）
@@ -85,9 +85,9 @@ Phase A (parallel where possible)
   └─ S0 — score 守护 test（同 candidate 在两种 stream 权重下 plane_first_admitted 一致）
 
 Phase B (sequential, 强依赖 Phase A 完成)
-  ├─ B1 — RRF 融合公式实现（D1，recall-service.ts:1721-1724 替换）
-  ├─ B2 — fused-rank budget cut（G1，recall-service.ts:1628 排序键改）
-  ├─ B3 — E1 lexical priority 提到 3（recall-service.ts:2239 一行常量）
+  ├─ B1 — RRF 融合公式实现（D1，`fine-assessment.ts` / `fusion-delivery.ts`）
+  ├─ B2 — fused-rank budget cut（G1，`fusion-delivery.ts` 排序键改）
+  ├─ B3 — E1 lexical priority 提到 3（`fusion-delivery.ts`）
   └─ B4 — 既有 score 仍 emit + diagnostic schema 加 fused_rank 字段
 
 Phase X (sequential, Alaya-native 修剪版)
@@ -140,7 +140,7 @@ Phase D (sequential)
 
 - **scope**：扩独立 diagnostic channel 加 `fusion_breakdown[]` 字段；按 `candidate_key` join，保留 `object_id` 供 dataset gold lookup
 - **emit shape**：每行 `{ candidate_key, object_id, origin_plane, per_stream_rank: { lexical_fts: 3, synthesis_fts: null, evidence_fts: null, evidence_structural_agreement: null, structural: 7, existing_score: 2, embedding_similarity: null, graph_expansion: 12, path_expansion: null, temporal_recency: 8, workspace_activation: 5 }, fused_rank, fused_rank_contribution_per_stream }`
-- **target files**：`packages/core/src/recall-service.ts`（emit）+ `apps/bench-runner/src/harness/recall-diagnostics-schema.ts`（diagnostic-sidecar schema）；不改 MCP public schema
+- **target files**：`packages/core/src/recall/recall-service.ts`（emit）+ `apps/bench-runner/src/harness/recall-diagnostics-schema.ts`（diagnostic-sidecar schema）；不改 MCP public schema
 - **acceptance**：diagnostic 包含每行 11 stream 的 rank；schema test 通过
 - **dependency**：无
 - **KPI**：K2 ordering correctness 主指标可观测
@@ -182,7 +182,7 @@ Phase D (sequential)
 
 ## B.B1 — RRF 融合公式实现
 
-- **scope**：把 `recall-service.ts:1721-1724` 的 `relevanceFactor = clamp01(ftsFactor × 0.24 + structuralFactor × 0.76)` 替换为 RRF 多流融合
+- **scope**：把 `packages/core/src/recall/fine-assessment.ts` / `packages/core/src/recall/fusion-delivery.ts` 的融合路径替换为 RRF 多流融合
 - **13 streams**（详见 `DECISION-01 § 2` + B.B4 diagnostic closure；implementation adds stable runtime streams for source-window ordering and personal-memory query intent）：
   - S1 `lexical_fts`：`match.normalized_rank` 在 lexical pool 内的 rank
   - S2 `evidence_fts`：EvidenceCapsule gist/excerpt 命中 rank
@@ -200,7 +200,7 @@ Phase D (sequential)
 - **RRF 公式**：`fused_rank(i) = Σ_streams ( w_stream / (k + rank_stream(i)) )`，k=60
 - **stream weights baseline**：A/B 使用全部 `w_stream = 1.0` 建立等权 baseline；Phase C fix-loop 当前默认权重收敛为 `existing_score=1`、`evidence_structural_agreement=20`、`path_expansion=3`、`temporal_recency=0`、`workspace_activation=0`、其余 stream `=1`，保留 CLI/env `fusion_weights` 覆盖继续扫
 - **既有 score 处理**：`computeEffectiveScoreDetails` **不删**，仍 emit；`existing_score` rank 作为 diagnostic + low-weight compatibility stream 保留；`effectiveScore` 继续作为 fused-score tie-breaker（Q6=A）
-- **target files**：`packages/core/src/recall-service.ts`（融合公式 + per-stream rank 计算）+ `apps/bench-runner/src/harness/recall-weight-overrides.ts`（bench sweep stream_weights validation；不改 public protocol schema）
+- **target files**：`packages/core/src/recall/recall-service.ts`（融合公式 + per-stream rank 计算）+ `apps/bench-runner/src/harness/recall-weight-overrides.ts`（bench sweep stream_weights validation；不改 public protocol schema）
 - **acceptance**：
   - `rtk pnpm build` 全绿
   - 新增单元测试：单 stream 命中 / 多 stream 命中 / 全 miss 三种情形 fused_rank 行为正确
@@ -211,8 +211,8 @@ Phase D (sequential)
 
 ## B.B2 — fused-rank budget cut
 
-- **scope**：把 `recall-service.ts:1628` `nextEntryCount > config.budgets.max_entries` cut 的排序键从 `effective_score DESC` 改为 `fused_score DESC / fused_rank ASC, effective_score DESC (true tiebreaker)`
-- **target files**：`packages/core/src/recall-service.ts`（rankedCandidates sort + budget cut）
+- **scope**：把 `packages/core/src/recall/fusion-delivery.ts` budget cut 的排序键从 `effective_score DESC` 改为 `fused_score DESC / fused_rank ASC, effective_score DESC (true tiebreaker)`
+- **target files**：`packages/core/src/recall/recall-service.ts`（rankedCandidates sort + budget cut）
 - **acceptance**：
   - `non_monotonic_rate` 在 controlled-replay `rotated-kind` 场景从 70/100 跌到 < 10/100（F-1 leading indicator）
   - `budget_dropped` 从 20 降到 < 8（必须 KPI）
@@ -221,8 +221,8 @@ Phase D (sequential)
 
 ## B.B3 — E1 lexical priority 提到 3
 
-- **scope**：`recall-service.ts:2239` `draftPriority` lexical=2 改为 3（与 6 个 structural plane 持平）
-- **target file**：`packages/core/src/recall-service.ts`（一行常量改）
+- **scope**：`packages/core/src/recall/fusion-delivery.ts` lexical priority 改为 3（与 structural plane 持平）
+- **target file**：`packages/core/src/recall/recall-service.ts`（一行常量改）
 - **acceptance**：`candidate_absent` 从 12 降到 < 6（必须 KPI）
 - **dependency**：B.B1 / B.B2（融合改造后 coarse pool 阶段可放宽，但本项独立可 verify）
 - **KPI**：K2 candidate_absent
@@ -231,7 +231,7 @@ Phase D (sequential)
 ## B.B4 — diagnostic sidecar 加 `fused_rank` 字段
 
 - **scope**：`RecallCandidateDiagnostic` / bench diagnostics sidecar 加 `fused_rank` 字段；不删 public `relevance_score` 字段；不改 `MemorySearchResultSchema`
-- **target files**：`packages/core/src/recall-service-types.ts` + `packages/core/src/recall-service.ts` + `apps/bench-runner/src/harness/recall-diagnostics-schema.ts` + `apps/bench-runner/src/longmemeval/diagnostics.ts`
+- **target files**：`packages/core/src/recall/recall-service-types.ts` + `packages/core/src/recall/recall-service.ts` + `apps/bench-runner/src/harness/recall-diagnostics-schema.ts` + `apps/bench-runner/src/longmemeval/diagnostics.ts`
 - **acceptance**：bench `delivered_results[]` 可从 independent diagnostics channel 补齐 `fused_rank` 整数；MCP public result schema 保持不变
 - **dependency**：B.B1（fused_rank 必须先存在）
 - **KPI**：trend dashboard 可显示 fused_rank
@@ -253,7 +253,7 @@ D20 决策：**不做**。X1 是 generic RAG 的标准 trick，违反 Alaya-nati
 ## X.X2 — Evidence FTS partial-phrase + multi-key
 
 - **scope**：EvidenceCapsule gist/excerpt FTS 支持 partial phrase + 多关键词联合（不仅是 OR）
-- **target files**：`packages/storage/src/repos/`（evidence search 查询）+ `packages/core/src/recall-service.ts:620+`（evidence FTS 路径）
+- **target files**：`packages/storage/src/repos/`（evidence search 查询）+ `packages/core/src/recall/recall-service.ts`（evidence FTS 路径）
 - **acceptance**：evidence-only 命中候选数提升 ≥ 25%
 - **dependency**：无
 - **KPI**：K1.*-off must；K2.6
@@ -261,7 +261,7 @@ D20 决策：**不做**。X1 是 generic RAG 的标准 trick，违反 Alaya-nati
 ## X.X3 — Session-id query parser
 
 - **scope**：query 含 "yesterday / last session / 上次" → 抽 session_id 范围作 coarse filter
-- **target files**：`packages/core/src/recall-service-helpers.ts` 加 query preprocessing；`packages/protocol/src/soul/recall-policy.ts` 加 session_id filter
+- **target files**：`packages/core/src/recall/recall-service-helpers.ts` 加 query preprocessing；`packages/protocol/src/soul/recall-policy.ts` 加 session_id filter
 - **acceptance**：LoCoMo 含 session reference 的 query R@5 ≥ 50%
 - **dependency**：无
 - **KPI**：K1.4-off / K1.4-on

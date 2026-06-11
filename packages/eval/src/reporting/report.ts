@@ -254,7 +254,7 @@ export function renderReport(
     // what the recall pipeline actually did per call; they are not
     // gates and not threshold targets. The token-unit caveat (chars/4
     // heuristic, CJK underestimated ~3-4x) lives on RecallTokenEconomy
-    // in packages/core/src/recall-service-types.ts.
+    // in packages/core/src/recall/recall-service-types.ts.
     lines.push(
       `- Per-recall token economy (${rte.sample_count} calls, measure-only):`
     );

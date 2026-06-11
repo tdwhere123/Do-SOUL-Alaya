@@ -27,12 +27,12 @@ import {
   classifyGlobalCandidate,
   computeRecallTokenEconomy,
   type RecallServiceDependencies
-} from "../../recall-service.js";
+} from "../../recall/recall-service.js";
 import type {
   RecallServiceEmbeddingRecallPort,
   RecallServiceMemoryRepoPort,
   RecallServicePathExpansionPort
-} from "../../recall-service-types.js";
+} from "../../recall/recall-service-types.js";
 import type { EmbeddingVectorRecord } from "../../embedding-recall-service.js";
 
 function createTaskSurface(): TaskObjectSurface {
@@ -1419,7 +1419,7 @@ describe("RecallService", () => {
   // per-stream gating) cannot quietly turn the instrument into a
   // measurable latency tax. The bound is loose enough to absorb host
   // jitter while still catching an order-of-magnitude regression.
-  // see also: packages/core/src/recall-service.ts
+  // see also: packages/core/src/recall/recall-service.ts
   // @anchor compute-recall-token-economy.
   // anti-patterns-lint-allow: the candidate-diagnostic shape is local to
   // this perf probe; promoting a shared factory would couple this latency
@@ -1536,7 +1536,7 @@ describe("RecallService", () => {
   // instrumented. We exercise the cascade-engaged branch by giving the
   // harness empty HOT and WARM tiers and a single COLD candidate.
   // see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy,
-  // packages/core/src/recall-service.ts (call site, expandTierCascade).
+  // packages/core/src/recall/recall-service.ts (call site, expandTierCascade).
   it("populates token_economy on degraded (cascade-engaged) recall paths", async () => {
     const coldOnlyMemory = createMemoryEntry({
       object_id: "11111111-1111-4111-8111-111111111111",
@@ -5512,7 +5512,7 @@ describe("RecallService", () => {
       // dimension does not match the strategy's deterministic filter must
       // not leak into recall just because its surface name appears in the
       // query and an entity extractor picks it up.
-      // see also: packages/core/src/recall-service.ts addCandidate filter gate
+      // see also: packages/core/src/recall/recall-service.ts addCandidate filter gate
       const memories = [
         createMemoryEntry({
           object_id: "memory-in-scope",
@@ -5674,7 +5674,7 @@ describe("RecallService", () => {
       // proper_noun surface (confidence 0.35-0.7) admitted ONLY on
       // entity_seed would still feed selectExpansionSeedDrafts (path 1) and
       // compound surface manipulation across 1-hop neighbors.
-      // see also: packages/core/src/recall-service.ts isWeakEntityOnlyDraft
+      // see also: packages/core/src/recall/coarse-candidates.ts isWeakEntityOnlyDraft
       const memories = [
         createMemoryEntry({
           object_id: "memory-anchor",
@@ -5797,7 +5797,7 @@ describe("RecallService", () => {
       // (or evidence_anchor, source_proximity, etc.) survives — the
       // co-admitting plane is independent corroboration that the surface
       // is meaningfully present in the corpus.
-      // see also: packages/core/src/recall-service.ts isWeakEntityOnlyDraft
+      // see also: packages/core/src/recall/coarse-candidates.ts isWeakEntityOnlyDraft
       const memories = [
         createMemoryEntry({
           object_id: "memory-anchor",
@@ -5909,7 +5909,7 @@ describe("RecallService", () => {
       // memory hit only by the weak entity surface must not fan
       // evidence_anchor / domain_tag_cluster admissions to unrelated
       // tier memories that merely share evidence_refs / domain_tags.
-      // see also: packages/core/src/recall-service.ts
+      // see also: packages/core/src/recall/coarse-candidates.ts
       //   isWeakEntityOnlyDraft, selectPreferredExpansionSeedEntries
       const memories = [
         createMemoryEntry({
@@ -6007,7 +6007,7 @@ describe("RecallService", () => {
     });
 
     describe("multi-seed graph fan-in", () => {
-      // see also: packages/core/src/recall-service.ts addGraphExpansionCandidates
+      // see also: packages/core/src/recall/recall-service.ts addGraphExpansionCandidates
       // Pool B branch and RecallMultiSeedGraphFanInDiagnostics. The per-seed
       // BFS now traverses PathRelation rows, so a fan-in neighbor is a path
       // source -> target whose relation_kind names the equivalent edge type.

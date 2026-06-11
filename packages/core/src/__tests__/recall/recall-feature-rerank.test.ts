@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileRecallQueryProbes } from "../../recall-query-probes.js";
+import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 import {
   RECALL_RERANK_EVIDENCE_ONLY_FACTOR,
   RECALL_RERANK_TOP_N,
@@ -7,7 +7,7 @@ import {
   computeRerankFeatures,
   rerankTopN,
   type RerankCandidate
-} from "../../recall-feature-rerank.js";
+} from "../../recall/recall-feature-rerank.js";
 
 interface FakeCandidate {
   readonly id: string;

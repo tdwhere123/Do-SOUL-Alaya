@@ -15,8 +15,8 @@
  * Cost ceiling: at most `maxEntities` (default 8) candidates per query,
  * sorted by confidence; the regex passes are O(query length).
  *
- * see also: packages/core/src/recall-service.ts collectEntityDerivedSeeds
- * see also: packages/core/src/recall-query-probes.ts splitLexicalTokens
+ * see also: packages/core/src/recall/recall-service.ts collectEntityDerivedSeeds
+ * see also: packages/core/src/recall/recall-query-probes.ts splitLexicalTokens
  */
 
 import type { EntityCandidate, EntityExtractionPort } from "./entity-extraction-port.js";

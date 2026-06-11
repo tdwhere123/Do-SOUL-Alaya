@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type MemoryEntry } from "@do-soul/alaya-protocol";
-import { filterMemoriesByTimeWindow } from "../../recall-service-helpers.js";
+import { filterMemoriesByTimeWindow } from "../../recall/recall-service-helpers.js";
 
 function entry(overrides: Partial<MemoryEntry> & Pick<MemoryEntry, "object_id">): MemoryEntry {
   return {

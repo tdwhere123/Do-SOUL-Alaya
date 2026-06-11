@@ -63,10 +63,10 @@ describe("RuleBasedEntityExtractor", () => {
 
   it("captures slash-separated file paths", async () => {
     const candidates = await extractor.extract(
-      "look at packages/core/src/recall-service.ts for the fix"
+      "look at packages/core/src/recall/recall-service.ts for the fix"
     );
     const path = candidates.find((c) => c.kind === "path");
-    expect(path?.surface).toBe("packages/core/src/recall-service.ts");
+    expect(path?.surface).toBe("packages/core/src/recall/recall-service.ts");
   });
 
   it("captures hash / BL / version task refs", async () => {

@@ -26,10 +26,10 @@ import type {
   EmbeddingRecallSupplementResult,
   PreparedEmbeddingSupplement,
   PreparedEmbeddingQueryHandle
-} from "./embedding-recall-service.js";
+} from "../embedding-recall-service.js";
 import type {
   ManifestationBiasSidecarEntry
-} from "./manifestation-resolver.js";
+} from "../manifestation-resolver.js";
 import type {
   GlobalMemoryRecallCachePort,
   GlobalMemoryRecallPort
@@ -312,7 +312,7 @@ export interface RecallServiceDependencies {
   ) => Readonly<import("@do-soul/alaya-protocol").RecallPolicy>;
   // see also: packages/core/src/entity-extraction-port.ts
   // see also: packages/core/src/entity-extraction-rules.ts RuleBasedEntityExtractor
-  readonly entityExtractionPort?: import("./entity-extraction-port.js").EntityExtractionPort;
+  readonly entityExtractionPort?: import("../entity-extraction-port.js").EntityExtractionPort;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly warn?: RecallServiceWarnPort;

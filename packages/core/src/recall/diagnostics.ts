@@ -1,13 +1,13 @@
 import type { RecallCandidate, RecallPolicy } from "@do-soul/alaya-protocol";
 import type { PreparedEmbeddingQueryHandle } from "../embedding-recall-service.js";
-import type { RecallQueryProbes } from "../recall-query-probes.js";
+import type { RecallQueryProbes } from "./recall-query-probes.js";
 import type {
   RecallCandidateDiagnostic,
   RecallDiagnostics,
   RecallEmbeddingProviderStatus,
   RecallGraphExpansionDiagnostics,
   RecallTokenEconomy
-} from "../recall-service-types.js";
+} from "./recall-service-types.js";
 import { RECALL_FUSION_STREAMS } from "./fusion-delivery.js";
 
 export function buildRecallDiagnostics(params: Readonly<{

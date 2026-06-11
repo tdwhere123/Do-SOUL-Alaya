@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { StorageTier, type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
 import type { EmbeddingProviderPort, EmbeddingVectorRecord } from "./embedding-recall-service.js";
-import { toErrorMessage } from "./recall-service-helpers.js";
+import { toErrorMessage } from "./recall/recall-service-helpers.js";
 
 export interface EmbeddingBackfillMemoryRepoPort {
   findByWorkspaceId(

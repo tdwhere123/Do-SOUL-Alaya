@@ -3,15 +3,15 @@ import type {
   RecallPolicy,
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
-import { rerankTopN, type RerankCandidate } from "../recall-feature-rerank.js";
-import type { RecallQueryProbes } from "../recall-query-probes.js";
+import { rerankTopN, type RerankCandidate } from "./recall-feature-rerank.js";
+import type { RecallQueryProbes } from "./recall-query-probes.js";
 import {
   buildRecallCandidateDedupeKey,
   clamp01,
   compareMemoryEntries,
   normalizeActivationScore,
   normalizeGraphSupport
-} from "../recall-service-helpers.js";
+} from "./recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
   RecallFusionBreakdown,
@@ -19,7 +19,7 @@ import type {
   RecallFusionStreamContributions,
   RecallFusionStreamRanks,
   RecallSupplementaryData
-} from "../recall-service-types.js";
+} from "./recall-service-types.js";
 import {
   normalizeEvidenceText,
   scoreEvidenceAnchorMatch,
@@ -180,7 +180,7 @@ export function buildRecallFusionDetails(params: Readonly<{
 }
 
 // invariant: path suppression demotes fused_score and re-ranks without adding diagnostics keys or dropping positive-score candidates.
-// see also: packages/core/src/recall-service.ts:collectNegativePathSuppressions,
+// see also: packages/core/src/recall/recall-service.ts:collectNegativePathSuppressions,
 // packages/core/src/recall/path-relations.ts:scorePathRelationSuppression,
 // apps/bench-runner/src/harness/recall-diagnostics-schema.ts:BenchRecallDiagnosticsSchema.
 export function applyPathSuppressionToFusionScores(
@@ -239,7 +239,7 @@ function scoreRecallFusionStream(
   // invariant: synthesis_capsule candidates score ONLY on synthesis_fts —
   // their dimension/source_kind/created_at are faked pseudo-memory_entry
   // fields, so any other stream is fail-closed for them here.
-  // see also: packages/core/src/recall-candidate-builder.ts:buildSynthesisCoarseRecallCandidate
+  // see also: packages/core/src/recall/recall-candidate-builder.ts:buildSynthesisCoarseRecallCandidate
   if (candidate.objectKind === "synthesis_capsule") {
     return stream === "synthesis_fts"
       ? clamp01(supplementaryData.synthesisFtsRanks[objectId] ?? 0)

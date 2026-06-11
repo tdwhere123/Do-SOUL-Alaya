@@ -38,7 +38,7 @@ Five repeating anti-patterns confirmed across four schema layers
    no Inspector route, `ProposalOption.unresolved_after_apply` written but
    unread, `EvidenceCapsule.semantic_anchor` / `event_anchor` written JSON
    but no deserializer, PathGraphSnapshot 11 fields unread. (Note:
-   `direction_bias` is **not** discarded — `packages/core/src/recall-service.ts:2038`
+   `direction_bias` is **not** discarded — `packages/core/src/recall/recall-service.ts:2038`
    reads it in path expansion, and `path-plasticity-runtime.ts:398-418` uses
    it for plasticity. Earlier classification was incorrect.)
 4. **21k+ pure sink** — `orphan_radar.reported`, `green.revoked`,

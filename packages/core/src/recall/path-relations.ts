@@ -3,11 +3,11 @@ import {
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { clamp01 } from "../recall-service-helpers.js";
+import { clamp01 } from "./recall-service-helpers.js";
 import type {
   RecallGraphExpansionTrackedEdgeType,
   RecallPathExpansionSourceDiagnostic
-} from "../recall-service-types.js";
+} from "./recall-service-types.js";
 import { pathRelationKindToTrackedEdgeType } from "./graph-expansion.js";
 
 // Active sign-aware suppression scale. A negative path (recall_bias < 0)
@@ -48,7 +48,7 @@ const PATH_SUPPRESSION_STRENGTH_FLOOR = 0.6;
 // (< 0.27) could still drive that target's fused_score to 0 via one subtraction
 // and drop it out of the candidate set. PATH_SUPPRESSION_RESIDUAL_FLOOR (below)
 // is the residual-side guard that demotes, never erases.
-// see also: packages/core/src/recall-service.ts:collectNegativePathSuppressions,
+// see also: packages/core/src/recall/recall-service.ts:collectNegativePathSuppressions,
 // packages/core/src/recall/path-relations.ts:scorePathRelationSuppression,
 // packages/core/src/recall/fusion-delivery.ts:PATH_SUPPRESSION_RESIDUAL_FLOOR.
 export const PATH_SUPPRESSION_MAX_PER_TARGET = 0.27;

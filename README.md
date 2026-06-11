@@ -358,10 +358,8 @@ recall falls back to lexical without raising. Recall lives on the
 **Path axis** (recall *is* a runtime manifestation of paths) and
 the **Runtime Control** layer.
 
-*Code anchors:* `packages/core/src/recall-service.ts:189-315`
-(orchestration), `packages/core/src/recall-service.ts:501-581` (the
-embedding-supplement merge — proof the boost is additive, never
-overriding).
+*Code anchors:* `packages/core/src/recall/recall-service.ts`
+(`RecallService.recall` orchestration and the embedding-supplement merge).
 
 ### 5. Receipt (回执)
 

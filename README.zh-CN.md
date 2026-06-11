@@ -284,9 +284,8 @@ Agent 收到的是 `delivery_id` 加结果项 + pointers，以及稳定的解释
 **Path 轴**（召回 *本身* 就是 path 在运行时的显化）和 **Runtime
 Control 层**。
 
-*代码锚点：* `packages/core/src/recall-service.ts:189-315`（编
-排）、`packages/core/src/recall-service.ts:501-581`（embedding-
-supplement merge —— 用代码证明 boost 是加性的，永远不 override）。
+*代码锚点：* `packages/core/src/recall/recall-service.ts`
+（`RecallService.recall` 编排和 embedding-supplement merge）。
 
 ### 5. 回执 (Receipt)
 

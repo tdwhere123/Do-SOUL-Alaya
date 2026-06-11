@@ -633,7 +633,7 @@ export interface BenchDaemonHandle {
    * workspace it was attached for. Call detach() before binding another
    * workspace.
    *
-   * see also: packages/core/src/recall-service.ts (workspace_id filter)
+   * see also: packages/core/src/recall/recall-service.ts (workspace_id filter)
    */
   attachWorkspace(input: {
     readonly workspaceId: string;

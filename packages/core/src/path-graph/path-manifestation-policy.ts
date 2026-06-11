@@ -388,13 +388,13 @@ export function planPromotion(input: PlanPromotionInput): PromotionPlan {
   // support_events_count with no sign filter), so without this guard an agent
   // could seed an attention_only negative, pump support >= 8, auto-promote it
   // to recall_allowed, and clear the suppression governance gate
-  // (packages/core/src/recall-service.ts:collectNegativePathSuppressions). A negative path's
+  // (packages/core/src/recall/recall-service.ts:collectNegativePathSuppressions). A negative path's
   // recall_allowed must come only from its birth seed (a conflict llm-verdict),
   // never from reinforcement. Positive paths still promote via support_events
   // (Hebbian intent preserved). Stability/strength/lifecycle still evolve for
   // negative paths; only governance promotion is suppressed.
   // see also: packages/core/src/path-plasticity/service.ts:PathPlasticityService.planDeltasForPath.
-  // see also: packages/core/src/recall-service.ts:collectNegativePathSuppressions.
+  // see also: packages/core/src/recall/recall-service.ts:collectNegativePathSuppressions.
   const governanceLadderAllowed = path.effect_vector.recall_bias >= 0;
   const nextGovernance = governanceLadderAllowed
     ? evolveGovernanceClass({

@@ -22,7 +22,7 @@ const ADDITIVE_WEIGHT_KEYS = [
 ] as const;
 
 // see also: packages/core/src/recall/fusion-delivery.ts:resolveRrfFusionWeights and
-// packages/core/src/recall-service.ts:resolveFusionScoringWeights (read these non-stream knobs
+// packages/core/src/recall/scoring.ts:resolveFusionScoringWeights (read these non-stream knobs
 // alongside per-stream weights)
 const FUSION_NON_STREAM_KEYS = [
   "RRF_K",

@@ -1,10 +1,10 @@
 import { EDGE_TYPE_RECALL_MODEL, type MemoryEntry } from "@do-soul/alaya-protocol";
-import { clamp01, compareMemoryEntries } from "../recall-service-helpers.js";
+import { clamp01, compareMemoryEntries } from "./recall-service-helpers.js";
 import type {
   RecallGraphExpansionDiagnostics,
   RecallGraphExpansionTrackedEdgeType,
   RecallMultiSeedGraphFanInDiagnostics
-} from "../recall-service-types.js";
+} from "./recall-service-types.js";
 
 // invariant: membership equals EDGE_TYPE_RECALL_MODEL transitive rows
 // (membership asserted in edge-hop-decay-derivation.test.ts; order asserted
@@ -71,7 +71,7 @@ export interface MutableGraphExpansionDiagnostics {
   readonly graph_expansion_plane_count_per_hop: [number, number];
   readonly graph_expansion_plane_count_per_edge_type: Record<RecallGraphExpansionTrackedEdgeType, number>;
   // invariant: 0 = pooled-seed only; 1+ = entity_seed fan-in ran.
-  // see also: packages/core/src/recall-service.ts:addGraphExpansionCandidates multi-seed branch
+  // see also: packages/core/src/recall/recall-service.ts:addGraphExpansionCandidates multi-seed branch
   multi_seed_fan_in_distinct_seeds: number;
   // anchor: dedup_collisions counts every collision (not unique colliders);
   // max-score reduction keeps one candidate.
@@ -262,7 +262,7 @@ function summarizeGraphExpansionCandidateSources(
 // re-derivable from sources (per-seed BFS history is local to each
 // addGraphExpansionCandidates call) so the merger prefers the cascade tier
 // with more distinct_seeds; when only one tier carries fan-in stats, that
-// tier wins. see also: packages/core/src/recall-service.ts:mergeCoarseFilters
+// tier wins. see also: packages/core/src/recall/recall-service.ts:mergeCoarseFilters
 export function mergeGraphExpansionDiagnosticsAcrossCascade(params: Readonly<{
   readonly sources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
   readonly currentFanIn?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;

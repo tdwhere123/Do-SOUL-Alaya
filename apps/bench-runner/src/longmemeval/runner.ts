@@ -652,7 +652,7 @@ export async function runLongMemEval(
       // or recall_explainability_partial), so diagnostics carry no
       // token_economy block. The aggregator drops nulls before the
       // distribution stats so degraded recalls don't dilute the run.
-      // see also: packages/core/src/recall-service.ts
+      // see also: packages/core/src/recall/recall-service.ts
       // (computeRecallTokenEconomy call site).
       const recallTokenEconomy = extractRecallTokenEconomy(recallResult);
       // K3.2 / K3.4 edge proposal KPI rows for this question's run:

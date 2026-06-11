@@ -398,13 +398,13 @@ export type QualityMetrics = z.infer<typeof QualityMetricsSchema>;
 // @anchor recall-token-economy-token-units: every *_tokens / *_token_*
 // figure under this block is the chars/4 approximation produced by
 // makeTokenEstimator (resolveCharsPerToken in
-// packages/core/src/recall-service-types.ts). The default 4 chars/token
+// packages/core/src/recall/recall-service-types.ts). The default 4 chars/token
 // is an OpenAI-style English heuristic; CJK content is underestimated
 // by roughly 3-4x because Chinese/Japanese/Korean characters average
 // closer to 1-1.5 chars/token under cl100k/o200k. Release notes citing
 // mean / p95 figures from this block must carry the same caveat.
 // see also:
-//   packages/core/src/recall-service-types.ts RecallTokenEconomy
+//   packages/core/src/recall/recall-service-types.ts RecallTokenEconomy
 //   packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy
 //   apps/bench-runner/src/harness/recall-diagnostics-schema.ts
 const PerCallStatSchema = z

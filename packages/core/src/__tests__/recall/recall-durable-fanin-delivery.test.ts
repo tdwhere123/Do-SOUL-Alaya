@@ -7,13 +7,13 @@ import {
 import {
   RECALL_FUSION_STREAMS,
   recallDeliveryReserveTestInternals
-} from "../../recall-service.js";
+} from "../../recall/recall-service.js";
 import type {
   RecallFusionBreakdown,
   RecallFusionStream,
   RecallSupplementaryData
-} from "../../recall-service-types.js";
-import { compileRecallQueryProbes } from "../../recall-query-probes.js";
+} from "../../recall/recall-service-types.js";
+import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 
 const {
   selectUncoveredSynthesisCapsules,

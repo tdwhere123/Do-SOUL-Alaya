@@ -15,10 +15,10 @@ import {
   type SoulActiveConstraint,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import { RecallService, type RecallServiceDependencies } from "../../recall-service.js";
-import { selectCandidatesWithinBudgets } from "../../recall-candidate-builder.js";
-import { compareRecallCandidates } from "../../recall-service-helpers.js";
-import { compileRecallQueryProbes } from "../../recall-query-probes.js";
+import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import { selectCandidatesWithinBudgets } from "../../recall/recall-candidate-builder.js";
+import { compareRecallCandidates } from "../../recall/recall-service-helpers.js";
+import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 
 const WS = "workspace-regression";
 const NOW = "2026-05-18T00:00:00.000Z";

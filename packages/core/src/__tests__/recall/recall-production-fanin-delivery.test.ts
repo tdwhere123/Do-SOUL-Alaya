@@ -25,7 +25,7 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { RecallService, type RecallServiceDependencies } from "../../recall-service.js";
+import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
 
 // anchor: PRODUCTION-PATH proof for the earned-co_recalled fan-in reserve
 // exemption. The sibling suite recall-durable-fanin-delivery.test.ts injects
@@ -41,7 +41,7 @@ import { RecallService, type RecallServiceDependencies } from "../../recall-serv
 // the flag set point forced to false, the co_recalled sibling is no longer
 // delivered, matching the supports control.)
 // see also: packages/core/src/recall/graph-expansion.ts:EARNED_CO_RECALLED_FANIN_RELATION_KIND,
-//   packages/core/src/recall-service.ts:addPathExpansionCandidates,
+//   packages/core/src/recall/recall-service.ts:addPathExpansionCandidates,
 //   packages/core/src/recall/fusion-delivery.ts:isStructuralRescueCandidate.
 
 const databases = new Set<StorageDatabase>();

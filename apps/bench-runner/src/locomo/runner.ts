@@ -359,7 +359,7 @@ interface ConversationResult {
   // returns null and those samples are skipped (not pushed) — the
   // conversation-level array length therefore matches the number of
   // structurally-instrumented recalls, never the total recall count.
-  // see also: packages/core/src/recall-service.ts
+  // see also: packages/core/src/recall/recall-service.ts
   // (computeRecallTokenEconomy call site).
   readonly recallTokenEconomySamples: readonly BenchRecallTokenEconomy[];
   // Event-sourced token-economy fold for this conversation's own bench DB —

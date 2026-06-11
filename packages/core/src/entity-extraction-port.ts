@@ -8,7 +8,7 @@
  * not themselves enter propose/accept paths.
  *
  * see also: packages/core/src/entity-extraction-rules.ts RuleBasedEntityExtractor
- * see also: packages/core/src/recall-service.ts collectEntityDerivedSeeds
+ * see also: packages/core/src/recall/recall-service.ts collectEntityDerivedSeeds
  */
 
 export type EntityCandidateKind =
