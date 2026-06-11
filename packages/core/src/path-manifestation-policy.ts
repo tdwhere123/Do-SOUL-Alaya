@@ -21,8 +21,8 @@ import {
 //   - dialogue_nudge    -> agent dialogue context, medium bar
 //   - stance_bias       -> silently biases agent stance, highest bar
 //
-// see also: manifestation-resolver.ts (consumer at recall time).
-// see also: path-plasticity-service.ts (consumer at plasticity tick).
+// see also: packages/core/src/manifestation-resolver.ts:ManifestationResolver.
+// see also: packages/core/src/path-plasticity/service.ts:PathPlasticityService.
 
 const MANIFESTATION_AUTHORITY: Readonly<
   Record<PathGovernanceClassValue, ReadonlySet<ManifestationLevelValue>>
@@ -152,18 +152,18 @@ const GOVERNANCE_MANIFESTATION_CEILING: Readonly<
 //
 // Trusted recall_allowed-birth markers (the ONLY producers that mint a POSITIVE
 // recall-eligible path directly at recall_allowed):
-//   - signal_graph_reference   (path-relation-proposal-service.ts
-//                                SIGNAL_GRAPH_REF_SEED_PROFILE — system signal-graph seed)
-//   - edge_proposal_accept:<id> (edge-proposal-service.ts acceptProposal — a
-//                                human/operator or auto-accept-floor governance ruling)
+//   - signal_graph_reference
+//     (packages/core/src/path-relation-proposal-service.ts:SIGNAL_GRAPH_REF_SEED_PROFILE)
+//   - edge_proposal_accept:<id>
+//     (packages/core/src/edge-proposal-service.ts:EdgeProposalService.acceptProposal)
 // strictly_governed is user/operator-set, not auto-reachable, so it keeps
 // full_eligible regardless of evidence_basis. The recall-WEIGHTING use of the
 // promoted band (graph_support / plasticity) is unaffected — only the
 // manifestation ceiling's trust source is narrowed here.
-// see also: path-manifestation-policy.ts evolveGovernanceClass (the pumpable ladder),
-//   path-relation-proposal-service.ts seed profiles (birth evidence markers),
-//   edge-proposal-service.ts acceptProposal (edge_proposal_accept mint),
-//   path-plasticity-service.ts buildUpdatesWithPromotion (preserves evidence_basis).
+// see also: packages/core/src/path-manifestation-policy.ts:evolveGovernanceClass.
+// see also: packages/core/src/path-relation-proposal-service.ts:SIGNAL_GRAPH_REF_SEED_PROFILE.
+// see also: packages/core/src/edge-proposal-service.ts:EdgeProposalService.acceptProposal.
+// see also: packages/core/src/path-plasticity/helpers.ts:buildUpdatesWithPromotion.
 const TRUSTED_RECALL_ALLOWED_EVIDENCE_MARKERS: ReadonlySet<string> =
   new Set<string>(["signal_graph_reference"]);
 const TRUSTED_RECALL_ALLOWED_EVIDENCE_PREFIXES: readonly string[] = Object.freeze([
@@ -388,13 +388,13 @@ export function planPromotion(input: PlanPromotionInput): PromotionPlan {
   // support_events_count with no sign filter), so without this guard an agent
   // could seed an attention_only negative, pump support >= 8, auto-promote it
   // to recall_allowed, and clear the suppression governance gate
-  // (recall-service.ts isPathGovernedForSuppression). A negative path's
+  // (packages/core/src/recall-service.ts:collectNegativePathSuppressions). A negative path's
   // recall_allowed must come only from its birth seed (a conflict llm-verdict),
   // never from reinforcement. Positive paths still promote via support_events
   // (Hebbian intent preserved). Stability/strength/lifecycle still evolve for
   // negative paths; only governance promotion is suppressed.
-  // see also: path-plasticity-service.ts (PromotionPlan consumer),
-  // recall-service.ts collectNegativePathSuppressions (suppression governance gate).
+  // see also: packages/core/src/path-plasticity/service.ts:PathPlasticityService.planDeltasForPath.
+  // see also: packages/core/src/recall-service.ts:collectNegativePathSuppressions.
   const governanceLadderAllowed = path.effect_vector.recall_bias >= 0;
   const nextGovernance = governanceLadderAllowed
     ? evolveGovernanceClass({
