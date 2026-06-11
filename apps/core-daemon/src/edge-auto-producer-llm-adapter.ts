@@ -31,7 +31,7 @@ import type {
  *   service then falls back to the local heuristic for that neighbor.
  *
  * see also: apps/core-daemon/src/reconciliation-llm-decision.ts
- * see also: packages/core/src/edge-auto-producer-llm-port.ts
+ * see also: packages/core/src/path-graph/edge-auto-producer-llm-port.ts
  *
  * anti-patterns-lint-allow: cache + transport helpers structurally
  * mirror reconciliation-llm-decision.ts; extracting a shared

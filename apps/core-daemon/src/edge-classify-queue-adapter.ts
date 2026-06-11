@@ -23,7 +23,7 @@ import type { GardenTaskEnqueueInput } from "@do-soul/alaya-storage";
  * heuristic path. Enqueue failures propagate to the caller, which (in
  * EdgeAutoProducerService.deferEdgeClassify) swallows them as best-effort —
  * the inline heuristic edge already stands.
- * see also: packages/core/src/edge-auto-producer-service.ts deferEdgeClassify.
+ * see also: packages/core/src/path-graph/edge-auto-producer-service.ts deferEdgeClassify.
  * see also: apps/core-daemon/src/mcp-memory-tool-handler.ts completeEdgeClassifyTask.
  */
 export interface EdgeClassifyQueueRepoPort {

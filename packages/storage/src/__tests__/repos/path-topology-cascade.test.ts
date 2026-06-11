@@ -23,7 +23,7 @@ import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
 // invariant: hard-deleted memory ids must not remain reachable through path topology.
 // see also: packages/storage/src/repos/cascade-delete.ts:pruneOrphanedPathTopology
 // see also: packages/storage/src/repos/memory-entry/lifecycle-workflows.ts:hardDeleteTombstonedMemoryEntry
-// see also: packages/core/src/graph-contract-service.ts:derive
+// see also: packages/core/src/path-graph/graph-contract-service.ts:derive
 
 const DELETED_MEMORY_ID = "11111111-1111-4111-8111-111111111111";
 const SURVIVING_MEMORY_ID = "22222222-2222-4222-8222-222222222222";

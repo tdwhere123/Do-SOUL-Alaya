@@ -890,7 +890,7 @@ export class MaterializationRouter {
       // exists). A thrown sink and a returned "failed" both land here and must
       // either persist exactly one durable proposal for the failed ref or throw
       // for the enrich_pending retry lane.
-      // see also: packages/core/src/path-relation-proposal-service.ts PathMintOutcome.
+      // see also: packages/core/src/path-graph/path-relation-proposal-service.ts PathMintOutcome.
       // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask.
       if (outcome === "failed") {
         const failedParams = {

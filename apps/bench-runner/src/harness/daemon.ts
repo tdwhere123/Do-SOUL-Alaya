@@ -562,7 +562,7 @@ export interface BenchDaemonHandle {
    * gold/answer knowledge.
    *
    * see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
-   * see also: packages/core/src/path-relation-proposal-service.ts onCoUsage
+   * see also: packages/core/src/path-graph/path-relation-proposal-service.ts onCoUsage
    */
   accrueSessionCoRecall(
     memberMemoryIds: readonly string[]
@@ -1722,7 +1722,7 @@ export async function startBenchDaemon(
   // lane (isPathGovernedForSuppression), not positive recall eligibility.
   //
   // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
-  // see also: packages/core/src/path-relation-proposal-service.ts onCoUsage / CO_RECALLED_SEED_PROFILE
+  // see also: packages/core/src/path-graph/path-relation-proposal-service.ts onCoUsage / CO_RECALLED_SEED_PROFILE
   // see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible
   async function accrueSessionCoRecall(
     memberMemoryIds: readonly string[]

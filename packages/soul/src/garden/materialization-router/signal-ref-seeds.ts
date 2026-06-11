@@ -25,7 +25,7 @@ import { type SignalRefSeedSpec } from "./contracts.js";
 // rule-hit conditions are agent-controllable content.
 // governanceClass is further clamped to the auto-build ceiling by
 // submitCandidate downstream.
-// see also: packages/core/src/path-relation-proposal-service.ts seed profiles.
+// see also: packages/core/src/path-graph/path-relation-proposal-service.ts seed profiles.
 // see also: packages/core/src/conflict-detection-service.ts — LLM-verdict negatives.
 // see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible.
 // see also: signal-ref-seed-parity.test.ts — pins this live table.

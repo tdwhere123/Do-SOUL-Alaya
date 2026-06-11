@@ -153,16 +153,16 @@ const GOVERNANCE_MANIFESTATION_CEILING: Readonly<
 // Trusted recall_allowed-birth markers (the ONLY producers that mint a POSITIVE
 // recall-eligible path directly at recall_allowed):
 //   - signal_graph_reference
-//     (packages/core/src/path-relation-proposal-service.ts:SIGNAL_GRAPH_REF_SEED_PROFILE)
+//     (packages/core/src/path-graph/path-relation-proposal-service.ts:SIGNAL_GRAPH_REF_SEED_PROFILE)
 //   - edge_proposal_accept:<id>
-//     (packages/core/src/edge-proposal-service.ts:EdgeProposalService.acceptProposal)
+//     (packages/core/src/path-graph/edge-proposal-service.ts:EdgeProposalService.acceptProposal)
 // strictly_governed is user/operator-set, not auto-reachable, so it keeps
 // full_eligible regardless of evidence_basis. The recall-WEIGHTING use of the
 // promoted band (graph_support / plasticity) is unaffected — only the
 // manifestation ceiling's trust source is narrowed here.
-// see also: packages/core/src/path-manifestation-policy.ts:evolveGovernanceClass.
-// see also: packages/core/src/path-relation-proposal-service.ts:SIGNAL_GRAPH_REF_SEED_PROFILE.
-// see also: packages/core/src/edge-proposal-service.ts:EdgeProposalService.acceptProposal.
+// see also: packages/core/src/path-graph/path-manifestation-policy.ts:evolveGovernanceClass.
+// see also: packages/core/src/path-graph/path-relation-proposal-service.ts:SIGNAL_GRAPH_REF_SEED_PROFILE.
+// see also: packages/core/src/path-graph/edge-proposal-service.ts:EdgeProposalService.acceptProposal.
 // see also: packages/core/src/path-plasticity/helpers.ts:buildUpdatesWithPromotion.
 const TRUSTED_RECALL_ALLOWED_EVIDENCE_MARKERS: ReadonlySet<string> =
   new Set<string>(["signal_graph_reference"]);

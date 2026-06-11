@@ -14,8 +14,8 @@ import {
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import { parseObjectId } from "./shared/validators.js";
+import { CoreError } from "../errors.js";
+import { parseObjectId } from "../shared/validators.js";
 
 // invariant: soul.explore_graph reads the unified path plane, not
 // memory_graph_edges. One-hop neighbors are PathRelation rows anchored on

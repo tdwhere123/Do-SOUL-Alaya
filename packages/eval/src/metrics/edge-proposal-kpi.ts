@@ -26,7 +26,7 @@ import { z } from "zod";
  *
  * see also:
  *   packages/protocol/src/events/graph-auditor.ts (authoritative payloads)
- *   packages/core/src/edge-proposal-service.ts (event producer)
+ *   packages/core/src/path-graph/edge-proposal-service.ts (event producer)
  *   apps/bench-runner/src/longmemeval/runner.ts (wiring site)
  */
 

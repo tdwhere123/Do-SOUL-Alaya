@@ -5,7 +5,7 @@ import { StorageError } from "../errors.js";
 // counts. Replaces the prior in-memory Map so counts toward the propose
 // threshold survive daemon restarts. Pairs are stored with the memory ids
 // ordered (low <= high) so (A,B) and (B,A) share one row.
-// see also: packages/core/src/path-relation-proposal-service.ts — consumer
+// see also: packages/core/src/path-graph/path-relation-proposal-service.ts — consumer
 // see also: migrations/083-path-relation-co-usage-counters.sql — schema
 
 export interface CoUsageCounterIncrementInput {

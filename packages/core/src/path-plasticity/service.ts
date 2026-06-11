@@ -8,7 +8,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { EventPublisherInput } from "../event-publisher.js";
 import { classifyPathImportance } from "../importance-gate.js";
-import { planPromotion, type PromotionPlan } from "../path-manifestation-policy.js";
+import { planPromotion, type PromotionPlan } from "../path-graph/path-manifestation-policy.js";
 import { PATH_PLASTICITY_CONSTANTS } from "./constants.js";
 import {
   buildUpdatesWithPromotion,
@@ -43,7 +43,7 @@ import type {
 // invariant: usage proofs mutate PathRelation plasticity only through audited Garden background work.
 // invariant: positive paths decay to dormancy; mergeable negative/neutral paths retire.
 // invariant: negative paths never promote governance through usage receipts.
-// see also: packages/core/src/path-manifestation-policy.ts:planPromotion
+// see also: packages/core/src/path-graph/path-manifestation-policy.ts:planPromotion
 export class PathPlasticityService {
   private readonly now: () => string;
 

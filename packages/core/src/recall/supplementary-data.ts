@@ -22,7 +22,7 @@ import {
   GOVERNANCE_CEILING_FAILSAFE_BAND,
   memoryGovernanceCeiling,
   type PathGovernanceContribution
-} from "../path-manifestation-policy.js";
+} from "../path-graph/path-manifestation-policy.js";
 import { computeMaxWeightTransferAmount } from "./scoring.js";
 import { anchorMemoryId, uniqueStrings } from "./path-relations.js";
 

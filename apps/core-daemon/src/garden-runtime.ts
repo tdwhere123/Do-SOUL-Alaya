@@ -149,7 +149,7 @@ const EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS = 8;
 // orphans per workspace so a backlog of stranded accepts drains without starving
 // the other reclaim work that shares this pass. Beyond the cap the bound degrades
 // to O(stranded / cap) passes; oldest-first ordering keeps it FIFO-fair.
-// see also: packages/core/src/edge-proposal-service.ts reconcileStuckAccepts.
+// see also: packages/core/src/path-graph/edge-proposal-service.ts reconcileStuckAccepts.
 const EDGE_PROPOSAL_RECONCILE_CAP_PER_PASS = 32;
 // invariant: per ~60s pass, expire at most this many past-TTL pending edge
 // proposals per workspace so the TTL sweep shares the pass without starving
@@ -417,7 +417,7 @@ interface BulkEnrichSignalRefReplayPort {
 // invisible to the pending list. This sweep re-drives the owed mint
 // idempotently (path dedup -> already_present). Bounded per pass and per
 // workspace; returns the per-outcome tally the tick LOGs.
-// see also: packages/core/src/edge-proposal-service.ts reconcileStuckAccepts.
+// see also: packages/core/src/path-graph/edge-proposal-service.ts reconcileStuckAccepts.
 interface EdgeProposalReconcilePort {
   reconcileStuckAccepts(input: {
     readonly workspaceId: string;
@@ -1824,7 +1824,7 @@ export function createGardenRuntime(input: {
   // via path dedup. Runs on the same ~60s pass as reclaimStaleEnrichClaims and
   // reclaimAbandonedGardenClaims. LOGs a per-workspace tally whenever it acted on
   // any row (no silent cap).
-  // see also: packages/core/src/edge-proposal-service.ts reconcileStuckAccepts.
+  // see also: packages/core/src/path-graph/edge-proposal-service.ts reconcileStuckAccepts.
   const reconcileStuckEdgeProposalAccepts = async (): Promise<void> => {
     const edgeProposalReconcile = input.edgeProposalReconcile;
     if (edgeProposalReconcile === undefined) {
@@ -1861,7 +1861,7 @@ export function createGardenRuntime(input: {
   // so an unreviewed backlog cannot grow unbounded on a no-reviewer deployment.
   // Runs on the same ~60s pass as reconcileStuckEdgeProposalAccepts. LOGs a
   // per-workspace tally whenever it expired any row.
-  // see also: packages/core/src/edge-proposal-service.ts sweepExpired.
+  // see also: packages/core/src/path-graph/edge-proposal-service.ts sweepExpired.
   const sweepExpiredEdgeProposals = async (): Promise<void> => {
     const edgeProposalReconcile = input.edgeProposalReconcile;
     if (edgeProposalReconcile === undefined) {

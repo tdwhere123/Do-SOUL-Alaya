@@ -11,7 +11,7 @@ import {
   type PathGovernanceClass,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { EventPublisherPropagationError, type EventPublisher, type EventPublisherInput } from "./event-publisher.js";
+import { EventPublisherPropagationError, type EventPublisher, type EventPublisherInput } from "../event-publisher.js";
 import type { PathFailureHealthInboxPort } from "./path-failure-health-inbox.js";
 
 // invariant: PathRelationProposalService is the single producer of

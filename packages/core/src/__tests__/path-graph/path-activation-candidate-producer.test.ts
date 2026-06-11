@@ -22,7 +22,7 @@ import { ManifestationResolver } from "../../manifestation-resolver.js";
 import {
   PathActivationCandidateProducer,
   type PathActivationCandidateProducerPathReaderPort
-} from "../../path-activation-candidate-producer.js";
+} from "../../path-graph/path-activation-candidate-producer.js";
 
 const NOW = "2026-04-17T09:00:00.000Z";
 const WORKSPACE = "workspace-alpha";

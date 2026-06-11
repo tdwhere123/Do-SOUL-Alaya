@@ -465,7 +465,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     // memory_graph_edges row. The closure forward-references
     // pathRelationProposalService (declared below); it is only invoked at
     // accept time, long after init, so there is no use-before-assignment.
-    // see also: packages/core/src/edge-proposal-service.ts acceptProposal.
+    // see also: packages/core/src/path-graph/edge-proposal-service.ts acceptProposal.
     pathCandidatePort: {
       submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
     },
@@ -867,7 +867,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // only invoked at materialization time, long after init, so there is no
   // use-before-assignment. governance is clamped to recall_allowed and
   // plasticity decides promotion downstream.
-  // see also: packages/core/src/path-candidate-sink.ts PathCandidateSink.
+  // see also: packages/core/src/path-graph/path-candidate-sink.ts PathCandidateSink.
   const pathCandidatePort: PathCandidateSink = {
     submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
   };
@@ -1174,7 +1174,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     // ownership at the durable sink. findById returns the owning workspace so
     // an agent/Garden ref to a missing or cross-workspace object is refused
     // before any path_relations row is written.
-    // see also: packages/core/src/path-relation-proposal-service.ts validateObjectAnchors
+    // see also: packages/core/src/path-graph/path-relation-proposal-service.ts validateObjectAnchors
     memoryExistence: {
       workspaceOfObject: async (objectId) => {
         const entry = await memoryEntryRepo.findById(objectId);
@@ -1446,7 +1446,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // upserts. Best-effort projection: any throw is swallowed by the caller so the
   // underlying mint/accept flow is never broken. The EdgeProposalService and
   // PathRelationProposalService both forward-reference this via closures.
-  // see also: packages/core/src/path-failure-health-inbox.ts;
+  // see also: packages/core/src/path-graph/path-failure-health-inbox.ts;
   //   packages/soul/src/garden/auditor.ts upsertHealthIssueGroup.
   const pathFailureHealthInboxPort: PathFailureHealthInboxPort = {
     recordPathRelationFailure: (entry) => {

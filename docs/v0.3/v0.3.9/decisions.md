@@ -161,7 +161,7 @@ or Proposal/HITL.
 ### Decision
 
 **Transactional `publishEventLogMutation` wrap.**
-`PathRelationProposalService.propose` (`packages/core/src/path-relation-proposal-service.ts:146-186`)
+`PathRelationProposalService.propose` (`packages/core/src/path-graph/path-relation-proposal-service.ts:146-186`)
 will route its `repo.create(...)` through the existing
 `publishEventLogMutation` helper, emitting `path.relation_created`
 (`packages/protocol/src/events/runtime-governance.ts:69-75`) in the
@@ -176,7 +176,7 @@ typed event) in the same transaction as the row insert.
 ### Why this shape
 
 - **Matches `PathPlasticityService` pattern** —
-  `packages/core/src/path-plasticity-service.ts:573-592` already uses
+  `packages/core/src/path-plasticity/service.ts:573-592` already uses
   this exact shape for reinforcement/weakening/retirement/redirection
   events. Consistency reduces reviewer load.
 - **Handbook invariant compliance** —
@@ -207,6 +207,6 @@ typed event) in the same transaction as the row insert.
 - `.do-it/findings/v0.3.9-root-cause-deep-dive/01-architecture-contract-vs-runtime.md`
   §Blocking 1 (PathRelation creation is on consumer usage path and is
   not EventLog-first).
-- `packages/core/src/path-plasticity-service.ts:573-592` (reference
+- `packages/core/src/path-plasticity/service.ts:573-592` (reference
   implementation of the desired pattern).
 - `docs/handbook/invariants.md:54-56` (the invariant being violated).

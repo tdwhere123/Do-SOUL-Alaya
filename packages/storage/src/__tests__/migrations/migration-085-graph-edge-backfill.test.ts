@@ -707,7 +707,7 @@ describe("migration 085 legacy graph-edge backfill", () => {
     // tier is symmetric: that reverse edge is the SAME semantic edge and MUST
     // dedup, else the pair carries two associative paths and graph_support
     // double-counts the recall weight at both endpoints.
-    // cross-file ref: packages/core/src/path-relation-proposal-service.ts accrueCoOccurrence (sorts then mints low->high)
+    // cross-file ref: packages/core/src/path-graph/path-relation-proposal-service.ts accrueCoOccurrence (sorts then mints low->high)
     for (const id of ["mem-low", "mem-high"]) {
       seedMemory(db, id, "workspace-1");
     }

@@ -14,7 +14,7 @@ import {
   type ManifestationLevel as ManifestationLevelValue,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import { governanceAuthorisesLevel } from "./path-manifestation-policy.js";
+import { governanceAuthorisesLevel } from "./path-graph/path-manifestation-policy.js";
 import { loadOrDefaultWithWorkspaceGuard } from "./shared/load-or-default-with-workspace-guard.js";
 import { normalizeUnit } from "./shared/normalize-unit.js";
 import { validateActivationCandidates } from "./shared/validated-activation-candidates.js";

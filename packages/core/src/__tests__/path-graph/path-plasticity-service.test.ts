@@ -11,7 +11,7 @@ import {
   PathPlasticityService,
   type PathPlasticityRepoPort,
   type UsageProofReaderPort
-} from "../../path-plasticity-service.js";
+} from "../../path-plasticity/index.js";
 import { EventPublisher, type RuntimeNotifier } from "../../event-publisher.js";
 
 const NOW_ISO = "2026-05-04T12:00:00.000Z";

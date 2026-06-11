@@ -89,7 +89,7 @@ export interface AlayaDaemonRuntimeServices {
   // seed time. counterSize is read-only diagnostics over the durable counter
   // (settled-vs-pending), not a write path. submitCandidate remains for
   // signal-ref / entity producers the bench drives elsewhere.
-  // see also: packages/core/src/path-relation-proposal-service.ts onCoUsage / submitCandidate
+  // see also: packages/core/src/path-graph/path-relation-proposal-service.ts onCoUsage / submitCandidate
   // see also: apps/bench-runner/src/harness/daemon.ts accrueSessionCoRecall
   readonly pathRelationProposalService: Pick<
     PathRelationProposalService,

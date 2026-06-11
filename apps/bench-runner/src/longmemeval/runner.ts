@@ -1263,7 +1263,7 @@ async function readLongMemEvalReportSideEffectSnapshot(
   // Without the fold, the bench co-recall hub's co_recalled paths would be
   // invisible to recalls_edge_count and the plane would read dead again.
   // canonical key set: @do-soul/alaya-protocol MemoryGraphEdgeType.
-  // see also: packages/core/src/graph-explore-service.ts (recalls-tier count)
+  // see also: packages/core/src/path-graph/graph-explore-service.ts (recalls-tier count)
   const byKind: Record<string, number> = Object.fromEntries(
     Object.values(MemoryGraphEdgeType).map((edgeType) => [edgeType, 0])
   );

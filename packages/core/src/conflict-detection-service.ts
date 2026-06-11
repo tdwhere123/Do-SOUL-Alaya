@@ -8,8 +8,8 @@ import {
   INCOMPATIBLE_SEED_PROFILE,
   type PathMintOutcome,
   type PathSeedProfile
-} from "./path-relation-proposal-service.js";
-import type { PathCandidateSink } from "./path-candidate-sink.js";
+} from "./path-graph/path-relation-proposal-service.js";
+import type { PathCandidateSink } from "./path-graph/path-candidate-sink.js";
 import { CoreError } from "./errors.js";
 
 // invariant: the trust tier of a conflict verdict. "rule" is the

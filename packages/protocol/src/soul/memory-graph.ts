@@ -63,7 +63,7 @@ export const MemoryGraphEdgeTypeSchema = z.enum(memoryGraphEdgeTypeValues);
 // governance-gated active-suppression channel in recall-service.ts, not in
 // this aggregate. The resulting positive-only sum is clamped to [0, 3] by
 // `normalizeGraphSupport`; the upper clamp matches the rest of the score range.
-// see also: packages/core/src/graph-explore-service.ts
+// see also: packages/core/src/path-graph/graph-explore-service.ts
 //   (countInbound* positive-only filter via isPathRecallEligible).
 //
 // invariant: RECALLS edge accumulation can saturate graph_support once

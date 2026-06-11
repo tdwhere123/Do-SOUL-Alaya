@@ -31,7 +31,7 @@ export const GraphAuditorEventType = {
   // accepted-owes-a-path obligation would only be findable by forensic
   // cross-join (auditability invariant). Keyed on proposal_id so an operator
   // can reconcile which accepted proposals are missing their minted path.
-  // see also: core/src/edge-proposal-service.ts acceptProposal mint-failure branch.
+  // see also: core/src/path-graph/edge-proposal-service.ts acceptProposal mint-failure branch.
   SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED: "soul.graph.edge_proposal_path_mint_failed",
   SOUL_GRAPH_EXPLORE_COMPLETED: "soul.graph.explore_completed",
   SOUL_AUDITOR_POINTER_HEALED: "soul.auditor.pointer_healed",

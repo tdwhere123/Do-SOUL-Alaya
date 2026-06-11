@@ -35,7 +35,7 @@ const PATH_SUPPRESSION_SCALE = 0.6;
 // attention_only seed band (initial strength 0.3-0.5 for co-occurrence-class
 // paths) so a barely-formed negative association cannot demote a memory until
 // plasticity has reinforced it past the floor. see also:
-// packages/core/src/path-relation-proposal-service.ts seed catalog (initialStrength per family).
+// packages/core/src/path-graph/path-relation-proposal-service.ts seed catalog (initialStrength per family).
 const PATH_SUPPRESSION_STRENGTH_FLOOR = 0.6;
 // invariant: hard ceiling on the total suppression delta any single target may
 // accumulate, across all converging negative paths. Sized to one supersedes-class
@@ -263,7 +263,7 @@ export function anchorMemoryId(anchor: PathAnchorRef): string | undefined {
 // Active sign-aware suppression is handled by collectNegativePathSuppressions;
 // this guard only stops positive path_expansion from amplifying suppressing
 // relations before that demotion pass runs.
-// see also: packages/core/src/path-relation-proposal-service.ts — recall_bias is
+// see also: packages/core/src/path-graph/path-relation-proposal-service.ts — recall_bias is
 // recallBiasSign * recallBiasMagnitude, so a negative family is < 0 and the
 // exception_to marker is exactly 0.
 // see also: packages/protocol/src/soul/path-relation.ts:isPathRecallEligible.

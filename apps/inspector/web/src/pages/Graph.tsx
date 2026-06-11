@@ -44,7 +44,7 @@ import type { SoulPathGraphContract } from "@do-soul/alaya-protocol";
 // SoulPathGraphContract). The force-graph component still consumes the local
 // GraphNode/GraphLink shape, so this page maps the contract nodes/edges onto
 // those props rather than changing the renderer.
-// see also: packages/core/src/graph-contract-service.ts
+// see also: packages/core/src/path-graph/graph-contract-service.ts
 //           apps/core-daemon/src/routes/path-graph.ts
 interface PathGraphEnvelope {
   readonly success: boolean;

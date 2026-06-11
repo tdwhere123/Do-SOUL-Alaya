@@ -18,12 +18,12 @@ import {
   type SoulListPendingEdgeProposalsResponse,
   type SoulProposeEdgeResponse
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "./errors.js";
-import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
+import { CoreError } from "../errors.js";
+import type { EventPublisher, EventPublisherInput } from "../event-publisher.js";
 import type { PathCandidateSink } from "./path-candidate-sink.js";
 import type { PathFailureHealthInboxPort } from "./path-failure-health-inbox.js";
 import type { PathMintOutcome } from "./path-relation-proposal-service.js";
-import { parseObjectId } from "./shared/validators.js";
+import { parseObjectId } from "../shared/validators.js";
 
 export interface EdgeProposalMemoryRepoPort {
   findById(objectId: string): Promise<{ readonly object_id: string; readonly workspace_id: string } | null>;

@@ -25,7 +25,7 @@
 //
 // see also: apps/core-daemon/src/mcp-memory-tool-handler.ts crossLinkRecalledMemories
 //   + onCoUsage (the live report_context_usage trigger this stands in for)
-// see also: packages/core/src/path-relation-proposal-service.ts onCoUsage /
+// see also: packages/core/src/path-graph/path-relation-proposal-service.ts onCoUsage /
 //   accrueCoOccurrence / proposeCoRecalled / CO_RECALLED_SEED_PROFILE
 // see also: apps/bench-runner/src/harness/daemon.ts accrueSessionCoRecall (sink call)
 //
@@ -51,7 +51,7 @@
 // member, while graph_expansion reaches both. Mis-designing R2 on graph_support
 // would silently miss every source-side sibling.
 // see also: packages/core/src/recall-service.ts collectPathGraphNeighbors
-// see also: packages/core/src/graph-explore-service.ts findInboundRecallEligiblePaths
+// see also: packages/core/src/path-graph/graph-explore-service.ts findInboundRecallEligiblePaths
 
 // anti-patterns-lint-allow: cap rationale, not a consumer-less constant.
 // invariant: the warm-up replays at most this many gold-blind adjacent member

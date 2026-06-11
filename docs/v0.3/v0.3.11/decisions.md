@@ -173,7 +173,7 @@ cache 缺失，必须由 parent supply/fetch 后再跑。
 ## D16 — B-2 当前是 rule heuristic，Phase B 重做 LLM 真版（2026-05-26）
 
 **背景**：Phase 0 codex worktree audit 揭示
-`packages/core/src/edge-auto-producer-service.ts:224-238` 的 B-2 实现是
+`packages/core/src/path-graph/edge-auto-producer-service.ts:224-238` 的 B-2 实现是
 rule-based confidence（`confidence(features, 0.55, ..., 0.85)`），不是
 `phase-6-graph-plan.md §B` + D8 / D11 锁定的 LLM pair classifier。
 finding B0-2 / I0-7 关联。

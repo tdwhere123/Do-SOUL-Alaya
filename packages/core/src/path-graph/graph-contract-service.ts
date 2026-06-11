@@ -7,7 +7,7 @@ import {
   type SoulPathGraphStrengthTrendDirection,
   type SoulPathGraphTrendDirection
 } from "@do-soul/alaya-protocol";
-import { deepFreeze } from "./shared/deep-freeze.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
 
 const GRAPH_CONTRACT_SNAPSHOT_HISTORY_LIMIT = 5;
 

@@ -9,10 +9,10 @@ import {
   AUTO_ACCEPT_REVIEWER_IDENTITY,
   EdgeProposalService,
   type EdgeProposalRepoPort
-} from "../../edge-proposal-service.js";
+} from "../../path-graph/edge-proposal-service.js";
 import type { EventPublisher } from "../../event-publisher.js";
-import type { PathCandidateSink } from "../../path-candidate-sink.js";
-import type { PathMintOutcome } from "../../path-relation-proposal-service.js";
+import type { PathCandidateSink } from "../../path-graph/path-candidate-sink.js";
+import type { PathMintOutcome } from "../../path-graph/path-relation-proposal-service.js";
 
 describe("EdgeProposalService", () => {
   it("creates a pending proposal without writing a durable graph edge", async () => {

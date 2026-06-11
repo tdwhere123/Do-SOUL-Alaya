@@ -15,7 +15,7 @@ import {
   type PathRelationProposalEventPublisherPort,
   type PathRelationProposalRepoPort,
   type SubmitCandidateInput
-} from "../../path-relation-proposal-service.js";
+} from "../../path-graph/path-relation-proposal-service.js";
 
 interface CounterRow {
   count: number;

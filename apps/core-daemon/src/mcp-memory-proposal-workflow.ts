@@ -313,7 +313,7 @@ export interface McpMemoryProposalWorkflowDependencies {
   // B3's gate before it lands. Wired by the daemon to
   // PathRelationProposalService.validateProposedObjectAnchors; left undefined
   // only in unit tests that do not exercise path_relation proposals.
-  // see also: packages/core/src/path-relation-proposal-service.ts validateProposedObjectAnchors
+  // see also: packages/core/src/path-graph/path-relation-proposal-service.ts validateProposedObjectAnchors
   readonly objectAnchorGate?: {
     validateProposedObjectAnchors(input: {
       readonly workspaceId: string;

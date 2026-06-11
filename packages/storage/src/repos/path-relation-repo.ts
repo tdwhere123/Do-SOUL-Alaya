@@ -508,7 +508,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
   // `findByAnchor` (source+target union) this scopes to the inbound half, which
   // recall graph_support needs to count paths arriving at a candidate memory.
   // No lifecycle filter is applied here; callers apply isPathRecallEligible.
-  // see also: packages/core/src/graph-explore-service.ts countInbound*.
+  // see also: packages/core/src/path-graph/graph-explore-service.ts countInbound*.
   public async findByTargetAnchor(
     workspaceId: string,
     anchorRef: PathAnchorRef

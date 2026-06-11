@@ -120,7 +120,7 @@ export function normalizeGraphSupport(count: number): number {
   // Negative-path suppression is handled separately in the governance-gated
   // active-suppression channel (recall-service.ts), not here. Lifting the upper
   // cap needs a co-evaluated bench sweep.
-  // see also: packages/core/src/graph-explore-service.ts (countInbound* positive-only filter)
+  // see also: packages/core/src/path-graph/graph-explore-service.ts (countInbound* positive-only filter)
   return Math.min(Math.max(count, 0), 3) / 3;
 }
 

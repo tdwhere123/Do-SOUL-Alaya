@@ -27,7 +27,7 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { PathRelationProposalService } from "../../path-relation-proposal-service.js";
+import { PathRelationProposalService } from "../../path-graph/path-relation-proposal-service.js";
 import { RecallService, type RecallServiceDependencies } from "../../recall-service.js";
 
 const databases = new Set<StorageDatabase>();

@@ -199,8 +199,8 @@ export interface GraphEdgeCreationPort {
 // cannot import @do-soul/alaya-core (invariants §6), so the seed shape
 // crosses the port boundary structurally. governanceClass is clamped to the
 // auto-build ceiling by submitCandidate downstream.
-// see also: packages/core/src/path-candidate-sink.ts PathCandidateSink.
-// see also: packages/core/src/path-relation-proposal-service.ts seed profiles.
+// see also: packages/core/src/path-graph/path-candidate-sink.ts PathCandidateSink.
+// see also: packages/core/src/path-graph/path-relation-proposal-service.ts seed profiles.
 
 // invariant: structural mirror of core's PathMintOutcome (@do-soul/alaya-soul
 // cannot import @do-soul/alaya-core, invariants §6, so the four-state crosses
@@ -212,7 +212,7 @@ export interface GraphEdgeCreationPort {
 // write is unavailable, the already-durable enrich_pending marker makes the
 // failure retryable in the BULK_ENRICH worker instead of terminally failing a
 // partially materialized signal.
-// see also: packages/core/src/path-relation-proposal-service.ts PathMintOutcome.
+// see also: packages/core/src/path-graph/path-relation-proposal-service.ts PathMintOutcome.
 export type PathCandidateMintOutcome = "applied" | "already_present" | "rejected" | "failed";
 export type SignalRefTransientFailureMode = "durable_proposal" | "throw_for_retry";
 

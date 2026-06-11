@@ -43,7 +43,7 @@ export const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdg
 // over-amplifying. Negative / neutral kinds never reach this map because the
 // traversal only follows isPathRecallEligible (recall_bias > 0) paths.
 // see also: packages/protocol/src/soul/memory-graph.ts:EDGE_TYPE_RECALL_MODEL
-// see also: packages/core/src/path-relation-proposal-service.ts seed catalog
+// see also: packages/core/src/path-graph/path-relation-proposal-service.ts seed catalog
 const PATH_ASSOCIATIVE_RELATION_KIND_FALLBACK: RecallGraphExpansionTrackedEdgeType = "recalls";
 // invariant: the earned multi-session fan-in carrier relation_kind. Mirrors
 // path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE.relationKind — the

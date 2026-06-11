@@ -357,7 +357,7 @@ consumers. Closes Cat-F + the L2 portion of Cat-G + Cat-I.2 / I.3.
   interface) THEN `typescript-pro` (to implement). Orchestrator chains
   them; strategist returns a design as input to the implementer.
 - **Write ownership:**
-  - new `packages/core/src/path-activation-candidate-producer.ts`
+  - new `packages/core/src/path-graph/path-activation-candidate-producer.ts`
   - `packages/core/src/manifestation-resolver.ts` (extension)
   - `apps/core-daemon/src/index.ts` (wire producer)
   - tests
@@ -379,8 +379,8 @@ consumers. Closes Cat-F + the L2 portion of Cat-G + Cat-I.2 / I.3.
 
 - **Owner:** `typescript-pro`
 - **Write ownership:**
-  - new `packages/core/src/path-manifestation-policy.ts`
-  - `packages/core/src/path-plasticity-service.ts` (extend plan output
+  - new `packages/core/src/path-graph/path-manifestation-policy.ts`
+  - `packages/core/src/path-plasticity/service.ts` (extend plan output
     with promotion plan-step + `stability_class` transitions)
   - `packages/core/src/manifestation-resolver.ts` (consume policy)
   - new tests

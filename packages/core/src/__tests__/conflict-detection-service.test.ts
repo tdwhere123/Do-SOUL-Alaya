@@ -5,7 +5,7 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { ConflictDetectionService } from "../conflict-detection-service.js";
-import type { PathMintOutcome } from "../path-relation-proposal-service.js";
+import type { PathMintOutcome } from "../path-graph/path-relation-proposal-service.js";
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   const base: MemoryEntry = {
@@ -91,7 +91,7 @@ describe("ConflictDetectionService", () => {
   // soul.propose_edge + B-1 cross-link) creates an edge_proposals row and does
   // NOT call submitCandidate at propose time — locked in
   // edge-proposal-service.test.ts ("creates a pending proposal ...").
-  // see also: packages/core/src/edge-proposal-service.ts AUTO_ACCEPT_FLOOR_BY_TRIGGER;
+  // see also: packages/core/src/path-graph/edge-proposal-service.ts AUTO_ACCEPT_FLOOR_BY_TRIGGER;
   //   docs/v0.3/v0.3.11/kpi-targets.md K4.1.
   it("B-4 direct-materializes a governed weak path (rule attention_only / llm recall_allowed), never edge_proposals, never strictly_governed", async () => {
     const ruleExisting = createMemoryEntry({ object_id: "mem-A", content: "I prefer dark roast coffee." });

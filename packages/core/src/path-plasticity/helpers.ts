@@ -10,7 +10,7 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import { classifyPathImportance } from "../importance-gate.js";
-import type { PromotionPlan } from "../path-manifestation-policy.js";
+import type { PromotionPlan } from "../path-graph/path-manifestation-policy.js";
 import { PATH_PLASTICITY_CONSTANTS } from "./constants.js";
 import type {
   MutableObjectUsageCounts,
@@ -97,7 +97,7 @@ export function isDormantPath(path: Readonly<PathRelation>): boolean {
 }
 
 // invariant: recall_bias sign is the path-family discriminator for dormancy vs retirement.
-// see also: packages/core/src/path-relation-proposal-service.ts:CO_RECALLED_SEED_PROFILE
+// see also: packages/core/src/path-graph/path-relation-proposal-service.ts:CO_RECALLED_SEED_PROFILE
 export function isPositiveAssociativeFamily(path: Readonly<PathRelation>): boolean {
   return path.effect_vector.recall_bias > 0;
 }
@@ -155,7 +155,7 @@ export function withLifecycleStatus(
 }
 
 // invariant: PromotionPlan rewrites only stability_class and governance_class.
-// see also: packages/core/src/path-manifestation-policy.ts:PromotionPlan
+// see also: packages/core/src/path-graph/path-manifestation-policy.ts:PromotionPlan
 export function buildUpdatesWithPromotion(params: {
   readonly path: Readonly<PathRelation>;
   readonly nextPlasticity: Readonly<PathPlasticityState>;
