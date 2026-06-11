@@ -103,7 +103,7 @@ export interface DormantDispositionCandidate {
 // A genuine error (shape precondition / missing port / storage fault) is NOT a
 // skip and still rejects loud. Mirrors DormantDemotionOutcome.
 // see also: apps/core-daemon/src/forget-disposition-ports.ts createTombstoneDispositionSweepPort,
-// packages/core/src/memory-service.ts autonomousTombstone.
+// packages/core/src/memory-service/service.ts:MemoryService.autonomousTombstone.
 export type DispositionSweepOutcome =
   | { readonly status: "tombstoned" }
   | { readonly status: "skipped"; readonly reason: string };
