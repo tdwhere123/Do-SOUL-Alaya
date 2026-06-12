@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createWarnLogger, reconcileBootstrapPathsForAllWorkspaces } from "../daemon-runtime-helpers.js";
+import { createWarnLogger, reconcileBootstrapPathsForAllWorkspaces } from "../../runtime/daemon-runtime-helpers.js";
 
 describe("createWarnLogger (pino-backed)", () => {
   afterEach(() => {

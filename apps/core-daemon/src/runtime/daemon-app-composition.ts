@@ -1,4 +1,4 @@
-import { createApp, type CoreDaemonLifecycleState, type CoreDaemonServices, type RequestProtectionConfig } from "./app.js";
+import { createApp, type CoreDaemonLifecycleState, type CoreDaemonServices, type RequestProtectionConfig } from "../app.js";
 
 type StartupStepLike = Readonly<{ readonly step: string }>;
 

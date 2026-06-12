@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
-import { createRuntimeNotifier } from "../runtime-notifier.js";
+import { createRuntimeNotifier } from "../../runtime/runtime-notifier.js";
 
 describe("RuntimeNotifier", () => {
   it("dispatches entries to entry and workspace listeners", async () => {

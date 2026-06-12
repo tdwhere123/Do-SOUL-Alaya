@@ -6,7 +6,7 @@ import {
   buildOperationAuditPath,
   type AlayaConfigPaths
 } from "./cli/config-files.js";
-import { parseStorageDbPathFromToml, resolveConfiguredDatabasePath } from "./storage-config.js";
+import { parseStorageDbPathFromToml, resolveConfiguredDatabasePath } from "./runtime/index.js";
 
 export type OperationName = "backup" | "export" | "import";
 

@@ -19,7 +19,7 @@ import {
   createOptionalMemoryEmbeddingRepo,
   readConfigEnvValue,
   readNonEmptyEnv
-} from "./daemon-runtime-support.js";
+} from "./runtime/index.js";
 import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
 
 export function createDaemonEmbeddingRuntime(input: {

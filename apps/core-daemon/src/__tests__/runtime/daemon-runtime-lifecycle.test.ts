@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createCoreDaemonLifecycleState,
   createDaemonLifecycleControls
-} from "../daemon-runtime-lifecycle.js";
+} from "../../runtime/daemon-runtime-lifecycle.js";
 
 describe("daemon lifecycle controls", () => {
   it("starts Garden services once and triggers the startup cleanup pass", () => {

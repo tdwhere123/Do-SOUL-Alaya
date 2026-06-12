@@ -5,7 +5,7 @@
     "vendor/**",
     "dist/**",
     "coverage/**",
-    "apps/core-daemon/src/worker-runtime-wiring.ts",
+    "apps/core-daemon/src/runtime/worker-runtime-wiring.ts",
     "scripts/analyze-recall-bias.mjs",
     "scripts/append-bench-degradation-backlog.mjs",
     "scripts/compute-bench-quality-metrics.mjs",

@@ -26,7 +26,7 @@ import {
   SqliteToolSpecRepo,
   initDatabase
 } from "@do-soul/alaya-storage";
-import { createRuntimeNotifier } from "../../runtime-notifier.js";
+import { createRuntimeNotifier } from "../../runtime/runtime-notifier.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRemoteDaemonOptInEnabled, resolveDaemonHostFromEnv } from "../server-options.js";
+import { isRemoteDaemonOptInEnabled, resolveDaemonHostFromEnv } from "../../runtime/server-options.js";
 
 type EnvLike = Record<string, string | undefined>;
 

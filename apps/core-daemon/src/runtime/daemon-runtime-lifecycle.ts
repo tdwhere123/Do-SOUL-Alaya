@@ -1,7 +1,7 @@
 import { serve, type ServerType } from "@hono/node-server";
-import type { CoreDaemonLifecycleState } from "./app.js";
+import type { CoreDaemonLifecycleState } from "../app.js";
 import { resolveDaemonHostFromEnv } from "./server-options.js";
-import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./index.js";
+import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./daemon-runtime-types.js";
 
 type DaemonAppFetch = Parameters<typeof serve>[0]["fetch"];
 

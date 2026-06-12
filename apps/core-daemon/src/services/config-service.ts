@@ -37,7 +37,7 @@ import {
   loadConfigEnv,
   readConfigEnvValue,
   readNonEmptyEnv
-} from "../daemon-runtime-support.js";
+} from "../runtime/index.js";
 import {
   ALAYA_GARDEN_PROVIDER_KIND_ENV,
   ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV,

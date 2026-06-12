@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { AlayaConfigPaths } from "./cli/config-files.js";
+import type { AlayaConfigPaths } from "../cli/config-files.js";
 
 export interface ResolveConfiguredDatabasePathOptions {
   readonly env?: NodeJS.ProcessEnv;

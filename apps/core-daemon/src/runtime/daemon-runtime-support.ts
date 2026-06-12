@@ -46,13 +46,13 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createWarnLogger } from "./daemon-runtime-helpers.js";
-import type { RequestProtectionConfig } from "./app.js";
-import type { AlayaConfigPaths } from "./cli/config-files.js";
+import type { RequestProtectionConfig } from "../app.js";
+import type { AlayaConfigPaths } from "../cli/config-files.js";
 import type { DaemonStartupStepRecord } from "./daemon-runtime-types.js";
-import { parseEnv } from "./services/env-file-service.js";
+import { parseEnv } from "../services/env-file-service.js";
 import { resolveConfiguredDatabasePath } from "./storage-config.js";
-import { isNodeErrorWithCode } from "./services/private-file-service.js";
-import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
+import { isNodeErrorWithCode } from "../services/private-file-service.js";
+import { resolveSecretRef, type ResolveSecretError } from "../secrets.js";
 import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 
 export const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";

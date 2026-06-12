@@ -609,9 +609,9 @@ vi.mock("../../app.js", () => ({
   createApp: hoisted.createApp
 }));
 
-vi.mock("../../daemon-runtime-support.js", async () => {
+vi.mock("../../runtime/daemon-runtime-support.js", async () => {
   const actual = await vi.importActual<Record<string, unknown>>(
-    "../../daemon-runtime-support.js"
+    "../../runtime/daemon-runtime-support.js"
   );
   const loadConfigEnvDefault = actual["loadConfigEnv"] as (
     envPath: string
@@ -642,7 +642,7 @@ vi.mock("../../budget-wiring.js", () => ({
   createBudgetProposalPort: vi.fn(() => ({}))
 }));
 
-vi.mock("../../files-data-dir.js", () => ({
+vi.mock("../../runtime/files-data-dir.js", () => ({
   resolveCoreDaemonFilesDirectory: vi.fn(() => "/tmp/alaya-files")
 }));
 

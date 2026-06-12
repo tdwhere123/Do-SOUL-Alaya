@@ -5,8 +5,8 @@ import {
   ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV,
   resolveEdgeClassifyWiring,
   readOfficialGardenSecretRef
-} from "../daemon-runtime-support.js";
-import { resolveGardenOpenAiCredential } from "../garden-credential.js";
+} from "../../runtime/daemon-runtime-support.js";
+import { resolveGardenOpenAiCredential } from "../../garden-credential.js";
 
 /**
  * C1 wiring tests — verify the env readers honour the new
@@ -111,9 +111,8 @@ describe("Garden compute env readers (C1)", () => {
 // decision index.ts uses to choose cloud llmPort vs the host-worker EDGE_CLASSIFY
 // defer queue vs heuristic-only. A regression that flips the default back to a
 // synchronous cloud call changes this function's output and is caught here.
-// see also:
-//   apps/core-daemon/src/daemon-runtime-support.ts resolveEdgeClassifyWiring
-//   apps/core-daemon/src/index.ts edgeClassifyWiring consumption
+// see also: apps/core-daemon/src/runtime/daemon-runtime-support.ts:resolveEdgeClassifyWiring
+// see also: apps/core-daemon/src/index.ts:edgeClassifyWiring
 describe("resolveEdgeClassifyWiring (K4.5 zero-cloud default)", () => {
   it("DEFAULT (no opt-in env, provider_kind=host_worker) -> host_worker_defer, no cloud llm", () => {
     const wiring = resolveEdgeClassifyWiring(

@@ -3,7 +3,7 @@ import {
   classifySoulGraphOriginKind,
   createSoulGraphService,
   deriveDomainTagSummary
-} from "../daemon-runtime-support.js";
+} from "../runtime/daemon-runtime-support.js";
 import { MemoryGovernanceEventType, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
 import type {
   SqliteMemoryEntryRepo,
@@ -11,8 +11,9 @@ import type {
   PathRelationRepo
 } from "@do-soul/alaya-storage";
 
-// Mirrors the non-exported MemoryEntryRecord alias in
-// daemon-runtime-support.ts (the row shape findByWorkspaceId returns).
+// invariant: keep this test-local row-shape alias aligned with the daemon's
+// runtime memory-entry rows so fixture records match findByWorkspaceId output.
+// see also: apps/core-daemon/src/runtime/daemon-runtime-support.ts:MemoryEntryRecord
 type MemoryEntryRecord = Awaited<ReturnType<SqliteMemoryEntryRepo["findByWorkspaceId"]>>[number];
 
 type SoulGraphProposalRepo = Pick<

@@ -14,7 +14,7 @@ import {
   resetToolRuntimeWiringState
 } from "./tool-runtime-wiring-fixture.js";
 import { getBuiltinConversationToolSpecs } from "../../mcp/builtin-conversation-tool-specs.js";
-import type { AlayaDaemonRuntime } from "../../daemon-runtime-types.js";
+import type { AlayaDaemonRuntime } from "../../runtime/daemon-runtime-types.js";
 
 const hoisted = getToolRuntimeWiringFixture();
 const activeRuntimes: Array<AlayaDaemonRuntime> = [];
@@ -990,7 +990,7 @@ async function bootDaemonRuntime(): Promise<AlayaDaemonRuntime> {
 async function bootStartedDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const runtime = await bootDaemonRuntime();
   // @anchor test-port-zero — OS-assigned port avoids parallel bind race.
-  // see also: apps/core-daemon/src/daemon-runtime-lifecycle.ts startHttpServer.
+  // see also: apps/core-daemon/src/runtime/daemon-runtime-lifecycle.ts:startHttpServer
   await runtime.startHttpServer({ port: 0 });
   return runtime;
 }

@@ -139,41 +139,47 @@ import {
   type GraphEdgeCreationPort,
   type PathRelationProposalPort
 } from "@do-soul/alaya-soul";
-import { createCoreDaemonApp } from "./daemon-app-composition.js";
 import { createDaemonEmbeddingRuntime } from "./daemon-embedding-runtime.js";
 import { createDaemonMcpMemoryToolHandler } from "./mcp-memory/daemon-handler.js";
 import { createAttachSurfaceRegistrar } from "./attach-surface-registrar.js";
 import { createBudgetProposalPort } from "./budget-wiring.js";
-import { defaultBootstrappingTemplates, defaultCanonicalAliasMap } from "./daemon-defaults.js";
 import { bootstrapDaemonMcpTooling } from "./mcp/daemon-mcp-tooling.js";
 import {
-  createManifestationBudgetConfigProvider,
-  createWarnLogger,
-  reconcileBootstrapPathsForAllWorkspaces
-} from "./daemon-runtime-helpers.js";
-import { createCoreDaemonLifecycleState, createDaemonLifecycleControls } from "./daemon-runtime-lifecycle.js";
-import {
+  createCoreDaemonApp,
+  createCoreDaemonLifecycleState,
+  createDaemonLifecycleControls,
   createEngineBindingTester,
   createGardenBacklogThresholds,
   createGlobalMemoryRecallCachePort,
   createGlobalMemoryRecallPort,
   createGlobalMemoryRouteService,
+  createManifestationBudgetConfigProvider,
   createOptionalGlobalMemoryRecallCacheRepo,
   createOptionalGlobalMemoryRepo,
   createRequestProtection,
+  createRuntimeNotifier,
   createSoulGraphService,
+  createWarnLogger,
+  defaultBootstrappingTemplates,
+  defaultCanonicalAliasMap,
+  isRemoteDaemonOptInEnabled,
   listServerHardConstraints,
   loadConfigEnv,
   patchArbitrationClaimService,
   recordStartupStep,
+  reconcileBootstrapPathsForAllWorkspaces,
+  resolveCoreDaemonFilesDirectory,
   resolveDatabasePath,
-  resolveEdgeClassifyWiring
-} from "./daemon-runtime-support.js";
+  resolveEdgeClassifyWiring,
+  type AlayaDaemonListenOptions,
+  type AlayaDaemonRuntime,
+  type AlayaDaemonServer,
+  type DaemonStartupStepRecord
+} from "./runtime/index.js";
 import { createReconciliationLlmDecisionPort } from "./reconciliation-llm-decision.js";
 import { createEdgeAutoProducerLlmPort } from "./edge-auto-producer-llm-adapter.js";
 import { createEdgeClassifyQueueAdapter } from "./edge-classify-queue-adapter.js";
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
-import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
 import {
   createTombstoneDispositionSweepPort,
   createTombstoneGcPort
@@ -187,9 +193,7 @@ import {
 import { SqliteHandoffGapAdapter } from "./handoff-gap-adapter.js";
 import { createManifestationContextLensAssembler } from "./manifestation-context-lens-assembler.js";
 import { parseZeroDayPoliciesJson } from "./zero-day-policies.js";
-import { createRuntimeNotifier } from "./runtime-notifier.js";
 import { createSecurityStatusBootstrapServices } from "./security-status-bootstrap.js";
-import { isRemoteDaemonOptInEnabled } from "./server-options.js";
 import { createConfigService } from "./services/config-service.js";
 import { createEnvironmentStatusService } from "./services/environment-status-service.js";
 import { GardenComputeProviderResolver } from "./services/garden-compute-provider-resolver.js";
@@ -208,14 +212,8 @@ import { SoulTopologyAuditService } from "./services/soul-topology-audit-service
 import { SqliteWorkspaceEngineConfigRepo } from "./services/workspace-engine-config-repo.js";
 import { createTrustStateRecorder } from "./trust-state.js";
 import { getBuiltinConversationToolSpecs } from "./mcp/builtin-conversation-tool-specs.js";
-import type {
-  AlayaDaemonListenOptions,
-  AlayaDaemonRuntime,
-  AlayaDaemonServer,
-  DaemonStartupStepRecord
-} from "./daemon-runtime-types.js";
 
-export type { AlayaDaemonListenOptions, AlayaDaemonRuntime, AlayaDaemonRuntimeServices, AlayaDaemonServer, DaemonStartupStepRecord } from "./daemon-runtime-types.js";
+export type { AlayaDaemonListenOptions, AlayaDaemonRuntime, AlayaDaemonRuntimeServices, AlayaDaemonServer, DaemonStartupStepRecord } from "./runtime/index.js";
 export { resolveSecretRef } from "./secrets.js";
 export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secrets.js";
 
@@ -888,7 +886,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // is the PURE source of truth for cloud-llm vs host-worker-defer vs
   // heuristic-only; index.ts must derive both branches from it so the
   // zero-cloud-by-default guarantee cannot drift between the daemon and its
-  // regression test. see also: daemon-runtime-support.ts resolveEdgeClassifyWiring.
+  // regression test.
+  // see also: apps/core-daemon/src/runtime/daemon-runtime-support.ts:resolveEdgeClassifyWiring
   const edgeClassifyWiring = resolveEdgeClassifyWiring(
     process.env,
     sharedGardenComputeConfig

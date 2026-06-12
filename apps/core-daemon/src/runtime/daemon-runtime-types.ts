@@ -1,13 +1,13 @@
-import type { RequestProtectionConfig } from "./app.js";
+import type { RequestProtectionConfig } from "../app.js";
 import type { createCoreDaemonApp } from "./daemon-app-composition.js";
 import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
-import type { AppConfigService } from "./services/config-service.js";
-import type { EmbeddingStatusService } from "./services/embedding-status-service.js";
-import type { EnvironmentStatusService } from "./services/environment-status-service.js";
-import type { GraphHealthService } from "./services/graph-health-service.js";
-import type { McpMemoryToolHandler } from "./mcp-memory/tool-handler.js";
-import type { RecallUtilizationService } from "./services/recall-utilization-service.js";
-import type { TrustStateRecorder } from "./trust-state.js";
+import type { AppConfigService } from "../services/config-service.js";
+import type { EmbeddingStatusService } from "../services/embedding-status-service.js";
+import type { EnvironmentStatusService } from "../services/environment-status-service.js";
+import type { GraphHealthService } from "../services/graph-health-service.js";
+import type { McpMemoryToolHandler } from "../mcp-memory/tool-handler.js";
+import type { RecallUtilizationService } from "../services/recall-utilization-service.js";
+import type { TrustStateRecorder } from "../trust-state.js";
 import type {
   EmbeddingRecallService,
   PathRelationProposalService,
@@ -43,7 +43,9 @@ export interface AlayaDaemonRuntime {
   // ONLY EMBEDDING_BACKFILL, not the full fire-and-forget Garden background
   // pass. The bench embedding warmup uses this to reach embedding readiness
   // without dragging BULK_ENRICH / path-snapshot / consolidation into a
-  // pre-recall gate. see also: daemon-runtime-lifecycle.ts, garden-runtime.ts.
+  // pre-recall gate.
+  // see also: apps/core-daemon/src/runtime/daemon-runtime-lifecycle.ts:runGardenEmbeddingBackfillPass
+  // see also: apps/core-daemon/src/garden-runtime.ts:runEmbeddingBackfillPass
   runGardenEmbeddingBackfillPass(workspaceId: string): Promise<void>;
   startHttpServer(options?: AlayaDaemonListenOptions): Promise<AlayaDaemonServer>;
   shutdown(): Promise<void>;

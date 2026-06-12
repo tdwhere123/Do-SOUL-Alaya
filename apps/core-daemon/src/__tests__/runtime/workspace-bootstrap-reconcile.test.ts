@@ -14,7 +14,7 @@ import {
   SqliteRunRepo,
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
-import { defaultBootstrappingTemplates } from "../daemon-defaults.js";
+import { defaultBootstrappingTemplates } from "../../runtime/daemon-defaults.js";
 
 const noopRuntimeNotifier = {
   notify: vi.fn<(runId: string, event: unknown) => void>(),
