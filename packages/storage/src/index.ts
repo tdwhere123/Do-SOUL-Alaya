@@ -42,7 +42,7 @@ export {
   SqliteGlobalMemoryRepo,
   type GlobalMemoryRepo,
   type GlobalMemoryRepoListFilters
-} from "./repos/global-memory-repo.js";
+} from "./repos/memory/index.js";
 export {
   SqliteKarmaEventRepo,
   type KarmaEvent,
@@ -104,7 +104,7 @@ export {
 export {
   SqliteStrongRefRepo,
   type StrongRefRepo
-} from "./repos/strong-ref-repo.js";
+} from "./repos/memory/index.js";
 export {
   SqlitePathRelationRepo,
   type PathRelationRepo
@@ -203,13 +203,13 @@ export {
   type GlobalMemoryRecallCacheRecord,
   type GlobalMemoryRecallCacheRepo,
   type GlobalMemoryRecallClassification
-} from "./repos/global-memory-recall-cache-repo.js";
+} from "./repos/memory/index.js";
 export {
   SqliteMemoryEmbeddingRepo,
   type MemoryEmbeddingRecord,
   type MemoryEmbeddingMetadata,
   type MemoryEmbeddingRepo
-} from "./repos/memory-embedding-repo.js";
+} from "./repos/memory/index.js";
 export {
   SqliteFileRepo,
   type FileRepo

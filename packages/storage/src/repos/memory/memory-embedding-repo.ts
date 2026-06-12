@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 
 export interface MemoryEmbeddingRecord {
   readonly object_id: string;

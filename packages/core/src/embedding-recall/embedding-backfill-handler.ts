@@ -14,7 +14,7 @@ export interface EmbeddingBackfillMemoryRepoPort {
 // stale decision needs, but NOT the embedding vector. Derived from
 // EmbeddingVectorRecord so the field set never drifts; matches the storage
 // port's MemoryEmbeddingMetadata shape structurally.
-// see also: packages/storage/src/repos/memory-embedding-repo.ts MemoryEmbeddingMetadata
+// see also: packages/storage/src/repos/memory/memory-embedding-repo.ts MemoryEmbeddingMetadata
 export type EmbeddingBackfillMetadata = Omit<EmbeddingVectorRecord, "embedding">;
 
 export interface EmbeddingBackfillRepoPort {
@@ -187,7 +187,7 @@ export class EmbeddingBackfillHandler {
     // inside the upsert transaction and refuses a vector whose content_hash no
     // longer matches, so a per-batch re-fetch here would only duplicate that
     // guard at O(n) hydration per batch (O(n^2) over the corpus).
-    // see also: packages/storage/src/repos/memory-embedding-repo.ts guardedUpsertTransaction
+    // see also: packages/storage/src/repos/memory/memory-embedding-repo.ts guardedUpsertTransaction
     const snapshotMemories = new Map(
       initialHotMemories.map((memory) => [memory.object_id, memory] as const)
     );
@@ -210,7 +210,7 @@ export class EmbeddingBackfillHandler {
     // no two upserts interleave mid-transaction even though their embeddings
     // were fetched concurrently — so aggregate counts and audit ordering stay
     // deterministic.
-    // see also: packages/storage/src/repos/memory-embedding-repo.ts guardedUpsertTransaction
+    // see also: packages/storage/src/repos/memory/memory-embedding-repo.ts guardedUpsertTransaction
     const concurrencyWindow = Math.max(1, Math.min(this.batchConcurrency, batches.length));
     const inFlight: (Promise<ConcurrentBatchResult> | null)[] = [];
     const startBatch = (batch: readonly EmbeddingBackfillCandidate[]): Promise<ConcurrentBatchResult> => {

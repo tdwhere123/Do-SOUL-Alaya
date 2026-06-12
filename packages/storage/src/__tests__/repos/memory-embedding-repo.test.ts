@@ -16,7 +16,7 @@ import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
 import type {
   MemoryEmbeddingMetadata,
   MemoryEmbeddingRecord
-} from "../../repos/memory-embedding-repo.js";
+} from "../../repos/memory/memory-embedding-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
