@@ -6,14 +6,14 @@ import {
   writePlatformKeychainSecret,
   type KeychainSubprocessResult,
   type KeychainSubprocessRunner
-} from "../secrets/keychain/index.js";
-import { checkLinuxKeychainAvailable, readLinuxKeychainSecret, writeLinuxKeychainSecret } from "../secrets/keychain/linux.js";
-import { readMacosKeychainSecret, writeMacosKeychainSecret } from "../secrets/keychain/macos.js";
+} from "../../secrets/keychain/index.js";
+import { checkLinuxKeychainAvailable, readLinuxKeychainSecret, writeLinuxKeychainSecret } from "../../secrets/keychain/linux.js";
+import { readMacosKeychainSecret, writeMacosKeychainSecret } from "../../secrets/keychain/macos.js";
 import {
   checkWindowsKeychainAvailable,
   readWindowsKeychainSecret,
   writeWindowsKeychainSecret
-} from "../secrets/keychain/windows.js";
+} from "../../secrets/keychain/windows.js";
 
 describe("keychain adapters", () => {
   it("builds the macOS security argv and maps success", () => {

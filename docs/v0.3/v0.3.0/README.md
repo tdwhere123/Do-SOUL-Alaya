@@ -24,7 +24,7 @@ runs strictly sequential. Group B (host autonomy evidence, `#BL-037`
    `apps/core-daemon/src/__tests__/host-autonomy-replay.test.ts`,
    new fixtures under `docs/v0.3/v0.3.0/host-autonomy-fixtures/`, the
    attach/profile path, and handbook docs — no overlap with group
-   A's `secrets.ts` / `cli/` / `packages/protocol/` blast radius.
+   A's `secrets/index.ts` / `cli/` / `packages/protocol/` blast radius.
    They may proceed in parallel with group A; the main thread runs
    them sequentially for review-loop simplicity.
 3. **Only slice 6 edits the readiness / §25 / version layer.**
@@ -45,7 +45,7 @@ runs strictly sequential. Group B (host autonomy evidence, `#BL-037`
 5. **`SecretRefReader` widening.** Slice 1 adds a non-optional
    `readKeychain(service, account)` to `SecretRefReader`. That makes
    the compiler flag every hand-constructed reader; slice 1 sweeps
-   them (`secrets.ts`, `secrets.test.ts`, `daemon-runtime-support.ts`,
+   them (`secrets/index.ts`, `secrets/index.test.ts`, `daemon-runtime-support.ts`,
    `index.ts`, `garden-credential.ts`, `daemon-embedding-runtime.ts`,
    `cli/register.ts`, `cli/install.ts`, test stubs). `SecretRefReader`
    has no MCP/EventLog/config surface, so this internal-type widening

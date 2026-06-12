@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../cli/bridge.js";
 import { createDoctorCommand } from "../cli/doctor.js";
 import { createInstallCommand } from "../cli/install.js";
-import { resolveSecretRef } from "../secrets.js";
+import { resolveSecretRef } from "../secrets/index.js";
 
 describe("install keychain migration", () => {
   it("writes a dedicated Garden keychain ref while preserving the existing embedding secret ref", async () => {

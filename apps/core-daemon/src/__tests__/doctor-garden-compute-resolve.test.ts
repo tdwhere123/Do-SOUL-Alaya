@@ -4,8 +4,8 @@ const hoisted = vi.hoisted(() => ({
   resolveSecretRef: vi.fn()
 }));
 
-vi.mock("../secrets.js", async () => {
-  const actual = await vi.importActual<typeof import("../secrets.js")>("../secrets.js");
+vi.mock("../secrets/index.js", async () => {
+  const actual = await vi.importActual<typeof import("../secrets/index.js")>("../secrets/index.js");
   return {
     ...actual,
     resolveSecretRef: hoisted.resolveSecretRef

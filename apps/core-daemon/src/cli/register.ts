@@ -43,7 +43,7 @@ import {
   resolveTrustedCliRunId,
   resolveCliWorkspaceContext
 } from "./workspace-context.js";
-import { resolveSecretRef, type ResolvedSecret, type ResolveSecretError } from "../secrets.js";
+import { resolveSecretRef, type ResolvedSecret, type ResolveSecretError } from "../secrets/index.js";
 import {
   parseSecretRefKeychainTarget,
   SECRET_REF_ENV_PREFIX,

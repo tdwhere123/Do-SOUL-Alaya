@@ -20,7 +20,7 @@ import {
   readConfigEnvValue,
   readNonEmptyEnv
 } from "./runtime/index.js";
-import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
+import { resolveSecretRef, type ResolveSecretError } from "./secrets/index.js";
 
 export function createDaemonEmbeddingRuntime(input: {
   readonly database: StorageDatabase;

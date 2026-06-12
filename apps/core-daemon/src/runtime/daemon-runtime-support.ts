@@ -52,7 +52,7 @@ import type { DaemonStartupStepRecord } from "./daemon-runtime-types.js";
 import { parseEnv } from "../services/env-file-service.js";
 import { resolveConfiguredDatabasePath } from "./storage-config.js";
 import { isNodeErrorWithCode } from "../services/private-file-service.js";
-import { resolveSecretRef, type ResolveSecretError } from "../secrets.js";
+import { resolveSecretRef, type ResolveSecretError } from "../secrets/index.js";
 import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 
 export const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";

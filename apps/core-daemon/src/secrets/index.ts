@@ -6,7 +6,7 @@ import {
   SECRET_REF_FILE_PREFIX,
   SECRET_REF_KEYCHAIN_PREFIX
 } from "@do-soul/alaya-protocol";
-import { readPlatformKeychainSecret, type KeychainReadError } from "./secrets/keychain/index.js";
+import { readPlatformKeychainSecret, type KeychainReadError } from "./keychain/index.js";
 
 export type SecretRef = string;
 

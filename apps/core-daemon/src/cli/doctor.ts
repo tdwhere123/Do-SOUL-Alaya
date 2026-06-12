@@ -4,7 +4,7 @@ import type { WorkspaceBootstrapReconcileResult } from "@do-soul/alaya-core";
 import type { DaemonStartupStepRecord } from "../index.js";
 import type { PathPlasticityLookupTelemetrySnapshot } from "../garden/path-plasticity-runtime.js";
 import type { GardenCredentialProvenance } from "../services/config-service.js";
-import type { ResolveSecretError } from "../secrets.js";
+import type { ResolveSecretError } from "../secrets/index.js";
 import {
   detectAttachedProfileInstructionsDrift,
   type ProfileInstructionsDriftReport,

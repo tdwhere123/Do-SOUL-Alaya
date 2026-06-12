@@ -185,7 +185,7 @@ import {
   createTombstoneGcPort
 } from "./garden/forget-disposition-ports.js";
 import { createGardenRuntime } from "./garden/runtime.js";
-import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
+import { resolveSecretRef, type ResolveSecretError } from "./secrets/index.js";
 import {
   createPathPlasticityService,
   createRecallPathPlasticityPort
@@ -214,8 +214,8 @@ import { createTrustStateRecorder } from "./trust-state.js";
 import { getBuiltinConversationToolSpecs } from "./mcp/builtin-conversation-tool-specs.js";
 
 export type { AlayaDaemonListenOptions, AlayaDaemonRuntime, AlayaDaemonRuntimeServices, AlayaDaemonServer, DaemonStartupStepRecord } from "./runtime/index.js";
-export { resolveSecretRef } from "./secrets.js";
-export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secrets.js";
+export { resolveSecretRef } from "./secrets/index.js";
+export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secrets/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
