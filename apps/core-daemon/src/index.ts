@@ -1322,10 +1322,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // object_kind falls outside routeByObjectKind as recallable memory_entries
   // (rather than dropping them to evidence_only). The bench daemon shares this
   // construction, so the benchmark exercises whatever production is configured
-  // to do. Default-off preserves the curated routing behavior.
+  // to do. Default-ON (operator decision 2026-06-12): real proposers emit open
+  // vocabulary, and dropping those facts made the memory plane forget ~99.9%
+  // of them. Set ALAYA_RETAIN_UNROUTED_FACTS=0 to restore curated-only routing.
   const retainUnroutedHighConfidenceFacts =
-    process.env.ALAYA_RETAIN_UNROUTED_FACTS === "1" ||
-    process.env.ALAYA_RETAIN_UNROUTED_FACTS === "true";
+    process.env.ALAYA_RETAIN_UNROUTED_FACTS !== "0" &&
+    process.env.ALAYA_RETAIN_UNROUTED_FACTS !== "false";
   // Optional override for the materialization confidence floor (default 0.5).
   const materializationConfidenceFloorRaw = Number(
     process.env.ALAYA_MATERIALIZATION_CONF_FLOOR
