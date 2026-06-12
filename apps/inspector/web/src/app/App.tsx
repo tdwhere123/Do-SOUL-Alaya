@@ -1,20 +1,20 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
-import { getInspectorToken, setInspectorToken, setUnauthorizedHandler, setWorkspaceId } from "./api";
+import { getInspectorToken, setInspectorToken, setUnauthorizedHandler, setWorkspaceId } from "../api";
 
-import BenchTrendPage from "./pages/BenchTrend";
-import GovernancePage from "./pages/Governance";
-import GraphPage from "./pages/Graph";
-import MemoryBrowserPage from "./pages/MemoryBrowser";
-import OverviewPage from "./pages/Overview";
-import RecallPage from "./pages/Recall";
-import SystemPage from "./pages/System";
+import BenchTrendPage from "../pages/BenchTrend";
+import GovernancePage from "../pages/Governance";
+import GraphPage from "../pages/Graph";
+import MemoryBrowserPage from "../pages/MemoryBrowser";
+import OverviewPage from "../pages/Overview";
+import RecallPage from "../pages/Recall";
+import SystemPage from "../pages/System";
 
-import CommandPalette, { useCommandPaletteHotkey } from "./components/CommandPalette";
-import Layout from "./components/Layout";
-import SessionExpired from "./components/SessionExpired";
-import { ToastProvider } from "./components/Toast";
-import { LocaleProvider } from "./i18n/Locale";
+import CommandPalette, { useCommandPaletteHotkey } from "../components/CommandPalette";
+import Layout from "../components/Layout";
+import SessionExpired from "../components/SessionExpired";
+import { ToastProvider } from "../components/Toast";
+import { LocaleProvider } from "../i18n/Locale";
 
 export function AppContent() {
   const [searchParams] = useSearchParams();
