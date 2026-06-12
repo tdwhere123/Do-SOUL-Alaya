@@ -815,6 +815,60 @@ export async function runLongMemEval(
             }));
           }
         }
+        // Diagnostic: route-B AUGMENT — keep natural top-5 raw, append LLM summary
+        // node(s) of the top-A anchor sessions' NOT-yet-delivered pool facts.
+        // Faithful collapsed-tree proxy (add a summary slot, don't replace the
+        // tight top-5). Default off; gold-only short-circuits above.
+        if (
+          process.env.ALAYA_BENCH_QA_SESSION_AUGMENT !== undefined &&
+          process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY === undefined &&
+          opts.qa !== undefined
+        ) {
+          const anchorA = Math.max(1, Math.floor(Number(process.env.ALAYA_BENCH_QA_SESSION_AUGMENT) || 2));
+          const metaOf = (id: string) =>
+            sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id));
+          const deliveredIds = new Set(delivered.map((d) => d.objectId));
+          // Anchor sessions = sessions of the top-A delivered (best-ranked) results.
+          const anchorSessions: string[] = [];
+          for (const pointer of results) {
+            const s = metaOf(pointer.object_id)?.sessionId;
+            if (s && !anchorSessions.includes(s)) anchorSessions.push(s);
+            if (anchorSessions.length >= anchorA) break;
+          }
+          const sys =
+            "You extract from a set of memories ONLY the facts needed to answer a question. " +
+            "Preserve exact dates, names, numbers, and event details verbatim. " +
+            "Output a terse bullet list of the relevant facts, each with its date. " +
+            "If nothing in these memories is relevant, output exactly: NONE";
+          const augments = await Promise.all(
+            anchorSessions.map(async (session, i) => {
+              let date: string | null = null;
+              const facts: string[] = [];
+              for (const pointer of results) {
+                const meta = metaOf(pointer.object_id);
+                if (meta?.sessionId !== session) continue;
+                if (deliveredIds.has(pointer.object_id)) continue; // skip already-delivered
+                const content = (meta?.content ?? "").trim();
+                if (content.length > 0 && !facts.includes(content)) facts.push(content);
+                if (date === null) date = meta?.eventDate ?? null;
+                if (facts.length >= 10) break;
+              }
+              if (facts.length === 0) return null;
+              const user =
+                `Question: ${question.question}\nCurrent date: ${question.question_date}\n` +
+                `Additional memories recorded on ${date ?? "unknown date"}:\n` +
+                facts.map((f) => `- ${f}`).join("\n");
+              const out = (await opts.qa!.chat(sys, user)).trim();
+              if (out.length === 0 || /^none$/iu.test(out)) return null;
+              return {
+                objectId: `session-augment-${i}-${session}`,
+                content: out,
+                ...(date === null ? {} : { eventDate: date })
+              };
+            })
+          );
+          delivered = [...delivered, ...augments.filter((a): a is QaDeliveredCandidate => a !== null)];
+        }
         qaVerdict = await scoreQaQuestion(
           {
             questionId: question.question_id,
