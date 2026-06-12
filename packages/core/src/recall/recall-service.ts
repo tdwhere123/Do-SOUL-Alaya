@@ -7,11 +7,8 @@ import {
   SoulRecallCompletedPayloadSchema,
   SoulRecallWeightTransferPayloadSchema,
   StorageTier,
-  isPathRecallEligible,
   type FineAssessmentConfig,
   type MemoryEntry,
-  type PathAnchorRef,
-  type PathRelation,
   type ProjectMappingAnchor,
   type RecallCandidate,
   type RecallPolicy,
@@ -74,24 +71,13 @@ import {
   resolveEmbeddingProviderStatus
 } from "./diagnostics.js";
 import {
-  EDGE_TYPE_HOP_DECAY,
-  EARNED_CO_RECALLED_FANIN_RELATION_KIND,
-  compareGraphExpansionCandidateDrafts,
   createEmptyGraphExpansionDiagnostics,
-  createMutableGraphExpansionDiagnostics,
-  freezeGraphExpansionCandidatesResult,
-  graphTraversalScoreFromPath,
   mergeGraphExpansionCandidateSources,
   mergeGraphExpansionDiagnosticsAcrossCascade,
   mergeGraphExpansionScores,
-  shouldReplaceGraphExpansionCandidate,
-  type GraphExpansionCandidateDraft,
   type GraphExpansionCandidateSourceDiagnostic,
-  type GraphExpansionCandidatesResult,
-  type GraphExpansionFrontierNode
 } from "./graph-expansion.js";
 import {
-  collectPathGraphNeighbors,
   uniquePathExpansionSources,
   uniqueStrings
 } from "./path-relations.js";
@@ -100,7 +86,10 @@ import {
   collectNegativePathSuppressions
 } from "./path-expansion.js";
 import {
-  DYNAMIC_RECALL_SEED_CAP,
+  addGraphExpansionCandidates,
+  collectEntityDerivedSeeds
+} from "./structural-expansion.js";
+import {
   ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR,
   EXPANDED_QUERY_RANK_DISCOUNT,
   SOURCE_PROXIMITY_STRUCTURAL_CARRY_MAX,
@@ -643,7 +632,7 @@ export class RecallService {
     readonly graphExpansionScores: Readonly<Record<string, number>>;
     readonly graphExpansionDiagnostics: Readonly<RecallGraphExpansionDiagnostics>;
     readonly graphExpansionCandidateSources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
-    // see also: packages/core/src/recall/recall-service.ts:RecallService.collectEntityDerivedSeeds.
+    // see also: packages/core/src/recall/structural-expansion.ts:collectEntityDerivedSeeds.
     readonly entitySeedScores: Readonly<Record<string, number>>;
     readonly pathExpansionScores: Readonly<Record<string, number>>;
     // Negative-path active suppression deltas keyed by target memory id.
@@ -976,12 +965,20 @@ export class RecallService {
       evidenceSearchPort: this.dependencies.evidenceSearchPort,
       warn: this.warn
     });
-    const entityDerivedSeeds = await this.collectEntityDerivedSeeds({
+    const entityDerivedSeeds = await collectEntityDerivedSeeds({
       workspaceId,
       queryText,
       byId,
       addCandidate,
-      lexicalFtsRanks: ftsRanks
+      lexicalFtsRanks: ftsRanks,
+      entityExtractionPort: this.dependencies.entityExtractionPort,
+      memoryRepo: this.dependencies.memoryRepo,
+      warn: this.warn,
+      entityExtractionMaxEntities: ENTITY_EXTRACTION_MAX_ENTITIES,
+      entitySeedPerEntityTopKStrong: ENTITY_SEED_PER_ENTITY_TOP_K_STRONG,
+      entitySeedPerEntityTopKWeak: ENTITY_SEED_PER_ENTITY_TOP_K_WEAK,
+      entitySeedTotalAdmitCap: ENTITY_SEED_TOTAL_ADMIT_CAP,
+      entitySeedMinSurfaceLength: ENTITY_SEED_MIN_SURFACE_LENGTH
     });
     // invariant: only strong entity signals are eligible to fan into
     // graph_expansion. Weak entities (kind=unknown / cjk_phrase /
@@ -1001,14 +998,14 @@ export class RecallService {
     // therefore skips any draft already carrying the path_expansion plane and
     // keeps only the propagation reach (hop-2 neighbors, plus hop-1 neighbors
     // of entity-derived seeds that path_expansion's draft-seed pass never
-    // visited). see also: packages/core/src/recall/recall-service.ts:RecallService.addGraphExpansionCandidates.
+    // visited). see also: packages/core/src/recall/structural-expansion.ts:addGraphExpansionCandidates.
     // Snapshot the Pool A draft seeds before path_expansion runs. Once
     // path_expansion admits a direct hop-1 neighbor, that neighbor becomes a
     // draft carrying the path_expansion plane and would otherwise qualify as a
     // graph BFS seed — collapsing genuine hop-2 reach into hop-1 and rooting
     // traversal at path-reached nodes rather than query anchors. Pinning the
     // seed set to the pre-path drafts keeps hop semantics stable across the
-    // ordering change. see also: packages/core/src/recall/recall-service.ts:RecallService.addGraphExpansionCandidates.
+    // ordering change. see also: packages/core/src/recall/structural-expansion.ts:addGraphExpansionCandidates.
     const prePathGraphSeedIds = selectExpansionSeedDrafts(drafts).map((draft) => draft.entry.object_id);
     await addPathExpansionCandidates({
       workspaceId,
@@ -1020,13 +1017,18 @@ export class RecallService {
       pathExpansionPort: this.dependencies.pathExpansionPort,
       warn: this.warn
     });
-    const graphExpansionResult = await this.addGraphExpansionCandidates({
+    const graphExpansionResult = await addGraphExpansionCandidates({
       workspaceId,
       byId,
       drafts,
       addCandidate,
+      pathExpansionPort: this.dependencies.pathExpansionPort,
       extraSeedMemoryIds: graphExpansionSeedIds,
-      draftSeedIds: prePathGraphSeedIds
+      draftSeedIds: prePathGraphSeedIds,
+      maxGraphHops: MAX_GRAPH_HOPS,
+      dynamicRecallEdgeFanout: DYNAMIC_RECALL_EDGE_FANOUT,
+      multiSeedGraphFanOutCap: MULTI_SEED_GRAPH_FAN_OUT_CAP,
+      warn: this.warn
     });
     graphExpansionDiagnostics = graphExpansionResult.diagnostics;
     graphExpansionCandidateSources = graphExpansionResult.candidateSources;
@@ -1100,407 +1102,6 @@ export class RecallService {
       pathSuppressionScores: Object.freeze(Object.fromEntries(pathSuppressionScores.entries())),
       degradation_reason: null
     });
-  }
-
-  private async addGraphExpansionCandidates(params: Readonly<{
-    readonly workspaceId: string;
-    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
-    readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
-    readonly addCandidate: CoarseCandidateAdder;
-    // see also: packages/core/src/recall/recall-service.ts:RecallService.collectEntityDerivedSeeds.
-    // Entity-bearing memory ids fan into graph_expansion as additional seeds
-    // so the graph plane is reachable even when the query never hits a prior
-    // expansion seed.
-    readonly extraSeedMemoryIds?: readonly string[];
-    // Pool A draft-seed object ids snapshotted before path_expansion mutated
-    // drafts. When provided, only these ids are eligible as content/structural
-    // BFS roots so path-reached neighbors do not become traversal seeds. When
-    // omitted the helper falls back to the live draft-seed selection.
-    readonly draftSeedIds?: readonly string[];
-  }>): Promise<Readonly<GraphExpansionCandidatesResult>> {
-    const diagnostics = createMutableGraphExpansionDiagnostics();
-    const candidateSources = new Map<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>();
-    // invariant: graph_expansion is the multi-hop traversal of the unified
-    // PathRelation plane. It reads the same pathExpansionPort the direct
-    // path_expansion plane uses. When no path port is wired the plane is empty.
-    const pathExpansionPort = this.dependencies.pathExpansionPort;
-    if (pathExpansionPort === undefined) {
-      return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
-    }
-
-    // invariant: entity-derived seeds drive the per-seed fan-in path (Pool B)
-    // even when they were also admitted into drafts via the entity_seed plane.
-    // Filtering them out of the pooled draft seeds (Pool A) below avoids
-    // double-traversing the same anchor while keeping the legacy
-    // content/structural seed BFS intact for non-entity callers.
-    // see also: packages/core/src/recall/recall-service.ts:RecallService.collectEntityDerivedSeeds.
-    const entitySeedIdSet = new Set<string>();
-    const entitySeedEntries: Readonly<MemoryEntry>[] = [];
-    for (const id of params.extraSeedMemoryIds ?? []) {
-      if (entitySeedIdSet.has(id)) {
-        continue;
-      }
-      const entry = params.byId.get(id);
-      if (entry === undefined) {
-        continue;
-      }
-      entitySeedEntries.push(entry);
-      entitySeedIdSet.add(id);
-      if (entitySeedEntries.length >= DYNAMIC_RECALL_SEED_CAP) {
-        break;
-      }
-    }
-    const draftSeedIdAllowList = params.draftSeedIds === undefined ? null : new Set(params.draftSeedIds);
-    const draftSeedsAll = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
-    const draftSeeds = draftSeedsAll.filter(
-      (seed) =>
-        !entitySeedIdSet.has(seed.entry.object_id) &&
-        (draftSeedIdAllowList === null || draftSeedIdAllowList.has(seed.entry.object_id))
-    );
-
-    if (draftSeeds.length === 0 && entitySeedEntries.length === 0) {
-      return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
-    }
-
-    const bestCandidates = new Map<string, GraphExpansionCandidateDraft>();
-
-    // Pool A: content / structural draft seeds (entity-derived seeds run
-    // through Pool B instead) expand as a single pooled frontier. When no
-    // entity-derived seeds are present this is the only active branch and
-    // multi_seed_graph_fan_in stays undefined.
-    if (draftSeeds.length > 0) {
-      const draftSeedEntries = draftSeeds.map((seed) => seed.entry);
-      await this.expandGraphFrontier({
-        workspaceId: params.workspaceId,
-        byId: params.byId,
-        pathExpansionPort,
-        seedEntries: draftSeedEntries,
-        onCandidate: (candidate) => {
-          const current = bestCandidates.get(candidate.entry.object_id);
-          if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
-            bestCandidates.set(candidate.entry.object_id, candidate);
-          }
-        }
-      });
-    }
-
-    // Pool B: entity-derived seeds fan in independently. Each seed runs its
-    // own BFS with a fresh expandedIds set so a seed reached early by one
-    // entity does not starve another entity's expansion. Per-seed candidate
-    // maps feed max-score dedup so a memory hit by two different entity
-    // paths records 1 dedup collision and keeps the higher-scoring draft.
-    if (entitySeedEntries.length > 0) {
-      diagnostics.multi_seed_fan_in_distinct_seeds = entitySeedEntries.length;
-      const perSeedCandidates: Map<string, GraphExpansionCandidateDraft>[] = [];
-      for (const seedEntry of entitySeedEntries) {
-        const seedMap = new Map<string, GraphExpansionCandidateDraft>();
-        await this.expandGraphFrontier({
-          workspaceId: params.workspaceId,
-          byId: params.byId,
-          pathExpansionPort,
-          seedEntries: [seedEntry],
-          onCandidate: (candidate) => {
-            const current = seedMap.get(candidate.entry.object_id);
-            if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
-              seedMap.set(candidate.entry.object_id, candidate);
-            }
-          }
-        });
-        diagnostics.multi_seed_fan_in_candidates_per_seed.push(seedMap.size);
-        perSeedCandidates.push(seedMap);
-      }
-      // anchor: max-score reduction across per-seed maps. Same candidate
-      // reached by two distinct entity seeds increments dedup_collisions
-      // once per extra arrival and keeps the strongest draft via the
-      // shared shouldReplaceGraphExpansionCandidate ordering.
-      const fanInSeen = new Set<string>();
-      for (const seedMap of perSeedCandidates) {
-        for (const [neighborId, candidate] of seedMap) {
-          if (fanInSeen.has(neighborId)) {
-            diagnostics.multi_seed_fan_in_dedup_collisions += 1;
-          }
-          fanInSeen.add(neighborId);
-          const current = bestCandidates.get(neighborId);
-          if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
-            bestCandidates.set(neighborId, candidate);
-          }
-        }
-      }
-    }
-
-    const admitted = [...bestCandidates.values()]
-      .sort(compareGraphExpansionCandidateDrafts)
-      .slice(0, MULTI_SEED_GRAPH_FAN_OUT_CAP);
-    for (const candidate of admitted) {
-      // double-count guard: path_expansion already runs (earlier in
-      // coarseFilter) and admits direct associations off the same PathRelation
-      // rows. A target it admitted must not also enter the graph_expansion
-      // plane — both planes feed independent RRF streams, so re-admitting here
-      // would hand one memory two stream slots. The graph plane keeps only the
-      // multi-hop reach path_expansion's direct pass never produced.
-      if (params.drafts.get(candidate.entry.object_id)?.admissionPlanes.includes("path_expansion") === true) {
-        continue;
-      }
-      const admittedByGraphExpansion = params.addCandidate(
-        candidate.entry,
-        "graph_expansion",
-        candidate.score,
-        "graph_expansion"
-      );
-      if (!admittedByGraphExpansion) {
-        continue;
-      }
-      diagnostics.graph_expansion_plane_count_per_hop[candidate.hop - 1] += 1;
-      diagnostics.graph_expansion_plane_count_per_edge_type[candidate.edgeType] += 1;
-      candidateSources.set(candidate.entry.object_id, Object.freeze({
-        hop: candidate.hop,
-        edgeType: candidate.edgeType
-      }));
-    }
-
-    return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
-  }
-
-  // anchor: single-source / pooled BFS expansion shared by both the pooled
-  // draft-seed path and the per-seed entity fan-in path. expandedIds is
-  // private to each invocation so a per-seed Pool B call cannot starve a
-  // sibling seed by absorbing its 1-hop neighbors first.
-  // see also: packages/core/src/recall/recall-service.ts:RecallService.addGraphExpansionCandidates.
-  private async expandGraphFrontier(params: Readonly<{
-    readonly workspaceId: string;
-    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
-    readonly pathExpansionPort: NonNullable<RecallServiceDependencies["pathExpansionPort"]>;
-    readonly seedEntries: readonly Readonly<MemoryEntry>[];
-    readonly onCandidate: (candidate: Readonly<GraphExpansionCandidateDraft>) => void;
-  }>): Promise<void> {
-    if (params.seedEntries.length === 0) {
-      return;
-    }
-    const expandedIds = new Set<string>();
-    let frontier: readonly GraphExpansionFrontierNode[] = params.seedEntries.map((entry) => ({
-      memoryId: entry.object_id,
-      pathScore: 1,
-      arrivalRelationKind: null
-    }));
-
-    for (let hop = 1; hop <= MAX_GRAPH_HOPS && frontier.length > 0; hop += 1) {
-      const nextFrontier = new Map<string, GraphExpansionFrontierNode>();
-      // Resolve the still-unexpanded frontier nodes into a single batched
-      // findByAnchors lookup so multi-hop traversal does not issue one query
-      // per node. The path repo returns every active path anchored on any of
-      // the requested object ids; the per-node direction filter below re-binds
-      // each path to the frontier node it actually leaves from.
-      const frontierIds = frontier
-        .map((node) => node.memoryId)
-        .filter((memoryId) => !expandedIds.has(memoryId));
-      if (frontierIds.length === 0) {
-        break;
-      }
-      const anchorRefs: PathAnchorRef[] = frontierIds.map((memoryId) => ({
-        kind: "object",
-        object_id: memoryId
-      }));
-      let paths: readonly Readonly<PathRelation>[];
-      try {
-        paths = await params.pathExpansionPort.findByAnchors(params.workspaceId, anchorRefs);
-      } catch (error) {
-        this.warn("graph expansion path lookup failed", {
-          workspace_id: params.workspaceId,
-          seed_count: frontierIds.length,
-          error: toErrorMessage(error)
-        });
-        break;
-      }
-      // invariant: only recall-eligible (active + recall_bias > 0) paths
-      // propagate. Negative / neutral paths are handled by active suppression
-      // (collectNegativePathSuppressions), never by traversal — admitting them
-      // as positive neighbors would amplify a suppressed memory.
-      const eligiblePaths = paths.filter((path) => isPathRecallEligible(path));
-      const frontierIdSet = new Set(frontierIds);
-      for (const node of frontier) {
-        if (expandedIds.has(node.memoryId)) {
-          continue;
-        }
-        expandedIds.add(node.memoryId);
-        const nodeNeighbors = collectPathGraphNeighbors(eligiblePaths, node.memoryId)
-          .slice(0, DYNAMIC_RECALL_EDGE_FANOUT);
-        for (const neighbor of nodeNeighbors) {
-          const edgeScore = graphTraversalScoreFromPath(neighbor.edgeType);
-          if (edgeScore <= 0) {
-            continue;
-          }
-          const neighborId = neighbor.neighborId;
-          if (expandedIds.has(neighborId)) {
-            continue;
-          }
-          const entry = params.byId.get(neighborId);
-          if (entry === undefined) {
-            continue;
-          }
-          // Same-relation chain-extension gate: at hop >= 2, drop a neighbor
-          // reached by the SAME relation_kind as its parent. Such single-relation
-          // lineage walks (e.g. a long derives_from chain) flood the pool with
-          // near-gold-free neighbours that demote genuine lexical / path gold
-          // under fusion. Keyed on the raw relation_kind, not the folded tracked
-          // edge_type, so heterogeneous associative reach (e.g. co_recalled ->
-          // shares_entity) stays admitted as healthy convergence; hop-1
-          // (arrivalRelationKind null) is never gated.
-          if (
-            hop > 1 &&
-            node.arrivalRelationKind !== null &&
-            neighbor.relationKind === node.arrivalRelationKind
-          ) {
-            continue;
-          }
-          const candidateScore = hop === 1
-            ? edgeScore
-            : clamp01(node.pathScore * EDGE_TYPE_HOP_DECAY[neighbor.edgeType] * edgeScore);
-          if (candidateScore <= 0) {
-            continue;
-          }
-          params.onCandidate({
-            entry,
-            score: candidateScore,
-            hop: hop as 1 | 2,
-            edgeType: neighbor.edgeType
-          });
-          if (hop < MAX_GRAPH_HOPS && !expandedIds.has(neighborId) && !frontierIdSet.has(neighborId)) {
-            const queued = nextFrontier.get(neighborId);
-            if (queued === undefined || candidateScore > queued.pathScore) {
-              nextFrontier.set(neighborId, {
-                memoryId: neighborId,
-                pathScore: candidateScore,
-                arrivalRelationKind: neighbor.relationKind
-              });
-            }
-          }
-        }
-      }
-      frontier = [...nextFrontier.values()].sort((a, b) => a.memoryId.localeCompare(b.memoryId));
-    }
-  }
-
-  // anchor: query-time entity FTS seeding. Returns the memory ids of every
-  // candidate admitted on the entity_seed plane (paired with the originating
-  // entity confidence) so the caller can fan them into graph_expansion as
-  // additional seeds subject to a confidence floor. The helper is fail-soft:
-  // if no port is wired, no query text is present, or the keyword search port
-  // is missing, returns an empty list and the recall pipeline degrades
-  // gracefully back to the pre-entity behavior.
-  // see also: packages/core/src/shared/entity-extraction-port.ts EntityExtractionPort
-  private async collectEntityDerivedSeeds(params: Readonly<{
-    readonly workspaceId: string;
-    readonly queryText: string | null;
-    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
-    readonly addCandidate: CoarseCandidateAdder;
-    // invariant: lexical FTS ranks observed during this coarse pass.
-    // When an entity-FTS hit overlaps a lexical_fts hit the RRF contribution
-    // must come from the lexical lane only — otherwise a single surface term
-    // gets two fusion-stream rank slots and an attacker-controlled query can
-    // roughly double a memory's fused score.
-    readonly lexicalFtsRanks: ReadonlyMap<string, number>;
-  }>): Promise<readonly Readonly<{ memoryId: string; entityConfidence: number }>[]> {
-    const port = this.dependencies.entityExtractionPort;
-    const memoryRepo = this.dependencies.memoryRepo;
-    if (
-      port === undefined ||
-      params.queryText === null ||
-      params.byId.size === 0 ||
-      (memoryRepo.searchByKeyword === undefined && memoryRepo.searchByKeywordWithinObjectIds === undefined)
-    ) {
-      return [];
-    }
-
-    let entities: readonly Readonly<{
-      readonly surface: string;
-      readonly normalized: string;
-      readonly confidence: number;
-    }>[];
-    try {
-      entities = await port.extract(params.queryText, { maxEntities: ENTITY_EXTRACTION_MAX_ENTITIES });
-    } catch (error) {
-      this.warn("entity extraction failed", {
-        workspace_id: params.workspaceId,
-        error: toErrorMessage(error)
-      });
-      return [];
-    }
-    if (entities.length === 0) {
-      return [];
-    }
-
-    // Track the strongest entity confidence we observed per memory id. The
-    // caller filters this against ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR
-    // when deciding which seeds may fan into graph_expansion.
-    const seedConfidenceById = new Map<string, number>();
-    let admittedTotal = 0;
-    const candidateIds = [...params.byId.keys()];
-    for (const entity of entities) {
-      if (admittedTotal >= ENTITY_SEED_TOTAL_ADMIT_CAP) {
-        break;
-      }
-      const surface = entity.surface.trim();
-      if (surface.length < ENTITY_SEED_MIN_SURFACE_LENGTH) {
-        continue;
-      }
-      const perEntityLimit = entity.confidence >= 0.85
-        ? ENTITY_SEED_PER_ENTITY_TOP_K_STRONG
-        : ENTITY_SEED_PER_ENTITY_TOP_K_WEAK;
-      let hits: readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[];
-      try {
-        hits =
-          memoryRepo.searchByKeywordWithinObjectIds !== undefined
-            ? await memoryRepo.searchByKeywordWithinObjectIds(
-                params.workspaceId,
-                surface,
-                perEntityLimit,
-                candidateIds
-              )
-            : await memoryRepo.searchByKeyword!(params.workspaceId, surface, perEntityLimit);
-      } catch (error) {
-        this.warn("entity seed lookup failed", {
-          workspace_id: params.workspaceId,
-          entity_surface: surface,
-          error: toErrorMessage(error)
-        });
-        continue;
-      }
-      for (const hit of hits) {
-        const entry = params.byId.get(hit.object_id);
-        if (entry === undefined) {
-          continue;
-        }
-        const rawScore = clamp01(hit.normalized_rank * entity.confidence);
-        if (rawScore <= 0) {
-          continue;
-        }
-        // see also: lexicalFtsRanks doc above. Lexical-overlap admissions
-        // still register on the entity_seed plane (so admission_planes
-        // diagnostics can distinguish entity-only from entity+lexical hits)
-        // but the RRF rank contribution is zeroed out — the entity_seed
-        // stream returns 0 for this id and drops out of fusion, preventing
-        // a single surface term from claiming two fusion-stream rank slots.
-        const hasLexicalOverlap = (params.lexicalFtsRanks.get(hit.object_id) ?? 0) > 0;
-        const score = hasLexicalOverlap ? 0 : rawScore;
-        // The 6th argument (entityConfidence) lets the draft pool reason
-        // about gating entity-only weak admissions out of graph_expansion
-        // fan-in via the path-1 seed pool.
-        // see also: packages/core/src/recall/coarse-candidates.ts:selectExpansionSeedDrafts,
-        // packages/core/src/recall/coarse-candidates.ts:ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR.
-        params.addCandidate(entry, "entity_seed", score, "entity_seed", undefined, entity.confidence);
-        const previous = seedConfidenceById.get(entry.object_id) ?? 0;
-        if (entity.confidence > previous) {
-          seedConfidenceById.set(entry.object_id, entity.confidence);
-        }
-        admittedTotal += 1;
-        if (admittedTotal >= ENTITY_SEED_TOTAL_ADMIT_CAP) {
-          break;
-        }
-      }
-    }
-    return [...seedConfidenceById.entries()].map(([memoryId, entityConfidence]) =>
-      Object.freeze({ memoryId, entityConfidence })
-    );
   }
 
 
