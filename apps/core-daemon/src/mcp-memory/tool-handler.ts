@@ -1,25 +1,18 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
   CandidateMemorySignalMemoryRefKeys,
   ControlPlaneObjectKind,
-  EdgeClassifyTaskPayloadSchema,
   EdgeProposalTriggerSource,
-  GARDEN_ROLE_TIER_MAP,
   GardenClaimTaskRequestSchema,
   GardenClaimTaskResponseSchema,
   GardenCompleteTaskRequestSchema,
   GardenCompleteTaskResponseSchema,
-  GardenEventType,
   GardenListPendingTasksRequestSchema,
   GardenListPendingTasksResponseSchema,
-  GardenRole,
-  GardenTaskKind,
-  GardenTier,
   MemoryGovernanceEventType,
   MemoryGraphEdgeType,
   MemoryDimensionSchema,
-  parseGardenEventPayload,
   ProposalResolutionState,
   RecallContextEventType,
   RetentionPolicy,
@@ -58,10 +51,6 @@ import {
   type ContextDeliveryRecord,
   type EdgeClassifyVerdict,
   type EventLogEntry,
-  type GardenClaimTaskRequest,
-  type GardenCompleteTaskRequest,
-  type GardenListPendingTasksRequest,
-  type GardenMcpWorkerRole,
   type GardenRoleValue,
   type MemoryEntry,
   type Proposal,
@@ -93,11 +82,10 @@ import type {
   GardenTaskEventInput,
   GardenTaskRow
 } from "@do-soul/alaya-storage";
-import { stableStringify } from "@do-soul/alaya-core";
 import { normalizeSchemaGroundedSignal, type GraphEdgeCreationPort } from "@do-soul/alaya-soul";
-import { buildGardenTaskSignalId } from "../garden/index.js";
 import { hasAlayaMemoryToolName, type AlayaMemoryToolName } from "./tool-catalog.js";
 import { buildMemorySearchResult, buildRecallStrategyMix } from "./recall-result.js";
+import { createGardenTaskHandlers } from "./garden-task-handlers.js";
 import {
   createRecallHandler,
   createReportContextUsageHandler
@@ -112,32 +100,6 @@ type MemoryUsageRefreshFields = MemoryEntryMutableFields & {
   readonly last_used_at?: string;
   readonly last_hit_at?: string;
 };
-type GardenCompletionCandidateSignal = NonNullable<
-  NonNullable<GardenCompleteTaskRequest["result_envelope"]>["candidate_signals"]
->[number];
-
-const RECALL_HIT_ACTIVATION_BUMP = 0.05;
-// Bounds the fan-out per `report_context_usage(used)` call. With N=8 the
-// ordered pairs cap at 56 cross-link proposals; the edge-proposal/path
-// candidate intake deduplicates on (source, target, edge_type), so repeated
-// reports of the same set are idempotent.
-const MAX_CROSS_LINK_FANOUT = 8;
-const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
-// A claimed EDGE_CLASSIFY task older than this is "stale" for the backlog
-// diagnostic: a host worker claimed it but never reported a verdict. Matches
-// the order of magnitude of the abandoned-claim reclaim window.
-const EDGE_CLASSIFY_STALE_AFTER_MS = 5 * 60 * 1000;
-// Auto-extract from a recall turn only when there is enough text for the
-// Garden compute provider to find a durable signal in; a bare keyword query
-// is below this floor and not worth a Garden task.
-const MIN_AUTO_EXTRACT_TURN_CHARS = 24;
-// Stop enqueuing recall-driven extract tasks once the pending Garden queue
-// visible to peekPending(LIBRARIAN, ...) — librarian rows plus the
-// higher-priority janitor/auditor rows — for a workspace is this deep: Garden
-// is not draining (e.g. host_worker mode with no worker, or a stalled
-// background pass) and piling on cannot help. Coarse backpressure —
-// over-counting only makes Alaya more conservative.
-const RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD = 128;
 // invariant: delivered pairs accrue co-recall only when the embedding-side
 // coherence gate returns their canonical unordered pair key.
 // see also: packages/core/src/path-graph/path-relation-proposal-service.ts:onCoRecall allowedPairKeys.
@@ -462,6 +424,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   const now = deps.now ?? (() => new Date().toISOString());
   const generateId = deps.generateId ?? randomUUID;
   const warn = deps.warn ?? ((message: string, meta: Record<string, unknown>) => console.warn(message, meta));
+  const gardenTasks = createGardenTaskHandlers({ deps, now, warn, generateId });
   const recall = createRecallHandler({ deps, now, warn, generateId });
   const reportContextUsage = createReportContextUsageHandler({ deps, now, warn });
   const registeredSurfaces = new Set<string>();
@@ -523,11 +486,35 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
           case "soul.resolve":
             return ok(toolName, await resolveStagedWarning(rawArguments, context));
           case "garden.list_pending_tasks":
-            return ok(toolName, await listPendingGardenTasks(GardenListPendingTasksRequestSchema.parse(rawArguments), context));
+            return ok(
+              toolName,
+              GardenListPendingTasksResponseSchema.parse(
+                await gardenTasks.listPendingGardenTasks(
+                  GardenListPendingTasksRequestSchema.parse(rawArguments),
+                  context
+                )
+              )
+            );
           case "garden.claim_task":
-            return ok(toolName, await claimGardenTask(GardenClaimTaskRequestSchema.parse(rawArguments), context));
+            return ok(
+              toolName,
+              GardenClaimTaskResponseSchema.parse(
+                await gardenTasks.claimGardenTask(
+                  GardenClaimTaskRequestSchema.parse(rawArguments),
+                  context
+                )
+              )
+            );
           case "garden.complete_task":
-            return ok(toolName, await completeGardenTask(GardenCompleteTaskRequestSchema.parse(rawArguments), context));
+            return ok(
+              toolName,
+              GardenCompleteTaskResponseSchema.parse(
+                await gardenTasks.completeGardenTask(
+                  GardenCompleteTaskRequestSchema.parse(rawArguments),
+                  context
+                )
+              )
+            );
         }
       } catch (error) {
         return fail(toolName, classifyError(error), sanitizeError(error));
@@ -717,338 +704,6 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     );
   }
 
-  async function listPendingGardenTasks(
-    request: GardenListPendingTasksRequest,
-    context: McpMemoryToolCallContext
-  ) {
-    if (deps.gardenTaskRepo === undefined) {
-      throw new ToolUnavailableError("Garden task queue is not available.");
-    }
-    const rows = deps.gardenTaskRepo.peekPending(
-      mapGardenMcpWorkerRole(request.role),
-      context.workspaceId,
-      request.limit
-    );
-    return GardenListPendingTasksResponseSchema.parse({
-      tasks: rows.map(toGardenTaskSnapshot)
-    });
-  }
-
-  async function claimGardenTask(
-    request: GardenClaimTaskRequest,
-    context: McpMemoryToolCallContext
-  ) {
-    if (deps.gardenTaskRepo === undefined) {
-      throw new ToolUnavailableError("Garden task queue is not available.");
-    }
-
-    const claimedAt = now();
-    const claimResult = deps.gardenTaskRepo.claimAtomic(
-      request.task_id,
-      context.agentTarget,
-      claimedAt,
-      context.workspaceId
-    );
-    const row = deps.gardenTaskRepo.findById(request.task_id);
-    if (row === null || row.workspace_id !== context.workspaceId) {
-      return GardenClaimTaskResponseSchema.parse(toSilentAlreadyClaimed(request.task_id));
-    }
-    if (claimResult !== "claimed" && row.claimed_by !== context.agentTarget) {
-      return GardenClaimTaskResponseSchema.parse(toSilentAlreadyClaimed(request.task_id));
-    }
-
-    return GardenClaimTaskResponseSchema.parse({
-      status: claimResult === "claimed" ? "claimed" : "already_claimed",
-      ...toGardenClaimTaskPayload(row)
-    });
-  }
-
-  async function completeGardenTask(
-    request: GardenCompleteTaskRequest,
-    context: McpMemoryToolCallContext
-  ) {
-    if (deps.gardenTaskRepo === undefined) {
-      throw new ToolUnavailableError("Garden task queue is not available.");
-    }
-
-    const row = deps.gardenTaskRepo.findById(request.task_id);
-    if (row === null || row.workspace_id !== context.workspaceId) {
-      throw new ToolNotFoundError(`Garden task not found: ${request.task_id}`);
-    }
-
-    if (row.status !== "claimed") {
-      throw new ToolValidationError(
-        `Garden task ${row.id} is not in claimed state (current: ${row.status}); claim it via garden.claim_task before completing.`
-      );
-    }
-    if (row.claimed_by !== context.agentTarget) {
-      throw new ToolValidationError(
-        `Garden task ${row.id} is claimed by a different agent target; only the claimant may complete it.`
-      );
-    }
-
-    const taskPayloadRunId =
-      isUnknownRecord(row.payload) && typeof row.payload.run_id === "string" && row.payload.run_id.length > 0
-        ? row.payload.run_id
-        : null;
-    const resolvedRunId = taskPayloadRunId ?? context.runId;
-
-    // invariant: the result envelope is a discriminated result type — exactly
-    // one result shape is meaningful per task kind. EDGE_CLASSIFY carries
-    // edge_verdict; every other host-worker kind (POST_TURN_EXTRACT) carries
-    // candidate_signals. Reject the mismatched shape so a host cannot smuggle
-    // the wrong result type into a claimed task. The claimant-only rule above
-    // still gates both branches.
-    const edgeVerdict = request.result_envelope?.edge_verdict;
-    const candidateSignalsCount = request.result_envelope?.candidate_signals?.length ?? 0;
-    if (row.kind === GardenTaskKind.EDGE_CLASSIFY) {
-      if (candidateSignalsCount > 0) {
-        throw new ToolValidationError(
-          `Garden task ${row.id} is an edge_classify task; complete it with result_envelope.edge_verdict, not candidate_signals.`
-        );
-      }
-      return await completeEdgeClassifyTask(request, context, row, resolvedRunId, edgeVerdict);
-    }
-    if (edgeVerdict !== undefined) {
-      throw new ToolValidationError(
-        `Garden task ${row.id} (${row.kind}) does not accept an edge_verdict; that result shape is only valid for edge_classify tasks.`
-      );
-    }
-
-    const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
-    const completionEnvelopeJson =
-      contentOnlySignals.length === 0
-        ? null
-        : buildGardenCompletionEnvelopeJson(row.id, contentOnlySignals);
-
-    if (contentOnlySignals.length > 0 && resolvedRunId === null) {
-      throw new ToolValidationError(
-        "garden.complete_task cannot emit candidate_signals without a run_id in the task payload or MCP call context."
-      );
-    }
-    if (row.completion_envelope_json !== null && row.completion_envelope_json !== completionEnvelopeJson) {
-      throw new ToolValidationError(
-        `Garden task ${row.id} candidate_signals changed after a previous partial completion attempt; retry with the original candidate signal envelope.`
-      );
-    }
-
-    const completionClaimedBy =
-      contentOnlySignals.length === 0
-        ? context.agentTarget
-        : `${context.agentTarget}:complete:${generateId()}`;
-    if (contentOnlySignals.length > 0) {
-      const completionClaimStarted = deps.gardenTaskRepo.beginCompletionAttempt(
-        row.id,
-        context.agentTarget,
-        completionClaimedBy,
-        now(),
-        completionEnvelopeJson
-      );
-      if (!completionClaimStarted) {
-        throw new ToolValidationError(
-          `Garden task ${row.id} claim changed before candidate signal emission; retry after claiming the task again.`
-        );
-      }
-    }
-
-    const emittedSignalIds: string[] = [];
-    try {
-      for (const [index, signalContent] of contentOnlySignals.entries()) {
-        const internalSignal = normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse({
-          signal_id: buildGardenTaskSignalId(row.id, index),
-          ...normalizeCandidateSignalGraphRefs(signalContent, warn),
-          workspace_id: context.workspaceId,
-          run_id: resolvedRunId,
-          surface_id: null,
-          source: SignalSource.GARDEN_COMPILE,
-          created_at: now()
-        }));
-        const received = await deps.signalService.receiveSignal(internalSignal);
-        emittedSignalIds.push(received.signal.signal_id);
-      }
-
-      const completedAt = now();
-      const event: GardenTaskEventInput = {
-        event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
-        entity_type: "garden_task",
-        entity_id: row.id,
-        workspace_id: context.workspaceId,
-        run_id: resolvedRunId,
-        caused_by: context.agentTarget,
-        payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
-          task_id: row.id,
-          task_kind: row.kind,
-          role: row.role,
-          tier: GARDEN_ROLE_TIER_MAP[row.role],
-          success: request.status === "completed",
-          objects_affected: emittedSignalIds,
-          candidate_signals_count: emittedSignalIds.length,
-          workspace_id: context.workspaceId,
-          occurred_at: completedAt
-        })
-      };
-
-      await deps.gardenTaskRepo.completeWithEvents(
-        row.id,
-        {
-          status: request.status,
-          completed_at: completedAt,
-          ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
-        },
-        [event],
-        completionClaimedBy
-      );
-    } catch (error) {
-      if (contentOnlySignals.length > 0) {
-        const released = deps.gardenTaskRepo.releaseClaim(row.id, completionClaimedBy);
-        if (!released) {
-          warn("Garden task completion claim could not be released after partial failure.", {
-            task_id: row.id,
-            claimed_by: completionClaimedBy,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
-      }
-      throw error;
-    }
-
-    return GardenCompleteTaskResponseSchema.parse({
-      task_id: row.id,
-      status: request.status,
-      events_appended: 1
-    });
-  }
-
-  // invariant: EDGE_CLASSIFY completion. The claimant reports the LLM-quality
-  // supports/derives_from/none verdict; the daemon applies it to the existing
-  // heuristic path via edgeVerdictApplier. The verdict's pair MUST match the
-  // task's payload pair so a claimant cannot redirect the refinement to an
-  // arbitrary memory pair. A "none" / below-floor verdict (or status=failed)
-  // refines nothing — the inline heuristic edge always stands. Completion is
-  // recorded with a SOUL_GARDEN_TASK_COMPLETED event; only the claimant reaches
-  // here (the caller already enforced the claimant-only rule).
-  async function completeEdgeClassifyTask(
-    request: GardenCompleteTaskRequest,
-    context: McpMemoryToolCallContext,
-    row: GardenTaskRow,
-    resolvedRunId: string | null,
-    verdict: EdgeClassifyVerdict | undefined
-  ) {
-    if (deps.gardenTaskRepo === undefined) {
-      throw new ToolUnavailableError("Garden task queue is not available.");
-    }
-
-    let objectsAffected: readonly string[] = [];
-    if (request.status === "completed") {
-      const payloadPair = readEdgeClassifyPayloadPair(row.id, row.payload);
-      // invariant: a successfully-completed EDGE_CLASSIFY task MUST carry a
-      // well-formed edge_verdict — edge_type "none" is the valid explicit "no
-      // edge" no-op, so absence of a verdict is not a successful no-op but a
-      // false success (the edge silently never gets classified). A worker that
-      // cannot produce a verdict completes with status="failed". The verdict's
-      // well-formedness is enforced by EdgeClassifyVerdictSchema at request parse;
-      // this guard closes only the missing-verdict gap.
-      if (verdict === undefined) {
-        throw new ToolValidationError(
-          `Garden task ${row.id} is an edge_classify task completed without a result_envelope.edge_verdict; report edge_type "none" for an explicit no-edge decision, or complete with status "failed" if no verdict can be produced.`
-        );
-      }
-      if (
-        verdict.source_object_id !== payloadPair.sourceObjectId ||
-        verdict.neighbor_object_id !== payloadPair.neighborObjectId
-      ) {
-        throw new ToolValidationError(
-          `Garden task ${row.id} edge_verdict pair does not match the claimed task's source/neighbor memory pair.`
-        );
-      }
-      if (deps.edgeVerdictApplier === undefined) {
-        throw new ToolUnavailableError(
-          "garden.complete_task received an edge_verdict but no edge-classification applier is wired."
-        );
-      }
-      const outcome = await deps.edgeVerdictApplier.applyVerdict({
-        workspaceId: context.workspaceId,
-        runId: resolvedRunId,
-        sourceSignalId: payloadPair.sourceSignalId,
-        verdict
-      });
-      // outcome is null when the verdict was a no-op (none / below floor) and a
-      // PathMintOutcome string when a relation was submitted. Surface the
-      // applied pair only when a relation actually landed.
-      if (outcome === "applied") {
-        objectsAffected = [payloadPair.sourceObjectId, payloadPair.neighborObjectId];
-      }
-    }
-
-    const completedAt = now();
-    const event: GardenTaskEventInput = {
-      event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
-      entity_type: "garden_task",
-      entity_id: row.id,
-      workspace_id: context.workspaceId,
-      run_id: resolvedRunId,
-      caused_by: context.agentTarget,
-      payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
-        task_id: row.id,
-        task_kind: row.kind,
-        role: row.role,
-        tier: GARDEN_ROLE_TIER_MAP[row.role],
-        success: request.status === "completed",
-        objects_affected: [...objectsAffected],
-        candidate_signals_count: 0,
-        workspace_id: context.workspaceId,
-        occurred_at: completedAt
-      })
-    };
-
-    await deps.gardenTaskRepo.completeWithEvents(
-      row.id,
-      {
-        status: request.status,
-        completed_at: completedAt,
-        ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
-      },
-      [event],
-      context.agentTarget
-    );
-
-    // invariant (eventual consistency): recall right after memory creation uses
-    // the inline heuristic verdict; the LLM-quality refinement lands only when a
-    // host worker completes the EDGE_CLASSIFY task. Emit the still-pending /
-    // stale EDGE_CLASSIFY backlog as an observable diagnostic so an operator can
-    // see how many heuristic edges are still awaiting refinement (and whether
-    // claimed tasks are going stale because no host worker is completing them).
-    emitEdgeClassifyBacklogDiagnostic(context.workspaceId);
-
-    return GardenCompleteTaskResponseSchema.parse({
-      task_id: row.id,
-      status: request.status,
-      events_appended: 1
-    });
-  }
-
-  function emitEdgeClassifyBacklogDiagnostic(workspaceId: string): void {
-    const repo = deps.gardenTaskRepo;
-    if (repo?.countByKind === undefined) {
-      return;
-    }
-    try {
-      const staleBeforeIso = new Date(Date.now() - EDGE_CLASSIFY_STALE_AFTER_MS).toISOString();
-      const backlog = repo.countByKind(GardenTaskKind.EDGE_CLASSIFY, staleBeforeIso, workspaceId);
-      warn("edge_classify backlog (heuristic edges awaiting host-worker LLM verdict)", {
-        workspace_id: workspaceId,
-        pending: backlog.pending,
-        stale: backlog.stale
-      });
-    } catch (error) {
-      // A diagnostic must never break completion.
-      warn("edge_classify backlog diagnostic failed", {
-        workspace_id: workspaceId,
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-  }
-
   function warnIfModelToolSignalMissingDeliveryAnchor(signal: CandidateMemorySignal): void {
     if (
       signal.source === SignalSource.MODEL_TOOL &&
@@ -1157,134 +812,6 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     });
   }
 
-}
-
-function buildGardenCompletionEnvelopeJson(
-  taskId: string,
-  signals: readonly GardenCompletionCandidateSignal[]
-): string {
-  const signalIds = signals.map((_, index) => buildGardenTaskSignalId(taskId, index));
-  const fingerprint = createHash("sha256")
-    .update(stableStringify({
-      task_id: taskId,
-      candidate_signal_ids: signalIds,
-      candidate_signals: signals
-    }))
-    .digest("hex");
-
-  return JSON.stringify({
-    version: 1,
-    task_id: taskId,
-    candidate_signal_count: signals.length,
-    candidate_signal_ids: signalIds,
-    fingerprint
-  });
-}
-
-function isUnknownRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function mapGardenMcpWorkerRole(role: GardenMcpWorkerRole | undefined): GardenRoleValue {
-  switch (role) {
-    case "janitor":
-      return GardenRole.JANITOR;
-    case "auditor":
-      return GardenRole.AUDITOR;
-    case "librarian":
-    case "host_worker":
-    case undefined:
-      return GardenRole.LIBRARIAN;
-  }
-}
-
-function toGardenTaskSnapshot(row: GardenTaskRow) {
-  return {
-    task_id: row.id,
-    role: gardenWorkerRoleForRow(row),
-    kind: row.kind,
-    created_at: row.created_at,
-    payload: publicGardenTaskPayload(row)
-  };
-}
-
-function toGardenClaimTaskPayload(row: GardenTaskRow) {
-  return {
-    task_id: row.id,
-    role: gardenWorkerRoleForRow(row),
-    kind: row.kind,
-    payload: publicGardenTaskPayload(row)
-  };
-}
-
-// invariant: POST_TURN_EXTRACT and EDGE_CLASSIFY are the two host-worker task
-// kinds — the attached CLI agent (Codex / Claude Code / similar) is the
-// compute, so both surface as role "host_worker" to the MCP worker loop.
-const HOST_WORKER_TASK_KINDS: ReadonlySet<string> = new Set([
-  GardenTaskKind.POST_TURN_EXTRACT,
-  GardenTaskKind.EDGE_CLASSIFY
-]);
-
-function gardenWorkerRoleForRow(row: GardenTaskRow): string {
-  return HOST_WORKER_TASK_KINDS.has(row.kind) ? "host_worker" : row.role;
-}
-
-function publicGardenTaskPayload(row: GardenTaskRow): unknown {
-  if (!isUnknownRecord(row.payload)) {
-    return row.payload;
-  }
-  if (row.kind === GardenTaskKind.POST_TURN_EXTRACT) {
-    return {
-      run_id: row.payload.run_id,
-      turn_index: row.payload.turn_index,
-      workspace_id: row.payload.workspace_id,
-      turn_digest: row.payload.turn_digest
-    };
-  }
-  if (row.kind === GardenTaskKind.EDGE_CLASSIFY) {
-    // The host worker needs only the pair content + classification context to
-    // render a verdict. source_signal_id is provenance the daemon re-binds at
-    // apply time and is not exposed to the worker.
-    return {
-      run_id: row.payload.run_id,
-      workspace_id: row.payload.workspace_id,
-      dimension: row.payload.dimension,
-      scope_class: row.payload.scope_class,
-      source_memory: row.payload.source_memory,
-      neighbor_memory: row.payload.neighbor_memory
-    };
-  }
-  return row.payload;
-}
-
-// invariant: completed EDGE_CLASSIFY tasks must be bound to a schema-valid
-// stored payload before any worker verdict can apply to a memory pair.
-function readEdgeClassifyPayloadPair(taskId: string, payload: unknown): {
-  readonly sourceObjectId: string;
-  readonly neighborObjectId: string;
-  readonly sourceSignalId: string | null;
-} {
-  const parsed = EdgeClassifyTaskPayloadSchema.safeParse(payload);
-  if (!parsed.success) {
-    throw new ToolValidationError(
-      `Garden task ${taskId} has malformed EDGE_CLASSIFY payload; cannot validate edge_verdict pair.`
-    );
-  }
-  return {
-    sourceObjectId: parsed.data.source_memory.object_id,
-    neighborObjectId: parsed.data.neighbor_memory.object_id,
-    sourceSignalId: parsed.data.source_signal_id ?? null
-  };
-}
-
-function toSilentAlreadyClaimed(taskId: string) {
-  return {
-    status: "already_claimed",
-    task_id: taskId,
-    role: "unknown",
-    kind: "unknown",
-    payload: null
-  };
 }
 
 function ok(toolName: AlayaMemoryToolName, output: unknown): McpMemoryToolCallResult {
