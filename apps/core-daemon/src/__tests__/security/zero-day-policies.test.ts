@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseZeroDayPoliciesJson } from "../zero-day-policies.js";
+import { parseZeroDayPoliciesJson } from "../../security/zero-day-policies.js";
 
 describe("parseZeroDayPoliciesJson", () => {
   it("returns an empty list when the env var is unset or blank", () => {

@@ -192,8 +192,8 @@ import {
 } from "./garden/path-plasticity-runtime.js";
 import { SqliteHandoffGapAdapter } from "./handoff-gap-adapter.js";
 import { createManifestationContextLensAssembler } from "./manifestation-context-lens-assembler.js";
-import { parseZeroDayPoliciesJson } from "./zero-day-policies.js";
-import { createSecurityStatusBootstrapServices } from "./security-status-bootstrap.js";
+import { parseZeroDayPoliciesJson } from "./security/zero-day-policies.js";
+import { createSecurityStatusBootstrapServices } from "./security/status-bootstrap.js";
 import { createConfigService } from "./services/config-service.js";
 import { createEnvironmentStatusService } from "./services/environment-status-service.js";
 import { GardenComputeProviderResolver } from "./services/garden-compute-provider-resolver.js";

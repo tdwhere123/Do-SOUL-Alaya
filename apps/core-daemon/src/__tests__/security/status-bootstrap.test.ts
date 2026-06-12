@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeGovernanceEventType, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { EventPublisherPropagationError } from "@do-soul/alaya-core";
-import { withSecurityStatusWorkspaceService } from "../security-status-bootstrap.js";
+import { withSecurityStatusWorkspaceService } from "../../security/status-bootstrap.js";
 
 function createPropagationError(): EventPublisherPropagationError {
   const entry: EventLogEntry = {
