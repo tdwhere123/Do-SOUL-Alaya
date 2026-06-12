@@ -40,6 +40,18 @@ const ANSWER_SYSTEM_DEFAULT =
  */
 const ANSWER_SYSTEM_PREFERENCE =
   "You are personalizing to one user. Use their preferences and history in the memory context to give a concrete recommendation tailored to what THIS user would prefer. Ground it in their stated preferences; do not give generic advice and do not refuse.";
+/**
+ * Temporal answer口径: an elapsed-time/ordering answer is never a literal string
+ * in the context — it must be computed from the recorded dates. Under the
+ * default 口径 the model reads that as "not in the context" and abstains
+ * (oracle probe 2026-06-12: half the temporal failures were "I don't know"
+ * with the needed dated memories delivered).
+ */
+const ANSWER_SYSTEM_TEMPORAL =
+  "Answer the user's question using ONLY the provided memory context. " +
+  "Each memory is prefixed with the date it was recorded; the current date accompanies the question. " +
+  "For elapsed time, durations, dates, or event ordering: find the relevant memories, resolve relative phrases ('yesterday', 'last week') against that memory's recorded date, and COMPUTE the answer from those dates. " +
+  "Commit to the computation the dates support instead of saying you don't know; only abstain when no relevant dated memory exists. Be concise.";
 
 /** Judge口径: one-word yes/no, matching LongMemEval's anscheck metric. */
 const JUDGE_SYSTEM =
@@ -129,11 +141,20 @@ export function judgeIsCorrect(verdict: string): boolean {
   return /\byes\b/iu.test(verdict) && !/\bno\b/iu.test(verdict);
 }
 
-/** Pick the answer system prompt: preference questions need personalization. */
+/** Pick the answer system prompt: preference needs personalization, temporal
+ * needs license to compute from dates. Abstention always keeps the default
+ * (those questions must be recognized as unanswerable, not computed through). */
 function answerSystemFor(questionType: string, isAbstention: boolean): string {
-  return questionType === "single-session-preference" && !isAbstention
-    ? ANSWER_SYSTEM_PREFERENCE
-    : ANSWER_SYSTEM_DEFAULT;
+  if (isAbstention) {
+    return ANSWER_SYSTEM_DEFAULT;
+  }
+  if (questionType === "single-session-preference") {
+    return ANSWER_SYSTEM_PREFERENCE;
+  }
+  if (questionType === "temporal-reasoning") {
+    return ANSWER_SYSTEM_TEMPORAL;
+  }
+  return ANSWER_SYSTEM_DEFAULT;
 }
 
 /**
