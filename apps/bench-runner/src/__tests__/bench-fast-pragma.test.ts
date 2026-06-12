@@ -6,7 +6,7 @@ import { initDatabase } from "@do-soul/alaya-storage";
 import { applyBenchFastPragmaIfRequested } from "../harness/daemon.js";
 
 // Bench-only SQLite tuning is layered on top of the production storage
-// hardening (see packages/storage/src/db.ts). The production pragmas are
+// hardening (see packages/storage/src/sqlite/db.ts). The production pragmas are
 // asserted by packages/storage/src/__tests__/db.test.ts; this file covers
 // only the bench-extra ones (temp_store, cache_size) and the env gate.
 

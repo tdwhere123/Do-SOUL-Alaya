@@ -13,7 +13,7 @@ import {
   type MemoryEntry,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteEdgeProposalRepo } from "../../repos/edge-proposal-repo.js";
 import { SqliteMemoryEntryRepo } from "../../repos/memory-entry-repo.js";
 import { SqlitePathRelationRepo } from "../../repos/path-relation-repo.js";

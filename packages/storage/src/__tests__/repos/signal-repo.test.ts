@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { RunMode, RunState, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteRunRepo } from "../../repos/run-repo.js";
 import { SqliteSignalRepo } from "../../repos/signal-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";

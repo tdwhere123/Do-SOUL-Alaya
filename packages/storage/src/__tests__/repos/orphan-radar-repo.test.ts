@@ -12,7 +12,7 @@ import {
   type MemoryEntry,
   type OrphanRadar
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteMemoryEntryRepo } from "../../repos/memory-entry-repo.js";
 import { SqliteOrphanRadarRepo } from "../../repos/orphan-radar-repo.js";
 import { SqliteRunRepo } from "../../repos/run-repo.js";

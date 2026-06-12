@@ -6,7 +6,7 @@ import {
   WorkspaceState,
   type GlobalMemoryEntry
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
 
 type Classification = "included" | "excluded";

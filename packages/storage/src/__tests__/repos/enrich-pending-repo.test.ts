@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DYNAMICS_CONSTANTS, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
-import { initDatabase, type StorageDatabase } from "../../db.js";
+import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
 import { SqliteEnrichPendingRepo } from "../../repos/enrich-pending-repo.js";
 

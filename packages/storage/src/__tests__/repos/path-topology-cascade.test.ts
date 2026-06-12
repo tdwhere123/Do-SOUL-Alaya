@@ -13,7 +13,7 @@ import {
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { initDatabase, type StorageDatabase } from "../../db.js";
+import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
 import { SqliteCoUsageCounterRepo } from "../../repos/co-usage-counter-repo.js";
 import { SqliteMemoryEntryRepo } from "../../repos/memory-entry-repo.js";
 import { SqlitePathRelationRepo } from "../../repos/path-relation-repo.js";

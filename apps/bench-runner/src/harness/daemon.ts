@@ -2440,7 +2440,7 @@ async function queryEdgeProposalKpiRows(
 }
 
 // @anchor BENCH_FAST_PRAGMA: bench-only SQLite tuning layered on top of the
-// production storage hardening (packages/storage/src/db.ts already sets
+// production storage hardening (packages/storage/src/sqlite/db.ts already sets
 // journal_mode=WAL + synchronous=NORMAL + foreign_keys + busy_timeout). The
 // bench harness adds two pragmas that production deliberately leaves at
 // default because they change the durability vs throughput tradeoff:

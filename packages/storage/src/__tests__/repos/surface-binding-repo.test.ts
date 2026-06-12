@@ -6,7 +6,7 @@ import {
   WorkspaceState,
   type SurfaceBinding
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteSurfaceBindingRepo } from "../../repos/surface-binding-repo.js";
 import { SqliteSurfaceIdentityRepo } from "../../repos/surface-identity-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";

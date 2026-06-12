@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { DirtyStateDossier } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteDirtyStateDossierRepo } from "../../repos/dirty-state-dossier-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();

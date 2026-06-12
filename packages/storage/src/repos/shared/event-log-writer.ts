@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventLogEntrySchema, type EventLogEntry } from "@do-soul/alaya-protocol";
-import type { SqliteConnection } from "../../db.js";
-import { StorageError } from "../../errors.js";
+import type { SqliteConnection } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
 
 export type EventLogDraftInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 

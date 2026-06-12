@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
-import { StorageError, type StorageErrorCode } from "./errors.js";
+import { StorageError, type StorageErrorCode } from "../shared/errors.js";
 
 export type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 
@@ -209,10 +209,10 @@ function computeKnownMaxVersion(migrationFiles: readonly string[]): number {
 
 function resolveMigrationsDirectory(): string {
   const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-  // Prefer the compiled output path first, then fall back to source for ts/vitest execution.
+  // Source and compiled layouts both place migrations next to sqlite/.
   const candidates = [
-    path.join(currentDirectory, "migrations"),
-    path.join(currentDirectory, "../src/migrations")
+    path.join(currentDirectory, "../migrations"),
+    path.join(currentDirectory, "../../src/migrations")
   ];
 
   for (const candidate of candidates) {

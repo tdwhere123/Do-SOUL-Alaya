@@ -6,8 +6,8 @@ import {
   type ProjectMappingAnchor as ProtocolProjectMappingAnchor,
   type ProjectMappingState
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../db.js";
-import { StorageError } from "../errors.js";
+import type { StorageDatabase } from "../sqlite/db.js";
+import { StorageError } from "../shared/errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "./shared/validators.js";
 

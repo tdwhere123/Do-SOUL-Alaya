@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteTrustStateRepo } from "../../repos/trust-state-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();

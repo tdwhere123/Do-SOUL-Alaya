@@ -1,5 +1,5 @@
-import type { StorageDatabase } from "../db.js";
-import { StorageError } from "../errors.js";
+import type { StorageDatabase } from "../sqlite/db.js";
+import { StorageError } from "../shared/errors.js";
 
 // invariant: durable hand-off queue between the synchronous write-path and the
 // asynchronous Garden BULK_ENRICH worker. Materialization enqueues one row per

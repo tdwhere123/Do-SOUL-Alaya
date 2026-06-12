@@ -1,5 +1,5 @@
-import type { SqliteConnection } from "../db.js";
-import { StorageError } from "../errors.js";
+import type { SqliteConnection } from "../sqlite/db.js";
+import { StorageError } from "../shared/errors.js";
 import {
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL

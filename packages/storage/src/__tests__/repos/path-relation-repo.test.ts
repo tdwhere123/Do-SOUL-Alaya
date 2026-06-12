@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import type { PathAnchorRef, PathRelation } from "@do-soul/alaya-protocol";
 import { PathAnchorRefSchema, serializePathAnchorRef } from "@do-soul/alaya-protocol";
-import { initDatabase, type StorageDatabase } from "../../db.js";
+import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
 import {
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL,

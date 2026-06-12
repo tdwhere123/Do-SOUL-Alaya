@@ -17,8 +17,8 @@ import {
   type MemoryEntry,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../../db.js";
-import { StorageError } from "../../../errors.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { StorageError } from "../../../shared/errors.js";
 import { SqliteEnrichPendingRepo } from "../../../repos/enrich-pending-repo.js";
 import { SqliteEventLogRepo } from "../../../repos/event-log-repo.js";
 import {

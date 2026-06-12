@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { StrongRef } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteStrongRefRepo } from "../../repos/strong-ref-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();

@@ -6,7 +6,7 @@ import {
   type Proposal,
   type ProposalResolutionState
 } from "@do-soul/alaya-protocol";
-import { StorageError } from "../../errors.js";
+import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../shared/validators.js";
 import type { ProposalReviewerAssignment, ProposalReviewerAssignmentInput } from "./types.js";

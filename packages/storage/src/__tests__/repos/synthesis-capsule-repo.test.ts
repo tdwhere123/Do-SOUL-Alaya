@@ -7,7 +7,7 @@ import {
   WorkspaceState,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteRunRepo } from "../../repos/run-repo.js";
 import { SqliteSynthesisCapsuleRepo } from "../../repos/synthesis-capsule-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";

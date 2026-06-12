@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { GreenStatus } from "@do-soul/alaya-protocol";
-import { initDatabase, type StorageDatabase } from "../../db.js";
+import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
 import { SqliteGreenStatusRepo } from "../../repos/green-status-repo.js";
 
 const databases = new Set<StorageDatabase>();

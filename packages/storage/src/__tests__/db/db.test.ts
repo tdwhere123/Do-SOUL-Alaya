@@ -4,8 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initDatabase } from "../../db.js";
-import { StorageError } from "../../errors.js";
+import { initDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
 
 interface TempContext {
   directory: string;

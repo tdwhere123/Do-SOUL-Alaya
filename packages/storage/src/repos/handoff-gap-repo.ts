@@ -1,6 +1,6 @@
 import { GapRecordSchema, HandoffRecordSchema, type GapRecord, type HandoffRecord } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../db.js";
-import { StorageError } from "../errors.js";
+import type { StorageDatabase } from "../sqlite/db.js";
+import { StorageError } from "../shared/errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
 
 // ---------------------------------------------------------------------------

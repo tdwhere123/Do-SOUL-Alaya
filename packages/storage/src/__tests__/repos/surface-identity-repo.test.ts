@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { SurfaceEventType, SurfaceStatus, WorkspaceKind, WorkspaceState, type SurfaceIdentity } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteSurfaceIdentityRepo } from "../../repos/surface-identity-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
 

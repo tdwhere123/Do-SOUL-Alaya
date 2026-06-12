@@ -1,6 +1,6 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../../db.js";
-import { StorageError } from "../../errors.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
 import {
   parseForgetDisposition,
   parseLifecycleState,

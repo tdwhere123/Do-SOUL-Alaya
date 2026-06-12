@@ -6,8 +6,8 @@ import {
   type GardenRoleValue,
   type GardenTaskKindValue
 } from "@do-soul/alaya-protocol";
-import type { SqliteConnection } from "../db.js";
-import { StorageError } from "../errors.js";
+import type { SqliteConnection } from "../sqlite/db.js";
+import { StorageError } from "../shared/errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "./shared/validators.js";
 

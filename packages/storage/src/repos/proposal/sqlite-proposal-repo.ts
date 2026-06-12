@@ -6,8 +6,8 @@ import {
   type ProposalResolutionState,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../../db.js";
-import { StorageError } from "../../errors.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
 import { MEMORY_ENTRY_SELECT_COLUMNS } from "../memory-entry/row-mapper.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { getEventLogWriter, insertEventLogEntry } from "../shared/event-log-writer.js";

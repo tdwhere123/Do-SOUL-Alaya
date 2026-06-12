@@ -9,7 +9,7 @@ import {
   type ClaimForm,
   type ConflictMatrixEdge
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteClaimFormRepo } from "../../repos/claim-form-repo.js";
 import { SqliteConflictMatrixRepo } from "../../repos/conflict-matrix-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";

@@ -5,7 +5,7 @@ import {
   WorkspaceState,
   type ProjectMappingAnchor
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
 
 type AcceptedByValue = "user" | "review" | "deterministic_rule";

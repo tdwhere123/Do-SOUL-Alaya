@@ -1,4 +1,4 @@
-import { StorageError } from "../../errors.js";
+import { StorageError } from "../../shared/errors.js";
 
 const SURFACE_URI_PATTERN = /^surface:\/\/[\w\-.:/]+$/;
 

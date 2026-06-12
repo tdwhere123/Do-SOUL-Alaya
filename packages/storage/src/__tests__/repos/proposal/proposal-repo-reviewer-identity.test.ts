@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryGovernanceEventType, RetentionPolicy, type Proposal } from "@do-soul/alaya-protocol";
-import { initDatabase, type StorageDatabase } from "../../../db.js";
+import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
 import { SqliteProposalRepo, type ProposalResolutionEventInput } from "../../../repos/proposal-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();

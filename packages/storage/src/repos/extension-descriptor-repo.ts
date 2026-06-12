@@ -4,8 +4,8 @@ import {
   type SkillPackage,
   type ToolProvider
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../db.js";
-import { StorageError } from "../errors.js";
+import type { StorageDatabase } from "../sqlite/db.js";
+import { StorageError } from "../shared/errors.js";
 import { parseNonEmptyString } from "./shared/validators.js";
 
 const TOOL_PROVIDER_DESCRIPTOR_TYPE = "tool_provider";

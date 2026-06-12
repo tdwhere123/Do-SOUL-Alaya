@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { RunMode, RunState, WorkspaceKind, WorkspaceState, type DeferredObligation } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteDeferredObligationRepo } from "../../repos/deferred-obligation-repo.js";
 import { SqliteRunRepo } from "../../repos/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";

@@ -8,7 +8,7 @@ import {
   type HighFrequencyPattern,
   type StaleMemoryEntry
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../db.js";
+import type { StorageDatabase } from "../sqlite/db.js";
 import {
   ACTIVE_STATE,
   addMilliseconds,

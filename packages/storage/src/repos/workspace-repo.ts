@@ -1,6 +1,6 @@
 import { WorkspaceSchema, type Workspace } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../db.js";
-import { StorageError } from "../errors.js";
+import type { StorageDatabase } from "../sqlite/db.js";
+import { StorageError } from "../shared/errors.js";
 import { cascadeDeleteWorkspace } from "./cascade-delete.js";
 
 // Walk the underlying better-sqlite3 error and any wrapped causes to detect

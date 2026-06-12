@@ -4,7 +4,7 @@ import {
   type MemoryEntryMutableFields,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
-import { StorageError } from "../../errors.js";
+import { StorageError } from "../../shared/errors.js";
 import { parseUpdateFields } from "../memory-entry/row-mapper.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString } from "../shared/validators.js";

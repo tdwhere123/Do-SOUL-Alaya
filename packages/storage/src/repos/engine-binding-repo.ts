@@ -1,6 +1,6 @@
 import { EngineBindingRecordSchema, type EngineBindingRecord } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../db.js";
-import { StorageError } from "../errors.js";
+import type { StorageDatabase } from "../sqlite/db.js";
+import { StorageError } from "../shared/errors.js";
 
 export type EngineBindingRecordCreateInput = Omit<EngineBindingRecord, "created_at" | "updated_at">;
 

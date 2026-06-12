@@ -7,7 +7,7 @@ import {
   WorkspaceState,
   type FileRecord
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteFileRepo } from "../../repos/file-repo.js";
 import { SqliteRunRepo } from "../../repos/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";

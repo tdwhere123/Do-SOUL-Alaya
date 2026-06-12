@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { HealthEventKind } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteHealthJournalRepo } from "../../repos/health-journal-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();

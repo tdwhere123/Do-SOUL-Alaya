@@ -7,7 +7,7 @@ import {
   WorkspaceKind,
   WorkspaceState
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteEventLogRepo } from "../../repos/event-log-repo.js";
 import { SqliteRunRepo } from "../../repos/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
