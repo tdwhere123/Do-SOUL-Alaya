@@ -82,13 +82,13 @@ import {
   type JanitorTombstoneGcPort,
   type LibrarianSchedulerPort
 } from "@do-soul/alaya-soul";
-import { findEventLogOrphansForWorkspace, findOrphanedMemoriesForWorkspace } from "./orphan-query.js";
-import { BackgroundServiceManager } from "./background/bootstrap.js";
-import { buildGardenTaskSignalId } from "./garden-task-signal-id.js";
+import { findEventLogOrphansForWorkspace, findOrphanedMemoriesForWorkspace } from "../orphan-query.js";
+import { BackgroundServiceManager } from "../background/bootstrap.js";
+import { buildGardenTaskSignalId } from "./task-signal-id.js";
 import {
   createPathPlasticityWatermarkRegistry,
   type PathPlasticityWatermarkRegistry
-} from "./path-plasticity-runtime.js";
+} from "../path-plasticity-runtime.js";
 
 type PathGraphSnapshotRecord = Readonly<PathGraphSnapshot>;
 type EmbeddingBackfillTaskOutcome = Readonly<{

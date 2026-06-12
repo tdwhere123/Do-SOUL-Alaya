@@ -45,7 +45,7 @@ export interface AlayaDaemonRuntime {
   // without dragging BULK_ENRICH / path-snapshot / consolidation into a
   // pre-recall gate.
   // see also: apps/core-daemon/src/runtime/daemon-runtime-lifecycle.ts:runGardenEmbeddingBackfillPass
-  // see also: apps/core-daemon/src/garden-runtime.ts:runEmbeddingBackfillPass
+  // see also: apps/core-daemon/src/garden/runtime.ts:runEmbeddingBackfillPass
   runGardenEmbeddingBackfillPass(workspaceId: string): Promise<void>;
   startHttpServer(options?: AlayaDaemonListenOptions): Promise<AlayaDaemonServer>;
   shutdown(): Promise<void>;

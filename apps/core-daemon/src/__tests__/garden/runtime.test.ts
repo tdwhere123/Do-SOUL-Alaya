@@ -17,7 +17,7 @@ import {
   ConsolidationPlanner,
   EmbeddingBackfillPartialFailureError
 } from "@do-soul/alaya-core";
-import type { BackgroundServiceConfig } from "../background/bootstrap.js";
+import type { BackgroundServiceConfig } from "../../background/bootstrap.js";
 
 const hoisted = vi.hoisted(() => {
   const schedulers: Array<{
@@ -122,7 +122,7 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
   };
 });
 
-import { createGardenRuntime } from "../garden-runtime.js";
+import { createGardenRuntime } from "../../garden/runtime.js";
 
 type GardenRuntimeInput = Parameters<typeof createGardenRuntime>[0];
 type CapturedScheduler = (typeof hoisted.schedulers)[number];

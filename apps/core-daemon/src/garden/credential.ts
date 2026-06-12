@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { secretRefScheme } from "@do-soul/alaya-protocol";
-import { resolveSecretRef, type ResolveSecretError, type ResolvedSecret } from "./secrets.js";
-import { readPlatformKeychainSecret } from "./secrets/keychain/index.js";
+import { resolveSecretRef, type ResolveSecretError, type ResolvedSecret } from "../secrets.js";
+import { readPlatformKeychainSecret } from "../secrets/keychain/index.js";
 
 export type GardenCredentialProvenance = Readonly<{
   readonly kind: "env" | "file" | "keychain" | "embedding-fallback" | "none";

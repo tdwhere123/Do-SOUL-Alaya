@@ -6,7 +6,7 @@ import {
   resolveEdgeClassifyWiring,
   readOfficialGardenSecretRef
 } from "../../runtime/daemon-runtime-support.js";
-import { resolveGardenOpenAiCredential } from "../../garden-credential.js";
+import { resolveGardenOpenAiCredential } from "../../garden/index.js";
 
 /**
  * C1 wiring tests — verify the env readers honour the new

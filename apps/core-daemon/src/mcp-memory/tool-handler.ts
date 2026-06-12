@@ -95,7 +95,7 @@ import type {
 } from "@do-soul/alaya-storage";
 import { stableStringify } from "@do-soul/alaya-core";
 import { normalizeSchemaGroundedSignal, type GraphEdgeCreationPort } from "@do-soul/alaya-soul";
-import { buildGardenTaskSignalId } from "../garden-task-signal-id.js";
+import { buildGardenTaskSignalId } from "../garden/index.js";
 import { hasAlayaMemoryToolName, type AlayaMemoryToolName } from "./tool-catalog.js";
 import { buildMemorySearchResult, buildRecallStrategyMix } from "./recall-result.js";
 import type { createSoulResolveHandler } from "./resolve-handler.js";

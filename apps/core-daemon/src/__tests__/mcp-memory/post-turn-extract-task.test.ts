@@ -29,8 +29,8 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import type { BackgroundServiceConfig } from "../../background/bootstrap.js";
-import { createGardenRuntime } from "../../garden-runtime.js";
-import { buildGardenTaskSignalId } from "../../garden-task-signal-id.js";
+import { createGardenRuntime } from "../../garden/runtime.js";
+import { buildGardenTaskSignalId } from "../../garden/index.js";
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext,

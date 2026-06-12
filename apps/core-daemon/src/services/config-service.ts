@@ -30,8 +30,8 @@ import {
   ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV,
   selectGardenCredentialProvenance,
   type GardenCredentialProvenance
-} from "../garden-credential.js";
-export type { GardenCredentialProvenance } from "../garden-credential.js";
+} from "../garden/index.js";
+export type { GardenCredentialProvenance } from "../garden/index.js";
 import type { AlayaConfigPaths } from "../cli/config-files.js";
 import {
   loadConfigEnv,

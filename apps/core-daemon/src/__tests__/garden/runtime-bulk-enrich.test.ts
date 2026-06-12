@@ -7,14 +7,14 @@ import {
   type GardenTaskResult,
   type GardenTierValue
 } from "@do-soul/alaya-protocol";
-import type { BackgroundServiceConfig } from "../background/bootstrap.js";
+import type { BackgroundServiceConfig } from "../../background/bootstrap.js";
 
 // invariant: BULK_ENRICH drain worker test (S3c). Pins that the Garden claims
 // enrich_pending rows, runs both governed enrichment services per memory, marks
 // them processed, is idempotent on a re-drain, and is triggered by BOTH the
 // periodic Librarian pass (bulk-import-complete style: enqueue for all
 // workspaces) AND the accumulated-count threshold (OQ5).
-// see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask
+// see also: apps/core-daemon/src/garden/runtime.ts runBulkEnrichTask
 // see also: packages/storage/src/repos/enrich-pending-repo.ts
 const hoisted = vi.hoisted(() => {
   const schedulers: Array<FakeGardenScheduler> = [];
@@ -96,7 +96,7 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
   };
 });
 
-import { createGardenRuntime } from "../garden-runtime.js";
+import { createGardenRuntime } from "../../garden/runtime.js";
 
 type GardenRuntimeInput = Parameters<typeof createGardenRuntime>[0];
 type Runtime = ReturnType<typeof createGardenRuntime>;

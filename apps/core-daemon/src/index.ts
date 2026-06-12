@@ -184,7 +184,7 @@ import {
   createTombstoneDispositionSweepPort,
   createTombstoneGcPort
 } from "./forget-disposition-ports.js";
-import { createGardenRuntime } from "./garden-runtime.js";
+import { createGardenRuntime } from "./garden/runtime.js";
 import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
 import {
   createPathPlasticityService,
