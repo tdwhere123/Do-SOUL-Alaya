@@ -191,7 +191,7 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   if (allQaVerdicts.length > 0) {
     const qaAgg = aggregateQaVerdicts(allQaVerdicts);
     process.stdout.write(
-      `LoCoMo QA accuracy=${qaAgg.qa_accuracy.toFixed(1)}% (${qaAgg.qa_correct}/${qaAgg.qa_total})\n`
+      `LoCoMo QA accuracy=${(qaAgg.qa_accuracy * 100).toFixed(1)}% (${qaAgg.qa_correct}/${qaAgg.qa_total})\n`
     );
     for (const [type, tally] of Object.entries(qaAgg.qa_by_type)) {
       process.stdout.write(`  ${type}: ${tally.correct}/${tally.total}\n`);
