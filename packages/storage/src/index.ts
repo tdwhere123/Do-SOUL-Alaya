@@ -10,7 +10,7 @@ export {
   SqliteEngineBindingRepo,
   type EngineBindingRecordCreateInput,
   type EngineBindingRepo
-} from "./repos/engine-binding-repo.js";
+} from "./repos/control/index.js";
 export {
   SqliteEventLogRepo,
   type EventLogAppendInput,
@@ -217,11 +217,11 @@ export {
 export {
   SqliteConfigRepo,
   type ConfigRepo
-} from "./repos/config-repo.js";
+} from "./repos/control/index.js";
 export {
   SqliteTrustStateRepo,
   type TrustStateRepo
-} from "./repos/trust-state-repo.js";
+} from "./repos/control/index.js";
 export { SqliteHandoffGapRepo } from "./repos/handoff-gap-repo.js";
 // invariant: storage owns an independent jieba module-state instance (Package
 // Dependency Direction forbids importing core's copy). Daemon and bench-runner
