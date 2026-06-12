@@ -915,7 +915,7 @@ describe("daemon tool runtime bootstrap", () => {
   });
 
   it("marks principal coding unavailable when a required sandbox tool is missing", async () => {
-    const appModule = await import("../../app.js");
+    const appModule = await import("../../runtime/app.js");
 
     await bootDaemonRuntime();
 

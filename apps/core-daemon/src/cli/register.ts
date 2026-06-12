@@ -29,7 +29,7 @@ import {
   resolveAlayaConfigPaths
 } from "./config-files.js";
 import { createDoctorCommand, type GardenComputeStatus, type GardenKeychainCheck } from "./doctor.js";
-import { readBuildInfo } from "../build-info.js";
+import { readBuildInfo } from "../runtime/build-info.js";
 import { createInstallCommand } from "./install.js";
 import { createInspectCommand } from "./inspect.js";
 import { createUpdateCommand } from "./update.js";

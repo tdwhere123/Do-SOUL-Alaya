@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createApp } from "../../app.js";
+import { createApp } from "../../runtime/app.js";
 import type { AppConfigService } from "../../services/config-service.js";
 
 describe("createApp", () => {

@@ -1,4 +1,4 @@
-import type { RequestProtectionConfig } from "../app.js";
+import type { RequestProtectionConfig } from "./app.js";
 import type { createCoreDaemonApp } from "./daemon-app-composition.js";
 import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 import type { AppConfigService } from "../services/config-service.js";

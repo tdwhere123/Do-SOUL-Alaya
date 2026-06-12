@@ -17,7 +17,7 @@ import {
   type GraphHealthSnapshot,
   type GraphHealthWarning
 } from "../services/graph-health-service.js";
-import type { BuildInfo } from "../build-info.js";
+import type { BuildInfo } from "../runtime/build-info.js";
 
 const UNKNOWN_BUILD_INFO: BuildInfo = {
   version: "0.0.0-dev",

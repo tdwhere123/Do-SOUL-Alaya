@@ -1,5 +1,5 @@
 import { serve, type ServerType } from "@hono/node-server";
-import type { CoreDaemonLifecycleState } from "../app.js";
+import type { CoreDaemonLifecycleState } from "./app.js";
 import { resolveDaemonHostFromEnv } from "./server-options.js";
 import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./daemon-runtime-types.js";
 

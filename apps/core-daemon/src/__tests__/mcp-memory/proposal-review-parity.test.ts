@@ -14,7 +14,7 @@ import {
   type RecallPolicy,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
-import { createApp } from "../../app.js";
+import { createApp } from "../../runtime/app.js";
 import type { ProposalRouteServices } from "../../routes/proposals.js";
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../cli/bridge.js";
 import { createReviewCommand } from "../../cli/review.js";

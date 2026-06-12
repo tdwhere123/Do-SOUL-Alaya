@@ -605,7 +605,7 @@ vi.mock("@hono/node-server", () => ({
   serve: hoisted.serve
 }));
 
-vi.mock("../../app.js", () => ({
+vi.mock("../../runtime/app.js", () => ({
   createApp: hoisted.createApp
 }));
 
