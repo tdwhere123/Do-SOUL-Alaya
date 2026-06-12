@@ -6,9 +6,9 @@ import {
   canonicalGovernanceSubject,
   type ClaimForm
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteClaimFormRepo } from "../../repos/claim-form-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteClaimFormRepo } from "../../../repos/governance/claim-form-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

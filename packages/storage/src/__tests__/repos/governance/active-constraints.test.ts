@@ -16,13 +16,13 @@ import {
   type MemoryEntry,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
-import { findActiveConstraints } from "../../repos/active-constraints.js";
-import { SqliteClaimFormRepo } from "../../repos/claim-form-repo.js";
-import { SqliteMemoryEntryRepo } from "../../repos/memory-entry/index.js";
-import { SqlitePathRelationRepo } from "../../repos/path/path-relation-repo.js";
-import { SqliteRunRepo } from "../../repos/runtime/run-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
+import { findActiveConstraints } from "../../../repos/governance/active-constraints.js";
+import { SqliteClaimFormRepo } from "../../../repos/governance/claim-form-repo.js";
+import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
+import { SqlitePathRelationRepo } from "../../../repos/path/path-relation-repo.js";
+import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<StorageDatabase>();
 

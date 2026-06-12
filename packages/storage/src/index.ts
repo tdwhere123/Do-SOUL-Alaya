@@ -37,7 +37,7 @@ export {
   type ActiveConstraintQueryResult,
   type ActiveConstraintRecord,
   type ActiveConstraintSourceChannel
-} from "./repos/active-constraints.js";
+} from "./repos/governance/index.js";
 export {
   SqliteGlobalMemoryRepo,
   type GlobalMemoryRepo,
@@ -71,7 +71,7 @@ export {
 export {
   SqliteClaimFormRepo,
   type ClaimFormRepo
-} from "./repos/claim-form-repo.js";
+} from "./repos/governance/index.js";
 export {
   SqliteProposalRepo,
   type AcceptedMemoryUpdateInput,
@@ -91,7 +91,7 @@ export {
 export {
   SqliteSlotRepo,
   type SlotRepo
-} from "./repos/slot-repo.js";
+} from "./repos/governance/index.js";
 
 export {
   SqliteToolSpecRepo,
@@ -144,7 +144,7 @@ export {
 export {
   SqliteDeferredObligationRepo,
   type DeferredObligationRepo
-} from "./repos/deferred-obligation-repo.js";
+} from "./repos/governance/index.js";
 export {
   SqliteDirtyStateDossierRepo,
   type DirtyStateDossierRepo
@@ -152,7 +152,7 @@ export {
 export {
   SqliteConflictMatrixRepo,
   type ConflictMatrixRepo
-} from "./repos/conflict-matrix-repo.js";
+} from "./repos/governance/index.js";
 
 export {
   SqliteSurfaceIdentityRepo,

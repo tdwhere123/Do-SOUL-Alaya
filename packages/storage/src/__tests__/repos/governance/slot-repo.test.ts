@@ -7,9 +7,9 @@ import {
   canonicalGovernanceSubject,
   type Slot
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteSlotRepo } from "../../repos/slot-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteSlotRepo } from "../../../repos/governance/slot-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const SLOT_ID_1 = "11111111-1111-4111-8111-111111111111";
 const SLOT_ID_2 = "22222222-2222-4222-8222-222222222222";

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { RunMode, RunState, WorkspaceKind, WorkspaceState, type DeferredObligation } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteDeferredObligationRepo } from "../../repos/deferred-obligation-repo.js";
-import { SqliteRunRepo } from "../../repos/runtime/run-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteDeferredObligationRepo } from "../../../repos/governance/deferred-obligation-repo.js";
+import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
