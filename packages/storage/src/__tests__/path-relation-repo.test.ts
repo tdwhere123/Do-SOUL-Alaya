@@ -476,6 +476,38 @@ describe("SqlitePathRelationRepo", () => {
     expect(updated.constitution).toEqual(relation.constitution);
   });
 
+  it("memoizes row parses by (path_id, updated_at) and evicts on update, delete, and re-create", async () => {
+    const { repo } = createRepo();
+    const relation = createPathRelationFixture();
+    repo.create(relation);
+
+    const first = await repo.findById(relation.path_id);
+    const second = await repo.findById(relation.path_id);
+    // Same frozen instance: the deep zod parse ran once for the unchanged row.
+    expect(second).toBe(first);
+
+    // An update that does NOT bump updated_at must still invalidate the memo.
+    repo.update(relation.path_id, {
+      effect_vector: {
+        ...relation.effect_vector,
+        salience: 0.9
+      }
+    });
+    const afterUpdate = await repo.findById(relation.path_id);
+    expect(afterUpdate?.effect_vector.salience).toBe(0.9);
+
+    await repo.delete(relation.path_id);
+    repo.create({
+      ...relation,
+      legitimacy: {
+        ...relation.legitimacy,
+        evidence_basis: ["evidence-recreated"]
+      }
+    });
+    const recreated = await repo.findById(relation.path_id);
+    expect(recreated?.legitimacy.evidence_basis).toEqual(["evidence-recreated"]);
+  });
+
   it("findActive only returns rows that match the current Wave 1 lifecycle shape", async () => {
     const { repo, database } = createRepo();
     const relation = createPathRelationFixture();
