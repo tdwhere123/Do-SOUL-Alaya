@@ -1318,6 +1318,14 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       };
     }
   };
+  // Production ingest config: keep high-confidence facts whose open-vocabulary
+  // object_kind falls outside routeByObjectKind as recallable memory_entries
+  // (rather than dropping them to evidence_only). The bench daemon shares this
+  // construction, so the benchmark exercises whatever production is configured
+  // to do. Default-off preserves the curated routing behavior.
+  const retainUnroutedHighConfidenceFacts =
+    process.env.ALAYA_RETAIN_UNROUTED_FACTS === "1" ||
+    process.env.ALAYA_RETAIN_UNROUTED_FACTS === "true";
   const materializationRouter = new MaterializationRouter({
     evidenceService,
     memoryService: materializationMemoryService,
@@ -1344,7 +1352,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     ...(reconciliationService === null
       ? {}
       : { reconciliationPort: reconciliationService }),
-    handoffGapHandler: sqliteHandoffGapAdapter
+    handoffGapHandler: sqliteHandoffGapAdapter,
+    retainUnroutedHighConfidenceFacts
   });
   const signalService = new SignalService({
     eventLogRepo,

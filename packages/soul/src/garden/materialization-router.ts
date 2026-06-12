@@ -467,6 +467,14 @@ export interface MaterializationRouterDeps {
   // to the BULK_ENRICH worker. see also: materializeConflictEvaluation.
   readonly conflictDetectionPort?: ConflictDetectionPort;
   readonly reconciliationPort?: ReconciliationPort;
+  // When true, a high-confidence potential_claim/potential_preference whose
+  // free-form object_kind is outside routeByObjectKind is kept as a recallable
+  // memory_entry (memory_entry_only — no draft claim) instead of dropped to
+  // evidence_only. Aligns production ingest with the open-vocabulary extractor
+  // (which emits ~10^5 distinct kinds, ~99.9% outside the 13-kind table). The
+  // bench seeds every haystack turn, so production must retain these facts for
+  // the bench to test production. Default-off preserves curated behavior.
+  readonly retainUnroutedHighConfidenceFacts?: boolean;
 }
 
 export class MaterializationRouter {
@@ -564,6 +572,16 @@ export class MaterializationRouter {
       // collapse the routing table was meant to break. Known claim-
       // capable dimensions are enumerated in routeByObjectKind; anything
       // outside the table is archived as questionable evidence only.
+      // retainUnroutedHighConfidenceFacts keeps the fact recallable as a
+      // memory_entry_only (a memory with NO draft claim, so the claim/
+      // governance surface stays unpolluted) — the same route `fact` takes.
+      if (this.dependencies.retainUnroutedHighConfidenceFacts === true) {
+        return {
+          kind: "evidence_only",
+          route_target: "memory_entry_only",
+          routing_reason: `high-confidence ${signal.signal_kind} with unrouted object_kind=${signal.object_kind} -> memory_entry_only (retain-unrouted-facts)`
+        };
+      }
       return {
         kind: "evidence_only",
         route_target: "evidence_only",

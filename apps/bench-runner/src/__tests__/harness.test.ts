@@ -1006,17 +1006,30 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       // never lands in the recall store and readMaterializedMemoryId throws
       // "did not materialize a memory_entry", dropping the whole turn batch.
       //
-      // The compile-seed path now canonicalizes an unrouted extracted
-      // object_kind onto `fact` (a memory_entry-producing route) and strips
-      // the stale schema-grounding block so normalizeSchemaGroundedSignal
-      // re-grounds the signal consistently. This test drives the real
-      // in-process signalService.receiveSignal seam with a compile()-shaped
-      // envelope whose object_kind is free-form, and asserts a durable
-      // memory_entry is created and recallable.
-      const daemon = await startBenchDaemon({
-        workspaceId: "harness-freeform-kind-ws",
-        runId: "harness-freeform-kind-run"
-      });
+      // The bench seeds the REAL free-form extracted object_kind (no longer
+      // canonicalized onto `fact`), so it exercises the production router
+      // exactly. With retainUnroutedHighConfidenceFacts the daemon keeps an
+      // unrouted high-confidence claim/preference as a recallable
+      // memory_entry_only; this test runs that path and asserts the durable
+      // memory_entry is created and recallable. Default-off would drop both to
+      // evidence_only (production parity) — see the router unit coverage.
+      const startWithRetainFacts = async () => {
+        const prev = process.env.ALAYA_RETAIN_UNROUTED_FACTS;
+        process.env.ALAYA_RETAIN_UNROUTED_FACTS = "1";
+        try {
+          return await startBenchDaemon({
+            workspaceId: "harness-freeform-kind-ws",
+            runId: "harness-freeform-kind-run"
+          });
+        } finally {
+          if (prev === undefined) {
+            delete process.env.ALAYA_RETAIN_UNROUTED_FACTS;
+          } else {
+            process.env.ALAYA_RETAIN_UNROUTED_FACTS = prev;
+          }
+        }
+      };
+      const daemon = await startWithRetainFacts();
       handles.push(daemon);
 
       const credentialledConfig: CompileSeedExtractionConfig = {
