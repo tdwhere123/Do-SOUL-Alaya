@@ -6,8 +6,8 @@ import {
   WorkspaceState,
   type GlobalMemoryEntry
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 type Classification = "included" | "excluded";
 
@@ -51,7 +51,7 @@ afterEach(() => {
 describe("Global memory storage repos", () => {
   it("applies migrations 050 and 051, exports the repos, and keeps global entries workspace-agnostic", async () => {
     const { database } = await createRepos();
-    const storage = (await import("../../index.js")) as Record<string, unknown>;
+    const storage = (await import("../../../index.js")) as Record<string, unknown>;
 
     expect(storage.SqliteGlobalMemoryRepo).toBeTypeOf("function");
     expect(storage.SqliteGlobalMemoryRecallCacheRepo).toBeTypeOf("function");
@@ -290,7 +290,7 @@ async function createRepos(): Promise<{
     workspace_state: WorkspaceState.ACTIVE
   });
 
-  const storage = (await import("../../index.js")) as {
+  const storage = (await import("../../../index.js")) as {
     SqliteGlobalMemoryRepo: new (database: ReturnType<typeof initDatabase>) => GlobalMemoryRepoLike;
     SqliteGlobalMemoryRecallCacheRepo: new (database: ReturnType<typeof initDatabase>) => GlobalMemoryRecallCacheRepoLike;
   };

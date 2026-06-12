@@ -9,14 +9,14 @@ import {
   WorkspaceState,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteMemoryEntryRepo } from "../../repos/memory-entry/index.js";
-import { SqliteRunRepo } from "../../repos/runtime/run-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
+import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 import type {
   MemoryEmbeddingMetadata,
   MemoryEmbeddingRecord
-} from "../../repos/memory/memory-embedding-repo.js";
+} from "../../../repos/memory/memory-embedding-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -30,7 +30,7 @@ afterEach(() => {
 
 describe("Memory embedding storage repo", () => {
   it("applies migration 052, exports the repo, and persists embeddings keyed by memory object id", async () => {
-    const storage = (await import("../../index.js")) as Record<string, unknown>;
+    const storage = (await import("../../../index.js")) as Record<string, unknown>;
     const { database, workspaceId, repo } = await createRepoContext();
 
     expect(storage.SqliteMemoryEmbeddingRepo).toBeTypeOf("function");
@@ -90,7 +90,7 @@ describe("Memory embedding storage repo", () => {
   it("allows migration 052 DDL to be re-run without failing on existing objects", async () => {
     const { database } = await createRepoContext();
     const migrationSql = readFileSync(
-      new URL("../../migrations/052-memory-embeddings.sql", import.meta.url),
+      new URL("../../../migrations/052-memory-embeddings.sql", import.meta.url),
       "utf8"
     );
 
@@ -346,7 +346,7 @@ async function createRepoContext(): Promise<{
   const workspaceRepo = new SqliteWorkspaceRepo(database);
   const runRepo = new SqliteRunRepo(database);
   const memoryRepo = new SqliteMemoryEntryRepo(database);
-  const { SqliteMemoryEmbeddingRepo } = await import("../../index.js");
+  const { SqliteMemoryEmbeddingRepo } = await import("../../../index.js");
 
   await workspaceRepo.create({
     workspace_id: "workspace-1",

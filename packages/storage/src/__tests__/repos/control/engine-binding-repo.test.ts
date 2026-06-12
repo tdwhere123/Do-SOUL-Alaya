@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { EngineProvider, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteEngineBindingRepo } from "../../repos/control/engine-binding-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteEngineBindingRepo } from "../../../repos/control/engine-binding-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
