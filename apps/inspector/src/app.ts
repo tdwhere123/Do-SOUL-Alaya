@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
-import { createInspectorAuthMiddleware } from "./auth.js";
+import { createInspectorAuthMiddleware } from "./middleware/auth.js";
 import { registerInspectorBenchSummaryRoutes } from "./routes/bench-summary.js";
 import { registerInspectorConfigRoutes } from "./routes/config.js";
 import { registerInspectorGraphRoutes } from "./routes/graph.js";
@@ -11,7 +11,7 @@ import { registerInspectorProposalRoutes } from "./routes/proposals.js";
 import { registerInspectorRecallStatsRoutes } from "./routes/recall-stats.js";
 import { registerInspectorSoulSearchRoutes } from "./routes/soul-search.js";
 import { registerInspectorStatusRoutes } from "./routes/status.js";
-import { registerInspectorStaticRoutes } from "./static.js";
+import { registerInspectorStaticRoutes } from "./routes/static.js";
 
 export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "GET /api/config/:workspaceId/soul",

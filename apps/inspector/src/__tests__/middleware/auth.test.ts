@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { constantTimeTokenEqual, createInspectorAuthMiddleware } from "../auth.js";
+import { constantTimeTokenEqual, createInspectorAuthMiddleware } from "../../middleware/auth.js";
 
 describe("inspector auth", () => {
   it("rejects missing and wrong tokens", async () => {
