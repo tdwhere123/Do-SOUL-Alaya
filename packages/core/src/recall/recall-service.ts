@@ -7,8 +7,6 @@ import {
   SoulRecallCompletedPayloadSchema,
   SoulRecallWeightTransferPayloadSchema,
   StorageTier,
-  isPathActiveForRecall,
-  isPathGovernedForSuppression,
   isPathRecallEligible,
   type FineAssessmentConfig,
   type MemoryEntry,
@@ -93,20 +91,14 @@ import {
   type GraphExpansionFrontierNode
 } from "./graph-expansion.js";
 import {
-  PATH_SUPPRESSION_MAX_PER_TARGET,
   collectPathGraphNeighbors,
-  directionEligiblePathExpansionTargets,
-  firstTimeConcernSeedId,
-  isPathExcludedFromRecall,
-  normalizeTimeConcernWindowDigest,
-  pathAnchorFacetKey,
-  pathMatchesTimeConcernWindowDigest,
-  pathRelationMemoryIds,
-  scorePathRelationExpansion,
-  scorePathRelationSuppression,
   uniquePathExpansionSources,
   uniqueStrings
 } from "./path-relations.js";
+import {
+  addPathExpansionCandidates,
+  collectNegativePathSuppressions
+} from "./path-expansion.js";
 import {
   DYNAMIC_RECALL_SEED_CAP,
   ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR,
@@ -655,7 +647,7 @@ export class RecallService {
     readonly entitySeedScores: Readonly<Record<string, number>>;
     readonly pathExpansionScores: Readonly<Record<string, number>>;
     // Negative-path active suppression deltas keyed by target memory id.
-    // see also: packages/core/src/recall/recall-service.ts:RecallService.collectNegativePathSuppressions,
+    // see also: packages/core/src/recall/path-expansion.ts:collectNegativePathSuppressions,
     // packages/core/src/recall/fusion-delivery.ts:applyPathSuppressionToFusionScores.
     readonly pathSuppressionScores: Readonly<Record<string, number>>;
     readonly degradation_reason: RecallResult["degradation_reason"];
@@ -701,7 +693,7 @@ export class RecallService {
     // Active sign-aware suppression: target memory id -> accumulated demotion
     // delta sourced from negative (recall_bias < 0) paths anchored on the
     // expansion seeds. Applied to the fused score before sort.
-    // see also: packages/core/src/recall/recall-service.ts:RecallService.collectNegativePathSuppressions,
+    // see also: packages/core/src/recall/path-expansion.ts:collectNegativePathSuppressions,
     // packages/core/src/recall/fusion-delivery.ts:applyPathSuppressionToFusionScores.
     const pathSuppressionScores = new Map<string, number>();
     const addCandidate = (
@@ -1018,12 +1010,15 @@ export class RecallService {
     // seed set to the pre-path drafts keeps hop semantics stable across the
     // ordering change. see also: packages/core/src/recall/recall-service.ts:RecallService.addGraphExpansionCandidates.
     const prePathGraphSeedIds = selectExpansionSeedDrafts(drafts).map((draft) => draft.entry.object_id);
-    await this.addPathExpansionCandidates({
+    await addPathExpansionCandidates({
       workspaceId,
       byId,
       drafts,
       queryProbes,
-      addCandidate
+      addCandidate,
+      dynamicRecallPlaneCap: DYNAMIC_RECALL_PLANE_CAP,
+      pathExpansionPort: this.dependencies.pathExpansionPort,
+      warn: this.warn
     });
     const graphExpansionResult = await this.addGraphExpansionCandidates({
       workspaceId,
@@ -1040,11 +1035,13 @@ export class RecallService {
     // isPathRecallEligible / direction filters never add their targets); here
     // they are collected separately so a reinforced negative actually demotes
     // its target's fused score instead of merely failing to amplify it.
-    await this.collectNegativePathSuppressions({
+    await collectNegativePathSuppressions({
       workspaceId,
       byId,
       drafts,
-      suppressionScores: pathSuppressionScores
+      suppressionScores: pathSuppressionScores,
+      pathExpansionPort: this.dependencies.pathExpansionPort,
+      warn: this.warn
     });
 
     const anchorMap = new Map(projectMappings.map((mapping) => [mapping.global_object_id, mapping]));
@@ -1506,240 +1503,6 @@ export class RecallService {
     );
   }
 
-  private async addPathExpansionCandidates(params: Readonly<{
-    readonly workspaceId: string;
-    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
-    readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
-    readonly queryProbes: Readonly<RecallQueryProbes>;
-    readonly addCandidate: CoarseCandidateAdder;
-  }>): Promise<void> {
-    const pathExpansionPort = this.dependencies.pathExpansionPort;
-    if (pathExpansionPort === undefined) {
-      return;
-    }
-
-    let added = await this.addTimeConcernPathExpansionCandidates(params);
-    if (added >= DYNAMIC_RECALL_PLANE_CAP || params.drafts.size === 0) {
-      return;
-    }
-
-    const seeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
-    if (seeds.length === 0) {
-      return;
-    }
-    const seedIds = new Set(seeds.map((seed) => seed.entry.object_id));
-    const anchors: PathAnchorRef[] = seeds.map((seed) => ({
-      kind: "object",
-      object_id: seed.entry.object_id
-    }));
-    let paths: readonly Readonly<PathRelation>[];
-    try {
-      paths = await pathExpansionPort.findByAnchors(params.workspaceId, anchors);
-    } catch (error) {
-      this.warn("path expansion lookup failed", {
-        workspace_id: params.workspaceId,
-        seed_count: seeds.length,
-        error: toErrorMessage(error)
-      });
-      return;
-    }
-
-    for (const path of paths) {
-      if (added >= DYNAMIC_RECALL_PLANE_CAP) {
-        return;
-      }
-      if (isPathExcludedFromRecall(path)) {
-        continue;
-      }
-      // Gold-blind: the discriminator reads the EARNED path's relation_kind, not
-      // a gold label. Only the co_recalled fan-in carrier (minted past the R1
-      // threshold-3 counter gate) grants the reserve exemption; every other
-      // relation_kind admitted here stays relevance-gated downstream.
-      const reachedViaEarnedCoRecalledFanin =
-        path.constitution.relation_kind === EARNED_CO_RECALLED_FANIN_RELATION_KIND;
-      for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
-        const entry = params.byId.get(target.targetId);
-        if (entry === undefined) {
-          continue;
-        }
-        params.addCandidate(
-          entry,
-          "path_expansion",
-          scorePathRelationExpansion(path),
-          "path_expansion",
-          {
-            path_id: path.path_id,
-            seed_id: target.seedId,
-            seed_kind: "memory",
-            target_object_id: target.targetId,
-            source_channel: "path_expansion",
-            relation_kind: path.constitution.relation_kind,
-            facet_key: pathAnchorFacetKey(path)
-          },
-          undefined,
-          reachedViaEarnedCoRecalledFanin
-        );
-        added += 1;
-        if (added >= DYNAMIC_RECALL_PLANE_CAP) {
-          return;
-        }
-      }
-    }
-  }
-
-  private async addTimeConcernPathExpansionCandidates(params: Readonly<{
-    readonly workspaceId: string;
-    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
-    readonly queryProbes: Readonly<RecallQueryProbes>;
-    readonly addCandidate: CoarseCandidateAdder;
-  }>): Promise<number> {
-    const pathExpansionPort = this.dependencies.pathExpansionPort;
-    const findByTimeConcernWindowDigests = pathExpansionPort?.findByTimeConcernWindowDigests;
-    if (findByTimeConcernWindowDigests === undefined || params.queryProbes.date_terms.length === 0) {
-      return 0;
-    }
-
-    const windowDigests = uniqueStrings(
-      params.queryProbes.date_terms
-        .map((term) => normalizeTimeConcernWindowDigest(term))
-        .filter((term) => term.length > 0)
-    );
-    if (windowDigests.length === 0) {
-      return 0;
-    }
-
-    let paths: readonly Readonly<PathRelation>[];
-    try {
-      paths = await findByTimeConcernWindowDigests.call(
-        pathExpansionPort,
-        params.workspaceId,
-        windowDigests
-      );
-    } catch (error) {
-      this.warn("time concern path expansion lookup failed", {
-        workspace_id: params.workspaceId,
-        window_digest_count: windowDigests.length,
-        error: toErrorMessage(error)
-      });
-      return 0;
-    }
-
-    let added = 0;
-    for (const path of paths) {
-      if (added >= DYNAMIC_RECALL_PLANE_CAP) {
-        return added;
-      }
-      if (isPathExcludedFromRecall(path) || !pathMatchesTimeConcernWindowDigest(path, windowDigests)) {
-        continue;
-      }
-      for (const targetId of pathRelationMemoryIds(path)) {
-        const entry = params.byId.get(targetId);
-        if (entry === undefined) {
-          continue;
-        }
-        params.addCandidate(
-          entry,
-          "path_expansion",
-          scorePathRelationExpansion(path),
-          "time_concern",
-          {
-            path_id: path.path_id,
-            seed_id: firstTimeConcernSeedId(path, windowDigests),
-            seed_kind: "time_concern",
-            target_object_id: targetId,
-            source_channel: "time_concern",
-            relation_kind: path.constitution.relation_kind,
-            facet_key: pathAnchorFacetKey(path)
-          }
-        );
-        added += 1;
-        if (added >= DYNAMIC_RECALL_PLANE_CAP) {
-          return added;
-        }
-      }
-    }
-    return added;
-  }
-
-  // anchor: active sign-aware suppression collector. Reuses the same expansion
-  // seeds and pathExpansionPort.findByAnchors lookup as path_expansion, but
-  // selects the negative (recall_bias < 0) active paths that the positive
-  // lanes deliberately exclude. Each such path demotes its direction-eligible
-  // target by a strength-gated delta (scorePathRelationSuppression). Deltas
-  // accumulate per target so multiple converging negatives compound. The
-  // collected map is applied to the fused score before sort. Fail-soft: a
-  // missing port or lookup failure leaves suppression empty and recall
-  // degrades to the no-suppression behavior.
-  // see also: packages/core/src/recall/fusion-delivery.ts:applyPathSuppressionToFusionScores,
-  // packages/core/src/recall/path-relations.ts:scorePathRelationSuppression.
-  private async collectNegativePathSuppressions(params: Readonly<{
-    readonly workspaceId: string;
-    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
-    readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
-    readonly suppressionScores: Map<string, number>;
-  }>): Promise<void> {
-    const pathExpansionPort = this.dependencies.pathExpansionPort;
-    if (pathExpansionPort === undefined || params.drafts.size === 0) {
-      return;
-    }
-    const seeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
-    if (seeds.length === 0) {
-      return;
-    }
-    const seedIds = new Set(seeds.map((seed) => seed.entry.object_id));
-    const anchors: PathAnchorRef[] = seeds.map((seed) => ({
-      kind: "object",
-      object_id: seed.entry.object_id
-    }));
-    let paths: readonly Readonly<PathRelation>[];
-    try {
-      paths = await pathExpansionPort.findByAnchors(params.workspaceId, anchors);
-    } catch (error) {
-      this.warn("path suppression lookup failed", {
-        workspace_id: params.workspaceId,
-        seed_count: seeds.length,
-        error: toErrorMessage(error)
-      });
-      return;
-    }
-    for (const path of paths) {
-      // invariant: only active, strictly-negative, governance-trusted paths
-      // suppress. Active lifecycle reuses isPathActiveForRecall (dormant/retired
-      // never suppress). isPathGovernedForSuppression is the governance gate:
-      // attention_only / hint_only negatives are agent-reachable through
-      // co-occurrence seeding + strength reinforcement, so they may exclude (via
-      // isPathRecallEligible) but never actively demote — strength alone cannot
-      // license suppression. Only recall_allowed / strictly_governed negatives
-      // reach the strength-scaled delta below.
-      // see also: path-relation.ts isPathGovernedForSuppression.
-      if (
-        !isPathActiveForRecall(path.lifecycle.status) ||
-        path.effect_vector.recall_bias >= 0 ||
-        !isPathGovernedForSuppression(path)
-      ) {
-        continue;
-      }
-      const delta = scorePathRelationSuppression(path);
-      if (delta <= 0) {
-        continue;
-      }
-      for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
-        if (!params.byId.has(target.targetId)) {
-          continue;
-        }
-        // invariant: per-target accumulation is capped at
-        // packages/core/src/recall/path-relations.ts:PATH_SUPPRESSION_MAX_PER_TARGET
-        // so converging negatives compound up to one reinforced-supersession
-        // delta but never gang into erasure.
-        const accumulated =
-          (params.suppressionScores.get(target.targetId) ?? 0) + delta;
-        params.suppressionScores.set(
-          target.targetId,
-          Math.min(accumulated, PATH_SUPPRESSION_MAX_PER_TARGET)
-        );
-      }
-    }
-  }
 
   private async expandTierCascade(params: {
     readonly workspaceId: string;
