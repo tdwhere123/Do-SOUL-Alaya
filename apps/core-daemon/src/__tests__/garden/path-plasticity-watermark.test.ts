@@ -22,7 +22,7 @@ import {
   createPathPlasticityWatermarkRegistry,
   createRecallPathPlasticityPort,
   createUsageProofReader
-} from "../path-plasticity-runtime.js";
+} from "../../garden/path-plasticity-runtime.js";
 
 /**
  * Per-workspace high-water mark for the path-plasticity Librarian task

@@ -82,13 +82,13 @@ import {
   type JanitorTombstoneGcPort,
   type LibrarianSchedulerPort
 } from "@do-soul/alaya-soul";
-import { findEventLogOrphansForWorkspace, findOrphanedMemoriesForWorkspace } from "../orphan-query.js";
+import { findEventLogOrphansForWorkspace, findOrphanedMemoriesForWorkspace } from "./orphan-query.js";
 import { BackgroundServiceManager } from "../background/bootstrap.js";
 import { buildGardenTaskSignalId } from "./task-signal-id.js";
 import {
   createPathPlasticityWatermarkRegistry,
   type PathPlasticityWatermarkRegistry
-} from "../path-plasticity-runtime.js";
+} from "./path-plasticity-runtime.js";
 
 type PathGraphSnapshotRecord = Readonly<PathGraphSnapshot>;
 type EmbeddingBackfillTaskOutcome = Readonly<{
@@ -1908,7 +1908,7 @@ export function createGardenRuntime(input: {
         // atomically with the DELETE. When the disposition/GC ports are unwired the
         // task is a safe no-op.
         // see also: packages/soul/src/garden/janitor.ts executeTombstoneGc,
-        // apps/core-daemon/src/forget-disposition-ports.ts computeForgetDisposition.
+        // apps/core-daemon/src/garden/forget-disposition-ports.ts computeForgetDisposition.
         await enqueueForAllWorkspaces(GardenTaskKind.TOMBSTONE_GC, GardenTier.TIER_0);
         markBackgroundPassCompleted();
       }

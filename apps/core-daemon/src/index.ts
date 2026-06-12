@@ -178,18 +178,18 @@ import {
 } from "./runtime/index.js";
 import { createReconciliationLlmDecisionPort } from "./reconciliation-llm-decision.js";
 import { createEdgeAutoProducerLlmPort } from "./edge-auto-producer-llm-adapter.js";
-import { createEdgeClassifyQueueAdapter } from "./edge-classify-queue-adapter.js";
+import { createEdgeClassifyQueueAdapter } from "./garden/edge-classify-queue-adapter.js";
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
 import {
   createTombstoneDispositionSweepPort,
   createTombstoneGcPort
-} from "./forget-disposition-ports.js";
+} from "./garden/forget-disposition-ports.js";
 import { createGardenRuntime } from "./garden/runtime.js";
 import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
 import {
   createPathPlasticityService,
   createRecallPathPlasticityPort
-} from "./path-plasticity-runtime.js";
+} from "./garden/path-plasticity-runtime.js";
 import { SqliteHandoffGapAdapter } from "./handoff-gap-adapter.js";
 import { createManifestationContextLensAssembler } from "./manifestation-context-lens-assembler.js";
 import { parseZeroDayPoliciesJson } from "./zero-day-policies.js";

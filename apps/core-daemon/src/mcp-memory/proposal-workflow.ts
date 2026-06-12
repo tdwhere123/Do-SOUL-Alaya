@@ -292,7 +292,7 @@ export interface McpMemoryProposalWorkflowDependencies {
   // the subset members; left undefined in unit tests that do not exercise member
   // resolution (capsule then builds with an empty member set).
   // see also: packages/storage/src/repos/memory-entry-repo.ts findByEvidenceRefs,
-  // apps/core-daemon/src/forget-disposition-ports.ts buildLiveCapsuleMemberIndex
+  // apps/core-daemon/src/garden/forget-disposition-ports.ts buildLiveCapsuleMemberIndex
   readonly synthesisMemberResolver?: {
     findMemberObjectIdsByEvidenceRefs(
       workspaceId: string,

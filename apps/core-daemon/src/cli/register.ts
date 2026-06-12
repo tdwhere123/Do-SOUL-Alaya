@@ -33,7 +33,7 @@ import { readBuildInfo } from "../build-info.js";
 import { createInstallCommand } from "./install.js";
 import { createInspectCommand } from "./inspect.js";
 import { createUpdateCommand } from "./update.js";
-import { defaultRecallPathPlasticityLookupTelemetry } from "../path-plasticity-runtime.js";
+import { defaultRecallPathPlasticityLookupTelemetry } from "../garden/path-plasticity-runtime.js";
 import { createOperationCommandSpecs } from "./operations.js";
 import { createReviewCommand } from "./review.js";
 import { createStatusCommand } from "./status.js";

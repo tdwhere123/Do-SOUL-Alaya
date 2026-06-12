@@ -60,7 +60,7 @@ uses existing PathRelation anchor reads to pull direction-eligible
 opposite-side object anchors into the recall pool. It does not create
 paths or durable relations during recall
 (`packages/storage/src/repos/path-relation-repo.ts`,
-`apps/core-daemon/src/path-plasticity-runtime.ts`).
+`apps/core-daemon/src/garden/path-plasticity-runtime.ts`).
 
 ## Working Diagnosis
 

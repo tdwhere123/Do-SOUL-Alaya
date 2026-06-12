@@ -646,7 +646,7 @@ vi.mock("../../runtime/files-data-dir.js", () => ({
   resolveCoreDaemonFilesDirectory: vi.fn(() => "/tmp/alaya-files")
 }));
 
-vi.mock("../../orphan-query.js", () => ({
+vi.mock("../../garden/orphan-query.js", () => ({
   findOrphanedMemoriesForWorkspace: vi.fn(async () => [])
 }));
 

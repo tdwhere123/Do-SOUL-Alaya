@@ -29,9 +29,9 @@ import {
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
 import { EventPublisher } from "@do-soul/alaya-core";
-import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../index.js";
-import { createPathPlasticityService } from "../path-plasticity-runtime.js";
-import { createTrustStateRecorder } from "../trust-state.js";
+import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
+import { createPathPlasticityService } from "../../garden/path-plasticity-runtime.js";
+import { createTrustStateRecorder } from "../../trust-state.js";
 
 const tempDirs: string[] = [];
 const originalDataDir = process.env.DATA_DIR;

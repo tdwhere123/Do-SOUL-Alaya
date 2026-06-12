@@ -41,7 +41,7 @@ live-data portrait §K.5):
    written as JSON but no deserialiser; `PathGraphSnapshot` 11 fields
    unread. Note: `direction_bias` is **not** discarded — recall path
    expansion reads it (`packages/core/src/recall/recall-service.ts:2038`) and
-   plasticity uses it (`apps/core-daemon/src/path-plasticity-runtime.ts:398-418`).
+   plasticity uses it (`apps/core-daemon/src/garden/path-plasticity-runtime.ts:398-418`).
 4. **21k+ pure sink** — `orphan_radar.reported`, `green.revoked`,
    `evidence_failure`.
 5. **Entire abstractions dead-coded** — `NodeInstance`, `SurfaceService`,

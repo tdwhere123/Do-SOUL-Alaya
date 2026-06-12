@@ -5,7 +5,7 @@ import {
   buildLiveCapsuleMemberIndex,
   computeForgetDisposition,
   createTombstoneDispositionSweepPort
-} from "../forget-disposition-ports.js";
+} from "../../garden/forget-disposition-ports.js";
 
 function memory(overrides: Partial<MemoryEntry> = {}): Readonly<MemoryEntry> {
   return Object.freeze({
