@@ -5,8 +5,8 @@ import {
   WorkspaceState,
   type ProjectMappingAnchor
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 type AcceptedByValue = "user" | "review" | "deterministic_rule";
 type ProjectMappingStateValue = (typeof ProjectMappingState)[keyof typeof ProjectMappingState];
@@ -49,7 +49,7 @@ afterEach(() => {
 describe("SqliteProjectMappingAnchorRepo", () => {
   it("applies migrations 020 and 021, exports the repo, and removes the redundant index", async () => {
     const { database } = await createRepo();
-    const storage = (await import("../../index.js")) as Record<string, unknown>;
+    const storage = (await import("../../../index.js")) as Record<string, unknown>;
 
     expect(storage.SqliteProjectMappingAnchorRepo).toBeTypeOf("function");
 
@@ -279,7 +279,7 @@ async function createRepo(): Promise<{
     workspace_state: WorkspaceState.ACTIVE
   });
 
-  const module = (await import("../../repos/project-mapping-anchor-repo.js")) as {
+  const module = (await import("../../../repos/surface/project-mapping-anchor-repo.js")) as {
     SqliteProjectMappingAnchorRepo: new (database: ReturnType<typeof initDatabase>) => ProjectMappingAnchorRepoLike;
   };
 

@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { WorkspaceKind, WorkspaceState, type GovernanceDriftLease } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteDriftLeaseRepo } from "../../repos/drift-lease-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteDriftLeaseRepo } from "../../../repos/lease/drift-lease-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -246,7 +246,7 @@ describe("SqliteDriftLeaseRepo", () => {
         "2099-04-20T08:00:00.000Z"
       );
 
-    database.connection.exec(readFileSync(new URL("../../migrations/047-drift-lease-operation-unique.sql", import.meta.url), "utf8"));
+    database.connection.exec(readFileSync(new URL("../../../migrations/047-drift-lease-operation-unique.sql", import.meta.url), "utf8"));
 
     const remaining = database.connection
       .prepare(

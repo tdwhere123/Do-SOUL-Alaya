@@ -3,15 +3,15 @@ import {
   type EventLogEntry,
   type FileRecord
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
 import {
   getEventLogWriter,
   insertEventLogEntry,
   type EventLogDraftInput
-} from "./shared/event-log-writer.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+} from "../shared/event-log-writer.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface FileRepo {
   create(record: Readonly<FileRecord>): Promise<Readonly<FileRecord>>;

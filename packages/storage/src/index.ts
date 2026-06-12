@@ -178,26 +178,26 @@ export {
 export {
   SqliteDriftLeaseRepo,
   type DriftLeaseRepo
-} from "./repos/drift-lease-repo.js";
+} from "./repos/lease/index.js";
 
 export {
   SqliteReconciliationLeaseRepo,
   type ReconciliationLease,
   type ReconciliationLeaseRepo
-} from "./repos/reconciliation-lease-repo.js";
+} from "./repos/lease/index.js";
 
 export {
   SqliteCrossCuttingPermissionRepo,
   type CrossCuttingPermissionRecord,
   type CrossCuttingPermissionRepo
-} from "./repos/cross-cutting-repo.js";
+} from "./repos/surface/index.js";
 
 export {
   SqliteProjectMappingAnchorRepo,
   type AcceptedBy,
   type ProjectMappingAnchorRecord,
   type ProjectMappingAnchorRepo
-} from "./repos/project-mapping-anchor-repo.js";
+} from "./repos/surface/index.js";
 export {
   SqliteGlobalMemoryRecallCacheRepo,
   type GlobalMemoryRecallCacheRecord,
@@ -213,7 +213,7 @@ export {
 export {
   SqliteFileRepo,
   type FileRepo
-} from "./repos/file-repo.js";
+} from "./repos/runtime/index.js";
 export {
   SqliteConfigRepo,
   type ConfigRepo
@@ -222,7 +222,7 @@ export {
   SqliteTrustStateRepo,
   type TrustStateRepo
 } from "./repos/control/index.js";
-export { SqliteHandoffGapRepo } from "./repos/handoff-gap-repo.js";
+export { SqliteHandoffGapRepo } from "./repos/runtime/index.js";
 // invariant: storage owns an independent jieba module-state instance (Package
 // Dependency Direction forbids importing core's copy). Daemon and bench-runner
 // MUST warm both core's and storage's segmenters at startup so the FTS query

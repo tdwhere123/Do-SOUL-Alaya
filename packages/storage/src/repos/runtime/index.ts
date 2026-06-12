@@ -8,6 +8,11 @@ export {
   type EventLogRepo
 } from "./event-log-repo.js";
 export {
+  SqliteFileRepo,
+  type FileRepo
+} from "./file-repo.js";
+export { SqliteHandoffGapRepo } from "./handoff-gap-repo.js";
+export {
   SqliteRunRepo,
   type RunCreateInput,
   type RunRepo

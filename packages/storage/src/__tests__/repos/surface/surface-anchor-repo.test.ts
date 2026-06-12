@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { SurfaceEventType, SurfaceAnchorKind, SurfaceStatus, WorkspaceKind, WorkspaceState, type SurfaceAnchor } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteSurfaceAnchorRepo } from "../../repos/surface/surface-anchor-repo.js";
-import { SqliteSurfaceIdentityRepo } from "../../repos/surface/surface-identity-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteSurfaceAnchorRepo } from "../../../repos/surface/surface-anchor-repo.js";
+import { SqliteSurfaceIdentityRepo } from "../../../repos/surface/surface-identity-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const SURFACE_OBJECT_ID = "11111111-1111-4111-8111-111111111111";
 const ANCHOR_OBJECT_ID_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

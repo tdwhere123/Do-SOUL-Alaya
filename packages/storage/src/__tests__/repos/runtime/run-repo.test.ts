@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { RunMode, RunState, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
-import { StorageError } from "../../shared/errors.js";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteRunRepo } from "../../repos/runtime/run-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { StorageError } from "../../../shared/errors.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

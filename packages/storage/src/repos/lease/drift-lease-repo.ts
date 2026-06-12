@@ -4,10 +4,10 @@ import {
   type GovernanceDriftLease,
   type SurfaceDriftOperationType
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
-import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
+import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 
 interface DriftLeaseRow {
   readonly lease_id: string;

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { BootstrappingRecord } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteBootstrappingRecordRepo, SqliteWorkspaceRepo } from "../../index.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteBootstrappingRecordRepo, SqliteWorkspaceRepo } from "../../../index.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

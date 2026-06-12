@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { ControlPlaneObjectKind, RetentionPolicy } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteHandoffGapRepo } from "../../repos/handoff-gap-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteHandoffGapRepo } from "../../../repos/runtime/handoff-gap-repo.js";
 import type { HandoffRecord, GapRecord } from "@do-soul/alaya-protocol";
 
 // ---------------------------------------------------------------------------

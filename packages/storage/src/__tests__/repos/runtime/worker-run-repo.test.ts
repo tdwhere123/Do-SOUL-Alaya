@@ -4,7 +4,7 @@ import path from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DelegatedWorkerRun } from "@do-soul/alaya-protocol";
-import { initDatabase, SqliteWorkerRunRepo, StorageDatabase, StorageError } from "../../index.js";
+import { initDatabase, SqliteWorkerRunRepo, StorageDatabase, StorageError } from "../../../index.js";
 
 const databases = new Set<StorageDatabase>();
 const tempDirectories = new Set<string>();
