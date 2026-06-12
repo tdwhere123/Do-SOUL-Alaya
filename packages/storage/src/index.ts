@@ -238,7 +238,7 @@ export {
   createGardenBackgroundDataPorts,
   type GardenBackgroundDataPorts,
   type GardenDataPortFactoryOptions
-} from "./repos/garden-data-ports.js";
+} from "./repos/garden/index.js";
 export {
   SqliteGardenTaskRepo,
   type GardenTaskBacklogCount,
@@ -253,4 +253,4 @@ export {
   type GardenTaskRepoPort,
   type GardenTaskRow,
   type GardenTaskStatus
-} from "./repos/garden-task-repo.js";
+} from "./repos/garden/index.js";

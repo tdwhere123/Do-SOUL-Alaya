@@ -243,7 +243,7 @@ export class DynamicsService {
     // fresh use revives. Penalties (amount <= 0) never revive. The lifecycle
     // flip is best-effort: a missing transitionLifecycle port (narrow test
     // fakes) or an active memory is a no-op. see also: lifecycle.ts dormant ->
-    // active transition; garden-data-ports.ts setLifecycleDormant.
+    // active transition; repos/garden/garden-data-ports.ts setLifecycleDormant.
     // invariant (N1): only revive (and audit) when the row was ACTUALLY dormant.
     // Prefer the SQL-guarded reviveDormant (atomic dormant -> active; returns null
     // when not dormant) so a concurrent/duplicate revival of an already-active row

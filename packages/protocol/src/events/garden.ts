@@ -23,7 +23,7 @@ export const GardenEventType = {
   // than left a silent DELETE. Distinct from CLAIM_RECLAIMED: CLAIM_RECLAIMED
   // re-arms a claimed-but-abandoned task back to pending; TASK_EXPIRED discards
   // a pending task no worker ever claimed.
-  // see also: storage/src/repos/garden-task-repo.ts expireUnclaimedByKind;
+  // see also: storage/src/repos/garden/garden-task-repo.ts expireUnclaimedByKind;
   //   apps/core-daemon/src/garden-runtime.ts expireUnclaimedHostWorkerTasks.
   SOUL_GARDEN_TASK_EXPIRED: "soul.garden.task_expired",
   SOUL_GARDEN_TIER_VIOLATION_REJECTED: "soul.garden.tier_violation_rejected",

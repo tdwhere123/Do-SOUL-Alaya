@@ -4,7 +4,7 @@ import {
   ProposalResolutionState,
   RetentionPolicy
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
 
 export const ACTIVE_STATE = "active";
 

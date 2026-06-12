@@ -84,7 +84,7 @@ export interface EnrichPendingRepo {
    * TTL (claimed_at < now - staleAfterMs) back to claimable (claimed_at = NULL),
    * so a claim stranded by a crash between claimBatch and markProcessed is
    * re-drained, not dropped. Returns rows reclaimed.
-   * see also: packages/storage/src/repos/garden-task-repo.ts peekAbandonedClaims
+   * see also: packages/storage/src/repos/garden/garden-task-repo.ts peekAbandonedClaims
    */
   reclaimStale(now: string, staleAfterMs: number): number;
 }

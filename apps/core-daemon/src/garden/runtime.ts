@@ -1754,8 +1754,8 @@ export function createGardenRuntime(input: {
   // delete is never silent. CAS-gated on status='pending' in the repo, so a task
   // a worker claimed between peek and delete is left intact. Runs on the same
   // ~60s pass as reclaimAbandonedGardenClaims; bounded per kind.
-  // see also: packages/storage/src/repos/garden-task-repo.ts peekExpiredUnclaimedTasks
-  // see also: packages/storage/src/repos/garden-task-repo.ts expireUnclaimedTasks
+  // see also: packages/storage/src/repos/garden/garden-task-repo.ts peekExpiredUnclaimedTasks
+  // see also: packages/storage/src/repos/garden/garden-task-repo.ts expireUnclaimedTasks
   const expireUnclaimedHostWorkerTasks = async (repo: SqliteGardenTaskRepo): Promise<void> => {
     const occurredAt = new Date().toISOString();
     const expiredBeforeIso = new Date(Date.now() - HOST_WORKER_TASK_TTL_MS).toISOString();

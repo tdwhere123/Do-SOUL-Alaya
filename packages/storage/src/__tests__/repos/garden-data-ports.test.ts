@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
-import { createGardenBackgroundDataPorts } from "../../repos/garden-data-ports.js";
+import { createGardenBackgroundDataPorts } from "../../repos/garden/garden-data-ports.js";
 
 const databases = new Set<StorageDatabase>();
 
