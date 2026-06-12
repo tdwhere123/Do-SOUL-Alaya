@@ -5,8 +5,8 @@ import { randomUUID } from "node:crypto";
 import {
   buildOperationAuditPath,
   type AlayaConfigPaths
-} from "./cli/config-files.js";
-import { parseStorageDbPathFromToml, resolveConfiguredDatabasePath } from "./runtime/index.js";
+} from "./config-files.js";
+import { parseStorageDbPathFromToml, resolveConfiguredDatabasePath } from "../runtime/index.js";
 
 export type OperationName = "backup" | "export" | "import";
 

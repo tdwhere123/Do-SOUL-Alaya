@@ -190,8 +190,8 @@ import {
   createPathPlasticityService,
   createRecallPathPlasticityPort
 } from "./garden/path-plasticity-runtime.js";
-import { SqliteHandoffGapAdapter } from "./handoff-gap-adapter.js";
-import { createManifestationContextLensAssembler } from "./manifestation-context-lens-assembler.js";
+import { SqliteHandoffGapAdapter } from "./handoff/gap-adapter.js";
+import { createManifestationContextLensAssembler } from "./manifestation/context-lens-assembler.js";
 import { parseZeroDayPoliciesJson } from "./security/zero-day-policies.js";
 import { createSecurityStatusBootstrapServices } from "./security/status-bootstrap.js";
 import { createConfigService } from "./services/config-service.js";

@@ -1,7 +1,7 @@
 import {
   createAlayaOperationsService,
   type AlayaOperationsService
-} from "../operations.js";
+} from "./operations-service.js";
 import {
   resolveAlayaConfigDir,
   resolveAlayaConfigPaths

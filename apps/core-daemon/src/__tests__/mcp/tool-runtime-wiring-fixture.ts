@@ -704,7 +704,7 @@ vi.mock("../../services/soul-approval-service.js", () => ({
   createSoulApprovalService: vi.fn(() => ({}))
 }));
 
-vi.mock("../../handoff-gap-adapter.js", () => ({
+vi.mock("../../handoff/gap-adapter.js", () => ({
   SqliteHandoffGapAdapter: vi.fn().mockImplementation(function SqliteHandoffGapAdapter() {
     return {};
   })

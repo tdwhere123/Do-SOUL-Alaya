@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { resolveAlayaConfigPaths } from "../cli/config-files.js";
-import { createAlayaOperationsService } from "../operations.js";
+import { resolveAlayaConfigPaths } from "../../cli/config-files.js";
+import { createAlayaOperationsService } from "../../cli/operations-service.js";
 
 describe("alaya operations", () => {
   it("backs up config and storage into a previewable bundle with an audit row", async () => {
