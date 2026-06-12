@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createBudgetProposalPort } from "../budget-wiring.js";
+import { createBudgetProposalPort } from "../../budget/wiring.js";
 
 describe("budget wiring", () => {
   it("uses the injected clock when creating bankruptcy proposals", async () => {

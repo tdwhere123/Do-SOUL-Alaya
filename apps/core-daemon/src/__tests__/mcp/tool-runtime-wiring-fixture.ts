@@ -638,7 +638,7 @@ vi.mock("../../background/bootstrap.js", () => ({
   })
 }));
 
-vi.mock("../../budget-wiring.js", () => ({
+vi.mock("../../budget/wiring.js", () => ({
   createBudgetProposalPort: vi.fn(() => ({}))
 }));
 

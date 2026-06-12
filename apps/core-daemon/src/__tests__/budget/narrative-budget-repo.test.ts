@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createNarrativeBudgetRepo } from "../narrative-budget-repo.js";
+import { createNarrativeBudgetRepo } from "../../budget/narrative-budget-repo.js";
 
 function makeNarrativeDigest(overrides?: Partial<{
   readonly digest_id: string;
