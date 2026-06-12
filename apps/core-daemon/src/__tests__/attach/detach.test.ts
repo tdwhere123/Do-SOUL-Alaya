@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createDetachCommandSpec } from "../cli/detach.js";
+import { createDetachCommandSpec } from "../../cli/attach/detach.js";
 import {
   applyProfileMutationPlan,
   buildAttachProfileMutationPlan
-} from "../profile-mutation.js";
+} from "../../attach/profile-mutation.js";
 import {
   createProfileCommandContext,
   MemoryProfileAuditWriter,

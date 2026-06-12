@@ -15,7 +15,7 @@ import {
   type ProfileMutationAuditRow,
   type ProfileMutationAuditWriter,
   type ProfileMutationFs
-} from "../profile-mutation.js";
+} from "../../attach/profile-mutation.js";
 
 class MemoryProfileFs implements ProfileMutationFs {
   public readonly files = new Map<string, string>();

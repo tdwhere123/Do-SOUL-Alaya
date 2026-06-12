@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { createAttachClaudeCommandSpec } from "../cli/attach-claude.js";
+import { createAttachCodexCommandSpec } from "../../cli/attach/codex.js";
 import {
   createProfileCommandContext,
   MemoryProfileAuditWriter,
   MemoryProfileFs
 } from "./profile-command-fixtures.js";
 
-describe("attach claude", () => {
+describe("attach codex", () => {
   it("writes MCP/slash profile records, audits, and records trust state", async () => {
     const fs = new MemoryProfileFs();
     const auditWriter = new MemoryProfileAuditWriter();
@@ -14,7 +14,7 @@ describe("attach claude", () => {
       recordInstalled: vi.fn(async () => {}),
       recordConfigured: vi.fn(async () => {})
     };
-    const command = createAttachClaudeCommandSpec({
+    const command = createAttachCodexCommandSpec({
       fs,
       auditWriter,
       trustStateRecorder,
@@ -27,11 +27,11 @@ describe("attach claude", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(fs.files.get("/tmp/home/.claude.json")).toContain("\"alaya\"");
-    expect(fs.files.get("/tmp/home/.claude/slash-commands.json")).toContain("bin/alaya.mjs");
-    expect(fs.files.get("/tmp/home/.claude/slash-commands.json")).toContain("inspect --open");
+    expect(fs.files.get("/tmp/home/.codex/config.toml")).toContain("[mcp_servers.alaya]");
+    expect(fs.files.get("/tmp/home/.codex/slash-commands.toml")).toContain("bin/alaya.mjs");
+    expect(fs.files.get("/tmp/home/.codex/slash-commands.toml")).toContain("inspect --open");
     expect(auditWriter.rows).toHaveLength(1);
-    expect(trustStateRecorder.recordInstalled).toHaveBeenCalledWith("claude-code");
-    expect(trustStateRecorder.recordConfigured).toHaveBeenCalledWith("claude-code");
+    expect(trustStateRecorder.recordInstalled).toHaveBeenCalledWith("codex");
+    expect(trustStateRecorder.recordConfigured).toHaveBeenCalledWith("codex");
   });
 });

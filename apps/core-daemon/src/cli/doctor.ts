@@ -9,7 +9,7 @@ import {
   detectAttachedProfileInstructionsDrift,
   type ProfileInstructionsDriftReport,
   type ProfileTarget
-} from "../profile-mutation.js";
+} from "../attach/index.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaSubcommandSpec } from "./bridge.js";
 import { resolveCliWorkspaceContext } from "./workspace-context.js";
 import {

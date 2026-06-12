@@ -1,15 +1,16 @@
 import type { SurfaceService } from "@do-soul/alaya-core";
 
 // invariant: ensureAgentSurface is the MCP-side counterpart to the
-// profile-file attach commands (apps/core-daemon/src/cli/attach-codex.ts
-// and attach-claude.ts). Profile mutation makes the agent's client
+// profile-file attach commands. Profile mutation makes the agent's client
 // config point at Alaya, but it never reaches the daemon's
 // surface_identities table. This registrar fills that gap: the first
 // MCP tool call from each (workspace_id, agent_target) writes a single
 // surface_identities row + SOUL_SURFACE_CREATED audit event, and every
 // later call hits the in-memory dedupe in the MCP handler.
+// see also: apps/core-daemon/src/cli/attach/codex.ts:createAttachCodexCommandSpec
+// see also: apps/core-daemon/src/cli/attach/claude.ts:createAttachClaudeCommandSpec
 // see also: apps/core-daemon/src/mcp-memory/tool-handler.ts
-// see also: packages/core/src/surfaces/surface-service.ts SurfaceService.createSurface
+// see also: packages/core/src/surfaces/surface-service.ts:SurfaceService.createSurface
 
 export interface AttachSurfaceRegistrar {
   ensureAgentSurface(input: {
@@ -40,9 +41,8 @@ export function createAttachSurfaceRegistrar(
         });
       } catch (error) {
         if (isConflictError(error)) {
-          // Another concurrent call created the surface row between the
-          // findBySurfaceId() probe and createSurface(); the row exists,
-          // so treat this as a successful registration.
+          // invariant: CONFLICT after the probe means another caller won the
+          // create race; the row exists, so registration is already satisfied.
           return;
         }
         deps.warn?.("ensureAgentSurface createSurface failed", {

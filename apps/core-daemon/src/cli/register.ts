@@ -13,11 +13,10 @@ import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
+import type { ProfileMutationAuditRow, ProfileMutationAuditWriter } from "../attach/index.js";
 import type { AlayaDaemonRuntime } from "../index.js";
+import { createAttachClaudeCommandSpec, createAttachCodexCommandSpec, createDetachCommandSpec } from "./attach/index.js";
 import { runAlayaMcpStdioServer } from "../mcp/mcp-server.js";
-import type { ProfileMutationAuditRow, ProfileMutationAuditWriter } from "../profile-mutation.js";
-import { createAttachClaudeCommandSpec } from "./attach-claude.js";
-import { createAttachCodexCommandSpec } from "./attach-codex.js";
 import {
   ALAYA_SYSEXITS,
   type AlayaCliArgsSchema,
@@ -29,7 +28,6 @@ import {
   resolveAlayaConfigDir,
   resolveAlayaConfigPaths
 } from "./config-files.js";
-import { createDetachCommandSpec } from "./detach.js";
 import { createDoctorCommand, type GardenComputeStatus, type GardenKeychainCheck } from "./doctor.js";
 import { readBuildInfo } from "../build-info.js";
 import { createInstallCommand } from "./install.js";

@@ -1,10 +1,10 @@
 import { PassThrough } from "node:stream";
-import type { AlayaCliContext } from "../cli/bridge.js";
+import type { AlayaCliContext } from "../../cli/bridge.js";
 import type {
   ProfileMutationAuditRow,
   ProfileMutationAuditWriter,
   ProfileMutationFs
-} from "../profile-mutation.js";
+} from "../../attach/profile-mutation.js";
 
 export class MemoryProfileFs implements ProfileMutationFs {
   public readonly files = new Map<string, string>();

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   canonicalAgentSurfaceId,
   createAttachSurfaceRegistrar
-} from "../attach-surface-registrar.js";
+} from "../../attach/surface-registrar.js";
 
 describe("createAttachSurfaceRegistrar", () => {
   it("creates a surface on first attach per (workspace, agent_target) and skips a subsequent existing row", async () => {

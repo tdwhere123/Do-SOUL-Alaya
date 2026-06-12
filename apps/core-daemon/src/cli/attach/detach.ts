@@ -4,7 +4,7 @@ import {
   type AlayaCliContext,
   type AlayaCliResult,
   type AlayaSubcommandSpec
-} from "./bridge.js";
+} from "../bridge.js";
 import {
   applyProfileMutationPlan,
   buildDetachProfileMutationPlan,
@@ -16,7 +16,7 @@ import {
   type ProfileMutationAuditWriter,
   type ProfileMutationConfirmIo,
   type ProfileMutationFs
-} from "../profile-mutation.js";
+} from "../../attach/index.js";
 
 export interface DetachCommandDeps {
   readonly fs?: ProfileMutationFs;

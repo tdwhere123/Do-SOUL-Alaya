@@ -141,7 +141,7 @@ import {
 } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "./daemon-embedding-runtime.js";
 import { createDaemonMcpMemoryToolHandler } from "./mcp-memory/daemon-handler.js";
-import { createAttachSurfaceRegistrar } from "./attach-surface-registrar.js";
+import { createAttachSurfaceRegistrar } from "./attach/surface-registrar.js";
 import { createBudgetProposalPort } from "./budget-wiring.js";
 import { bootstrapDaemonMcpTooling } from "./mcp/daemon-mcp-tooling.js";
 import {
