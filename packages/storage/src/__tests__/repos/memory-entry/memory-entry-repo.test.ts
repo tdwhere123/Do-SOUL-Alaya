@@ -27,7 +27,7 @@ import {
   type MemoryEntryRepoDiagnosticSink
 } from "../../../repos/memory-entry/index.js";
 import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
-import { SqliteSynthesisCapsuleRepo } from "../../../repos/synthesis-capsule-repo.js";
+import { SqliteSynthesisCapsuleRepo } from "../../../repos/capsules/synthesis-capsule-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();

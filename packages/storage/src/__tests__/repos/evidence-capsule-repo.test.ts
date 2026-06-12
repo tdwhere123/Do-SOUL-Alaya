@@ -8,7 +8,7 @@ import {
   type EvidenceCapsule
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../sqlite/db.js";
-import { SqliteEvidenceCapsuleRepo } from "../../repos/evidence-capsule-repo.js";
+import { SqliteEvidenceCapsuleRepo } from "../../repos/capsules/evidence-capsule-repo.js";
 import { SqliteRunRepo } from "../../repos/runtime/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
 

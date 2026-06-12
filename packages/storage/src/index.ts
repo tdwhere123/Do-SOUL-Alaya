@@ -21,7 +21,7 @@ export {
   SqliteEvidenceCapsuleRepo,
   type EvidenceCapsuleRepo,
   type EvidenceCapsuleKeywordHit
-} from "./repos/evidence-capsule-repo.js";
+} from "./repos/capsules/index.js";
 export {
   SqliteMemoryEntryRepo,
   type MemoryEntryRepo,
@@ -57,7 +57,7 @@ export {
   SqliteSynthesisCapsuleRepo,
   type SynthesisCapsuleRepo,
   type SynthesisCapsuleKeywordHit
-} from "./repos/synthesis-capsule-repo.js";
+} from "./repos/capsules/index.js";
 export {
   SqliteEdgeProposalRepo,
   type EdgeProposalCreateInput,

@@ -86,7 +86,7 @@ export interface RecallServiceEvidenceSearchPort {
 // is SqliteSynthesisCapsuleRepo (migration 079). Recall queries it on the
 // FTS-backed keyword path and joins each hit as a synthesis_capsule candidate
 // before fusion, rerank, and delivery-budget selection.
-// see also: packages/storage/src/repos/synthesis-capsule-repo.ts
+// see also: packages/storage/src/repos/capsules/synthesis-capsule-repo.ts
 export interface RecallServiceSynthesisSearchPort {
   searchByKeyword(
     workspaceId: string,
