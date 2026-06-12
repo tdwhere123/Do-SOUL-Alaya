@@ -732,6 +732,89 @@ export async function runLongMemEval(
               };
             });
         }
+        // Diagnostic: route-B proxy — session-CONSOLIDATION delivery. Offline sim
+        // (route-b-is-consolidation-not-rerank) showed a summary node packing a
+        // whole session's facts into one slot lifts gold coverage@5 39%->91%,
+        // because multi-fact gold (mean 5.5/q) can't fit 5 raw-fact slots but does
+        // fit as ~2.6-gold-per-session summary blocks. Unlike the flood cohort
+        // (60 raw scattered facts, hurt QA), this delivers K DENSE, coherent,
+        // dated per-session blocks. Faithful proxy for production route B
+        // (synthesis_capsule consolidation) without touching the recall hot path.
+        // Value = K session blocks; per-session fact cap keeps each block dense.
+        // Mutually exclusive with gold-only and session-cohort. Default off.
+        if (
+          process.env.ALAYA_BENCH_QA_SESSION_DIGEST !== undefined &&
+          process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY === undefined &&
+          process.env.ALAYA_BENCH_QA_SESSION_COHORT === undefined
+        ) {
+          const sessionsK = Math.max(
+            1,
+            Math.floor(Number(process.env.ALAYA_BENCH_QA_SESSION_DIGEST) || 6)
+          );
+          const factsPerSession = 8;
+          const metaOf = (id: string) =>
+            sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id));
+          // Group recall pool by session, preserving rank order within a session.
+          const bySession = new Map<
+            string,
+            { date: string | null; facts: string[]; bestRank: number }
+          >();
+          results.forEach((pointer, rank) => {
+            const meta = metaOf(pointer.object_id);
+            const session = meta?.sessionId ?? null;
+            if (session === null || meta === undefined) return;
+            const content = (meta.content ?? "").trim();
+            if (content.length === 0) return;
+            const group = bySession.get(session);
+            if (group === undefined) {
+              bySession.set(session, {
+                date: meta.eventDate ?? null,
+                facts: [content],
+                bestRank: rank
+              });
+            } else if (group.facts.length < factsPerSession && !group.facts.includes(content)) {
+              group.facts.push(content);
+            }
+          });
+          // Top-K sessions by best member rank → one dense dated block each.
+          const topSessions = [...bySession.entries()]
+            .sort((a, b) => a[1].bestRank - b[1].bestRank)
+            .slice(0, sessionsK);
+          if (process.env.ALAYA_BENCH_QA_SESSION_DIGEST_LLM !== undefined && opts.qa !== undefined) {
+            // Query-focused map-reduce: each session's facts are summarized by the
+            // LLM to ONLY the question-relevant facts (dates/names/numbers kept),
+            // denoising the raw block before the answer model reduces over them.
+            // This is the "intelligent summary node" — compression, not concat.
+            const sys =
+              "You extract from a set of memories ONLY the facts needed to answer a question. " +
+              "Preserve exact dates, names, numbers, and event details verbatim. " +
+              "Output a terse bullet list of the relevant facts, each with its date. " +
+              "If nothing in these memories is relevant, output exactly: NONE";
+            const summaries = await Promise.all(
+              topSessions.map(async ([session, group], i) => {
+                const user =
+                  `Question: ${question.question}\nCurrent date: ${question.question_date}\n` +
+                  `Memories recorded on ${group.date ?? "unknown date"}:\n` +
+                  group.facts.map((f) => `- ${f}`).join("\n");
+                const out = (await opts.qa!.chat(sys, user)).trim();
+                return { session, i, date: group.date, out };
+              })
+            );
+            delivered = summaries
+              .filter((s) => s.out.length > 0 && !/^none$/iu.test(s.out))
+              .map((s) => ({
+                objectId: `session-digest-llm-${s.i}-${s.session}`,
+                content: s.out,
+                ...(s.date === null ? {} : { eventDate: s.date })
+              }));
+          } else {
+            delivered = topSessions.map(([session, group], i) => ({
+              objectId: `session-digest-${i}-${session}`,
+              content: group.facts.map((f) => `- ${f}`).join("\n"),
+              ...(group.date === null ? {} : { eventDate: group.date })
+            }));
+          }
+        }
         qaVerdict = await scoreQaQuestion(
           {
             questionId: question.question_id,
