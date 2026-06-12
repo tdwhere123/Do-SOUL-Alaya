@@ -634,6 +634,7 @@ export async function runLongMemEval(
             rank: i + 1,
             objectId: p.object_id,
             isGold: goldSet.has(p.object_id),
+            sessionId: entry?.sessionId ?? null,
             eventDate: entry?.eventDate ?? null,
             content: (entry?.content ?? "").replace(/\s+/gu, " ").slice(0, 400)
           };
@@ -684,6 +685,46 @@ export async function runLongMemEval(
               ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
             };
           });
+        }
+        // Diagnostic: session-cohort QA delivery. Anchor on the top-N recall
+        // results, then deliver every materialized fact whose session appears
+        // among those anchors (capped) — tests whether gathering session-coherent
+        // context recovers the scattered multi-fact gold (offline: top-5 gold
+        // coverage 32%->79%). Needs a wide recall pool (ALAYA_BENCH_RECALL_MAXK).
+        // Mutually exclusive with the gold-only oracle; default off.
+        if (
+          process.env.ALAYA_BENCH_QA_SESSION_COHORT !== undefined &&
+          process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY === undefined
+        ) {
+          const anchorN = Math.max(
+            1,
+            Math.floor(Number(process.env.ALAYA_BENCH_QA_SESSION_COHORT) || 5)
+          );
+          const cohortCap = 60;
+          const sessionOf = (id: string): string | null =>
+            sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id))?.sessionId ?? null;
+          const anchorSessions = new Set(
+            results
+              .slice(0, anchorN)
+              .map((pointer) => sessionOf(pointer.object_id))
+              .filter((session): session is string => session !== null)
+          );
+          delivered = results
+            .filter((pointer) => {
+              const session = sessionOf(pointer.object_id);
+              return session !== null && anchorSessions.has(session);
+            })
+            .slice(0, cohortCap)
+            .map((pointer) => {
+              const entry = sidecar.get(
+                buildLongMemEvalSidecarKey("memory_entry", pointer.object_id)
+              );
+              return {
+                objectId: pointer.object_id,
+                content: entry?.content ?? "",
+                ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+              };
+            });
         }
         qaVerdict = await scoreQaQuestion(
           {
