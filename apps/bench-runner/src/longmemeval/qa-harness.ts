@@ -45,13 +45,19 @@ const ANSWER_SYSTEM_PREFERENCE =
  * in the context — it must be computed from the recorded dates. Under the
  * default 口径 the model reads that as "not in the context" and abstains
  * (oracle probe 2026-06-12: half the temporal failures were "I don't know"
- * with the needed dated memories delivered).
+ * with the needed dated memories delivered). Rule shape follows Mem0's
+ * evaluation ANSWER_PROMPT (resolve relative phrases against the memory's own
+ * timestamp, worked example, show the calculation, latest memory wins).
  */
 const ANSWER_SYSTEM_TEMPORAL =
   "Answer the user's question using ONLY the provided memory context. " +
-  "Each memory is prefixed with the date it was recorded; the current date accompanies the question. " +
-  "For elapsed time, durations, dates, or event ordering: find the relevant memories, resolve relative phrases ('yesterday', 'last week') against that memory's recorded date, and COMPUTE the answer from those dates. " +
-  "Commit to the computation the dates support instead of saying you don't know; only abstain when no relevant dated memory exists. Be concise.";
+  "Each memory is prefixed with the date it was recorded; the current date accompanies the question.\n" +
+  "Rules:\n" +
+  "1. Relative phrases INSIDE a memory ('yesterday', 'last week', 'a month ago') are relative to THAT memory's recorded date — resolve them to absolute dates first. Example: a memory recorded on 2023/05/04 saying 'I went to India last year' means the trip was in 2022.\n" +
+  "2. For elapsed time, durations, or event ordering: list the relevant absolute dates, then compute the answer step by step from those dates and the current date.\n" +
+  "3. If memories conflict, trust the most recently recorded one.\n" +
+  "Commit to the computation the dates support; do not answer 'I don't know' when the relevant dated memories are present — only abstain when no relevant dated memory exists. " +
+  "Show the brief date calculation, then end with the final answer in one short sentence.";
 
 /** Judge口径: one-word yes/no, matching LongMemEval's anscheck metric. */
 const JUDGE_SYSTEM =
