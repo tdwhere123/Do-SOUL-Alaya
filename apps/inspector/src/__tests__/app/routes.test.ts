@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createInspectorApp, INSPECTOR_ROUTE_SURFACE } from "../../app.js";
+import { createInspectorApp, INSPECTOR_ROUTE_SURFACE } from "../../runtime/app.js";
 
 describe("inspector routes", () => {
   it("pins the frozen backend route surface", () => {

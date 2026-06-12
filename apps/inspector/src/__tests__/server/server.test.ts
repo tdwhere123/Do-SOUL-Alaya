@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
-import { startInspectorServer } from "../../server.js";
+import { startInspectorServer } from "../../runtime/server.js";
 
 describe("inspector server startup", () => {
   afterEach(() => {

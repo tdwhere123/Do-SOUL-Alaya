@@ -18,9 +18,10 @@ This package ships two concerns under one published artifact:
 
 The CLI launcher (`alaya inspect`) lives in
 `apps/core-daemon/src/cli/inspect.ts` and spawns this package's
-`dist/server.js` as a managed child process. The daemon URL is
-hard-coded to `http://127.0.0.1:5173` in `src/app.ts`; the inspector
-itself defaults to port `5174` (see CLI launcher for collision logic).
+`dist/runtime/server.js` as a managed child process. The daemon URL is
+hard-coded to `http://127.0.0.1:5173` in `src/runtime/app.ts`; the
+inspector itself defaults to port `5174` (see CLI launcher for
+collision logic).
 
 ## Dev
 
