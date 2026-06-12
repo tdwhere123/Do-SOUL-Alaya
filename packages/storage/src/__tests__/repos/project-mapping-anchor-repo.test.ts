@@ -6,7 +6,7 @@ import {
   type ProjectMappingAnchor
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../sqlite/db.js";
-import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
+import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
 
 type AcceptedByValue = "user" | "review" | "deterministic_rule";
 type ProjectMappingStateValue = (typeof ProjectMappingState)[keyof typeof ProjectMappingState];

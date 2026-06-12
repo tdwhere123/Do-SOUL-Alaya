@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SurfaceEventType, SurfaceStatus, WorkspaceKind, WorkspaceState, type SurfaceIdentity } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../sqlite/db.js";
 import { SqliteSurfaceIdentityRepo } from "../../repos/surface/surface-identity-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
+import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
 
 const SURFACE_OBJECT_ID_1 = "11111111-1111-4111-8111-111111111111";
 const SURFACE_OBJECT_ID_2 = "22222222-2222-4222-8222-222222222222";

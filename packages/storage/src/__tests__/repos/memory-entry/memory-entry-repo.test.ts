@@ -20,15 +20,15 @@ import {
 import { initDatabase } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
 import { SqliteEnrichPendingRepo } from "../../../repos/enrich-pending-repo.js";
-import { SqliteEventLogRepo } from "../../../repos/event-log-repo.js";
+import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
 import {
   FIND_BY_EVIDENCE_REFS_INPUT_CAP,
   SqliteMemoryEntryRepo,
   type MemoryEntryRepoDiagnosticSink
 } from "../../../repos/memory-entry/index.js";
-import { SqliteRunRepo } from "../../../repos/run-repo.js";
+import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
 import { SqliteSynthesisCapsuleRepo } from "../../../repos/synthesis-capsule-repo.js";
-import { SqliteWorkspaceRepo } from "../../../repos/workspace-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

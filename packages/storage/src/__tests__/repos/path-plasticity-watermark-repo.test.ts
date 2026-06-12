@@ -2,9 +2,9 @@ import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustStateEventType, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
-import { SqliteEventLogRepo } from "../../repos/event-log-repo.js";
+import { SqliteEventLogRepo } from "../../repos/runtime/event-log-repo.js";
 import { SqlitePathPlasticityWatermarkRepo } from "../../repos/path/path-plasticity-watermark-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
+import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<StorageDatabase>();
 

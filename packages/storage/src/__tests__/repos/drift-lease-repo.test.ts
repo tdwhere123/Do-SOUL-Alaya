@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WorkspaceKind, WorkspaceState, type GovernanceDriftLease } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../sqlite/db.js";
 import { SqliteDriftLeaseRepo } from "../../repos/drift-lease-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
+import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

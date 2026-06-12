@@ -5,10 +5,10 @@ import {
   type DelegatedWorkerRun,
   type WorkerRunState
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface WorkerRunRepo {
   getById(workerRunId: string): Promise<Readonly<DelegatedWorkerRun> | null>;

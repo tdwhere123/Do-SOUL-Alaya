@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventLogEntrySchema, type EventLogEntry } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
 
 /**
  * Caller-facing input for appending an event.

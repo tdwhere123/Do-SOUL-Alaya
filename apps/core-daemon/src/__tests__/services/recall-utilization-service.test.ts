@@ -94,7 +94,7 @@ function usagePayload(input: {
 }
 
 // Mirrors the production SQL semantics in
-// `packages/storage/src/repos/event-log-repo.ts` queryByWorkspaceAndTypeStatement:
+// `packages/storage/src/repos/runtime/event-log-repo.ts` queryByWorkspaceAndTypeStatement:
 //   COALESCE(payload_json.reported_at, created_at) > since      (strict)
 //   COALESCE(payload_json.reported_at, created_at) <= until     (inclusive)
 // The new recall-context payloads carry occurred_at, not reported_at, so

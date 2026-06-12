@@ -12,7 +12,7 @@ import {
 import { initDatabase } from "../../sqlite/db.js";
 import { SqliteClaimFormRepo } from "../../repos/claim-form-repo.js";
 import { SqliteConflictMatrixRepo } from "../../repos/conflict-matrix-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
+import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
 
 const WORKSPACE_ID = "workspace-1";
 const EDGE_ID_1 = "11111111-1111-4111-8111-111111111111";

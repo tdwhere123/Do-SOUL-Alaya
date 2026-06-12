@@ -4,8 +4,8 @@ export {
   SqliteWorkspaceRepo,
   type WorkspaceCreateInput,
   type WorkspaceRepo
-} from "./repos/workspace-repo.js";
-export { SqliteRunRepo, type RunCreateInput, type RunRepo } from "./repos/run-repo.js";
+} from "./repos/runtime/index.js";
+export { SqliteRunRepo, type RunCreateInput, type RunRepo } from "./repos/runtime/index.js";
 export {
   SqliteEngineBindingRepo,
   type EngineBindingRecordCreateInput,
@@ -15,7 +15,7 @@ export {
   SqliteEventLogRepo,
   type EventLogAppendInput,
   type EventLogRepo
-} from "./repos/event-log-repo.js";
+} from "./repos/runtime/index.js";
 export { SqliteSignalRepo, type SignalRepo } from "./repos/signal-repo.js";
 export {
   SqliteEvidenceCapsuleRepo,
@@ -128,7 +128,7 @@ export {
 export {
   SqliteBootstrappingRecordRepo,
   type BootstrappingRecordRepo
-} from "./repos/bootstrapping-record-repo.js";
+} from "./repos/runtime/index.js";
 export {
   SqlitePathGraphSnapshotRepo,
   type PathGraphSnapshotRepo
@@ -140,7 +140,7 @@ export {
 export {
   SqliteWorkerRunRepo,
   type WorkerRunRepo
-} from "./repos/worker-run-repo.js";
+} from "./repos/runtime/index.js";
 export {
   SqliteDeferredObligationRepo,
   type DeferredObligationRepo

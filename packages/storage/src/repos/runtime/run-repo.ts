@@ -1,7 +1,7 @@
 import { RunSchema, RunStateSchema, type Run, type RunState } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { cascadeDeleteRun } from "./path/cascade-delete.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { cascadeDeleteRun } from "../path/cascade-delete.js";
 
 export type RunCreateInput = Omit<Run, "created_at" | "last_active_at">;
 

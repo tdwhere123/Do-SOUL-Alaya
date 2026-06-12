@@ -9,7 +9,7 @@ import {
 import { initDatabase } from "../../sqlite/db.js";
 import { SqliteSurfaceBindingRepo } from "../../repos/surface/surface-binding-repo.js";
 import { SqliteSurfaceIdentityRepo } from "../../repos/surface/surface-identity-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
+import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

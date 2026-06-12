@@ -2376,7 +2376,7 @@ function emitBenchContextLensAssembledEvent(
 // (the run-level aggregateBenchTokenMetrics then SUMS those cumulative
 // snapshots). queryByWorkspaceAndType uses idx_event_log_workspace_type_created
 // so the read stays bounded to this workspace's own emitted/lens events.
-// see also: packages/storage/src/repos/event-log-repo.ts queryByWorkspaceAndType
+// see also: packages/storage/src/repos/runtime/event-log-repo.ts queryByWorkspaceAndType
 async function queryTokenMetrics(
   dataDir: string,
   workspaceId: string
