@@ -139,7 +139,7 @@ import {
   type GraphEdgeCreationPort,
   type PathRelationProposalPort
 } from "@do-soul/alaya-soul";
-import { createDaemonEmbeddingRuntime } from "./daemon-embedding-runtime.js";
+import { createDaemonEmbeddingRuntime } from "./ai/daemon-embedding-runtime.js";
 import { createDaemonMcpMemoryToolHandler } from "./mcp-memory/daemon-handler.js";
 import { createAttachSurfaceRegistrar } from "./attach/surface-registrar.js";
 import { createBudgetProposalPort } from "./budget/wiring.js";
@@ -176,8 +176,8 @@ import {
   type AlayaDaemonServer,
   type DaemonStartupStepRecord
 } from "./runtime/index.js";
-import { createReconciliationLlmDecisionPort } from "./reconciliation-llm-decision.js";
-import { createEdgeAutoProducerLlmPort } from "./edge-auto-producer-llm-adapter.js";
+import { createReconciliationLlmDecisionPort } from "./ai/reconciliation-llm-decision.js";
+import { createEdgeAutoProducerLlmPort } from "./ai/edge-auto-producer-llm-adapter.js";
 import { createEdgeClassifyQueueAdapter } from "./garden/edge-classify-queue-adapter.js";
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
 import {

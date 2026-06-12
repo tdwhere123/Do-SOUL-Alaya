@@ -18,7 +18,7 @@ import { EdgeAutoProducerService } from "@do-soul/alaya-core";
 // fails this test if any network call is attempted.
 // see also: apps/core-daemon/src/runtime/daemon-runtime-support.ts:resolveEdgeClassifyWiring
 // see also: apps/core-daemon/src/index.ts:edgeClassifyWiring
-// see also: apps/core-daemon/src/edge-auto-producer-llm-adapter.ts:requestVerdictFromGarden
+// see also: apps/core-daemon/src/ai/edge-auto-producer-llm-adapter.ts:requestVerdictFromGarden
 // see also: packages/core/src/path-graph/edge-auto-producer-service.ts:deferEdgeClassify
 
 describe("B-2 edge classification (K4.5 no-network, default config)", () => {

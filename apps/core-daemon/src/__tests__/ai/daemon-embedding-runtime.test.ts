@@ -6,7 +6,7 @@ import {
   SqliteMemoryEntryRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { createDaemonEmbeddingRuntime } from "../daemon-embedding-runtime.js";
+import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 
 type RuntimeInput = Parameters<typeof createDaemonEmbeddingRuntime>[0];
 type HealthSvc = RuntimeInput["healthJournalService"];

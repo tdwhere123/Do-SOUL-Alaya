@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeRequestKey,
   type PairInput
-} from "../edge-auto-producer-llm-adapter.js";
+} from "../../ai/edge-auto-producer-llm-adapter.js";
 
 // invariant: the disk decision cache keys verdicts by sha256 over the
 // model id + all pair fields. The field separator must keep field

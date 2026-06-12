@@ -247,7 +247,7 @@ export interface McpMemoryToolHandlerDependencies {
   // invariant: embedding coherence is checked outside the truth-boundary path
   // service; this gate returns only canonical `${low}|${high}` delivered-pair keys.
   // see also:
-  // apps/core-daemon/src/daemon-embedding-runtime.ts:createDaemonEmbeddingRuntime,
+  // apps/core-daemon/src/ai/daemon-embedding-runtime.ts:createDaemonEmbeddingRuntime,
   // packages/core/src/embedding-recall/service.ts:EmbeddingRecallService.coherentPairKeys.
   readonly coRecallCoherenceGate?: {
     coherentPairKeys(

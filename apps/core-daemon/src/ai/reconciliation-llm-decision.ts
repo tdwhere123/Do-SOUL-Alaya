@@ -38,7 +38,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // decision.
 const RECONCILIATION_DECISION_CACHE_ROOT = resolve(
   __dirname,
-  "../../../docs/bench-history/datasets/reconciliation-decisions"
+  "../../../../docs/bench-history/datasets/reconciliation-decisions"
 );
 
 const DECISION_REQUEST_TIMEOUT_MS = 60_000;

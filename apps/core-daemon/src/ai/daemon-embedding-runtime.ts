@@ -13,14 +13,14 @@ import type { SqliteMemoryEntryRepo, StorageDatabase } from "@do-soul/alaya-stor
 import {
   createEmbeddingStatusService,
   type EmbeddingStatusDegradationSource
-} from "./services/embedding-status-service.js";
+} from "../services/embedding-status-service.js";
 import {
   DEFAULT_OPENAI_EMBEDDING_MODEL,
   createOptionalMemoryEmbeddingRepo,
   readConfigEnvValue,
   readNonEmptyEnv
-} from "./runtime/index.js";
-import { resolveSecretRef, type ResolveSecretError } from "./secrets/index.js";
+} from "../runtime/index.js";
+import { resolveSecretRef, type ResolveSecretError } from "../secrets/index.js";
 
 export function createDaemonEmbeddingRuntime(input: {
   readonly database: StorageDatabase;

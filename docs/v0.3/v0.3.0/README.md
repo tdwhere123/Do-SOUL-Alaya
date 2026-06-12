@@ -46,7 +46,7 @@ runs strictly sequential. Group B (host autonomy evidence, `#BL-037`
    `readKeychain(service, account)` to `SecretRefReader`. That makes
    the compiler flag every hand-constructed reader; slice 1 sweeps
    them (`secrets/index.ts`, `secrets/index.test.ts`, `daemon-runtime-support.ts`,
-   `index.ts`, `garden-credential.ts`, `daemon-embedding-runtime.ts`,
+   `index.ts`, `garden-credential.ts`, `ai/daemon-embedding-runtime.ts`,
    `cli/register.ts`, `cli/install.ts`, test stubs). `SecretRefReader`
    has no MCP/EventLog/config surface, so this internal-type widening
    is out of §25 scope per the §25 carve-out.

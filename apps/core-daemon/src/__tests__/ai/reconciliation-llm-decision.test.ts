@@ -2,14 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createReconciliationLlmDecisionPort } from "../reconciliation-llm-decision.js";
+import { createReconciliationLlmDecisionPort } from "../../ai/reconciliation-llm-decision.js";
 
 // invariant: covers the disk-cached garden-LLM reconciliation decision
 // port — the null-credentials disable, the decision cache round trip,
 // and the content-anchored cache target (a cache hit resolves the
 // target back to the CURRENT candidate carrying that content, and drops
 // the target when no current candidate matches).
-// see also: apps/core-daemon/src/reconciliation-llm-decision.ts
+// see also: apps/core-daemon/src/ai/reconciliation-llm-decision.ts
 
 const baseConfig = {
   providerUrl: "https://example.test/v1",

@@ -19,7 +19,7 @@ import type {
  * confidence floor (LLM_CONFIDENCE_FLOOR in edge-auto-producer-service.ts)
  * gates entry and PathPlasticityService reinforcement gates recall.
  *
- * The transport mirrors apps/core-daemon/src/reconciliation-llm-decision.ts:
+ * The transport mirrors apps/core-daemon/src/ai/reconciliation-llm-decision.ts:
  * - garden compute local path only (invariant: no new cloud dependency
  *   may be introduced here — caller resolves the garden secret_ref the
  *   same way the official-api garden provider does)
@@ -30,7 +30,7 @@ import type {
  * - malformed / non-ok / timed-out responses degrade to null; the
  *   service then falls back to the local heuristic for that neighbor.
  *
- * see also: apps/core-daemon/src/reconciliation-llm-decision.ts
+ * see also: apps/core-daemon/src/ai/reconciliation-llm-decision.ts
  * see also: packages/core/src/path-graph/edge-auto-producer-llm-port.ts
  *
  * anti-patterns-lint-allow: cache + transport helpers structurally
@@ -44,7 +44,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const DECISION_CACHE_ROOT = resolve(
   __dirname,
-  "../../../docs/bench-history/datasets/edge-auto-producer-decisions"
+  "../../../../docs/bench-history/datasets/edge-auto-producer-decisions"
 );
 
 const DECISION_REQUEST_TIMEOUT_MS = 60_000;
