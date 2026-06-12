@@ -291,7 +291,7 @@ export interface McpMemoryProposalWorkflowDependencies {
   // memoryEntryRepo.findByEvidenceRefs (intersection candidates) then narrowed to
   // the subset members; left undefined in unit tests that do not exercise member
   // resolution (capsule then builds with an empty member set).
-  // see also: packages/storage/src/repos/memory-entry-repo.ts findByEvidenceRefs,
+  // see also: packages/storage/src/repos/memory-entry/sqlite-memory-entry-repo.ts findByEvidenceRefs,
   // apps/core-daemon/src/garden/forget-disposition-ports.ts buildLiveCapsuleMemberIndex
   readonly synthesisMemberResolver?: {
     findMemberObjectIdsByEvidenceRefs(

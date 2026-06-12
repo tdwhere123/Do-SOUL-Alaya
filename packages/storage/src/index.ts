@@ -28,7 +28,7 @@ export {
   type MemoryEntryRepoDynamicsUpdateFields,
   type MemoryEntryRepoTierUpdateInput,
   type MemoryEntryRepoUpdateFields
-} from "./repos/memory-entry-repo.js";
+} from "./repos/memory-entry/index.js";
 export {
   DEFAULT_ACTIVE_CONSTRAINTS_CAP,
   MAX_ACTIVE_CONSTRAINTS_CAP,
@@ -80,7 +80,7 @@ export {
   type ProposalCreateInput,
   type ProposalResolutionEventInput,
   type ProposalRepo
-} from "./repos/proposal-repo.js";
+} from "./repos/proposal/index.js";
 export {
   SqliteHealthJournalRepo,
   type HealthJournalCreateInput,

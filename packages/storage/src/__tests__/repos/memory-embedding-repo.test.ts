@@ -10,7 +10,7 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../sqlite/db.js";
-import { SqliteMemoryEntryRepo } from "../../repos/memory-entry-repo.js";
+import { SqliteMemoryEntryRepo } from "../../repos/memory-entry/index.js";
 import { SqliteRunRepo } from "../../repos/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
 import type {

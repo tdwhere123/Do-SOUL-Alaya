@@ -15,7 +15,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
 import { SqliteCoUsageCounterRepo } from "../../repos/co-usage-counter-repo.js";
-import { SqliteMemoryEntryRepo } from "../../repos/memory-entry-repo.js";
+import { SqliteMemoryEntryRepo } from "../../repos/memory-entry/index.js";
 import { SqlitePathRelationRepo } from "../../repos/path/path-relation-repo.js";
 import { SqliteRunRepo } from "../../repos/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";

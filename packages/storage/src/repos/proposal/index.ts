@@ -1,4 +1,4 @@
-export { SqliteProposalRepo } from "./proposal/sqlite-proposal-repo.js";
+export { SqliteProposalRepo } from "./sqlite-proposal-repo.js";
 export type {
   AcceptedMemoryUpdateInput,
   AcceptedPathRelationGovernanceInput,
@@ -15,4 +15,4 @@ export type {
   ProposalReviewerAssignmentInput,
   ScopedProposal,
   UpdatePendingResolutionOptions
-} from "./proposal/types.js";
+} from "./types.js";
