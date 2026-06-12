@@ -5,15 +5,15 @@ import {
   type SurfaceIdentity,
   type SurfaceStatus
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
 import {
   getEventLogWriter,
   insertEventLogEntry,
   type EventLogDraftInput
-} from "./shared/event-log-writer.js";
-import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
+} from "../shared/event-log-writer.js";
+import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 
 export interface SurfaceIdentityRepo {
   create(identity: Readonly<SurfaceIdentity>): Promise<Readonly<SurfaceIdentity>>;

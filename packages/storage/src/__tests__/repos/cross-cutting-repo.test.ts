@@ -9,7 +9,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../sqlite/db.js";
 import { SqliteCrossCuttingPermissionRepo } from "../../repos/cross-cutting-repo.js";
-import { SqliteSurfaceIdentityRepo } from "../../repos/surface-identity-repo.js";
+import { SqliteSurfaceIdentityRepo } from "../../repos/surface/surface-identity-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();

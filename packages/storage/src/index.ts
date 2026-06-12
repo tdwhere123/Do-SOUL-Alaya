@@ -157,7 +157,7 @@ export {
 export {
   SqliteSurfaceIdentityRepo,
   type SurfaceIdentityRepo
-} from "./repos/surface-identity-repo.js";
+} from "./repos/surface/index.js";
 
 export {
   SqliteHealthIssueGroupRepo,
@@ -167,13 +167,13 @@ export {
 export {
   SqliteSurfaceAnchorRepo,
   type SurfaceAnchorRepo
-} from "./repos/surface-anchor-repo.js";
+} from "./repos/surface/index.js";
 
 export {
   SqliteSurfaceBindingRepo,
   type SurfaceBindingRecord,
   type SurfaceBindingRepo
-} from "./repos/surface-binding-repo.js";
+} from "./repos/surface/index.js";
 
 export {
   SqliteDriftLeaseRepo,
