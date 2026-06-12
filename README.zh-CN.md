@@ -305,9 +305,9 @@ Control 层**。
 落在 **Evidence 轴**（作为 control-plane 证据）+ **Runtime
 Control 层**。
 
-*代码锚点：* `apps/core-daemon/src/trust-state.ts:147-187`、
+*代码锚点：* `apps/core-daemon/src/trust/state.ts:147-187`、
 `packages/protocol/src/soul/mcp-types.ts:146`（三态 enum）、
-`packages/core/src/path-plasticity-service.ts`（usage receipt 喂给
+`packages/core/src/path-plasticity/service.ts`（usage receipt 喂给
 Path 轴可塑性）。
 
 ### 6. 维护 (Maintenance)

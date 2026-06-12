@@ -49,7 +49,7 @@ import {
   SourceDeliveryAnchorValidationError,
   createMcpMemoryProposalWorkflow
 } from "../../mcp-memory/proposal-workflow.js";
-import { createTrustStateRecorder } from "../../trust-state.js";
+import { createTrustStateRecorder } from "../../trust/state.js";
 
 const TRACE_SQL = `
 WITH delivered AS (

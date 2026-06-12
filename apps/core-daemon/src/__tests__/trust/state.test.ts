@@ -13,7 +13,7 @@ import {
   TrustStateRecorderNotReady,
   TrustStateUnknownDeliveryError,
   TrustStateUnverifiableRequiresDeliveryError
-} from "../trust-state.js";
+} from "../../trust/state.js";
 
 const DELIVERY_AT = "2026-04-30T10:00:00.000Z";
 const USAGE_AT = "2026-04-30T10:01:00.000Z";

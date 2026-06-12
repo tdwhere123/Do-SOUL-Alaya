@@ -31,7 +31,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createMcpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
-import { createTrustStateRecorder } from "../../trust-state.js";
+import { createTrustStateRecorder } from "../../trust/state.js";
 
 const databases = new Set<StorageDatabase>();
 

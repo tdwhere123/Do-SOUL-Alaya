@@ -379,9 +379,9 @@ agent can skip it, and Alaya degrades to a "delivered" trust state
 without erroring. Lives on the **Evidence axis** as control-plane
 evidence, **Runtime Control** layer.
 
-*Code anchors:* `apps/core-daemon/src/trust-state.ts:147-187`,
+*Code anchors:* `apps/core-daemon/src/trust/state.ts:147-187`,
 `packages/protocol/src/soul/mcp-types.ts:146` (the three-state enum),
-`packages/core/src/path-plasticity-service.ts` (Path-axis plasticity
+`packages/core/src/path-plasticity/service.ts` (Path-axis plasticity
 fed by usage receipts).
 
 ### 6. Maintenance (维护)

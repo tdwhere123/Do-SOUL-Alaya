@@ -210,7 +210,7 @@ import {
 import { createSoulApprovalService } from "./services/soul-approval-service.js";
 import { SoulTopologyAuditService } from "./services/soul-topology-audit-service.js";
 import { SqliteWorkspaceEngineConfigRepo } from "./services/workspace-engine-config-repo.js";
-import { createTrustStateRecorder } from "./trust-state.js";
+import { createTrustStateRecorder } from "./trust/state.js";
 import { getBuiltinConversationToolSpecs } from "./mcp/builtin-conversation-tool-specs.js";
 
 export type { AlayaDaemonListenOptions, AlayaDaemonRuntime, AlayaDaemonRuntimeServices, AlayaDaemonServer, DaemonStartupStepRecord } from "./runtime/index.js";

@@ -833,7 +833,7 @@ and core-daemon config-route tests.
 Resolved for delivery / usage records by
 `packages/storage/src/migrations/056-trust-state-persistence.sql`,
 `packages/storage/src/repos/trust-state-repo.ts`, and
-`apps/core-daemon/src/trust-state.ts`. Duplicate delivery / usage
+`apps/core-daemon/src/trust/state.ts`. Duplicate delivery / usage
 records now raise storage conflicts instead of overwriting rows, so
 `publishWithMutation(entry)` rolls the EventLog entry back on duplicate
 persistence. `trust-state-persistence.test.ts` proves delivery / usage
