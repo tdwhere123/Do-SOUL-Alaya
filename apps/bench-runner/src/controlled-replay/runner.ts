@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { entrySlug } from "@do-soul/alaya-eval";
-import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../shared/version.js";
 import {
   BENCH_SEED_ROTATION,
   rotatingSeedObjectKind,

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initDatabase } from "@do-soul/alaya-storage";
-import { RECALL_PIPELINE_VERSION } from "../version.js";
+import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
 import {
   BENCH_DAEMON_DB_FILENAME,
   assertSnapshotVersionMatch,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../../shared/monotonic.js";
 
 describe("monotonic elapsed measurement", () => {
   it("reports a non-negative finite elapsed for an immediate start/stop", () => {

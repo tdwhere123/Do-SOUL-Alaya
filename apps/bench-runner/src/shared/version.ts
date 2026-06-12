@@ -20,7 +20,7 @@ export function resolveBenchRunnerVersion(): string {
   }
   const pkgPath = resolve(
     dirname(fileURLToPath(import.meta.url)),
-    "../package.json"
+    "../../package.json"
   );
   const parsed = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: unknown };
   if (typeof parsed.version !== "string" || parsed.version.length === 0) {

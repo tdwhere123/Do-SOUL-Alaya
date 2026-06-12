@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
-import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
-import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../shared/version.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../shared/monotonic.js";
 import {
   buildTokenEconomy,
   computeTokenSavedRatio,
@@ -713,7 +713,7 @@ function isLongMemEvalGoldEligibleResult(result: Readonly<{
   return (result.object_kind ?? "memory_entry") === "memory_entry";
 }
 
-// see also: apps/bench-runner/src/version.ts
+// see also: apps/bench-runner/src/shared/version.ts
 
 function resolveCommitSha7(): string {
   try {

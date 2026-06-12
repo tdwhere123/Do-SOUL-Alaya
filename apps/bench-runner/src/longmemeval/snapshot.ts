@@ -10,7 +10,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
-import { RECALL_PIPELINE_VERSION } from "../version.js";
+import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
 
 /**
  * @anchor longmemeval-recall-eval-snapshot

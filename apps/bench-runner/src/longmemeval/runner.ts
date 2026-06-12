@@ -7,7 +7,7 @@ import {
   RECALL_PIPELINE_VERSION,
   resolveBenchCommitSha7,
   resolveBenchRunnerVersion
-} from "../version.js";
+} from "../shared/version.js";
 import {
   aggregateEdgeProposalAutoAccept,
   aggregateEdgeProposalRate,
@@ -40,7 +40,7 @@ import {
   type BenchTokenMetrics,
   type BenchWorkspaceHandle
 } from "../harness/daemon.js";
-import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../shared/monotonic.js";
 import {
   aggregateBenchTokenMetrics,
   assertBenchTokenEconomyContract
@@ -1700,7 +1700,7 @@ function truncateExcerpt(value: string): string {
   return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
 }
 
-// see also: apps/bench-runner/src/version.ts
+// see also: apps/bench-runner/src/shared/version.ts
 
 function resolveCommitSha7(): string {
   return resolveBenchCommitSha7();

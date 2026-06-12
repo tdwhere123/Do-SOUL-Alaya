@@ -16,8 +16,8 @@ import {
   RECALL_PIPELINE_VERSION,
   resolveBenchCommitSha7,
   resolveBenchRunnerVersion
-} from "../version.js";
-import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
+} from "../shared/version.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../shared/monotonic.js";
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   startBenchDaemon,

@@ -13,7 +13,7 @@ import {
   type HistoryLayout,
   type KpiPayload
 } from "@do-soul/alaya-eval";
-import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../shared/version.js";
 
 export interface LiveBenchOptions {
   readonly historyRoot: string;
@@ -463,7 +463,7 @@ function parseRunDate(value: string): Date {
   return date;
 }
 
-// see also: apps/bench-runner/src/version.ts resolveBenchRunnerVersion
+// see also: apps/bench-runner/src/shared/version.ts resolveBenchRunnerVersion
 function resolveCommitSha7(): string {
   const sha = resolveGitHeadSha(process.cwd()).slice(0, 7);
   if (sha.length === 0) {

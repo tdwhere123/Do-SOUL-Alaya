@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { resolveBenchRunnerVersion } from "../version.js";
+import { resolveBenchRunnerVersion } from "../shared/version.js";
 import { type SeedObjectKind } from "./seed-rotation.js";
 export { rotatingSeedObjectKind, type SeedObjectKind, BENCH_SEED_ROTATION } from "./seed-rotation.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -2707,4 +2707,4 @@ function stripFirstClassMemoryRefsFromRawPayload(
   return sanitized;
 }
 
-// see also: apps/bench-runner/src/version.ts
+// see also: apps/bench-runner/src/shared/version.ts

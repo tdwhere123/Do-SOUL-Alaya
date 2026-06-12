@@ -63,7 +63,7 @@ import { runSelfBench } from "./self/runner.js";
 import { fetchLocomo } from "./locomo/fetch.js";
 import { runLocomo } from "./locomo/runner.js";
 import { runControlledReplay } from "./controlled-replay/runner.js";
-import { resolveBenchCommitSha7 } from "./version.js";
+import { resolveBenchCommitSha7 } from "./shared/version.js";
 import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind,
