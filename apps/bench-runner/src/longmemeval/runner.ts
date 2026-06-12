@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -618,6 +618,38 @@ export async function runLongMemEval(
             `gold=${goldMemoryIds.length} inK=${inK} ranks=[${ranks.join(",")}] ` +
             `sessFootholds=${footholds}/${sessionBest.size} ` +
             `sessBest=[${[...sessionBest.values()].sort((a, b) => (a < 0 ? 1 : b < 0 ? -1 : a - b)).join(",")}]`
+        );
+      }
+
+      // Diagnostic: dump the FULL ranked candidate pool (content + gold flag +
+      // event date + fusion rank) as JSONL for offline re-ranking experiments —
+      // tests whether a structural signal can lift gold above co-topical
+      // distractors without touching the recall hot path. API-free (recall only).
+      // Default off; set ALAYA_BENCH_POOL_DUMP to a writable file path.
+      if (process.env.ALAYA_BENCH_POOL_DUMP !== undefined) {
+        const goldSet = new Set(goldMemoryIds);
+        const candidates = results.map((p, i) => {
+          const entry = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", p.object_id));
+          return {
+            rank: i + 1,
+            objectId: p.object_id,
+            isGold: goldSet.has(p.object_id),
+            eventDate: entry?.eventDate ?? null,
+            content: (entry?.content ?? "").replace(/\s+/gu, " ").slice(0, 400)
+          };
+        });
+        appendFileSync(
+          process.env.ALAYA_BENCH_POOL_DUMP,
+          JSON.stringify({
+            questionId: question.question_id,
+            questionType: question.question_type,
+            question: question.question,
+            questionDate: question.question_date,
+            goldAnswer: question.answer,
+            goldCount: goldMemoryIds.length,
+            poolSize: results.length,
+            candidates
+          }) + "\n"
         );
       }
 
