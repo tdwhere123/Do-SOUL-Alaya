@@ -4,6 +4,12 @@ export {
   type GardenDataPortFactoryOptions
 } from "./garden-data-ports.js";
 export {
+  SqliteEnrichPendingRepo,
+  type EnrichPendingClaim,
+  type EnrichPendingEnqueueInput,
+  type EnrichPendingRepo
+} from "./enrich-pending-repo.js";
+export {
   SqliteGardenTaskRepo,
   type GardenTaskBacklogCount,
   type GardenTaskKindBacklogCount,

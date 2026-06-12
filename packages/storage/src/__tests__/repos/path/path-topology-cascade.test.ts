@@ -13,12 +13,12 @@ import {
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
-import { SqliteCoUsageCounterRepo } from "../../repos/co-usage-counter-repo.js";
-import { SqliteMemoryEntryRepo } from "../../repos/memory-entry/index.js";
-import { SqlitePathRelationRepo } from "../../repos/path/path-relation-repo.js";
-import { SqliteRunRepo } from "../../repos/runtime/run-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
+import { SqliteCoUsageCounterRepo } from "../../../repos/path/co-usage-counter-repo.js";
+import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
+import { SqlitePathRelationRepo } from "../../../repos/path/path-relation-repo.js";
+import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 // invariant: hard-deleted memory ids must not remain reachable through path topology.
 // see also: packages/storage/src/repos/path/cascade-delete.ts:pruneOrphanedPathTopology

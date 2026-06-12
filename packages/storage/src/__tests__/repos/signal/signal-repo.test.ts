@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { RunMode, RunState, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteRunRepo } from "../../repos/runtime/run-repo.js";
-import { SqliteSignalRepo } from "../../repos/signal-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
+import { SqliteSignalRepo } from "../../../repos/signal/signal-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

@@ -1,4 +1,9 @@
 export {
+  SqliteCoUsageCounterRepo,
+  type CoUsageCounterIncrementInput,
+  type CoUsageCounterRepo
+} from "./co-usage-counter-repo.js";
+export {
   SqliteEdgeProposalRepo,
   type EdgeProposalCreateInput,
   type EdgeProposalMintFailureReconcileInput,

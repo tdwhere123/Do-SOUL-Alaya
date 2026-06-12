@@ -1,5 +1,5 @@
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
 
 // invariant: durable hand-off queue between the synchronous write-path and the
 // asynchronous Garden BULK_ENRICH worker. Materialization enqueues one row per
@@ -14,7 +14,7 @@ import { StorageError } from "../shared/errors.js";
 // drain emits an auditable abandon event so the drop is never silent.
 // see also: migrations/086-enrich-pending.sql — base schema
 // see also: migrations/088-enrich-pending-attempt-bound.sql — attempt cap + dead-letter
-// see also: apps/core-daemon/src/garden-runtime.ts — drain worker
+// see also: apps/core-daemon/src/garden/runtime.ts — drain worker
 // see also: packages/soul/src/garden/materialization-router/router.ts — enqueue producer
 
 export interface EnrichPendingEnqueueInput {

@@ -13,12 +13,12 @@ import {
   type MemoryEntry,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteEdgeProposalRepo } from "../../repos/path/edge-proposal-repo.js";
-import { SqliteMemoryEntryRepo } from "../../repos/memory-entry/index.js";
-import { SqlitePathRelationRepo } from "../../repos/path/path-relation-repo.js";
-import { SqliteRunRepo } from "../../repos/runtime/run-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteEdgeProposalRepo } from "../../../repos/path/edge-proposal-repo.js";
+import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
+import { SqlitePathRelationRepo } from "../../../repos/path/path-relation-repo.js";
+import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 const MEMORY_1 = "00000000-0000-4000-8000-000000000001";

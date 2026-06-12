@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import type { PathAnchorRef, PathRelation } from "@do-soul/alaya-protocol";
 import { PathAnchorRefSchema, serializePathAnchorRef } from "@do-soul/alaya-protocol";
-import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
+import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
 import {
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL,
   SqlitePathRelationRepo
-} from "../../repos/path/path-relation-repo.js";
+} from "../../../repos/path/path-relation-repo.js";
 
 // invariant: the backing-id-coverage guard reads anchor discriminant kinds
 // from the protocol schema rather than a hardcoded list, so the live union is
@@ -365,9 +365,9 @@ describe("SqlitePathRelationRepo", () => {
   });
 
   it("keeps the anchor-key SQL byte-identical to the migration 048 index expression", async () => {
-    const repoSource = await readFile(new URL("../../repos/path/path-relation-repo.ts", import.meta.url), "utf8");
+    const repoSource = await readFile(new URL("../../../repos/path/path-relation-repo.ts", import.meta.url), "utf8");
     const indexSource = await readFile(
-      new URL("../../migrations/048-path-relations-and-event-log-indexes.sql", import.meta.url),
+      new URL("../../../migrations/048-path-relations-and-event-log-indexes.sql", import.meta.url),
       "utf8"
     );
 

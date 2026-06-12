@@ -16,7 +16,7 @@ export {
   type EventLogAppendInput,
   type EventLogRepo
 } from "./repos/runtime/index.js";
-export { SqliteSignalRepo, type SignalRepo } from "./repos/signal-repo.js";
+export { SqliteSignalRepo, type SignalRepo } from "./repos/signal/index.js";
 export {
   SqliteEvidenceCapsuleRepo,
   type EvidenceCapsuleRepo,
@@ -48,7 +48,7 @@ export {
   type KarmaEvent,
   type KarmaEventKind,
   type KarmaEventRepo
-} from "./repos/karma-event-repo.js";
+} from "./repos/signal/index.js";
 export {
   SqliteGreenStatusRepo,
   type GreenStatusRepo
@@ -113,13 +113,13 @@ export {
   SqliteCoUsageCounterRepo,
   type CoUsageCounterIncrementInput,
   type CoUsageCounterRepo
-} from "./repos/co-usage-counter-repo.js";
+} from "./repos/path/index.js";
 export {
   SqliteEnrichPendingRepo,
   type EnrichPendingClaim,
   type EnrichPendingEnqueueInput,
   type EnrichPendingRepo
-} from "./repos/enrich-pending-repo.js";
+} from "./repos/garden/index.js";
 export {
   SqlitePathPlasticityWatermarkRepo,
   type PathPlasticityWatermarkRecord,

@@ -1,5 +1,5 @@
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
 
 // invariant: durable backing store for PathRelationProposalService co-usage
 // counts. Replaces the prior in-memory Map so counts toward the propose

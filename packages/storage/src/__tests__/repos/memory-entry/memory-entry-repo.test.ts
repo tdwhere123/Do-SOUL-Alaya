@@ -19,7 +19,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
-import { SqliteEnrichPendingRepo } from "../../../repos/enrich-pending-repo.js";
+import { SqliteEnrichPendingRepo } from "../../../repos/garden/enrich-pending-repo.js";
 import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
 import {
   FIND_BY_EVIDENCE_REFS_INPUT_CAP,

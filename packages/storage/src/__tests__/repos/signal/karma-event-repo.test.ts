@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { KarmaEvent } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../sqlite/db.js";
-import { SqliteKarmaEventRepo } from "../../repos/karma-event-repo.js";
+import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteKarmaEventRepo } from "../../../repos/signal/karma-event-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

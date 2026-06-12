@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DYNAMICS_CONSTANTS, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
-import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
-import { SqliteEnrichPendingRepo } from "../../repos/enrich-pending-repo.js";
+import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { SqliteEnrichPendingRepo } from "../../../repos/garden/enrich-pending-repo.js";
 
 const MAX_ATTEMPTS = DYNAMICS_CONSTANTS.enrich.max_attempts;
 

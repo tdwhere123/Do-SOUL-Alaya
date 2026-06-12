@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustStateEventType, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
-import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
-import { SqliteEventLogRepo } from "../../repos/runtime/event-log-repo.js";
-import { SqlitePathPlasticityWatermarkRepo } from "../../repos/path/path-plasticity-watermark-repo.js";
-import { SqliteWorkspaceRepo } from "../../repos/runtime/workspace-repo.js";
+import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
+import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
+import { SqlitePathPlasticityWatermarkRepo } from "../../../repos/path/path-plasticity-watermark-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 const databases = new Set<StorageDatabase>();
 
@@ -99,7 +99,7 @@ describe("SqlitePathPlasticityWatermarkRepo", () => {
 
     const lowerBoundMs = Date.now() - 24 * 60 * 60 * 1000 - 2_000;
     const migrationSql = await readFile(
-      new URL("../../migrations/060-path-plasticity-watermark.sql", import.meta.url),
+      new URL("../../../migrations/060-path-plasticity-watermark.sql", import.meta.url),
       "utf8"
     );
     database.connection.exec(migrationSql);
