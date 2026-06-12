@@ -96,7 +96,7 @@ export {
   type SampleSizeLabel
 } from "./metrics/wilson-ci.js";
 
-export { runCli } from "./cli.js";
+export { runCli } from "./cli/index.js";
 
 export { LONGMEMEVAL_S_META, type DatasetMeta } from "./longmemeval/dataset.js";
 export {

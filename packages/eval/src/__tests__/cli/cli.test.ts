@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runCli } from "../../cli.js";
+import { runCli } from "../../cli/index.js";
 
 describe("alaya-eval CLI", () => {
   let originalStdoutWrite: typeof process.stdout.write;
