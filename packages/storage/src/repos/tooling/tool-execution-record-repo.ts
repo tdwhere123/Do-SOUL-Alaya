@@ -1,7 +1,7 @@
 import { ToolExecutionRecordSchema, type ToolExecutionRecord } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
 
 export interface ToolExecutionRecordRepo {
   insert(record: ToolExecutionRecord): Promise<Readonly<ToolExecutionRecord>>;

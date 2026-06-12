@@ -96,11 +96,11 @@ export {
 export {
   SqliteToolSpecRepo,
   type ToolSpecRepo
-} from "./repos/tool-spec-repo.js";
+} from "./repos/tooling/index.js";
 export {
   SqliteToolExecutionRecordRepo,
   type ToolExecutionRecordRepo
-} from "./repos/tool-execution-record-repo.js";
+} from "./repos/tooling/index.js";
 export {
   SqliteStrongRefRepo,
   type StrongRefRepo
@@ -136,7 +136,7 @@ export {
 export {
   SqliteExtensionDescriptorRepo,
   type ExtensionDescriptorRepo
-} from "./repos/extension-descriptor-repo.js";
+} from "./repos/tooling/index.js";
 export {
   SqliteWorkerRunRepo,
   type WorkerRunRepo
