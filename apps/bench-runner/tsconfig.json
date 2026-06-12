@@ -10,7 +10,7 @@
       "@do-soul/alaya-engine-gateway": ["../../packages/engine-gateway/src/index.ts"],
       "@do-soul/alaya-storage": ["../../packages/storage/src/index.ts"],
       "@do-soul/alaya": ["../../apps/core-daemon/src/index.ts"],
-      "@do-soul/alaya/mcp-server": ["../../apps/core-daemon/src/mcp-server.ts"],
+      "@do-soul/alaya/mcp-server": ["../../apps/core-daemon/src/mcp/mcp-server.ts"],
       "@do-soul/alaya/cli/bridge": ["../../apps/core-daemon/src/cli/bridge.ts"],
       "@do-soul/alaya/cli/register": ["../../apps/core-daemon/src/cli/register.ts"],
       "@do-soul/alaya-eval": ["../../packages/eval/src/index.ts"]

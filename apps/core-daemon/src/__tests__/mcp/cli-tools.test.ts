@@ -1,9 +1,9 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
-import { createToolsCommand } from "../cli/tools.js";
-import type { AlayaCliContext } from "../cli/bridge.js";
-import { ALAYA_SYSEXITS } from "../cli/bridge.js";
-import type { McpMemoryToolHandler } from "../mcp-memory/tool-handler.js";
+import { createToolsCommand } from "../../cli/tools.js";
+import type { AlayaCliContext } from "../../cli/bridge.js";
+import { ALAYA_SYSEXITS } from "../../cli/bridge.js";
+import type { McpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
 
 describe("alaya tools", () => {
   it("lists the same first-party catalog used by MCP", async () => {

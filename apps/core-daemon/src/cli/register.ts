@@ -14,7 +14,7 @@ import { dirname } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
 import type { AlayaDaemonRuntime } from "../index.js";
-import { runAlayaMcpStdioServer } from "../mcp-server.js";
+import { runAlayaMcpStdioServer } from "../mcp/mcp-server.js";
 import type { ProfileMutationAuditRow, ProfileMutationAuditWriter } from "../profile-mutation.js";
 import { createAttachClaudeCommandSpec } from "./attach-claude.js";
 import { createAttachCodexCommandSpec } from "./attach-codex.js";

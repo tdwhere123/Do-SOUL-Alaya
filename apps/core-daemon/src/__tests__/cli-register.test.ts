@@ -11,7 +11,7 @@ const hoisted = vi.hoisted(() => ({
   serverClose: vi.fn(async () => {})
 }));
 
-vi.mock("../mcp-server.js", () => ({
+vi.mock("../mcp/mcp-server.js", () => ({
   runAlayaMcpStdioServer: hoisted.runAlayaMcpStdioServer
 }));
 

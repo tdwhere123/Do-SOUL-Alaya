@@ -231,7 +231,7 @@ implemented and tested. Gate-4 passed on 2026-05-01 after the attached-agent
 MCP proof, Inspector config-write repair, and trust delivery/usage durability
 repair all passed targeted verification.
 
-`apps/core-daemon/src/__tests__/attached-agent-mcp-proof.test.ts`
+`apps/core-daemon/src/__tests__/mcp/attached-agent-mcp-proof.test.ts`
 now resolves `#BL-018`: it runs `alaya install`, `alaya attach codex`,
 MCP `tools/list`, `soul.recall`, `soul.open_pointer`,
 `soul.report_context_usage`, `soul.emit_candidate_signal`, proposal

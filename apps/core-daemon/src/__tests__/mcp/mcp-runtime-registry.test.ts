@@ -18,15 +18,15 @@ import {
   createDaemonMcpCatalogFromEnv,
   createConversationToolCatalog,
   syncConversationToolCatalog
-} from "../mcp-catalog.js";
-import { createDaemonMcpRuntimeRegistry } from "../mcp-runtime-registry.js";
+} from "../../mcp/mcp-catalog.js";
+import { createDaemonMcpRuntimeRegistry } from "../../mcp/mcp-runtime-registry.js";
 import {
   SqliteEventLogRepo,
   SqliteExtensionDescriptorRepo,
   SqliteToolSpecRepo,
   initDatabase
 } from "@do-soul/alaya-storage";
-import { createRuntimeNotifier } from "../runtime-notifier.js";
+import { createRuntimeNotifier } from "../../runtime-notifier.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

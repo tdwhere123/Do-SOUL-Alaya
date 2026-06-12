@@ -13,8 +13,8 @@ import {
   getToolRuntimeWiringFixture,
   resetToolRuntimeWiringState
 } from "./tool-runtime-wiring-fixture.js";
-import { getBuiltinConversationToolSpecs } from "../builtin-conversation-tool-specs.js";
-import type { AlayaDaemonRuntime } from "../daemon-runtime-types.js";
+import { getBuiltinConversationToolSpecs } from "../../mcp/builtin-conversation-tool-specs.js";
+import type { AlayaDaemonRuntime } from "../../daemon-runtime-types.js";
 
 const hoisted = getToolRuntimeWiringFixture();
 const activeRuntimes: Array<AlayaDaemonRuntime> = [];
@@ -144,7 +144,7 @@ describe("daemon tool runtime bootstrap", () => {
       vi.useFakeTimers();
       const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
       const [{ BackgroundServiceManager }, coreActual] = await Promise.all([
-        vi.importActual<typeof import("../background/bootstrap.js")>("../background/bootstrap.js"),
+        vi.importActual<typeof import("../../background/bootstrap.js")>("../../background/bootstrap.js"),
         vi.importActual<typeof import("@do-soul/alaya-core")>("@do-soul/alaya-core")
       ]);
       const { GardenBacklogTelemetryService } = coreActual;
@@ -915,7 +915,7 @@ describe("daemon tool runtime bootstrap", () => {
   });
 
   it("marks principal coding unavailable when a required sandbox tool is missing", async () => {
-    const appModule = await import("../app.js");
+    const appModule = await import("../../app.js");
 
     await bootDaemonRuntime();
 
@@ -981,7 +981,7 @@ async function resolveBootGardenProvider(): Promise<unknown> {
 }
 
 async function bootDaemonRuntime(): Promise<AlayaDaemonRuntime> {
-  const { createAlayaDaemonRuntime } = await import("../index.js");
+  const { createAlayaDaemonRuntime } = await import("../../index.js");
   const runtime = await createAlayaDaemonRuntime();
   activeRuntimes.push(runtime);
   return runtime;

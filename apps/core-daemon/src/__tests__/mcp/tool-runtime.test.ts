@@ -9,13 +9,13 @@ import type {
   ToolExecutionRecord,
   ToolSpec
 } from "@do-soul/alaya-protocol";
-import { createExternalConversationToolExecutor } from "../mcp-catalog.js";
+import { createExternalConversationToolExecutor } from "../../mcp/mcp-catalog.js";
 import {
   executeConversationTool,
   executeConversationToolOrThrow,
   handleConversationToolUse,
   registerConversationToolSpecs
-} from "../tool-runtime.js";
+} from "../../mcp/tool-runtime.js";
 
 const tempDirs = new Set<string>();
 

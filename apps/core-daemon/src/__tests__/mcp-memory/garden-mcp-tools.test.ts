@@ -30,7 +30,7 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { createAlayaMcpServer } from "../../mcp-server.js";
+import { createAlayaMcpServer } from "../../mcp/mcp-server.js";
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext,

@@ -605,13 +605,13 @@ vi.mock("@hono/node-server", () => ({
   serve: hoisted.serve
 }));
 
-vi.mock("../app.js", () => ({
+vi.mock("../../app.js", () => ({
   createApp: hoisted.createApp
 }));
 
-vi.mock("../daemon-runtime-support.js", async () => {
+vi.mock("../../daemon-runtime-support.js", async () => {
   const actual = await vi.importActual<Record<string, unknown>>(
-    "../daemon-runtime-support.js"
+    "../../daemon-runtime-support.js"
   );
   const loadConfigEnvDefault = actual["loadConfigEnv"] as (
     envPath: string
@@ -626,7 +626,7 @@ vi.mock("../daemon-runtime-support.js", async () => {
   };
 });
 
-vi.mock("../background/bootstrap.js", () => ({
+vi.mock("../../background/bootstrap.js", () => ({
   BackgroundServiceManager: vi.fn().mockImplementation(function BackgroundServiceManager(services) {
     const manager = {
       services,
@@ -638,19 +638,19 @@ vi.mock("../background/bootstrap.js", () => ({
   })
 }));
 
-vi.mock("../budget-wiring.js", () => ({
+vi.mock("../../budget-wiring.js", () => ({
   createBudgetProposalPort: vi.fn(() => ({}))
 }));
 
-vi.mock("../files-data-dir.js", () => ({
+vi.mock("../../files-data-dir.js", () => ({
   resolveCoreDaemonFilesDirectory: vi.fn(() => "/tmp/alaya-files")
 }));
 
-vi.mock("../orphan-query.js", () => ({
+vi.mock("../../orphan-query.js", () => ({
   findOrphanedMemoriesForWorkspace: vi.fn(async () => [])
 }));
 
-vi.mock("../services/config-service.js", () => ({
+vi.mock("../../services/config-service.js", () => ({
   createConfigService: vi.fn(() => {
     const getRuntimeGardenComputeConfig = vi.fn(async () => {
       const envValues = await readMockConfigEnv();
@@ -696,21 +696,21 @@ vi.mock("../services/config-service.js", () => ({
   })
 }));
 
-vi.mock("../services/environment-status-service.js", () => ({
+vi.mock("../../services/environment-status-service.js", () => ({
   createEnvironmentStatusService: hoisted.createEnvironmentStatusService
 }));
 
-vi.mock("../services/soul-approval-service.js", () => ({
+vi.mock("../../services/soul-approval-service.js", () => ({
   createSoulApprovalService: vi.fn(() => ({}))
 }));
 
-vi.mock("../handoff-gap-adapter.js", () => ({
+vi.mock("../../handoff-gap-adapter.js", () => ({
   SqliteHandoffGapAdapter: vi.fn().mockImplementation(function SqliteHandoffGapAdapter() {
     return {};
   })
 }));
 
-vi.mock("../mcp-runtime-registry.js", () => ({
+vi.mock("../../mcp/mcp-runtime-registry.js", () => ({
   createDaemonMcpRuntimeRegistry: vi.fn(() => ({
     listServerInfos: vi.fn(() => hoisted.mcpRuntimeServerInfos),
     refresh: hoisted.mcpRuntimeRefresh,

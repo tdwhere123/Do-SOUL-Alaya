@@ -354,7 +354,7 @@ LLM-as-sole-producer and no-port-no-edges scenarios.
 **Status**: Resolved in v0.3.6 review-loop round 5 (commit `b8fce04`).
 
 **Resolution**: `bootStartedDaemonRuntime` in
-`apps/core-daemon/src/__tests__/tool-runtime-bootstrap.test.ts` now
+`apps/core-daemon/src/__tests__/mcp/tool-runtime-bootstrap.test.ts` now
 passes `{ port: 0 }` to `runtime.startHttpServer`, so the OS assigns a
 free port per test. The previous fixed-3000 default raced with other
 core-daemon test files in parallel runs and produced sporadic hook
@@ -871,7 +871,7 @@ The payload includes `prior_green_state`, `prior_valid_until`, and
 ### #BL-018 — attached-agent MCP proof harness
 
 Resolved by
-`apps/core-daemon/src/__tests__/attached-agent-mcp-proof.test.ts`.
+`apps/core-daemon/src/__tests__/mcp/attached-agent-mcp-proof.test.ts`.
 The harness keeps one daemon runtime alive for install, attach, MCP
 `tools/list`, recall, pointer open, usage report, candidate signal,
 proposal, governance reject, Garden background pass, status, and doctor.

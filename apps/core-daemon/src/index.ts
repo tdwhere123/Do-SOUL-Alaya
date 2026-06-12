@@ -145,7 +145,7 @@ import { createDaemonMcpMemoryToolHandler } from "./mcp-memory/daemon-handler.js
 import { createAttachSurfaceRegistrar } from "./attach-surface-registrar.js";
 import { createBudgetProposalPort } from "./budget-wiring.js";
 import { defaultBootstrappingTemplates, defaultCanonicalAliasMap } from "./daemon-defaults.js";
-import { bootstrapDaemonMcpTooling } from "./daemon-mcp-tooling.js";
+import { bootstrapDaemonMcpTooling } from "./mcp/daemon-mcp-tooling.js";
 import {
   createManifestationBudgetConfigProvider,
   createWarnLogger,
@@ -207,7 +207,7 @@ import { createSoulApprovalService } from "./services/soul-approval-service.js";
 import { SoulTopologyAuditService } from "./services/soul-topology-audit-service.js";
 import { SqliteWorkspaceEngineConfigRepo } from "./services/workspace-engine-config-repo.js";
 import { createTrustStateRecorder } from "./trust-state.js";
-import { getBuiltinConversationToolSpecs } from "./builtin-conversation-tool-specs.js";
+import { getBuiltinConversationToolSpecs } from "./mcp/builtin-conversation-tool-specs.js";
 import type {
   AlayaDaemonListenOptions,
   AlayaDaemonRuntime,

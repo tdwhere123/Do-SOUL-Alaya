@@ -18,7 +18,7 @@ import { createApp } from "../../app.js";
 import type { ProposalRouteServices } from "../../routes/proposals.js";
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../cli/bridge.js";
 import { createReviewCommand } from "../../cli/review.js";
-import { callAlayaMcpMemoryTool } from "../../mcp-server.js";
+import { callAlayaMcpMemoryTool } from "../../mcp/mcp-server.js";
 import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal-workflow.js";
 import {
   createMcpMemoryToolHandler,

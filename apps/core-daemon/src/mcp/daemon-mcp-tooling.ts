@@ -10,7 +10,7 @@ import {
   parseDaemonMcpServerRuntimeConfigs
 } from "./mcp-catalog.js";
 import { createDaemonMcpRuntimeRegistry } from "./mcp-runtime-registry.js";
-import type { WarnLogger } from "./daemon-runtime-helpers.js";
+import type { WarnLogger } from "../daemon-runtime-helpers.js";
 
 type ExtensionRegistryDeps = ConstructorParameters<typeof ExtensionRegistryService>[0];
 type McpToolDiscoveryDeps = ConstructorParameters<typeof McpToolDiscoveryService>[0];
