@@ -1,8 +1,8 @@
 import { PathGraphSnapshotSchema, type PathGraphSnapshot } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
-import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
+import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 
 type PathGraphSnapshotMetrics = Omit<PathGraphSnapshot, "snapshot_id" | "workspace_id" | "snapshot_at">;
 

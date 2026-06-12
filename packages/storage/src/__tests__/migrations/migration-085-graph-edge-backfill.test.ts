@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { StorageDatabase } from "../../sqlite/db.js";
-import { SqlitePathRelationRepo } from "../../repos/path-relation-repo.js";
+import { SqlitePathRelationRepo } from "../../repos/path/path-relation-repo.js";
 
 // B2 regression: migration 085 retires memory_graph_edges. An upgraded DB
 // (initialized before the path/edge spine cutover) can still hold durable

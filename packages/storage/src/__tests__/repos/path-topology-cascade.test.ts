@@ -16,12 +16,12 @@ import {
 import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
 import { SqliteCoUsageCounterRepo } from "../../repos/co-usage-counter-repo.js";
 import { SqliteMemoryEntryRepo } from "../../repos/memory-entry-repo.js";
-import { SqlitePathRelationRepo } from "../../repos/path-relation-repo.js";
+import { SqlitePathRelationRepo } from "../../repos/path/path-relation-repo.js";
 import { SqliteRunRepo } from "../../repos/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../repos/workspace-repo.js";
 
 // invariant: hard-deleted memory ids must not remain reachable through path topology.
-// see also: packages/storage/src/repos/cascade-delete.ts:pruneOrphanedPathTopology
+// see also: packages/storage/src/repos/path/cascade-delete.ts:pruneOrphanedPathTopology
 // see also: packages/storage/src/repos/memory-entry/lifecycle-workflows.ts:hardDeleteTombstonedMemoryEntry
 // see also: packages/core/src/path-graph/graph-contract-service.ts:derive
 

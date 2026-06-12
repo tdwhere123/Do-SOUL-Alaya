@@ -9,7 +9,7 @@ import { StorageError } from "../../shared/errors.js";
 import {
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
-} from "../path-relation-repo.js";
+} from "../path/path-relation-repo.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 import {
   autonomousTombstone,

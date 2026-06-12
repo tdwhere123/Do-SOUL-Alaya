@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { PathGraphSnapshot } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../sqlite/db.js";
-import { SqlitePathGraphSnapshotRepo } from "../../repos/path-graph-snapshot-repo.js";
+import { SqlitePathGraphSnapshotRepo } from "../../repos/path/path-graph-snapshot-repo.js";
 
 const databases = new Set<StorageDatabase>();
 

@@ -194,7 +194,7 @@ WHERE e.backfill_rank = 1
       -- associative path and graph_support double-counts the recall weight.
       -- The DIRECTIONAL kinds keep same-orientation-only dedup: for them a
       -- reverse-oriented path is a DISTINCT edge, not a duplicate.
-      -- cross-file ref: packages/storage/src/repos/edge-proposal-repo.ts listAcceptedAwaitingPath (matches either orientation)
+      -- cross-file ref: packages/storage/src/repos/path/edge-proposal-repo.ts listAcceptedAwaitingPath (matches either orientation)
       -- cross-file ref: packages/core/src/path-graph/path-relation-proposal-service.ts anchorPointsAt / accrueCoOccurrence
       AND (
         (

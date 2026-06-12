@@ -6,10 +6,10 @@ import {
   type PathLifecycleStatus,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface PathRelationRepo {
   create(relation: PathRelation): Readonly<PathRelation>;
@@ -119,8 +119,8 @@ const TARGET_ANCHOR_KEY_SQL = PATH_RELATION_TARGET_ANCHOR_KEY_SQL;
 // Deliberately does NOT ride the composite anchor-key expression indexes: a key
 // match would miss memory ids carried as source_object_id by the concern kinds.
 // cross-file ref: packages/protocol/src/soul/path-relation.ts getPathAnchorBackingObjectId
-// cross-file ref: packages/storage/src/repos/cascade-delete.ts pruneOrphanedPathTopology
-// cross-file ref: packages/storage/src/repos/edge-proposal-repo.ts listAcceptedAwaitingPath
+// cross-file ref: packages/storage/src/repos/path/cascade-delete.ts pruneOrphanedPathTopology
+// cross-file ref: packages/storage/src/repos/path/edge-proposal-repo.ts listAcceptedAwaitingPath
 function anchorBackingObjectIdSql(anchorPath: "source_anchor" | "target_anchor"): string {
   return `CASE json_extract(anchors_json, '$.${anchorPath}.kind')
       WHEN 'object' THEN json_extract(anchors_json, '$.${anchorPath}.object_id')

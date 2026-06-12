@@ -9,14 +9,14 @@ import {
   type EdgeProposalFilter,
   type EdgeProposalStatusValue
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
 import {
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
 } from "./path-relation-repo.js";
-import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
+import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 
 export interface EdgeProposalCreateInput {
   readonly proposal_id: string;

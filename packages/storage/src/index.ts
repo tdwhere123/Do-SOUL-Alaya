@@ -63,7 +63,7 @@ export {
   type EdgeProposalCreateInput,
   type EdgeProposalRepo,
   type EdgeProposalReviewInput
-} from "./repos/edge-proposal-repo.js";
+} from "./repos/path/index.js";
 export {
   SqliteOrphanRadarRepo,
   type OrphanRadarRepo
@@ -108,7 +108,7 @@ export {
 export {
   SqlitePathRelationRepo,
   type PathRelationRepo
-} from "./repos/path-relation-repo.js";
+} from "./repos/path/index.js";
 export {
   SqliteCoUsageCounterRepo,
   type CoUsageCounterIncrementInput,
@@ -124,7 +124,7 @@ export {
   SqlitePathPlasticityWatermarkRepo,
   type PathPlasticityWatermarkRecord,
   type PathPlasticityWatermarkRepo
-} from "./repos/path-plasticity-watermark-repo.js";
+} from "./repos/path/index.js";
 export {
   SqliteBootstrappingRecordRepo,
   type BootstrappingRecordRepo
@@ -132,7 +132,7 @@ export {
 export {
   SqlitePathGraphSnapshotRepo,
   type PathGraphSnapshotRepo
-} from "./repos/path-graph-snapshot-repo.js";
+} from "./repos/path/index.js";
 export {
   SqliteExtensionDescriptorRepo,
   type ExtensionDescriptorRepo

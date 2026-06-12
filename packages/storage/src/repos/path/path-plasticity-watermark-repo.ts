@@ -1,6 +1,6 @@
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { parseNonEmptyString } from "./shared/validators.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface PathPlasticityWatermarkRecord {
   readonly workspace_id: string;

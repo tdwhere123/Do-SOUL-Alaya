@@ -18,7 +18,7 @@ const CONSOLIDATION_MERGE_MIN_CLUSTER_SIZE =
 /**
  * The slice of `PathRelationRepo` the planner reads. Injected so the planner is
  * constructable and unit-testable without the daemon wiring or a live DB.
- * see also: packages/storage/src/repos/path-relation-repo.ts findDormant.
+ * see also: packages/storage/src/repos/path/path-relation-repo.ts findDormant.
  */
 export interface ConsolidationPlannerPathRelationPort {
   findDormant(

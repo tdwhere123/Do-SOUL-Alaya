@@ -1,5 +1,5 @@
-import type { SqliteConnection } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
+import type { SqliteConnection } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
 import {
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
@@ -22,7 +22,7 @@ import {
 // endpoint memory id is in `deletedMemoryIdsSql` (a SELECT of object_id values).
 // `bindParams` are re-bound once per IN-match position (source, target,
 // co-usage low, co-usage high). Caller must run this inside its transaction.
-// cross-file ref: packages/storage/src/repos/path-relation-repo.ts backing-object-id SQL
+// cross-file ref: packages/storage/src/repos/path/path-relation-repo.ts backing-object-id SQL
 function pruneOrphanedPathTopology(
   connection: SqliteConnection,
   deletedMemoryIdsSql: string,

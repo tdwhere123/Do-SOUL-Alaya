@@ -10,7 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { ClaimFormRepo } from "./claim-form-repo.js";
 import type { MemoryEntryRepo } from "./memory-entry-repo.js";
-import type { PathRelationRepo } from "./path-relation-repo.js";
+import type { PathRelationRepo } from "./path/path-relation-repo.js";
 
 export const DEFAULT_ACTIVE_CONSTRAINTS_CAP = 20;
 export const MAX_ACTIVE_CONSTRAINTS_CAP = 50;

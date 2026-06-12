@@ -7,7 +7,7 @@ import {
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL,
   SqlitePathRelationRepo
-} from "../../repos/path-relation-repo.js";
+} from "../../repos/path/path-relation-repo.js";
 
 // invariant: the backing-id-coverage guard reads anchor discriminant kinds
 // from the protocol schema rather than a hardcoded list, so the live union is
@@ -365,7 +365,7 @@ describe("SqlitePathRelationRepo", () => {
   });
 
   it("keeps the anchor-key SQL byte-identical to the migration 048 index expression", async () => {
-    const repoSource = await readFile(new URL("../../repos/path-relation-repo.ts", import.meta.url), "utf8");
+    const repoSource = await readFile(new URL("../../repos/path/path-relation-repo.ts", import.meta.url), "utf8");
     const indexSource = await readFile(
       new URL("../../migrations/048-path-relations-and-event-log-indexes.sql", import.meta.url),
       "utf8"
@@ -669,7 +669,7 @@ describe("SqlitePathRelationRepo", () => {
   // escapes cascade pruning (orphaned topology). This guard fails when a kind
   // exists in PathAnchorRefSchema without a matching WHEN branch in the
   // backing-id SQL, forcing a conscious coverage decision.
-  // cross-file ref: packages/storage/src/repos/path-relation-repo.ts anchorBackingObjectIdSql
+  // cross-file ref: packages/storage/src/repos/path/path-relation-repo.ts anchorBackingObjectIdSql
   it("backing-id SQL covers every PathAnchorRef kind (no silently-unpruned kind)", () => {
     const kinds = anchorKindsFromSchema();
     expect(kinds.length).toBeGreaterThan(0);

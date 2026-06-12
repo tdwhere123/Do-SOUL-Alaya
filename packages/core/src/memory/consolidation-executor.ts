@@ -26,7 +26,7 @@ const CONSOLIDATION_MERGE_WHY_MAX_ENTRIES =
  * synchronous variant so the EventLog append and the path-relation mutation
  * commit inside one `appendManyWithMutation` SQLite transaction.
  *
- * see also: packages/storage/src/repos/path-relation-repo.ts
+ * see also: packages/storage/src/repos/path/path-relation-repo.ts
  */
 export interface ConsolidationPathRelationPort {
   findById(pathId: string): Promise<Readonly<PathRelation> | null>;
@@ -44,7 +44,7 @@ export interface ConsolidationPathRelationPort {
    * `appendManyWithMutation` sync-mutate callback). The SqlitePathRelationRepo
    * delete runs its statement synchronously; its Promise-typed signature is
    * assignable here and resolves after the sync body has already run.
-   * see also: packages/storage/src/repos/path-relation-repo.ts delete.
+   * see also: packages/storage/src/repos/path/path-relation-repo.ts delete.
    */
   delete(pathId: string): void;
 }
@@ -581,7 +581,7 @@ function dedupeBounded(
 // explicitly "dormant" (no unset-defaults-to-dormant fallback). Re-checked at
 // the delete site so a loser that revived to active (or was pinned / governed)
 // between plan emission and commit is refused.
-// see also: packages/storage/src/repos/path-relation-repo.ts findDormant.
+// see also: packages/storage/src/repos/path/path-relation-repo.ts findDormant.
 function isDormantAtApply(path: Readonly<PathRelation>): boolean {
   return path.lifecycle.status === "dormant";
 }
