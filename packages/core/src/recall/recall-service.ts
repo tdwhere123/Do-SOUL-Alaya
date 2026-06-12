@@ -1,29 +1,20 @@
 import { randomUUID } from "node:crypto";
 import {
-  ControlPlaneObjectKind,
   DYNAMICS_CONSTANTS,
   RecallContextEventType,
-  RetentionPolicy,
   SoulRecallCompletedPayloadSchema,
-  SoulRecallWeightTransferPayloadSchema,
   StorageTier,
-  type FineAssessmentConfig,
   type MemoryEntry,
   type ProjectMappingAnchor,
-  type RecallCandidate,
   type RecallPolicy,
   type SoulRecallHostContext,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "./recall-query-probes.js";
-import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "../conversation/task-surface-builder.js";
+import { type NodeStrategy } from "../conversation/task-surface-builder.js";
 import {
-  COLD_CASCADE_DECAY,
-  MIN_RECALL_RESULTS,
-  WARM_CASCADE_DECAY,
   assertActivationWeightsSumToOne,
-  buildRecallCandidateDedupeKey,
   classifyGlobalCandidate,
   classifyProjectMappingCandidate,
   clamp01,
@@ -53,12 +44,10 @@ import type {
   RecallResult,
   RecallServiceDependencies,
   RecallServiceWarnPort,
-  RecallSupplementaryData,
   RecallTokenEconomy,
   TokenEstimator
 } from "./recall-service-types.js";
 import { makeTokenEstimator } from "./recall-service-types.js";
-import { parseRecallPolicy } from "../shared/recall-policy.js";
 import {
   addContentDerivedExpansionCandidates,
   addSourceProximityCandidates
@@ -72,9 +61,6 @@ import {
 } from "./diagnostics.js";
 import {
   createEmptyGraphExpansionDiagnostics,
-  mergeGraphExpansionCandidateSources,
-  mergeGraphExpansionDiagnosticsAcrossCascade,
-  mergeGraphExpansionScores,
   type GraphExpansionCandidateSourceDiagnostic,
 } from "./graph-expansion.js";
 import {
@@ -90,6 +76,17 @@ import {
   collectEntityDerivedSeeds
 } from "./structural-expansion.js";
 import {
+  applyManifestationBiasSidecar,
+  appendWeightTransferTelemetry,
+  assessCoarseFilter,
+  buildDefaultPolicy,
+  expandTierCascade,
+  loadActiveConstraints,
+  mergeCoarseFilters,
+  recordGlobalRecallClassificationsSafely,
+  resolvePolicy
+} from "./orchestration.js";
+import {
   ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR,
   EXPANDED_QUERY_RANK_DISCOUNT,
   SOURCE_PROXIMITY_STRUCTURAL_CARRY_MAX,
@@ -104,7 +101,6 @@ import {
   type CoarseCandidateDraft
 } from "./coarse-candidates.js";
 import { fineAssess } from "./fine-assessment.js";
-import { collectSupplementaryData } from "./supplementary-data.js";
 import {
   collectEmbeddingCoarseInjection,
   collectEmbeddingSupplement,
@@ -192,13 +188,22 @@ export class RecallService {
     readonly hostContext?: Readonly<SoulRecallHostContext>;
     readonly activeConstraintsCap?: number | null;
   }): Promise<RecallResult> {
-    const policy = this.resolvePolicy(params.strategy, params.taskSurface.runtime_id, params.policyOverride);
+    const policy = resolvePolicy({
+      strategy: params.strategy,
+      taskSurfaceRef: params.taskSurface.runtime_id,
+      policyOverride: params.policyOverride,
+      buildDefaultPolicy: (strategy, taskSurfaceRef) => this.buildDefaultPolicy(strategy, taskSurfaceRef)
+    });
     const tokenEstimator = makeTokenEstimator({ hint: params.hostContext?.tokenizer_hint });
     const queryText = normalizeQueryText(params.taskSurface.display_name);
     const queryProbes = compileRecallQueryProbes(queryText);
     const [slots, activeConstraints] = await Promise.all([
       this.dependencies.slotRepo.findByWorkspace(params.workspaceId),
-      this.loadActiveConstraints(params.workspaceId, params.activeConstraintsCap ?? null)
+      loadActiveConstraints({
+        activeConstraintsPort: this.dependencies.activeConstraintsPort,
+        workspaceId: params.workspaceId,
+        cap: params.activeConstraintsCap ?? null
+      })
     ]);
     const winnerClaimIds = new Set(slots.flatMap((slot) => (slot.winner_claim_id === null ? [] : [slot.winner_claim_id])));
     // Resolve claim IDs to their backing memory entry IDs.
@@ -256,7 +261,10 @@ export class RecallService {
     // Keep supplementary scoring data on the final merged candidate set only;
     // the HOT pass drives tier expansion but must not double-read graph/path
     // signals when the cascade widens.
-    const coarseFilter = await this.expandTierCascade({
+    const coarseFilter = await expandTierCascade({
+      coarseFilter: this.coarseFilter.bind(this),
+      projectMappingPort: this.dependencies.projectMappingPort,
+      mergeCoarseFilters,
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
       config: policy.coarse_filter,
@@ -316,7 +324,10 @@ export class RecallService {
       (reason: unknown) => ({ status: "rejected" as const, reason })
     );
 
-    const initialAssessment = await this.assessCoarseFilter({
+    const initialAssessment = await assessCoarseFilter({
+      dependencies: this.dependencies,
+      warn: this.warn,
+      now: this.now,
       coarseFilter: Object.freeze({
         ...coarseFilter,
         candidates: combinedCoarseCandidates,
@@ -375,7 +386,9 @@ export class RecallService {
       preparedEmbeddingQuery.handle,
       preparedEmbeddingQuery.degradedReason
     );
-    const candidates = await this.applyManifestationBiasSidecar({
+    const candidates = await applyManifestationBiasSidecar({
+      manifestationSidecarPort: this.dependencies.manifestationSidecarPort,
+      warn: this.warn,
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
       taskSurfaceRef: params.taskSurface,
@@ -404,14 +417,22 @@ export class RecallService {
         occurred_at: occurredAt
       })
     });
-    await this.appendWeightTransferTelemetry({
+    await appendWeightTransferTelemetry({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      warn: this.warn,
+      now: this.now,
+      recallsEdgeColdThreshold: RECALLS_EDGE_COLD_THRESHOLD,
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
       graphAndPathColdScore: supplementaryData.graphAndPathColdScore,
       recallsEdgeCount: supplementaryData.recallsEdgeCount,
       weightTransferAmount: supplementaryData.weightTransferAmount
     });
-    await this.recordGlobalRecallClassificationsSafely(globalRecallClassifications);
+    await recordGlobalRecallClassificationsSafely({
+      globalRecallCachePort: this.dependencies.globalRecallCachePort,
+      warn: this.warn,
+      classifications: globalRecallClassifications
+    });
 
     // Pure derivation, no async work and no extra corpus reads: token
     // economy is computed from values already materialised above. See
@@ -458,149 +479,14 @@ export class RecallService {
     });
   }
 
-  private async loadActiveConstraints(
-    workspaceId: string,
-    cap: number | null
-  ): Promise<Readonly<{
-    readonly constraints: RecallResult["active_constraints"];
-    readonly total_count: number;
-  }>> {
-    const port = this.dependencies.activeConstraintsPort;
-    if (port === undefined) {
-      return Object.freeze({
-        constraints: Object.freeze([]),
-        total_count: 0
-      });
-    }
-    return port.findActiveConstraints({ workspaceId, cap });
-  }
-
-  private async applyManifestationBiasSidecar(params: Readonly<{
-    readonly workspaceId: string;
-    readonly runId: string | null;
-    readonly taskSurfaceRef: Readonly<TaskObjectSurface>;
-    readonly candidates: readonly Readonly<RecallCandidate>[];
-  }>): Promise<readonly Readonly<RecallCandidate>[]> {
-    const sidecarPort = this.dependencies.manifestationSidecarPort;
-    if (sidecarPort === undefined || params.candidates.length === 0 || params.runId === null) {
-      return params.candidates;
-    }
-
-    const anchorMemoryObjectIds = Object.freeze(
-      [...new Set(params.candidates.map((candidate) => candidate.object_id))]
-    );
-
-    let sidecarEntries: readonly Readonly<import("../manifestation/manifestation-resolver.js").ManifestationBiasSidecarEntry>[];
-    try {
-      sidecarEntries = await sidecarPort.buildBiasSidecar({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        anchorMemoryObjectIds,
-        taskSurfaceRef: params.taskSurfaceRef
-      });
-    } catch (error) {
-      this.warn("manifestation bias sidecar build failed", {
-        workspace_id: params.workspaceId,
-        run_id: params.runId,
-        error: toErrorMessage(error)
-      });
-      return params.candidates;
-    }
-
-    if (sidecarEntries.length === 0) {
-      return params.candidates;
-    }
-
-    // Highest unfinishedness_bias wins per target memory; ties resolve
-    // deterministically by candidate_id so repeated runs are stable.
-    const byMemoryId = new Map<string, Readonly<import("../manifestation/manifestation-resolver.js").ManifestationBiasSidecarEntry>>();
-    const sortedEntries = [...sidecarEntries].sort((left, right) => {
-      if (right.unfinishedness_bias !== left.unfinishedness_bias) {
-        return right.unfinishedness_bias - left.unfinishedness_bias;
-      }
-      return left.candidate_id.localeCompare(right.candidate_id);
-    });
-    for (const entry of sortedEntries) {
-      if (entry.target_memory_object_id === null) {
-        continue;
-      }
-      if (!byMemoryId.has(entry.target_memory_object_id)) {
-        byMemoryId.set(entry.target_memory_object_id, entry);
-      }
-    }
-
-    if (byMemoryId.size === 0) {
-      return params.candidates;
-    }
-
-    return Object.freeze(
-      params.candidates.map((candidate) => {
-        const sidecar = byMemoryId.get(candidate.object_id);
-        if (sidecar === undefined) {
-          return candidate;
-        }
-        return Object.freeze({
-          ...candidate,
-          pending_incomplete: sidecar.pending_incomplete,
-          unfinishedness_bias: sidecar.unfinishedness_bias
-        });
-      })
-    );
-  }
-
-  private async recordGlobalRecallClassificationsSafely(
-    classifications: readonly Readonly<{
-      readonly workspaceId: string;
-      readonly globalObjectId: string;
-      readonly classification: "included" | "excluded";
-    }>[]
-  ): Promise<void> {
-    if (classifications.length === 0) {
-      return;
-    }
-
-    try {
-      await this.dependencies.globalRecallCachePort?.recordClassifications(
-        Object.freeze(classifications)
-      );
-    } catch (error) {
-      this.warn("global recall cache record failed", {
-        workspace_id: classifications[0]?.workspaceId ?? null,
-        classification_count: classifications.length,
-        error: toErrorMessage(error)
-      });
-      return;
-    }
-  }
-
   public buildDefaultPolicy(strategy: NodeStrategy, taskSurfaceRef: string): Readonly<RecallPolicy> {
-    const defaults = STRATEGY_RECALL_DEFAULTS[strategy];
-    const now = this.now();
-
-    const base = parseRecallPolicy({
-      runtime_id: this.generateRuntimeId(),
-      object_kind: ControlPlaneObjectKind.RECALL_POLICY,
-      task_surface_ref: taskSurfaceRef,
-      expires_at: new Date(new Date(now).getTime() + 30 * 60 * 1000).toISOString(),
-      derived_from: taskSurfaceRef,
-      retention_policy: RetentionPolicy.SESSION_ONLY,
-      coarse_filter: defaults.coarse,
-      fine_assessment: defaults.fine
+    return buildDefaultPolicy({
+      strategy,
+      taskSurfaceRef,
+      now: this.now,
+      generateRuntimeId: this.generateRuntimeId,
+      defaultPolicyDecorator: this.dependencies.defaultPolicyDecorator
     });
-    const decorator = this.dependencies.defaultPolicyDecorator;
-    return decorator === undefined ? base : parseRecallPolicy(decorator(base));
-  }
-
-  private resolvePolicy(
-    strategy: NodeStrategy,
-    taskSurfaceRef: string,
-    policyOverride?: Readonly<RecallPolicy>
-  ): Readonly<RecallPolicy> {
-    if (policyOverride === undefined) {
-      return this.buildDefaultPolicy(strategy, taskSurfaceRef);
-    }
-
-    return parseRecallPolicy(policyOverride);
   }
 
   private async coarseFilter(
@@ -1103,234 +989,4 @@ export class RecallService {
       degradation_reason: null
     });
   }
-
-
-  private async expandTierCascade(params: {
-    readonly workspaceId: string;
-    readonly runId: string | null;
-    readonly config: Readonly<RecallPolicy>["coarse_filter"];
-    readonly fineAssessmentConfig: Readonly<FineAssessmentConfig>;
-    readonly queryText: string | null;
-    readonly queryProbes: Readonly<RecallQueryProbes>;
-    readonly hotCoarseFilter: Awaited<ReturnType<RecallService["coarseFilter"]>>;
-    readonly hotFineAssessmentCount: number;
-    readonly winnerMemoryIds: ReadonlySet<string>;
-    readonly timeFilter?: RecallTimeFilter;
-  }): Promise<Awaited<ReturnType<RecallService["coarseFilter"]>>> {
-    const targetCount = Math.min(MIN_RECALL_RESULTS, params.fineAssessmentConfig.budgets.max_entries);
-    if (targetCount === 0) {
-      return params.hotCoarseFilter;
-    }
-
-    if (params.hotFineAssessmentCount >= targetCount) {
-      return params.hotCoarseFilter;
-    }
-
-    const projectMappings =
-      this.dependencies.projectMappingPort?.findByWorkspace === undefined
-        ? []
-        : await this.dependencies.projectMappingPort.findByWorkspace(params.workspaceId);
-    const warmFilter = await this.coarseFilter(params.workspaceId, params.config, params.queryText, {
-      tier: StorageTier.WARM,
-      projectMappings,
-      sourceChannel: "warm_cascade",
-      scoreMultiplier: WARM_CASCADE_DECAY,
-      timeFilter: params.timeFilter,
-      queryProbes: params.queryProbes,
-      winnerMemoryIds: params.winnerMemoryIds,
-      deliveryMaxEntries: params.fineAssessmentConfig.budgets.max_entries
-    });
-    const warmMerged = this.mergeCoarseFilters(params.hotCoarseFilter, warmFilter, "warm_cascade_engaged");
-    // Use coarse-filter candidate counts for cascade gates; supplementary
-    // graph/plasticity/embedding lookups run once on the final merged filter.
-    if (warmMerged.candidates.length >= targetCount) {
-      return warmMerged;
-    }
-
-    const coldFilter = await this.coarseFilter(params.workspaceId, params.config, params.queryText, {
-      tier: StorageTier.COLD,
-      projectMappings,
-      sourceChannel: "cold_cascade",
-      scoreMultiplier: COLD_CASCADE_DECAY,
-      timeFilter: params.timeFilter,
-      queryProbes: params.queryProbes,
-      winnerMemoryIds: params.winnerMemoryIds,
-      deliveryMaxEntries: params.fineAssessmentConfig.budgets.max_entries
-    });
-    return this.mergeCoarseFilters(warmMerged, coldFilter, "cold_cascade_engaged");
-  }
-
-  private async assessCoarseFilter(params: {
-    readonly coarseFilter: Awaited<ReturnType<RecallService["coarseFilter"]>>;
-    readonly workspaceId: string;
-    readonly runId: string | null;
-    readonly queryText: string | null;
-    readonly queryProbes: Readonly<RecallQueryProbes>;
-    readonly policy: Readonly<RecallPolicy>;
-    readonly winnerMemoryIds: ReadonlySet<string>;
-    readonly tokenEstimator: TokenEstimator;
-  }): Promise<Readonly<{
-    readonly supplementaryData: RecallSupplementaryData;
-    readonly candidates: readonly Readonly<RecallCandidate>[];
-    readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
-  }>> {
-    const supplementaryData = await collectSupplementaryData({
-      dependencies: this.dependencies,
-      warn: this.warn,
-      candidates: params.coarseFilter.candidates.map((candidate) => candidate.entry),
-      workspaceId: params.workspaceId,
-      runId: params.runId,
-      queryText: params.queryText,
-      queryProbes: params.queryProbes,
-      policy: params.policy,
-      coarseFtsRanks: params.coarseFilter.ftsRanks,
-      coarseTrigramFtsRanks: params.coarseFilter.trigramFtsRanks,
-      coarseSynthesisFtsRanks: params.coarseFilter.synthesisFtsRanks,
-      coarseEvidenceFtsRanks: params.coarseFilter.evidenceFtsRanks,
-      coarseEvidenceFtsRanksPerRef: params.coarseFilter.evidenceFtsRanksPerRef,
-      coarseSourceProximityScores: params.coarseFilter.sourceProximityScores,
-      coarseSourceCohortKeys: params.coarseFilter.sourceCohortKeys,
-      coarseStructuralScores: params.coarseFilter.structuralScores,
-      coarseGraphExpansionScores: params.coarseFilter.graphExpansionScores,
-      coarseEntitySeedScores: params.coarseFilter.entitySeedScores,
-      coarsePathExpansionScores: params.coarseFilter.pathExpansionScores,
-      coarsePathSuppressionScores: params.coarseFilter.pathSuppressionScores
-    });
-    const assessment = fineAssess({
-      candidates: params.coarseFilter.candidates,
-      policy: params.policy,
-      winnerMemoryIds: params.winnerMemoryIds,
-      supplementaryData,
-      tokenEstimator: params.tokenEstimator,
-      now: this.now,
-      warn: this.warn
-    });
-
-    return Object.freeze({
-      supplementaryData,
-      candidates: assessment.candidates,
-      diagnostics: assessment.diagnostics
-    });
-  }
-
-  private mergeCoarseFilters(
-    current: Awaited<ReturnType<RecallService["coarseFilter"]>>,
-    next: Awaited<ReturnType<RecallService["coarseFilter"]>>,
-    degradationReason: NonNullable<RecallResult["degradation_reason"]>
-  ): Awaited<ReturnType<RecallService["coarseFilter"]>> {
-    const seen = new Set(current.candidates.map((candidate) => buildRecallCandidateDedupeKey(candidate)));
-    const nextCandidates = next.candidates.filter((candidate) => {
-      const key = buildRecallCandidateDedupeKey(candidate);
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    });
-    const nextCandidateIds = new Set(nextCandidates.map((candidate) => candidate.entry.object_id));
-    const graphExpansionCandidateSources = mergeGraphExpansionCandidateSources(
-      current.graphExpansionCandidateSources,
-      next.graphExpansionCandidateSources,
-      nextCandidateIds
-    );
-
-    return Object.freeze({
-      total_scanned: current.total_scanned + next.total_scanned,
-      candidates: Object.freeze([...current.candidates, ...nextCandidates]),
-      ftsRanks: Object.freeze({
-        ...current.ftsRanks,
-        ...next.ftsRanks
-      }),
-      trigramFtsRanks: Object.freeze({
-        ...current.trigramFtsRanks,
-        ...next.trigramFtsRanks
-      }),
-      synthesisFtsRanks: Object.freeze({
-        ...current.synthesisFtsRanks,
-        ...next.synthesisFtsRanks
-      }),
-      evidenceFtsRanks: Object.freeze({
-        ...current.evidenceFtsRanks,
-        ...next.evidenceFtsRanks
-      }),
-      evidenceFtsRanksPerRef: Object.freeze({
-        ...current.evidenceFtsRanksPerRef,
-        ...next.evidenceFtsRanksPerRef
-      }),
-      sourceProximityScores: Object.freeze({
-        ...current.sourceProximityScores,
-        ...next.sourceProximityScores
-      }),
-      sourceCohortKeys: Object.freeze({
-        ...current.sourceCohortKeys,
-        ...next.sourceCohortKeys
-      }),
-      structuralScores: Object.freeze({
-        ...current.structuralScores,
-        ...next.structuralScores
-      }),
-      graphExpansionScores: mergeGraphExpansionScores(
-        current.graphExpansionScores,
-        next.graphExpansionScores,
-        nextCandidateIds
-      ),
-      graphExpansionDiagnostics: mergeGraphExpansionDiagnosticsAcrossCascade({
-        sources: graphExpansionCandidateSources,
-        currentFanIn: current.graphExpansionDiagnostics.multi_seed_graph_fan_in,
-        nextFanIn: next.graphExpansionDiagnostics.multi_seed_graph_fan_in
-      }),
-      graphExpansionCandidateSources,
-      entitySeedScores: Object.freeze({
-        ...current.entitySeedScores,
-        ...next.entitySeedScores
-      }),
-      pathExpansionScores: Object.freeze({
-        ...current.pathExpansionScores,
-        ...next.pathExpansionScores
-      }),
-      pathSuppressionScores: Object.freeze({
-        ...current.pathSuppressionScores,
-        ...next.pathSuppressionScores
-      }),
-      degradation_reason: degradationReason
-    });
-  }
-
-  private async appendWeightTransferTelemetry(input: Readonly<{
-    readonly workspaceId: string;
-    readonly runId: string | null;
-    readonly graphAndPathColdScore: number;
-    readonly recallsEdgeCount: number;
-    readonly weightTransferAmount: number;
-  }>): Promise<void> {
-    if (input.weightTransferAmount <= 0) {
-      return;
-    }
-    try {
-      await this.dependencies.eventLogRepo.append({
-        event_type: RecallContextEventType.SOUL_RECALL_WEIGHT_TRANSFER,
-        entity_type: "recall_weight_transfer",
-        entity_id: input.runId ?? input.workspaceId,
-        workspace_id: input.workspaceId,
-        run_id: input.runId,
-        caused_by: "system",
-        payload_json: SoulRecallWeightTransferPayloadSchema.parse({
-          workspace_id: input.workspaceId,
-          run_id: input.runId,
-          cold_score: clamp01(input.graphAndPathColdScore),
-          recalls_edge_count: Math.max(0, Math.trunc(input.recallsEdgeCount)),
-          recalls_threshold: RECALLS_EDGE_COLD_THRESHOLD,
-          transferred_amount: clamp01(input.weightTransferAmount),
-          occurred_at: this.now()
-        })
-      });
-    } catch (error) {
-      this.warn("recall weight transfer telemetry append failed", {
-        workspace_id: input.workspaceId,
-        run_id: input.runId,
-        error: toErrorMessage(error)
-      });
-    }
-  }
-
 }
