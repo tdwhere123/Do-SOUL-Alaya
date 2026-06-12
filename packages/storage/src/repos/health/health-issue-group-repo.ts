@@ -5,9 +5,9 @@ import {
   type HealthIssueResolutionStateValue,
   type HealthIssueSuggestedActionValue
 } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../sqlite/db.js";
-import { StorageError } from "../shared/errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
+import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
 
 // invariant: HealthIssueGroupRepo is the projection store for the
 // Inspector health inbox. Writers upsert by (workspace_id,

@@ -52,7 +52,7 @@ export {
 export {
   SqliteGreenStatusRepo,
   type GreenStatusRepo
-} from "./repos/green-status-repo.js";
+} from "./repos/health/index.js";
 export {
   SqliteSynthesisCapsuleRepo,
   type SynthesisCapsuleRepo,
@@ -67,7 +67,7 @@ export {
 export {
   SqliteOrphanRadarRepo,
   type OrphanRadarRepo
-} from "./repos/orphan-radar-repo.js";
+} from "./repos/health/index.js";
 export {
   SqliteClaimFormRepo,
   type ClaimFormRepo
@@ -86,7 +86,7 @@ export {
   type HealthJournalCreateInput,
   type HealthJournalQueryParams,
   type HealthJournalRepo
-} from "./repos/health-journal-repo.js";
+} from "./repos/health/index.js";
 
 export {
   SqliteSlotRepo,
@@ -148,7 +148,7 @@ export {
 export {
   SqliteDirtyStateDossierRepo,
   type DirtyStateDossierRepo
-} from "./repos/dirty-state-dossier-repo.js";
+} from "./repos/health/index.js";
 export {
   SqliteConflictMatrixRepo,
   type ConflictMatrixRepo
@@ -162,7 +162,7 @@ export {
 export {
   SqliteHealthIssueGroupRepo,
   type HealthIssueGroupRepo
-} from "./repos/health-issue-group-repo.js";
+} from "./repos/health/index.js";
 
 export {
   SqliteSurfaceAnchorRepo,

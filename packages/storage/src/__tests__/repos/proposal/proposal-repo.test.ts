@@ -18,7 +18,7 @@ import {
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
-import { SqliteGreenStatusRepo } from "../../../repos/green-status-repo.js";
+import { SqliteGreenStatusRepo } from "../../../repos/health/green-status-repo.js";
 import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry-repo.js";
 import { SqliteProposalRepo, type ProposalResolutionEventInput } from "../../../repos/proposal-repo.js";
 

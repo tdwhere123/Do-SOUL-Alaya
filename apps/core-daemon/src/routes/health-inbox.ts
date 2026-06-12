@@ -13,7 +13,7 @@ import {
 // mutates rows. State transitions (resolve / suppress) belong to the
 // repo write surface, which is reached through a separate proposal /
 // MCP path, not through this projection.
-// see also: packages/storage/src/repos/health-issue-group-repo.ts
+// see also: packages/storage/src/repos/health/health-issue-group-repo.ts
 
 export interface HealthInboxRouteServices {
   readonly workspaceService: Pick<WorkspaceService, "getById">;
