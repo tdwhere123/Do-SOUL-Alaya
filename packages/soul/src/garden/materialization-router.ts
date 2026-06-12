@@ -475,6 +475,12 @@ export interface MaterializationRouterDeps {
   // bench seeds every haystack turn, so production must retain these facts for
   // the bench to test production. Default-off preserves curated behavior.
   readonly retainUnroutedHighConfidenceFacts?: boolean;
+  // Minimum confidence for a potential_claim/potential_preference to materialize
+  // (default 0.5). Lowering it recovers facts the open-vocabulary extractor
+  // emitted with moderate confidence (the 0.3-0.5 band, ~10% of signals) that
+  // would otherwise be archived to evidence_only. Trades curation for recall;
+  // shared by prod + bench via the single daemon construction.
+  readonly materializationConfidenceFloor?: number;
 }
 
 export class MaterializationRouter {
@@ -559,9 +565,11 @@ export class MaterializationRouter {
       };
     }
 
+    const materializationConfidenceFloor =
+      this.dependencies.materializationConfidenceFloor ?? 0.5;
     if (
       (signal.signal_kind === "potential_claim" || signal.signal_kind === "potential_preference") &&
-      signal.confidence >= 0.5
+      signal.confidence >= materializationConfidenceFloor
     ) {
       const objectKindRoute = routeByObjectKind(signal.object_kind);
       if (objectKindRoute !== null) {

@@ -1326,6 +1326,16 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const retainUnroutedHighConfidenceFacts =
     process.env.ALAYA_RETAIN_UNROUTED_FACTS === "1" ||
     process.env.ALAYA_RETAIN_UNROUTED_FACTS === "true";
+  // Optional override for the materialization confidence floor (default 0.5).
+  const materializationConfidenceFloorRaw = Number(
+    process.env.ALAYA_MATERIALIZATION_CONF_FLOOR
+  );
+  const materializationConfidenceFloor =
+    Number.isFinite(materializationConfidenceFloorRaw) &&
+    materializationConfidenceFloorRaw >= 0 &&
+    materializationConfidenceFloorRaw <= 1
+      ? materializationConfidenceFloorRaw
+      : undefined;
   const materializationRouter = new MaterializationRouter({
     evidenceService,
     memoryService: materializationMemoryService,
@@ -1353,7 +1363,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       ? {}
       : { reconciliationPort: reconciliationService }),
     handoffGapHandler: sqliteHandoffGapAdapter,
-    retainUnroutedHighConfidenceFacts
+    retainUnroutedHighConfidenceFacts,
+    ...(materializationConfidenceFloor === undefined
+      ? {}
+      : { materializationConfidenceFloor })
   });
   const signalService = new SignalService({
     eventLogRepo,
