@@ -348,6 +348,12 @@ export async function runLongMemEval(
     hitAt1: boolean;
     hitAt5: boolean;
     hitAt10: boolean;
+    // Full-gold coverage counters (see runOneQuestion): goldTotal is this
+    // question's gold-memory count (0 for abstention), goldInTop{5,10} how many
+    // of them ranked within the window. Aggregated into full_gold_at_k KPIs.
+    goldTotal: number;
+    goldInTop5: number;
+    goldInTop10: number;
     firstTier: "hot" | "warm" | "cold";
     latencyMs: number;
     degradationReason: string | null;
@@ -767,6 +773,15 @@ export async function runLongMemEval(
         sidecar,
         answerSessionIds: answerSessionSet
       });
+      // Full-gold coverage (distinct from the official-hit hitAt5, which is true
+      // when ANY gold session is in top-5). A multi-fact question needs ALL its
+      // gold memories delivered; official-hit hides that. goldTotal is 0 for
+      // abstention questions (no gold), so those are excluded from coverage.
+      const goldRankById = new Map(results.map((p, i) => [p.object_id, i + 1]));
+      const goldRanks = goldMemoryIds.map((id) => goldRankById.get(id) ?? -1);
+      const goldTotal = goldMemoryIds.length;
+      const goldInTop5 = goldRanks.filter((r) => r > 0 && r <= 5).length;
+      const goldInTop10 = goldRanks.filter((r) => r > 0 && r <= 10).length;
       const diagnostics = buildQuestionDiagnostic({
         questionId: question.question_id,
         goldMemoryIds,
@@ -816,6 +831,9 @@ export async function runLongMemEval(
         hitAt1: scoredHits.hitAt1,
         hitAt5: scoredHits.hitAt5,
         hitAt10: scoredHits.hitAt10,
+        goldTotal,
+        goldInTop5,
+        goldInTop10,
         firstTier: scoredHits.firstTier,
         latencyMs,
         degradationReason: recallResult.degradation_reason ?? null,
@@ -976,6 +994,15 @@ export async function runLongMemEval(
   let degradePartial = 0;
   let totalHitAt1 = 0;
   let totalHitAt10 = 0;
+  // Full-gold coverage accumulators (over questions with gold; abstention has
+  // none). fullGoldQuestions counts the denominator; fullGoldAt{5,10} count
+  // questions where EVERY gold memory landed in the window; coverage{5,10}Sum
+  // sums the per-question delivered fraction for a mean.
+  let fullGoldQuestions = 0;
+  let fullGoldAt5 = 0;
+  let fullGoldAt10 = 0;
+  let coverage5Sum = 0;
+  let coverage10Sum = 0;
   let truncSeedTotal = 0;
   let truncAnswerTotal = 0;
   let truncCharsTotal = 0;
@@ -1013,6 +1040,13 @@ export async function runLongMemEval(
     latencies.push(res.latencyMs);
     if (res.hitAt1) totalHitAt1++;
     if (res.hitAt10) totalHitAt10++;
+    if (res.goldTotal > 0) {
+      fullGoldQuestions++;
+      coverage5Sum += res.goldInTop5 / res.goldTotal;
+      coverage10Sum += res.goldInTop10 / res.goldTotal;
+      if (res.goldInTop5 === res.goldTotal) fullGoldAt5++;
+      if (res.goldInTop10 === res.goldTotal) fullGoldAt10++;
+    }
     if (res.firstTier === "hot") tierHot++;
     else if (res.firstTier === "warm") tierWarm++;
     else tierCold++;
@@ -1049,6 +1083,14 @@ export async function runLongMemEval(
   const rAt1 = n === 0 ? 0 : totalHitAt1 / n;
   const rAt5 = n === 0 ? 0 : perScenario.filter((r) => r.hit_at_5).length / n;
   const rAt10 = n === 0 ? 0 : totalHitAt10 / n;
+  // Full-gold coverage: the honest multi-fact口径. fullGoldAt5Rate = fraction of
+  // gold-bearing questions with EVERY gold memory in top-5 (vs rAt5's any-gold);
+  // goldCoverageAt5 = mean delivered-gold fraction. These expose the multi-fact
+  // delivery gap the official-hit rAt5 hides. see [[r5-dual-kpi-trap]].
+  const fullGoldAt5Rate = fullGoldQuestions === 0 ? 0 : fullGoldAt5 / fullGoldQuestions;
+  const fullGoldAt10Rate = fullGoldQuestions === 0 ? 0 : fullGoldAt10 / fullGoldQuestions;
+  const goldCoverageAt5 = fullGoldQuestions === 0 ? 0 : coverage5Sum / fullGoldQuestions;
+  const goldCoverageAt10 = fullGoldQuestions === 0 ? 0 : coverage10Sum / fullGoldQuestions;
   const latencyP50 = computePercentile(latencies, 50);
   const latencyP95 = computePercentile(latencies, 95);
   const providerSummary = summarizeProviderStates(questionDiagnostics);
@@ -1140,6 +1182,17 @@ export async function runLongMemEval(
       r_at_1: rAt1,
       r_at_5: rAt5,
       r_at_10: rAt10,
+      ...(fullGoldQuestions === 0
+        ? {}
+        : {
+            full_gold_coverage: {
+              gold_bearing_questions: fullGoldQuestions,
+              full_gold_at_5: fullGoldAt5Rate,
+              full_gold_at_10: fullGoldAt10Rate,
+              gold_coverage_at_5: goldCoverageAt5,
+              gold_coverage_at_10: goldCoverageAt10
+            }
+          }),
       ...(opts.embeddingMode === "env"
         ? {
             r_at_5_overall: rAt5,
