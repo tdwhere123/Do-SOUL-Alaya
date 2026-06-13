@@ -15,7 +15,7 @@ import { EventPublisher } from "../../runtime/event-publisher.js";
 import { WorkerRunLifecycleService } from "../../runtime/worker-run-lifecycle-service.js";
 import { type IntegrationGateDecision } from "../../security/integration-gate.js";
 import { SerialDelegationService, type DispatchWorkerInput } from "../../runtime/serial-delegation-service.js";
-import { ScriptedRuntimeAdapter } from "../../test-doubles/scripted-runtime-adapter.js";
+import { ScriptedRuntimeAdapter } from "../../test-doubles/__tests__/scripted-runtime-adapter.js";
 import type { TestMock } from "../shared/mock-types.js";
 
 export const FIXED_NOW = "2026-04-13T11:00:00.000Z";

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
-import { ScriptedRuntimeAdapter } from "../../test-doubles/scripted-runtime-adapter.js";
+import { ScriptedRuntimeAdapter } from "../../test-doubles/__tests__/scripted-runtime-adapter.js";
 import {
   FIXED_NOW,
   FIXED_WORKER_RUN_ID,
