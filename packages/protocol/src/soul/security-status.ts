@@ -3,7 +3,7 @@ import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 
 export const SecurityPostureSchema = z.enum([
   "baseline",

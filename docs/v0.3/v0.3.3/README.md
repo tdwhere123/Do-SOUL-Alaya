@@ -34,7 +34,7 @@ public contract must cite invariant 25 and rerun the SemVer snapshot path.
 
 ## Bootstrap Default Semantics
 
-`apps/core-daemon/src/daemon-defaults.ts` intentionally ships
+`apps/core-daemon/src/runtime/daemon-defaults.ts` intentionally ships
 `defaultBootstrappingTemplates` as an empty list. PathRelation rows are
 ontology structure, not daemon filler. A daemon startup or
 `alaya doctor --reconcile-bootstrap` run with no configured templates

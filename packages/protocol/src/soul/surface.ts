@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NonEmptyStringSchema } from "../schema-primitives.js";
+import { NonEmptyStringSchema } from "../shared/schema-primitives.js";
 import { PersistentObjectEnvelopeSchema } from "./envelope.js";
 import { ObjectKind } from "./object-kind.js";
 

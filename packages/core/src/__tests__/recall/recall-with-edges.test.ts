@@ -26,8 +26,8 @@ import {
   WorkspaceState,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { GraphExploreService } from "../../graph-explore-service.js";
-import { RecallService, type RecallServiceDependencies } from "../../recall-service.js";
+import { GraphExploreService } from "../../path-graph/graph-explore-service.js";
+import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
 
 // Recall scoring must read per-memory inbound graph support from SQLite (the
 // unified path plane), not from a constant or process-local cache.
@@ -49,7 +49,7 @@ const MEM_ISOLATED = "00000000-0000-4000-8000-000000000004";
 // graph_support is fed by GraphExploreService.countInbound* which now read the
 // unified path plane (path_relations), not memory_graph_edges. This proves the
 // recall-service wiring is alive on the path plane and survives the edge-table
-// retirement. see also: packages/core/src/graph-explore-service.ts.
+// retirement. see also: packages/core/src/path-graph/graph-explore-service.ts.
 describe("RecallService end-to-end with path-plane graph_support", () => {
   it("lifts score_factors.graph_support above 0 from inbound recall-eligible paths", async () => {
     const { database, memoryEntryRepo, pathRelationRepo } = await createRealStorage();

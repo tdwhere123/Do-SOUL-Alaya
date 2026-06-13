@@ -9,7 +9,7 @@
  *
  * Fail-soft: if @node-rs/jieba cannot load on this host, the helper
  * returns the input as a single element so `tokenizeFtsQuery` callers
- * never throw. see also: packages/core/src/cjk-segmentation.ts.
+ * never throw. see also: packages/core/src/shared/cjk-segmentation.ts.
  */
 
 let jiebaState:

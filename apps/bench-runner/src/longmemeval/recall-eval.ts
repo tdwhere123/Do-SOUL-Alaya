@@ -25,7 +25,7 @@ import {
   RECALL_PIPELINE_VERSION,
   resolveBenchCommitSha7,
   resolveBenchRunnerVersion
-} from "../version.js";
+} from "../shared/version.js";
 import {
   startBenchDaemon,
   type BenchDaemonHandle,

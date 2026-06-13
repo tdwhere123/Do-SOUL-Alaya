@@ -18,8 +18,8 @@ import {
   COLD_CASCADE_DECAY,
   MIN_RECALL_RESULTS,
   WARM_CASCADE_DECAY
-} from "../../recall-service-helpers.js";
-import { RecallService, type RecallServiceDependencies } from "../../recall-service.js";
+} from "../../recall/recall-service-helpers.js";
+import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
 
 function createTaskSurface(): TaskObjectSurface {
   return {

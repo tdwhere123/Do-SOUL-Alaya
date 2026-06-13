@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import { NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { PersistentObjectEnvelopeSchema } from "./envelope.js";
 import { ObjectKind } from "./object-kind.js";
 
@@ -52,7 +52,7 @@ export const ClaimCandidateConditionsSchema = z
 
 // invariant: synthesis capsules describe synthesis-tier observations;
 // draft -> active claim transitions are owned by ResolutionService.
-// see also: packages/core/src/resolution-service.ts
+// see also: packages/core/src/governance/resolution-service.ts
 export const SynthesisCapsuleSchema = PersistentObjectEnvelopeSchema.unwrap()
   .extend({
     object_kind: z.literal(ObjectKind.SYNTHESIS_CAPSULE),

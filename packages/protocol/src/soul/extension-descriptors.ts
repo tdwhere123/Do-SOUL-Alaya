@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
 
 const EXTENSION_ID_MAX_LENGTH = 256;
 const EXTENSION_NAME_MAX_LENGTH = 512;

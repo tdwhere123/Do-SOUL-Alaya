@@ -14,7 +14,12 @@ import {
   type EventLogEntry,
   type Proposal
 } from "@do-soul/alaya-protocol";
-import type { McpMemoryToolHandler } from "../mcp-memory-tool-handler.js";
+import type { McpMemoryToolHandler } from "../mcp-memory/tool-handler.js";
+import {
+  isRequestBodyTooLargeError,
+  rejectUnexpectedRequestBody,
+  throwInvalidRequestBody
+} from "./shared.js";
 
 // invariant: governance_class promotion to strictly_governed is an
 // auditable change (handbook invariants §3) and therefore must travel
@@ -138,7 +143,10 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
         );
       }
       body = parsed as Record<string, unknown>;
-    } catch {
+    } catch (error) {
+      if (isRequestBodyTooLargeError(error)) {
+        throwInvalidRequestBody(error);
+      }
       return context.json({ success: false, error: "invalid JSON body" }, 400);
     }
     const args: Record<string, unknown> = {
@@ -171,6 +179,8 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
   });
 
   app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/keep", async (context) => {
+    const unexpectedBody = await rejectUnexpectedRequestBody(context);
+    if (unexpectedBody !== null) return unexpectedBody;
     const workspaceId = context.req.param("wsId");
     const memoryId = context.req.param("memoryId");
     await services.workspaceService.getById(workspaceId);
@@ -218,6 +228,8 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
   });
 
   app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/downgrade", async (context) => {
+    const unexpectedBody = await rejectUnexpectedRequestBody(context);
+    if (unexpectedBody !== null) return unexpectedBody;
     const workspaceId = context.req.param("wsId");
     const memoryId = context.req.param("memoryId");
     await services.workspaceService.getById(workspaceId);
@@ -328,6 +340,8 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
   );
 
   app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/retire", async (context) => {
+    const unexpectedBody = await rejectUnexpectedRequestBody(context);
+    if (unexpectedBody !== null) return unexpectedBody;
     const workspaceId = context.req.param("wsId");
     const memoryId = context.req.param("memoryId");
     await services.workspaceService.getById(workspaceId);
@@ -418,7 +432,10 @@ async function readJsonObject(context: Context): Promise<Record<string, unknown>
       return null;
     }
     return parsed as Record<string, unknown>;
-  } catch {
+  } catch (error) {
+    if (isRequestBodyTooLargeError(error)) {
+      throwInvalidRequestBody(error);
+    }
     return null;
   }
 }

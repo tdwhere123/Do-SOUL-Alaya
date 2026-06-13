@@ -1,34 +1,34 @@
-export { StorageError, type StorageErrorCode } from "./errors.js";
-export { initDatabase, StorageDatabase, getCurrentSchemaSummary, type InitDatabaseOptions } from "./db.js";
+export { StorageError, type StorageErrorCode } from "./shared/index.js";
+export { initDatabase, StorageDatabase, getCurrentSchemaSummary, type InitDatabaseOptions } from "./sqlite/index.js";
 export {
   SqliteWorkspaceRepo,
   type WorkspaceCreateInput,
   type WorkspaceRepo
-} from "./repos/workspace-repo.js";
-export { SqliteRunRepo, type RunCreateInput, type RunRepo } from "./repos/run-repo.js";
+} from "./repos/runtime/index.js";
+export { SqliteRunRepo, type RunCreateInput, type RunRepo } from "./repos/runtime/index.js";
 export {
   SqliteEngineBindingRepo,
   type EngineBindingRecordCreateInput,
   type EngineBindingRepo
-} from "./repos/engine-binding-repo.js";
+} from "./repos/control/index.js";
 export {
   SqliteEventLogRepo,
   type EventLogAppendInput,
   type EventLogRepo
-} from "./repos/event-log-repo.js";
-export { SqliteSignalRepo, type SignalRepo } from "./repos/signal-repo.js";
+} from "./repos/runtime/index.js";
+export { SqliteSignalRepo, type SignalRepo } from "./repos/signal/index.js";
 export {
   SqliteEvidenceCapsuleRepo,
   type EvidenceCapsuleRepo,
   type EvidenceCapsuleKeywordHit
-} from "./repos/evidence-capsule-repo.js";
+} from "./repos/capsules/index.js";
 export {
   SqliteMemoryEntryRepo,
   type MemoryEntryRepo,
   type MemoryEntryRepoDynamicsUpdateFields,
   type MemoryEntryRepoTierUpdateInput,
   type MemoryEntryRepoUpdateFields
-} from "./repos/memory-entry-repo.js";
+} from "./repos/memory-entry/index.js";
 export {
   DEFAULT_ACTIVE_CONSTRAINTS_CAP,
   MAX_ACTIVE_CONSTRAINTS_CAP,
@@ -37,41 +37,41 @@ export {
   type ActiveConstraintQueryResult,
   type ActiveConstraintRecord,
   type ActiveConstraintSourceChannel
-} from "./repos/active-constraints.js";
+} from "./repos/governance/index.js";
 export {
   SqliteGlobalMemoryRepo,
   type GlobalMemoryRepo,
   type GlobalMemoryRepoListFilters
-} from "./repos/global-memory-repo.js";
+} from "./repos/memory/index.js";
 export {
   SqliteKarmaEventRepo,
   type KarmaEvent,
   type KarmaEventKind,
   type KarmaEventRepo
-} from "./repos/karma-event-repo.js";
+} from "./repos/signal/index.js";
 export {
   SqliteGreenStatusRepo,
   type GreenStatusRepo
-} from "./repos/green-status-repo.js";
+} from "./repos/health/index.js";
 export {
   SqliteSynthesisCapsuleRepo,
   type SynthesisCapsuleRepo,
   type SynthesisCapsuleKeywordHit
-} from "./repos/synthesis-capsule-repo.js";
+} from "./repos/capsules/index.js";
 export {
   SqliteEdgeProposalRepo,
   type EdgeProposalCreateInput,
   type EdgeProposalRepo,
   type EdgeProposalReviewInput
-} from "./repos/edge-proposal-repo.js";
+} from "./repos/path/index.js";
 export {
   SqliteOrphanRadarRepo,
   type OrphanRadarRepo
-} from "./repos/orphan-radar-repo.js";
+} from "./repos/health/index.js";
 export {
   SqliteClaimFormRepo,
   type ClaimFormRepo
-} from "./repos/claim-form-repo.js";
+} from "./repos/governance/index.js";
 export {
   SqliteProposalRepo,
   type AcceptedMemoryUpdateInput,
@@ -80,154 +80,154 @@ export {
   type ProposalCreateInput,
   type ProposalResolutionEventInput,
   type ProposalRepo
-} from "./repos/proposal-repo.js";
+} from "./repos/proposal/index.js";
 export {
   SqliteHealthJournalRepo,
   type HealthJournalCreateInput,
   type HealthJournalQueryParams,
   type HealthJournalRepo
-} from "./repos/health-journal-repo.js";
+} from "./repos/health/index.js";
 
 export {
   SqliteSlotRepo,
   type SlotRepo
-} from "./repos/slot-repo.js";
+} from "./repos/governance/index.js";
 
 export {
   SqliteToolSpecRepo,
   type ToolSpecRepo
-} from "./repos/tool-spec-repo.js";
+} from "./repos/tooling/index.js";
 export {
   SqliteToolExecutionRecordRepo,
   type ToolExecutionRecordRepo
-} from "./repos/tool-execution-record-repo.js";
+} from "./repos/tooling/index.js";
 export {
   SqliteStrongRefRepo,
   type StrongRefRepo
-} from "./repos/strong-ref-repo.js";
+} from "./repos/memory/index.js";
 export {
   SqlitePathRelationRepo,
   type PathRelationRepo
-} from "./repos/path-relation-repo.js";
+} from "./repos/path/index.js";
 export {
   SqliteCoUsageCounterRepo,
   type CoUsageCounterIncrementInput,
   type CoUsageCounterRepo
-} from "./repos/co-usage-counter-repo.js";
+} from "./repos/path/index.js";
 export {
   SqliteEnrichPendingRepo,
   type EnrichPendingClaim,
   type EnrichPendingEnqueueInput,
   type EnrichPendingRepo
-} from "./repos/enrich-pending-repo.js";
+} from "./repos/garden/index.js";
 export {
   SqlitePathPlasticityWatermarkRepo,
   type PathPlasticityWatermarkRecord,
   type PathPlasticityWatermarkRepo
-} from "./repos/path-plasticity-watermark-repo.js";
+} from "./repos/path/index.js";
 export {
   SqliteBootstrappingRecordRepo,
   type BootstrappingRecordRepo
-} from "./repos/bootstrapping-record-repo.js";
+} from "./repos/runtime/index.js";
 export {
   SqlitePathGraphSnapshotRepo,
   type PathGraphSnapshotRepo
-} from "./repos/path-graph-snapshot-repo.js";
+} from "./repos/path/index.js";
 export {
   SqliteExtensionDescriptorRepo,
   type ExtensionDescriptorRepo
-} from "./repos/extension-descriptor-repo.js";
+} from "./repos/tooling/index.js";
 export {
   SqliteWorkerRunRepo,
   type WorkerRunRepo
-} from "./repos/worker-run-repo.js";
+} from "./repos/runtime/index.js";
 export {
   SqliteDeferredObligationRepo,
   type DeferredObligationRepo
-} from "./repos/deferred-obligation-repo.js";
+} from "./repos/governance/index.js";
 export {
   SqliteDirtyStateDossierRepo,
   type DirtyStateDossierRepo
-} from "./repos/dirty-state-dossier-repo.js";
+} from "./repos/health/index.js";
 export {
   SqliteConflictMatrixRepo,
   type ConflictMatrixRepo
-} from "./repos/conflict-matrix-repo.js";
+} from "./repos/governance/index.js";
 
 export {
   SqliteSurfaceIdentityRepo,
   type SurfaceIdentityRepo
-} from "./repos/surface-identity-repo.js";
+} from "./repos/surface/index.js";
 
 export {
   SqliteHealthIssueGroupRepo,
   type HealthIssueGroupRepo
-} from "./repos/health-issue-group-repo.js";
+} from "./repos/health/index.js";
 
 export {
   SqliteSurfaceAnchorRepo,
   type SurfaceAnchorRepo
-} from "./repos/surface-anchor-repo.js";
+} from "./repos/surface/index.js";
 
 export {
   SqliteSurfaceBindingRepo,
   type SurfaceBindingRecord,
   type SurfaceBindingRepo
-} from "./repos/surface-binding-repo.js";
+} from "./repos/surface/index.js";
 
 export {
   SqliteDriftLeaseRepo,
   type DriftLeaseRepo
-} from "./repos/drift-lease-repo.js";
+} from "./repos/lease/index.js";
 
 export {
   SqliteReconciliationLeaseRepo,
   type ReconciliationLease,
   type ReconciliationLeaseRepo
-} from "./repos/reconciliation-lease-repo.js";
+} from "./repos/lease/index.js";
 
 export {
   SqliteCrossCuttingPermissionRepo,
   type CrossCuttingPermissionRecord,
   type CrossCuttingPermissionRepo
-} from "./repos/cross-cutting-repo.js";
+} from "./repos/surface/index.js";
 
 export {
   SqliteProjectMappingAnchorRepo,
   type AcceptedBy,
   type ProjectMappingAnchorRecord,
   type ProjectMappingAnchorRepo
-} from "./repos/project-mapping-anchor-repo.js";
+} from "./repos/surface/index.js";
 export {
   SqliteGlobalMemoryRecallCacheRepo,
   type GlobalMemoryRecallCacheRecord,
   type GlobalMemoryRecallCacheRepo,
   type GlobalMemoryRecallClassification
-} from "./repos/global-memory-recall-cache-repo.js";
+} from "./repos/memory/index.js";
 export {
   SqliteMemoryEmbeddingRepo,
   type MemoryEmbeddingRecord,
   type MemoryEmbeddingMetadata,
   type MemoryEmbeddingRepo
-} from "./repos/memory-embedding-repo.js";
+} from "./repos/memory/index.js";
 export {
   SqliteFileRepo,
   type FileRepo
-} from "./repos/file-repo.js";
+} from "./repos/runtime/index.js";
 export {
   SqliteConfigRepo,
   type ConfigRepo
-} from "./repos/config-repo.js";
+} from "./repos/control/index.js";
 export {
   SqliteTrustStateRepo,
   type TrustStateRepo
-} from "./repos/trust-state-repo.js";
-export { SqliteHandoffGapRepo } from "./repos/handoff-gap-repo.js";
+} from "./repos/control/index.js";
+export { SqliteHandoffGapRepo } from "./repos/runtime/index.js";
 // invariant: storage owns an independent jieba module-state instance (Package
 // Dependency Direction forbids importing core's copy). Daemon and bench-runner
 // MUST warm both core's and storage's segmenters at startup so the FTS query
 // path never hits the loading-state fallback on the user-visible hot path.
-// see also: packages/core/src/cjk-segmentation.ts, apps/core-daemon/src/index.ts.
+// see also: packages/core/src/shared/cjk-segmentation.ts, apps/core-daemon/src/index.ts.
 export {
   warmCjkSegmentation,
   segmentCjkRun,
@@ -238,7 +238,7 @@ export {
   createGardenBackgroundDataPorts,
   type GardenBackgroundDataPorts,
   type GardenDataPortFactoryOptions
-} from "./repos/garden-data-ports.js";
+} from "./repos/garden/index.js";
 export {
   SqliteGardenTaskRepo,
   type GardenTaskBacklogCount,
@@ -253,4 +253,4 @@ export {
   type GardenTaskRepoPort,
   type GardenTaskRow,
   type GardenTaskStatus
-} from "./repos/garden-task-repo.js";
+} from "./repos/garden/index.js";

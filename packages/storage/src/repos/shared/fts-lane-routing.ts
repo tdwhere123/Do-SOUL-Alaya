@@ -1,5 +1,5 @@
 import type BetterSqlite3 from "better-sqlite3";
-import { buildGroupedOrdinalScores } from "../memory-entry-keyword-search.js";
+import { buildGroupedOrdinalScores } from "../memory-entry/keyword-search.js";
 import {
   isCjkSegmentationCandidate,
   segmentCjkRun
@@ -166,9 +166,9 @@ export function mergeFtsLanes(
  * triggers) stores memory/evidence/synthesis content verbatim; if this
  * helper normalized to NFKC while content stored raw, full-width vs
  * half-width / compatibility-decomposed codepoints would silently miss
- * every match. The sibling tokenizer in memory-entry-keyword-search.ts
- * is also raw — keep them aligned. see also: cjk-segmentation.ts,
- *   packages/storage/src/repos/memory-entry-keyword-search.ts.
+ * every match. The sibling tokenizer is also raw.
+ * see also: packages/storage/src/repos/shared/cjk-segmentation.ts:segmentCjkRun
+ * see also: packages/storage/src/repos/memory-entry/keyword-search.ts:tokenizeFtsQuery
  *
  * invariant: CJK-bearing surface tokens are kept AND jieba word-level
  * pieces are appended so the trigram lane sees the long form (substring

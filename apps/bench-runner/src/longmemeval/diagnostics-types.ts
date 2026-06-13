@@ -1,0 +1,229 @@
+import {
+  DiagnosticActiveConstraintResultSchema,
+  DiagnosticRecallResultSchema,
+  LongMemEvalGoldDiagnosticSchema,
+  LongMemEvalQuestionDiagnosticSchema
+} from "./diagnostics-schema.js";
+import type { z } from "zod";
+
+export type BenchEmbeddingProviderState =
+  | "provider_returned"
+  | "provider_pending"
+  | "provider_failed"
+  | "provider_not_requested"
+  | "unknown";
+
+// @anchor diagnostics-schema: the persisted shape of these records is owned
+// by diagnostics-schema.ts; these aliases keep one source of truth.
+export type DiagnosticRecallResult = z.infer<typeof DiagnosticRecallResultSchema>;
+
+export type DiagnosticActiveConstraintResult = z.infer<
+  typeof DiagnosticActiveConstraintResultSchema
+>;
+
+export type DiagnosticScoreFactors = Readonly<Record<string, unknown>>;
+export type DiagnosticStreamRanks = Readonly<Record<string, number | null>>;
+export type DiagnosticStreamContributions = Readonly<Record<string, number>>;
+
+export interface DiagnosticRecallResultInput {
+  readonly object_id: string;
+  readonly object_kind?: string | null;
+  readonly rank: number;
+  readonly relevance_score: number;
+  readonly fused_rank?: number | null;
+  readonly plane_first_admitted?: string | null;
+  readonly plane_winning_admission?: string | null;
+  readonly score_factors?: DiagnosticScoreFactors | null;
+}
+
+export type LongMemEvalGoldDiagnostic = z.infer<
+  typeof LongMemEvalGoldDiagnosticSchema
+>;
+
+export type LongMemEvalQuestionDiagnostic = z.infer<
+  typeof LongMemEvalQuestionDiagnosticSchema
+>;
+
+export interface ProviderStateSummary {
+  readonly total: number;
+  readonly provider_returned: number;
+  readonly provider_pending: number;
+  readonly provider_failed: number;
+  readonly provider_not_requested: number;
+  readonly unknown: number;
+  readonly provider_returned_rate: number;
+  readonly provider_pending_rate: number;
+  readonly provider_failed_rate: number;
+  readonly provider_not_requested_rate: number;
+  readonly unknown_rate: number;
+}
+
+export interface LongMemEvalEmbeddingVectorCacheSummary {
+  readonly expected_count: number;
+  readonly ready_count: number;
+  readonly not_ready_count: number;
+  readonly ready_rate: number;
+  readonly max_pass_count: number;
+}
+
+export interface LongMemEvalQueryEmbeddingCacheSummary {
+  readonly requested_count: number;
+  readonly ready_count: number;
+  readonly not_ready_count: number;
+  readonly ready_rate: number;
+  readonly cache_hit_count: number;
+  readonly provider_requested_count: number;
+  readonly last_error?: string;
+}
+
+export interface LongMemEvalReportUsageSummary {
+  readonly mode: "none" | "always-used" | "gold-only" | "mixed";
+  readonly reports_attempted: number;
+  readonly reports_used: number;
+  readonly reports_skipped: number;
+  readonly used_object_count: number;
+}
+
+export interface LongMemEvalReportSideEffectSnapshot {
+  readonly question_id: string;
+  readonly workspace_id: string;
+  // invariant: `memory_graph_edges_*` are COMPATIBILITY ALIASES of the
+  // unified `path_relations` (path-plane) counts, NOT a live
+  // `memory_graph_edges` table — that table is retired (migration 085).
+  // Names are kept verbatim so historical bench-archive schemas stay stable;
+  // do not rename. Populated from path-plane counts in runner.ts
+  // (readLongMemEvalReportSideEffectSnapshot); see graph-health-service.ts.
+  readonly memory_graph_edges_total: number;
+  readonly memory_graph_edges_by_type: Readonly<Record<string, number>>;
+  readonly recalls_edge_count: number;
+  readonly path_relations_total: number;
+  readonly latest_path_event_at: string | null;
+  readonly warnings: readonly string[];
+}
+
+export interface LongMemEvalReportSideEffectSummary {
+  readonly mode: "none" | "always-used" | "gold-only" | "mixed";
+  readonly workspaces_observed: number;
+  readonly memory_graph_edges_total: number;
+  readonly memory_graph_edges_by_type: Readonly<Record<string, number>>;
+  readonly recalls_edge_count: number;
+  readonly path_relations_total: number;
+  readonly latest_path_event_at: string | null;
+  readonly snapshots: readonly LongMemEvalReportSideEffectSnapshot[];
+}
+
+export type LongMemEvalGraphExpansionPlaneCountPerHop = readonly [number, number];
+
+export interface LongMemEvalGraphExpansionPlaneCountPerEdgeType {
+  readonly derives_from: number;
+  readonly recalls: number;
+  readonly supports: number;
+}
+
+export interface LongMemEvalRecallEvidenceSummary {
+  readonly delivered_result_count: number;
+  readonly graph_support_gold_count: number;
+  readonly path_plasticity_gold_count: number;
+  readonly graph_expansion_plane_count: number;
+  readonly path_expansion_plane_count: number;
+  readonly graph_expansion_plane_count_per_hop: LongMemEvalGraphExpansionPlaneCountPerHop;
+  readonly graph_expansion_plane_count_per_edge_type: Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType>;
+  readonly delivered_plane_counts: Readonly<{
+    readonly first_admitted: Readonly<Record<string, number>>;
+    readonly winning_admission: Readonly<Record<string, number>>;
+  }>;
+  readonly gold_source_channel_counts: Readonly<Record<string, number>>;
+  readonly gold_source_plane_counts: Readonly<Record<string, number>>;
+}
+
+export interface LongMemEvalDiagnosticsSidecar {
+  readonly schema_version: 1;
+  readonly bench_name: "public" | "public-multiturn" | "public-crossquestion" | "public-locomo";
+  readonly split: string;
+  readonly run_at: string;
+  readonly alaya_commit: string;
+  readonly recall_pipeline_version?: string;
+  readonly embedding_provider: string;
+  readonly embedding_mode: "disabled" | "env";
+  readonly policy_shape?: "stress" | "chat";
+  readonly simulate_report?: "none" | "always-used" | "gold-only" | "mixed";
+  readonly report_usage?: LongMemEvalReportUsageSummary;
+  readonly report_side_effects?: LongMemEvalReportSideEffectSummary;
+  readonly scored_recall_evidence?: LongMemEvalRecallEvidenceSummary;
+  readonly embedding_vector_cache?: LongMemEvalEmbeddingVectorCacheSummary;
+  readonly query_embedding_cache?: LongMemEvalQueryEmbeddingCacheSummary;
+  readonly provider_state_summary: ProviderStateSummary;
+  readonly questions: readonly LongMemEvalQuestionDiagnostic[];
+}
+
+export interface LongMemEvalCompactDiagnosticsSidecar {
+  readonly schema_version: 1;
+  readonly compact_schema_version: 1;
+  readonly bench_name: LongMemEvalDiagnosticsSidecar["bench_name"];
+  readonly split: string;
+  readonly run_at: string;
+  readonly alaya_commit: string;
+  readonly recall_pipeline_version?: string;
+  readonly embedding_provider: string;
+  readonly embedding_mode: "disabled" | "env";
+  readonly policy_shape?: "stress" | "chat";
+  readonly simulate_report?: "none" | "always-used" | "gold-only" | "mixed";
+  readonly question_count: number;
+  readonly full_diagnostics_artifact_path: string;
+  readonly provider_state_summary: ProviderStateSummary;
+  readonly report_usage?: LongMemEvalReportUsageSummary;
+  readonly report_side_effects?: Omit<LongMemEvalReportSideEffectSummary, "snapshots"> & {
+    readonly snapshot_count: number;
+  };
+  readonly scored_recall_evidence?: LongMemEvalRecallEvidenceSummary;
+  readonly embedding_vector_cache?: LongMemEvalEmbeddingVectorCacheSummary;
+  readonly query_embedding_cache?: LongMemEvalQueryEmbeddingCacheSummary;
+}
+
+export interface NarrowRecallDiagnostics {
+  readonly keys: readonly string[];
+  readonly candidatesByObjectId: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly candidatesByObjectIdentity: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly candidatesByCandidateKey: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly candidateKeysByObjectId: ReadonlyMap<string, readonly string[]>;
+  readonly providerState: BenchEmbeddingProviderState;
+  readonly providerDegradationReason: string | null;
+  readonly graphExpansionPlaneCountPerHop: LongMemEvalGraphExpansionPlaneCountPerHop;
+  readonly graphExpansionPlaneCountPerEdgeType: Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType>;
+}
+
+export interface CandidateDiagnostic {
+  readonly candidateKey: string;
+  readonly objectId: string;
+  readonly objectKind: string;
+  readonly dimension: string | null;
+  readonly originPlane: string;
+  readonly preBudgetRank: number | null;
+  readonly selectionOrder: number | null;
+  readonly finalRank: number | null;
+  readonly fusedRank: number | null;
+  readonly fusedScore: number | null;
+  readonly perStreamRank: DiagnosticStreamRanks | null;
+  readonly fusedRankContributionPerStream: DiagnosticStreamContributions | null;
+  readonly planeFirstAdmitted: string | null;
+  readonly planeWinningAdmission: string | null;
+  readonly sourcePlanes: readonly string[];
+  readonly lexicalRank: number | null;
+  readonly structuralScore: number | null;
+  readonly scoreFactors: DiagnosticScoreFactors | null;
+  readonly sourceChannels: readonly string[];
+  readonly budgetDropReason: string | null;
+  readonly rankAfterFusion: number | null;
+  readonly rankAfterFeatureRerank: number | null;
+  readonly rankAfterLexicalPriority: number | null;
+  readonly rankAfterSynthesisReserve: number | null;
+  readonly rankAfterStructuralReserve: number | null;
+  readonly reservedBy: string | null;
+}
+
+export interface ReadCandidateDiagnosticsResult {
+  readonly byObjectId: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly byObjectIdentity: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly byCandidateKey: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly keysByObjectId: ReadonlyMap<string, readonly string[]>;
+}

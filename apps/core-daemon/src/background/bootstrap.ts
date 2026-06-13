@@ -20,7 +20,7 @@ export class BackgroundServiceManager {
   private readonly services: readonly BackgroundServiceConfig[];
   private readonly logger: BackgroundServiceLogger;
   private timers: ReturnType<typeof setInterval>[] = [];
-  private inFlight: Promise<void>[] = [];
+  private readonly inFlight = new Set<Promise<void>>();
   private executionLocks: Map<string, boolean> = new Map();
   private started = false;
 
@@ -58,9 +58,9 @@ export class BackgroundServiceManager {
             .finally(() => {
               this.executionLocks.set(svc.name, false);
             });
-          this.inFlight.push(p);
+          this.inFlight.add(p);
           void p.finally(() => {
-            this.inFlight = this.inFlight.filter((x) => x !== p);
+            this.inFlight.delete(p);
           });
         }, svc.intervalMs)
       );
@@ -70,14 +70,14 @@ export class BackgroundServiceManager {
   public async stop(options: BackgroundServiceStopOptions = {}): Promise<void> {
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
-    const drainPromise = Promise.allSettled(this.inFlight).then(() => undefined);
+    const drainPromise = Promise.allSettled([...this.inFlight]).then(() => undefined);
     if (options.timeoutMs === null) {
       await drainPromise;
     } else {
       const timeoutMs = options.timeoutMs ?? 10_000;
       await Promise.race([drainPromise, new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
     }
-    this.inFlight = [];
+    this.inFlight.clear();
     this.started = false;
   }
 }

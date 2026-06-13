@@ -15,7 +15,7 @@ import {
   type WorkspaceEngineConfig,
   type WorkspaceGitBindingStatus
 } from "@do-soul/alaya-protocol";
-import { parseJsonBody } from "./shared.js";
+import { parseJsonBody, rejectUnexpectedRequestBody } from "./shared.js";
 
 export interface WorkspaceGitBindingRepo {
   getById(id: string): Promise<Workspace | null>;
@@ -246,6 +246,8 @@ export function registerWorkspaceRoutes(app: Hono, services: WorkspaceRouteServi
   });
 
   app.delete("/workspaces/:id", async (context) => {
+    const unexpectedBody = await rejectUnexpectedRequestBody(context);
+    if (unexpectedBody !== null) return unexpectedBody;
     const workspace = await services.workspaceService.delete(context.req.param("id"));
     return context.json({ success: true, data: workspace }, 200);
   });

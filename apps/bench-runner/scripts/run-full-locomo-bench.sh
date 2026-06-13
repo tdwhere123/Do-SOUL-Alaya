@@ -24,7 +24,7 @@ NODE_RUNNER=("$NODE_BIN")
 if [[ "${BENCH_NODE_USE_ENV_PROXY:-0}" == "1" ]]; then
   NODE_RUNNER+=(--use-env-proxy)
 fi
-BENCH_RUNNER_CLI="apps/bench-runner/dist/cli.js"
+BENCH_RUNNER_CLI="apps/bench-runner/dist/cli/index.js"
 
 runtime_dist_for_src() {
   local src="$1"

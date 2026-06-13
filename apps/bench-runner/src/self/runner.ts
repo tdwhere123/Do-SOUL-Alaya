@@ -2,8 +2,8 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
-import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../shared/version.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../shared/monotonic.js";
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   diffKpis,
@@ -262,7 +262,7 @@ function computePercentile(values: number[], p: number): number {
   return sorted[Math.max(0, idx)] ?? 0;
 }
 
-// see also: apps/bench-runner/src/version.ts
+// see also: apps/bench-runner/src/shared/version.ts
 
 function resolveCommitSha7(): string {
   try {

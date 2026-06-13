@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { WorkspaceService } from "@do-soul/alaya-core";
-import type { McpMemoryToolHandler } from "../mcp-memory-tool-handler.js";
+import type { McpMemoryToolHandler } from "../mcp-memory/tool-handler.js";
+import { isRequestBodyTooLargeError, throwInvalidRequestBody } from "./shared.js";
 
 export interface SoulSearchRouteServices {
   readonly workspaceService: WorkspaceService;
@@ -133,7 +134,10 @@ async function readJsonObject(context: Context): Promise<Record<string, unknown>
       return null;
     }
     return parsed as Record<string, unknown>;
-  } catch {
+  } catch (error) {
+    if (isRequestBodyTooLargeError(error)) {
+      throwInvalidRequestBody(error);
+    }
     return null;
   }
 }

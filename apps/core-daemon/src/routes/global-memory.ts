@@ -7,6 +7,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { Hono } from "hono";
 import { CoreError, type WorkspaceService } from "@do-soul/alaya-core";
+import { throwInvalidRequestBody } from "./shared.js";
 
 export type GlobalMemoryEntryRecord = GlobalMemoryEntry;
 
@@ -114,7 +115,7 @@ async function parseJsonObject(
   try {
     body = await readJson();
   } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid request body", { cause: error });
+    throwInvalidRequestBody(error);
   }
 
   if (body === null || typeof body !== "object" || Array.isArray(body)) {

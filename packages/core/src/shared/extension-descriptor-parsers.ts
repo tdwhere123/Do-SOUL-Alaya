@@ -4,7 +4,7 @@ import {
   type SkillPackage,
   type ToolProvider
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "./errors.js";
 
 export function parseExtensionToolProvider(value: unknown): Readonly<ToolProvider> {
   try {

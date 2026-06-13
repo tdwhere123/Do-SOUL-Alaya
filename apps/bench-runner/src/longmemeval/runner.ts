@@ -1,13 +1,10 @@
-import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   RECALL_PIPELINE_VERSION,
-  resolveBenchCommitSha7,
   resolveBenchRunnerVersion
-} from "../version.js";
+} from "../shared/version.js";
 import {
   aggregateEdgeProposalAutoAccept,
   aggregateEdgeProposalRate,
@@ -35,20 +32,13 @@ import {
   type BenchEmbeddingMode,
   type BenchEmbeddingProviderKind,
   type BenchQueryEmbeddingWarmupSummary,
-  type BenchRecallOptions,
-  type BenchReportContextUsageInput,
-  type BenchTokenMetrics,
-  type BenchWorkspaceHandle
+  type BenchTokenMetrics
 } from "../harness/daemon.js";
-import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
 import {
   aggregateBenchTokenMetrics,
   assertBenchTokenEconomyContract
 } from "../harness/token-economy.js";
-import {
-  aggregateRecallTokenEconomy,
-  extractRecallTokenEconomy
-} from "./recall-token-economy.js";
+import { aggregateRecallTokenEconomy } from "./recall-token-economy.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
 import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
@@ -57,23 +47,16 @@ import {
 } from "../harness/recall-weight-overrides.js";
 import {
   buildLongMemEvalQualityMetrics,
-  buildQuestionDiagnostic,
   rAt5WithProviderReturned,
   renderCompactDiagnosticsSidecar,
   renderDiagnosticsSidecar,
   summarizeLongMemEvalRecallEvidence,
   summarizeLongMemEvalReportSideEffects,
   summarizeProviderStates,
-  type LongMemEvalEmbeddingVectorCacheSummary,
-  type LongMemEvalQueryEmbeddingCacheSummary,
   type LongMemEvalQuestionDiagnostic,
   type LongMemEvalReportSideEffectSnapshot
 } from "./diagnostics.js";
 import { writeExternalDiagnosticsArtifact } from "./diagnostics-artifacts.js";
-import {
-  MemoryGraphEdgeType,
-  mapRelationKindToGraphEdgeType
-} from "@do-soul/alaya-protocol";
 import {
   buildLongMemEvalColdWarmComparisonSidecar,
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
@@ -81,59 +64,54 @@ import {
   readLatestLongMemEvalOppositeArchive,
   renderLongMemEvalColdWarmComparisonSidecar
 } from "./archive-evidence.js";
-import {
-  isAbstentionQuestionId,
-  scoreAbstentionQuestion
-} from "./abstention.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
-import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
+import { type LongMemEvalVariant } from "./dataset.js";
 import { collectDistinctTurnContents } from "./extraction-fill.js";
 import { selectFullRunBaseline } from "./recall-eval-archive.js";
 import {
-  buildSessionSynthesisInput,
-  computeNextTurnSeedRefs,
   createCompileSeedRunner,
   resolveBenchAllowLiveExtraction,
   toSeedExtractionPathKpi,
-  type CompileSeedRunner,
-  type SessionSeededTurn
 } from "./compile-seed.js";
 import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
 } from "./seed-extraction-release-blocker.js";
-import {
-  BENCH_DAEMON_DB_FILENAME,
-  RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
-  checkpointAndCopyBenchDb,
-  readSchemaMigrationVersion,
-  writeSnapshotManifest,
-  writeSnapshotSidecar,
-  type LongMemEvalSnapshotQuestion,
-  type SnapshotExtractionProvenance
-} from "./snapshot.js";
-import { readExtractionCacheManifest } from "./extraction-cache-manifest.js";
+import { type LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import { EXTRACTION_CACHE_ROOT } from "./compile-seed.js";
 import {
   aggregateQaVerdicts,
-  scoreQaQuestion,
-  type QaDeliveredCandidate,
   type QaQuestionVerdict
 } from "./qa-harness.js";
-import type { QaChatFn } from "./qa-chat.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
-// Mirrors apps/bench-runner/src/harness/daemon.ts DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL
-// so the kpi provider label reflects the on-device model when
-// --embedding-provider local_onnx is used (the OPENAI_* env vars describe a
-// remote endpoint and do not apply to a local_onnx run).
-const DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL =
-  "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
-const PINNED_META_ROOT = resolve(
-  __dirname,
-  "../../../../docs/bench-history/datasets"
-);
+import { QaChatError, type QaChatFn } from "./qa-chat.js";
+import {
+  computePercentile,
+  readLongMemEvalPinnedMeta,
+  recallOptionsForPolicyShape,
+  resolveBenchEmbeddingProviderLabel,
+  resolveCommitSha7,
+  summarizeEmbeddingVectorCache,
+  summarizeQueryEmbeddingCache,
+  writeRecallEvalSnapshot
+} from "./runner-helpers.js";
+import {
+  runLongMemEvalQuestion,
+  type LongMemEvalWorkerResult
+} from "./runner-question.js";
+export {
+  buildLongMemEvalReportContextUsage,
+  buildLongMemEvalSidecarKey,
+  deriveLongMemEvalGoldMemoryIds,
+  resolveBenchEmbeddingProviderLabel,
+  resolveLongMemEvalHitVerdict,
+  runLongMemEvalRecallCycle,
+  scoreLongMemEvalRecallHits,
+  type LongMemEvalBenchRecallResult,
+  type LongMemEvalHitScoringInput,
+  type LongMemEvalHitScoringResult,
+  type LongMemEvalReportSimulationStats,
+  type LongMemEvalSidecarEntry
+} from "./runner-helpers.js";
 const LONGMEMEVAL_SEED_POLICY = Object.freeze({
   mode: "label_independent_all_fact",
   label_independent: true,
@@ -202,36 +180,6 @@ export interface LongMemEvalRunResult {
   readonly payload: KpiPayload;
 }
 
-export interface LongMemEvalSidecarEntry {
-  readonly objectId: string;
-  readonly objectKind: "memory_entry" | "synthesis_capsule";
-  readonly sessionId: string;
-  readonly hasAnswer: boolean;
-  // Seeded turn content, carried only when opts.qa is set so the QA harness can
-  // stitch delivered recall into answer-model context; off => omitted (no bytes).
-  readonly content?: string;
-  // Session date (haystack_dates) this turn is from, QA-only. Lets the answer
-  // model anchor temporal day-math; recall never reads it.
-  readonly eventDate?: string;
-}
-
-export interface LongMemEvalHitScoringInput {
-  readonly results: readonly {
-    readonly object_id: string;
-    readonly object_kind?: string;
-    readonly relevance_score: number;
-  }[];
-  readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
-  readonly answerSessionIds: ReadonlySet<string>;
-}
-
-export interface LongMemEvalHitScoringResult {
-  readonly hitAt1: boolean;
-  readonly hitAt5: boolean;
-  readonly hitAt10: boolean;
-  readonly firstTier: "hot" | "warm" | "cold";
-}
-
 /**
  * @anchor longmemeval-runner — per-question workspace, seed-then-recall
  *
@@ -265,45 +213,10 @@ export interface LongMemEvalHitScoringResult {
  * recorded in diagnostics only; it is never counted toward R@K.
  *
  * see also: apps/bench-runner/src/harness/daemon.ts — proposeMemoryFromSignal
- * see also: packages/eval/src/report.ts — report.md "Scoring contract"
+ * see also: packages/eval/src/reporting/report.ts — report.md "Scoring contract"
  *   section; its LongMemEval-S text must mirror this measurement-basis
  *   note (the report.md prose lives there, not in this package).
  */
-
-// @anchor BENCH_PROFILE_TIMER: env-gated per-question phase timer. Default
-// OFF; set ALAYA_BENCH_PROFILE=1 to emit one [bench_profile] line per
-// question on stderr. Consumed by smoke runs that need to diff per-phase
-// distribution (e.g. before/after SQLite tuning). The timer uses
-// hrtime.bigint() (ns); rendering converts to ms with one-decimal
-// precision. Phases are optional — only those `record`-ed appear in
-// the line.
-const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
-
-function isBenchProfileEnabled(): boolean {
-  const raw = process.env[BENCH_PROFILE_ENV];
-  if (raw === undefined) return false;
-  const normalized = raw.trim().toLowerCase();
-  return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "off" && normalized !== "no";
-}
-
-interface PhaseTimer {
-  readonly tick: () => bigint;
-  readonly record: (name: string, started: bigint) => void;
-  readonly format: () => string;
-}
-
-function createPhaseTimer(): PhaseTimer {
-  const samples: Array<{ name: string; ms: number }> = [];
-  return {
-    tick: () => process.hrtime.bigint(),
-    record: (name: string, started: bigint) => {
-      const elapsedNs = process.hrtime.bigint() - started;
-      const ms = Number(elapsedNs) / 1_000_000;
-      samples.push({ name, ms });
-    },
-    format: () => samples.map((s) => `${s.name}=${s.ms.toFixed(1)}ms`).join(" ")
-  };
-}
 
 export async function runLongMemEval(
   opts: LongMemEvalRunOptions
@@ -342,392 +255,6 @@ export async function runLongMemEval(
   const policyShape = opts.policyShape ?? "stress";
   const simulateReport = opts.simulateReport ?? "none";
   const recallOptions = recallOptionsForPolicyShape(policyShape);
-
-  type WorkerResult = {
-    questionId: string;
-    hitAt1: boolean;
-    hitAt5: boolean;
-    hitAt10: boolean;
-    firstTier: "hot" | "warm" | "cold";
-    latencyMs: number;
-    degradationReason: string | null;
-    seedTurnsTruncated: number;
-    answerTurnsTruncated: number;
-    seedCharsClipped: number;
-    diagnostics: LongMemEvalQuestionDiagnostic;
-    embeddingWarmup: BenchEmbeddingWarmupSummary | null;
-    queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
-    reportUsageStats: LongMemEvalReportSimulationStats;
-    reportSideEffectSnapshot: LongMemEvalReportSideEffectSnapshot;
-    tokenMetrics: BenchTokenMetrics;
-    // Per-recall structural token-economy sample from
-    // recallResult.diagnostics.token_economy. Null when the degraded
-    // recall path (any non-null degradation_reason) omits the
-    // token_economy block in core, so the bench extractor returns null
-    // and the run-level aggregator drops the sample before computing
-    // distribution stats.
-    recallTokenEconomy: BenchRecallTokenEconomy | null;
-    // Per-question EventLog rows for the K3.2 / K3.4 edge proposal
-    // KPI: SOUL_GRAPH_EDGE_PROPOSAL_CREATED + _REVIEWED. Empty when
-    // the run produced no proposals; the aggregator still returns
-    // undefined in that case so the KPI omits the block.
-    edgeProposalKpiRows: readonly EdgeProposalKpiEventRow[];
-    // @anchor longmemeval-snapshot-capture: per-question persisted scoring
-    // sidecar, populated only when opts.snapshotOut is set. Undefined on a
-    // normal run so the snapshot path adds zero cost.
-    snapshotQuestion?: LongMemEvalSnapshotQuestion;
-    // End-to-end QA verdict, present only when opts.qa is set (else no LLM call).
-    qaVerdict?: QaQuestionVerdict;
-  };
-
-  async function runOneQuestion(
-    daemon: BenchDaemonHandle,
-    question: typeof window[number],
-    turnIndex: number,
-    seedRunner: CompileSeedRunner
-  ): Promise<WorkerResult> {
-    // @anchor bench-profile-instrumentation: per-question phase timing,
-    // gated by ALAYA_BENCH_PROFILE.
-    const profileEnabled = isBenchProfileEnabled();
-    const phase = createPhaseTimer();
-    const tAttach = phase.tick();
-    const workspace: BenchWorkspaceHandle = await daemon.attachWorkspace({
-      workspaceId: `lme-${question.question_id.slice(0, 8)}`,
-      runId: `run-${question.question_id.slice(0, 8)}`
-    });
-    phase.record("workspace_attach", tAttach);
-    try {
-      const tSeedLoop = phase.tick();
-      const sidecar = new Map<string, LongMemEvalSidecarEntry>();
-      const answerSessionSet = new Set(question.answer_session_ids);
-      let seedTurnsTruncated = 0;
-      let answerTurnsTruncated = 0;
-      let seedCharsClipped = 0;
-
-      let seedIndex = 0;
-      // anchor: question-level coherence members. Collects every seeded
-      // memory_entry id + its session across ALL sessions, for the
-      // experimental ingestion-time coheres_with crystallization
-      // (ALAYA_EXP_COHERENCE_EDGES) — cross-session pairs need the full set.
-      const coherenceMembers: { memoryId: string; sessionId: string }[] = [];
-      for (let si = 0; si < question.haystack_sessions.length; si++) {
-        const session = question.haystack_sessions[si];
-        const sessionId = question.haystack_session_ids[si] ?? `session-${si}`;
-        if (session === undefined) continue;
-
-        // invariant: extract per ROUND (a user message + its assistant
-        // response), not per bare message — production POST_TURN_EXTRACT
-        // extracts per round and a lone message gives the extractor no
-        // context to resolve pronouns/dates. round.hasAnswer is true iff
-        // any covered message is answer-bearing, so the sidecar still maps
-        // every answer round and recall scoring stays accurate.
-        const rounds = pairSessionIntoRounds(session);
-        // Per-session turns collected for the L2 synthesis seed below.
-        const sessionTurns: SessionSeededTurn[] = [];
-        // anchor: same-session co-recall members. Collects every seeded
-        // memory_entry id of THIS session in seed order so the post-loop
-        // earned co-recall accrual selects co-occurring pairs. Order is
-        // session-deterministic (seed order), never gold-derived.
-        // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
-        const sessionMemberMemoryIds: string[] = [];
-        let sessionHasAnswer = false;
-        // anchor: session-adjacent derives_from. Carries the prior turn's
-        // seeded memory_entry ids so the next turn's signal carries
-        // top-level source_memory_refs.
-        // see also: packages/soul/src/garden/materialization-router.ts
-        //   createAllMemoryRefEdges
-        let previousTurnSeedMemoryIds: readonly string[] = [];
-        for (let ri = 0; ri < rounds.length; ri++) {
-          const round = rounds[ri];
-          if (round === undefined) continue;
-
-          const evidenceRef = `${question.question_id}-s${si}-r${ri}`;
-          const seedResult = await seedRunner.seedTurn({
-            daemon: workspace,
-            turnContent: round.content,
-            evidenceRefBase: evidenceRef,
-            seedIndex,
-            workspaceId: workspace.workspaceId,
-            runId: workspace.runId,
-            ...(previousTurnSeedMemoryIds.length === 0
-              ? {}
-              : { sourceMemoryRefs: previousTurnSeedMemoryIds })
-          });
-          seedIndex += 1;
-          if (seedResult.turnTruncated) {
-            seedTurnsTruncated += 1;
-            seedCharsClipped += seedResult.charsClipped;
-            if (round.hasAnswer) {
-              answerTurnsTruncated += 1;
-            }
-          }
-          if (round.hasAnswer) {
-            sessionHasAnswer = true;
-          }
-          for (const seed of seedResult.seeds) {
-            sidecar.set(buildLongMemEvalSidecarKey("memory_entry", seed.memoryId), {
-              objectId: seed.memoryId,
-              objectKind: "memory_entry",
-              sessionId,
-              hasAnswer: round.hasAnswer,
-              // QA-only: carry the seeded turn content + its session date so
-              // delivered recall can be stitched into answer-model context with a
-              // temporal anchor. Off => omitted (byte-identical).
-              ...(opts.qa === undefined
-                ? {}
-                : {
-                    content: round.content,
-                    ...(question.haystack_dates[si] === undefined
-                      ? {}
-                      : { eventDate: question.haystack_dates[si] })
-                  })
-            });
-            sessionTurns.push({
-              turnContent: round.content,
-              evidenceId: seed.evidenceId
-            });
-            sessionMemberMemoryIds.push(seed.memoryId);
-            coherenceMembers.push({ memoryId: seed.memoryId, sessionId });
-          }
-          // invariant: single-id D-1 fan-out. see also:
-          //   apps/bench-runner/src/longmemeval/compile-seed.ts computeNextTurnSeedRefs
-          //   apps/bench-runner/src/locomo/runner.ts previousTurnSeedMemoryIds
-          previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
-        }
-
-        // invariant: same-session EARNED co-recall accrual. Drives the
-        // production onCoUsage counter gate over a bounded gold-blind pair set
-        // so THIS session earns a SPARSE set of recalls-tier co_recalled
-        // PathRelations (at most BENCH_CO_RECALL_WARMUP_PAIR_CAP), mirroring
-        // what production grows from B-1 cross-link over live
-        // report_context_usage co-usage (which the bench cannot exercise — no
-        // attached agent reports usage). Session membership (seed order) is the
-        // ONLY pair-selection signal; no gold turn is consulted.
-        // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
-        await workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
-
-        // L2 synthesis seed: emit ONE session-level synthesis capsule pointing
-        // at this session's real evidence_capsule ids. It is sidecar-tracked
-        // for diagnostics, but memory-gold scoring remains memory_entry-only.
-        const synthesisInput = buildSessionSynthesisInput({
-          topicKey: `${question.question_id}-s${si}`,
-          turns: sessionTurns
-        });
-        if (synthesisInput !== null) {
-          const synthesisResult = await workspace.proposeSynthesis(synthesisInput);
-          if (synthesisResult.synthesisId !== null) {
-            sidecar.set(buildLongMemEvalSidecarKey("synthesis_capsule", synthesisResult.synthesisId), {
-              objectId: synthesisResult.synthesisId,
-              objectKind: "synthesis_capsule",
-              sessionId,
-              hasAnswer: sessionHasAnswer
-            });
-          }
-        }
-      }
-
-      phase.record("seed_loop", tSeedLoop);
-
-      const tEmbeddingWarmup = phase.tick();
-      const embeddingWarmup =
-        opts.embeddingMode === "env"
-          ? await workspace.warmEmbeddingCache(deriveLongMemEvalMemoryObjectIds(sidecar))
-          : null;
-      const queryEmbeddingWarmup =
-        opts.embeddingMode === "env"
-          ? await workspace.warmQueryEmbeddingCache([question.question])
-          : null;
-      phase.record("embedding_warmup", tEmbeddingWarmup);
-
-      // EXPERIMENT (design S, ALAYA_EXP_COHERENCE_EDGES): ingestion-time
-      // coheres_with crystallization. After embedding vectors are warm,
-      // crystallize a SPARSE set of cross-session high-cosine edges (co_recalled
-      // carrier prototype) so path_expansion can bridge paraphrased
-      // cross-session gold. Default OFF => bit-identical. Reverted before merge
-      // unless positive on K1.1 AND K4.
-      if (
-        opts.embeddingMode === "env" &&
-        process.env.ALAYA_EXP_COHERENCE_EDGES === "1"
-      ) {
-        const coherenceSummary = await workspace.accrueCoherenceCoRecall(
-          coherenceMembers,
-          {
-            floor: Number(process.env.ALAYA_EXP_COHERENCE_FLOOR ?? "0.6"),
-            capPerNode: Number(process.env.ALAYA_EXP_COHERENCE_CAP ?? "3"),
-            crossSessionOnly: process.env.ALAYA_EXP_COHERENCE_XSESSION !== "0"
-          }
-        );
-        console.error(
-          `[coherence-edges] q=${question.question_id} ` +
-            `coherent=${coherenceSummary.coherentPairs} ` +
-            `kept=${coherenceSummary.keptPairs} minted=${coherenceSummary.minted}`
-        );
-      }
-
-      const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
-
-      const tRecall = phase.tick();
-      const recallCycle = await runLongMemEvalRecallCycle({
-        daemon: workspace,
-        query: question.question,
-        recallOptions,
-        simulateReport,
-        goldMemoryIds,
-        turnIndex,
-        questionText: question.question
-      });
-      phase.record("recall", tRecall);
-      const recallResult = recallCycle.scoredRecallResult;
-      const latencyMs = recallCycle.scoredRecallLatencyMs;
-      const results = recallResult.results;
-      const activeConstraintResults = (recallResult.active_constraints ?? []).map((constraint, index) => ({
-        object_id: constraint.object_id,
-        rank: index + 1
-      }));
-      const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
-        object_id: pointer.object_id,
-        object_kind: pointer.object_kind,
-        rank: index + 1,
-        relevance_score: pointer.relevance_score,
-        score_factors: pointer.score_factors ?? null
-      }));
-
-      // End-to-end QA scoring: answer-LLM over delivered recall content, then
-      // LLM-judge vs gold. Gated on opts.qa so a normal run makes zero LLM calls.
-      // Build candidates from delivered top-k memory_entry results in rank order,
-      // resolving each id back to its seeded content via the sidecar.
-      let qaVerdict: QaQuestionVerdict | undefined;
-      if (opts.qa !== undefined) {
-        const delivered: QaDeliveredCandidate[] = deliveredResults
-          .filter((result) => (result.object_kind ?? "memory_entry") === "memory_entry")
-          .map((result) => {
-            const entry = sidecar.get(
-              buildLongMemEvalSidecarKey("memory_entry", result.object_id)
-            );
-            return {
-              objectId: result.object_id,
-              content: entry?.content ?? "",
-              ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
-            };
-          });
-        qaVerdict = await scoreQaQuestion(
-          {
-            questionId: question.question_id,
-            questionType: question.question_type,
-            question: question.question,
-            questionDate: question.question_date,
-            goldAnswer: question.answer,
-            delivered
-          },
-          opts.qa.chat
-        );
-      }
-
-      // Numerator rule: answerable questions score by id-equality hits;
-      // abstention (`_abs`) questions score by calibrated confidence — the
-      // top-k must stay below the false-confident threshold. The recall@k
-      // denominator stays at the full question count for both.
-      const isAbstention = isAbstentionQuestionId(question.question_id);
-      const scoredHits = resolveLongMemEvalHitVerdict({
-        isAbstention,
-        results,
-        sidecar,
-        answerSessionIds: answerSessionSet
-      });
-      const diagnostics = buildQuestionDiagnostic({
-        questionId: question.question_id,
-        goldMemoryIds,
-        answerSessionIds: question.answer_session_ids,
-        deliveredResults,
-        activeConstraintResults,
-        hitAt1: scoredHits.hitAt1,
-        hitAt5: scoredHits.hitAt5,
-        hitAt10: scoredHits.hitAt10,
-        isAbstention,
-        degradationReason: recallResult.degradation_reason ?? null,
-        recallResult,
-        embeddingMode: opts.embeddingMode ?? "disabled"
-      });
-      const tKpiQuery = phase.tick();
-      const reportSideEffectSnapshot =
-        await readLongMemEvalReportSideEffectSnapshot(
-          question.question_id,
-          daemon,
-          workspace.workspaceId
-        );
-      // Event-sourced token-economy figures for this question's run: read
-      // back from the EventLog after the seed loop and every recall, so
-      // each contributing SOUL_SIGNAL_EMITTED / SOUL_CONTEXT_LENS_ASSEMBLED
-      // row is already persisted. Must run before the finally-shutdown.
-      const tokenMetrics = await workspace.queryTokenMetrics();
-      // Per-recall STRUCTURAL token-economy sample. Pulled directly off
-      // the already-parsed BenchRecallDiagnostics. A null here means
-      // RecallService skipped the instrument because the recall was
-      // degraded (any non-null degradation_reason — warm/cold cascade
-      // or recall_explainability_partial), so diagnostics carry no
-      // token_economy block. The aggregator drops nulls before the
-      // distribution stats so degraded recalls don't dilute the run.
-      // see also: packages/core/src/recall-service.ts
-      // (computeRecallTokenEconomy call site).
-      const recallTokenEconomy = extractRecallTokenEconomy(recallResult);
-      // K3.2 / K3.4 edge proposal KPI rows for this question's run:
-      // SOUL_GRAPH_EDGE_PROPOSAL_CREATED + _REVIEWED EventLog rows.
-      // Read back after seeding + recall so every auto-accept policy
-      // decision is durably persisted before aggregation.
-      // see also: packages/eval/src/edge-proposal-kpi.ts
-      const edgeProposalKpiRows = await workspace.queryEdgeProposalKpiRows();
-      phase.record("kpi_query", tKpiQuery);
-
-      return {
-        questionId: question.question_id,
-        hitAt1: scoredHits.hitAt1,
-        hitAt5: scoredHits.hitAt5,
-        hitAt10: scoredHits.hitAt10,
-        firstTier: scoredHits.firstTier,
-        latencyMs,
-        degradationReason: recallResult.degradation_reason ?? null,
-        seedTurnsTruncated,
-        answerTurnsTruncated,
-        seedCharsClipped,
-        diagnostics,
-        embeddingWarmup,
-        queryEmbeddingWarmup,
-        reportUsageStats: recallCycle.reportUsageStats,
-        reportSideEffectSnapshot,
-        tokenMetrics,
-        recallTokenEconomy,
-        edgeProposalKpiRows,
-        ...(qaVerdict === undefined ? {} : { qaVerdict }),
-        ...(opts.snapshotOut === undefined
-          ? {}
-          : {
-              snapshotQuestion: {
-                questionId: question.question_id,
-                question: question.question,
-                answerSessionIds: [...question.answer_session_ids],
-                workspaceId: workspace.workspaceId,
-                runId: workspace.runId,
-                sidecar: [...sidecar.values()].map((entry) => ({
-                  objectId: entry.objectId,
-                  objectKind: entry.objectKind,
-                  sessionId: entry.sessionId,
-                  hasAnswer: entry.hasAnswer
-                }))
-              }
-            })
-      };
-    } finally {
-      const tDetach = phase.tick();
-      await workspace.detach();
-      phase.record("workspace_detach", tDetach);
-      if (profileEnabled) {
-        process.stderr.write(
-          `[bench_profile] question=${question.question_id} ${phase.format()}\n`
-        );
-      }
-    }
-  }
-
   // @anchor longmemeval-sequential: intra-process concurrency races
   // on the process.env mutated by startBenchDaemon (DATA_DIR /
   // ALAYA_CONFIG_DIR / HOME / ALAYA_REVIEWER_*).
@@ -754,7 +281,7 @@ export async function runLongMemEval(
     cacheRoot: extractionCacheRoot,
     ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
   });
-  const collected: WorkerResult[] = [];
+  const collected: LongMemEvalWorkerResult[] = [];
   // @anchor longmemeval-snapshot-capture: when seeding for a recall-eval
   // snapshot, capture each question's scoring sidecar + workspace ids so they
   // can be persisted beside the DB (the seed loop otherwise discards them).
@@ -782,17 +309,48 @@ export async function runLongMemEval(
       ...(seedDataDirRoot === undefined ? {} : { dataDirRoot: seedDataDirRoot }),
       recallWeightOverrides
     });
+    let questionFailures = 0;
     for (let i = 0; i < window.length; i++) {
       const q = window[i];
       if (q === undefined) continue;
-      const res = await runOneQuestion(daemon, q, i + 1, seedRunner);
-      collected.push(res);
-      if (captureSnapshot && res.snapshotQuestion !== undefined) {
-        snapshotQuestions.push(res.snapshotQuestion);
+      try {
+        const res = await runLongMemEvalQuestion({
+          daemon,
+          question: q,
+          turnIndex: i + 1,
+          seedRunner,
+          recallOptions,
+          simulateReport,
+          embeddingMode: opts.embeddingMode ?? "disabled",
+          embeddingProviderKind: opts.embeddingProviderKind ?? "openai",
+          captureSnapshot,
+          ...(opts.qa === undefined ? {} : { qaChat: opts.qa.chat })
+        });
+        collected.push(res);
+        if (captureSnapshot && res.snapshotQuestion !== undefined) {
+          snapshotQuestions.push(res.snapshotQuestion);
+        }
+        process.stdout.write(
+          `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
+            `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
+        );
+      } catch (err) {
+        // Resilience: skip only a transient QA-chat failure (an API error that
+        // survived its retries) so one bad question never aborts a multi-hour
+        // run. A fail-closed invariant (e.g. incomplete embedding cache) is
+        // re-thrown and still aborts. KPIs then cover the completed Qs.
+        if (!(err instanceof QaChatError)) throw err;
+        questionFailures += 1;
+        process.stderr.write(
+          `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} FAILED — ` +
+            `skipped: ${err.message}\n`
+        );
       }
+    }
+    if (questionFailures > 0) {
       process.stdout.write(
-        `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
-          `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
+        `[longmemeval] ${questionFailures}/${window.length} question(s) failed ` +
+          `and were skipped; KPIs cover the ${collected.length} completed.\n`
       );
     }
     // @anchor longmemeval-seed-then-snapshot: emit the recall-eval snapshot
@@ -860,7 +418,7 @@ export async function runLongMemEval(
   // so aggregateEdgeProposalRate can emit the proposals_per_question
   // distribution. K3.2's "40-80/workspace/day" target is uninterpretable
   // off per_workspace_per_day_* alone because the bench harness uses
-  // one workspaceId per run. see also: packages/eval/src/kpi-schema.ts.
+  // one workspaceId per run. see also: packages/eval/src/schema/kpi-schema.ts.
   // The flat across-questions list is derived by flattening these chunks at
   // the aggregator call site rather than stored a second time.
   const edgeProposalKpiRowsPerQuestion: EdgeProposalKpiEventRow[][] = [];
@@ -931,7 +489,7 @@ export async function runLongMemEval(
 
   // @anchor variant-to-split: exhaustive Record so a new
   // LongMemEvalVariant without a split mapping is a compile error.
-  // see also: packages/eval/src/kpi-schema.ts BenchSplit enum.
+  // see also: packages/eval/src/schema/kpi-schema.ts BenchSplit enum.
   const VARIANT_TO_SPLIT: Record<typeof opts.variant, BenchSplit> = {
     longmemeval_oracle: "longmemeval-oracle",
     longmemeval_s: "longmemeval-s",
@@ -1068,7 +626,7 @@ export async function runLongMemEval(
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
   // Diff against the latest PASSING full-run entry of the SAME split. Oracle vs
   // S are not comparable retrieval evaluations (Oracle's session filter is
-  // no-op, S's is meaningful). See packages/eval/src/history.ts
+  // no-op, S's is meaningful). see also: packages/eval/src/history/history.ts
   // @anchor read-latest-split-aware. selectFullRunBaseline additionally
   // excludes fast-loop recall-eval archives, which share this public/ bucket +
   // passing pointer but never paid extraction/materialization.
@@ -1183,542 +741,6 @@ export async function runLongMemEval(
     diagnosticsPath: entry.sidecarPaths[LONGMEMEVAL_DIAGNOSTICS_FILENAME] ?? null,
     payload
   };
-}
-
-interface LongMemEvalReportSimulationStats {
-  readonly reportsAttempted: number;
-  readonly reportsUsed: number;
-  readonly reportsSkipped: number;
-  readonly usedObjectCount: number;
-}
-
-export type LongMemEvalBenchRecallResult = Awaited<
-  ReturnType<BenchDaemonHandle["recall"]>
->;
-
-export interface LongMemEvalRecallCycleResult {
-  readonly scoredRecallResult: LongMemEvalBenchRecallResult;
-  readonly scoredRecallLatencyMs: number;
-  readonly reportUsageStats: LongMemEvalReportSimulationStats;
-}
-
-export async function runLongMemEvalRecallCycle(input: {
-  readonly daemon: Pick<BenchDaemonHandle, "recall" | "reportContextUsage">;
-  readonly query: string;
-  readonly recallOptions: BenchRecallOptions;
-  readonly simulateReport: BenchSimulateReportMode;
-  readonly goldMemoryIds: readonly string[];
-  readonly turnIndex: number;
-  readonly questionText: string;
-}): Promise<LongMemEvalRecallCycleResult> {
-  if (input.simulateReport === "none") {
-    const recallStart = monotonicNowNs();
-    const scoredRecallResult = await input.daemon.recall(
-      input.query,
-      input.recallOptions
-    );
-    return {
-      scoredRecallResult,
-      scoredRecallLatencyMs: monotonicElapsedMs(recallStart),
-      reportUsageStats: {
-        reportsAttempted: 0,
-        reportsUsed: 0,
-        reportsSkipped: 0,
-        usedObjectCount: 0
-      }
-    };
-  }
-
-  const preReportRecallResult = await input.daemon.recall(
-    input.query,
-    input.recallOptions
-  );
-  const reportUsage = buildLongMemEvalReportContextUsage({
-    simulateReport: input.simulateReport,
-    deliveryId: preReportRecallResult.delivery_id,
-    results: preReportRecallResult.results,
-    goldMemoryIds: input.goldMemoryIds,
-    turnIndex: input.turnIndex,
-    questionText: input.questionText
-  });
-  if (reportUsage.reportInput !== null) {
-    await input.daemon.reportContextUsage(reportUsage.reportInput);
-  }
-
-  const recallStart = monotonicNowNs();
-  const scoredRecallResult = await input.daemon.recall(
-    input.query,
-    input.recallOptions
-  );
-  return {
-    scoredRecallResult,
-    scoredRecallLatencyMs: monotonicElapsedMs(recallStart),
-    reportUsageStats: reportUsage.stats
-  };
-}
-
-async function readLongMemEvalReportSideEffectSnapshot(
-  questionId: string,
-  daemon: Pick<BenchDaemonHandle, "runtime">,
-  workspaceId: string
-): Promise<LongMemEvalReportSideEffectSnapshot> {
-  const status = await daemon.runtime.services.graphHealthService.getStatus(
-    workspaceId
-  );
-  // invariant: memory_graph_edges_by_type aliases the unified path plane
-  // (path_relations_by_kind / _total) and must carry every canonical
-  // edge_type key (defaulting to 0) so historical-archive deltas keep a stable
-  // key set. graphHealthService groups by raw constitution.relation_kind, so
-  // a recalls-tier kind (co_recalled / shares_entity / signal_graph_ref) lands
-  // under its own key, NOT under "recalls". mapRelationKindToGraphEdgeType folds
-  // each kind into its canonical graph edge_type bucket — the SAME fold
-  // graph-explore-service applies when it counts inbound recalls — so the
-  // archive's recalls_edge_count reflects the recalls TIER (what production
-  // grows from B-1 cross-link as co_recalled), not just literal "recalls".
-  // Without the fold, the bench co-recall hub's co_recalled paths would be
-  // invisible to recalls_edge_count and the plane would read dead again.
-  // canonical key set: @do-soul/alaya-protocol MemoryGraphEdgeType.
-  // see also: packages/core/src/graph-explore-service.ts (recalls-tier count)
-  const byKind: Record<string, number> = Object.fromEntries(
-    Object.values(MemoryGraphEdgeType).map((edgeType) => [edgeType, 0])
-  );
-  for (const [kind, count] of Object.entries(status.path_relations_by_kind)) {
-    const edgeType = mapRelationKindToGraphEdgeType(kind);
-    byKind[edgeType] = (byKind[edgeType] ?? 0) + count;
-  }
-  return {
-    question_id: questionId,
-    workspace_id: status.workspace_id,
-    memory_graph_edges_total: status.path_relations_total,
-    memory_graph_edges_by_type: byKind,
-    recalls_edge_count: byKind.recalls ?? 0,
-    path_relations_total: status.path_relations_total,
-    latest_path_event_at: status.latest_path_event_at,
-    warnings: status.warnings
-  };
-}
-
-export function buildLongMemEvalReportContextUsage(input: {
-  readonly simulateReport: BenchSimulateReportMode;
-  readonly deliveryId: string;
-  readonly results: readonly {
-    readonly object_id: string;
-    readonly object_kind?: string;
-  }[];
-  readonly goldMemoryIds: readonly string[];
-  readonly turnIndex: number;
-  readonly questionText: string;
-}): {
-  readonly reportInput: BenchReportContextUsageInput | null;
-  readonly stats: LongMemEvalReportSimulationStats;
-} {
-  if (input.simulateReport === "none") {
-    return {
-      reportInput: null,
-      stats: {
-        reportsAttempted: 0,
-        reportsUsed: 0,
-        reportsSkipped: 0,
-        usedObjectCount: 0
-      }
-    };
-  }
-
-  const deliveredResults = input.results.slice(0, 10);
-  const deliveredMemoryResults = deliveredResults.filter(isLongMemEvalGoldEligibleResult);
-  const deliveredMemoryIds = new Set(deliveredMemoryResults.map((result) => result.object_id));
-  const goldIds = new Set(input.goldMemoryIds);
-  const deliveredGoldIds = deliveredMemoryResults
-    .map((result) => result.object_id)
-    .filter((objectId) => goldIds.has(objectId));
-
-  let usedObjectIds: string[] = [];
-  if (input.simulateReport === "gold-only") {
-    usedObjectIds = deliveredGoldIds;
-  } else if (input.simulateReport === "mixed") {
-    if (deliveredGoldIds.length > 0) {
-      const firstNonGold = deliveredMemoryResults.find(
-        (result) => !goldIds.has(result.object_id)
-      );
-      usedObjectIds =
-        firstNonGold === undefined
-          ? deliveredGoldIds
-          : [...deliveredGoldIds, firstNonGold.object_id];
-    } else {
-      usedObjectIds =
-        deliveredMemoryResults[0] === undefined ? [] : [deliveredMemoryResults[0].object_id];
-    }
-  } else if (input.simulateReport === "always-used") {
-    usedObjectIds =
-      deliveredMemoryResults[0] === undefined ? [] : [deliveredMemoryResults[0].object_id];
-  }
-
-  const safeUsedObjectIds = usedObjectIds.filter((objectId) => deliveredMemoryIds.has(objectId));
-  const usedSet = new Set(safeUsedObjectIds);
-  const usageState = safeUsedObjectIds.length > 0 ? "used" : "skipped";
-  const reportInput: BenchReportContextUsageInput = {
-    deliveryId: input.deliveryId,
-    usageState,
-    ...(safeUsedObjectIds.length === 0
-      ? {}
-      : { usedObjectIds: safeUsedObjectIds }),
-    deliveredObjects: deliveredResults.map((result) => ({
-      objectId: result.object_id,
-      objectKind: result.object_kind ?? "memory_entry",
-      usageStatus:
-        isLongMemEvalGoldEligibleResult(result) &&
-        usedSet.has(result.object_id)
-          ? "used"
-          : "skipped"
-    })),
-    turnIndex: input.turnIndex,
-    turnDigest: {
-      lastMessages: [
-        {
-          role: "user",
-          contentExcerpt: truncateExcerpt(input.questionText)
-        }
-      ]
-    },
-    reason:
-      usageState === "used"
-        ? `LongMemEval simulate_report=${input.simulateReport}: reported delivered object usage.`
-        : `LongMemEval simulate_report=${input.simulateReport}: no delivered object selected.`
-  };
-
-  return {
-    reportInput,
-    stats: {
-      reportsAttempted: 1,
-      reportsUsed: usageState === "used" ? 1 : 0,
-      reportsSkipped: usageState === "skipped" ? 1 : 0,
-      usedObjectCount: safeUsedObjectIds.length
-    }
-  };
-}
-
-export function resolveBenchEmbeddingProviderLabel(
-  embeddingMode: BenchEmbeddingMode,
-  env: Readonly<Record<string, string | undefined>> = process.env,
-  providerKind: BenchEmbeddingProviderKind = "openai"
-): string {
-  if (embeddingMode === "disabled") {
-    return "none";
-  }
-
-  // local_onnx is an on-device provider; the OPENAI_* env vars describe a
-  // remote endpoint and do not apply. Label it by the resolved local model.
-  if (providerKind === "local_onnx") {
-    const localModel =
-      env.ALAYA_LOCAL_EMBEDDING_MODEL?.trim() || DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL;
-    return `local_onnx:${localModel}`;
-  }
-
-  const model = env.OPENAI_EMBEDDING_MODEL?.trim() || DEFAULT_BENCH_EMBEDDING_MODEL;
-  const providerUrl = env.OPENAI_EMBEDDING_PROVIDER_URL?.trim();
-  if (providerUrl === undefined || providerUrl.length === 0) {
-    return `openai:${model}`;
-  }
-
-  return `${labelEmbeddingProviderUrl(providerUrl)}:${model}`;
-}
-
-function labelEmbeddingProviderUrl(providerUrl: string): string {
-  try {
-    const hostname = new URL(providerUrl).hostname.toLowerCase();
-    if (hostname.includes("yunwu")) {
-      return "yunwu";
-    }
-  } catch {
-    return "openai-compatible";
-  }
-
-  return "openai-compatible";
-}
-
-function recallOptionsForPolicyShape(
-  policyShape: BenchPolicyShape
-): { readonly maxResults: 10; readonly conflictAwareness: boolean } {
-  return {
-    maxResults: 10,
-    conflictAwareness: policyShape === "stress"
-  };
-}
-
-/**
- * @anchor longmemeval-seed-then-snapshot — produce a recall-eval snapshot.
- *
- * Checkpoints + copies the seeded daemon DB to `snapshotOut`, then writes the
- * per-question scoring sidecar + a version-binding manifest beside it. Reads
- * the schema migration version off the live DB and the extraction-cache
- * manifest's provenance so recall-eval can bind the snapshot and inherit
- * gate-only fields. MUST be called before daemon.shutdown() (the DB connection
- * must be open for the checkpoint).
- *
- * see also: apps/bench-runner/src/longmemeval/snapshot.ts
- * see also: apps/bench-runner/src/longmemeval/recall-eval.ts (consumer)
- */
-function writeRecallEvalSnapshot(input: {
-  readonly snapshotOut: string;
-  readonly seedDataDirRoot: string;
-  readonly variant: LongMemEvalVariant;
-  readonly commitSha7: string;
-  readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
-  readonly extractionCacheRoot: string;
-}): void {
-  const liveDbPath = resolve(input.seedDataDirRoot, BENCH_DAEMON_DB_FILENAME);
-  const schemaMigrationVersion = readSchemaMigrationVersion(liveDbPath);
-  checkpointAndCopyBenchDb(liveDbPath, input.snapshotOut);
-
-  const extractionManifest = readExtractionCacheManifest(input.extractionCacheRoot);
-  const extractionProvenance: SnapshotExtractionProvenance | null =
-    extractionManifest === undefined
-      ? null
-      : {
-          extraction_model: extractionManifest.extraction_model,
-          provider_url: extractionManifest.provider_url,
-          system_prompt_sha256: extractionManifest.system_prompt_sha256,
-          dataset: extractionManifest.dataset,
-          dataset_revision: extractionManifest.dataset_revision,
-          ...(extractionManifest.coverage === undefined
-            ? {}
-            : { coverage: extractionManifest.coverage }),
-          ...(extractionManifest.cached_turns === undefined
-            ? {}
-            : { cached_turns: extractionManifest.cached_turns }),
-          ...(extractionManifest.requested_turns === undefined
-            ? {}
-            : { requested_turns: extractionManifest.requested_turns })
-        };
-
-  writeSnapshotSidecar(input.snapshotOut, {
-    schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
-    variant: input.variant,
-    questions: input.snapshotQuestions
-  });
-  writeSnapshotManifest(input.snapshotOut, {
-    schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
-    variant: input.variant,
-    question_count: input.snapshotQuestions.length,
-    recall_pipeline_version: RECALL_PIPELINE_VERSION,
-    schema_migration_version: schemaMigrationVersion,
-    bench_runner_version: resolveBenchRunnerVersion(),
-    alaya_commit: input.commitSha7,
-    db_filename: basename(input.snapshotOut),
-    sidecar_filename: `${basename(input.snapshotOut)}.sidecar.json`,
-    built_at: new Date().toISOString(),
-    extraction_provenance: extractionProvenance
-  });
-}
-
-/**
- * Resolve the per-k hit verdict for one LongMemEval question.
- *
- * Answerable questions keep the byte-identical id-equality scoring of
- * {@link scoreLongMemEvalRecallHits}. Abstention questions are re-scored by
- * calibrated confidence (see longmemeval/abstention.ts): "hit at k" means
- * recall stayed appropriately unconfident across the top-k. `firstTier` is
- * always derived from the actual top-1 relevance_score so tier reporting is
- * unchanged.
- */
-export function resolveLongMemEvalHitVerdict(
-  input: LongMemEvalHitScoringInput & { readonly isAbstention: boolean }
-): LongMemEvalHitScoringResult {
-  if (!input.isAbstention) {
-    return scoreLongMemEvalRecallHits(input);
-  }
-  const abstention = scoreAbstentionQuestion({ results: input.results });
-  const firstResult = input.results[0];
-  return {
-    hitAt1: abstention.correctAt1,
-    hitAt5: abstention.correctAt5,
-    hitAt10: abstention.correctAt10,
-    firstTier:
-      firstResult === undefined
-        ? "cold"
-        : inferTier(firstResult.relevance_score)
-  };
-}
-
-export function scoreLongMemEvalRecallHits(
-  input: LongMemEvalHitScoringInput
-): LongMemEvalHitScoringResult {
-  let hitAt1 = false;
-  let hitAt5 = false;
-  let hitAt10 = false;
-  let firstTier: "hot" | "warm" | "cold" = "cold";
-
-  for (let rank = 0; rank < input.results.length && rank < 10; rank++) {
-    const pointer = input.results[rank];
-    if (pointer === undefined) continue;
-    if (rank === 0) {
-      firstTier = inferTier(pointer.relevance_score);
-    }
-    if (!isLongMemEvalGoldEligibleResult(pointer)) {
-      continue;
-    }
-    const meta = input.sidecar.get(
-      buildLongMemEvalSidecarKey("memory_entry", pointer.object_id)
-    );
-    const isHit =
-      meta !== undefined &&
-      meta.hasAnswer &&
-      input.answerSessionIds.has(meta.sessionId);
-    if (isHit) {
-      if (rank === 0) hitAt1 = true;
-      if (rank < 5) hitAt5 = true;
-      hitAt10 = true;
-    }
-  }
-
-  return { hitAt1, hitAt5, hitAt10, firstTier };
-}
-
-function isLongMemEvalGoldEligibleResult(result: Readonly<{
-  readonly object_kind?: string | null;
-}>): boolean {
-  return (result.object_kind ?? "memory_entry") === "memory_entry";
-}
-
-export function buildLongMemEvalSidecarKey(
-  objectKind: LongMemEvalSidecarEntry["objectKind"],
-  objectId: string
-): string {
-  return `${objectKind}:${objectId}`;
-}
-
-export function deriveLongMemEvalGoldMemoryIds(
-  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
-  answerSessionIds: ReadonlySet<string>
-): readonly string[] {
-  return Object.freeze(
-    [...sidecar.values()]
-      .filter(
-        (entry) =>
-          entry.objectKind === "memory_entry" &&
-          entry.hasAnswer &&
-          answerSessionIds.has(entry.sessionId)
-      )
-      .map((entry) => entry.objectId)
-  );
-}
-
-function deriveLongMemEvalMemoryObjectIds(
-  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>
-): readonly string[] {
-  return Object.freeze(
-    [...sidecar.values()]
-      .filter((entry) => entry.objectKind === "memory_entry")
-      .map((entry) => entry.objectId)
-  );
-}
-
-function readLongMemEvalPinnedMeta(
-  variant: LongMemEvalVariant,
-  root?: string
-): { readonly sha256: string; readonly source: string } {
-  const source = resolve(root ?? PINNED_META_ROOT, `${variant}.meta.json`);
-  const parsed = JSON.parse(readFileSync(source, "utf8")) as {
-    sha256?: unknown;
-  };
-  if (typeof parsed.sha256 !== "string" || parsed.sha256.length === 0) {
-    throw new Error(`LongMemEval pinned meta missing sha256: ${source}`);
-  }
-  return { sha256: parsed.sha256, source };
-}
-
-function inferTier(relevanceScore: number): "hot" | "warm" | "cold" {
-  if (relevanceScore >= 0.7) return "hot";
-  if (relevanceScore >= 0.4) return "warm";
-  return "cold";
-}
-
-function computePercentile(values: number[], p: number): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.ceil((p / 100) * sorted.length) - 1;
-  return sorted[Math.max(0, idx)] ?? 0;
-}
-
-function summarizeEmbeddingVectorCache(
-  summaries: readonly BenchEmbeddingWarmupSummary[]
-): LongMemEvalEmbeddingVectorCacheSummary | null {
-  const readySummaries = summaries.filter((summary) => summary.status === "ready");
-  if (readySummaries.length === 0) {
-    return null;
-  }
-
-  const expectedCount = readySummaries.reduce(
-    (sum, summary) => sum + summary.expected_count,
-    0
-  );
-  const readyCount = readySummaries.reduce(
-    (sum, summary) => sum + summary.ready_count,
-    0
-  );
-  const maxPassCount = readySummaries.reduce(
-    (max, summary) => Math.max(max, summary.pass_count),
-    0
-  );
-
-  return {
-    expected_count: expectedCount,
-    ready_count: readyCount,
-    not_ready_count: Math.max(0, expectedCount - readyCount),
-    ready_rate: ratio(readyCount, expectedCount),
-    max_pass_count: maxPassCount
-  };
-}
-
-function summarizeQueryEmbeddingCache(
-  summaries: readonly BenchQueryEmbeddingWarmupSummary[]
-): LongMemEvalQueryEmbeddingCacheSummary | null {
-  const readySummaries = summaries.filter((summary) => summary.status === "ready");
-  if (readySummaries.length === 0) {
-    return null;
-  }
-
-  const requestedCount = readySummaries.reduce(
-    (sum, summary) => sum + summary.requested_count,
-    0
-  );
-  const readyCount = readySummaries.reduce(
-    (sum, summary) => sum + summary.ready_count,
-    0
-  );
-  const cacheHitCount = readySummaries.reduce(
-    (sum, summary) => sum + summary.cache_hit_count,
-    0
-  );
-  const providerRequestedCount = readySummaries.reduce(
-    (sum, summary) => sum + summary.provider_requested_count,
-    0
-  );
-  const lastError = [...readySummaries].reverse().find((summary) => summary.last_error !== undefined)?.last_error;
-
-  return {
-    requested_count: requestedCount,
-    ready_count: readyCount,
-    not_ready_count: Math.max(0, requestedCount - readyCount),
-    ready_rate: ratio(readyCount, requestedCount),
-    cache_hit_count: cacheHitCount,
-    provider_requested_count: providerRequestedCount,
-    ...(lastError === undefined ? {} : { last_error: lastError })
-  };
-}
-
-function ratio(count: number, total: number): number {
-  return total === 0 ? 0 : count / total;
-}
-
-function truncateExcerpt(value: string): string {
-  return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
-}
-
-// see also: apps/bench-runner/src/version.ts
-
-function resolveCommitSha7(): string {
-  return resolveBenchCommitSha7();
 }
 
 export type { LongMemEvalVariant };

@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { CoreError, type ConversationService, type RunHotStateService, type RunService } from "@do-soul/alaya-core";
-import { parseJsonBody } from "./shared.js";
+import { parseJsonBody, rejectUnexpectedRequestBody } from "./shared.js";
 import {
   type EventLogEntry,
   RunInterruptResultSchema,
@@ -101,6 +101,8 @@ export function registerRunRoutes(app: Hono, services: RunRouteServices): void {
   });
 
   app.post("/runs/:id/interrupt", async (context) => {
+    const unexpectedBody = await rejectUnexpectedRequestBody(context);
+    if (unexpectedBody !== null) return unexpectedBody;
     const runId = context.req.param("id");
     const result = await services.conversationService.interruptRun(runId);
 
@@ -149,6 +151,8 @@ export function registerRunRoutes(app: Hono, services: RunRouteServices): void {
   });
 
   app.delete("/runs/:id", async (context) => {
+    const unexpectedBody = await rejectUnexpectedRequestBody(context);
+    if (unexpectedBody !== null) return unexpectedBody;
     const runId = context.req.param("id");
     const run = await services.runService.delete(runId);
     deleteRunSnapshotCache(runId);

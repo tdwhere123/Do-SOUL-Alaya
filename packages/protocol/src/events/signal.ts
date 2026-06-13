@@ -3,8 +3,8 @@ import {
   CandidateMemorySignalMemoryRefsSchema,
   SignalKindSchema,
   SignalSourceSchema
-} from "../candidate-memory-signal.js";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+} from "../signals/candidate-memory-signal.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 
 const signalEventTypeValues = [
   "soul.signal.emitted",

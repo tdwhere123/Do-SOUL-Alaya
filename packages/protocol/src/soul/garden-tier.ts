@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 
 const gardenRoleValues = ["janitor", "auditor", "librarian"] as const;
 const gardenTierValues = ["tier_0", "tier_1", "tier_2"] as const;
@@ -72,7 +72,7 @@ export const GardenTaskKind = {
   // best-effort LLM-quality verdict that an attached CLI agent (the compute)
   // produces and reports back via garden.complete_task, refining the existing
   // path. A claim that never arrives leaves the heuristic verdict standing.
-  // see also: packages/core/src/edge-auto-producer-service.ts decideForNeighbor.
+  // see also: packages/core/src/path-graph/edge-auto-producer-service.ts decideForNeighbor.
   EDGE_CLASSIFY: "edge_classify"
 } as const;
 
@@ -136,7 +136,7 @@ const librarianTaskKinds = Object.freeze([
 // every in-process role permission set (an in-process librarian must not claim
 // them). They are enqueued under the LIBRARIAN role for queue tiering but
 // surface as role "host_worker" to the MCP worker loop.
-// see also: apps/core-daemon/src/mcp-memory-tool-handler.ts gardenWorkerRoleForRow.
+// see also: apps/core-daemon/src/mcp-memory/tool-handler.ts gardenWorkerRoleForRow.
 
 export const GARDEN_ROLE_PERMISSIONS = Object.freeze({
   [GardenRole.JANITOR]: GardenPermissionSchema.parse({

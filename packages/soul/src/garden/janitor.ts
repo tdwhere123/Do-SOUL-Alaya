@@ -103,7 +103,7 @@ export interface DormantDispositionCandidate {
 // A genuine error (shape precondition / missing port / storage fault) is NOT a
 // skip and still rejects loud. Mirrors DormantDemotionOutcome.
 // see also: apps/core-daemon/src/forget-disposition-ports.ts createTombstoneDispositionSweepPort,
-// packages/core/src/memory-service.ts autonomousTombstone.
+// packages/core/src/memory/memory-service/service.ts:MemoryService.autonomousTombstone.
 export type DispositionSweepOutcome =
   | { readonly status: "tombstoned" }
   | { readonly status: "skipped"; readonly reason: string };
@@ -113,7 +113,7 @@ export type DispositionSweepOutcome =
 // capsule membership, judged_useless = mechanical importance gate) and only
 // tombstones rows the gate cleared. A memory with a null disposition is left
 // dormant (reversible), never terminalized.
-// see also: packages/core/src/importance-gate.ts classifyMemoryImportance.
+// see also: packages/core/src/manifestation/importance-gate.ts classifyMemoryImportance.
 export interface JanitorDispositionSweepPort {
   findDormantDispositionCandidates(workspaceId: string): Promise<readonly DormantDispositionCandidate[]>;
   autonomousTombstone(candidate: DormantDispositionCandidate, taskId: string): Promise<DispositionSweepOutcome>;

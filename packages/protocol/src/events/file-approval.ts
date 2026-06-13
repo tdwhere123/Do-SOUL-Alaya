@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
-import { SupportedMimeTypeSchema } from "../files.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import { SupportedMimeTypeSchema } from "../workspace/files.js";
 
 const fileApprovalEventTypeValues = [
   "file.uploaded",

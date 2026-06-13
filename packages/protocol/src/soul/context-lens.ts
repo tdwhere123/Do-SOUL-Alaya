@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import { NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { EnforcementLevelSchema } from "./claim-form.js";
 import { ControlPlaneEnvelopeSchema } from "./envelope.js";
 import { ManifestationStateSchema } from "./memory-entry.js";

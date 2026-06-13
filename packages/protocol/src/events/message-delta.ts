@@ -3,7 +3,7 @@ import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema,
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 
 // Streaming lifecycle enum
 export const StreamingStatusSchema = z.enum(["idle", "streaming", "completed", "error"]);

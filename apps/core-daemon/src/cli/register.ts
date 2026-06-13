@@ -13,11 +13,10 @@ import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
+import type { ProfileMutationAuditRow, ProfileMutationAuditWriter } from "../attach/index.js";
 import type { AlayaDaemonRuntime } from "../index.js";
-import { runAlayaMcpStdioServer } from "../mcp-server.js";
-import type { ProfileMutationAuditRow, ProfileMutationAuditWriter } from "../profile-mutation.js";
-import { createAttachClaudeCommandSpec } from "./attach-claude.js";
-import { createAttachCodexCommandSpec } from "./attach-codex.js";
+import { createAttachClaudeCommandSpec, createAttachCodexCommandSpec, createDetachCommandSpec } from "./attach/index.js";
+import { runAlayaMcpStdioServer } from "../mcp/mcp-server.js";
 import {
   ALAYA_SYSEXITS,
   type AlayaCliArgsSchema,
@@ -29,13 +28,12 @@ import {
   resolveAlayaConfigDir,
   resolveAlayaConfigPaths
 } from "./config-files.js";
-import { createDetachCommandSpec } from "./detach.js";
 import { createDoctorCommand, type GardenComputeStatus, type GardenKeychainCheck } from "./doctor.js";
-import { readBuildInfo } from "../build-info.js";
+import { readBuildInfo } from "../runtime/build-info.js";
 import { createInstallCommand } from "./install.js";
 import { createInspectCommand } from "./inspect.js";
 import { createUpdateCommand } from "./update.js";
-import { defaultRecallPathPlasticityLookupTelemetry } from "../path-plasticity-runtime.js";
+import { defaultRecallPathPlasticityLookupTelemetry } from "../garden/path-plasticity-runtime.js";
 import { createOperationCommandSpecs } from "./operations.js";
 import { createReviewCommand } from "./review.js";
 import { createStatusCommand } from "./status.js";
@@ -45,7 +43,7 @@ import {
   resolveTrustedCliRunId,
   resolveCliWorkspaceContext
 } from "./workspace-context.js";
-import { resolveSecretRef, type ResolvedSecret, type ResolveSecretError } from "../secrets.js";
+import { resolveSecretRef, type ResolvedSecret, type ResolveSecretError } from "../secrets/index.js";
 import {
   parseSecretRefKeychainTarget,
   SECRET_REF_ENV_PREFIX,

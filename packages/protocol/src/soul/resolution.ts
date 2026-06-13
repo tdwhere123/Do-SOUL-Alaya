@@ -6,12 +6,12 @@ import {
   BoundedReasonSchema,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 import { type StagedWarningResolutionOption } from "./staged-warning.js";
 
 // invariant: closed set of resolution kinds soul.resolve accepts.
-// see also: packages/core/src/resolution-service.ts (dispatcher)
-// see also: packages/core/src/governance-policy.ts (classifyWarning)
+// see also: packages/core/src/governance/resolution-service.ts (dispatcher)
+// see also: packages/core/src/governance/governance-policy.ts (classifyWarning)
 // see also: packages/protocol/src/soul/staged-warning.ts
 //   StagedWarningResolutionOptionSchema
 const soulResolutionKindValues = [
@@ -46,7 +46,7 @@ export type SoulResolutionKind = z.infer<typeof SoulResolutionKindSchema>;
 // is an agent-side helper (per-turn ask_now budget); the daemon
 // echoes the classification onto the resolution audit event without
 // re-classifying.
-// see also: packages/core/src/governance-policy.ts
+// see also: packages/core/src/governance/governance-policy.ts
 export const SoulResolveRequestSchema = z
   .object({
     target_object_id: BoundedIdSchema,

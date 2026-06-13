@@ -7,7 +7,7 @@
 // the live witness for derivePrecedenceBasis and the
 // claim_status=draft lock; non-rotating seeders never exercise
 // the claim_form persistence path.
-// see also: packages/soul/src/garden/materialization-router.ts
+// see also: packages/soul/src/garden/materialization-router/inputs.ts
 //   routeByObjectKind
 // see also: apps/bench-runner/src/harness/daemon.ts proposeMemory
 
@@ -60,7 +60,7 @@ export function rotatingSeedObjectKind(seedIndex: number): SeedObjectKind {
 // verbatim so the archive still exercises both router branches. The
 // original LLM-chosen kind is preserved by the caller in
 // raw_payload.extracted_object_kind for audit fidelity.
-// see also: packages/soul/src/garden/materialization-router.ts
+// see also: packages/soul/src/garden/materialization-router/inputs.ts
 //   routeByObjectKind
 // see also: apps/bench-runner/src/longmemeval/compile-seed.ts extractSeedInputs
 const MEMORY_ENTRY_ROUTED_OBJECT_KINDS: ReadonlySet<string> = new Set([

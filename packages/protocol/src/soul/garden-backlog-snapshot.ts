@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   IsoDatetimeStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 
 export const GardenBacklogQueueDepthByTierSchema = z
   .object({

@@ -8,7 +8,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { RecallUtilizationEventLogPort } from "../services/recall-utilization-service.js";
 
-// see also: packages/eval/src/utilization-buckets.ts — parallel pure
+// see also: packages/eval/src/metrics/utilization-buckets.ts — parallel pure
 // aggregation helper for the bench cohort metric. The two implementations
 // keep the same bucket semantics on purpose: the daemon route depends only
 // on protocol + storage, the eval helper depends only on zod.

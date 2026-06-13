@@ -16,7 +16,7 @@ import {
   type AlayaConfigPaths
 } from "../config-files.js";
 import { ensurePrivateDirectory, writePrivateTextAtomic } from "../../services/private-file-service.js";
-import { resolveSecretRef as resolveRuntimeSecretRef, type ResolveSecretError } from "../../secrets.js";
+import { resolveSecretRef as resolveRuntimeSecretRef, type ResolveSecretError } from "../../secrets/index.js";
 import {
   checkPlatformKeychainAvailable,
   readPlatformKeychainSecret,

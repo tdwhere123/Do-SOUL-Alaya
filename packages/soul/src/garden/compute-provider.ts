@@ -70,7 +70,7 @@ const DIAGNOSTIC_PROMPT_PREFIX_MAX_CHARS = 512;
 
 // One parsed signal from the official-API extractor JSON. distilled_fact is
 // absent when the model omits it (or supplies a non-string / empty value);
-// in that case materialization-router.ts buildDistilledFact falls through to
+// in that case materialization-router/inputs.ts buildDistilledFact falls through to
 // the rule distiller rather than receiving a faked span.
 export interface OfficialApiSignalDraft {
   readonly signal_kind: CandidateMemorySignal["signal_kind"];
@@ -107,7 +107,7 @@ export const OFFICIAL_API_GARDEN_MODEL = "gpt-4.1-mini";
 // wording, adapted to this provider's {"signals":[...]} envelope so the
 // production passive-extraction path emits resolved one-assertion facts
 // instead of falling through to the rule distiller in
-// materialization-router.ts buildDistilledFact.
+// materialization-router/inputs.ts buildDistilledFact.
 // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
 //   (the LongMemEval bench seed path that drives this provider)
 export const OFFICIAL_API_SYSTEM_PROMPT = [
@@ -187,7 +187,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     for (const draft of drafts) {
       const confidence = clampConfidence(draft.confidence);
       // Observability: a draft with no distilled_fact makes
-      // materialization-router.ts buildDistilledFact degrade to its rule
+      // materialization-router/inputs.ts buildDistilledFact degrade to its rule
       // distiller (raw-payload truncation) instead of storing a resolved
       // one-assertion fact. Count per turn so the production omission rate
       // — how often ingestion silently loses §18-faithfulness — is visible.
@@ -214,7 +214,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
               confidence,
               rawPayload: {
                 matched_text: draft.matched_text,
-                // materialization-router.ts buildDistilledFact reads this
+                // materialization-router/inputs.ts buildDistilledFact reads this
                 // key when present; an absent value (model omitted it)
                 // falls through to that file's rule distiller. Never write
                 // a faked span here.
@@ -625,7 +625,7 @@ function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft
   // distilled_fact is the resolved one-assertion fact materialization
   // stores as memory_entry content. A model that omits it (or sends a
   // non-string / empty value) leaves the field ABSENT so
-  // materialization-router.ts buildDistilledFact degrades honestly to
+  // materialization-router/inputs.ts buildDistilledFact degrades honestly to
   // its rule distiller — never fake one from matched_text. The clamp
   // shares DISTILLED_FACT_MAX_CHARS so the provider and materialization
   // agree on one budget.

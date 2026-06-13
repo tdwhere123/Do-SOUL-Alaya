@@ -3,7 +3,7 @@ import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 
 const stabilityClassValues = ["volatile", "normal", "stable", "pinned"] as const;
 const directionBiasValues = [
@@ -65,7 +65,7 @@ export const ManifestationPreferenceSchema = z.enum(manifestationPreferenceValue
 // "retired" (terminal) and "dormant" (reversible cold storage) are excluded.
 // A path whose status is unset is treated as active for backward
 // compatibility with rows persisted before lifecycle.status was populated.
-// see also: path-plasticity-service.ts (active <-> dormant transitions).
+// see also: path-plasticity/service.ts (active <-> dormant transitions).
 export function isPathActiveForRecall(
   status: PathLifecycleStatus | undefined
 ): boolean {

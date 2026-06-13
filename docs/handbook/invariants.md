@@ -39,7 +39,7 @@ These rules always win over lower-level docs and task-card convenience.
     used SSE because it had GUI / TUI consumers; Alaya does not.
     Daemon-internal eventing is via in-process audit log +
     `RuntimeNotifier` notification only (interface in
-    `packages/core/src/event-publisher.ts`). Any new daemon code paths
+    `packages/core/src/runtime/event-publisher.ts`). Any new daemon code paths
     (e.g. `apps/core-daemon/src/sse/`, route streaming TransformStream,
     background bootstrap, event-publisher chain) must keep the SSE
     transport stripped while preserving the EventLog → audit ordering.
@@ -149,7 +149,7 @@ These rules always win over lower-level docs and task-card convenience.
     - **EventLog payload surface:** payload schemas under
       `packages/protocol/src/events/*`.
     - **Runtime control-plane config surface:** config schemas under
-      `packages/protocol/src/app-config.ts`.
+      `packages/protocol/src/config/app-config.ts`.
 
     Workspace-internal TypeScript interfaces with no MCP, EventLog,
     config, or production-consumer surface are out of SemVer scope
@@ -178,7 +178,7 @@ These rules always win over lower-level docs and task-card convenience.
     relevant maintenance migration entry.
 
     PRs touching `packages/protocol/src/events/`,
-    `packages/protocol/src/app-config.ts`,
+    `packages/protocol/src/config/app-config.ts`,
     `packages/engine-gateway/src/provider/soul-tool-specs.ts`, or any
     Zod schema transitively reachable from MCP request/response types
     in `mcp-types.ts` must cite §25 and declare the SemVer step. If

@@ -40,8 +40,8 @@ live-data portrait §K.5):
    written but unread; `EvidenceCapsule.semantic_anchor` / `event_anchor`
    written as JSON but no deserialiser; `PathGraphSnapshot` 11 fields
    unread. Note: `direction_bias` is **not** discarded — recall path
-   expansion reads it (`packages/core/src/recall-service.ts:2038`) and
-   plasticity uses it (`apps/core-daemon/src/path-plasticity-runtime.ts:398-418`).
+   expansion reads it (`packages/core/src/recall/recall-service.ts:2038`) and
+   plasticity uses it (`apps/core-daemon/src/garden/path-plasticity-runtime.ts:398-418`).
 4. **21k+ pure sink** — `orphan_radar.reported`, `green.revoked`,
    `evidence_failure`.
 5. **Entire abstractions dead-coded** — `NodeInstance`, `SurfaceService`,
@@ -280,8 +280,8 @@ Cat-G.
 
 - **Owner:** `typescript-pro`
 - **Write ownership:**
-  - `packages/core/src/claim-service.ts`
-  - `packages/core/src/__tests__/claim-service.test.ts`
+  - `packages/core/src/governance/claim-service.ts`
+  - `packages/core/src/__tests__/governance/claim-service.test.ts`
   - `packages/soul/src/garden/materialization-router.ts` — only
     `buildClaimInput()`, to thread the right `precedence_basis` from
     the signal
@@ -306,8 +306,8 @@ Cat-G.
 
 - **Owner:** `typescript-pro`
 - **Write ownership:**
-  - `packages/core/src/recall-service.ts` (`computeEffectiveScoreDetails`)
-  - `packages/core/src/recall-candidate-builder.ts` (small wiring if
+  - `packages/core/src/recall/recall-service.ts` (`computeEffectiveScoreDetails`)
+  - `packages/core/src/recall/recall-candidate-builder.ts` (small wiring if
     needed)
   - `packages/protocol/src/soul/recall-candidate.ts` (only if a new
     factor needs a schema field; `contradiction_penalty` already exists)
@@ -357,7 +357,7 @@ consumers. Closes Cat-F + the L2 portion of Cat-G + Cat-I.2 / I.3.
   interface) THEN `typescript-pro` (to implement). Orchestrator chains
   them; strategist returns a design as input to the implementer.
 - **Write ownership:**
-  - new `packages/core/src/path-activation-candidate-producer.ts`
+  - new `packages/core/src/path-graph/path-activation-candidate-producer.ts`
   - `packages/core/src/manifestation-resolver.ts` (extension)
   - `apps/core-daemon/src/index.ts` (wire producer)
   - tests
@@ -379,8 +379,8 @@ consumers. Closes Cat-F + the L2 portion of Cat-G + Cat-I.2 / I.3.
 
 - **Owner:** `typescript-pro`
 - **Write ownership:**
-  - new `packages/core/src/path-manifestation-policy.ts`
-  - `packages/core/src/path-plasticity-service.ts` (extend plan output
+  - new `packages/core/src/path-graph/path-manifestation-policy.ts`
+  - `packages/core/src/path-plasticity/service.ts` (extend plan output
     with promotion plan-step + `stability_class` transitions)
   - `packages/core/src/manifestation-resolver.ts` (consume policy)
   - new tests
@@ -502,8 +502,8 @@ Closes Cat-A + Cat-C 5-bucket + Cat-E + Cat-H.5 completion +
   - `apps/core-daemon/src/mcp-memory-tool-catalog.ts` (register the 14th
     verb)
   - new handler `apps/core-daemon/src/mcp-memory-resolve-handler.ts`
-  - new `packages/core/src/resolution-service.ts` (typed dispatcher)
-  - new `packages/core/src/governance-policy.ts` (`classifyWarning`
+  - new `packages/core/src/governance/resolution-service.ts` (typed dispatcher)
+  - new `packages/core/src/governance/governance-policy.ts` (`classifyWarning`
     returns `ask_now` / `apply_silently` / `track_only` /
     `inspect_later`; per-turn `ask_now` budget)
   - `packages/engine-gateway/src/provider/soul-tool-specs.ts`

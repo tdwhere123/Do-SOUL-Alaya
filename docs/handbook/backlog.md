@@ -270,7 +270,7 @@ test) confirms no warm recall regression from the base-weight priors; or a writt
 **Status**: Resolved in v0.3.8.
 
 **Resolution**: `OpenAIEmbeddingClient` already accepted a baseUrl
-override (`packages/core/src/embedding-recall-service.ts`) and the
+override (`packages/core/src/embedding-recall/openai-client.ts`) and the
 bench-runner harness already exposed `--embedding env`
 (`apps/bench-runner/src/harness/daemon.ts:152-200` + MANAGED_ENV_KEYS
 listing `OPENAI_EMBEDDING_PROVIDER_URL` / `OPENAI_EMBEDDING_MODEL`).
@@ -285,11 +285,11 @@ embedding-on-500 archive pairs under
 
 **Status**: Resolved in v0.3.8.
 
-**Resolution**: `packages/eval/src/wilson-ci.ts` (new) computes the
-95% Wilson interval. `packages/eval/src/report.ts` annotates R@K
+**Resolution**: `packages/eval/src/metrics/wilson-ci.ts` (new) computes the
+95% Wilson interval. `packages/eval/src/reporting/report.ts` annotates R@K
 with the half-width and explicit lo/hi bounds; the header line
 emits a sample-size label (smoke / shard_merged / full).
-`packages/eval/src/diff.ts` widens the ratio-KPI band to
+`packages/eval/src/history/diff.ts` widens the ratio-KPI band to
 `max(raw_band, ci_half_width)` when `evaluated_count < 100`, so
 small-N runs cannot trip the fail/warn alarm on noise. Eight new
 `wilson-ci.test.ts` cases + two reframed `diff.test.ts` cases pin
@@ -354,7 +354,7 @@ LLM-as-sole-producer and no-port-no-edges scenarios.
 **Status**: Resolved in v0.3.6 review-loop round 5 (commit `b8fce04`).
 
 **Resolution**: `bootStartedDaemonRuntime` in
-`apps/core-daemon/src/__tests__/tool-runtime-bootstrap.test.ts` now
+`apps/core-daemon/src/__tests__/mcp/tool-runtime-bootstrap.test.ts` now
 passes `{ port: 0 }` to `runtime.startHttpServer`, so the OS assigns a
 free port per test. The previous fixed-3000 default raced with other
 core-daemon test files in parallel runs and produced sporadic hook
@@ -833,7 +833,7 @@ and core-daemon config-route tests.
 Resolved for delivery / usage records by
 `packages/storage/src/migrations/056-trust-state-persistence.sql`,
 `packages/storage/src/repos/trust-state-repo.ts`, and
-`apps/core-daemon/src/trust-state.ts`. Duplicate delivery / usage
+`apps/core-daemon/src/trust/state.ts`. Duplicate delivery / usage
 records now raise storage conflicts instead of overwriting rows, so
 `publishWithMutation(entry)` rolls the EventLog entry back on duplicate
 persistence. `trust-state-persistence.test.ts` proves delivery / usage
@@ -844,7 +844,7 @@ EventLog replay before recorder readiness.
 ### #BL-020 — Trust installed/configured/unverifiable counter persistence
 
 Resolved by EventLog-backed startup replay in
-`packages/core/src/trust-state-service.ts` and
+`packages/core/src/governance/trust-state-service.ts` and
 `apps/core-daemon/src/index.ts`. `recordInstalled`, `recordConfigured`,
 and `recordUnverifiable` remain runtime projections, but daemon startup
 replays their SQLite EventLog rows before the trust recorder is marked
@@ -871,7 +871,7 @@ The payload includes `prior_green_state`, `prior_valid_until`, and
 ### #BL-018 — attached-agent MCP proof harness
 
 Resolved by
-`apps/core-daemon/src/__tests__/attached-agent-mcp-proof.test.ts`.
+`apps/core-daemon/src/__tests__/mcp/attached-agent-mcp-proof.test.ts`.
 The harness keeps one daemon runtime alive for install, attach, MCP
 `tools/list`, recall, pointer open, usage report, candidate signal,
 proposal, governance reject, Garden background pass, status, and doctor.

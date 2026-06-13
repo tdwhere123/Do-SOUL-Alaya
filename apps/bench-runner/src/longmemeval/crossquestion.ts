@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
-import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
-import { monotonicElapsedMs, monotonicNowNs } from "../monotonic.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../shared/version.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../shared/monotonic.js";
 import {
   buildTokenEconomy,
   computeTokenSavedRatio,
@@ -117,7 +117,7 @@ interface QuestionResult {
   // (any non-null degradation_reason) omits the token_economy
   // block in core, so the bench extractor returns null and degraded
   // questions don't dilute the run-level distribution.
-  // see also: packages/core/src/recall-service.ts
+  // see also: packages/core/src/recall/recall-service.ts
   // (computeRecallTokenEconomy call site).
   readonly recallTokenEconomy: BenchRecallTokenEconomy | null;
 }
@@ -666,7 +666,7 @@ function isLongMemEvalGoldEligibleResult(result: Readonly<{
   return (result.object_kind ?? "memory_entry") === "memory_entry";
 }
 
-// see also: apps/bench-runner/src/version.ts
+// see also: apps/bench-runner/src/shared/version.ts
 
 function resolveCommitSha7(): string {
   try {

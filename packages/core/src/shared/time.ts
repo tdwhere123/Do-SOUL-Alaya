@@ -1,4 +1,4 @@
-import { CoreError } from "../errors.js";
+import { CoreError } from "./errors.js";
 
 export type NowProvider = () => string;
 

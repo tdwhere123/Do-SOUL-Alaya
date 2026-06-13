@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
-import { EventPublisherPropagationError } from "../../event-publisher.js";
+import { EventPublisherPropagationError } from "../../runtime/event-publisher.js";
 import {
   PathRelationProposalService,
   PATH_RELATION_PROPOSE_THRESHOLD,
   type CoUsageCounterPort,
   type PathRelationProposalEventPublisherPort
-} from "../../path-relation-proposal-service.js";
+} from "../../path-graph/path-relation-proposal-service.js";
 
 // invariant: PathRelation row insert and `path.relation_created` EventLog row
 // MUST land in a single SQLite transaction. This locks the contract from the

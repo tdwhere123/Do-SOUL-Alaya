@@ -3,7 +3,7 @@ import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 
 // invariant: HealthIssueGroup is a control-plane projection, not memory
 // ontology. It aggregates raw OrphanRadar / GreenStatus revoke /

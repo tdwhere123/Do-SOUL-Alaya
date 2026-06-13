@@ -2,14 +2,14 @@ import { access, constants as fsConstants } from "node:fs/promises";
 import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
 import type { WorkspaceBootstrapReconcileResult } from "@do-soul/alaya-core";
 import type { DaemonStartupStepRecord } from "../index.js";
-import type { PathPlasticityLookupTelemetrySnapshot } from "../path-plasticity-runtime.js";
+import type { PathPlasticityLookupTelemetrySnapshot } from "../garden/path-plasticity-runtime.js";
 import type { GardenCredentialProvenance } from "../services/config-service.js";
-import type { ResolveSecretError } from "../secrets.js";
+import type { ResolveSecretError } from "../secrets/index.js";
 import {
   detectAttachedProfileInstructionsDrift,
   type ProfileInstructionsDriftReport,
   type ProfileTarget
-} from "../profile-mutation.js";
+} from "../attach/index.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaSubcommandSpec } from "./bridge.js";
 import { resolveCliWorkspaceContext } from "./workspace-context.js";
 import {
@@ -17,7 +17,7 @@ import {
   type GraphHealthSnapshot,
   type GraphHealthWarning
 } from "../services/graph-health-service.js";
-import type { BuildInfo } from "../build-info.js";
+import type { BuildInfo } from "../runtime/build-info.js";
 
 const UNKNOWN_BUILD_INFO: BuildInfo = {
   version: "0.0.0-dev",

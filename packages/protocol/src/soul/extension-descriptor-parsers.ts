@@ -1,4 +1,4 @@
-import { deepFreeze } from "../deep-freeze.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
 import type { SkillPackage, ToolProvider } from "./extension-descriptors.js";
 import { SkillPackageSchema, ToolProviderSchema } from "./extension-descriptors.js";
 

@@ -7,8 +7,8 @@
 -- The autonomous-tombstone step and the physical-delete authority both gate on
 -- forget_disposition IS NOT NULL (defense in depth). Human Inspector retire
 -- leaves both columns NULL and is not auto-GC'd.
--- see also: packages/protocol/src/soul/memory-entry.ts ForgetDisposition,
--- packages/storage/src/repos/memory-entry-repo.ts hardDeleteTombstoned.
+-- see also: packages/protocol/src/soul/memory-entry.ts:ForgetDisposition
+-- see also: packages/storage/src/repos/memory-entry/lifecycle-workflows.ts:hardDeleteTombstonedMemoryEntry
 ALTER TABLE memory_entries
   ADD COLUMN forget_disposition TEXT;
 

@@ -4,7 +4,7 @@ import {
   governanceSubjectQualifierAliasDomain,
   type CanonicalAliasResolver
 } from "./canonical-alias.js";
-import { NonEmptyStringSchema } from "../schema-primitives.js";
+import { NonEmptyStringSchema } from "../shared/schema-primitives.js";
 
 const CanonicalDomainRegex = /^[\p{L}\p{N}_.-]+$/u;
 const CanonicalTokenWhitespaceRegex = /\s+/g;

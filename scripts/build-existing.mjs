@@ -62,10 +62,11 @@ if (existsSync(daemonDistDir)) {
     headResult.status === 0 && typeof headResult.stdout === "string"
       ? headResult.stdout.trim()
       : "unknown";
+  const builtAt = resolveBuiltAt();
   const buildInfo = {
     version: typeof daemonPkg.version === "string" ? daemonPkg.version : "unknown",
     git_head: gitHead,
-    built_at: new Date().toISOString()
+    built_at: builtAt
   };
   mkdirSync(daemonDistDir, { recursive: true });
   writeFileSync(
@@ -89,3 +90,42 @@ if (existsSync(join(inspectorWebDir, "package.json"))) {
 }
 
 process.exit(0);
+
+function resolveBuiltAt() {
+  const sourceDateEpoch = parseSourceDateEpoch(process.env.SOURCE_DATE_EPOCH);
+  if (sourceDateEpoch !== null) {
+    return sourceDateEpoch;
+  }
+
+  const commitTimestampResult = spawnSync("git", ["show", "-s", "--format=%cI", "HEAD"], {
+    encoding: "utf8"
+  });
+  if (commitTimestampResult.status === 0 && typeof commitTimestampResult.stdout === "string") {
+    const commitTimestamp = commitTimestampResult.stdout.trim();
+    if (commitTimestamp.length > 0) {
+      return commitTimestamp;
+    }
+  }
+
+  return "unknown";
+}
+
+function parseSourceDateEpoch(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    return null;
+  }
+
+  const epoch = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(epoch)) {
+    return null;
+  }
+
+  const epochMs = trimmed.length > 10 ? epoch : epoch * 1000;
+  const builtAt = new Date(epochMs);
+  return Number.isNaN(builtAt.getTime()) ? null : builtAt.toISOString();
+}

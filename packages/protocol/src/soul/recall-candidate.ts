@@ -5,7 +5,7 @@ import {
   BoundedReasonSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 import { ManifestationStateSchema, MemoryDimensionSchema } from "./memory-entry.js";
 import { ScopeClassSchema } from "./object-kind.js";
 import { ActivationWeightsSchema } from "./recall-policy.js";
@@ -60,7 +60,7 @@ export const RecallScoreFactorsSchema = z
 // annotations forwarded from PathRelation.effect_vector through the
 // ManifestationResolver sidecar. They do not enter activation_weights.
 // see also: path-activation-candidate-producer.ts (producer),
-// manifestation-resolver.ts (forwarder).
+// packages/core/src/manifestation/manifestation-resolver.ts (forwarder).
 const UnfinishednessBiasSchema = z.number().min(0).max(1);
 
 export const RecallBudgetStateSchema = z
@@ -78,7 +78,7 @@ export const RecallBudgetStateSchema = z
 // invariant: a recall candidate is sourced from a memory_entry (L1 distilled
 // fact) or a synthesis_capsule (L2 cross-evidence summary). The synthesis
 // source joins the existing fusion as an additional candidate channel.
-// see also: packages/core/src/recall-service.ts — synthesis candidate join.
+// see also: packages/core/src/recall/recall-service.ts — synthesis candidate join.
 const RecallCandidateObjectKindSchema = z.enum([
   "memory_entry",
   "synthesis_capsule"

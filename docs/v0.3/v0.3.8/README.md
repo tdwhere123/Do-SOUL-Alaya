@@ -158,21 +158,21 @@ materialization-router.
   (`openPointer`).
 - Activation factor: `packages/core/src/dynamics-constants-runtime.ts`.
 - Cohort guard / usage_proof seed gate / preview: 
-  `packages/core/src/recall-service.ts`,
-  `packages/core/src/recall-service-helpers.ts`.
+  `packages/core/src/recall/recall-service.ts`,
+  `packages/core/src/recall/recall-service-helpers.ts`.
 - Budget widening: `packages/core/src/task-surface-builder.ts`.
 - Edge producers: `packages/soul/src/garden/materialization-router.ts`
-  (caller-explicit) + `packages/core/src/conflict-detection-service.ts`
+  (caller-explicit) + `packages/core/src/governance/conflict-detection-service.ts`
   (rule-based + optional LLM).
-- PathRelation propose: `packages/core/src/path-relation-proposal-service.ts`.
+- PathRelation propose: `packages/core/src/path-graph/path-relation-proposal-service.ts`.
 - Evidence FTS:
   `packages/storage/src/migrations/068-evidence-capsule-fts.sql`,
   `packages/storage/src/repos/evidence-capsule-repo.ts`,
   `packages/storage/src/repos/memory-entry-repo.ts`
   (`findByEvidenceRefs`).
-- Codex-review wiring repair: `packages/core/src/recall-service.ts`
-  (cohort + mandatory cap), `packages/core/src/path-relation-proposal-service.ts`
-  (TTL eviction), `packages/core/src/conflict-detection-service.ts`
+- Codex-review wiring repair: `packages/core/src/recall/recall-service.ts`
+  (cohort + mandatory cap), `packages/core/src/path-graph/path-relation-proposal-service.ts`
+  (TTL eviction), `packages/core/src/governance/conflict-detection-service.ts`
   (rule toggle), `packages/eval/src/wilson-ci.ts` (CI helper).
 - LoCoMo bench: `apps/bench-runner/src/locomo/` +
   `docs/bench-history/datasets/locomo10.meta.json` (pinned sha256).

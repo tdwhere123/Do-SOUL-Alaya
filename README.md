@@ -251,8 +251,8 @@ Triage at the boundary, not at recall. The signal record is durable on the
 **Runtime Control** layer; ontology truth (Memory Ontology layer,
 Object / Evidence axes) is untouched until later phases say so.
 
-*Code anchors:* `packages/core/src/signal-service.ts:80-130`,
-`packages/core/src/signal-service.ts:270-283` (the triage gate).
+*Code anchors:* `packages/core/src/memory/signal-service.ts:80-130`,
+`packages/core/src/memory/signal-service.ts:270-283` (the triage gate).
 
 ### 2. Governance (治理)
 
@@ -294,10 +294,10 @@ lifecycle, karma) lives on the **Memory Ontology** layer and
 above.
 
 *Code anchors:*
-`apps/core-daemon/src/mcp-memory-proposal-workflow.ts`,
-`apps/core-daemon/src/mcp-memory-resolve-handler.ts`,
-`packages/core/src/resolution-service.ts`,
-`packages/core/src/memory-service.ts`,
+`apps/core-daemon/src/mcp-memory/proposal-workflow.ts`,
+`apps/core-daemon/src/mcp-memory/resolve-handler.ts`,
+`packages/core/src/governance/resolution-service.ts`,
+`packages/core/src/memory/memory-service.ts`,
 `packages/storage/src/migrations/063-proposal-memory-update-patch.sql`.
 
 ### 3. Durability (沉淀)
@@ -321,7 +321,7 @@ mutation; consumers downstream subscribe to the notification, not to
 the DB. Lives on the **Memory Ontology** layer (durable truth) plus
 **Runtime Control** (the dispatch).
 
-*Code anchors:* `packages/core/src/event-publisher.ts:40-62`,
+*Code anchors:* `packages/core/src/runtime/event-publisher.ts:40-62`,
 `packages/storage/src/repos/event-log-repo.ts:69-118`.
 
 ### 4. Recall (召回)
@@ -358,10 +358,8 @@ recall falls back to lexical without raising. Recall lives on the
 **Path axis** (recall *is* a runtime manifestation of paths) and
 the **Runtime Control** layer.
 
-*Code anchors:* `packages/core/src/recall-service.ts:189-315`
-(orchestration), `packages/core/src/recall-service.ts:501-581` (the
-embedding-supplement merge — proof the boost is additive, never
-overriding).
+*Code anchors:* `packages/core/src/recall/recall-service.ts`
+(`RecallService.recall` orchestration and the embedding-supplement merge).
 
 ### 5. Receipt (回执)
 
@@ -381,9 +379,9 @@ agent can skip it, and Alaya degrades to a "delivered" trust state
 without erroring. Lives on the **Evidence axis** as control-plane
 evidence, **Runtime Control** layer.
 
-*Code anchors:* `apps/core-daemon/src/trust-state.ts:147-187`,
+*Code anchors:* `apps/core-daemon/src/trust/state.ts:147-187`,
 `packages/protocol/src/soul/mcp-types.ts:146` (the three-state enum),
-`packages/core/src/path-plasticity-service.ts` (Path-axis plasticity
+`packages/core/src/path-plasticity/service.ts` (Path-axis plasticity
 fed by usage receipts).
 
 ### 6. Maintenance (维护)

@@ -41,7 +41,7 @@ regression thresholds and an Inspector trend line — is engineering.
   `/overview` and `/recall`, including the separate
   `public-multiturn` archive.
 - The diff engine encodes regression thresholds in
-  `packages/eval/src/thresholds.ts`. A `✗` finding flips the CLI exit
+  `packages/eval/src/gates/thresholds.ts`. A `✗` finding flips the CLI exit
   code, so this archive can be wired into CI later without changing
   contract.
 
@@ -149,7 +149,7 @@ docs/bench-history/
 
 ### Sample-size label cascade
 
-`packages/eval/src/wilson-ci.ts` derives the sample-size label from
+`packages/eval/src/metrics/wilson-ci.ts` derives the sample-size label from
 `evaluated_count` and `latency_source` via four tiers:
 
 | Label          | Bucket                                          | What the bench claim is good for |
@@ -188,7 +188,7 @@ docs/bench-history/
 Version-scoped planning labels such as `K1.3-off` belong in the
 release initiative docs only. Machine-readable hard gates, reports, and
 archives use stable semantic identifiers from
-`packages/eval/src/release-gates.ts` so future releases can reuse the
+`packages/eval/src/gates/release-gates.ts` so future releases can reuse the
 same gates without inheriting v0.3.10 phase names.
 
 ```jsonc
@@ -252,7 +252,7 @@ same gates without inheriting v0.3.10 phase names.
 
 ## Thresholds (regression verdicts)
 
-Defined in `packages/eval/src/thresholds.ts`. Reference values:
+Defined in `packages/eval/src/gates/thresholds.ts`. Reference values:
 
 Bands are inclusive (`≥`): a drop of exactly 2.0 pp registers as `warn`,
 a drop of exactly 5.0 pp registers as `fail`.

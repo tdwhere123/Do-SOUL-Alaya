@@ -3,7 +3,7 @@ import {
   CandidateMemorySignalContentSchema,
   EmitCandidateSignalResponseSchema,
   McpEmitCandidateSignalRequestSchema
-} from "../candidate-memory-signal.js";
+} from "../signals/candidate-memory-signal.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_EVIDENCE_ARRAY_MAX,
@@ -15,7 +15,7 @@ import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
-} from "../schema-primitives.js";
+} from "../shared/schema-primitives.js";
 import {
   GraphExploreDirSchema,
   GraphNeighborSchema,
@@ -407,7 +407,7 @@ export const GardenCompleteTaskResponseSchema = z
 // Agent-facing schema strips workspace_id / run_id / surface_id; the daemon
 // binds those from the trusted MCP call context per invariants §29 Default
 // Scope. See McpEmitCandidateSignalRequestSchema in
-// ../candidate-memory-signal.ts for the rationale and the parity with
+// ../signals/candidate-memory-signal.ts for the rationale and the parity with
 // SoulExploreGraphRequestSchema and SoulListPendingProposalsRequestSchema.
 export const SoulEmitCandidateSignalRequestSchema = McpEmitCandidateSignalRequestSchema;
 export const SoulEmitCandidateSignalResponseSchema = EmitCandidateSignalResponseSchema;
@@ -553,7 +553,7 @@ export type SoulReportContextUsageResponse = z.infer<typeof SoulReportContextUsa
  * source of truth: external MCP clients see the same constraints zod enforces
  * at parse time (maxLength / maxItems / strict additionalProperties / ...), so
  * a 100MB query is rejected by both the catalog-published shape and the
- * runtime parser. `apps/core-daemon/src/mcp-memory-tool-catalog.ts` consumes
+ * runtime parser. `apps/core-daemon/src/mcp-memory/tool-catalog.ts` consumes
  * this rather than carrying its own JSON Schema dictionary.
  */
 import { zodToJsonSchema } from "zod-to-json-schema";

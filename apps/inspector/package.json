@@ -12,8 +12,8 @@
   },
   "files": ["dist/", "web/dist/"],
   "type": "module",
-  "main": "dist/server.js",
-  "types": "dist/server.d.ts",
+  "main": "dist/runtime/server.js",
+  "types": "dist/runtime/server.d.ts",
   "engines": {
     "node": ">=20.19.0"
   },

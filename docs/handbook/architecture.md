@@ -44,8 +44,8 @@ Other axes may reference it but must not silently replace it.
 ```text
 apps/core-daemon         Hono HTTP/MCP daemon and wiring layer
 
-packages/protocol        zod schemas and shared domain types
-packages/storage         SQLite migrations and repos
+packages/protocol        zod schemas and shared domain types, grouped by schema domain
+packages/storage         SQLite migrations and domainized repos
 packages/core            business logic, state transitions, EventLog
                          publishing, runtime adapters, ConversationService,
                          RecallService, GreenService, governance services
@@ -53,6 +53,8 @@ packages/soul            SOUL kernel, Garden, heuristics, maintenance
                          roles (Auditor / Janitor / Librarian / Scheduler)
 packages/engine-gateway  provider adapters (OpenAI / Anthropic / custom)
                          and MCP bridge (routing only)
+packages/eval            benchmark KPI schemas, history diff/report utilities,
+                         release gates, and metric helpers grouped by domain
 ```
 
 Dependency direction:
@@ -93,6 +95,11 @@ surfaces are:
   (Provider/Config, Memory Graph, Trust/Status). Inspector writes are
   limited to daemon runtime parameters per invariant §21; memory
   ontology writes still go through the proposal / governance path.
+  The frontend code stays domainized under `apps/inspector/web/src/`
+  (`app/`, `api/`, `components/`, `i18n/`, `pages/`, `utils/`) while
+  frontend tests live under the aggregated
+  `apps/inspector/web/src/__tests__/` tree, and page-local graph
+  rendering support now lives under `pages/graph-page/`.
   Not an agent surface; never participates in agent control flow.
 - **Slash boot trigger** (`/alaya-inspect`) — optional host-native
   convenience that should launch `alaya inspect --open` and therefore
@@ -120,7 +127,7 @@ Audit precedes broadcast. Every state change records an audit row
 before any consumer can observe it.
 
 The in-process notification interface is **`RuntimeNotifier`**, exported
-from `packages/core/src/event-publisher.ts`:
+from `packages/core/src/runtime/event-publisher.ts`:
 
 ```ts
 export interface RuntimeNotifier {
@@ -163,7 +170,7 @@ review finding:
    - HealthJournalService, EventPublisher, RuntimeEventNormalizer
    - EvidenceService, MemoryService, SignalService
    - GreenService, GovernanceLeaseService, SessionOverrideService
-   - RecallService (needs Memory + Embedding repos)
+   - RecallService (needs Memory + Embedding repos; fusion, delivery, graph-expansion, path-relation, and diagnostics helpers live under `packages/core/src/recall/`)
    - OutputShapingService, NarrativeBudgetService, ManifestationResolver
    - SynthesisService, ProposalService
    - ConversationService (memory-orchestration only; chat-specific orchestration was removed during the v0.1 port — see invariant §20)
@@ -222,8 +229,8 @@ typed payload:
 | `defer` | Writes a `DeferredObligation` carrying the re-entry timestamp; replaces the retired `cooldown_until` field on `SynthesisCapsule`. |
 | `not_relevant` | Records that the warning was inspected but did not apply to the current task. |
 
-The handler is at `apps/core-daemon/src/mcp-memory-resolve-handler.ts`;
-the typed dispatcher is `packages/core/src/resolution-service.ts`.
+The handler is at `apps/core-daemon/src/mcp-memory/resolve-handler.ts`;
+the typed dispatcher is `packages/core/src/governance/resolution-service.ts`.
 The `assertDeliveryInScope` check requires the `target_object_id` to
 be a direct member of the agent's delivered_object_ids or to be
 reachable indirectly through the `claimSourceReader` port (so a

@@ -12,7 +12,7 @@
 // integrity signal so a silently-embedding-off run cannot pass unnoticed.
 // see also:
 //   apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass (the throw)
-//   packages/core/src/embedding-backfill-handler.ts (benign skip reasons)
+//   packages/core/src/embedding-recall/embedding-backfill-handler.ts (benign skip reasons)
 //   apps/bench-runner/src/harness/daemon.ts drainEmbeddingWarmupPasses
 
 const BENIGN_SKIP_PREFIX = "embedding_backfill_skipped:";

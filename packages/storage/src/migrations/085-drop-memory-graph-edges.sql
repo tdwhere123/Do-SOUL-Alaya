@@ -11,7 +11,7 @@
 -- strength / evidence_basis) mirrors the seed-profile catalog that the live
 -- producer (PathRelationProposalService) mints with, so a backfilled row is
 -- numerically the same shape a freshly minted one would be.
--- cross-file ref: packages/core/src/path-relation-proposal-service.ts (seed catalog)
+-- cross-file ref: packages/core/src/path-graph/path-relation-proposal-service.ts (seed catalog)
 -- cross-file ref: packages/protocol/src/soul/path-anchor-identity.ts (anchor JSON shape)
 --
 -- The backfill is idempotent: path_id is derived deterministically from edge_id
@@ -29,7 +29,7 @@
 -- matches a cutover-minted `co_recalled` row for the same pair; without it a
 -- pre-spine `recalls` edge and the cutover `co_recalled` path would both
 -- survive, doubling the associative recall weight for one pair.
--- cross-file ref: packages/core/src/path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE
+-- cross-file ref: packages/core/src/path-graph/path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE
 -- cross-file ref: packages/protocol/src/soul/memory-graph.ts mapRelationKindToGraphEdgeType
 --
 -- invariant: graph support / recalls counts consume the MAPPED graph edge_type,
@@ -44,7 +44,7 @@
 -- UNSORTED while the live co_recalled producer mints SORTED low->high). Non-
 -- recalls edge_types map 1:1 to their own graph edge_type AND are directional,
 -- so they keep the narrower same-kind, same-orientation dedup.
--- cross-file ref: packages/core/src/graph-explore-service.ts (mapped-type support/recall counts)
+-- cross-file ref: packages/core/src/path-graph/graph-explore-service.ts (mapped-type support/recall counts)
 --
 -- Defensive backfill: a corrupt or externally-mutated local DB (an FK-orphaned
 -- legacy row, or an edge_type outside the migration-017 CHECK set that slipped
@@ -194,8 +194,8 @@ WHERE e.backfill_rank = 1
       -- associative path and graph_support double-counts the recall weight.
       -- The DIRECTIONAL kinds keep same-orientation-only dedup: for them a
       -- reverse-oriented path is a DISTINCT edge, not a duplicate.
-      -- cross-file ref: packages/storage/src/repos/edge-proposal-repo.ts listAcceptedAwaitingPath (matches either orientation)
-      -- cross-file ref: packages/core/src/path-relation-proposal-service.ts anchorPointsAt / accrueCoOccurrence
+      -- cross-file ref: packages/storage/src/repos/path/edge-proposal-repo.ts listAcceptedAwaitingPath (matches either orientation)
+      -- cross-file ref: packages/core/src/path-graph/path-relation-proposal-service.ts anchorPointsAt / accrueCoOccurrence
       AND (
         (
           json_extract(p.anchors_json, '$.source_anchor.object_id') = e.source_memory_id

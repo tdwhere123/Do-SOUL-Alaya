@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
   listAlayaMemoryTools
-} from "../mcp-memory-tool-catalog.js";
+} from "../mcp-memory/tool-catalog.js";
 import type {
   McpMemoryToolCallContext,
   McpMemoryToolHandler
-} from "../mcp-memory-tool-handler.js";
+} from "../mcp-memory/tool-handler.js";
 import {
   ALAYA_SYSEXITS,
   type AlayaCliArgsSchema,

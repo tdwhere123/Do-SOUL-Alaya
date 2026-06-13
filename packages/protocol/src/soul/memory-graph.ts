@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
 
 // invariant: `co_recalled` is intentionally EXCLUDED from this enum. It is a
 // PathRelation relation_kind (the auto-build associative carrier) that projects
@@ -9,9 +9,9 @@ import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primiti
 // relation_kind === "co_recalled", a value that no graph edge_type ever takes,
 // so adding co_recalled here would let a generic graph edge masquerade as the
 // earned fan-in carrier. A future edit that adds it trips the contract test.
-// see also: mapRelationKindToGraphEdgeType, recall-service.ts
-//   EARNED_CO_RECALLED_FANIN_RELATION_KIND;
-//   packages/protocol/src/__tests__/memory-graph-co-recalled-invariant.test.ts.
+// see also: packages/protocol/src/soul/memory-graph.ts:mapRelationKindToGraphEdgeType,
+//   packages/core/src/recall/graph-expansion.ts:EARNED_CO_RECALLED_FANIN_RELATION_KIND,
+//   packages/protocol/src/__tests__/soul/memory-graph-co-recalled-invariant.test.ts.
 const memoryGraphEdgeTypeValues = [
   "supports",
   "derives_from",
@@ -63,7 +63,7 @@ export const MemoryGraphEdgeTypeSchema = z.enum(memoryGraphEdgeTypeValues);
 // governance-gated active-suppression channel in recall-service.ts, not in
 // this aggregate. The resulting positive-only sum is clamped to [0, 3] by
 // `normalizeGraphSupport`; the upper clamp matches the rest of the score range.
-// see also: packages/core/src/graph-explore-service.ts
+// see also: packages/core/src/path-graph/graph-explore-service.ts
 //   (countInbound* positive-only filter via isPathRecallEligible).
 //
 // invariant: RECALLS edge accumulation can saturate graph_support once

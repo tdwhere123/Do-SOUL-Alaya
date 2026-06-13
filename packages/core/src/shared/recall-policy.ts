@@ -1,5 +1,5 @@
 import { RecallPolicySchema, type RecallPolicy } from "@do-soul/alaya-protocol";
-import { CoreError } from "../errors.js";
+import { CoreError } from "./errors.js";
 
 export function parseRecallPolicy(value: RecallPolicy): Readonly<RecallPolicy> {
   try {
