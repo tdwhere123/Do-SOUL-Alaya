@@ -224,7 +224,20 @@ type PathLifecycleWithStatus = PathRelation["lifecycle"] & {
   readonly status?: PathLifecycleStatus;
 };
 
+// Memoized parse cap: clears wholesale when exceeded (rare; entries are small).
+const PARSED_ROW_CACHE_MAX = 50_000;
+
 export class SqlitePathRelationRepo implements PathRelationRepo {
+  // Parsed rows keyed by path_id, validated against updated_at on every hit.
+  // Recall's governance-ceiling and path-expansion stages re-read most of the
+  // edge table per query; rows are immutable between mutations, so re-running
+  // the deep zod parse on every read dominated recall CPU. In-process mutations
+  // evict below; the daemon is the single writer-of-record for this DB.
+  private readonly parsedRowCache = new Map<
+    string,
+    { readonly updatedAt: string; readonly relation: Readonly<PathRelation> }
+  >();
+
   private readonly createStatement;
   private readonly updateStatement;
   private readonly findByIdStatement;
@@ -318,6 +331,41 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     `);
   }
 
+  private parseRowCached(row: PathRelationRow): Readonly<PathRelation> {
+    const cached = this.parsedRowCache.get(row.path_id);
+    if (cached !== undefined && cached.updatedAt === row.updated_at) {
+      return cached.relation;
+    }
+    const relation = parsePathRelationRow(row);
+    if (this.parsedRowCache.size >= PARSED_ROW_CACHE_MAX) {
+      this.parsedRowCache.clear();
+    }
+    this.parsedRowCache.set(row.path_id, { updatedAt: row.updated_at, relation });
+    return relation;
+  }
+
+  private parseRowsCached(
+    rows: readonly PathRelationRow[],
+    options: {
+      readonly dedupe?: boolean;
+    } = {}
+  ): readonly Readonly<PathRelation>[] {
+    const relations = rows.map((row) => this.parseRowCached(row));
+
+    if (!options.dedupe) {
+      return deepFreeze(relations);
+    }
+
+    const deduped = new Map<string, Readonly<PathRelation>>();
+    for (const relation of relations) {
+      deduped.set(relation.path_id, relation);
+    }
+
+    return deepFreeze(
+      [...deduped.values()].sort((left, right) => comparePathRelationOrder(left, right))
+    );
+  }
+
   public create(relation: PathRelation): Readonly<PathRelation> {
     const parsedRelation = parsePathRelation(relation);
 
@@ -360,7 +408,8 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       );
     }
 
-    return parsePathRelationRow(row);
+    this.parsedRowCache.delete(parsedRelation.path_id);
+    return this.parseRowCached(row);
   }
 
   /**
@@ -390,7 +439,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       throw new StorageError("NOT_FOUND", `Path relation ${parsedPathId} was not found.`);
     }
 
-    const existing = parsePathRelationRow(existingRow);
+    const existing = this.parseRowCached(existingRow);
 
     const nextRelation = parsePathRelation({
       ...existing,
@@ -446,7 +495,10 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       );
     }
 
-    return parsePathRelationRow(updatedRow);
+    // Evict before re-parsing: callers may update fields without bumping
+    // updated_at, which the cache key alone would mistake for an unchanged row.
+    this.parsedRowCache.delete(parsedPathId);
+    return this.parseRowCached(updatedRow);
   }
 
   public async findById(pathId: string): Promise<Readonly<PathRelation> | null> {
@@ -454,7 +506,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
 
     try {
       const row = this.findByIdStatement.get(parsedPathId) as PathRelationRow | undefined;
-      return row === undefined ? null : parsePathRelationRow(row);
+      return row === undefined ? null : this.parseRowCached(row);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -469,7 +521,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
 
     try {
       const rows = this.findByWorkspaceStatement.all(parsedWorkspaceId) as PathRelationRow[];
-      return parsePathRelationRows(rows);
+      return this.parseRowsCached(rows);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -494,7 +546,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     try {
       const sourceRows = this.findBySourceAnchorStatement.all(parsedWorkspaceId, anchorKey) as PathRelationRow[];
       const targetRows = this.findByTargetAnchorStatement.all(parsedWorkspaceId, anchorKey) as PathRelationRow[];
-      return parsePathRelationRows([...sourceRows, ...targetRows], { dedupe: true });
+      return this.parseRowsCached([...sourceRows, ...targetRows], { dedupe: true });
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -519,7 +571,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
 
     try {
       const rows = this.findByTargetAnchorStatement.all(parsedWorkspaceId, anchorKey) as PathRelationRow[];
-      return parsePathRelationRows(rows);
+      return this.parseRowsCached(rows);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -548,7 +600,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
         ...anchorKeys,
         ...anchorKeys
       ) as PathRelationRow[];
-      return parsePathRelationRows(rows, { dedupe: true });
+      return this.parseRowsCached(rows, { dedupe: true });
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -572,7 +624,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
         parsedWorkspaceId,
         parsedObjectId
       ) as PathRelationRow[];
-      return parsePathRelationRows(rows, { dedupe: true });
+      return this.parseRowsCached(rows, { dedupe: true });
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -591,7 +643,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
 
     try {
       const rows = this.findActiveStatement.all(parsedWorkspaceId) as PathRelationRow[];
-      return parsePathRelationRows(rows);
+      return this.parseRowsCached(rows);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -617,7 +669,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
         parsedWorkspaceId,
         parsedOlderThanIso
       ) as PathRelationRow[];
-      return parsePathRelationRows(rows);
+      return this.parseRowsCached(rows);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -639,6 +691,8 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to delete path relation ${parsedPathId}.`, error);
     }
+
+    this.parsedRowCache.delete(parsedPathId);
   }
 
   // Test-only seam: the SQL text the repo actually prepared for its anchor
@@ -706,28 +760,6 @@ function normalizeLifecycle(lifecycle: PathRelation["lifecycle"]): PathRelation[
     ...(lifecycle.cooldown_rule === undefined ? {} : { cooldown_rule: lifecycle.cooldown_rule }),
     ...(lifecycle.override_rule === undefined ? {} : { override_rule: lifecycle.override_rule })
   } as PathRelation["lifecycle"];
-}
-
-function parsePathRelationRows(
-  rows: readonly PathRelationRow[],
-  options: {
-    readonly dedupe?: boolean;
-  } = {}
-): readonly Readonly<PathRelation>[] {
-  const relations = rows.map((row) => parsePathRelationRow(row));
-
-  if (!options.dedupe) {
-    return deepFreeze(relations);
-  }
-
-  const deduped = new Map<string, Readonly<PathRelation>>();
-  for (const relation of relations) {
-    deduped.set(relation.path_id, relation);
-  }
-
-  return deepFreeze(
-    [...deduped.values()].sort((left, right) => comparePathRelationOrder(left, right))
-  );
 }
 
 function comparePathRelationOrder(left: Readonly<PathRelation>, right: Readonly<PathRelation>): number {

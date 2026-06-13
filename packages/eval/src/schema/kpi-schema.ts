@@ -251,6 +251,22 @@ const PathVsGraphFaninSchema = z
   })
   .strict();
 
+// @anchor full-gold-coverage: the honest multi-fact recall口径. r_at_5 is
+// official-hit (ANY gold session in top-5) and runs high even when most gold is
+// missing; a multi-fact question needs ALL its gold delivered. full_gold_at_5 =
+// fraction of gold-bearing questions with EVERY gold memory in top-5;
+// gold_coverage_at_5 = mean delivered-gold fraction. Denominator excludes
+// abstention questions (no gold). see memory r5-dual-kpi-trap.
+const FullGoldCoverageSchema = z
+  .object({
+    gold_bearing_questions: z.number().int().nonnegative(),
+    full_gold_at_5: RatioSchema,
+    full_gold_at_10: RatioSchema,
+    gold_coverage_at_5: RatioSchema,
+    gold_coverage_at_10: RatioSchema
+  })
+  .strict();
+
 // @anchor longmemeval-gold-rank-buckets: per-answerable-question best-gold
 // rank distribution. delivered_top5 == hit@5; the pre_budget_* buckets place
 // the best gold's pre-budget rank for misses. Heavy 6-25 mass = rerank
@@ -577,6 +593,9 @@ const KpiCoreSchema = z.object({
   r_at_10: RatioSchema,
   r_at_5_overall: RatioSchema.optional(),
   r_at_5_with_embedding_returned: RatioSchema.optional(),
+  // Optional so older kpi.json records stay schema-valid; LongMemEval runs
+  // populate it. The honest multi-fact口径 vs the official-hit r_at_5.
+  full_gold_coverage: FullGoldCoverageSchema.optional(),
   r_at_5_round_1: RatioSchema.optional(),
   r_at_5_round_2: RatioSchema.optional(),
   r_at_5_round_n: RatioSchema.optional(),

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { RevokeReason, StorageTier } from "@do-soul/alaya-protocol";
+import {
+  RevokeReason,
+  StorageTier,
+  type EventLogEntry,
+  type MemoryEntry
+} from "@do-soul/alaya-protocol";
 import { MemoryService, type MemoryServiceDependencies } from "../../memory/memory-service.js";
 import {
   createDependencies,

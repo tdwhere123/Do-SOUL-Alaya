@@ -733,6 +733,26 @@ export async function createRecallMaterializationWiring(input: {
       };
     }
   };
+  // Production ingest config: keep high-confidence facts whose open-vocabulary
+  // object_kind falls outside routeByObjectKind as recallable memory_entries
+  // (rather than dropping them to evidence_only). The bench daemon shares this
+  // construction, so the benchmark exercises whatever production is configured
+  // to do. Default-ON (operator decision 2026-06-12): real proposers emit open
+  // vocabulary, and dropping those facts made the memory plane forget ~99.9%
+  // of them. Set ALAYA_RETAIN_UNROUTED_FACTS=0 to restore curated-only routing.
+  const retainUnroutedHighConfidenceFacts =
+    process.env.ALAYA_RETAIN_UNROUTED_FACTS !== "0" &&
+    process.env.ALAYA_RETAIN_UNROUTED_FACTS !== "false";
+  // Optional override for the materialization confidence floor (default 0.5).
+  const materializationConfidenceFloorRaw = Number(
+    process.env.ALAYA_MATERIALIZATION_CONF_FLOOR
+  );
+  const materializationConfidenceFloor =
+    Number.isFinite(materializationConfidenceFloorRaw) &&
+    materializationConfidenceFloorRaw >= 0 &&
+    materializationConfidenceFloorRaw <= 1
+      ? materializationConfidenceFloorRaw
+      : undefined;
   const materializationRouter = new MaterializationRouter({
     evidenceService: input.evidenceService,
     memoryService: materializationMemoryService,
@@ -750,7 +770,11 @@ export async function createRecallMaterializationWiring(input: {
     ...(reconciliationService === null
       ? {}
       : { reconciliationPort: reconciliationService }),
-    handoffGapHandler: sqliteHandoffGapAdapter
+    handoffGapHandler: sqliteHandoffGapAdapter,
+    retainUnroutedHighConfidenceFacts,
+    ...(materializationConfidenceFloor === undefined
+      ? {}
+      : { materializationConfidenceFloor })
   });
   const signalService = new SignalService({
     eventLogRepo: input.eventLogRepo as never,

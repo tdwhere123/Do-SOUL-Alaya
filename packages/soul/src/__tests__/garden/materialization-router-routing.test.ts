@@ -120,6 +120,47 @@ describe("MaterializationRouter routing-by-object_kind", () => {
     expect(target.route_target).toBe("evidence_only");
   });
 
+  it("retains an unknown object_kind high-confidence claim as memory_entry_only when retainUnroutedHighConfidenceFacts is set", () => {
+    const router = new MaterializationRouter({
+      ...createDeps(),
+      retainUnroutedHighConfidenceFacts: true
+    });
+
+    const target = router.route(
+      createSignal({
+        object_kind: "totally_unknown_kind",
+        signal_kind: "potential_claim",
+        confidence: 0.95,
+        evidence_refs: ["msg-1", "msg-2"]
+      })
+    );
+
+    // The open-vocabulary fact stays recallable (memory_entry, no draft claim)
+    // instead of dropping to evidence_only — the production ingest the bench
+    // now exercises after dropping the seed-side canonicalize-to-`fact` mask.
+    expect(target.route_target).toBe("memory_entry_only");
+  });
+
+  it("still defers a low-confidence unknown object_kind even when retainUnroutedHighConfidenceFacts is set", () => {
+    const router = new MaterializationRouter({
+      ...createDeps(),
+      retainUnroutedHighConfidenceFacts: true
+    });
+
+    const target = router.route(
+      createSignal({
+        object_kind: "totally_unknown_kind",
+        signal_kind: "potential_claim",
+        confidence: 0.2,
+        evidence_refs: ["msg-1"]
+      })
+    );
+
+    // retain only covers the high-confidence (>=0.5) branch; the confidence
+    // gate below 0.3 still defers.
+    expect(target.route_target).toBe("deferred");
+  });
+
   it("routes unknown object_kind under potential_preference to evidence_only at high confidence", () => {
     const router = new MaterializationRouter(createDeps());
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { WorkerBaselineLock } from "@do-soul/alaya-protocol";
+import type { DelegatedWorkerRun, WorkerBaselineLock } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import { IntegrationGatePublicationError } from "../../security/integration-gate.js";
 import {

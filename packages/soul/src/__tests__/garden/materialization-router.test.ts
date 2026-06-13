@@ -4,7 +4,13 @@ import {
   MaterializationRouter,
   normalizeSchemaGroundedSignal
 } from "@do-soul/alaya-soul";
-import { type EnqueueFn, createDeps, createRouter, createSignal } from "./materialization-router-fixture.js";
+import {
+  type EnqueueFn,
+  type MockCreatedObjectWithEnrich,
+  createDeps,
+  createRouter,
+  createSignal
+} from "./materialization-router-fixture.js";
 
 describe("MaterializationRouter", () => {
   it("routes potential_claim to memory_and_claim when confidence and evidence thresholds pass", () => {

@@ -4,7 +4,8 @@ import {
   ScopeClass,
 } from "@do-soul/alaya-protocol";
 import {
-  createMcpMemoryToolHandler
+  createMcpMemoryToolHandler,
+  type McpMemoryToolHandlerDependencies
 } from "../../mcp-memory/tool-handler.js";
 import {
   context,

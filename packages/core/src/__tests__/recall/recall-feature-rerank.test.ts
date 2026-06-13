@@ -3,11 +3,16 @@ import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 import {
   RECALL_RERANK_EVIDENCE_ONLY_FACTOR,
   RECALL_RERANK_TOP_N,
+  type RerankCandidate,
   buildRerankPoolIdf,
   computeRerankFeatures,
   rerankTopN
 } from "../../recall/recall-feature-rerank.js";
-import { candidate, ids } from "./recall-feature-rerank-test-fixtures.js";
+import {
+  type FakeCandidate,
+  candidate,
+  ids
+} from "./recall-feature-rerank-test-fixtures.js";
 
 describe("recall feature rerank — computeRerankFeatures", () => {
   it("awards exact-phrase credit on a verbatim query span", () => {

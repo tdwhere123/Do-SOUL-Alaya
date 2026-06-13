@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind,
@@ -173,7 +174,18 @@ export async function runLongMemEvalQuestion(input: {
             objectKind: "memory_entry",
             sessionId,
             hasAnswer: round.hasAnswer,
-            ...(input.qaChat === undefined ? {} : { content: round.content })
+            // Carry content (+ event date) when QA is on OR a pool dump is
+            // requested (offline rerank/coverage analysis needs candidate text +
+            // event date). Off on both => omitted.
+            ...(input.qaChat === undefined &&
+            process.env.ALAYA_BENCH_POOL_DUMP === undefined
+              ? {}
+              : {
+                  content: round.content,
+                  ...(input.question.haystack_dates[si] === undefined
+                    ? {}
+                    : { eventDate: input.question.haystack_dates[si] })
+                })
           });
           sessionTurns.push({
             turnContent: round.content,
@@ -277,19 +289,94 @@ export async function runLongMemEvalQuestion(input: {
       score_factors: pointer.score_factors ?? null
     }));
 
+    // Diagnostic: where do this question's gold memories rank in the full
+    // (maxK-capped) recall list? Distinguishes "gold just past rank 10"
+    // (coverage) from "gold missing entirely" (ranking miss). Default off.
+    if (process.env.ALAYA_BENCH_GOLD_RANK_DUMP !== undefined) {
+      const rankById = new Map(results.map((p, i) => [p.object_id, i + 1]));
+      const ranks = goldMemoryIds
+        .map((id) => rankById.get(id) ?? -1)
+        .sort((a, b) => (a < 0 ? 1 : b < 0 ? -1 : a - b));
+      const inK = ranks.filter((r) => r > 0).length;
+      // Per gold session: the BEST (min) rank among its gold members. A session
+      // with no ranked member (best=-1) has NO foothold in the candidate pool.
+      const sessionBest = new Map<string, number>();
+      for (const id of goldMemoryIds) {
+        const sid =
+          sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id))?.sessionId ?? "?";
+        const r = rankById.get(id) ?? -1;
+        const cur = sessionBest.get(sid);
+        if (cur === undefined || (r > 0 && (cur < 0 || r < cur))) sessionBest.set(sid, r);
+      }
+      const footholds = [...sessionBest.values()].filter((r) => r > 0).length;
+      console.error(
+        `[gold-rank] q=${input.question.question_id} sess=${input.question.answer_session_ids.length} ` +
+          `gold=${goldMemoryIds.length} inK=${inK} ranks=[${ranks.join(",")}] ` +
+          `sessFootholds=${footholds}/${sessionBest.size} ` +
+          `sessBest=[${[...sessionBest.values()].sort((a, b) => (a < 0 ? 1 : b < 0 ? -1 : a - b)).join(",")}]`
+      );
+    }
+
+    // Diagnostic: dump the FULL ranked candidate pool (content + gold flag +
+    // event date + fusion rank) as JSONL for offline re-ranking experiments.
+    // API-free (recall only). Default off; set ALAYA_BENCH_POOL_DUMP to a path.
+    if (process.env.ALAYA_BENCH_POOL_DUMP !== undefined) {
+      const goldSet = new Set(goldMemoryIds);
+      const candidates = results.map((p, i) => {
+        const entry = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", p.object_id));
+        return {
+          rank: i + 1,
+          objectId: p.object_id,
+          isGold: goldSet.has(p.object_id),
+          sessionId: entry?.sessionId ?? null,
+          eventDate: entry?.eventDate ?? null,
+          content: (entry?.content ?? "").replace(/\s+/gu, " ").slice(0, 400)
+        };
+      });
+      appendFileSync(
+        process.env.ALAYA_BENCH_POOL_DUMP,
+        JSON.stringify({
+          questionId: input.question.question_id,
+          questionType: input.question.question_type,
+          question: input.question.question,
+          questionDate: input.question.question_date,
+          goldAnswer: input.question.answer,
+          goldCount: goldMemoryIds.length,
+          poolSize: results.length,
+          candidates
+        }) + "\n"
+      );
+    }
+
     let qaVerdict: QaQuestionVerdict | undefined;
     if (input.qaChat !== undefined) {
-      const delivered: QaDeliveredCandidate[] = deliveredResults
+      let delivered: QaDeliveredCandidate[] = deliveredResults
         .filter(
           (result) => (result.object_kind ?? "memory_entry") === "memory_entry"
         )
-        .map((result) => ({
-          objectId: result.object_id,
-          content:
-            sidecar.get(
-              buildLongMemEvalSidecarKey("memory_entry", result.object_id)
-            )?.content ?? ""
-        }));
+        .map((result) => {
+          const entry = sidecar.get(
+            buildLongMemEvalSidecarKey("memory_entry", result.object_id)
+          );
+          return {
+            objectId: result.object_id,
+            content: entry?.content ?? "",
+            ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+          };
+        });
+      // Diagnostic oracle: replace delivered recall with ONLY the materialized
+      // gold memories (no distractors), to isolate ingestion-drop from recall
+      // ranking/noise. Gold not materialized at ingestion is absent here too.
+      if (process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined) {
+        delivered = goldMemoryIds.map((id) => {
+          const entry = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id));
+          return {
+            objectId: id,
+            content: entry?.content ?? "",
+            ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+          };
+        });
+      }
       qaVerdict = await scoreQaQuestion(
         {
           questionId: input.question.question_id,

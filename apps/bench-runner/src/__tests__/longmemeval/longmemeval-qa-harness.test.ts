@@ -46,6 +46,19 @@ describe("qa-harness context stitching", () => {
     const ctx = buildQaAnswerContext([{ objectId: "a", content: long }]);
     expect(ctx.length).toBe(20_000);
   });
+
+  it("prefixes each candidate with its event date when present, drops empty", () => {
+    const ctx = buildQaAnswerContext([
+      { objectId: "a", content: "visited MoMA", eventDate: "2023/01/08 (Sun) 12:49" },
+      { objectId: "b", content: "", eventDate: "2023/01/10 (Tue) 09:00" },
+      { objectId: "c", content: "no date fact" }
+    ]);
+    // dated candidate gets a [Recorded on …] anchor; empty content is dropped
+    // even with a date; an undated candidate stays bare (back-compat).
+    expect(ctx).toBe(
+      "[Recorded on 2023/01/08 (Sun) 12:49]\nvisited MoMA\n\nno date fact"
+    );
+  });
 });
 
 describe("qa-harness judge verdict (one-word yes/no)", () => {

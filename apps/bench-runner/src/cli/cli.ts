@@ -418,6 +418,11 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
         `  Policy shape: ${result.payload.policy_shape ?? "stress"}\n` +
         `  Simulate report: ${result.payload.simulate_report ?? "none"}\n` +
         `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
+        (kpi.full_gold_coverage === undefined
+          ? ""
+          : `  full-gold@5=${pct(kpi.full_gold_coverage.full_gold_at_5)} ` +
+            `cov@5=${pct(kpi.full_gold_coverage.gold_coverage_at_5)} ` +
+            `(official R@5 counts ANY gold; this needs ALL ${kpi.full_gold_coverage.gold_bearing_questions}q)\n`) +
         (kpi.qa_metrics === undefined
           ? ""
           : `  QA accuracy=${pct(kpi.qa_metrics.qa_accuracy)} ` +
@@ -547,7 +552,8 @@ async function runLocomoCommand(opts: ParsedFlags): Promise<number> {
       historyRoot: opts.historyRoot,
       dataDir: opts.dataDir,
       embeddingMode: opts.embeddingMode,
-      embeddingProviderKind: opts.embeddingProviderKind
+      embeddingProviderKind: opts.embeddingProviderKind,
+      ...(opts.qa ? { qa: { chat: createGardenChatFn(resolveQaChatConfig()) } } : {})
     });
     const kpi = result.payload.kpi;
     process.stdout.write(

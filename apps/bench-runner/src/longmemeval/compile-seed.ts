@@ -72,10 +72,7 @@ import type {
   SeededMemoryResult,
   SeededSynthesisResult
 } from "../harness/daemon.js";
-import {
-  canonicalizeSeedObjectKind,
-  rotatingSeedObjectKind
-} from "../harness/seed-rotation.js";
+import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import { isUnscoredMaterializedSeedError } from "../harness/seed-errors.js";
 export {
   buildSessionSynthesisInput,
@@ -540,20 +537,18 @@ async function extractSeedInputs(input: {
       continue;
     }
     const matchedText = readRawString(signal.raw_payload, "matched_text");
-    // invariant: the production compile() LLM emits a free-form object_kind
-    // (travel_itinerary / podcast / health_advice / …). MaterializationRouter
-    // routeByObjectKind only mints a memory_entry for its enumerated
-    // dimension table; any other kind on a high-confidence
-    // potential_claim / potential_preference signal routes to evidence_only
-    // — an evidence_capsule with NO memory_entry — so the seeded turn fact
-    // never lands in the recall store. Canonicalize the kind onto a
-    // memory_entry-producing route; preserve the LLM's choice in
-    // raw_payload.extracted_object_kind for audit fidelity.
-    // see also: apps/bench-runner/src/harness/seed-rotation.ts
-    //   canonicalizeSeedObjectKind
-    // see also: packages/soul/src/garden/materialization-router/inputs.ts
-    //   routeByObjectKind
-    const seedObjectKind = canonicalizeSeedObjectKind(signal.object_kind);
+    // The production compile() LLM emits a free-form object_kind
+    // (travel_itinerary / podcast / health_advice / …). The bench seeds the
+    // REAL extracted kind so the benchmark exercises the production
+    // MaterializationRouter exactly: an unrouted kind on a high-confidence
+    // claim/preference materializes a recallable memory_entry only when the
+    // daemon runs with retainUnroutedHighConfidenceFacts, and otherwise drops
+    // to evidence_only just as production does. (Previously the bench
+    // canonicalized the kind onto `fact` to force materialization — that
+    // masked the real production ingest drop, so the bench no longer does it.)
+    // see also: packages/soul/src/garden/materialization-router/router.ts
+    //   routeByObjectKind / retainUnroutedHighConfidenceFacts
+    const seedObjectKind = signal.object_kind;
     drafts.push({
       signalKind: signal.signal_kind,
       objectKind: seedObjectKind,

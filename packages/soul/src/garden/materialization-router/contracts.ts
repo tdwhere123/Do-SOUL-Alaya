@@ -360,4 +360,18 @@ export interface MaterializationRouterDeps {
   // to the BULK_ENRICH worker. see also: materializeConflictEvaluation.
   readonly conflictDetectionPort?: ConflictDetectionPort;
   readonly reconciliationPort?: ReconciliationPort;
+  // When true, a high-confidence potential_claim/potential_preference whose
+  // free-form object_kind is outside routeByObjectKind is kept as a recallable
+  // memory_entry (memory_entry_only — no draft claim) instead of dropped to
+  // evidence_only. Aligns production ingest with the open-vocabulary extractor
+  // (which emits ~10^5 distinct kinds, ~99.9% outside the 13-kind table). The
+  // bench seeds every haystack turn, so production must retain these facts for
+  // the bench to test production. Default-off preserves curated behavior.
+  readonly retainUnroutedHighConfidenceFacts?: boolean;
+  // Minimum confidence for a potential_claim/potential_preference to materialize
+  // (default 0.5). Lowering it recovers facts the open-vocabulary extractor
+  // emitted with moderate confidence (the 0.3-0.5 band, ~10% of signals) that
+  // would otherwise be archived to evidence_only. Trades curation for recall;
+  // shared by prod + bench via the single daemon construction.
+  readonly materializationConfidenceFloor?: number;
 }

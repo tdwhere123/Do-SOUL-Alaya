@@ -119,9 +119,11 @@ export class MaterializationRouter {
       };
     }
 
+    const materializationConfidenceFloor =
+      this.dependencies.materializationConfidenceFloor ?? 0.5;
     if (
       (signal.signal_kind === "potential_claim" || signal.signal_kind === "potential_preference") &&
-      signal.confidence >= 0.5
+      signal.confidence >= materializationConfidenceFloor
     ) {
       const objectKindRoute = routeByObjectKind(signal.object_kind);
       if (objectKindRoute !== null) {
@@ -132,6 +134,16 @@ export class MaterializationRouter {
       // collapse the routing table was meant to break. Known claim-
       // capable dimensions are enumerated in routeByObjectKind; anything
       // outside the table is archived as questionable evidence only.
+      // retainUnroutedHighConfidenceFacts keeps the fact recallable as a
+      // memory_entry_only (a memory with NO draft claim, so the claim/
+      // governance surface stays unpolluted) — the same route `fact` takes.
+      if (this.dependencies.retainUnroutedHighConfidenceFacts === true) {
+        return {
+          kind: "evidence_only",
+          route_target: "memory_entry_only",
+          routing_reason: `high-confidence ${signal.signal_kind} with unrouted object_kind=${signal.object_kind} -> memory_entry_only (retain-unrouted-facts)`
+        };
+      }
       return {
         kind: "evidence_only",
         route_target: "evidence_only",

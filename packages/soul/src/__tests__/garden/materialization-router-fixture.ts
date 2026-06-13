@@ -12,7 +12,9 @@ type EvidenceCreate = MaterializationRouterDeps["evidenceService"]["create"];
 type MemoryCreate = MaterializationRouterDeps["memoryService"]["create"];
 type SynthesisCreate = MaterializationRouterDeps["synthesisService"]["create"];
 type ClaimCreate = MaterializationRouterDeps["claimService"]["create"];
-type SubmitCandidate = MaterializationRouterDeps["pathCandidateSinkPort"]["submitCandidate"];
+type SubmitCandidate = NonNullable<
+  MaterializationRouterDeps["pathCandidateSinkPort"]
+>["submitCandidate"];
 
 export type RunWithDecisionFn = NonNullable<
   MaterializationRouterDeps["reconciliationPort"]

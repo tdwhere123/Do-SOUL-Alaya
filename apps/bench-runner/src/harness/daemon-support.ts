@@ -278,6 +278,13 @@ export function buildBenchDiagnosticRecallPolicy(
     Math.max(coarseCandidateLimit, maxResults * 10, 1),
     1000
   );
+  // Diagnostic-only delivery token budget. Default 2000 = production口径; a wide
+  // override lets a probe deliver the full ranked pool so gold-rank can tell
+  // in-pool-ranked-low from absent-from-pool. No fusion-weight change.
+  const maxTotalTokens = Math.max(
+    2000,
+    Math.floor(Number(process.env.ALAYA_BENCH_RECALL_MAX_TOKENS ?? "2000")) || 2000
+  );
   return {
     runtime_id: randomUUID(),
     object_kind: ControlPlaneObjectKind.RECALL_POLICY,
@@ -303,7 +310,7 @@ export function buildBenchDiagnosticRecallPolicy(
     },
     fine_assessment: {
       budgets: {
-        max_total_tokens: 2000,
+        max_total_tokens: maxTotalTokens,
         max_entries: maxResults,
         per_dimension_limits: null
       },

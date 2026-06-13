@@ -443,7 +443,7 @@ describe("cli inspect", () => {
     const spawnInspector = vi.fn(() => new FakeInspectorChild());
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
         if (url.endsWith("/health")) {
           return new Response(null, { status: 200 });

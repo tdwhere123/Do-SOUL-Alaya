@@ -83,7 +83,7 @@ import {
   aggregateQaVerdicts,
   type QaQuestionVerdict
 } from "./qa-harness.js";
-import type { QaChatFn } from "./qa-chat.js";
+import { QaChatError, type QaChatFn } from "./qa-chat.js";
 import {
   computePercentile,
   readLongMemEvalPinnedMeta,
@@ -309,28 +309,48 @@ export async function runLongMemEval(
       ...(seedDataDirRoot === undefined ? {} : { dataDirRoot: seedDataDirRoot }),
       recallWeightOverrides
     });
+    let questionFailures = 0;
     for (let i = 0; i < window.length; i++) {
       const q = window[i];
       if (q === undefined) continue;
-      const res = await runLongMemEvalQuestion({
-        daemon,
-        question: q,
-        turnIndex: i + 1,
-        seedRunner,
-        recallOptions,
-        simulateReport,
-        embeddingMode: opts.embeddingMode ?? "disabled",
-        embeddingProviderKind: opts.embeddingProviderKind ?? "openai",
-        captureSnapshot,
-        ...(opts.qa === undefined ? {} : { qaChat: opts.qa.chat })
-      });
-      collected.push(res);
-      if (captureSnapshot && res.snapshotQuestion !== undefined) {
-        snapshotQuestions.push(res.snapshotQuestion);
+      try {
+        const res = await runLongMemEvalQuestion({
+          daemon,
+          question: q,
+          turnIndex: i + 1,
+          seedRunner,
+          recallOptions,
+          simulateReport,
+          embeddingMode: opts.embeddingMode ?? "disabled",
+          embeddingProviderKind: opts.embeddingProviderKind ?? "openai",
+          captureSnapshot,
+          ...(opts.qa === undefined ? {} : { qaChat: opts.qa.chat })
+        });
+        collected.push(res);
+        if (captureSnapshot && res.snapshotQuestion !== undefined) {
+          snapshotQuestions.push(res.snapshotQuestion);
+        }
+        process.stdout.write(
+          `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
+            `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
+        );
+      } catch (err) {
+        // Resilience: skip only a transient QA-chat failure (an API error that
+        // survived its retries) so one bad question never aborts a multi-hour
+        // run. A fail-closed invariant (e.g. incomplete embedding cache) is
+        // re-thrown and still aborts. KPIs then cover the completed Qs.
+        if (!(err instanceof QaChatError)) throw err;
+        questionFailures += 1;
+        process.stderr.write(
+          `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} FAILED — ` +
+            `skipped: ${err.message}\n`
+        );
       }
+    }
+    if (questionFailures > 0) {
       process.stdout.write(
-        `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
-          `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
+        `[longmemeval] ${questionFailures}/${window.length} question(s) failed ` +
+          `and were skipped; KPIs cover the ${collected.length} completed.\n`
       );
     }
     // @anchor longmemeval-seed-then-snapshot: emit the recall-eval snapshot

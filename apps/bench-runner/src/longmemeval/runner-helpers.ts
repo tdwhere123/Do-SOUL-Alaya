@@ -63,6 +63,9 @@ export interface LongMemEvalSidecarEntry {
   readonly sessionId: string;
   readonly hasAnswer: boolean;
   readonly content?: string;
+  // Per-turn event date (haystack_dates[si]). Carried for the QA temporal answer
+  // context and the pool dump; only populated when QA or a pool dump is on.
+  readonly eventDate?: string;
 }
 
 export interface LongMemEvalHitScoringInput {
@@ -327,11 +330,19 @@ function labelEmbeddingProviderUrl(providerUrl: string): string {
   return "openai-compatible";
 }
 
+// Recall pool width. Default 10 (production口径). A wide override lets a
+// diagnostic probe (gold-rank / pool dump) see where buried gold ranks beyond
+// the delivery window; delivery itself stays top-10. No fusion-weight change.
+const BENCH_RECALL_MAXK = Math.max(
+  10,
+  Math.floor(Number(process.env.ALAYA_BENCH_RECALL_MAXK ?? "10")) || 10
+);
+
 export function recallOptionsForPolicyShape(
   policyShape: BenchPolicyShape
-): { readonly maxResults: 10; readonly conflictAwareness: boolean } {
+): { readonly maxResults: number; readonly conflictAwareness: boolean } {
   return {
-    maxResults: 10,
+    maxResults: BENCH_RECALL_MAXK,
     conflictAwareness: policyShape === "stress"
   };
 }
