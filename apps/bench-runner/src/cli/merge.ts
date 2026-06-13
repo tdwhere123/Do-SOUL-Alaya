@@ -27,7 +27,7 @@ import {
   readLongMemEvalDiagnosticsSidecar,
   renderLongMemEvalColdWarmComparisonSidecar,
   type LongMemEvalArchiveEvidenceSummary
-} from "./longmemeval/archive-evidence.js";
+} from "../longmemeval/archive-evidence.js";
 import {
   renderCompactDiagnosticsSidecar,
   renderDiagnosticsSidecar,
@@ -36,17 +36,17 @@ import {
   type LongMemEvalEmbeddingVectorCacheSummary,
   type LongMemEvalQueryEmbeddingCacheSummary,
   type LongMemEvalReportUsageSummary
-} from "./longmemeval/diagnostics.js";
-import { writeExternalDiagnosticsArtifact } from "./longmemeval/diagnostics-artifacts.js";
+} from "../longmemeval/diagnostics.js";
+import { writeExternalDiagnosticsArtifact } from "../longmemeval/diagnostics-artifacts.js";
 import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport,
   seedExtractionReleaseBlockerExitCode
-} from "./longmemeval/seed-extraction-release-blocker.js";
-import { mergeQualityMetrics } from "./cli-merge-quality.js";
-import { aggregateBenchTokenMetrics } from "./harness/token-economy.js";
-import type { BenchTokenMetrics } from "./harness/daemon.js";
-import { resolveBenchCommitSha7 } from "./shared/version.js";
+} from "../longmemeval/seed-extraction-release-blocker.js";
+import { mergeQualityMetrics } from "./merge-quality.js";
+import { aggregateBenchTokenMetrics } from "../harness/token-economy.js";
+import type { BenchTokenMetrics } from "../harness/daemon.js";
+import { resolveBenchCommitSha7 } from "../shared/version.js";
 
 export interface MergeLongMemEvalCommandOptions {
   readonly historyRoot: string;

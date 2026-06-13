@@ -1,5 +1,5 @@
 import type { KpiPayload, QualityMetrics } from "@do-soul/alaya-eval";
-import { buildPerPlaneRecallCoverage } from "./longmemeval/diagnostics.js";
+import { buildPerPlaneRecallCoverage } from "../longmemeval/diagnostics.js";
 
 function ratio(count: number, total: number): number {
   return total === 0 ? 0 : count / total;

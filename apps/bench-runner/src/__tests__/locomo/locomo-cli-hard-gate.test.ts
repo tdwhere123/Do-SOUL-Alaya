@@ -1,6 +1,6 @@
 import type { KpiPayload } from "@do-soul/alaya-eval";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runCli } from "../../cli.js";
+import { runCli } from "../../cli/index.js";
 import { runLocomo } from "../../locomo/runner.js";
 
 vi.mock("../../locomo/runner.js", () => ({

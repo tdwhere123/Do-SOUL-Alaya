@@ -3,13 +3,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { KpiPayload } from "@do-soul/alaya-eval";
-import { runCli } from "../../cli.js";
+import { runCli } from "../../cli/index.js";
 import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   LONGMEMEVAL_DIAGNOSTICS_FILENAME
 } from "../../longmemeval/archive-evidence.js";
 
-// @anchor merge-validation-tests: see apps/bench-runner/src/cli.ts
+// @anchor merge-validation-tests: see apps/bench-runner/src/cli/cli.ts
 // @anchor merge-shard-validations. Each test sets up two shard roots
 // containing minimally-valid kpi.json files and invokes the
 // merge-longmemeval subcommand. The merge must reject incompatible

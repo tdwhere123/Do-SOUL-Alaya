@@ -6,27 +6,27 @@ import {
   type BenchSimulateReportMode,
   type KpiPayload
 } from "@do-soul/alaya-eval";
-import { fetchLongMemEval } from "./longmemeval/fetch.js";
-import { runLongMemEvalMultiturn } from "./longmemeval/multiturn.js";
-import { runLongMemEvalCrossQuestion } from "./longmemeval/crossquestion.js";
-import { runLiveBench } from "./live/runner.js";
-import { runLongMemEval } from "./longmemeval/runner.js";
+import { fetchLongMemEval } from "../longmemeval/fetch.js";
+import { runLongMemEvalMultiturn } from "../longmemeval/multiturn.js";
+import { runLongMemEvalCrossQuestion } from "../longmemeval/crossquestion.js";
+import { runLiveBench } from "../live/runner.js";
+import { runLongMemEval } from "../longmemeval/runner.js";
 import {
   createGardenChatFn,
   resolveQaChatConfig
-} from "./longmemeval/qa-chat.js";
-import { runExtractionFill } from "./longmemeval/extraction-fill.js";
-import { runRecallEval } from "./longmemeval/recall-eval.js";
+} from "../longmemeval/qa-chat.js";
+import { runExtractionFill } from "../longmemeval/extraction-fill.js";
+import { runRecallEval } from "../longmemeval/recall-eval.js";
 import {
   seedExtractionReleaseBlockerExitCode
-} from "./longmemeval/seed-extraction-release-blocker.js";
-import { runSelfBench } from "./self/runner.js";
-import { fetchLocomo } from "./locomo/fetch.js";
-import { runLocomo } from "./locomo/runner.js";
-import { runControlledReplay } from "./controlled-replay/runner.js";
-import { runMergeLongMemEvalCommand } from "./cli-merge.js";
-import type { BenchEmbeddingMode, BenchEmbeddingProviderKind } from "./harness/daemon.js";
-import type { LongMemEvalVariant } from "./longmemeval/dataset.js";
+} from "../longmemeval/seed-extraction-release-blocker.js";
+import { runSelfBench } from "../self/runner.js";
+import { fetchLocomo } from "../locomo/fetch.js";
+import { runLocomo } from "../locomo/runner.js";
+import { runControlledReplay } from "../controlled-replay/runner.js";
+import { runMergeLongMemEvalCommand } from "./merge.js";
+import type { BenchEmbeddingMode, BenchEmbeddingProviderKind } from "../harness/daemon.js";
+import type { LongMemEvalVariant } from "../longmemeval/dataset.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 
