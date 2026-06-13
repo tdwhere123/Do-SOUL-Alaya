@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createInspectorApp, INSPECTOR_ROUTE_SURFACE } from "../../runtime/app.js";
+import {
+  createInspectorApp,
+  INSPECTOR_ROUTE_SURFACE,
+  MAX_INSPECTOR_REQUEST_BODY_BYTES
+} from "../../runtime/app.js";
 
 describe("inspector routes", () => {
   it("pins the frozen backend route surface", () => {
@@ -214,6 +218,108 @@ describe("inspector routes", () => {
     expect(await response.json()).toEqual({ error: "daemon_unavailable" });
   });
 
+  it("forwards request ids to the daemon and preserves them on the inspector response", async () => {
+    let forwardedRequestId: string | null = null;
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async (_input, init) => {
+        const headers = new Headers(init?.headers);
+        forwardedRequestId = headers.get("x-request-id");
+        return new Response(JSON.stringify({ success: true, data: { ok: true } }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-request-id": headers.get("x-request-id") ?? "missing"
+          }
+        });
+      }
+    });
+
+    const response = await app.request("/api/status?token=token", {
+      headers: { "x-request-id": "req-123" }
+    });
+
+    expect(response.status).toBe(200);
+    expect(forwardedRequestId).toBe("req-123");
+    expect(response.headers.get("x-request-id")).toBe("req-123");
+    expect(response.headers.get("x-correlation-id")).toBe("req-123");
+  });
+
+  it("rejects oversized inspector mutation bodies before proxying", async () => {
+    let called = false;
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async () => {
+        called = true;
+        return Response.json({ success: true, data: { ok: true } });
+      }
+    });
+
+    const response = await app.request(
+      createChunkedJsonRequest(
+        "http://localhost/api/proposals/ws1/memory/mem-1/rewrite?token=token",
+        JSON.stringify({ new_content: "x".repeat(MAX_INSPECTOR_REQUEST_BODY_BYTES) })
+      )
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: "request_body_too_large" });
+    expect(called).toBe(false);
+    expect(response.headers.get("x-request-id")).toBeTruthy();
+  });
+
+  it("rejects chunked oversized bodies on no-body inspector proposal actions before proxying", async () => {
+    let called = false;
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async () => {
+        called = true;
+        return Response.json({ success: true, data: { ok: true } });
+      }
+    });
+
+    const response = await app.request(
+      createChunkedJsonRequest(
+        "http://localhost/api/proposals/ws1/memory/mem-1/keep?token=token",
+        JSON.stringify({ payload: "x".repeat(MAX_INSPECTOR_REQUEST_BODY_BYTES) })
+      )
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: "request_body_too_large" });
+    expect(called).toBe(false);
+  });
+
+  it("rejects unexpected small bodies on no-body inspector proposal actions before proxying", async () => {
+    let called = false;
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async () => {
+        called = true;
+        return Response.json({ success: true, data: { ok: true } });
+      }
+    });
+
+    const response = await app.request(
+      createChunkedJsonRequest(
+        "http://localhost/api/proposals/ws1/memory/mem-1/keep?token=token",
+        JSON.stringify({ payload: "x" })
+      )
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
+    expect(called).toBe(false);
+  });
+
   it("sanitizes daemon validation errors for embedding paste requests", async () => {
     const plaintext = "sk-test-leaked-secret";
     const app = createInspectorApp({
@@ -346,8 +452,8 @@ describe("inspector routes", () => {
         url: "http://daemon.local/workspaces/ws1/proposals/pending?limit=10",
         method: "GET",
         body: null,
-        requestToken: null,
-        desktop: null
+        requestToken: "daemon-request-token",
+        desktop: "1"
       },
       {
         url: "http://daemon.local/workspaces/ws1/proposals/prop-1/review",
@@ -382,6 +488,7 @@ describe("inspector routes", () => {
       method: string;
       body: string | null;
       requestToken: string | null;
+      desktop: string | null;
     }[] = [];
     const app = createInspectorApp({
       token: "token",
@@ -395,7 +502,8 @@ describe("inspector routes", () => {
           url: String(input),
           method: init?.method ?? "GET",
           body: init?.body === undefined ? null : String(init.body),
-          requestToken: headers.get("x-request-token")
+          requestToken: headers.get("x-request-token"),
+          desktop: headers.get("x-alaya-desktop")
         });
         return Response.json({ success: true, data: { ok: true } });
       }
@@ -416,13 +524,15 @@ describe("inspector routes", () => {
         url: "http://daemon.local/workspaces/ws1/health-inbox?state=pending",
         method: "GET",
         body: null,
-        requestToken: null
+        requestToken: "daemon-request-token",
+        desktop: "1"
       },
       {
         url: "http://daemon.local/workspaces/ws1/soul/memory/mem-1/proposals/promote-strictly-governed",
         method: "POST",
         body: "{}",
-        requestToken: "daemon-request-token"
+        requestToken: "daemon-request-token",
+        desktop: "1"
       }
     ]);
   });
@@ -864,3 +974,25 @@ describe("inspector routes", () => {
     expect(calls).toEqual([]);
   });
 });
+
+function createChunkedJsonRequest(url: string, bodyText: string): Request {
+  const bytes = new TextEncoder().encode(bodyText);
+  let sent = false;
+
+  return new Request(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) {
+          controller.close();
+          return;
+        }
+        sent = true;
+        controller.enqueue(bytes);
+        controller.close();
+      }
+    }),
+    duplex: "half"
+  });
+}

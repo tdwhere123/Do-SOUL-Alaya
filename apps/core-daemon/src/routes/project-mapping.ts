@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { Hono } from "hono";
 import { CoreError, StrictConfirmationRequired } from "@do-soul/alaya-core";
+import { throwInvalidRequestBody } from "./shared.js";
 
 export interface ProjectMappingRouteServices {
   readonly workspaceService: WorkspaceService;
@@ -186,7 +187,7 @@ async function parseJsonObject(
   try {
     body = await readJson();
   } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid request body", { cause: error });
+    throwInvalidRequestBody(error);
   }
 
   if (body === null || typeof body !== "object" || Array.isArray(body)) {

@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import { CoreError, type BudgetBankruptcyService, type RunService } from "@do-soul/alaya-core";
+import { throwInvalidRequestBody } from "./shared.js";
 
 export interface BudgetRouteServices {
   readonly budgetBankruptcyService: BudgetBankruptcyService;
@@ -41,7 +42,7 @@ async function parseResolveBody(readJson: () => Promise< unknown>): Promise<{
   try {
     body = await readJson();
   } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid request body", { cause: error });
+    throwInvalidRequestBody(error);
   }
 
   if (body === null || typeof body !== "object") {

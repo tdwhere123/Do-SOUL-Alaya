@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
@@ -57,11 +57,15 @@ import { registerWorkspaceFileRoutes, type WorkspaceFilesRouteServices } from ".
 import { registerWorkspaceRoutes, type WorkspaceRouteServices } from "../routes/workspaces.js";
 
 export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
+export const MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
+export const REQUEST_ID_HEADER = "x-request-id";
+export const CORRELATION_ID_HEADER = "x-correlation-id";
 
 export interface RequestProtectionConfig {
   readonly allowedOrigin: string;
   readonly requestToken: string;
   readonly allowDesktopOriginlessRequests?: boolean;
+  readonly tokenSource?: "env" | "ephemeral";
 }
 
 export interface CoreDaemonServices {
@@ -128,6 +132,21 @@ export function createApp(
 ): Hono {
   const app = new Hono();
 
+  app.use("*", async (context, next) => {
+    const requestId = resolveRequestId(
+      context.req.header(REQUEST_ID_HEADER),
+      context.req.header(CORRELATION_ID_HEADER)
+    );
+    const requestScopedContext = context as typeof context & {
+      set(name: string, value: string): void;
+    };
+    requestScopedContext.set("requestId", requestId);
+    requestScopedContext.set("correlationId", requestId);
+    context.header(REQUEST_ID_HEADER, requestId);
+    context.header(CORRELATION_ID_HEADER, requestId);
+    await next();
+  });
+
   if (lifecycle !== undefined) {
     app.use("*", async (context, next) => {
       // Liveness must stay green during graceful drain so the orchestrator
@@ -166,7 +185,17 @@ export function createApp(
         413
       )
   });
-
+  const requestBodyLimit = bodyLimit({
+    maxSize: MAX_REQUEST_BODY_BYTES,
+    onError: (context) =>
+      context.json(
+        {
+          success: false,
+          error: "Request body exceeds the 10 MB limit"
+        },
+        413
+      )
+  });
   app.use(
     "*",
     cors({
@@ -179,7 +208,14 @@ export function createApp(
 
         return "";
       },
-      allowHeaders: ["Content-Type", "X-Request-Token", "X-Alaya-Desktop"]
+      allowHeaders: [
+        "Content-Type",
+        "X-Request-Token",
+        "X-Alaya-Desktop",
+        "X-Request-Id",
+        "X-Correlation-Id"
+      ],
+      exposeHeaders: ["X-Request-Id", "X-Correlation-Id"]
     })
   );
 
@@ -187,7 +223,7 @@ export function createApp(
     const { requestToken } = services.requestProtection;
 
     app.use("*", async (context, next) => {
-      if (!isProtectedRequest(context.req.method, context.req.path, context.req.query("run_id"))) {
+      if (!isProtectedRequest(context.req.method, context.req.path)) {
         await next();
         return;
       }
@@ -195,7 +231,7 @@ export function createApp(
       const origin = normalizeOrigin(context.req.header("origin"));
       const localOperatorRequest = isLocalOperatorRequest(context.req.header("x-alaya-desktop"));
 
-      if (!isAllowedMutatingOrigin(origin, allowedOrigin, localOperatorRequest, allowDesktopOriginlessRequests)) {
+      if (!isAllowedProtectedRequest(origin, allowedOrigin, localOperatorRequest, allowDesktopOriginlessRequests)) {
         return context.json(
           {
             success: false,
@@ -229,31 +265,6 @@ export function createApp(
 
       await next();
     });
-
-    app.get("/session/request-token", (context) => {
-      const origin = normalizeOrigin(context.req.header("origin"));
-      const localOperatorRequest = isLocalOperatorRequest(context.req.header("x-alaya-desktop"));
-
-      if (!isAllowedRequestTokenOrigin(origin, allowedOrigin, localOperatorRequest, allowDesktopOriginlessRequests)) {
-        return context.json(
-          {
-            success: false,
-            error: "Origin is not allowed"
-          },
-          403
-        );
-      }
-
-      return context.json(
-        {
-          success: true,
-          data: {
-            request_token: requestToken
-          }
-        },
-        200
-      );
-    });
   }
 
   app.use("/files", async (context, next) => {
@@ -262,7 +273,36 @@ export function createApp(
       return;
     }
 
+    if (hasDeclaredOversizeBody(context.req.header("content-length"), MAX_FILE_SIZE_BYTES)) {
+      return context.json(
+        {
+          success: false,
+          error: "File exceeds the 20 MB limit"
+        },
+        413
+      );
+    }
+
     await fileUploadBodyLimit(context, next);
+  });
+
+  app.use("*", async (context, next) => {
+    if (!isBodyLimitedMethod(context.req.method) || context.req.path === "/files") {
+      await next();
+      return;
+    }
+
+    if (hasDeclaredOversizeBody(context.req.header("content-length"), MAX_REQUEST_BODY_BYTES)) {
+      return context.json(
+        {
+          success: false,
+          error: "Request body exceeds the 10 MB limit"
+        },
+        413
+      );
+    }
+
+    await requestBodyLimit(context, next);
   });
 
   registerErrorHandler(app);
@@ -273,9 +313,9 @@ export function createApp(
 }
 
 // Standard unauthenticated liveness probe for deployment health checks.
-// GETs are already exempt from the request-token gate (isProtectedRequest),
-// and the drain middleware skips LIVENESS_PATH, so this stays cheap and never
-// touches the DB or any provider — liveness means "process is up".
+// Only the liveness path is exempt from the request-token gate, and the drain
+// middleware skips LIVENESS_PATH, so this stays cheap and never touches the DB
+// or any provider — liveness means "process is up".
 const LIVENESS_PATH = "/health";
 
 function registerLivenessRoute(app: Hono): void {
@@ -327,36 +367,42 @@ function registerConfiguredRoutes(app: Hono, routes: CoreDaemonRouteServices | u
   if (routes.e2eEventTriggers !== undefined) registerE2eEventTriggerRoutes(app, routes.e2eEventTriggers);
 }
 
-function isProtectedRequest(method: string, path: string, runIdQuery: string | undefined): boolean {
-  return (
-    isMutatingMethod(method) ||
-    isAuditProtectedGet(method, path) ||
-    isSlashDiscoveryProtectedGet(method, path, runIdQuery)
-  );
-}
-
-function isMutatingMethod(method: string): boolean {
-  return method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
-}
-
-function isAuditProtectedGet(method: string, path: string): boolean {
-  if (method !== "GET") {
+function isProtectedRequest(method: string, path: string): boolean {
+  if (path === LIVENESS_PATH) {
     return false;
   }
 
-  return (
-    /^\/soul\/workspaces\/[^/]+\/topology$/.test(path) ||
-    /^\/runs\/[^/]+\/recall-candidates$/.test(path)
-  );
-}
-
-function isSlashDiscoveryProtectedGet(method: string, path: string, runIdQuery: string | undefined): boolean {
-  return method === "GET" && path === "/slash-commands" && runIdQuery !== undefined && runIdQuery.trim().length > 0;
+  return method !== "OPTIONS";
 }
 
 function normalizeOrigin(origin: string | undefined): string | undefined {
   const normalized = origin?.trim();
   return normalized === undefined || normalized.length === 0 ? undefined : normalized;
+}
+
+function resolveRequestId(
+  requestIdHeader: string | undefined,
+  correlationIdHeader: string | undefined
+): string {
+  const requestId = normalizeOrigin(requestIdHeader);
+  if (requestId !== undefined) {
+    return requestId;
+  }
+
+  const correlationId = normalizeOrigin(correlationIdHeader);
+  return correlationId ?? randomUUID();
+}
+
+function isBodyLimitedMethod(method: string): boolean {
+  return method === "POST" || method === "PATCH" || method === "PUT" || method === "DELETE";
+}
+
+function hasDeclaredOversizeBody(contentLengthHeader: string | undefined, maxBytes: number): boolean {
+  const declaredLength = contentLengthHeader === undefined
+    ? Number.NaN
+    : Number.parseInt(contentLengthHeader, 10);
+
+  return Number.isFinite(declaredLength) && declaredLength > maxBytes;
 }
 
 function isLocalOperatorRequest(header: string | undefined): boolean {
@@ -378,24 +424,6 @@ function isAllowedProtectedRequest(
   }
 
   return origin === undefined && localOperatorRequest;
-}
-
-function isAllowedMutatingOrigin(
-  origin: string | undefined,
-  allowedOrigin: string,
-  localOperatorRequest: boolean,
-  allowDesktopOriginlessRequests: boolean
-): boolean {
-  return isAllowedProtectedRequest(origin, allowedOrigin, localOperatorRequest, allowDesktopOriginlessRequests);
-}
-
-function isAllowedRequestTokenOrigin(
-  origin: string | undefined,
-  allowedOrigin: string,
-  localOperatorRequest: boolean,
-  allowDesktopOriginlessRequests: boolean
-): boolean {
-  return isAllowedProtectedRequest(origin, allowedOrigin, localOperatorRequest, allowDesktopOriginlessRequests);
 }
 
 function matchesRequestToken(provided: string, expected: string): boolean {

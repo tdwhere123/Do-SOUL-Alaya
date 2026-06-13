@@ -1,5 +1,11 @@
 import type { Context, Hono } from "hono";
-import { assertInspectorWorkspace, proxyDaemonJson, type InspectorProxyOptions } from "./shared.js";
+import {
+  assertInspectorWorkspace,
+  isRequestBodyTooLargeError,
+  rejectUnexpectedRequestBody,
+  proxyDaemonJson,
+  type InspectorProxyOptions
+} from "./shared.js";
 
 // A1 (HITL daemon backbone) — Inspector tooling-loopback for the new
 // pending-proposals listing tool plus accept/reject. The Inspector is
@@ -32,7 +38,10 @@ export function registerInspectorProposalRoutes(app: Hono, options: InspectorPro
     let body: unknown;
     try {
       body = await context.req.json();
-    } catch {
+    } catch (error) {
+      if (isRequestBodyTooLargeError(error)) {
+        throw error;
+      }
       return context.json({ error: "invalid_request" }, 400);
     }
     return await proxyDaemonJson(context, options, {
@@ -78,7 +87,10 @@ export function registerInspectorProposalRoutes(app: Hono, options: InspectorPro
       let body: unknown = undefined;
       try {
         body = await context.req.json();
-      } catch {
+      } catch (error) {
+        if (isRequestBodyTooLargeError(error)) {
+          throw error;
+        }
         body = undefined;
       }
       return await proxyDaemonJson(context, options, {
@@ -103,11 +115,18 @@ async function proxyMemoryAction(
   }
   const forbidden = assertInspectorWorkspace(context, options, workspaceId);
   if (forbidden !== null) return forbidden;
+  if (action !== "rewrite") {
+    const unexpectedBody = await rejectUnexpectedRequestBody(context);
+    if (unexpectedBody !== null) return unexpectedBody;
+  }
   let body: unknown = undefined;
   if (action === "rewrite") {
     try {
       body = await context.req.json();
-    } catch {
+    } catch (error) {
+      if (isRequestBodyTooLargeError(error)) {
+        throw error;
+      }
       return context.json({ error: "invalid_request" }, 400);
     }
   }

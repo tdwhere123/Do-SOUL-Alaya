@@ -17,9 +17,16 @@ type CurrencyRecordRepo = {
   findById(id: string): Promise<CurrencyRecord | null>;
 };
 
-export type WarnLogger = Readonly<{
+export type LoggerPort = Readonly<{
+  trace(message: string, meta: Record<string, unknown>): void;
+  debug(message: string, meta: Record<string, unknown>): void;
+  info(message: string, meta: Record<string, unknown>): void;
   warn(message: string, meta: Record<string, unknown>): void;
+  error(message: string, meta: Record<string, unknown>): void;
+  fatal(message: string, meta: Record<string, unknown>): void;
 }>;
+
+export type WarnLogger = LoggerPort;
 
 // Defense-in-depth field redaction. pino paths only match a single level
 // (`token` = top-level, `*.token` = one nested level); there is no recursive
@@ -90,13 +97,28 @@ function getSharedPinoLogger(): Logger {
   return sharedPinoLogger;
 }
 
-export function createWarnLogger(): WarnLogger {
+export function createWarnLogger(): LoggerPort {
   const logger = getSharedPinoLogger();
   return Object.freeze({
+    trace: (message: string, meta: Record<string, unknown>) => {
+      logger.trace(meta, message);
+    },
+    debug: (message: string, meta: Record<string, unknown>) => {
+      logger.debug(meta, message);
+    },
+    info: (message: string, meta: Record<string, unknown>) => {
+      logger.info(meta, message);
+    },
     // pino is object-first: warn(meta, message). The WarnLogger port is
     // message-first, so swap the argument order at the boundary.
     warn: (message: string, meta: Record<string, unknown>) => {
       logger.warn(meta, message);
+    },
+    error: (message: string, meta: Record<string, unknown>) => {
+      logger.error(meta, message);
+    },
+    fatal: (message: string, meta: Record<string, unknown>) => {
+      logger.fatal(meta, message);
     }
   });
 }

@@ -1,6 +1,11 @@
 import type { Hono } from "hono";
 import { CoreError } from "@do-soul/alaya-core";
 import { EngineError, EngineErrorKind } from "@do-soul/alaya-protocol";
+import {
+  isRequestBodyTooLargeError,
+  REQUEST_BODY_TOO_LARGE_MESSAGE
+} from "../routes/shared.js";
+import { CORRELATION_ID_HEADER, REQUEST_ID_HEADER } from "../runtime/app.js";
 
 const SAFE_PUBLIC_VALIDATION_MESSAGES = new Set([
   "Origin is not allowed",
@@ -13,6 +18,33 @@ const SAFE_PUBLIC_VALIDATION_MESSAGES = new Set([
 
 export function registerErrorHandler(app: Hono): void {
   app.onError((error, context) => {
+    const requestId = readRequestId(context);
+    if (requestId !== undefined) {
+      context.header(REQUEST_ID_HEADER, requestId);
+      context.header(CORRELATION_ID_HEADER, requestId);
+    }
+
+    if (isRequestBodyTooLargeError(error)) {
+      console.error(
+        "[daemon] sanitized request body limit error",
+        summarizeHandledError(
+          error instanceof Error ? error : new Error("request body too large"),
+          {
+            publicMessage: REQUEST_BODY_TOO_LARGE_MESSAGE,
+            request_id: requestId
+          }
+        )
+      );
+
+      return context.json(
+        {
+          success: false,
+          error: REQUEST_BODY_TOO_LARGE_MESSAGE
+        },
+        413
+      );
+    }
+
     if (error instanceof CoreError) {
       const publicMessage = publicMessageForCoreError(error);
 
@@ -21,7 +53,8 @@ export function registerErrorHandler(app: Hono): void {
           "[daemon] sanitized core validation error",
           summarizeHandledError(error, {
             code: error.code,
-            publicMessage
+            publicMessage,
+            request_id: requestId
           })
         );
       }
@@ -40,7 +73,8 @@ export function registerErrorHandler(app: Hono): void {
         "[daemon] sanitized engine error",
         summarizeHandledError(error, {
           kind: error.kind,
-          publicMessage: publicMessageForEngineError(error)
+          publicMessage: publicMessageForEngineError(error),
+          request_id: requestId
         })
       );
 
@@ -54,7 +88,7 @@ export function registerErrorHandler(app: Hono): void {
       );
     }
 
-    console.error("[daemon] unhandled error", summarizeUnhandledError(error));
+    console.error("[daemon] unhandled error", summarizeUnhandledError(error, requestId));
 
     return context.json(
       {
@@ -64,6 +98,11 @@ export function registerErrorHandler(app: Hono): void {
       500
     );
   });
+}
+
+function readRequestId(context: { get(name: string): unknown }): string | undefined {
+  const requestId = context.get("requestId");
+  return typeof requestId === "string" && requestId.length > 0 ? requestId : undefined;
 }
 
 function summarizeHandledError(
@@ -91,20 +130,23 @@ function summarizeHandledError(
   };
 }
 
-function summarizeUnhandledError(error: unknown): {
+function summarizeUnhandledError(error: unknown, requestId?: string): {
   readonly name: string;
   readonly message: string;
+  readonly request_id?: string;
 } {
   if (error instanceof Error) {
     return {
       name: error.name,
-      message: error.message
+      message: error.message,
+      ...(requestId === undefined ? {} : { request_id: requestId })
     };
   }
 
   return {
     name: "NonError",
-    message: String(error)
+    message: String(error),
+    ...(requestId === undefined ? {} : { request_id: requestId })
   };
 }
 

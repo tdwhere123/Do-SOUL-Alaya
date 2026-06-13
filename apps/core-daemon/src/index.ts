@@ -130,6 +130,7 @@ import {
   createPathFailureHealthInbox,
   normalizeRecallTimeConcernWindowDigest,
   finalizeAlayaDaemonRuntime,
+  validateDaemonEnv,
   type AlayaDaemonListenOptions,
   type AlayaDaemonRuntime,
   type AlayaDaemonServer,
@@ -177,6 +178,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
 
 export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
+  validateDaemonEnv(process.env);
   // anchor: warm jieba (CJK word segmenter) at daemon start so the first
   // recall query already sees segmented lexical_terms instead of paying
   // the native-binding import cost on the user-visible path. AWAIT both
@@ -197,9 +199,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     warmStorageCjkSegmentation()
   ]);
   const startupSteps: DaemonStartupStepRecord[] = [];
+  const validatedEnv = validateDaemonEnv(process.env);
   const warnLogger = createWarnLogger();
   const runtimeNotifier = createRuntimeNotifier();
-  const requestProtection = createRequestProtection();
+  const requestProtection = createRequestProtection(validatedEnv);
   const remoteDaemonOptInEnabled = isRemoteDaemonOptInEnabled(process.env);
   const configPaths = resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: process.env }));
   const configEnv = await loadConfigEnv(configPaths.envPath);
@@ -958,6 +961,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       gardenRuntime,
       securityStatusService,
       globalMemoryRecallInvalidationSubscription,
+      requestProtection,
       database,
       intervalsToClear: [pathRelationEvictionTimer]
     },

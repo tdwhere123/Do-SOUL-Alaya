@@ -140,7 +140,9 @@ describe("cli inspect", () => {
     const result = await promise;
 
     expect(result.exitCode).toBe(0);
-    expect(daemonStarts).toEqual([{ hostname: "127.0.0.1", port: 5173 }]);
+    expect(daemonStarts).toEqual([
+      { hostname: "127.0.0.1", port: 5173, allowEphemeralRequestToken: true }
+    ]);
     expect(spawned).toMatchObject([
       {
         env: {
@@ -275,6 +277,48 @@ describe("cli inspect", () => {
     ]);
   });
 
+  it("forwards the explicit external daemon request token when resolving workspaces", async () => {
+    const child = new FakeInspectorChild();
+    const seenRequestTokens: Array<string | undefined> = [];
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "e".repeat(64),
+      spawnInspector: () => child,
+      listWorkspaces: async (_daemonUrl, auth) => {
+        seenRequestTokens.push(auth?.requestToken);
+        return [
+          {
+            workspace_id: "ws-auth",
+            name: "Auth",
+            repo_path: "/tmp/auth",
+            workspace_state: "active"
+          }
+        ];
+      }
+    });
+
+    const promise = command.handler(
+      createContext({
+        env: {
+          ALAYA_DAEMON_URL: "http://external-daemon.local",
+          ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN: " explicit-external-token "
+        }
+      }),
+      {
+        open: false,
+        port: 5174,
+        token: null,
+        workspace: null
+      }
+    );
+    setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+    setTimeout(() => child.emitExit(0, null), 10);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(seenRequestTokens).toEqual(["explicit-external-token"]);
+  });
+
   it("fails instead of starting a standalone inspector when no daemon is managed", async () => {
     const stderr = new PassThrough();
     const stderrChunks: string[] = [];
@@ -363,6 +407,80 @@ describe("cli inspect", () => {
     expect(spawnInspector).not.toHaveBeenCalled();
     expect(stderrChunks.join("")).toContain("stale/incompatible daemon on 127.0.0.1:5173");
     expect(stderrChunks.join("")).toContain("/config/runtime/garden-compute");
+  });
+
+  it("refuses to bind Inspector to an occupied daemon when request-token auth is required", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const spawnInspector = vi.fn(() => new FakeInspectorChild());
+    const command = createInspectCommand({
+      checkPortAvailable: async (port) => port !== 5173,
+      generateToken: () => "4".repeat(64),
+      probeDaemon: async () => ({ status: "auth_required", detail: "HTTP 403" }),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector
+    });
+
+    const result = await command.handler(createContext({ stderr }), {
+      open: false,
+      port: 5174,
+      token: null,
+      workspace: null
+    });
+
+    expect(result.exitCode).toBe(70);
+    expect(spawnInspector).not.toHaveBeenCalled();
+    expect(stderrChunks.join("")).toContain("requires request-token auth");
+    expect(stderrChunks.join("")).toContain("ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN");
+  });
+
+  it("treats a protected daemon 403 as auth-required even when an external token was supplied", async () => {
+    const originalFetch = globalThis.fetch;
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const spawnInspector = vi.fn(() => new FakeInspectorChild());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/health")) {
+          return new Response(null, { status: 200 });
+        }
+        expect(new Headers(init?.headers).get("x-request-token")).toBe("wrong-token");
+        return new Response(null, { status: 403 });
+      })
+    );
+    const command = createInspectCommand({
+      checkPortAvailable: async (port) => port !== 5173,
+      generateToken: () => "4".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector
+    });
+
+    try {
+      const result = await command.handler(
+        createContext({
+          env: { ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN: "wrong-token" },
+          stderr
+        }),
+        {
+          open: false,
+          port: 5174,
+          token: null,
+          workspace: null
+        }
+      );
+
+      expect(result.exitCode).toBe(70);
+      expect(spawnInspector).not.toHaveBeenCalled();
+      expect(stderrChunks.join("")).toContain("requires request-token auth");
+      expect(stderrChunks.join("")).not.toContain("stale/incompatible daemon");
+    } finally {
+      vi.unstubAllGlobals();
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("refuses to bind Inspector to an occupied non-Alaya daemon port", async () => {

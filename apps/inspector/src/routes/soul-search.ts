@@ -1,5 +1,10 @@
 import type { Hono } from "hono";
-import { assertInspectorWorkspace, proxyDaemonJson, type InspectorProxyOptions } from "./shared.js";
+import {
+  assertInspectorWorkspace,
+  isRequestBodyTooLargeError,
+  proxyDaemonJson,
+  type InspectorProxyOptions
+} from "./shared.js";
 
 // Inspector loopback for the NL+time-aware search bar. Forwards body verbatim
 // to the daemon's POST /workspaces/:wsId/soul/search, which routes through
@@ -18,7 +23,10 @@ export function registerInspectorSoulSearchRoutes(
     let body: unknown;
     try {
       body = await context.req.json();
-    } catch {
+    } catch (error) {
+      if (isRequestBodyTooLargeError(error)) {
+        throw error;
+      }
       return context.json({ error: "invalid_request" }, 400);
     }
     return await proxyDaemonJson(context, options, {

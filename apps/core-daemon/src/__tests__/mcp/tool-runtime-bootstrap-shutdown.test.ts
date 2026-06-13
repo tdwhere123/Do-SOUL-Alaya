@@ -292,6 +292,6 @@ async function bootDaemonRuntime(): Promise<AlayaDaemonRuntime> {
 
 async function bootStartedDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const runtime = await bootDaemonRuntime();
-  await runtime.startHttpServer({ port: 0 });
+  await runtime.startHttpServer({ port: 0, allowEphemeralRequestToken: true });
   return runtime;
 }

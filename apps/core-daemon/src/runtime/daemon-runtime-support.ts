@@ -63,11 +63,29 @@ const GARDEN_BACKLOG_SNAPSHOT_INTERVAL_MS = 60_000;
 type GlobalMemoryListFilters = Parameters<GlobalMemoryRepo["list"]>[0];
 type MemoryEntryRecord = Awaited<ReturnType<SqliteMemoryEntryRepo["findByWorkspaceId"]>>[number];
 
-export function createRequestProtection(): RequestProtectionConfig {
+type RequestProtectionEnvLike = Readonly<{
+  ALAYA_REQUEST_TOKEN?: string;
+  ALLOWED_ORIGIN?: string;
+}>;
+
+export function createRequestProtection(env: RequestProtectionEnvLike = process.env): RequestProtectionConfig {
+  const configuredRequestToken = env.ALAYA_REQUEST_TOKEN?.trim();
+  const allowedOrigin = env.ALLOWED_ORIGIN?.trim();
+
   return Object.freeze({
-    allowedOrigin: process.env.ALLOWED_ORIGIN ?? "http://localhost:5173",
-    requestToken: process.env.ALAYA_REQUEST_TOKEN ?? randomBytes(32).toString("hex"),
-    allowDesktopOriginlessRequests: true
+    allowedOrigin:
+      allowedOrigin !== undefined && allowedOrigin.length > 0
+        ? allowedOrigin
+        : "http://localhost:5173",
+    requestToken:
+      configuredRequestToken !== undefined && configuredRequestToken.length > 0
+        ? configuredRequestToken
+        : randomBytes(32).toString("hex"),
+    allowDesktopOriginlessRequests: true,
+    tokenSource:
+      configuredRequestToken !== undefined && configuredRequestToken.length > 0
+        ? "env"
+        : "ephemeral"
   });
 }
 

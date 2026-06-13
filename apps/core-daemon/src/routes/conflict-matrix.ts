@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { CoreError, type ArbitrationService, type WorkspaceService } from "@do-soul/alaya-core";
-import { parseJsonBody } from "./shared.js";
+import { parseJsonBody, rejectUnexpectedRequestBody } from "./shared.js";
 import { ConflictEdgeTypeSchema } from "@do-soul/alaya-protocol";
 
 export interface ConflictMatrixRouteServices {
@@ -39,11 +39,15 @@ export function registerConflictMatrixRoutes(app: Hono, services: ConflictMatrix
   });
 
   app.delete("/conflict-matrix-edges/:id", async (context) => {
+    const unexpectedBody = await rejectUnexpectedRequestBody(context);
+    if (unexpectedBody !== null) return unexpectedBody;
     await services.arbitrationService.deleteEdge(context.req.param("id"));
     return context.json({ success: true, data: null }, 200);
   });
 
   app.post("/workspaces/:wsId/conflict-matrix/rebuild", async (context) => {
+    const unexpectedBody = await rejectUnexpectedRequestBody(context);
+    if (unexpectedBody !== null) return unexpectedBody;
     const workspaceId = context.req.param("wsId");
     await services.workspaceService.getById(workspaceId);
 

@@ -1,5 +1,6 @@
 export * from "./daemon-app-composition.js";
 export * from "./daemon-defaults.js";
+export * from "./daemon-env.js";
 export * from "./daemon-runtime-helpers.js";
 export * from "./daemon-runtime-finalization.js";
 export * from "./daemon-runtime-lifecycle.js";

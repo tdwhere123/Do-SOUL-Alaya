@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { createApp } from "../../runtime/app.js";
+import {
+  CORRELATION_ID_HEADER,
+  createApp,
+  MAX_REQUEST_BODY_BYTES,
+  REQUEST_ID_HEADER
+} from "../../runtime/app.js";
+import { createRequestProtection } from "../../runtime/daemon-runtime-support.js";
 import type { AppConfigService } from "../../services/config-service.js";
 
 describe("createApp", () => {
-  it("requires a timing-safe request token for mutating routes", async () => {
+  it("requires a timing-safe request token for protected routes", async () => {
     const app = createApp({
       requestProtection: {
         allowedOrigin: "http://localhost:5173",
@@ -37,7 +43,7 @@ describe("createApp", () => {
     });
   });
 
-  it("exposes request token only to allowed local origins", async () => {
+  it("requires a request token for non-health GET routes", async () => {
     const app = createApp({
       requestProtection: {
         allowedOrigin: "http://localhost:5173",
@@ -45,19 +51,65 @@ describe("createApp", () => {
       }
     });
 
-    const response = await app.request("/session/request-token", {
+    const missing = await app.request("/unknown", {
       headers: {
         origin: "http://localhost:5173"
       }
     });
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      success: true,
-      data: {
-        request_token: "secret-token"
+    expect(missing.status).toBe(403);
+    await expect(missing.json()).resolves.toEqual({
+      success: false,
+      error: "X-Request-Token is required"
+    });
+
+    const authenticated = await app.request("/unknown", {
+      headers: {
+        "x-request-token": "secret-token",
+        "x-alaya-desktop": "1"
       }
     });
+
+    expect(authenticated.status).toBe(404);
+  });
+
+  it("propagates request and correlation ids on authenticated responses", async () => {
+    const app = createApp({
+      requestProtection: {
+        allowedOrigin: "http://localhost:5173",
+        requestToken: "secret-token"
+      }
+    });
+
+    const response = await app.request("/unknown", {
+      headers: {
+        "x-request-token": "secret-token",
+        "x-alaya-desktop": "1",
+        "x-request-id": "req-123"
+      }
+    });
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get(REQUEST_ID_HEADER)).toBe("req-123");
+    expect(response.headers.get(CORRELATION_ID_HEADER)).toBe("req-123");
+  });
+
+  it("accepts trimmed allowed-origin values after startup normalization", async () => {
+    const app = createApp({
+      requestProtection: createRequestProtection({
+        ALLOWED_ORIGIN: " http://localhost:5173 ",
+        ALAYA_REQUEST_TOKEN: "secret-token"
+      })
+    });
+
+    const response = await app.request("/unknown", {
+      headers: {
+        origin: "http://localhost:5173",
+        "x-request-token": "secret-token"
+      }
+    });
+
+    expect(response.status).toBe(404);
   });
 
   it("serves an unauthenticated liveness probe at GET /health", async () => {
@@ -130,4 +182,140 @@ describe("createApp", () => {
     expect(response.status).toBe(200);
     expect(patchRuntimeEmbeddingConfig).toHaveBeenCalledWith({ embedding_enabled: true });
   });
+
+  it("rejects oversized non-file mutation bodies", async () => {
+    const patchRuntimeEmbeddingConfig = vi.fn(async () => ({
+      embedding_enabled: true,
+      model_id: "text-embedding-3-small",
+      provider_url: null,
+      secret_ref: null
+    }));
+    const app = createApp({
+      routes: {
+        config: {
+          workspaceService: { getById: vi.fn() } as any,
+          configService: {
+            getSoulConfig: vi.fn(),
+            patchSoulConfig: vi.fn(),
+            getStrategyConfig: vi.fn(),
+            patchStrategyConfig: vi.fn(),
+            getEnvironmentConfig: vi.fn(),
+            patchEnvironmentConfig: vi.fn(),
+            getRuntimeEmbeddingConfig: vi.fn(),
+            patchRuntimeEmbeddingConfig,
+            getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" as const }))
+          } as unknown as AppConfigService
+        }
+      }
+    });
+    const response = await app.request(
+      createChunkedJsonRequest(
+        "http://localhost/config/runtime/embedding-supplement",
+        "PATCH",
+        JSON.stringify({ payload: "x".repeat(MAX_REQUEST_BODY_BYTES) })
+      )
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Request body exceeds the 10 MB limit"
+    });
+    expect(patchRuntimeEmbeddingConfig).not.toHaveBeenCalled();
+    expect(response.headers.get(REQUEST_ID_HEADER)).toBeTruthy();
+  });
+
+  it("rejects chunked oversized DELETE bodies before route dispatch", async () => {
+    const deleteEdge = vi.fn(async () => undefined);
+    const app = createApp({
+      routes: {
+        conflictMatrix: {
+          workspaceService: { getById: vi.fn() } as any,
+          arbitrationService: {
+            deleteEdge,
+            createEdge: vi.fn(),
+            listEdgesByWorkspace: vi.fn(),
+            rebuildConflictMatrix: vi.fn()
+          } as any
+        }
+      }
+    });
+
+    const response = await app.request(
+      createChunkedJsonRequest(
+        "http://localhost/conflict-matrix-edges/edge-1",
+        "DELETE",
+        JSON.stringify({ payload: "x".repeat(MAX_REQUEST_BODY_BYTES) })
+      )
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Request body exceeds the 10 MB limit"
+    });
+    expect(deleteEdge).not.toHaveBeenCalled();
+  });
+
+  it("rejects unexpected small DELETE bodies before route dispatch", async () => {
+    const deleteEdge = vi.fn(async () => undefined);
+    const app = createApp({
+      routes: {
+        conflictMatrix: {
+          workspaceService: { getById: vi.fn() } as any,
+          arbitrationService: {
+            deleteEdge,
+            createEdge: vi.fn(),
+            listEdgesByWorkspace: vi.fn(),
+            rebuildConflictMatrix: vi.fn()
+          } as any
+        }
+      }
+    });
+
+    const response = await app.request(
+      createChunkedJsonRequest(
+        "http://localhost/conflict-matrix-edges/edge-1",
+        "DELETE",
+        JSON.stringify({ payload: "x" })
+      )
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Request body is not allowed for this route"
+    });
+    expect(deleteEdge).not.toHaveBeenCalled();
+  });
 });
+
+function createChunkedJsonRequest(
+  url: string,
+  method: "PATCH" | "DELETE",
+  bodyText: string,
+  extraHeaders: Record<string, string> = {}
+): Request {
+  const bytes = new TextEncoder().encode(bodyText);
+  let sent = false;
+
+  return new Request(url, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      ...extraHeaders
+    },
+    body: new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) {
+          controller.close();
+          return;
+        }
+        sent = true;
+        controller.enqueue(bytes);
+        controller.close();
+      }
+    }),
+    duplex: "half"
+  });
+}

@@ -128,6 +128,7 @@ export interface AlayaDaemonRuntimeServices {
 export interface AlayaDaemonListenOptions {
   readonly hostname?: string;
   readonly port?: number;
+  readonly allowEphemeralRequestToken?: boolean;
 }
 
 export interface AlayaDaemonServer {

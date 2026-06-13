@@ -1,5 +1,5 @@
 import { serve, type ServerType } from "@hono/node-server";
-import type { CoreDaemonLifecycleState } from "./app.js";
+import type { CoreDaemonLifecycleState, RequestProtectionConfig } from "./app.js";
 import { resolveDaemonHostFromEnv } from "./server-options.js";
 import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./daemon-runtime-types.js";
 
@@ -34,6 +34,7 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   daemonMcpRuntimeRegistry: Readonly<{ close(): Promise<void> }>;
   globalMemoryRecallInvalidationSubscription: Readonly<{ dispose(): void }> | null;
   database: Readonly<{ close(): void }>;
+  requestProtection: RequestProtectionConfig;
   intervalsToClear?: ReadonlyArray<NodeJS.Timeout>;
 }>;
 
@@ -145,10 +146,24 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
       await input.gardenRuntime.runEmbeddingBackfillPass(workspaceId);
     },
     startHttpServer: async (options: AlayaDaemonListenOptions = {}) => {
+      const allowEphemeralRequestToken = options.allowEphemeralRequestToken ?? false;
+      if (input.requestProtection.tokenSource === "ephemeral" && !allowEphemeralRequestToken) {
+        throw new Error(
+          "ALAYA_REQUEST_TOKEN must be set before starting the daemon HTTP server. Use `alaya inspect` for a managed temporary daemon or set ALAYA_REQUEST_TOKEN explicitly."
+        );
+      }
+
       startBackgroundServices();
 
       if (server !== null) {
         throw new Error("Alaya daemon HTTP server is already running.");
+      }
+
+      if (input.requestProtection.tokenSource === "ephemeral") {
+        input.warnLogger.warn("starting managed daemon with ephemeral request token", {
+          host: options.hostname ?? resolveDaemonHostFromEnv(process.env),
+          port: options.port ?? parsePort(process.env.PORT, 3000)
+        });
       }
 
       const hostname = options.hostname ?? resolveDaemonHostFromEnv(process.env);
@@ -160,10 +175,18 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
       });
 
       process.on("SIGTERM", () => {
-        void shutdown();
+        void shutdown().catch((error) => {
+          input.warnLogger.warn("daemon shutdown failed after SIGTERM", {
+            error: error instanceof Error ? error.message : String(error)
+          });
+        });
       });
       process.on("SIGINT", () => {
-        void shutdown();
+        void shutdown().catch((error) => {
+          input.warnLogger.warn("daemon shutdown failed after SIGINT", {
+            error: error instanceof Error ? error.message : String(error)
+          });
+        });
       });
 
       input.warnLogger.warn("core daemon listening", {

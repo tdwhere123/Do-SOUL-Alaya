@@ -17,14 +17,18 @@ export interface InspectCommandDependencies {
   readonly getRequestToken?: () => string | undefined;
   readonly spawnInspector?: (input: SpawnInspectorInput) => InspectorChildProcess;
   readonly startDaemonServer?: (options: InspectDaemonListenOptions) => Promise<InspectDaemonServer>;
-  readonly probeDaemon?: (url: string) => Promise<InspectDaemonProbeResult>;
+  readonly probeDaemon?: (url: string, auth?: DaemonRequestAuth) => Promise<InspectDaemonProbeResult>;
   readonly checkPortAvailable?: (port: number) => Promise<boolean>;
   readonly openUrl?: (url: string) => Promise<void>;
   readonly inspectorEntryPath?: string;
-  readonly listWorkspaces?: (daemonUrl: string) => Promise<readonly WorkspaceSummary[]>;
+  readonly listWorkspaces?: (
+    daemonUrl: string,
+    auth?: DaemonRequestAuth
+  ) => Promise<readonly WorkspaceSummary[]>;
   readonly getWorkspaceById?: (
     daemonUrl: string,
-    workspaceId: string
+    workspaceId: string,
+    auth?: DaemonRequestAuth
   ) => Promise<WorkspaceLookupResult>;
 }
 
@@ -43,6 +47,7 @@ export type WorkspaceLookupResult =
 export interface InspectDaemonListenOptions {
   readonly hostname?: string;
   readonly port?: number;
+  readonly allowEphemeralRequestToken?: boolean;
 }
 
 export interface InspectDaemonServer {
@@ -54,7 +59,12 @@ export interface InspectDaemonServer {
 export type InspectDaemonProbeResult =
   | { readonly status: "compatible" }
   | { readonly status: "unavailable"; readonly detail?: string }
+  | { readonly status: "auth_required"; readonly detail?: string }
   | { readonly status: "missing_capability"; readonly detail?: string };
+
+interface DaemonRequestAuth {
+  readonly requestToken?: string;
+}
 
 export interface SpawnInspectorInput {
   readonly port: number;
@@ -131,25 +141,35 @@ async function executeInspect(
   let startedDaemon: InspectDaemonServer | null = null;
 
   try {
-    const daemon = await ensureDaemonForInspector(ctx, deps, checkPortAvailable);
+    const externalDaemonRequestToken = normalizeOptionalToken(
+      ctx.env[EXTERNAL_DAEMON_REQUEST_TOKEN_ENV]
+    );
+    const daemon = await ensureDaemonForInspector(
+      ctx,
+      deps,
+      checkPortAvailable,
+      externalDaemonRequestToken
+    );
     startedDaemon = daemon.startedDaemon;
-    const workspaceResolution = await resolveWorkspaceForInspector(ctx, deps, daemon.url, args.workspace);
+    const daemonRequestAuth = resolveDaemonRequestAuth({
+      startedDaemon: daemon.startedDaemon !== null,
+      getRequestToken: deps.getRequestToken,
+      externalRequestToken: externalDaemonRequestToken
+    });
+    const workspaceResolution = await resolveWorkspaceForInspector(
+      ctx,
+      deps,
+      daemon.url,
+      args.workspace,
+      daemonRequestAuth
+    );
     if (workspaceResolution.status !== "ok") {
       return { exitCode: workspaceResolution.exitCode };
     }
     const url = `http://127.0.0.1:${args.port}/?token=${token}&workspaceId=${encodeURIComponent(workspaceResolution.workspaceId)}`;
     const inspectorEnv: NodeJS.ProcessEnv = { ALAYA_DAEMON_URL: daemon.url };
-    if (daemon.startedDaemon !== null) {
-      const requestToken = deps.getRequestToken?.();
-      const trimmedRequestToken = requestToken?.trim();
-      if (trimmedRequestToken !== undefined && trimmedRequestToken.length > 0) {
-        inspectorEnv.ALAYA_REQUEST_TOKEN = trimmedRequestToken;
-      }
-    } else {
-      const externalRequestToken = ctx.env[EXTERNAL_DAEMON_REQUEST_TOKEN_ENV]?.trim();
-      if (externalRequestToken !== undefined && externalRequestToken.length > 0) {
-        inspectorEnv.ALAYA_REQUEST_TOKEN = externalRequestToken;
-      }
+    if (daemonRequestAuth.requestToken !== undefined) {
+      inspectorEnv.ALAYA_REQUEST_TOKEN = daemonRequestAuth.requestToken;
     }
     child = (deps.spawnInspector ?? defaultSpawnInspector)({
       port: args.port,
@@ -188,11 +208,12 @@ async function resolveWorkspaceForInspector(
   ctx: AlayaCliContext,
   deps: InspectCommandDependencies,
   daemonUrl: string,
-  explicitId: string | null
+  explicitId: string | null,
+  auth?: DaemonRequestAuth
 ): Promise<WorkspaceResolution> {
   if (explicitId !== null) {
     const trimmed = explicitId.trim();
-    const lookup = await (deps.getWorkspaceById ?? defaultGetWorkspaceById)(daemonUrl, trimmed);
+    const lookup = await (deps.getWorkspaceById ?? defaultGetWorkspaceById)(daemonUrl, trimmed, auth);
     if (lookup.status === "ok") {
       return { status: "ok", workspaceId: lookup.workspace.workspace_id };
     }
@@ -210,7 +231,7 @@ async function resolveWorkspaceForInspector(
 
   let workspaces: readonly WorkspaceSummary[];
   try {
-    workspaces = await (deps.listWorkspaces ?? defaultListWorkspaces)(daemonUrl);
+    workspaces = await (deps.listWorkspaces ?? defaultListWorkspaces)(daemonUrl, auth);
   } catch (error) {
     ctx.stderr.write(`failed to list workspaces from daemon: ${describeError(error)}\n`);
     return { status: "fail", exitCode: ALAYA_SYSEXITS.SOFTWARE };
@@ -254,9 +275,17 @@ async function resolveWorkspaceForInspector(
   return { status: "fail", exitCode: ALAYA_SYSEXITS.USAGE };
 }
 
-async function defaultListWorkspaces(daemonUrl: string): Promise<readonly WorkspaceSummary[]> {
+async function defaultListWorkspaces(
+  daemonUrl: string,
+  auth?: DaemonRequestAuth
+): Promise<readonly WorkspaceSummary[]> {
   const baseUrl = normalizeBaseUrl(daemonUrl);
-  const response = await fetch(new URL("workspaces", baseUrl), { method: "GET" });
+  const response = await fetch(new URL("workspaces", baseUrl), buildDaemonRequestInit("GET", auth));
+  if (response.status === 403 && auth?.requestToken === undefined) {
+    throw new Error(
+      "daemon /workspaces requires request-token auth; set ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN or let `alaya inspect` manage the daemon"
+    );
+  }
   if (!response.ok) {
     throw new Error(`daemon /workspaces returned HTTP ${response.status}`);
   }
@@ -270,19 +299,27 @@ async function defaultListWorkspaces(daemonUrl: string): Promise<readonly Worksp
 
 async function defaultGetWorkspaceById(
   daemonUrl: string,
-  workspaceId: string
+  workspaceId: string,
+  auth?: DaemonRequestAuth
 ): Promise<WorkspaceLookupResult> {
   const baseUrl = normalizeBaseUrl(daemonUrl);
   let response: Response;
   try {
     response = await fetch(new URL(`workspaces/${encodeURIComponent(workspaceId)}`, baseUrl), {
-      method: "GET"
+      ...buildDaemonRequestInit("GET", auth)
     });
   } catch (error) {
     return { status: "error", detail: describeError(error) };
   }
   if (response.status === 404) {
     return { status: "not_found" };
+  }
+  if (response.status === 403 && auth?.requestToken === undefined) {
+    return {
+      status: "error",
+      detail:
+        "daemon requires request-token auth; set ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN or let `alaya inspect` manage the daemon"
+    };
   }
   if (!response.ok) {
     return { status: "error", detail: `HTTP ${response.status}` };
@@ -308,7 +345,8 @@ function coerceWorkspaceSummary(value: unknown): WorkspaceSummary {
 async function ensureDaemonForInspector(
   ctx: AlayaCliContext,
   deps: InspectCommandDependencies,
-  checkPortAvailable: (port: number) => Promise<boolean>
+  checkPortAvailable: (port: number) => Promise<boolean>,
+  externalRequestToken: string | undefined
 ): Promise<{ readonly url: string; readonly startedDaemon: InspectDaemonServer | null }> {
   const configuredUrl = ctx.env.ALAYA_DAEMON_URL?.trim();
   if (configuredUrl !== undefined && configuredUrl.length > 0) {
@@ -321,10 +359,17 @@ async function ensureDaemonForInspector(
   }
 
   if (!(await checkPortAvailable(DEFAULT_DAEMON_PORT))) {
-    const probe = await (deps.probeDaemon ?? defaultProbeDaemon)(fallbackUrl);
+    const probe = await (deps.probeDaemon ?? defaultProbeDaemon)(fallbackUrl, {
+      requestToken: externalRequestToken
+    });
     if (probe.status === "unavailable") {
       throw new Error(
         `daemon port ${DEFAULT_DAEMON_PORT} is in use but does not answer as Alaya; stop that process or set ALAYA_DAEMON_URL explicitly.`
+      );
+    }
+    if (probe.status === "auth_required") {
+      throw new Error(
+        `daemon on ${DEFAULT_DAEMON_HOST}:${DEFAULT_DAEMON_PORT} requires request-token auth; set ${EXTERNAL_DAEMON_REQUEST_TOKEN_ENV} or stop that daemon and rerun alaya inspect.`
       );
     }
     if (probe.status === "missing_capability") {
@@ -338,7 +383,8 @@ async function ensureDaemonForInspector(
 
   const startedDaemon = await deps.startDaemonServer({
     hostname: DEFAULT_DAEMON_HOST,
-    port: DEFAULT_DAEMON_PORT
+    port: DEFAULT_DAEMON_PORT,
+    allowEphemeralRequestToken: true
   });
   return {
     url: `http://${startedDaemon.hostname}:${startedDaemon.port}`,
@@ -509,14 +555,14 @@ async function defaultCheckPortAvailable(port: number): Promise<boolean> {
   });
 }
 
-async function defaultProbeDaemon(url: string): Promise<InspectDaemonProbeResult> {
+async function defaultProbeDaemon(url: string, auth?: DaemonRequestAuth): Promise<InspectDaemonProbeResult> {
   const baseUrl = normalizeBaseUrl(url);
   try {
-    const response = await fetch(new URL("/status", baseUrl), {
+    const response = await fetch(new URL("/health", baseUrl), {
       method: "GET"
     });
     if (!response.ok) {
-      return { status: "unavailable", detail: `status HTTP ${response.status}` };
+      return { status: "unavailable", detail: `health HTTP ${response.status}` };
     }
   } catch (error) {
     return { status: "unavailable", detail: describeError(error) };
@@ -524,15 +570,51 @@ async function defaultProbeDaemon(url: string): Promise<InspectDaemonProbeResult
 
   try {
     const capability = await fetch(new URL("/config/runtime/garden-compute", baseUrl), {
-      method: "GET"
+      ...buildDaemonRequestInit("GET", auth)
     });
     if (capability.ok) {
       return { status: "compatible" };
+    }
+    if (capability.status === 403) {
+      return { status: "auth_required", detail: "HTTP 403" };
     }
     return { status: "missing_capability", detail: `HTTP ${capability.status}` };
   } catch (error) {
     return { status: "missing_capability", detail: describeError(error) };
   }
+}
+
+function resolveDaemonRequestAuth(input: {
+  readonly startedDaemon: boolean;
+  readonly getRequestToken?: () => string | undefined;
+  readonly externalRequestToken: string | undefined;
+}): DaemonRequestAuth {
+  return input.startedDaemon
+    ? { requestToken: normalizeOptionalToken(input.getRequestToken?.()) }
+    : { requestToken: input.externalRequestToken };
+}
+
+function normalizeOptionalToken(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+}
+
+function buildDaemonRequestInit(
+  method: "GET" | "PATCH" | "POST",
+  auth?: DaemonRequestAuth
+): Readonly<{ readonly method: "GET" | "PATCH" | "POST"; readonly headers?: Headers }> {
+  const headers = buildDaemonRequestHeaders(auth);
+  return headers === undefined ? { method } : { method, headers };
+}
+
+function buildDaemonRequestHeaders(auth?: DaemonRequestAuth): Headers | undefined {
+  if (auth?.requestToken === undefined) {
+    return undefined;
+  }
+  const headers = new Headers();
+  headers.set("x-request-token", auth.requestToken);
+  headers.set("x-alaya-desktop", "1");
+  return headers;
 }
 
 function formatProbeDetail(detail: string | undefined): string {
