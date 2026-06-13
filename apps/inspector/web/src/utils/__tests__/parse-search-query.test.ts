@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSearchQuery } from "./parse-search-query";
+import { parseSearchQuery } from "../parse-search-query";
 
 const REF = new Date(2026, 4, 15, 10, 0, 0); // 2026-05-15 10:00 local
 

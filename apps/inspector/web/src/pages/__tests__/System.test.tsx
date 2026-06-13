@@ -2,12 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import SystemPage from "./System";
+import SystemPage from "../System";
 
-vi.mock("./Status", () => ({
+vi.mock("../Status", () => ({
   default: () => <div data-testid="status-child">status</div>
 }));
-vi.mock("./Config", () => ({
+vi.mock("../Config", () => ({
   default: () => <div data-testid="config-child">config</div>
 }));
 

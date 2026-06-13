@@ -1,27 +1,27 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import { AppContent } from "./App";
-import { ToastProvider } from "../components/Toast";
-import { getWorkspaceId, setWorkspaceId } from "../api";
+import { AppContent } from "../App";
+import { ToastProvider } from "../../components/Toast";
+import { getWorkspaceId, setWorkspaceId } from "../../api";
 
-vi.mock("../pages/Overview", () => ({
+vi.mock("../../pages/Overview", () => ({
   default: () => <div>overview page</div>
 }));
 
-vi.mock("../pages/Config", () => ({
+vi.mock("../../pages/Config", () => ({
   default: () => <div>config page</div>
 }));
 
-vi.mock("../pages/Graph", () => ({
+vi.mock("../../pages/Graph", () => ({
   default: () => <div>graph page</div>
 }));
 
-vi.mock("../pages/Recall", () => ({
+vi.mock("../../pages/Recall", () => ({
   default: () => <div>recall page</div>
 }));
 
-vi.mock("../pages/Status", () => ({
+vi.mock("../../pages/Status", () => ({
   default: () => <div>status page</div>
 }));
 

@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, act, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import ConfigPage from "./Config";
-import { ToastProvider } from "../components/Toast";
-import { LocaleProvider } from "../i18n/Locale";
-import { setInspectorToken, setWorkspaceId } from "../api";
+import ConfigPage from "../Config";
+import { ToastProvider } from "../../components/Toast";
+import { LocaleProvider } from "../../i18n/Locale";
+import { setInspectorToken, setWorkspaceId } from "../../api";
 
 function renderConfig() {
   return render(

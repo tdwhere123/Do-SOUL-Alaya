@@ -3,16 +3,16 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { forwardRef, useEffect, useImperativeHandle, type ReactElement } from "react";
-import { ToastProvider } from "../components/Toast";
-import { setInspectorToken, setWorkspaceId } from "../api";
+import { ToastProvider } from "../../components/Toast";
+import { setInspectorToken, setWorkspaceId } from "../../api";
 import {
   STABILITY_DASH,
   linkDistance,
   linkStrength,
   linkWidth,
   nodeInfluenceSize
-} from "../utils/graph";
-import GraphPage from "./Graph";
+} from "../../utils/graph";
+import GraphPage from "../Graph";
 
 const forceGraphMockState = vi.hoisted(() => ({
   distanceCalls: [] as number[][],

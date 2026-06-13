@@ -2,8 +2,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { DetailDrawer } from "./DetailDrawer";
-import type { GraphNode } from "../types/graph";
+import { DetailDrawer } from "../DetailDrawer";
+import type { GraphNode } from "../../types/graph";
 
 const NODE: GraphNode = {
   id: "memory-1",

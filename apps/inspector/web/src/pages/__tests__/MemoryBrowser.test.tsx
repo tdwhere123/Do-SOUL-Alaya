@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import MemoryBrowserPage from "./MemoryBrowser";
-import { ToastProvider } from "../components/Toast";
-import { setInspectorToken, setWorkspaceId } from "../api";
+import MemoryBrowserPage from "../MemoryBrowser";
+import { ToastProvider } from "../../components/Toast";
+import { setInspectorToken, setWorkspaceId } from "../../api";
 
 function renderMemoryBrowser() {
   return render(

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import StatusPage from "./Status";
-import { ToastProvider } from "../components/Toast";
-import { setInspectorToken } from "../api";
+import StatusPage from "../Status";
+import { ToastProvider } from "../../components/Toast";
+import { setInspectorToken } from "../../api";
 
 function renderStatus() {
   return render(

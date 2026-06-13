@@ -5,7 +5,7 @@ import {
   setUnauthorizedHandler,
   setWorkspaceId,
   type ApiError
-} from "./api";
+} from "../api";
 
 describe("apiFetch", () => {
   let fetchMock: ReturnType<typeof vi.fn>;

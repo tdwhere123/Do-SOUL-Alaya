@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import OverviewPage from "./Overview";
-import { ToastProvider } from "../components/Toast";
-import { setInspectorToken, setWorkspaceId } from "../api";
+import OverviewPage from "../Overview";
+import { ToastProvider } from "../../components/Toast";
+import { setInspectorToken, setWorkspaceId } from "../../api";
 
 function renderOverview() {
   return render(
