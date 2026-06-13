@@ -160,7 +160,7 @@ describe("EdgeProposalService", () => {
     });
   });
 
-  // B5(a): edge-proposal TTL — proposeEdge stamps a default expires_at and the
+  // edge-proposal TTL — proposeEdge stamps a default expires_at and the
   // sweep flips past-TTL pending proposals to terminal `expired`.
   it("stamps a default expires_at at creation when the caller supplies none", async () => {
     const repo = createProposalRepo();

@@ -322,7 +322,7 @@ interface EdgeProposalReconcilePort {
     readonly rejected: number;
     readonly transient_failed: number;
   }>;
-  // invariant: B5(a) TTL sweep. Flips pending proposals past their expires_at to
+  // invariant: TTL sweep. Flips pending proposals past their expires_at to
   // terminal `expired` (audited), bounded per pass/workspace. Runs on the same
   // ~60s pass as reconcileStuckAccepts. see also: edge-proposal-service.ts
   // sweepExpired; sweepExpiredEdgeProposals below.
@@ -814,7 +814,7 @@ export function createGardenRuntime(input: {
         }
         bulkEnrichRuntime.reclaimStaleClaims();
         await gardenSchedulerRuntime.reconcileStuckEdgeProposalAccepts();
-        // B5(a): expire past-TTL pending edge proposals so the unreviewed
+        // expire past-TTL pending edge proposals so the unreviewed
         // backlog cannot grow unbounded on a no-reviewer deployment.
         await gardenSchedulerRuntime.sweepExpiredEdgeProposals();
         await hostWorkerTaskRuntime.processPostTurnExtractTask();
