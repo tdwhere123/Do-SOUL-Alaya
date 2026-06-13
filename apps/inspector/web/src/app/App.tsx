@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { getInspectorToken, setInspectorToken, setUnauthorizedHandler, setWorkspaceId } from "../api";
 
 import BenchTrendPage from "../pages/BenchTrend";
 import GovernancePage from "../pages/Governance";
-import GraphPage from "../pages/Graph";
 import MemoryBrowserPage from "../pages/MemoryBrowser";
 import OverviewPage from "../pages/Overview";
 import RecallPage from "../pages/Recall";
@@ -15,6 +14,8 @@ import Layout from "../components/Layout";
 import SessionExpired from "../components/SessionExpired";
 import { ToastProvider } from "../components/Toast";
 import { LocaleProvider } from "../i18n/Locale";
+
+const GraphPage = lazy(() => import("../pages/Graph"));
 
 export function AppContent() {
   const [searchParams] = useSearchParams();
@@ -87,7 +88,14 @@ export function AppContent() {
           <Route path="/overview" element={<OverviewPage />} />
           <Route path="/governance" element={<GovernancePage />} />
           <Route path="/memory-browser" element={<MemoryBrowserPage />} />
-          <Route path="/graph" element={<GraphPage />} />
+          <Route
+            path="/graph"
+            element={
+              <Suspense fallback={<RouteLoadingFallback label="Loading graph surface..." />}>
+                <GraphPage />
+              </Suspense>
+            }
+          />
           <Route path="/system" element={<SystemPage />} />
           {/* Demoted deep links (reachable via cards / command palette). */}
           <Route path="/recall" element={<RecallPage />} />
@@ -117,6 +125,17 @@ function LegacyRedirect({ to, tab }: { readonly to: string; readonly tab: string
   const next = new URLSearchParams(searchParams);
   next.set("tab", tab);
   return <Navigate to={`${to}?${next.toString()}`} replace />;
+}
+
+function RouteLoadingFallback({ label }: { readonly label: string }) {
+  return (
+    <div className="flex items-center justify-center h-full min-h-[50vh] bg-beige-100">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-12 h-12 border-2 border-ink-600/20 border-t-ink-600 rounded-full animate-spin" />
+        <p className="text-ink-600 font-mono text-xs uppercase tracking-widest">{label}</p>
+      </div>
+    </div>
+  );
 }
 
 function App() {
