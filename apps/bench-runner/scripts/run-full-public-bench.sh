@@ -40,7 +40,7 @@ WEIGHTS=""
 DATA_DIR="${BENCH_DATA_DIR:-apps/bench-runner/data/longmemeval}"
 HISTORY_ROOT="${BENCH_PUBLIC_HISTORY_ROOT:-docs/bench-history}"
 LOG_DIR="${BENCH_LOG_DIR:-/tmp/alaya-bench-logs}"
-BENCH_RUNNER_CLI="apps/bench-runner/dist/cli.js"
+BENCH_RUNNER_CLI="apps/bench-runner/dist/cli/index.js"
 NODE_BIN="${BENCH_NODE_BIN:-node}"
 NODE_RUNNER=("$NODE_BIN")
 if [[ "${BENCH_NODE_USE_ENV_PROXY:-0}" == "1" ]]; then

@@ -194,6 +194,7 @@ describe("bench recall weight overrides", () => {
     expect(script).toContain("BENCH_NODE_USE_ENV_PROXY");
     expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/embedding-provider-preflight.mjs");
     expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval");
+    expect(script).toContain("BENCH_RUNNER_CLI=\"apps/bench-runner/dist/cli/index.js\"");
     expect(script).toContain("! -path '*/__tests__/*'");
     expect(script).toContain("! -name '*.test.ts'");
     expect(script).toContain("exited 1 after writing KPI; allowing merge");
@@ -216,6 +217,7 @@ describe("bench recall weight overrides", () => {
     expect(script).toContain("BENCH_NODE_USE_ENV_PROXY");
     expect(script).toContain("ensure_bench_runner_build_fresh");
     expect(script).toContain("bench runner dist appears stale");
+    expect(script).toContain("BENCH_RUNNER_CLI=\"apps/bench-runner/dist/cli/index.js\"");
     expect(script).toContain("! -path '*/__tests__/*'");
     expect(script).toContain("! -name '*.test.ts'");
     expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/embedding-provider-preflight.mjs");
