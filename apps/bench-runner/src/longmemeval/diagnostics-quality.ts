@@ -510,7 +510,7 @@ function ratio(count: number, total: number): number {
 }
 
 // @anchor per-plane-recall-coverage: shared by buildLongMemEvalQualityMetrics
-// and cli.ts mergeQualityMetrics so single-shard and merged kpi.json carry
+// and cli-merge-quality.ts mergeQualityMetrics so single-shard and merged kpi.json carry
 // the same per-plane block shape.
 export function buildPerPlaneRecallCoverage(
   goldCounts: ReadonlyMap<string, number>,
