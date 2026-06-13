@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  type CandidateMemorySignal,
   DYNAMICS_CONSTANTS,
   GardenTaskKind,
   type GardenTaskDescriptor,
@@ -8,6 +7,18 @@ import {
   type GardenTierValue
 } from "@do-soul/alaya-protocol";
 import type { BackgroundServiceConfig } from "../../background/bootstrap.js";
+import {
+  FakeEnrichPendingRepo,
+  buildMemory,
+  buildSignal,
+  bulkEnrichTask,
+  createGardenDataPorts,
+  createRuntimeInput,
+  type DetectFn,
+  type ProduceFn,
+  type ReplaySignalRefsFn,
+  type SourceSignalLookupFn
+} from "./runtime-bulk-enrich-fixture.js";
 
 // invariant: BULK_ENRICH drain worker test (S3c). Pins that the Garden claims
 // enrich_pending rows, runs both governed enrichment services per memory, marks
@@ -98,169 +109,7 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
 
 import { createGardenRuntime } from "../../garden/runtime.js";
 
-type GardenRuntimeInput = Parameters<typeof createGardenRuntime>[0];
 type Runtime = ReturnType<typeof createGardenRuntime>;
-type ProduceFn = NonNullable<GardenRuntimeInput["enrichEdgeProducerPort"]>["produceForNewMemory"];
-type DetectFn = NonNullable<
-  GardenRuntimeInput["enrichConflictDetectionPort"]
->["detectAndLinkConflicts"];
-type ReplaySignalRefsFn = NonNullable<
-  GardenRuntimeInput["enrichSignalRefReplayPort"]
->["replaySignalRefs"];
-type SourceSignalLookupFn = NonNullable<
-  GardenRuntimeInput["enrichSourceSignalLookup"]
->["getById"];
-
-interface PendingRow {
-  workspaceId: string;
-  memoryId: string;
-  runId: string | null;
-  sourceSignalId: string | null;
-  claimedAt: string | null;
-  processed: boolean;
-  attemptCount: number;
-  abandonedAt: string | null;
-}
-
-class FakeEnrichPendingRepo {
-  private readonly rows: PendingRow[] = [];
-  // Test-only effective claim budget. Models a small claim_batch_size so a
-  // poison marker (oldest-first) can starve healthy markers behind it until it
-  // dead-letters. null = honor the limit the drain passes (production behavior).
-  private budgetCap: number | null = null;
-
-  public setBudgetCap(cap: number | null): void {
-    this.budgetCap = cap;
-  }
-
-  public enqueue(workspaceId: string, memoryId: string): void {
-    const existing = this.rows.find((row) => row.workspaceId === workspaceId && row.memoryId === memoryId);
-    if (existing !== undefined && !existing.processed) {
-      return;
-    }
-    if (existing !== undefined) {
-      existing.claimedAt = null;
-      existing.processed = false;
-      existing.attemptCount = 0;
-      existing.abandonedAt = null;
-      return;
-    }
-    this.rows.push({
-      workspaceId,
-      memoryId,
-      runId: "run-1",
-      sourceSignalId: `signal-${memoryId}`,
-      claimedAt: null,
-      processed: false,
-      attemptCount: 0,
-      abandonedAt: null
-    });
-  }
-
-  // Mirrors the SQL claimable predicate: not processed, not in-flight, not
-  // dead-lettered, and under the attempt cap.
-  public claimBatch(
-    workspaceId: string,
-    limit: number,
-    claimedAt: string,
-    maxAttempts: number
-  ): readonly {
-    readonly workspaceId: string;
-    readonly memoryId: string;
-    readonly runId: string | null;
-    readonly sourceSignalId: string | null;
-  }[] {
-    const claimable = this.rows.filter(
-      (row) =>
-        row.workspaceId === workspaceId &&
-        !row.processed &&
-        row.claimedAt === null &&
-        row.abandonedAt === null &&
-        row.attemptCount < maxAttempts
-    );
-    const effectiveLimit = this.budgetCap === null ? limit : Math.min(limit, this.budgetCap);
-    const claimed = claimable.slice(0, effectiveLimit);
-    for (const row of claimed) {
-      row.claimedAt = claimedAt;
-    }
-    return claimed.map((row) => ({
-      workspaceId: row.workspaceId,
-      memoryId: row.memoryId,
-      runId: row.runId,
-      sourceSignalId: row.sourceSignalId
-    }));
-  }
-
-  public markProcessed(workspaceId: string, memoryId: string): void {
-    const row = this.rows.find((entry) => entry.workspaceId === workspaceId && entry.memoryId === memoryId);
-    if (row !== undefined) {
-      row.processed = true;
-    }
-  }
-
-  // Mirrors the SQL recordFailedAttempt transaction: increment under the
-  // processed/abandoned guard, then release (under cap) or dead-letter (at cap).
-  public recordFailedAttempt(
-    workspaceId: string,
-    memoryId: string,
-    maxAttempts: number,
-    abandonedAt: string
-  ): { readonly attemptCount: number; readonly abandoned: boolean } {
-    const row = this.rows.find((entry) => entry.workspaceId === workspaceId && entry.memoryId === memoryId);
-    if (row === undefined || row.processed || row.abandonedAt !== null) {
-      return { attemptCount: row?.attemptCount ?? 0, abandoned: false };
-    }
-    row.attemptCount += 1;
-    if (row.attemptCount >= maxAttempts) {
-      row.abandonedAt = abandonedAt;
-      return { attemptCount: row.attemptCount, abandoned: true };
-    }
-    row.claimedAt = null;
-    return { attemptCount: row.attemptCount, abandoned: false };
-  }
-
-  public delete(workspaceId: string, memoryId: string): void {
-    const index = this.rows.findIndex(
-      (entry) => entry.workspaceId === workspaceId && entry.memoryId === memoryId
-    );
-    if (index >= 0) {
-      this.rows.splice(index, 1);
-    }
-  }
-
-  public countPending(workspaceId: string): number {
-    return this.rows.filter((row) => row.workspaceId === workspaceId && !row.processed).length;
-  }
-
-  public reclaimStale(now: string, staleAfterMs: number): number {
-    const cutoff = new Date(new Date(now).getTime() - staleAfterMs).toISOString();
-    let reclaimed = 0;
-    for (const row of this.rows) {
-      if (
-        row.claimedAt !== null &&
-        !row.processed &&
-        row.abandonedAt === null &&
-        row.claimedAt < cutoff
-      ) {
-        row.claimedAt = null;
-        reclaimed += 1;
-      }
-    }
-    return reclaimed;
-  }
-
-  // Test-only: leave a row claimed-but-unprocessed to simulate a worker that
-  // crashed between claimBatch and markProcessed.
-  public simulateStrandedClaim(workspaceId: string, memoryId: string, claimedAt: string): void {
-    const row = this.rows.find((entry) => entry.workspaceId === workspaceId && entry.memoryId === memoryId);
-    if (row === undefined) {
-      throw new Error(`No enrich_pending row for ${workspaceId}/${memoryId}.`);
-    }
-    row.claimedAt = claimedAt;
-    row.processed = false;
-  }
-}
-
 describe("garden runtime BULK_ENRICH drain worker", () => {
   beforeEach(() => {
     hoisted.schedulers.splice(0, hoisted.schedulers.length);
@@ -1060,68 +909,6 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
   });
 });
 
-function buildMemory(
-  memoryId: string,
-  workspaceId = "workspace-1"
-): Readonly<{
-  readonly object_id: string;
-  readonly dimension: string;
-  readonly scope_class: string;
-  readonly content: string;
-  readonly domain_tags: readonly string[];
-  readonly workspace_id: string;
-  readonly run_id: string;
-}> {
-  return {
-    object_id: memoryId,
-    dimension: "fact",
-    scope_class: "project",
-    content: `content-for-${memoryId}`,
-    domain_tags: ["rtk"],
-    workspace_id: workspaceId,
-    run_id: "run-1"
-  };
-}
-
-function buildSignal(signalId: string): CandidateMemorySignal {
-  return {
-    signal_id: signalId,
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
-    source: "garden_compile",
-    signal_kind: "potential_claim",
-    object_kind: "fact",
-    scope_hint: "project",
-    domain_tags: ["rtk"],
-    confidence: 0.9,
-    evidence_refs: [],
-    source_memory_refs: ["memory-source"],
-    supersedes_refs: [],
-    exception_to_refs: [],
-    contradicts_refs: [],
-    incompatible_with_refs: [],
-    raw_payload: {
-      distilled_fact: "Signal ref replay fact."
-    },
-    signal_state: "compiled",
-    created_at: "2026-05-30T12:00:00.000Z"
-  };
-}
-
-function bulkEnrichTask(): GardenTaskDescriptor {
-  return {
-    task_id: `bulk-${Math.random()}`,
-    task_kind: GardenTaskKind.BULK_ENRICH,
-    required_tier: "tier_2",
-    workspace_id: "workspace-1",
-    run_id: null,
-    target_object_refs: ["workspace-1"],
-    priority: 10,
-    created_at: "2026-05-30T12:00:00.000Z"
-  };
-}
-
 async function dispatchBulkEnrich(runtime: Runtime): Promise<void> {
   currentScheduler().enqueue(bulkEnrichTask());
   await getService(runtime, "GardenScheduler").task();
@@ -1144,93 +931,4 @@ function getService(runtime: Runtime, name: string): BackgroundServiceConfig {
     throw new Error(`Missing background service ${name}.`);
   }
   return service;
-}
-
-function createRuntimeInput(options: {
-  readonly enrichPendingRepo: FakeEnrichPendingRepo;
-  readonly findById: (memoryId: string) => Promise<ReturnType<typeof buildMemory> | null>;
-  readonly produceForNewMemory?: ProduceFn;
-  readonly detectAndLinkConflicts?: DetectFn;
-  readonly sourceSignalLookup?: SourceSignalLookupFn;
-  readonly replaySignalRefs?: ReplaySignalRefsFn;
-  readonly omitEnrichmentServices?: boolean;
-  readonly workspaceIds?: readonly string[];
-  readonly edgeProposalReconcile?: NonNullable<GardenRuntimeInput["edgeProposalReconcile"]>;
-  readonly publish?: ReturnType<typeof vi.fn>;
-}): GardenRuntimeInput {
-  const fallbackPublish = vi.fn(async (entry: Record<string, unknown>) => ({
-    event_id: `event-${fallbackPublish.mock.calls.length + 1}`,
-    created_at: "2026-05-30T12:00:00.000Z",
-    revision: 1,
-    ...entry
-  }));
-  const publish = options.publish ?? fallbackPublish;
-  const workspaceIds = options.workspaceIds ?? ["workspace-1"];
-
-  return {
-    databaseConnection: {} as GardenRuntimeInput["databaseConnection"],
-    backlogThresholds: {
-      warning_queue_depth: 100,
-      warning_rearm_depth: 50,
-      snapshot_interval_ms: 1000
-    },
-    eventLogRepo: {} as GardenRuntimeInput["eventLogRepo"],
-    eventPublisher: {
-      publish,
-      appendManyWithMutation: vi.fn()
-    } as unknown as GardenRuntimeInput["eventPublisher"],
-    gardenDataPorts: {} as GardenRuntimeInput["gardenDataPorts"],
-    healthJournalRepo: {
-      append: vi.fn(async () => undefined)
-    } as unknown as GardenRuntimeInput["healthJournalRepo"],
-    handoffGapRepo: {
-      findExpiredObjectsByWorkspace: vi.fn(async () => []),
-      deleteById: vi.fn()
-    } as unknown as GardenRuntimeInput["handoffGapRepo"],
-    orphanDetectionEnabled: false,
-    orphanRadarRepo: null,
-    pathGraphSnapshotRepo: {
-      findLatest: vi.fn(async () => null),
-      create: vi.fn(),
-      findHistory: vi.fn(async () => []),
-      deleteOlderThan: vi.fn(async () => undefined)
-    } as unknown as GardenRuntimeInput["pathGraphSnapshotRepo"],
-    pathRelationRepo: {
-      findActive: vi.fn(async () => []),
-      findByAnchors: vi.fn(async () => [])
-    } as unknown as GardenRuntimeInput["pathRelationRepo"],
-    strongRefService: {
-      isProtected: vi.fn(async () => false)
-    } as unknown as GardenRuntimeInput["strongRefService"],
-    workspaceRepo: {
-      list: vi.fn(async () => workspaceIds.map((workspace_id) => ({ workspace_id })))
-    } as unknown as GardenRuntimeInput["workspaceRepo"],
-    enrichPendingRepo: options.enrichPendingRepo as unknown as NonNullable<
-      GardenRuntimeInput["enrichPendingRepo"]
-    >,
-    enrichMemoryLookup: { findById: options.findById },
-    ...(options.replaySignalRefs === undefined
-      ? {}
-      : {
-          enrichSourceSignalLookup: {
-            getById: options.sourceSignalLookup ?? (async (signalId: string) => buildSignal(signalId))
-          },
-          enrichSignalRefReplayPort: {
-            replaySignalRefs: options.replaySignalRefs
-          }
-        }),
-    ...(options.edgeProposalReconcile === undefined
-      ? {}
-      : { edgeProposalReconcile: options.edgeProposalReconcile }),
-    ...(options.omitEnrichmentServices === true
-      ? {}
-      : {
-          enrichEdgeProducerPort: {
-            produceForNewMemory: options.produceForNewMemory ?? (async () => undefined)
-          },
-          ...(options.detectAndLinkConflicts === undefined
-            ? {}
-            : { enrichConflictDetectionPort: { detectAndLinkConflicts: options.detectAndLinkConflicts } })
-        })
-  };
 }
