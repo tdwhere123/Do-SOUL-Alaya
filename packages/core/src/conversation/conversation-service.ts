@@ -260,7 +260,17 @@ export class ConversationService {
           new Date().toISOString()
         );
         runtimeMode = snapshot.current_mode;
-      } catch {}
+      } catch (error) {
+        runtimeMode = RuntimeMode.MINIMAL;
+        this.dependencies.warn(
+          "[ConversationService] Budget bankruptcy snapshot lookup failed; using minimal runtime mode",
+          {
+            run_id: input.run.run_id,
+            workspace_id: input.workspace.workspace_id,
+            error
+          }
+        );
+      }
     }
 
     try {

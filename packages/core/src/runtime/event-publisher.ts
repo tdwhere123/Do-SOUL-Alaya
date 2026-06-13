@@ -99,7 +99,20 @@ export class EventPublisher {
   ): T {
     const { entries, mutateResult } = this.appendManyInTransaction(eventInputs, mutate);
     for (const entry of entries) {
-      void this.propagate(entry).catch(() => undefined);
+      void this.propagate(entry).catch((error) => {
+        process.emitWarning("[EventPublisher] Detached propagation failed after commit", {
+          code: "ALAYA_EVENT_PROPAGATION_DETACHED_FAILED",
+          detail: JSON.stringify({
+            event_id: entry.event_id,
+            event_type: entry.event_type,
+            entity_type: entry.entity_type,
+            entity_id: entry.entity_id,
+            run_id: entry.run_id,
+            workspace_id: entry.workspace_id,
+            error: error instanceof Error ? error.message : String(error)
+          })
+        });
+      });
     }
     return mutateResult;
   }

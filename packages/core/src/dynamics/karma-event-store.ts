@@ -20,6 +20,8 @@ export interface KarmaEventStoreWarnPort {
   warn(message: string, meta: Record<string, unknown>): void;
 }
 
+const KARMA_EVENT_PERSIST_WARNING_CODE = "ALAYA_KARMA_EVENT_PERSIST_FAILED";
+
 // Hard cap so a long-lived in-memory store cannot grow without bound; it
 // retains only the most recent MAX_RETAINED_EVENTS, evicting oldest-first.
 const MAX_RETAINED_EVENTS = 10000;
@@ -59,6 +61,16 @@ export class SqliteKarmaEventStore implements KarmaEventStore {
     void this.repo.create(parsed).catch((error) => {
       this.warn?.warn("[SqliteKarmaEventStore] Failed to persist karma event", {
         error
+      });
+      process.emitWarning("[SqliteKarmaEventStore] Failed to persist karma event", {
+        code: KARMA_EVENT_PERSIST_WARNING_CODE,
+        detail: JSON.stringify({
+          object_id: parsed.object_id,
+          workspace_id: parsed.workspace_id,
+          run_id: parsed.run_id,
+          kind: parsed.kind,
+          error: error instanceof Error ? error.message : String(error)
+        })
       });
     });
   }

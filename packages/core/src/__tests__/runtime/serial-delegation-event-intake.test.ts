@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "@do-soul/alaya-protocol";
 import { SerialDelegationEventIntake } from "../../runtime/serial-delegation-event-intake.js";
 
@@ -6,6 +6,7 @@ describe("SerialDelegationEventIntake", () => {
   it("surfaces the current operation failure while allowing later enqueues to recover", async () => {
     const intake = new SerialDelegationEventIntake();
     const operations: string[] = [];
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
 
     intake.enqueue(async () => {
       operations.push("first");
@@ -13,6 +14,12 @@ describe("SerialDelegationEventIntake", () => {
     });
 
     await expect(intake.drain()).rejects.toThrow("boom");
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[SerialDelegationEventIntake] Queued runtime event operation failed",
+      expect.objectContaining({
+        code: "ALAYA_SERIAL_DELEGATION_QUEUE_FAILED"
+      })
+    );
 
     intake.enqueue(async () => {
       operations.push("second");
@@ -20,6 +27,8 @@ describe("SerialDelegationEventIntake", () => {
 
     await expect(intake.drain()).resolves.toBeUndefined();
     expect(operations).toEqual(["first", "second"]);
+
+    emitWarning.mockRestore();
   });
 
   it("resolves waiters with the pending session_finished event observed during the grace window", async () => {

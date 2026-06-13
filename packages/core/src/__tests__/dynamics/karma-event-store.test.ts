@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { KarmaEvent } from "@do-soul/alaya-protocol";
 import {
   InMemoryKarmaEventStore,
@@ -66,6 +66,38 @@ describe("SqliteKarmaEventStore", () => {
     // The store holds no copy; clearing the repo empties the read.
     repo.rows.length = 0;
     expect(store.findByObjectId("obj-a")).toHaveLength(0);
+  });
+
+  it("emits an operator-visible warning when async persistence fails", async () => {
+    const warn = { warn: vi.fn() };
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const store = new SqliteKarmaEventStore(
+      {
+        create: vi.fn(async () => {
+          throw new Error("sqlite busy");
+        }),
+        findByObjectIdSync: vi.fn(() => [])
+      },
+      warn
+    );
+
+    store.record(makeEvent("obj-fail", "evt-fail"));
+    await Promise.resolve();
+
+    expect(warn.warn).toHaveBeenCalledWith(
+      "[SqliteKarmaEventStore] Failed to persist karma event",
+      expect.objectContaining({
+        error: expect.any(Error)
+      })
+    );
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[SqliteKarmaEventStore] Failed to persist karma event",
+      expect.objectContaining({
+        code: "ALAYA_KARMA_EVENT_PERSIST_FAILED"
+      })
+    );
+
+    emitWarning.mockRestore();
   });
 
   it("InMemoryKarmaEventStore remains the explicit in-memory test double", () => {

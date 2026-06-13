@@ -122,6 +122,8 @@ export type PreparedEmbeddingQuerySnapshot =
   | {
       readonly status: "failed";
       readonly reason: string;
+      readonly error_name?: string;
+      readonly error_message?: string;
     };
 
 export interface PreparedEmbeddingQueryHandle {

@@ -216,6 +216,51 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
     expect(notifyEntry).toHaveBeenCalledTimes(1);
   });
 
+  it("emits an operator-visible warning when detached propagation rejects", async () => {
+    const repo = buildFakeRepo();
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const publisher = new EventPublisher({
+      eventLogRepo: repo,
+      runHotStateService: { apply: vi.fn() },
+      runtimeNotifier: {
+        notify: vi.fn(),
+        notifyEntry: vi.fn(async () => {
+          throw new Error("detached notify exploded");
+        })
+      }
+    });
+
+    publisher.appendManyWithMutationAndDetachPropagation(
+      [
+        {
+          event_type: "worker.state_changed",
+          entity_type: "worker_run",
+          entity_id: "worker-detached-fail-1",
+          workspace_id: "ws-1",
+          run_id: "run-1",
+          caused_by: "worker_lifecycle",
+          payload_json: WorkerStateChangedPayloadSchema.parse({
+            workerId: "worker-detached-fail-1",
+            state: "active",
+            previousState: "init"
+          })
+        }
+      ],
+      () => "committed"
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[EventPublisher] Detached propagation failed after commit",
+      expect.objectContaining({
+        code: "ALAYA_EVENT_PROPAGATION_DETACHED_FAILED"
+      })
+    );
+
+    emitWarning.mockRestore();
+  });
+
   it("committed/detached mutation still rolls back when the synchronous mutate throws", () => {
     const repo = buildFakeRepo();
     const publisher = new EventPublisher({

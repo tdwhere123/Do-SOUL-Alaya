@@ -162,6 +162,47 @@ describe("EmbeddingRecallService", () => {
     ]);
   });
 
+  it("preserves provider error context on failed prepared query embeddings", async () => {
+    const service = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => [])
+      },
+      provider: createProvider({
+        embedTexts: vi.fn(async () => {
+          throw new TypeError("network timeout");
+        })
+      }),
+      eventLogRepo: {
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+          event_id: `event-${entry.event_type}`,
+          created_at: "2026-04-23T00:00:00.000Z",
+          revision: 0,
+          ...entry
+        })),
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "prepared-query-error",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const preparedQuery = service.prepareQueryEmbedding({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "Semantic recall ranking"
+    });
+    const snapshot =
+      typeof preparedQuery.waitForSnapshot === "function"
+        ? await preparedQuery.waitForSnapshot(50)
+        : preparedQuery.getSnapshot();
+
+    expect(snapshot).toEqual({
+      status: "failed",
+      reason: "query_embedding_failed",
+      error_name: "TypeError",
+      error_message: "network timeout"
+    });
+  });
+
   it("reuses prepared stored vectors instead of reading the vector table twice", async () => {
     const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${entry.event_type}`,

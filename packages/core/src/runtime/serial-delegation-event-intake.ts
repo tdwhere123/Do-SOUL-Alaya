@@ -88,6 +88,12 @@ export class SerialDelegationEventIntake {
           // operation unexpectedly rejects so later events can still settle,
           // but preserve the failure for drain() so callers still observe it.
           this.drainError ??= error;
+          process.emitWarning("[SerialDelegationEventIntake] Queued runtime event operation failed", {
+            code: "ALAYA_SERIAL_DELEGATION_QUEUE_FAILED",
+            detail: JSON.stringify({
+              error: error instanceof Error ? error.message : String(error)
+            })
+          });
         }
       });
   }

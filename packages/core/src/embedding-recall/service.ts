@@ -113,10 +113,12 @@ export class EmbeddingRecallService {
         });
         this.putCachedQueryEmbedding(queryCacheKey, snapshot.embedding);
       })
-      .catch(() => {
+      .catch((error) => {
         snapshot = Object.freeze({
           status: "failed",
-          reason: "query_embedding_failed"
+          reason: "query_embedding_failed",
+          error_name: error instanceof Error ? error.name : undefined,
+          error_message: toErrorMessage(error)
         });
       });
 
@@ -526,6 +528,15 @@ export class EmbeddingRecallService {
     }
 
     if (snapshot.status !== "ready") {
+      if (snapshot.status === "failed") {
+        this.warn("embedding supplement degraded", {
+          workspace_id: params.workspaceId,
+          run_id: params.runId,
+          reason: snapshot.reason,
+          error_name: snapshot.error_name,
+          error: snapshot.error_message ?? snapshot.reason
+        });
+      }
       await this.recordDegraded({
         workspaceId: params.workspaceId,
         runId: params.runId,
@@ -631,7 +642,10 @@ export class EmbeddingRecallService {
           ? await preparedQuery.waitForSnapshot(this.queryTimeoutMs)
           : initialSnapshot;
       if (snapshot.status !== "ready") {
-        throw new Error(snapshot.status === "failed" ? snapshot.reason : "query_embedding_pending");
+        if (snapshot.status === "failed") {
+          throw new Error(snapshot.error_message ?? snapshot.reason);
+        }
+        throw new Error("query_embedding_pending");
       }
       queryEmbedding = snapshot.embedding;
       embeddingInferenceCalls = preparedQuery.cacheHit ? 0 : 1;

@@ -69,6 +69,41 @@ describe("ConversationService", () => {
     expect(result.recalledContextSection).toContain("Use explicit evidence before durable memory.");
   });
 
+  it("falls back to minimal runtime mode and warns when the budget snapshot lookup fails", async () => {
+    const contextLens = createContextLens();
+    const workingProjection = createWorkingProjection();
+    const contextLensAssembler = {
+      assemble: vi.fn(async () => ({ contextLens, workingProjection }))
+    };
+    const snapshotError = new Error("budget repo offline");
+    const warn = vi.fn();
+    const { service } = createService({
+      warn,
+      contextLensAssembler,
+      budgetBankruptcyService: {
+        getSnapshot: vi.fn(async () => {
+          throw snapshotError;
+        })
+      }
+    });
+
+    await service.assembleMemoryContext("run-1");
+
+    expect(contextLensAssembler.assemble).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeMode: RuntimeMode.MINIMAL
+      })
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "[ConversationService] Budget bankruptcy snapshot lookup failed; using minimal runtime mode",
+      expect.objectContaining({
+        run_id: "run-1",
+        workspace_id: "workspace-1",
+        error: snapshotError
+      })
+    );
+  });
+
   it("memory orchestration returns null context and warns when ContextLens assembly fails", async () => {
     const warn = vi.fn();
     const { service } = createService({
