@@ -20,7 +20,8 @@
       "@do-soul/alaya-core": ["./packages/core/src/index.ts"],
       "@do-soul/alaya-soul": ["./packages/soul/src/index.ts"],
       "@do-soul/alaya-engine-gateway": ["./packages/engine-gateway/src/index.ts"],
-      "@do-soul/alaya-storage": ["./packages/storage/src/index.ts"]
+      "@do-soul/alaya-storage": ["./packages/storage/src/index.ts"],
+      "@do-soul/alaya-eval": ["./packages/eval/src/index.ts"]
     },
     "types": ["node", "vitest/globals"]
   }

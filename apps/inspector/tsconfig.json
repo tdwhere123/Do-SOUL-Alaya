@@ -7,6 +7,7 @@
   "include": ["src/**/*.ts"],
   "exclude": ["src/__tests__/**/*.ts"],
   "references": [
-    { "path": "../../packages/protocol" }
+    { "path": "../../packages/protocol" },
+    { "path": "../../packages/eval" }
   ]
 }
