@@ -149,6 +149,10 @@ export interface McpMemoryToolHandlerDependencies {
       objectId: string,
       workspaceId: string
     ): Promise<Readonly<MemoryEntry> | null>;
+    findByIdsScoped?(
+      objectIds: readonly string[],
+      workspaceId: string
+    ): Promise<readonly Readonly<MemoryEntry>[]>;
     update(
       objectId: string,
       fields: MemoryUsageRefreshFields,

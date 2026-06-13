@@ -116,6 +116,10 @@ export interface RecallUsageHandlerDependencies {
       objectId: string,
       workspaceId: string
     ): Promise<Readonly<MemoryEntry> | null>;
+    findByIdsScoped?(
+      objectIds: readonly string[],
+      workspaceId: string
+    ): Promise<readonly Readonly<MemoryEntry>[]>;
     updateScoped?(
       objectId: string,
       workspaceId: string,
@@ -165,11 +169,23 @@ export interface RecallUsageHandlerDependencies {
 type WarnPort = (message: string, meta: Record<string, unknown>) => void;
 
 class ContextUsageValidationError extends Error {
-  public readonly code = "VALIDATION" as const;
+  public readonly code: "VALIDATION";
+
+  public constructor(message: string) {
+    super(message);
+    this.name = "ContextUsageValidationError";
+    this.code = "VALIDATION";
+  }
 }
 
 class ContextUsageNotFoundError extends Error {
-  public readonly code = "NOT_FOUND" as const;
+  public readonly code: "NOT_FOUND";
+
+  public constructor(message: string) {
+    super(message);
+    this.name = "ContextUsageNotFoundError";
+    this.code = "NOT_FOUND";
+  }
 }
 
 class RecallHitTierPromotionCasMiss extends Error {}
@@ -505,14 +521,23 @@ async function validateReportedRecallHits(
     }
   }
 
-  await Promise.all(
-    usedObjectIds.map(async (objectId) => {
-      const memory = await deps.memoryService.findByIdScoped(objectId, workspaceId);
-      if (memory === null) {
+  if (deps.memoryService.findByIdsScoped !== undefined) {
+    const memories = await deps.memoryService.findByIdsScoped(usedObjectIds, workspaceId);
+    const foundIds = new Set(memories.map((memory) => memory.object_id));
+    for (const objectId of usedObjectIds) {
+      if (!foundIds.has(objectId)) {
         throw new ContextUsageNotFoundError(`Memory entry ${objectId} was not found.`);
       }
-    })
-  );
+    }
+    return;
+  }
+
+  await Promise.all(usedObjectIds.map(async (objectId) => {
+    const memory = await deps.memoryService.findByIdScoped(objectId, workspaceId);
+    if (memory === null) {
+      throw new ContextUsageNotFoundError(`Memory entry ${objectId} was not found.`);
+    }
+  }));
 }
 
 async function refreshReportedRecallHits(
@@ -621,8 +646,21 @@ async function promoteRecallHitMemories(
   }
 
   const usedObjectIds = resolveUsedObjectIds(request);
+  const currentByObjectId =
+    params.deps.memoryService.findByIdsScoped === undefined
+      ? null
+      : new Map(
+          (
+            await params.deps.memoryService.findByIdsScoped(
+              usedObjectIds,
+              attribution.workspaceId
+            )
+          ).map((entry) => [entry.object_id, entry] as const)
+        );
   for (const objectId of usedObjectIds) {
-    const current = await params.deps.memoryService.findByIdScoped(objectId, attribution.workspaceId);
+    const current =
+      currentByObjectId?.get(objectId) ??
+      await params.deps.memoryService.findByIdScoped(objectId, attribution.workspaceId);
     if (current === null) {
       continue;
     }

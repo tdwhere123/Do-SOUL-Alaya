@@ -201,6 +201,11 @@ async function createHarness(options: {
         await options.afterFindByIdScoped?.();
         return entry;
       },
+      findByIdsScoped: async (objectIds, workspaceId) => {
+        const entries = await memoryService.findByIdsScoped(objectIds, workspaceId);
+        await options.afterFindByIdScoped?.();
+        return entries;
+      },
       update: memoryService.update.bind(memoryService),
       validateUpdate: memoryService.validateUpdate.bind(memoryService)
     },

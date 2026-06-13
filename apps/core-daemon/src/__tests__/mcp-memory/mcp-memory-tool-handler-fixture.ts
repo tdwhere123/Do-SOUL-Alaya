@@ -52,6 +52,10 @@ export function createDeps(): McpMemoryToolHandlerDependencies {
         const entry = createMemory();
         return entry.workspace_id === workspaceId ? entry : null;
       }),
+      findByIdsScoped: vi.fn(async (objectIds: readonly string[], workspaceId: string) =>
+        objectIds
+          .map((objectId) => createMemory({ object_id: objectId, workspace_id: workspaceId }))
+      ),
       update: vi.fn(async (_objectId, fields) => createMemory(fields)),
       updateScoped: vi.fn(async (_objectId, _workspaceId, fields) => createMemory(fields))
     },

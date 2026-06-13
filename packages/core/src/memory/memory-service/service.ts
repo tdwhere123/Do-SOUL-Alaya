@@ -829,6 +829,25 @@ export class MemoryService {
     return entry;
   }
 
+  // invariant: scoped batch lookup hides cross-workspace rows the same way the
+  // single-id scoped lookup does, so callers cannot distinguish hidden rows
+  // from missing ones.
+  public async findByIdsScoped(
+    objectIds: readonly string[],
+    workspaceId: string
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const findByIds = this.dependencies.memoryEntryRepo.findByIds;
+    if (findByIds === undefined) {
+      const entries = await Promise.all(
+        objectIds.map(async (objectId) => await this.findByIdScoped(objectId, workspaceId))
+      );
+      return entries.filter((entry): entry is Readonly<MemoryEntry> => entry !== null);
+    }
+
+    const entries = await findByIds.call(this.dependencies.memoryEntryRepo, objectIds);
+    return entries.filter((entry) => entry.workspace_id === workspaceId);
+  }
+
   public findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]> {
     return this.dependencies.memoryEntryRepo.findByWorkspaceId(workspaceId);
   }

@@ -155,6 +155,9 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
     memoryEntryRepo: {
       create: vi.fn(async (entry) => Object.freeze({ ...entry })),
       findById: vi.fn(async () => createMemoryEntry()),
+      findByIds: vi.fn(async (objectIds: readonly string[]) =>
+        objectIds.map((objectId) => createMemoryEntry({ object_id: objectId }))
+      ),
       findByWorkspaceId: vi.fn(async () => []),
       findByRunId: vi.fn(async () => []),
       findByDimension: vi.fn(async () => []),

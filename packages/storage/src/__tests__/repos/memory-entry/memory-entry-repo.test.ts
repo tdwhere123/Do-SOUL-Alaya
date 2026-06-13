@@ -728,6 +728,25 @@ describe("SqliteMemoryEntryRepo", () => {
     ]);
   });
 
+  it("finds short-token keyword matches beyond the first exact-scan batch", async () => {
+    const { repo } = await createRepo();
+    for (let index = 0; index < 205; index += 1) {
+      await repo.create(
+        createMemoryEntry({
+          object_id: `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`,
+          content: index === 204 ? "Go keep the late exact match." : `Governance filler row ${index}.`
+        })
+      );
+    }
+
+    await expect(repo.searchByKeyword("workspace-1", "go", 5)).resolves.toEqual([
+      {
+        object_id: "00000205-1111-4111-8111-111111111111",
+        normalized_rank: 1
+      }
+    ]);
+  });
+
   it("excludes tombstoned hot rows from hot-tier recall and short-token keyword fallback", async () => {
     const { repo } = await createRepo();
     await repo.create(

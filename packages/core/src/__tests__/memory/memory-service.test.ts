@@ -64,6 +64,38 @@ describe("MemoryService", () => {
     });
   });
 
+  it("filters cross-workspace rows from scoped batch lookups", async () => {
+    const findByIds = vi.fn(async () => [
+      createMemoryEntry({ object_id: "mem-1", workspace_id: "workspace-1" }),
+      createMemoryEntry({ object_id: "mem-2", workspace_id: "workspace-2" }),
+      createMemoryEntry({ object_id: "mem-3", workspace_id: "workspace-1" })
+    ]);
+    const { dependencies } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => Object.freeze({ ...entry })),
+        findById: vi.fn(async () => null),
+        findByIds,
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      }
+    });
+
+    const service = new MemoryService(dependencies);
+    await expect(service.findByIdsScoped(["mem-1", "mem-2", "mem-3"], "workspace-1")).resolves.toEqual([
+      expect.objectContaining({ object_id: "mem-1", workspace_id: "workspace-1" }),
+      expect.objectContaining({ object_id: "mem-3", workspace_id: "workspace-1" })
+    ]);
+    expect(findByIds).toHaveBeenCalledWith(["mem-1", "mem-2", "mem-3"]);
+  });
+
   it("commits the enrich_pending marker atomically with the row when the create input carries the intent", async () => {
     // invariant pinned: a created memory ALWAYS carries its enrich_pending
     // marker and audit row — the EventLog append, row insert, and enqueue run

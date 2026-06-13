@@ -21,6 +21,8 @@ export interface MemoryEntrySearchWorkflowHost {
   readonly searchByKeywordPorterStatement: SqliteAllStatement;
 }
 
+const EXACT_KEYWORD_SCAN_BATCH_SIZE = 200;
+
 export async function searchByKeyword(
   this: MemoryEntrySearchWorkflowHost,
   workspaceId: string,
@@ -137,29 +139,56 @@ function searchExactKeywordRows(
 
   const tokenMatchers = tokens.map((token) => createShortKeywordMatcher(token));
   const objectIdFilter = buildObjectIdFilterSql(candidateObjectIds);
-  const rows = this.db.connection.prepare(`
-    SELECT
-      object_id,
-      content
-    FROM memory_entries
-    WHERE workspace_id = ?
-    AND COALESCE(retention_state, '') != 'tombstoned'
-    AND COALESCE(lifecycle_state, '') != 'dormant'
-    ${objectIdFilter.sql}
-    ORDER BY object_id ASC
-  `).all(workspaceId, ...objectIdFilter.params) as readonly ExactKeywordCandidateRow[];
+  const rows: ExactKeywordSearchRow[] = [];
+  let lastObjectId: string | null = null;
+
+  while (true) {
+    const keysetPredicate = lastObjectId === null ? "" : "AND object_id > ?";
+    const batch = this.db.connection.prepare(`
+      SELECT
+        object_id,
+        content
+      FROM memory_entries
+      WHERE workspace_id = ?
+      AND COALESCE(retention_state, '') != 'tombstoned'
+      AND COALESCE(lifecycle_state, '') != 'dormant'
+      ${objectIdFilter.sql}
+      ${keysetPredicate}
+      ORDER BY object_id ASC
+      LIMIT ?
+    `).all(
+      workspaceId,
+      ...objectIdFilter.params,
+      ...(lastObjectId === null ? [] : [lastObjectId]),
+      EXACT_KEYWORD_SCAN_BATCH_SIZE
+    ) as readonly ExactKeywordCandidateRow[];
+
+    if (batch.length === 0) {
+      break;
+    }
+
+    for (const row of batch) {
+      const matchedTokenCount = tokenMatchers.reduce(
+        (count, matcher) => count + (matcher(row.content) ? 1 : 0),
+        0
+      );
+      if (matchedTokenCount > 0) {
+        rows.push(
+          Object.freeze({
+            object_id: row.object_id,
+            matched_token_count: matchedTokenCount
+          })
+        );
+      }
+    }
+
+    if (batch.length < EXACT_KEYWORD_SCAN_BATCH_SIZE) {
+      break;
+    }
+    lastObjectId = batch.at(-1)?.object_id ?? null;
+  }
 
   return rows
-    .map((row) =>
-      Object.freeze({
-        object_id: row.object_id,
-        matched_token_count: tokenMatchers.reduce(
-          (count, matcher) => count + (matcher(row.content) ? 1 : 0),
-          0
-        )
-      })
-    )
-    .filter((row) => row.matched_token_count > 0)
     .sort((left, right) => {
       const matchDelta = right.matched_token_count - left.matched_token_count;
       if (matchDelta !== 0) {

@@ -11,6 +11,7 @@ import {
   createActiveConstraint,
   createDeliveryRecord,
   createDeps,
+  createMemory,
   createRecallCandidate
 } from "./mcp-memory-tool-handler-fixture.js";
 
@@ -634,7 +635,7 @@ describe("mcp memory tool handler", () => {
       }),
       { expectedWorkspaceId: context.workspaceId }
     );
-    expect(deps.memoryService.findByIdScoped).toHaveBeenCalledWith("mem1", "ws1");
+    expect(deps.memoryService.findByIdsScoped).toHaveBeenCalledWith(["mem1"], "ws1");
     expect(deps.memoryService.findByIdScoped).not.toHaveBeenCalledWith("mem2", "ws1");
     expect(deps.memoryService.updateScoped).toHaveBeenCalledTimes(1);
     expect(deps.memoryService.updateScoped).toHaveBeenCalledWith(
@@ -778,7 +779,8 @@ describe("mcp memory tool handler", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(deps.memoryService.findByIdScoped).toHaveBeenCalledWith("mem1", "ws1");
+    expect(deps.memoryService.findByIdsScoped).toHaveBeenCalledWith(["mem1"], "ws1");
+    expect(deps.memoryService.findByIdScoped).not.toHaveBeenCalled();
     expect(deps.memoryService.updateScoped).toHaveBeenCalledTimes(1);
     expect(deps.memoryService.updateScoped).toHaveBeenCalledWith(
       "mem1",
@@ -790,6 +792,34 @@ describe("mcp memory tool handler", () => {
       },
       "recall_usage_reported"
     );
+  });
+
+  it("rejects report_context_usage when scoped batch lookup cannot resolve a used memory", async () => {
+    const deps = createDeps();
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) => ({
+      ...createDeliveryRecord(deliveryId),
+      delivered_object_ids: ["mem1", "mem2"]
+    }));
+    deps.memoryService.findByIdsScoped = vi.fn(async () => [createMemory({ object_id: "mem1" })]);
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        used_object_ids: ["mem1", "mem2"],
+        reason: "missing memory"
+      },
+      context
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "NOT_FOUND" }
+    });
+    expect(deps.memoryService.findByIdsScoped).toHaveBeenCalledWith(["mem1", "mem2"], "ws1");
+    expect(deps.memoryService.findByIdScoped).not.toHaveBeenCalled();
   });
 
   it("does not refresh recall access for skipped reports", async () => {
