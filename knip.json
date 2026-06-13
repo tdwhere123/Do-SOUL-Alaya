@@ -10,7 +10,8 @@
     "scripts/append-bench-degradation-backlog.mjs",
     "scripts/compute-bench-quality-metrics.mjs",
     "scripts/compute-cohort-from-archive.mjs",
-    "scripts/fetch-local-embedding-model.mjs"
+    "scripts/fetch-local-embedding-model.mjs",
+    "scripts/run-full-bench-v0311.mjs"
   ],
   "ignoreWorkspaces": ["vendor/**"],
   "entry": [
@@ -48,7 +49,8 @@
     },
     "apps/core-daemon": {
       "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tsconfig.json"]
+      "project": ["src/**/*.ts", "tsconfig.json"],
+      "ignoreDependencies": ["pino-pretty"]
     },
     "apps/bench-runner": {
       "entry": [
