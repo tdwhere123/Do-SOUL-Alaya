@@ -20,5 +20,8 @@
   },
   "dependencies": {
     "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@do-soul/alaya-protocol": "workspace:*"
   }
 }
