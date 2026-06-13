@@ -46,7 +46,7 @@ import {
   type QaQuestionVerdict,
   type QaDeliveredCandidate
 } from "../longmemeval/qa-harness.js";
-import type { QaChatFn } from "../longmemeval/qa-chat.js";
+import { type QaChatFn, QaChatError } from "../longmemeval/qa-chat.js";
 import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
@@ -146,9 +146,11 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       : { embeddingProviderKind: opts.embeddingProviderKind })
   });
   try {
+  let conversationFailures = 0;
   for (let i = 0; i < window.length; i++) {
     const conversation = window[i];
     if (conversation === undefined) continue;
+    try {
     const convResult = await runOneConversation(daemon, conversation, opts);
     conversationResults.push(convResult);
     totalQa += convResult.qaCount;
@@ -175,6 +177,22 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
     process.stdout.write(
       `[${i + 1}/${window.length}] ${conversation.sample_id} ` +
         `qa=${convResult.qaCount} R@5=${(convResult.hitAt5 / Math.max(1, convResult.qaCount) * 100).toFixed(1)}%\n`
+    );
+    } catch (err) {
+      // Resilience: skip only a transient QA-chat failure so one bad conversation
+      // never aborts the run; a fail-closed invariant (e.g. incomplete embedding
+      // warm cache) is re-thrown and still aborts. Remaining convs aggregate.
+      if (!(err instanceof QaChatError)) throw err;
+      conversationFailures += 1;
+      process.stderr.write(
+        `[${i + 1}/${window.length}] ${conversation.sample_id} FAILED — ` +
+          `skipped: ${err.message}\n`
+      );
+    }
+  }
+  if (conversationFailures > 0) {
+    process.stdout.write(
+      `[locomo] ${conversationFailures}/${window.length} conversation(s) failed and were skipped.\n`
     );
   }
   } finally {

@@ -58,36 +58,83 @@ export function resolveQaChatConfig(
   return { url, apiKey, model };
 }
 
+// Transient failures retried with exponential backoff so a single network blip
+// or 5xx doesn't crash a 1000-call full-bench run. 4xx (except 408/429) is a
+// client error and fails fast.
+const QA_MAX_ATTEMPTS = 5;
+const QA_RETRY_BASE_MS = 600;
+const QA_RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Terminal QA-chat failure after the transient retries are exhausted (network
+ * reject / 5xx). Distinguished so the bench loop can SKIP the affected question
+ * without swallowing a fatal fail-closed invariant — those stay plain Errors and
+ * still abort the run. A non-retryable 4xx also stays a plain Error (config/auth
+ * problem must surface, not be skipped 500×).
+ */
+export class QaChatError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "QaChatError";
+  }
+}
+
 /**
  * Build a real chat fn over fetch. Same shape as the verified probe: one
- * system + one user message, returns the first choice's content. Throws on a
- * non-2xx so a transient provider error surfaces rather than scoring a blank
- * answer as WRONG.
+ * system + one user message, returns the first choice's content. Transient
+ * provider/network errors are retried; a non-retryable non-2xx surfaces so a
+ * transient provider error never scores a blank answer as WRONG.
  */
 export function createGardenChatFn(config: QaChatConfig): QaChatFn {
   const endpoint = `${config.url.replace(/\/+$/u, "")}/chat/completions`;
   return async (system: string, user: string): Promise<string> => {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user }
-        ]
-      })
-    });
-    if (!res.ok) {
-      const body = (await res.text()).slice(0, 300);
-      throw new Error(`garden chat HTTP ${res.status}: ${body}`);
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= QA_MAX_ATTEMPTS; attempt += 1) {
+      let res: Response;
+      try {
+        res = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: config.model,
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content: user }
+            ]
+          })
+        });
+      } catch (err) {
+        // network-level reject ("fetch failed") — retry until attempts exhausted
+        lastErr = err;
+        if (attempt >= QA_MAX_ATTEMPTS) break;
+        await sleep(QA_RETRY_BASE_MS * 2 ** (attempt - 1));
+        continue;
+      }
+      if (!res.ok) {
+        const body = (await res.text()).slice(0, 300);
+        if (QA_RETRYABLE_STATUS.has(res.status) && attempt < QA_MAX_ATTEMPTS) {
+          lastErr = new Error(`garden chat HTTP ${res.status}: ${body}`);
+          await sleep(QA_RETRY_BASE_MS * 2 ** (attempt - 1));
+          continue;
+        }
+        throw new Error(`garden chat HTTP ${res.status}: ${body}`);
+      }
+      const data = (await res.json()) as {
+        choices?: { message?: { content?: string } }[];
+      };
+      return data.choices?.[0]?.message?.content ?? "";
     }
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    return data.choices?.[0]?.message?.content ?? "";
+    throw new QaChatError(
+      `garden chat failed after ${QA_MAX_ATTEMPTS} attempts: ${
+        lastErr instanceof Error ? lastErr.message : String(lastErr)
+      }`,
+      { cause: lastErr }
+    );
   };
 }

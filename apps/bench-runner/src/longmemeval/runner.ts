@@ -120,7 +120,7 @@ import {
   type QaDeliveredCandidate,
   type QaQuestionVerdict
 } from "./qa-harness.js";
-import type { QaChatFn } from "./qa-chat.js";
+import { type QaChatFn, QaChatError } from "./qa-chat.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
@@ -476,10 +476,11 @@ export async function runLongMemEval(
               objectKind: "memory_entry",
               sessionId,
               hasAnswer: round.hasAnswer,
-              // QA-only: carry the seeded turn content + its session date so
-              // delivered recall can be stitched into answer-model context with a
-              // temporal anchor. Off => omitted (byte-identical).
-              ...(opts.qa === undefined
+              // Carried when QA is on (answer-model context) OR a pool dump is
+              // requested (offline rerank/coverage analysis needs candidate text +
+              // event date). Off on both => omitted (byte-identical).
+              ...(opts.qa === undefined &&
+              process.env.ALAYA_BENCH_POOL_DUMP === undefined
                 ? {}
                 : {
                     content: round.content,
@@ -1070,17 +1071,37 @@ export async function runLongMemEval(
       ...(seedDataDirRoot === undefined ? {} : { dataDirRoot: seedDataDirRoot }),
       recallWeightOverrides
     });
+    let questionFailures = 0;
     for (let i = 0; i < window.length; i++) {
       const q = window[i];
       if (q === undefined) continue;
-      const res = await runOneQuestion(daemon, q, i + 1, seedRunner);
-      collected.push(res);
-      if (captureSnapshot && res.snapshotQuestion !== undefined) {
-        snapshotQuestions.push(res.snapshotQuestion);
+      try {
+        const res = await runOneQuestion(daemon, q, i + 1, seedRunner);
+        collected.push(res);
+        if (captureSnapshot && res.snapshotQuestion !== undefined) {
+          snapshotQuestions.push(res.snapshotQuestion);
+        }
+        process.stdout.write(
+          `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
+            `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
+        );
+      } catch (err) {
+        // Resilience: skip only a transient QA-chat failure (an API error that
+        // survived its retries) so one bad question never aborts a multi-hour
+        // run. A fail-closed invariant (e.g. incomplete embedding cache) is
+        // re-thrown and still aborts. KPIs then cover the completed Qs.
+        if (!(err instanceof QaChatError)) throw err;
+        questionFailures += 1;
+        process.stderr.write(
+          `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} FAILED — ` +
+            `skipped: ${err.message}\n`
+        );
       }
+    }
+    if (questionFailures > 0) {
       process.stdout.write(
-        `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
-          `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
+        `[longmemeval] ${questionFailures}/${window.length} question(s) failed ` +
+          `and were skipped; KPIs cover the ${collected.length} completed.\n`
       );
     }
     // @anchor longmemeval-seed-then-snapshot: emit the recall-eval snapshot
