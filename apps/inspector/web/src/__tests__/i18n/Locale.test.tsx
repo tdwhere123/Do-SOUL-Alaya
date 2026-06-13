@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { LocaleProvider, useI18n } from "../Locale";
-import { en, zh, type DictKey } from "../dict";
+import { LocaleProvider, useI18n } from "../../i18n/Locale";
+import { en, zh, type DictKey } from "../../i18n/dict";
 
 function Probe() {
   const { t, locale, setLocale } = useI18n();

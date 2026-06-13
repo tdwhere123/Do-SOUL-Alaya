@@ -12,7 +12,7 @@ import {
   linkWidth,
   nodeInfluenceSize
 } from "../../utils/graph";
-import GraphPage from "../Graph";
+import GraphPage from "../../pages/Graph";
 
 const forceGraphMockState = vi.hoisted(() => ({
   distanceCalls: [] as number[][],

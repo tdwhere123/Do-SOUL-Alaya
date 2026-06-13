@@ -2,12 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import GovernancePage from "../Governance";
+import GovernancePage from "../../pages/Governance";
 
-vi.mock("../Proposals", () => ({
+vi.mock("../../pages/Proposals", () => ({
   default: () => <div data-testid="proposals-child">proposals</div>
 }));
-vi.mock("../HealthInbox", () => ({
+vi.mock("../../pages/HealthInbox", () => ({
   default: () => <div data-testid="health-inbox-child">health inbox</div>
 }));
 

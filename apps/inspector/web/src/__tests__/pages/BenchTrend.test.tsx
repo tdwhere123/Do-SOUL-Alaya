@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import BenchTrendPage from "../BenchTrend";
+import BenchTrendPage from "../../pages/BenchTrend";
 import { LocaleProvider } from "../../i18n/Locale";
 import { setInspectorToken, setWorkspaceId } from "../../api";
 

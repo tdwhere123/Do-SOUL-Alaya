@@ -95,6 +95,11 @@ surfaces are:
   (Provider/Config, Memory Graph, Trust/Status). Inspector writes are
   limited to daemon runtime parameters per invariant §21; memory
   ontology writes still go through the proposal / governance path.
+  The frontend code stays domainized under `apps/inspector/web/src/`
+  (`app/`, `api/`, `components/`, `i18n/`, `pages/`, `utils/`) while
+  frontend tests live under the aggregated
+  `apps/inspector/web/src/__tests__/` tree, and page-local graph
+  rendering support now lives under `pages/graph-page/`.
   Not an agent surface; never participates in agent control flow.
 - **Slash boot trigger** (`/alaya-inspect`) — optional host-native
   convenience that should launch `alaya inspect --open` and therefore

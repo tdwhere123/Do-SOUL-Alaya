@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import { AppContent } from "../App";
+import { AppContent } from "../../app/App";
 import { ToastProvider } from "../../components/Toast";
 import { getWorkspaceId, setWorkspaceId } from "../../api";
 

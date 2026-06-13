@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import RecallPage from "../Recall";
+import RecallPage from "../../pages/Recall";
 import { ToastProvider } from "../../components/Toast";
 import { setInspectorToken, setWorkspaceId } from "../../api";
 

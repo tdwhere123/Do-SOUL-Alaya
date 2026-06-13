@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
-import ProposalsPage from "../Proposals";
+import ProposalsPage from "../../pages/Proposals";
 import { setInspectorToken, setWorkspaceId } from "../../api";
 import { ToastProvider } from "../../components/Toast";
 
