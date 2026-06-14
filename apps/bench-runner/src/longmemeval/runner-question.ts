@@ -45,6 +45,43 @@ import type { QaChatFn } from "./qa-chat.js";
 
 const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
 
+/** Round-robin across the source sessions of the recalled pool so one
+ * high-match session can't bury other answer sessions' gold below the delivery
+ * budget. Reshapes QA delivery selection only (post-recall); recall-service is
+ * untouched. Pair with a wide ALAYA_BENCH_RECALL_MAXK so the deep gold is in
+ * the pool to redistribute. */
+function selectSessionSpread<T extends { readonly object_id: string }>(
+  pool: readonly T[],
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
+  budget: number
+): T[] {
+  const bySession = new Map<string, T[]>();
+  for (const pointer of pool) {
+    const sessionId =
+      sidecar.get(buildLongMemEvalSidecarKey("memory_entry", pointer.object_id))
+        ?.sessionId ?? "?";
+    const bucket = bySession.get(sessionId);
+    if (bucket === undefined) bySession.set(sessionId, [pointer]);
+    else bucket.push(pointer);
+  }
+  // Map insertion order = each session's first (best) fusion rank.
+  const buckets = [...bySession.values()];
+  const picked: T[] = [];
+  for (let depth = 0; picked.length < budget; depth += 1) {
+    let progressed = false;
+    for (const bucket of buckets) {
+      const item = bucket[depth];
+      if (item !== undefined) {
+        picked.push(item);
+        progressed = true;
+        if (picked.length >= budget) break;
+      }
+    }
+    if (!progressed) break;
+  }
+  return picked;
+}
+
 function isBenchProfileEnabled(): boolean {
   const raw = process.env[BENCH_PROFILE_ENV];
   if (raw === undefined) return false;
@@ -350,7 +387,24 @@ export async function runLongMemEvalQuestion(input: {
 
     let qaVerdict: QaQuestionVerdict | undefined;
     if (input.qaChat !== undefined) {
-      let delivered: QaDeliveredCandidate[] = deliveredResults
+      // Session-distributed delivery (default off): redistribute the wide
+      // recalled pool across source sessions instead of flat top-10, so deep
+      // answer-session gold reaches the QA reader. Recall-service untouched.
+      const qaPointers: ReadonlyArray<{
+        readonly object_id: string;
+        readonly object_kind?: string | null;
+      }> =
+        process.env.ALAYA_BENCH_QA_SESSION_SPREAD === undefined
+          ? deliveredResults
+          : selectSessionSpread(
+              results.filter(
+                (pointer) =>
+                  (pointer.object_kind ?? "memory_entry") === "memory_entry"
+              ),
+              sidecar,
+              10
+            );
+      let delivered: QaDeliveredCandidate[] = qaPointers
         .filter(
           (result) => (result.object_kind ?? "memory_entry") === "memory_entry"
         )
