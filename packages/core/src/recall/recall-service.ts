@@ -849,6 +849,7 @@ export class RecallService {
       addCandidate,
       admissionLimit: resolveSourceProximityAdmissionLimit(options.deliveryMaxEntries),
       evidenceSearchPort: this.dependencies.evidenceSearchPort,
+      robustSourceRefParsing: this.dependencies.robustSourceRefParsing ?? false,
       warn: this.warn
     });
     const entityDerivedSeeds = await collectEntityDerivedSeeds({

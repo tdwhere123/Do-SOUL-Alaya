@@ -210,12 +210,13 @@ export interface EvidenceSourceChunkEntry {
 
 export function buildEvidenceSourceChunkIndex(
   entries: readonly Readonly<MemoryEntry>[],
-  sourceRefsByMemoryId?: ReadonlyMap<string, readonly string[]>
+  sourceRefsByMemoryId?: ReadonlyMap<string, readonly string[]>,
+  robust = false
 ): ReadonlyMap<string, readonly EvidenceSourceChunkEntry[]> {
   const bySource = new Map<string, EvidenceSourceChunkEntry[]>();
   for (const entry of entries) {
     for (const ref of sourceRefsByMemoryId?.get(entry.object_id) ?? entry.evidence_refs) {
-      const parsed = parseEvidenceSourceChunkRef(ref);
+      const parsed = parseEvidenceSourceChunkRef(ref, robust);
       if (parsed === null) {
         continue;
       }
@@ -239,11 +240,15 @@ export function buildEvidenceSourceChunkIndex(
 
 export function buildEvidenceSourceCohortKeys(
   entries: readonly Readonly<MemoryEntry>[],
-  sourceRefsByMemoryId: ReadonlyMap<string, readonly string[]>
+  sourceRefsByMemoryId: ReadonlyMap<string, readonly string[]>,
+  robust = false
 ): Readonly<Record<string, string>> {
   const keys: Record<string, string> = {};
   for (const entry of entries) {
-    const cohortKey = selectEvidenceSourceCohortKey(sourceRefsByMemoryId.get(entry.object_id) ?? entry.evidence_refs);
+    const cohortKey = selectEvidenceSourceCohortKey(
+      sourceRefsByMemoryId.get(entry.object_id) ?? entry.evidence_refs,
+      robust
+    );
     if (cohortKey !== null) {
       keys[entry.object_id] = cohortKey;
     }
@@ -251,9 +256,9 @@ export function buildEvidenceSourceCohortKeys(
   return Object.freeze(keys);
 }
 
-export function selectEvidenceSourceCohortKey(refs: readonly string[]): string | null {
+export function selectEvidenceSourceCohortKey(refs: readonly string[], robust = false): string | null {
   for (const ref of refs) {
-    const parsed = parseEvidenceSourceChunkRef(ref);
+    const parsed = parseEvidenceSourceChunkRef(ref, robust);
     if (parsed !== null && parsed.sourceKey.length > 0) {
       return parsed.sourceKey;
     }
@@ -261,9 +266,24 @@ export function selectEvidenceSourceCohortKey(refs: readonly string[]): string |
   return null;
 }
 
-export function parseEvidenceSourceChunkRef(ref: string): EvidenceSourceChunkRef | null {
-  const normalized = ref.trim().toLowerCase();
-  const sessionTurn = /^(.*?)(?:[-_./#:])s(?:ession)?[-_]?(\d+)(?:[-_./#:])t(?:urn)?[-_]?(\d+)$/.exec(normalized);
+// `robust` (opt-in via ALAYA_RECALL_SOURCE_REF_ROBUST, threaded from the daemon)
+// also recognizes round-labeled refs and per-fact suffixes: conversational
+// ingestion labels its units rounds (`r`/`round`, a round = one user+assistant
+// turn pair = the same turn-position concept) and fans one round into several
+// facts each suffixed `-f<n>`. Without it, refs like `q-s3-r2` / `q-s3-r2-f1`
+// fail to parse and source proximity silently no-ops on conversational corpora.
+// Default-off keeps existing `t`/`turn`/`chunk` parsing byte-identical.
+export function parseEvidenceSourceChunkRef(
+  ref: string,
+  robust = false
+): EvidenceSourceChunkRef | null {
+  const trimmed = ref.trim().toLowerCase();
+  const normalized = robust ? trimmed.replace(/[-_./#:]f\d+$/u, "") : trimmed;
+  const turnMarker = robust ? "(?:t(?:urn)?|r(?:ound)?)" : "t(?:urn)?";
+  const sessionTurn = new RegExp(
+    `^(.*?)(?:[-_./#:])s(?:ession)?[-_]?(\\d+)(?:[-_./#:])${turnMarker}[-_]?(\\d+)$`,
+    "u"
+  ).exec(normalized);
   if (sessionTurn !== null) {
     const [, prefix, session, turn] = sessionTurn;
     return {
@@ -272,7 +292,8 @@ export function parseEvidenceSourceChunkRef(ref: string): EvidenceSourceChunkRef
     };
   }
 
-  const chunk = /^(.*?)(?:[-_./#:])(?:chunk|turn|t)[-_]?(\d+)$/.exec(normalized);
+  const chunkMarker = robust ? "(?:chunk|turn|t|round|r)" : "(?:chunk|turn|t)";
+  const chunk = new RegExp(`^(.*?)(?:[-_./#:])${chunkMarker}[-_]?(\\d+)$`, "u").exec(normalized);
   if (chunk !== null) {
     const [, prefix, index] = chunk;
     return {
