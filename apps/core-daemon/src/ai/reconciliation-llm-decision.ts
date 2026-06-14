@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ReconciliationLlmDecisionPort } from "@do-soul/alaya-core";
+import { requestGardenChatCompletionContent } from "./garden-chat-completion.js";
 
 /**
  * @anchor reconciliation-llm-decision
@@ -320,49 +321,11 @@ async function requestDecisionFromGarden(
   if (config.apiKey === null) {
     throw new Error("garden API key is unavailable");
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DECISION_REQUEST_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${normalizeBaseUrl(config.providerUrl)}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
-        model: config.model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: DECISION_SYSTEM_PROMPT },
-          { role: "user", content: prompt }
-        ]
-      }),
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      throw new Error(
-        `garden reconciliation decision HTTP ${response.status} ${response.statusText}`
-      );
-    }
-    const payload = (await response.json()) as {
-      readonly choices?: readonly {
-        readonly message?: { readonly content?: unknown };
-      }[];
-    };
-    const content = payload.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || content.trim().length === 0) {
-      throw new Error("garden reconciliation decision returned no content");
-    }
-    return content;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function normalizeBaseUrl(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/u, "");
-  return trimmed.endsWith("/chat/completions")
-    ? trimmed.slice(0, -"/chat/completions".length)
-    : trimmed;
+  return await requestGardenChatCompletionContent({
+    config,
+    systemPrompt: DECISION_SYSTEM_PROMPT,
+    userPrompt: prompt,
+    timeoutMs: DECISION_REQUEST_TIMEOUT_MS,
+    failureLabel: "garden reconciliation decision"
+  });
 }

@@ -16,7 +16,11 @@ const SAFE_PUBLIC_VALIDATION_MESSAGES = new Set([
   "governance route clock must return a valid ISO timestamp"
 ]);
 
-export function registerErrorHandler(app: Hono): void {
+export interface ErrorLoggerPort {
+  error(message: string, meta: Record<string, unknown>): void;
+}
+
+export function registerErrorHandler(app: Hono, logger: ErrorLoggerPort): void {
   app.onError((error, context) => {
     const requestId = readRequestId(context);
     if (requestId !== undefined) {
@@ -25,7 +29,7 @@ export function registerErrorHandler(app: Hono): void {
     }
 
     if (isRequestBodyTooLargeError(error)) {
-      console.error(
+      logger.error(
         "[daemon] sanitized request body limit error",
         summarizeHandledError(
           error instanceof Error ? error : new Error("request body too large"),
@@ -49,7 +53,7 @@ export function registerErrorHandler(app: Hono): void {
       const publicMessage = publicMessageForCoreError(error);
 
       if (error.code === "VALIDATION" && publicMessage !== error.message) {
-        console.error(
+        logger.error(
           "[daemon] sanitized core validation error",
           summarizeHandledError(error, {
             code: error.code,
@@ -69,7 +73,7 @@ export function registerErrorHandler(app: Hono): void {
     }
 
     if (error instanceof EngineError) {
-      console.error(
+      logger.error(
         "[daemon] sanitized engine error",
         summarizeHandledError(error, {
           kind: error.kind,
@@ -88,7 +92,7 @@ export function registerErrorHandler(app: Hono): void {
       );
     }
 
-    console.error("[daemon] unhandled error", summarizeUnhandledError(error, requestId));
+    logger.error("[daemon] unhandled error", summarizeUnhandledError(error, requestId));
 
     return context.json(
       {
@@ -132,20 +136,20 @@ function summarizeHandledError(
 
 function summarizeUnhandledError(error: unknown, requestId?: string): {
   readonly name: string;
-  readonly message: string;
+  readonly messageRedacted: true;
   readonly request_id?: string;
 } {
   if (error instanceof Error) {
     return {
       name: error.name,
-      message: error.message,
+      messageRedacted: true,
       ...(requestId === undefined ? {} : { request_id: requestId })
     };
   }
 
   return {
     name: "NonError",
-    message: String(error),
+    messageRedacted: true,
     ...(requestId === undefined ? {} : { request_id: requestId })
   };
 }

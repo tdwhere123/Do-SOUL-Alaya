@@ -3,7 +3,8 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { readBuildInfo } from "./build-info.js";
-import { registerErrorHandler } from "../middleware/error-handler.js";
+import { createWarnLogger } from "./daemon-runtime-helpers.js";
+import { registerErrorHandler, type ErrorLoggerPort } from "../middleware/error-handler.js";
 import { registerBudgetRoutes, type BudgetRouteServices } from "../routes/budget.js";
 import { registerClaimRoutes, type ClaimRouteServices } from "../routes/claims.js";
 import { registerConfigRoutes, type ConfigRouteServices } from "../routes/config.js";
@@ -69,6 +70,7 @@ export interface RequestProtectionConfig {
 }
 
 export interface CoreDaemonServices {
+  readonly logger?: ErrorLoggerPort;
   readonly requestProtection?: RequestProtectionConfig;
   readonly routes?: CoreDaemonRouteServices;
 }
@@ -215,7 +217,13 @@ export function createApp(
         "X-Request-Id",
         "X-Correlation-Id"
       ],
-      exposeHeaders: ["X-Request-Id", "X-Correlation-Id"]
+      exposeHeaders: [
+        "X-Request-Id",
+        "X-Correlation-Id",
+        "X-Total-Count",
+        "X-Limit",
+        "X-Offset"
+      ]
     })
   );
 
@@ -305,7 +313,7 @@ export function createApp(
     await requestBodyLimit(context, next);
   });
 
-  registerErrorHandler(app);
+  registerErrorHandler(app, services.logger ?? createWarnLogger());
   registerLivenessRoute(app);
   registerConfiguredRoutes(app, services.routes);
 

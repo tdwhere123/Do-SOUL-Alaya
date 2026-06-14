@@ -1,6 +1,12 @@
-import { Suspense, lazy, useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
-import { getInspectorToken, setInspectorToken, setUnauthorizedHandler, setWorkspaceId } from "../api";
+import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useSearchParams } from "react-router-dom";
+import {
+  getInspectorToken,
+  getWorkspaceId,
+  setInspectorToken,
+  setUnauthorizedHandler,
+  setWorkspaceId
+} from "../api";
 
 import BenchTrendPage from "../pages/BenchTrend";
 import GovernancePage from "../pages/Governance";
@@ -11,6 +17,7 @@ import SystemPage from "../pages/System";
 
 import CommandPalette, { useCommandPaletteHotkey } from "../components/CommandPalette";
 import Layout from "../components/Layout";
+import NoWorkspaceAlert from "../components/NoWorkspaceAlert";
 import SessionExpired from "../components/SessionExpired";
 import { ToastProvider } from "../components/Toast";
 import { LocaleProvider } from "../i18n/Locale";
@@ -18,6 +25,7 @@ import { LocaleProvider } from "../i18n/Locale";
 const GraphPage = lazy(() => import("../pages/Graph"));
 
 export function AppContent() {
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const [ready, setReady] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -26,12 +34,12 @@ export function AppContent() {
   useCommandPaletteHotkey(paletteOpen, () => setPaletteOpen((prev) => !prev));
 
   useEffect(() => {
-    const token = searchParams.get("token");
-    const workspaceId = searchParams.get("workspaceId");
+    const launchParams = readLaunchParams(searchParams, location.hash);
 
-    if (token) {
-      setInspectorToken(token);
-      setWorkspaceId(workspaceId?.trim().length ? workspaceId : null);
+    if (launchParams.token) {
+      setInspectorToken(launchParams.token);
+      setWorkspaceId(launchParams.workspaceId?.trim().length ? launchParams.workspaceId : null);
+      clearTokenFragment();
       setAuthError(null);
       setReady(true);
     } else if (getInspectorToken()) {
@@ -45,7 +53,7 @@ export function AppContent() {
 
     setUnauthorizedHandler(() => setSessionExpired(true));
     return () => setUnauthorizedHandler(null);
-  }, [searchParams]);
+  }, [location.hash, searchParams]);
 
   if (sessionExpired) {
     return <SessionExpired />;
@@ -91,9 +99,11 @@ export function AppContent() {
           <Route
             path="/graph"
             element={
-              <Suspense fallback={<RouteLoadingFallback label="Loading graph surface..." />}>
-                <GraphPage />
-              </Suspense>
+              <WorkspaceRequiredRoute testId="graph-no-workspace">
+                <Suspense fallback={<RouteLoadingFallback label="Loading graph surface..." />}>
+                  <GraphPage />
+                </Suspense>
+              </WorkspaceRequiredRoute>
             }
           />
           <Route path="/system" element={<SystemPage />} />
@@ -120,11 +130,47 @@ export function AppContent() {
   );
 }
 
+function readLaunchParams(searchParams: URLSearchParams, hash: string): {
+  readonly token: string | null;
+  readonly workspaceId: string | null;
+} {
+  const hashParams = new URLSearchParams(hash.replace(/^#/u, ""));
+  return {
+    token: hashParams.get("token"),
+    workspaceId: searchParams.get("workspaceId") ?? hashParams.get("workspaceId")
+  };
+}
+
+function clearTokenFragment(): void {
+  if (!window.location.hash.includes("token=")) {
+    return;
+  }
+
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}`
+  );
+}
+
 function LegacyRedirect({ to, tab }: { readonly to: string; readonly tab: string }) {
   const [searchParams] = useSearchParams();
   const next = new URLSearchParams(searchParams);
   next.set("tab", tab);
   return <Navigate to={`${to}?${next.toString()}`} replace />;
+}
+
+function WorkspaceRequiredRoute({
+  children,
+  testId
+}: {
+  readonly children: ReactNode;
+  readonly testId: string;
+}) {
+  if (getWorkspaceId() === null) {
+    return <NoWorkspaceAlert testId={testId} />;
+  }
+  return <>{children}</>;
 }
 
 function RouteLoadingFallback({ label }: { readonly label: string }) {

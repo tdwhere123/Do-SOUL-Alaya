@@ -18,6 +18,7 @@ const ForceGraph3D = lazy(() => import("react-force-graph-3d")) as unknown as ty
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
 import { DetailDrawer } from "../components/DetailDrawer";
+import NoWorkspaceAlert from "../components/NoWorkspaceAlert";
 import type { GraphNode, GraphLink, SpotlightState } from "../types/graph";
 import { parseSearchQuery } from "../utils/parse-search-query";
 import { useI18n } from "../i18n/Locale";
@@ -675,17 +676,7 @@ export default function GraphPage() {
   );
 
   if (workspaceId === null) {
-    return (
-      <div
-        role="alert"
-        data-testid="graph-no-workspace"
-        className="flex-1 min-h-0 flex items-center justify-center bg-beige-100 p-8"
-      >
-        <p className="font-mono text-sm text-ink-700">
-          {t("common:noWorkspace")}
-        </p>
-      </div>
-    );
+    return <NoWorkspaceAlert testId="graph-no-workspace" />;
   }
 
   return (

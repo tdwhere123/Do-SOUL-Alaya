@@ -34,7 +34,7 @@ describe("BackgroundServiceManager", () => {
         });
       })
       .mockImplementationOnce(async () => {
-        throw new Error("background boom");
+        throw new Error("token abcd1234");
       });
     const logger = { warn: vi.fn() };
     const manager = new BackgroundServiceManager([
@@ -63,8 +63,11 @@ describe("BackgroundServiceManager", () => {
     );
     expect(logger.warn).toHaveBeenCalledWith("background service task failed", {
       service: "test-service",
-      error: "background boom"
+      errorName: "Error",
+      errorMessageRedacted: true
     });
+    const failureMeta = logger.warn.mock.calls.find((call) => call[0] === "background service task failed")?.[1];
+    expect(JSON.stringify(failureMeta)).not.toContain("abcd1234");
     vi.useRealTimers();
   });
 });

@@ -37,7 +37,7 @@ describe("cli inspect", () => {
 
     expect(result.exitCode).toBe(0);
     expect(stdoutChunks.join("")).toBe(
-      "http://127.0.0.1:5174/?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&workspaceId=ws-1\n"
+      "http://127.0.0.1:5174/?workspaceId=ws-1#token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
     );
   });
 
@@ -100,7 +100,7 @@ describe("cli inspect", () => {
       }
     ]);
     expect(opened).toEqual([
-      "http://127.0.0.1:5175/?token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb&workspaceId=ws-1"
+      "http://127.0.0.1:5175/?workspaceId=ws-1#token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     ]);
   });
 
@@ -510,21 +510,21 @@ describe("cli inspect", () => {
 
   it("prefers Windows browser bridge candidates when running in WSL", () => {
     expect(
-      openCommandCandidates("http://127.0.0.1:5174/?token=t", {
+      openCommandCandidates("http://127.0.0.1:5174/?workspaceId=ws-1#token=t", {
         os: "linux",
         env: { WSL_DISTRO_NAME: "Ubuntu" }
       })
     ).toEqual([
-      ["wslview", ["http://127.0.0.1:5174/?token=t"]],
-      ["cmd.exe", ["/c", "start", "", "http://127.0.0.1:5174/?token=t"]],
-      ["xdg-open", ["http://127.0.0.1:5174/?token=t"]]
+      ["wslview", ["http://127.0.0.1:5174/?workspaceId=ws-1#token=t"]],
+      ["cmd.exe", ["/c", "start", "", "http://127.0.0.1:5174/?workspaceId=ws-1#token=t"]],
+      ["xdg-open", ["http://127.0.0.1:5174/?workspaceId=ws-1#token=t"]]
     ]);
   });
 
   it("falls back to the next browser opener when the first command is missing", async () => {
     const attempts: string[] = [];
 
-    await openUrlWithSpawn("http://127.0.0.1:5174/?token=t", {
+    await openUrlWithSpawn("http://127.0.0.1:5174/?workspaceId=ws-1#token=t", {
       env: { WSL_INTEROP: "/run/WSL/1_interop" },
       os: "linux",
       spawnBrowser: (command) => {
@@ -618,7 +618,7 @@ describe("cli inspect", () => {
     const result = await promise;
 
     expect(result.exitCode).toBe(0);
-    expect(stdoutChunks.join("")).toContain("&workspaceId=local_efcd2c3483725c97");
+    expect(stdoutChunks.join("")).toContain("?workspaceId=local_efcd2c3483725c97#token=");
   });
 
   it("resolves the auto-selected workspace through the daemon /workspaces HTTP contract", async () => {
@@ -665,7 +665,7 @@ describe("cli inspect", () => {
 
       expect(result.exitCode).toBe(0);
       expect(daemon.requests).toEqual(["/workspaces"]);
-      expect(stdoutChunks.join("")).toContain("&workspaceId=ws-http");
+      expect(stdoutChunks.join("")).toContain("?workspaceId=ws-http#token=");
     } finally {
       daemon.restore();
     }
@@ -876,7 +876,7 @@ describe("cli inspect", () => {
     setTimeout(() => childOk.emitExit(0, null), 10);
     const okResult = await okPromise;
     expect(okResult.exitCode).toBe(0);
-    expect(stdoutOkChunks.join("")).toContain("&workspaceId=explicit-ws");
+    expect(stdoutOkChunks.join("")).toContain("?workspaceId=explicit-ws#token=");
 
     const stderrMissing = new PassThrough();
     const stderrMissingChunks: string[] = [];
@@ -944,7 +944,7 @@ describe("cli inspect", () => {
 
       expect(result.exitCode).toBe(0);
       expect(daemon.requests).toEqual(["/workspaces/explicit-ws"]);
-      expect(stdoutChunks.join("")).toContain("&workspaceId=explicit-ws");
+      expect(stdoutChunks.join("")).toContain("?workspaceId=explicit-ws#token=");
     } finally {
       daemon.restore();
     }

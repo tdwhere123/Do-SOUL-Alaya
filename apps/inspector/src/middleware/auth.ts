@@ -18,9 +18,7 @@ export function createInspectorAuthMiddleware(token: string, options: InspectorA
       return;
     }
 
-    const providedToken = normalizeToken(
-      context.req.query("token") ?? context.req.header("x-alaya-inspector-token")
-    );
+    const providedToken = readHeaderToken(context);
     if (providedToken === null || !constantTimeTokenEqual(providedToken, expectedToken)) {
       return context.json({ error: "unauthorized" }, 401);
     }
@@ -43,6 +41,19 @@ export function constantTimeTokenEqual(provided: string, expected: string): bool
 function normalizeToken(value: string | undefined): string | null {
   const trimmed = value?.trim() ?? "";
   return trimmed.length === 0 ? null : trimmed;
+}
+
+function readHeaderToken(context: Context): string | null {
+  const explicitHeader = normalizeToken(context.req.header("x-alaya-inspector-token"));
+  if (explicitHeader !== null) {
+    return explicitHeader;
+  }
+
+  const authorization = context.req.header("authorization") ?? "";
+  const bearerPrefix = "Bearer ";
+  return authorization.startsWith(bearerPrefix)
+    ? normalizeToken(authorization.slice(bearerPrefix.length))
+    : null;
 }
 
 function isPublicPath(pathname: string, prefixes: readonly string[]): boolean {

@@ -1,6 +1,32 @@
-import { createApp, type CoreDaemonLifecycleState, type CoreDaemonServices, type RequestProtectionConfig } from "./app.js";
+import {
+  createApp,
+  type CoreDaemonLifecycleState,
+  type CoreDaemonRouteServices,
+  type CoreDaemonServices,
+  type RequestProtectionConfig
+} from "./app.js";
 
 type StartupStepLike = Readonly<{ readonly step: string }>;
+type RouteService<K extends keyof CoreDaemonRouteServices> = NonNullable<CoreDaemonRouteServices[K]>;
+type RouteField<
+  K extends keyof CoreDaemonRouteServices,
+  F extends keyof RouteService<K>
+> = RouteService<K>[F];
+type CoreDaemonAppServices = CoreDaemonServices & {
+  readonly principalCodingEngineAvailable: boolean;
+  readonly listServerHardConstraints: (workspaceId: string) => Promise<readonly unknown[]>;
+};
+type E2eEventLogRepo = RouteField<"e2eEventTriggers", "eventLogRepo">;
+type E2eEventLogAppendInput = Parameters<E2eEventLogRepo["append"]>[0];
+type E2eEventLogAppendResult = Awaited<ReturnType<E2eEventLogRepo["append"]>>;
+type E2eEventLogInputPort = {
+  append(event: E2eEventLogAppendInput): E2eEventLogAppendResult | Promise<E2eEventLogAppendResult>;
+};
+type TopologyAuditInputPort = {
+  appendPathTopologyExploreCompleted(
+    topology: Parameters<NonNullable<RouteField<"soul", "topologyAuditService">>["appendPathTopologyExploreCompleted"]>[0]
+  ): unknown | Promise<unknown>;
+};
 
 type CreateCoreDaemonAppInput = Readonly<{
   requestProtection: RequestProtectionConfig;
@@ -12,60 +38,102 @@ type CreateCoreDaemonAppInput = Readonly<{
   filesDirectory: string;
   env: NodeJS.ProcessEnv;
   listServerHardConstraints: (workspaceId: string) => Promise<readonly unknown[]>;
-  workspaceService: unknown;
-  engineBindingService: unknown;
-  workspaceGitBindingRepo: unknown;
-  runService: unknown;
-  workerRunRepo: unknown;
-  toolExecutionRecordRepo: unknown;
-  securityStatusService: unknown;
-  embeddingStatusService: unknown;
-  conversationService: unknown;
-  runHotStateService: unknown;
-  eventLogRepo: unknown;
-  governanceLeaseService: unknown;
-  sessionOverrideService: unknown;
-  budgetBankruptcyService: unknown;
-  contextLensAssembler: unknown;
-  signalService: unknown;
-  evidenceService: unknown;
-  gardenBacklogTelemetryService: unknown;
-  memoryService: unknown;
-  greenService: unknown;
-  healthJournalService: unknown;
-  configService: unknown;
-  environmentStatusService: unknown;
-  slotService: unknown;
-  arbitrationService: unknown;
-  recallService: unknown;
-  recallUtilizationService: unknown;
-  singleUsedAnchorEmitter?: unknown;
-  deliveryAnchorReader?: unknown;
-  taskSurfaceBuilder: unknown;
-  synthesisService: unknown;
-  claimService: unknown;
-  proposalService: unknown;
-  proposalRepo: unknown;
-  healthIssueGroupRepo: unknown;
+  workspaceService: RouteField<"workspaces", "workspaceService"> &
+    RouteField<"workspaceFiles", "workspaceService"> &
+    RouteField<"securityStatus", "workspaceService"> &
+    RouteField<"embeddingStatus", "workspaceService"> &
+    RouteField<"memories", "workspaceService"> &
+    RouteField<"greenStatus", "workspaceService"> &
+    RouteField<"healthJournal", "workspaceService"> &
+    RouteField<"config", "workspaceService"> &
+    RouteField<"slots", "workspaceService"> &
+    RouteField<"recall", "workspaceService"> &
+    RouteField<"recallStats", "workspaceService"> &
+    RouteField<"syntheses", "workspaceService"> &
+    RouteField<"claims", "workspaceService"> &
+    RouteField<"proposals", "workspaceService"> &
+    RouteField<"healthInbox", "workspaceService"> &
+    RouteField<"files", "workspaceService"> &
+    RouteField<"soul", "workspaceService"> &
+    RouteField<"soulGraph", "workspaceService"> &
+    RouteField<"pathGraph", "workspaceService"> &
+    RouteField<"soulSearch", "workspaceService"> &
+    RouteField<"projectMapping", "workspaceService"> &
+    RouteField<"globalMemory", "workspaceService"> &
+    RouteField<"conflictMatrix", "workspaceService">;
+  engineBindingService: RouteField<"workspaces", "engineBindingService">;
+  workspaceGitBindingRepo: RouteField<"workspaces", "workspaceGitBindingRepo">;
+  runService: RouteField<"workspaceFiles", "runService"> &
+    RouteField<"runs", "runService"> &
+    RouteField<"evidence", "runService"> &
+    RouteField<"overrides", "runService"> &
+    RouteField<"governance", "runService"> &
+    RouteField<"budget", "runService"> &
+    RouteField<"recall", "runService"> &
+    RouteField<"files", "runService"> &
+    RouteField<"e2eEventTriggers", "runService">;
+  workerRunRepo: RouteField<"workspaceFiles", "workerRunRepo">;
+  toolExecutionRecordRepo: RouteField<"workspaceFiles", "toolExecutionRecordRepo">;
+  securityStatusService: RouteField<"securityStatus", "securityStatusService">;
+  embeddingStatusService: RouteField<"embeddingStatus", "embeddingStatusService">;
+  conversationService: RouteField<"runs", "conversationService">;
+  runHotStateService: RouteField<"runs", "runHotStateService">;
+  eventLogRepo: RouteField<"runs", "eventLogRepo"> &
+    RouteField<"recallUtilization", "eventLogRepo"> &
+    E2eEventLogInputPort;
+  governanceLeaseService: RouteField<"runs", "governanceLeaseService"> &
+    RouteField<"governance", "governanceLeaseService">;
+  sessionOverrideService: RouteField<"runs", "sessionOverrideService"> &
+    RouteField<"overrides", "sessionOverrideService"> &
+    RouteField<"governance", "sessionOverrideService">;
+  budgetBankruptcyService: RouteField<"runs", "budgetBankruptcyService"> &
+    RouteField<"budget", "budgetBankruptcyService">;
+  contextLensAssembler: RouteField<"runs", "contextLensAssembler">;
+  signalService: RouteField<"signals", "signalService">;
+  evidenceService: RouteField<"evidence", "evidenceService">;
+  gardenBacklogTelemetryService: RouteService<"gardenBacklog">["gardenBacklogTelemetryService"];
+  memoryService: RouteField<"memories", "memoryService"> &
+    RouteField<"proposals", "memoryService">;
+  greenService: RouteField<"greenStatus", "greenService"> &
+    RouteField<"governance", "greenService">;
+  healthJournalService: RouteField<"healthJournal", "healthJournalService">;
+  configService: RouteField<"config", "configService">;
+  environmentStatusService: RouteField<"config", "environmentStatusService">;
+  slotService: RouteField<"slots", "slotService">;
+  arbitrationService: RouteField<"slots", "arbitrationService"> &
+    RouteField<"conflictMatrix", "arbitrationService">;
+  recallService: RouteField<"recall", "recallService">;
+  recallUtilizationService: RouteField<"recallStats", "recallUtilizationService">;
+  singleUsedAnchorEmitter?: RouteField<"recallUtilization", "singleUsedAnchorEmitter">;
+  deliveryAnchorReader?: RouteField<"recallUtilization", "deliveryAnchorReader">;
+  taskSurfaceBuilder: RouteField<"recall", "taskSurfaceBuilder">;
+  synthesisService: RouteField<"syntheses", "synthesisService">;
+  claimService: RouteField<"claims", "claimService">;
+  proposalService: RouteField<"proposals", "proposalService">;
+  proposalRepo: RouteField<"proposals", "proposalRepo">;
+  healthIssueGroupRepo: RouteField<"healthInbox", "healthIssueGroupRepo">;
   // A1 (HITL daemon backbone) — Inspector loopback HTTP routes call
   // the same MCP handler that attached agents use.
-  mcpMemoryToolHandler: unknown;
-  fileRepo: unknown;
-  runtimeNotifier: unknown;
-  topologyAuditService: unknown;
-  graphExploreService: unknown;
-  topologyService: unknown;
-  soulApprovalService: unknown;
-  soulGraphService: unknown;
-  graphContractService: unknown;
-  projectMappingService: unknown;
-  globalMemoryService: unknown;
-  mcp: unknown;
-  warn: unknown;
+  mcpMemoryToolHandler: RouteField<"proposals", "mcpMemoryToolHandler"> &
+    RouteField<"soulSearch", "mcpMemoryToolHandler">;
+  fileRepo: RouteField<"files", "fileRepo">;
+  runtimeNotifier: RouteField<"proposals", "runtimeNotifier"> &
+    RouteField<"files", "runtimeNotifier"> &
+    RouteField<"e2eEventTriggers", "runtimeNotifier">;
+  topologyAuditService?: TopologyAuditInputPort;
+  graphExploreService: RouteField<"soul", "graphExploreService">;
+  topologyService: RouteField<"soul", "topologyService">;
+  soulApprovalService: RouteField<"soul", "approvalService">;
+  soulGraphService: RouteField<"soulGraph", "soulGraphService">;
+  graphContractService: RouteField<"pathGraph", "graphContractService">;
+  projectMappingService: RouteField<"projectMapping", "projectMappingService">;
+  globalMemoryService?: RouteField<"globalMemory", "globalMemoryService">;
+  mcp: RouteField<"status", "mcp">;
+  warn: RouteField<"runs", "warn">;
 }>;
 
 export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType<typeof createApp> {
-  return createApp({
+  const services = {
     requestProtection: {
       allowedOrigin: input.requestProtection.allowedOrigin,
       requestToken: input.requestProtection.requestToken,
@@ -75,6 +143,7 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
       workspaces: {
         workspaceService: input.workspaceService,
         engineBindingService: input.engineBindingService,
+        codingEngineAvailable: input.principalCodingEngineAvailable,
         workspaceGitBindingRepo: input.workspaceGitBindingRepo
       },
       workspaceFiles: {
@@ -203,7 +272,9 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
       },
       soul: {
         workspaceService: input.workspaceService,
-        topologyAuditService: input.topologyAuditService,
+        ...(input.topologyAuditService === undefined
+          ? {}
+          : { topologyAuditService: createTopologyAuditPort(input.topologyAuditService) }),
         graphExploreService: input.graphExploreService,
         topologyService: input.topologyService,
         approvalService: input.soulApprovalService
@@ -245,7 +316,7 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
         ? {
             e2eEventTriggers: {
               runService: input.runService,
-              eventLogRepo: input.eventLogRepo,
+              eventLogRepo: createE2eEventLogRepo(input.eventLogRepo),
               runtimeNotifier: input.runtimeNotifier
             }
           }
@@ -253,8 +324,23 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
     },
     principalCodingEngineAvailable: input.principalCodingEngineAvailable,
     listServerHardConstraints: input.listServerHardConstraints
-  } as unknown as CoreDaemonServices & {
-    readonly principalCodingEngineAvailable: boolean;
-    readonly listServerHardConstraints: typeof input.listServerHardConstraints;
-  }, input.lifecycleState);
+  } satisfies CoreDaemonAppServices;
+
+  return createApp(services, input.lifecycleState);
+}
+
+function createE2eEventLogRepo(eventLogRepo: E2eEventLogInputPort): E2eEventLogRepo {
+  return {
+    append: async (event) => await eventLogRepo.append(event)
+  };
+}
+
+function createTopologyAuditPort(
+  topologyAuditService: TopologyAuditInputPort
+): NonNullable<RouteField<"soul", "topologyAuditService">> {
+  return {
+    appendPathTopologyExploreCompleted: async (topology) => {
+      await topologyAuditService.appendPathTopologyExploreCompleted(topology);
+    }
+  };
 }
