@@ -775,11 +775,12 @@ export async function createRecallMaterializationWiring(input: {
       ? materializationConfidenceFloorRaw
       : undefined;
   // Index the full source turn as the evidence excerpt so evidence_fts can reach
-  // memories whose distilled content dropped the query terms. Inert until a
-  // signal carries full_turn_content. ALAYA_EVIDENCE_FULL_TURN=0 to disable.
+  // memories whose distilled content dropped the query terms. Opt-in: it lifts
+  // recall coverage but the extra co-topical evidence hits dilute precise-select
+  // QA (temporal regressed end-to-end), so default off pending a ranking pass.
   const fullTurnEvidenceExcerpt =
-    process.env.ALAYA_EVIDENCE_FULL_TURN !== "0" &&
-    process.env.ALAYA_EVIDENCE_FULL_TURN !== "false";
+    process.env.ALAYA_EVIDENCE_FULL_TURN === "1" ||
+    process.env.ALAYA_EVIDENCE_FULL_TURN === "true";
   const materializationRouter = new MaterializationRouter({
     evidenceService: input.evidenceService,
     memoryService: materializationMemoryService,
