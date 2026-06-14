@@ -391,21 +391,34 @@ export async function runLongMemEvalQuestion(input: {
       // widens it so the aggregation reader sees more of a counting question's
       // scattered gold; session-spread (default off) redistributes that budget
       // across source sessions. Recall-service untouched.
+      // Aggregation questions (multi-session) want a wide budget so scattered
+      // gold reaches the reader; precise types (temporal) are hurt by extra
+      // dated candidates, so they stay narrow. ALAYA_BENCH_QA_WIDE_AGG turns on
+      // the type-aware budget; ALAYA_BENCH_QA_DELIVER_K is a global A/B override.
       const deliverKRaw = Number(process.env.ALAYA_BENCH_QA_DELIVER_K);
       const deliverK =
         Number.isFinite(deliverKRaw) && deliverKRaw > 0
           ? Math.floor(deliverKRaw)
-          : 10;
+          : process.env.ALAYA_BENCH_QA_WIDE_AGG !== undefined &&
+              input.question.question_type === "multi-session"
+            ? 30
+            : 10;
       const memoryEntryResults = results.filter(
         (pointer) => (pointer.object_kind ?? "memory_entry") === "memory_entry"
       );
+      // Widen for a global override, or for WIDE_AGG on multi-session only;
+      // other types keep the top-10 delivery.
+      const useWideDelivery =
+        process.env.ALAYA_BENCH_QA_DELIVER_K !== undefined ||
+        (process.env.ALAYA_BENCH_QA_WIDE_AGG !== undefined &&
+          input.question.question_type === "multi-session");
       const qaPointers: ReadonlyArray<{
         readonly object_id: string;
         readonly object_kind?: string | null;
       }> =
         process.env.ALAYA_BENCH_QA_SESSION_SPREAD !== undefined
           ? selectSessionSpread(memoryEntryResults, sidecar, deliverK)
-          : process.env.ALAYA_BENCH_QA_DELIVER_K !== undefined
+          : useWideDelivery
             ? memoryEntryResults.slice(0, deliverK)
             : deliveredResults;
       let delivered: QaDeliveredCandidate[] = qaPointers
@@ -422,6 +435,19 @@ export async function runLongMemEvalQuestion(input: {
             ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
           };
         });
+      // Drop near-duplicate delivered content (one turn materializes into several
+      // seeds that each carry the whole turn text) so a counting question doesn't
+      // see the same event repeated and so the context budget holds more distinct
+      // candidates. Default off (ALAYA_BENCH_QA_DEDUP_DELIVERY).
+      if (process.env.ALAYA_BENCH_QA_DEDUP_DELIVERY !== undefined) {
+        const seen = new Set<string>();
+        delivered = delivered.filter((cand) => {
+          const key = cand.content.replace(/\s+/gu, " ").trim().slice(0, 200);
+          if (key.length === 0 || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
       // Diagnostic oracle: replace delivered recall with ONLY the materialized
       // gold memories (no distractors), to isolate ingestion-drop from recall
       // ranking/noise. Gold not materialized at ingestion is absent here too.
