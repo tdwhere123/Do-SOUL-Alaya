@@ -170,7 +170,8 @@ export async function readLongMemEvalReportSideEffectSnapshot(
   );
   for (const [kind, count] of Object.entries(status.path_relations_by_kind)) {
     const edgeType = mapRelationKindToGraphEdgeType(kind);
-    byKind[edgeType] = (byKind[edgeType] ?? 0) + count;
+    const relationCount = typeof count === "number" ? count : 0;
+    byKind[edgeType] = (byKind[edgeType] ?? 0) + relationCount;
   }
   return {
     question_id: questionId,

@@ -61,9 +61,10 @@ export function buildGardenComputeRoutingProviders(input: {
   readonly config: RuntimeGardenComputeConfig;
   readonly officialGardenProvider: GardenComputeProviderResolver;
   readonly localHeuristicsProvider: LocalHeuristics;
+  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }): readonly ComputeRoutingCandidate[] {
   return [
-    ...(canResolveOfficialGardenProvider(input.config)
+    ...(canResolveOfficialGardenProvider(input.config, input.warn)
       ? [
           {
             kind: ComputeProviderPriority.OFFICIAL_API,
@@ -82,7 +83,10 @@ export function buildGardenComputeRoutingProviders(input: {
   ];
 }
 
-export function canResolveOfficialGardenProvider(config: RuntimeGardenComputeConfig): boolean {
+export function canResolveOfficialGardenProvider(
+  config: RuntimeGardenComputeConfig,
+  warn?: (message: string, meta: Record<string, unknown>) => void
+): boolean {
   if (
     config.provider_kind !== "official_api" ||
     !config.enabled ||
@@ -94,7 +98,12 @@ export function canResolveOfficialGardenProvider(config: RuntimeGardenComputeCon
   try {
     resolveGardenSecretRefValue(config.secret_ref);
     return true;
-  } catch {
+  } catch (error) {
+    warn?.("garden official provider secret_ref resolve failed", {
+      provider_kind: config.provider_kind,
+      secret_ref: config.secret_ref,
+      reason: error instanceof Error ? error.message : String(error)
+    });
     return false;
   }
 }
@@ -154,7 +163,7 @@ export function createConflictDetectionLlmPort(): ConflictDetectionLlmPort | nul
           signal: controller.signal
         });
         if (!response.ok) {
-          return "none";
+          throw new Error(`Conflict detection LLM HTTP ${response.status} ${response.statusText}`);
         }
         const data = (await response.json()) as {
           readonly choices?: ReadonlyArray<{ readonly message?: { readonly content?: string } }>;
@@ -163,8 +172,11 @@ export function createConflictDetectionLlmPort(): ConflictDetectionLlmPort | nul
         if (text.startsWith("contradicts")) return "contradicts";
         if (text.startsWith("incompatible_with")) return "incompatible_with";
         return "none";
-      } catch {
-        return "none";
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Conflict detection LLM HTTP ")) {
+          throw error;
+        }
+        throw new Error("Conflict detection LLM request failed", { cause: error });
       } finally {
         clearTimeout(timer);
       }

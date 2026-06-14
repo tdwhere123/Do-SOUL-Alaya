@@ -246,4 +246,44 @@ describe("RunHotStateService", () => {
       updated_at: "2026-04-12T00:00:30.000Z"
     });
   });
+
+  it("bounds cached snapshots and refreshes recently used runs", async () => {
+    const service = new RunHotStateService({
+      runRepo: {
+        getById: vi.fn(async (runId: string) => createRun({ run_id: runId }))
+      },
+      eventLogRepo: {
+        queryByRun: vi.fn(async () => [])
+      },
+      maxSnapshots: 2
+    });
+    const cacheView = service as unknown as {
+      readonly snapshots: ReadonlyMap<string, unknown>;
+    };
+
+    await service.getSnapshot("run-1");
+    await service.getSnapshot("run-2");
+    await service.getSnapshot("run-1");
+    await service.getSnapshot("run-3");
+
+    expect([...cacheView.snapshots.keys()]).toEqual(["run-1", "run-3"]);
+
+    await service.apply({
+      event_id: "evt-run-deleted",
+      event_type: WorkspaceRunEventType.RUN_DELETED,
+      entity_type: "run",
+      entity_id: "run-1",
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      caused_by: "user_action",
+      revision: 4,
+      created_at: "2026-04-12T00:00:40.000Z",
+      payload: {
+        run_id: "run-1",
+        workspace_id: "workspace-1"
+      }
+    });
+
+    expect([...cacheView.snapshots.keys()]).toEqual(["run-3"]);
+  });
 });

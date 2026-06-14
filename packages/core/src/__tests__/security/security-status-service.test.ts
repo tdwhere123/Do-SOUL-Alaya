@@ -337,4 +337,59 @@ describe("SecurityStatusService", () => {
     expect(subscribeStatusEvaluations).toHaveBeenCalledTimes(1);
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
+
+  it("bounds observed status cache, refreshes matching workspaces, and clears on close", async () => {
+    let observer: ((status: SecurityStatusContract, reason: string) => Promise<void> | void) | undefined;
+    const unsubscribe = vi.fn();
+    const publish = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      ...entry,
+      event_id: "event-1",
+      created_at: FIXED_NOW,
+      revision: 0
+    }));
+    const service = new SecurityStatusService({
+      zeroDayLayer: {
+        getSecurityStatus: vi.fn(async (workspaceId: string) =>
+          createSecurityStatus(workspaceId)
+        ),
+        initializeWorkspaceSecurity: vi.fn(async () => false),
+        subscribeStatusEvaluations: vi.fn((candidate) => {
+          observer = candidate;
+          return unsubscribe;
+        })
+      },
+      eventPublisher: { publish },
+      observedStatusCacheLimit: 2
+    });
+    const cacheView = service as unknown as {
+      readonly observedStatuses: ReadonlyMap<string, unknown>;
+    };
+
+    await observer?.(createSecurityStatus("workspace-1"), "evaluated");
+    await observer?.(createSecurityStatus("workspace-2"), "evaluated");
+    await observer?.(createSecurityStatus("workspace-1"), "same_status_refresh");
+    await observer?.(createSecurityStatus("workspace-3"), "evaluated");
+
+    expect(publish).toHaveBeenCalledTimes(3);
+    expect([...cacheView.observedStatuses.keys()]).toEqual([
+      "workspace-1",
+      "workspace-3"
+    ]);
+
+    service.close();
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect([...cacheView.observedStatuses.keys()]).toEqual([]);
+  });
 });
+
+function createSecurityStatus(workspaceId: string): SecurityStatusContract {
+  return SecurityStatusContractSchema.parse({
+    workspace_id: workspaceId,
+    posture: "baseline",
+    zero_day_active: false,
+    active_security_locks: 0,
+    last_assessment_at: FIXED_NOW,
+    active_protections: []
+  });
+}

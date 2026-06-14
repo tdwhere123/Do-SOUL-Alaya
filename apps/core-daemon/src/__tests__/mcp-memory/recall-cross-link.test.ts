@@ -16,7 +16,8 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
-  type MemoryEntry
+  type MemoryEntry,
+  type RecallCandidate
 } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
@@ -186,6 +187,55 @@ describe("recall cross-link: report_context_usage(used) proposes RECALLS edges",
 
     expect(result).toMatchObject({ ok: true });
   });
+
+  it("emits an observable warning when co-recall fire-and-forget warning itself fails", async () => {
+    const warn = vi.fn((message: string) => {
+      if (message === "co-recall plasticity accrual failed") {
+        throw new Error("logger sink down");
+      }
+    });
+    const harness = await createHarness([MEM_A, MEM_B], {
+      warn,
+      recallCandidateIds: [MEM_A, MEM_B],
+      pathRelationProposalService: {
+        onCoUsage: vi.fn(async () => {}),
+        onCoRecall: vi.fn(async () => {
+          throw new Error("co-recall db down");
+        })
+      },
+      coRecallCoherenceGate: {
+        coherentPairKeys: vi.fn(async () => new Set([`${MEM_A}|${MEM_B}`]))
+      }
+    });
+
+    const result = await harness.handler.call({
+      toolName: "soul.recall",
+      arguments: {
+        query: "coffee",
+        scope_class: ScopeClass.PROJECT,
+        dimension: MemoryDimension.PREFERENCE,
+        domain_tags: ["recall"],
+        max_results: 2
+      },
+      context: {
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        agentTarget: "cli",
+        sessionId: "recall-cross-link-session"
+      }
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(
+        "co-recall plasticity fire-and-forget failed",
+        expect.objectContaining({
+          workspace_id: "workspace-1",
+          error: "logger sink down"
+        })
+      );
+    });
+  });
 });
 
 async function createHarness(
@@ -193,6 +243,21 @@ async function createHarness(
   options: {
     readonly realEdgeProposals?: boolean;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+    readonly recallCandidateIds?: readonly string[];
+    readonly pathRelationProposalService?: {
+      onCoUsage(usedObjectIds: readonly string[], workspaceId: string): Promise<void>;
+      onCoRecall(
+        recalledObjectIds: readonly string[],
+        workspaceId: string,
+        allowedPairKeys?: ReadonlySet<string>
+      ): Promise<void>;
+    };
+    readonly coRecallCoherenceGate?: {
+      coherentPairKeys(
+        workspaceId: string,
+        deliveredObjectIds: readonly string[]
+      ): Promise<ReadonlySet<string>>;
+    };
   } = {}
 ) {
   const database = initDatabase({ filename: ":memory:" });
@@ -295,7 +360,7 @@ async function createHarness(
   const handler = createMcpMemoryToolHandler({
     recallService: {
       recall: vi.fn(async () => ({
-        candidates: [],
+        candidates: (options.recallCandidateIds ?? []).map((objectId) => createRecallCandidate(objectId)),
         active_constraints: [],
         active_constraints_count: 0,
         total_scanned: 0,
@@ -317,6 +382,12 @@ async function createHarness(
     },
     edgeProposalService,
     graphEdgePort,
+    ...(options.pathRelationProposalService === undefined
+      ? {}
+      : { pathRelationProposalService: options.pathRelationProposalService }),
+    ...(options.coRecallCoherenceGate === undefined
+      ? {}
+      : { coRecallCoherenceGate: options.coRecallCoherenceGate }),
     sessionOverrideService: {
       apply: vi.fn(async () => ({ runtime_id: "override-1" }))
     },
@@ -400,5 +471,20 @@ function createMemoryEntry(objectId: string): MemoryEntry {
     reinforcement_count: 0,
     contradiction_count: 0,
     superseded_by: null
+  };
+}
+
+function createRecallCandidate(objectId: string): RecallCandidate {
+  return {
+    object_id: objectId,
+    object_kind: "memory_entry",
+    activation_score: 0.5,
+    relevance_score: 0.8,
+    content_preview: `seed memory ${objectId}`,
+    token_estimate: 8,
+    manifestation: "excerpt",
+    dimension: MemoryDimension.PREFERENCE,
+    scope_class: ScopeClass.PROJECT,
+    origin_plane: "workspace_local"
   };
 }

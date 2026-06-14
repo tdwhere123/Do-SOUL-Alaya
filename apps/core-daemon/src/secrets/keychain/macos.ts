@@ -45,6 +45,10 @@ export function writeMacosKeychainSecret(
   runner: KeychainSubprocessRunner
 ): KeychainWriteResult {
   const result = runner("security", ["-i"], {
+    // Secrets stay off argv, but any host-level shell transcript or terminal
+    // recording that captures interactive stdin can still observe this input.
+    // Alaya never enables such recording; operators must treat it as an
+    // external host-policy risk, the same way the Windows adapter does.
     input: `add-generic-password -s ${quoteSecurityInteractiveArg(service)} -a ${quoteSecurityInteractiveArg(account)} -w ${quoteSecurityInteractiveArg(value)} -U\n`,
     timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS
   });

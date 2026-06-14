@@ -923,8 +923,17 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     return updateMemoryEntryTier.call(this as unknown as MemoryEntryUpdateWorkflowHost, input);
   }
 
-  public async archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>> {
-    return archiveMemoryEntry.call(this as unknown as MemoryEntryLifecycleWorkflowHost, objectId, updatedAt);
+  public async archive(
+    objectId: string,
+    updatedAt: string,
+    onArchived?: () => void
+  ): Promise<Readonly<MemoryEntry>> {
+    return archiveMemoryEntry.call(
+      this as unknown as MemoryEntryLifecycleWorkflowHost,
+      objectId,
+      updatedAt,
+      onArchived
+    );
   }
 
   public async updateDynamics(
@@ -943,13 +952,15 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   public async transitionLifecycle(
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
-    updatedAt: string
+    updatedAt: string,
+    onTransition?: () => void
   ): Promise<Readonly<MemoryEntry>> {
     return transitionMemoryEntryLifecycle.call(
       this as unknown as MemoryEntryLifecycleWorkflowHost,
       objectId,
       lifecycleState,
-      updatedAt
+      updatedAt,
+      onTransition
     );
   }
 
@@ -973,8 +984,8 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     );
   }
 
-  public async hardDeleteTombstoned(objectId: string): Promise<void> {
-    return hardDeleteTombstonedMemoryEntry.call(this as unknown as MemoryEntryLifecycleWorkflowHost, objectId);
+  public async hardDeleteTombstoned(objectId: string, onDeleted?: () => void): Promise<void> {
+    return hardDeleteTombstonedMemoryEntry.call(this as unknown as MemoryEntryLifecycleWorkflowHost, objectId, onDeleted);
   }
 }
 

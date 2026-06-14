@@ -129,6 +129,8 @@ function formatBenchEmbeddingSecretError(error: ResolveSecretError): string {
       return `${prefix}; keychain secret lookup failed`;
     case "malformed":
       return `${prefix}; secret ref is malformed`;
+    default:
+      return `${prefix}; secret resolution failed`;
   }
 }
 

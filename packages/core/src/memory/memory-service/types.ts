@@ -103,7 +103,8 @@ export interface MemoryServiceMemoryEntryRepoPort {
   transitionLifecycle?(
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
-    updatedAt: string
+    updatedAt: string,
+    onTransition?: () => void
   ): Promise<Readonly<MemoryEntry>>;
   // invariant: guarded active -> dormant demotion commits audit + UPDATE
   // atomically and returns null on benign 0-row races.
@@ -112,8 +113,8 @@ export interface MemoryServiceMemoryEntryRepoPort {
     updatedAt: string,
     onTransition?: () => void
   ): Promise<Readonly<MemoryEntry> | null>;
-  archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>>;
-  hardDeleteTombstoned?(objectId: string): Promise<void>;
+  archive(objectId: string, updatedAt: string, onArchived?: () => void): Promise<Readonly<MemoryEntry>>;
+  hardDeleteTombstoned?(objectId: string, onDeleted?: () => void): Promise<void>;
   // invariant: gated autonomous tombstone writes the durable forget_disposition
   // marker and terminalizes only a dormant row.
   autonomousTombstone?(input: {

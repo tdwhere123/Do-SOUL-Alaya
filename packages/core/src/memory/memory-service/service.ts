@@ -138,48 +138,39 @@ export class MemoryService {
     readonly event: EventLogEntry;
   }> {
     const createWithinTransaction = this.dependencies.memoryEntryRepo.createWithinTransaction;
-    if (createWithinTransaction !== undefined) {
-      const enrichPendingWriter = this.dependencies.enrichPendingWriter;
-      if (enqueueEnrichment !== undefined && enrichPendingWriter === undefined) {
-        throw new CoreError(
-          "CONFLICT",
-          "Atomic enrich_pending enqueue requested but the enrich-pending writer is not wired."
-        );
-      }
-
-      let event: EventLogEntry | undefined;
-      const created = createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, {
-        beforeCreate: () => {
-          event = this.appendCreatedEventSynchronously(createdEventInput);
-        },
-        afterCreate: () => {
-          if (enqueueEnrichment !== undefined) {
-            enrichPendingWriter?.enqueue({
-              workspaceId: memoryEntry.workspace_id,
-              memoryId: memoryEntry.object_id,
-              runId: enqueueEnrichment.runId,
-              sourceSignalId: enqueueEnrichment.sourceSignalId
-            });
-          }
-        }
-      });
-
-      if (event === undefined) {
-        throw new CoreError("CONFLICT", "Memory create transaction did not append its audit event.");
-      }
-
-      return { created, event };
+    if (createWithinTransaction === undefined) {
+      throw new CoreError("CONFLICT", "Memory create transaction port is not available");
     }
 
-    if (enqueueEnrichment !== undefined) {
+    const enrichPendingWriter = this.dependencies.enrichPendingWriter;
+    if (enqueueEnrichment !== undefined && enrichPendingWriter === undefined) {
       throw new CoreError(
         "CONFLICT",
-        "Atomic enrich_pending enqueue requested but the storage transaction port is not wired."
+        "Atomic enrich_pending enqueue requested but the enrich-pending writer is not wired."
       );
     }
 
-    const event = await this.dependencies.eventLogRepo.append(createdEventInput);
-    const created = await this.dependencies.memoryEntryRepo.create(memoryEntry);
+    let event: EventLogEntry | undefined;
+    const created = createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, {
+      beforeCreate: () => {
+        event = this.appendCreatedEventSynchronously(createdEventInput);
+      },
+      afterCreate: () => {
+        if (enqueueEnrichment !== undefined) {
+          enrichPendingWriter?.enqueue({
+            workspaceId: memoryEntry.workspace_id,
+            memoryId: memoryEntry.object_id,
+            runId: enqueueEnrichment.runId,
+            sourceSignalId: enqueueEnrichment.sourceSignalId
+          });
+        }
+      }
+    });
+
+    if (event === undefined) {
+      throw new CoreError("CONFLICT", "Memory create transaction did not append its audit event.");
+    }
+
     return { created, event };
   }
 
@@ -265,7 +256,7 @@ export class MemoryService {
       evidence_refs: null,
       occurred_at: occurredAt
     } as const;
-    const archivedEvent = await this.dependencies.eventLogRepo.append({
+    const archivedEventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_ARCHIVED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -273,9 +264,9 @@ export class MemoryService {
       run_id: existing.run_id,
       caused_by: parsedCausedBy,
       payload_json: SoulMemoryArchivedPayloadSchema.parse(transitionPayload)
-    });
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
-    const stateChangedEvent = await this.dependencies.eventLogRepo.append({
+    const stateChangedEventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -283,9 +274,18 @@ export class MemoryService {
       run_id: existing.run_id,
       caused_by: parsedCausedBy,
       payload_json: SoulMemoryStateChangedPayloadSchema.parse(transitionPayload)
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+    let archivedEvent: EventLogEntry | undefined;
+    let stateChangedEvent: EventLogEntry | undefined;
+    const archived = await this.dependencies.memoryEntryRepo.archive(parsedObjectId, occurredAt, () => {
+      archivedEvent = this.appendAuditEventSynchronously(archivedEventInput);
+      stateChangedEvent = this.appendAuditEventSynchronously(stateChangedEventInput);
     });
 
-    const archived = await this.dependencies.memoryEntryRepo.archive(parsedObjectId, occurredAt);
+    if (archivedEvent === undefined || stateChangedEvent === undefined) {
+      throw new CoreError("CONFLICT", "Memory archive transaction did not append its audit events.");
+    }
     await this.dependencies.runtimeNotifier.notifyEntry(archivedEvent);
     await this.dependencies.runtimeNotifier.notifyEntry(stateChangedEvent);
     return archived;
@@ -319,7 +319,7 @@ export class MemoryService {
     }
 
     const occurredAt = this.now();
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -338,10 +338,15 @@ export class MemoryService {
         evidence_refs: null,
         occurred_at: occurredAt
       })
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+    let event: EventLogEntry | undefined;
+    const updated = await transitionLifecycle(parsedObjectId, parsedNextState, occurredAt, () => {
+      event = this.appendAuditEventSynchronously(eventInput);
     });
-
-    const updated = await transitionLifecycle(parsedObjectId, parsedNextState, occurredAt);
-
+    if (event === undefined) {
+      throw new CoreError("CONFLICT", "Memory lifecycle transition transaction did not append its audit event.");
+    }
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return updated;
   }
@@ -434,7 +439,7 @@ export class MemoryService {
     }
 
     const occurredAt = this.now();
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -453,9 +458,15 @@ export class MemoryService {
         evidence_refs: null,
         occurred_at: occurredAt
       })
-    });
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
-    await hardDeleteTombstoned(parsedObjectId);
+    let event: EventLogEntry | undefined;
+    await hardDeleteTombstoned(parsedObjectId, () => {
+      event = this.appendAuditEventSynchronously(eventInput);
+    });
+    if (event === undefined) {
+      throw new CoreError("CONFLICT", "Memory tombstone delete transaction did not append its audit event.");
+    }
     await this.dependencies.runtimeNotifier.notifyEntry(event);
   }
 

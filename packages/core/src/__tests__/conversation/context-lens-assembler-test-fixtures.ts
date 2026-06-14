@@ -100,6 +100,12 @@ export function createDependencies(
       )
     },
     memoryRepo: {
+      findByIds: vi.fn(async (objectIds: readonly string[]) =>
+        objectIds.flatMap((objectId) => {
+          const loaded = memories.get(objectId);
+          return loaded === undefined ? [] : [loaded];
+        })
+      ),
       findById: vi.fn(async (objectId: string) => memories.get(objectId) ?? null)
     },
     eventLogRepo,
@@ -123,6 +129,10 @@ export function createDependencies(
     recallService: {
       recall: ReturnType<typeof vi.fn>;
       buildDefaultPolicy: ReturnType<typeof vi.fn>;
+    };
+    memoryRepo: {
+      findByIds: ReturnType<typeof vi.fn>;
+      findById: ReturnType<typeof vi.fn>;
     };
   };
 }

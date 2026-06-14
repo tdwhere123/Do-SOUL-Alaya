@@ -265,7 +265,12 @@ export class GovernanceLeaseService {
   }
 
   private async rehydrateFromEventLog(runId: string): Promise<StoredLease | null> {
-    const events = await this.dependencies.eventLogRepo.queryByRun(runId);
+    let events: readonly EventLogEntry[];
+    try {
+      events = await this.dependencies.eventLogRepo.queryByRun(runId);
+    } catch {
+      return null;
+    }
     let active: StoredLease | null = null;
 
     for (const event of events) {

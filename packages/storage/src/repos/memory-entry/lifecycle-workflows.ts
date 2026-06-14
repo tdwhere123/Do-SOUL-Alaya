@@ -163,24 +163,29 @@ export async function hardDeleteTombstonedWithDisposition(
 export async function archiveMemoryEntry(
   this: MemoryEntryLifecycleWorkflowHost,
   objectId: string,
-  updatedAt: string
+  updatedAt: string,
+  onArchived?: () => void
 ): Promise<Readonly<MemoryEntry>> {
   const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
   try {
-    const result = this.archiveStatement.run(parsedUpdatedAt, objectId);
+    return this.db.connection.transaction(() => {
+      onArchived?.();
 
-    if (result.changes === 0) {
-      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
-    }
+      const result = this.archiveStatement.run(parsedUpdatedAt, objectId);
 
-    const archived = await this.findById(objectId);
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
+      }
 
-    if (archived === null) {
-      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after archive.`);
-    }
+      const archived = this.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
 
-    return archived;
+      if (archived === undefined) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after archive.`);
+      }
+
+      return parseMemoryEntryRow(archived);
+    })();
   } catch (error) {
     if (error instanceof StorageError) {
       throw error;
@@ -194,30 +199,35 @@ export async function transitionMemoryEntryLifecycle(
   this: MemoryEntryLifecycleWorkflowHost,
   objectId: string,
   lifecycleState: MemoryEntry["lifecycle_state"],
-  updatedAt: string
+  updatedAt: string,
+  onTransition?: () => void
 ): Promise<Readonly<MemoryEntry>> {
   const parsedLifecycleState = parseLifecycleState(lifecycleState);
   const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
   try {
-    // invariant (I3): non-tombstone transitions clear the disposition GC marker.
-    const statement =
-      parsedLifecycleState === "tombstone"
-        ? this.transitionLifecycleStatement
-        : this.transitionLifecycleClearForgetStatement;
-    const result = statement.run(parsedLifecycleState, parsedUpdatedAt, objectId);
+    return this.db.connection.transaction(() => {
+      onTransition?.();
 
-    if (result.changes === 0) {
-      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
-    }
+      // invariant (I3): non-tombstone transitions clear the disposition GC marker.
+      const statement =
+        parsedLifecycleState === "tombstone"
+          ? this.transitionLifecycleStatement
+          : this.transitionLifecycleClearForgetStatement;
+      const result = statement.run(parsedLifecycleState, parsedUpdatedAt, objectId);
 
-    const updated = await this.findById(objectId);
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
+      }
 
-    if (updated === null) {
-      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after lifecycle update.`);
-    }
+      const updated = this.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
 
-    return updated;
+      if (updated === undefined) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after lifecycle update.`);
+      }
+
+      return parseMemoryEntryRow(updated);
+    })();
   } catch (error) {
     if (error instanceof StorageError) {
       throw error;
@@ -293,10 +303,13 @@ export async function transitionMemoryEntryToDormantIfActive(
 
 export async function hardDeleteTombstonedMemoryEntry(
   this: MemoryEntryLifecycleWorkflowHost,
-  objectId: string
+  objectId: string,
+  onDeleted?: () => void
 ): Promise<void> {
   try {
     this.db.connection.transaction(() => {
+      onDeleted?.();
+
       const result = this.hardDeleteTombstonedStatement.run(objectId);
 
       if (result.changes === 0) {
@@ -306,7 +319,7 @@ export async function hardDeleteTombstonedMemoryEntry(
         );
       }
 
-        // invariant: ineligible tombstones never strip live path topology.
+      // invariant: ineligible tombstones never strip live path topology.
       this.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
       this.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
     })();

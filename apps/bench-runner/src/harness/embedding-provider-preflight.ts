@@ -147,5 +147,7 @@ function formatSecretResolutionPreflightFailure(error: ResolveSecretError): stri
     case "keychain_tooling_unavailable":
     case "keychain_entry_not_found":
       return `${prefix}: keychain secret lookup failed`;
+    default:
+      return `${prefix}: secret resolution failed`;
   }
 }

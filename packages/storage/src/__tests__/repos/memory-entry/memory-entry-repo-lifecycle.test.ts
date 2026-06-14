@@ -69,6 +69,27 @@ describe("SqliteMemoryEntryRepo", () => {
     await expect(repo.findById("55555555-5555-4555-8555-555555555555")).resolves.toBeNull();
   });
 
+  it("hardDeleteTombstoned rolls the delete back when onDeleted throws", async () => {
+    const { repo } = await createRepo();
+    const entry = createMemoryEntry({
+      object_id: "55555555-5555-4555-8555-555555555556",
+      retention_state: "tombstoned",
+      lifecycle_state: "tombstone"
+    });
+    await repo.create(entry);
+    const onDeleted = vi.fn(() => {
+      throw new Error("delete audit append failed mid-transaction");
+    });
+
+    await expect(repo.hardDeleteTombstoned(entry.object_id, onDeleted)).rejects.toThrow(StorageError);
+
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+    await expect(repo.findById(entry.object_id)).resolves.toEqual(expect.objectContaining({
+      object_id: entry.object_id,
+      retention_state: "tombstoned"
+    }));
+  });
+
   it("autonomousTombstone only fires on a dormant row and writes the durable disposition", async () => {
     const { repo } = await createRepo();
     const dormant = createMemoryEntry({
@@ -542,6 +563,25 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(tombstoned.forget_disposition).toBe("judged_useless");
   });
 
+  it("transitionLifecycle rolls the lifecycle update back when onTransition throws", async () => {
+    const { repo } = await createRepo();
+    const active = createMemoryEntry({
+      object_id: "dddddddd-0000-4000-8000-000000000003",
+      lifecycle_state: "active"
+    });
+    await repo.create(active);
+    const onTransition = vi.fn(() => {
+      throw new Error("lifecycle audit append failed mid-transaction");
+    });
+
+    await expect(
+      repo.transitionLifecycle(active.object_id, "dormant", "2026-03-22T00:00:00.000Z", onTransition)
+    ).rejects.toThrow(StorageError);
+
+    expect(onTransition).toHaveBeenCalledTimes(1);
+    expect((await repo.findById(active.object_id))?.lifecycle_state).toBe("active");
+  });
+
   it("N1: reviveDormant flips a dormant row to active and clears the forget marker", async () => {
     const { repo } = await createRepo();
     const dormant = createMemoryEntry({
@@ -658,6 +698,25 @@ describe("SqliteMemoryEntryRepo", () => {
     const archived = await repo.archive(entry.object_id, "2026-03-21T04:00:00.000Z");
     expect(archived.lifecycle_state).toBe("archived");
     expect(archived.updated_at).toBe("2026-03-21T04:00:00.000Z");
+  });
+
+  it("archive rolls the archive update back when onArchived throws", async () => {
+    const { repo } = await createRepo();
+    const entry = createMemoryEntry({
+      object_id: "55555555-0000-4000-8000-000000000001",
+      lifecycle_state: "active"
+    });
+    await repo.create(entry);
+    const onArchived = vi.fn(() => {
+      throw new Error("archive audit append failed mid-transaction");
+    });
+
+    await expect(
+      repo.archive(entry.object_id, "2026-03-21T04:00:00.000Z", onArchived)
+    ).rejects.toThrow(StorageError);
+
+    expect(onArchived).toHaveBeenCalledTimes(1);
+    expect((await repo.findById(entry.object_id))?.lifecycle_state).toBe("active");
   });
 
   it("keeps all dynamics fields null in phase 1B", async () => {

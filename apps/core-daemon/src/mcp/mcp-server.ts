@@ -19,6 +19,7 @@ import {
   listAlayaMemoryTools,
   type AlayaMemoryToolDefinition
 } from "../mcp-memory/tool-catalog.js";
+import { readRuntimeVersion } from "../runtime/build-info.js";
 import type {
   McpMemoryToolCallContext,
   McpMemoryToolHandler
@@ -28,6 +29,7 @@ export interface AlayaMcpServerOptions {
   readonly memoryToolHandler: McpMemoryToolHandler;
   readonly contextProvider: () => McpMemoryToolCallContext;
   readonly tools?: readonly AlayaMemoryToolDefinition[];
+  readonly version?: string;
 }
 
 export interface AlayaMcpStdioServer {
@@ -47,13 +49,20 @@ export const ALAYA_MCP_SERVER_INSTRUCTIONS = [
   "Only the agent target that claimed a task can complete it; another attached host completing it is rejected. Task payload carries the run_id bound by the MCP context; attached MCP sessions without ALAYA_RUN_ID are first canonicalized as session runs. Never substitute a different run id."
 ].join(" ");
 
+export function createAlayaMcpServerInfo(options: Pick<AlayaMcpServerOptions, "version"> = {}): Readonly<{
+  readonly name: "do-soul-alaya";
+  readonly version: string;
+}> {
+  return Object.freeze({
+    name: "do-soul-alaya",
+    version: options.version ?? readRuntimeVersion()
+  });
+}
+
 export function createAlayaMcpServer(options: AlayaMcpServerOptions): Server {
   const tools = options.tools ?? listAlayaMemoryTools();
   const server = new Server(
-    {
-      name: "do-soul-alaya",
-      version: "0.0.1"
-    },
+    createAlayaMcpServerInfo(options),
     {
       capabilities: {
         tools: {}

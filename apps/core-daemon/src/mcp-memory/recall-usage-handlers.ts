@@ -274,7 +274,12 @@ export function createRecallHandler(params: Readonly<{
       delivered_at: params.now()
     });
 
-    void accrueCoRecallPlasticity(params, deliveredObjectIds, context.workspaceId).catch(() => {});
+    void accrueCoRecallPlasticity(params, deliveredObjectIds, context.workspaceId).catch((err) => {
+      params.warn("co-recall plasticity fire-and-forget failed", {
+        workspace_id: context.workspaceId,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    });
 
     enqueueRecallExtractTask(params, request, context, deliveredObjectIds);
 

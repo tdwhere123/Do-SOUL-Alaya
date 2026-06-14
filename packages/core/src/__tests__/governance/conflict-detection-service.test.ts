@@ -367,6 +367,91 @@ describe("ConflictDetectionService", () => {
     expect(llmPort.classifyPair).toHaveBeenCalled();
   });
 
+  it("strictNoDrop=true rethrows LLM classifier failures instead of degrading to no-conflict", async () => {
+    const ambiguous = createMemoryEntry({
+      object_id: "mem-A",
+      content: "Generic coffee preference text.",
+      domain_tags: ["coffee", "alpha"]
+    });
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => [ambiguous]),
+      findBySharedDomainTags: vi.fn(async () => [])
+    };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const llmPort = {
+      classifyPair: vi.fn(async () => {
+        throw new Error("llm unavailable");
+      })
+    };
+    const service = new ConflictDetectionService({
+      memoryRepo,
+      pathCandidatePort,
+      llmPort,
+      llmMaxPairsPerNewMemory: 4
+    });
+
+    await expect(
+      service.detectAndLinkConflicts({
+        newMemoryId: "mem-B",
+        newMemoryDimension: MemoryDimension.PREFERENCE,
+        newMemoryScopeClass: ScopeClass.PROJECT,
+        newMemoryContent: "Different but related coffee fact.",
+        newMemoryDomainTags: ["coffee", "beta"],
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        strictNoDrop: true
+      })
+    ).rejects.toThrow("llm unavailable");
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+  });
+
+  it("default mode warns and degrades when the LLM classifier fails", async () => {
+    const warn = vi.fn();
+    const ambiguous = createMemoryEntry({
+      object_id: "mem-A",
+      content: "Generic coffee preference text.",
+      domain_tags: ["coffee", "alpha"]
+    });
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => [ambiguous]),
+      findBySharedDomainTags: vi.fn(async () => [])
+    };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const llmPort = {
+      classifyPair: vi.fn(async () => {
+        throw new Error("llm unavailable");
+      })
+    };
+    const service = new ConflictDetectionService({
+      memoryRepo,
+      pathCandidatePort,
+      llmPort,
+      llmMaxPairsPerNewMemory: 4,
+      warn
+    });
+
+    await expect(
+      service.detectAndLinkConflicts({
+        newMemoryId: "mem-B",
+        newMemoryDimension: MemoryDimension.PREFERENCE,
+        newMemoryScopeClass: ScopeClass.PROJECT,
+        newMemoryContent: "Different but related coffee fact.",
+        newMemoryDomainTags: ["coffee", "beta"],
+        workspaceId: "workspace-1",
+        runId: "run-1"
+      })
+    ).resolves.toBeUndefined();
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "conflict detection llm pair classify failed",
+      expect.objectContaining({
+        new_memory_id: "mem-B",
+        existing_memory_id: "mem-A",
+        error: "llm unavailable"
+      })
+    );
+  });
+
   it("skips LLM when rule path already produced a contradicts edge", async () => {
     // tag overlap = 1.0 + token overlap << 0.35 → rule fires contradicts;
     // LLM must not run because LLM-only-on-no-rule is the documented

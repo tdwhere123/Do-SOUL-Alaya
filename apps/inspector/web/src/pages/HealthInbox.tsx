@@ -35,7 +35,11 @@ interface HealthInboxEnvelope {
   };
 }
 
-type HealthIssueCauseKind = "orphan_radar" | "green_revoked" | "evidence_failure";
+type HealthIssueCauseKind =
+  | "orphan_radar"
+  | "green_revoked"
+  | "evidence_failure"
+  | "path_relation_failure";
 type HealthIssueSeverity = "info" | "warn" | "blocking";
 type HealthIssueResolutionState = "pending" | "resolved" | "suppressed";
 
@@ -53,7 +57,8 @@ const CAUSE_OPTIONS: ReadonlyArray<CauseFilter> = [
   "all",
   "orphan_radar",
   "green_revoked",
-  "evidence_failure"
+  "evidence_failure",
+  "path_relation_failure"
 ];
 
 const SEVERITY_BADGE: Readonly<Record<HealthIssueSeverity, string>> = {
@@ -171,6 +176,9 @@ export default function HealthInboxPage() {
             value={causeFilter}
             options={CAUSE_OPTIONS}
             onChange={(next) => setCauseFilter(next as CauseFilter)}
+            renderOptionLabel={(option) =>
+              option === "all" ? option : t(`healthInbox:cause.${option}` as never)
+            }
           />
         </div>
       </header>
@@ -271,6 +279,7 @@ function FilterChipGroup(props: {
   readonly value: string;
   readonly options: readonly string[];
   readonly onChange: (next: string) => void;
+  readonly renderOptionLabel?: (option: string) => string;
 }) {
   return (
     <div className="flex items-center gap-1">
@@ -288,7 +297,7 @@ function FilterChipGroup(props: {
               : "border-beige-300 text-ink-600 hover:bg-beige-100"
           }`}
         >
-          {option}
+          {props.renderOptionLabel?.(option) ?? option}
         </button>
       ))}
     </div>

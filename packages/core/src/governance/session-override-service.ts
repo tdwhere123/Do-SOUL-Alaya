@@ -221,7 +221,12 @@ export class SessionOverrideService {
   }
 
   private async rehydrateFromEventLog(runId: string): Promise<readonly Readonly<SessionOverride>[]> {
-    const events = await this.dependencies.eventLogRepo.queryByRun(runId);
+    let events: readonly EventLogEntry[];
+    try {
+      events = await this.dependencies.eventLogRepo.queryByRun(runId);
+    } catch {
+      return Object.freeze([]);
+    }
     const overrides = events
       .filter((event) => event.event_type === GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED)
       .flatMap((event) => {
