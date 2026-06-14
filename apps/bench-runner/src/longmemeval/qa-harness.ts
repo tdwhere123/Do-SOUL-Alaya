@@ -26,8 +26,12 @@
 import type { QaChatFn } from "./qa-chat.js";
 import { isAbstentionQuestionId } from "./abstention.js";
 
-/** Max chars of stitched memory context handed to the answer model. */
-const QA_CONTEXT_CHAR_CAP = 20_000;
+/** Max chars of stitched memory context handed to the answer model. Override
+ * with ALAYA_BENCH_QA_CONTEXT_CHARS to test wider aggregation delivery. */
+function qaContextCharCap(): number {
+  const raw = Number(process.env.ALAYA_BENCH_QA_CONTEXT_CHARS);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 20_000;
+}
 
 /** Default answer口径: ground strictly in context, abstain when truly absent. */
 const ANSWER_SYSTEM_DEFAULT =
@@ -147,7 +151,7 @@ export function buildQaAnswerContext(
         : candidate.content
     )
     .join("\n\n");
-  return text.slice(0, QA_CONTEXT_CHAR_CAP);
+  return text.slice(0, qaContextCharCap());
 }
 
 /**

@@ -387,23 +387,27 @@ export async function runLongMemEvalQuestion(input: {
 
     let qaVerdict: QaQuestionVerdict | undefined;
     if (input.qaChat !== undefined) {
-      // Session-distributed delivery (default off): redistribute the wide
-      // recalled pool across source sessions instead of flat top-10, so deep
-      // answer-session gold reaches the QA reader. Recall-service untouched.
+      // QA delivery budget (default 10 = unchanged). ALAYA_BENCH_QA_DELIVER_K
+      // widens it so the aggregation reader sees more of a counting question's
+      // scattered gold; session-spread (default off) redistributes that budget
+      // across source sessions. Recall-service untouched.
+      const deliverKRaw = Number(process.env.ALAYA_BENCH_QA_DELIVER_K);
+      const deliverK =
+        Number.isFinite(deliverKRaw) && deliverKRaw > 0
+          ? Math.floor(deliverKRaw)
+          : 10;
+      const memoryEntryResults = results.filter(
+        (pointer) => (pointer.object_kind ?? "memory_entry") === "memory_entry"
+      );
       const qaPointers: ReadonlyArray<{
         readonly object_id: string;
         readonly object_kind?: string | null;
       }> =
-        process.env.ALAYA_BENCH_QA_SESSION_SPREAD === undefined
-          ? deliveredResults
-          : selectSessionSpread(
-              results.filter(
-                (pointer) =>
-                  (pointer.object_kind ?? "memory_entry") === "memory_entry"
-              ),
-              sidecar,
-              10
-            );
+        process.env.ALAYA_BENCH_QA_SESSION_SPREAD !== undefined
+          ? selectSessionSpread(memoryEntryResults, sidecar, deliverK)
+          : process.env.ALAYA_BENCH_QA_DELIVER_K !== undefined
+            ? memoryEntryResults.slice(0, deliverK)
+            : deliveredResults;
       let delivered: QaDeliveredCandidate[] = qaPointers
         .filter(
           (result) => (result.object_kind ?? "memory_entry") === "memory_entry"
