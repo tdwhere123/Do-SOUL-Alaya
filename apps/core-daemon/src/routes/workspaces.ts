@@ -15,7 +15,12 @@ import {
   type WorkspaceEngineConfig,
   type WorkspaceGitBindingStatus
 } from "@do-soul/alaya-protocol";
-import { parseJsonBody, rejectUnexpectedRequestBody } from "./shared.js";
+import {
+  parseJsonBody,
+  parseListPagination,
+  rejectUnexpectedRequestBody,
+  writeListPaginationHeaders
+} from "./shared.js";
 
 export interface WorkspaceGitBindingRepo {
   getById(id: string): Promise<Workspace | null>;
@@ -72,11 +77,14 @@ export function registerWorkspaceRoutes(app: Hono, services: WorkspaceRouteServi
   });
 
   app.get("/workspaces", async (context) => {
+    const pagination = parseListPagination(context);
     const workspaces = await Promise.all(
-      (await services.workspaceService.list()).map(async (workspace) =>
+      (await services.workspaceService.list(pagination)).map(async (workspace) =>
         await sanitizeWorkspaceForGenericRead(workspace, services.gitBindingValidation)
       )
     );
+    const totalCount = await services.workspaceService.count();
+    writeListPaginationHeaders(context, totalCount, pagination);
     return context.json({ success: true, data: workspaces }, 200);
   });
 

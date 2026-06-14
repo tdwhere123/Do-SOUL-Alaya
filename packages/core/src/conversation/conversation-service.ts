@@ -34,7 +34,17 @@ export interface ConversationWorkspaceRepoPort {
 
 export interface ConversationEventLogRepoPort {
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
+  queryConversationMessageEventsByRun?(
+    runId: string,
+    page?: ConversationListPageOptions
+  ): Promise<readonly EventLogEntry[]>;
+  countConversationMessageEventsByRun?(runId: string): Promise<number>;
   append?(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
+}
+
+export interface ConversationListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 export interface ConversationGardenComputeProviderPort {
@@ -155,10 +165,27 @@ const MAX_RECALLED_CONTEXT_CHARS = 4_000;
 export class ConversationService {
   public constructor(private readonly dependencies: ConversationServiceDependencies) {}
 
-  public async listMessages(runId: string): Promise<readonly ConversationMessage[]> {
+  public async listMessages(
+    runId: string,
+    page?: ConversationListPageOptions
+  ): Promise<readonly ConversationMessage[]> {
     const run = await this.requireRun(runId);
-    const events = await this.dependencies.eventLogRepo.queryByRun(run.run_id);
+    const pagedReader = this.dependencies.eventLogRepo.queryConversationMessageEventsByRun;
+    if (pagedReader === undefined) {
+      const messages = rebuildConversationMessages(await this.dependencies.eventLogRepo.queryByRun(run.run_id));
+      return applyMessagePage(messages, page);
+    }
+    const events = await pagedReader.call(this.dependencies.eventLogRepo, run.run_id, page);
     return rebuildConversationMessages(events);
+  }
+
+  public async countMessages(runId: string): Promise<number> {
+    const run = await this.requireRun(runId);
+    const counter = this.dependencies.eventLogRepo.countConversationMessageEventsByRun;
+    if (counter !== undefined) {
+      return await counter.call(this.dependencies.eventLogRepo, run.run_id);
+    }
+    return rebuildConversationMessages(await this.dependencies.eventLogRepo.queryByRun(run.run_id)).length;
   }
 
   public async sendMessage(_runId: string, _input: unknown): Promise<never> {
@@ -731,6 +758,17 @@ function getGardenProviderFailureKind(error: unknown): string {
   }
 
   return "unknown";
+}
+
+function applyMessagePage(
+  messages: readonly ConversationMessage[],
+  page: ConversationListPageOptions | undefined
+): readonly ConversationMessage[] {
+  if (page === undefined) {
+    return messages;
+  }
+
+  return messages.slice(page.offset, page.offset + page.limit);
 }
 
 function getErrorMessage(error: unknown): string {

@@ -8,10 +8,16 @@ export type RunCreateInput = Omit<Run, "created_at" | "last_active_at">;
 export interface RunRepo {
   create(data: RunCreateInput): Run;
   getById(id: string): Promise<Run | null>;
-  listByWorkspace(workspaceId: string): Promise<readonly Run[]>;
+  listByWorkspace(workspaceId: string, page?: RunListPageOptions): Promise<readonly Run[]>;
+  countByWorkspace(workspaceId: string): Promise<number>;
   delete(id: string): void;
   updateState(id: string, state: RunState): Promise<Run>;
   update(id: string, patch: Partial<Run>): Run;
+}
+
+export interface RunListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 interface RunRow {
@@ -28,10 +34,16 @@ interface RunRow {
   readonly last_active_at: string;
 }
 
+interface CountRow {
+  readonly total: number;
+}
+
 export class SqliteRunRepo implements RunRepo {
   private readonly createStatement;
   private readonly getByIdStatement;
   private readonly listByWorkspaceStatement;
+  private readonly listByWorkspacePagedStatement;
+  private readonly countByWorkspaceStatement;
   private readonly deleteStatement;
   private readonly updateStateStatement;
   private readonly updateTitleStatement;
@@ -86,6 +98,29 @@ export class SqliteRunRepo implements RunRepo {
       WHERE workspace_id = ?
       ORDER BY created_at ASC, run_id ASC
     `);
+    this.listByWorkspacePagedStatement = db.connection.prepare(`
+      SELECT
+        run_id,
+        workspace_id,
+        title,
+        goal,
+        run_mode,
+        engine_binding_id,
+        engine_class,
+        run_state,
+        current_surface_id,
+        created_at,
+        last_active_at
+      FROM runs
+      WHERE workspace_id = ?
+      ORDER BY created_at ASC, run_id ASC
+      LIMIT ? OFFSET ?
+    `);
+    this.countByWorkspaceStatement = db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM runs
+      WHERE workspace_id = ?
+    `);
     this.deleteStatement = db.connection.prepare("DELETE FROM runs WHERE run_id = ?");
     this.updateStateStatement = db.connection.prepare(`
       UPDATE runs
@@ -137,12 +172,27 @@ export class SqliteRunRepo implements RunRepo {
     }
   }
 
-  public async listByWorkspace(workspaceId: string): Promise<readonly Run[]> {
+  public async listByWorkspace(
+    workspaceId: string,
+    page?: RunListPageOptions
+  ): Promise<readonly Run[]> {
     try {
-      const rows = this.listByWorkspaceStatement.all(workspaceId) as RunRow[];
+      const rows =
+        page === undefined
+          ? (this.listByWorkspaceStatement.all(workspaceId) as RunRow[])
+          : (this.listByWorkspacePagedStatement.all(workspaceId, page.limit, page.offset) as RunRow[]);
       return rows.map((row) => parseRun(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list runs for workspace ${workspaceId}.`, error);
+    }
+  }
+
+  public async countByWorkspace(workspaceId: string): Promise<number> {
+    try {
+      const row = this.countByWorkspaceStatement.get(workspaceId) as CountRow | undefined;
+      return row === undefined ? 0 : Number(row.total);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to count runs for workspace ${workspaceId}.`, error);
     }
   }
 

@@ -36,9 +36,15 @@ export interface WorkspaceRepoPort {
     readonly workspace_state: Workspace["workspace_state"];
   }): Workspace;
   getById(id: string): Promise<Workspace | null>;
-  list(): Promise<readonly Workspace[]>;
+  list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]>;
+  count?(): Promise<number>;
   delete(id: string): void;
   updateDefaultEngineClass(id: string, engineClass: Workspace["default_engine_class"]): Workspace;
+}
+
+export interface WorkspaceListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 export interface WorkspaceRunRepoPort {
@@ -362,8 +368,16 @@ export class WorkspaceService {
     };
   }
 
-  public list(): Promise<readonly Workspace[]> {
-    return this.dependencies.workspaceRepo.list();
+  public list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]> {
+    return this.dependencies.workspaceRepo.list(page);
+  }
+
+  public async count(): Promise<number> {
+    const count = this.dependencies.workspaceRepo.count;
+    if (count !== undefined) {
+      return await count.call(this.dependencies.workspaceRepo);
+    }
+    return (await this.dependencies.workspaceRepo.list()).length;
   }
 
   public async getById(workspaceId: string): Promise<Workspace> {

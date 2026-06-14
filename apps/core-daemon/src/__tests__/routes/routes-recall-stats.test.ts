@@ -47,7 +47,7 @@ const SAMPLE_STATS = {
 
 function buildApp(services: Parameters<typeof registerRecallStatsRoutes>[1]): Hono {
   const app = new Hono();
-  registerErrorHandler(app);
+  registerErrorHandler(app, { error: vi.fn() });
   registerRecallStatsRoutes(app, services);
   return app;
 }

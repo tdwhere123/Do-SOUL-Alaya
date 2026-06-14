@@ -35,11 +35,17 @@ export type WorkspaceCreateInput = Omit<Workspace, "created_at" | "archived_at" 
 export interface WorkspaceRepo {
   create(data: WorkspaceCreateInput): Workspace;
   getById(id: string): Promise<Workspace | null>;
-  list(): Promise<readonly Workspace[]>;
+  list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]>;
+  count(): Promise<number>;
   delete(id: string): void;
   updateRepoPath(id: string, repoPath: Workspace["repo_path"]): Promise<Workspace>;
   updateDefaultEngineBinding(id: string, bindingId: string | null): Workspace;
   updateDefaultEngineClass(id: string, engineClass: Workspace["default_engine_class"]): Workspace;
+}
+
+export interface WorkspaceListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 interface WorkspaceRow {
@@ -55,10 +61,16 @@ interface WorkspaceRow {
   readonly archived_at: string | null;
 }
 
+interface CountRow {
+  readonly total: number;
+}
+
 export class SqliteWorkspaceRepo implements WorkspaceRepo {
   private readonly createStatement;
   private readonly getByIdStatement;
   private readonly listStatement;
+  private readonly listPagedStatement;
+  private readonly countStatement;
   private readonly deleteStatement;
   private readonly updateRepoPathStatement;
   private readonly updateDefaultEngineBindingStatement;
@@ -109,6 +121,26 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
         archived_at
       FROM workspaces
       ORDER BY created_at ASC, workspace_id ASC
+    `);
+    this.listPagedStatement = db.connection.prepare(`
+      SELECT
+        workspace_id,
+        name,
+        root_path,
+        workspace_kind,
+        repo_path,
+        default_engine_binding,
+        default_engine_class,
+        workspace_state,
+        created_at,
+        archived_at
+      FROM workspaces
+      ORDER BY created_at ASC, workspace_id ASC
+      LIMIT ? OFFSET ?
+    `);
+    this.countStatement = db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM workspaces
     `);
     this.deleteStatement = db.connection.prepare("DELETE FROM workspaces WHERE workspace_id = ?");
     this.updateRepoPathStatement = db.connection.prepare(`
@@ -177,12 +209,24 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
     }
   }
 
-  public async list(): Promise<readonly Workspace[]> {
+  public async list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]> {
     try {
-      const rows = this.listStatement.all() as WorkspaceRow[];
+      const rows =
+        page === undefined
+          ? (this.listStatement.all() as WorkspaceRow[])
+          : (this.listPagedStatement.all(page.limit, page.offset) as WorkspaceRow[]);
       return rows.map((row) => parseWorkspace(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to list workspaces.", error);
+    }
+  }
+
+  public async count(): Promise<number> {
+    try {
+      const row = this.countStatement.get() as CountRow | undefined;
+      return row === undefined ? 0 : Number(row.total);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to count workspaces.", error);
     }
   }
 

@@ -23,10 +23,14 @@ function urlOf(input: FetchInput): string {
   return input.url;
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse(
+  body: unknown,
+  status = 200,
+  headers: Record<string, string> = {}
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json" }
+    headers: { "content-type": "application/json", ...headers }
   });
 }
 
@@ -64,7 +68,11 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
     fetchMock.mockImplementation(async (input: FetchInput, init?: RequestInit) => {
       const url = urlOf(input);
       if (url.includes("/memory-entries/ws1")) {
-        return jsonResponse({ success: true, data: SAMPLE_ROWS });
+        return jsonResponse({ success: true, data: SAMPLE_ROWS }, 200, {
+          "x-total-count": "1",
+          "x-limit": "200",
+          "x-offset": "0"
+        });
       }
       if (url.includes("/proposals/promote-strictly-governed") && init?.method === "POST") {
         return jsonResponse({
@@ -101,5 +109,54 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
       });
       expect(matched).toBe(true);
     });
+  });
+
+  it("loads additional memory pages instead of silently truncating at the first page", async () => {
+    const firstPage = Array.from({ length: 200 }, (_, index) => ({
+      ...SAMPLE_ROWS[0]!,
+      object_id: `mem-${String(index).padStart(3, "0")}`,
+      content: `memory page one ${index}`
+    }));
+    const secondPage = [
+      {
+        ...SAMPLE_ROWS[0]!,
+        object_id: "mem-200",
+        content: "memory page two 200"
+      }
+    ];
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (url.includes("/memory-entries/ws1") && url.includes("offset=0")) {
+        return jsonResponse({ success: true, data: firstPage }, 200, {
+          "x-total-count": "201",
+          "x-limit": "200",
+          "x-offset": "0"
+        });
+      }
+      if (url.includes("/memory-entries/ws1") && url.includes("offset=200")) {
+        return jsonResponse({ success: true, data: secondPage }, 200, {
+          "x-total-count": "201",
+          "x-limit": "200",
+          "x-offset": "200"
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+
+    renderMemoryBrowser();
+
+    expect((await screen.findByTestId("memory-pagination-status")).textContent).toContain(
+      "200 of 201 loaded"
+    );
+    fireEvent.click(screen.getByTestId("memory-load-more"));
+
+    expect(await screen.findByText("memory page two 200")).not.toBeNull();
+    expect(screen.getByTestId("memory-pagination-status").textContent).toContain(
+      "201 of 201 loaded"
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/memory-entries/ws1?limit=200&offset=200"),
+      expect.any(Object)
+    );
   });
 });

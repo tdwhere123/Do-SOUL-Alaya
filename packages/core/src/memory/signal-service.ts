@@ -20,8 +20,14 @@ export interface SignalServiceEventLogRepoPort {
 export interface SignalServiceSignalRepoPort {
   create(signal: CandidateMemorySignal): Promise<CandidateMemorySignal>;
   getById(signalId: string): Promise<CandidateMemorySignal | null>;
-  listByRun(runId: string): Promise<readonly CandidateMemorySignal[]>;
+  listByRun(runId: string, page?: SignalListPageOptions): Promise<readonly CandidateMemorySignal[]>;
+  countByRun?(runId: string): Promise<number>;
   updateState(signalId: string, state: SignalStateValue): Promise<CandidateMemorySignal>;
+}
+
+export interface SignalListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 export interface SignalRuntimeNotifier {
@@ -120,8 +126,19 @@ export class SignalService {
     return await this.triageAndMaybeMaterialize(storedSignal);
   }
 
-  public async listByRun(runId: string): Promise<readonly CandidateMemorySignal[]> {
-    return await this.dependencies.signalRepo.listByRun(runId);
+  public async listByRun(
+    runId: string,
+    page?: SignalListPageOptions
+  ): Promise<readonly CandidateMemorySignal[]> {
+    return await this.dependencies.signalRepo.listByRun(runId, page);
+  }
+
+  public async countByRun(runId: string): Promise<number> {
+    const countByRun = this.dependencies.signalRepo.countByRun;
+    if (countByRun !== undefined) {
+      return await countByRun.call(this.dependencies.signalRepo, runId);
+    }
+    return (await this.dependencies.signalRepo.listByRun(runId)).length;
   }
 
   private async resumeExistingSignal(existingSignal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {

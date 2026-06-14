@@ -203,6 +203,14 @@ describe("SqliteProposalRepo", () => {
       secondPending.proposal_id,
       firstPending.proposal_id
     ]);
+
+    const allPage = await repo.findByWorkspaceId("workspace-1", { limit: 1, offset: 1 });
+    expect(allPage.map((row) => row.proposal_id)).toEqual([accepted.proposal_id]);
+    await expect(repo.countByWorkspaceId("workspace-1")).resolves.toBe(3);
+
+    const pendingPage = await repo.findPending("workspace-1", { limit: 1, offset: 1 });
+    expect(pendingPage.map((row) => row.proposal_id)).toEqual([firstPending.proposal_id]);
+    await expect(repo.countPending("workspace-1")).resolves.toBe(2);
   });
 
   it("counts pending memory-target proposal edges independently of pending summary limits", async () => {

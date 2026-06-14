@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { CoreError, type MemoryService, type RunService, type WorkspaceService } from "@do-soul/alaya-core";
 import { MemoryDimensionSchema } from "@do-soul/alaya-protocol";
+import { parseListPagination, writeListPaginationHeaders } from "./shared.js";
 
 export interface MemoryRouteServices {
   readonly workspaceService: WorkspaceService;
@@ -19,10 +20,17 @@ export function registerMemoryRoutes(app: Hono, services: MemoryRouteServices): 
     await services.workspaceService.getById(workspaceId);
 
     const dimension = context.req.query("dimension");
+    const parsedDimension = dimension === undefined ? undefined : parseDimension(dimension);
+    const pagination = parseListPagination(context);
     const memories =
-      dimension === undefined
-        ? await services.memoryService.findByWorkspaceId(workspaceId)
-        : await services.memoryService.findByDimension(workspaceId, parseDimension(dimension));
+      parsedDimension === undefined
+        ? await services.memoryService.findByWorkspaceId(workspaceId, pagination)
+        : await services.memoryService.findByDimension(workspaceId, parsedDimension, pagination);
+    const totalCount =
+      parsedDimension === undefined
+        ? await services.memoryService.countByWorkspaceId(workspaceId)
+        : await services.memoryService.countByDimension(workspaceId, parsedDimension);
+    writeListPaginationHeaders(context, totalCount, pagination);
 
     return context.json({ success: true, data: memories }, 200);
   });
@@ -31,7 +39,10 @@ export function registerMemoryRoutes(app: Hono, services: MemoryRouteServices): 
     const runId = context.req.param("runId");
     await services.runService.getById(runId);
 
-    const memories = await services.memoryService.findByRunId(runId);
+    const pagination = parseListPagination(context);
+    const memories = await services.memoryService.findByRunId(runId, pagination);
+    const totalCount = await services.memoryService.countByRunId(runId);
+    writeListPaginationHeaders(context, totalCount, pagination);
     return context.json({ success: true, data: memories }, 200);
   });
 }

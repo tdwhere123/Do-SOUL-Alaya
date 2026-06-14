@@ -96,6 +96,11 @@ export interface FindPendingSummariesOptions {
   readonly now?: string;
 }
 
+export interface ProposalListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
+}
+
 export type ProposalResolutionEventInput = EventLogDraftInput;
 export type ProposalCreationEventInput = EventLogDraftInput;
 
@@ -168,8 +173,15 @@ export interface ProposalRepo {
   }>>;
   findById(proposalId: string): Promise<Readonly<Proposal> | null>;
   findScopedById(proposalId: string): Promise<Readonly<ScopedProposal> | null>;
-  findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
-  findPending(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
+  findByWorkspaceId(
+    workspaceId: string,
+    page?: ProposalListPageOptions
+  ): Promise<readonly Readonly<Proposal>[]>;
+  countByWorkspaceId(workspaceId: string): Promise<number>;
+  findPending(
+    workspaceId: string,
+    page?: ProposalListPageOptions
+  ): Promise<readonly Readonly<Proposal>[]>;
   // Cheap COUNT(*) for pending proposals in a workspace. Used by the soul
   // graph endpoint to report a true `node_total` independent of the
   // findPendingSummaries SQL `LIMIT` (otherwise the sampled-vs-complete

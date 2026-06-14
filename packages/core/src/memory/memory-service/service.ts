@@ -21,6 +21,7 @@ import type {
   MemoryEntryInput,
   MemoryEntryRepoUpdateFields,
   MemoryEntryUpdateFields,
+  MemoryListPageOptions,
   MemoryServiceDependencies
 } from "./types.js";
 import {
@@ -848,19 +849,53 @@ export class MemoryService {
     return entries.filter((entry) => entry.workspace_id === workspaceId);
   }
 
-  public findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]> {
-    return this.dependencies.memoryEntryRepo.findByWorkspaceId(workspaceId);
+  public findByWorkspaceId(
+    workspaceId: string,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return this.dependencies.memoryEntryRepo.findByWorkspaceId(workspaceId, undefined, page);
   }
 
-  public findByRunId(runId: string): Promise<readonly Readonly<MemoryEntry>[]> {
-    return this.dependencies.memoryEntryRepo.findByRunId(runId);
+  public async countByWorkspaceId(workspaceId: string): Promise<number> {
+    const countByWorkspaceId = this.dependencies.memoryEntryRepo.countByWorkspaceId;
+    if (countByWorkspaceId !== undefined) {
+      return await countByWorkspaceId.call(this.dependencies.memoryEntryRepo, workspaceId);
+    }
+    return (await this.findByWorkspaceId(workspaceId)).length;
+  }
+
+  public findByRunId(
+    runId: string,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return this.dependencies.memoryEntryRepo.findByRunId(runId, page);
+  }
+
+  public async countByRunId(runId: string): Promise<number> {
+    const countByRunId = this.dependencies.memoryEntryRepo.countByRunId;
+    if (countByRunId !== undefined) {
+      return await countByRunId.call(this.dependencies.memoryEntryRepo, runId);
+    }
+    return (await this.findByRunId(runId)).length;
   }
 
   public findByDimension(
     workspaceId: string,
-    dimension: MemoryEntry["dimension"]
+    dimension: MemoryEntry["dimension"],
+    page?: MemoryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]> {
-    return this.dependencies.memoryEntryRepo.findByDimension(workspaceId, dimension);
+    return this.dependencies.memoryEntryRepo.findByDimension(workspaceId, dimension, page);
+  }
+
+  public async countByDimension(
+    workspaceId: string,
+    dimension: MemoryEntry["dimension"]
+  ): Promise<number> {
+    const countByDimension = this.dependencies.memoryEntryRepo.countByDimension;
+    if (countByDimension !== undefined) {
+      return await countByDimension.call(this.dependencies.memoryEntryRepo, workspaceId, dimension);
+    }
+    return (await this.findByDimension(workspaceId, dimension)).length;
   }
 
   public findByScopeClass(

@@ -181,6 +181,36 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(rows.map((row) => row.object_id)).toEqual(["7ab81ca8-9425-4e18-ad4a-81ab6406db55"]);
   });
 
+  it("findByWorkspaceId supports limit/offset with a separate count", async () => {
+    const { repo } = await createRepo();
+    const ids = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333"
+    ];
+
+    for (const [index, objectId] of ids.entries()) {
+      await repo.create(
+        createMemoryEntry({
+          object_id: objectId,
+          storage_tier: StorageTier.HOT,
+          workspace_id: "workspace-1",
+          run_id: `run-page-${index}`,
+          created_at: `2026-03-21T00:00:0${index}.000Z`,
+          updated_at: `2026-03-21T00:00:0${index}.000Z`
+        })
+      );
+    }
+
+    const page = await repo.findByWorkspaceId("workspace-1", undefined, {
+      limit: 1,
+      offset: 1
+    });
+
+    expect(page.map((row) => row.object_id)).toEqual([ids[1]]);
+    await expect(repo.countByWorkspaceId("workspace-1")).resolves.toBe(3);
+  });
+
   it("returns explicit cold-tier records when tier is provided", async () => {
     const { repo } = await createRepo();
 

@@ -17,8 +17,10 @@ import {
 import type { McpMemoryToolHandler } from "../mcp-memory/tool-handler.js";
 import {
   isRequestBodyTooLargeError,
+  parseListPagination,
   rejectUnexpectedRequestBody,
-  throwInvalidRequestBody
+  throwInvalidRequestBody,
+  writeListPaginationHeaders
 } from "./shared.js";
 
 // invariant: governance_class promotion to strictly_governed is an
@@ -88,10 +90,16 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
     await services.workspaceService.getById(workspaceId);
 
     const state = context.req.query("state");
+    const pagination = parseListPagination(context);
     const proposals =
       state === "all"
-        ? await services.proposalService.findByWorkspaceId(workspaceId)
-        : await services.proposalService.findPending(workspaceId);
+        ? await services.proposalService.findByWorkspaceId(workspaceId, pagination)
+        : await services.proposalService.findPending(workspaceId, pagination);
+    const totalCount =
+      state === "all"
+        ? await services.proposalService.countByWorkspaceId(workspaceId)
+        : await services.proposalService.countPending(workspaceId);
+    writeListPaginationHeaders(context, totalCount, pagination);
 
     return context.json({ success: true, data: proposals }, 200);
   });

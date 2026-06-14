@@ -62,9 +62,9 @@ describe("inspector routes", () => {
       }
     });
 
-    await app.request("/api/config/ws1/soul?token=token");
-    await app.request("/api/config/ws1/embedding-supplement?token=token");
-    await app.request("/api/config/runtime/embedding-supplement?token=token", {
+    await authenticatedRequest(app, "/api/config/ws1/soul");
+    await authenticatedRequest(app, "/api/config/ws1/embedding-supplement");
+    await authenticatedRequest(app, "/api/config/runtime/embedding-supplement", {
       method: "PATCH",
       body: JSON.stringify({
         secret_ref_mode: "paste",
@@ -72,8 +72,8 @@ describe("inspector routes", () => {
       }),
       headers: { "content-type": "application/json" }
     });
-    await app.request("/api/config/ws1/garden-compute?token=token");
-    await app.request("/api/config/runtime/garden-compute?token=token", {
+    await authenticatedRequest(app, "/api/config/ws1/garden-compute");
+    await authenticatedRequest(app, "/api/config/runtime/garden-compute", {
       method: "PATCH",
       body: JSON.stringify({
         provider_kind: "official_api",
@@ -82,22 +82,23 @@ describe("inspector routes", () => {
       }),
       headers: { "content-type": "application/json" }
     });
-    await app.request("/api/config/ws1/manifestation-budget?token=token");
-    await app.request("/api/config/ws1/manifestation-budget?token=token", {
+    await authenticatedRequest(app, "/api/config/ws1/manifestation-budget");
+    await authenticatedRequest(app, "/api/config/ws1/manifestation-budget", {
       method: "PATCH",
       body: JSON.stringify({ stance_bias_cap: 8 }),
       headers: { "content-type": "application/json" }
     });
-    await app.request("/api/config/ws1/strategy?token=token", {
+    await authenticatedRequest(app, "/api/config/ws1/strategy", {
       method: "PATCH",
       body: JSON.stringify({ auto_approve_readonly: true }),
       headers: { "content-type": "application/json" }
     });
-    await app.request("/api/graph/ws1?token=token");
-    await app.request(
-      "/api/recall-stats/ws1?token=token&since=2026-05-01T00:00:00Z&until=2026-05-08T00:00:00Z&excludeAgentTargets=inspector,cli"
+    await authenticatedRequest(app, "/api/graph/ws1");
+    await authenticatedRequest(
+      app,
+      "/api/recall-stats/ws1?since=2026-05-01T00:00:00Z&until=2026-05-08T00:00:00Z&excludeAgentTargets=inspector,cli"
     );
-    await app.request("/api/status?token=token");
+    await authenticatedRequest(app, "/api/status");
 
     expect(calls).toEqual([
       { url: "http://daemon.local/workspaces/ws1/config/soul", method: "GET", body: null },
@@ -172,7 +173,7 @@ describe("inspector routes", () => {
       }
     });
 
-    const response = await app.request("/api/config/ws1/embedding-supplement?token=token");
+    const response = await authenticatedRequest(app, "/api/config/ws1/embedding-supplement");
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -194,7 +195,7 @@ describe("inspector routes", () => {
       fetchImpl: async () => Response.json({ error: "/secret/path" }, { status: 503 })
     });
 
-    const response = await app.request("/api/status?token=token");
+    const response = await authenticatedRequest(app, "/api/status");
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "daemon_503" });
@@ -212,7 +213,7 @@ describe("inspector routes", () => {
       }
     });
 
-    const response = await app.request("/api/graph/ws1?token=token");
+    const response = await authenticatedRequest(app, "/api/graph/ws1");
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "daemon_unavailable" });
@@ -237,7 +238,7 @@ describe("inspector routes", () => {
       }
     });
 
-    const response = await app.request("/api/status?token=token", {
+    const response = await authenticatedRequest(app, "/api/status", {
       headers: { "x-request-id": "req-123" }
     });
 
@@ -261,7 +262,7 @@ describe("inspector routes", () => {
 
     const response = await app.request(
       createChunkedJsonRequest(
-        "http://localhost/api/proposals/ws1/memory/mem-1/rewrite?token=token",
+        "http://localhost/api/proposals/ws1/memory/mem-1/rewrite",
         JSON.stringify({ new_content: "x".repeat(MAX_INSPECTOR_REQUEST_BODY_BYTES) })
       )
     );
@@ -286,7 +287,7 @@ describe("inspector routes", () => {
 
     const response = await app.request(
       createChunkedJsonRequest(
-        "http://localhost/api/proposals/ws1/memory/mem-1/keep?token=token",
+        "http://localhost/api/proposals/ws1/memory/mem-1/keep",
         JSON.stringify({ payload: "x".repeat(MAX_INSPECTOR_REQUEST_BODY_BYTES) })
       )
     );
@@ -310,7 +311,7 @@ describe("inspector routes", () => {
 
     const response = await app.request(
       createChunkedJsonRequest(
-        "http://localhost/api/proposals/ws1/memory/mem-1/keep?token=token",
+        "http://localhost/api/proposals/ws1/memory/mem-1/keep",
         JSON.stringify({ payload: "x" })
       )
     );
@@ -329,7 +330,7 @@ describe("inspector routes", () => {
       fetchImpl: async () => Response.json({ error: `validation failed: ${plaintext}` }, { status: 400 })
     });
 
-    const response = await app.request("/api/config/runtime/embedding-supplement?token=token", {
+    const response = await authenticatedRequest(app, "/api/config/runtime/embedding-supplement", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -356,7 +357,7 @@ describe("inspector routes", () => {
       }
     });
 
-    const response = await app.request("/api/config/runtime/embedding-supplement?token=token", {
+    const response = await authenticatedRequest(app, "/api/config/runtime/embedding-supplement", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -379,17 +380,18 @@ describe("inspector routes", () => {
     await writeFile(path.join(staticRoot, "assets", "app.js"), "console.log('ok');", "utf8");
     const app = createInspectorApp({ token: "token", staticRoot });
 
-    expect((await app.request("/")).status).toBe(401);
+    expect((await app.request("/")).status).toBe(200);
     expect((await app.request("/api/status")).status).toBe(401);
-    expect(await (await app.request("/?token=token")).text()).toContain("<html>ok</html>");
+    expect((await app.request("/api/status?token=token")).status).toBe(401);
+    expect(await (await app.request("/?workspaceId=ws1#token=token")).text()).toContain("<html>ok</html>");
     expect(await (await app.request("/assets/app.js")).text()).toContain("console.log");
-    expect((await app.request("/..%2F..%2Fetc%2Fpasswd?token=token")).status).toBe(404);
+    expect((await app.request("/..%2F..%2Fetc%2Fpasswd")).status).toBe(404);
 
     const missingApp = createInspectorApp({
       token: "token",
       staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-missing-"))
     });
-    const missingResponse = await missingApp.request("/?token=token");
+    const missingResponse = await missingApp.request("/");
     expect(missingResponse.status).toBe(503);
     expect(await missingResponse.json()).toEqual({ error: "frontend_bundle_missing" });
   });
@@ -428,8 +430,8 @@ describe("inspector routes", () => {
       }
     });
 
-    await app.request("/api/proposals/ws1/pending?token=token&limit=10");
-    await app.request("/api/proposals/ws1/prop-1/review?token=token", {
+    await authenticatedRequest(app, "/api/proposals/ws1/pending?limit=10");
+    await authenticatedRequest(app, "/api/proposals/ws1/prop-1/review", {
       method: "POST",
       body: JSON.stringify({
         verdict: "accept",
@@ -438,12 +440,12 @@ describe("inspector routes", () => {
       }),
       headers: { "content-type": "application/json" }
     });
-    await app.request("/api/proposals/ws1/memory/mem-1/rewrite?token=token", {
+    await authenticatedRequest(app, "/api/proposals/ws1/memory/mem-1/rewrite", {
       method: "POST",
       body: JSON.stringify({ new_content: "rewritten memory" }),
       headers: { "content-type": "application/json" }
     });
-    await app.request("/api/proposals/ws1/memory/mem-1/retire?token=token", {
+    await authenticatedRequest(app, "/api/proposals/ws1/memory/mem-1/retire", {
       method: "POST"
     });
 
@@ -509,9 +511,10 @@ describe("inspector routes", () => {
       }
     });
 
-    await app.request("/api/workspaces/ws1/health-inbox?token=token&state=pending");
-    await app.request(
-      "/api/workspaces/ws1/soul/memory/mem-1/proposals/promote-strictly-governed?token=token",
+    await authenticatedRequest(app, "/api/workspaces/ws1/health-inbox?state=pending");
+    await authenticatedRequest(
+      app,
+      "/api/workspaces/ws1/soul/memory/mem-1/proposals/promote-strictly-governed",
       {
         method: "POST",
         body: JSON.stringify({}),
@@ -549,9 +552,10 @@ describe("inspector routes", () => {
       }
     });
 
-    const healthInbox = await app.request("/api/workspaces/ws2/health-inbox?token=token");
-    const promote = await app.request(
-      "/api/workspaces/ws2/soul/memory/mem-1/proposals/promote-strictly-governed?token=token",
+    const healthInbox = await authenticatedRequest(app, "/api/workspaces/ws2/health-inbox");
+    const promote = await authenticatedRequest(
+      app,
+      "/api/workspaces/ws2/soul/memory/mem-1/proposals/promote-strictly-governed",
       { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }
     );
 
@@ -574,18 +578,18 @@ describe("inspector routes", () => {
       }
     });
 
-    const graph = await app.request("/api/graph/ws2?token=token");
-    const graphWhitespace = await app.request("/api/graph/ws1%20?token=token");
-    const config = await app.request("/api/config/ws2/strategy?token=token");
-    const proposals = await app.request("/api/proposals/ws2/pending?token=token");
-    const recallStats = await app.request("/api/recall-stats/ws2?token=token");
-    const search = await app.request("/api/soul/search/ws2?token=token", {
+    const graph = await authenticatedRequest(app, "/api/graph/ws2");
+    const graphWhitespace = await authenticatedRequest(app, "/api/graph/ws1%20");
+    const config = await authenticatedRequest(app, "/api/config/ws2/strategy");
+    const proposals = await authenticatedRequest(app, "/api/proposals/ws2/pending");
+    const recallStats = await authenticatedRequest(app, "/api/recall-stats/ws2");
+    const search = await authenticatedRequest(app, "/api/soul/search/ws2", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text: "memory" })
     });
-    const memoryList = await app.request("/api/memory-entries/ws2?token=token");
-    const pointer = await app.request("/api/pointers/ws2/evidence-1?token=token");
+    const memoryList = await authenticatedRequest(app, "/api/memory-entries/ws2");
+    const pointer = await authenticatedRequest(app, "/api/pointers/ws2/evidence-1");
 
     expect(graph.status).toBe(403);
     expect(graphWhitespace.status).toBe(403);
@@ -614,9 +618,44 @@ describe("inspector routes", () => {
         return Response.json({ success: true, data: { object_id: "obj/1", gist: "g", excerpt: "e" } });
       }
     });
-    const response = await app.request("/api/pointers/ws1/obj%2F1?token=token");
+    const response = await authenticatedRequest(app, "/api/pointers/ws1/obj%2F1");
     expect(response.status).toBe(200);
     expect(calls).toEqual(["http://daemon.local/workspaces/ws1/evidence/obj%2F1"]);
+  });
+
+  it("forwards memory pagination query parameters and preserves pagination headers", async () => {
+    const calls: string[] = [];
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async (input) => {
+        calls.push(String(input));
+        return Response.json(
+          { success: true, data: [{ object_id: "m201" }] },
+          {
+            headers: {
+              "x-total-count": "250",
+              "x-limit": "200",
+              "x-offset": "200"
+            }
+          }
+        );
+      }
+    });
+
+    const response = await authenticatedRequest(
+      app,
+      "/api/memory-entries/ws1?dimension=fact&limit=200&offset=200"
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([
+      "http://daemon.local/workspaces/ws1/memories?dimension=fact&limit=200&offset=200"
+    ]);
+    expect(response.headers.get("x-total-count")).toBe("250");
+    expect(response.headers.get("x-limit")).toBe("200");
+    expect(response.headers.get("x-offset")).toBe("200");
   });
 
   it("returns empty bench-summary when the history root does not exist yet", async () => {
@@ -632,7 +671,7 @@ describe("inspector routes", () => {
       fetchImpl: async () => Response.json({}, { status: 500 })
     });
 
-    const response = await app.request("/api/bench-summary?token=token");
+    const response = await authenticatedRequest(app, "/api/bench-summary");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       success: true,
@@ -689,7 +728,7 @@ describe("inspector routes", () => {
       fetchImpl: async () => Response.json({}, { status: 500 })
     });
 
-    const response = await app.request("/api/bench-summary?token=token");
+    const response = await authenticatedRequest(app, "/api/bench-summary");
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       success: boolean;
@@ -757,7 +796,7 @@ describe("inspector routes", () => {
       fetchImpl: async () => Response.json({}, { status: 500 })
     });
 
-    const response = await app.request("/api/bench-summary?token=token");
+    const response = await authenticatedRequest(app, "/api/bench-summary");
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       data: {
@@ -827,7 +866,7 @@ describe("inspector routes", () => {
       fetchImpl: async () => Response.json({}, { status: 500 })
     });
 
-    const response = await app.request("/api/bench-summary?token=token");
+    const response = await authenticatedRequest(app, "/api/bench-summary");
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       success: boolean;
@@ -927,7 +966,7 @@ describe("inspector routes", () => {
       fetchImpl: async () => Response.json({}, { status: 500 })
     });
 
-    const response = await app.request("/api/bench-trend?token=token&limit=30");
+    const response = await authenticatedRequest(app, "/api/bench-trend?limit=30");
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       readonly data: {
@@ -967,7 +1006,7 @@ describe("inspector routes", () => {
       }
     });
 
-    const response = await app.request("/api/graph/ws1?token=token");
+    const response = await authenticatedRequest(app, "/api/graph/ws1");
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({ error: "workspace_binding_missing" });
@@ -975,13 +1014,30 @@ describe("inspector routes", () => {
   });
 });
 
+async function authenticatedRequest(
+  app: ReturnType<typeof createInspectorApp>,
+  path: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  return await app.request(path, withInspectorAuth(init));
+}
+
+function withInspectorAuth(init: RequestInit = {}): RequestInit {
+  const headers = new Headers(init.headers);
+  headers.set("x-alaya-inspector-token", "token");
+  return { ...init, headers };
+}
+
 function createChunkedJsonRequest(url: string, bodyText: string): Request {
   const bytes = new TextEncoder().encode(bodyText);
   let sent = false;
 
   return new Request(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-alaya-inspector-token": "token"
+    },
     body: new ReadableStream<Uint8Array>({
       pull(controller) {
         if (sent) {

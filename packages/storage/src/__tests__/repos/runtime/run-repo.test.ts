@@ -91,6 +91,36 @@ describe("SqliteRunRepo", () => {
     expect(runs[0]?.run_id).toBe("run_a1");
   });
 
+  it("listByWorkspace supports limit/offset with a separate count", async () => {
+    const { workspaceRepo, runRepo } = createRunRepos();
+    await workspaceRepo.create({
+      workspace_id: "ws_page",
+      name: "page",
+      root_path: "/tmp/page",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      default_engine_binding: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+    for (const id of ["run_page_1", "run_page_2", "run_page_3"]) {
+      await runRepo.create({
+        run_id: id,
+        workspace_id: "ws_page",
+        title: id,
+        goal: null,
+        run_mode: RunMode.CHAT,
+        engine_binding_id: null,
+        engine_class: null,
+        run_state: RunState.IDLE,
+        current_surface_id: null
+      });
+    }
+
+    const page = await runRepo.listByWorkspace("ws_page", { limit: 1, offset: 1 });
+
+    expect(page.map((run) => run.run_id)).toEqual(["run_page_2"]);
+    await expect(runRepo.countByWorkspace("ws_page")).resolves.toBe(3);
+  });
+
   it("updateState returns an updated run without mutating prior results", async () => {
     const { workspaceRepo, runRepo } = createRunRepos();
     await workspaceRepo.create({

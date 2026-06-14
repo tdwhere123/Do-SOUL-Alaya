@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCcw, X } from "lucide-react";
-import { apiFetch, getWorkspaceId, type ApiError } from "../api";
+import { apiFetch, apiFetchWithHeaders, getWorkspaceId, type ApiError } from "../api";
 import { useI18n } from "../i18n/Locale";
 import { useToasts } from "../components/Toast";
 
@@ -66,11 +66,17 @@ const SCOPE_OPTIONS: readonly string[] = [
   "session"
 ];
 
+const MEMORY_PAGE_SIZE = 200;
+
 export default function MemoryBrowserPage() {
   const { t } = useI18n();
   const workspaceId = getWorkspaceId();
   const [rows, setRows] = useState<readonly MemoryEntryRow[]>([]);
+  const [totalRows, setTotalRows] = useState<number | null>(null);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [hasMoreRows, setHasMoreRows] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dimensionFilter, setDimensionFilter] = useState<DimensionFilter>("all");
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
@@ -83,7 +89,7 @@ export default function MemoryBrowserPage() {
   const isMountedRef = useRef(true);
   const { showToast } = useToasts();
 
-  const fetchRows = useCallback(async () => {
+  const fetchRowsPage = useCallback(async (offset: number, mode: "replace" | "append") => {
     if (workspaceId === null) {
       setLoading(false);
       return;
@@ -95,12 +101,24 @@ export default function MemoryBrowserPage() {
       if (dimensionFilter !== "all") {
         search.set("dimension", dimensionFilter);
       }
+      search.set("limit", String(MEMORY_PAGE_SIZE));
+      search.set("offset", String(offset));
       const query = search.toString();
-      const envelope = await apiFetch<MemoryEntryListEnvelope>(
+      const result = await apiFetchWithHeaders<MemoryEntryListEnvelope>(
         `/memory-entries/${workspaceId}${query.length > 0 ? `?${query}` : ""}`
       );
       if (!isMountedRef.current || myRequestId !== requestIdRef.current) return;
-      setRows(envelope.data);
+      const pageRows = result.payload.data;
+      const total = readOptionalIntegerHeader(result.headers, "x-total-count");
+      const loadedCount = offset + pageRows.length;
+      setRows((previous) => mode === "append" ? [...previous, ...pageRows] : pageRows);
+      setTotalRows(total);
+      setNextOffset(loadedCount);
+      setHasMoreRows(total === null ? pageRows.length === MEMORY_PAGE_SIZE : loadedCount < total);
+      if (mode === "replace") {
+        setSelectedRow(null);
+        setPointer(null);
+      }
       setError(null);
     } catch (err) {
       if (!isMountedRef.current || myRequestId !== requestIdRef.current) return;
@@ -111,6 +129,7 @@ export default function MemoryBrowserPage() {
     } finally {
       if (isMountedRef.current && myRequestId === requestIdRef.current) {
         setLoading(false);
+        setLoadingMore(false);
         setRefreshing(false);
       }
     }
@@ -119,11 +138,15 @@ export default function MemoryBrowserPage() {
   useEffect(() => {
     isMountedRef.current = true;
     setLoading(true);
-    void fetchRows();
+    setRows([]);
+    setTotalRows(null);
+    setNextOffset(0);
+    setHasMoreRows(false);
+    void fetchRowsPage(0, "replace");
     return () => {
       isMountedRef.current = false;
     };
-  }, [fetchRows]);
+  }, [fetchRowsPage]);
 
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
@@ -217,7 +240,7 @@ export default function MemoryBrowserPage() {
             disabled={refreshing}
             onClick={() => {
               setRefreshing(true);
-              void fetchRows();
+              void fetchRowsPage(0, "replace");
             }}
           >
             <RefreshCcw className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`} />
@@ -287,6 +310,28 @@ export default function MemoryBrowserPage() {
                 ))}
               </tbody>
             </table>
+          )}
+          {!loading && error === null && (
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-beige-200 bg-beige-50 font-mono text-[11px] text-ink-500">
+              <span data-testid="memory-pagination-status">
+                Showing {filteredRows.length} filtered / {rows.length}
+                {totalRows === null ? "" : ` of ${totalRows}`} loaded
+              </span>
+              {hasMoreRows && (
+                <button
+                  type="button"
+                  data-testid="memory-load-more"
+                  disabled={loadingMore}
+                  onClick={() => {
+                    setLoadingMore(true);
+                    void fetchRowsPage(nextOffset, "append");
+                  }}
+                  className="px-3 py-1 text-[10px] uppercase border border-beige-300 hover:bg-beige-100 disabled:opacity-50"
+                >
+                  {loadingMore ? "Loading..." : "Load more"}
+                </button>
+              )}
+            </div>
           )}
         </main>
 
@@ -420,4 +465,14 @@ function truncate(text: string, max: number): string {
 function formatRatio(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return value.toFixed(2);
+}
+
+function readOptionalIntegerHeader(headers: Headers, name: string): number | null {
+  const value = headers.get(name);
+  if (value === null || value.trim().length === 0) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }

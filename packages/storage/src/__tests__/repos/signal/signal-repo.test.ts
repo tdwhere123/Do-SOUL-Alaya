@@ -82,6 +82,19 @@ describe("SqliteSignalRepo", () => {
     expect(signals.map((signal) => signal.signal_id)).toEqual(["signal-1", "signal-2"]);
   });
 
+  it("listByRun supports limit/offset with a separate count", async () => {
+    const { signalRepo } = await createSignalRepo();
+
+    await signalRepo.create(createSignal({ signal_id: "signal-page-1", run_id: "run-1" }));
+    await signalRepo.create(createSignal({ signal_id: "signal-page-2", run_id: "run-1" }));
+    await signalRepo.create(createSignal({ signal_id: "signal-page-3", run_id: "run-1" }));
+
+    const page = await signalRepo.listByRun("run-1", { limit: 1, offset: 1 });
+
+    expect(page.map((signal) => signal.signal_id)).toEqual(["signal-page-2"]);
+    await expect(signalRepo.countByRun("run-1")).resolves.toBe(3);
+  });
+
   it("updates signal_state on the public signal shape", async () => {
     const { database, signalRepo } = await createSignalRepo();
     const signal = createSignal();

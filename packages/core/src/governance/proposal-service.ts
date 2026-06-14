@@ -10,8 +10,21 @@ export interface ProposalServiceEventLogRepoPort {
 
 export interface ProposalServiceProposalRepoPort {
   findById(proposalId: string): Promise<Readonly<Proposal> | null>;
-  findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
-  findPending(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
+  findByWorkspaceId(
+    workspaceId: string,
+    page?: ProposalListPageOptions
+  ): Promise<readonly Readonly<Proposal>[]>;
+  countByWorkspaceId?(workspaceId: string): Promise<number>;
+  findPending(
+    workspaceId: string,
+    page?: ProposalListPageOptions
+  ): Promise<readonly Readonly<Proposal>[]>;
+  countPending?(workspaceId: string): Promise<number>;
+}
+
+export interface ProposalListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 export interface ProposalRuntimeNotifier {
@@ -37,11 +50,39 @@ export class ProposalService {
     return this.dependencies.proposalRepo.findById(proposalId);
   }
 
-  public findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<Proposal>[]> {
-    return this.dependencies.proposalRepo.findByWorkspaceId(workspaceId);
+  public findByWorkspaceId(
+    workspaceId: string,
+    page?: ProposalListPageOptions
+  ): Promise<readonly Readonly<Proposal>[]> {
+    if (page === undefined) {
+      return this.dependencies.proposalRepo.findByWorkspaceId(workspaceId);
+    }
+    return this.dependencies.proposalRepo.findByWorkspaceId(workspaceId, page);
   }
 
-  public findPending(workspaceId: string): Promise<readonly Readonly<Proposal>[]> {
-    return this.dependencies.proposalRepo.findPending(workspaceId);
+  public async countByWorkspaceId(workspaceId: string): Promise<number> {
+    const countByWorkspaceId = this.dependencies.proposalRepo.countByWorkspaceId;
+    if (countByWorkspaceId !== undefined) {
+      return await countByWorkspaceId.call(this.dependencies.proposalRepo, workspaceId);
+    }
+    return (await this.dependencies.proposalRepo.findByWorkspaceId(workspaceId)).length;
+  }
+
+  public findPending(
+    workspaceId: string,
+    page?: ProposalListPageOptions
+  ): Promise<readonly Readonly<Proposal>[]> {
+    if (page === undefined) {
+      return this.dependencies.proposalRepo.findPending(workspaceId);
+    }
+    return this.dependencies.proposalRepo.findPending(workspaceId, page);
+  }
+
+  public async countPending(workspaceId: string): Promise<number> {
+    const countPending = this.dependencies.proposalRepo.countPending;
+    if (countPending !== undefined) {
+      return await countPending.call(this.dependencies.proposalRepo, workspaceId);
+    }
+    return (await this.dependencies.proposalRepo.findPending(workspaceId)).length;
   }
 }

@@ -15,9 +15,12 @@ describe("memory routes (HTTP surface narrowed)", () => {
       getById: vi.fn(async () => ({ run_id: "run-1", workspace_id: "ws-1" }))
     };
     const memoryService = {
-      findByWorkspaceId: vi.fn(async () => [{ object_id: "m1" }]),
+      findByWorkspaceId: vi.fn(async () => [{ object_id: "m1" }, { object_id: "m2" }, { object_id: "m3" }]),
+      countByWorkspaceId: vi.fn(async () => 3),
       findByDimension: vi.fn(async () => [{ object_id: "m2" }]),
+      countByDimension: vi.fn(async () => 1),
       findByRunId: vi.fn(async () => [{ object_id: "m3" }]),
+      countByRunId: vi.fn(async () => 1),
       findById: vi.fn(async () => {
         throw new Error("findById must not be reachable from HTTP /memories/:id");
       })
@@ -42,7 +45,32 @@ describe("memory routes (HTTP surface narrowed)", () => {
 
     expect(response.status).toBe(200);
     expect(workspaceService.getById).toHaveBeenCalledWith("ws-1");
-    expect(memoryService.findByWorkspaceId).toHaveBeenCalledWith("ws-1");
+    expect(memoryService.findByWorkspaceId).toHaveBeenCalledWith("ws-1", {
+      limit: 200,
+      offset: 0
+    });
+    expect(memoryService.countByWorkspaceId).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("passes pagination to GET /workspaces/:wsId/memories without handler-level slicing", async () => {
+    const { app, memoryService } = buildApp();
+    memoryService.findByWorkspaceId.mockImplementation(async (...args: unknown[]) => {
+      const page = args[1];
+      expect(page).toEqual({ limit: 1, offset: 1 });
+      return [{ object_id: "m2" }];
+    });
+
+    const response = await app.request("/workspaces/ws-1/memories?limit=1&offset=1");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-total-count")).toBe("3");
+    expect(response.headers.get("x-limit")).toBe("1");
+    expect(response.headers.get("x-offset")).toBe("1");
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      data: [{ object_id: "m2" }]
+    });
+    expect(memoryService.countByWorkspaceId).toHaveBeenCalledWith("ws-1");
   });
 
   it("retains GET /runs/:runId/memories with run scoping", async () => {
@@ -52,6 +80,10 @@ describe("memory routes (HTTP surface narrowed)", () => {
 
     expect(response.status).toBe(200);
     expect(runService.getById).toHaveBeenCalledWith("run-1");
-    expect(memoryService.findByRunId).toHaveBeenCalledWith("run-1");
+    expect(memoryService.findByRunId).toHaveBeenCalledWith("run-1", {
+      limit: 200,
+      offset: 0
+    });
+    expect(memoryService.countByRunId).toHaveBeenCalledWith("run-1");
   });
 });
