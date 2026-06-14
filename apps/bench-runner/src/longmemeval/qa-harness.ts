@@ -61,7 +61,8 @@ const ANSWER_SYSTEM_TEMPORAL =
 /** Multi-session aggregation 口径: a count/sum/compare answer is derived, never
  * a literal string, so the default 口径 makes the model abstain or under-count
  * when the components are present. General aggregation guidance (mirrors the
- * temporal 口径); gated by ALAYA_BENCH_QA_AGG_PROMPT, default off. */
+ * temporal 口径); default for multi-session, opt out with
+ * ALAYA_BENCH_QA_AGG_PROMPT=0. */
 const ANSWER_SYSTEM_AGGREGATION =
   "Answer the user's question using ONLY the provided memory context. " +
   "The question asks you to aggregate across the whole history (count, total, compare, or average), so the answer is almost never written in any single memory — you must derive it.\n" +
@@ -173,9 +174,13 @@ function answerSystemFor(questionType: string, isAbstention: boolean): string {
   if (questionType === "temporal-reasoning") {
     return ANSWER_SYSTEM_TEMPORAL;
   }
+  // multi-session is LongMemEval's aggregation/comparison category; the
+  // aggregation 口径 is the default for it (like temporal/preference), opt out
+  // with ALAYA_BENCH_QA_AGG_PROMPT=0 for A/B.
   if (
     questionType === "multi-session" &&
-    process.env.ALAYA_BENCH_QA_AGG_PROMPT !== undefined
+    process.env.ALAYA_BENCH_QA_AGG_PROMPT !== "0" &&
+    process.env.ALAYA_BENCH_QA_AGG_PROMPT !== "off"
   ) {
     return ANSWER_SYSTEM_AGGREGATION;
   }
