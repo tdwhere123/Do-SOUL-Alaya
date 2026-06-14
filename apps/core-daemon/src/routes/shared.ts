@@ -180,9 +180,16 @@ async function inspectUnexpectedRequestBody(context: Context): Promise<"none" | 
     }
     throw error;
   } finally {
-    try {
-      await reader.cancel();
-    } catch {}
+    await reader.cancel().catch((error: unknown) => {
+      if (isRequestBodyTooLargeError(error)) {
+        return;
+      }
+      console.warn("[routes/shared] request body reader cancel failed after inspection", {
+        method: context.req.method,
+        path: context.req.path,
+        error
+      });
+    });
   }
 
   if (total > 0 || (declaredLength ?? 0) > 0 || transferEncoding !== undefined) {

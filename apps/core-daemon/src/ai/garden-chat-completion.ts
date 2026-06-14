@@ -65,7 +65,7 @@ async function requestGardenChatCompletionContentOnce(
     } catch (error) {
       throw new GardenChatCompletionTransportError(
         `${input.failureLabel} transport failed`,
-        error
+        redactSecretFromCause(error, config.apiKey)
       );
     }
     if (!response.ok) {
@@ -114,6 +114,28 @@ function isRetryableGardenChatError(error: unknown): boolean {
   }
 
   return error instanceof GardenChatCompletionTransportError;
+}
+
+function redactSecretFromCause(error: unknown, secret: string): unknown {
+  if (secret.length === 0) {
+    return error;
+  }
+  if (error instanceof Error) {
+    const redacted = new Error(redactSecret(error.message, secret));
+    redacted.name = error.name;
+    if (error.stack !== undefined) {
+      redacted.stack = redactSecret(error.stack, secret);
+    }
+    return redacted;
+  }
+  if (typeof error === "string") {
+    return redactSecret(error, secret);
+  }
+  return error;
+}
+
+function redactSecret(value: string, secret: string): string {
+  return value.split(secret).join("[REDACTED_SECRET]");
 }
 
 function sleep(ms: number): Promise<void> {

@@ -3,8 +3,10 @@ import {
   ALAYA_MCP_SERVER_INSTRUCTIONS,
   callAlayaMcpMemoryTool,
   createAlayaMcpServer,
+  createAlayaMcpServerInfo,
   createAlayaMcpToolsResult
 } from "../../mcp/mcp-server.js";
+import { readRuntimeVersion } from "../../runtime/build-info.js";
 import type { McpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
 
 describe("mcp server", () => {
@@ -86,5 +88,13 @@ describe("mcp server", () => {
     expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("soul.recall -> soul.open_pointer");
     expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("soul.emit_candidate_signal");
     expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("accepted proposal apply");
+  });
+
+  it("derives MCP server info version from runtime metadata instead of a hardcoded sentinel", () => {
+    expect(createAlayaMcpServerInfo()).toEqual({
+      name: "do-soul-alaya",
+      version: readRuntimeVersion()
+    });
+    expect(createAlayaMcpServerInfo().version).not.toBe("0.0.1");
   });
 });

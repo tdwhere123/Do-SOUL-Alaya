@@ -115,7 +115,6 @@ import {
   isRemoteDaemonOptInEnabled,
   listServerHardConstraints,
   loadConfigEnv,
-  patchArbitrationClaimService,
   recordStartupStep,
   reconcileBootstrapPathsForAllWorkspaces,
   resolvePersistedGardenLastPassAt,
@@ -451,15 +450,24 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     eventLogRepo,
     runtimeNotifier
   });
-  const slotServiceRef: { current: SlotService | null } = { current: null };
+  const claimServiceRef: { current: ClaimService | null } = { current: null };
+  const arbitrationClaimService: ConstructorParameters<typeof ArbitrationService>[0]["claimService"] = {
+    transitionLifecycle: async (...args) => {
+      const claimService = claimServiceRef.current;
+      if (claimService === null) {
+        throw new Error("ArbitrationService claimService used before ClaimService initialization.");
+      }
+      return await claimService.transitionLifecycle(...args);
+    }
+  };
   const arbitrationService = new ArbitrationService({
     slotRepo,
     claimRepo: claimFormRepo,
     conflictMatrixRepo,
-    claimService: null as never,
+    claimService: arbitrationClaimService,
     eventLogRepo,
     runtimeNotifier
-  } as ConstructorParameters<typeof ArbitrationService>[0]);
+  });
   const slotService = new SlotService({
     slotRepo,
     eventLogRepo,
@@ -468,16 +476,15 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       arbitrateSlot: async (slotId, options) => await arbitrationService.arbitrateSlot(slotId, options)
     }
   });
-  slotServiceRef.current = slotService;
   const claimService = new ClaimService({
     claimFormRepo,
     eventLogRepo,
     slotService,
     runtimeNotifier,
     eventPublisher,
-    canonicalAliasService
+      canonicalAliasService
   });
-  patchArbitrationClaimService(arbitrationService, claimService);
+  claimServiceRef.current = claimService;
   const sessionOverrideService = new SessionOverrideService({ eventLogRepo });
   const proposalService = new ProposalService({
     proposalRepo,

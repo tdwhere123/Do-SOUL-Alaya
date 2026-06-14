@@ -271,6 +271,20 @@ describe("SessionOverrideService", () => {
     ]);
   });
 
+  it("degrades to no active overrides when EventLog rehydrate read fails", async () => {
+    const queryByRun = vi.fn(async () => {
+      throw new Error("event log read failed");
+    });
+    const service = new SessionOverrideService({
+      now: () => "2026-03-24T00:00:00.000Z",
+      generateRuntimeId: createRuntimeIdGenerator(),
+      eventLogRepo: createEventLogRepo({ queryByRun })
+    });
+
+    await expect(service.getActiveFor("run-1")).resolves.toEqual([]);
+    expect(queryByRun).toHaveBeenCalledWith("run-1");
+  });
+
   it("does not let a stale rehydration overwrite a newly applied override", async () => {
     const queryDeferred = createDeferred<readonly EventLogEntry[]>();
     const service = new SessionOverrideService({

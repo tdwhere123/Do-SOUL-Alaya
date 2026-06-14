@@ -19,17 +19,28 @@ export interface RunHotStateEventLogRepoPort {
 export interface RunHotStateServiceDependencies {
   readonly runRepo: RunHotStateRunRepoPort;
   readonly eventLogRepo: RunHotStateEventLogRepoPort;
+  readonly maxSnapshots?: number;
 }
+
+const DEFAULT_RUN_HOT_STATE_SNAPSHOT_CAP = 10_000;
 
 export class RunHotStateService {
   private readonly snapshots = new Map<string, RunHotState>();
+  private readonly maxSnapshots: number;
 
-  public constructor(private readonly dependencies: RunHotStateServiceDependencies) {}
+  public constructor(private readonly dependencies: RunHotStateServiceDependencies) {
+    this.maxSnapshots = parsePositiveIntegerCap(
+      dependencies.maxSnapshots,
+      DEFAULT_RUN_HOT_STATE_SNAPSHOT_CAP,
+      "maxSnapshots"
+    );
+  }
 
   public async getSnapshot(runId: string): Promise<RunHotState | null> {
     const existing = this.snapshots.get(runId);
 
     if (existing !== undefined) {
+      this.cacheSnapshot(runId, existing);
       return existing;
     }
 
@@ -40,7 +51,7 @@ export class RunHotStateService {
     }
 
     const snapshot = await snapshotFromRun(run, this.dependencies.eventLogRepo);
-    this.snapshots.set(runId, snapshot);
+    this.cacheSnapshot(runId, snapshot);
     return snapshot;
   }
 
@@ -51,7 +62,7 @@ export class RunHotStateService {
 
     switch (event.event_type) {
       case "run.created": {
-        this.snapshots.set(event.run_id, {
+        this.cacheSnapshot(event.run_id, {
           run_id: event.run_id,
           run_state: "idle",
           active_surface_id: null,
@@ -67,7 +78,7 @@ export class RunHotStateService {
       }
       case "run.message.appended": {
         const current = await this.getOrBuild(event.run_id, event.created_at);
-        this.snapshots.set(event.run_id, {
+        this.cacheSnapshot(event.run_id, {
           ...current,
           run_state: "active",
           engine_status: EngineStatus.STREAMING,
@@ -78,7 +89,7 @@ export class RunHotStateService {
       }
       case "engine.response.received": {
         const current = await this.getOrBuild(event.run_id, event.created_at);
-        this.snapshots.set(event.run_id, {
+        this.cacheSnapshot(event.run_id, {
           ...current,
           run_state: "active",
           engine_status: EngineStatus.IDLE,
@@ -99,13 +110,29 @@ export class RunHotStateService {
     lastMessageAt?: string | null
   ): Promise<void> {
     const current = await this.getOrBuild(runId, timestamp);
-    this.snapshots.set(runId, {
+    this.cacheSnapshot(runId, {
       ...current,
       run_state: "active",
       engine_status: engineStatus,
       ...(lastMessageAt !== undefined ? { last_message_at: lastMessageAt } : {}),
       updated_at: timestamp
     });
+  }
+
+  private cacheSnapshot(runId: string, snapshot: RunHotState): void {
+    this.snapshots.delete(runId);
+    this.snapshots.set(runId, snapshot);
+    this.pruneSnapshots();
+  }
+
+  private pruneSnapshots(): void {
+    while (this.snapshots.size > this.maxSnapshots) {
+      const oldestRunId = this.snapshots.keys().next().value as string | undefined;
+      if (oldestRunId === undefined) {
+        return;
+      }
+      this.snapshots.delete(oldestRunId);
+    }
   }
 
   private async getOrBuild(runId: string, timestamp: string): Promise<RunHotState> {
@@ -124,6 +151,20 @@ export class RunHotStateService {
       updated_at: timestamp
     };
   }
+}
+
+function parsePositiveIntegerCap(
+  value: number | undefined,
+  fallback: number,
+  name: string
+): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (!Number.isFinite(value) || value < 1) {
+    throw new Error(`${name} must be a positive finite integer`);
+  }
+  return Math.floor(value);
 }
 
 async function snapshotFromRun(

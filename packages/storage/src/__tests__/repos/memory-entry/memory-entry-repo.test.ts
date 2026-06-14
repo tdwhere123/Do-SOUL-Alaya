@@ -28,6 +28,20 @@ import {
 
 const databases = trackedDatabases;
 
+type StatementSource = {
+  readonly source: string;
+};
+
+type MemoryEntryRepoStatementsForTest = {
+  readonly findByWorkspaceHotStatement: StatementSource;
+  readonly findByWorkspaceTierStatement: StatementSource;
+  readonly countByWorkspaceHotStatement: StatementSource;
+  readonly countByWorkspaceTierStatement: StatementSource;
+  readonly findByRunIdStatement: StatementSource;
+  readonly findByDimensionHotStatement: StatementSource;
+  readonly findByScopeClassHotStatement: StatementSource;
+};
+
 afterEach(() => {
   for (const database of databases) {
     database.close();
@@ -209,6 +223,68 @@ describe("SqliteMemoryEntryRepo", () => {
 
     expect(page.map((row) => row.object_id)).toEqual([ids[1]]);
     await expect(repo.countByWorkspaceId("workspace-1")).resolves.toBe(3);
+  });
+
+  it("uses active-row indexes for workspace, run, dimension, and scope list shapes", async () => {
+    const { database, repo } = await createRepo();
+    const statements = repo as unknown as MemoryEntryRepoStatementsForTest;
+    const indexRows = database.connection
+      .prepare("PRAGMA index_list('memory_entries')")
+      .all() as ReadonlyArray<{ readonly name: string }>;
+
+    expect(indexRows.map((row) => row.name).sort()).toEqual(
+      expect.arrayContaining([
+        "idx_memory_entries_run_active_created",
+        "idx_memory_entries_workspace_dimension_hot_active_created",
+        "idx_memory_entries_workspace_scope_hot_active_created",
+        "idx_memory_entries_workspace_tier_active_created"
+      ])
+    );
+
+    const expectPlanUsesIndex = (
+      sql: string,
+      params: readonly unknown[],
+      indexName: string
+    ): void => {
+      const plan = database.connection
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...params) as ReadonlyArray<{ readonly detail: string }>;
+      const details = plan.map((step) => step.detail).join(" | ");
+      expect(
+        plan.some((step) => step.detail.includes(`USING INDEX ${indexName}`)),
+        `expected ${indexName}, got: ${details}`
+      ).toBe(true);
+      expect(
+        plan.some((step) => step.detail.startsWith("SCAN memory_entries")),
+        `expected no memory_entries scan, got: ${details}`
+      ).toBe(false);
+    };
+
+    expectPlanUsesIndex(statements.findByWorkspaceHotStatement.source, [
+      "workspace-1"
+    ], "idx_memory_entries_workspace_tier_active_created");
+    expectPlanUsesIndex(statements.findByWorkspaceTierStatement.source, [
+      "workspace-1",
+      StorageTier.WARM
+    ], "idx_memory_entries_workspace_tier_active_created");
+    expectPlanUsesIndex(statements.countByWorkspaceHotStatement.source, [
+      "workspace-1"
+    ], "idx_memory_entries_workspace_tier_active_created");
+    expectPlanUsesIndex(statements.countByWorkspaceTierStatement.source, [
+      "workspace-1",
+      StorageTier.WARM
+    ], "idx_memory_entries_workspace_tier_active_created");
+    expectPlanUsesIndex(statements.findByRunIdStatement.source, [
+      "run-1"
+    ], "idx_memory_entries_run_active_created");
+    expectPlanUsesIndex(statements.findByDimensionHotStatement.source, [
+      "workspace-1",
+      MemoryDimension.PREFERENCE
+    ], "idx_memory_entries_workspace_dimension_hot_active_created");
+    expectPlanUsesIndex(statements.findByScopeClassHotStatement.source, [
+      "workspace-1",
+      ScopeClass.PROJECT
+    ], "idx_memory_entries_workspace_scope_hot_active_created");
   });
 
   it("returns explicit cold-tier records when tier is provided", async () => {

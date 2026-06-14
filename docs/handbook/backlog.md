@@ -160,23 +160,21 @@ the dependency visible instead of silently dropping it.
 hot path through v0.3.12; otherwise land the lease-pierce invalidation hook with a
 test that a pierced lease invalidates a cached governance verdict.
 
-### #BL-055 — Inspector web UI label/filter for `path_relation_failure`
+### #BL-055 — Resolved (Inspector Health Inbox path-relation-failure label/filter)
 
-**Status**: Open (deferred; opened v0.3.11, 2026-06-04). **Due**: next Inspector UI
-pass.
+**Status**: Resolved on `audit/full-repair-2026-06-14` (2026-06-14; opened
+v0.3.11, 2026-06-04).
 
-**Context**: D-EDGEAUDIT surfaces path-relation / edge-proposal failures as a new
-`path_relation_failure` health cause in the Health Inbox projection. The Inspector web
-UI renders the grouped Health Inbox but does not yet carry a dedicated label/filter
-for this new cause kind, so an operator cannot filter to it directly.
+**Resolution**: the Inspector Health Inbox now treats `path_relation_failure`
+as a first-class cause kind. The web page type/option list includes it, the
+cause filter renders a human label instead of the raw enum token, and the
+localized dictionary now exposes dedicated English and Chinese labels.
+`apps/inspector/web/src/__tests__/pages/HealthInbox.test.tsx` covers both the
+rendered label and the `causeKind=path_relation_failure` filter request.
 
-**Why deferred (not hidden debt)**: the producer + projection are live and auditable
-via the daemon; this is a UI affordance on top of an already-surfaced cause, not a
-missing capability.
-
-**Close condition**: the Inspector Health Inbox renders a human label for
-`path_relation_failure` and offers a cause-kind filter that includes it, covered by a
-component test.
+**Close evidence**: `apps/inspector/web/src/pages/HealthInbox.tsx`,
+`apps/inspector/web/src/i18n/dict.ts`,
+`apps/inspector/web/src/__tests__/pages/HealthInbox.test.tsx`.
 
 ### #BL-047 — `multi_hop_path` as a dedicated recall fusion stream
 

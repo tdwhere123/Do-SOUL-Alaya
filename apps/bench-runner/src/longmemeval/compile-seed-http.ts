@@ -193,6 +193,7 @@ export function createGardenHttpExtractor(
             input.abortSignal.addEventListener("abort", onOperatorAbort);
           }
         }
+        let attemptSettled = false;
         try {
           const fetchPromise = fetchImpl(`${config.providerUrl}/chat/completions`, {
             method: "POST",
@@ -218,10 +219,23 @@ export function createGardenHttpExtractor(
             }),
             signal: controller.signal
           });
-          // invariant: if the timeout backstop wins the race the abandoned
-          // fetch may still reject later (socket finally errors); a no-op catch
-          // keeps that late rejection from surfacing as an unhandledRejection.
-          fetchPromise.catch(() => {});
+          // invariant: timeout/operator-abort may settle the outer attempt
+          // before the abandoned fetch rejects. That late rejection must not
+          // surface as an unhandledRejection. If a rejection appears only
+          // after the attempt settled WITHOUT an abort, keep it visible because
+          // it is unexpected.
+          void fetchPromise.catch((error: unknown) => {
+            if (!attemptSettled || controller.signal.aborted) {
+              return;
+            }
+            console.warn(
+              "bench-runner/garden-http-extractor: fetch rejected after outer settlement",
+              {
+                attempt,
+                error
+              }
+            );
+          });
           const response = await Promise.race([fetchPromise, timeoutSettlement]);
           if (!response.ok) {
             const err = new Error(
@@ -235,10 +249,23 @@ export function createGardenHttpExtractor(
           // socket can hang exactly like the original abort-ignoring fetch
           // hang (commits a2d3047 + 34645f1); racing it against
           // timeoutSettlement keeps the attempt inside budget. The abandoned
-          // body-read promise gets a no-op catch so a late rejection does not
-          // surface as an unhandledRejection (same pattern as fetchPromise).
+          // body-read promise must not surface as an unhandledRejection after
+          // the outer attempt already settled; timeout/operator-abort paths
+          // intentionally abandon it, while other post-settlement rejections
+          // remain visible as unexpected.
           const bodyTextPromise = response.text();
-          bodyTextPromise.catch(() => {});
+          void bodyTextPromise.catch((error: unknown) => {
+            if (!attemptSettled || controller.signal.aborted) {
+              return;
+            }
+            console.warn(
+              "bench-runner/garden-http-extractor: body read rejected after outer settlement",
+              {
+                attempt,
+                error
+              }
+            );
+          });
           const bodyText = await Promise.race([
             bodyTextPromise,
             timeoutSettlement
@@ -291,6 +318,7 @@ export function createGardenHttpExtractor(
             }
           };
         } catch (error) {
+          attemptSettled = true;
           lastError = error;
           const status = readStatusFromBenchError(error);
           // Operator abort: never retry.
@@ -327,6 +355,7 @@ export function createGardenHttpExtractor(
           attempt += 1;
           await sleepImpl(jitterMs);
         } finally {
+          attemptSettled = true;
           clearTimeout(timer);
           clearInterval(wallClockTimer);
           if (input.abortSignal !== undefined) {

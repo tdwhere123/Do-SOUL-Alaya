@@ -37,7 +37,12 @@ describe("MemoryService", () => {
       },
       memoryEntryRepo: {
         create: vi.fn(async (entry) => {
+          throw new Error(`plain create should not be used for ${entry.object_id}`);
+        }),
+        createWithinTransaction: vi.fn((entry, callbacks) => {
+          callbacks.beforeCreate?.();
           order.push("repo_create");
+          callbacks.afterCreate?.();
           return Object.freeze({ ...entry });
         }),
         findById: vi.fn(async () => null),

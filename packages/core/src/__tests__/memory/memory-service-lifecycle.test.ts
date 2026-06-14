@@ -33,6 +33,44 @@ describe("MemoryService", () => {
     expect(notifySpy).not.toHaveBeenCalled();
   });
 
+  it("does not append a lifecycle audit when the repo transition fails before the atomic callback", async () => {
+    const transitionError = new Error("repo transition failed before audit callback");
+    const transitionLifecycle = vi.fn(async () => {
+      throw transitionError;
+    });
+    const { dependencies, appendSpy, notifySpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () => createMemoryEntry({ lifecycle_state: "active" })),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        transitionLifecycle
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.transitionLifecycle(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "dormant",
+        "autonomous_dormant_demotion: task-1",
+        TransitionCausedBy.DETERMINISTIC_RULE
+      )
+    ).rejects.toThrow(transitionError);
+
+    expect(transitionLifecycle).toHaveBeenCalledTimes(1);
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(notifySpy).not.toHaveBeenCalled();
+  });
+
   it("audits an active -> dormant demotion (SOUL_MEMORY_STATE_CHANGED) BEFORE the row leaves recall via the DB mutation", async () => {
     // invariant pinned: dormancy is a recall-visibility change (dormant rows are
     // excluded from recall / list / FTS at the storage layer), so the demotion
@@ -68,10 +106,18 @@ describe("MemoryService", () => {
         archive: vi.fn(async () => {
           throw new Error("not used");
         }),
-        transitionLifecycle: vi.fn(async (_objectId: string, lifecycleState: MemoryEntry["lifecycle_state"], updatedAt: string) => {
-          order.push("repo_transition");
-          return Object.freeze(createMemoryEntry({ lifecycle_state: lifecycleState, updated_at: updatedAt }));
-        })
+        transitionLifecycle: vi.fn(
+          async (
+            _objectId: string,
+            lifecycleState: MemoryEntry["lifecycle_state"],
+            updatedAt: string,
+            onTransition?: () => void
+          ) => {
+            onTransition?.();
+            order.push("repo_transition");
+            return Object.freeze(createMemoryEntry({ lifecycle_state: lifecycleState, updated_at: updatedAt }));
+          }
+        )
       },
       runtimeNotifier: {
         notifyEntry: vi.fn(async () => {
@@ -215,6 +261,40 @@ describe("MemoryService", () => {
     expect(notifySpy).not.toHaveBeenCalled();
   });
 
+  it("does not append archive audits when the repo archive fails before the atomic callback", async () => {
+    const archiveError = new Error("repo archive failed before audit callback");
+    const archive = vi.fn(async () => {
+      throw archiveError;
+    });
+    const { dependencies, appendSpy, notifySpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () => createMemoryEntry({ lifecycle_state: "active" })),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.archive(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "manual_archive",
+        TransitionCausedBy.USER
+      )
+    ).rejects.toThrow(archiveError);
+
+    expect(archive).toHaveBeenCalledTimes(1);
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(notifySpy).not.toHaveBeenCalled();
+  });
+
   it("rejects hard delete when retention_state is not tombstoned", async () => {
     const hardDeleteSpy = vi.fn(async () => undefined);
     const { dependencies, appendSpy, notifySpy } = createDependencies({
@@ -277,6 +357,45 @@ describe("MemoryService", () => {
       message: "Memory tombstone delete port is not available"
     });
 
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(notifySpy).not.toHaveBeenCalled();
+  });
+
+  it("does not append a deleted audit when the repo hard delete fails before the atomic callback", async () => {
+    const deleteError = new Error("repo hard delete failed before audit callback");
+    const hardDeleteTombstoned = vi.fn(async () => {
+      throw deleteError;
+    });
+    const { dependencies, appendSpy, notifySpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () =>
+          createMemoryEntry({ lifecycle_state: "tombstone", retention_state: "tombstoned" })
+        ),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        hardDeleteTombstoned
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.hardDeleteTombstoned(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "janitor_gc",
+        TransitionCausedBy.SYSTEM
+      )
+    ).rejects.toThrow(deleteError);
+
+    expect(hardDeleteTombstoned).toHaveBeenCalledTimes(1);
     expect(appendSpy).not.toHaveBeenCalled();
     expect(notifySpy).not.toHaveBeenCalled();
   });

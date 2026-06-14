@@ -25,7 +25,7 @@ describe("MemoryService", () => {
           order.push("event_query");
           return createEventLogHistory(6);
         }),
-        append: vi.fn(async (event) => {
+        append: vi.fn((event) => {
           const persistedRevision = revisions.length + 7;
           revisions.push(persistedRevision);
           order.push(`event:${event.event_type}`);
@@ -47,7 +47,8 @@ describe("MemoryService", () => {
         update: vi.fn(async () => {
           throw new Error("not used");
         }),
-        archive: vi.fn(async (_objectId, updatedAt) => {
+        archive: vi.fn(async (_objectId, updatedAt, onArchived?: () => void) => {
+          onArchived?.();
           order.push("repo_archive");
           return Object.freeze({
             ...existing,

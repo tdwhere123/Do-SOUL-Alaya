@@ -20,13 +20,22 @@ export interface SecurityStatusServiceDependencies {
   >;
   readonly eventPublisher: Pick<EventPublisher, "publish">;
   readonly now?: () => string;
+  readonly observedStatusCacheLimit?: number;
 }
+
+const DEFAULT_OBSERVED_STATUS_CACHE_LIMIT = 10_000;
 
 export class SecurityStatusService {
   private readonly observedStatuses = new Map<string, ObservedSecurityStatus>();
+  private readonly observedStatusCacheLimit: number;
   private readonly unsubscribeStatusEvaluations: () => void;
 
   public constructor(private readonly deps: SecurityStatusServiceDependencies) {
+    this.observedStatusCacheLimit = parsePositiveIntegerLimit(
+      deps.observedStatusCacheLimit,
+      DEFAULT_OBSERVED_STATUS_CACHE_LIMIT,
+      "observedStatusCacheLimit"
+    );
     this.unsubscribeStatusEvaluations = this.deps.zeroDayLayer.subscribeStatusEvaluations(
       this.observeEvaluatedStatus
     );
@@ -34,6 +43,7 @@ export class SecurityStatusService {
 
   public close(): void {
     this.unsubscribeStatusEvaluations();
+    this.observedStatuses.clear();
   }
 
   public async getStatus(workspaceId: string): Promise<SecurityStatusContract> {
@@ -84,7 +94,7 @@ export class SecurityStatusService {
     reason: string
   ): Promise<void> {
     await this.deps.eventPublisher.publish(createStatusChangedEvent(status, reason));
-    this.observedStatuses.set(status.workspace_id, snapshotStatus(status));
+    this.cacheObservedStatus(status.workspace_id, snapshotStatus(status));
   }
 
   private readonly observeEvaluatedStatus: ZeroDaySecurityStatusEvaluationObserver = async (
@@ -101,10 +111,30 @@ export class SecurityStatusService {
     const observedStatus = this.observedStatuses.get(status.workspace_id);
 
     if (observedStatus !== undefined && statusesMatch(observedStatus, status)) {
+      this.cacheObservedStatus(status.workspace_id, observedStatus);
       return;
     }
 
     await this.publishStatusChange(status, reason);
+  }
+
+  private cacheObservedStatus(
+    workspaceId: string,
+    status: ObservedSecurityStatus
+  ): void {
+    this.observedStatuses.delete(workspaceId);
+    this.observedStatuses.set(workspaceId, status);
+    this.pruneObservedStatuses();
+  }
+
+  private pruneObservedStatuses(): void {
+    while (this.observedStatuses.size > this.observedStatusCacheLimit) {
+      const oldestWorkspaceId = this.observedStatuses.keys().next().value as string | undefined;
+      if (oldestWorkspaceId === undefined) {
+        return;
+      }
+      this.observedStatuses.delete(oldestWorkspaceId);
+    }
   }
 
   private async readFailureTimestamp(workspaceId: string): Promise<string> {
@@ -114,6 +144,20 @@ export class SecurityStatusService {
       return readNow(this.deps.now);
     }
   }
+}
+
+function parsePositiveIntegerLimit(
+  value: number | undefined,
+  fallback: number,
+  name: string
+): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (!Number.isFinite(value) || value < 1) {
+    throw new Error(`${name} must be a positive finite integer`);
+  }
+  return Math.floor(value);
 }
 
 type SecurityInitializationOperation = "create" | "list" | "get_by_id";

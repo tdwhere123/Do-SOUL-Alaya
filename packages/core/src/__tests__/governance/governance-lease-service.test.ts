@@ -270,6 +270,21 @@ describe("GovernanceLeaseService", () => {
     expect(appendSpy).not.toHaveBeenCalled();
   });
 
+  it("degrades to no active lease when EventLog rehydrate read fails", async () => {
+    const queryByRun = vi.fn(async () => {
+      throw new Error("event log read failed");
+    });
+    const service = new GovernanceLeaseService({
+      now: () => "2026-03-25T00:00:00.000Z",
+      generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
+      eventLogRepo: createEventLogRepo({ queryByRun })
+    });
+
+    await expect(service.getActive("run-1")).resolves.toBeNull();
+    await expect(service.isHeld("run-1")).resolves.toBe(false);
+    expect(queryByRun).toHaveBeenCalledWith("run-1");
+  });
+
   it("fails replay when a persisted governance lease event payload is malformed", async () => {
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
