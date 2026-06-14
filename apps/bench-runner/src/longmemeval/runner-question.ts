@@ -359,14 +359,24 @@ export async function runLongMemEvalQuestion(input: {
     // API-free (recall only). Default off; set ALAYA_BENCH_POOL_DUMP to a path.
     if (process.env.ALAYA_BENCH_POOL_DUMP !== undefined) {
       const goldSet = new Set(goldMemoryIds);
+      // Per-candidate fusion breakdown (per-stream rank) from the core recall
+      // diagnostics, for offline "which stream buries the gold" analysis.
+      const fusionByOid = new Map<string, { fusedRank?: number; perStream?: unknown }>();
+      const fb = (recallResult as { readonly diagnostics?: { readonly fusion_breakdown?: ReadonlyArray<{ readonly object_id: string; readonly fused_rank?: number; readonly per_stream_rank?: unknown }> } }).diagnostics?.fusion_breakdown;
+      if (Array.isArray(fb)) {
+        for (const b of fb) fusionByOid.set(b.object_id, { fusedRank: b.fused_rank, perStream: b.per_stream_rank });
+      }
       const candidates = results.map((p, i) => {
         const entry = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", p.object_id));
+        const fusion = fusionByOid.get(p.object_id);
         return {
           rank: i + 1,
           objectId: p.object_id,
           isGold: goldSet.has(p.object_id),
           sessionId: entry?.sessionId ?? null,
           eventDate: entry?.eventDate ?? null,
+          ...(fusion?.fusedRank === undefined ? {} : { fusedRank: fusion.fusedRank }),
+          ...(fusion?.perStream === undefined ? {} : { perStream: fusion.perStream }),
           content: (entry?.content ?? "").replace(/\s+/gu, " ").slice(0, 400)
         };
       });
