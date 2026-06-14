@@ -266,13 +266,9 @@ export function selectEvidenceSourceCohortKey(refs: readonly string[], robust = 
   return null;
 }
 
-// `robust` (opt-in via ALAYA_RECALL_SOURCE_REF_ROBUST, threaded from the daemon)
-// also recognizes round-labeled refs and per-fact suffixes: conversational
-// ingestion labels its units rounds (`r`/`round`, a round = one user+assistant
-// turn pair = the same turn-position concept) and fans one round into several
-// facts each suffixed `-f<n>`. Without it, refs like `q-s3-r2` / `q-s3-r2-f1`
-// fail to parse and source proximity silently no-ops on conversational corpora.
-// Default-off keeps existing `t`/`turn`/`chunk` parsing byte-identical.
+// `robust` also accepts round-labeled refs (`r`/`round`) and strips a per-fact
+// `-f<n>` suffix, so conversational refs like `q-s3-r2[-f1]` parse instead of
+// silently disabling source proximity. Default keeps t/turn/chunk parsing as-is.
 export function parseEvidenceSourceChunkRef(
   ref: string,
   robust = false

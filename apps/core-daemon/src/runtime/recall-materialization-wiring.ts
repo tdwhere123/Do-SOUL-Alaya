@@ -774,13 +774,12 @@ export async function createRecallMaterializationWiring(input: {
     materializationConfidenceFloorRaw <= 1
       ? materializationConfidenceFloorRaw
       : undefined;
-  // Opt-in: store the full source turn as each evidence capsule's searchable
-  // excerpt/gist so evidence_fts recalls memories whose distilled content dropped
-  // the query vocabulary (LongMemEval preference any-gold 77% -> 97%). Default off;
-  // the bench shares this construction.
+  // Index the full source turn as the evidence excerpt so evidence_fts can reach
+  // memories whose distilled content dropped the query terms. Inert until a
+  // signal carries full_turn_content. ALAYA_EVIDENCE_FULL_TURN=0 to disable.
   const fullTurnEvidenceExcerpt =
-    process.env.ALAYA_EVIDENCE_FULL_TURN === "1" ||
-    process.env.ALAYA_EVIDENCE_FULL_TURN === "true";
+    process.env.ALAYA_EVIDENCE_FULL_TURN !== "0" &&
+    process.env.ALAYA_EVIDENCE_FULL_TURN !== "false";
   const materializationRouter = new MaterializationRouter({
     evidenceService: input.evidenceService,
     memoryService: materializationMemoryService,

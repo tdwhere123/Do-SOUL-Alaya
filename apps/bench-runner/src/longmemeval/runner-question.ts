@@ -370,10 +370,7 @@ export async function runLongMemEvalQuestion(input: {
           content: (entry?.content ?? "").replace(/\s+/gu, " ").slice(0, 400)
         };
       });
-      // Full gold set (recalled or not) with content + session, so offline
-      // experiments can measure intra-session coverage expansion: a gold turn
-      // absent from `candidates` but whose session has ≥1 recalled member would
-      // be covered by a session-coherence expansion. recalled flag = in pool.
+      // Full gold set with session + recalled flag, for offline coverage analysis.
       const recalledIds = new Set(results.map((p) => p.object_id));
       const goldMemories = goldMemoryIds.map((id) => {
         const entry = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id));

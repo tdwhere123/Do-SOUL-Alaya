@@ -272,13 +272,9 @@ export function buildEvidenceInput(
   summarySuffix?: string,
   opts?: { readonly fullTurnExcerpt?: boolean }
 ): EvidenceMaterializationInput {
-  // When fullTurnExcerpt is on (opt-in, default off), widen the searchable
-  // evidence excerpt/gist to the full source turn the signal carries
-  // (`full_turn_content`) so evidence_capsule_fts holds the query vocabulary that
-  // distillation + the narrow matched_text span drop. Lifts LongMemEval
-  // preference any-gold recall 77% -> 97% by letting evidence_fts surface a
-  // memory whose distilled content missed the query. Default keeps the
-  // matched_text-span excerpt unchanged.
+  // fullTurnExcerpt widens the searchable excerpt/gist to the signal's full
+  // source turn so evidence FTS keeps the query terms distillation drops;
+  // otherwise the matched_text-span summary is used.
   const excerpt =
     opts?.fullTurnExcerpt === true
       ? (readStringPayload(signal.raw_payload, "full_turn_content") ??
