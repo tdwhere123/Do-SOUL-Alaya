@@ -370,6 +370,20 @@ export async function runLongMemEvalQuestion(input: {
           content: (entry?.content ?? "").replace(/\s+/gu, " ").slice(0, 400)
         };
       });
+      // Full gold set (recalled or not) with content + session, so offline
+      // experiments can measure intra-session coverage expansion: a gold turn
+      // absent from `candidates` but whose session has ≥1 recalled member would
+      // be covered by a session-coherence expansion. recalled flag = in pool.
+      const recalledIds = new Set(results.map((p) => p.object_id));
+      const goldMemories = goldMemoryIds.map((id) => {
+        const entry = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id));
+        return {
+          objectId: id,
+          sessionId: entry?.sessionId ?? null,
+          recalled: recalledIds.has(id),
+          content: (entry?.content ?? "").replace(/\s+/gu, " ").slice(0, 240)
+        };
+      });
       appendFileSync(
         process.env.ALAYA_BENCH_POOL_DUMP,
         JSON.stringify({
@@ -380,6 +394,7 @@ export async function runLongMemEvalQuestion(input: {
           goldAnswer: input.question.answer,
           goldCount: goldMemoryIds.length,
           poolSize: results.length,
+          goldMemories,
           candidates
         }) + "\n"
       );

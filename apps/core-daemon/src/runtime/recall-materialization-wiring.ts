@@ -335,6 +335,12 @@ export async function createRecallMaterializationWiring(input: {
       });
     }
   };
+  // Opt-in source-ref robustness: parse round-labeled / per-fact evidence refs
+  // (`s3-r2`, `s3-r2-f1`) so source proximity engages on conversational corpora
+  // whose refs aren't t/turn/chunk. Default off; the bench shares this wiring.
+  const robustSourceRefParsing =
+    process.env.ALAYA_RECALL_SOURCE_REF_ROBUST === "1" ||
+    process.env.ALAYA_RECALL_SOURCE_REF_ROBUST === "true";
   const recallService = new RecallService({
     memoryRepo: input.memoryEntryRepo,
     slotRepo: input.slotRepo,
@@ -344,6 +350,7 @@ export async function createRecallMaterializationWiring(input: {
     pathPlasticityPort: recallPathPlasticityPort,
     pathExpansionPort: recallPathExpansionPort,
     activeConstraintsPort: recallActiveConstraintsPort,
+    robustSourceRefParsing,
     evidenceSearchPort: {
       searchByKeyword: async (workspaceId, queryText, limit) =>
         input.evidenceCapsuleRepo.searchByKeyword === undefined
