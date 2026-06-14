@@ -58,6 +58,19 @@ const ANSWER_SYSTEM_TEMPORAL =
   "3. If memories conflict, trust the most recently recorded one.\n" +
   "Commit to the computation the dates support; do not answer 'I don't know' when the relevant dated memories are present — only abstain when no relevant dated memory exists. " +
   "Show the brief date calculation, then end with the final answer in one short sentence.";
+/** Multi-session aggregation 口径: a count/sum/compare answer is derived, never
+ * a literal string, so the default 口径 makes the model abstain or under-count
+ * when the components are present. General aggregation guidance (mirrors the
+ * temporal 口径); gated by ALAYA_BENCH_QA_AGG_PROMPT, default off. */
+const ANSWER_SYSTEM_AGGREGATION =
+  "Answer the user's question using ONLY the provided memory context. " +
+  "The question asks you to aggregate across the whole history (count, total, compare, or average), so the answer is almost never written in any single memory — you must derive it.\n" +
+  "Rules:\n" +
+  "1. First enumerate EVERY memory relevant to the question as a short list. The context often repeats the same underlying event across several entries — treat entries describing the same item/event as ONE and count distinct items only.\n" +
+  "2. Then compute: for 'how many' count the distinct items; for 'how much/total' sum the amounts; for 'which … most/least' compare the values across all candidates; for 'average' sum then divide.\n" +
+  "3. Count items even when mentioned only in passing or framed differently — an attempt, a plan, a free one, a fix all count if the question's scope includes them; prominence of the mention does not decide.\n" +
+  "Commit to the total the enumerated items support; do not answer 'I don't know' when relevant memories are present — only abstain when no relevant memory exists at all. " +
+  "Show the brief enumeration and calculation, then end with the final answer in one short sentence.";
 
 /** Judge口径: one-word yes/no, matching LongMemEval's anscheck metric. */
 const JUDGE_SYSTEM =
@@ -159,6 +172,12 @@ function answerSystemFor(questionType: string, isAbstention: boolean): string {
   }
   if (questionType === "temporal-reasoning") {
     return ANSWER_SYSTEM_TEMPORAL;
+  }
+  if (
+    questionType === "multi-session" &&
+    process.env.ALAYA_BENCH_QA_AGG_PROMPT !== undefined
+  ) {
+    return ANSWER_SYSTEM_AGGREGATION;
   }
   return ANSWER_SYSTEM_DEFAULT;
 }

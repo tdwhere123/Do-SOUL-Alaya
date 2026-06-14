@@ -388,6 +388,33 @@ export async function runLongMemEvalQuestion(input: {
         },
         input.qaChat
       );
+      // Diagnostic: dump the delivered context + model answer + judge verdict as
+      // JSONL, so failing questions can be read by hand to split "delivered text
+      // lacks the answer" (ingestion-drop) from "delivered text has it but the
+      // reader answered wrong" (reader). Pairs with DELIVER_GOLD_ONLY to isolate
+      // the oracle ceiling. Default off; set ALAYA_BENCH_QA_DUMP to a file path.
+      if (process.env.ALAYA_BENCH_QA_DUMP !== undefined) {
+        appendFileSync(
+          process.env.ALAYA_BENCH_QA_DUMP,
+          JSON.stringify({
+            questionId: input.question.question_id,
+            questionType: input.question.question_type,
+            question: input.question.question,
+            questionDate: input.question.question_date,
+            goldAnswer: input.question.answer,
+            modelAnswer: qaVerdict.modelAnswer,
+            judgeVerdict: qaVerdict.judgeVerdict,
+            correct: qaVerdict.correct,
+            deliveredGoldOnly:
+              process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined,
+            delivered: delivered.map((d) => ({
+              objectId: d.objectId,
+              ...(d.eventDate === undefined ? {} : { eventDate: d.eventDate }),
+              content: d.content.replace(/\s+/gu, " ")
+            }))
+          }) + "\n"
+        );
+      }
     }
 
     const isAbstention = isAbstentionQuestionId(input.question.question_id);
