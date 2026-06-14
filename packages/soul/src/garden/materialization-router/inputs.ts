@@ -269,9 +269,22 @@ function pickEvidenceKind(signal: CandidateMemorySignal): EvidenceKindValue {
 
 export function buildEvidenceInput(
   signal: CandidateMemorySignal,
-  summarySuffix?: string
+  summarySuffix?: string,
+  opts?: { readonly fullTurnExcerpt?: boolean }
 ): EvidenceMaterializationInput {
-  const excerpt = buildSignalSummary(signal);
+  // When fullTurnExcerpt is on (opt-in, default off), widen the searchable
+  // evidence excerpt/gist to the full source turn the signal carries
+  // (`full_turn_content`) so evidence_capsule_fts holds the query vocabulary that
+  // distillation + the narrow matched_text span drop. Lifts LongMemEval
+  // preference any-gold recall 77% -> 97% by letting evidence_fts surface a
+  // memory whose distilled content missed the query. Default keeps the
+  // matched_text-span excerpt unchanged.
+  const excerpt =
+    opts?.fullTurnExcerpt === true
+      ? (readStringPayload(signal.raw_payload, "full_turn_content") ??
+         readStringPayload(signal.raw_payload, "bench_full_turn_content") ??
+         buildSignalSummary(signal))
+      : buildSignalSummary(signal);
 
   return {
     created_by: signal.source,

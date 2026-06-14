@@ -231,7 +231,7 @@ export class MaterializationRouter {
     try {
       await this.preflightSignalRefFallback(signal);
 
-      const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
+      const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, { fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt }));
       createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
       const memory = await this.dependencies.memoryService.create(
@@ -298,7 +298,9 @@ export class MaterializationRouter {
     try {
       const evidenceCount = Math.max(2, signal.evidence_refs.length);
       const evidenceInputs = Array.from({ length: evidenceCount }, (_, index) =>
-        buildEvidenceInput(signal, `signal_ref_${index + 1}`)
+        buildEvidenceInput(signal, `signal_ref_${index + 1}`, {
+          fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt
+        })
       );
 
       const evidences = await Promise.all(
@@ -421,7 +423,7 @@ export class MaterializationRouter {
     try {
       await this.preflightSignalRefFallback(signal);
 
-      const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
+      const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, { fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt }));
       createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
       const memory = await this.dependencies.memoryService.create(
@@ -500,7 +502,7 @@ export class MaterializationRouter {
 
     const ensureEvidence = async (): Promise<string> => {
       if (evidenceId === undefined) {
-        const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
+        const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, { fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt }));
         evidenceId = evidence.object_id;
         createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
       }
@@ -979,7 +981,7 @@ export class MaterializationRouter {
     target: MaterializationTarget
   ): Promise<MaterializationResult> {
     try {
-      const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
+      const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, { fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt }));
 
       return {
         signal_id: signal.signal_id,

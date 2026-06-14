@@ -374,4 +374,11 @@ export interface MaterializationRouterDeps {
   // would otherwise be archived to evidence_only. Trades curation for recall;
   // shared by prod + bench via the single daemon construction.
   readonly materializationConfidenceFloor?: number;
+  // When true (default off), widen each materialized evidence capsule's
+  // searchable excerpt/gist to the full source turn the signal carries
+  // (`full_turn_content`) instead of the narrow matched_text span, so
+  // evidence_capsule_fts can recall a memory whose distilled content dropped the
+  // query vocabulary. Lifts LongMemEval preference any-gold recall 77% -> 97%.
+  // Shared by prod + bench via the single daemon construction.
+  readonly fullTurnEvidenceExcerpt?: boolean;
 }
