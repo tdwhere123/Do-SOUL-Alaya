@@ -62,6 +62,21 @@ const ANSWER_SYSTEM_TEMPORAL =
   "3. If memories conflict, trust the most recently recorded one.\n" +
   "Commit to the computation the dates support; do not answer 'I don't know' when the relevant dated memories are present — only abstain when no relevant dated memory exists. " +
   "Show the brief date calculation, then end with the final answer in one short sentence.";
+/** Temporal 口径 for a WIDE delivery: the context holds many dated memories,
+ * most irrelevant. A precise date answer is hurt by extra dates unless the
+ * reader first filters to the events the question is actually about. Adds a
+ * relevance-filter step to the temporal rules. Gated by
+ * ALAYA_BENCH_QA_TEMPORAL_ENUM, default off. */
+const ANSWER_SYSTEM_TEMPORAL_ENUM =
+  "Answer the user's question using ONLY the provided memory context. " +
+  "Each memory is prefixed with the date it was recorded; the current date accompanies the question. " +
+  "The context contains MANY dated memories, most unrelated to the question.\n" +
+  "Rules:\n" +
+  "1. FIRST list only the memories that are actually about the event(s) the question asks about; ignore every other dated memory. If two memories describe the same event, keep the most recently recorded one.\n" +
+  "2. Relative phrases INSIDE a memory ('yesterday', 'last week') are relative to THAT memory's recorded date — resolve them to absolute dates first.\n" +
+  "3. For elapsed time, durations, or ordering: take the absolute dates of ONLY the relevant events, then compute step by step against the current date.\n" +
+  "Commit to the computation those dates support; only abstain when no relevant dated memory exists. " +
+  "Show the short list of relevant dates and the calculation, then the final answer in one sentence.";
 /** Multi-session aggregation 口径: a count/sum/compare answer is derived, never
  * a literal string, so the default 口径 makes the model abstain or under-count
  * when the components are present. General aggregation guidance (mirrors the
@@ -176,7 +191,9 @@ function answerSystemFor(questionType: string, isAbstention: boolean): string {
     return ANSWER_SYSTEM_PREFERENCE;
   }
   if (questionType === "temporal-reasoning") {
-    return ANSWER_SYSTEM_TEMPORAL;
+    return process.env.ALAYA_BENCH_QA_TEMPORAL_ENUM !== undefined
+      ? ANSWER_SYSTEM_TEMPORAL_ENUM
+      : ANSWER_SYSTEM_TEMPORAL;
   }
   // multi-session is LongMemEval's aggregation/comparison category; the
   // aggregation 口径 is the default for it (like temporal/preference), opt out
