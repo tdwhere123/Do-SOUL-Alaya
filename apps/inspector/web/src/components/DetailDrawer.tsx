@@ -28,7 +28,7 @@ export interface DetailDrawerProps {
   ) => Promise<void>;
 }
 
-export function DetailDrawer({
+export default function DetailDrawer({
   node,
   onClose,
   onFocusSubgraph,

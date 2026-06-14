@@ -188,6 +188,7 @@ describe("MCP tool request/response schemas", () => {
         schema: SoulMemorySearchResponseSchema,
         value: {
           delivery_id: "delivery-1",
+          protocol_version: 1,
           results: [
             {
               object_id: "memory-1",

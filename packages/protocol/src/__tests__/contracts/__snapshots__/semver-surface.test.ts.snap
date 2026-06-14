@@ -72,7 +72,7 @@ soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#f6ed9a7
 soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#887900d
 soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#a8fdf75|enum=cold_cascade_engaged|recall_explainability_partial|warm_cascade_engaged
 soul:mcp-types.ts#SoulMemorySearchRequestSchema(active_constraints_cap,dimension,domain_tags,host_context,max_results,query,recent_turn,scope_class,since,time_field,until)#6982853
-soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_count,degradation_reason,delivery_id,results,strategy_mix,total_count)#5bc4f3a
+soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_count,degradation_reason,delivery_id,protocol_version,results,strategy_mix,total_count)#ddc4bbc
 soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,excerpt,gist,object_id,object_kind,schema_version)#fcdde3f
 soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a961e8f
 soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind)#7eb611f
@@ -264,9 +264,9 @@ evt:workspace-run.ts#WorkspaceDefaultEngineClassUpdatedPayloadSchema(default_eng
 evt:workspace-run.ts#WorkspaceDeletedPayloadSchema(workspace_id)#12a0443
 evt:workspace-run.ts#WorkspaceEngineBindingUpdatedPayloadSchema(base_url,binding_id,model,provider_type,workspace_id)#13e80c2
 [runtimeConfigKeys]
-protocol:config/app-config.ts#EnvironmentConfigSchema(env_vars,worktree_enabled)#806520f
-protocol:config/app-config.ts#RuntimeEmbeddingConfigSchema(embedding_enabled,model_id,provider_url,secret_ref)#66e6292
-protocol:config/app-config.ts#RuntimeGardenComputeConfigSchema(enabled,model_id,provider_kind,provider_url,secret_ref)#949f3c0
-protocol:config/app-config.ts#SoulConfigSchema(auto_checkpoint,garden_backlog_soft_limit,local_heuristics_enabled,memory_consolidation_enabled,memory_hard_cap)#aa5f6fb
-protocol:config/app-config.ts#StrategyConfigSchema(auto_approve_readonly,require_bash_approval,require_network_approval,require_write_approval)#e6c15d0"
+protocol:config/app-config.ts#EnvironmentConfigSchema(config_version,env_vars,worktree_enabled)#1579b37
+protocol:config/app-config.ts#RuntimeEmbeddingConfigSchema(config_version,embedding_enabled,model_id,provider_url,secret_ref)#b58f6ee
+protocol:config/app-config.ts#RuntimeGardenComputeConfigSchema(config_version,enabled,model_id,provider_kind,provider_url,secret_ref)#763dfaa
+protocol:config/app-config.ts#SoulConfigSchema(auto_checkpoint,config_version,garden_backlog_soft_limit,local_heuristics_enabled,memory_consolidation_enabled,memory_hard_cap)#a9fd20a
+protocol:config/app-config.ts#StrategyConfigSchema(auto_approve_readonly,config_version,require_bash_approval,require_network_approval,require_write_approval)#0c58571"
 `;

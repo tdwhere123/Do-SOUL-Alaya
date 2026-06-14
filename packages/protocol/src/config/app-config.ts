@@ -1,24 +1,32 @@
 import { z } from "zod";
 import { NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 
-export const SoulConfigSchema = z
-  .object({
-    memory_consolidation_enabled: z.boolean(),
-    local_heuristics_enabled: z.boolean(),
-    garden_backlog_soft_limit: z.number().int().min(10).max(1000),
-    memory_hard_cap: z.number().int().min(100).max(10000),
-    auto_checkpoint: z.boolean()
-  })
-  .readonly();
+export const APP_CONFIG_VERSION = 1 as const;
+const AppConfigVersionSchema = z.literal(APP_CONFIG_VERSION);
 
-export const StrategyConfigSchema = z
-  .object({
-    require_bash_approval: z.boolean(),
-    require_write_approval: z.boolean(),
-    require_network_approval: z.boolean(),
-    auto_approve_readonly: z.boolean()
-  })
-  .readonly();
+function makeVersionedConfigSchema<T extends z.ZodRawShape>(shape: T) {
+  return z
+    .object({
+      config_version: AppConfigVersionSchema.optional(),
+      ...shape
+    })
+    .readonly();
+}
+
+export const SoulConfigSchema = makeVersionedConfigSchema({
+  memory_consolidation_enabled: z.boolean(),
+  local_heuristics_enabled: z.boolean(),
+  garden_backlog_soft_limit: z.number().int().min(10).max(1000),
+  memory_hard_cap: z.number().int().min(100).max(10000),
+  auto_checkpoint: z.boolean()
+});
+
+export const StrategyConfigSchema = makeVersionedConfigSchema({
+  require_bash_approval: z.boolean(),
+  require_write_approval: z.boolean(),
+  require_network_approval: z.boolean(),
+  auto_approve_readonly: z.boolean()
+});
 
 export const EnvironmentVariablesSchema = z
   .record(z.string())
@@ -35,12 +43,10 @@ export const EnvironmentVariablesSchema = z
   })
   .readonly();
 
-export const EnvironmentConfigSchema = z
-  .object({
-    env_vars: EnvironmentVariablesSchema,
-    worktree_enabled: z.boolean()
-  })
-  .readonly();
+export const EnvironmentConfigSchema = makeVersionedConfigSchema({
+  env_vars: EnvironmentVariablesSchema,
+  worktree_enabled: z.boolean()
+});
 
 export const ToolchainStatusSchema = z
   .object({
@@ -51,14 +57,12 @@ export const ToolchainStatusSchema = z
   })
   .readonly();
 
-export const RuntimeEmbeddingConfigSchema = z
-  .object({
-    provider_url: NonEmptyStringSchema.nullable(),
-    secret_ref: NonEmptyStringSchema.nullable(),
-    model_id: NonEmptyStringSchema.nullable(),
-    embedding_enabled: z.boolean()
-  })
-  .readonly();
+export const RuntimeEmbeddingConfigSchema = makeVersionedConfigSchema({
+  provider_url: NonEmptyStringSchema.nullable(),
+  secret_ref: NonEmptyStringSchema.nullable(),
+  model_id: NonEmptyStringSchema.nullable(),
+  embedding_enabled: z.boolean()
+});
 
 export const RuntimeEmbeddingConfigPatchSchema = RuntimeEmbeddingConfigSchema.unwrap()
   .partial()
@@ -149,15 +153,13 @@ const RuntimeSecretRefSchema = z
 
 export const RuntimeGardenProviderKindSchema = z.enum(["official_api", "local_heuristics", "host_worker"]);
 
-export const RuntimeGardenComputeConfigSchema = z
-  .object({
-    provider_kind: RuntimeGardenProviderKindSchema,
-    model_id: NonEmptyStringSchema.nullable(),
-    provider_url: NonEmptyStringSchema.nullable(),
-    secret_ref: RuntimeSecretRefSchema.nullable(),
-    enabled: z.boolean()
-  })
-  .readonly();
+export const RuntimeGardenComputeConfigSchema = makeVersionedConfigSchema({
+  provider_kind: RuntimeGardenProviderKindSchema,
+  model_id: NonEmptyStringSchema.nullable(),
+  provider_url: NonEmptyStringSchema.nullable(),
+  secret_ref: RuntimeSecretRefSchema.nullable(),
+  enabled: z.boolean()
+});
 
 export const RuntimeGardenComputeConfigPatchSchema = RuntimeGardenComputeConfigSchema.unwrap()
   .partial()
@@ -196,6 +198,7 @@ export type RuntimeGardenComputeConfigPatch = z.infer<typeof RuntimeGardenComput
 export type AlayaStatus = z.infer<typeof AlayaStatusSchema>;
 
 export const DEFAULT_SOUL_CONFIG: SoulConfig = {
+  config_version: APP_CONFIG_VERSION,
   memory_consolidation_enabled: true,
   local_heuristics_enabled: true,
   garden_backlog_soft_limit: 100,
@@ -204,6 +207,7 @@ export const DEFAULT_SOUL_CONFIG: SoulConfig = {
 };
 
 export const DEFAULT_STRATEGY_CONFIG: StrategyConfig = {
+  config_version: APP_CONFIG_VERSION,
   require_bash_approval: true,
   require_write_approval: true,
   require_network_approval: true,
@@ -211,6 +215,7 @@ export const DEFAULT_STRATEGY_CONFIG: StrategyConfig = {
 };
 
 export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
+  config_version: APP_CONFIG_VERSION,
   env_vars: {},
   worktree_enabled: false
 };

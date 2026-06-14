@@ -134,6 +134,21 @@ describe("SqlitePathRelationRepo", () => {
     ).resolves.toEqual([withActiveLifecycle(matchingRelation)]);
   });
 
+  it("rejects rows whose JSON parses but violates the path-relation field schema", async () => {
+    const { repo, database } = createRepo();
+    insertRawPathRelationRow(database, {
+      pathId: "path-invalid-shape",
+      effectVectorJson: JSON.stringify({
+        recall_bias: 0.5
+      })
+    });
+
+    await expect(repo.findById("path-invalid-shape")).rejects.toMatchObject({
+      name: "StorageError",
+      code: "VALIDATION_FAILED"
+    });
+  });
+
   it("finds path relations for every PathAnchorRef variant", async () => {
     const { repo } = createRepo();
     const cases: ReadonlyArray<{

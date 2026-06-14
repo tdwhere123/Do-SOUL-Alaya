@@ -41,5 +41,17 @@ export default defineConfig({
     maxWorkers,
     minWorkers: 1,
     reporters: ["default"],
+    coverage: {
+      enabled: false,
+      provider: "v8",
+      reporter: ["text-summary", "json-summary", "lcov"],
+      reportsDirectory: "coverage",
+      exclude: [
+        "**/__tests__/**",
+        "**/*.{test,spec}.ts",
+        "**/dist/**",
+        "bin/**"
+      ]
+    }
   },
 });

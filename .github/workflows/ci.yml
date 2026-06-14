@@ -14,13 +14,31 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: '20.19.0'
   PNPM_VERSION: '9.15.9'
 
 jobs:
   quality:
-    name: Build, test, hygiene
-    runs-on: ubuntu-latest
+    name: Quality (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: ubuntu-node20
+            os: ubuntu-latest
+            node: '20.19.0'
+            run_hygiene: true
+            run_coverage: true
+          - label: ubuntu-node22
+            os: ubuntu-latest
+            node: '22'
+            run_hygiene: false
+            run_coverage: false
+          - label: macos-node20
+            os: macos-latest
+            node: '20.19.0'
+            run_hygiene: false
+            run_coverage: false
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +48,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: ${{ matrix.node }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -43,11 +61,25 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Test with coverage
+        if: ${{ matrix.run_coverage }}
+        run: pnpm run test:coverage
+
       - name: Test
+        if: ${{ !matrix.run_coverage }}
         run: pnpm test
 
       - name: Hygiene
+        if: ${{ matrix.run_hygiene }}
         run: pnpm run hygiene:unused
+
+      - name: Upload coverage baseline
+        if: ${{ matrix.run_coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-coverage-${{ matrix.label }}
+          path: coverage
+          retention-days: 14
 
   content-contracts:
     name: Bench content contracts
@@ -57,7 +89,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: '20.19.0'
 
       - name: Check bench-history contract
         run: node scripts/ci/check-content-contracts.mjs
@@ -75,7 +107,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: '20.19.0'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -85,5 +117,5 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Smoke CLI entrypoint
-        run: node bin/alaya.mjs --help >/dev/null
+      - name: Smoke built CLI in an isolated workspace
+        run: node scripts/ci/smoke-built-cli.mjs

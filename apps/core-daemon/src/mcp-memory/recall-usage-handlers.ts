@@ -296,6 +296,7 @@ export function createRecallHandler(params: Readonly<{
 
     return SoulMemorySearchResponseSchema.parse({
       delivery_id: deliveryId,
+      protocol_version: 1,
       results,
       active_constraints: recallResult.active_constraints,
       active_constraints_count: recallResult.active_constraints_count,

@@ -3,11 +3,12 @@ import {
   ComputeProviderPriority,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
-import type { GardenComputeProvider } from "@do-soul/alaya-soul";
+import { LocalHeuristics } from "@do-soul/alaya-soul";
 import {
   buildGardenComputeRoutingProviders,
   createConflictDetectionLlmPort
 } from "../../runtime/garden-compute-support.js";
+import { GardenComputeProviderResolver } from "../../services/garden-compute-provider-resolver.js";
 
 const originalConflictProviderUrl = process.env.ALAYA_CONFLICT_LLM_PROVIDER_URL;
 const originalConflictApiKey = process.env.ALAYA_CONFLICT_LLM_API_KEY;
@@ -55,8 +56,8 @@ describe("buildGardenComputeRoutingProviders", () => {
     const warn = vi.fn();
     const providers = buildGardenComputeRoutingProviders({
       config: createOfficialGardenConfig({ secret_ref: "env:ALAYA_MISSING_GARDEN_KEY" }),
-      officialGardenProvider: createProvider("official_api"),
-      localHeuristicsProvider: createProvider("local_heuristics"),
+      officialGardenProvider: createOfficialResolver(),
+      localHeuristicsProvider: new LocalHeuristics(),
       warn
     });
 
@@ -101,11 +102,14 @@ function createOfficialGardenConfig(
   };
 }
 
-function createProvider(providerKind: GardenComputeProvider["provider_kind"]): GardenComputeProvider {
-  return {
-    provider_kind: providerKind,
-    compile: vi.fn(async () => [])
-  };
+function createOfficialResolver(): GardenComputeProviderResolver {
+  // The routing builder only stores the resolver as a candidate and never resolves
+  // through it in this test path, so the dependencies are inert stubs.
+  return new GardenComputeProviderResolver({
+    configReader: { getRuntimeGardenComputeConfig: vi.fn() },
+    secretReader: vi.fn(),
+    makeProvider: vi.fn(() => new LocalHeuristics())
+  });
 }
 
 function restoreEnv(name: string, value: string | undefined): void {

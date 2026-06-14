@@ -35,6 +35,11 @@ import {
   parseStorageTier,
   type MemoryEntryRow
 } from "./row-mapper.js";
+import type {
+  SqliteAllStatement,
+  SqliteGetStatement,
+  SqliteRunStatement
+} from "./statement-types.js";
 import {
   updateMemoryEntry,
   updateMemoryEntryDynamics,
@@ -59,9 +64,24 @@ interface CountRow {
   readonly total: number;
 }
 
-export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
+// Implementing the three workflow-host interfaces makes the delegate calls below
+// type-checked at the class boundary: if a host contract grows a member the repo
+// lacks, this declaration stops compiling — which is why the prepared statements
+// the workflows read through `this` are exposed as `public readonly` rather than
+// bridged with an `as unknown as` cast. Consumers still depend on MemoryEntryRepo,
+// which does not surface these statements.
+export class SqliteMemoryEntryRepo
+  implements
+    MemoryEntryRepo,
+    MemoryEntrySearchWorkflowHost,
+    MemoryEntryLifecycleWorkflowHost,
+    MemoryEntryUpdateWorkflowHost
+{
   private readonly createStatement;
-  private readonly findByIdStatement;
+  // Public host-contract members are annotated with the narrow statement aliases
+  // (not the unnameable BetterSqlite3.Statement) so the declaration emit stays
+  // self-contained and each field matches its workflow-host requirement exactly.
+  public readonly findByIdStatement: SqliteGetStatement;
   private readonly findByWorkspaceHotStatement;
   private readonly findByWorkspaceHotPagedStatement;
   private readonly countByWorkspaceHotStatement;
@@ -75,37 +95,37 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   private readonly findByDimensionHotPagedStatement;
   private readonly countByDimensionHotStatement;
   private readonly findByScopeClassHotStatement;
-  private readonly updateStatement;
-  private readonly updateScopedStatement;
-  private readonly searchByKeywordStatement;
+  public readonly updateStatement: SqliteRunStatement;
+  public readonly updateScopedStatement: SqliteRunStatement;
+  public readonly searchByKeywordStatement: SqliteAllStatement;
   // see also: packages/storage/src/migrations/077-memory-content-fts-dual.sql
-  private readonly searchByKeywordPorterStatement;
+  public readonly searchByKeywordPorterStatement: SqliteAllStatement;
   private readonly findLowActivityActiveMemoriesStatement;
   private readonly findTombstonedMemoriesStatement;
-  private readonly transitionLifecycleStatement;
+  public readonly transitionLifecycleStatement: SqliteRunStatement;
   // invariant (I3): a revived / non-tombstone transition clears the terminal
   // forget marker so an active/dormant row never carries a removal disposition.
-  private readonly transitionLifecycleClearForgetStatement;
+  public readonly transitionLifecycleClearForgetStatement: SqliteRunStatement;
   // invariant (N1): guarded dormant -> active revival; changes=0 when not dormant.
-  private readonly reviveDormantStatement;
+  public readonly reviveDormantStatement: SqliteRunStatement;
   // invariant: active -> dormant skips benign changes=0 races and clears forget markers.
-  private readonly demoteActiveToDormantStatement;
-  private readonly archiveStatement;
-  private readonly hardDeleteTombstonedStatement;
+  public readonly demoteActiveToDormantStatement: SqliteRunStatement;
+  public readonly archiveStatement: SqliteRunStatement;
+  public readonly hardDeleteTombstonedStatement: SqliteRunStatement;
   private readonly findDormantMemoriesStatement;
-  private readonly autonomousTombstoneStatement;
+  public readonly autonomousTombstoneStatement: SqliteRunStatement;
   private readonly findTombstonedWithDispositionStatement;
-  private readonly hardDeleteTombstonedWithDispositionStatement;
+  public readonly hardDeleteTombstonedWithDispositionStatement: SqliteRunStatement;
   // invariant: compressed delete rechecks capsule liveness atomically with removal.
-  private readonly hardDeleteTombstonedCompressedGuardedStatement;
+  public readonly hardDeleteTombstonedCompressedGuardedStatement: SqliteRunStatement;
   // invariant: judged_useless delete replays the local-only verdict at delete time.
-  private readonly hardDeleteTombstonedJudgedUselessGuardedStatement;
+  public readonly hardDeleteTombstonedJudgedUselessGuardedStatement: SqliteRunStatement;
   // invariant: hard-delete prunes path topology because endpoints are not FK-backed.
-  private readonly deleteOrphanedPathRelationsStatement;
-  private readonly deleteOrphanedCoUsageCountersStatement;
+  public readonly deleteOrphanedPathRelationsStatement: SqliteRunStatement;
+  public readonly deleteOrphanedCoUsageCountersStatement: SqliteRunStatement;
 
   public constructor(
-    private readonly db: StorageDatabase,
+    public readonly db: StorageDatabase,
     private readonly diagnostics: MemoryEntryRepoDiagnosticSink = () => {}
   ) {
     this.createStatement = db.connection.prepare(`
@@ -799,7 +819,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     queryText: string,
     limit: number
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
-    return searchByKeyword.call(this as unknown as MemoryEntrySearchWorkflowHost, workspaceId, queryText, limit);
+    return searchByKeyword.call(this, workspaceId, queryText, limit);
   }
 
   public async searchByKeywordWithinObjectIds(
@@ -809,7 +829,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     objectIds: readonly string[]
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
     return searchByKeywordWithinObjectIds.call(
-      this as unknown as MemoryEntrySearchWorkflowHost,
+      this,
       workspaceId,
       queryText,
       limit,
@@ -881,7 +901,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     input: AutonomousTombstoneInput,
     options?: { readonly onTransition?: () => void }
   ): Promise<Readonly<MemoryEntry>> {
-    return autonomousTombstone.call(this as unknown as MemoryEntryLifecycleWorkflowHost, input, options);
+    return autonomousTombstone.call(this, input, options);
   }
 
   public async hardDeleteTombstonedWithDisposition(
@@ -893,7 +913,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     }
   ): Promise<boolean> {
     return hardDeleteTombstonedWithDisposition.call(
-      this as unknown as MemoryEntryLifecycleWorkflowHost,
+      this,
       objectId,
       options
     );
@@ -903,7 +923,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     objectId: string,
     fields: MemoryEntryRepoUpdateFields
   ): Promise<Readonly<MemoryEntry>> {
-    return updateMemoryEntry.call(this as unknown as MemoryEntryUpdateWorkflowHost, objectId, fields);
+    return updateMemoryEntry.call(this, objectId, fields);
   }
 
   public async updateScoped(
@@ -912,7 +932,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     fields: MemoryEntryRepoUpdateFields
   ): Promise<Readonly<MemoryEntry>> {
     return updateScopedMemoryEntry.call(
-      this as unknown as MemoryEntryUpdateWorkflowHost,
+      this,
       objectId,
       workspaceId,
       fields
@@ -920,7 +940,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   }
 
   public updateTier(input: MemoryEntryRepoTierUpdateInput): Readonly<MemoryEntry> | null {
-    return updateMemoryEntryTier.call(this as unknown as MemoryEntryUpdateWorkflowHost, input);
+    return updateMemoryEntryTier.call(this, input);
   }
 
   public async archive(
@@ -929,7 +949,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     onArchived?: () => void
   ): Promise<Readonly<MemoryEntry>> {
     return archiveMemoryEntry.call(
-      this as unknown as MemoryEntryLifecycleWorkflowHost,
+      this,
       objectId,
       updatedAt,
       onArchived
@@ -942,7 +962,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     updatedAt: string
   ): Promise<Readonly<MemoryEntry>> {
     return updateMemoryEntryDynamics.call(
-      this as unknown as MemoryEntryUpdateWorkflowHost,
+      this,
       objectId,
       fields,
       updatedAt
@@ -956,7 +976,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     onTransition?: () => void
   ): Promise<Readonly<MemoryEntry>> {
     return transitionMemoryEntryLifecycle.call(
-      this as unknown as MemoryEntryLifecycleWorkflowHost,
+      this,
       objectId,
       lifecycleState,
       updatedAt,
@@ -968,7 +988,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     objectId: string,
     updatedAt: string
   ): Promise<Readonly<MemoryEntry> | null> {
-    return reviveDormantMemoryEntry.call(this as unknown as MemoryEntryLifecycleWorkflowHost, objectId, updatedAt);
+    return reviveDormantMemoryEntry.call(this, objectId, updatedAt);
   }
 
   public async transitionToDormantIfActive(
@@ -977,7 +997,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     onTransition?: () => void
   ): Promise<Readonly<MemoryEntry> | null> {
     return transitionMemoryEntryToDormantIfActive.call(
-      this as unknown as MemoryEntryLifecycleWorkflowHost,
+      this,
       objectId,
       updatedAt,
       onTransition
@@ -985,7 +1005,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   }
 
   public async hardDeleteTombstoned(objectId: string, onDeleted?: () => void): Promise<void> {
-    return hardDeleteTombstonedMemoryEntry.call(this as unknown as MemoryEntryLifecycleWorkflowHost, objectId, onDeleted);
+    return hardDeleteTombstonedMemoryEntry.call(this, objectId, onDeleted);
   }
 }
 

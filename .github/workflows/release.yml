@@ -243,9 +243,14 @@ jobs:
           TARBALL: ${{ needs.package.outputs.tarball }}
         run: |
           set -euo pipefail
+          prerelease_args=()
+          if [[ "$TAG" == *-* ]]; then
+            prerelease_args+=(--prerelease)
+          fi
           gh release create "$TAG" \
             --verify-tag \
             --title "$TAG" \
             --generate-notes \
+            "${prerelease_args[@]}" \
             "release-assets/$TARBALL" \
             release-assets/SHA256SUMS

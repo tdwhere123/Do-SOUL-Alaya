@@ -118,8 +118,12 @@ const MANIFESTATION_ESCALATION_POLICY_FIELDS = [
   "lens_requires_task_coupling",
   "lens_requires_governance_ceiling"
 ] as const;
+const CURRENT_CONFIG_VERSION = DEFAULT_SOUL_CONFIG.config_version ?? 1;
+type ConfigPatchObject = Record<string, unknown>;
+type VersionedConfigObject = ConfigPatchObject & { readonly config_version?: number };
 
 const DEFAULT_RUNTIME_EMBEDDING_CONFIG: RuntimeEmbeddingConfig = {
+  config_version: CURRENT_CONFIG_VERSION,
   provider_url: null,
   secret_ref: null,
   model_id: null,
@@ -242,18 +246,20 @@ function keyFor(workspaceId: string, section: "soul" | "strategy" | "environment
   return `workspace:${workspaceId}:${section}`;
 }
 
-async function getSectionConfig<T>(
+async function getSectionConfig<T extends VersionedConfigObject>(
   repo: ConfigRepo,
   key: string,
   schema: { parse(value: unknown): T },
   defaults: T
 ): Promise<T> {
   // ConfigRepo.get is synchronous (sqlite prepared statement); no await needed.
-  const raw = repo.get<T>(key);
-  return schema.parse(raw ?? defaults);
+  const raw = repo.get<unknown>(key);
+  return schema.parse(
+    normalizeLegacyConfigVersion(raw ?? defaults, readConfigVersion(defaults))
+  );
 }
 
-async function patchSectionConfig<T extends Record<string, unknown>>(
+async function patchSectionConfig<T extends VersionedConfigObject>(
   repo: ConfigRepo,
   key: string,
   fullSchema: { parse(value: unknown): T },
@@ -269,15 +275,23 @@ async function patchSectionConfig<T extends Record<string, unknown>>(
   }
 
   // ConfigRepo.patch is synchronous (sqlite read-modify-write); no await needed.
-  const next = repo.patch(key, parsedPatch.data, defaults);
-  return fullSchema.parse(next);
+  const next = repo.patch(
+    key,
+    withConfigVersion(parsedPatch.data, readConfigVersion(defaults)),
+    defaults
+  );
+  return fullSchema.parse(
+    normalizeLegacyConfigVersion(next, readConfigVersion(defaults))
+  );
 }
 
 async function getRuntimeEmbeddingConfig(repo: ConfigRepo): Promise<RuntimeEmbeddingConfig> {
   // ConfigRepo.get is synchronous; no await needed.
   return RuntimeEmbeddingConfigSchema.parse(
-    repo.get<RuntimeEmbeddingConfig>(RUNTIME_EMBEDDING_CONFIG_KEY) ??
-      DEFAULT_RUNTIME_EMBEDDING_CONFIG
+    normalizeLegacyConfigVersion(
+      repo.get<unknown>(RUNTIME_EMBEDDING_CONFIG_KEY) ?? DEFAULT_RUNTIME_EMBEDDING_CONFIG,
+      readConfigVersion(DEFAULT_RUNTIME_EMBEDDING_CONFIG)
+    )
   );
 }
 
@@ -306,7 +320,11 @@ async function patchManifestationBudgetConfig(input: {
   readonly clock: () => string;
   readonly generateAuditId: () => string;
 }): Promise<ManifestationBudgetConfig> {
-  const patch = asRecord(input.patch);
+  const patch = parseConfigPatchObject(input.patch, "Invalid manifestation budget config patch");
+  const escalationPolicyPatch = parseOptionalConfigPatchObject(
+    patch.escalation_policy,
+    "Invalid manifestation budget config patch"
+  );
   const current = (
     await getManifestationBudgetConfig(input.repo, input.workspaceId, input.clock)
   ).config;
@@ -317,7 +335,7 @@ async function patchManifestationBudgetConfig(input: {
     workspace_id: input.workspaceId,
     escalation_policy: {
       ...current.escalation_policy,
-      ...asRecord(patch.escalation_policy)
+      ...escalationPolicyPatch
     },
     updated_at: occurredAt
   });
@@ -334,14 +352,14 @@ async function patchManifestationBudgetConfig(input: {
         run_id: null,
         caused_by: "inspector",
         payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
-          entry_id: auditEntryId,
-          event_kind: HealthEventKind.RECALL_TUNING,
-          workspace_id: input.workspaceId,
-          occurred_at: occurredAt,
-          change_summary: buildManifestationBudgetChangeSummary(patch)
-        })
-      }
-    ],
+            entry_id: auditEntryId,
+            event_kind: HealthEventKind.RECALL_TUNING,
+            workspace_id: input.workspaceId,
+            occurred_at: occurredAt,
+            change_summary: buildManifestationBudgetChangeSummary(patch, escalationPolicyPatch)
+          })
+        }
+      ],
     () => {
       input.repo.set(configKey, next);
       return next;
@@ -370,22 +388,19 @@ function defaultManifestationBudgetConfig(
   });
 }
 
-function buildManifestationBudgetChangeSummary(patch: Record<string, unknown>): {
+function buildManifestationBudgetChangeSummary(
+  patch: ConfigPatchObject,
+  escalationPolicyPatch: ConfigPatchObject
+): {
   readonly fields_changed: readonly string[];
 } {
   const fieldsChanged = [
     ...MANIFESTATION_BUDGET_CAP_FIELDS.filter((field) => patch[field] !== undefined),
     ...MANIFESTATION_ESCALATION_POLICY_FIELDS
-      .filter((field) => asRecord(patch.escalation_policy)[field] !== undefined)
+      .filter((field) => escalationPolicyPatch[field] !== undefined)
       .map((field) => `escalation_policy.${field}`)
   ];
   return { fields_changed: fieldsChanged };
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
 }
 
 async function getRuntimeGardenComputeConfig(
@@ -408,7 +423,8 @@ function parseGardenComputeConfigWithLegacyFallback(
   source: string,
   warn: (message: string) => void
 ): RuntimeGardenComputeConfig {
-  const direct = RuntimeGardenComputeConfigSchema.safeParse(input);
+  const normalizedInput = normalizeLegacyConfigVersion(input, CURRENT_CONFIG_VERSION);
+  const direct = RuntimeGardenComputeConfigSchema.safeParse(normalizedInput);
   if (direct.success) {
     return direct.data;
   }
@@ -417,9 +433,10 @@ function parseGardenComputeConfigWithLegacyFallback(
     `${source}: rejected by schema (${issues}); dropping secret_ref and falling back to local_heuristics. ` +
       "Re-run `alaya install --keychain` (or fix the offending env/SQL value) to restore Garden compute."
   );
-  const fallbackBase = isRecord(input) ? input : {};
+  const fallbackBase = isRecord(normalizedInput) ? normalizedInput : {};
   const fallback = {
     ...fallbackBase,
+    config_version: CURRENT_CONFIG_VERSION,
     secret_ref: null,
     enabled: false,
     provider_kind: "local_heuristics"
@@ -429,6 +446,43 @@ function parseGardenComputeConfigWithLegacyFallback(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseConfigPatchObject(value: unknown, validationMessage: string): ConfigPatchObject {
+  if (!isRecord(value)) {
+    throw new CoreError("VALIDATION", validationMessage);
+  }
+
+  return value;
+}
+
+function parseOptionalConfigPatchObject(value: unknown, validationMessage: string): ConfigPatchObject {
+  return value === undefined ? {} : parseConfigPatchObject(value, validationMessage);
+}
+
+function readConfigVersion(defaults: VersionedConfigObject): number {
+  return defaults.config_version ?? CURRENT_CONFIG_VERSION;
+}
+
+function normalizeLegacyConfigVersion(value: unknown, configVersion: number): unknown {
+  if (!isRecord(value) || value.config_version !== undefined) {
+    return value;
+  }
+
+  return {
+    ...value,
+    config_version: configVersion
+  };
+}
+
+function withConfigVersion<T extends VersionedConfigObject>(
+  patch: Partial<T>,
+  configVersion: number
+): Partial<T> {
+  return {
+    ...patch,
+    config_version: configVersion
+  };
 }
 
 async function patchRuntimeEmbeddingConfig(input: {
@@ -487,10 +541,12 @@ async function patchRuntimeEmbeddingConfig(input: {
         () => {
           const next = input.repo.patch(
             RUNTIME_EMBEDDING_CONFIG_KEY,
-            normalized.patch,
+            withConfigVersion(normalized.patch, readConfigVersion(DEFAULT_RUNTIME_EMBEDDING_CONFIG)),
             DEFAULT_RUNTIME_EMBEDDING_CONFIG
           );
-          return RuntimeEmbeddingConfigSchema.parse(next);
+          return RuntimeEmbeddingConfigSchema.parse(
+            normalizeLegacyConfigVersion(next, readConfigVersion(DEFAULT_RUNTIME_EMBEDDING_CONFIG))
+          );
         }
       )
   });
@@ -549,7 +605,7 @@ async function patchRuntimeGardenComputeConfig(input: {
         () => {
           const next = input.repo.patch(
             RUNTIME_GARDEN_COMPUTE_CONFIG_KEY,
-            normalized.patch,
+            withConfigVersion(normalized.patch, readConfigVersion(defaults)),
             defaults
           );
           // Route through the same malformed-row fallback the read path uses
@@ -608,6 +664,7 @@ async function defaultRuntimeGardenComputeConfig(
 
   return parseGardenComputeConfigWithLegacyFallback(
     {
+      config_version: CURRENT_CONFIG_VERSION,
       provider_kind: providerKind,
       model_id: modelId,
       provider_url: readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_PROVIDER_URL_ENV)),

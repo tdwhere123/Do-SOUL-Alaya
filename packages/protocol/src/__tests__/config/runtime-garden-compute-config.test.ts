@@ -7,6 +7,7 @@ import {
 describe("RuntimeGardenComputeConfig schema (C1)", () => {
   it("accepts a fully-specified official_api config", () => {
     const value = {
+      config_version: 1,
       provider_kind: "official_api",
       model_id: "gpt-4.1-mini",
       provider_url: "https://api.openai.com/v1",
@@ -18,6 +19,7 @@ describe("RuntimeGardenComputeConfig schema (C1)", () => {
 
   it("accepts local_heuristics with all-null compute fields", () => {
     const value = {
+      config_version: 1,
       provider_kind: "local_heuristics",
       model_id: null,
       provider_url: null,
@@ -29,6 +31,7 @@ describe("RuntimeGardenComputeConfig schema (C1)", () => {
 
   it("accepts host_worker for attached-agent Garden compute", () => {
     const value = {
+      config_version: 1,
       provider_kind: "host_worker",
       model_id: null,
       provider_url: null,
@@ -105,6 +108,9 @@ describe("RuntimeGardenComputeConfigPatch schema (C1)", () => {
   });
 
   it("accepts each field individually", () => {
+    expect(RuntimeGardenComputeConfigPatchSchema.parse({ config_version: 1 })).toEqual({
+      config_version: 1
+    });
     expect(
       RuntimeGardenComputeConfigPatchSchema.parse({ provider_kind: "official_api" })
     ).toEqual({ provider_kind: "official_api" });

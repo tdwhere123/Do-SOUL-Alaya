@@ -11,12 +11,25 @@ export interface ListPagination {
   readonly offset: number;
 }
 
-export async function parseJsonBody(readJson: () => Promise< unknown>): Promise< unknown> {
+export type JsonBodyValidator<T> = (value: unknown) => T;
+
+export async function parseJsonBody(readJson: () => Promise<unknown>): Promise<unknown>;
+export async function parseJsonBody<T>(
+  readJson: () => Promise<unknown>,
+  validate: JsonBodyValidator<T>
+): Promise<T>;
+export async function parseJsonBody<T>(
+  readJson: () => Promise<unknown>,
+  validate?: JsonBodyValidator<T>
+): Promise<unknown> {
+  let body: unknown;
   try {
-    return await readJson();
+    body = await readJson();
   } catch (error) {
     throwInvalidRequestBody(error);
   }
+
+  return validate === undefined ? body : validate(body);
 }
 
 export function throwInvalidRequestBody(error: unknown): never {

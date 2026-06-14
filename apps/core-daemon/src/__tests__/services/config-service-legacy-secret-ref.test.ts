@@ -20,6 +20,7 @@ describe("config-service legacy secret_ref compatibility", () => {
 
     const config = await harness.configService.getRuntimeGardenComputeConfig();
 
+    expect(config.config_version).toBe(1);
     expect(config.secret_ref).toBe("keychain:alaya: openai");
     expect(config.provider_kind).toBe("official_api");
     expect(harness.warn).not.toHaveBeenCalled();
@@ -37,6 +38,7 @@ describe("config-service legacy secret_ref compatibility", () => {
 
     const config = await harness.configService.getRuntimeGardenComputeConfig();
 
+    expect(config.config_version).toBe(1);
     expect(config.secret_ref).toBe("keychain:alaya:openai");
     expect(config.provider_kind).toBe("official_api");
     expect(harness.warn).not.toHaveBeenCalled();
@@ -49,6 +51,7 @@ describe("config-service legacy secret_ref compatibility", () => {
 
     const config = await harness.configService.getRuntimeGardenComputeConfig();
 
+    expect(config.config_version).toBe(1);
     expect(config.secret_ref).toBe("keychain:alaya:--openai");
     expect(config.provider_kind).toBe("official_api");
     expect(harness.warn).not.toHaveBeenCalled();

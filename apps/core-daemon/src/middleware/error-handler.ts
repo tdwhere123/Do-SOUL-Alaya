@@ -13,7 +13,8 @@ const SAFE_PUBLIC_VALIDATION_MESSAGES = new Set([
   "File exceeds the 20 MB limit",
   "File not found",
   "Strict confirmation required",
-  "governance route clock must return a valid ISO timestamp"
+  "governance route clock must return a valid ISO timestamp",
+  "Config patch body must be a JSON object"
 ]);
 
 export interface ErrorLoggerPort {

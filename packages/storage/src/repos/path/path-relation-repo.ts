@@ -738,15 +738,30 @@ function parsePathRelationRow(row: PathRelationRow): Readonly<PathRelation> {
   return parsePathRelation({
     path_id: row.path_id,
     workspace_id: row.workspace_id,
-    anchors: parseJsonField<PathRelation["anchors"]>(row.anchors_json, "anchors"),
-    constitution: parseJsonField<PathRelation["constitution"]>(row.constitution_json, "constitution"),
-    effect_vector: parseJsonField<PathRelation["effect_vector"]>(row.effect_vector_json, "effect_vector"),
-    plasticity_state: parseJsonField<PathRelation["plasticity_state"]>(
-      row.plasticity_state_json,
-      "plasticity_state"
+    anchors: parseJsonFieldWithSchema(row.anchors_json, "anchors", pathRelationFieldSchemas.anchors),
+    constitution: parseJsonFieldWithSchema(
+      row.constitution_json,
+      "constitution",
+      pathRelationFieldSchemas.constitution
     ),
-    lifecycle: normalizeLifecycle(parseJsonField<PathRelation["lifecycle"]>(row.lifecycle_json, "lifecycle")),
-    legitimacy: parseJsonField<PathRelation["legitimacy"]>(row.legitimacy_json, "legitimacy"),
+    effect_vector: parseJsonFieldWithSchema(
+      row.effect_vector_json,
+      "effect_vector",
+      pathRelationFieldSchemas.effect_vector
+    ),
+    plasticity_state: parseJsonFieldWithSchema(
+      row.plasticity_state_json,
+      "plasticity_state",
+      pathRelationFieldSchemas.plasticity_state
+    ),
+    lifecycle: normalizeLifecycle(
+      parseJsonFieldWithSchema(row.lifecycle_json, "lifecycle", pathRelationFieldSchemas.lifecycle)
+    ),
+    legitimacy: parseJsonFieldWithSchema(
+      row.legitimacy_json,
+      "legitimacy",
+      pathRelationFieldSchemas.legitimacy
+    ),
     created_at: row.created_at,
     updated_at: row.updated_at
   });
@@ -770,13 +785,35 @@ function comparePathRelationOrder(left: Readonly<PathRelation>, right: Readonly<
   return left.created_at.localeCompare(right.created_at);
 }
 
-function parseJsonField<T>(value: string, fieldName: string): T {
+// Per-field schemas reused verbatim from PathRelationSchema (no duplicate
+// definitions, no widening of the protocol export surface). unwrap() peels the
+// outer .readonly() so .shape exposes each column's validator.
+const pathRelationFieldSchemas = PathRelationSchema.unwrap().shape;
+
+// Validate each JSON column against its own schema so a corrupted column raises
+// a precise, field-named error instead of letting an unchecked `as T` cast lie
+// until the whole-object parse fails generically.
+function parseJsonFieldWithSchema<T>(
+  value: string,
+  fieldName: string,
+  schema: { parse(input: unknown): T }
+): T {
+  let parsed: unknown;
   try {
-    return JSON.parse(value) as T;
+    parsed = JSON.parse(value);
   } catch (error) {
     throw new StorageError(
       "VALIDATION_FAILED",
       `Failed to parse path relation ${fieldName}.`,
+      error
+    );
+  }
+  try {
+    return schema.parse(parsed);
+  } catch (error) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      `Invalid path relation ${fieldName}.`,
       error
     );
   }

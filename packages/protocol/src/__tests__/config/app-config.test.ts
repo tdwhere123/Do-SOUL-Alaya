@@ -18,6 +18,7 @@ import {
 describe("app config schemas", () => {
   it("exports parseable default soul, strategy, and environment configs", () => {
     expect(SoulConfigSchema.parse(DEFAULT_SOUL_CONFIG)).toEqual({
+      config_version: 1,
       memory_consolidation_enabled: true,
       local_heuristics_enabled: true,
       garden_backlog_soft_limit: 100,
@@ -26,6 +27,7 @@ describe("app config schemas", () => {
     });
 
     expect(StrategyConfigSchema.parse(DEFAULT_STRATEGY_CONFIG)).toEqual({
+      config_version: 1,
       require_bash_approval: true,
       require_write_approval: true,
       require_network_approval: true,
@@ -33,6 +35,7 @@ describe("app config schemas", () => {
     });
 
     expect(EnvironmentConfigSchema.parse(DEFAULT_ENVIRONMENT_CONFIG)).toEqual({
+      config_version: 1,
       env_vars: {},
       worktree_enabled: false
     });
@@ -136,12 +139,14 @@ describe("app config schemas", () => {
   it("exports runtime embedding and Alaya status schemas for Inspector", () => {
     expect(
       RuntimeEmbeddingConfigSchema.parse({
+        config_version: 1,
         provider_url: null,
         secret_ref: "env:OPENAI_API_KEY",
         model_id: "text-embedding-3-small",
         embedding_enabled: true
       })
     ).toEqual({
+      config_version: 1,
       provider_url: null,
       secret_ref: "env:OPENAI_API_KEY",
       model_id: "text-embedding-3-small",
@@ -149,10 +154,12 @@ describe("app config schemas", () => {
     });
 
     expect(RuntimeEmbeddingConfigPatchSchema.safeParse({ embedding_enabled: false }).success).toBe(true);
+    expect(RuntimeEmbeddingConfigPatchSchema.safeParse({ config_version: 1 }).success).toBe(true);
     expect(RuntimeEmbeddingConfigPatchSchema.safeParse({ unknown: true }).success).toBe(false);
 
     expect(
       RuntimeGardenComputeConfigSchema.parse({
+        config_version: 1,
         provider_kind: "official_api",
         provider_url: null,
         secret_ref: "keychain:alaya-garden:openai",
@@ -160,6 +167,7 @@ describe("app config schemas", () => {
         enabled: true
       })
     ).toMatchObject({
+      config_version: 1,
       secret_ref: "keychain:alaya-garden:openai"
     });
 

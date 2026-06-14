@@ -39,6 +39,11 @@ const POLL_OK_MS = 5_000;
 const POLL_BACKOFF_MS = 30_000;
 const REFRESH_COOLDOWN_MS = 1_000;
 
+/**
+ * Polls the daemon status route, classifies degraded/schema-error states, and
+ * exposes the same refresh cooldown contract used by the inspector status and
+ * overview surfaces.
+ */
 export function useDaemonHealth(): UseDaemonHealthResult {
   const [state, setState] = useState<DaemonHealthState>({ kind: "loading" });
   const [refreshing, setRefreshing] = useState(false);
