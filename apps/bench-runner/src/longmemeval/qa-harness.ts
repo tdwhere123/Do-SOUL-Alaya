@@ -229,11 +229,22 @@ function buildJudgeUser(
     );
   }
   if (questionType === "single-session-preference") {
+    // Official LongMemEval preference rubric (deliberately lenient) + an explicit
+    // clarification of that intent. The clarification is neutral for a faithful judge
+    // (gpt-4o: 29/30 with and without it) but stops a stronger model (gpt-5.4-mini)
+    // from silently applying a stricter-than-official bar: with it, mini's agreement
+    // with the gpt-4o official-rubric verdicts rises 73%->90% while its scrambled-gold
+    // rejection stays 100% (2026-06-15 calibration). Lets future baselines use a strong
+    // judge faithfully instead of pinning to the older, weaker gpt-4o.
     return (
       "I will give you a question, a rubric for desired personalized response, and a response from a model. " +
       "Please answer yes if the response satisfies the desired response. Otherwise, answer no. " +
       "The model does not need to reflect all the points in the rubric. " +
-      "The response is correct as long as it recalls and utilizes the user's personal information correctly.\n\n" +
+      "The response is correct as long as it recalls and utilizes the user's personal information correctly. " +
+      "Answer yes if the response recalls and uses the user's relevant personal information from the rubric, " +
+      "even if it is not exhaustive, omits some rubric points, or also includes some general advice. " +
+      "Only answer no if the response ignores the user's personal information, contradicts it, or recommends " +
+      "something the rubric says the user would not prefer.\n\n" +
       `Question: ${question}\n\nRubric: ${gold}\n\nModel Response: ${answer}\n\n` +
       "Is the model response correct? Answer yes or no only."
     );

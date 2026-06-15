@@ -775,12 +775,13 @@ export async function createRecallMaterializationWiring(input: {
       ? materializationConfidenceFloorRaw
       : undefined;
   // Index the full source turn as the evidence excerpt so evidence_fts can reach
-  // memories whose distilled content dropped the query terms. Opt-in: it lifts
-  // recall coverage but the extra co-topical evidence hits dilute precise-select
-  // QA (temporal regressed end-to-end), so default off pending a ranking pass.
+  // memories whose distilled content dropped the query terms. Default on: the
+  // per-category LongMemEval pass (2026-06-15, gpt-4o official-rubric judge) shows
+  // it lifts buried-lookup recall (ss-user 82.9->94.3, preference) with no temporal
+  // regression (60.0 both arms). Set ALAYA_EVIDENCE_FULL_TURN=0 to opt out.
   const fullTurnEvidenceExcerpt =
-    process.env.ALAYA_EVIDENCE_FULL_TURN === "1" ||
-    process.env.ALAYA_EVIDENCE_FULL_TURN === "true";
+    process.env.ALAYA_EVIDENCE_FULL_TURN !== "0" &&
+    process.env.ALAYA_EVIDENCE_FULL_TURN !== "false";
   const materializationRouter = new MaterializationRouter({
     evidenceService: input.evidenceService,
     memoryService: materializationMemoryService,
