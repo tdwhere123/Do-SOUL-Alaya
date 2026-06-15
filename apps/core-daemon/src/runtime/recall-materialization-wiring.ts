@@ -774,11 +774,11 @@ export async function createRecallMaterializationWiring(input: {
     materializationConfidenceFloorRaw <= 1
       ? materializationConfidenceFloorRaw
       : undefined;
-  // Index the full source turn as the evidence excerpt so evidence_fts can reach
-  // memories whose distilled content dropped the query terms. Default on: the
-  // per-category LongMemEval pass (2026-06-15, gpt-4o official-rubric judge) shows
-  // it lifts buried-lookup recall (ss-user 82.9->94.3, preference) with no temporal
-  // regression (60.0 both arms). Set ALAYA_EVIDENCE_FULL_TURN=0 to opt out.
+  // Evidence excerpt = the full source turn when a signal carries it in raw_payload
+  // (full_turn_content / bench_full_turn_content), else the matched-span summary; widens
+  // evidence_fts to query terms distillation drops. invariant: INERT in production — no
+  // core proposer sets full_turn_content, so only the bench harness exercises it today.
+  // ALAYA_EVIDENCE_FULL_TURN=0 forces off.
   const fullTurnEvidenceExcerpt =
     process.env.ALAYA_EVIDENCE_FULL_TURN !== "0" &&
     process.env.ALAYA_EVIDENCE_FULL_TURN !== "false";
