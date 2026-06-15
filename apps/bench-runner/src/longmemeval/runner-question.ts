@@ -375,11 +375,18 @@ export async function runLongMemEvalQuestion(input: {
         for (const b of fb) fusionByOid.set(b.object_id, { fusedRank: b.fused_rank, perStream: b.per_stream_rank });
       }
       const candidates = results.map((p, i) => {
-        const entry = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", p.object_id));
+        const kind = p.object_kind ?? "memory_entry";
+        // memory_entry candidates key on "memory_entry"; synthesis_capsule (route-B
+        // navigator) candidates carry their session via the capsule sidecar — resolve
+        // it so offline route-B coverage sim can credit a capsule's whole session.
+        const entry =
+          sidecar.get(buildLongMemEvalSidecarKey("memory_entry", p.object_id)) ??
+          sidecar.get(buildLongMemEvalSidecarKey("synthesis_capsule", p.object_id));
         const fusion = fusionByOid.get(p.object_id);
         return {
           rank: i + 1,
           objectId: p.object_id,
+          objectKind: kind,
           isGold: goldSet.has(p.object_id),
           sessionId: entry?.sessionId ?? null,
           eventDate: entry?.eventDate ?? null,
