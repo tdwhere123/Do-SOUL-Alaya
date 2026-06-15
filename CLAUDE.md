@@ -108,6 +108,14 @@ See `docs/handbook/workflow/review-protocol.md` for severity (Blocking
 - **Build + test is a hard gate.** Do not claim done until `rtk pnpm
   build` and the relevant `rtk pnpm exec vitest run` both pass and the
   Review Protocol checklist reports zero Blocking / Important findings.
+- **Comment discipline — terse, why-not-what.** Default to no comment;
+  add one only when the *why* is non-obvious, and keep it to a single
+  short line. Forbidden in source: multi-line narrative or sales-pitch
+  comments, restating what the code already says, and ephemeral
+  worklog/experiment labels (e.g. `B2(d)`, `ARC`, ticket IDs, "now we…",
+  "as discussed"). Prefer smaller, well-named functions over a long
+  comment explaining long code — if a block needs a paragraph to explain,
+  split or rename it instead.
 
 ## Architecture (one line)
 
