@@ -269,7 +269,10 @@ function buildJudgeUser(
  */
 export async function scoreQaQuestion(
   input: QaQuestionInput,
-  chat: QaChatFn
+  chat: QaChatFn,
+  // Judge with a separate model when given (the official LongMemEval metric uses
+  // gpt-4o); defaults to the answer chat for backward compatibility.
+  judgeChat: QaChatFn = chat
 ): Promise<QaQuestionVerdict> {
   const context = buildQaAnswerContext(input.delivered);
   const isAbstention = isAbstentionQuestionId(input.questionId);
@@ -278,7 +281,7 @@ export async function scoreQaQuestion(
     // question date = "now"; temporal Qs anchor elapsed-day math against it.
     `Current date: ${input.questionDate}\n\nMemory context:\n${context}\n\nQuestion: ${input.question}\nAnswer:`
   );
-  const judgeVerdict = await chat(
+  const judgeVerdict = await judgeChat(
     JUDGE_SYSTEM,
     buildJudgeUser(
       input.questionType,

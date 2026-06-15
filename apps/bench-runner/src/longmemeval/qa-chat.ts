@@ -35,6 +35,10 @@ export const QA_ENV_MODEL = "OFFICIAL_API_GARDEN_MODEL";
 // elsewhere and is unaffected by this override.
 const QA_ENV_MODEL_OVERRIDE = "OFFICIAL_API_GARDEN_QA_MODEL";
 const QA_DEFAULT_MODEL = "gpt-5.4-nano";
+// Judge model override, independent of the answer model (LongMemEval's official
+// metric judges with gpt-4o; mini-as-judge deflates preference). Falls back to
+// the answer model when unset.
+const QA_ENV_JUDGE_MODEL_OVERRIDE = "OFFICIAL_API_GARDEN_QA_JUDGE_MODEL";
 
 /**
  * Resolve the garden chat credentials from env. Throws (fail-loud) when the
@@ -56,6 +60,20 @@ export function resolveQaChatConfig(
     throw new Error(`--qa requires ${QA_ENV_API_KEY} (garden chat API key)`);
   }
   return { url, apiKey, model };
+}
+
+/**
+ * Resolve the JUDGE chat credentials: same provider/key as the answer chat, but
+ * the model is the judge override, falling back to the answer model when unset.
+ */
+export function resolveQaJudgeChatConfig(
+  env: NodeJS.ProcessEnv = process.env
+): QaChatConfig {
+  const base = resolveQaChatConfig(env);
+  const judgeModel = env[QA_ENV_JUDGE_MODEL_OVERRIDE]?.trim();
+  return judgeModel !== undefined && judgeModel.length > 0
+    ? { ...base, model: judgeModel }
+    : base;
 }
 
 // Transient failures retried with exponential backoff so a single network blip

@@ -42,8 +42,15 @@ import {
 } from "./qa-harness.js";
 import type { LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import type { QaChatFn } from "./qa-chat.js";
+import { selectRelevantMemories } from "./qa-llm-filter.js";
 
 const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
+
+/** Read a positive-integer env override, else the fallback. */
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+}
 
 /** Round-robin across the source sessions of the recalled pool so one
  * high-match session can't bury other answer sessions' gold below the delivery
@@ -148,6 +155,7 @@ export async function runLongMemEvalQuestion(input: {
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
   readonly captureSnapshot: boolean;
   readonly qaChat?: QaChatFn;
+  readonly qaJudgeChat?: QaChatFn;
 }): Promise<LongMemEvalWorkerResult> {
   const profileEnabled = isBenchProfileEnabled();
   const phase = createPhaseTimer();
@@ -457,6 +465,39 @@ export async function runLongMemEvalQuestion(input: {
             ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
           };
         });
+      // Agent-side LLM relevance filter: retrieve WIDE (catch precise-class gold
+      // buried at rank 12-15), let an LLM pick the few relevant memories, deliver
+      // NARROW clean context. Decouples retrieve-width from deliver-width — the
+      // semantic selection fusion ranking can't do (§D wall). Default off.
+      if (
+        process.env.ALAYA_BENCH_QA_LLM_FILTER !== undefined &&
+        input.qaChat !== undefined
+      ) {
+        const filterK = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_K", 30);
+        const filterM = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_M", 8);
+        const widePool: QaDeliveredCandidate[] = memoryEntryResults
+          .slice(0, filterK)
+          .map((result) => {
+            const entry = sidecar.get(
+              buildLongMemEvalSidecarKey("memory_entry", result.object_id)
+            );
+            return {
+              objectId: result.object_id,
+              content: entry?.content ?? "",
+              ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+            };
+          })
+          .filter((cand) => cand.content.length > 0);
+        const selected = await selectRelevantMemories(
+          input.question.question,
+          widePool,
+          filterM,
+          input.qaChat
+        );
+        if (selected.length > 0) {
+          delivered = selected;
+        }
+      }
       // Drop near-duplicate delivered content (one turn materializes into several
       // seeds that each carry the whole turn text) so a counting question doesn't
       // see the same event repeated and so the context budget holds more distinct
@@ -492,7 +533,8 @@ export async function runLongMemEvalQuestion(input: {
           goldAnswer: input.question.answer,
           delivered
         },
-        input.qaChat
+        input.qaChat,
+        input.qaJudgeChat ?? input.qaChat
       );
       // Diagnostic: dump the delivered context + model answer + judge verdict as
       // JSONL, so failing questions can be read by hand to split "delivered text

@@ -73,7 +73,7 @@ export interface LocomoRunOptions {
   readonly pinnedMetaRoot?: string;
   readonly offset?: number;
   // End-to-end QA: present only with --qa. Supplies the answer-LLM/judge chat fn.
-  readonly qa?: { readonly chat: QaChatFn };
+  readonly qa?: { readonly chat: QaChatFn; readonly judgeChat?: QaChatFn };
 }
 
 export interface LocomoRunResult {
@@ -213,6 +213,21 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
     );
     for (const [type, tally] of Object.entries(qaAgg.qa_by_type)) {
       process.stdout.write(`  ${type}: ${tally.correct}/${tally.total}\n`);
+    }
+    // Per raw LoCoMo category (1 single-hop / 2 temporal / 3 multi-hop /
+    // 4 open-domain) — the ≥90/category view the temporal|factual split hides.
+    const byCat = new Map<number, { correct: number; total: number }>();
+    for (const row of conversationResults.flatMap((r) => r.qaCategoryRows)) {
+      const t = byCat.get(row.category) ?? { correct: 0, total: 0 };
+      t.total += 1;
+      if (row.correct) t.correct += 1;
+      byCat.set(row.category, t);
+    }
+    for (const cat of [...byCat.keys()].sort((a, b) => a - b)) {
+      const t = byCat.get(cat)!;
+      process.stdout.write(
+        `  category ${cat}: ${t.correct}/${t.total} = ${((100 * t.correct) / t.total).toFixed(1)}%\n`
+      );
     }
   }
   const providerStateSummary = summarizeProviderStates(questionDiagnostics);
@@ -406,6 +421,7 @@ interface ConversationResult {
   // one per workspace, aggregated across conversations at the run level.
   readonly tokenMetrics: BenchTokenMetrics;
   readonly qaVerdicts: readonly QaQuestionVerdict[];
+  readonly qaCategoryRows: readonly { category: number; correct: boolean }[];
 }
 
 async function runOneConversation(
@@ -488,6 +504,7 @@ async function runOneConversation(
     const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
     const recallTokenEconomySamples: BenchRecallTokenEconomy[] = [];
     const qaVerdicts: QaQuestionVerdict[] = [];
+    const qaCategoryRows: { category: number; correct: boolean }[] = [];
 
     // invariant: R@K denominator counts only QAs with non-empty evidence.
     // LoCoMo category-5 (adversarial) and some other rows carry no
@@ -554,19 +571,23 @@ async function runOneConversation(
             ...(date === undefined || date === null ? {} : { eventDate: date })
           };
         });
-        qaVerdicts.push(
-          await scoreQaQuestion(
-            {
-              questionId: `${conversation.sample_id}:${scoredCount}`,
-              questionType: qa.category === 2 ? "temporal-reasoning" : "locomo-factual",
-              question: qa.question,
-              questionDate: conversationNowDate,
-              goldAnswer: String(qa.answer),
-              delivered
-            },
-            opts.qa.chat
-          )
+        const qaVerdict = await scoreQaQuestion(
+          {
+            questionId: `${conversation.sample_id}:${scoredCount}`,
+            questionType: qa.category === 2 ? "temporal-reasoning" : "locomo-factual",
+            question: qa.question,
+            questionDate: conversationNowDate,
+            goldAnswer: String(qa.answer),
+            delivered
+          },
+          opts.qa.chat,
+          opts.qa.judgeChat ?? opts.qa.chat
         );
+        qaVerdicts.push(qaVerdict);
+        // Per-LoCoMo-category tally (1 single-hop / 2 temporal / 3 multi-hop /
+        // 4 open-domain). questionType collapses to temporal|factual for the
+        // judge template, so track the raw category separately for ≥90/category.
+        qaCategoryRows.push({ category: qa.category, correct: qaVerdict.correct });
       }
     }
 
@@ -588,7 +609,8 @@ async function runOneConversation(
       queryEmbeddingWarmup,
       recallTokenEconomySamples,
       tokenMetrics,
-      qaVerdicts
+      qaVerdicts,
+      qaCategoryRows
     };
   } finally {
     await workspace.detach();

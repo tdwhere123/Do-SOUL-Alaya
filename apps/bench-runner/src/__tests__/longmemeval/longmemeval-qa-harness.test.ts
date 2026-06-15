@@ -71,6 +71,30 @@ describe("qa-harness judge verdict (one-word yes/no)", () => {
   });
 });
 
+describe("scoreQaQuestion judge routing", () => {
+  it("sends the judge call to judgeChat when provided, answer to chat", async () => {
+    const answer = fakeChat(["Paris"]);
+    const judge = fakeChat(["yes"]);
+    const verdict = await scoreQaQuestion(
+      {
+        questionId: "q1",
+        questionType: "single-session-user",
+        question: "Where?",
+        questionDate: "2023/05/10 (Wed) 09:00",
+        goldAnswer: "Paris",
+        delivered: [{ objectId: "a", content: "lives in Paris" }]
+      },
+      answer.chat,
+      judge.chat
+    );
+    // answer chat got exactly the answer call; judge chat got the judge call.
+    expect(answer.calls).toHaveLength(1);
+    expect(judge.calls).toHaveLength(1);
+    expect(judge.calls[0]?.user).toContain("Correct Answer: Paris");
+    expect(verdict.correct).toBe(true);
+  });
+});
+
 describe("scoreQaQuestion (answerable, factual)", () => {
   it("answers over stitched context then judges against gold", async () => {
     const { chat, calls } = fakeChat(["Berlin", "yes"]);
