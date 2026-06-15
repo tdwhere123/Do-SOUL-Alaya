@@ -98,10 +98,11 @@ describe("proposal review inspector cli parity", () => {
         });
       }
     });
-    const inspectorResponse = await inspectorApp.request("/api/proposals/ws1/prop-1/review?token=inspector-token", {
+    const inspectorResponse = await inspectorApp.request("/api/proposals/ws1/prop-1/review", {
       method: "POST",
       headers: {
-        "content-type": "application/json"
+        "content-type": "application/json",
+        "x-alaya-inspector-token": "inspector-token"
       },
       body: JSON.stringify({
         verdict: reviewerArgs.verdict,
@@ -208,10 +209,13 @@ async function runReviewParityScenario(
     }
   });
   const inspectorResponse = await inspectorApp.request(
-    "/api/proposals/ws1/prop-1/review?token=inspector-token",
+    "/api/proposals/ws1/prop-1/review",
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "x-alaya-inspector-token": "inspector-token"
+      },
       body: JSON.stringify({
         verdict: reviewerArgs.verdict,
         reason: reviewerArgs.reason,

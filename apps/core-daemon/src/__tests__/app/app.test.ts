@@ -183,6 +183,47 @@ describe("createApp", () => {
     expect(patchRuntimeEmbeddingConfig).toHaveBeenCalledWith({ embedding_enabled: true });
   });
 
+  it("rejects non-object config patch bodies before dispatching to the config service", async () => {
+    const patchManifestationBudgetConfig = vi.fn(async (patch: unknown) => patch);
+    const app = createApp({
+      routes: {
+        config: {
+          workspaceService: {
+            getById: vi.fn(async () => ({ workspace_id: "workspace-1" }))
+          } as any,
+          configService: {
+            getSoulConfig: vi.fn(),
+            patchSoulConfig: vi.fn(),
+            getStrategyConfig: vi.fn(),
+            patchStrategyConfig: vi.fn(),
+            getEnvironmentConfig: vi.fn(),
+            patchEnvironmentConfig: vi.fn(),
+            getManifestationBudgetConfig: vi.fn(),
+            patchManifestationBudgetConfig,
+            getRuntimeEmbeddingConfig: vi.fn(),
+            patchRuntimeEmbeddingConfig: vi.fn(),
+            getRuntimeGardenComputeConfig: vi.fn(),
+            patchRuntimeGardenComputeConfig: vi.fn(),
+            getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" as const }))
+          } as unknown as AppConfigService
+        }
+      }
+    });
+
+    const response = await app.request("/workspaces/workspace-1/config/manifestation-budget", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([])
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Config patch body must be a JSON object"
+    });
+    expect(patchManifestationBudgetConfig).not.toHaveBeenCalled();
+  });
+
   it("rejects oversized non-file mutation bodies", async () => {
     const patchRuntimeEmbeddingConfig = vi.fn(async () => ({
       embedding_enabled: true,

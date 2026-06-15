@@ -106,6 +106,8 @@ describe("context lens assembler", () => {
     expect(assembler.getLastLens("run-1")).toEqual(result.contextLens);
     expect(assembler.getLastLens("missing-run")).toBeNull();
     expect(dependencies.claimRepo.findByIds).toHaveBeenCalledWith([CLAIM_ID]);
+    expect(dependencies.memoryRepo.findByIds).toHaveBeenCalledWith([PROJECT_MEMORY_ID, GLOBAL_MEMORY_ID]);
+    expect(dependencies.memoryRepo.findById).not.toHaveBeenCalled();
     expect(dependencies.recallService.buildDefaultPolicy).toHaveBeenCalledWith("analyze", TASK_SURFACE_ID);
 
     expect(dependencies.eventLogRepo.append).toHaveBeenCalledWith(

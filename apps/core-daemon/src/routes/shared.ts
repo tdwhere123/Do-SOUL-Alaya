@@ -3,13 +3,33 @@ import { CoreError } from "@do-soul/alaya-core";
 
 export const REQUEST_BODY_TOO_LARGE_MESSAGE = "Request body exceeds the 10 MB limit";
 export const REQUEST_BODY_NOT_ALLOWED_MESSAGE = "Request body is not allowed for this route";
+const DEFAULT_LIST_LIMIT = 200;
+const MAX_LIST_LIMIT = 500;
 
-export async function parseJsonBody(readJson: () => Promise< unknown>): Promise< unknown> {
+export interface ListPagination {
+  readonly limit: number;
+  readonly offset: number;
+}
+
+export type JsonBodyValidator<T> = (value: unknown) => T;
+
+export async function parseJsonBody(readJson: () => Promise<unknown>): Promise<unknown>;
+export async function parseJsonBody<T>(
+  readJson: () => Promise<unknown>,
+  validate: JsonBodyValidator<T>
+): Promise<T>;
+export async function parseJsonBody<T>(
+  readJson: () => Promise<unknown>,
+  validate?: JsonBodyValidator<T>
+): Promise<unknown> {
+  let body: unknown;
   try {
-    return await readJson();
+    body = await readJson();
   } catch (error) {
     throwInvalidRequestBody(error);
   }
+
+  return validate === undefined ? body : validate(body);
 }
 
 export function throwInvalidRequestBody(error: unknown): never {
@@ -26,6 +46,35 @@ export function isRequestBodyTooLargeError(error: unknown): boolean {
   }
 
   return readStatusCode(error) === 413 || readErrorName(error) === "BodyLimitError";
+}
+
+export function parseListPagination(context: Context): ListPagination {
+  return {
+    limit: parseBoundedInteger(
+      context.req.query("limit"),
+      "limit",
+      DEFAULT_LIST_LIMIT,
+      1,
+      MAX_LIST_LIMIT
+    ),
+    offset: parseBoundedInteger(
+      context.req.query("offset"),
+      "offset",
+      0,
+      0,
+      Number.MAX_SAFE_INTEGER
+    )
+  };
+}
+
+export function writeListPaginationHeaders(
+  context: Context,
+  totalCount: number,
+  pagination: ListPagination
+): void {
+  context.header("x-total-count", String(totalCount));
+  context.header("x-limit", String(pagination.limit));
+  context.header("x-offset", String(pagination.offset));
 }
 
 function readStatusCode(error: unknown): number | null {
@@ -61,6 +110,26 @@ function readErrorName(error: unknown): string | null {
 
   const candidate = error as { readonly cause?: unknown };
   return candidate.cause === undefined ? null : readErrorName(candidate.cause);
+}
+
+function parseBoundedInteger(
+  value: string | undefined,
+  name: string,
+  defaultValue: number,
+  min: number,
+  max: number
+): number {
+  if (value === undefined || value.trim().length === 0) {
+    return defaultValue;
+  }
+
+  const trimmed = value.trim();
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max || String(parsed) !== trimmed) {
+    throw new CoreError("VALIDATION", `${name} must be an integer between ${min} and ${max}`);
+  }
+
+  return parsed;
 }
 
 export async function rejectUnexpectedRequestBody(context: Context): Promise<Response | null> {
@@ -124,9 +193,16 @@ async function inspectUnexpectedRequestBody(context: Context): Promise<"none" | 
     }
     throw error;
   } finally {
-    try {
-      await reader.cancel();
-    } catch {}
+    await reader.cancel().catch((error: unknown) => {
+      if (isRequestBodyTooLargeError(error)) {
+        return;
+      }
+      console.warn("[routes/shared] request body reader cancel failed after inspection", {
+        method: context.req.method,
+        path: context.req.path,
+        error
+      });
+    });
   }
 
   if (total > 0 || (declaredLength ?? 0) > 0 || transferEncoding !== undefined) {

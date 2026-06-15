@@ -6,7 +6,7 @@ import { registerErrorHandler } from "../../middleware/error-handler.js";
 
 function buildApp(services: Parameters<typeof registerHealthInboxRoutes>[1]): Hono {
   const app = new Hono();
-  registerErrorHandler(app);
+  registerErrorHandler(app, { error: vi.fn() });
   registerHealthInboxRoutes(app, services);
   return app;
 }

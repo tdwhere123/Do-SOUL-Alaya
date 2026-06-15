@@ -94,7 +94,7 @@ describe("AppContent", () => {
   });
 
   it("keeps the launch token after redirecting from / to the real overview surface", async () => {
-    renderApp("/?token=test-token&workspaceId=ws1");
+    renderApp("/?workspaceId=ws1#token=test-token");
 
     expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
     expect(screen.getByTestId("overview-card-proposals").textContent).toContain("5");
@@ -103,7 +103,7 @@ describe("AppContent", () => {
   });
 
   it("renders the real legacy /status redirect through the system surface", async () => {
-    renderApp("/status?token=test-token&workspaceId=ws1");
+    renderApp("/status?workspaceId=ws1#token=test-token");
 
     expect(await screen.findByText("Startup Log")).toBeTruthy();
     expect(screen.getByText("repo opened")).toBeTruthy();
@@ -113,7 +113,7 @@ describe("AppContent", () => {
   it("clears stale workspace state when a fresh token URL omits workspaceId", async () => {
     setWorkspaceId("stale-ws");
 
-    renderApp("/?token=fresh-token");
+    renderApp("/#token=fresh-token");
 
     expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
     expect(getWorkspaceId()).toBeNull();
@@ -122,7 +122,7 @@ describe("AppContent", () => {
   it("renders the lazy graph route through the app router", async () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => null);
 
-    renderApp("/graph?token=test-token");
+    renderApp("/graph#token=test-token");
 
     expect(await screen.findByTestId("graph-no-workspace")).toBeTruthy();
     expect(

@@ -50,6 +50,11 @@ export type MemoryEntryRepoUpdateFields = ProtocolMemoryEntryRepoUpdateFields & 
   readonly last_hit_at?: string;
 };
 
+export interface MemoryListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
+}
+
 export interface MemoryServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
@@ -70,13 +75,21 @@ export interface MemoryServiceMemoryEntryRepoPort {
   findByIds?(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
   findByWorkspaceId(
     workspaceId: string,
-    tier?: MemoryEntry["storage_tier"]
+    tier?: MemoryEntry["storage_tier"],
+    page?: MemoryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
-  findByRunId(runId: string): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByWorkspaceId?(workspaceId: string, tier?: MemoryEntry["storage_tier"]): Promise<number>;
+  findByRunId(
+    runId: string,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByRunId?(runId: string): Promise<number>;
   findByDimension(
     workspaceId: string,
-    dimension: MemoryEntry["dimension"]
+    dimension: MemoryEntry["dimension"],
+    page?: MemoryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByDimension?(workspaceId: string, dimension: MemoryEntry["dimension"]): Promise<number>;
   findByScopeClass(
     workspaceId: string,
     scopeClass: ScopeClass
@@ -90,7 +103,8 @@ export interface MemoryServiceMemoryEntryRepoPort {
   transitionLifecycle?(
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
-    updatedAt: string
+    updatedAt: string,
+    onTransition?: () => void
   ): Promise<Readonly<MemoryEntry>>;
   // invariant: guarded active -> dormant demotion commits audit + UPDATE
   // atomically and returns null on benign 0-row races.
@@ -99,8 +113,8 @@ export interface MemoryServiceMemoryEntryRepoPort {
     updatedAt: string,
     onTransition?: () => void
   ): Promise<Readonly<MemoryEntry> | null>;
-  archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>>;
-  hardDeleteTombstoned?(objectId: string): Promise<void>;
+  archive(objectId: string, updatedAt: string, onArchived?: () => void): Promise<Readonly<MemoryEntry>>;
+  hardDeleteTombstoned?(objectId: string, onDeleted?: () => void): Promise<void>;
   // invariant: gated autonomous tombstone writes the durable forget_disposition
   // marker and terminalizes only a dormant row.
   autonomousTombstone?(input: {

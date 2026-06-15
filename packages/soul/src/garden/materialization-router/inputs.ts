@@ -269,9 +269,18 @@ function pickEvidenceKind(signal: CandidateMemorySignal): EvidenceKindValue {
 
 export function buildEvidenceInput(
   signal: CandidateMemorySignal,
-  summarySuffix?: string
+  summarySuffix?: string,
+  opts?: { readonly fullTurnExcerpt?: boolean }
 ): EvidenceMaterializationInput {
-  const excerpt = buildSignalSummary(signal);
+  // fullTurnExcerpt widens the searchable excerpt/gist to the signal's full
+  // source turn so evidence FTS keeps the query terms distillation drops;
+  // otherwise the matched_text-span summary is used.
+  const excerpt =
+    opts?.fullTurnExcerpt === true
+      ? (readStringPayload(signal.raw_payload, "full_turn_content") ??
+         readStringPayload(signal.raw_payload, "bench_full_turn_content") ??
+         buildSignalSummary(signal))
+      : buildSignalSummary(signal);
 
   return {
     created_by: signal.source,

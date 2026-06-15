@@ -26,8 +26,12 @@
 import type { QaChatFn } from "./qa-chat.js";
 import { isAbstentionQuestionId } from "./abstention.js";
 
-/** Max chars of stitched memory context handed to the answer model. */
-const QA_CONTEXT_CHAR_CAP = 20_000;
+/** Max chars of stitched memory context handed to the answer model. Override
+ * with ALAYA_BENCH_QA_CONTEXT_CHARS to test wider aggregation delivery. */
+function qaContextCharCap(): number {
+  const raw = Number(process.env.ALAYA_BENCH_QA_CONTEXT_CHARS);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 20_000;
+}
 
 /** Default answer口径: ground strictly in context, abstain when truly absent. */
 const ANSWER_SYSTEM_DEFAULT =
@@ -58,6 +62,35 @@ const ANSWER_SYSTEM_TEMPORAL =
   "3. If memories conflict, trust the most recently recorded one.\n" +
   "Commit to the computation the dates support; do not answer 'I don't know' when the relevant dated memories are present — only abstain when no relevant dated memory exists. " +
   "Show the brief date calculation, then end with the final answer in one short sentence.";
+/** Temporal 口径 for a WIDE delivery: the context holds many dated memories,
+ * most irrelevant. A precise date answer is hurt by extra dates unless the
+ * reader first filters to the events the question is actually about. Adds a
+ * relevance-filter step to the temporal rules. Gated by
+ * ALAYA_BENCH_QA_TEMPORAL_ENUM, default off. */
+const ANSWER_SYSTEM_TEMPORAL_ENUM =
+  "Answer the user's question using ONLY the provided memory context. " +
+  "Each memory is prefixed with the date it was recorded; the current date accompanies the question. " +
+  "The context contains MANY dated memories, most unrelated to the question.\n" +
+  "Rules:\n" +
+  "1. FIRST list only the memories that are actually about the event(s) the question asks about; ignore every other dated memory. If two memories describe the same event, keep the most recently recorded one.\n" +
+  "2. Relative phrases INSIDE a memory ('yesterday', 'last week') are relative to THAT memory's recorded date — resolve them to absolute dates first.\n" +
+  "3. For elapsed time, durations, or ordering: take the absolute dates of ONLY the relevant events, then compute step by step against the current date.\n" +
+  "Commit to the computation those dates support; only abstain when no relevant dated memory exists. " +
+  "Show the short list of relevant dates and the calculation, then the final answer in one sentence.";
+/** Multi-session aggregation 口径: a count/sum/compare answer is derived, never
+ * a literal string, so the default 口径 makes the model abstain or under-count
+ * when the components are present. General aggregation guidance (mirrors the
+ * temporal 口径); default for multi-session, opt out with
+ * ALAYA_BENCH_QA_AGG_PROMPT=0. */
+const ANSWER_SYSTEM_AGGREGATION =
+  "Answer the user's question using ONLY the provided memory context. " +
+  "The question asks you to aggregate across the whole history (count, total, compare, or average), so the answer is almost never written in any single memory — you must derive it.\n" +
+  "Rules:\n" +
+  "1. First enumerate EVERY memory relevant to the question as a short list. The context often repeats the same underlying event across several entries — treat entries describing the same item/event as ONE and count distinct items only.\n" +
+  "2. Then compute: for 'how many' count the distinct items; for 'how much/total' sum the amounts; for 'which … most/least' compare the values across all candidates; for 'average' sum then divide.\n" +
+  "3. Count items even when mentioned only in passing or framed differently — an attempt, a plan, a free one, a fix all count if the question's scope includes them; prominence of the mention does not decide.\n" +
+  "Commit to the total the enumerated items support; do not answer 'I don't know' when relevant memories are present — only abstain when no relevant memory exists at all. " +
+  "Show the brief enumeration and calculation, then end with the final answer in one short sentence.";
 
 /** Judge口径: one-word yes/no, matching LongMemEval's anscheck metric. */
 const JUDGE_SYSTEM =
@@ -133,7 +166,7 @@ export function buildQaAnswerContext(
         : candidate.content
     )
     .join("\n\n");
-  return text.slice(0, QA_CONTEXT_CHAR_CAP);
+  return text.slice(0, qaContextCharCap());
 }
 
 /**
@@ -158,7 +191,19 @@ function answerSystemFor(questionType: string, isAbstention: boolean): string {
     return ANSWER_SYSTEM_PREFERENCE;
   }
   if (questionType === "temporal-reasoning") {
-    return ANSWER_SYSTEM_TEMPORAL;
+    return process.env.ALAYA_BENCH_QA_TEMPORAL_ENUM !== undefined
+      ? ANSWER_SYSTEM_TEMPORAL_ENUM
+      : ANSWER_SYSTEM_TEMPORAL;
+  }
+  // multi-session is LongMemEval's aggregation/comparison category; the
+  // aggregation 口径 is the default for it (like temporal/preference), opt out
+  // with ALAYA_BENCH_QA_AGG_PROMPT=0 for A/B.
+  if (
+    questionType === "multi-session" &&
+    process.env.ALAYA_BENCH_QA_AGG_PROMPT !== "0" &&
+    process.env.ALAYA_BENCH_QA_AGG_PROMPT !== "off"
+  ) {
+    return ANSWER_SYSTEM_AGGREGATION;
   }
   return ANSWER_SYSTEM_DEFAULT;
 }
@@ -184,11 +229,22 @@ function buildJudgeUser(
     );
   }
   if (questionType === "single-session-preference") {
+    // Official LongMemEval preference rubric (deliberately lenient) + an explicit
+    // clarification of that intent. The clarification is neutral for a faithful judge
+    // (gpt-4o: 29/30 with and without it) but stops a stronger model (gpt-5.4-mini)
+    // from silently applying a stricter-than-official bar: with it, mini's agreement
+    // with the gpt-4o official-rubric verdicts rises 73%->90% while its scrambled-gold
+    // rejection stays 100% (2026-06-15 calibration). Lets future baselines use a strong
+    // judge faithfully instead of pinning to the older, weaker gpt-4o.
     return (
       "I will give you a question, a rubric for desired personalized response, and a response from a model. " +
       "Please answer yes if the response satisfies the desired response. Otherwise, answer no. " +
       "The model does not need to reflect all the points in the rubric. " +
-      "The response is correct as long as it recalls and utilizes the user's personal information correctly.\n\n" +
+      "The response is correct as long as it recalls and utilizes the user's personal information correctly. " +
+      "Answer yes if the response recalls and uses the user's relevant personal information from the rubric, " +
+      "even if it is not exhaustive, omits some rubric points, or also includes some general advice. " +
+      "Only answer no if the response ignores the user's personal information, contradicts it, or recommends " +
+      "something the rubric says the user would not prefer.\n\n" +
       `Question: ${question}\n\nRubric: ${gold}\n\nModel Response: ${answer}\n\n` +
       "Is the model response correct? Answer yes or no only."
     );
@@ -224,7 +280,10 @@ function buildJudgeUser(
  */
 export async function scoreQaQuestion(
   input: QaQuestionInput,
-  chat: QaChatFn
+  chat: QaChatFn,
+  // Judge with a separate model when given (the official LongMemEval metric uses
+  // gpt-4o); defaults to the answer chat for backward compatibility.
+  judgeChat: QaChatFn = chat
 ): Promise<QaQuestionVerdict> {
   const context = buildQaAnswerContext(input.delivered);
   const isAbstention = isAbstentionQuestionId(input.questionId);
@@ -233,7 +292,7 @@ export async function scoreQaQuestion(
     // question date = "now"; temporal Qs anchor elapsed-day math against it.
     `Current date: ${input.questionDate}\n\nMemory context:\n${context}\n\nQuestion: ${input.question}\nAnswer:`
   );
-  const judgeVerdict = await chat(
+  const judgeVerdict = await judgeChat(
     JUDGE_SYSTEM,
     buildJudgeUser(
       input.questionType,

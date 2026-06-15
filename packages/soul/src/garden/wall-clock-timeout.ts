@@ -184,15 +184,27 @@ export async function withWallClockTimeout<T>(
   }, WALL_CLOCK_TICK_MS);
   wallClockHandle.unref?.();
 
+  let raceSettled = false;
   try {
     const inner = fn(controller.signal);
-    // invariant: if the timeout backstop wins the race, the abandoned `inner`
-    // promise may still reject later (e.g. the socket finally errors). Attach a
-    // no-op catch so that late rejection does not surface as an
-    // unhandledRejection and crash the process.
-    inner.catch(() => {});
-    return await Promise.race([inner, timeoutSettlement]);
+    // invariant: once the outer race already settled, a late rejection from an
+    // abandoned inner promise must not surface as an unhandledRejection.
+    // Timeout/operator-abort paths intentionally abandon the inner; any other
+    // post-settlement rejection is unexpected and should stay visible.
+    void inner.catch((error: unknown) => {
+      if (!raceSettled || controller.signal.aborted) {
+        return;
+      }
+      console.warn(
+        "garden/wall-clock-timeout: inner promise rejected after outer settlement",
+        { error }
+      );
+    });
+    const result = await Promise.race([inner, timeoutSettlement]);
+    raceSettled = true;
+    return result;
   } catch (error) {
+    raceSettled = true;
     // Distinguish OUR timeout from any other rejection. If `trigger` is set,
     // our controller aborted the inner; rewrap as WallClockTimeoutError so
     // callers can classify it cleanly. If the operator aborted, surface the

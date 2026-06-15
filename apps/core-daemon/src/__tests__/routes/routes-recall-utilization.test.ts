@@ -97,7 +97,7 @@ function fakeEventLogRepo(rows: readonly EventLogEntry[]): RecallUtilizationEven
 
 function buildApp(services: RecallUtilizationRouteServices): Hono {
   const app = new Hono();
-  registerErrorHandler(app);
+  registerErrorHandler(app, { error: vi.fn() });
   registerRecallUtilizationRoutes(app, services);
   return app;
 }

@@ -17,21 +17,19 @@ const PROJECTS = [
 const extraArgs = process.argv.slice(2);
 const isWindows = process.platform === "win32";
 const childEnv = createChildEnv();
+const coverageEnabled = extraArgs.some(
+  (arg) => arg === "--coverage.enabled" || arg.startsWith("--coverage.enabled=")
+);
+const hasCoverageReportsDirectoryArg = extraArgs.some(
+  (arg) =>
+    arg === "--coverage.reportsDirectory" || arg.startsWith("--coverage.reportsDirectory=")
+);
 
 for (const project of PROJECTS) {
   console.log(`\n==> vitest project: ${project}`);
   const result = spawnSync(
     "pnpm",
-    [
-      "exec",
-      "vitest",
-      "run",
-      "--config",
-      "vitest.config.mjs",
-      "--project",
-      project,
-      ...extraArgs
-    ],
+    buildVitestArgs(project),
     {
       env: childEnv,
       stdio: "inherit",
@@ -57,4 +55,29 @@ function createChildEnv() {
     }
   }
   return env;
+}
+
+function buildVitestArgs(project) {
+  return [
+    "exec",
+    "vitest",
+    "run",
+    "--config",
+    "vitest.config.mjs",
+    "--project",
+    project,
+    ...extraArgs,
+    ...buildCoverageArgs(project)
+  ];
+}
+
+function buildCoverageArgs(project) {
+  if (!coverageEnabled || hasCoverageReportsDirectoryArg) {
+    return [];
+  }
+  return ["--coverage.reportsDirectory", `coverage/${sanitizeProjectName(project)}`];
+}
+
+function sanitizeProjectName(project) {
+  return project.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }

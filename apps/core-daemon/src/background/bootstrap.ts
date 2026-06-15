@@ -52,7 +52,7 @@ export class BackgroundServiceManager {
             .catch((err) => {
               this.logger.warn("background service task failed", {
                 service: svc.name,
-                error: err instanceof Error ? err.message : String(err)
+                ...summarizeBackgroundTaskError(err)
               });
             })
             .finally(() => {
@@ -87,3 +87,13 @@ const defaultBackgroundServiceLogger: BackgroundServiceLogger = Object.freeze({
     console.warn(message, meta);
   }
 });
+
+function summarizeBackgroundTaskError(error: unknown): {
+  readonly errorName: string;
+  readonly errorMessageRedacted: true;
+} {
+  return {
+    errorName: error instanceof Error ? error.name : "NonError",
+    errorMessageRedacted: true
+  };
+}

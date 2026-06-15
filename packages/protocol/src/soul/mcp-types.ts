@@ -156,6 +156,10 @@ export const SoulMemorySearchRequestSchema = z
 export const SoulMemorySearchResponseSchema = z
   .object({
     delivery_id: NonEmptyStringSchema,
+    // Additive response marker for sibling consumers. Older daemons omit it;
+    // newer ones emit the current protocol value without changing the rest of
+    // the recall payload shape.
+    protocol_version: NonNegativeIntSchema.min(1).optional(),
     results: z.array(MemorySearchResultSchema).readonly(),
     active_constraints: z.array(SoulActiveConstraintSchema).readonly().optional(),
     active_constraints_count: NonNegativeIntSchema.optional(),

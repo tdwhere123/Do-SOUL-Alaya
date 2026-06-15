@@ -193,6 +193,7 @@ export async function addSourceProximityCandidates(params: Readonly<{
   readonly addCandidate: CoarseCandidateAdder;
   readonly admissionLimit: number;
   readonly evidenceSearchPort?: RecallServiceDependencies["evidenceSearchPort"];
+  readonly robustSourceRefParsing?: boolean;
   readonly warn: RecallServiceWarnPort;
 }>): Promise<Readonly<Record<string, string>>> {
   if (params.drafts.size === 0 || params.admissionLimit <= 0) {
@@ -204,14 +205,15 @@ export async function addSourceProximityCandidates(params: Readonly<{
     return Object.freeze({});
   }
 
+  const robust = params.robustSourceRefParsing ?? false;
   const sourceRefsByMemoryId = await loadEvidenceSourceRefsByMemoryId({
     workspaceId: params.workspaceId,
     entries: params.tierMemories,
     evidenceSearchPort: params.evidenceSearchPort,
     warn: params.warn
   });
-  const sourceCohortKeys = buildEvidenceSourceCohortKeys(params.tierMemories, sourceRefsByMemoryId);
-  const bySource = buildEvidenceSourceChunkIndex(params.tierMemories, sourceRefsByMemoryId);
+  const sourceCohortKeys = buildEvidenceSourceCohortKeys(params.tierMemories, sourceRefsByMemoryId, robust);
+  const bySource = buildEvidenceSourceChunkIndex(params.tierMemories, sourceRefsByMemoryId, robust);
   if (bySource.size === 0) {
     return sourceCohortKeys;
   }
@@ -223,7 +225,7 @@ export async function addSourceProximityCandidates(params: Readonly<{
       readonly score: number;
     }>();
     for (const ref of sourceRefsByMemoryId.get(seed.draft.entry.object_id) ?? seed.draft.entry.evidence_refs) {
-      const parsed = parseEvidenceSourceChunkRef(ref);
+      const parsed = parseEvidenceSourceChunkRef(ref, robust);
       if (parsed === null) {
         continue;
       }

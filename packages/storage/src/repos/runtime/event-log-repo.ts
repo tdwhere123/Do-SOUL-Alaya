@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { EventLogEntrySchema, type EventLogEntry } from "@do-soul/alaya-protocol";
+import {
+  EventLogEntrySchema,
+  StreamingEventType,
+  WorkspaceRunEventType,
+  type EventLogEntry
+} from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 
@@ -22,6 +27,11 @@ export interface EventLogRepo {
   transactional<T>(fn: () => T): T;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
+  queryConversationMessageEventsByRun(
+    runId: string,
+    page?: EventLogPageOptions
+  ): Promise<readonly EventLogEntry[]>;
+  countConversationMessageEventsByRun(runId: string): Promise<number>;
   queryByRunCursorState(
     runId: string,
     lastEventId: string | null
@@ -42,6 +52,11 @@ export interface EventLogRepo {
   queryByType(eventType: string): Promise<readonly EventLogEntry[]>;
   getLatestEventId(runId: string): Promise<string | null>;
   getLatestWorkspaceEventId(workspaceId: string): Promise<string | null>;
+}
+
+export interface EventLogPageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 interface EventLogRow {
@@ -76,11 +91,24 @@ interface EventLogCursorStateRow {
   readonly latest_event_id: string | null;
 }
 
+interface CountRow {
+  readonly total: number;
+}
+
+const CONVERSATION_MESSAGE_EVENT_TYPES = [
+  WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
+  WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED,
+  StreamingEventType.MESSAGE_COMPLETED
+] as const;
+
 export class SqliteEventLogRepo implements EventLogRepo {
   private readonly appendStatement;
   private readonly deleteByIdStatement;
   private readonly queryByEntityStatement;
   private readonly queryByRunStatement;
+  private readonly queryConversationMessageEventsByRunStatement;
+  private readonly queryConversationMessageEventsByRunPagedStatement;
+  private readonly countConversationMessageEventsByRunStatement;
   private readonly queryByRunCursorStateStatement;
   private readonly queryByWorkspaceStatement;
   private readonly queryByWorkspaceAndTypeStatement;
@@ -140,6 +168,47 @@ export class SqliteEventLogRepo implements EventLogRepo {
       FROM event_log
       WHERE run_id = ?
       ORDER BY created_at ASC, rowid ASC
+    `);
+    this.queryConversationMessageEventsByRunStatement = db.connection.prepare(`
+      SELECT
+        event_id,
+        event_type,
+        entity_type,
+        entity_id,
+        workspace_id,
+        run_id,
+        caused_by,
+        revision,
+        payload_json,
+        created_at
+      FROM event_log
+      WHERE run_id = ?
+        AND event_type IN (?, ?, ?)
+      ORDER BY created_at ASC, rowid ASC
+    `);
+    this.queryConversationMessageEventsByRunPagedStatement = db.connection.prepare(`
+      SELECT
+        event_id,
+        event_type,
+        entity_type,
+        entity_id,
+        workspace_id,
+        run_id,
+        caused_by,
+        revision,
+        payload_json,
+        created_at
+      FROM event_log
+      WHERE run_id = ?
+        AND event_type IN (?, ?, ?)
+      ORDER BY created_at ASC, rowid ASC
+      LIMIT ? OFFSET ?
+    `);
+    this.countConversationMessageEventsByRunStatement = db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM event_log
+      WHERE run_id = ?
+        AND event_type IN (?, ?, ?)
     `);
     this.queryByRunCursorStateStatement = db.connection.prepare(`
       SELECT
@@ -376,6 +445,41 @@ export class SqliteEventLogRepo implements EventLogRepo {
       return rows.map((row) => parseEventLogEntryRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to query event log by run.", error);
+    }
+  }
+
+  public async queryConversationMessageEventsByRun(
+    runId: string,
+    page?: EventLogPageOptions
+  ): Promise<readonly EventLogEntry[]> {
+    try {
+      const rows =
+        page === undefined
+          ? (this.queryConversationMessageEventsByRunStatement.all(
+              runId,
+              ...CONVERSATION_MESSAGE_EVENT_TYPES
+            ) as EventLogRow[])
+          : (this.queryConversationMessageEventsByRunPagedStatement.all(
+              runId,
+              ...CONVERSATION_MESSAGE_EVENT_TYPES,
+              page.limit,
+              page.offset
+            ) as EventLogRow[]);
+      return rows.map((row) => parseEventLogEntryRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to query message events by run.", error);
+    }
+  }
+
+  public async countConversationMessageEventsByRun(runId: string): Promise<number> {
+    try {
+      const row = this.countConversationMessageEventsByRunStatement.get(
+        runId,
+        ...CONVERSATION_MESSAGE_EVENT_TYPES
+      ) as CountRow | undefined;
+      return row === undefined ? 0 : Number(row.total);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to count message events by run.", error);
     }
   }
 

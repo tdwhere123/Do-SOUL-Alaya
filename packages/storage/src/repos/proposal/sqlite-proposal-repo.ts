@@ -49,6 +49,7 @@ import {
   type CreateProposalWithEventsOptions,
   type FindPendingSummariesOptions,
   type PendingProposalSummary,
+  type ProposalListPageOptions,
   type ProposalCreateInput,
   type ProposalCreationEventInput,
   type ProposalRepo,
@@ -63,7 +64,10 @@ export class SqliteProposalRepo implements ProposalRepo {
   private readonly createStatement;
   private readonly findByIdStatement;
   private readonly findByWorkspaceIdStatement;
+  private readonly findByWorkspaceIdPagedStatement;
+  private readonly countByWorkspaceIdStatement;
   private readonly findPendingStatement;
+  private readonly findPendingPagedStatement;
   private readonly countPendingStatement;
   private readonly findPendingByRunIdStatement;
   private readonly assignReviewerStatement;
@@ -129,12 +133,31 @@ export class SqliteProposalRepo implements ProposalRepo {
       WHERE workspace_id = ?
       ORDER BY last_updated_at DESC, proposal_id DESC
     `);
+    this.findByWorkspaceIdPagedStatement = db.connection.prepare(`
+      SELECT${PROPOSAL_SELECT_COLUMNS}
+      FROM proposals
+      WHERE workspace_id = ?
+      ORDER BY last_updated_at DESC, proposal_id DESC
+      LIMIT ? OFFSET ?
+    `);
+    this.countByWorkspaceIdStatement = db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM proposals
+      WHERE workspace_id = ?
+    `);
 
     this.findPendingStatement = db.connection.prepare(`
       SELECT${PROPOSAL_SELECT_COLUMNS}
       FROM proposals
       WHERE workspace_id = ? AND resolution_state = 'pending'
       ORDER BY last_updated_at DESC, proposal_id DESC
+    `);
+    this.findPendingPagedStatement = db.connection.prepare(`
+      SELECT${PROPOSAL_SELECT_COLUMNS}
+      FROM proposals
+      WHERE workspace_id = ? AND resolution_state = 'pending'
+      ORDER BY last_updated_at DESC, proposal_id DESC
+      LIMIT ? OFFSET ?
     `);
 
     this.countPendingStatement = db.connection.prepare(`
@@ -469,11 +492,17 @@ export class SqliteProposalRepo implements ProposalRepo {
     }
   }
 
-  public async findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<Proposal>[]> {
+  public async findByWorkspaceId(
+    workspaceId: string,
+    page?: ProposalListPageOptions
+  ): Promise<readonly Readonly<Proposal>[]> {
     const parsedWorkspaceId = parseWorkspaceId(workspaceId);
 
     try {
-      const rows = this.findByWorkspaceIdStatement.all(parsedWorkspaceId) as ProposalRow[];
+      const rows =
+        page === undefined
+          ? (this.findByWorkspaceIdStatement.all(parsedWorkspaceId) as ProposalRow[])
+          : (this.findByWorkspaceIdPagedStatement.all(parsedWorkspaceId, page.limit, page.offset) as ProposalRow[]);
       return rows.map((row) => parseProposalRow(row));
     } catch (error) {
       throw new StorageError(
@@ -484,11 +513,34 @@ export class SqliteProposalRepo implements ProposalRepo {
     }
   }
 
-  public async findPending(workspaceId: string): Promise<readonly Readonly<Proposal>[]> {
+  public async countByWorkspaceId(workspaceId: string): Promise<number> {
     const parsedWorkspaceId = parseWorkspaceId(workspaceId);
 
     try {
-      const rows = this.findPendingStatement.all(parsedWorkspaceId) as ProposalRow[];
+      const row = this.countByWorkspaceIdStatement.get(parsedWorkspaceId) as
+        | { readonly total: number }
+        | undefined;
+      return row === undefined ? 0 : Number(row.total);
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to count proposals for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async findPending(
+    workspaceId: string,
+    page?: ProposalListPageOptions
+  ): Promise<readonly Readonly<Proposal>[]> {
+    const parsedWorkspaceId = parseWorkspaceId(workspaceId);
+
+    try {
+      const rows =
+        page === undefined
+          ? (this.findPendingStatement.all(parsedWorkspaceId) as ProposalRow[])
+          : (this.findPendingPagedStatement.all(parsedWorkspaceId, page.limit, page.offset) as ProposalRow[]);
       return rows.map((row) => parseProposalRow(row));
     } catch (error) {
       throw new StorageError(

@@ -25,6 +25,7 @@ describe("createReconciliationLlmDecisionPort", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     rmSync(cacheRoot, { recursive: true, force: true });
   });
 
@@ -57,6 +58,64 @@ describe("createReconciliationLlmDecisionPort", () => {
     expect(second.targetObjectId).toBe("memory-a");
     // Served from disk — no second LLM call.
     expect(llmComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries transient garden HTTP failures before parsing the decision", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("rate limited", {
+        status: 429,
+        statusText: "Too Many Requests"
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ kind: "add", reason: "distinct" })
+            }
+          }
+        ]
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }));
+    const port = createReconciliationLlmDecisionPort({
+      config: baseConfig,
+      cacheRoot
+    });
+
+    const result = await port!.decide({
+      incomingContent: "works in Munich",
+      candidates: [{ objectId: "memory-a", content: "The user lives in Berlin" }]
+    });
+
+    expect(result).toMatchObject({ kind: "add", reason: "distinct" });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry deterministic 200 response-shape failures", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: ""
+            }
+          }
+        ]
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }));
+    const port = createReconciliationLlmDecisionPort({
+      config: baseConfig,
+      cacheRoot
+    });
+
+    await expect(port!.decide({
+      incomingContent: "works in Munich",
+      candidates: [{ objectId: "memory-a", content: "The user lives in Berlin" }]
+    })).rejects.toThrow("garden reconciliation decision returned no content");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it("content-anchored cache hit resolves the target to the current object_id", async () => {

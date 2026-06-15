@@ -22,6 +22,14 @@ export function registerInspectorMemoryEntryRoutes(
     if (dimension !== undefined && dimension.length > 0) {
       search.set("dimension", dimension);
     }
+    const limit = context.req.query("limit");
+    if (limit !== undefined && limit.length > 0) {
+      search.set("limit", limit);
+    }
+    const offset = context.req.query("offset");
+    if (offset !== undefined && offset.length > 0) {
+      search.set("offset", offset);
+    }
     const query = search.toString();
     return await proxyDaemonJson(context, options, {
       method: "GET",

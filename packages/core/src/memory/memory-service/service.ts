@@ -21,6 +21,7 @@ import type {
   MemoryEntryInput,
   MemoryEntryRepoUpdateFields,
   MemoryEntryUpdateFields,
+  MemoryListPageOptions,
   MemoryServiceDependencies
 } from "./types.js";
 import {
@@ -137,48 +138,39 @@ export class MemoryService {
     readonly event: EventLogEntry;
   }> {
     const createWithinTransaction = this.dependencies.memoryEntryRepo.createWithinTransaction;
-    if (createWithinTransaction !== undefined) {
-      const enrichPendingWriter = this.dependencies.enrichPendingWriter;
-      if (enqueueEnrichment !== undefined && enrichPendingWriter === undefined) {
-        throw new CoreError(
-          "CONFLICT",
-          "Atomic enrich_pending enqueue requested but the enrich-pending writer is not wired."
-        );
-      }
-
-      let event: EventLogEntry | undefined;
-      const created = createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, {
-        beforeCreate: () => {
-          event = this.appendCreatedEventSynchronously(createdEventInput);
-        },
-        afterCreate: () => {
-          if (enqueueEnrichment !== undefined) {
-            enrichPendingWriter?.enqueue({
-              workspaceId: memoryEntry.workspace_id,
-              memoryId: memoryEntry.object_id,
-              runId: enqueueEnrichment.runId,
-              sourceSignalId: enqueueEnrichment.sourceSignalId
-            });
-          }
-        }
-      });
-
-      if (event === undefined) {
-        throw new CoreError("CONFLICT", "Memory create transaction did not append its audit event.");
-      }
-
-      return { created, event };
+    if (createWithinTransaction === undefined) {
+      throw new CoreError("CONFLICT", "Memory create transaction port is not available");
     }
 
-    if (enqueueEnrichment !== undefined) {
+    const enrichPendingWriter = this.dependencies.enrichPendingWriter;
+    if (enqueueEnrichment !== undefined && enrichPendingWriter === undefined) {
       throw new CoreError(
         "CONFLICT",
-        "Atomic enrich_pending enqueue requested but the storage transaction port is not wired."
+        "Atomic enrich_pending enqueue requested but the enrich-pending writer is not wired."
       );
     }
 
-    const event = await this.dependencies.eventLogRepo.append(createdEventInput);
-    const created = await this.dependencies.memoryEntryRepo.create(memoryEntry);
+    let event: EventLogEntry | undefined;
+    const created = createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, {
+      beforeCreate: () => {
+        event = this.appendCreatedEventSynchronously(createdEventInput);
+      },
+      afterCreate: () => {
+        if (enqueueEnrichment !== undefined) {
+          enrichPendingWriter?.enqueue({
+            workspaceId: memoryEntry.workspace_id,
+            memoryId: memoryEntry.object_id,
+            runId: enqueueEnrichment.runId,
+            sourceSignalId: enqueueEnrichment.sourceSignalId
+          });
+        }
+      }
+    });
+
+    if (event === undefined) {
+      throw new CoreError("CONFLICT", "Memory create transaction did not append its audit event.");
+    }
+
     return { created, event };
   }
 
@@ -264,7 +256,7 @@ export class MemoryService {
       evidence_refs: null,
       occurred_at: occurredAt
     } as const;
-    const archivedEvent = await this.dependencies.eventLogRepo.append({
+    const archivedEventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_ARCHIVED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -272,9 +264,9 @@ export class MemoryService {
       run_id: existing.run_id,
       caused_by: parsedCausedBy,
       payload_json: SoulMemoryArchivedPayloadSchema.parse(transitionPayload)
-    });
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
-    const stateChangedEvent = await this.dependencies.eventLogRepo.append({
+    const stateChangedEventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -282,9 +274,18 @@ export class MemoryService {
       run_id: existing.run_id,
       caused_by: parsedCausedBy,
       payload_json: SoulMemoryStateChangedPayloadSchema.parse(transitionPayload)
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+    let archivedEvent: EventLogEntry | undefined;
+    let stateChangedEvent: EventLogEntry | undefined;
+    const archived = await this.dependencies.memoryEntryRepo.archive(parsedObjectId, occurredAt, () => {
+      archivedEvent = this.appendAuditEventSynchronously(archivedEventInput);
+      stateChangedEvent = this.appendAuditEventSynchronously(stateChangedEventInput);
     });
 
-    const archived = await this.dependencies.memoryEntryRepo.archive(parsedObjectId, occurredAt);
+    if (archivedEvent === undefined || stateChangedEvent === undefined) {
+      throw new CoreError("CONFLICT", "Memory archive transaction did not append its audit events.");
+    }
     await this.dependencies.runtimeNotifier.notifyEntry(archivedEvent);
     await this.dependencies.runtimeNotifier.notifyEntry(stateChangedEvent);
     return archived;
@@ -318,7 +319,7 @@ export class MemoryService {
     }
 
     const occurredAt = this.now();
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -337,10 +338,15 @@ export class MemoryService {
         evidence_refs: null,
         occurred_at: occurredAt
       })
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+    let event: EventLogEntry | undefined;
+    const updated = await transitionLifecycle(parsedObjectId, parsedNextState, occurredAt, () => {
+      event = this.appendAuditEventSynchronously(eventInput);
     });
-
-    const updated = await transitionLifecycle(parsedObjectId, parsedNextState, occurredAt);
-
+    if (event === undefined) {
+      throw new CoreError("CONFLICT", "Memory lifecycle transition transaction did not append its audit event.");
+    }
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return updated;
   }
@@ -433,7 +439,7 @@ export class MemoryService {
     }
 
     const occurredAt = this.now();
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -452,9 +458,15 @@ export class MemoryService {
         evidence_refs: null,
         occurred_at: occurredAt
       })
-    });
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
-    await hardDeleteTombstoned(parsedObjectId);
+    let event: EventLogEntry | undefined;
+    await hardDeleteTombstoned(parsedObjectId, () => {
+      event = this.appendAuditEventSynchronously(eventInput);
+    });
+    if (event === undefined) {
+      throw new CoreError("CONFLICT", "Memory tombstone delete transaction did not append its audit event.");
+    }
     await this.dependencies.runtimeNotifier.notifyEntry(event);
   }
 
@@ -848,19 +860,53 @@ export class MemoryService {
     return entries.filter((entry) => entry.workspace_id === workspaceId);
   }
 
-  public findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]> {
-    return this.dependencies.memoryEntryRepo.findByWorkspaceId(workspaceId);
+  public findByWorkspaceId(
+    workspaceId: string,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return this.dependencies.memoryEntryRepo.findByWorkspaceId(workspaceId, undefined, page);
   }
 
-  public findByRunId(runId: string): Promise<readonly Readonly<MemoryEntry>[]> {
-    return this.dependencies.memoryEntryRepo.findByRunId(runId);
+  public async countByWorkspaceId(workspaceId: string): Promise<number> {
+    const countByWorkspaceId = this.dependencies.memoryEntryRepo.countByWorkspaceId;
+    if (countByWorkspaceId !== undefined) {
+      return await countByWorkspaceId.call(this.dependencies.memoryEntryRepo, workspaceId);
+    }
+    return (await this.findByWorkspaceId(workspaceId)).length;
+  }
+
+  public findByRunId(
+    runId: string,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return this.dependencies.memoryEntryRepo.findByRunId(runId, page);
+  }
+
+  public async countByRunId(runId: string): Promise<number> {
+    const countByRunId = this.dependencies.memoryEntryRepo.countByRunId;
+    if (countByRunId !== undefined) {
+      return await countByRunId.call(this.dependencies.memoryEntryRepo, runId);
+    }
+    return (await this.findByRunId(runId)).length;
   }
 
   public findByDimension(
     workspaceId: string,
-    dimension: MemoryEntry["dimension"]
+    dimension: MemoryEntry["dimension"],
+    page?: MemoryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]> {
-    return this.dependencies.memoryEntryRepo.findByDimension(workspaceId, dimension);
+    return this.dependencies.memoryEntryRepo.findByDimension(workspaceId, dimension, page);
+  }
+
+  public async countByDimension(
+    workspaceId: string,
+    dimension: MemoryEntry["dimension"]
+  ): Promise<number> {
+    const countByDimension = this.dependencies.memoryEntryRepo.countByDimension;
+    if (countByDimension !== undefined) {
+      return await countByDimension.call(this.dependencies.memoryEntryRepo, workspaceId, dimension);
+    }
+    return (await this.findByDimension(workspaceId, dimension)).length;
   }
 
   public findByScopeClass(

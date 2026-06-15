@@ -276,7 +276,7 @@ describe("Memory embedding storage repo", () => {
   });
 
   it("chunks large metadata lookups below SQLite's bind-parameter ceiling", async () => {
-    const { workspaceId, repo } = await createRepoContext();
+    const { database, workspaceId, repo } = await createRepoContext();
     const existingIds = [
       "11111111-1111-4111-8111-111111111111",
       "22222222-2222-4222-8222-222222222222"
@@ -303,9 +303,13 @@ describe("Memory embedding storage repo", () => {
 
     const metadata = await repo.findMetadataByObjectIds(oversizedLookup);
     const hydrated = await repo.listByObjectIds(workspaceId, oversizedLookup);
+    const filterRowsAfterHydration = database.connection
+      .prepare("SELECT object_id FROM temp.memory_embedding_object_id_filter")
+      .all() as ReadonlyArray<{ readonly object_id: string }>;
 
     expect(metadata.map((record) => record.object_id)).toEqual([...existingIds].sort());
     expect(hydrated.map((record) => record.object_id)).toEqual([...existingIds].sort());
+    expect(filterRowsAfterHydration).toEqual([]);
     for (const record of metadata) {
       expect(record).not.toHaveProperty("embedding");
     }

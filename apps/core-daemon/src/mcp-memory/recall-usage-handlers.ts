@@ -274,7 +274,12 @@ export function createRecallHandler(params: Readonly<{
       delivered_at: params.now()
     });
 
-    void accrueCoRecallPlasticity(params, deliveredObjectIds, context.workspaceId).catch(() => {});
+    void accrueCoRecallPlasticity(params, deliveredObjectIds, context.workspaceId).catch((err) => {
+      params.warn("co-recall plasticity fire-and-forget failed", {
+        workspace_id: context.workspaceId,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    });
 
     enqueueRecallExtractTask(params, request, context, deliveredObjectIds);
 
@@ -291,6 +296,7 @@ export function createRecallHandler(params: Readonly<{
 
     return SoulMemorySearchResponseSchema.parse({
       delivery_id: deliveryId,
+      protocol_version: 1,
       results,
       active_constraints: recallResult.active_constraints,
       active_constraints_count: recallResult.active_constraints_count,

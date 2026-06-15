@@ -42,8 +42,52 @@ import {
 } from "./qa-harness.js";
 import type { LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import type { QaChatFn } from "./qa-chat.js";
+import { selectRelevantMemories } from "./qa-llm-filter.js";
 
 const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
+
+/** Read a positive-integer env override, else the fallback. */
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+}
+
+/** Round-robin across the source sessions of the recalled pool so one
+ * high-match session can't bury other answer sessions' gold below the delivery
+ * budget. Reshapes QA delivery selection only (post-recall); recall-service is
+ * untouched. Pair with a wide ALAYA_BENCH_RECALL_MAXK so the deep gold is in
+ * the pool to redistribute. */
+function selectSessionSpread<T extends { readonly object_id: string }>(
+  pool: readonly T[],
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
+  budget: number
+): T[] {
+  const bySession = new Map<string, T[]>();
+  for (const pointer of pool) {
+    const sessionId =
+      sidecar.get(buildLongMemEvalSidecarKey("memory_entry", pointer.object_id))
+        ?.sessionId ?? "?";
+    const bucket = bySession.get(sessionId);
+    if (bucket === undefined) bySession.set(sessionId, [pointer]);
+    else bucket.push(pointer);
+  }
+  // Map insertion order = each session's first (best) fusion rank.
+  const buckets = [...bySession.values()];
+  const picked: T[] = [];
+  for (let depth = 0; picked.length < budget; depth += 1) {
+    let progressed = false;
+    for (const bucket of buckets) {
+      const item = bucket[depth];
+      if (item !== undefined) {
+        picked.push(item);
+        progressed = true;
+        if (picked.length >= budget) break;
+      }
+    }
+    if (!progressed) break;
+  }
+  return picked;
+}
 
 function isBenchProfileEnabled(): boolean {
   const raw = process.env[BENCH_PROFILE_ENV];
@@ -111,6 +155,7 @@ export async function runLongMemEvalQuestion(input: {
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
   readonly captureSnapshot: boolean;
   readonly qaChat?: QaChatFn;
+  readonly qaJudgeChat?: QaChatFn;
 }): Promise<LongMemEvalWorkerResult> {
   const profileEnabled = isBenchProfileEnabled();
   const phase = createPhaseTimer();
@@ -322,15 +367,43 @@ export async function runLongMemEvalQuestion(input: {
     // API-free (recall only). Default off; set ALAYA_BENCH_POOL_DUMP to a path.
     if (process.env.ALAYA_BENCH_POOL_DUMP !== undefined) {
       const goldSet = new Set(goldMemoryIds);
+      // Per-candidate fusion breakdown (per-stream rank) from the core recall
+      // diagnostics, for offline "which stream buries the gold" analysis.
+      const fusionByOid = new Map<string, { fusedRank?: number; perStream?: unknown }>();
+      const fb = (recallResult as { readonly diagnostics?: { readonly fusion_breakdown?: ReadonlyArray<{ readonly object_id: string; readonly fused_rank?: number; readonly per_stream_rank?: unknown }> } }).diagnostics?.fusion_breakdown;
+      if (Array.isArray(fb)) {
+        for (const b of fb) fusionByOid.set(b.object_id, { fusedRank: b.fused_rank, perStream: b.per_stream_rank });
+      }
       const candidates = results.map((p, i) => {
-        const entry = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", p.object_id));
+        const kind = p.object_kind ?? "memory_entry";
+        // memory_entry candidates key on "memory_entry"; synthesis_capsule (route-B
+        // navigator) candidates carry their session via the capsule sidecar — resolve
+        // it so offline route-B coverage sim can credit a capsule's whole session.
+        const entry =
+          sidecar.get(buildLongMemEvalSidecarKey("memory_entry", p.object_id)) ??
+          sidecar.get(buildLongMemEvalSidecarKey("synthesis_capsule", p.object_id));
+        const fusion = fusionByOid.get(p.object_id);
         return {
           rank: i + 1,
           objectId: p.object_id,
+          objectKind: kind,
           isGold: goldSet.has(p.object_id),
           sessionId: entry?.sessionId ?? null,
           eventDate: entry?.eventDate ?? null,
+          ...(fusion?.fusedRank === undefined ? {} : { fusedRank: fusion.fusedRank }),
+          ...(fusion?.perStream === undefined ? {} : { perStream: fusion.perStream }),
           content: (entry?.content ?? "").replace(/\s+/gu, " ").slice(0, 400)
+        };
+      });
+      // Full gold set with session + recalled flag, for offline coverage analysis.
+      const recalledIds = new Set(results.map((p) => p.object_id));
+      const goldMemories = goldMemoryIds.map((id) => {
+        const entry = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id));
+        return {
+          objectId: id,
+          sessionId: entry?.sessionId ?? null,
+          recalled: recalledIds.has(id),
+          content: (entry?.content ?? "").replace(/\s+/gu, " ").slice(0, 240)
         };
       });
       appendFileSync(
@@ -343,6 +416,7 @@ export async function runLongMemEvalQuestion(input: {
           goldAnswer: input.question.answer,
           goldCount: goldMemoryIds.length,
           poolSize: results.length,
+          goldMemories,
           candidates
         }) + "\n"
       );
@@ -350,7 +424,41 @@ export async function runLongMemEvalQuestion(input: {
 
     let qaVerdict: QaQuestionVerdict | undefined;
     if (input.qaChat !== undefined) {
-      let delivered: QaDeliveredCandidate[] = deliveredResults
+      // QA delivery budget (default 10 = unchanged). ALAYA_BENCH_QA_DELIVER_K
+      // widens it so the aggregation reader sees more of a counting question's
+      // scattered gold; session-spread (default off) redistributes that budget
+      // across source sessions. Recall-service untouched.
+      // Aggregation questions (multi-session) want a wide budget so scattered
+      // gold reaches the reader; precise types (temporal) are hurt by extra
+      // dated candidates, so they stay narrow. ALAYA_BENCH_QA_WIDE_AGG turns on
+      // the type-aware budget; ALAYA_BENCH_QA_DELIVER_K is a global A/B override.
+      const deliverKRaw = Number(process.env.ALAYA_BENCH_QA_DELIVER_K);
+      const deliverK =
+        Number.isFinite(deliverKRaw) && deliverKRaw > 0
+          ? Math.floor(deliverKRaw)
+          : process.env.ALAYA_BENCH_QA_WIDE_AGG !== undefined &&
+              input.question.question_type === "multi-session"
+            ? 30
+            : 10;
+      const memoryEntryResults = results.filter(
+        (pointer) => (pointer.object_kind ?? "memory_entry") === "memory_entry"
+      );
+      // Widen for a global override, or for WIDE_AGG on multi-session only;
+      // other types keep the top-10 delivery.
+      const useWideDelivery =
+        process.env.ALAYA_BENCH_QA_DELIVER_K !== undefined ||
+        (process.env.ALAYA_BENCH_QA_WIDE_AGG !== undefined &&
+          input.question.question_type === "multi-session");
+      const qaPointers: ReadonlyArray<{
+        readonly object_id: string;
+        readonly object_kind?: string | null;
+      }> =
+        process.env.ALAYA_BENCH_QA_SESSION_SPREAD !== undefined
+          ? selectSessionSpread(memoryEntryResults, sidecar, deliverK)
+          : useWideDelivery
+            ? memoryEntryResults.slice(0, deliverK)
+            : deliveredResults;
+      let delivered: QaDeliveredCandidate[] = qaPointers
         .filter(
           (result) => (result.object_kind ?? "memory_entry") === "memory_entry"
         )
@@ -364,6 +472,52 @@ export async function runLongMemEvalQuestion(input: {
             ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
           };
         });
+      // Agent-side LLM relevance filter: retrieve WIDE (catch precise-class gold
+      // buried at rank 12-15), let an LLM pick the few relevant memories, deliver
+      // NARROW clean context. Decouples retrieve-width from deliver-width — the
+      // semantic selection fusion ranking can't do (§D wall). Default off.
+      if (
+        process.env.ALAYA_BENCH_QA_LLM_FILTER !== undefined &&
+        input.qaChat !== undefined
+      ) {
+        const filterK = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_K", 30);
+        const filterM = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_M", 8);
+        const widePool: QaDeliveredCandidate[] = memoryEntryResults
+          .slice(0, filterK)
+          .map((result) => {
+            const entry = sidecar.get(
+              buildLongMemEvalSidecarKey("memory_entry", result.object_id)
+            );
+            return {
+              objectId: result.object_id,
+              content: entry?.content ?? "",
+              ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+            };
+          })
+          .filter((cand) => cand.content.length > 0);
+        const selected = await selectRelevantMemories(
+          input.question.question,
+          widePool,
+          filterM,
+          input.qaChat
+        );
+        if (selected.length > 0) {
+          delivered = selected;
+        }
+      }
+      // Drop near-duplicate delivered content (one turn materializes into several
+      // seeds that each carry the whole turn text) so a counting question doesn't
+      // see the same event repeated and so the context budget holds more distinct
+      // candidates. Default off (ALAYA_BENCH_QA_DEDUP_DELIVERY).
+      if (process.env.ALAYA_BENCH_QA_DEDUP_DELIVERY !== undefined) {
+        const seen = new Set<string>();
+        delivered = delivered.filter((cand) => {
+          const key = cand.content.replace(/\s+/gu, " ").trim().slice(0, 200);
+          if (key.length === 0 || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
       // Diagnostic oracle: replace delivered recall with ONLY the materialized
       // gold memories (no distractors), to isolate ingestion-drop from recall
       // ranking/noise. Gold not materialized at ingestion is absent here too.
@@ -386,8 +540,36 @@ export async function runLongMemEvalQuestion(input: {
           goldAnswer: input.question.answer,
           delivered
         },
-        input.qaChat
+        input.qaChat,
+        input.qaJudgeChat ?? input.qaChat
       );
+      // Diagnostic: dump the delivered context + model answer + judge verdict as
+      // JSONL, so failing questions can be read by hand to split "delivered text
+      // lacks the answer" (ingestion-drop) from "delivered text has it but the
+      // reader answered wrong" (reader). Pairs with DELIVER_GOLD_ONLY to isolate
+      // the oracle ceiling. Default off; set ALAYA_BENCH_QA_DUMP to a file path.
+      if (process.env.ALAYA_BENCH_QA_DUMP !== undefined) {
+        appendFileSync(
+          process.env.ALAYA_BENCH_QA_DUMP,
+          JSON.stringify({
+            questionId: input.question.question_id,
+            questionType: input.question.question_type,
+            question: input.question.question,
+            questionDate: input.question.question_date,
+            goldAnswer: input.question.answer,
+            modelAnswer: qaVerdict.modelAnswer,
+            judgeVerdict: qaVerdict.judgeVerdict,
+            correct: qaVerdict.correct,
+            deliveredGoldOnly:
+              process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined,
+            delivered: delivered.map((d) => ({
+              objectId: d.objectId,
+              ...(d.eventDate === undefined ? {} : { eventDate: d.eventDate }),
+              content: d.content.replace(/\s+/gu, " ")
+            }))
+          }) + "\n"
+        );
+      }
     }
 
     const isAbstention = isAbstentionQuestionId(input.question.question_id);

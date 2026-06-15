@@ -13,7 +13,8 @@ import { runLiveBench } from "../live/runner.js";
 import { runLongMemEval } from "../longmemeval/runner.js";
 import {
   createGardenChatFn,
-  resolveQaChatConfig
+  resolveQaChatConfig,
+  resolveQaJudgeChatConfig
 } from "../longmemeval/qa-chat.js";
 import { runExtractionFill } from "../longmemeval/extraction-fill.js";
 import { runRecallEval } from "../longmemeval/recall-eval.js";
@@ -369,10 +370,12 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
     const qaOption = opts.qa
       ? (() => {
           const config = resolveQaChatConfig();
+          const judgeConfig = resolveQaJudgeChatConfig();
           return {
             chat: createGardenChatFn(config),
+            judgeChat: createGardenChatFn(judgeConfig),
             answerModel: config.model,
-            judgeModel: config.model
+            judgeModel: judgeConfig.model
           };
         })()
       : undefined;
@@ -553,7 +556,14 @@ async function runLocomoCommand(opts: ParsedFlags): Promise<number> {
       dataDir: opts.dataDir,
       embeddingMode: opts.embeddingMode,
       embeddingProviderKind: opts.embeddingProviderKind,
-      ...(opts.qa ? { qa: { chat: createGardenChatFn(resolveQaChatConfig()) } } : {})
+      ...(opts.qa
+        ? {
+            qa: {
+              chat: createGardenChatFn(resolveQaChatConfig()),
+              judgeChat: createGardenChatFn(resolveQaJudgeChatConfig())
+            }
+          }
+        : {})
     });
     const kpi = result.payload.kpi;
     process.stdout.write(

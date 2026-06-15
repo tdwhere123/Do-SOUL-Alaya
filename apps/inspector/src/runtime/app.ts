@@ -96,7 +96,7 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
     console.error("[inspector] sanitized route error", summarizeInspectorError(error, status));
     return context.json({ error: status === 400 ? "invalid_request" : "internal_error" }, status);
   });
-  app.use("*", createInspectorAuthMiddleware(options.token, { publicPathPrefixes: ["/assets/"] }));
+  app.use("/api/*", createInspectorAuthMiddleware(options.token));
   app.use("*", async (context, next) => {
     if (
       context.req.method !== "POST" &&

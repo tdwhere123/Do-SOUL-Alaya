@@ -123,6 +123,8 @@ const LONGMEMEVAL_SEED_POLICY = Object.freeze({
 // End-to-end QA option, shape mirrors cli.ts qaOption (chat fn + model labels).
 export interface LongMemEvalQaRunOption {
   readonly chat: QaChatFn;
+  /** Judge chat fn; defaults to `chat` (answer model) when omitted. */
+  readonly judgeChat?: QaChatFn;
   readonly answerModel: string;
   readonly judgeModel: string;
 }
@@ -324,7 +326,14 @@ export async function runLongMemEval(
           embeddingMode: opts.embeddingMode ?? "disabled",
           embeddingProviderKind: opts.embeddingProviderKind ?? "openai",
           captureSnapshot,
-          ...(opts.qa === undefined ? {} : { qaChat: opts.qa.chat })
+          ...(opts.qa === undefined
+            ? {}
+            : {
+                qaChat: opts.qa.chat,
+                ...(opts.qa.judgeChat === undefined
+                  ? {}
+                  : { qaJudgeChat: opts.qa.judgeChat })
+              })
         });
         collected.push(res);
         if (captureSnapshot && res.snapshotQuestion !== undefined) {

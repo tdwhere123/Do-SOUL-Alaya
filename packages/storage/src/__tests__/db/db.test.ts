@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initDatabase } from "../../sqlite/db.js";
+import { getCurrentSchemaSummary, initDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 
 interface TempContext {
@@ -125,6 +125,63 @@ describe("initDatabase forward-version guard", () => {
     try {
       const journalMode = database.connection.pragma("journal_mode", { simple: true });
       expect(String(journalMode).toLowerCase()).toBe("wal");
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("initDatabase migration runner", () => {
+  let context: TempContext;
+
+  beforeEach(() => {
+    context = createTempDatabasePath();
+  });
+
+  afterEach(() => {
+    cleanupTempDirectory(context.directory);
+  });
+
+  it("resumes a partially migrated file database and finishes with the full ordered schema ledger", () => {
+    const migrationFiles = readMigrationInventory().files;
+    const partialCutoff = migrationFiles.length - 3;
+    expect(partialCutoff).toBeGreaterThan(0);
+    const seed = new BetterSqlite3(context.filename);
+    try {
+      seed.pragma("foreign_keys = ON");
+      seed.exec(`
+        CREATE TABLE schema_version (
+          version INTEGER PRIMARY KEY,
+          applied_at TEXT NOT NULL
+        )
+      `);
+      const markApplied = seed.prepare(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)"
+      );
+
+      for (const file of migrationFiles.slice(0, partialCutoff)) {
+        seed.transaction(() => {
+          seed.exec(file.sql);
+          markApplied.run(file.version, `2026-06-14T00:00:${String(file.version).padStart(2, "0")}.000Z`);
+        })();
+      }
+    } finally {
+      seed.close();
+    }
+
+    const database = initDatabase({ filename: context.filename });
+    try {
+      const appliedVersions = (
+        database.connection.prepare("SELECT version FROM schema_version ORDER BY version ASC").all() as ReadonlyArray<{
+          readonly version: number;
+        }>
+      ).map((row) => row.version);
+      expect(appliedVersions).toEqual(migrationFiles.map((file) => file.version));
+      expect(getCurrentSchemaSummary(database)).toEqual({
+        persistedMaxVersion: migrationFiles.at(-1)?.version ?? null,
+        knownMaxVersion: migrationFiles.at(-1)?.version ?? 0,
+        schemaOk: true
+      });
     } finally {
       database.close();
     }

@@ -174,11 +174,20 @@ function copyTraceHeaders(context: Context, response: Response, fallbackRequestI
     response.headers.get(INSPECTOR_REQUEST_ID_HEADER) ??
     response.headers.get(INSPECTOR_CORRELATION_ID_HEADER) ??
     fallbackRequestId;
-  if (requestId === null || requestId === undefined || requestId.length === 0) {
-    return;
+  if (requestId !== null && requestId !== undefined && requestId.length > 0) {
+    context.header(INSPECTOR_REQUEST_ID_HEADER, requestId);
+    context.header(INSPECTOR_CORRELATION_ID_HEADER, requestId);
   }
-  context.header(INSPECTOR_REQUEST_ID_HEADER, requestId);
-  context.header(INSPECTOR_CORRELATION_ID_HEADER, requestId);
+  copyHeaderIfPresent(context, response, "x-total-count");
+  copyHeaderIfPresent(context, response, "x-limit");
+  copyHeaderIfPresent(context, response, "x-offset");
+}
+
+function copyHeaderIfPresent(context: Context, response: Response, name: string): void {
+  const value = response.headers.get(name);
+  if (value !== null && value.length > 0) {
+    context.header(name, value);
+  }
 }
 
 async function inspectUnexpectedRequestBody(context: Context): Promise<"none" | "unexpected" | "too_large"> {
@@ -216,9 +225,16 @@ async function inspectUnexpectedRequestBody(context: Context): Promise<"none" | 
     }
     throw error;
   } finally {
-    try {
-      await reader.cancel();
-    } catch {}
+    await reader.cancel().catch((error: unknown) => {
+      if (isRequestBodyTooLargeError(error)) {
+        return;
+      }
+      console.warn("[routes/shared] request body reader cancel failed after inspection", {
+        method: context.req.method,
+        path: context.req.path,
+        error
+      });
+    });
   }
 
   if (total > 0 || (declaredLength ?? 0) > 0 || transferEncoding !== undefined) {

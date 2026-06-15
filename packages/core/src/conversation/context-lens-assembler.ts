@@ -71,6 +71,7 @@ export interface LensAssemblerClaimRepoPort {
 
 export interface LensAssemblerMemoryRepoPort {
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
+  findByIds?(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
 export interface LensAssemblerEventLogRepoPort {
@@ -423,8 +424,24 @@ export class ContextLensAssembler {
   private async loadRecalledMemories(
     candidates: readonly Readonly<RecallCandidate>[]
   ): Promise<ReadonlyMap<string, Readonly<MemoryEntry>>> {
+    const objectIds = [...new Set(candidates.map((candidate) => candidate.object_id))];
+    if (objectIds.length === 0) {
+      return new Map();
+    }
+
+    if (this.dependencies.memoryRepo.findByIds !== undefined) {
+      const memories = await this.dependencies.memoryRepo.findByIds(objectIds);
+      const memoryById = new Map(memories.map((memory) => [memory.object_id, memory] as const));
+      return new Map(
+        objectIds.flatMap((objectId) => {
+          const memory = memoryById.get(objectId);
+          return memory === undefined ? [] : [[objectId, memory] as const];
+        })
+      );
+    }
+
     const entries = await Promise.all(
-      [...new Set(candidates.map((candidate) => candidate.object_id))].map(async (objectId) => {
+      objectIds.map(async (objectId) => {
         const memory = await this.dependencies.memoryRepo.findById(objectId);
         return memory === null ? null : ([objectId, memory] as const);
       })

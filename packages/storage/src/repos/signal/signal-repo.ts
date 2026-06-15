@@ -11,8 +11,14 @@ import { StorageError } from "../../shared/errors.js";
 export interface SignalRepo {
   create(signal: CandidateMemorySignal): Promise<CandidateMemorySignal>;
   getById(signalId: string): Promise<CandidateMemorySignal | null>;
-  listByRun(runId: string): Promise<readonly CandidateMemorySignal[]>;
+  listByRun(runId: string, page?: SignalListPageOptions): Promise<readonly CandidateMemorySignal[]>;
+  countByRun(runId: string): Promise<number>;
   updateState(signalId: string, state: SignalStateType): Promise<CandidateMemorySignal>;
+}
+
+export interface SignalListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 interface SignalRow {
@@ -37,10 +43,16 @@ interface SignalRow {
   readonly created_at: string;
 }
 
+interface CountRow {
+  readonly total: number;
+}
+
 export class SqliteSignalRepo implements SignalRepo {
   private readonly createStatement;
   private readonly getByIdStatement;
   private readonly listByRunStatement;
+  private readonly listByRunPagedStatement;
+  private readonly countByRunStatement;
   private readonly updateStateStatement;
 
   public constructor(private readonly db: StorageDatabase) {
@@ -117,6 +129,37 @@ export class SqliteSignalRepo implements SignalRepo {
       WHERE run_id = ?
       ORDER BY created_at ASC, signal_id ASC
     `);
+    this.listByRunPagedStatement = db.connection.prepare(`
+      SELECT
+        signal_id,
+        workspace_id,
+        run_id,
+        surface_id,
+        source,
+        signal_kind,
+        object_kind,
+        scope_hint,
+        domain_tags_json,
+        confidence,
+        evidence_refs_json,
+        source_memory_refs_json,
+        supersedes_refs_json,
+        exception_to_refs_json,
+        contradicts_refs_json,
+        incompatible_with_refs_json,
+        raw_payload_json,
+        signal_state,
+        created_at
+      FROM signals
+      WHERE run_id = ?
+      ORDER BY created_at ASC, signal_id ASC
+      LIMIT ? OFFSET ?
+    `);
+    this.countByRunStatement = db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM signals
+      WHERE run_id = ?
+    `);
     this.updateStateStatement = db.connection.prepare(`
       UPDATE signals
       SET signal_state = ?
@@ -168,12 +211,27 @@ export class SqliteSignalRepo implements SignalRepo {
     }
   }
 
-  public async listByRun(runId: string): Promise<readonly CandidateMemorySignal[]> {
+  public async listByRun(
+    runId: string,
+    page?: SignalListPageOptions
+  ): Promise<readonly CandidateMemorySignal[]> {
     try {
-      const rows = this.listByRunStatement.all(runId) as SignalRow[];
+      const rows =
+        page === undefined
+          ? (this.listByRunStatement.all(runId) as SignalRow[])
+          : (this.listByRunPagedStatement.all(runId, page.limit, page.offset) as SignalRow[]);
       return rows.map((row) => parseSignalRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list signals for run ${runId}.`, error);
+    }
+  }
+
+  public async countByRun(runId: string): Promise<number> {
+    try {
+      const row = this.countByRunStatement.get(runId) as CountRow | undefined;
+      return row === undefined ? 0 : Number(row.total);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to count signals for run ${runId}.`, error);
     }
   }
 

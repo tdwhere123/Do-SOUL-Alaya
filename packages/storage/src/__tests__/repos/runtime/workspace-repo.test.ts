@@ -69,6 +69,26 @@ describe("SqliteWorkspaceRepo", () => {
     expect(workspaces[0]?.workspace_id).toBe("ws_one");
   });
 
+  it("list supports limit/offset with a separate count", async () => {
+    const workspaceRepo = createWorkspaceRepo();
+
+    for (const workspaceId of ["ws_page_1", "ws_page_2", "ws_page_3"]) {
+      await workspaceRepo.create({
+        workspace_id: workspaceId,
+        name: workspaceId,
+        root_path: `/tmp/${workspaceId}`,
+        workspace_kind: WorkspaceKind.MIXED,
+        default_engine_binding: null,
+        workspace_state: WorkspaceState.ACTIVE
+      });
+    }
+
+    const page = await workspaceRepo.list({ limit: 1, offset: 1 });
+
+    expect(page.map((workspace) => workspace.workspace_id)).toEqual(["ws_page_2"]);
+    await expect(workspaceRepo.count()).resolves.toBe(3);
+  });
+
   it("delete removes an existing workspace", async () => {
     const workspaceRepo = createWorkspaceRepo();
     await workspaceRepo.create({

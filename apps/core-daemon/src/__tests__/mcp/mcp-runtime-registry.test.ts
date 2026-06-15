@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createDaemonMcpRuntimeRegistry } from "../../mcp/mcp-runtime-registry.js";
+import {
+  createDaemonMcpRuntimeClientInfo,
+  createDaemonMcpRuntimeRegistry
+} from "../../mcp/mcp-runtime-registry.js";
 
 describe("daemon MCP runtime registry", () => {
   it("requires an explicit warn handler instead of silently swallowing cleanup errors", () => {
@@ -96,6 +99,38 @@ describe("daemon MCP runtime registry", () => {
     expect(result).toEqual({
       content: [{ type: "text", text: "ok" }]
     });
+  });
+
+  it("passes derived runtime client info to injected MCP clients", async () => {
+    const connect = vi.fn(async () => undefined);
+    const createClient = vi.fn(() => ({
+      close: vi.fn(async () => undefined),
+      connect,
+      callTool: vi.fn(async () => ({ content: [] })),
+      listTools: vi.fn(async () => ({ tools: [] }))
+    }));
+
+    const registry = createDaemonMcpRuntimeRegistry({
+      serverConfigs: {
+        filesystem: {
+          transportType: "stdio",
+          command: "node"
+        }
+      },
+      createClient,
+      createStdioTransport: vi.fn(() => ({ kind: "stdio" })),
+      createStreamableHttpTransport: vi.fn(),
+      warn: vi.fn()
+    } as unknown as Parameters<typeof createDaemonMcpRuntimeRegistry>[0]);
+
+    await registry.callTool({
+      serverName: "filesystem",
+      toolName: "filesystem.read_file",
+      input: { path: "README.md" }
+    });
+
+    expect(createClient).toHaveBeenCalledWith(createDaemonMcpRuntimeClientInfo());
+    expect(createDaemonMcpRuntimeClientInfo().version).not.toBe("0.0.1");
   });
 
   it("normalizes MCP tool failures into structured daemon errors", async () => {

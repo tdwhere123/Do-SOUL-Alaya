@@ -17,7 +17,10 @@ describe("routes-memory port batch", () => {
     const memoryService = {
       findByWorkspaceId: vi.fn(async () => [{ object_id: "m1" }]),
       findByDimension: vi.fn(async () => [{ object_id: "m2" }]),
+      countByWorkspaceId: vi.fn(async () => 1),
+      countByDimension: vi.fn(async () => 1),
       findByRunId: vi.fn(async () => [{ object_id: "m3" }]),
+      countByRunId: vi.fn(async () => 1),
       findById: vi.fn(async () => ({ object_id: "m4" }))
     };
 
@@ -31,7 +34,11 @@ describe("routes-memory port batch", () => {
       data: [{ object_id: "m2" }]
     });
     expect(workspaceService.getById).toHaveBeenCalledWith("ws-1");
-    expect(memoryService.findByDimension).toHaveBeenCalledWith("ws-1", "fact");
+    expect(memoryService.findByDimension).toHaveBeenCalledWith("ws-1", "fact", {
+      limit: 200,
+      offset: 0
+    });
+    expect(memoryService.countByDimension).toHaveBeenCalledWith("ws-1", "fact");
   });
 
   it("registerRecallRoutes builds task surface and recalls with strategy override", async () => {
@@ -157,6 +164,8 @@ describe("routes-memory port batch", () => {
       proposalService: {
         findByWorkspaceId: vi.fn(),
         findPending: vi.fn(),
+        countByWorkspaceId: vi.fn(),
+        countPending: vi.fn(),
         findById: vi.fn(),
         review: vi.fn(async () => {
           throw new Error("review must not be reachable from HTTP");
@@ -219,7 +228,11 @@ describe("routes-memory port batch", () => {
     const app = new Hono();
     const services = {
       runService: { getById: vi.fn(async () => ({ run_id: "run-1", workspace_id: "ws-1" })) },
-      signalService: { listByRun: vi.fn(async () => [{ signal_id: "sig-1" }]), receiveSignal: vi.fn() }
+      signalService: {
+        listByRun: vi.fn(async () => [{ signal_id: "sig-1" }]),
+        countByRun: vi.fn(async () => 1),
+        receiveSignal: vi.fn()
+      }
     };
     registerSignalRoutes(app, services as any);
 
@@ -230,6 +243,10 @@ describe("routes-memory port batch", () => {
       data: [{ signal_id: "sig-1" }]
     });
     expect(services.runService.getById).toHaveBeenCalledWith("run-1");
-    expect(services.signalService.listByRun).toHaveBeenCalledWith("run-1");
+    expect(services.signalService.listByRun).toHaveBeenCalledWith("run-1", {
+      limit: 200,
+      offset: 0
+    });
+    expect(services.signalService.countByRun).toHaveBeenCalledWith("run-1");
   });
 });

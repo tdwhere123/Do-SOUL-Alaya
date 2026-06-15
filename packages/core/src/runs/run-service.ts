@@ -28,9 +28,15 @@ export interface RunRepoPort {
     readonly current_surface_id: Run["current_surface_id"];
   }): Run;
   getById(id: string): Promise<Run | null>;
-  listByWorkspace(workspaceId: string): Promise<readonly Run[]>;
+  listByWorkspace(workspaceId: string, page?: RunListPageOptions): Promise<readonly Run[]>;
+  countByWorkspace?(workspaceId: string): Promise<number>;
   delete(id: string): void;
   update(id: string, patch: Partial<Run>): Run;
+}
+
+export interface RunListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 export interface RunWorkspaceRepoPort {
@@ -186,9 +192,21 @@ export class RunService {
     );
   }
 
-  public async listByWorkspace(workspaceId: string): Promise<readonly Run[]> {
+  public async listByWorkspace(
+    workspaceId: string,
+    page?: RunListPageOptions
+  ): Promise<readonly Run[]> {
     await this.requireWorkspace(workspaceId);
-    return this.dependencies.runRepo.listByWorkspace(workspaceId);
+    return this.dependencies.runRepo.listByWorkspace(workspaceId, page);
+  }
+
+  public async countByWorkspace(workspaceId: string): Promise<number> {
+    await this.requireWorkspace(workspaceId);
+    const countByWorkspace = this.dependencies.runRepo.countByWorkspace;
+    if (countByWorkspace !== undefined) {
+      return await countByWorkspace.call(this.dependencies.runRepo, workspaceId);
+    }
+    return (await this.dependencies.runRepo.listByWorkspace(workspaceId)).length;
   }
 
   public async getById(runId: string): Promise<Run> {

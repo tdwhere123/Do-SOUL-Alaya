@@ -180,6 +180,20 @@ describe("routes-config port batch", () => {
     });
   });
 
+  it("rejects non-object manifestation budget patches before EventLog mutation", async () => {
+    const harness = await createServiceHarness();
+
+    await expect(
+      harness.service.patchManifestationBudgetConfig("ws-budget", [])
+    ).rejects.toThrow("Invalid manifestation budget config patch");
+    await expect(
+      harness.service.patchManifestationBudgetConfig("ws-budget", {
+        escalation_policy: []
+      })
+    ).rejects.toThrow("Invalid manifestation budget config patch");
+    expect(harness.appendManyWithMutation).not.toHaveBeenCalled();
+  });
+
   it("persists runtime embedding config through the config service envelope and EventLog audit", async () => {
     const harness = await createServiceHarness();
 
@@ -191,6 +205,7 @@ describe("routes-config port batch", () => {
     });
 
     await expect(harness.service.getRuntimeEmbeddingConfig()).resolves.toEqual({
+      config_version: 1,
       provider_url: "https://embedding.example.test/v1",
       secret_ref: "env:OPENAI_API_KEY",
       model_id: "text-embedding-3-small",
@@ -253,6 +268,7 @@ describe("routes-config port batch", () => {
     });
 
     await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      config_version: 1,
       secret_ref: "keychain:alaya-garden:openai"
     });
     await expect(readFile(harness.paths.envPath, "utf8")).resolves.toContain(
@@ -281,6 +297,7 @@ describe("routes-config port batch", () => {
     });
 
     await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      config_version: 1,
       provider_kind: "host_worker",
       secret_ref: null
     });
@@ -301,6 +318,7 @@ describe("routes-config port batch", () => {
     await writeFile(harness.paths.envPath, "ALAYA_GARDEN_PROVIDER_KIND=host_worker\n", "utf8");
 
     await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      config_version: 1,
       provider_kind: "host_worker",
       enabled: false
     });
@@ -314,6 +332,7 @@ describe("routes-config port batch", () => {
     // no LLM). official_api is reached only via secret presence or an explicit
     // declared provider_kind.
     await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      config_version: 1,
       provider_kind: "host_worker"
     });
   });
@@ -331,6 +350,7 @@ describe("routes-config port batch", () => {
     await writeFile(harness.paths.envPath, "ALAYA_GARDEN_PROVIDER_KIND=local_heuristics\n", "utf8");
 
     await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      config_version: 1,
       provider_kind: "host_worker"
     });
   });
@@ -504,6 +524,7 @@ describe("routes-config port batch", () => {
       })
     ).rejects.toThrow();
     await expect(harness.service.getRuntimeEmbeddingConfig()).resolves.toEqual({
+      config_version: 1,
       provider_url: null,
       secret_ref: null,
       model_id: null,
@@ -526,6 +547,7 @@ describe("routes-config port batch", () => {
 
     await expect(readdir(leakDir)).resolves.toEqual([]);
     await expect(harness.service.getRuntimeEmbeddingConfig()).resolves.toEqual({
+      config_version: 1,
       provider_url: null,
       secret_ref: null,
       model_id: null,
@@ -745,8 +767,9 @@ describe("routes-config port batch", () => {
       const soulGet = await app.request("/workspaces/ws-section/config/soul");
       expect(soulGet.status).toBe(200);
       const soulRound = (await soulGet.json()) as {
-        data: { memory_hard_cap: number; auto_checkpoint: boolean };
+        data: { config_version: number; memory_hard_cap: number; auto_checkpoint: boolean };
       };
+      expect(soulRound.data.config_version).toBe(1);
       expect(soulRound.data.memory_hard_cap).toBe(4096);
       expect(soulRound.data.auto_checkpoint).toBe(false);
 
@@ -758,8 +781,13 @@ describe("routes-config port batch", () => {
       expect(strategyPatch.status).toBe(200);
       const strategyGet = await app.request("/workspaces/ws-section/config/strategy");
       const strategyRound = (await strategyGet.json()) as {
-        data: { require_bash_approval: boolean; auto_approve_readonly: boolean };
+        data: {
+          config_version: number;
+          require_bash_approval: boolean;
+          auto_approve_readonly: boolean;
+        };
       };
+      expect(strategyRound.data.config_version).toBe(1);
       expect(strategyRound.data.require_bash_approval).toBe(false);
       expect(strategyRound.data.auto_approve_readonly).toBe(true);
 
@@ -771,8 +799,13 @@ describe("routes-config port batch", () => {
       expect(environmentPatch.status).toBe(200);
       const environmentGet = await app.request("/workspaces/ws-section/config/environment");
       const environmentRound = (await environmentGet.json()) as {
-        data: { worktree_enabled: boolean; env_vars: Record<string, string> };
+        data: {
+          config_version: number;
+          worktree_enabled: boolean;
+          env_vars: Record<string, string>;
+        };
       };
+      expect(environmentRound.data.config_version).toBe(1);
       expect(environmentRound.data.worktree_enabled).toBe(true);
       expect(environmentRound.data.env_vars).toEqual({ ALAYA_DEBUG: "1" });
 
@@ -784,6 +817,88 @@ describe("routes-config port batch", () => {
     } finally {
       database.close();
     }
+  });
+
+  it("normalizes legacy versionless workspace and runtime config rows on read and patch", async () => {
+    const repo = createMemoryConfigRepo();
+    repo.set("workspace:ws-legacy:soul", {
+      memory_consolidation_enabled: true,
+      local_heuristics_enabled: true,
+      garden_backlog_soft_limit: 123,
+      memory_hard_cap: 2048,
+      auto_checkpoint: true
+    });
+    repo.set("workspace:ws-legacy:strategy", {
+      require_bash_approval: true,
+      require_write_approval: true,
+      require_network_approval: false,
+      auto_approve_readonly: false
+    });
+    repo.set("workspace:ws-legacy:environment", {
+      env_vars: { ALAYA_DEBUG: "1" },
+      worktree_enabled: true
+    });
+    repo.set("runtime:embedding-supplement", {
+      provider_url: null,
+      secret_ref: "env:OPENAI_API_KEY",
+      model_id: "text-embedding-3-small",
+      embedding_enabled: false
+    });
+    repo.set("runtime:garden-compute", {
+      provider_kind: "host_worker",
+      provider_url: null,
+      secret_ref: null,
+      model_id: null,
+      enabled: false
+    });
+    const harness = await createServiceHarness({ repo });
+
+    await expect(harness.service.getSoulConfig("ws-legacy")).resolves.toMatchObject({
+      config_version: 1,
+      garden_backlog_soft_limit: 123
+    });
+    await expect(harness.service.getStrategyConfig("ws-legacy")).resolves.toMatchObject({
+      config_version: 1,
+      require_network_approval: false
+    });
+    await expect(harness.service.getEnvironmentConfig("ws-legacy")).resolves.toMatchObject({
+      config_version: 1,
+      env_vars: { ALAYA_DEBUG: "1" }
+    });
+    await expect(harness.service.getRuntimeEmbeddingConfig()).resolves.toMatchObject({
+      config_version: 1,
+      secret_ref: "env:OPENAI_API_KEY"
+    });
+    await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      config_version: 1,
+      provider_kind: "host_worker"
+    });
+
+    await expect(
+      harness.service.patchSoulConfig("ws-legacy", {
+        auto_checkpoint: false
+      })
+    ).resolves.toMatchObject({
+      config_version: 1,
+      auto_checkpoint: false
+    });
+    expect(repo.get<Record<string, unknown>>("workspace:ws-legacy:soul")).toMatchObject({
+      config_version: 1,
+      auto_checkpoint: false
+    });
+
+    await expect(
+      harness.service.patchRuntimeEmbeddingConfig({
+        embedding_enabled: true
+      })
+    ).resolves.toMatchObject({
+      config_version: 1,
+      embedding_enabled: true
+    });
+    expect(repo.get<Record<string, unknown>>("runtime:embedding-supplement")).toMatchObject({
+      config_version: 1,
+      embedding_enabled: true
+    });
   });
 
   it("serializes same-path paste writes without exposing plaintext in responses", async () => {

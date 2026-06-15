@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  StreamingEventType,
   WorkspaceRunEventType,
   RunMode,
   RunState,
@@ -81,6 +82,76 @@ describe("SqliteEventLogRepo", () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]?.run_id).toBe("run_target");
+  });
+
+  it("paginates conversation message events by run with a separate count", async () => {
+    const { eventLogRepo } = await createEventLogRepos();
+    await eventLogRepo.append({
+      event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
+      entity_type: "message",
+      entity_id: "msg-1",
+      workspace_id: "ws_events",
+      run_id: "run_target",
+      caused_by: "user_action",
+      payload_json: {
+        run_id: "run_target",
+        role: "user",
+        content: "hello",
+        message_id: "msg-1"
+      }
+    });
+    await eventLogRepo.append({
+      event_type: WorkspaceRunEventType.RUN_CREATED,
+      entity_type: "run",
+      entity_id: "run_target",
+      workspace_id: "ws_events",
+      run_id: "run_target",
+      caused_by: "user_action",
+      payload_json: {
+        run_id: "run_target",
+        workspace_id: "ws_events",
+        run_mode: RunMode.CHAT,
+        title: "target"
+      }
+    });
+    await eventLogRepo.append({
+      event_type: WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED,
+      entity_type: "message",
+      entity_id: "msg-2",
+      workspace_id: "ws_events",
+      run_id: "run_target",
+      caused_by: "assistant",
+      payload_json: {
+        run_id: "run_target",
+        message_id: "msg-2",
+        content: "hi",
+        finish_reason: "stop"
+      }
+    });
+    await eventLogRepo.append({
+      event_type: StreamingEventType.MESSAGE_COMPLETED,
+      entity_type: "message",
+      entity_id: "msg-3",
+      workspace_id: "ws_events",
+      run_id: "run_target",
+      caused_by: "assistant",
+      payload_json: {
+        type: StreamingEventType.MESSAGE_COMPLETED,
+        runId: "run_target",
+        messageId: "msg-3",
+        content: "streamed",
+        finishReason: "stop",
+        timestamp: "2026-03-21T00:00:03.000Z"
+      }
+    });
+
+    const page = await eventLogRepo.queryConversationMessageEventsByRun("run_target", {
+      limit: 1,
+      offset: 1
+    });
+
+    expect(page.map((event) => event.entity_id)).toEqual(["msg-2"]);
+    await expect(eventLogRepo.countConversationMessageEventsByRun("run_target")).resolves.toBe(3);
   });
 
   it("queryByEntity returns only matching entity events", async () => {

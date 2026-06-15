@@ -52,8 +52,10 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       getById: vi.fn(async () => ({ workspace_id: "ws-1" }))
     };
     const proposalService = {
-      findByWorkspaceId: vi.fn(async () => []),
-      findPending: vi.fn(async () => []),
+      findByWorkspaceId: vi.fn(async () => [{ proposal_id: "p1" }, { proposal_id: "p2" }, { proposal_id: "p3" }]),
+      countByWorkspaceId: vi.fn(async () => 3),
+      findPending: vi.fn(async () => [{ proposal_id: "p1" }, { proposal_id: "p2" }, { proposal_id: "p3" }]),
+      countPending: vi.fn(async () => 3),
       findById: vi.fn(async () => ({ proposal_id: "p1" })),
       review: vi.fn(async () => {
         throw new Error("review must not be reachable from HTTP");
@@ -106,7 +108,31 @@ describe("proposal routes (HTTP surface narrowed)", () => {
 
     expect(response.status).toBe(200);
     expect(workspaceService.getById).toHaveBeenCalledWith("ws-1");
-    expect(proposalService.findPending).toHaveBeenCalledWith("ws-1");
+    expect(proposalService.findPending).toHaveBeenCalledWith("ws-1", {
+      limit: 200,
+      offset: 0
+    });
+    expect(proposalService.countPending).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("passes pagination to GET /workspaces/:wsId/proposals without handler-level slicing", async () => {
+    const { app, proposalService } = buildApp();
+    proposalService.findPending.mockImplementation(async (...args: unknown[]) => {
+      const page = args[1];
+      expect(page).toEqual({ limit: 2, offset: 1 });
+      return [{ proposal_id: "p2" }, { proposal_id: "p3" }];
+    });
+
+    const response = await app.request("/workspaces/ws-1/proposals?limit=2&offset=1");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-total-count")).toBe("3");
+    expect(response.headers.get("x-limit")).toBe("2");
+    expect(response.headers.get("x-offset")).toBe("1");
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      data: [{ proposal_id: "p2" }, { proposal_id: "p3" }]
+    });
   });
 
   it("creates Inspector memory-action proposals through the MCP proposal workflow", async () => {

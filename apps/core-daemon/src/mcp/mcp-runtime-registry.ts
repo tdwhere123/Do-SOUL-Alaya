@@ -12,6 +12,7 @@ import {
 import { readNow } from "@do-soul/alaya-core";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServerInfo } from "@do-soul/alaya-protocol";
+import { readRuntimeVersion } from "../runtime/build-info.js";
 
 type DaemonMcpListedTool = {
   readonly name: string;
@@ -43,6 +44,11 @@ type DaemonMcpRuntimeClientHandle = {
   readonly transport: DaemonMcpRuntimeTransport;
 };
 
+type DaemonMcpRuntimeClientInfo = Readonly<{
+  readonly name: "do-soul-alaya-core-daemon";
+  readonly version: string;
+}>;
+
 type WarnLogger = Readonly<{
   warn(message: string, meta: Record<string, unknown>): void;
 }>;
@@ -64,9 +70,16 @@ export interface DaemonMcpRuntimeRegistry {
   }): Promise< unknown>;
 }
 
+export function createDaemonMcpRuntimeClientInfo(): DaemonMcpRuntimeClientInfo {
+  return Object.freeze({
+    name: "do-soul-alaya-core-daemon",
+    version: readRuntimeVersion()
+  });
+}
+
 export function createDaemonMcpRuntimeRegistry(input: {
   readonly serverConfigs: Readonly<Record<string, DaemonMcpServerRuntimeConfig>>;
-  readonly createClient?: () => DaemonMcpRuntimeClient;
+  readonly createClient?: (clientInfo: DaemonMcpRuntimeClientInfo) => DaemonMcpRuntimeClient;
   readonly createStdioTransport?: (
     params: StdioServerParameters
   ) => StdioClientTransport;
@@ -78,6 +91,7 @@ export function createDaemonMcpRuntimeRegistry(input: {
   readonly warn: WarnPort;
 }): DaemonMcpRuntimeRegistry {
   const warn = resolveWarn(input.warn);
+  const clientInfo = createDaemonMcpRuntimeClientInfo();
   const clientHandles = new Map<string, Promise<DaemonMcpRuntimeClientHandle>>();
   const toolCache = new Map<string, readonly DaemonMcpListedTool[]>();
   const liveServerNames = new Set<string>();
@@ -222,14 +236,8 @@ export function createDaemonMcpRuntimeRegistry(input: {
     config: DaemonMcpServerRuntimeConfig
   ): Promise<DaemonMcpRuntimeClientHandle> {
     const client =
-      input.createClient?.() ??
-      new Client(
-        {
-          name: "do-soul-alaya-core-daemon",
-          version: "0.0.1"
-        },
-        { capabilities: {} }
-      );
+      input.createClient?.(clientInfo) ??
+      new Client(clientInfo, { capabilities: {} });
     const transport: DaemonMcpRuntimeTransport =
       config.transportType === "stdio"
         ? (input.createStdioTransport ?? ((params) => new StdioClientTransport(params)))({

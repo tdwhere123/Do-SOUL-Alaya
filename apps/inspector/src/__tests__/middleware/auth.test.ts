@@ -8,21 +8,24 @@ describe("inspector auth", () => {
 
     await expectStatus(app, "/", 401);
     await expectStatus(app, "/?token=wrong", 401);
+    await expectStatus(app, "/?token=secret-token", 401);
     await expectStatus(app, "/", 401, { "x-alaya-inspector-token": "wrong" });
   });
 
-  it("accepts query or header tokens without echoing them", async () => {
+  it("accepts header or bearer tokens without echoing them", async () => {
     const app = createApp();
 
-    const queryResponse = await app.request("/?token=secret-token");
     const headerResponse = await app.request("/", {
       headers: { "x-alaya-inspector-token": "secret-token" }
     });
+    const bearerResponse = await app.request("/", {
+      headers: { authorization: "Bearer secret-token" }
+    });
 
-    expect(queryResponse.status).toBe(200);
     expect(headerResponse.status).toBe(200);
-    expect(await queryResponse.text()).not.toContain("secret-token");
+    expect(bearerResponse.status).toBe(200);
     expect(await headerResponse.text()).not.toContain("secret-token");
+    expect(await bearerResponse.text()).not.toContain("secret-token");
   });
 
   it("uses length-safe constant-time comparison", () => {

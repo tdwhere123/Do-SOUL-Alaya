@@ -698,19 +698,27 @@ export class RecallService {
         this.dependencies.memoryRepo.searchByKeyword !== undefined)
     ) {
       const byId = new Map(tierMemories.map((memory) => [memory.object_id, memory]));
+      // Bind to the repo so the delegate keeps its receiver; the local consts let
+      // TS narrow away the optional methods without a non-null assertion. The
+      // outer guard guarantees at least one is defined, so the [] tail is unreachable.
+      const memoryRepo = this.dependencies.memoryRepo;
+      const searchWithinObjectIds = memoryRepo.searchByKeywordWithinObjectIds?.bind(memoryRepo);
+      const searchByKeywordFn = memoryRepo.searchByKeyword?.bind(memoryRepo);
       const supplement =
-        this.dependencies.memoryRepo.searchByKeywordWithinObjectIds !== undefined
-          ? await this.dependencies.memoryRepo.searchByKeywordWithinObjectIds(
+        searchWithinObjectIds !== undefined
+          ? await searchWithinObjectIds(
               workspaceId,
               queryText,
               config.semantic_supplement.max_supplement,
               [...byId.keys()]
             )
-          : await this.dependencies.memoryRepo.searchByKeyword!(
-              workspaceId,
-              queryText,
-              config.semantic_supplement.max_supplement
-            );
+          : searchByKeywordFn !== undefined
+            ? await searchByKeywordFn(
+                workspaceId,
+                queryText,
+                config.semantic_supplement.max_supplement
+              )
+            : [];
       for (const match of supplement) {
         ftsRanks.set(match.object_id, clamp01(match.normalized_rank));
         if (match.trigram_rank !== undefined && match.trigram_rank > 0) {
@@ -730,18 +738,20 @@ export class RecallService {
       const expandedQuery = buildExpandedKeywordQuery(queryProbes);
       if (expandedQuery !== null) {
         const expandedSupplement =
-          this.dependencies.memoryRepo.searchByKeywordWithinObjectIds !== undefined
-            ? await this.dependencies.memoryRepo.searchByKeywordWithinObjectIds(
+          searchWithinObjectIds !== undefined
+            ? await searchWithinObjectIds(
                 workspaceId,
                 expandedQuery,
                 config.semantic_supplement.max_supplement,
                 [...byId.keys()]
               )
-            : await this.dependencies.memoryRepo.searchByKeyword!(
-                workspaceId,
-                expandedQuery,
-                config.semantic_supplement.max_supplement
-              );
+            : searchByKeywordFn !== undefined
+              ? await searchByKeywordFn(
+                  workspaceId,
+                  expandedQuery,
+                  config.semantic_supplement.max_supplement
+                )
+              : [];
         for (const match of expandedSupplement) {
           const discounted = clamp01(match.normalized_rank) * EXPANDED_QUERY_RANK_DISCOUNT;
           if (discounted <= 0) {
@@ -849,6 +859,7 @@ export class RecallService {
       addCandidate,
       admissionLimit: resolveSourceProximityAdmissionLimit(options.deliveryMaxEntries),
       evidenceSearchPort: this.dependencies.evidenceSearchPort,
+      robustSourceRefParsing: this.dependencies.robustSourceRefParsing ?? false,
       warn: this.warn
     });
     const entityDerivedSeeds = await collectEntityDerivedSeeds({

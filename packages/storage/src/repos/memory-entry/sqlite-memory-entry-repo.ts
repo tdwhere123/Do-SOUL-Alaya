@@ -35,6 +35,11 @@ import {
   parseStorageTier,
   type MemoryEntryRow
 } from "./row-mapper.js";
+import type {
+  SqliteAllStatement,
+  SqliteGetStatement,
+  SqliteRunStatement
+} from "./statement-types.js";
 import {
   updateMemoryEntry,
   updateMemoryEntryDynamics,
@@ -46,6 +51,7 @@ import {
   FIND_BY_EVIDENCE_REFS_INPUT_CAP,
   FIND_BY_EVIDENCE_REFS_ROW_LIMIT,
   type AutonomousTombstoneInput,
+  type MemoryEntryListPageOptions,
   type MemoryEntryKeywordSearchResult,
   type MemoryEntryRepo,
   type MemoryEntryRepoDiagnosticSink,
@@ -54,45 +60,72 @@ import {
   type MemoryEntryRepoUpdateFields
 } from "./types.js";
 
-export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
+interface CountRow {
+  readonly total: number;
+}
+
+// Implementing the three workflow-host interfaces makes the delegate calls below
+// type-checked at the class boundary: if a host contract grows a member the repo
+// lacks, this declaration stops compiling — which is why the prepared statements
+// the workflows read through `this` are exposed as `public readonly` rather than
+// bridged with an `as unknown as` cast. Consumers still depend on MemoryEntryRepo,
+// which does not surface these statements.
+export class SqliteMemoryEntryRepo
+  implements
+    MemoryEntryRepo,
+    MemoryEntrySearchWorkflowHost,
+    MemoryEntryLifecycleWorkflowHost,
+    MemoryEntryUpdateWorkflowHost
+{
   private readonly createStatement;
-  private readonly findByIdStatement;
+  // Public host-contract members are annotated with the narrow statement aliases
+  // (not the unnameable BetterSqlite3.Statement) so the declaration emit stays
+  // self-contained and each field matches its workflow-host requirement exactly.
+  public readonly findByIdStatement: SqliteGetStatement;
   private readonly findByWorkspaceHotStatement;
+  private readonly findByWorkspaceHotPagedStatement;
+  private readonly countByWorkspaceHotStatement;
   private readonly findByWorkspaceTierStatement;
+  private readonly findByWorkspaceTierPagedStatement;
+  private readonly countByWorkspaceTierStatement;
   private readonly findByRunIdStatement;
+  private readonly findByRunIdPagedStatement;
+  private readonly countByRunIdStatement;
   private readonly findByDimensionHotStatement;
+  private readonly findByDimensionHotPagedStatement;
+  private readonly countByDimensionHotStatement;
   private readonly findByScopeClassHotStatement;
-  private readonly updateStatement;
-  private readonly updateScopedStatement;
-  private readonly searchByKeywordStatement;
+  public readonly updateStatement: SqliteRunStatement;
+  public readonly updateScopedStatement: SqliteRunStatement;
+  public readonly searchByKeywordStatement: SqliteAllStatement;
   // see also: packages/storage/src/migrations/077-memory-content-fts-dual.sql
-  private readonly searchByKeywordPorterStatement;
+  public readonly searchByKeywordPorterStatement: SqliteAllStatement;
   private readonly findLowActivityActiveMemoriesStatement;
   private readonly findTombstonedMemoriesStatement;
-  private readonly transitionLifecycleStatement;
+  public readonly transitionLifecycleStatement: SqliteRunStatement;
   // invariant (I3): a revived / non-tombstone transition clears the terminal
   // forget marker so an active/dormant row never carries a removal disposition.
-  private readonly transitionLifecycleClearForgetStatement;
+  public readonly transitionLifecycleClearForgetStatement: SqliteRunStatement;
   // invariant (N1): guarded dormant -> active revival; changes=0 when not dormant.
-  private readonly reviveDormantStatement;
+  public readonly reviveDormantStatement: SqliteRunStatement;
   // invariant: active -> dormant skips benign changes=0 races and clears forget markers.
-  private readonly demoteActiveToDormantStatement;
-  private readonly archiveStatement;
-  private readonly hardDeleteTombstonedStatement;
+  public readonly demoteActiveToDormantStatement: SqliteRunStatement;
+  public readonly archiveStatement: SqliteRunStatement;
+  public readonly hardDeleteTombstonedStatement: SqliteRunStatement;
   private readonly findDormantMemoriesStatement;
-  private readonly autonomousTombstoneStatement;
+  public readonly autonomousTombstoneStatement: SqliteRunStatement;
   private readonly findTombstonedWithDispositionStatement;
-  private readonly hardDeleteTombstonedWithDispositionStatement;
+  public readonly hardDeleteTombstonedWithDispositionStatement: SqliteRunStatement;
   // invariant: compressed delete rechecks capsule liveness atomically with removal.
-  private readonly hardDeleteTombstonedCompressedGuardedStatement;
+  public readonly hardDeleteTombstonedCompressedGuardedStatement: SqliteRunStatement;
   // invariant: judged_useless delete replays the local-only verdict at delete time.
-  private readonly hardDeleteTombstonedJudgedUselessGuardedStatement;
+  public readonly hardDeleteTombstonedJudgedUselessGuardedStatement: SqliteRunStatement;
   // invariant: hard-delete prunes path topology because endpoints are not FK-backed.
-  private readonly deleteOrphanedPathRelationsStatement;
-  private readonly deleteOrphanedCoUsageCountersStatement;
+  public readonly deleteOrphanedPathRelationsStatement: SqliteRunStatement;
+  public readonly deleteOrphanedCoUsageCountersStatement: SqliteRunStatement;
 
   public constructor(
-    private readonly db: StorageDatabase,
+    public readonly db: StorageDatabase,
     private readonly diagnostics: MemoryEntryRepoDiagnosticSink = () => {}
   ) {
     this.createStatement = db.connection.prepare(`
@@ -145,6 +178,22 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         AND COALESCE(lifecycle_state, '') != 'dormant'
       ORDER BY created_at ASC, object_id ASC
     `);
+    this.findByWorkspaceHotPagedStatement = db.connection.prepare(`
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND storage_tier = 'hot'
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
+      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `);
+    this.countByWorkspaceHotStatement = db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND storage_tier = 'hot'
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
+    `);
     this.findByWorkspaceTierStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
@@ -152,6 +201,22 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         AND COALESCE(retention_state, '') != 'tombstoned'
         AND COALESCE(lifecycle_state, '') != 'dormant'
       ORDER BY created_at ASC, object_id ASC
+    `);
+    this.findByWorkspaceTierPagedStatement = db.connection.prepare(`
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND storage_tier = ?
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
+      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `);
+    this.countByWorkspaceTierStatement = db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND storage_tier = ?
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
     `);
     this.findByRunIdStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
@@ -161,6 +226,22 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         AND COALESCE(lifecycle_state, '') != 'dormant'
       ORDER BY created_at ASC, object_id ASC
     `);
+    this.findByRunIdPagedStatement = db.connection.prepare(`
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE run_id = ?
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
+      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `);
+    this.countByRunIdStatement = db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE run_id = ?
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
+    `);
     this.findByDimensionHotStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
@@ -168,6 +249,22 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         AND COALESCE(retention_state, '') != 'tombstoned'
         AND COALESCE(lifecycle_state, '') != 'dormant'
       ORDER BY created_at ASC, object_id ASC
+    `);
+    this.findByDimensionHotPagedStatement = db.connection.prepare(`
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND dimension = ? AND storage_tier = 'hot'
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
+      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `);
+    this.countByDimensionHotStatement = db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND dimension = ? AND storage_tier = 'hot'
+        AND COALESCE(retention_state, '') != 'tombstoned'
+        AND COALESCE(lifecycle_state, '') != 'dormant'
     `);
     this.findByScopeClassHotStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
@@ -487,14 +584,19 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
 
   public async findByWorkspaceId(
     workspaceId: string,
-    tier?: StorageTier
+    tier?: StorageTier,
+    page?: MemoryEntryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     try {
       const parsedTier = tier === undefined ? undefined : parseStorageTier(tier);
       const rows =
         parsedTier === undefined || parsedTier === StorageTier.HOT
-          ? (this.findByWorkspaceHotStatement.all(workspaceId) as MemoryEntryRow[])
-          : (this.findByWorkspaceTierStatement.all(workspaceId, parsedTier) as MemoryEntryRow[]);
+          ? page === undefined
+            ? (this.findByWorkspaceHotStatement.all(workspaceId) as MemoryEntryRow[])
+            : (this.findByWorkspaceHotPagedStatement.all(workspaceId, page.limit, page.offset) as MemoryEntryRow[])
+          : page === undefined
+            ? (this.findByWorkspaceTierStatement.all(workspaceId, parsedTier) as MemoryEntryRow[])
+            : (this.findByWorkspaceTierPagedStatement.all(workspaceId, parsedTier, page.limit, page.offset) as MemoryEntryRow[]);
       return rows.map((row) => parseMemoryEntryRow(row));
     } catch (error) {
       throw new StorageError(
@@ -505,29 +607,80 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     }
   }
 
-  // Run-scoped reads intentionally include both hot and cold tiers.
-  public async findByRunId(runId: string): Promise<readonly Readonly<MemoryEntry>[]> {
+  public async countByWorkspaceId(workspaceId: string, tier?: StorageTier): Promise<number> {
     try {
-      const rows = this.findByRunIdStatement.all(runId) as MemoryEntryRow[];
+      const parsedTier = tier === undefined ? undefined : parseStorageTier(tier);
+      const row =
+        parsedTier === undefined || parsedTier === StorageTier.HOT
+          ? (this.countByWorkspaceHotStatement.get(workspaceId) as CountRow | undefined)
+          : (this.countByWorkspaceTierStatement.get(workspaceId, parsedTier) as CountRow | undefined);
+      return readCount(row);
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to count memory entries for workspace ${workspaceId}.`,
+        error
+      );
+    }
+  }
+
+  // Run-scoped reads intentionally include both hot and cold tiers.
+  public async findByRunId(
+    runId: string,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    try {
+      const rows =
+        page === undefined
+          ? (this.findByRunIdStatement.all(runId) as MemoryEntryRow[])
+          : (this.findByRunIdPagedStatement.all(runId, page.limit, page.offset) as MemoryEntryRow[]);
       return rows.map((row) => parseMemoryEntryRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list memory entries for run ${runId}.`, error);
     }
   }
 
+  public async countByRunId(runId: string): Promise<number> {
+    try {
+      const row = this.countByRunIdStatement.get(runId) as CountRow | undefined;
+      return readCount(row);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to count memory entries for run ${runId}.`, error);
+    }
+  }
+
   public async findByDimension(
     workspaceId: string,
-    dimension: MemoryDimension
+    dimension: MemoryDimension,
+    page?: MemoryEntryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     const parsedDimension = parseMemoryDimension(dimension);
 
     try {
-      const rows = this.findByDimensionHotStatement.all(workspaceId, parsedDimension) as MemoryEntryRow[];
+      const rows =
+        page === undefined
+          ? (this.findByDimensionHotStatement.all(workspaceId, parsedDimension) as MemoryEntryRow[])
+          : (this.findByDimensionHotPagedStatement.all(workspaceId, parsedDimension, page.limit, page.offset) as MemoryEntryRow[]);
       return rows.map((row) => parseMemoryEntryRow(row));
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list memory entries for workspace ${workspaceId} and dimension ${parsedDimension}.`,
+        error
+      );
+    }
+  }
+
+  public async countByDimension(workspaceId: string, dimension: MemoryDimension): Promise<number> {
+    const parsedDimension = parseMemoryDimension(dimension);
+
+    try {
+      const row = this.countByDimensionHotStatement.get(workspaceId, parsedDimension) as CountRow | undefined;
+      return readCount(row);
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to count memory entries for workspace ${workspaceId} and dimension ${parsedDimension}.`,
         error
       );
     }
@@ -666,7 +819,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     queryText: string,
     limit: number
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
-    return searchByKeyword.call(this as unknown as MemoryEntrySearchWorkflowHost, workspaceId, queryText, limit);
+    return searchByKeyword.call(this, workspaceId, queryText, limit);
   }
 
   public async searchByKeywordWithinObjectIds(
@@ -676,7 +829,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     objectIds: readonly string[]
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
     return searchByKeywordWithinObjectIds.call(
-      this as unknown as MemoryEntrySearchWorkflowHost,
+      this,
       workspaceId,
       queryText,
       limit,
@@ -748,7 +901,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     input: AutonomousTombstoneInput,
     options?: { readonly onTransition?: () => void }
   ): Promise<Readonly<MemoryEntry>> {
-    return autonomousTombstone.call(this as unknown as MemoryEntryLifecycleWorkflowHost, input, options);
+    return autonomousTombstone.call(this, input, options);
   }
 
   public async hardDeleteTombstonedWithDisposition(
@@ -760,7 +913,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     }
   ): Promise<boolean> {
     return hardDeleteTombstonedWithDisposition.call(
-      this as unknown as MemoryEntryLifecycleWorkflowHost,
+      this,
       objectId,
       options
     );
@@ -770,7 +923,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     objectId: string,
     fields: MemoryEntryRepoUpdateFields
   ): Promise<Readonly<MemoryEntry>> {
-    return updateMemoryEntry.call(this as unknown as MemoryEntryUpdateWorkflowHost, objectId, fields);
+    return updateMemoryEntry.call(this, objectId, fields);
   }
 
   public async updateScoped(
@@ -779,7 +932,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     fields: MemoryEntryRepoUpdateFields
   ): Promise<Readonly<MemoryEntry>> {
     return updateScopedMemoryEntry.call(
-      this as unknown as MemoryEntryUpdateWorkflowHost,
+      this,
       objectId,
       workspaceId,
       fields
@@ -787,11 +940,20 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   }
 
   public updateTier(input: MemoryEntryRepoTierUpdateInput): Readonly<MemoryEntry> | null {
-    return updateMemoryEntryTier.call(this as unknown as MemoryEntryUpdateWorkflowHost, input);
+    return updateMemoryEntryTier.call(this, input);
   }
 
-  public async archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>> {
-    return archiveMemoryEntry.call(this as unknown as MemoryEntryLifecycleWorkflowHost, objectId, updatedAt);
+  public async archive(
+    objectId: string,
+    updatedAt: string,
+    onArchived?: () => void
+  ): Promise<Readonly<MemoryEntry>> {
+    return archiveMemoryEntry.call(
+      this,
+      objectId,
+      updatedAt,
+      onArchived
+    );
   }
 
   public async updateDynamics(
@@ -800,7 +962,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     updatedAt: string
   ): Promise<Readonly<MemoryEntry>> {
     return updateMemoryEntryDynamics.call(
-      this as unknown as MemoryEntryUpdateWorkflowHost,
+      this,
       objectId,
       fields,
       updatedAt
@@ -810,13 +972,15 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   public async transitionLifecycle(
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
-    updatedAt: string
+    updatedAt: string,
+    onTransition?: () => void
   ): Promise<Readonly<MemoryEntry>> {
     return transitionMemoryEntryLifecycle.call(
-      this as unknown as MemoryEntryLifecycleWorkflowHost,
+      this,
       objectId,
       lifecycleState,
-      updatedAt
+      updatedAt,
+      onTransition
     );
   }
 
@@ -824,7 +988,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     objectId: string,
     updatedAt: string
   ): Promise<Readonly<MemoryEntry> | null> {
-    return reviveDormantMemoryEntry.call(this as unknown as MemoryEntryLifecycleWorkflowHost, objectId, updatedAt);
+    return reviveDormantMemoryEntry.call(this, objectId, updatedAt);
   }
 
   public async transitionToDormantIfActive(
@@ -833,14 +997,18 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     onTransition?: () => void
   ): Promise<Readonly<MemoryEntry> | null> {
     return transitionMemoryEntryToDormantIfActive.call(
-      this as unknown as MemoryEntryLifecycleWorkflowHost,
+      this,
       objectId,
       updatedAt,
       onTransition
     );
   }
 
-  public async hardDeleteTombstoned(objectId: string): Promise<void> {
-    return hardDeleteTombstonedMemoryEntry.call(this as unknown as MemoryEntryLifecycleWorkflowHost, objectId);
+  public async hardDeleteTombstoned(objectId: string, onDeleted?: () => void): Promise<void> {
+    return hardDeleteTombstonedMemoryEntry.call(this, objectId, onDeleted);
   }
+}
+
+function readCount(row: CountRow | undefined): number {
+  return row === undefined ? 0 : Number(row.total);
 }

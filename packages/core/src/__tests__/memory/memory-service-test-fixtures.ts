@@ -137,9 +137,20 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
       })
     )
   );
-  const repoArchiveSpy = vi.fn(async (_objectId: string, updatedAt: string) =>
-    Object.freeze(createMemoryEntry({ lifecycle_state: "archived", updated_at: updatedAt }))
+  const repoCreateWithinTransactionSpy = vi.fn(
+    (
+      entry: MemoryEntry,
+      callbacks: Parameters<NonNullable<MemoryServiceDependencies["memoryEntryRepo"]["createWithinTransaction"]>>[1]
+    ) => {
+      callbacks.beforeCreate?.();
+      callbacks.afterCreate?.();
+      return Object.freeze({ ...entry });
+    }
   );
+  const repoArchiveSpy = vi.fn(async (_objectId: string, updatedAt: string, onArchived?: () => void) => {
+    onArchived?.();
+    return Object.freeze(createMemoryEntry({ lifecycle_state: "archived", updated_at: updatedAt }));
+  });
   const repoFindByScopeClassSpy = vi.fn(async () => [Object.freeze(createMemoryEntry())]);
 
   const dependencies: MemoryServiceDependencies = {
@@ -154,6 +165,7 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
     },
     memoryEntryRepo: {
       create: vi.fn(async (entry) => Object.freeze({ ...entry })),
+      createWithinTransaction: repoCreateWithinTransactionSpy,
       findById: vi.fn(async () => createMemoryEntry()),
       findByIds: vi.fn(async (objectIds: readonly string[]) =>
         objectIds.map((objectId) => createMemoryEntry({ object_id: objectId }))

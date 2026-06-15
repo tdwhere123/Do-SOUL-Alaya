@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { CoreError, type RunService, type SignalService } from "@do-soul/alaya-core";
-import { parseJsonBody } from "./shared.js";
+import { parseJsonBody, parseListPagination, writeListPaginationHeaders } from "./shared.js";
 import { EmitCandidateSignalResponseSchema, SignalSource } from "@do-soul/alaya-protocol";
 import { materializeCandidateSignal } from "@do-soul/alaya-soul";
 
@@ -13,7 +13,10 @@ export function registerSignalRoutes(app: Hono, services: SignalRouteServices): 
   app.get("/runs/:id/signals", async (context) => {
     const runId = context.req.param("id");
     await services.runService.getById(runId);
-    const signals = await services.signalService.listByRun(runId);
+    const pagination = parseListPagination(context);
+    const signals = await services.signalService.listByRun(runId, pagination);
+    const totalCount = await services.signalService.countByRun(runId);
+    writeListPaginationHeaders(context, totalCount, pagination);
     return context.json({ success: true, data: signals }, 200);
   });
 

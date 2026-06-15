@@ -293,12 +293,10 @@ export class ConflictDetectionService {
             );
           }
         } catch (err) {
-          // invariant: in strict no-drop mode a transient path-mint failure
-          // rethrown by writeEdge must propagate so the worker releases the
-          // claim — it is NOT a per-pair classify failure to swallow. An LLM
-          // classify throw is still warn-and-continue in both modes (the
-          // verdict is best-effort; a missing verdict drops no owed path).
-          if (strictNoDrop && err instanceof CoreError && err.code === "OBLIGATION_VIOLATION") {
+          // invariant: in strict no-drop mode an LLM-port failure is not a
+          // clean "none" verdict. The worker must release the claim so this
+          // owed ambiguity check can retry instead of silently dropping it.
+          if (strictNoDrop) {
             throw err;
           }
           this.warn("conflict detection llm pair classify failed", {

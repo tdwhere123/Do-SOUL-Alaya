@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCcw } from "lucide-react";
-import { apiFetch, getWorkspaceId, type ApiError } from "../api";
+import { apiFetch, getWorkspaceId } from "../api";
+import { useApiQuery } from "../hooks/useApiQuery";
 import { useToasts } from "../components/Toast";
 import { useI18n } from "../i18n/Locale";
 import type { DictKey } from "../i18n/dict";
@@ -72,83 +73,63 @@ const WINDOW_HOURS: Readonly<Record<WindowChoice, number>> = {
 
 const REFRESH_COOLDOWN_MS = 1_000;
 
+/**
+ * RecallPage exposes the daemon's recall-delivery, usage, and embedding
+ * telemetry for a rolling operator-selected time window.
+ */
 export default function RecallPage() {
   const { t } = useI18n();
+  const { showToast } = useToasts();
   const workspaceId = getWorkspaceId();
   const [windowChoice, setWindowChoice] = useState<WindowChoice>("7d");
-  const [stats, setStats] = useState<RecallStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const isMountedRef = useRef(true);
   const refreshLockRef = useRef(false);
   const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const requestIdRef = useRef(0);
-  const { showToast } = useToasts();
 
-  const fetchStats = useCallback(
-    async (choice: WindowChoice) => {
-      if (workspaceId === null) {
-        setLoading(false);
-        return;
-      }
-      const since = new Date(
-        Date.now() - WINDOW_HOURS[choice] * 60 * 60 * 1000
-      ).toISOString();
-      requestIdRef.current += 1;
-      const myRequestId = requestIdRef.current;
-      try {
-        const search = new URLSearchParams();
-        search.set("since", since);
-        const envelope = await apiFetch<RecallStatsEnvelope>(
-          `/recall-stats/${workspaceId}?${search.toString()}`
-        );
-        if (!isMountedRef.current || myRequestId !== requestIdRef.current) return;
-        setStats(envelope.data);
-        setError(null);
-      } catch (err) {
-        if (!isMountedRef.current || myRequestId !== requestIdRef.current) return;
-        if ((err as ApiError).status === 401) return;
-        const message = err instanceof Error ? err.message : "unknown error";
-        setError(message);
-        showToast({ message: `Recall fetch failed: ${message}`, type: "error" });
-      } finally {
-        if (isMountedRef.current && myRequestId === requestIdRef.current) {
-          setLoading(false);
-        }
-      }
-    },
-    [workspaceId, showToast]
-  );
+  const fetchStats = useCallback(async (signal: AbortSignal): Promise<RecallStats> => {
+    const since = new Date(
+      Date.now() - WINDOW_HOURS[windowChoice] * 60 * 60 * 1000
+    ).toISOString();
+    const search = new URLSearchParams();
+    search.set("since", since);
+    const envelope = await apiFetch<RecallStatsEnvelope>(
+      `/recall-stats/${workspaceId}?${search.toString()}`,
+      { signal }
+    );
+    return envelope.data;
+  }, [windowChoice, workspaceId]);
+
+  const {
+    data: stats,
+    error,
+    loading,
+    refetch
+  } = useApiQuery(fetchStats, [workspaceId, windowChoice], {
+    enabled: workspaceId !== null,
+    onError: (message) => {
+      showToast({ message: `Recall fetch failed: ${message}`, type: "error" });
+    }
+  });
 
   useEffect(() => {
-    isMountedRef.current = true;
-    setLoading(true);
-    void fetchStats(windowChoice);
     return () => {
-      isMountedRef.current = false;
       if (cooldownTimerRef.current) {
         clearTimeout(cooldownTimerRef.current);
-        cooldownTimerRef.current = null;
       }
     };
-  }, [fetchStats, windowChoice]);
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     if (refreshLockRef.current) return;
     refreshLockRef.current = true;
     setRefreshing(true);
-    await fetchStats(windowChoice);
-    if (!isMountedRef.current) {
-      refreshLockRef.current = false;
-      return;
-    }
+    await refetch("background");
     cooldownTimerRef.current = setTimeout(() => {
       cooldownTimerRef.current = null;
       refreshLockRef.current = false;
-      if (isMountedRef.current) setRefreshing(false);
+      setRefreshing(false);
     }, REFRESH_COOLDOWN_MS);
-  }, [fetchStats, windowChoice]);
+  }, [refetch]);
 
   if (workspaceId === null) {
     return (
@@ -156,9 +137,9 @@ export default function RecallPage() {
         <div
           role="alert"
           data-testid="recall-no-workspace"
-          className="max-w-4xl mx-auto w-full p-8 font-mono text-sm text-ink-700"
+          className="mx-auto w-full max-w-4xl p-8 font-mono text-sm text-ink-700"
         >
-          <h1 className="text-2xl font-bold text-ink-600 mb-3 uppercase tracking-widest">
+          <h1 className="mb-3 text-2xl font-bold uppercase tracking-widest text-ink-600">
             {t("common:noWorkspace")}
           </h1>
         </div>
@@ -168,15 +149,11 @@ export default function RecallPage() {
 
   return (
     <div className="h-full w-full overflow-y-auto">
-      <div className="max-w-5xl mx-auto w-full p-8 font-mono">
-        <header className="mb-10 flex items-end justify-between gap-6 flex-wrap">
+      <div className="mx-auto w-full max-w-5xl p-8 font-mono">
+        <header className="mb-10 flex flex-wrap items-end justify-between gap-6">
           <div>
-            <h1 className="text-3xl font-bold text-ink-600 mb-2">
-              {t("recall:title")}
-            </h1>
-            <p className="text-ink-700/60 text-sm max-w-2xl">
-              {t("recall:subtitle")}
-            </p>
+            <h1 className="mb-2 text-3xl font-bold text-ink-600">{t("recall:title")}</h1>
+            <p className="max-w-2xl text-sm text-ink-700/60">{t("recall:subtitle")}</p>
           </div>
           <div className="flex items-end gap-3">
             <WindowToggle choice={windowChoice} onChoose={setWindowChoice} t={t} />
@@ -184,36 +161,30 @@ export default function RecallPage() {
               type="button"
               onClick={() => void handleRefresh()}
               disabled={refreshing}
-              className="flex items-center gap-2 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-700/60 hover:text-ink-700 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-2 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-700/60 transition-colors hover:text-ink-700 disabled:opacity-50"
               aria-label={t("common:refresh.aria")}
             >
-              <RefreshCcw className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`} />
+              <RefreshCcw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
               {t("common:refresh")}
             </button>
           </div>
         </header>
 
         {loading && stats === null ? (
-          <p
-            data-testid="recall-loading"
-            className="text-ink-700/60 text-sm font-mono"
-          >
+          <p data-testid="recall-loading" className="font-mono text-sm text-ink-700/60">
             {t("recall:loading")}
           </p>
         ) : null}
 
         {error !== null && stats === null ? (
-          <p
-            data-testid="recall-error"
-            className="text-state-error-text font-mono text-sm"
-          >
+          <p data-testid="recall-error" className="font-mono text-sm text-state-error-text">
             {t("recall:error", { message: error })}
           </p>
         ) : null}
 
         {stats !== null ? (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+            <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
               <KpiCard
                 testId="recall-kpi-total"
                 label={t("recall:kpi.total")}
@@ -246,7 +217,7 @@ export default function RecallPage() {
               />
             </div>
 
-            <section className="mb-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <section className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <DetailRow
                 label={t("recall:detail.p50Pointer")}
                 value={String(stats.recall.p50_pointer_count)}
@@ -280,7 +251,7 @@ export default function RecallPage() {
 
             <section
               data-testid="recall-window-meta"
-              className="text-[10px] font-mono uppercase tracking-widest text-ink-700/55"
+              className="text-[10px] uppercase tracking-widest text-ink-700/55"
             >
               {t("recall:meta.window", {
                 since: stats.window.since ?? "—",
@@ -324,7 +295,7 @@ function WindowToggle({ choice, onChoose, t }: WindowToggleProps) {
           onClick={() => onChoose(value)}
           aria-pressed={choice === value}
           className={
-            "px-2 py-0.5 rounded-full text-[10px] font-mono uppercase transition-colors " +
+            "rounded-full px-2 py-0.5 text-[10px] font-mono uppercase transition-colors " +
             (choice === value
               ? "bg-ink-600 text-beige-50"
               : "text-ink-700/60 hover:text-ink-700")
@@ -347,36 +318,30 @@ function KpiCard({ label, value, testId }: KpiCardProps) {
   return (
     <div
       data-testid={testId}
-      className="p-4 bg-beige-50 border border-beige-200 rounded-lg flex flex-col gap-2"
+      className="flex flex-col gap-2 rounded-lg border border-beige-200 bg-beige-50 p-4"
     >
-      <span className="text-[10px] uppercase tracking-widest font-bold text-ink-700/40">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-ink-700/40">
         {label}
       </span>
-      <span className="text-2xl font-bold text-ink-600 tabular-nums">
-        {value}
-      </span>
+      <span className="text-2xl font-bold tabular-nums text-ink-600">{value}</span>
     </div>
   );
 }
 
 interface DetailRowProps {
+  readonly hint?: string;
   readonly label: string;
   readonly value: string;
-  readonly hint?: string;
 }
 
-function DetailRow({ label, value, hint }: DetailRowProps) {
+function DetailRow({ hint, label, value }: DetailRowProps) {
   return (
-    <div className="p-4 bg-beige-50/70 border border-beige-200 rounded flex flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-widest font-bold text-ink-700/40">
+    <div className="flex flex-col gap-1 rounded border border-beige-200 bg-beige-50/70 p-4">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-ink-700/40">
         {label}
       </span>
-      <span className="text-base text-ink-600 font-mono tabular-nums">
-        {value}
-      </span>
-      {hint !== undefined ? (
-        <span className="text-[10px] text-ink-700/40">{hint}</span>
-      ) : null}
+      <span className="font-mono text-base tabular-nums text-ink-600">{value}</span>
+      {hint !== undefined ? <span className="text-[10px] text-ink-700/40">{hint}</span> : null}
     </div>
   );
 }

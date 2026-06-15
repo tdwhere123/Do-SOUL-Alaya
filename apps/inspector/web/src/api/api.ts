@@ -36,6 +36,11 @@ export interface ApiError extends Error {
   status?: number;
 }
 
+export interface ApiFetchResult<T> {
+  readonly payload: T;
+  readonly headers: Headers;
+}
+
 const RETRYABLE_METHODS = new Set(["GET", "HEAD"]);
 
 async function sleep(ms: number): Promise<void> {
@@ -43,6 +48,13 @@ async function sleep(ms: number): Promise<void> {
 }
 
 export async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  return (await apiFetchWithHeaders<T>(path, options)).payload;
+}
+
+export async function apiFetchWithHeaders<T>(
+  path: string,
+  options: ApiRequestOptions = {}
+): Promise<ApiFetchResult<T>> {
   const { params, headers, body, method = "GET", ...rest } = options;
 
   let resolvedPath = path;
@@ -112,7 +124,10 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
       throw error;
     }
 
-    return response.json() as Promise<T>;
+    return {
+      payload: await response.json() as T,
+      headers: response.headers
+    };
   }
 
   throw lastError instanceof Error ? lastError : new Error("apiFetch exhausted retries");

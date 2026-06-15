@@ -403,8 +403,9 @@ export function createBenchSeedOps(
     );
 
     const received = await input.activeRuntime.services.signalService.receiveSignal(signal);
-    const memoryObject = received.materialization?.created_objects.find(
-      (obj) => obj.object_kind === "memory_entry"
+    const createdObjects = received.materialization?.created_objects ?? [];
+    const memoryObject = createdObjects.find(
+      (obj: (typeof createdObjects)[number]) => obj.object_kind === "memory_entry"
     );
     if (memoryObject === undefined) {
       const routingReason = received.materialization?.routing_reason ?? "n/a";
@@ -422,8 +423,8 @@ export function createBenchSeedOps(
         }
       };
     }
-    const evidenceObject = received.materialization?.created_objects.find(
-      (obj) => obj.object_kind === "evidence_capsule"
+    const evidenceObject = createdObjects.find(
+      (obj: (typeof createdObjects)[number]) => obj.object_kind === "evidence_capsule"
     );
     let accepted: { readonly proposalId: string };
     try {

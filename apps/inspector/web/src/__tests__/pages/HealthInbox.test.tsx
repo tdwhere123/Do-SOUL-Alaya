@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import HealthInboxPage from "../../pages/HealthInbox";
 import { ToastProvider } from "../../components/Toast";
@@ -55,7 +55,11 @@ interface HealthIssueGroupShape {
   readonly workspace_id: string;
   readonly target_object_id: string;
   readonly target_object_kind: string;
-  readonly cause_kind: "orphan_radar" | "green_revoked" | "evidence_failure";
+  readonly cause_kind:
+    | "orphan_radar"
+    | "green_revoked"
+    | "evidence_failure"
+    | "path_relation_failure";
   readonly severity: "info" | "warn" | "blocking";
   readonly confidence: number;
   readonly first_seen_at: string;
@@ -107,6 +111,14 @@ describe("HealthInboxPage", () => {
         cause_kind: "evidence_failure",
         severity: "info",
         count: 1
+      }),
+      makeGroup({
+        group_id: "g-6",
+        target_object_id: "mem-6",
+        cause_kind: "path_relation_failure",
+        severity: "blocking",
+        suggested_actions: ["inspect_path_relation"],
+        count: 2
       })
     ];
     fetchMock.mockImplementation(async (input: FetchInput) => {
@@ -125,10 +137,11 @@ describe("HealthInboxPage", () => {
     await waitFor(() =>
       expect(screen.getAllByTestId("health-inbox-group").length).toBeGreaterThanOrEqual(5)
     );
-    // groupedByCause produces three cause buckets above
-    expect(screen.getByText(/orphan radar|孤儿雷达/i)).toBeTruthy();
-    expect(screen.getByText(/green revoked|Green 撤销/i)).toBeTruthy();
-    expect(screen.getByText(/evidence failure|证据失败/i)).toBeTruthy();
+    // groupedByCause produces four cause buckets above.
+    expect(screen.getAllByText(/orphan radar|孤儿雷达/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/green revoked|Green 撤销/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/evidence failure|证据失败/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/path relation failure|路径关系失败/i).length).toBeGreaterThan(0);
   });
 
   it("forwards the state filter to the daemon route", async () => {
@@ -155,5 +168,26 @@ describe("HealthInboxPage", () => {
         screen.getByText(/No health issues|无健康问题/i)
       ).toBeTruthy()
     );
+  });
+
+  it("forwards the path_relation_failure cause filter to the daemon route", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ success: true, data: { workspace_id: "ws1", groups: [], total_count: 0 } })
+    );
+    renderHealthInbox();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: /path relation failure|路径关系失败/i }));
+
+    await waitFor(() => {
+      const called = fetchMock.mock.calls.some((call) => {
+        const url = urlOf(call[0] as FetchInput);
+        return (
+          url.includes("/workspaces/ws1/health-inbox") &&
+          url.includes("causeKind=path_relation_failure")
+        );
+      });
+      expect(called).toBe(true);
+    });
   });
 });

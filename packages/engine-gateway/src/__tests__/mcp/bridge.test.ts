@@ -233,9 +233,17 @@ describe("McpBridge", () => {
     expect(result).toEqual({
       type: "tool_result",
       tool_use_id: toolUse.id,
-      content: JSON.stringify({ error: "MCP tool execution failed." }),
+      content: JSON.stringify({
+        error: {
+          error_code: "handler_exception",
+          message: "MCP tool execution failed.",
+          error_type: "Error"
+        }
+      }),
       is_error: true
     });
+    expect(result.content).not.toContain("db.internal");
+    expect(result.content).not.toContain("abcd1234");
   });
 
   it("rejects hallucinated soul.* tool names before dispatching to handlers", async () => {
@@ -283,10 +291,10 @@ describe("McpBridge", () => {
   });
 
   it.each([
-    ["string", "boom"],
-    ["number", 42],
-    ["plain object", { boom: true }]
-  ])("collapses %s throws to the generic tool failure string", async (_label, thrownValue) => {
+    ["string", "boom", "string"],
+    ["number", 42, "number"],
+    ["plain object", { boom: true }, "object"]
+  ])("returns sanitized diagnostics for %s throws", async (_label, thrownValue, errorType) => {
     const bridge = new McpBridge({
       soulHandler: vi.fn(async () => {
         throw thrownValue;
@@ -298,9 +306,16 @@ describe("McpBridge", () => {
     expect(result).toEqual({
       type: "tool_result",
       tool_use_id: toolUse.id,
-      content: JSON.stringify({ error: "MCP tool execution failed." }),
+      content: JSON.stringify({
+        error: {
+          error_code: "handler_exception",
+          message: "MCP tool execution failed.",
+          error_type: errorType
+        }
+      }),
       is_error: true
     });
+    expect(result.content).not.toContain("boom");
   });
 
   it("defines provider-neutral SOUL tool specs for the stable public memory surface", () => {

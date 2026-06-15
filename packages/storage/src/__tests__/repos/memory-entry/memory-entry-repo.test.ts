@@ -28,6 +28,20 @@ import {
 
 const databases = trackedDatabases;
 
+type StatementSource = {
+  readonly source: string;
+};
+
+type MemoryEntryRepoStatementsForTest = {
+  readonly findByWorkspaceHotStatement: StatementSource;
+  readonly findByWorkspaceTierStatement: StatementSource;
+  readonly countByWorkspaceHotStatement: StatementSource;
+  readonly countByWorkspaceTierStatement: StatementSource;
+  readonly findByRunIdStatement: StatementSource;
+  readonly findByDimensionHotStatement: StatementSource;
+  readonly findByScopeClassHotStatement: StatementSource;
+};
+
 afterEach(() => {
   for (const database of databases) {
     database.close();
@@ -179,6 +193,98 @@ describe("SqliteMemoryEntryRepo", () => {
 
     const rows = await repo.findByWorkspaceId("workspace-1");
     expect(rows.map((row) => row.object_id)).toEqual(["7ab81ca8-9425-4e18-ad4a-81ab6406db55"]);
+  });
+
+  it("findByWorkspaceId supports limit/offset with a separate count", async () => {
+    const { repo } = await createRepo();
+    const ids = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333"
+    ];
+
+    for (const [index, objectId] of ids.entries()) {
+      await repo.create(
+        createMemoryEntry({
+          object_id: objectId,
+          storage_tier: StorageTier.HOT,
+          workspace_id: "workspace-1",
+          run_id: `run-page-${index}`,
+          created_at: `2026-03-21T00:00:0${index}.000Z`,
+          updated_at: `2026-03-21T00:00:0${index}.000Z`
+        })
+      );
+    }
+
+    const page = await repo.findByWorkspaceId("workspace-1", undefined, {
+      limit: 1,
+      offset: 1
+    });
+
+    expect(page.map((row) => row.object_id)).toEqual([ids[1]]);
+    await expect(repo.countByWorkspaceId("workspace-1")).resolves.toBe(3);
+  });
+
+  it("uses active-row indexes for workspace, run, dimension, and scope list shapes", async () => {
+    const { database, repo } = await createRepo();
+    const statements = repo as unknown as MemoryEntryRepoStatementsForTest;
+    const indexRows = database.connection
+      .prepare("PRAGMA index_list('memory_entries')")
+      .all() as ReadonlyArray<{ readonly name: string }>;
+
+    expect(indexRows.map((row) => row.name).sort()).toEqual(
+      expect.arrayContaining([
+        "idx_memory_entries_run_active_created",
+        "idx_memory_entries_workspace_dimension_hot_active_created",
+        "idx_memory_entries_workspace_scope_hot_active_created",
+        "idx_memory_entries_workspace_tier_active_created"
+      ])
+    );
+
+    const expectPlanUsesIndex = (
+      sql: string,
+      params: readonly unknown[],
+      indexName: string
+    ): void => {
+      const plan = database.connection
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...params) as ReadonlyArray<{ readonly detail: string }>;
+      const details = plan.map((step) => step.detail).join(" | ");
+      expect(
+        plan.some((step) => step.detail.includes(`USING INDEX ${indexName}`)),
+        `expected ${indexName}, got: ${details}`
+      ).toBe(true);
+      expect(
+        plan.some((step) => step.detail.startsWith("SCAN memory_entries")),
+        `expected no memory_entries scan, got: ${details}`
+      ).toBe(false);
+    };
+
+    expectPlanUsesIndex(statements.findByWorkspaceHotStatement.source, [
+      "workspace-1"
+    ], "idx_memory_entries_workspace_tier_active_created");
+    expectPlanUsesIndex(statements.findByWorkspaceTierStatement.source, [
+      "workspace-1",
+      StorageTier.WARM
+    ], "idx_memory_entries_workspace_tier_active_created");
+    expectPlanUsesIndex(statements.countByWorkspaceHotStatement.source, [
+      "workspace-1"
+    ], "idx_memory_entries_workspace_tier_active_created");
+    expectPlanUsesIndex(statements.countByWorkspaceTierStatement.source, [
+      "workspace-1",
+      StorageTier.WARM
+    ], "idx_memory_entries_workspace_tier_active_created");
+    expectPlanUsesIndex(statements.findByRunIdStatement.source, [
+      "run-1"
+    ], "idx_memory_entries_run_active_created");
+    expectPlanUsesIndex(statements.findByDimensionHotStatement.source, [
+      "workspace-1",
+      MemoryDimension.PREFERENCE
+    ], "idx_memory_entries_workspace_dimension_hot_active_created");
+    expectPlanUsesIndex(statements.findByScopeClassHotStatement.source, [
+      "workspace-1",
+      ScopeClass.PROJECT
+    ], "idx_memory_entries_workspace_scope_hot_active_created");
   });
 
   it("returns explicit cold-tier records when tier is provided", async () => {

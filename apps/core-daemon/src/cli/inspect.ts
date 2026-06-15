@@ -166,7 +166,9 @@ async function executeInspect(
     if (workspaceResolution.status !== "ok") {
       return { exitCode: workspaceResolution.exitCode };
     }
-    const url = `http://127.0.0.1:${args.port}/?token=${token}&workspaceId=${encodeURIComponent(workspaceResolution.workspaceId)}`;
+    const url =
+      `http://127.0.0.1:${args.port}/?workspaceId=${encodeURIComponent(workspaceResolution.workspaceId)}` +
+      `#token=${encodeURIComponent(token)}`;
     const inspectorEnv: NodeJS.ProcessEnv = { ALAYA_DAEMON_URL: daemon.url };
     if (daemonRequestAuth.requestToken !== undefined) {
       inspectorEnv.ALAYA_REQUEST_TOKEN = daemonRequestAuth.requestToken;

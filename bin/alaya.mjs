@@ -126,5 +126,14 @@ function isDirectExecution() {
 
 if (isDirectExecution()) {
   const exitCode = await runAlayaCli();
-  process.exit(exitCode);
+  // invariant: flush stdout/stderr before exit. macOS pipe buffers are small and a bare
+  // process.exit() drops un-drained output, truncating large --json payloads (e.g. the
+  // 16-tool `tools list --json`). write("",cb) fires after the stream buffer flushes.
+  let pending = 2;
+  const finish = () => {
+    pending -= 1;
+    if (pending === 0) process.exit(exitCode);
+  };
+  process.stdout.write("", finish);
+  process.stderr.write("", finish);
 }

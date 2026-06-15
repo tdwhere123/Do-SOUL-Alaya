@@ -313,6 +313,10 @@ export interface RecallServiceDependencies {
   // see also: packages/core/src/shared/entity-extraction-port.ts
   // see also: packages/core/src/shared/entity-extraction-rules.ts RuleBasedEntityExtractor
   readonly entityExtractionPort?: import("../shared/entity-extraction-port.js").EntityExtractionPort;
+  // Opt-in (ALAYA_RECALL_SOURCE_REF_ROBUST): also parse round-labeled / per-fact
+  // evidence source refs (`s3-r2`, `s3-r2-f1`) so source proximity engages on
+  // conversational corpora. Default off keeps t/turn/chunk parsing unchanged.
+  readonly robustSourceRefParsing?: boolean;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly warn?: RecallServiceWarnPort;

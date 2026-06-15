@@ -1,9 +1,15 @@
 import type { Hono } from "hono";
 import { CoreError, type ConversationService, type RunHotStateService, type RunService } from "@do-soul/alaya-core";
-import { parseJsonBody, rejectUnexpectedRequestBody } from "./shared.js";
+import {
+  parseJsonBody,
+  parseListPagination,
+  rejectUnexpectedRequestBody,
+  writeListPaginationHeaders
+} from "./shared.js";
 import {
   type EventLogEntry,
   RunInterruptResultSchema,
+  RunRenameInputSchema,
 } from "@do-soul/alaya-protocol";
 import {
   deleteRunSnapshotCache,
@@ -68,7 +74,11 @@ export function registerRunRoutes(app: Hono, services: RunRouteServices): void {
   });
 
   app.get("/workspaces/:id/runs", async (context) => {
-    const runs = await services.runService.listByWorkspace(context.req.param("id"));
+    const workspaceId = context.req.param("id");
+    const pagination = parseListPagination(context);
+    const runs = await services.runService.listByWorkspace(workspaceId, pagination);
+    const totalCount = await services.runService.countByWorkspace(workspaceId);
+    writeListPaginationHeaders(context, totalCount, pagination);
     return context.json({ success: true, data: runs }, 200);
   });
 
@@ -78,7 +88,11 @@ export function registerRunRoutes(app: Hono, services: RunRouteServices): void {
   });
 
   app.get("/runs/:id/messages", async (context) => {
-    const messages = await services.conversationService.listMessages(context.req.param("id"));
+    const runId = context.req.param("id");
+    const pagination = parseListPagination(context);
+    const messages = await services.conversationService.listMessages(runId, pagination);
+    const totalCount = await services.conversationService.countMessages(runId);
+    writeListPaginationHeaders(context, totalCount, pagination);
     return context.json({ success: true, data: messages }, 200);
   });
 
@@ -145,8 +159,8 @@ export function registerRunRoutes(app: Hono, services: RunRouteServices): void {
 
   app.patch("/runs/:id", async (context) => {
     const runId = context.req.param("id");
-    const body = await parseJsonBody(context.req.json.bind(context.req));
-    const run = await services.runService.rename({ run_id: runId, ...(body as Record<string, unknown>) });
+    const body = parseRunRenameInput(runId, await parseJsonBody(context.req.json.bind(context.req)));
+    const run = await services.runService.rename(body);
     return context.json({ success: true, data: run }, 200);
   });
 
@@ -177,5 +191,18 @@ function logRunRouteWarning(
 }
 
 function defaultRunRouteWarning(message: string, meta: Record<string, unknown>): void {
-  console.warn(message, meta);
+  void message;
+  void meta;
+}
+
+function parseRunRenameInput(runId: string, body: unknown): unknown {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    throw new CoreError("VALIDATION", "Invalid request body");
+  }
+
+  try {
+    return RunRenameInputSchema.parse({ run_id: runId, ...body });
+  } catch (error) {
+    throw new CoreError("VALIDATION", "Invalid request body", { cause: error });
+  }
 }

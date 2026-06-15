@@ -22,6 +22,11 @@ export interface MemoryEntryRepoDynamicsUpdateFields {
   readonly superseded_by?: string;
 }
 
+export interface MemoryEntryListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
+}
+
 export interface MemoryEntryRepoTierUpdateInput {
   readonly objectId: string;
   readonly workspaceId: string;
@@ -57,13 +62,21 @@ export interface MemoryEntryRepo {
   findByIds(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
   findByWorkspaceId(
     workspaceId: string,
-    tier?: StorageTier
+    tier?: StorageTier,
+    page?: MemoryEntryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
-  findByRunId(runId: string): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByWorkspaceId(workspaceId: string, tier?: StorageTier): Promise<number>;
+  findByRunId(
+    runId: string,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByRunId(runId: string): Promise<number>;
   findByDimension(
     workspaceId: string,
-    dimension: MemoryDimension
+    dimension: MemoryDimension,
+    page?: MemoryEntryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByDimension(workspaceId: string, dimension: MemoryDimension): Promise<number>;
   findByScopeClass(
     workspaceId: string,
     scopeClass: ScopeClass
@@ -103,7 +116,8 @@ export interface MemoryEntryRepo {
   transitionLifecycle(
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
-    updatedAt: string
+    updatedAt: string,
+    onTransition?: () => void
   ): Promise<Readonly<MemoryEntry>>;
   // invariant (N1): guarded reversible revival; null when the row was not dormant.
   reviveDormant(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry> | null>;
@@ -113,8 +127,8 @@ export interface MemoryEntryRepo {
     updatedAt: string,
     onTransition?: () => void
   ): Promise<Readonly<MemoryEntry> | null>;
-  archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>>;
-  hardDeleteTombstoned(objectId: string): Promise<void>;
+  archive(objectId: string, updatedAt: string, onArchived?: () => void): Promise<Readonly<MemoryEntry>>;
+  hardDeleteTombstoned(objectId: string, onDeleted?: () => void): Promise<void>;
   // invariant: autonomous tombstone candidates are dormant-only and pre-disposition.
   findDormantMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   // invariant: autonomous tombstone can terminalize only currently dormant rows.

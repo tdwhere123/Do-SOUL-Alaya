@@ -36,7 +36,10 @@ describe("ConfigPage", () => {
         });
       }
       if (url.endsWith("/config/ws-1/strategy")) {
-        return jsonResponse({ auto_approve_readonly: false });
+        return jsonResponse({
+          auto_approve_readonly: false,
+          config_version: "2026-06-14"
+        });
       }
       if (url.endsWith("/config/ws-1/environment")) {
         return jsonResponse({ worktree_enabled: false, env_vars: {} });
@@ -111,6 +114,15 @@ describe("ConfigPage", () => {
         )
       ).toBe(true);
     });
+  });
+
+  it("does not render additive config_version metadata in the generic editor", async () => {
+    renderConfig();
+    const strategyHeading = await screen.findByRole("heading", {
+      name: /Strategy & Guardrails/i
+    });
+    const strategySection = strategyHeading.closest("div.mb-12") as HTMLElement;
+    expect(within(strategySection).queryByText(/config version/i)).toBeNull();
   });
 
   it("renders manifestation budget controls from the workspace config route", async () => {

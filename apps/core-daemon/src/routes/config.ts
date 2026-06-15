@@ -11,81 +11,80 @@ export interface ConfigRouteServices {
 }
 
 export function registerConfigRoutes(app: Hono, services: ConfigRouteServices): void {
-  if (services.configService !== undefined) {
+  const { configService } = services;
+  if (configService !== undefined) {
     app.get("/workspaces/:workspaceId/config/soul", async (context) => {
       const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
-      const config = await services.configService!.getSoulConfig(workspaceId);
+      const config = await configService.getSoulConfig(workspaceId);
       return context.json({ success: true, data: config }, 200);
     });
 
     app.patch("/workspaces/:workspaceId/config/soul", async (context) => {
       const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
-      const config = await services.configService!.patchSoulConfig(
+      const config = await configService.patchSoulConfig(
         workspaceId,
-        await parseJsonBody(context.req.json.bind(context.req))
+        await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
       );
       return context.json({ success: true, data: config }, 200);
     });
 
     app.get("/workspaces/:workspaceId/config/strategy", async (context) => {
       const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
-      const config = await services.configService!.getStrategyConfig(workspaceId);
+      const config = await configService.getStrategyConfig(workspaceId);
       return context.json({ success: true, data: config }, 200);
     });
 
     app.patch("/workspaces/:workspaceId/config/strategy", async (context) => {
       const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
-      const config = await services.configService!.patchStrategyConfig(
+      const config = await configService.patchStrategyConfig(
         workspaceId,
-        await parseJsonBody(context.req.json.bind(context.req))
+        await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
       );
       return context.json({ success: true, data: config }, 200);
     });
 
     app.get("/workspaces/:workspaceId/config/environment", async (context) => {
       const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
-      const config = await services.configService!.getEnvironmentConfig(workspaceId);
+      const config = await configService.getEnvironmentConfig(workspaceId);
       return context.json({ success: true, data: config }, 200);
     });
 
     app.patch("/workspaces/:workspaceId/config/environment", async (context) => {
       const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
-      const config = await services.configService!.patchEnvironmentConfig(
+      const config = await configService.patchEnvironmentConfig(
         workspaceId,
-        await parseJsonBody(context.req.json.bind(context.req))
+        await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
       );
       return context.json({ success: true, data: config }, 200);
     });
 
     app.get("/config/runtime/embedding-supplement", async (context) => {
-      const config = await services.configService!.getRuntimeEmbeddingConfig();
+      const config = await configService.getRuntimeEmbeddingConfig();
       return context.json({ success: true, data: config }, 200);
     });
 
     app.patch("/config/runtime/embedding-supplement", async (context) => {
-      const config = await services.configService!.patchRuntimeEmbeddingConfig(
-        await parseJsonBody(context.req.json.bind(context.req))
+      const config = await configService.patchRuntimeEmbeddingConfig(
+        await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
       );
       return context.json({ success: true, data: config, requires_daemon_restart: true }, 200);
     });
 
     app.get("/config/runtime/garden-compute", async (context) => {
-      const config = await services.configService!.getRuntimeGardenComputeConfig();
+      const config = await configService.getRuntimeGardenComputeConfig();
       return context.json({ success: true, data: config }, 200);
     });
 
     app.patch("/config/runtime/garden-compute", async (context) => {
-      const config = await services.configService!.patchRuntimeGardenComputeConfig(
-        await parseJsonBody(context.req.json.bind(context.req))
+      const config = await configService.patchRuntimeGardenComputeConfig(
+        await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
       );
       return context.json({ success: true, data: config, requires_daemon_restart: false }, 200);
     });
-  }
 
-  if (services.configService !== undefined) {
     app.get("/workspaces/:workspaceId/config/manifestation-budget", async (context) => {
       const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
-      const result = await services.configService!.getManifestationBudgetConfig(workspaceId);
+      const result = await configService.getManifestationBudgetConfig(workspaceId);
       return context.json({
         success: true,
         data: result.config,
@@ -95,18 +94,19 @@ export function registerConfigRoutes(app: Hono, services: ConfigRouteServices): 
 
     app.patch("/workspaces/:workspaceId/config/manifestation-budget", async (context) => {
       const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
-      const saved = await services.configService!.patchManifestationBudgetConfig(
+      const saved = await configService.patchManifestationBudgetConfig(
         workspaceId,
-        await parseJsonBody(context.req.json.bind(context.req))
+        await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
       );
       return context.json({ success: true, data: saved, requires_daemon_restart: false }, 200);
     });
   }
 
-  if (services.environmentStatusService !== undefined) {
+  const { environmentStatusService } = services;
+  if (environmentStatusService !== undefined) {
     app.get("/workspaces/:workspaceId/environment-status", async (context) => {
       await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
-      const status = await services.environmentStatusService!.getStatus();
+      const status = await environmentStatusService.getStatus();
       return context.json({ success: true, data: status }, 200);
     });
   }
@@ -121,4 +121,12 @@ async function requireWorkspace(workspaceService: WorkspaceService, workspaceId:
 
   await workspaceService.getById(trimmed);
   return trimmed;
+}
+
+function parseConfigPatchBody(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new CoreError("VALIDATION", "Config patch body must be a JSON object");
+  }
+
+  return value as Record<string, unknown>;
 }

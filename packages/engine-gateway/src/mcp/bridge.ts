@@ -101,7 +101,11 @@ function readErrorMessage(
     ) as Record<string, string | number | boolean | null>;
   }
 
-  return "MCP tool execution failed.";
+  return {
+    error_code: "handler_exception",
+    message: "MCP tool execution failed.",
+    error_type: error instanceof Error ? error.name : typeof error
+  };
 }
 
 function isStructuredValidationError(

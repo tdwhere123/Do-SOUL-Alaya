@@ -103,6 +103,19 @@ const MEMORY_EMBEDDING_SELECT_COLUMNS = `
       updated_at
 `;
 
+const MEMORY_EMBEDDING_SELECT_COLUMNS_QUALIFIED = `
+      memory_embeddings.object_id AS object_id,
+      memory_embeddings.workspace_id AS workspace_id,
+      memory_embeddings.content_hash AS content_hash,
+      memory_embeddings.provider_kind AS provider_kind,
+      memory_embeddings.model_id AS model_id,
+      memory_embeddings.schema_version AS schema_version,
+      memory_embeddings.dimensions AS dimensions,
+      memory_embeddings.embedding_blob AS embedding_blob,
+      memory_embeddings.created_at AS created_at,
+      memory_embeddings.updated_at AS updated_at
+`;
+
 // Metadata column list: every column EXCEPT embedding_blob, so a metadata read
 // never touches the vector payload.
 const MEMORY_EMBEDDING_METADATA_COLUMNS = `
@@ -123,7 +136,11 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
   private readonly findByObjectIdStatement;
   private readonly listByWorkspaceStatement;
   private readonly findCurrentMemoryContentStatement;
+  private readonly clearObjectIdFilterStatement;
+  private readonly insertObjectIdFilterStatement;
+  private readonly listByObjectIdFilterStatement;
   private readonly guardedUpsertTransaction;
+  private readonly listByObjectIdFilterTransaction;
 
   public constructor(private readonly db: StorageDatabase) {
     this.upsertStatement = db.connection.prepare(`
@@ -168,6 +185,26 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
         AND workspace_id = ?
       LIMIT 1
     `);
+    db.connection.exec(`
+      CREATE TEMP TABLE IF NOT EXISTS memory_embedding_object_id_filter (
+        object_id TEXT PRIMARY KEY
+      ) WITHOUT ROWID
+    `);
+    this.clearObjectIdFilterStatement = db.connection.prepare(`
+      DELETE FROM temp.memory_embedding_object_id_filter
+    `);
+    this.insertObjectIdFilterStatement = db.connection.prepare(`
+      INSERT OR IGNORE INTO temp.memory_embedding_object_id_filter (object_id)
+      VALUES (?)
+    `);
+    this.listByObjectIdFilterStatement = db.connection.prepare(`
+      SELECT${MEMORY_EMBEDDING_SELECT_COLUMNS_QUALIFIED}
+      FROM memory_embeddings
+      INNER JOIN temp.memory_embedding_object_id_filter filter_ids
+        ON filter_ids.object_id = memory_embeddings.object_id
+      WHERE workspace_id = ?
+      ORDER BY memory_embeddings.object_id ASC
+    `);
     this.guardedUpsertTransaction = db.connection.transaction(
       (
         parsedRecord: Readonly<MemoryEmbeddingRecord>
@@ -197,6 +234,17 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
         }
 
         return parseMemoryEmbeddingRow(persisted);
+      }
+    );
+    this.listByObjectIdFilterTransaction = db.connection.transaction(
+      (
+        parsedWorkspaceId: string,
+        parsedObjectIds: readonly string[]
+      ): readonly MemoryEmbeddingRow[] => {
+        for (const objectId of parsedObjectIds) {
+          this.insertObjectIdFilterStatement.run(objectId);
+        }
+        return this.listByObjectIdFilterStatement.all(parsedWorkspaceId) as MemoryEmbeddingRow[];
       }
     );
   }
@@ -392,17 +440,11 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     }
 
     try {
-      const rows: MemoryEmbeddingRow[] = [];
-      for (const chunk of chunkObjectIds(parsedObjectIds)) {
-        const placeholders = chunk.map(() => "?").join(", ");
-        const statement = this.db.connection.prepare(`
-          SELECT${MEMORY_EMBEDDING_SELECT_COLUMNS}
-          FROM memory_embeddings
-          WHERE workspace_id = ?
-            AND object_id IN (${placeholders})
-        `);
-        rows.push(...(statement.all(parsedWorkspaceId, ...chunk) as MemoryEmbeddingRow[]));
-      }
+      this.clearObjectIdFilterStatement.run();
+      const rows = this.listByObjectIdFilterTransaction(
+        parsedWorkspaceId,
+        parsedObjectIds
+      );
       return Object.freeze(
         rows
           .map((row) => parseMemoryEmbeddingRow(row))
@@ -418,6 +460,8 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
         `Failed to list filtered memory embeddings for workspace ${parsedWorkspaceId}.`,
         error
       );
+    } finally {
+      this.clearObjectIdFilterStatement.run();
     }
   }
 }

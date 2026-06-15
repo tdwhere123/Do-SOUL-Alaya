@@ -158,14 +158,14 @@ export async function createRecallMaterializationWiring(input: {
     input.globalMemoryRepo === null
       ? undefined
       : createGlobalMemoryRouteService({
-          globalMemoryRepo: input.globalMemoryRepo as never,
+          globalMemoryRepo: input.globalMemoryRepo,
           projectMappingService: input.projectMappingService
         });
   const globalMemoryRecallService =
     input.globalMemoryRepo === null
       ? undefined
       : createGlobalMemoryRecallPort({
-          globalMemoryRepo: input.globalMemoryRepo as never
+          globalMemoryRepo: input.globalMemoryRepo
         });
   const globalMemoryRecallInvalidationSubscription: GlobalMemoryRecallSubscription | null =
     globalMemoryRecallService?.subscribeToInvalidations(input.runtimeNotifier) ?? null;
@@ -179,8 +179,8 @@ export async function createRecallMaterializationWiring(input: {
   } = createDaemonEmbeddingRuntime({
     database: input.database,
     configEnv: input.configEnv,
-    eventLogRepo: input.eventLogRepo as never,
-    healthJournalService: input.healthJournalService as never,
+    eventLogRepo: input.eventLogRepo,
+    healthJournalService: input.healthJournalService,
     memoryEntryRepo: input.memoryEntryRepo,
     warn: input.warn
   });
@@ -215,7 +215,7 @@ export async function createRecallMaterializationWiring(input: {
   const getManifestationResolver = (): ManifestationResolver => {
     if (manifestationResolverInstance === null) {
       manifestationResolverInstance = new ManifestationResolver({
-        budgetConfigProvider: input.manifestationBudgetConfigProvider as never,
+        budgetConfigProvider: input.manifestationBudgetConfigProvider,
         eventLogWriter: {
           append: async (entry) => input.eventLogRepo.append(entry)
         }
@@ -248,7 +248,7 @@ export async function createRecallMaterializationWiring(input: {
     }
   };
   const recallUtilizationService = createRecallUtilizationService({
-    eventLogRepo: input.eventLogRepo as never
+    eventLogRepo: input.eventLogRepo
   });
   const singleUsedAnchorEmitter: SingleUsedAnchorTelemetryEmitter = {
     async emit(emitInput) {
@@ -271,8 +271,12 @@ export async function createRecallMaterializationWiring(input: {
       } as const;
       try {
         await input.eventPublisher.appendManyWithMutation([event], () => undefined);
-      } catch {
-        // invariant: telemetry emission never propagates failure to the route.
+      } catch (error) {
+        input.warn("single used-anchor telemetry emission failed", {
+          deliveryId: emitInput.deliveryId,
+          usedAnchorObjectId: emitInput.usedAnchorObjectId,
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
     }
   };
@@ -331,15 +335,22 @@ export async function createRecallMaterializationWiring(input: {
       });
     }
   };
+  // Opt-in source-ref robustness: parse round-labeled / per-fact evidence refs
+  // (`s3-r2`, `s3-r2-f1`) so source proximity engages on conversational corpora
+  // whose refs aren't t/turn/chunk. Default off; the bench shares this wiring.
+  const robustSourceRefParsing =
+    process.env.ALAYA_RECALL_SOURCE_REF_ROBUST === "1" ||
+    process.env.ALAYA_RECALL_SOURCE_REF_ROBUST === "true";
   const recallService = new RecallService({
     memoryRepo: input.memoryEntryRepo,
-    slotRepo: input.slotRepo as never,
-    eventLogRepo: input.eventLogRepo as never,
-    graphSupportPort: input.graphExploreService as never,
+    slotRepo: input.slotRepo,
+    eventLogRepo: input.eventLogRepo,
+    graphSupportPort: input.graphExploreService,
     projectMappingPort: input.projectMappingService,
     pathPlasticityPort: recallPathPlasticityPort,
     pathExpansionPort: recallPathExpansionPort,
     activeConstraintsPort: recallActiveConstraintsPort,
+    robustSourceRefParsing,
     evidenceSearchPort: {
       searchByKeyword: async (workspaceId, queryText, limit) =>
         input.evidenceCapsuleRepo.searchByKeyword === undefined
@@ -374,7 +385,7 @@ export async function createRecallMaterializationWiring(input: {
             ? {}
             : {
                 globalRecallCachePort: createGlobalMemoryRecallCachePort({
-                  globalMemoryRecallCacheRepo: input.globalMemoryRecallCacheRepo as never,
+                  globalMemoryRecallCacheRepo: input.globalMemoryRecallCacheRepo,
                   now: () => new Date().toISOString()
                 })
               })
@@ -423,17 +434,21 @@ export async function createRecallMaterializationWiring(input: {
   const edgeAutoProducerGardenComputeConfig = edgeAutoProducerLlmEnabled
     ? sharedGardenComputeConfig
     : null;
+  const edgeAutoProducerOfficialConfig =
+    edgeAutoProducerGardenComputeConfig !== null &&
+    canResolveOfficialGardenProvider(edgeAutoProducerGardenComputeConfig)
+      ? edgeAutoProducerGardenComputeConfig
+      : null;
   const edgeAutoProducerGardenApiKey = ((): string | null => {
-    if (
-      edgeAutoProducerGardenComputeConfig === null ||
-      !canResolveOfficialGardenProvider(edgeAutoProducerGardenComputeConfig as never)
-    ) {
+    if (edgeAutoProducerOfficialConfig === null) {
+      return null;
+    }
+    const secretRef = edgeAutoProducerOfficialConfig.secret_ref;
+    if (secretRef === null) {
       return null;
     }
     try {
-      return resolveGardenSecretRefValue(
-        edgeAutoProducerGardenComputeConfig.secret_ref as string
-      );
+      return resolveGardenSecretRefValue(secretRef);
     } catch {
       return null;
     }
@@ -532,15 +547,21 @@ export async function createRecallMaterializationWiring(input: {
     ingestReconciliationEnabled
       ? await input.rawConfigService.getRuntimeGardenComputeConfig()
       : null;
+  const reconciliationOfficialConfig =
+    reconciliationGardenComputeConfig !== null &&
+    canResolveOfficialGardenProvider(reconciliationGardenComputeConfig)
+      ? reconciliationGardenComputeConfig
+      : null;
   const reconciliationGardenApiKey = ((): string | null => {
-    if (
-      reconciliationGardenComputeConfig === null ||
-      !canResolveOfficialGardenProvider(reconciliationGardenComputeConfig as never)
-    ) {
+    if (reconciliationOfficialConfig === null) {
+      return null;
+    }
+    const secretRef = reconciliationOfficialConfig.secret_ref;
+    if (secretRef === null) {
       return null;
     }
     try {
-      return resolveGardenSecretRefValue(reconciliationGardenComputeConfig.secret_ref as string);
+      return resolveGardenSecretRefValue(secretRef);
     } catch {
       return null;
     }
@@ -609,7 +630,7 @@ export async function createRecallMaterializationWiring(input: {
         return entry === null ? null : entry.workspace_id;
       }
     },
-    eventPublisher: input.eventPublisher as never,
+    eventPublisher: input.eventPublisher,
     healthInboxPort: {
       recordPathRelationFailure: (entry) =>
         input.pathFailureHealthInboxPort.recordPathRelationFailure(entry)
@@ -620,14 +641,14 @@ export async function createRecallMaterializationWiring(input: {
   });
   const deferredObligationService = new DeferredObligationService({
     repo: input.deferredObligationRepo,
-    eventPublisher: input.eventPublisher as never
+    eventPublisher: input.eventPublisher
   });
   const resolutionService = new ResolutionService({
-    eventPublisher: input.eventPublisher as never,
+    eventPublisher: input.eventPublisher,
     claimRepo: input.claimFormRepo,
     memoryRepo: input.memoryEntryRepo,
-    claimService: input.claimService as never,
-    memoryService: input.memoryService as never,
+    claimService: input.claimService,
+    memoryService: input.memoryService,
     deferredObligationService
   });
   const pathRelationEvictionIntervalMs = pathRelationCounterTtlMs ?? PATH_RELATION_COUNTER_DEFAULT_TTL_MS;
@@ -753,6 +774,14 @@ export async function createRecallMaterializationWiring(input: {
     materializationConfidenceFloorRaw <= 1
       ? materializationConfidenceFloorRaw
       : undefined;
+  // Evidence excerpt = the full source turn when a signal carries it in raw_payload
+  // (full_turn_content / bench_full_turn_content), else the matched-span summary; widens
+  // evidence_fts to query terms distillation drops. invariant: INERT in production — no
+  // core proposer sets full_turn_content, so only the bench harness exercises it today.
+  // ALAYA_EVIDENCE_FULL_TURN=0 forces off.
+  const fullTurnEvidenceExcerpt =
+    process.env.ALAYA_EVIDENCE_FULL_TURN !== "0" &&
+    process.env.ALAYA_EVIDENCE_FULL_TURN !== "false";
   const materializationRouter = new MaterializationRouter({
     evidenceService: input.evidenceService,
     memoryService: materializationMemoryService,
@@ -772,14 +801,15 @@ export async function createRecallMaterializationWiring(input: {
       : { reconciliationPort: reconciliationService }),
     handoffGapHandler: sqliteHandoffGapAdapter,
     retainUnroutedHighConfidenceFacts,
+    fullTurnEvidenceExcerpt,
     ...(materializationConfidenceFloor === undefined
       ? {}
       : { materializationConfidenceFloor })
   });
   const signalService = new SignalService({
-    eventLogRepo: input.eventLogRepo as never,
+    eventLogRepo: input.eventLogRepo,
     signalRepo: input.signalRepo,
-    runtimeNotifier: input.runtimeNotifier as never,
+    runtimeNotifier: input.runtimeNotifier,
     postTriageMaterializer: {
       materialize: async (signal: CandidateMemorySignal) =>
         await materializationRouter.materializeSignal(signal)
