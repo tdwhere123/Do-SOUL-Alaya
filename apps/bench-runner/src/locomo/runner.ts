@@ -47,6 +47,7 @@ import {
   type QaDeliveredCandidate
 } from "../longmemeval/qa-harness.js";
 import { type QaChatFn, QaChatError } from "../longmemeval/qa-chat.js";
+import { appendFileSync } from "node:fs";
 import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
@@ -588,6 +589,26 @@ async function runOneConversation(
         // 4 open-domain). questionType collapses to temporal|factual for the
         // judge template, so track the raw category separately for ≥90/category.
         qaCategoryRows.push({ category: qa.category, correct: qaVerdict.correct });
+        // Per-question QA dump for failure diagnosis (recall-miss vs reader).
+        // Default off; set ALAYA_BENCH_QA_DUMP to a file path.
+        if (process.env.ALAYA_BENCH_QA_DUMP !== undefined) {
+          appendFileSync(
+            process.env.ALAYA_BENCH_QA_DUMP,
+            JSON.stringify({
+              questionId: `${conversation.sample_id}:${scoredCount}`,
+              category: qa.category,
+              hitAt5: hit5,
+              question: qa.question,
+              goldAnswer: String(qa.answer),
+              modelAnswer: qaVerdict.modelAnswer,
+              correct: qaVerdict.correct,
+              delivered: delivered.slice(0, 5).map((d) => ({
+                objectId: d.objectId,
+                content: d.content.replace(/\s+/gu, " ").slice(0, 200)
+              }))
+            }) + "\n"
+          );
+        }
       }
     }
 
