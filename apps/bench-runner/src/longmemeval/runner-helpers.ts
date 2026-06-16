@@ -334,16 +334,22 @@ function labelEmbeddingProviderUrl(providerUrl: string): string {
 // Recall pool width. Default 10 (production口径). A wide override lets a
 // diagnostic probe (gold-rank / pool dump) see where buried gold ranks beyond
 // the delivery window; delivery itself stays top-10. No fusion-weight change.
-const BENCH_RECALL_MAXK = Math.max(
-  10,
-  Math.floor(Number(process.env.ALAYA_BENCH_RECALL_MAXK ?? "10")) || 10
-);
+// Pool-dump runs widen to at least 100 automatically so the JSONL captures the
+// deep-buried gold tail without a second env knob.
+function resolveBenchRecallMaxK(): number {
+  const configured = Math.floor(Number(process.env.ALAYA_BENCH_RECALL_MAXK ?? "10"));
+  const base = Number.isFinite(configured) && configured > 0 ? configured : 10;
+  if (process.env.ALAYA_BENCH_POOL_DUMP !== undefined) {
+    return Math.max(100, base);
+  }
+  return Math.max(10, base);
+}
 
 export function recallOptionsForPolicyShape(
   policyShape: BenchPolicyShape
 ): { readonly maxResults: number; readonly conflictAwareness: boolean } {
   return {
-    maxResults: BENCH_RECALL_MAXK,
+    maxResults: resolveBenchRecallMaxK(),
     conflictAwareness: policyShape === "stress"
   };
 }

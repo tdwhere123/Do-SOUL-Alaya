@@ -127,6 +127,7 @@ export async function finalizeAlayaDaemonRuntime(input: {
     }),
     startBackgroundServices: lifecycleControls.startBackgroundServices,
     runGardenBackgroundPass: lifecycleControls.runGardenBackgroundPass,
+    runGardenBulkEnrichPass: lifecycleControls.runGardenBulkEnrichPass,
     runGardenEmbeddingBackfillPass: lifecycleControls.runGardenEmbeddingBackfillPass,
     startHttpServer: lifecycleControls.startHttpServer,
     shutdown: lifecycleControls.shutdown

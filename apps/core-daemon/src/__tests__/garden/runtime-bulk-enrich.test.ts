@@ -50,13 +50,15 @@ const hoisted = vi.hoisted(() => {
 
     public async dispatchNextMatchingTaskKind(
       role: string,
-      taskKinds: readonly string[]
+      taskKinds: readonly string[],
+      workspaceId?: string
     ): Promise<GardenTaskDescriptor | null> {
       const roleTierValue = roleTier[role] ?? "tier_0";
       const taskIndex = this.queue.findIndex(
         (task) =>
           taskKinds.includes(task.task_kind) &&
-          tierOrder[task.required_tier] <= tierOrder[roleTierValue]
+          tierOrder[task.required_tier] <= tierOrder[roleTierValue] &&
+          (workspaceId === undefined || task.workspace_id === workspaceId)
       );
       if (taskIndex < 0) {
         return null;
@@ -290,6 +292,78 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(produceForNewMemory).toHaveBeenCalledTimes(workspaceIds.length);
   });
 
+  it("workspace-targeted bulk-enrich drain leaves sibling workspaces untouched", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-A", "memory-A");
+    const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) =>
+          buildMemory(memoryId, memoryId.replace("memory-", "workspace-"))
+        ),
+        produceForNewMemory,
+        workspaceIds: ["workspace-A", "workspace-B"]
+      })
+    );
+    currentScheduler().enqueue({
+      ...bulkEnrichTask(),
+      task_id: "bulk-workspace-B",
+      workspace_id: "workspace-B",
+      target_object_refs: ["workspace-B"]
+    });
+
+    await runtime.runBulkEnrichPass("workspace-A");
+
+    expect(produceForNewMemory).toHaveBeenCalledTimes(1);
+    expect(enrichPendingRepo.countPending("workspace-A")).toBe(0);
+    expect(runtime.getStatus().last_pass_at).toBeNull();
+    expect(currentScheduler().completions).toHaveLength(0);
+    expect(
+      currentScheduler()
+        .queue.filter((task) => task.task_kind === GardenTaskKind.BULK_ENRICH)
+        .map((task) => task.workspace_id)
+    ).toEqual(["workspace-B"]);
+  });
+
+  it("workspace-targeted bulk-enrich does not reclaim stale sibling claims", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-A", "memory-A");
+    enrichPendingRepo.enqueue("workspace-B", "memory-B");
+    enrichPendingRepo.simulateStrandedClaim(
+      "workspace-B",
+      "memory-B",
+      "2020-01-01T00:00:00.000Z"
+    );
+    const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) =>
+          buildMemory(memoryId, memoryId.replace("memory-", "workspace-"))
+        ),
+        produceForNewMemory,
+        workspaceIds: ["workspace-A", "workspace-B"]
+      })
+    );
+
+    await runtime.runBulkEnrichPass("workspace-A");
+
+    expect(produceForNewMemory.mock.calls.map((call) => call[0].newMemoryId)).toEqual([
+      "memory-A"
+    ]);
+    expect(
+      enrichPendingRepo.claimBatch(
+        "workspace-B",
+        50,
+        new Date().toISOString(),
+        DYNAMICS_CONSTANTS.enrich.max_attempts
+      )
+    ).toHaveLength(0);
+    expect(enrichPendingRepo.countPending("workspace-B")).toBe(1);
+    expect(currentScheduler().completions).toHaveLength(0);
+  });
+
   it("the count threshold enqueues a BULK_ENRICH task once the pending count crosses batch_trigger_count (accumulated-count trigger)", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     const count = DYNAMICS_CONSTANTS.enrich.batch_trigger_count;
@@ -500,6 +574,41 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     );
     expect(reclaimed).toBe(0);
     // Still in-flight (claimed), so a re-claim finds nothing.
+    expect(
+      enrichPendingRepo.claimBatch(
+        "workspace-1",
+        50,
+        new Date().toISOString(),
+        DYNAMICS_CONSTANTS.enrich.max_attempts
+      )
+    ).toHaveLength(0);
+  });
+
+  it("workspace-targeted bulk-enrich no-ops for fresh in-flight claims", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-1", "memory-1");
+    const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        produceForNewMemory
+      })
+    );
+
+    enrichPendingRepo.claimBatch(
+      "workspace-1",
+      50,
+      new Date().toISOString(),
+      DYNAMICS_CONSTANTS.enrich.max_attempts
+    );
+
+    await runtime.runBulkEnrichPass("workspace-1");
+
+    expect(produceForNewMemory).not.toHaveBeenCalled();
+    expect(currentScheduler().completions).toHaveLength(0);
+    expect(currentScheduler().queue).toHaveLength(0);
+    expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
     expect(
       enrichPendingRepo.claimBatch(
         "workspace-1",

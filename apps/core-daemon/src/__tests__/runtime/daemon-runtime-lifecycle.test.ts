@@ -1,8 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDaemonLifecycleControls } from "../../runtime/daemon-runtime-lifecycle.js";
 
-function createControls(tokenSource: "env" | "ephemeral") {
+function createControls(
+  tokenSource: "env" | "ephemeral",
+  overrides: Partial<{
+    runBackgroundPass: ReturnType<typeof vi.fn>;
+    runBulkEnrichPass: ReturnType<typeof vi.fn>;
+    runEmbeddingBackfillPass: ReturnType<typeof vi.fn>;
+  }> = {}
+) {
   const warn = vi.fn();
+  const runBackgroundPass =
+    overrides.runBackgroundPass ?? vi.fn(async () => undefined);
+  const runBulkEnrichPass =
+    overrides.runBulkEnrichPass ?? vi.fn(async () => undefined);
+  const runEmbeddingBackfillPass =
+    overrides.runEmbeddingBackfillPass ?? vi.fn(async () => undefined);
   const controls = createDaemonLifecycleControls({
     app: { fetch: async () => new Response("ok") },
     lifecycleState: {
@@ -20,8 +33,9 @@ function createControls(tokenSource: "env" | "ephemeral") {
         stop: vi.fn(async () => undefined)
       },
       setBacklogTelemetryObserver: vi.fn(),
-      runBackgroundPass: vi.fn(async () => undefined),
-      runEmbeddingBackfillPass: vi.fn(async () => undefined)
+      runBackgroundPass,
+      runBulkEnrichPass,
+      runEmbeddingBackfillPass
     },
     securityStatusService: { close: vi.fn() },
     daemonMcpRuntimeRegistry: { close: vi.fn(async () => undefined) },
@@ -34,7 +48,7 @@ function createControls(tokenSource: "env" | "ephemeral") {
     }
   });
 
-  return { controls, warn };
+  return { controls, warn, runBackgroundPass, runBulkEnrichPass, runEmbeddingBackfillPass };
 }
 
 describe("createDaemonLifecycleControls", () => {
@@ -63,5 +77,30 @@ describe("createDaemonLifecycleControls", () => {
     );
 
     await server.close();
+  });
+
+  it("waits for the startup pass before running targeted bulk enrich", async () => {
+    let resolveStartup: (() => void) | undefined;
+    const runBackgroundPass = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveStartup = resolve;
+        })
+    );
+    const runBulkEnrichPass = vi.fn(async () => undefined);
+    const { controls } = createControls("env", {
+      runBackgroundPass,
+      runBulkEnrichPass
+    });
+
+    controls.startBackgroundServices();
+    const targetedDrain = controls.runGardenBulkEnrichPass("workspace-1");
+
+    expect(runBulkEnrichPass).not.toHaveBeenCalled();
+    resolveStartup?.();
+    await targetedDrain;
+
+    expect(runBackgroundPass).toHaveBeenCalledTimes(1);
+    expect(runBulkEnrichPass).toHaveBeenCalledWith("workspace-1");
   });
 });

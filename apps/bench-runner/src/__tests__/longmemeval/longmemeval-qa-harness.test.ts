@@ -41,10 +41,10 @@ describe("qa-harness context stitching", () => {
     expect(ctx).toBe("first fact\n\nsecond fact");
   });
 
-  it("caps the stitched context at 20000 chars", () => {
-    const long = "x".repeat(30_000);
+  it("caps the stitched context at 60000 chars by default", () => {
+    const long = "x".repeat(80_000);
     const ctx = buildQaAnswerContext([{ objectId: "a", content: long }]);
-    expect(ctx.length).toBe(20_000);
+    expect(ctx.length).toBe(60_000);
   });
 
   it("prefixes each candidate with its event date when present, drops empty", () => {

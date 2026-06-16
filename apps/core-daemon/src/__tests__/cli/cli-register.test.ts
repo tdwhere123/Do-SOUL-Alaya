@@ -580,6 +580,7 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
     } as unknown as AlayaDaemonRuntime["services"],
     startBackgroundServices: () => {},
     runGardenBackgroundPass: async () => {},
+    runGardenBulkEnrichPass: async () => {},
     runGardenEmbeddingBackfillPass: async () => {},
     startHttpServer: async () => ({
       hostname: "127.0.0.1",

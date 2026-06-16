@@ -407,6 +407,7 @@ export function createGardenRuntime(input: {
   getStatus(): GardenRuntimeStatus;
   runEventLogOrphanDetection(): Promise<void>;
   runBackgroundPass(): Promise<void>;
+  runBulkEnrichPass(workspaceId: string): Promise<void>;
   runEmbeddingBackfillPass(workspaceId: string): Promise<void>;
   setBacklogTelemetryObserver(observer: GardenBacklogTelemetryObserver | null): void;
 }> {
@@ -894,6 +895,16 @@ export function createGardenRuntime(input: {
       last_pass_at: lastBackgroundPassAt
     }),
     runEventLogOrphanDetection: () => gardenSchedulerRuntime.runEventLogOrphanDetection(),
+    // invariant: targeted BULK_ENRICH drain for bench edge-plane readiness.
+    // This processes only the requested workspace's currently claimable
+    // enrich_pending rows; it does not reclaim stale claims, enqueue garden
+    // tasks, or advance unrelated maintenance on sibling workspaces.
+    runBulkEnrichPass: async (workspaceId: string) => {
+      await bulkEnrichRuntime.runClaimableWorkspacePass(
+        workspaceId,
+        BULK_ENRICH_DRAIN_CAP_PER_PASS
+      );
+    },
     runEmbeddingBackfillPass: (workspaceId: string) =>
       gardenSchedulerRuntime.runEmbeddingBackfillPass(workspaceId),
     runBackgroundPass: async () => {

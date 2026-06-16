@@ -542,6 +542,7 @@ async function runOneConversation(
             recallQuestions.map((qa) => qa.question)
           )
         : null;
+    await daemon.runEdgePlanePassIfConfigured();
 
     let hitAt1 = 0;
     let hitAt5 = 0;

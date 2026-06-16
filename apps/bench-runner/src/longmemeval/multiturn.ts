@@ -268,6 +268,7 @@ export async function runLongMemEvalMultiturn(
           })
         );
       }
+      await daemon.runEdgePlanePassIfConfigured();
 
       const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
       const roundResults: RoundResult[] = [];

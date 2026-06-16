@@ -17,6 +17,7 @@ export interface BulkEnrichRuntimeSupport {
   enqueueForAllWorkspaces(enqueuedThisPass: Set<string>): Promise<void>;
   enqueueForCountThreshold(enqueuedThisPass: Set<string>): Promise<void>;
   reclaimStaleClaims(): void;
+  runClaimableWorkspacePass(workspaceId: string, maxBatches: number): Promise<void>;
   runTask(task: Readonly<GardenTaskDescriptor>): Promise<void>;
 }
 
@@ -198,6 +199,124 @@ export function createBulkEnrichRuntimeSupport(input: Readonly<{
     );
   };
 
+  const processClaimedBatch = async (
+    claimed: readonly {
+      readonly workspaceId: string;
+      readonly memoryId: string;
+      readonly runId: string | null;
+      readonly sourceSignalId: string | null;
+    }[],
+    processedAt: string,
+    ports: Readonly<{
+      enrichPendingRepo: NonNullable<typeof input.enrichPendingRepo>;
+      memoryLookup: NonNullable<typeof input.enrichMemoryLookup>;
+      edgeProducer: typeof input.enrichEdgeProducerPort;
+      conflictDetection: typeof input.enrichConflictDetectionPort;
+      signalLookup: typeof input.enrichSourceSignalLookup;
+      signalRefReplay: typeof input.enrichSignalRefReplayPort;
+    }>
+  ): Promise<{
+    readonly processedCount: number;
+    readonly missingCount: number;
+    readonly failedCount: number;
+    readonly abandonedCount: number;
+  }> => {
+    let processedCount = 0;
+    let missingCount = 0;
+    let failedCount = 0;
+    let abandonedCount = 0;
+
+    for (const pending of claimed) {
+      try {
+        const memory = await ports.memoryLookup.findById(pending.memoryId);
+        if (memory === null) {
+          ports.enrichPendingRepo.delete(pending.workspaceId, pending.memoryId);
+          missingCount += 1;
+          continue;
+        }
+        if (ports.signalRefReplay !== undefined && pending.sourceSignalId !== null) {
+          if (ports.signalLookup === undefined) {
+            throw new Error(
+              "BULK_ENRICH signal-ref replay is wired without a source signal lookup port."
+            );
+          }
+          const sourceSignal = await ports.signalLookup.getById(pending.sourceSignalId);
+          if (sourceSignal === null) {
+            throw new Error(
+              `BULK_ENRICH signal-ref replay could not load source signal ${pending.sourceSignalId}.`
+            );
+          }
+          await ports.signalRefReplay.replaySignalRefs({
+            newMemoryId: memory.object_id,
+            signal: sourceSignal
+          });
+        }
+        if (ports.edgeProducer !== undefined) {
+          await ports.edgeProducer.produceForNewMemory({
+            newMemoryId: memory.object_id,
+            workspaceId: memory.workspace_id,
+            runId: memory.run_id,
+            sourceSignalId: pending.sourceSignalId ?? memory.object_id
+          });
+        }
+        if (ports.conflictDetection !== undefined) {
+          await ports.conflictDetection.detectAndLinkConflicts({
+            newMemoryId: memory.object_id,
+            newMemoryDimension: memory.dimension,
+            newMemoryScopeClass: memory.scope_class,
+            newMemoryContent: memory.content,
+            newMemoryDomainTags: memory.domain_tags,
+            workspaceId: memory.workspace_id,
+            runId: memory.run_id,
+            strictNoDrop: true
+          });
+        }
+        ports.enrichPendingRepo.markProcessed(
+          pending.workspaceId,
+          pending.memoryId,
+          processedAt
+        );
+        processedCount += 1;
+      } catch (memoryError) {
+        const failureKind =
+          memoryError instanceof Error ? memoryError.message : String(memoryError);
+        const outcome = ports.enrichPendingRepo.recordFailedAttempt(
+          pending.workspaceId,
+          pending.memoryId,
+          DYNAMICS_CONSTANTS.enrich.max_attempts,
+          processedAt
+        );
+        failedCount += 1;
+        if (outcome.abandoned) {
+          abandonedCount += 1;
+          await emitEnrichAbandoned(pending, outcome.attemptCount, failureKind, processedAt);
+          input.warn("bulk enrich memory abandoned after exhausting retries; dead-lettered", {
+            workspace_id: pending.workspaceId,
+            memory_id: pending.memoryId,
+            source_signal_id: pending.sourceSignalId,
+            attempt_count: outcome.attemptCount,
+            max_attempts: DYNAMICS_CONSTANTS.enrich.max_attempts,
+            error: failureKind
+          });
+        } else {
+          input.warn("bulk enrich memory failed; released claim for retry", {
+            workspace_id: pending.workspaceId,
+            memory_id: pending.memoryId,
+            attempt_count: outcome.attemptCount,
+            error: failureKind
+          });
+        }
+      }
+    }
+
+    return {
+      processedCount,
+      missingCount,
+      failedCount,
+      abandonedCount
+    };
+  };
+
   const runTask = async (task: Readonly<GardenTaskDescriptor>): Promise<void> => {
     const completedAt = new Date().toISOString();
     const enrichPendingRepo = input.enrichPendingRepo;
@@ -226,93 +345,20 @@ export function createBulkEnrichRuntimeSupport(input: Readonly<{
         completedAt,
         DYNAMICS_CONSTANTS.enrich.max_attempts
       );
-      let processedCount = 0;
-      let missingCount = 0;
-      let failedCount = 0;
-      let abandonedCount = 0;
-
-      for (const pending of claimed) {
-        try {
-          const memory = await memoryLookup.findById(pending.memoryId);
-          if (memory === null) {
-            enrichPendingRepo.delete(pending.workspaceId, pending.memoryId);
-            missingCount += 1;
-            continue;
-          }
-          if (signalRefReplay !== undefined && pending.sourceSignalId !== null) {
-            if (signalLookup === undefined) {
-              throw new Error("BULK_ENRICH signal-ref replay is wired without a source signal lookup port.");
-            }
-            const sourceSignal = await signalLookup.getById(pending.sourceSignalId);
-            if (sourceSignal === null) {
-              throw new Error(
-                `BULK_ENRICH signal-ref replay could not load source signal ${pending.sourceSignalId}.`
-              );
-            }
-            await signalRefReplay.replaySignalRefs({
-              newMemoryId: memory.object_id,
-              signal: sourceSignal
-            });
-          }
-          if (edgeProducer !== undefined) {
-            await edgeProducer.produceForNewMemory({
-              newMemoryId: memory.object_id,
-              workspaceId: memory.workspace_id,
-              runId: memory.run_id,
-              sourceSignalId: pending.sourceSignalId ?? memory.object_id
-            });
-          }
-          if (conflictDetection !== undefined) {
-            await conflictDetection.detectAndLinkConflicts({
-              newMemoryId: memory.object_id,
-              newMemoryDimension: memory.dimension,
-              newMemoryScopeClass: memory.scope_class,
-              newMemoryContent: memory.content,
-              newMemoryDomainTags: memory.domain_tags,
-              workspaceId: memory.workspace_id,
-              runId: memory.run_id,
-              strictNoDrop: true
-            });
-          }
-          enrichPendingRepo.markProcessed(pending.workspaceId, pending.memoryId, completedAt);
-          processedCount += 1;
-        } catch (memoryError) {
-          const failureKind =
-            memoryError instanceof Error ? memoryError.message : String(memoryError);
-          const outcome = enrichPendingRepo.recordFailedAttempt(
-            pending.workspaceId,
-            pending.memoryId,
-            DYNAMICS_CONSTANTS.enrich.max_attempts,
-            completedAt
-          );
-          failedCount += 1;
-          if (outcome.abandoned) {
-            abandonedCount += 1;
-            await emitEnrichAbandoned(pending, outcome.attemptCount, failureKind, completedAt);
-            input.warn("bulk enrich memory abandoned after exhausting retries; dead-lettered", {
-              workspace_id: pending.workspaceId,
-              memory_id: pending.memoryId,
-              source_signal_id: pending.sourceSignalId,
-              attempt_count: outcome.attemptCount,
-              max_attempts: DYNAMICS_CONSTANTS.enrich.max_attempts,
-              error: failureKind
-            });
-          } else {
-            input.warn("bulk enrich memory failed; released claim for retry", {
-              workspace_id: pending.workspaceId,
-              memory_id: pending.memoryId,
-              attempt_count: outcome.attemptCount,
-              error: failureKind
-            });
-          }
-        }
-      }
+      const summary = await processClaimedBatch(claimed, completedAt, {
+        enrichPendingRepo,
+        memoryLookup,
+        edgeProducer,
+        conflictDetection,
+        signalLookup,
+        signalRefReplay
+      });
 
       await reportCompletion(task, completedAt, true, [
-        `bulk_enrich:processed_${processedCount}`,
-        `bulk_enrich:missing_${missingCount}`,
-        `bulk_enrich:failed_${failedCount}`,
-        `bulk_enrich:abandoned_${abandonedCount}`
+        `bulk_enrich:processed_${summary.processedCount}`,
+        `bulk_enrich:missing_${summary.missingCount}`,
+        `bulk_enrich:failed_${summary.failedCount}`,
+        `bulk_enrich:abandoned_${summary.abandonedCount}`
       ]);
     } catch (error) {
       await reportCompletion(task, completedAt, false, [], error);
@@ -320,6 +366,52 @@ export function createBulkEnrichRuntimeSupport(input: Readonly<{
         workspace_id: task.workspace_id,
         error: error instanceof Error ? error.message : String(error)
       });
+    }
+  };
+
+  const runClaimableWorkspacePass = async (
+    workspaceId: string,
+    maxBatches: number
+  ): Promise<void> => {
+    const enrichPendingRepo = input.enrichPendingRepo;
+    const memoryLookup = input.enrichMemoryLookup;
+    const edgeProducer = input.enrichEdgeProducerPort;
+    const conflictDetection = input.enrichConflictDetectionPort;
+    const signalLookup = input.enrichSourceSignalLookup;
+    const signalRefReplay = input.enrichSignalRefReplayPort;
+    if (enrichPendingRepo === undefined || memoryLookup === undefined) {
+      return;
+    }
+    if (
+      edgeProducer === undefined &&
+      conflictDetection === undefined &&
+      signalRefReplay === undefined
+    ) {
+      return;
+    }
+
+    for (let batch = 0; batch < maxBatches; batch += 1) {
+      const processedAt = new Date().toISOString();
+      const claimed = enrichPendingRepo.claimBatch(
+        workspaceId,
+        DYNAMICS_CONSTANTS.enrich.claim_batch_size,
+        processedAt,
+        DYNAMICS_CONSTANTS.enrich.max_attempts
+      );
+      if (claimed.length === 0) {
+        break;
+      }
+      await processClaimedBatch(claimed, processedAt, {
+        enrichPendingRepo,
+        memoryLookup,
+        edgeProducer,
+        conflictDetection,
+        signalLookup,
+        signalRefReplay
+      });
+      if (claimed.length < DYNAMICS_CONSTANTS.enrich.claim_batch_size) {
+        break;
+      }
     }
   };
 
@@ -378,6 +470,7 @@ export function createBulkEnrichRuntimeSupport(input: Readonly<{
     enqueueForAllWorkspaces,
     enqueueForCountThreshold,
     reclaimStaleClaims,
+    runClaimableWorkspacePass,
     runTask
   };
 }

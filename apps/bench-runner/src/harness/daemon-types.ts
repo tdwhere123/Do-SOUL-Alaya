@@ -350,6 +350,16 @@ export interface BenchDaemonHandle {
   warmQueryEmbeddingCache(
     queryTexts: readonly string[]
   ): Promise<BenchQueryEmbeddingWarmupSummary>;
+  /**
+   * @anchor runEdgePlanePassIfConfigured — bench-only targeted edge-plane drain.
+   *
+   * Default no-op. When ALAYA_BENCH_RUN_EDGE_PLANE is enabled, drains only the
+   * current workspace's BULK_ENRICH worker loop so the graph/edge plane can
+   * materialize before recall without advancing unrelated Garden maintenance on
+   * sibling workspaces. Shared handle-level seam so runners do not duplicate
+   * env parsing or call runtime methods ad hoc.
+   */
+  runEdgePlanePassIfConfigured(): Promise<void>;
   reportContextUsage(input: BenchReportContextUsageInput): Promise<void>;
   /**
    * @anchor proposeMemory — full propose+review chain

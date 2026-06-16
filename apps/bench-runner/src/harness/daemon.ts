@@ -113,6 +113,7 @@ const DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL = "Xenova/paraphrase-multilingual-MiniL
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
 const BENCH_EMBEDDING_SCHEMA_VERSION = 1;
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 10;
+const BENCH_EDGE_PLANE_ENV = "ALAYA_BENCH_RUN_EDGE_PLANE";
 // invariant: bounds the no-progress passes warmup tolerates before giving up,
 // large enough to outlast the per-pass Librarian slot competition (the runtime
 // dispatches one Librarian task per pass) so EMBEDDING_BACKFILL eventually wins
@@ -120,6 +121,15 @@ const DEFAULT_EMBEDDING_WARMUP_PASSES = 10;
 // see also: apps/core-daemon/src/garden-runtime.ts LIBRARIAN_RUNTIME_TASK_KINDS
 const EMBEDDING_WARMUP_MAX_STALL_PASSES = 10;
 let activeBenchDaemonCount = 0;
+
+function shouldRunBenchEdgePlane(): boolean {
+  const raw = process.env[BENCH_EDGE_PLANE_ENV];
+  if (raw === undefined) {
+    return false;
+  }
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== "0" && normalized !== "off" && normalized !== "false";
+}
 
 export async function startBenchDaemon(
   opts: BenchDaemonOptions = {}
@@ -628,6 +638,13 @@ export async function startBenchDaemon(
     return summary;
   }
 
+  async function runEdgePlanePassIfConfigured(): Promise<void> {
+    if (!shouldRunBenchEdgePlane()) {
+      return;
+    }
+    await activeRuntime.runGardenBulkEnrichPass(activeContext.workspaceId);
+  }
+
   async function shutdown(): Promise<void> {
     try {
       await closeBenchDaemonResources({
@@ -746,6 +763,7 @@ export async function startBenchDaemon(
     recall,
     warmEmbeddingCache,
     warmQueryEmbeddingCache,
+    runEdgePlanePassIfConfigured,
     reportContextUsage,
     proposeMemory,
     proposeMemoryFromSignal,

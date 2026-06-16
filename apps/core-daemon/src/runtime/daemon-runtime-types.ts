@@ -39,6 +39,12 @@ export interface AlayaDaemonRuntime {
   readonly services: AlayaDaemonRuntimeServices;
   startBackgroundServices(): void;
   runGardenBackgroundPass(): Promise<void>;
+  // invariant: targeted BULK_ENRICH drain for bench edge-plane readiness.
+  // Runs only the requested workspace's BULK_ENRICH worker loop, leaving the
+  // broader Garden cadence and sibling workspaces untouched.
+  // see also: apps/core-daemon/src/runtime/daemon-runtime-lifecycle.ts:runGardenBulkEnrichPass
+  // see also: apps/core-daemon/src/garden/runtime.ts:runBulkEnrichPass
+  runGardenBulkEnrichPass(workspaceId: string): Promise<void>;
   // invariant: targeted embedding-backfill drain for recall readiness; runs
   // ONLY EMBEDDING_BACKFILL, not the full fire-and-forget Garden background
   // pass. The bench embedding warmup uses this to reach embedding readiness

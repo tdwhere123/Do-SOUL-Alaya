@@ -50,6 +50,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -545,6 +546,25 @@ describe("LoCoMo runner", () => {
     expect(findings).toContain("seed_extraction_path no_credentials_fallback");
   });
 
+  it("drains the edge plane before recall when ALAYA_BENCH_RUN_EDGE_PLANE is enabled", async () => {
+    vi.stubEnv("ALAYA_BENCH_RUN_EDGE_PLANE", "1");
+    const runEdgePlanePassIfConfigured = vi.fn(async () => undefined);
+    const recall = vi.fn(async () => buildRecallResult("memory-d1"));
+    startBenchDaemonMock.mockResolvedValue(
+      buildMockDaemon({ recall, runEdgePlanePassIfConfigured })
+    );
+
+    await runLocomo({
+      variant: "locomo10",
+      historyRoot: tmpDir
+    });
+
+    expect(runEdgePlanePassIfConfigured).toHaveBeenCalledTimes(1);
+    expect(runEdgePlanePassIfConfigured.mock.invocationCallOrder[0]).toBeLessThan(
+      recall.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+  });
+
   it("diffs public-locomo runs against the newest passing baseline", async () => {
     const priorPassingRunAt = "2026-05-19T12:00:00.000Z";
     await writeLocomoArchive(
@@ -640,6 +660,7 @@ function buildMockDaemon(overrides: {
   readonly warmEmbeddingCache?: ReturnType<typeof vi.fn>;
   readonly warmQueryEmbeddingCache?: ReturnType<typeof vi.fn>;
   readonly accrueSessionCoRecall?: ReturnType<typeof vi.fn>;
+  readonly runEdgePlanePassIfConfigured?: ReturnType<typeof vi.fn>;
 }) {
   const recall = overrides.recall ?? vi.fn(async () => buildRecallResult());
   const warmEmbeddingCache =
@@ -717,10 +738,13 @@ function buildMockDaemon(overrides: {
     recalled_context_tokens_mean: 50,
     seed_event_count: 4
   }));
+  const runEdgePlanePassIfConfigured =
+    overrides.runEdgePlanePassIfConfigured ?? vi.fn(async () => undefined);
   return {
     proposeMemory,
     warmEmbeddingCache,
     warmQueryEmbeddingCache,
+    runEdgePlanePassIfConfigured,
     recall,
     accrueSessionCoRecall,
     queryTokenMetrics,

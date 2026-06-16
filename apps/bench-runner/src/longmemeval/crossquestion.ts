@@ -252,6 +252,7 @@ export async function runLongMemEvalCrossQuestion(
           })
         );
       }
+      await daemon.runEdgePlanePassIfConfigured();
 
       const answerSessionSet = new Set(question.answer_session_ids);
       const goldMemoryIds = [...sidecar.entries()]

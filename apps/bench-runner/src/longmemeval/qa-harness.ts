@@ -29,7 +29,7 @@ import type { QaChatFn } from "./qa-chat.js";
  * with ALAYA_BENCH_QA_CONTEXT_CHARS to test wider aggregation delivery. */
 function qaContextCharCap(): number {
   const raw = Number(process.env.ALAYA_BENCH_QA_CONTEXT_CHARS);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 20_000;
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 60_000;
 }
 
 /** Default answer口径: ground strictly in context, abstain when truly absent. */
