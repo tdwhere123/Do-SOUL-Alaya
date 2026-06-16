@@ -172,35 +172,44 @@ export class LocalHeuristics implements GardenComputeProvider {
         }
 
         seenMatches.add(dedupeKey);
-        signals.push(
-          CandidateMemorySignalSchema.parse({
-            signal_id: randomUUID(),
-            workspace_id: context.workspace_id,
-            run_id: context.run_id,
-            surface_id: context.surface_id,
-            source: SignalSource.GARDEN_COMPILE,
-            signal_kind: definition.signal_kind,
-            object_kind: definition.object_kind,
-            scope_hint: null,
-            domain_tags: [],
-            confidence: definition.confidence,
-            evidence_refs: [],
-            raw_payload: buildSchemaGroundedRawPayload({
-              signalKind: definition.signal_kind,
-              objectKind: definition.object_kind,
+        // One over-budget raw_payload must not abort the turn's other signals.
+        try {
+          signals.push(
+            CandidateMemorySignalSchema.parse({
+              signal_id: randomUUID(),
+              workspace_id: context.workspace_id,
+              run_id: context.run_id,
+              surface_id: context.surface_id,
+              source: SignalSource.GARDEN_COMPILE,
+              signal_kind: definition.signal_kind,
+              object_kind: definition.object_kind,
+              scope_hint: null,
+              domain_tags: [],
               confidence: definition.confidence,
-              rawPayload: {
-                matched_text: matchedText,
-                pattern_category: definition.pattern_category,
-                turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, matchedText),
-                // reader keys on full_turn_content (inputs.ts buildEvidenceInput
-                // widening); clamp keeps raw_payload under the 16 KB cap.
-                full_turn_content: clampFullTurnContent(normalizedTurnContent)
-              }
-            }),
-            created_at: createdAt
-          })
-        );
+              evidence_refs: [],
+              raw_payload: buildSchemaGroundedRawPayload({
+                signalKind: definition.signal_kind,
+                objectKind: definition.object_kind,
+                confidence: definition.confidence,
+                rawPayload: {
+                  matched_text: matchedText,
+                  pattern_category: definition.pattern_category,
+                  turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, matchedText),
+                  // reader keys on full_turn_content (inputs.ts buildEvidenceInput
+                  // widening); clamp keeps raw_payload under the 16 KB cap.
+                  full_turn_content: clampFullTurnContent(normalizedTurnContent)
+                }
+              }),
+              created_at: createdAt
+            })
+          );
+        } catch (error) {
+          console.warn("garden/local-heuristics: dropped one heuristic signal", {
+            runId: context.run_id,
+            signalKind: definition.signal_kind,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
     }
 
@@ -211,23 +220,25 @@ export class LocalHeuristics implements GardenComputeProvider {
       }
 
       seenMatches.add(dedupeKey);
-      signals.push(
-        CandidateMemorySignalSchema.parse({
-          signal_id: randomUUID(),
-          workspace_id: context.workspace_id,
-          run_id: context.run_id,
-          surface_id: context.surface_id,
-          source: SignalSource.GARDEN_COMPILE,
-          signal_kind: "potential_claim",
-          object_kind: "fact",
-          scope_hint: null,
-          domain_tags: ["time_concern"],
-          confidence: 0.52,
-          evidence_refs: [],
-          raw_payload: buildSchemaGroundedRawPayload({
-            signalKind: "potential_claim",
-            objectKind: "fact",
+      // One over-budget raw_payload must not abort the turn's other signals.
+      try {
+        signals.push(
+          CandidateMemorySignalSchema.parse({
+            signal_id: randomUUID(),
+            workspace_id: context.workspace_id,
+            run_id: context.run_id,
+            surface_id: context.surface_id,
+            source: SignalSource.GARDEN_COMPILE,
+            signal_kind: "potential_claim",
+            object_kind: "fact",
+            scope_hint: null,
+            domain_tags: ["time_concern"],
             confidence: 0.52,
+            evidence_refs: [],
+            raw_payload: buildSchemaGroundedRawPayload({
+              signalKind: "potential_claim",
+              objectKind: "fact",
+              confidence: 0.52,
               rawPayload: {
                 matched_text: timeConcern.matched_text,
                 pattern_category: "time_concern",
@@ -252,9 +263,16 @@ export class LocalHeuristics implements GardenComputeProvider {
                 full_turn_content: clampFullTurnContent(normalizedTurnContent)
               }
             }),
-          created_at: createdAt
-        })
-      );
+            created_at: createdAt
+          })
+        );
+      } catch (error) {
+        console.warn("garden/local-heuristics: dropped one heuristic signal", {
+          runId: context.run_id,
+          signalKind: "potential_claim",
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     }
 
     return signals;
