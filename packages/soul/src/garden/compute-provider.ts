@@ -223,7 +223,10 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
                   : { distilled_fact: draft.distilled_fact }),
                 provider_kind: this.provider_kind,
                 extraction_reason: draft.reason ?? "official_api",
-                turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, draft.matched_text)
+                turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, draft.matched_text),
+                // reader keys on full_turn_content (inputs.ts buildEvidenceInput
+                // widening); clamp keeps raw_payload under the 16 KB cap.
+                full_turn_content: clampFullTurnContent(normalizedTurnContent)
               }
             }),
             created_at: createdAt
@@ -683,6 +686,12 @@ function buildTurnExcerpt(turnContent: string, matchedText: string): string {
   const start = Math.max(0, index - 40);
   const end = Math.min(turnContent.length, index + matchedText.length + 40);
   return turnContent.slice(start, end).trim();
+}
+
+const MAX_FULL_TURN_CONTENT_CHARS = 2_048;
+
+function clampFullTurnContent(turnContent: string): string {
+  return turnContent.slice(0, MAX_FULL_TURN_CONTENT_CHARS);
 }
 
 interface SignalErrorDiagnostic {

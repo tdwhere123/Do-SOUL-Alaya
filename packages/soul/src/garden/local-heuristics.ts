@@ -192,7 +192,10 @@ export class LocalHeuristics implements GardenComputeProvider {
               rawPayload: {
                 matched_text: matchedText,
                 pattern_category: definition.pattern_category,
-                turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, matchedText)
+                turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, matchedText),
+                // reader keys on full_turn_content (inputs.ts buildEvidenceInput
+                // widening); clamp keeps raw_payload under the 16 KB cap.
+                full_turn_content: clampFullTurnContent(normalizedTurnContent)
               }
             }),
             created_at: createdAt
@@ -245,7 +248,8 @@ export class LocalHeuristics implements GardenComputeProvider {
                     confidence: 0.52
                   }
                 ],
-                turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, timeConcern.excerpt)
+                turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, timeConcern.excerpt),
+                full_turn_content: clampFullTurnContent(normalizedTurnContent)
               }
             }),
           created_at: createdAt
@@ -270,6 +274,12 @@ function buildTurnExcerpt(turnContent: string, matchedText: string): string {
   const start = Math.max(0, index - 40);
   const end = Math.min(turnContent.length, index + matchedText.length + 40);
   return turnContent.slice(start, end).trim();
+}
+
+const MAX_FULL_TURN_CONTENT_CHARS = 2_048;
+
+function clampFullTurnContent(turnContent: string): string {
+  return turnContent.slice(0, MAX_FULL_TURN_CONTENT_CHARS);
 }
 
 function extractTimeConcerns(turnContent: string): readonly TimeConcernMatch[] {
