@@ -1,3 +1,22 @@
+/**
+ * @packageDocumentation
+ * `@do-soul/alaya-protocol` is the zod-only schema leaf of Do-SOUL Alaya: the
+ * shared contracts every other package depends on, with no runtime logic of its
+ * own. Schemas are grouped by domain:
+ *
+ * - `soul` — memory ontology: entries, evidence/synthesis capsules, claims,
+ *   recall candidates/policy, governance, karma, lifecycle, status models.
+ * - `workspace` — workspace and workspace-file contracts.
+ * - `runtime` — run and hot-state contracts.
+ * - `signals` — candidate memory signals proposed by agents/garden.
+ * - `events` — event-log entry shapes.
+ * - `engine` — engine-facing contracts.
+ * - `conversation` — conversation and context-lens surfaces.
+ * - `tools` — MCP tool catalog contracts.
+ * - `workers` — background-worker contracts.
+ * - `config` — configuration schemas.
+ * - `shared` — primitives shared across the above.
+ */
 export * from "./workspace/workspace.js";
 export * from "./workspace/workspace-files.js";
 export * from "./runtime/run.js";
