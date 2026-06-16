@@ -110,7 +110,9 @@ function buildRecallService(params: {
     },
     evidenceSearchPort: {
       searchByKeyword: params.evidenceCapsuleRepo.searchByKeyword.bind(params.evidenceCapsuleRepo),
-      findByIds: params.evidenceCapsuleRepo.findByIds.bind(params.evidenceCapsuleRepo)
+      // Port passes (workspaceId, ids); the repo's findByIds is keyed by ids only.
+      findByIds: (_workspaceId: string, evidenceObjectIds: readonly string[]) =>
+        params.evidenceCapsuleRepo.findByIds(evidenceObjectIds)
     }
   };
 
@@ -289,7 +291,7 @@ describe("RecallService integration (real SQLite + FTS5)", () => {
 
     const backed = result.candidates.find((row) => row.object_id === backedMemoryId);
     expect(backed, "evidence-backed memory should be admitted via evidence FTS").toBeDefined();
-    expect(backed?.source_channels?.some((channel) => channel.includes("evidence"))).toBe(true);
+    expect(backed?.source_channels?.some((channel: string) => channel.includes("evidence"))).toBe(true);
 
     database.close();
     databases.delete(database);

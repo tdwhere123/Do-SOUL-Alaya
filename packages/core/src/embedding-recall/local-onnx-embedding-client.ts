@@ -197,22 +197,40 @@ export function defaultLocalOnnxCacheDir(): string {
   return path.join(cacheHome, "do-soul-alaya/models");
 }
 
+type TransformersModule = {
+  readonly env: {
+    allowRemoteModels: boolean;
+    cacheDir?: string;
+    localModelPath?: string;
+  };
+  readonly pipeline: (
+    task: "feature-extraction",
+    model: string,
+    options: { readonly dtype: string }
+  ) => Promise<LocalOnnxFeatureExtractor>;
+};
+
+async function importTransformers(): Promise<TransformersModule> {
+  try {
+    return (await import("@huggingface/transformers")) as TransformersModule;
+  } catch (error) {
+    // transformers is an optional peer; surface the actionable cause instead of
+    // a generic load failure when an opt-in deployer simply hasn't installed it.
+    if ((error as { code?: string }).code === "ERR_MODULE_NOT_FOUND") {
+      throw new Error(
+        "@huggingface/transformers is an optional peer dependency for the local ONNX embedding provider; install it to enable on-device embeddings.",
+        { cause: error }
+      );
+    }
+    throw error;
+  }
+}
+
 async function defaultLocalOnnxPipelineLoader(
   modelId: string,
   cacheDir: string | null
 ): Promise<LocalOnnxFeatureExtractor> {
-  const transformers = (await import("@huggingface/transformers")) as {
-    readonly env: {
-      allowRemoteModels: boolean;
-      cacheDir?: string;
-      localModelPath?: string;
-    };
-    readonly pipeline: (
-      task: "feature-extraction",
-      model: string,
-      options: { readonly dtype: string }
-    ) => Promise<LocalOnnxFeatureExtractor>;
-  };
+  const transformers = await importTransformers();
   // invariant: embedding is a recall supplement; the on-device provider must
   // not reach the network during recall. Weights are pre-fetched out of band.
   transformers.env.allowRemoteModels = false;

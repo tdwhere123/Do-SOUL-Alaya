@@ -24,16 +24,16 @@ import {
 import { collectPathGraphNeighbors } from "./path-relations.js";
 import { recallFusionRetuneEnabled } from "./recall-retune-flags.js";
 import { clamp01, toErrorMessage } from "./recall-service-helpers.js";
-
-// Entity-seed score retained at this fraction per unit of lexical overlap under
-// the retune flag, instead of a hard zero.
-const ENTITY_LEXICAL_OVERLAP_DECAY = 0.5;
 import type {
   RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "./recall-service-types.js";
+
+// Entity-seed score retained at this fraction per unit of lexical overlap under
+// the retune flag, instead of a hard zero.
+const ENTITY_LEXICAL_OVERLAP_DECAY = 0.5;
 
 type CoarseCandidateAdder = (
   entry: Readonly<MemoryEntry>,
