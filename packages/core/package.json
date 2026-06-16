@@ -26,8 +26,15 @@
   },
   "dependencies": {
     "@do-soul/alaya-protocol": "workspace:*",
-    "@huggingface/transformers": "^4.2.0",
     "@node-rs/jieba": "2.0.1"
+  },
+  "peerDependencies": {
+    "@huggingface/transformers": "^4.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@huggingface/transformers": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@do-soul/alaya-storage": "workspace:*"

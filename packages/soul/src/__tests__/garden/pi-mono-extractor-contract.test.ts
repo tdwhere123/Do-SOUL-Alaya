@@ -1,20 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "@earendil-works/pi-ai";
 import {
   SignalExtractorError,
-  createPiMonoExtractor
+  createPiMonoExtractor,
+  type PiMonoAssistantMessage,
+  type PiMonoContext,
+  type PiMonoModel,
+  type PiMonoStreamOptions
 } from "../../garden/pi-mono-extractor.js";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "../../garden/compute-provider.js";
 
-// The pi-ai `complete` seam shape — used as the explicit generic on vi.fn
-// so mock.calls[i] is typed as [Model<string>, Context, ProviderStreamOptions?]
+// The `complete` seam shape — used as the explicit generic on vi.fn so
+// mock.calls[i] is typed as [PiMonoModel, PiMonoContext, PiMonoStreamOptions?]
 // instead of vitest's default `[]` inference from a zero-arg arrow.
 type PiMonoCompleteFn = NonNullable<
   Parameters<typeof createPiMonoExtractor>[0]["complete"]
 >;
 
 describe("pi-mono-extractor-contract", () => {
-  it("passes exact prompts and provider options into pi-ai complete", async () => {
+  it("passes exact prompts and provider options into the transport seam", async () => {
     const signal = new AbortController().signal;
     const completeImpl = vi.fn<PiMonoCompleteFn>(async () =>
       createAssistantMessage('{"signals":[]}')
@@ -54,19 +57,41 @@ describe("pi-mono-extractor-contract", () => {
       })
     ]);
     // options is non-null on every production call (the extractor always
-    // passes apiKey / signal / maxRetries / onPayload), but typed optional
-    // because the pi-ai surface allows callers to omit it.
+    // passes apiKey / signal / maxRetries / onPayload).
     expect(options).toBeDefined();
     expect(options!.apiKey).toBe("sk-live");
     expect(options!.signal).toBe(signal);
     expect(options!.timeoutMs).toBe(456);
     expect(options!.maxRetries).toBe(0);
+    expect(options!.temperature).toBe(0);
     expect(options!.onPayload).toEqual(expect.any(Function));
+    // The fetch transport builds its chat/completions body from these inputs:
+    // exact system/user messages, temperature 0, JSON response_format.
+    const body = options!.onPayload!(
+      {
+        model: seenModel.id,
+        temperature: options!.temperature,
+        messages: [
+          { role: "system", content: context.systemPrompt },
+          { role: "user", content: context.messages[0]!.content }
+        ]
+      },
+      seenModel
+    );
+    expect(body).toEqual({
+      model: "gpt-4.1-mini",
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: OFFICIAL_API_SYSTEM_PROMPT },
+        { role: "user", content: "turn payload" }
+      ]
+    });
   });
 
   it("requests JSON mode for OpenAI Responses and Chat Completions payloads", async () => {
-    let options: ProviderStreamOptions | undefined;
-    const completeImpl = vi.fn(async (_model: Model<string>, _context: Context, seenOptions?: ProviderStreamOptions) => {
+    let options: PiMonoStreamOptions | undefined;
+    const completeImpl = vi.fn(async (_model: PiMonoModel, _context: PiMonoContext, seenOptions?: PiMonoStreamOptions) => {
       options = seenOptions;
       return createAssistantMessage('{"signals":[]}');
     });
@@ -96,7 +121,7 @@ describe("pi-mono-extractor-contract", () => {
     });
   });
 
-  it("passes endpoint overrides to pi-ai as an OpenAI-compatible base URL", async () => {
+  it("resolves endpoint overrides into the OpenAI-compatible base URL on the seam", async () => {
     const completeImpl = vi.fn<PiMonoCompleteFn>(async () =>
       createAssistantMessage('{"signals":[]}')
     );
@@ -117,6 +142,61 @@ describe("pi-mono-extractor-contract", () => {
     expect(model.id).toBe("gpt-4.1-mini");
     expect(model.api).toBe("openai-completions");
     expect(model.baseUrl).toBe("https://proxy.example.test/v1");
+  });
+
+  it("default fetch transport POSTs to {baseUrl}/chat/completions with bearer auth and JSON body", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: '{"signals":[]}' } }]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      // No injected complete: exercises the production fetch default.
+      const extractor = createPiMonoExtractor({
+        apiKey: "sk-live",
+        model: "custom-model",
+        endpoint: "https://proxy.example.test/v1/chat/completions"
+      });
+
+      await expect(
+        extractor.extract({
+          systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+          userPrompt: "turn payload"
+        })
+      ).resolves.toEqual({
+        rawJson: '{"signals":[]}',
+        extractorMeta: {
+          recoveryKind: "none",
+          retryCount: 0,
+          retryClassification: "success_first_try"
+        }
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(url).toBe("https://proxy.example.test/v1/chat/completions");
+      expect(init!.method).toBe("POST");
+      const headers = init!.headers as Record<string, string>;
+      expect(headers.authorization).toBe("Bearer sk-live");
+      expect(headers["content-type"]).toBe("application/json");
+      expect(JSON.parse(init!.body as string)).toEqual({
+        model: "custom-model",
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: OFFICIAL_API_SYSTEM_PROMPT },
+          { role: "user", content: "turn payload" }
+        ]
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("maps invalid JSON, timeout, and transport failures to typed extractor errors", async () => {
@@ -502,7 +582,7 @@ describe("pi-mono-extractor retry-with-jitter (Phase A.3)", () => {
   });
 });
 
-function createModel(): Model<string> {
+function createModel(): PiMonoModel {
   return {
     id: "gpt-4.1-mini",
     name: "GPT 4.1 mini",
@@ -517,22 +597,8 @@ function createModel(): Model<string> {
   };
 }
 
-function createAssistantMessage(text: string): AssistantMessage {
+function createAssistantMessage(text: string): PiMonoAssistantMessage {
   return {
-    role: "assistant",
-    content: [{ type: "text", text }],
-    api: "openai-responses",
-    provider: "openai",
-    model: "gpt-4.1-mini",
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
-    },
-    stopReason: "stop",
-    timestamp: Date.now()
+    content: [{ type: "text", text }]
   };
 }

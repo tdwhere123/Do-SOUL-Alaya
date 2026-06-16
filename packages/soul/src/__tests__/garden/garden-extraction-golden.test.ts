@@ -5,10 +5,13 @@
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "@earendil-works/pi-ai";
 import {
   createPiMonoExtractor,
-  type PiMonoExtractorDependencies
+  type PiMonoAssistantMessage,
+  type PiMonoContext,
+  type PiMonoExtractorDependencies,
+  type PiMonoModel,
+  type PiMonoStreamOptions
 } from "../../garden/pi-mono-extractor.js";
 
 type PiMonoComplete = NonNullable<PiMonoExtractorDependencies["complete"]>;
@@ -54,9 +57,9 @@ describe("garden-extraction-golden", () => {
 
       expect(completeImpl).toHaveBeenCalledTimes(1);
       const [, context, options] = completeImpl.mock.calls[0] as [
-        Model<string>,
-        Context,
-        ProviderStreamOptions
+        PiMonoModel,
+        PiMonoContext,
+        PiMonoStreamOptions
       ];
       expect(context.systemPrompt).toBe("system prompt");
       expect(context.messages).toEqual([
@@ -98,7 +101,7 @@ function toProviderJson(expected: readonly ExpectedSignal[]): string {
   });
 }
 
-function createModel(): Model<string> {
+function createModel(): PiMonoModel {
   return {
     id: "gpt-4.1-mini",
     name: "GPT 4.1 mini",
@@ -113,23 +116,9 @@ function createModel(): Model<string> {
   };
 }
 
-function createAssistantMessage(text: string): AssistantMessage {
+function createAssistantMessage(text: string): PiMonoAssistantMessage {
   return {
-    role: "assistant",
-    content: [{ type: "text", text }],
-    api: "openai-responses",
-    provider: "openai",
-    model: "gpt-4.1-mini",
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
-    },
-    stopReason: "stop",
-    timestamp: Date.now()
+    content: [{ type: "text", text }]
   };
 }
 

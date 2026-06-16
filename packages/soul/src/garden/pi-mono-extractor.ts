@@ -1,13 +1,3 @@
-import {
-  complete,
-  getModel,
-  type Api,
-  type AssistantMessage,
-  type Context,
-  type Model,
-  type ProviderStreamOptions
-} from "@earendil-works/pi-ai";
-
 export interface SignalExtractor {
   extract(input: {
     readonly systemPrompt: string;
@@ -93,13 +83,56 @@ export interface PiMonoExtractorDependencies {
   readonly random?: () => number;
 }
 
-type PiMonoComplete = (
-  model: Model<Api>,
-  context: Context,
-  options?: ProviderStreamOptions
-) => Promise<AssistantMessage>;
+// Local seam types for the LLM transport. Shape is preserved (model handle +
+// context + options -> assistant message) so injected test transports keep
+// working; the production default is fetch-based.
+export interface PiMonoModel {
+  readonly id: string;
+  readonly name: string;
+  readonly api: string;
+  readonly provider: string;
+  readonly baseUrl: string;
+  readonly reasoning: boolean;
+  readonly input: readonly string[];
+  readonly cost: {
+    readonly input: number;
+    readonly output: number;
+    readonly cacheRead: number;
+    readonly cacheWrite: number;
+  };
+  readonly contextWindow: number;
+  readonly maxTokens: number;
+}
 
-type PiMonoGetModel = (provider: "openai", modelId: string) => Model<Api> | undefined;
+export interface PiMonoContext {
+  readonly systemPrompt: string;
+  readonly messages: readonly {
+    readonly role: string;
+    readonly content: string;
+    readonly timestamp: number;
+  }[];
+}
+
+export interface PiMonoStreamOptions {
+  readonly apiKey?: string;
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
+  readonly maxRetries?: number;
+  readonly temperature?: number;
+  readonly onPayload?: (payload: unknown, model: PiMonoModel) => unknown;
+}
+
+export interface PiMonoAssistantMessage {
+  readonly content: readonly { readonly type: string; readonly text?: string }[];
+}
+
+type PiMonoComplete = (
+  model: PiMonoModel,
+  context: PiMonoContext,
+  options?: PiMonoStreamOptions
+) => Promise<PiMonoAssistantMessage>;
+
+type PiMonoGetModel = (provider: "openai", modelId: string) => PiMonoModel | undefined;
 
 const DEFAULT_MAX_RETRIES = 0;
 const DEFAULT_CONTEXT_WINDOW = 128_000;
@@ -125,8 +158,10 @@ const RETRY_JITTER_BASE_MS = 250;
 const RETRY_JITTER_MAX_MS = 1500;
 
 export function createPiMonoExtractor(deps: PiMonoExtractorDependencies): SignalExtractor {
-  const completeImpl = deps.complete ?? complete;
-  const getModelImpl = deps.getModel ?? ((provider, modelId) => getModel(provider, modelId as never) as Model<Api> | undefined);
+  const completeImpl = deps.complete ?? fetchComplete;
+  // The default carries no provider catalog; selectModel falls through to the
+  // OpenAI-compatible handle that pins the resolved baseUrl.
+  const getModelImpl = deps.getModel ?? (() => undefined);
   const selectedModel = selectModel({
     modelId: deps.model,
     endpoint: deps.endpoint,
@@ -265,7 +300,7 @@ function selectModel(input: {
   readonly modelId: string;
   readonly endpoint?: string;
   readonly getModel: PiMonoGetModel;
-}): Model<Api> {
+}): PiMonoModel {
   const baseModel = input.getModel("openai", input.modelId) ?? createOpenAiCompatibleModel(input.modelId);
   if (input.endpoint === undefined) {
     return baseModel;
@@ -278,7 +313,7 @@ function selectModel(input: {
   };
 }
 
-function createOpenAiCompatibleModel(modelId: string): Model<Api> {
+function createOpenAiCompatibleModel(modelId: string): PiMonoModel {
   return {
     id: modelId,
     name: modelId,
@@ -291,6 +326,80 @@ function createOpenAiCompatibleModel(modelId: string): Model<Api> {
     contextWindow: DEFAULT_CONTEXT_WINDOW,
     maxTokens: DEFAULT_MAX_TOKENS
   };
+}
+
+// OpenAI-compatible POST to {baseUrl}/chat/completions. Non-ok throws an Error
+// carrying .status so the retry loop classifies 4xx vs 5xx/429.
+async function fetchComplete(
+  model: PiMonoModel,
+  context: PiMonoContext,
+  options?: PiMonoStreamOptions
+): Promise<PiMonoAssistantMessage> {
+  const baseUrl = model.baseUrl.replace(/\/+$/u, "");
+  const body: Record<string, unknown> = {
+    model: model.id,
+    temperature: options?.temperature ?? 0,
+    messages: [
+      { role: "system", content: context.systemPrompt },
+      ...context.messages.map((message) => ({
+        role: message.role,
+        content: message.content
+      }))
+    ]
+  };
+  const shaped = options?.onPayload?.(body, model) ?? body;
+  const controller = new AbortController();
+  const onAbort = (): void => controller.abort();
+  if (options?.signal !== undefined) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      options.signal.addEventListener("abort", onAbort);
+    }
+  }
+  const timer =
+    options?.timeoutMs === undefined
+      ? null
+      : setTimeout(() => controller.abort(), options.timeoutMs);
+  timer?.unref?.();
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(options?.apiKey === undefined
+          ? {}
+          : { authorization: `Bearer ${options.apiKey}` })
+      },
+      body: JSON.stringify(shaped),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      const error = new Error(
+        `Signal extractor request failed: HTTP ${response.status} ${response.statusText}`
+      );
+      (error as { status?: number }).status = response.status;
+      throw error;
+    }
+    const payload = (await response.json()) as {
+      readonly choices?: readonly {
+        readonly message?: { readonly content?: unknown };
+      }[];
+    };
+    const content = payload.choices?.[0]?.message?.content;
+    return {
+      content: [
+        { type: "text", text: typeof content === "string" ? content : "" }
+      ]
+    };
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+    if (options?.signal !== undefined) {
+      options.signal.removeEventListener("abort", onAbort);
+    }
+  }
 }
 
 function requestJsonPayload(payload: unknown): unknown {
@@ -321,9 +430,12 @@ function requestJsonPayload(payload: unknown): unknown {
   return payload;
 }
 
-function readTextContent(message: AssistantMessage): string {
+function readTextContent(message: PiMonoAssistantMessage): string {
   const text = message.content
-    .filter((block): block is { readonly type: "text"; readonly text: string } => block.type === "text")
+    .filter(
+      (block): block is { readonly type: "text"; readonly text: string } =>
+        block.type === "text" && typeof block.text === "string"
+    )
     .map((block) => block.text)
     .join("");
 

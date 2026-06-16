@@ -23,7 +23,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
-    "@do-soul/alaya-protocol": "workspace:*",
-    "@earendil-works/pi-ai": "0.74.0"
+    "@do-soul/alaya-protocol": "workspace:*"
   }
 }
