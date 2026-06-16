@@ -111,13 +111,7 @@ export function cosineSimilarity(left: Float32Array, right: Float32Array): numbe
   return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
 }
 
-export function clamp01(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-
-  return Math.min(1, Math.max(0, value));
-}
+export { clamp01 } from "../shared/clamp.js";
 
 export function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

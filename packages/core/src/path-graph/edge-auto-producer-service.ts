@@ -1,3 +1,4 @@
+import { clamp01 } from "../shared/clamp.js";
 import {
   EdgeProposalTriggerSource,
   MemoryGraphEdgeType,
@@ -911,19 +912,6 @@ function describeDecision(label: string, features: SimilarityFeatures): string {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-  if (value < 0) {
-    return 0;
-  }
-  if (value > 1) {
-    return 1;
-  }
-  return value;
 }
 
 function errorMessage(error: unknown): string {

@@ -1,3 +1,4 @@
+import { clamp01 } from "../shared/clamp.js";
 import {
   DYNAMICS_CONSTANTS,
   FORMATION_CONFIDENCE_MAP,
@@ -150,6 +151,4 @@ function parseHalfLifeMs(value: number): number {
   return parsed;
 }
 
-export function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
-}
+export { clamp01 };

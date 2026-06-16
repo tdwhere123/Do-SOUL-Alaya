@@ -1,3 +1,4 @@
+import { clamp01 } from "../shared/clamp.js";
 import {
   BankruptcyKind,
   DYNAMICS_CONSTANTS,
@@ -173,9 +174,7 @@ export function getGlobalRecallLimit(policy: Readonly<RecallPolicy>): number {
   );
 }
 
-export function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
-}
+export { clamp01 };
 
 export function isClaimLikeDimension(value: MemoryDimensionType): boolean {
   return CLAIM_LIKE_DIMENSIONS.has(value);

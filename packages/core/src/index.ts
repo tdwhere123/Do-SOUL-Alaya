@@ -76,6 +76,7 @@ export * from "./runtime/serial-delegation-recovery.js";
 export * from "./runtime/serial-delegation-service.js";
 export * from "./governance/session-override-service.js";
 export * from "./shared/actors.js";
+export * from "./shared/clamp.js";
 export * from "./shared/deep-freeze.js";
 export * from "./shared/event-utils.js";
 export * from "./shared/extension-descriptor-parsers.js";

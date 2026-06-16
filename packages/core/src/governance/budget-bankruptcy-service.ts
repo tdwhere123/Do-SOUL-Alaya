@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { clamp01 } from "../shared/clamp.js";
 import {
   BankruptcyAction,
   BankruptcyDossierSchema,
@@ -597,10 +598,6 @@ function pressureRatioForKind(kind: BankruptcyKindValue): number {
     case BankruptcyKind.HARD:
       return 1;
   }
-}
-
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
 }
 
 function buildProposalOptions(

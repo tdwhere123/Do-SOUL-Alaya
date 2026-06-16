@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { clamp01 } from "../shared/clamp.js";
 import {
   ActivationCandidateSchema,
   isPathRecallEligible,
@@ -142,17 +143,4 @@ function clonePathAnchorRef(anchor: PathAnchorRef): PathAnchorRef {
         window_digest: anchor.window_digest
       });
   }
-}
-
-function clamp01(value: number): number {
-  if (Number.isNaN(value)) {
-    return 0;
-  }
-  if (value < 0) {
-    return 0;
-  }
-  if (value > 1) {
-    return 1;
-  }
-  return value;
 }
