@@ -141,7 +141,7 @@ export function buildLivePayload(commit: string): KpiPayload {
     dataset: {
       name: "alaya-live-strict-real",
       size: 500,
-      source: ".do-it/checks/alaya-live/main-check.json#run-1"
+      source: "var/checks/alaya-live/main-check.json#run-1"
     },
     sample_size: 500,
     evaluated_count: 500,

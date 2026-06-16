@@ -88,15 +88,14 @@ const eventSchemaModules: readonly SchemaModule[] = [
 ];
 
 const wrapperTypeNames = new Set([
-  "ZodBranded",
-  "ZodCatch",
-  "ZodDefault",
-  "ZodEffects",
-  "ZodNullable",
-  "ZodOptional",
-  "ZodPipeline",
-  "ZodPromise",
-  "ZodReadonly"
+  "catch",
+  "default",
+  "nonoptional",
+  "nullable",
+  "optional",
+  "pipe",
+  "prefault",
+  "readonly"
 ]);
 
 describe("semver-surface", () => {
@@ -235,51 +234,48 @@ function visitSchema(
   }
 
   const def = readDef(schema);
-  switch (def.typeName) {
-    case "ZodObject":
+  switch (def.type) {
+    case "object":
       for (const child of Object.values(readObjectShape(schema))) {
         visitSchema(child, schemaRegistry, reachable, visited);
       }
       return;
-    case "ZodArray":
-      visitUnknownSchema(def.type, schemaRegistry, reachable, visited);
+    case "array":
+      visitUnknownSchema(def.element, schemaRegistry, reachable, visited);
       return;
-    case "ZodTuple":
+    case "tuple":
       for (const child of readUnknownSchemaArray(def.items)) {
         visitSchema(child, schemaRegistry, reachable, visited);
       }
+      visitUnknownSchema(def.rest, schemaRegistry, reachable, visited);
       return;
-    case "ZodUnion":
+    case "union":
       for (const child of readUnknownSchemaArray(def.options)) {
         visitSchema(child, schemaRegistry, reachable, visited);
       }
       return;
-    case "ZodDiscriminatedUnion":
-      for (const child of readDiscriminatedUnionOptions(def.options)) {
-        visitSchema(child, schemaRegistry, reachable, visited);
-      }
-      return;
-    case "ZodIntersection":
+    case "intersection":
       visitUnknownSchema(def.left, schemaRegistry, reachable, visited);
       visitUnknownSchema(def.right, schemaRegistry, reachable, visited);
       return;
-    case "ZodRecord":
-      visitUnknownSchema(def.valueType, schemaRegistry, reachable, visited);
-      return;
-    case "ZodMap":
+    case "record":
       visitUnknownSchema(def.keyType, schemaRegistry, reachable, visited);
       visitUnknownSchema(def.valueType, schemaRegistry, reachable, visited);
       return;
-    case "ZodSet":
+    case "map":
+      visitUnknownSchema(def.keyType, schemaRegistry, reachable, visited);
       visitUnknownSchema(def.valueType, schemaRegistry, reachable, visited);
       return;
-    case "ZodLazy":
+    case "set":
+      visitUnknownSchema(def.valueType, schemaRegistry, reachable, visited);
+      return;
+    case "lazy":
       if (typeof def.getter === "function") {
         visitUnknownSchema(def.getter(), schemaRegistry, reachable, visited);
       }
       return;
     default:
-      if (wrapperTypeNames.has(def.typeName)) {
+      if (wrapperTypeNames.has(def.type)) {
         visitUnknownSchema(readWrappedInnerSchema(def), schemaRegistry, reachable, visited);
       }
   }
@@ -305,7 +301,7 @@ function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
   while (!seen.has(current)) {
     seen.add(current);
     const def = readDef(current);
-    if (!wrapperTypeNames.has(def.typeName)) {
+    if (!wrapperTypeNames.has(def.type)) {
       return current;
     }
 
@@ -321,7 +317,7 @@ function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
 
 function getObjectKeys(schema: z.ZodTypeAny): readonly string[] {
   const unwrapped = unwrapSchema(schema);
-  if (readDef(unwrapped).typeName !== "ZodObject") {
+  if (readDef(unwrapped).type !== "object") {
     return Object.freeze([]);
   }
 
@@ -329,114 +325,34 @@ function getObjectKeys(schema: z.ZodTypeAny): readonly string[] {
 }
 
 function describeSchema(schema: z.ZodTypeAny): SchemaDescriptor {
-  const signature = buildSchemaSignature(schema, new WeakSet());
+  const jsonSchema = z.toJSONSchema(schema, {
+    target: "openapi-3.0",
+    io: "input",
+    unrepresentable: "throw",
+    reused: "inline",
+    cycles: "ref"
+  });
   return Object.freeze({
     keys: getObjectKeys(schema),
-    signatureHash: sha256(signature).slice(0, 7),
+    signatureHash: sha256(stableStringify(jsonSchema)).slice(0, 7),
     metadata: getSchemaMetadata(schema)
   });
 }
 
-function buildSchemaSignature(schema: z.ZodTypeAny, seen: WeakSet<z.ZodTypeAny>): string {
-  if (seen.has(schema)) {
-    return "[cycle]";
-  }
-  seen.add(schema);
-
-  const def = readDef(schema);
-  switch (def.typeName) {
-    case "ZodObject": {
-      const shape = readObjectShape(schema);
-      const fields = Object.entries(shape)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, child]) => `${key}:${buildSchemaSignature(child, seen)}`);
-      return `object(${String(def.unknownKeys ?? "")}|${fields.join(",")})`;
-    }
-    case "ZodArray":
-      return `array(${formatChecks(def)}|${buildUnknownSchemaSignature(def.type, seen)})`;
-    case "ZodTuple":
-      return `tuple(${readUnknownSchemaArray(def.items).map((child) => buildSchemaSignature(child, seen)).join(",")})`;
-    case "ZodUnion":
-      return `union(${readUnknownSchemaArray(def.options).map((child) => buildSchemaSignature(child, seen)).join("|")})`;
-    case "ZodDiscriminatedUnion":
-      return `du(${String(def.discriminator ?? "")}:${readDiscriminatedUnionOptions(def.options).map((child) => buildSchemaSignature(child, seen)).join("|")})`;
-    case "ZodIntersection":
-      return `intersection(${buildUnknownSchemaSignature(def.left, seen)}&${buildUnknownSchemaSignature(def.right, seen)})`;
-    case "ZodRecord":
-      return `record(${buildUnknownSchemaSignature(def.keyType, seen)}=>${buildUnknownSchemaSignature(def.valueType, seen)})`;
-    case "ZodMap":
-      return `map(${buildUnknownSchemaSignature(def.keyType, seen)}=>${buildUnknownSchemaSignature(def.valueType, seen)})`;
-    case "ZodSet":
-      return `set(${formatChecks(def)}|${buildUnknownSchemaSignature(def.valueType, seen)})`;
-    case "ZodLazy":
-      return typeof def.getter === "function"
-        ? `lazy(${buildUnknownSchemaSignature(def.getter(), seen)})`
-        : "lazy(?)";
-    case "ZodString":
-    case "ZodNumber":
-    case "ZodBigInt":
-    case "ZodDate":
-      return `${def.typeName}(${formatChecks(def)})`;
-    case "ZodEnum":
-      return `enum(${readStringArray(def.values).join("|")})`;
-    case "ZodNativeEnum":
-      return `nativeEnum(${readNativeEnumValues(def.values).join("|")})`;
-    case "ZodLiteral":
-      return `literal(${JSON.stringify(def.value)})`;
-    case "ZodBoolean":
-    case "ZodNull":
-    case "ZodUndefined":
-    case "ZodAny":
-    case "ZodUnknown":
-    case "ZodNever":
-    case "ZodVoid":
-      return def.typeName;
-    default:
-      if (wrapperTypeNames.has(def.typeName)) {
-        return `${def.typeName}(${buildUnknownSchemaSignature(readWrappedInnerSchema(def), seen)})`;
-      }
-      return `${def.typeName}(${formatChecks(def)})`;
-  }
-}
-
-function buildUnknownSchemaSignature(value: unknown, seen: WeakSet<z.ZodTypeAny>): string {
-  return isZodSchema(value) ? buildSchemaSignature(value, seen) : "?";
-}
-
-function formatChecks(def: Record<string, unknown>): string {
-  const checks = def.checks;
-  if (!Array.isArray(checks)) {
-    return "";
-  }
-  return checks
-    .map((check) => stableStringify(check))
-    .sort()
-    .join(",");
-}
-
 function getSchemaMetadata(schema: z.ZodTypeAny): string | null {
   const def = readDef(unwrapSchema(schema));
-  if (def.typeName === "ZodEnum") {
-    return `enum=${readStringArray(def.values).join("|")}`;
+  if (def.type === "enum") {
+    return `enum=${readStringArray(Object.values(def.entries as Record<string, unknown>)).join("|")}`;
   }
-  if (def.typeName === "ZodNativeEnum") {
-    return `enum=${readNativeEnumValues(def.values).join("|")}`;
-  }
-  if (def.typeName === "ZodLiteral") {
-    return `literal=${JSON.stringify(def.value)}`;
+  if (def.type === "literal") {
+    const values = def.values;
+    return `literal=${JSON.stringify(Array.isArray(values) ? values[0] : values)}`;
   }
   return null;
 }
 
 function readStringArray(value: unknown): readonly string[] {
   return Array.isArray(value) ? value.map(String).sort() : [];
-}
-
-function readNativeEnumValues(value: unknown): readonly string[] {
-  if (typeof value !== "object" || value === null) {
-    return [];
-  }
-  return [...new Set(Object.values(value).filter((item) => typeof item !== "number").map(String))].sort();
 }
 
 function stableStringify(value: unknown): string {
@@ -458,7 +374,7 @@ function readObjectShape(schema: z.ZodTypeAny): Record<string, z.ZodTypeAny> {
 }
 
 function readWrappedInnerSchema(def: Record<string, unknown>): unknown {
-  return def.innerType ?? def.schema ?? def.type ?? def.in ?? def.out;
+  return def.innerType ?? def.schema ?? def.in ?? def.out;
 }
 
 function visitUnknownSchema(
@@ -476,15 +392,8 @@ function readUnknownSchemaArray(value: unknown): readonly z.ZodTypeAny[] {
   return Array.isArray(value) ? value.filter(isZodSchema) : [];
 }
 
-function readDiscriminatedUnionOptions(value: unknown): readonly z.ZodTypeAny[] {
-  if (value instanceof Map) {
-    return [...value.values()].filter(isZodSchema);
-  }
-  return readUnknownSchemaArray(value);
-}
-
-function readDef(schema: z.ZodTypeAny): Record<string, unknown> & { readonly typeName: string } {
-  return schema._def as Record<string, unknown> & { readonly typeName: string };
+function readDef(schema: z.ZodTypeAny): Record<string, unknown> & { readonly type: string } {
+  return schema._def as unknown as Record<string, unknown> & { readonly type: string };
 }
 
 function isZodSchema(value: unknown): value is z.ZodTypeAny {

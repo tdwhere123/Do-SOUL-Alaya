@@ -15,7 +15,7 @@ type IsReadonlyProperty<T, K extends keyof T> = IfEquals<
   true
 >;
 type AssertTrue<T extends true> = T;
-type _GovernanceSubjectReadonlyChecks = [
+export type _GovernanceSubjectReadonlyChecks = [
   AssertTrue<IsReadonlyProperty<GovernanceSubject, "subject_domain">>,
   AssertTrue<IsReadonlyProperty<GovernanceSubject, "subject_qualifiers">>,
   AssertTrue<IsReadonlyProperty<GovernanceSubject, "canonical_key">>

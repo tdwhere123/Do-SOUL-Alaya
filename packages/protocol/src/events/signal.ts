@@ -39,14 +39,14 @@ export const SoulSignalEmittedPayloadSchema = z.object({
   exception_to_refs: CandidateMemorySignalMemoryRefsSchema,
   contradicts_refs: CandidateMemorySignalMemoryRefsSchema,
   incompatible_with_refs: CandidateMemorySignalMemoryRefsSchema,
-  raw_payload: z.record(z.unknown()).readonly()
+  raw_payload: z.record(z.string(), z.unknown()).readonly()
 }).readonly();
 
 export const SoulSignalNormalizedPayloadSchema = z.object({
   signal_id: NonEmptyStringSchema,
   workspace_id: NonEmptyStringSchema,
   run_id: NonEmptyStringSchema,
-  normalized_fields: z.record(z.unknown()).readonly()
+  normalized_fields: z.record(z.string(), z.unknown()).readonly()
 }).readonly();
 
 export const SoulSignalTriagedPayloadSchema = z.object({

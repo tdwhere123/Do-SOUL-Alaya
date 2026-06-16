@@ -29,7 +29,7 @@ export const StrategyConfigSchema = makeVersionedConfigSchema({
 });
 
 export const EnvironmentVariablesSchema = z
-  .record(z.string())
+  .record(z.string(), z.string())
   .superRefine((value, context) => {
     for (const key of Object.keys(value)) {
       if (key.trim().length === 0) {
@@ -50,7 +50,7 @@ export const EnvironmentConfigSchema = makeVersionedConfigSchema({
 
 export const ToolchainStatusSchema = z
   .object({
-    tools: z.record(z.boolean()).readonly(),
+    tools: z.record(z.string(), z.boolean()).readonly(),
     active_worktrees: NonNegativeIntSchema,
     db_path: NonEmptyStringSchema,
     files_dir: NonEmptyStringSchema

@@ -80,7 +80,7 @@ export const ToolUseBlockSchema = z.object({
   type: z.literal("tool_use"),
   id: NonEmptyStringSchema,
   name: NonEmptyStringSchema,
-  input: z.record(z.unknown()).readonly()
+  input: z.record(z.string(), z.unknown()).readonly()
 }).readonly();
 
 export const EngineResultSchema = z.object({

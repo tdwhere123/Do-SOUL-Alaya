@@ -3,6 +3,8 @@
   "compilerOptions": {
     "noEmit": true,
     "composite": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "rootDir": null,
     "outDir": null
   },

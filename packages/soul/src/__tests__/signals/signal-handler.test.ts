@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { SoulSignalHandler, materializeCandidateSignal } from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal, ConversationRuntimeContext } from "@do-soul/alaya-protocol";
 

@@ -326,8 +326,8 @@ Highlights:
   storage_tier, workspace_id) no longer leak.
 - MR-I03 + MR-I04: `BoundedString` primitives applied across MCP request
   schemas (query 4096 / id 256 / reason 16384 / arrays 1000 / evidence
-  arrays 100); the catalog now derives `inputSchema` from zod via
-  `zod-to-json-schema` so external clients see the same bounds the
+  arrays 100); the catalog now derives `inputSchema` from zod via its
+  built-in JSON Schema export so external clients see the same bounds the
   runtime enforces.
 - MR-I11: `alaya doctor` reports `storage.schema_ok` (persisted vs known
   max migration version) so an operator can tell apart "db file exists"

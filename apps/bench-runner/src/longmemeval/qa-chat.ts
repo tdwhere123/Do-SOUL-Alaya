@@ -1,8 +1,7 @@
 /**
  * @anchor longmemeval-qa-chat — thin OpenAI-compatible chat primitive for the
- * end-to-end QA harness (answer-LLM + LLM-judge). Mirrors the verified probe
- * `.do-it/a-qa-probe.mjs`: a bare POST /v1/chat/completions against the garden
- * provider URL (yunwu.ai, model gpt-5.4-nano). The garden extractor reuses the
+ * end-to-end QA harness (answer-LLM + LLM-judge). It issues a bare POST
+ * /v1/chat/completions against the garden provider URL. The garden extractor reuses the
  * SAME primitive, but a thin helper keeps the QA path self-contained,
  * dependency-light, and mockable (the QA harness takes a `QaChatFn` so unit
  * tests inject a fake chat and spend zero network / zero tokens).

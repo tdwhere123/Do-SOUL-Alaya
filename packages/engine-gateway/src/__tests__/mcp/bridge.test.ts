@@ -385,6 +385,13 @@ describe("McpBridge", () => {
     });
     expect(emitCandidateSignal?.description).toContain("source_memory_refs");
     expect(emitCandidateSignal?.description).toContain("not put those graph hints only in raw_payload");
-    expect(emitCandidateSignal?.parametersSchema.parse(toolUse.input)).toEqual(toolUse.input);
+    expect(emitCandidateSignal?.parametersSchema.parse(toolUse.input)).toEqual({
+      ...toolUse.input,
+      source_memory_refs: [],
+      supersedes_refs: [],
+      exception_to_refs: [],
+      contradicts_refs: [],
+      incompatible_with_refs: []
+    });
   });
 });

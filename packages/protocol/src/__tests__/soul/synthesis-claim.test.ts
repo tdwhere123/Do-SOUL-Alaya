@@ -25,10 +25,10 @@ import type { GovernanceSubject } from "../../index.js";
 type IfEquals<X, Y, A = true, B = false> =
   (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? A : B;
 type AssertTrue<T extends true> = T;
-type _ClaimFormGovernanceSubjectTypeCheck = AssertTrue<
+export type _ClaimFormGovernanceSubjectTypeCheck = AssertTrue<
   IfEquals<ClaimForm["governance_subject"], GovernanceSubject>
 >;
-type _ClaimCandidateConditionKeys = AssertTrue<
+export type _ClaimCandidateConditionKeys = AssertTrue<
   IfEquals<
     keyof ClaimCandidateConditions,
     | "min_evidence_count"

@@ -12,10 +12,10 @@ const CanonicalTokenIllegalCharactersRegex = /[^\p{L}\p{N}_.-]/gu;
 const CanonicalTokenRepeatedUnderscoreRegex = /_+/g;
 const CanonicalTokenBoundaryUnderscoreRegex = /^_+|_+$/g;
 
-const GovernanceQualifierSchema = z.record(NonEmptyStringSchema).readonly();
+const GovernanceQualifierSchema = z.record(z.string(), NonEmptyStringSchema).readonly();
 
 export const GovernanceQualifierAliasMapSchema = z
-  .record(z.record(NonEmptyStringSchema).readonly())
+  .record(z.string(), z.record(z.string(), NonEmptyStringSchema).readonly())
   .readonly();
 
 export type GovernanceQualifierAliasMap = z.infer<typeof GovernanceQualifierAliasMapSchema>;
@@ -75,7 +75,7 @@ function normalizeQualifiers(
   aliasMap: GovernanceQualifierAliasMap,
   aliasResolver?: CanonicalAliasResolver
 ): Record<string, string> {
-  const parsedQualifiers = z.record(z.string()).parse(qualifiers);
+  const parsedQualifiers = z.record(z.string(), z.string()).parse(qualifiers);
   const dedupedQualifiers = new Map<string, string>();
 
   for (const [rawKey, rawValue] of Object.entries(parsedQualifiers)) {

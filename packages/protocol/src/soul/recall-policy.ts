@@ -45,7 +45,7 @@ export const RecallBudgetsSchema = z
   .object({
     max_total_tokens: NonNegativeIntSchema,
     max_entries: NonNegativeIntSchema,
-    per_dimension_limits: z.record(NonNegativeIntSchema).readonly().nullable()
+    per_dimension_limits: z.record(z.string(), NonNegativeIntSchema).readonly().nullable()
   })
   .readonly();
 

@@ -32,7 +32,7 @@ export const PromotionGateSchema = ControlPlaneEnvelopeSchema.unwrap()
   .extend({
     object_kind: z.literal(ControlPlaneObjectKind.PROMOTION_GATE),
     conditions: z.array(PromotionConditionSchema).readonly(),
-    per_dimension_defaults: z.record(z.array(PromotionConditionSchema).readonly()).readonly().nullable()
+    per_dimension_defaults: z.record(z.string(), z.array(PromotionConditionSchema).readonly()).readonly().nullable()
   })
   .readonly();
 

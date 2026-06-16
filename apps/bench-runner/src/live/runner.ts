@@ -30,7 +30,7 @@ export interface LiveBenchResult {
   readonly payload: KpiPayload;
 }
 
-const DEFAULT_SOURCE_PATH = ".do-it/checks/alaya-live/main-check.json";
+const DEFAULT_SOURCE_PATH = "var/checks/alaya-live/main-check.json";
 const LIVE_GATES_FILENAME = "live-gates.json";
 const GATE_VALUE_MAX_LENGTH = 200;
 const SENSITIVE_GATE_PATTERN =

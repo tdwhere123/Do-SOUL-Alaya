@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { ToolSpec } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
-import { StorageError } from "../../../shared/errors.js";
 import { SqliteToolSpecRepo } from "../../../index.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();

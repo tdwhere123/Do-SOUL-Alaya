@@ -66,17 +66,6 @@ export interface MockCreatedObjectWithEnrich extends MockCreatedObject {
   readonly enrichmentEnqueued?: boolean;
 }
 
-type MockServiceInput = Record<string, unknown>;
-type MockPathCandidateInput = {
-  readonly workspaceId: string;
-  readonly sourceAnchor: { readonly kind: "object"; readonly object_id: string };
-  readonly targetAnchor: { readonly kind: "object"; readonly object_id: string };
-  readonly relationKind: string;
-  readonly recallBiasSign: 1 | 0 | -1;
-  readonly governanceClass: string;
-  readonly initialStrength: number;
-};
-
 type MockPathRelationProposalInput = {
   readonly workspaceId: string;
   readonly runId: string;

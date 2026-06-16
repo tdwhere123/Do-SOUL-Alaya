@@ -3,16 +3,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  MemoryDimension,
-  ScopeClass,
   StorageTier,
   SynthesisStatus,
   type MemoryEntry,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
-import { SqliteEnrichPendingRepo } from "../../../repos/garden/enrich-pending-repo.js";
-import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
 import {
   FIND_BY_EVIDENCE_REFS_INPUT_CAP,
   SqliteMemoryEntryRepo,
@@ -20,7 +16,6 @@ import {
 } from "../../../repos/memory-entry/index.js";
 import { SqliteSynthesisCapsuleRepo } from "../../../repos/capsules/synthesis-capsule-repo.js";
 import {
-  createMemoryCreatedEventInput,
   createMemoryEntry,
   createRepo,
   trackedDatabases

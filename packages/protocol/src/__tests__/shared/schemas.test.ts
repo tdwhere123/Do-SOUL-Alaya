@@ -2,26 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   CandidateMemorySignalInputSchema,
   CandidateMemorySignalSchema,
-  ConversationMessageSchema,
-  ConversationRequestSchema,
-  EngineBindingSchema,
-  EngineBindingInputSchema,
-  EngineBindingRecordSchema,
-  EngineConnectionTestResultSchema,
-  EngineError,
-  EngineErrorKind,
-  EngineErrorSchema,
-  EngineFinishReasonSchema,
-  EngineMessageSchema,
-  EnginePortMessageSchema,
   EngineProvider,
-  EngineResultSchema,
   EngineStatus,
-  ExecShellToolInputSchema,
-  ExecShellToolResultSchema,
   EmitCandidateSignalResponseSchema,
   EventLogEntrySchema,
-  FileToolErrorSchema,
   parseWorkspaceRunEventPayload,
   parseSignalEventPayload,
   WorkspaceRunEventBaseSchema,
@@ -29,22 +13,13 @@ import {
   WorkspaceRunEventType,
   SignalEventSchema,
   SignalEventType,
-  ListDirectoryToolInputSchema,
-  ListDirectoryToolResultSchema,
-  ReadFileToolInputSchema,
-  ReadFileToolResultSchema,
   RunHotStateSchema,
   SignalKind,
   SignalSource,
   SignalState,
-  SearchFilesToolInputSchema,
-  SearchFilesToolResultSchema,
   RunMode,
   RunSchema,
   RunState,
-  ToolUseBlockSchema,
-  WriteFileToolInputSchema,
-  WriteFileToolResultSchema,
   WorkspaceCreatedEventSchema,
   WorkspaceCreateInputSchema,
   WorkspaceEngineConfigSchema,
@@ -64,7 +39,7 @@ type IsReadonlyProperty<T, K extends keyof T> = IfEquals<
   true
 >;
 type AssertTrue<T extends true> = T;
-type _WorkspaceRunEventReadonlyChecks = [
+export type _WorkspaceRunEventReadonlyChecks = [
   AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "event_id">>,
   AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "entity_type">>,
   AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "entity_id">>,
@@ -74,7 +49,7 @@ type _WorkspaceRunEventReadonlyChecks = [
   AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "revision">>,
   AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "created_at">>
 ];
-type _CandidateMemorySignalReadonlyChecks = [
+export type _CandidateMemorySignalReadonlyChecks = [
   AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "signal_id">>,
   AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "workspace_id">>,
   AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "run_id">>,
@@ -150,15 +125,6 @@ const eventLogEntryBase = {
     workspace_kind: WorkspaceKind.LOCAL_REPO
   },
   created_at: validTimestamp
-} as const;
-
-const engineBindingBase = {
-  binding_id: "binding-1",
-  provider: EngineProvider.OPENAI,
-  base_url: null,
-  model: "gpt-4o-mini",
-  api_key_ref: "OPENAI_API_KEY",
-  config: {}
 } as const;
 
 const engineBindingInputBase = {
@@ -713,7 +679,14 @@ describe("CandidateMemorySignalSchema", () => {
 
 describe("CandidateMemorySignalInputSchema", () => {
   it("accepts a minimal MCP input payload", () => {
-    expect(CandidateMemorySignalInputSchema.parse(candidateMemorySignalInputBase)).toEqual(candidateMemorySignalInputBase);
+    expect(CandidateMemorySignalInputSchema.parse(candidateMemorySignalInputBase)).toEqual({
+      ...candidateMemorySignalInputBase,
+      source_memory_refs: [],
+      supersedes_refs: [],
+      exception_to_refs: [],
+      contradicts_refs: [],
+      incompatible_with_refs: []
+    });
   });
 
   it("accepts a populated MCP input payload", () => {
@@ -729,7 +702,14 @@ describe("CandidateMemorySignalInputSchema", () => {
       }
     };
 
-    expect(CandidateMemorySignalInputSchema.parse(value)).toEqual(value);
+    expect(CandidateMemorySignalInputSchema.parse(value)).toEqual({
+      ...value,
+      source_memory_refs: [],
+      supersedes_refs: [],
+      exception_to_refs: [],
+      contradicts_refs: [],
+      incompatible_with_refs: []
+    });
   });
 
   it("rejects a payload with signal_id supplied by the caller", () => {

@@ -3,7 +3,6 @@ import { DISTILLED_FACT_MAX_CHARS, MaterializationRouter } from "@do-soul/alaya-
 import {
   type DetectFn,
   type EnqueueFn,
-  type MockPathRelationProposalFn,
   createDeps,
   createPathRelationProposalPort,
   createSignal

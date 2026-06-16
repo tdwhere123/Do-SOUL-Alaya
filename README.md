@@ -829,7 +829,7 @@ new axis interaction) — open an issue first to align on shape.
 
 - [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) — local SQLite driver.
 - [`Hono`](https://hono.dev) — HTTP framework for the daemon.
-- [`zod`](https://zod.dev) and [`zod-to-json-schema`](https://github.com/StefanTerdell/zod-to-json-schema) — single source of truth for the public MCP catalog.
+- [`zod`](https://zod.dev) — single source of truth for the public MCP catalog (its built-in JSON Schema export derives the tool input schemas).
 - [`Vitest`](https://vitest.dev), [`pnpm`](https://pnpm.io), [`tsup`](https://tsup.egoist.dev), and the Model Context Protocol spec.
 
 ---

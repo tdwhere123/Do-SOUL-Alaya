@@ -37,7 +37,8 @@
     },
     "packages/core": {
       "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tsconfig.json"]
+      "project": ["src/**/*.ts", "tsconfig.json"],
+      "ignoreDependencies": ["@huggingface/transformers"]
     },
     "packages/soul": {
       "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],

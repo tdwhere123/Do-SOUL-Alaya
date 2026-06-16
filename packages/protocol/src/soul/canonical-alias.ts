@@ -21,7 +21,7 @@ export const CanonicalAliasEntrySchema = z
   .readonly();
 
 export const CanonicalAliasMapSchema = z
-  .record(z.array(CanonicalAliasEntrySchema).readonly())
+  .record(z.string(), z.array(CanonicalAliasEntrySchema).readonly())
   .readonly();
 
 export type CanonicalAliasEntry = z.infer<typeof CanonicalAliasEntrySchema>;

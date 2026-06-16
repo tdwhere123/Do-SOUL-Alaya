@@ -16,14 +16,14 @@ export const BenchEmbeddingProviderStateSchema = z.enum([
 ]);
 
 const DiagnosticStreamRanksSchema = z
-  .record(z.number().nullable())
+  .record(z.string(), z.number().nullable())
   .readonly();
 
 const DiagnosticStreamContributionsSchema = z
-  .record(z.number())
+  .record(z.string(), z.number())
   .readonly();
 
-const DiagnosticScoreFactorsSchema = z.record(z.unknown()).readonly();
+const DiagnosticScoreFactorsSchema = z.record(z.string(), z.unknown()).readonly();
 
 const GraphExpansionPlaneCountPerHopSchema = z
   .tuple([
@@ -40,7 +40,7 @@ const GraphExpansionPlaneCountPerEdgeTypeSchema = z
   })
   .readonly();
 
-const PhaseLatencyMsSchema = z.record(z.number().nonnegative()).readonly();
+const PhaseLatencyMsSchema = z.record(z.string(), z.number().nonnegative()).readonly();
 
 export const DiagnosticRecallResultSchema = z
   .object({

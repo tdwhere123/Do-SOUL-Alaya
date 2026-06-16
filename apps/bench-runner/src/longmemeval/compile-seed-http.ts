@@ -209,7 +209,6 @@ export function createGardenHttpExtractor(
               // delta stream when stream:true; a non-stream request answers with
               // an EMPTY SSE body (`data: [DONE]\n\n` only), which permanently
               // wedged the 500q extraction-fill. We parse the SSE body below.
-              // see: .do-it/findings/garden-sse-streaming-rootcause.md
               stream: true,
               response_format: { type: "json_object" },
               messages: [
@@ -296,7 +295,6 @@ export function createGardenHttpExtractor(
           // throw routes through the catch below: no HTTP status -> unknown
           // transport -> classifyBenchHttpError marks it retryable, so it
           // retries then fails loud (never cached).
-          // see: .do-it/findings/garden-sse-streaming-rootcause.md
           try {
             parseOfficialApiSignals(content);
           } catch (parseError) {
@@ -378,7 +376,6 @@ export function createGardenHttpExtractor(
 // JSON.parse is skipped defensively (partial keep-alive noise) rather than
 // thrown — the empty-content guard in the caller still classifies a
 // content-free stream as a failure, so silent corruption cannot pass.
-// see: .do-it/findings/garden-sse-streaming-rootcause.md
 export function extractContentFromChatCompletionBody(
   bodyText: string,
   contentType: string | null

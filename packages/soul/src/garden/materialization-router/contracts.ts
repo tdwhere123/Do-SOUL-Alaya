@@ -1,9 +1,7 @@
 import {
-  type CandidateMemorySignal,
   type ClaimForm,
   type EdgeProposalTriggerSourceValue,
   type EvidenceCapsule,
-  type FormationKind,
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue,
   type PathGovernanceClass as PathGovernanceClassValue,

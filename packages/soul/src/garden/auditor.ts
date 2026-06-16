@@ -29,22 +29,14 @@ import {
   type AuditorPointerHealPort,
   type AuditorPointerHealthPort,
   type AuditorSchedulerPort,
-  type BrokenPointerRecord,
-  type ColdStartAssessment,
-  type DraftCandidate,
   type EventLogEntry,
-  type ExpiringGreenStatus,
   SoulAuditorPointerHealedPayloadSchema,
   SoulOrphanRadarReportedPayloadSchema,
   type GardenRoleValue,
   type GardenTaskDescriptor,
   type GardenTaskResult,
   type GardenTierValue,
-  type HealablePointerRecord,
-  type HealthJournalRecordPort,
-  type HighFrequencyPattern,
-  type OrphanedMemoryRecord,
-  type StaleMemoryEntry
+  type HealthJournalRecordPort
 } from "@do-soul/alaya-protocol";
 
 export const AUDITOR_CONSTANTS = {

@@ -22,7 +22,7 @@ export const WorkerTrustAssessmentSchema = z
     workspace_id: NonEmptyStringSchema,
     trust_level: WorkerTrustLevelSchema,
     factors: z.array(TrustAssessmentFactorSchema).readonly(),
-    factor_details: z.record(z.string()).optional(),
+    factor_details: z.record(z.string(), z.string()).optional(),
     assessed_at: IsoDatetimeStringSchema
   })
   .strict()

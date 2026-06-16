@@ -140,7 +140,7 @@ export async function runAlayaMcpStdioServer(
 }
 
 function toMcpTool(tool: AlayaMemoryToolDefinition): Tool {
-  // inputSchema is a zod-to-json-schema-derived Record<string, unknown>; the
+  // inputSchema is a JSON-Schema-derived Record<string, unknown>; the
   // MCP SDK's Tool shape requires the canonical { type: "object", properties,
   // required, additionalProperties } subset, so we shallow-spread the derived
   // JSON Schema rather than re-typing each field.

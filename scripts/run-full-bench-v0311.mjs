@@ -22,7 +22,7 @@
 // kpi.json before continuing.
 //
 // Usage:
-//   set -a; . .do-it/bench-env/alaya-api.env; set +a
+//   export OFFICIAL_API_GARDEN_MODEL=<model>   # or source your bench env file
 //   node scripts/run-full-bench-v0311.mjs                        # both benches
 //   node scripts/run-full-bench-v0311.mjs --bench lme-s          # single bench id
 //   node scripts/run-full-bench-v0311.mjs --bench lme-s,locomo-off  # comma list
@@ -73,7 +73,7 @@ const BENCH_RUNNER = path.join(
 );
 const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
 const BENCH_ENV_SOURCE_COMMAND =
-  "set -a; . .do-it/bench-env/alaya-api.env; set +a";
+  `export ${GARDEN_MODEL_ENV}=<model> (or source your bench environment file)`;
 const EXTRACTION_CACHE_MANIFEST_PATH = path.join(
   REPO_ROOT,
   "docs/bench-history/datasets/longmemeval-extraction-cache/manifest.json"

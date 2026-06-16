@@ -102,7 +102,7 @@ export function renderReport(
   if (current.bench_name === "live" || current.split === "strict-real") {
     lines.push(
       "- **Live strict-real archive.** This entry normalizes an existing",
-      "  `.do-it/checks/alaya-live` run into bench-history so live provider,",
+      "  `var/checks/alaya-live` run into bench-history so live provider,",
       "  MCP security, semantic supplement, and Garden review-loop evidence",
       "  can be diffed beside `self` and `public`. It imports top1/top5",
       "  summary metrics and strict gate outcomes; it does not carry raw",

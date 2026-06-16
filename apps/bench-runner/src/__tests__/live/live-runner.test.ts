@@ -122,7 +122,7 @@ describe("live strict-real bench archive", () => {
     expect(resolveGitDir(repoRoot)).toBe(gitDir);
   });
 
-  it("archives per-run main-check-run summaries from historical .do-it runs", async () => {
+  it("archives per-run main-check-run summaries from historical live-check runs", async () => {
     const historyRoot = path.join(tmpRoot, "run-summary-history");
     const wrapper = buildSource() as LiveWrapperSource;
     const directSummary = {
@@ -259,9 +259,9 @@ function buildSource(): unknown {
     latest_run_id: "2026-05-12T05-27-16-166Z-strict-real",
     status: "pass",
     generated_at: "2026-05-12T05:39:53.229Z",
-    run_dir: ".do-it/checks/alaya-live/runs/2026-05-12T05-27-16-166Z-strict-real",
-    report: ".do-it/checks/alaya-live/runs/2026-05-12T05-27-16-166Z-strict-real/report.md",
-    summary: ".do-it/checks/alaya-live/runs/2026-05-12T05-27-16-166Z-strict-real/main-check-run.json",
+    run_dir: "var/checks/alaya-live/runs/2026-05-12T05-27-16-166Z-strict-real",
+    report: "var/checks/alaya-live/runs/2026-05-12T05-27-16-166Z-strict-real/report.md",
+    summary: "var/checks/alaya-live/runs/2026-05-12T05-27-16-166Z-strict-real/main-check-run.json",
     gates: [
       {
         id: "provider_top5",

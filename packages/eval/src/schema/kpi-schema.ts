@@ -58,7 +58,7 @@ export const RecallWeightOverridesSummarySchema = z
     source: z.enum(["cli", "env"]),
     activation_weights_phase4b: ActivationWeightsSummarySchema.optional(),
     additive: AdditiveScoringWeightsSummarySchema.optional(),
-    fusion_weights: z.record(z.number().finite().nonnegative()).optional()
+    fusion_weights: z.record(z.string(), z.number().finite().nonnegative()).optional()
   })
   .strict();
 export type RecallWeightOverridesSummary = z.infer<typeof RecallWeightOverridesSummarySchema>;
@@ -317,7 +317,7 @@ const GoldFacetSeparationSchema = z
     separable: z.number().int().nonnegative(),
     overlapping: z.number().int().nonnegative(),
     indeterminate: z.number().int().nonnegative(),
-    gold_dimension_counts: z.record(z.number().int().nonnegative())
+    gold_dimension_counts: z.record(z.string(), z.number().int().nonnegative())
   })
   .strict();
 
@@ -361,7 +361,7 @@ const QualityMetricsSchema = z
     // bench runs always populate it. Keyed by plane label; the key set is
     // whatever planes the run's gold candidates actually exposed.
     per_plane_recall_coverage: z
-      .record(PerPlaneRecallCoverageEntrySchema)
+      .record(z.string(), PerPlaneRecallCoverageEntrySchema)
       .default({}),
     // Cohort fan-in attribution (codex I2). Optional so pre-fan-in kpi.json
     // records stay valid; new LongMemEval runs always populate it.
@@ -406,7 +406,7 @@ const QualityMetricsSchema = z
       })
       .strict()
       .optional(),
-    miss_distribution: z.record(z.number().int().nonnegative())
+    miss_distribution: z.record(z.string(), z.number().int().nonnegative())
   })
   .strict();
 export type QualityMetrics = z.infer<typeof QualityMetricsSchema>;
@@ -666,7 +666,7 @@ export type KpiCore = z.infer<typeof KpiCoreSchema>;
 const DiffVsPreviousSchema = z.object({
   previous_run: z.string(),
   r_at_5_delta_pp: z.number(),
-  verdict_per_kpi: z.record(Verdict)
+  verdict_per_kpi: z.record(z.string(), Verdict)
 });
 export type DiffVsPrevious = z.infer<typeof DiffVsPreviousSchema>;
 

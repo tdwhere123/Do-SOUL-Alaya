@@ -1,26 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  FormationKind,
   GreenGovernanceEventType,
   GreenState,
-  MemoryDimension,
   MemoryGovernanceEventType,
-  RevokeReason,
-  RetentionPolicy,
-  ScopeClass,
-  SourceKind,
-  StorageTier,
-  VerificationBasis,
-  VerifiedBy,
-  type GreenStatus,
-  type MemoryEntry,
-  type Proposal,
-  type SynthesisCapsule
+  RevokeReason
 } from "@do-soul/alaya-protocol";
-import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
 import { SqliteGreenStatusRepo } from "../../../repos/health/green-status-repo.js";
 import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
-import { SqliteProposalRepo, type ProposalResolutionEventInput } from "../../../repos/proposal/index.js";
 
 import {
   countGreenPiercedEvents,

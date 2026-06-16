@@ -44,7 +44,7 @@ export const HealthJournalEntrySchema = z
     workspace_id: NonEmptyStringSchema,
     run_id: NonEmptyStringSchema.nullable(),
     summary: NonEmptyStringSchema,
-    detail_json: z.record(z.unknown()),
+    detail_json: z.record(z.string(), z.unknown()),
     created_at: IsoDatetimeStringSchema
   })
   .strict()

@@ -24,8 +24,8 @@
 /**
  * False-confident relevance-score threshold (tunable).
  *
- * Derived from per-question diagnostics of recent no-LLM full runs
- * (.do-it/runtime/q100-a|b and earlier). Evidence: the top-1
+ * Derived from per-question diagnostics of recent no-LLM full runs.
+ * Evidence: the top-1
  * `relevance_score` of genuine R@1 hits on answerable questions forms the
  * "recall genuinely found the answer" distribution — min ~0.873,
  * lower-quartile (p25) ~0.916, median ~0.93 (n=741). A delivered result at

@@ -79,7 +79,7 @@ const RecallCandidateDiagnosticSchema = z
     relevance_score: z.number().min(0).max(1),
     lexical_rank: z.number().min(0).max(1).nullable(),
     structural_score: z.number().min(0).max(1),
-    score_factors: z.record(z.unknown()).readonly(),
+    score_factors: z.record(z.string(), z.unknown()).readonly(),
     source_channels: z.array(z.string().min(1)).readonly(),
     path_expansion_sources: z.array(RecallDiagnosticPathExpansionSourceSchema).readonly(),
     rank_after_fusion: z.number().int().positive().optional(),
@@ -212,7 +212,7 @@ export const BenchRecallDiagnosticsSchema = z
     // Bench keeps it as opaque numeric telemetry for offline bottleneck
     // localization and must accept new phase keys without widening the rest of
     // the diagnostics contract.
-    phase_latency_ms: z.record(z.number().nonnegative()).readonly().optional()
+    phase_latency_ms: z.record(z.string(), z.number().nonnegative()).readonly().optional()
   })
   .strict()
   .readonly();

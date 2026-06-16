@@ -102,8 +102,8 @@ export function resolveCompileSeedExtractionConfig(
     throw new Error(
       "bench extraction model is unresolved: neither env " +
         `${GARDEN_MODEL_ENV} is set nor does the extraction cache manifest ` +
-        "declare extraction_model. Source the bench env " +
-        "(set -a; . .do-it/bench-env/alaya-api.env; set +a) or build the " +
+        "declare extraction_model. Export the extraction model env var " +
+        "in the bench environment or build the " +
         "cache manifest first. Refusing to fall back to a default model — a " +
         "wrong default silently misses every cache key and degrades to a " +
         "full live extraction."

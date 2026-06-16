@@ -14,14 +14,13 @@ import {
   type HistoryLayout
 } from "../../history/history.js";
 import { KpiPayloadSchema, type KpiPayload } from "../../schema/kpi-schema.js";
-import { renderFindings, renderReport } from "../../reporting/report.js";
+import { renderFindings } from "../../reporting/report.js";
 import { collectReleaseHardGates, releaseHardGateAllowsLatestPassing } from "../../gates/release-gates.js";
 import {
   buildFullLongMemEvalPayload,
   buildLivePayload,
   buildLocomoPayload,
   buildPayload,
-  cleanSeedExtractionPath,
   passingQualityMetrics,
   writeBenchPointer,
   writePointerlessPayload

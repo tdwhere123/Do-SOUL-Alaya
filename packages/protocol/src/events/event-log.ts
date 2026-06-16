@@ -92,7 +92,7 @@ export const EventLogEntrySchema = z.object({
   run_id: NonEmptyStringSchema.nullable(),
   caused_by: z.string().nullable(),
   revision: NonNegativeIntSchema,
-  payload_json: z.record(z.unknown()),
+  payload_json: z.record(z.string(), z.unknown()),
   created_at: IsoDatetimeStringSchema
 }).readonly();
 

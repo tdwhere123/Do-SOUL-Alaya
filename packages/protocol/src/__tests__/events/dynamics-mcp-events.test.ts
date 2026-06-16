@@ -107,6 +107,11 @@ describe("MCP tool request/response schemas", () => {
           domain_tags: ["repo"],
           confidence: 0.7,
           evidence_refs: ["message-1"],
+          source_memory_refs: [],
+          supersedes_refs: [],
+          exception_to_refs: [],
+          contradicts_refs: [],
+          incompatible_with_refs: [],
           raw_payload: { summary: "candidate signal" }
         }
       },

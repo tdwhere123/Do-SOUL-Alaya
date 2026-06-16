@@ -148,7 +148,14 @@ describe("Trustworthy Loop source_delivery_ids protocol contracts", () => {
       }).success
     ).toBe(false);
 
-    expect(CandidateMemorySignalContentSchema.parse(candidateContentBase)).toEqual(candidateContentBase);
+    expect(CandidateMemorySignalContentSchema.parse(candidateContentBase)).toEqual({
+      ...candidateContentBase,
+      source_memory_refs: [],
+      supersedes_refs: [],
+      exception_to_refs: [],
+      contradicts_refs: [],
+      incompatible_with_refs: []
+    });
     expect(
       CandidateMemorySignalContentSchema.safeParse({
         ...candidateContentBase,

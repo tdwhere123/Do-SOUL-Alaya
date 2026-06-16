@@ -3,7 +3,7 @@ import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-
 
 const engineProviderValues = ["openai", "anthropic", "custom"] as const;
 const EngineBaseUrlSchema = z.string().url();
-const EngineConfigSchema = z.record(z.unknown());
+const EngineConfigSchema = z.record(z.string(), z.unknown());
 
 export const EngineProvider = {
   OPENAI: "openai",

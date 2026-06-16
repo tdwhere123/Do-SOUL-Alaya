@@ -313,7 +313,6 @@ describe("createGardenHttpExtractor retry policy", () => {
 // SSE body; a compliant provider's plain JSON body must still work
 // (back-compat). The body read stays under the same wall-clock backstop as the
 // fetch so a mid-stream stalled socket settles as a timeout, not a hang.
-// see: .do-it/findings/garden-sse-streaming-rootcause.md
 describe("createGardenHttpExtractor — SSE streaming body parse", () => {
   const HTTP_CONFIG: CompileSeedExtractionConfig = {
     providerUrl: "https://example.test/v1",
@@ -444,7 +443,6 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     // A fresh Response per call: a content error has no HTTP status so the
     // retry loop treats it as unknown-transport and retries; each attempt
     // reads a fresh (unconsumed) body.
-    // see: .do-it/findings/garden-sse-streaming-rootcause.md
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
       makeSseResponse(
         'data: {"choices":[{"delta":{"content":"{\\"signals\\":[{\\"a"}}]}\n\n' +

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
 
-const AuditEventDetailSchema = z.record(z.unknown()).readonly();
+const AuditEventDetailSchema = z.record(z.string(), z.unknown()).readonly();
 
 export const AuditEventSchema = z
   .object({

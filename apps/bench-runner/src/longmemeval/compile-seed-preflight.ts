@@ -107,8 +107,8 @@ export function preflightExtractionCache(input: {
         `"${input.config.model}" != cache manifest extraction_model ` +
         `"${manifest.extraction_model}". The cache would miss every key and ` +
         "this run would be a full live extraction (~466h). Set " +
-        `${GARDEN_MODEL_ENV}=${manifest.extraction_model} (e.g. ` +
-        "set -a; . .do-it/bench-env/alaya-api.env; set +a) or rebuild the " +
+        `${GARDEN_MODEL_ENV}=${manifest.extraction_model} in the bench ` +
+        "environment or rebuild the " +
         "cache for the new model."
     );
   }
