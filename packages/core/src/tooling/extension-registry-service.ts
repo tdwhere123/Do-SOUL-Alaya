@@ -455,18 +455,40 @@ export class ExtensionRegistryService {
 
     const existingLoadPromise = this.providerCacheLoadPromise;
     const baselinePromise = existingLoadPromise ?? this.loadProviderCache();
-    const mergedPromise = baselinePromise.then((baselineSnapshot) => {
-      const mergedSnapshot = mergeProviderIntoCacheSnapshot(
-        this.providerCacheSnapshot ?? baselineSnapshot,
-        normalizedProvider
-      );
-      this.publishProviderCache(mergedSnapshot);
-      return mergedSnapshot;
-    });
+    const mergedPromise = baselinePromise
+      .then((baselineSnapshot) => {
+        const mergedSnapshot = mergeProviderIntoCacheSnapshot(
+          this.providerCacheSnapshot ?? baselineSnapshot,
+          normalizedProvider
+        );
+        this.publishProviderCache(mergedSnapshot);
+        return mergedSnapshot;
+      })
+      .catch((error) => {
+        // Degrade to last-good (or empty) cache so a failed provider merge
+        // cannot wedge the cache load for later callers.
+        process.emitWarning("[ExtensionRegistryService] provider cache merge failed; degrading to last-good", {
+          code: "ALAYA_EXTENSION_CACHE_MERGE_DEGRADED",
+          detail: JSON.stringify({
+            provider_id: normalizedProvider.provider_id,
+            error: error instanceof Error ? error.message : String(error)
+          })
+        });
+        return this.providerCacheSnapshot ?? createProviderCacheSnapshot([]);
+      });
     this.providerCacheLoadPromise = mergedPromise;
 
     if (existingLoadPromise !== null) {
-      void mergedPromise.catch(() => undefined);
+      // mergedPromise self-degrades above; this guards any residual rejection.
+      void mergedPromise.catch((error) => {
+        process.emitWarning("[ExtensionRegistryService] detached provider cache merge rejected (fire-and-forget)", {
+          code: "ALAYA_EXTENSION_CACHE_MERGE_DETACHED_FAILED",
+          detail: JSON.stringify({
+            provider_id: normalizedProvider.provider_id,
+            error: error instanceof Error ? error.message : String(error)
+          })
+        });
+      });
       return;
     }
 

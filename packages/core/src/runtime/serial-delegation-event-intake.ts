@@ -78,7 +78,16 @@ export class SerialDelegationEventIntake {
 
   public enqueue(operation: () => Promise<void>): void {
     this.eventQueue = this.eventQueue
-      .catch(() => undefined)
+      .catch((error) => {
+        // Prior queued op already self-reports via the .then handler below;
+        // log here only to flag the otherwise-silent chain-keep swallow.
+        process.emitWarning("[SerialDelegationEventIntake] Prior queued operation rejected (fire-and-forget)", {
+          code: "ALAYA_SERIAL_DELEGATION_QUEUE_PRIOR_REJECTED",
+          detail: JSON.stringify({
+            error: error instanceof Error ? error.message : String(error)
+          })
+        });
+      })
       .then(async () => {
         try {
           await operation();

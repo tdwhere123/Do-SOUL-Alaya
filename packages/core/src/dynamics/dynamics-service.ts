@@ -367,7 +367,16 @@ export class DynamicsService {
         targetObjectId: updated.object_id,
         workspaceId: updated.workspace_id
       })
-      .catch(() => undefined);
+      .catch((error) => {
+        process.emitWarning("[DynamicsService] greenService.reevaluate rejected (fire-and-forget)", {
+          code: "ALAYA_DYNAMICS_GREEN_REEVALUATE_FAILED",
+          detail: JSON.stringify({
+            object_id: updated.object_id,
+            workspace_id: updated.workspace_id,
+            error: error instanceof Error ? error.message : String(error)
+          })
+        });
+      });
   }
 
   public async computeRetentionScore(memory: Readonly<MemoryEntry>): Promise<number> {

@@ -119,7 +119,16 @@ export class MemoryService {
           targetObjectId: created.object_id,
           workspaceId: created.workspace_id
         })
-        .catch(() => undefined);
+        .catch((error) => {
+          process.emitWarning("[MemoryService] greenService.reevaluate rejected (fire-and-forget)", {
+            code: "ALAYA_MEMORY_GREEN_REEVALUATE_FAILED",
+            detail: JSON.stringify({
+              object_id: created.object_id,
+              workspace_id: created.workspace_id,
+              error: error instanceof Error ? error.message : String(error)
+            })
+          });
+        });
     }
 
     return created;
