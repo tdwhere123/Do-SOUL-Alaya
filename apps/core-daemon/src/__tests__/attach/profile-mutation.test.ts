@@ -177,7 +177,7 @@ describe("profile mutation", () => {
   });
 
   it("resolves repo source layout launchers to the checkout root bin", () => {
-    const sourceDir = "/tmp/Do SOUL Alaya/apps/core-daemon/src";
+    const sourceDir = "/tmp/Do SOUL Alaya/apps/core-daemon/src/attach";
 
     expect(resolveAlayaMcpLauncher({}, { importMetaDirname: sourceDir })).toEqual({
       command: "node",
@@ -189,7 +189,7 @@ describe("profile mutation", () => {
   });
 
   it("resolves repo built layout launchers to the checkout root bin", () => {
-    const distDir = "/tmp/Do SOUL Alaya/apps/core-daemon/dist";
+    const distDir = "/tmp/Do SOUL Alaya/apps/core-daemon/dist/attach";
 
     expect(resolveAlayaMcpLauncher({}, { importMetaDirname: distDir })).toEqual({
       command: "node",
@@ -201,7 +201,7 @@ describe("profile mutation", () => {
   });
 
   it("resolves installed package dist layout launchers to the package bin", () => {
-    const distDir = "/tmp/install root/node_modules/@do-soul/alaya/dist";
+    const distDir = "/tmp/install root/node_modules/@do-soul/alaya/dist/attach";
 
     expect(resolveAlayaMcpLauncher({}, { importMetaDirname: distDir })).toEqual({
       command: "node",

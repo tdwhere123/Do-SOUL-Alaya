@@ -941,19 +941,31 @@ function resolveAlayaPackageRoot(rootInput: AlayaLauncherRootInput | undefined):
   }
 
   const moduleDir = path.resolve(rootInput?.importMetaDirname ?? import.meta.dirname);
-  const moduleParent = dirname(moduleDir);
-  const moduleGrandparent = dirname(moduleParent);
-  const isRepoCoreDaemonModule =
-    (path.basename(moduleDir) === "src" || path.basename(moduleDir) === "dist") &&
-    path.basename(moduleParent) === "core-daemon" &&
-    path.basename(moduleGrandparent) === "apps";
 
-  if (isRepoCoreDaemonModule) {
-    return path.resolve(moduleDir, "..", "..", "..");
+  // This module compiles into a subdirectory (dist/attach), so climb to the
+  // src/dist build root before deriving the checkout or package root.
+  let buildRoot = moduleDir;
+  while (
+    path.basename(buildRoot) !== "dist" &&
+    path.basename(buildRoot) !== "src" &&
+    dirname(buildRoot) !== buildRoot
+  ) {
+    buildRoot = dirname(buildRoot);
   }
 
-  if (path.basename(moduleDir) === "dist") {
-    return moduleParent;
+  const buildParent = dirname(buildRoot);
+  const buildGrandparent = dirname(buildParent);
+  const isRepoCoreDaemonModule =
+    (path.basename(buildRoot) === "src" || path.basename(buildRoot) === "dist") &&
+    path.basename(buildParent) === "core-daemon" &&
+    path.basename(buildGrandparent) === "apps";
+
+  if (isRepoCoreDaemonModule) {
+    return path.resolve(buildRoot, "..", "..", "..");
+  }
+
+  if (path.basename(buildRoot) === "dist") {
+    return buildParent;
   }
 
   return path.resolve(moduleDir, "..", "..", "..");
