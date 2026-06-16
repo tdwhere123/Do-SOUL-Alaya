@@ -41,6 +41,35 @@ describe("cli inspect", () => {
     );
   });
 
+  it("surfaces inspector stderr when the child exits before ready", async () => {
+    const child = new FakeInspectorChild();
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "a".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector: () => child,
+      listWorkspaces: oneWorkspaceList()
+    });
+
+    const promise = command.handler(createContext({ stderr }), {
+      open: false,
+      port: 5174,
+      token: null,
+      workspace: null
+    });
+    setTimeout(() => child.stderr.write("Error: Cannot find module '/missing/server.js'\n"), 0);
+    setTimeout(() => child.emitExit(1, null), 10);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(70);
+    const stderrText = stderrChunks.join("");
+    expect(stderrText).toContain("inspector exited before ready: 1");
+    expect(stderrText).toContain("Cannot find module '/missing/server.js'");
+  });
+
   it("returns a remediation when the port is busy", async () => {
     const stderr = new PassThrough();
     const stderrChunks: string[] = [];

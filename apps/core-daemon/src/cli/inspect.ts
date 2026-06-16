@@ -81,6 +81,8 @@ export interface InspectorChildProcess {
   kill(signal?: NodeJS.Signals): boolean;
   once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
   once(event: "error", listener: (error: Error) => void): this;
+  off(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  off(event: "error", listener: (error: Error) => void): this;
 }
 
 export interface BrowserOpenerChildProcess {
@@ -106,6 +108,7 @@ const DEFAULT_DAEMON_HOST = "127.0.0.1";
 const DEFAULT_DAEMON_PORT = 5173;
 const READY_LINE = "inspector_ready";
 const SHUTDOWN_TIMEOUT_MS = 2000;
+const INSPECTOR_STDERR_CAPTURE_LIMIT = 4096;
 const ALLOW_FIXED_TOKEN_ENV = "ALAYA_INSPECTOR_ALLOW_FIXED_TOKEN";
 const EXTERNAL_DAEMON_REQUEST_TOKEN_ENV = "ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN";
 const INSPECTOR_CHILD_ENV_KEYS = ["ALAYA_DAEMON_URL", "ALAYA_REQUEST_TOKEN"] as const;
@@ -489,36 +492,63 @@ async function waitForInspectorReady(child: InspectorChildProcess, ctx: AlayaCli
     throw new Error("inspector stdout unavailable");
   }
 
-  let buffer = "";
+  let stdoutBuffer = "";
+  let stderrTail = "";
   await new Promise<void>((resolve, reject) => {
-    const onData = (chunk: Buffer | string) => {
-      buffer += chunk.toString();
-      const lines = buffer.split(/\r?\n/u);
-      buffer = lines.pop() ?? "";
+    let settled = false;
+    const finish = (action: () => void): void => {
+      if (settled) return;
+      settled = true;
+      child.stdout?.off("data", onStdout);
+      child.stderr?.off("data", onStderr);
+      child.off("error", onError);
+      child.off("exit", onExit);
+      action();
+    };
+    function onStdout(chunk: Buffer | string): void {
+      stdoutBuffer += chunk.toString();
+      const lines = stdoutBuffer.split(/\r?\n/u);
+      stdoutBuffer = lines.pop() ?? "";
       for (const line of lines) {
         if (line === READY_LINE) {
-          child.stdout?.off("data", onData);
-          resolve();
-        } else if (line.trim().length > 0) {
-          ctx.stdout.write(`[inspector] ${line}\n`);
+          finish(resolve);
+          return;
         }
+        if (line.trim().length > 0) ctx.stdout.write(`[inspector] ${line}\n`);
       }
-    };
-    child.stdout!.on("data", onData);
-    child.once("error", reject);
-    child.once("exit", (code, signal) => reject(new Error(`inspector exited before ready: ${code ?? signal ?? "unknown"}`)));
+    }
+    // Capture stderr before ready so an early crash surfaces its own error
+    // instead of a bare "exited before ready" exit code.
+    function onStderr(chunk: Buffer | string): void {
+      stderrTail = `${stderrTail}${chunk.toString()}`.slice(-INSPECTOR_STDERR_CAPTURE_LIMIT);
+      echoInspectorLines(ctx.stderr, chunk);
+    }
+    function onError(error: Error): void {
+      finish(() => reject(error));
+    }
+    function onExit(code: number | null, signal: NodeJS.Signals | null): void {
+      const reason = code ?? signal ?? "unknown";
+      const detail = stderrTail.trim();
+      finish(() => reject(new Error(
+        detail.length > 0
+          ? `inspector exited before ready: ${reason}\n${detail}`
+          : `inspector exited before ready: ${reason}`
+      )));
+    }
+    child.stdout!.on("data", onStdout);
+    child.stderr?.on("data", onStderr);
+    child.once("error", onError);
+    child.once("exit", onExit);
   });
 
-  child.stdout.on("data", (chunk) => {
-    for (const line of chunk.toString().split(/\r?\n/u)) {
-      if (line.trim().length > 0) ctx.stdout.write(`[inspector] ${line}\n`);
-    }
-  });
-  child.stderr?.on("data", (chunk) => {
-    for (const line of chunk.toString().split(/\r?\n/u)) {
-      if (line.trim().length > 0) ctx.stderr.write(`[inspector] ${line}\n`);
-    }
-  });
+  child.stdout.on("data", (chunk) => echoInspectorLines(ctx.stdout, chunk));
+  child.stderr?.on("data", (chunk) => echoInspectorLines(ctx.stderr, chunk));
+}
+
+function echoInspectorLines(stream: { write(text: string): void }, chunk: Buffer | string): void {
+  for (const line of chunk.toString().split(/\r?\n/u)) {
+    if (line.trim().length > 0) stream.write(`[inspector] ${line}\n`);
+  }
 }
 
 async function waitForChildExitOrSignal(child: InspectorChildProcess): Promise<void> {
