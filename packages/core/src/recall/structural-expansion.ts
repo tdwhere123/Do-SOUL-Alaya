@@ -25,8 +25,8 @@ import { collectPathGraphNeighbors } from "./path-relations.js";
 import { recallFusionRetuneEnabled } from "./recall-retune-flags.js";
 import { clamp01, toErrorMessage } from "./recall-service-helpers.js";
 
-// C4: entity-seed score retained at this fraction per unit of lexical overlap
-// under the retune flag, instead of a hard zero.
+// Entity-seed score retained at this fraction per unit of lexical overlap under
+// the retune flag, instead of a hard zero.
 const ENTITY_LEXICAL_OVERLAP_DECAY = 0.5;
 import type {
   RecallAdmissionPlane,

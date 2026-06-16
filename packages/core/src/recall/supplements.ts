@@ -23,7 +23,7 @@ import { recallFusionRetuneEnabled } from "./recall-retune-flags.js";
 
 const EMBEDDING_INJECTION_SIMILARITY_FLOOR = 0.5;
 const EMBEDDING_MAX_INJECTED_DELIVERY = 2;
-// C2: under the retune flag, relax the semantic-injection gate (pairs with the
+// Under the retune flag, relax the semantic-injection gate (pairs with the
 // embedding weight bump and a retrieval-tuned model).
 const EMBEDDING_INJECTION_SIMILARITY_FLOOR_RETUNED = 0.35;
 const EMBEDDING_MAX_INJECTED_DELIVERY_RETUNED = 10;

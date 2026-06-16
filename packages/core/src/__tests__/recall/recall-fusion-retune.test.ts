@@ -11,8 +11,8 @@ import {
 
 const RETUNE_ENV = "ALAYA_RECALL_FUSION_RETUNE_V1";
 
-// Exercises the opt-in fusion retune bundle (F6/C2/C3a). The production default
-// is off and covered by the regression suite; here the flag is forced on.
+// Exercises the opt-in fusion retune bundle. The production default is off and
+// covered by the regression suite; here the flag is forced on.
 describe("recall fusion retune (flag on)", () => {
   let previous: string | undefined;
 
@@ -29,7 +29,7 @@ describe("recall fusion retune (flag on)", () => {
     }
   });
 
-  it("F6: folds lexical lanes into a single composite contribution on lexical_fts", async () => {
+  it("folds lexical lanes into a single composite contribution on lexical_fts", async () => {
     const highActivation = memory({
       object_id: "high-activation",
       content: "ordinary activation-heavy memory",
@@ -66,7 +66,7 @@ describe("recall fusion retune (flag on)", () => {
     expect(high?.fused_rank_contribution_per_stream.lexical_fts).toBeGreaterThan(0);
   });
 
-  it("C2: embedding_similarity carries weight 3 under retune", async () => {
+  it("raises embedding_similarity weight under retune", async () => {
     const lexicalPeer = memory({
       object_id: "lexical-peer",
       content: "ordinary activation peer memory",
@@ -111,7 +111,7 @@ describe("recall fusion retune (flag on)", () => {
     expect(gold?.fused_rank_contribution_per_stream.embedding_similarity).toBeCloseTo(3 / 61, 5);
   });
 
-  it("C3a: temporal_recency fires only for date-term queries under retune", async () => {
+  it("fires temporal_recency only for date-term queries under retune", async () => {
     const recent = memory({ object_id: "recent", content: "release status note", created_at: "2026-05-18T00:00:00.000Z" });
     const { dependencies } = deps([recent], {
       searchByKeyword: async () => [{ object_id: "recent", normalized_rank: 1 }]

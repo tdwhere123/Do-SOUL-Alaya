@@ -70,12 +70,11 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   workspace_activation: 0
 });
 
-// F6: evidence-driven near-collinear lexical lanes (all query-term-overlap
-// driven) folded into one mean-rank composite under the retune flag so the
-// lexical block stops out-voting discriminative gold. Must include structural +
-// existing_score (the 2nd/3rd largest distractor lanes at n=266). Not folded:
-// embedding_similarity (semantically independent, weight-raised instead) and
-// synthesis_fts (synthesis capsules score on it alone).
+// Near-collinear lexical lanes (all driven by query-term overlap) folded into
+// one mean-rank composite under the retune flag so the lexical block stops
+// out-voting discriminative gold. embedding_similarity and synthesis_fts stay
+// independent: the former is semantic and weight-raised, capsules score only on
+// the latter.
 const LEXICAL_COMPOSITE_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
   "lexical_fts",
   "trigram_fts",
@@ -85,9 +84,9 @@ const LEXICAL_COMPOSITE_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
   "existing_score"
 ]);
 
-// Retune defaults (flag ALAYA_RECALL_FUSION_RETUNE_V1). Folded composite members
-// drop to 0 (lexical_fts stays the composite carrier weight); embedding rises to
-// 3 (C2); temporal stays 0 here and is date-gated to 2 in resolveRrfFusionWeights.
+// Retune weights. Folded composite members drop to 0 (lexical_fts stays the
+// composite carrier); embedding is raised; temporal stays 0 here and is
+// date-gated in resolveRrfFusionWeights.
 const RECALL_FUSION_RETUNED_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
   lexical_fts: 3,
   trigram_fts: 0,
@@ -163,7 +162,7 @@ export function buildRecallFusionDetails(params: Readonly<{
     for (const stream of RECALL_FUSION_STREAMS) {
       const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
       perStreamRank[stream] = rank;
-      // F6: folded lexical lanes contribute once through the composite below.
+      // Folded lexical lanes contribute once through the composite below.
       if (retune && LEXICAL_COMPOSITE_STREAMS.has(stream)) {
         continue;
       }
@@ -834,7 +833,7 @@ function resolveRrfFusionWeights(
     : RECALL_RRF_DEFAULT_K;
   const weights = Object.fromEntries(
     RECALL_FUSION_STREAMS.map((stream) => {
-      // C3a: date-gate temporal only under retune; created_at recency stays off otherwise.
+      // Date-gate temporal only under retune; created_at recency stays off otherwise.
       const baseWeight = stream === "temporal_recency" && retune && hasDateTerms
         ? RECALL_RETUNE_TEMPORAL_DATE_WEIGHT
         : base[stream];
@@ -847,8 +846,8 @@ function resolveRrfFusionWeights(
   });
 }
 
-// F6: mean rank across the folded lexical lanes, ignoring lanes the candidate
-// did not match (null). One composite contribution replaces six per-lane ones.
+// Mean rank across the folded lexical lanes, ignoring lanes the candidate did
+// not match (null). One composite contribution replaces six per-lane ones.
 function meanLexicalCompositeRank(
   perStreamRank: Record<RecallFusionStream, number | null>
 ): number | null {

@@ -407,7 +407,7 @@ describe("RecallService", () => {
       expect(lexicalContribution).toBeGreaterThan(0);
     });
 
-    it("C4: retune flag decays entity_seed on lexical overlap instead of zeroing it", async () => {
+    it("retune flag decays entity_seed on lexical overlap instead of zeroing it", async () => {
       const previous = process.env.ALAYA_RECALL_FUSION_RETUNE_V1;
       process.env.ALAYA_RECALL_FUSION_RETUNE_V1 = "1";
       try {
