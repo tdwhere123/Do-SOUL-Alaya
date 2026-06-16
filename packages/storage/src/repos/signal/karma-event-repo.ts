@@ -1,4 +1,4 @@
-import { parseKarmaEvent as parseProtocolKarmaEvent, type KarmaEvent, type KarmaEventKind } from "@do-soul/alaya-protocol";
+import { parseKarmaEvent as parseProtocolKarmaEvent, type KarmaEvent } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";

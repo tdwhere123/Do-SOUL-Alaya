@@ -29,7 +29,7 @@ export class SqliteBootstrappingRecordRepo implements BootstrappingRecordRepo {
   private readonly createStatement;
   private readonly findByWorkspaceStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
       INSERT INTO bootstrapping_records (
         record_id,

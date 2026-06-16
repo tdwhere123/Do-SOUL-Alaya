@@ -1,13 +1,8 @@
 import type {
-  GardenCompressionCandidate,
   GardenLibrarianMergeDetectionPort,
   GardenLibrarianNeighborDetectionPort,
   GardenLibrarianPathCompressionPort,
-  GardenLibrarianSynthesisThrottlePort,
-  GardenMergeCandidate,
-  GardenNeighborGroup,
-  GardenSynthesisCandidateCluster,
-  GardenTemplateCluster
+  GardenLibrarianSynthesisThrottlePort
 } from "./garden-data-ports.js";
 import {
   ACTIVE_STATE,

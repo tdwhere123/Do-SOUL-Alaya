@@ -54,7 +54,7 @@ export class SqliteToolExecutionRecordRepo implements ToolExecutionRecordRepo {
   private readonly listByPrincipalRunIdStatement;
   private readonly listByWorkerRunIdStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.insertStatement = db.connection.prepare(`
       INSERT INTO tool_execution_records (
         execution_id,

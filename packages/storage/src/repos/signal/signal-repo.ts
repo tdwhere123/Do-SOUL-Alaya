@@ -55,7 +55,7 @@ export class SqliteSignalRepo implements SignalRepo {
   private readonly countByRunStatement;
   private readonly updateStateStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
       INSERT INTO signals (
         signal_id,

@@ -1,44 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  ControlPlaneObjectKind,
-  DYNAMICS_CONSTANTS,
-  MemoryGovernanceEventType,
-  ObjectLifecycleState,
-  RecallContextEventType,
-  ProjectMappingState,
-  RetentionPolicy,
-  ScopeClass,
-  SynthesisStatus,
-  type EventLogEntry,
-  type MemoryEntry,
   type PathAnchorRef,
-  type PathRelation,
-  type ProjectMappingAnchor,
-  type RecallCandidate,
-  type RecallPolicy,
-  type SoulActiveConstraint,
-  type Slot,
-  type SynthesisCapsule,
-  type TaskObjectSurface
+  type PathRelation
 } from "@do-soul/alaya-protocol";
+import { RecallService } from "../../recall/recall-service.js";
+import type { RecallServicePathExpansionPort } from "../../recall/recall-service-types.js";
 import {
-  RecallService,
-  classifyGlobalCandidate,
-  type RecallServiceDependencies
-} from "../../recall/recall-service.js";
-import type {
-  RecallServiceEmbeddingRecallPort,
-  RecallServiceMemoryRepoPort,
-  RecallServicePathExpansionPort
-} from "../../recall/recall-service-types.js";
-import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
-import {
-  createAnchor,
   createDependencies,
   createMemoryEntry,
   createPathRelation,
-  createPreparedQueryHandle,
-  createSlot,
   createTaskSurface,
   overridePolicy
 } from "./recall-service-test-fixtures.js";

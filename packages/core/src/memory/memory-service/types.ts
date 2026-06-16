@@ -1,7 +1,6 @@
 import {
   RevokeReason,
   type EventLogEntry,
-  type FactualPolicyCondition,
   type MemoryEntry,
   type MemoryEntryMutableFields,
   type MemoryEntryRepoUpdateFields as ProtocolMemoryEntryRepoUpdateFields,

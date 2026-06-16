@@ -48,7 +48,7 @@ export class SqliteHealthJournalRepo implements HealthJournalRepo {
   private readonly findByWorkspaceStatement;
   private readonly findByWorkspaceAndKindStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.appendStatement = db.connection.prepare(`
       INSERT INTO health_journal (
         entry_id,

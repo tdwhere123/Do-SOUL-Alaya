@@ -729,7 +729,7 @@ describe("ReconciliationService storage-level lease", () => {
     const { deps } = createDeps([]);
     const releaseCalls: string[] = [];
     const lease = {
-      tryAcquire: (leaseKey: string, ownerToken: string) => ({ owner_token: ownerToken }),
+      tryAcquire: (_leaseKey: string, ownerToken: string) => ({ owner_token: ownerToken }),
       release: (leaseKey: string, ownerToken: string) => {
         releaseCalls.push(`${leaseKey}:${ownerToken}`);
       }

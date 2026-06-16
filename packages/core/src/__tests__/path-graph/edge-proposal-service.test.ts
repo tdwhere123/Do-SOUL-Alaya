@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { EdgeProposalStatus, EdgeProposalTriggerSource } from "@do-soul/alaya-protocol";
 import {
   AUTO_ACCEPT_FLOOR_BY_TRIGGER,

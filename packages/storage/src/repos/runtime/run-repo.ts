@@ -44,7 +44,6 @@ export class SqliteRunRepo implements RunRepo {
   private readonly listByWorkspaceStatement;
   private readonly listByWorkspacePagedStatement;
   private readonly countByWorkspaceStatement;
-  private readonly deleteStatement;
   private readonly updateStateStatement;
   private readonly updateTitleStatement;
 
@@ -121,7 +120,6 @@ export class SqliteRunRepo implements RunRepo {
       FROM runs
       WHERE workspace_id = ?
     `);
-    this.deleteStatement = db.connection.prepare("DELETE FROM runs WHERE run_id = ?");
     this.updateStateStatement = db.connection.prepare(`
       UPDATE runs
       SET run_state = ?, last_active_at = ?

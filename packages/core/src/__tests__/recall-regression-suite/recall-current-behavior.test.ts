@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
-  RecallContextEventType,
   StorageTier,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
@@ -346,7 +345,7 @@ describe("recall regression suite", () => {
       evidence_refs: refIds
     });
     const evidenceById = new Map(
-      refIds.map((id, index) => [id, evidenceCapsule(id, `source-${id}`)] as const)
+      refIds.map((id) => [id, evidenceCapsule(id, `source-${id}`)] as const)
     );
     const findByIds = vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
       ids.flatMap((id) => {

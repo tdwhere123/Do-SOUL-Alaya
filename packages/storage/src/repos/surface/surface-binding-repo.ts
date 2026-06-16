@@ -79,7 +79,7 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
   private readonly findDetachedBySurfaceIdStatement;
   private readonly cascadeDetachStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
       INSERT INTO surface_bindings (
         binding_id,

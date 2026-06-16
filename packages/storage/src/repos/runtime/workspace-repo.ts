@@ -71,7 +71,6 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
   private readonly listStatement;
   private readonly listPagedStatement;
   private readonly countStatement;
-  private readonly deleteStatement;
   private readonly updateRepoPathStatement;
   private readonly updateDefaultEngineBindingStatement;
   private readonly updateDefaultEngineClassStatement;
@@ -142,7 +141,6 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
       SELECT COUNT(*) AS total
       FROM workspaces
     `);
-    this.deleteStatement = db.connection.prepare("DELETE FROM workspaces WHERE workspace_id = ?");
     this.updateRepoPathStatement = db.connection.prepare(`
       UPDATE workspaces
       SET repo_path = ?

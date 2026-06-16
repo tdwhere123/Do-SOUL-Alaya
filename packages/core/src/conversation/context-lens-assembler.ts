@@ -343,7 +343,7 @@ export class ContextLensAssembler {
         params.activeOverrides
       );
       tokensAfterDegradation = workingProjection.total_token_estimate;
-      const degradedEvent = await this.dependencies.eventLogRepo.append({
+      await this.dependencies.eventLogRepo.append({
         event_type: BudgetEventType.SOUL_BUDGET_DEGRADED,
         entity_type: "context_lens",
         entity_id: contextLens.runtime_id,

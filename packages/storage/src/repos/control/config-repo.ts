@@ -15,7 +15,7 @@ export class SqliteConfigRepo implements ConfigRepo {
   private readonly getStatement;
   private readonly upsertStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.getStatement = db.connection.prepare(`
       SELECT value
       FROM app_config

@@ -5,7 +5,6 @@ import {
   type EvidenceCapsule,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../../shared/errors.js";
 import { EvidenceService, type EvidenceCapsuleInput } from "../../memory/evidence-service.js";
 
 function createEvidenceInput(overrides: Partial<EvidenceCapsuleInput> = {}): EvidenceCapsuleInput {

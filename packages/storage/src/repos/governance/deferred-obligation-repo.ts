@@ -60,7 +60,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
   private readonly findActiveByWorkspaceStatement;
   private readonly findExpiredStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.getByIdStatement = db.connection.prepare(`
       SELECT${DEFERRED_OBLIGATION_SELECT_COLUMNS}
       FROM deferred_obligations

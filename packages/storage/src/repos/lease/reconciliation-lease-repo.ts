@@ -48,7 +48,7 @@ export class SqliteReconciliationLeaseRepo implements ReconciliationLeaseRepo {
   private readonly releaseStatement;
   private readonly findByKeyStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     // invariant: the INSERT-OR-CONFLICT CAS. The INSERT wins outright when
     // no row exists. On a key collision the DO UPDATE fires, but the
     // `WHERE` clause restricts the overwrite to a lease whose stored

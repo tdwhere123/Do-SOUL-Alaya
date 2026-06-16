@@ -28,7 +28,7 @@ export class SqliteEngineBindingRepo implements EngineBindingRepo {
   private readonly listByWorkspaceStatement;
   private readonly upsertStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.getByIdStatement = db.connection.prepare(`
       SELECT
         binding_id,

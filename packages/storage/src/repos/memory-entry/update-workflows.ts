@@ -1,4 +1,4 @@
-import { StorageTier, type MemoryEntry } from "@do-soul/alaya-protocol";
+import { type MemoryEntry } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { parseNonEmptyString } from "../shared/validators.js";

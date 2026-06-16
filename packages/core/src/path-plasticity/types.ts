@@ -2,8 +2,6 @@ import type {
   DirectionBias,
   EventLogEntry,
   PathAnchorRef,
-  PathLifecycleStatus,
-  PathPlasticityState,
   PathRelation,
   SoulContextObjectIdentity,
   UsageProofRecord

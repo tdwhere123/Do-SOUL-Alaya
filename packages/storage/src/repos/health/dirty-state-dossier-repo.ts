@@ -42,7 +42,7 @@ export class SqliteDirtyStateDossierRepo implements DirtyStateDossierRepo {
   private readonly findByWorkspaceStatement;
   private readonly findByWorkerRunStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.insertStatement = db.connection.prepare(`
       INSERT INTO dirty_state_dossiers (
         dossier_id,

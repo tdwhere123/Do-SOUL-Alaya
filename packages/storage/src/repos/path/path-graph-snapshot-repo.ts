@@ -34,7 +34,7 @@ export class SqlitePathGraphSnapshotRepo implements PathGraphSnapshotRepo {
   private readonly findHistoryStatement;
   private readonly deleteOlderThanStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
       INSERT INTO path_graph_snapshots (
         snapshot_id,
@@ -175,24 +175,6 @@ export class SqlitePathGraphSnapshotRepo implements PathGraphSnapshotRepo {
     }
   }
 
-  private async findById(snapshotId: string): Promise<Readonly<PathGraphSnapshot> | null> {
-    const parsedSnapshotId = parseNonEmptyString(snapshotId, "snapshot id");
-
-    try {
-      const row = this.findByIdStatement.get(parsedSnapshotId) as PathGraphSnapshotRow | undefined;
-      return row === undefined ? null : parsePathGraphSnapshotRow(row);
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to load path graph snapshot ${parsedSnapshotId}.`,
-        error
-      );
-    }
-  }
 }
 
 function extractMetrics(snapshot: PathGraphSnapshot): PathGraphSnapshotMetrics {

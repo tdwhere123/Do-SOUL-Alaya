@@ -11,7 +11,6 @@ import {
   WorkspaceDeletedPayloadSchema,
   WorkspaceCreateInputSchema,
   WorkspaceKind,
-  WorkspaceSchema,
   WorkspaceState,
   type BootstrappingRecord,
   type EngineBindingInput,

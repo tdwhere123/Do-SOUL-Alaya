@@ -1,7 +1,6 @@
 import {
   GreenGovernanceEventType,
   MemoryGovernanceEventType,
-  PathGovernanceClass,
   RevokeReason,
   RuntimeGovernanceEventType,
   SoulGreenPiercedPayloadSchema,

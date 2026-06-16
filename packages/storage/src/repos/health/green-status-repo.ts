@@ -67,7 +67,7 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
   private readonly upsertStatement;
   private readonly deleteStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.findByObjectIdStatement = db.connection.prepare(`
       SELECT${GREEN_STATUS_SELECT_COLUMNS}
       FROM green_statuses

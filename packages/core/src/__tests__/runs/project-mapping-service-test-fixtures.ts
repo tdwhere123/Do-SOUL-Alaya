@@ -1,7 +1,5 @@
 import { vi } from "vitest";
 import {
-  AcceptedBy,
-  ConfirmationPolicy,
   MemoryDimension,
   ObjectLifecycleState,
   ProjectMappingState,

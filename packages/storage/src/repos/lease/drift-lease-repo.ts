@@ -41,7 +41,7 @@ export class SqliteDriftLeaseRepo implements DriftLeaseRepo {
   private readonly now: () => string;
 
   public constructor(
-    private readonly db: StorageDatabase,
+    db: StorageDatabase,
     options: { readonly now?: () => string } = {}
   ) {
     this.createStatement = db.connection.prepare(`

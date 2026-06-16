@@ -59,7 +59,7 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
   private readonly findBetweenClaimsStatement;
   private readonly deleteStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
       INSERT INTO conflict_matrix_edges (
         object_id,

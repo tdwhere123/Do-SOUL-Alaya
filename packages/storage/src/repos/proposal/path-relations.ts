@@ -6,7 +6,6 @@ import {
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
-import { parseNonEmptyString } from "../shared/validators.js";
 import type { PathRelationProposalPayload } from "./types.js";
 import type { ProposalPathRelationRow } from "./rows.js";
 import type { parseAcceptedPathRelationGovernanceInput } from "./acceptance.js";
@@ -69,39 +68,6 @@ export function parsePathRelationProposalPayload(value: unknown): Readonly<PathR
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate proposal proposed_path_relation.", error);
   }
-}
-
-function serializeSourceDeliveryIds(value: readonly string[] | null): string | null {
-  if (value === null) {
-    return null;
-  }
-
-  const parsed = parseSourceDeliveryIdsArray(value);
-  return JSON.stringify(parsed);
-}
-
-function parseSourceDeliveryIds(value: string | null): readonly string[] | null {
-  if (value === null) {
-    return null;
-  }
-
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse proposal source_delivery_ids JSON.", error);
-  }
-
-  return parseSourceDeliveryIdsArray(parsedJson);
-}
-
-function parseSourceDeliveryIdsArray(value: unknown): readonly string[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new StorageError("VALIDATION_FAILED", "Proposal source_delivery_ids must be a non-empty array.");
-  }
-  return deepFreeze(
-    value.map((item, index) => parseNonEmptyString(item, `source_delivery_ids[${index}]`))
-  );
 }
 
 export function createStrictlyGovernedPathRelation(

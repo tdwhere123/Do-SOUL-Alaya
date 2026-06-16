@@ -1,40 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  ControlPlaneObjectKind,
-  DYNAMICS_CONSTANTS,
   MemoryDimension,
-  MemoryGovernanceEventType,
-  ObjectLifecycleState,
-  RecallContextEventType,
   ProjectMappingState,
-  RetentionPolicy,
   ScopeClass,
-  SynthesisStatus,
-  type EventLogEntry,
-  type MemoryEntry,
-  type PathAnchorRef,
-  type PathRelation,
-  type ProjectMappingAnchor,
-  type RecallCandidate,
-  type RecallPolicy,
-  type SoulActiveConstraint,
-  type Slot,
-  type SynthesisCapsule,
-  type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import {
-  RecallService,
-  classifyGlobalCandidate,
-  computeRecallTokenEconomy,
-  type RecallServiceDependencies
-} from "../../recall/recall-service.js";
-import type {
-  RecallServiceEmbeddingRecallPort,
-  RecallServiceMemoryRepoPort,
-  RecallServicePathExpansionPort
-} from "../../recall/recall-service-types.js";
-import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
-import { createActiveConstraint, createAnchor, createDependencies, createMemoryEntry, createPathRelation, createPreparedQueryHandle, createSlot, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
+import { RecallService } from "../../recall/recall-service.js";
+import { createActiveConstraint, createAnchor, createDependencies, createMemoryEntry, createPreparedQueryHandle, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
   it("merges adopted global-source candidates through optional recall ports and excludes non-adopted globals", async () => {

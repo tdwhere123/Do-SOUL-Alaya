@@ -14,7 +14,6 @@ import {
   type Workspace,
   type WorkingProjection
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../../shared/errors.js";
 import {
   ConversationService,
   type ConversationServiceDependencies

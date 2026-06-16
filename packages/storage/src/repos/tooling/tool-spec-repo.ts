@@ -48,7 +48,7 @@ export class SqliteToolSpecRepo implements ToolSpecRepo {
   private readonly listStatement;
   private readonly deleteStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.insertStatement = db.connection.prepare(`
       INSERT INTO tool_specs (
         tool_id,

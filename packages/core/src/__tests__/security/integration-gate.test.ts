@@ -8,7 +8,6 @@ import {
 import { EventPublisherPropagationError } from "../../runtime/event-publisher.js";
 import {
   IntegrationGate,
-  IntegrationGatePublicationError,
   VERIFIED_CLAUDE_RUNTIME_CAPABILITY_PROFILE,
   WORKER_INTEGRATION_STATUS_EVENT_TYPE
 } from "../../security/integration-gate.js";

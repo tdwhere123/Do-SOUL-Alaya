@@ -65,7 +65,7 @@ export class SqliteSlotRepo implements SlotRepo {
   private readonly findByWinnerClaimIdStatement;
   private readonly updateWinnerStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
       INSERT INTO slots (
         object_id,

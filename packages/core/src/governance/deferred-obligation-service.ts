@@ -8,8 +8,7 @@ import {
   ObligationTrustNarrativeEventType,
   type DeferredObligation,
   type DeferredObligationKind,
-  type DeferredObligationState,
-  type EventLogEntry
+  type DeferredObligationState
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import type { EventPublisher } from "../runtime/event-publisher.js";

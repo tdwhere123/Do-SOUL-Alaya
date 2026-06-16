@@ -33,20 +33,12 @@ import {
 import type {
   CoarseRecallCandidate,
   RecallAdmissionPlane,
-  RecallCandidateDiagnostic,
-  RecallFusionStream,
-  RecallFusionStreamContributions,
-  RecallFusionStreamRanks,
-  RecallDiagnostics,
-  RecallEmbeddingProviderStatus,
   RecallGraphExpansionDiagnostics,
-  RecallGraphExpansionTrackedEdgeType,
   RecallPathExpansionSourceDiagnostic,
   RecallResult,
   RecallServiceDependencies,
   RecallServiceWarnPort,
-  RecallTokenEconomy,
-  TokenEstimator
+  RecallTokenEconomy
 } from "./recall-service-types.js";
 import { makeTokenEstimator } from "./recall-service-types.js";
 import {
@@ -151,21 +143,6 @@ const RECALLS_EDGE_COLD_THRESHOLD = 50;
 // so the per-plane admit ceiling is the structural truth and the multi-seed
 // path inherits the same bound. see also: DYNAMIC_RECALL_PLANE_CAP
 const MULTI_SEED_GRAPH_FAN_OUT_CAP = DYNAMIC_RECALL_PLANE_CAP;
-
-type CoarseCandidateAdder = (
-  entry: Readonly<MemoryEntry>,
-  plane: RecallAdmissionPlane,
-  structuralScore?: number,
-  sourceChannel?: string,
-  pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
-  // invariant: only forwarded for plane === "entity_seed" by
-  // collectEntityDerivedSeeds; other planes leave this undefined.
-  entityConfidence?: number,
-  // invariant: only forwarded true by the direct path_expansion admission when
-  // the traversed PathRelation's relation_kind is the earned co_recalled fan-in
-  // carrier; other admissions leave it undefined. see also: addCandidate.
-  reachedViaEarnedCoRecalledFanin?: boolean
-) => boolean;
 
 export class RecallService {
   private readonly generateRuntimeId: () => string;

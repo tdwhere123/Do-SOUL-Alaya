@@ -34,7 +34,7 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
   private readonly listToolProvidersStatement;
   private readonly findDescriptorByIdStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.upsertDescriptorStatement = db.connection.prepare(`
       INSERT INTO extension_descriptors (
         descriptor_id,

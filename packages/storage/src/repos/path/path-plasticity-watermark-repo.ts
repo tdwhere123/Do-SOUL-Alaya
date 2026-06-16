@@ -25,7 +25,7 @@ export class SqlitePathPlasticityWatermarkRepo implements PathPlasticityWatermar
   private readonly findByWorkspaceIdStatement;
   private readonly upsertStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     this.findByWorkspaceIdStatement = db.connection.prepare(`
       SELECT
         workspace_id,

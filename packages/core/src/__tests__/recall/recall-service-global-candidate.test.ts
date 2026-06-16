@@ -1,40 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  ControlPlaneObjectKind,
-  DYNAMICS_CONSTANTS,
-  MemoryDimension,
-  MemoryGovernanceEventType,
-  ObjectLifecycleState,
-  RecallContextEventType,
   ProjectMappingState,
-  RetentionPolicy,
-  ScopeClass,
-  SynthesisStatus,
-  type EventLogEntry,
-  type MemoryEntry,
-  type PathAnchorRef,
-  type PathRelation,
-  type ProjectMappingAnchor,
-  type RecallCandidate,
-  type RecallPolicy,
-  type SoulActiveConstraint,
-  type Slot,
-  type SynthesisCapsule,
-  type TaskObjectSurface
+  type ProjectMappingAnchor
 } from "@do-soul/alaya-protocol";
-import {
-  RecallService,
-  classifyGlobalCandidate,
-  computeRecallTokenEconomy,
-  type RecallServiceDependencies
-} from "../../recall/recall-service.js";
-import type {
-  RecallServiceEmbeddingRecallPort,
-  RecallServiceMemoryRepoPort,
-  RecallServicePathExpansionPort
-} from "../../recall/recall-service-types.js";
-import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
-import { createActiveConstraint, createAnchor, createDependencies, createMemoryEntry, createPathRelation, createPreparedQueryHandle, createSlot, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
+import { classifyGlobalCandidate } from "../../recall/recall-service.js";
+import { createAnchor } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
   it("classifyGlobalCandidate only includes accepted and adapted anchors for future global supply", () => {

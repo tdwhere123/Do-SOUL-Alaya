@@ -5,7 +5,6 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import {
-  classifyPathImportance,
   isConsolidationDeletable,
   isConsolidationSurvivorEligible
 } from "../manifestation/importance-gate.js";

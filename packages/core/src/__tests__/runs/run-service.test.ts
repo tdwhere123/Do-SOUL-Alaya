@@ -183,23 +183,6 @@ interface CreateServiceOptions {
 function createService(options: CreateServiceOptions): RunService {
   const workspace = options.workspace ?? createWorkspace();
   const bindingById = options.bindingById ?? {};
-  const runRepoCreate = vi.fn(async (input: {
-    readonly run_id: string;
-    readonly workspace_id: string;
-    readonly title: Run["title"];
-    readonly goal: Run["goal"];
-    readonly run_mode: Run["run_mode"];
-    readonly engine_binding_id: Run["engine_binding_id"];
-    readonly engine_class: Run["engine_class"];
-    readonly run_state: Run["run_state"];
-    readonly current_surface_id: Run["current_surface_id"];
-  }) => {
-    return createRun({
-      ...input,
-      created_at: "2026-04-15T00:00:00.000Z",
-      last_active_at: "2026-04-15T00:00:00.000Z"
-    });
-  });
 
   return new RunService({
     workspaceRepo: {
