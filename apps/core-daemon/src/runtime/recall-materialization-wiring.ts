@@ -99,6 +99,7 @@ import {
   createGlobalMemoryRouteService,
   resolveEdgeClassifyWiring
 } from "./daemon-runtime-support.js";
+import { warnOnRejectedBackgroundTask } from "./daemon-runtime-helpers.js";
 import type { AppConfigService } from "../services/config-service.js";
 import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 
@@ -184,13 +185,15 @@ export async function createRecallMaterializationWiring(input: {
     memoryEntryRepo: input.memoryEntryRepo,
     warn: input.warn
   });
-  embeddingProviderWarmup
-    .then((status) => {
+  void warnOnRejectedBackgroundTask(
+    embeddingProviderWarmup.then((status) => {
       if (status === "ready") {
         input.warn("embedding provider warmup ready", { status });
       }
-    })
-    .catch(() => undefined);
+    }),
+    input.warn,
+    "embedding provider warmup observer failed"
+  );
 
   const recallPathPlasticityPort = createRecallPathPlasticityPort({
     pathRelationRepo: input.pathRelationRepo

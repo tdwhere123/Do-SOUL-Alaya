@@ -1,5 +1,19 @@
+import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createWarnLogger, reconcileBootstrapPathsForAllWorkspaces } from "../../runtime/daemon-runtime-helpers.js";
+import {
+  createWarnLogger,
+  installUnhandledRejectionHandler,
+  reconcileBootstrapPathsForAllWorkspaces,
+  warnOnRejectedBackgroundTask
+} from "../../runtime/daemon-runtime-helpers.js";
+
+type FakeProcess = EventEmitter & {
+  exitCode?: number;
+};
+
+function createFakeProcess(): FakeProcess {
+  return Object.assign(new EventEmitter(), { exitCode: undefined as number | undefined });
+}
 
 describe("createWarnLogger (pino-backed)", () => {
   afterEach(() => {
@@ -68,6 +82,101 @@ describe("createWarnLogger (pino-backed)", () => {
     const error = record.error as Record<string, unknown>;
     expect(error.message).toBe("[Redacted]");
     expect(error.code).toBe("E_BOOM");
+  });
+});
+
+describe("installUnhandledRejectionHandler", () => {
+  it("logs the rejection and marks the process as failed", () => {
+    const fakeProcess = createFakeProcess();
+    const error = vi.fn();
+
+    installUnhandledRejectionHandler({ error }, fakeProcess);
+    fakeProcess.emit("unhandledRejection", new Error("boom"));
+
+    expect(error).toHaveBeenCalledWith(
+      "unhandled rejection",
+      expect.objectContaining({ reason: "boom" })
+    );
+    expect(fakeProcess.exitCode).toBe(1);
+  });
+
+  it("installs one listener per process and updates to the latest logger", () => {
+    const fakeProcess = createFakeProcess();
+    const firstLogger = { error: vi.fn() };
+    const secondLogger = { error: vi.fn() };
+
+    installUnhandledRejectionHandler(firstLogger, fakeProcess);
+    installUnhandledRejectionHandler(secondLogger, fakeProcess);
+    fakeProcess.emit("unhandledRejection", "later failure");
+
+    expect(fakeProcess.listenerCount("unhandledRejection")).toBe(1);
+    expect(firstLogger.error).not.toHaveBeenCalled();
+    expect(secondLogger.error).toHaveBeenCalledWith(
+      "unhandled rejection",
+      expect.objectContaining({ reason: "later failure" })
+    );
+  });
+
+  it("requests shutdown once when a fatal rejection is seen before the runtime can supply the callback", async () => {
+    const fakeProcess = createFakeProcess();
+    const error = vi.fn();
+    const shutdown = vi.fn(async () => undefined);
+
+    installUnhandledRejectionHandler({ error }, fakeProcess);
+    fakeProcess.emit("unhandledRejection", new Error("boot failure"));
+    installUnhandledRejectionHandler({ error }, fakeProcess, { shutdown });
+    installUnhandledRejectionHandler({ error }, fakeProcess, { shutdown });
+
+    await Promise.resolve();
+
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(fakeProcess.exitCode).toBe(1);
+  });
+
+  it("re-arms shutdown handling when a later runtime installs a new callback", async () => {
+    const fakeProcess = createFakeProcess();
+    const error = vi.fn();
+    const firstShutdown = vi.fn(async () => undefined);
+    const secondShutdown = vi.fn(async () => undefined);
+
+    installUnhandledRejectionHandler({ error }, fakeProcess, { shutdown: firstShutdown });
+    fakeProcess.emit("unhandledRejection", new Error("first fatal"));
+    await Promise.resolve();
+
+    installUnhandledRejectionHandler({ error }, fakeProcess, { shutdown: secondShutdown });
+    fakeProcess.emit("unhandledRejection", new Error("second fatal"));
+    await Promise.resolve();
+
+    expect(firstShutdown).toHaveBeenCalledTimes(1);
+    expect(secondShutdown).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("warnOnRejectedBackgroundTask", () => {
+  it("logs rejected fire-and-forget work instead of swallowing it silently", async () => {
+    const warn = vi.fn();
+
+    await warnOnRejectedBackgroundTask(
+      Promise.resolve().then(() => {
+        throw new Error("boom");
+      }),
+      warn,
+      "embedding provider warmup monitor failed"
+    );
+
+    expect(warn).toHaveBeenCalledWith(
+      "embedding provider warmup monitor failed",
+      expect.objectContaining({ error: "boom" })
+    );
+  });
+
+  it("stays quiet when the background task settles cleanly", async () => {
+    const warn = vi.fn();
+
+    await expect(
+      warnOnRejectedBackgroundTask(Promise.resolve("ok"), warn, "should not log")
+    ).resolves.toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

@@ -715,6 +715,127 @@ describe("daemon tool runtime bootstrap", () => {
       })
     );
   });
+
+  it("keeps one unhandledRejection listener across fatal shutdown and later reboot", async () => {
+    const originalExitCode = process.exitCode;
+    const unhandledRejectionListenersBefore = process.listeners("unhandledRejection").length;
+
+    try {
+      await bootStartedDaemonRuntime();
+      const unhandledRejectionListenersAfterFirstBoot =
+        process.listeners("unhandledRejection").length;
+      expect(unhandledRejectionListenersAfterFirstBoot).toBeGreaterThanOrEqual(
+        unhandledRejectionListenersBefore
+      );
+
+      let serverCloseCallsBeforeFatal = hoisted.serverClose.mock.calls.length;
+      process.emit("unhandledRejection", new Error("first fatal async boundary"), Promise.resolve());
+
+      await vi.waitFor(() => {
+        expect(hoisted.serverClose.mock.calls.length).toBeGreaterThan(
+          serverCloseCallsBeforeFatal
+        );
+      });
+      expect(process.exitCode).toBe(1);
+      process.exitCode = originalExitCode;
+
+      await bootStartedDaemonRuntime();
+      expect(process.listeners("unhandledRejection")).toHaveLength(
+        unhandledRejectionListenersAfterFirstBoot
+      );
+
+      serverCloseCallsBeforeFatal = hoisted.serverClose.mock.calls.length;
+      process.emit("unhandledRejection", new Error("second fatal async boundary"), Promise.resolve());
+
+      await vi.waitFor(() => {
+        expect(hoisted.serverClose.mock.calls.length).toBeGreaterThan(
+          serverCloseCallsBeforeFatal
+        );
+      });
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = originalExitCode;
+    }
+  });
+
+  it("does not await embedding warmup and stays quiet when warmup reports a normal failed status", async () => {
+    const providerWarmup = createDeferred<"ready" | "failed">();
+    const output: string[] = [];
+    const writeSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        output.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+        return true;
+      });
+    hoisted.createDaemonEmbeddingRuntimeOverride = () => ({
+      embeddingStatusService: {},
+      embeddingRecallService: undefined,
+      embeddingBackfillHandler: undefined,
+      defaultPolicyDecorator: undefined,
+      providerWarmup: providerWarmup.promise
+    });
+
+    let bootResolved = false;
+    const runtimePromise = bootDaemonRuntime().then((runtime) => {
+      bootResolved = true;
+      return runtime;
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(bootResolved).toBe(true);
+      });
+
+      providerWarmup.resolve("failed");
+      await Promise.resolve();
+
+      const serialized = output.join("");
+      expect(serialized).not.toContain("embedding provider warmup ready");
+      expect(serialized).not.toContain("embedding provider warmup observer failed");
+      await expect(runtimePromise).resolves.toBeDefined();
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
+
+  it("logs unexpected embedding warmup observer failures without blocking boot", async () => {
+    const providerWarmup = createDeferred<"ready" | "failed">();
+    const output: string[] = [];
+    const writeSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        output.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+        return true;
+      });
+    hoisted.createDaemonEmbeddingRuntimeOverride = () => ({
+      embeddingStatusService: {},
+      embeddingRecallService: undefined,
+      embeddingBackfillHandler: undefined,
+      defaultPolicyDecorator: undefined,
+      providerWarmup: providerWarmup.promise
+    });
+
+    let bootResolved = false;
+    const runtimePromise = bootDaemonRuntime().then((runtime) => {
+      bootResolved = true;
+      return runtime;
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(bootResolved).toBe(true);
+      });
+
+      providerWarmup.reject(new Error("observer boom"));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(output.join("")).toContain("embedding provider warmup observer failed");
+      await expect(runtimePromise).resolves.toBeDefined();
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
 });
 
 async function resolveBootGardenProvider(): Promise<unknown> {

@@ -109,6 +109,7 @@ import {
   createRequestProtection,
   createRuntimeNotifier,
   createSoulGraphService,
+  installUnhandledRejectionHandler,
   createWarnLogger,
   defaultBootstrappingTemplates,
   defaultCanonicalAliasMap,
@@ -200,6 +201,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const startupSteps: DaemonStartupStepRecord[] = [];
   const validatedEnv = validateDaemonEnv(process.env);
   const warnLogger = createWarnLogger();
+  // Process-global guard: install once even when tests/bench start multiple runtimes.
+  installUnhandledRejectionHandler(warnLogger);
   const runtimeNotifier = createRuntimeNotifier();
   const requestProtection = createRequestProtection(validatedEnv);
   const remoteDaemonOptInEnabled = isRemoteDaemonOptInEnabled(process.env);
@@ -840,7 +843,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
               floor: CO_RECALL_COHERENCE_FLOOR
             })
         };
-  return await finalizeAlayaDaemonRuntime({
+  const runtime = await finalizeAlayaDaemonRuntime({
     requestProtection,
     runtimeNotifier,
     startupSteps,
@@ -992,6 +995,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       gardenTaskRepo
     }
   });
+  installUnhandledRejectionHandler(warnLogger, process, {
+    shutdown: runtime.shutdown
+  });
+  return runtime;
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {

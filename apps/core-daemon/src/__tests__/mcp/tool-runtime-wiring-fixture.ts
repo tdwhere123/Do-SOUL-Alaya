@@ -533,6 +533,10 @@ const hoisted = vi.hoisted(() => {
       readonly capture: ReturnType<typeof vi.fn>;
       readonly getSnapshot: ReturnType<typeof vi.fn>;
     }>,
+    createDaemonEmbeddingRuntimeOverride: null as
+      | null
+      | ((input: unknown) => Record<string, unknown>),
+    lastDaemonEmbeddingRuntimeInput: null as null | Record<string, unknown>,
     pathGraphSnapshotterBuildSnapshot: vi.fn(async () => pathGraphSnapshot),
     reviewPathGraphSnapshotHistory: vi.fn(() => null),
     contextLensAssemble: vi.fn(async () => ({
@@ -625,6 +629,23 @@ vi.mock("../../runtime/daemon-runtime-support.js", async () => {
   return {
     ...actual,
     loadConfigEnv: hoisted.loadConfigEnv
+  };
+});
+
+vi.mock("../../ai/daemon-embedding-runtime.js", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>(
+    "../../ai/daemon-embedding-runtime.js"
+  );
+  const createDaemonEmbeddingRuntime = actual["createDaemonEmbeddingRuntime"] as (
+    input: Record<string, unknown>
+  ) => Record<string, unknown>;
+  return {
+    ...actual,
+    createDaemonEmbeddingRuntime: vi.fn((input: Record<string, unknown>) => {
+      hoisted.lastDaemonEmbeddingRuntimeInput = input;
+      const override = hoisted.createDaemonEmbeddingRuntimeOverride;
+      return override === null ? createDaemonEmbeddingRuntime(input) : override(input);
+    })
   };
 });
 
@@ -827,6 +848,8 @@ export function resetToolRuntimeWiringState(): void {
   hoisted.engineToolSnapshots.splice(0, hoisted.engineToolSnapshots.length);
   hoisted.backgroundManagers.splice(0, hoisted.backgroundManagers.length);
   hoisted.gardenBacklogTelemetryServices.splice(0, hoisted.gardenBacklogTelemetryServices.length);
+  hoisted.createDaemonEmbeddingRuntimeOverride = null;
+  hoisted.lastDaemonEmbeddingRuntimeInput = null;
   hoisted.mcpBridgeDeps = null;
   hoisted.canonicalAliasServiceDeps = null;
   hoisted.claimServiceDeps = null;

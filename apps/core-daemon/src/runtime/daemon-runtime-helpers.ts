@@ -28,6 +28,41 @@ export type LoggerPort = Readonly<{
 
 export type WarnLogger = LoggerPort;
 
+type UnhandledRejectionListener = (reason: unknown) => void;
+
+type UnhandledRejectionProcessPort = {
+  exitCode?: number | string | null;
+  on(event: "unhandledRejection", listener: UnhandledRejectionListener): unknown;
+};
+
+type UnhandledRejectionHandlerOptions = Readonly<{
+  shutdown?: () => Promise<unknown> | unknown;
+}>;
+
+const UNHANDLED_REJECTION_LOGGER_KEY = Symbol.for(
+  "do-soul.alaya.unhandledRejectionLogger"
+);
+const UNHANDLED_REJECTION_LISTENER_KEY = Symbol.for(
+  "do-soul.alaya.unhandledRejectionListener"
+);
+const UNHANDLED_REJECTION_SEEN_KEY = Symbol.for(
+  "do-soul.alaya.unhandledRejectionSeen"
+);
+const UNHANDLED_REJECTION_SHUTDOWN_KEY = Symbol.for(
+  "do-soul.alaya.unhandledRejectionShutdown"
+);
+const UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY = Symbol.for(
+  "do-soul.alaya.unhandledRejectionShutdownPromise"
+);
+
+type UnhandledRejectionProcessState = UnhandledRejectionProcessPort & {
+  [UNHANDLED_REJECTION_LOGGER_KEY]?: Pick<LoggerPort, "error">;
+  [UNHANDLED_REJECTION_LISTENER_KEY]?: UnhandledRejectionListener;
+  [UNHANDLED_REJECTION_SEEN_KEY]?: boolean;
+  [UNHANDLED_REJECTION_SHUTDOWN_KEY]?: () => Promise<unknown> | unknown;
+  [UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY]?: Promise<void>;
+};
+
 // Defense-in-depth field redaction. pino paths only match a single level
 // (`token` = top-level, `*.token` = one nested level); there is no recursive
 // `**`. The summarizers in middleware/error-handler.ts remain the first line —
@@ -97,6 +132,10 @@ function getSharedPinoLogger(): Logger {
   return sharedPinoLogger;
 }
 
+function formatUnknownErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function createWarnLogger(): LoggerPort {
   const logger = getSharedPinoLogger();
   return Object.freeze({
@@ -123,6 +162,85 @@ export function createWarnLogger(): LoggerPort {
   });
 }
 
+export function installUnhandledRejectionHandler(
+  logger: Pick<LoggerPort, "error">,
+  processPort: UnhandledRejectionProcessPort = process,
+  options: UnhandledRejectionHandlerOptions = {}
+): void {
+  const processState = processPort as UnhandledRejectionProcessState;
+  processState[UNHANDLED_REJECTION_LOGGER_KEY] = logger;
+  if (options.shutdown !== undefined) {
+    const priorShutdown = processState[UNHANDLED_REJECTION_SHUTDOWN_KEY];
+    if (priorShutdown !== undefined && priorShutdown !== options.shutdown) {
+      processState[UNHANDLED_REJECTION_SEEN_KEY] = false;
+      processState[UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY] = undefined;
+    }
+    processState[UNHANDLED_REJECTION_SHUTDOWN_KEY] = options.shutdown;
+  }
+  if (processState[UNHANDLED_REJECTION_LISTENER_KEY] !== undefined) {
+    ensureUnhandledRejectionShutdown(processState, processPort);
+    return;
+  }
+
+  const listener: UnhandledRejectionListener = (reason) => {
+    processState[UNHANDLED_REJECTION_SEEN_KEY] = true;
+    processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error("unhandled rejection", {
+      reason: formatUnknownErrorMessage(reason)
+    });
+    processPort.exitCode = 1;
+    ensureUnhandledRejectionShutdown(processState, processPort);
+  };
+
+  processPort.on("unhandledRejection", listener);
+  processState[UNHANDLED_REJECTION_LISTENER_KEY] = listener;
+  ensureUnhandledRejectionShutdown(processState, processPort);
+}
+
+export async function warnOnRejectedBackgroundTask(
+  task: Promise<unknown>,
+  warn: WarnLogger["warn"],
+  message: string,
+  meta: Record<string, unknown> = {}
+): Promise<void> {
+  try {
+    await task;
+  } catch (error) {
+    warn(message, {
+      ...meta,
+      error: formatUnknownErrorMessage(error)
+    });
+  }
+}
+
+function ensureUnhandledRejectionShutdown(
+  processState: UnhandledRejectionProcessState,
+  processPort: UnhandledRejectionProcessPort
+): void {
+  if (processState[UNHANDLED_REJECTION_SEEN_KEY] !== true) {
+    return;
+  }
+  if (processState[UNHANDLED_REJECTION_SHUTDOWN_KEY] === undefined) {
+    return;
+  }
+  if (processState[UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY] !== undefined) {
+    return;
+  }
+
+  processState[UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY] = Promise.resolve(
+    processState[UNHANDLED_REJECTION_SHUTDOWN_KEY]!()
+  )
+    .catch((error) => {
+      processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error(
+        "unhandled rejection shutdown failed",
+        {
+          error: formatUnknownErrorMessage(error)
+        }
+      );
+      processPort.exitCode = 1;
+    })
+    .then(() => undefined);
+}
+
 export type ReconcileBootstrapPathsForAllWorkspacesDeps = Readonly<{
   readonly workspaceRepo: Readonly<{
     list(): Promise<
@@ -147,7 +265,7 @@ export async function reconcileBootstrapPathsForAllWorkspaces(
     workspaces = await deps.workspaceRepo.list();
   } catch (error) {
     deps.warn("bootstrap reconcile enumeration failed", {
-      error: error instanceof Error ? error.message : String(error)
+      error: formatUnknownErrorMessage(error)
     });
     return;
   }
@@ -162,7 +280,7 @@ export async function reconcileBootstrapPathsForAllWorkspaces(
     } catch (error) {
       deps.warn("bootstrap reconcile failed", {
         workspace_id: workspace.workspace_id,
-        error: error instanceof Error ? error.message : String(error)
+        error: formatUnknownErrorMessage(error)
       });
     }
   }

@@ -44,12 +44,14 @@ describe("daemon tool runtime bootstrap shutdown", () => {
       const stopGate = createDeferred<void>();
       const closeGate = createDeferred<void>();
       const signalHandlers = new Map<"SIGINT" | "SIGTERM", () => void>();
+      const originalOn = process.on.bind(process);
       const processOnSpy = vi.spyOn(process, "on");
       processOnSpy.mockImplementation(((event: string, handler: () => void) => {
         if (event === "SIGINT" || event === "SIGTERM") {
           signalHandlers.set(event, handler);
+          return process;
         }
-        return process;
+        return originalOn(event as never, handler as never);
       }) as typeof process.on);
       hoisted.backgroundManagerStop.mockImplementationOnce(async () => {
         await stopGate.promise;
@@ -98,12 +100,14 @@ describe("daemon tool runtime bootstrap shutdown", () => {
     async () => {
       const stopGate = createDeferred<void>();
       const signalHandlers = new Map<"SIGINT" | "SIGTERM", () => void>();
+      const originalOn = process.on.bind(process);
       const processOnSpy = vi.spyOn(process, "on");
       processOnSpy.mockImplementation(((event: string, handler: () => void) => {
         if (event === "SIGINT" || event === "SIGTERM") {
           signalHandlers.set(event, handler);
+          return process;
         }
-        return process;
+        return originalOn(event as never, handler as never);
       }) as typeof process.on);
       hoisted.backgroundManagerStop.mockImplementationOnce(async () => {
         await stopGate.promise;
