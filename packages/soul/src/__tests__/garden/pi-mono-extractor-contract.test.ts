@@ -199,6 +199,57 @@ describe("pi-mono-extractor-contract", () => {
     }
   });
 
+  it("retries a 5xx from the real fetch transport and reports failure_max_retries", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("", { status: 503, statusText: "Service Unavailable" }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const extractor = createPiMonoExtractor({
+        apiKey: "sk-live",
+        model: "custom-model",
+        endpoint: "https://proxy.example.test/v1",
+        sleep: async () => undefined,
+        random: () => 0
+      });
+      await expect(
+        extractor.extract({ systemPrompt: "sys", userPrompt: "turn" })
+      ).rejects.toMatchObject({
+        kind: "transport_failure",
+        retryClassification: "failure_max_retries"
+      });
+      // 1 initial attempt + MAX_EXTRACTOR_RETRIES retries.
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not retry a 4xx from the real fetch transport", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("", { status: 401, statusText: "Unauthorized" }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const extractor = createPiMonoExtractor({
+        apiKey: "sk-live",
+        model: "custom-model",
+        endpoint: "https://proxy.example.test/v1",
+        sleep: async () => undefined,
+        random: () => 0
+      });
+      await expect(
+        extractor.extract({ systemPrompt: "sys", userPrompt: "turn" })
+      ).rejects.toMatchObject({
+        kind: "transport_failure",
+        retryClassification: "failure_non_retryable_4xx"
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("maps invalid JSON, timeout, and transport failures to typed extractor errors", async () => {
     const invalidJsonExtractor = createPiMonoExtractor({
       apiKey: "sk-test",

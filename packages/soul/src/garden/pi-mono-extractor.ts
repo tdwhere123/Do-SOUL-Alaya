@@ -313,6 +313,9 @@ function selectModel(input: {
   };
 }
 
+// Default direct-OpenAI model. The fetch transport always targets
+// /chat/completions (the universal OpenAI-compatible endpoint the bench and
+// proxies use), not the OpenAI Responses API the prior pi-ai default resolved.
 function createOpenAiCompatibleModel(modelId: string): PiMonoModel {
   return {
     id: modelId,
