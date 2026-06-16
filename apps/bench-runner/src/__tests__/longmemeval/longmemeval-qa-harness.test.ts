@@ -79,6 +79,7 @@ describe("scoreQaQuestion judge routing", () => {
       {
         questionId: "q1",
         questionType: "single-session-user",
+        isAbstention: false,
         question: "Where?",
         questionDate: "2023/05/10 (Wed) 09:00",
         goldAnswer: "Paris",
@@ -102,6 +103,7 @@ describe("scoreQaQuestion (answerable, factual)", () => {
       {
         questionId: "q1",
         questionType: "single-session-user",
+        isAbstention: false,
         question: "Where does the user live?",
         questionDate: "2023/05/10 (Wed) 09:00",
         goldAnswer: "Berlin",
@@ -134,6 +136,7 @@ describe("scoreQaQuestion (answerable, factual)", () => {
       {
         questionId: "q2",
         questionType: "multi-session",
+        isAbstention: false,
         question: "Where does the user live?",
         questionDate: "2023/05/10 (Wed) 09:00",
         goldAnswer: "Berlin",
@@ -153,6 +156,7 @@ describe("scoreQaQuestion (preference uses rubric template)", () => {
       {
         questionId: "p1",
         questionType: "single-session-preference",
+        isAbstention: false,
         question: "Recommend some video editing resources.",
         questionDate: "2023/05/10 (Wed) 09:00",
         goldAnswer: "The user would prefer Adobe Premiere Pro resources.",
@@ -167,6 +171,27 @@ describe("scoreQaQuestion (preference uses rubric template)", () => {
     // judge side frames gold as a Rubric, not a Correct Answer.
     expect(calls[1]?.user).toContain("Rubric: The user would prefer");
   });
+
+  it("routes LoCoMo aggregation questions through the aggregation answer prompt", async () => {
+    const { chat, calls } = fakeChat(["There are 2 projects.", "yes"]);
+    const verdict = await scoreQaQuestion(
+      {
+        questionId: "conv-30:7",
+        questionType: "locomo-aggregation",
+        isAbstention: false,
+        question: "How many projects did I mention?",
+        questionDate: "2023/05/10 (Wed) 09:00",
+        goldAnswer: "2",
+        delivered: [
+          { objectId: "m1", content: "user: I fixed the violin project." },
+          { objectId: "m2", content: "user: I started a mural project." }
+        ]
+      },
+      chat
+    );
+    expect(verdict.correct).toBe(true);
+    expect(calls[0]?.system).toContain("aggregate across the whole history");
+  });
 });
 
 describe("scoreQaQuestion (abstention _abs uses the abstention judge)", () => {
@@ -176,6 +201,7 @@ describe("scoreQaQuestion (abstention _abs uses the abstention judge)", () => {
       {
         questionId: "topic_abs",
         questionType: "single-session-user",
+        isAbstention: true,
         question: "What is the user's PIN?",
         questionDate: "2023/05/10 (Wed) 09:00",
         goldAnswer: "The information provided is not enough.",
@@ -197,6 +223,7 @@ describe("scoreQaQuestion (abstention _abs uses the abstention judge)", () => {
       {
         questionId: "topic_abs",
         questionType: "single-session-user",
+        isAbstention: true,
         question: "What is the user's PIN?",
         questionDate: "2023/05/10 (Wed) 09:00",
         goldAnswer: "The information provided is not enough.",

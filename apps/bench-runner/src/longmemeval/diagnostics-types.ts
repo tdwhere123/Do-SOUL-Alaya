@@ -120,6 +120,8 @@ export interface LongMemEvalGraphExpansionPlaneCountPerEdgeType {
   readonly supports: number;
 }
 
+export type LongMemEvalPhaseLatencyMs = Readonly<Record<string, number>>;
+
 export interface LongMemEvalRecallEvidenceSummary {
   readonly delivered_result_count: number;
   readonly graph_support_gold_count: number;
@@ -190,6 +192,7 @@ export interface NarrowRecallDiagnostics {
   readonly providerDegradationReason: string | null;
   readonly graphExpansionPlaneCountPerHop: LongMemEvalGraphExpansionPlaneCountPerHop;
   readonly graphExpansionPlaneCountPerEdgeType: Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType>;
+  readonly phaseLatencyMs: LongMemEvalPhaseLatencyMs | null;
 }
 
 export interface CandidateDiagnostic {

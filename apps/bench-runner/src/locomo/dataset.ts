@@ -18,20 +18,69 @@ export const LocomoTurnSchema = z
   .passthrough();
 export type LocomoTurn = z.infer<typeof LocomoTurnSchema>;
 
+const LocomoEvidenceSchema = z
+  .array(z.string())
+  .default([])
+  .superRefine((rawEvidence, ctx) => {
+    rawEvidence.forEach((rawRef, index) => {
+      if (rawRef.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "LoCoMo evidence refs must not be blank.",
+          path: [index]
+        });
+        return;
+      }
+      const segments = rawRef.split(";").map((part) => part.trim());
+      if (segments.some((part) => part.length === 0)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "LoCoMo evidence refs must not contain empty dia_id segments.",
+          path: [index]
+        });
+      }
+    });
+  })
+  .transform(normalizeLocomoEvidenceRefs);
+
 export const LocomoQaSchema = z.object({
   question: z.string(),
-  // invariant: LoCoMo category-5 adversarial entries either carry
-  // `answer: null` or omit the field entirely (the question is
-  // unanswerable by design). Treat both as the empty string at the
-  // schema boundary; the runner skips empty-evidence QAs from the
-  // scoring denominator.
+  // invariant: the pinned LoCoMo fixture uses an empty/omitted answer as the
+  // abstention marker. Most category-5 adversarial rows are answerless and use
+  // `adversarial_answer` as the tempting wrong answer, but a small number of
+  // category-5 rows carry an explicit gold answer (for example "No") and must
+  // stay scoreable as factual QA. Normalize null/omitted answers to "" at the
+  // schema boundary so the runner can classify abstention from the actual gold
+  // answer field instead of a category heuristic.
   answer: z
     .union([z.string(), z.number(), z.null()])
     .optional()
     .transform((v) => (v === null || v === undefined ? "" : String(v))),
-  evidence: z.array(z.string()).default([]),
+  // The pinned fixture is mostly one dia_id per element, but at least one QA
+  // row ships a semicolon-joined multi-hop string (`"D8:6; D9:17"`). Split at
+  // the schema boundary so every downstream caller sees normalized dia_ids
+  // instead of re-implementing ad-hoc parsing in scoring code.
+  evidence: LocomoEvidenceSchema,
   category: z.number().int(),
   adversarial_answer: z.string().optional()
+}).superRefine((qa, ctx) => {
+  if (qa.category !== 5 && qa.answer.trim().length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "LoCoMo categories 1-4 must carry an explicit gold answer.",
+      path: ["answer"]
+    });
+  }
+  // The pinned fixture intentionally has four category-3 rows with no gold
+  // evidence. All other categories are evidence-backed and should fail closed
+  // if a future fixture drift would silently deflate retrieval denominators.
+  if (qa.category !== 3 && qa.evidence.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "LoCoMo categories other than 3 must carry at least one evidence dia_id.",
+      path: ["evidence"]
+    });
+  }
 });
 export type LocomoQa = z.infer<typeof LocomoQaSchema>;
 
@@ -88,4 +137,13 @@ function sessionOrdinal(sessionId: string): number {
   const match = sessionId.match(/_(\d+)$/);
   if (match === null) return Number.MAX_SAFE_INTEGER;
   return Number(match[1]);
+}
+
+function normalizeLocomoEvidenceRefs(evidence: readonly string[]): string[] {
+  return evidence.flatMap((rawRef) =>
+    rawRef
+      .split(";")
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0)
+  );
 }

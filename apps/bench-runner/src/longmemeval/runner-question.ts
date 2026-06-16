@@ -422,6 +422,7 @@ export async function runLongMemEvalQuestion(input: {
       );
     }
 
+    const isAbstention = isAbstentionQuestionId(input.question.question_id);
     let qaVerdict: QaQuestionVerdict | undefined;
     if (input.qaChat !== undefined) {
       // QA delivery budget (default 10 = unchanged). ALAYA_BENCH_QA_DELIVER_K
@@ -535,6 +536,7 @@ export async function runLongMemEvalQuestion(input: {
         {
           questionId: input.question.question_id,
           questionType: input.question.question_type,
+          isAbstention,
           question: input.question.question,
           questionDate: input.question.question_date,
           goldAnswer: input.question.answer,
@@ -572,7 +574,6 @@ export async function runLongMemEvalQuestion(input: {
       }
     }
 
-    const isAbstention = isAbstentionQuestionId(input.question.question_id);
     const scoredHits = resolveLongMemEvalHitVerdict({
       isAbstention,
       results,

@@ -4,7 +4,12 @@ import { resolveLocomoSampleSize } from "../../locomo/runner.js";
 
 function buildConversation(
   sampleId: string,
-  qa: ReadonlyArray<{ question: string; evidence: string[]; category: number }>
+  qa: ReadonlyArray<{
+    question: string;
+    evidence: string[];
+    category: number;
+    answer?: string;
+  }>
 ): LocomoSample {
   return LocomoSampleSchema.parse({
     sample_id: sampleId,
@@ -12,30 +17,30 @@ function buildConversation(
       speaker_a: "Alice",
       speaker_b: "Bob"
     },
-    qa: qa.map((row) => ({ ...row, answer: "" }))
+    qa: qa.map((row) => ({ ...row, answer: row.answer ?? "gold" }))
   });
 }
 
 describe("resolveLocomoSampleSize", () => {
-  it("counts only evidence-bearing QAs across the full dataset", () => {
+  it("counts every evidence-bearing QA across the full dataset", () => {
     const conversations = [
       buildConversation("c1", [
-        { question: "q1", evidence: ["D1"], category: 1 },
-        { question: "q2", evidence: ["D2"], category: 2 },
-        { question: "q3", evidence: [], category: 5 }
+        { question: "q1", evidence: ["D1"], category: 1, answer: "a1" },
+        { question: "q2", evidence: ["D2"], category: 2, answer: "a2" },
+        { question: "q3", evidence: ["D3"], category: 5, answer: "" }
       ]),
       buildConversation("c2", [
-        { question: "q4", evidence: ["D3"], category: 1 },
-        { question: "q5", evidence: [], category: 5 }
+        { question: "q4", evidence: ["D4"], category: 1, answer: "a4" },
+        { question: "q5", evidence: [], category: 3, answer: "a5" }
       ])
     ];
-    expect(resolveLocomoSampleSize(conversations)).toBe(3);
+    expect(resolveLocomoSampleSize(conversations)).toBe(4);
   });
 
-  it("returns 0 when every QA is adversarial / empty-evidence", () => {
+  it("returns 0 when every QA lacks retrieval evidence", () => {
     const conversations = [
       buildConversation("c1", [
-        { question: "q1", evidence: [], category: 5 }
+        { question: "q1", evidence: [], category: 3, answer: "gold" }
       ])
     ];
     expect(resolveLocomoSampleSize(conversations)).toBe(0);

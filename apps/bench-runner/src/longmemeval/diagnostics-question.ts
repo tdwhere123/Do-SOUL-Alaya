@@ -116,6 +116,9 @@ export function buildQuestionDiagnostic(input: {
     degradation_reason: input.degradationReason,
     recall_diagnostics_present: diagnostics !== null,
     recall_diagnostics_keys: diagnostics?.keys ?? [],
+    ...(diagnostics?.phaseLatencyMs === null || diagnostics?.phaseLatencyMs === undefined
+      ? {}
+      : { phase_latency_ms: diagnostics.phaseLatencyMs }),
     provider_state:
       diagnostics?.providerState ??
       (input.embeddingMode === "disabled" ? "provider_not_requested" : "unknown"),

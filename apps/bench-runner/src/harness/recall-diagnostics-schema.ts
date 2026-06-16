@@ -206,7 +206,13 @@ export const BenchRecallDiagnosticsSchema = z
     // see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy,
     // packages/core/src/recall/recall-service.ts (call site), and packages/core/src/recall/recall-service-types.ts
     // (RecallDiagnostics.token_economy doc-comment).
-    token_economy: RecallTokenEconomySchema.optional()
+    token_economy: RecallTokenEconomySchema.optional(),
+    // Optional wall-clock per recall phase, mirrored from
+    // packages/core/src/recall/recall-service-types.ts RecallDiagnostics.
+    // Bench keeps it as opaque numeric telemetry for offline bottleneck
+    // localization and must accept new phase keys without widening the rest of
+    // the diagnostics contract.
+    phase_latency_ms: z.record(z.number().nonnegative()).readonly().optional()
   })
   .strict()
   .readonly();

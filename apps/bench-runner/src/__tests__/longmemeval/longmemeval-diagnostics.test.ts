@@ -44,6 +44,10 @@ describe("LongMemEval recall diagnostics", () => {
         recalls: 1,
         supports: 1
       },
+      phase_latency_ms: {
+        coarse_filter: 1.25,
+        fusion: 2.5
+      },
       fusion_breakdown: [],
       candidates: [],
       token_economy: {
@@ -60,6 +64,55 @@ describe("LongMemEval recall diagnostics", () => {
       derives_from: 1,
       recalls: 1,
       supports: 1
+    });
+    expect(parsed.phase_latency_ms).toEqual({
+      coarse_filter: 1.25,
+      fusion: 2.5
+    });
+  });
+
+  it("persists phase latency into per-question diagnostics", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-phase-latency",
+      goldMemoryIds: ["gold-a"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [
+        {
+          object_id: "gold-a",
+          rank: 1,
+          relevance_score: 0.9
+        }
+      ],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          provider_state: "provider_not_requested",
+          graph_expansion_plane_count_per_hop: [0, 0],
+          graph_expansion_plane_count_per_edge_type: {
+            derives_from: 0,
+            recalls: 0,
+            supports: 0
+          },
+          phase_latency_ms: {
+            coarse_filter: 1.25,
+            fusion: 2.5
+          },
+          candidates: []
+        }
+      }
+    });
+
+    expect(row.phase_latency_ms).toEqual({
+      coarse_filter: 1.25,
+      fusion: 2.5
+    });
+    expect(LongMemEvalQuestionDiagnosticSchema.parse(row).phase_latency_ms).toEqual({
+      coarse_filter: 1.25,
+      fusion: 2.5
     });
   });
 

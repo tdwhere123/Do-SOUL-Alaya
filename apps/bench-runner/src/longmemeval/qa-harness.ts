@@ -24,7 +24,6 @@
  * see also: apps/bench-runner/src/longmemeval/abstention.ts — `_abs` semantics
  */
 import type { QaChatFn } from "./qa-chat.js";
-import { isAbstentionQuestionId } from "./abstention.js";
 
 /** Max chars of stitched memory context handed to the answer model. Override
  * with ALAYA_BENCH_QA_CONTEXT_CHARS to test wider aggregation delivery. */
@@ -113,6 +112,8 @@ export interface QaQuestionInput {
   readonly questionId: string;
   /** LongMemEval `question_type`; selects the answer + judge template. */
   readonly questionType: string;
+  /** Dataset-owned abstention semantics; callers classify, scorer consumes. */
+  readonly isAbstention: boolean;
   readonly question: string;
   /**
    * LongMemEval `question_date` — when the question is asked, i.e. "now".
@@ -199,7 +200,8 @@ function answerSystemFor(questionType: string, isAbstention: boolean): string {
   // aggregation 口径 is the default for it (like temporal/preference), opt out
   // with ALAYA_BENCH_QA_AGG_PROMPT=0 for A/B.
   if (
-    questionType === "multi-session" &&
+    (questionType === "multi-session" ||
+      questionType === "locomo-aggregation") &&
     process.env.ALAYA_BENCH_QA_AGG_PROMPT !== "0" &&
     process.env.ALAYA_BENCH_QA_AGG_PROMPT !== "off"
   ) {
@@ -286,9 +288,8 @@ export async function scoreQaQuestion(
   judgeChat: QaChatFn = chat
 ): Promise<QaQuestionVerdict> {
   const context = buildQaAnswerContext(input.delivered);
-  const isAbstention = isAbstentionQuestionId(input.questionId);
   const modelAnswer = await chat(
-    answerSystemFor(input.questionType, isAbstention),
+    answerSystemFor(input.questionType, input.isAbstention),
     // question date = "now"; temporal Qs anchor elapsed-day math against it.
     `Current date: ${input.questionDate}\n\nMemory context:\n${context}\n\nQuestion: ${input.question}\nAnswer:`
   );
@@ -296,7 +297,7 @@ export async function scoreQaQuestion(
     JUDGE_SYSTEM,
     buildJudgeUser(
       input.questionType,
-      isAbstention,
+      input.isAbstention,
       input.question,
       input.goldAnswer,
       modelAnswer
@@ -305,7 +306,7 @@ export async function scoreQaQuestion(
   return {
     questionId: input.questionId,
     questionType: input.questionType,
-    isAbstention,
+    isAbstention: input.isAbstention,
     correct: judgeIsCorrect(judgeVerdict),
     modelAnswer,
     judgeVerdict,

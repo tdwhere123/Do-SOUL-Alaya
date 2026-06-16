@@ -18,7 +18,6 @@ import {
   resolveBenchRunnerVersion
 } from "../shared/version.js";
 import { monotonicElapsedMs, monotonicNowNs } from "../shared/monotonic.js";
-import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   startBenchDaemon,
   type BenchDaemonHandle,
@@ -47,6 +46,17 @@ import {
   type QaDeliveredCandidate
 } from "../longmemeval/qa-harness.js";
 import { type QaChatFn, QaChatError } from "../longmemeval/qa-chat.js";
+import {
+  createCompileSeedRunner,
+  computeNextTurnSeedRefs,
+  resolveBenchAllowLiveExtraction,
+  toSeedExtractionPathKpi,
+  type CompileSeedRunner
+} from "../longmemeval/compile-seed.js";
+import {
+  appendSeedExtractionReleaseBlockerToFindings,
+  appendSeedExtractionReleaseBlockerToReport
+} from "../longmemeval/seed-extraction-release-blocker.js";
 import { appendFileSync } from "node:fs";
 import {
   aggregateRecallTokenEconomy,
@@ -134,6 +144,10 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   let totalHitAt10 = 0;
   let totalQa = 0;
   const conversationResults: ConversationResult[] = [];
+  const seedRunner = createCompileSeedRunner({
+    requiredTurnContents: collectDistinctLocomoTurnContents(window),
+    ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
+  });
 
   // @anchor locomo-daemon-per-run: one bench daemon spans the run; per-
   // conversation isolation is via daemon.attachWorkspace.
@@ -152,7 +166,12 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
     const conversation = window[i];
     if (conversation === undefined) continue;
     try {
-    const convResult = await runOneConversation(daemon, conversation, opts);
+    const convResult = await runOneConversation(
+      daemon,
+      seedRunner,
+      conversation,
+      opts
+    );
     conversationResults.push(convResult);
     totalQa += convResult.qaCount;
     totalHitAt1 += convResult.hitAt1;
@@ -199,6 +218,15 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   } finally {
     await daemon.shutdown();
   }
+  const extractionStats = seedRunner.stats;
+  process.stdout.write(
+    `[locomo compile-seed] path=${extractionStats.path} ` +
+      `cache_hits=${extractionStats.cacheHits} ` +
+      `llm_calls=${extractionStats.llmCalls} ` +
+      `offline_fallbacks=${extractionStats.offlineFallbacks} ` +
+      `facts=${extractionStats.factsProduced} ` +
+      `signals_dropped=${extractionStats.signalsDropped}\n`
+  );
 
   const rAt1 = totalQa === 0 ? 0 : totalHitAt1 / totalQa;
   const rAt5 = totalQa === 0 ? 0 : totalHitAt5 / totalQa;
@@ -312,6 +340,7 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       latency_source: "exact",
       token_saved_ratio_vs_full_prompt: tokenSavedRatio,
       token_economy: tokenEconomy,
+      seed_extraction_path: toSeedExtractionPathKpi(extractionStats),
       ...(recallTokenEconomy === null
         ? {}
         : { recall_token_economy: recallTokenEconomy }),
@@ -345,8 +374,14 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
     previous?.run_at ?? ""
   );
   const slug = entrySlug(runAt, commitSha7);
-  const report = renderReport(payload, previous, diff);
-  const findings = renderFindings(payload, diff);
+  const report = appendSeedExtractionReleaseBlockerToReport(
+    renderReport(payload, previous, diff),
+    payload
+  );
+  const findings = appendSeedExtractionReleaseBlockerToFindings(
+    renderFindings(payload, diff),
+    payload
+  );
   const diagnosticsPayload = {
     schema_version: 1,
     bench_name: "public-locomo",
@@ -427,6 +462,7 @@ interface ConversationResult {
 
 async function runOneConversation(
   daemon: BenchDaemonHandle,
+  seedRunner: CompileSeedRunner,
   conversation: LocomoSample,
   opts: LocomoRunOptions
 ): Promise<ConversationResult> {
@@ -437,7 +473,7 @@ async function runOneConversation(
   });
   try {
     const diaIdByMemoryId = new Map<string, string>();
-    const memoryIdByDiaId = new Map<string, string>();
+    const memoryIdsByDiaId = new Map<string, string[]>();
     // QA-only: resolve delivered recall pointers back to seeded content + the
     // session date. Populated always (cheap); consumed only when opts.qa is set.
     const contentByMemoryId = new Map<string, string>();
@@ -453,7 +489,6 @@ async function runOneConversation(
     // see also: apps/bench-runner/src/harness/seed-rotation.ts
     let seedIndex = 0;
     for (const session of sessions) {
-      // see also: longmemeval/runner.ts session-adjacent derives_from anchor
       let previousTurnSeedMemoryIds: readonly string[] = [];
       // anchor: same-session co-recall members, seed order. see also:
       //   apps/bench-runner/src/longmemeval/runner.ts sessionMemberMemoryIds
@@ -461,19 +496,28 @@ async function runOneConversation(
       for (const turn of session.turns) {
         const seedContent = `${turn.speaker}: ${turn.text}`;
         const evidenceRef = `${conversation.sample_id}-${turn.dia_id}`;
-        const seed = await workspace.proposeMemory(seedContent, evidenceRef, {
-          objectKind: rotatingSeedObjectKind(seedIndex),
+        const seedResult = await seedRunner.seedTurn({
+          daemon: workspace,
+          turnContent: seedContent,
+          evidenceRefBase: evidenceRef,
+          seedIndex,
+          workspaceId: workspace.workspaceId,
+          runId: workspace.runId,
           ...(previousTurnSeedMemoryIds.length === 0
             ? {}
             : { sourceMemoryRefs: previousTurnSeedMemoryIds })
         });
-        diaIdByMemoryId.set(seed.memoryId, turn.dia_id);
-        memoryIdByDiaId.set(turn.dia_id, seed.memoryId);
-        contentByMemoryId.set(seed.memoryId, seedContent);
-        dateByMemoryId.set(seed.memoryId, session.date_time);
         seedIndex += 1;
-        previousTurnSeedMemoryIds = [seed.memoryId];
-        sessionMemberMemoryIds.push(seed.memoryId);
+        for (const seed of seedResult.seeds) {
+          diaIdByMemoryId.set(seed.memoryId, turn.dia_id);
+          const current = memoryIdsByDiaId.get(turn.dia_id) ?? [];
+          current.push(seed.memoryId);
+          memoryIdsByDiaId.set(turn.dia_id, current);
+          contentByMemoryId.set(seed.memoryId, seedContent);
+          dateByMemoryId.set(seed.memoryId, session.date_time);
+          sessionMemberMemoryIds.push(seed.memoryId);
+        }
+        previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
       }
       // invariant: same-session EARNED co-recall accrual. Mirror of the
       // LongMemEval seed path so LoCoMo's graph/path plane earns the production
@@ -484,14 +528,19 @@ async function runOneConversation(
       await workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
     }
 
+    const allSeededMemoryIds = [...memoryIdsByDiaId.values()].flat();
     const embeddingWarmup =
       opts.embeddingMode === "env"
-        ? await workspace.warmEmbeddingCache([...memoryIdByDiaId.values()])
+        ? await workspace.warmEmbeddingCache(allSeededMemoryIds)
         : null;
-    const scoredQuestions = conversation.qa.filter((qa) => qa.evidence.length > 0);
+    const recallQuestions = conversation.qa.filter((qa) =>
+      shouldRunLocomoRecall(qa, opts)
+    );
     const queryEmbeddingWarmup =
       opts.embeddingMode === "env"
-        ? await workspace.warmQueryEmbeddingCache(scoredQuestions.map((qa) => qa.question))
+        ? await workspace.warmQueryEmbeddingCache(
+            recallQuestions.map((qa) => qa.question)
+          )
         : null;
 
     let hitAt1 = 0;
@@ -507,63 +556,83 @@ async function runOneConversation(
     const qaVerdicts: QaQuestionVerdict[] = [];
     const qaCategoryRows: { category: number; correct: boolean }[] = [];
 
-    // invariant: R@K denominator counts only QAs with non-empty evidence.
-    // LoCoMo category-5 (adversarial) and some other rows carry no
-    // evidence; including them in the denominator would deflate
-    // published R@K against external baselines that score the same
-    // way.
-    for (const qa of conversation.qa) {
-      const evidenceSet = new Set(qa.evidence);
-      if (evidenceSet.size === 0) {
+    // invariant: R@K counts every evidence-bearing QA, including answerless
+    // adversarial rows. Those rows still have gold evidence for retrieval;
+    // abstention only affects the optional QA judge prompt, not the retrieval
+    // denominator.
+    for (let qaIndex = 0; qaIndex < conversation.qa.length; qaIndex += 1) {
+      const qa = conversation.qa[qaIndex];
+      if (qa === undefined) {
         continue;
       }
-      scoredCount += 1;
+      const questionId = buildLocomoQuestionId(conversation.sample_id, qaIndex);
+      const evidenceSet = new Set(qa.evidence);
+      const isAbstention = isLocomoAbstentionQa(qa);
+      const retrievalScorable = hasLocomoRetrievalEvidence(qa);
+      if (!retrievalScorable && opts.qa === undefined) {
+        continue;
+      }
+      const goldMemoryIds = retrievalScorable
+        ? resolveLocomoGoldMemoryIds({
+            questionId,
+            evidenceSet,
+            memoryIdsByDiaId
+          })
+        : [];
       const result = await runQuestion(workspace, qa);
-      latencies.push(result.latencyMs);
-      const ranked = result.pointers
-        .slice(0, 10)
-        .map((pointer) => diaIdByMemoryId.get(pointer.object_id));
-      const hit1 = ranked[0] !== undefined && evidenceSet.has(ranked[0]);
-      const hit5 = ranked.slice(0, 5).some((dia) => dia !== undefined && evidenceSet.has(dia));
-      const hit10 = ranked.some((dia) => dia !== undefined && evidenceSet.has(dia));
-      if (hit1) hitAt1 += 1;
-      if (hit5) hitAt5 += 1;
-      if (hit10) hitAt10 += 1;
-      const firstScore = result.pointers[0]?.relevance_score ?? 0;
-      if (firstScore >= 0.7) tierHot += 1;
-      else if (firstScore >= 0.4) tierWarm += 1;
-      else tierCold += 1;
-      const evidenceIds = [...evidenceSet];
-      questionDiagnostics.push(
-        buildQuestionDiagnostic({
-          questionId: `${conversation.sample_id}:${scoredCount}`,
-          goldMemoryIds: evidenceIds
-            .map((diaId) => memoryIdByDiaId.get(diaId))
-            .filter((memoryId): memoryId is string => memoryId !== undefined),
-          answerSessionIds: evidenceIds,
-          deliveredResults: result.pointers.map((pointer, index) => ({
-            object_id: pointer.object_id,
-            rank: index + 1,
-            relevance_score: pointer.relevance_score
-          })),
-          hitAt1: hit1,
-          hitAt5: hit5,
-          hitAt10: hit10,
-          degradationReason: result.degradationReason,
-          recallResult: result.recallResult,
-          embeddingMode
-        })
-      );
-      const tokenEconomySample = extractRecallTokenEconomy(result.recallResult);
-      if (tokenEconomySample !== null) {
-        recallTokenEconomySamples.push(tokenEconomySample);
+      let hit1 = false;
+      let hit5 = false;
+      let hit10 = false;
+      if (retrievalScorable) {
+        scoredCount += 1;
+        latencies.push(result.latencyMs);
+        const ranked = result.pointers
+          .slice(0, 10)
+          .map((pointer) => diaIdByMemoryId.get(pointer.object_id));
+        hit1 = ranked[0] !== undefined && evidenceSet.has(ranked[0]);
+        hit5 = ranked
+          .slice(0, 5)
+          .some((dia) => dia !== undefined && evidenceSet.has(dia));
+        hit10 = ranked.some(
+          (dia) => dia !== undefined && evidenceSet.has(dia)
+        );
+        if (hit1) hitAt1 += 1;
+        if (hit5) hitAt5 += 1;
+        if (hit10) hitAt10 += 1;
+        const firstScore = result.pointers[0]?.relevance_score ?? 0;
+        if (firstScore >= 0.7) tierHot += 1;
+        else if (firstScore >= 0.4) tierWarm += 1;
+        else tierCold += 1;
+        questionDiagnostics.push(
+          buildQuestionDiagnostic({
+            questionId,
+            goldMemoryIds,
+            answerSessionIds: [...evidenceSet],
+            deliveredResults: result.pointers.map((pointer, index) => ({
+              object_id: pointer.object_id,
+              rank: index + 1,
+              relevance_score: pointer.relevance_score
+            })),
+            hitAt1: hit1,
+            hitAt5: hit5,
+            hitAt10: hit10,
+            isAbstention: false,
+            degradationReason: result.degradationReason,
+            recallResult: result.recallResult,
+            embeddingMode
+          })
+        );
+        const tokenEconomySample = extractRecallTokenEconomy(result.recallResult);
+        if (tokenEconomySample !== null) {
+          recallTokenEconomySamples.push(tokenEconomySample);
+        }
       }
 
       // End-to-end QA: answer-LLM over delivered recall + LLM-judge vs gold.
-      // Gated on opts.qa so a normal run makes zero LLM calls. Cat-5 adversarial
-      // rows carry no evidence and are already skipped above; remaining rows
-      // with a gold answer are scored (cat-2 → temporal judge, else factual).
-      if (opts.qa !== undefined && qa.answer !== null && qa.answer !== undefined) {
+      // Gated on opts.qa so a normal run makes zero LLM calls. Category-5
+      // answerless rows still count in the retrieval denominator when they
+      // carry gold evidence; abstention only changes the QA judge prompt.
+      if (opts.qa !== undefined) {
         const delivered: QaDeliveredCandidate[] = result.pointers.map((pointer) => {
           const date = dateByMemoryId.get(pointer.object_id);
           return {
@@ -574,11 +643,12 @@ async function runOneConversation(
         });
         const qaVerdict = await scoreQaQuestion(
           {
-            questionId: `${conversation.sample_id}:${scoredCount}`,
-            questionType: qa.category === 2 ? "temporal-reasoning" : "locomo-factual",
+            questionId,
+            questionType: resolveLocomoQaQuestionType(qa),
+            isAbstention,
             question: qa.question,
             questionDate: conversationNowDate,
-            goldAnswer: String(qa.answer),
+            goldAnswer: resolveLocomoQaGoldAnswer(qa),
             delivered
           },
           opts.qa.chat,
@@ -595,9 +665,9 @@ async function runOneConversation(
           appendFileSync(
             process.env.ALAYA_BENCH_QA_DUMP,
             JSON.stringify({
-              questionId: `${conversation.sample_id}:${scoredCount}`,
+              questionId,
               category: qa.category,
-              hitAt5: hit5,
+              hitAt5: retrievalScorable ? hit5 : null,
               question: qa.question,
               goldAnswer: String(qa.answer),
               modelAnswer: qaVerdict.modelAnswer,
@@ -742,21 +812,100 @@ function resolveCommitSha7(): string {
   return resolveBenchCommitSha7();
 }
 
-// invariant: sample_size counts the scoreable-QA upper bound across
-// the full dataset (every QA carrying non-empty evidence), not the
-// number of conversations. evaluated_count is the subset this run
-// actually scored, so evaluated_count <= sample_size holds even when
-// --limit slices the conversation window.
+// invariant: sample_size counts the retrieval denominator across the full
+// dataset (every QA carrying non-empty evidence), not the number of
+// conversations. Answerless adversarial rows still exercise retrieval when
+// they point at gold evidence; abstention only changes the optional QA judge
+// path. evaluated_count is the subset this run actually scored, so
+// evaluated_count <= sample_size holds even when --limit slices the
+// conversation window.
 export function resolveLocomoSampleSize(
   conversations: readonly LocomoSample[]
 ): number {
   let total = 0;
   for (const conv of conversations) {
     for (const qa of conv.qa) {
-      if (qa.evidence.length > 0) {
+      if (hasLocomoRetrievalEvidence(qa)) {
         total += 1;
       }
     }
   }
   return total;
+}
+
+function collectDistinctLocomoTurnContents(
+  conversations: readonly LocomoSample[]
+): readonly string[] {
+  const turns = new Set<string>();
+  for (const conversation of conversations) {
+    for (const session of extractSessions(conversation.conversation)) {
+      for (const turn of session.turns) {
+        const content = `${turn.speaker}: ${turn.text}`.trim();
+        if (content.length > 0) {
+          turns.add(content);
+        }
+      }
+    }
+  }
+  return [...turns];
+}
+
+function hasLocomoRetrievalEvidence(qa: LocomoQa): boolean {
+  return qa.evidence.length > 0;
+}
+
+function isLocomoAbstentionQa(qa: LocomoQa): boolean {
+  return qa.answer.trim().length === 0;
+}
+
+function resolveLocomoQaGoldAnswer(qa: LocomoQa): string {
+  if (!isLocomoAbstentionQa(qa)) {
+    return qa.answer;
+  }
+  return "The conversation does not provide enough information to answer this question.";
+}
+
+function shouldRunLocomoRecall(
+  qa: LocomoQa,
+  opts: LocomoRunOptions
+): boolean {
+  return hasLocomoRetrievalEvidence(qa) || opts.qa !== undefined;
+}
+
+function resolveLocomoQaQuestionType(qa: LocomoQa): string {
+  if (qa.category === 2) {
+    return "temporal-reasoning";
+  }
+  if (qa.category === 3) {
+    return "locomo-aggregation";
+  }
+  return "locomo-factual";
+}
+
+function buildLocomoQuestionId(sampleId: string, qaIndex: number): string {
+  return `${sampleId}:${qaIndex + 1}`;
+}
+
+function resolveLocomoGoldMemoryIds(input: {
+  readonly questionId: string;
+  readonly evidenceSet: ReadonlySet<string>;
+  readonly memoryIdsByDiaId: ReadonlyMap<string, readonly string[]>;
+}): string[] {
+  const goldMemoryIds: string[] = [];
+  const missingDiaIds: string[] = [];
+  for (const diaId of input.evidenceSet) {
+    const memoryIds = input.memoryIdsByDiaId.get(diaId) ?? [];
+    if (memoryIds.length === 0) {
+      missingDiaIds.push(diaId);
+      continue;
+    }
+    goldMemoryIds.push(...memoryIds);
+  }
+  if (missingDiaIds.length > 0) {
+    throw new Error(
+      `LoCoMo seed materialization lost gold evidence for ${input.questionId}: ` +
+        missingDiaIds.join(", ")
+    );
+  }
+  return goldMemoryIds;
 }

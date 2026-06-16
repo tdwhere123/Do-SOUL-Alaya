@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { KpiPayload } from "@do-soul/alaya-eval";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as compileSeedModule from "../../longmemeval/compile-seed.js";
+import { LocomoSampleSchema } from "../../locomo/dataset.js";
 
 const startBenchDaemonMock = vi.hoisted(() => vi.fn());
 const loadLocomoMock = vi.hoisted(() => vi.fn());
@@ -52,6 +54,140 @@ afterEach(async () => {
 });
 
 describe("LoCoMo runner", () => {
+  it("maps multi-fact extracted seeds back to the source dia_id for scoring", async () => {
+    const createCompileSeedRunnerSpy = vi
+      .spyOn(compileSeedModule, "createCompileSeedRunner")
+      .mockReturnValue({
+        stats: {
+          path: "official_api_compile",
+          cacheHits: 0,
+          llmCalls: 1,
+          offlineFallbacks: 0,
+          liveExtractionFailures: 0,
+          cachedExtractionFailures: 0,
+          factsProduced: 3,
+          signalsDropped: 0,
+          signalsDroppedByReason: {
+            candidate_absent: 0,
+            materialization_error: 0
+          },
+          parseDropped: 0,
+          compileOverflowDropped: 0,
+          lastTurnRawSignalCount: 0,
+          lastTurnDraftCount: 0,
+          lastExtractionSource: null,
+          lastCacheKey: null
+        },
+        seedTurn: vi.fn(async ({ evidenceRefBase }: { evidenceRefBase: string }) => {
+          if (evidenceRefBase.endsWith("-d1")) {
+            return {
+              seeds: [
+                {
+                  memoryId: "memory-d1-a",
+                  signalId: "signal-d1-a",
+                  proposalId: "proposal-d1-a",
+                  evidenceId: null,
+                  truncated: false,
+                  charsClipped: 0
+                },
+                {
+                  memoryId: "memory-d1-b",
+                  signalId: "signal-d1-b",
+                  proposalId: "proposal-d1-b",
+                  evidenceId: null,
+                  truncated: false,
+                  charsClipped: 0
+                }
+              ],
+              turnTruncated: false,
+              charsClipped: 0
+            };
+          }
+          return {
+            seeds: [
+              {
+                memoryId: "memory-d2",
+                signalId: "signal-d2",
+                proposalId: "proposal-d2",
+                evidenceId: null,
+                truncated: false,
+                charsClipped: 0
+              }
+            ],
+            turnTruncated: false,
+            charsClipped: 0
+          };
+        })
+      } as ReturnType<typeof compileSeedModule.createCompileSeedRunner>);
+    const warmEmbeddingCache = vi.fn(async () => ({
+      status: "ready" as const,
+      expected_count: 3,
+      ready_count: 3,
+      ready_rate: 1,
+      pass_count: 1,
+      missing_object_ids: [],
+      provider_kind: "openai",
+      model_id: "text-embedding-3-small"
+    }));
+    const recall = vi.fn(async () => buildRecallResult("memory-d1-b"));
+    startBenchDaemonMock.mockResolvedValue(
+      buildMockDaemon({ recall, warmEmbeddingCache })
+    );
+
+    try {
+      const result = await runLocomo({
+        variant: "locomo10",
+        historyRoot: tmpDir,
+        embeddingMode: "env"
+      });
+      expect(result.payload.kpi.r_at_5).toBe(1);
+      expect(warmEmbeddingCache).toHaveBeenCalledWith([
+        "memory-d1-a",
+        "memory-d1-b",
+        "memory-d2"
+      ]);
+    } finally {
+      createCompileSeedRunnerSpy.mockRestore();
+    }
+  });
+
+  it("normalizes semicolon-joined gold evidence before recall scoring", async () => {
+    loadLocomoMock.mockResolvedValue([
+      LocomoSampleSchema.parse({
+        sample_id: "sample-1",
+        conversation: {
+          speaker_a: "Alice",
+          speaker_b: "Bob",
+          session_1_date_time: "2026-05-20",
+          session_1: [
+            { speaker: "Alice", dia_id: "d1", text: "Alice keeps the violin receipt." },
+            { speaker: "Bob", dia_id: "d2", text: "Bob stores the sunset painting." }
+          ]
+        },
+        qa: [
+          {
+            question: "What painting was stored?",
+            answer: "sunset",
+            evidence: ["d1; d2"],
+            category: 3
+          }
+        ]
+      })
+    ]);
+    const recall = vi.fn(async () => buildRecallResult("memory-d2"));
+    startBenchDaemonMock.mockResolvedValue(buildMockDaemon({ recall }));
+
+    const result = await runLocomo({
+      variant: "locomo10",
+      historyRoot: tmpDir
+    });
+
+    expect(result.payload.sample_size).toBe(1);
+    expect(result.payload.evaluated_count).toBe(1);
+    expect(result.payload.kpi.r_at_5).toBe(1);
+    expect(recall).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed before scoring when embedding warm cache is incomplete", async () => {
     const recall = vi.fn();
     const warmEmbeddingCache = vi.fn(async () => {
@@ -187,6 +323,228 @@ describe("LoCoMo runner", () => {
     );
   });
 
+  it("keeps answerless adversarial rows in the retrieval denominator while still using the abstention QA judge", async () => {
+    loadLocomoMock.mockResolvedValue([
+      {
+        sample_id: "sample-1",
+        conversation: {
+          speaker_a: "Alice",
+          speaker_b: "Bob",
+          session_1_date_time: "2026-05-20",
+          session_1: [
+            { speaker: "Alice", dia_id: "d1", text: "Alice keeps the violin receipt." },
+            { speaker: "Bob", dia_id: "d2", text: "Bob talks about weather." }
+          ]
+        },
+        qa: [
+          {
+            question: "Who keeps the violin receipt?",
+            answer: "Alice",
+            evidence: ["d1"],
+            category: 1
+          },
+          {
+            question: "What is Alice's PIN?",
+            answer: "",
+            evidence: ["d2"],
+            category: 5
+          }
+        ]
+      }
+    ]);
+    const replies = ["Alice", "yes", "I don't know.", "yes"];
+    const qaChat = vi.fn(async () => replies.shift() ?? "yes");
+    const recall = vi
+      .fn()
+      .mockImplementationOnce(async () => buildRecallResult("memory-d1"))
+      .mockImplementationOnce(async () => buildRecallResult("memory-d2"));
+    startBenchDaemonMock.mockResolvedValue(buildMockDaemon({ recall }));
+
+    const result = await runLocomo({
+      variant: "locomo10",
+      historyRoot: tmpDir,
+      qa: { chat: qaChat }
+    });
+
+    expect(result.payload.sample_size).toBe(2);
+    expect(result.payload.evaluated_count).toBe(2);
+    expect(result.payload.kpi.r_at_5).toBe(1);
+    expect(qaChat).toHaveBeenCalledTimes(4);
+    const abstentionJudgeUser =
+      ((qaChat.mock.calls[3] as unknown as string[] | undefined)?.[1] ?? "");
+    expect(abstentionJudgeUser).toContain("Explanation:");
+  });
+
+  it("keeps category-5 rows with an explicit gold answer scoreable as factual QA", async () => {
+    loadLocomoMock.mockResolvedValue([
+      {
+        sample_id: "sample-1",
+        conversation: {
+          speaker_a: "Alice",
+          speaker_b: "Bob",
+          session_1_date_time: "2026-05-20",
+          session_1: [
+            { speaker: "Alice", dia_id: "d1", text: "Alice owns a cat named Oscar." },
+            { speaker: "Bob", dia_id: "d2", text: "Oscar belongs to Alice, not Melanie." }
+          ]
+        },
+        qa: [
+          {
+            question: "Is Oscar Melanie's pet?",
+            answer: "No",
+            adversarial_answer: "Yes",
+            evidence: ["d2"],
+            category: 5
+          }
+        ]
+      }
+    ]);
+    const qaChat = vi.fn(async (system: string, user: string) => {
+      if (user.includes("Correct Answer:")) return "yes";
+      if (system.includes("strict grader")) return "yes";
+      return "No";
+    });
+    const recall = vi.fn(async () => buildRecallResult("memory-d2"));
+    startBenchDaemonMock.mockResolvedValue(buildMockDaemon({ recall }));
+
+    const result = await runLocomo({
+      variant: "locomo10",
+      historyRoot: tmpDir,
+      qa: { chat: qaChat }
+    });
+
+    expect(result.payload.sample_size).toBe(1);
+    expect(result.payload.evaluated_count).toBe(1);
+    expect(result.payload.kpi.r_at_5).toBe(1);
+    expect(qaChat).toHaveBeenCalledTimes(2);
+    const factualJudgeUser =
+      ((qaChat.mock.calls[1] as unknown as string[] | undefined)?.[1] ?? "");
+    expect(factualJudgeUser).toContain("Correct Answer: No");
+    expect(factualJudgeUser).not.toContain("Explanation:");
+  });
+
+  it("routes category-3 LoCoMo QA through the aggregation answer prompt", async () => {
+    loadLocomoMock.mockResolvedValue([
+      {
+        sample_id: "sample-1",
+        conversation: {
+          speaker_a: "Alice",
+          speaker_b: "Bob",
+          session_1_date_time: "2026-05-20",
+          session_1: [
+            { speaker: "Alice", dia_id: "d1", text: "Alice planned a mural project." },
+            { speaker: "Bob", dia_id: "d2", text: "Bob mentioned a violin project." }
+          ]
+        },
+        qa: [
+          {
+            question: "How many projects were mentioned?",
+            answer: "2",
+            evidence: ["d1", "d2"],
+            category: 3
+          }
+        ]
+      }
+    ]);
+    const qaChat = vi.fn(async (system: string) => {
+      if (system.includes("strict grader")) return "yes";
+      return "2";
+    });
+    startBenchDaemonMock.mockResolvedValue(buildMockDaemon({}));
+
+    const result = await runLocomo({
+      variant: "locomo10",
+      historyRoot: tmpDir,
+      qa: { chat: qaChat }
+    });
+
+    expect(result.payload.sample_size).toBe(1);
+    expect(result.payload.evaluated_count).toBe(1);
+    expect(result.payload.kpi.r_at_5).toBe(1);
+    const aggregationAnswerSystem =
+      ((qaChat.mock.calls[0] as unknown as string[] | undefined)?.[0] ?? "");
+    expect(aggregationAnswerSystem).toContain("aggregate across the whole history");
+  });
+
+  it("fails closed when a scored gold dia_id materializes to zero memory ids", async () => {
+    const createCompileSeedRunnerSpy = vi
+      .spyOn(compileSeedModule, "createCompileSeedRunner")
+      .mockReturnValue({
+        stats: {
+          path: "official_api_compile",
+          cacheHits: 0,
+          llmCalls: 1,
+          offlineFallbacks: 0,
+          liveExtractionFailures: 0,
+          cachedExtractionFailures: 0,
+          factsProduced: 2,
+          signalsDropped: 1,
+          signalsDroppedByReason: {
+            candidate_absent: 1,
+            materialization_error: 0
+          },
+          parseDropped: 0,
+          compileOverflowDropped: 0,
+          lastTurnRawSignalCount: 0,
+          lastTurnDraftCount: 0,
+          lastExtractionSource: null,
+          lastCacheKey: null
+        },
+        seedTurn: vi.fn(async ({ evidenceRefBase }: { evidenceRefBase: string }) => {
+          if (evidenceRefBase.endsWith("-d1")) {
+            return { seeds: [], turnTruncated: false, charsClipped: 0 };
+          }
+          return {
+            seeds: [
+              {
+                memoryId: "memory-d2",
+                signalId: "signal-d2",
+                proposalId: "proposal-d2",
+                evidenceId: null,
+                truncated: false,
+                charsClipped: 0
+              }
+            ],
+            turnTruncated: false,
+            charsClipped: 0
+          };
+        })
+      } as ReturnType<typeof compileSeedModule.createCompileSeedRunner>);
+    const recall = vi.fn(async () => buildRecallResult());
+    startBenchDaemonMock.mockResolvedValue(buildMockDaemon({ recall }));
+
+    try {
+      await expect(
+        runLocomo({
+          variant: "locomo10",
+          historyRoot: tmpDir
+        })
+      ).rejects.toThrow("LoCoMo seed materialization lost gold evidence");
+      expect(recall).not.toHaveBeenCalled();
+    } finally {
+      createCompileSeedRunnerSpy.mockRestore();
+    }
+  });
+
+  it("archives the seed-extraction path and blocker text on the LoCoMo surface", async () => {
+    startBenchDaemonMock.mockResolvedValue(buildMockDaemon({}));
+
+    const result = await runLocomo({
+      variant: "locomo10",
+      historyRoot: tmpDir
+    });
+    const kpi = JSON.parse(await readFile(result.kpiPath, "utf8")) as KpiPayload;
+    const report = await readFile(result.reportPath, "utf8");
+    const findings = await readFile(result.findingsPath, "utf8");
+
+    expect(kpi.kpi.seed_extraction_path).toMatchObject({
+      path: "no_credentials_fallback",
+      offline_fallbacks: 2
+    });
+    expect(report).toContain("seed_extraction_path no_credentials_fallback");
+    expect(findings).toContain("seed_extraction_path no_credentials_fallback");
+  });
+
   it("diffs public-locomo runs against the newest passing baseline", async () => {
     const priorPassingRunAt = "2026-05-19T12:00:00.000Z";
     await writeLocomoArchive(
@@ -318,6 +676,25 @@ function buildMockDaemon(overrides: {
       charsClipped: 0
     };
   });
+  const proposeMemoryFromSignal = vi.fn(async (input: { evidenceRef: string }) => {
+    const diaId = input.evidenceRef.split("-").at(-1) ?? "unknown";
+    return {
+      memoryId: `memory-${diaId}`,
+      signalId: `signal-${diaId}`,
+      proposalId: `proposal-${diaId}`,
+      evidenceId: null,
+      truncated: false,
+      charsClipped: 0
+    };
+  });
+  const proposeMemoriesFromCompileSignals = vi.fn(
+    async (inputs: readonly { evidenceRef: string }[]) => ({
+      seeds: await Promise.all(
+        inputs.map((input) => proposeMemoryFromSignal({ evidenceRef: input.evidenceRef }))
+      ),
+      dropped: []
+    })
+  );
   // Stubbed earned co-recall accrual: the LoCoMo seed loop calls it once per
   // session; the fake returns a settled summary (one pair minted) so the runner
   // exercises the call without the real production counter gate.
@@ -351,6 +728,8 @@ function buildMockDaemon(overrides: {
       workspaceId: input.workspaceId,
       runId: input.runId,
       proposeMemory,
+      proposeMemoryFromSignal,
+      proposeMemoriesFromCompileSignals,
       warmEmbeddingCache,
       warmQueryEmbeddingCache,
       recall,
@@ -362,16 +741,16 @@ function buildMockDaemon(overrides: {
   };
 }
 
-function buildRecallResult() {
+function buildRecallResult(objectId = "memory-d1") {
   return {
     delivery_id: "delivery-1",
     results: [
       {
-        object_id: "memory-d1",
+        object_id: objectId,
         object_kind: "memory_entry",
         relevance_score: 0.9,
-        content_preview: "memory-d1",
-        evidence_pointers: ["memory-d1"],
+        content_preview: objectId,
+        evidence_pointers: [objectId],
         selection_reason: "test",
         source_channels: [],
         score_factors: { relevance: 0.9 },
@@ -401,7 +780,7 @@ function buildRecallResult() {
       embedding_provider_status: "provider_returned",
       candidates: [
         {
-          object_id: "memory-d1",
+          object_id: objectId,
           final_rank: 1,
           fused_rank: 1,
           fused_score: 1,

@@ -40,6 +40,8 @@ const GraphExpansionPlaneCountPerEdgeTypeSchema = z
   })
   .readonly();
 
+const PhaseLatencyMsSchema = z.record(z.number().nonnegative()).readonly();
+
 export const DiagnosticRecallResultSchema = z
   .object({
     object_id: z.string(),
@@ -136,6 +138,7 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     degradation_reason: z.string().nullable(),
     recall_diagnostics_present: z.boolean(),
     recall_diagnostics_keys: z.array(z.string()).readonly(),
+    phase_latency_ms: PhaseLatencyMsSchema.optional(),
     provider_state: BenchEmbeddingProviderStateSchema,
     provider_degradation_reason: z.string().nullable(),
     graph_expansion_plane_count_per_hop:

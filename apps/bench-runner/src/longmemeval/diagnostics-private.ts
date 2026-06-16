@@ -78,7 +78,8 @@ export function readRecallDiagnostics(
       createEmptyGraphExpansionPlaneCountPerHop(),
     graphExpansionPlaneCountPerEdgeType:
       readGraphExpansionPlaneCountPerEdgeType(record.graph_expansion_plane_count_per_edge_type) ??
-      createEmptyGraphExpansionPlaneCountPerEdgeType()
+      createEmptyGraphExpansionPlaneCountPerEdgeType(),
+    phaseLatencyMs: readNumberRecord(record.phase_latency_ms)
   };
 }
 
