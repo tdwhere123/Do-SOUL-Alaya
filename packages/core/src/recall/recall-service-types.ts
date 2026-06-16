@@ -558,6 +558,9 @@ export interface RecallDiagnostics {
   // degraded recall paths so bench token-instrument coverage can stay at
   // 100% per recall call without inventing synthetic zero samples.
   readonly token_economy?: Readonly<RecallTokenEconomy>;
+  // Per-phase wall-clock (ms) for offline latency-bottleneck localization.
+  // Optional: only emitted on the instrumented full recall path.
+  readonly phase_latency_ms?: Readonly<Record<string, number>>;
 }
 
 export interface RecallResult {

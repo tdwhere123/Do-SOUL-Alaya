@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import {
   DYNAMICS_CONSTANTS,
   RecallContextEventType,
@@ -221,6 +222,7 @@ export class RecallService {
       );
     }
 
+    const recallPhaseStart = performance.now();
     const hotCoarseFilter = await this.coarseFilter(params.workspaceId, policy.coarse_filter, queryText, {
       timeFilter: params.timeFilter,
       queryProbes,
@@ -276,6 +278,7 @@ export class RecallService {
       winnerMemoryIds,
       timeFilter: params.timeFilter
     });
+    const recallAfterCoarse = performance.now();
     const synthesisCoarseFilter = await collectSynthesisCoarseCandidates({
       dependencies: this.dependencies,
       warn: this.warn,
@@ -284,6 +287,7 @@ export class RecallService {
       queryProbes,
       policy
     });
+    const recallAfterSynthesis = performance.now();
     const lexicalCoarseCandidates = Object.freeze([
       ...coarseFilter.candidates,
       ...filteredGlobalCandidates,
@@ -376,6 +380,7 @@ export class RecallService {
             now: this.now,
             warn: this.warn
           });
+    const recallAfterFusion = performance.now();
     const embeddingProviderStatus = resolveEmbeddingProviderStatus(
       policy,
       preparedEmbeddingQuery.handle,
@@ -394,10 +399,17 @@ export class RecallService {
       taskSurfaceRef: params.taskSurface,
       candidates: finalAssessment.candidates
     });
+    const recallAfterManifestation = performance.now();
     const candidateDiagnostics = finalizeRecallCandidateDiagnostics(
       finalAssessment.diagnostics,
       candidates
     );
+    const phaseLatencyMs = {
+      coarse: recallAfterCoarse - recallPhaseStart,
+      synthesis: recallAfterSynthesis - recallAfterCoarse,
+      fusion: recallAfterFusion - recallAfterSynthesis,
+      manifestation: recallAfterManifestation - recallAfterFusion
+    };
     const occurredAt = this.now();
 
     await this.dependencies.eventLogRepo.append({
@@ -474,7 +486,8 @@ export class RecallService {
         providerDegradationReason,
         graphExpansionDiagnostics: coarseFilter.graphExpansionDiagnostics,
         candidates: candidateDiagnostics,
-        tokenEconomy
+        tokenEconomy,
+        phaseLatencyMs
       })
     });
   }

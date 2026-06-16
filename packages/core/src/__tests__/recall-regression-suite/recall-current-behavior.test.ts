@@ -81,6 +81,27 @@ describe("recall regression suite", () => {
     expect(diag?.plane_winning_admission).toBe("lexical");
   });
 
+  it("emits per-phase latency telemetry on the full recall path", async () => {
+    const mem = memory({ object_id: "phase-mem", content: "phase latency probe" });
+    const { dependencies } = deps([mem], {
+      searchByKeyword: async () => [{ object_id: "phase-mem", normalized_rank: 1 }]
+    });
+    const result = await new RecallService(dependencies).recall({
+      taskSurface: task("phase latency probe"),
+      workspaceId: WS,
+      strategy: "analyze"
+    });
+    const latency = result.diagnostics?.phase_latency_ms;
+    expect(latency).toBeDefined();
+    expect(Object.keys(latency ?? {})).toEqual(
+      expect.arrayContaining(["coarse", "synthesis", "fusion", "manifestation"])
+    );
+    for (const value of Object.values(latency ?? {})) {
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(value)).toBe(true);
+    }
+  });
+
   it("records path_expansion as the winning admission plane for path-only linked candidates", async () => {
     const seed = memory({ object_id: "seed", content: "needle seed" });
     const linked = memory({ object_id: "linked", content: "linked recall target" });

@@ -21,6 +21,7 @@ export function buildRecallDiagnostics(params: Readonly<{
   readonly graphExpansionDiagnostics: Readonly<RecallGraphExpansionDiagnostics>;
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly tokenEconomy: Readonly<RecallTokenEconomy>;
+  readonly phaseLatencyMs?: Readonly<Record<string, number>>;
 }>): Readonly<RecallDiagnostics> {
   return Object.freeze({
     query_probes: Object.freeze({
@@ -68,7 +69,10 @@ export function buildRecallDiagnostics(params: Readonly<{
       }))
     ),
     candidates: Object.freeze([...params.candidates]),
-    token_economy: params.tokenEconomy
+    token_economy: params.tokenEconomy,
+    ...(params.phaseLatencyMs === undefined
+      ? {}
+      : { phase_latency_ms: Object.freeze({ ...params.phaseLatencyMs }) })
   });
 }
 

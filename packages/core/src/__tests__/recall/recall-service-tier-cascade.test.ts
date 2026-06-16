@@ -207,7 +207,16 @@ describe("RecallService tier cascade", () => {
     expect(cascade.findByWorkspaceIdSpy).toHaveBeenCalledTimes(1);
     expect(cascade.findByWorkspaceIdSpy).toHaveBeenCalledWith("workspace-1", StorageTier.HOT);
     expect(graphSupportSpy).toHaveBeenCalledTimes(MIN_RECALL_RESULTS);
-    expect(cascade.result).toEqual(control.result);
+    // phase_latency_ms is non-deterministic wall-clock telemetry, orthogonal to
+    // what is recalled; drop it before the byte-identical comparison.
+    const withoutLatency = (result: typeof control.result) => ({
+      ...result,
+      diagnostics:
+        result.diagnostics === undefined
+          ? undefined
+          : { ...result.diagnostics, phase_latency_ms: undefined }
+    });
+    expect(withoutLatency(cascade.result)).toEqual(withoutLatency(control.result));
     expect(cascade.result.degradation_reason).toBeNull();
     expect(cascade.result.candidates.flatMap((candidate) => candidate.source_channels ?? [])).not.toContain("warm_cascade");
     expect(cascade.result.candidates.flatMap((candidate) => candidate.source_channels ?? [])).not.toContain("cold_cascade");
