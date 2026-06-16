@@ -19,9 +19,14 @@ import type {
 } from "./recall-service-types.js";
 import { buildEvidenceSearchQueries } from "./coarse-candidates.js";
 import { normalizeEmbeddingProviderDegradationReason } from "./diagnostics.js";
+import { recallFusionRetuneEnabled } from "./recall-retune-flags.js";
 
 const EMBEDDING_INJECTION_SIMILARITY_FLOOR = 0.5;
 const EMBEDDING_MAX_INJECTED_DELIVERY = 2;
+// C2: under the retune flag, relax the semantic-injection gate (pairs with the
+// embedding weight bump and a retrieval-tuned model).
+const EMBEDDING_INJECTION_SIMILARITY_FLOOR_RETUNED = 0.35;
+const EMBEDDING_MAX_INJECTED_DELIVERY_RETUNED = 10;
 
 export function emptyEmbeddingSupplementResult(): EmbeddingRecallSupplementResult {
   return Object.freeze({
@@ -132,25 +137,31 @@ export async function collectEmbeddingCoarseInjection(params: {
   }
 
   const poolObjectIdSet = new Set(poolObjectIds);
+  const retune = recallFusionRetuneEnabled();
+  const injectionFloor = retune
+    ? EMBEDDING_INJECTION_SIMILARITY_FLOOR_RETUNED
+    : EMBEDDING_INJECTION_SIMILARITY_FLOOR;
+  const maxInjected = retune
+    ? EMBEDDING_MAX_INJECTED_DELIVERY_RETUNED
+    : EMBEDDING_MAX_INJECTED_DELIVERY;
   // Gate the injected neighbors on the query cosine floor and hard-cap the
-  // count: the semantic facet contributes at most EMBEDDING_MAX_INJECTED_DELIVERY
-  // pool-external objects, each clearing EMBEDDING_INJECTION_SIMILARITY_FLOOR.
-  // The cosine floor IS the relevance gate — these are pure-semantic objects
-  // with zero lexical overlap, so no lexical/deterministic filter applies.
+  // count: the semantic facet contributes at most maxInjected pool-external
+  // objects, each clearing the cosine floor. The cosine floor IS the relevance
+  // gate — these are pure-semantic objects with zero lexical overlap, so no
+  // lexical/deterministic filter applies.
   const candidates = neighborEntries
     .filter(
       (entry) =>
         entry.workspace_id === params.workspaceId &&
         !poolObjectIdSet.has(entry.object_id) &&
-        (similarityByObjectId.get(entry.object_id) ?? 0) >=
-          EMBEDDING_INJECTION_SIMILARITY_FLOOR
+        (similarityByObjectId.get(entry.object_id) ?? 0) >= injectionFloor
     )
     .sort(
       (left, right) =>
         (similarityByObjectId.get(right.object_id) ?? 0) -
         (similarityByObjectId.get(left.object_id) ?? 0)
     )
-    .slice(0, EMBEDDING_MAX_INJECTED_DELIVERY)
+    .slice(0, maxInjected)
     .map((entry) =>
       Object.freeze({
         entry,

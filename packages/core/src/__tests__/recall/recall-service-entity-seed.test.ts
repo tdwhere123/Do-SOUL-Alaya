@@ -407,6 +407,55 @@ describe("RecallService", () => {
       expect(lexicalContribution).toBeGreaterThan(0);
     });
 
+    it("C4: retune flag decays entity_seed on lexical overlap instead of zeroing it", async () => {
+      const previous = process.env.ALAYA_RECALL_FUSION_RETUNE_V1;
+      process.env.ALAYA_RECALL_FUSION_RETUNE_V1 = "1";
+      try {
+        const memories = [
+          createMemoryEntry({
+            object_id: "memory-overlap",
+            dimension: MemoryDimension.PROCEDURE,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "MaterializationRouter binds memory creation."
+          })
+        ];
+        const { dependencies } = createDependencies(memories);
+        const searchByKeywordWithinObjectIds = vi.fn(async () => [
+          { object_id: "memory-overlap", normalized_rank: 0.9 }
+        ]);
+        const service = new RecallService({
+          ...dependencies,
+          memoryRepo: { ...dependencies.memoryRepo, searchByKeywordWithinObjectIds },
+          entityExtractionPort: {
+            extract: async () => [
+              Object.freeze({
+                surface: "MaterializationRouter",
+                normalized: "materializationrouter",
+                kind: "proper_noun" as const,
+                confidence: 0.7
+              })
+            ]
+          }
+        });
+        const result = await service.recall({
+          taskSurface: { ...createTaskSurface(), display_name: "MaterializationRouter behavior" },
+          workspaceId: "workspace-1",
+          strategy: "chat"
+        });
+        const diag = result.diagnostics?.candidates.find((c) => c.object_id === "memory-overlap");
+        const entitySeedContribution = diag?.fused_rank_contribution_per_stream?.entity_seed ?? 0;
+        expect(entitySeedContribution).toBeGreaterThan(0);
+        expect(diag?.per_stream_rank?.entity_seed ?? null).not.toBeNull();
+      } finally {
+        if (previous === undefined) {
+          delete process.env.ALAYA_RECALL_FUSION_RETUNE_V1;
+        } else {
+          process.env.ALAYA_RECALL_FUSION_RETUNE_V1 = previous;
+        }
+      }
+    });
+
     it("excludes a weak entity-only draft from graph_expansion fan-in (Fix-5b path 1)", async () => {
       // invariant: when the only non-activation admission is entity_seed
       // and the strongest entity confidence is below
