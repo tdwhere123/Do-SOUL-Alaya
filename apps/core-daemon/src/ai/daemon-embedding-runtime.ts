@@ -53,8 +53,16 @@ export function createDaemonEmbeddingRuntime(input: {
   const localEmbeddingModel = readNonEmptyEnv(
     readConfigEnvValue(input.configEnv, "ALAYA_LOCAL_EMBEDDING_MODEL")
   );
+  const embeddingOptInRaw = readConfigEnvValue(
+    input.configEnv,
+    "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT"
+  );
+  // A configured on-device local ONNX provider (no API key, no network) is a
+  // first-class recall stream: default-on unless explicitly disabled. An API
+  // provider stays strict opt-in (cost/network), so it still requires "true".
   const embeddingSupplementOptInEnabled =
-    readConfigEnvValue(input.configEnv, "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT") === "true";
+    embeddingOptInRaw === "true" ||
+    (embeddingProviderKind === "local_onnx" && embeddingOptInRaw !== "false");
   const recallPolicyEmbeddingEnabled = embeddingSupplementOptInEnabled;
   const embeddingProvider: EmbeddingProviderPort | null = resolveEmbeddingProvider({
     providerKind: embeddingProviderKind,

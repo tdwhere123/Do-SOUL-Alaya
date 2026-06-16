@@ -5,6 +5,7 @@ import type { KpiPayload } from "@do-soul/alaya-eval";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as compileSeedModule from "../../longmemeval/compile-seed.js";
 import { LocomoSampleSchema } from "../../locomo/dataset.js";
+import { buildLocomoSeedContent } from "../../locomo/runner.js";
 
 const startBenchDaemonMock = vi.hoisted(() => vi.fn());
 const loadLocomoMock = vi.hoisted(() => vi.fn());
@@ -814,3 +815,29 @@ function buildRecallResult(objectId = "memory-d1") {
     }
   };
 }
+
+describe("buildLocomoSeedContent", () => {
+  const baseTurn = { speaker: "Alice", dia_id: "d1", text: "take a look at this" };
+
+  it("leaves a caption-less turn byte-identical to speaker:text", () => {
+    expect(buildLocomoSeedContent({ ...baseTurn })).toBe("Alice: take a look at this");
+  });
+
+  it("splices blip_caption and image query when present", () => {
+    expect(
+      buildLocomoSeedContent({
+        ...baseTurn,
+        blip_caption: "a sunrise oil painting",
+        query: "what is in the photo"
+      })
+    ).toBe(
+      "Alice: take a look at this [image: a sunrise oil painting] [image query: what is in the photo]"
+    );
+  });
+
+  it("splices only the caption when the image query is absent", () => {
+    expect(
+      buildLocomoSeedContent({ ...baseTurn, blip_caption: "pottery workshop" })
+    ).toBe("Alice: take a look at this [image: pottery workshop]");
+  });
+});

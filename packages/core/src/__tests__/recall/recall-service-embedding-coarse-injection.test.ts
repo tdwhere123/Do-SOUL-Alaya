@@ -1,40 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  ControlPlaneObjectKind,
-  DYNAMICS_CONSTANTS,
-  MemoryDimension,
-  MemoryGovernanceEventType,
-  ObjectLifecycleState,
-  RecallContextEventType,
-  ProjectMappingState,
-  RetentionPolicy,
-  ScopeClass,
-  SynthesisStatus,
-  type EventLogEntry,
-  type MemoryEntry,
-  type PathAnchorRef,
-  type PathRelation,
-  type ProjectMappingAnchor,
-  type RecallCandidate,
-  type RecallPolicy,
-  type SoulActiveConstraint,
-  type Slot,
-  type SynthesisCapsule,
-  type TaskObjectSurface
-} from "@do-soul/alaya-protocol";
-import {
-  RecallService,
-  classifyGlobalCandidate,
-  computeRecallTokenEconomy,
-  type RecallServiceDependencies
-} from "../../recall/recall-service.js";
+import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
+import { RecallService } from "../../recall/recall-service.js";
 import type {
   RecallServiceEmbeddingRecallPort,
-  RecallServiceMemoryRepoPort,
-  RecallServicePathExpansionPort
+  RecallServiceMemoryRepoPort
 } from "../../recall/recall-service-types.js";
-import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
-import { createActiveConstraint, createAnchor, createDependencies, createMemoryEntry, createPathRelation, createPreparedQueryHandle, createSlot, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
+import {
+  createDependencies,
+  createMemoryEntry,
+  createPreparedQueryHandle,
+  createTaskSurface,
+  overridePolicy
+} from "./recall-service-test-fixtures.js";
 
 describe("RecallService embedding-on coarse injection", () => {
   // A memory whose content shares no lexical token with the recall query, so
@@ -190,5 +167,130 @@ describe("RecallService embedding-on coarse injection", () => {
     expect(
       result.candidates.some((candidate) => candidate.object_id === lexicallyAbsentMemory.object_id)
     ).toBe(false);
+  });
+});
+
+describe("RecallService embedding coarse-injection cap and floor", () => {
+  const absentMemories: readonly MemoryEntry[] = [1, 2, 3].map((suffix) =>
+    createMemoryEntry({
+      object_id: `33333333-3333-4333-8333-33333333333${suffix}`,
+      content: `Unrelated Helsinki revenue note ${suffix}.`,
+      activation_score: 0.05
+    })
+  );
+
+  function buildScopedService(
+    memories: readonly MemoryEntry[],
+    sims: readonly number[]
+  ) {
+    const { dependencies } = createDependencies([...memories]);
+    const collectWorkspaceNeighbors = vi.fn(async () =>
+      memories.map((memory, index) =>
+        Object.freeze({
+          object_id: memory.object_id,
+          normalized_similarity: sims[index] ?? 0
+        })
+      )
+    );
+    const findByIds = vi.fn(async (ids: readonly string[]) =>
+      memories.filter((memory) => ids.includes(memory.object_id))
+    );
+    const embeddingRecallService = {
+      hasStoredVectors: vi.fn(async () => true),
+      prepareQueryEmbedding: vi.fn(() =>
+        createPreparedQueryHandle("prepared-injection-cap")
+      ),
+      querySupplementIfReady: vi.fn(async () => ({
+        supplementaryEntries: Object.freeze([]),
+        similarityHintsByObjectId: Object.freeze({})
+      })),
+      querySupplement: vi.fn(async () => ({
+        supplementaryEntries: Object.freeze([]),
+        similarityHintsByObjectId: Object.freeze({})
+      })),
+      collectWorkspaceNeighbors
+    } satisfies RecallServiceEmbeddingRecallPort;
+    return new RecallService({
+      ...dependencies,
+      memoryRepo: { ...dependencies.memoryRepo, findByIds },
+      embeddingRecallService
+    });
+  }
+
+  function buildInjectionPolicy(
+    service: RecallService,
+    opts: { readonly cap?: number; readonly floor?: number }
+  ): RecallPolicy {
+    const basePolicy = service.buildDefaultPolicy(
+      "analyze",
+      createTaskSurface().runtime_id
+    );
+    return overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        precomputed_rank: {
+          ...basePolicy.coarse_filter.precomputed_rank,
+          min_activation_score: 0.5
+        },
+        semantic_supplement: {
+          enabled: true,
+          max_supplement: 10,
+          embedding_enabled: true,
+          ...(opts.cap === undefined ? {} : { injection_cap: opts.cap }),
+          ...(opts.floor === undefined
+            ? {}
+            : { injection_similarity_floor: opts.floor })
+        }
+      }
+    });
+  }
+
+  it("honors injection_cap, injecting only the top-N cosine neighbors", async () => {
+    const service = buildScopedService(absentMemories, [0.95, 0.9, 0.85]);
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: buildInjectionPolicy(service, { cap: 2 })
+    });
+    const injectedIds = new Set(
+      absentMemories
+        .map((memory) => memory.object_id)
+        .filter((id) =>
+          result.candidates.some((candidate) => candidate.object_id === id)
+        )
+    );
+    expect(injectedIds.size).toBe(2);
+  });
+
+  it("excludes a sub-floor neighbor by default but injects it once the policy lowers the floor", async () => {
+    const [memory] = absentMemories;
+    if (memory === undefined) throw new Error("fixture missing");
+
+    const defaultService = buildScopedService([memory], [0.4]);
+    const defaultResult = await defaultService.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: buildInjectionPolicy(defaultService, {})
+    });
+    expect(
+      defaultResult.candidates.some(
+        (candidate) => candidate.object_id === memory.object_id
+      )
+    ).toBe(false);
+
+    const loweredService = buildScopedService([memory], [0.4]);
+    const loweredResult = await loweredService.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: buildInjectionPolicy(loweredService, { floor: 0.3 })
+    });
+    expect(
+      loweredResult.candidates.some(
+        (candidate) => candidate.object_id === memory.object_id
+      )
+    ).toBe(true);
   });
 });

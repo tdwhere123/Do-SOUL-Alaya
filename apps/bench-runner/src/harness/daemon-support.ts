@@ -269,6 +269,14 @@ export function withEmbeddingFusionWeightInjected(
   });
 }
 
+// When enabled, the LongMemEval / LoCoMo seeders stamp a per-session surface_id
+// so delivery-time session coverage has a grouping axis (off => surface_id null
+// => coverage rerank is a no-op, default-identical recall).
+export function benchSessionSurfacesEnabled(): boolean {
+  const raw = process.env.ALAYA_BENCH_SESSION_SURFACES?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+}
+
 export function buildBenchDiagnosticRecallPolicy(
   taskSurfaceId: string,
   maxResultsInput: number,
@@ -287,6 +295,24 @@ export function buildBenchDiagnosticRecallPolicy(
     2000,
     Math.floor(Number(process.env.ALAYA_BENCH_RECALL_MAX_TOKENS ?? "2000")) || 2000
   );
+  // Embedding semantic-injection sweep knobs (embedding-on only). Unset => recall
+  // service defaults.
+  const rawInjectionCap = Number(
+    process.env.ALAYA_BENCH_EMBEDDING_INJECTION_CAP ?? ""
+  );
+  const embeddingInjectionCap =
+    Number.isInteger(rawInjectionCap) && rawInjectionCap >= 0
+      ? rawInjectionCap
+      : null;
+  const rawInjectionFloor = Number(
+    process.env.ALAYA_BENCH_EMBEDDING_INJECTION_FLOOR ?? ""
+  );
+  const embeddingInjectionFloor =
+    Number.isFinite(rawInjectionFloor) &&
+    rawInjectionFloor >= 0 &&
+    rawInjectionFloor <= 1
+      ? rawInjectionFloor
+      : null;
   return {
     runtime_id: randomUUID(),
     object_kind: ControlPlaneObjectKind.RECALL_POLICY,
@@ -307,7 +333,13 @@ export function buildBenchDiagnosticRecallPolicy(
       semantic_supplement: {
         enabled: true,
         max_supplement: keywordCandidateLimit,
-        embedding_enabled: true
+        embedding_enabled: true,
+        ...(embeddingInjectionCap === null
+          ? {}
+          : { injection_cap: embeddingInjectionCap }),
+        ...(embeddingInjectionFloor === null
+          ? {}
+          : { injection_similarity_floor: embeddingInjectionFloor })
       }
     },
     fine_assessment: {

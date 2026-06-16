@@ -230,20 +230,75 @@ const DOMAIN_SYNONYM_CLUSTERS: ReadonlyArray<readonly string[]> = [
   ["error", "errors", "failure", "failures"]
 ];
 
-// Built once: lowercased term -> sorted unique set of its cluster partners
-// (excluding the term itself). Deterministic — derived purely from the static
-// table above.
-const SYNONYM_EXPANSION_BY_TERM: ReadonlyMap<string, readonly string[]> = (() => {
+const SYNONYM_CLUSTER_MAX_MEMBERS = 8;
+const SYNONYM_CLUSTER_MAX_TOTAL = 256;
+
+// Optional operator-supplied clusters (JSON array of string arrays) merged with
+// the built-in table via ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS. Fail-loud on
+// malformed JSON so a typo cannot silently disable expansion.
+function readExtraSynonymClusters(): ReadonlyArray<readonly string[]> {
+  const raw = process.env.ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS;
+  if (raw === undefined || raw.trim() === "") {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS must be valid JSON: ${String(error)}`
+    );
+  }
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every(
+      (cluster) =>
+        Array.isArray(cluster) &&
+        cluster.every((member) => typeof member === "string")
+    )
+  ) {
+    throw new Error(
+      "ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS must be a JSON array of string arrays"
+    );
+  }
+  return (parsed as readonly (readonly string[])[]).map((cluster) =>
+    cluster
+      .map((member) => member.trim().toLocaleLowerCase())
+      .filter((member) => member.length > 0)
+  );
+}
+
+// term -> sorted unique cluster partners. The caps are enforced at build time so
+// an over-broad table (which dilutes the candidate pool and depresses RRF R@5)
+// fails loud at boot rather than degrading recall silently.
+export function buildSynonymExpansionTable(): ReadonlyMap<string, readonly string[]> {
+  const clusters = [...DOMAIN_SYNONYM_CLUSTERS, ...readExtraSynonymClusters()];
+  if (clusters.length > SYNONYM_CLUSTER_MAX_TOTAL) {
+    throw new Error(
+      `synonym cluster table exceeds ${SYNONYM_CLUSTER_MAX_TOTAL} clusters (${clusters.length})`
+    );
+  }
   const map = new Map<string, string[]>();
-  for (const cluster of DOMAIN_SYNONYM_CLUSTERS) {
+  for (const cluster of clusters) {
+    if (cluster.length > SYNONYM_CLUSTER_MAX_MEMBERS) {
+      throw new Error(
+        `synonym cluster exceeds ${SYNONYM_CLUSTER_MAX_MEMBERS} members: ${cluster.join(",")}`
+      );
+    }
     for (const member of cluster) {
       const partners = cluster.filter((other) => other !== member);
-      const existing = map.get(member) ?? [];
-      map.set(member, [...existing, ...partners]);
+      map.set(member, [...(map.get(member) ?? []), ...partners]);
     }
   }
-  return new Map([...map.entries()].map(([term, partners]) => [term, [...new Set(partners)].sort()]));
-})();
+  return new Map(
+    [...map.entries()].map(([term, partners]) => [
+      term,
+      [...new Set(partners)].sort()
+    ])
+  );
+}
+
+const SYNONYM_EXPANSION_BY_TERM = buildSynonymExpansionTable();
 
 /**
  * Deterministic lexical-term expansion. For each surface term it yields

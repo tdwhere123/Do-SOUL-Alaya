@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, type MemoryEntry } from "@do-soul/alaya-protocol";
 import {
   EmbeddingBackfillHandler,
@@ -17,6 +17,13 @@ function hashContent(content: string): string {
 }
 
 describe("EmbeddingBackfillHandler", () => {
+  beforeEach(() => {
+    vi.stubEnv("ALAYA_EMBEDDING_RECALL_TIERS", "hot");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("upserts only missing or changed hot-memory embeddings and skips unchanged content hashes", async () => {
     const hotMemories = [
       createMemoryEntry({
@@ -158,6 +165,40 @@ describe("EmbeddingBackfillHandler", () => {
     expect(embedTexts).toHaveBeenCalledTimes(2);
     expect(findByWorkspaceId).toHaveBeenCalledTimes(1);
     expect(result.objectsAffected).toEqual(hotMemories.map((memory) => memory.object_id));
+  });
+
+  it("backfills every configured tier (default HOT+WARM), one fetch per tier", async () => {
+    vi.stubEnv("ALAYA_EMBEDDING_RECALL_TIERS", "hot,warm");
+    const hotMemory = createMemoryEntry({
+      object_id: "hot-1",
+      content: "Hot tier semantic note."
+    });
+    const warmMemory = createMemoryEntry({
+      object_id: "warm-1",
+      content: "Warm tier semantic note."
+    });
+    const findByWorkspaceId = vi.fn(async (_workspaceId: string, tier?: string) =>
+      tier === "warm" ? [warmMemory] : [hotMemory]
+    );
+    const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map(() => new Float32Array([0.4, 0.5, 0.6]))
+    );
+    const handler = new EmbeddingBackfillHandler({
+      memoryRepo: { findByWorkspaceId },
+      memoryEmbeddingRepo: {
+        findMetadataByObjectIds: vi.fn(async () => []),
+        upsert,
+        upsertIfContentHashMatchesCurrentMemory: upsert
+      },
+      provider: createProvider({ embedTexts }),
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const result = await handler.handle({ workspace_id: "workspace-1" });
+
+    expect(findByWorkspaceId).toHaveBeenCalledTimes(2);
+    expect(result.objectsAffected).toEqual(["hot-1", "warm-1"]);
   });
 
   it("returns a deterministic skip when the embedding provider is unavailable", async () => {

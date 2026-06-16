@@ -324,6 +324,9 @@ export function createCompileSeedRunner(options?: {
           seedInputs.length === 1
             ? input.evidenceRefBase
             : `${input.evidenceRefBase}-f${i}`,
+        ...(input.surfaceId === undefined || input.surfaceId === null
+          ? {}
+          : { surfaceId: input.surfaceId }),
         ...(input.sourceMemoryRefs === undefined || input.sourceMemoryRefs.length === 0
           ? {}
           : { sourceMemoryRefs: input.sourceMemoryRefs })

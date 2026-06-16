@@ -217,6 +217,62 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
     }
   });
 
+  it(
+    "defaults embedding ON for a configured local_onnx provider even without the opt-in flag",
+    async () => {
+      saveEnv();
+      const fixture = buildFixture();
+      try {
+        const configEnv = new Map<string, string>([
+          // No ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: a configured on-device local
+          // ONNX provider is a first-class recall stream, on by default.
+          ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
+        ]);
+        const { defaultPolicyDecorator, providerWarmup } = createDaemonEmbeddingRuntime({
+          database: fixture.database,
+          configEnv,
+          eventLogRepo: fixture.eventLogRepo,
+          healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+          memoryEntryRepo: fixture.memoryEntryRepo,
+          warn: fixture.warn as unknown as WarnFn
+        });
+
+        expect(defaultPolicyDecorator).toBeDefined();
+        await expect(providerWarmup).resolves.toBeDefined();
+        const decorated = defaultPolicyDecorator!(makeBasePolicy());
+        expect(decorated.scoring_weight_overrides?.fusion_weights?.embedding_similarity).toBe(6);
+      } finally {
+        teardown(fixture);
+        restoreEnv();
+      }
+    },
+    15_000
+  );
+
+  it("keeps an API embedding provider strict opt-in (decorator absent without the flag)", () => {
+    saveEnv();
+    const fixture = buildFixture();
+    try {
+      const configEnv = new Map<string, string>([
+        // openai provider, no opt-in flag, no key -> stays off (cost/network).
+        ["ALAYA_EMBEDDING_PROVIDER", "openai"]
+      ]);
+      const { defaultPolicyDecorator } = createDaemonEmbeddingRuntime({
+        database: fixture.database,
+        configEnv,
+        eventLogRepo: fixture.eventLogRepo,
+        healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+        memoryEntryRepo: fixture.memoryEntryRepo,
+        warn: fixture.warn as unknown as WarnFn
+      });
+
+      expect(defaultPolicyDecorator).toBeUndefined();
+    } finally {
+      teardown(fixture);
+      restoreEnv();
+    }
+  });
+
   it("leaves the decorator undefined and policies untouched when ALAYA_ENABLE_EMBEDDING_SUPPLEMENT is off", () => {
     saveEnv();
     const fixture = buildFixture();

@@ -321,6 +321,18 @@ const GoldFacetSeparationSchema = z
   })
   .strict();
 
+// @anchor longmemeval-per-gold-rank-buckets: rank distribution split by gold
+// ordinal within a question. gold_ordinal_0 = the best-ranked gold per question;
+// gold_ordinal_1plus = the 2nd/3rd+ golds. ordinal_1plus.delivered_top5 is the
+// full-gold@5 axis the best-gold bucket hides. Heavy ordinal_1plus mass in 6-25
+// = recoverable by delivery reorder; 100+/absent mass = pool/segment wall.
+const PerGoldRankBucketsSchema = z
+  .object({
+    gold_ordinal_0: GoldRankBucketsSchema,
+    gold_ordinal_1plus: GoldRankBucketsSchema
+  })
+  .strict();
+
 const QualityMetricsSchema = z
   .object({
     schema_version: z.literal("bench-quality-metrics.v1"),
@@ -364,6 +376,14 @@ const QualityMetricsSchema = z
     top_distractor_breakdown: TopDistractorBreakdownSchema.optional(),
     object_kind_delivery: ObjectKindDeliverySchema.optional(),
     gold_facet_separation: GoldFacetSeparationSchema.optional(),
+    // Per-gold rank buckets split by ordinal. Optional so older kpi.json stays
+    // valid; new LongMemEval runs always populate it. The ordinal_1plus block is
+    // the full-gold@5 axis.
+    per_gold_rank_buckets: PerGoldRankBucketsSchema.optional(),
+    // For each missed 2nd/3rd+ gold, what kind of candidate held the top-5 slots
+    // it wanted (reuses the top-distractor classification, summed over
+    // ordinal_1plus missed golds). Optional for older records.
+    per_gold_displaced_by: TopDistractorBreakdownSchema.optional(),
     // @anchor longmemeval-abstention: calibrated-confidence scoring of the
     // LongMemEval-S abstention questions (`question_id` ending `_abs`).
     // Optional so pre-abstention-scoring kpi.json records stay valid; new

@@ -90,6 +90,22 @@ export function buildLongMemEvalQualityMetrics(
     indeterminate: 0
   };
   const goldDimensionCounts: Record<string, number> = {};
+  // @anchor longmemeval-per-gold-rank-buckets: every gold classified by its OWN
+  // rank, split by ordinal (best gold vs 2nd/3rd+). The best-gold bucket above
+  // hides full-gold@5: a question can hit@5 on its strongest gold while its other
+  // golds sit at rank 8+. ordinal_1plus.delivered_top5 is the full-gold@5 axis.
+  const perGoldRankBuckets = {
+    gold_ordinal_0: emptyGoldRankBucketTally(),
+    gold_ordinal_1plus: emptyGoldRankBucketTally()
+  };
+  const perGoldDisplacedBy: Record<TopDistractorBucket, number> = {
+    existing_score_dominant: 0,
+    synthesis_reserved: 0,
+    source_proximity_local_only: 0,
+    path_or_graph_dominant: 0,
+    lexical_topic_neighbor: 0,
+    unknown: 0
+  };
 
   for (const question of diagnostics) {
     missDistribution[question.miss_classification] =
@@ -257,6 +273,27 @@ export function buildLongMemEvalQualityMetrics(
           goldFacetSeparation.separable++;
         }
       }
+
+      // Classify every gold by its own rank (hit@5 and miss alike). A missed
+      // 2nd/3rd+ gold also credits the top-5 candidates that held its slots.
+      const orderedGold = [...question.gold].sort(
+        (left, right) => goldOrdinalSortRank(left) - goldOrdinalSortRank(right)
+      );
+      orderedGold.forEach((gold, ordinal) => {
+        const bucket = classifyGoldRankBucket(gold);
+        const tally =
+          ordinal === 0
+            ? perGoldRankBuckets.gold_ordinal_0
+            : perGoldRankBuckets.gold_ordinal_1plus;
+        tally[bucket]++;
+        if (ordinal > 0 && bucket !== "delivered_top5") {
+          for (const delivered of question.delivered_results) {
+            if (delivered.rank <= 5) {
+              perGoldDisplacedBy[classifyTopDistractor(delivered)]++;
+            }
+          }
+        }
+      });
     }
   }
 
@@ -353,8 +390,57 @@ export function buildLongMemEvalQualityMetrics(
       ...goldFacetSeparation,
       gold_dimension_counts: goldDimensionCounts
     },
+    per_gold_rank_buckets: perGoldRankBuckets,
+    per_gold_displaced_by: perGoldDisplacedBy,
     miss_distribution: missDistribution
   };
+}
+
+type GoldRankBucketKey =
+  | "delivered_top5"
+  | "pre_budget_6_10"
+  | "pre_budget_11_25"
+  | "pre_budget_26_50"
+  | "pre_budget_51_100"
+  | "pre_budget_gt_100"
+  | "candidate_absent";
+
+function emptyGoldRankBucketTally(): Record<GoldRankBucketKey, number> {
+  return {
+    delivered_top5: 0,
+    pre_budget_6_10: 0,
+    pre_budget_11_25: 0,
+    pre_budget_26_50: 0,
+    pre_budget_51_100: 0,
+    pre_budget_gt_100: 0,
+    candidate_absent: 0
+  };
+}
+
+// Mirror the best-gold bucket thresholds (lines above): delivered in top-5 wins;
+// otherwise the pre-budget pool rank (fused_rank fallback) places the gold.
+function classifyGoldRankBucket(
+  gold: LongMemEvalGoldDiagnostic
+): GoldRankBucketKey {
+  if (gold.final_rank !== null && gold.final_rank <= 5) {
+    return "delivered_top5";
+  }
+  const rank = gold.pre_budget_rank ?? gold.fused_rank;
+  if (rank === null) return "candidate_absent";
+  if (rank <= 10) return "pre_budget_6_10";
+  if (rank <= 25) return "pre_budget_11_25";
+  if (rank <= 50) return "pre_budget_26_50";
+  if (rank <= 100) return "pre_budget_51_100";
+  return "pre_budget_gt_100";
+}
+
+// Ordinal sort key: in-window golds (final_rank 1-5) sort ahead of pool-only
+// golds (pre-budget rank), so ordinal 0 is the gold that did best.
+function goldOrdinalSortRank(gold: LongMemEvalGoldDiagnostic): number {
+  if (gold.final_rank !== null && gold.final_rank <= 5) {
+    return gold.final_rank;
+  }
+  return gold.pre_budget_rank ?? gold.fused_rank ?? Number.POSITIVE_INFINITY;
 }
 
 type TopDistractorBucket =

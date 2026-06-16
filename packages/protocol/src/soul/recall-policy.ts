@@ -23,7 +23,13 @@ export const SemanticSupplementConfigSchema = z
   .object({
     enabled: z.boolean(),
     max_supplement: NonNegativeIntSchema,
-    embedding_enabled: z.boolean().optional()
+    embedding_enabled: z.boolean().optional(),
+    // Pure-semantic coarse-injection cap (pool-external, zero-lexical-overlap
+    // neighbors the embedding stream injects) and the cosine floor gating them.
+    // Distinct from max_supplement (the coarse pool budget); omitted => recall
+    // service defaults.
+    injection_cap: NonNegativeIntSchema.optional(),
+    injection_similarity_floor: z.number().min(0).max(1).optional()
   })
   .readonly();
 

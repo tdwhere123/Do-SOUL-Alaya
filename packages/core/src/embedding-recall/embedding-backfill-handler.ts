@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { StorageTier, type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
 import type { EmbeddingProviderPort, EmbeddingVectorRecord } from "./embedding-recall-service.js";
 import { toErrorMessage } from "../recall/recall-service-helpers.js";
+import { resolveEmbeddingRecallTiers } from "./tier-config.js";
 
 export interface EmbeddingBackfillMemoryRepoPort {
   findByWorkspaceId(
@@ -125,14 +126,16 @@ export class EmbeddingBackfillHandler {
       });
     }
 
-    const initialHotMemories = await this.dependencies.memoryRepo.findByWorkspaceId(
-      task.workspace_id,
-      StorageTier.HOT
+    const tierMemoryLists = await Promise.all(
+      resolveEmbeddingRecallTiers().map((tier) =>
+        this.dependencies.memoryRepo.findByWorkspaceId(task.workspace_id, tier)
+      )
     );
-    if (initialHotMemories.length === 0) {
+    const initialMemories = tierMemoryLists.flat();
+    if (initialMemories.length === 0) {
       return Object.freeze({
         objectsAffected: Object.freeze([]),
-        auditEntries: Object.freeze(["embedding_backfill_skipped:no_hot_memories"])
+        auditEntries: Object.freeze(["embedding_backfill_skipped:no_memories"])
       });
     }
 
@@ -140,14 +143,14 @@ export class EmbeddingBackfillHandler {
     // trip, no vector hydration). The cache-hit / stale decision and created_at
     // preservation below use only these metadata fields.
     const existingMetadata = await this.dependencies.memoryEmbeddingRepo.findMetadataByObjectIds(
-      initialHotMemories.map((memory) => memory.object_id)
+      initialMemories.map((memory) => memory.object_id)
     );
     const existingById = new Map<string, Readonly<EmbeddingBackfillMetadata>>(
       existingMetadata.map((record) => [record.object_id, record] as const)
     );
 
     const unchangedAuditEntries: string[] = [];
-    const memoriesToEmbed = initialHotMemories.flatMap((memory) => {
+    const memoriesToEmbed = initialMemories.flatMap((memory) => {
       const contentHash = hashMemoryContent(memory.content);
       const existing = existingById.get(memory.object_id) ?? null;
 
@@ -181,7 +184,7 @@ export class EmbeddingBackfillHandler {
     const objectsAffected: string[] = [];
     const auditEntries = [...unchangedAuditEntries];
 
-    // invariant: the single hot-corpus snapshot taken above is the embed input
+    // invariant: the single corpus snapshot taken above is the embed input
     // and the only in-handler stale reference. The atomic write-time guard
     // (upsertIfContentHashMatchesCurrentMemory) re-reads live memory content
     // inside the upsert transaction and refuses a vector whose content_hash no
@@ -189,7 +192,7 @@ export class EmbeddingBackfillHandler {
     // guard at O(n) hydration per batch (O(n^2) over the corpus).
     // see also: packages/storage/src/repos/memory/memory-embedding-repo.ts guardedUpsertTransaction
     const snapshotMemories = new Map(
-      initialHotMemories.map((memory) => [memory.object_id, memory] as const)
+      initialMemories.map((memory) => [memory.object_id, memory] as const)
     );
 
     const batches = buildEmbeddingBackfillBatches(memoriesToEmbed);

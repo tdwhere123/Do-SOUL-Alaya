@@ -1,6 +1,6 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
-import { compileRecallQueryProbes, expandLexicalTerms, splitLexicalTokens } from "../../recall/recall-query-probes.js";
+import { buildSynonymExpansionTable, compileRecallQueryProbes, expandLexicalTerms, splitLexicalTokens } from "../../recall/recall-query-probes.js";
 import {
   __resetCjkSegmentationStateForTests,
   warmCjkSegmentation
@@ -191,5 +191,40 @@ describe("splitLexicalTokens CJK segmentation fail-soft", () => {
     // No jieba pieces yet — the load is still in-flight.
     expect(tokens).not.toContain("喜欢");
     expect(tokens).not.toContain("咖啡");
+  });
+});
+
+describe("synonym expansion table", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("merges operator-supplied clusters bidirectionally", () => {
+    vi.stubEnv(
+      "ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS",
+      JSON.stringify([["k8s", "kubernetes"]])
+    );
+    const table = buildSynonymExpansionTable();
+    expect(table.get("k8s")).toEqual(["kubernetes"]);
+    expect(table.get("kubernetes")).toEqual(["k8s"]);
+  });
+
+  it("fails loud when a cluster exceeds the member cap", () => {
+    vi.stubEnv(
+      "ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS",
+      JSON.stringify([["a", "b", "c", "d", "e", "f", "g", "h", "i"]])
+    );
+    expect(() => buildSynonymExpansionTable()).toThrow(/exceeds 8 members/u);
+  });
+
+  it("fails loud on malformed JSON", () => {
+    vi.stubEnv("ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS", "{not json");
+    expect(() => buildSynonymExpansionTable()).toThrow(/valid JSON/u);
+  });
+
+  it("does not bridge lexically-disjoint roots (no cross-root semantic expansion)", () => {
+    const expanded = expandLexicalTerms(["prefer"]);
+    expect(expanded).not.toContain("like");
+    expect(expanded).not.toContain("want");
   });
 });

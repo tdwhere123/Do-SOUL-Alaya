@@ -14,6 +14,7 @@ import {
   EMBEDDING_WORKSPACE_SCAN_CAP,
   QUERY_EMBEDDING_WARMUP_BATCH_SIZE
 } from "./constants.js";
+import { resolveEmbeddingRecallTiers } from "./tier-config.js";
 import {
   EMPTY_SUPPLEMENT_RESULT,
   clamp01,
@@ -595,19 +596,19 @@ export class EmbeddingRecallService {
 
     let storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
     try {
-      // invariant: WARM / COLD memories sit behind the tier cascade gate; the
-      // embedding coarse-injection path must not pre-empt that. Cap the scan
-      // so a workspace with very many HOT vectors does not pay a worst-case
+      // invariant: the tier whitelist (default HOT+WARM, env-configurable) bounds
+      // which vectors the coarse-injection scan considers. Cap the scan so a
+      // workspace with very many vectors does not pay a worst-case
       // O(workspace_size) cost per recall.
       // invariant: SQL-side provider+model isolation keeps the cap populated
       // with cosine-comparable rows for the active provider only — without it
       // a workspace that has switched providers would burn the cap on
       // unusable vectors before the JS-side filter could drop them.
-      // see also: packages/core/src/embedding-recall/types.ts:EmbeddingWorkspaceScanOptions.
+      // see also: packages/core/src/embedding-recall/tier-config.ts:resolveEmbeddingRecallTiers.
       storedVectors = await this.dependencies.embeddingRepo.listByWorkspace(
         params.workspaceId,
         {
-          tierFilter: ["hot"],
+          tierFilter: resolveEmbeddingRecallTiers(),
           limit: EMBEDDING_WORKSPACE_SCAN_CAP,
           providerKind: this.dependencies.provider.providerKind,
           modelId: this.dependencies.provider.modelId

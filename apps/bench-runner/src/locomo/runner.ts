@@ -27,6 +27,7 @@ import {
   type BenchQueryEmbeddingWarmupSummary,
   type BenchWorkspaceHandle
 } from "../harness/daemon.js";
+import { benchSessionSurfacesEnabled } from "../harness/daemon-support.js";
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
@@ -68,7 +69,7 @@ import {
 } from "../harness/token-economy.js";
 import type { BenchTokenMetrics } from "../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
-import { extractSessions, type LocomoQa, type LocomoSample, type LocomoVariant } from "./dataset.js";
+import { extractSessions, type LocomoQa, type LocomoSample, type LocomoTurn, type LocomoVariant } from "./dataset.js";
 import { loadLocomo, type LocomoFetchResult } from "./fetch.js";
 
 const LOCOMO_SOURCE_URL = "https://github.com/snap-research/locomo/blob/main/data/locomo10.json";
@@ -488,13 +489,17 @@ async function runOneConversation(
     // (memory_entry is persisted in both branches).
     // see also: apps/bench-runner/src/harness/seed-rotation.ts
     let seedIndex = 0;
+    let sessionOrdinal = 0;
     for (const session of sessions) {
+      const sessionSurfaceId = benchSessionSurfacesEnabled()
+        ? `${conversation.sample_id}-s${sessionOrdinal}`
+        : undefined;
       let previousTurnSeedMemoryIds: readonly string[] = [];
       // anchor: same-session co-recall members, seed order. see also:
       //   apps/bench-runner/src/longmemeval/runner.ts sessionMemberMemoryIds
       const sessionMemberMemoryIds: string[] = [];
       for (const turn of session.turns) {
-        const seedContent = `${turn.speaker}: ${turn.text}`;
+        const seedContent = buildLocomoSeedContent(turn);
         const evidenceRef = `${conversation.sample_id}-${turn.dia_id}`;
         const seedResult = await seedRunner.seedTurn({
           daemon: workspace,
@@ -503,6 +508,9 @@ async function runOneConversation(
           seedIndex,
           workspaceId: workspace.workspaceId,
           runId: workspace.runId,
+          ...(sessionSurfaceId === undefined
+            ? {}
+            : { surfaceId: sessionSurfaceId }),
           ...(previousTurnSeedMemoryIds.length === 0
             ? {}
             : { sourceMemoryRefs: previousTurnSeedMemoryIds })
@@ -526,6 +534,7 @@ async function runOneConversation(
       // session); pair selection uses session membership (seed order) only.
       // see also: apps/bench-runner/src/harness/co-recall-warmup.ts planSessionCoRecallWarmup
       await workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
+      sessionOrdinal += 1;
     }
 
     const allSeededMemoryIds = [...memoryIdsByDiaId.values()].flat();
@@ -834,6 +843,22 @@ export function resolveLocomoSampleSize(
   return total;
 }
 
+// invariant: identical seed string at both call sites (live seed + extraction
+// cache-key collection), else the extraction cache key mismatches and seeds
+// diverge. Image turns splice blip_caption / query so the answer signal a
+// deictic text ("take a look") drops is recoverable by lexical recall.
+export function buildLocomoSeedContent(turn: LocomoTurn): string {
+  const caption = turn.blip_caption?.trim() ?? "";
+  const query = turn.query?.trim() ?? "";
+  return [
+    `${turn.speaker}: ${turn.text}`,
+    caption.length > 0 ? `[image: ${caption}]` : "",
+    query.length > 0 ? `[image query: ${query}]` : ""
+  ]
+    .filter((part) => part.length > 0)
+    .join(" ");
+}
+
 function collectDistinctLocomoTurnContents(
   conversations: readonly LocomoSample[]
 ): readonly string[] {
@@ -841,7 +866,7 @@ function collectDistinctLocomoTurnContents(
   for (const conversation of conversations) {
     for (const session of extractSessions(conversation.conversation)) {
       for (const turn of session.turns) {
-        const content = `${turn.speaker}: ${turn.text}`.trim();
+        const content = buildLocomoSeedContent(turn).trim();
         if (content.length > 0) {
           turns.add(content);
         }

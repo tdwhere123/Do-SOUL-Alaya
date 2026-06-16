@@ -131,6 +131,9 @@ export interface BenchSignalSeedInput {
   readonly turnContent: string;
   /** Verbatim triggering span, when the extractor supplied one. */
   readonly matchedText?: string;
+  /** Per-session surface_id stamp; when set the seeded memory_entry carries it
+   *  so delivery-time session coverage can group by surface. */
+  readonly surfaceId?: string | null;
   /**
    * The exact raw_payload the production OfficialApiGardenProvider.compile
    * attached to this signal — matched_text / turn_content_excerpt /

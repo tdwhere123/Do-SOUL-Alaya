@@ -37,10 +37,11 @@ Usage:
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m] [--data-dir <path>] [--force]
   alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--qa] [--data-dir <path>] [--snapshot-out <db>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
     --qa  end-to-end QA accuracy (answer-LLM + LLM-judge over delivered recall). OFF by default. ON => 2 garden chat calls/question (costs money). Needs OFFICIAL_API_GARDEN_PROVIDER_URL / ALAYA_OFFICIAL_GARDEN_API_KEY / OFFICIAL_API_GARDEN_MODEL.
-  alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
-  alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--edge-plane] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--edge-plane] [--data-dir <path>] [--history-root <path>]
+    --edge-plane  drain the BULK_ENRICH edge pass before recall (cumulative modes only). OFF by default to keep embedding ON/OFF corpora comparable.
   alaya-bench-runner fetch-locomo [--data-dir <path>] [--force]
-  alaya-bench-runner locomo [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner locomo [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--edge-plane] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner self [--history-root <path>]
   alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
   alaya-bench-runner controlled-replay [--history-root <path>]
@@ -140,6 +141,9 @@ interface ParsedFlags {
   // --qa: gate the end-to-end QA harness (answer-LLM + LLM-judge). Default off
   // => zero LLM calls, zero cost, recall path + kpi bytes unchanged.
   readonly qa: boolean;
+  // --edge-plane: drain the BULK_ENRICH edge pass before recall (cumulative
+  // modes only). Default off keeps embedding ON/OFF corpora comparable.
+  readonly edgePlane: boolean;
 }
 
 function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
@@ -163,6 +167,7 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let extractionCacheRoot: string | undefined;
   let concurrency: number | undefined;
   let qa = false;
+  let edgePlane = false;
   const shards: string[] = [];
   let collectingShards = false;
 
@@ -295,6 +300,9 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     } else if (token === "--qa" || token === "--answer-judge") {
       qa = true;
       collectingShards = false;
+    } else if (token === "--edge-plane") {
+      edgePlane = true;
+      collectingShards = false;
     } else if (token === "--source") {
       source = args[++i];
       collectingShards = false;
@@ -337,7 +345,8 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     pinnedMetaRoot,
     extractionCacheRoot,
     concurrency,
-    qa
+    qa,
+    edgePlane
   };
 }
 
@@ -448,8 +457,18 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
   }
 }
 
+// --edge-plane sets the BULK_ENRICH drain gate the bench daemon reads
+// (shouldRunBenchEdgePlane). Cumulative modes only — single-question recall
+// never reaches the co_usage>=3 mint threshold the edge plane feeds.
+function applyBenchEdgePlaneFlag(opts: ParsedFlags): void {
+  if (opts.edgePlane) {
+    process.env.ALAYA_BENCH_RUN_EDGE_PLANE = "true";
+  }
+}
+
 async function runLongMemEvalMultiturnCommand(opts: ParsedFlags): Promise<number> {
   try {
+    applyBenchEdgePlaneFlag(opts);
     process.stdout.write(
       `Running LongMemEval multi-turn ${opts.variant}` +
         (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
@@ -486,6 +505,7 @@ async function runLongMemEvalMultiturnCommand(opts: ParsedFlags): Promise<number
 
 async function runLongMemEvalCrossQuestionCommand(opts: ParsedFlags): Promise<number> {
   try {
+    applyBenchEdgePlaneFlag(opts);
     process.stdout.write(
       `Running LongMemEval cross-question ${opts.variant}` +
         (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
@@ -541,6 +561,7 @@ async function runFetchLocomoCommand(opts: ParsedFlags): Promise<number> {
 
 async function runLocomoCommand(opts: ParsedFlags): Promise<number> {
   try {
+    applyBenchEdgePlaneFlag(opts);
     process.stdout.write(
       `Running LoCoMo10` +
         (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +

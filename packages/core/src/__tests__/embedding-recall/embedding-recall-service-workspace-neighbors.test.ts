@@ -198,7 +198,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     expect(neighbors).toHaveLength(0);
   });
 
-  it("requests HOT-tier vectors only and bounds the scan with the workspace cap", async () => {
+  it("requests the configured embedding tiers (default HOT+WARM) and bounds the scan with the workspace cap", async () => {
     const listByWorkspace = vi.fn(async () => [
       createEmbeddingRecord({ object_id: "near", embedding: new Float32Array([0.05, 0.99]) })
     ]);
@@ -218,7 +218,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     expect(listByWorkspace).toHaveBeenCalledWith(
       "workspace-1",
       expect.objectContaining({
-        tierFilter: ["hot"],
+        tierFilter: ["hot", "warm"],
         limit: EMBEDDING_WORKSPACE_SCAN_CAP
       })
     );

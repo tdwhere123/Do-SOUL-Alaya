@@ -42,6 +42,28 @@ export function mergeQualityMetrics(
   let graphFaninGoldHitAt5Count = 0;
   let pathPrimaryGoldHitAt5Count = 0;
   let graphOnlyGoldHitAt5Count = 0;
+  // invariant: every additive count block a shard carries is summed here, else
+  // merged kpi.json silently drops it.
+  let anyGoldRankBuckets = false;
+  const goldRankBucketTotals = emptyRankTally();
+  let anyTopDistractor = false;
+  const topDistractorTotals = emptyDistractorTally();
+  let anyObjectKindDelivery = false;
+  const objectKindDeliveryTotals = {
+    memory_entry: 0,
+    synthesis_capsule: 0,
+    total_delivered: 0
+  };
+  let anyGoldFacet = false;
+  const goldFacetTotals = { separable: 0, overlapping: 0, indeterminate: 0 };
+  const goldDimensionCounts: Record<string, number> = {};
+  let anyPerGoldRankBuckets = false;
+  const perGoldRankBucketTotals = {
+    gold_ordinal_0: emptyRankTally(),
+    gold_ordinal_1plus: emptyRankTally()
+  };
+  let anyPerGoldDisplacedBy = false;
+  const perGoldDisplacedByTotals = emptyDistractorTally();
 
   for (const metric of metrics) {
     if (metric === undefined) continue;
@@ -106,6 +128,43 @@ export function mergeQualityMetrics(
         metric.path_vs_graph_fanin.path_primary_hit_at_5_count;
       graphOnlyGoldHitAt5Count +=
         metric.path_vs_graph_fanin.graph_only_hit_at_5_count;
+    }
+    if (metric.gold_rank_buckets !== undefined) {
+      anyGoldRankBuckets = true;
+      accumulateRecord(goldRankBucketTotals, metric.gold_rank_buckets);
+    }
+    if (metric.top_distractor_breakdown !== undefined) {
+      anyTopDistractor = true;
+      accumulateRecord(topDistractorTotals, metric.top_distractor_breakdown);
+    }
+    if (metric.object_kind_delivery !== undefined) {
+      anyObjectKindDelivery = true;
+      accumulateRecord(objectKindDeliveryTotals, metric.object_kind_delivery);
+    }
+    if (metric.gold_facet_separation !== undefined) {
+      anyGoldFacet = true;
+      const facet = metric.gold_facet_separation;
+      goldFacetTotals.separable += facet.separable;
+      goldFacetTotals.overlapping += facet.overlapping;
+      goldFacetTotals.indeterminate += facet.indeterminate;
+      for (const [dim, count] of Object.entries(facet.gold_dimension_counts)) {
+        goldDimensionCounts[dim] = (goldDimensionCounts[dim] ?? 0) + count;
+      }
+    }
+    if (metric.per_gold_rank_buckets !== undefined) {
+      anyPerGoldRankBuckets = true;
+      accumulateRecord(
+        perGoldRankBucketTotals.gold_ordinal_0,
+        metric.per_gold_rank_buckets.gold_ordinal_0
+      );
+      accumulateRecord(
+        perGoldRankBucketTotals.gold_ordinal_1plus,
+        metric.per_gold_rank_buckets.gold_ordinal_1plus
+      );
+    }
+    if (metric.per_gold_displaced_by !== undefined) {
+      anyPerGoldDisplacedBy = true;
+      accumulateRecord(perGoldDisplacedByTotals, metric.per_gold_displaced_by);
     }
   }
 
@@ -187,6 +246,59 @@ export function mergeQualityMetrics(
           }
         }
       : {}),
+    ...(anyGoldRankBuckets ? { gold_rank_buckets: goldRankBucketTotals } : {}),
+    ...(anyTopDistractor
+      ? { top_distractor_breakdown: topDistractorTotals }
+      : {}),
+    ...(anyObjectKindDelivery
+      ? { object_kind_delivery: objectKindDeliveryTotals }
+      : {}),
+    ...(anyGoldFacet
+      ? {
+          gold_facet_separation: {
+            ...goldFacetTotals,
+            gold_dimension_counts: goldDimensionCounts
+          }
+        }
+      : {}),
+    ...(anyPerGoldRankBuckets
+      ? { per_gold_rank_buckets: perGoldRankBucketTotals }
+      : {}),
+    ...(anyPerGoldDisplacedBy
+      ? { per_gold_displaced_by: perGoldDisplacedByTotals }
+      : {}),
     miss_distribution: missDistribution
   };
+}
+
+function emptyRankTally() {
+  return {
+    delivered_top5: 0,
+    pre_budget_6_10: 0,
+    pre_budget_11_25: 0,
+    pre_budget_26_50: 0,
+    pre_budget_51_100: 0,
+    pre_budget_gt_100: 0,
+    candidate_absent: 0
+  };
+}
+
+function emptyDistractorTally() {
+  return {
+    existing_score_dominant: 0,
+    synthesis_reserved: 0,
+    source_proximity_local_only: 0,
+    path_or_graph_dominant: 0,
+    lexical_topic_neighbor: 0,
+    unknown: 0
+  };
+}
+
+function accumulateRecord<K extends string>(
+  target: Record<K, number>,
+  source: Record<K, number>
+): void {
+  for (const key of Object.keys(target) as K[]) {
+    target[key] += source[key];
+  }
 }

@@ -42,6 +42,7 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toContain("--weights '<json>'");
     expect(stdoutBuf).toContain("--data-dir <path>");
     expect(stdoutBuf).toContain("--force");
+    expect(stdoutBuf).toContain("--edge-plane");
   });
 
   it("mentions extraction-fill and recall-eval in help output", async () => {

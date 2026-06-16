@@ -10,6 +10,7 @@ import type {
   BenchDaemonHandle
 } from "../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
+import { benchSessionSurfacesEnabled } from "../harness/daemon-support.js";
 import { extractRecallTokenEconomy } from "./recall-token-economy.js";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
 import type {
@@ -261,6 +262,7 @@ export async function runLongMemEvalQuestion(input: {
           seedIndex,
           workspaceId: workspace.workspaceId,
           runId: workspace.runId,
+          ...(benchSessionSurfacesEnabled() ? { surfaceId: sessionId } : {}),
           ...(previousTurnSeedMemoryIds.length === 0
             ? {}
             : { sourceMemoryRefs: previousTurnSeedMemoryIds })

@@ -388,7 +388,7 @@ export function createBenchSeedOps(
         signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
         workspace_id: input.activeContext.workspaceId,
         run_id: input.activeContext.runId,
-        surface_id: null,
+        surface_id: signalInput.surfaceId ?? null,
         source: SignalSource.GARDEN_COMPILE,
         signal_kind: signalInput.signalKind,
         object_kind: signalInput.objectKind,

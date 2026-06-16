@@ -21,6 +21,7 @@ import type {
 import {
   applyFeatureRerank,
   applyPathSuppressionToFusionScores,
+  applySessionCoverageRerank,
   buildEmptyRecallFusionBreakdown,
   buildRecallFusionDetails,
   compareFusedRecallCandidates,
@@ -111,8 +112,12 @@ export function fineAssess(params: FineAssessParams): Readonly<{
     supplementaryData,
     config.budgets.max_entries
   );
-  const synthesisReservedCandidates = reserveSynthesisDeliverySlots(
+  const coverageOrderedCandidates = applySessionCoverageRerank(
     prioritizedCandidates,
+    config.budgets.max_entries
+  );
+  const synthesisReservedCandidates = reserveSynthesisDeliverySlots(
+    coverageOrderedCandidates,
     supplementaryData,
     config.budgets.max_entries
   );
@@ -120,7 +125,7 @@ export function fineAssess(params: FineAssessParams): Readonly<{
     synthesisReservedCandidates,
     supplementaryData,
     config.budgets.max_entries,
-    synthesisReserveCount(prioritizedCandidates, config.budgets.max_entries)
+    synthesisReserveCount(coverageOrderedCandidates, config.budgets.max_entries)
   );
 
   // Per-stage delivery-rank capture (1-based). Each fineAssess stage reorders
