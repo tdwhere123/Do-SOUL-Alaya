@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "compact_schema_version": 1,
+  "bench_name": "public",
+  "split": "longmemeval-s",
+  "run_at": "2026-06-16T17:33:42.523Z",
+  "alaya_commit": "144b94a",
+  "recall_pipeline_version": "fusion-rrf-synthesis-v2",
+  "embedding_provider": "none",
+  "embedding_mode": "disabled",
+  "policy_shape": "stress",
+  "simulate_report": "none",
+  "question_count": 100,
+  "full_diagnostics_artifact_path": "/home/tdwhere/vibe/Do-SOUL-Alaya/.do-it/bench-runs/pc/qa-wt/.bench-artifacts/public/2026-06-16T173342Z-144b94a-policy-stress/longmemeval-diagnostics.json",
+  "provider_state_summary": {
+    "total": 100,
+    "provider_returned": 0,
+    "provider_pending": 0,
+    "provider_failed": 0,
+    "provider_not_requested": 100,
+    "unknown": 0,
+    "provider_returned_rate": 0,
+    "provider_pending_rate": 0,
+    "provider_failed_rate": 0,
+    "provider_not_requested_rate": 1,
+    "unknown_rate": 0
+  },
+  "report_usage": {
+    "mode": "none",
+    "reports_attempted": 0,
+    "reports_used": 0,
+    "reports_skipped": 0,
+    "used_object_count": 0
+  },
+  "report_side_effects": {
+    "mode": "none",
+    "workspaces_observed": 100,
+    "memory_graph_edges_total": 59685,
+    "memory_graph_edges_by_type": {
+      "supports": 0,
+      "derives_from": 45550,
+      "contradicts": 0,
+      "supersedes": 0,
+      "recalls": 14135,
+      "exception_to": 0,
+      "incompatible_with": 0
+    },
+    "recalls_edge_count": 14135,
+    "path_relations_total": 59685,
+    "latest_path_event_at": "2026-06-16T18:24:04.425Z",
+    "snapshot_count": 100
+  },
+  "scored_recall_evidence": {
+    "delivered_result_count": 1000,
+    "graph_support_gold_count": 0,
+    "path_plasticity_gold_count": 0,
+    "graph_expansion_plane_count": 15,
+    "path_expansion_plane_count": 465,
+    "graph_expansion_plane_count_per_hop": [
+      0,
+      950
+    ],
+    "graph_expansion_plane_count_per_edge_type": {
+      "derives_from": 257,
+      "recalls": 693,
+      "supports": 0
+    },
+    "delivered_plane_counts": {
+      "first_admitted": {
+        "activation": 276,
+        "lexical": 628,
+        "path_expansion": 40,
+        "session_surface_cohort": 56
+      },
+      "winning_admission": {
+        "path_expansion": 172,
+        "lexical": 828
+      }
+    },
+    "gold_source_channel_counts": {
+      "workspace_local": 439,
+      "lexical": 248,
+      "lexical_expanded": 236,
+      "evidence_fts": 422,
+      "query_probe_lexical": 182,
+      "evidence_anchor": 318,
+      "plane:lexical": 424,
+      "plane:evidence_anchor": 318,
+      "activation": 80,
+      "plane:activation": 80,
+      "path_expansion": 293,
+      "plane:path_expansion": 293,
+      "session_surface_cohort": 214,
+      "plane:session_surface_cohort": 214,
+      "graph_expansion": 15,
+      "plane:graph_expansion": 15
+    },
+    "gold_source_plane_counts": {
+      "lexical": 424,
+      "evidence_anchor": 318,
+      "activation": 80,
+      "path_expansion": 293,
+      "session_surface_cohort": 214,
+      "graph_expansion": 15
+    }
+  }
+}

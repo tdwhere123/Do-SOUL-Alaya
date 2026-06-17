@@ -1,0 +1,996 @@
+{
+  "bench_name": "public",
+  "split": "longmemeval-s",
+  "run_at": "2026-06-16T18:29:55.475Z",
+  "alaya_commit": "144b94a",
+  "alaya_version": "0.3.11",
+  "recall_pipeline_version": "fusion-rrf-synthesis-v2",
+  "embedding_provider": "local_onnx:Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+  "chat_provider": "none",
+  "policy_shape": "stress",
+  "simulate_report": "none",
+  "seed_policy": {
+    "mode": "label_independent_all_fact",
+    "label_independent": true,
+    "object_kind": "fact",
+    "description": "LongMemEval public recall evaluation seeds every haystack turn as a factual memory; has_answer labels are used only for scoring sidecars."
+  },
+  "dataset": {
+    "name": "longmemeval_s",
+    "size": 500,
+    "source": "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
+    "checksum_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+    "checksum_source": "/home/tdwhere/vibe/Do-SOUL-Alaya/.worktrees/bench-144b94af/docs/bench-history/datasets/longmemeval_s.meta.json"
+  },
+  "sample_size": 500,
+  "evaluated_count": 100,
+  "harness_mode": "mcp_propose_review",
+  "kpi": {
+    "r_at_1": 0.68,
+    "r_at_5": 0.91,
+    "r_at_10": 0.92,
+    "r_at_5_overall": 0.91,
+    "r_at_5_with_embedding_returned": 0.91,
+    "provider_returned_rate": 1,
+    "provider_pending_rate": 0,
+    "provider_failed_rate": 0,
+    "provider_not_requested_rate": 0,
+    "embedding_vector_cache_ready_rate": 1,
+    "query_embedding_cache_ready_rate": 1,
+    "latency_ms_p50": 318.923317,
+    "latency_ms_p95": 700.354324,
+    "latency_source": "exact",
+    "token_saved_ratio_vs_full_prompt": 0.9999503134505835,
+    "token_economy": {
+      "schema_version": "bench-token-economy.v1",
+      "raw_history_tokens": 12265952,
+      "stored_memory_tokens": 3823294,
+      "recalled_context_tokens_total": 64602,
+      "recall_event_count": 106,
+      "recalled_context_tokens_mean": 609.4528301886793,
+      "seed_event_count": 68471
+    },
+    "recall_token_economy": {
+      "schema_version": "bench-recall-token-economy.v1",
+      "sample_count": 100,
+      "delivered_context_tokens_estimate": {
+        "mean": 611.14,
+        "p50": 587.5,
+        "p95": 833.35,
+        "max": 995
+      },
+      "coarse_pool_size": {
+        "mean": 438.32,
+        "p50": 426.5,
+        "p95": 609.8,
+        "max": 740
+      },
+      "fine_evaluated": {
+        "mean": 438.32,
+        "p50": 426.5,
+        "p95": 609.8,
+        "max": 740
+      },
+      "fusion_streams_with_hits": {
+        "mean": 13.02,
+        "p50": 13,
+        "p95": 13.049999999999997,
+        "max": 14
+      },
+      "embedding_inference_calls": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      }
+    },
+    "tier_distribution": {
+      "hot": 100,
+      "warm": 0,
+      "cold": 0
+    },
+    "degradation_reasons": {
+      "none": 100,
+      "warm_cascade_engaged": 0,
+      "cold_cascade_engaged": 0,
+      "recall_explainability_partial": 0
+    },
+    "seed_truncation": {
+      "seed_turns_truncated": 0,
+      "answer_turns_truncated": 0,
+      "seed_chars_clipped": 0
+    },
+    "seed_extraction_path": {
+      "path": "official_api_compile",
+      "cache_hits": 25127,
+      "llm_calls": 0,
+      "offline_fallbacks": 0,
+      "live_extraction_failures": 0,
+      "cached_extraction_failures": 0,
+      "facts_produced": 64644,
+      "signals_dropped": 7369,
+      "parse_dropped": 299,
+      "compile_overflow_dropped": 0,
+      "signals_dropped_by_reason": {
+        "candidate_absent": 6920,
+        "materialization_error": 150
+      }
+    },
+    "quality_metrics": {
+      "schema_version": "bench-quality-metrics.v1",
+      "non_monotonic_rate": 0,
+      "non_monotonic_count": 0,
+      "non_monotonic_denominator": 100,
+      "budget_drop_distribution": {
+        "max_entries": {
+          "count": 41,
+          "share": 0.09172259507829977,
+          "denominator": 447
+        }
+      },
+      "high_lexical_demoted_rate": 0.05660377358490566,
+      "high_lexical_demoted_count": 9,
+      "high_lexical_demoted_denominator": 159,
+      "candidate_absent_count": 0,
+      "candidate_absent_denominator": 100,
+      "no_gold_count": 0,
+      "no_gold_denominator": 100,
+      "evidence_stream_gold_delivery_rate": 1,
+      "evidence_stream_gold_delivery_count": 159,
+      "evidence_stream_gold_delivery_denominator": 159,
+      "path_stream_top10_rate": 0.75,
+      "path_stream_top10_count": 750,
+      "path_stream_top10_denominator": 1000,
+      "per_plane_recall_coverage": {
+        "activation": {
+          "gold_count": 80,
+          "hit_at_5_count": 25,
+          "hit_at_5_rate": 0.3125
+        },
+        "evidence_anchor": {
+          "gold_count": 318,
+          "hit_at_5_count": 159,
+          "hit_at_5_rate": 0.5
+        },
+        "graph_expansion": {
+          "gold_count": 27,
+          "hit_at_5_count": 0,
+          "hit_at_5_rate": 0
+        },
+        "lexical": {
+          "gold_count": 424,
+          "hit_at_5_count": 159,
+          "hit_at_5_rate": 0.375
+        },
+        "path_expansion": {
+          "gold_count": 371,
+          "hit_at_5_count": 148,
+          "hit_at_5_rate": 0.39892183288409705
+        },
+        "session_surface_cohort": {
+          "gold_count": 214,
+          "hit_at_5_count": 76,
+          "hit_at_5_rate": 0.35514018691588783
+        }
+      },
+      "cohort_attribution": {
+        "delivered_plane_count": 42,
+        "gold_source_plane_count": 214,
+        "gold_first_admitted_count": 6,
+        "gold_winning_admission_count": 0,
+        "hit_at_5_count": 76,
+        "hit_at_5_rate": 0.35514018691588783
+      },
+      "path_vs_graph_fanin": {
+        "path_gold_source_count": 371,
+        "path_gold_hit_at_5_count": 148,
+        "path_gold_hit_at_5_rate": 0.39892183288409705,
+        "graph_gold_source_count": 27,
+        "graph_gold_hit_at_5_count": 0,
+        "graph_gold_hit_at_5_rate": 0,
+        "path_primary_hit_at_5_count": 148,
+        "graph_only_hit_at_5_count": 0
+      },
+      "abstention": {
+        "schema_version": "bench-abstention.v1",
+        "total": 6,
+        "false_confident_threshold": 0.91,
+        "correct_at_1": 5,
+        "correct_at_5": 4,
+        "correct_at_10": 4,
+        "false_confident_at_1": 1,
+        "false_confident_at_5": 2,
+        "false_confident_at_10": 2
+      },
+      "gold_rank_buckets": {
+        "delivered_top5": 87,
+        "pre_budget_6_10": 4,
+        "pre_budget_11_25": 3,
+        "pre_budget_26_50": 0,
+        "pre_budget_51_100": 0,
+        "pre_budget_gt_100": 0,
+        "candidate_absent": 0
+      },
+      "top_distractor_breakdown": {
+        "existing_score_dominant": 0,
+        "synthesis_reserved": 0,
+        "source_proximity_local_only": 0,
+        "path_or_graph_dominant": 0,
+        "lexical_topic_neighbor": 35,
+        "unknown": 0
+      },
+      "object_kind_delivery": {
+        "memory_entry": 800,
+        "synthesis_capsule": 200,
+        "total_delivered": 1000
+      },
+      "gold_facet_separation": {
+        "separable": 1,
+        "overlapping": 6,
+        "indeterminate": 0,
+        "gold_dimension_counts": {
+          "fact": 6,
+          "constraint": 1,
+          "decision": 1
+        }
+      },
+      "per_gold_rank_buckets": {
+        "gold_ordinal_0": {
+          "delivered_top5": 86,
+          "pre_budget_6_10": 5,
+          "pre_budget_11_25": 3,
+          "pre_budget_26_50": 0,
+          "pre_budget_51_100": 0,
+          "pre_budget_gt_100": 0,
+          "candidate_absent": 0
+        },
+        "gold_ordinal_1plus": {
+          "delivered_top5": 73,
+          "pre_budget_6_10": 51,
+          "pre_budget_11_25": 84,
+          "pre_budget_26_50": 64,
+          "pre_budget_51_100": 52,
+          "pre_budget_gt_100": 29,
+          "candidate_absent": 0
+        }
+      },
+      "per_gold_displaced_by": {
+        "existing_score_dominant": 0,
+        "synthesis_reserved": 0,
+        "source_proximity_local_only": 0,
+        "path_or_graph_dominant": 0,
+        "lexical_topic_neighbor": 1400,
+        "unknown": 0
+      },
+      "miss_distribution": {
+        "hit_at_5": 87,
+        "under_ranked": 4,
+        "budget_dropped": 3,
+        "abstained_correctly": 4,
+        "abstain_false_confident": 2
+      }
+    },
+    "qa_metrics": {
+      "qa_total": 100,
+      "qa_correct": 65,
+      "qa_accuracy": 0.65,
+      "qa_abstention_total": 6,
+      "qa_abstention_correct": 6,
+      "qa_by_type": {
+        "single-session-user": {
+          "total": 70,
+          "correct": 58
+        },
+        "multi-session": {
+          "total": 30,
+          "correct": 7
+        }
+      },
+      "answer_model": "gpt-5.4-nano",
+      "judge_model": "gpt-5.4-nano"
+    },
+    "per_scenario": [
+      {
+        "id": "e47becba",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 231.93762
+      },
+      {
+        "id": "118b2229",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 184.883356
+      },
+      {
+        "id": "51a45a95",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 177.045189
+      },
+      {
+        "id": "58bf7951",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 252.707382
+      },
+      {
+        "id": "1e043500",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 191.781087
+      },
+      {
+        "id": "c5e8278d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 187.935287
+      },
+      {
+        "id": "6ade9755",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 189.832119
+      },
+      {
+        "id": "6f9b354f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 179.728267
+      },
+      {
+        "id": "58ef2f1c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 215.00116
+      },
+      {
+        "id": "f8c5f88b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 187.377371
+      },
+      {
+        "id": "5d3d2817",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 198.955544
+      },
+      {
+        "id": "7527f7e2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 221.295201
+      },
+      {
+        "id": "c960da58",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 207.541957
+      },
+      {
+        "id": "3b6f954b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 216.1139
+      },
+      {
+        "id": "726462e0",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 266.952251
+      },
+      {
+        "id": "94f70d80",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 220.538101
+      },
+      {
+        "id": "66f24dbb",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 230.935495
+      },
+      {
+        "id": "ad7109d1",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 196.98236
+      },
+      {
+        "id": "af8d2e46",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 258.126779
+      },
+      {
+        "id": "dccbc061",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 200.623669
+      },
+      {
+        "id": "c8c3f81d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 223.917524
+      },
+      {
+        "id": "8ebdbe50",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 211.144475
+      },
+      {
+        "id": "6b168ec8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 193.554185
+      },
+      {
+        "id": "75499fd8",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 199.419189
+      },
+      {
+        "id": "21436231",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 247.128826
+      },
+      {
+        "id": "95bcc1c8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 300.742728
+      },
+      {
+        "id": "0862e8bf",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 229.120561
+      },
+      {
+        "id": "853b0a1d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 262.810674
+      },
+      {
+        "id": "a06e4cfe",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 318.923317
+      },
+      {
+        "id": "37d43f65",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 227.222539
+      },
+      {
+        "id": "b86304ba",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 260.158599
+      },
+      {
+        "id": "d52b4f67",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 225.079082
+      },
+      {
+        "id": "25e5aa4f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 245.921553
+      },
+      {
+        "id": "caf9ead2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 296.286911
+      },
+      {
+        "id": "8550ddae",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 312.454203
+      },
+      {
+        "id": "60d45044",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 231.845111
+      },
+      {
+        "id": "3f1e9474",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 362.644373
+      },
+      {
+        "id": "86b68151",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 245.523808
+      },
+      {
+        "id": "577d4d32",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 331.44641
+      },
+      {
+        "id": "ec81a493",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 272.706304
+      },
+      {
+        "id": "15745da0",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 345.98064
+      },
+      {
+        "id": "e01b8e2f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 299.175621
+      },
+      {
+        "id": "bc8a6e93",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 273.266529
+      },
+      {
+        "id": "ccb36322",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 463.931608
+      },
+      {
+        "id": "001be529",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 295.17694
+      },
+      {
+        "id": "b320f3f8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 296.498151
+      },
+      {
+        "id": "19b5f2b3",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 266.046985
+      },
+      {
+        "id": "4fd1909e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 325.386806
+      },
+      {
+        "id": "545bd2b5",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 473.343416
+      },
+      {
+        "id": "8a137a7f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 267.048045
+      },
+      {
+        "id": "76d63226",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 291.511043
+      },
+      {
+        "id": "86f00804",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 232.643236
+      },
+      {
+        "id": "8e9d538c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 333.29938
+      },
+      {
+        "id": "311778f1",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 397.832411
+      },
+      {
+        "id": "c19f7a0b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 428.412511
+      },
+      {
+        "id": "4100d0a0",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 221.179256
+      },
+      {
+        "id": "29f2956b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 368.433875
+      },
+      {
+        "id": "1faac195",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 241.603899
+      },
+      {
+        "id": "faba32e5",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 334.730369
+      },
+      {
+        "id": "f4f1d8a4",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 337.680601
+      },
+      {
+        "id": "c14c00dd",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 409.064242
+      },
+      {
+        "id": "36580ce8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 438.257673
+      },
+      {
+        "id": "3d86fd0a",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 204.582596
+      },
+      {
+        "id": "a82c026e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 289.451991
+      },
+      {
+        "id": "0862e8bf_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 449.967156
+      },
+      {
+        "id": "15745da0_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 645.799588
+      },
+      {
+        "id": "bc8a6e93_abs",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 415.170175
+      },
+      {
+        "id": "19b5f2b3_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 396.469469
+      },
+      {
+        "id": "29f2956b_abs",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 556.568362
+      },
+      {
+        "id": "f4f1d8a4_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 397.757338
+      },
+      {
+        "id": "0a995998",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 439.823519
+      },
+      {
+        "id": "6d550036",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 560.06661
+      },
+      {
+        "id": "gpt4_59c863d7",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 636.459262
+      },
+      {
+        "id": "b5ef892d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 565.154657
+      },
+      {
+        "id": "e831120c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 549.370874
+      },
+      {
+        "id": "3a704032",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 427.385875
+      },
+      {
+        "id": "gpt4_d84a3211",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 646.612829
+      },
+      {
+        "id": "aae3761f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 392.358977
+      },
+      {
+        "id": "gpt4_f2262a51",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 385.163455
+      },
+      {
+        "id": "dd2973ad",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 543.419848
+      },
+      {
+        "id": "c4a1ceb8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 733.97305
+      },
+      {
+        "id": "gpt4_a56e767c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 624.709319
+      },
+      {
+        "id": "6cb6f249",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 549.812397
+      },
+      {
+        "id": "46a3abf7",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 898.349984
+      },
+      {
+        "id": "36b9f61e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 453.718034
+      },
+      {
+        "id": "28dc39ac",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 618.400106
+      },
+      {
+        "id": "gpt4_2f8be40d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 748.670955
+      },
+      {
+        "id": "2e6d26dc",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 496.213414
+      },
+      {
+        "id": "gpt4_15e38248",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 455.091578
+      },
+      {
+        "id": "88432d0a",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 617.082146
+      },
+      {
+        "id": "80ec1f4f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 553.41779
+      },
+      {
+        "id": "d23cf73b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 830.89241
+      },
+      {
+        "id": "gpt4_7fce9456",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 700.354324
+      },
+      {
+        "id": "d682f1a2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 816.727076
+      },
+      {
+        "id": "7024f17c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 499.165553
+      },
+      {
+        "id": "gpt4_5501fe77",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 628.199631
+      },
+      {
+        "id": "gpt4_2ba83207",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 565.904613
+      },
+      {
+        "id": "2318644b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 616.509214
+      },
+      {
+        "id": "2ce6a0f2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 650.204127
+      },
+      {
+        "id": "gpt4_d12ceb0e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 376.165328
+      }
+    ]
+  },
+  "diff_vs_previous": null
+}
