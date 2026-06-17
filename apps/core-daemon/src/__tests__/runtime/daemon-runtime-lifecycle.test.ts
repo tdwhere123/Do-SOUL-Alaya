@@ -4,9 +4,11 @@ import { createDaemonLifecycleControls } from "../../runtime/daemon-runtime-life
 function createControls(
   tokenSource: "env" | "ephemeral",
   overrides: Partial<{
-    runBackgroundPass: ReturnType<typeof vi.fn>;
-    runBulkEnrichPass: ReturnType<typeof vi.fn>;
-    runEmbeddingBackfillPass: ReturnType<typeof vi.fn>;
+    runBackgroundPass: () => Promise<void>;
+    runBulkEnrichPass: (workspaceId: string) => Promise<void>;
+    runEmbeddingBackfillPass: (workspaceId: string) => Promise<void>;
+    recallReadWorkerClient: { close(): Promise<void> };
+    database: { close(): void };
   }> = {}
 ) {
   const warn = vi.fn();
@@ -40,7 +42,8 @@ function createControls(
     securityStatusService: { close: vi.fn() },
     daemonMcpRuntimeRegistry: { close: vi.fn(async () => undefined) },
     globalMemoryRecallInvalidationSubscription: null,
-    database: { close: vi.fn() },
+    recallReadWorkerClient: overrides.recallReadWorkerClient,
+    database: overrides.database ?? { close: vi.fn() },
     requestProtection: {
       allowedOrigin: "http://localhost:5173",
       requestToken: "secret-token",
@@ -102,5 +105,29 @@ describe("createDaemonLifecycleControls", () => {
 
     expect(runBackgroundPass).toHaveBeenCalledTimes(1);
     expect(runBulkEnrichPass).toHaveBeenCalledWith("workspace-1");
+  });
+
+  it("closes the recall read worker before closing the database", async () => {
+    const order: string[] = [];
+    const recallReadWorkerClient = {
+      close: vi.fn(async () => {
+        order.push("worker");
+      })
+    };
+    const database = {
+      close: vi.fn(() => {
+        order.push("database");
+      })
+    };
+    const { controls } = createControls("env", {
+      recallReadWorkerClient,
+      database
+    });
+
+    await controls.shutdown();
+
+    expect(recallReadWorkerClient.close).toHaveBeenCalledTimes(1);
+    expect(database.close).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["worker", "database"]);
   });
 });

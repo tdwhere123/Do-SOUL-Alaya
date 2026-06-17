@@ -6,8 +6,11 @@ export class SerialDelegationEventIntake {
   // After cancel/recovery we allow a tiny observation window for an in-flight
   // terminal event to land before forcing the queue to settle without it.
   private static readonly SESSION_FINISHED_GRACE_PERIOD_MS = 25;
+  private static readonly MAX_QUEUED_OPERATIONS = 4096;
   private acceptsEvents = true;
-  private eventQueue: Promise<void> = Promise.resolve();
+  private readonly queuedOperations: Array<() => Promise<void>> = [];
+  private readonly drainWaiters = new Set<() => void>();
+  private consumerRunning = false;
   private drainError: unknown = null;
   private pendingSessionFinishedEvent: SessionFinishedEvent | null = null;
   private readonly pendingSessionFinishedWaiters = new Set<
@@ -61,13 +64,18 @@ export class SerialDelegationEventIntake {
       const timeoutId = setTimeout(() => {
         settle(this.pendingSessionFinishedEvent);
       }, SerialDelegationEventIntake.SESSION_FINISHED_GRACE_PERIOD_MS);
+      timeoutId.unref?.();
 
       this.pendingSessionFinishedWaiters.add(settle);
     });
   }
 
   public async drain(): Promise<void> {
-    await this.eventQueue;
+    while (this.consumerRunning || this.queuedOperations.length > 0) {
+      await new Promise<void>((resolve) => {
+        this.drainWaiters.add(resolve);
+      });
+    }
 
     if (this.drainError !== null) {
       const error = this.drainError;
@@ -77,18 +85,40 @@ export class SerialDelegationEventIntake {
   }
 
   public enqueue(operation: () => Promise<void>): void {
-    this.eventQueue = this.eventQueue
-      .catch((error) => {
-        // Prior queued op already self-reports via the .then handler below;
-        // log here only to flag the otherwise-silent chain-keep swallow.
-        process.emitWarning("[SerialDelegationEventIntake] Prior queued operation rejected (fire-and-forget)", {
-          code: "ALAYA_SERIAL_DELEGATION_QUEUE_PRIOR_REJECTED",
-          detail: JSON.stringify({
-            error: error instanceof Error ? error.message : String(error)
-          })
-        });
-      })
-      .then(async () => {
+    if (this.queuedOperations.length >= SerialDelegationEventIntake.MAX_QUEUED_OPERATIONS) {
+      const error = new Error(
+        `Serial delegation event queue capacity exceeded (${SerialDelegationEventIntake.MAX_QUEUED_OPERATIONS})`
+      );
+      this.drainError ??= error;
+      process.emitWarning("[SerialDelegationEventIntake] Queued runtime event operation rejected", {
+        code: "ALAYA_SERIAL_DELEGATION_QUEUE_CAPACITY_EXCEEDED",
+        detail: JSON.stringify({
+          capacity: SerialDelegationEventIntake.MAX_QUEUED_OPERATIONS
+        })
+      });
+      this.resolveDrainWaitersIfIdle();
+      return;
+    }
+
+    this.queuedOperations.push(operation);
+    this.startConsumer();
+  }
+
+  private startConsumer(): void {
+    if (this.consumerRunning) {
+      return;
+    }
+    this.consumerRunning = true;
+    void this.consumeQueue();
+  }
+
+  private async consumeQueue(): Promise<void> {
+    try {
+      while (this.queuedOperations.length > 0) {
+        const operation = this.queuedOperations.shift();
+        if (operation === undefined) {
+          continue;
+        }
         try {
           await operation();
         } catch (error) {
@@ -104,12 +134,30 @@ export class SerialDelegationEventIntake {
             })
           });
         }
-      });
+      }
+    } finally {
+      this.consumerRunning = false;
+      if (this.queuedOperations.length > 0) {
+        this.startConsumer();
+        return;
+      }
+      this.resolveDrainWaitersIfIdle();
+    }
   }
 
   private resolvePendingSessionFinishedWaiters(event: SessionFinishedEvent): void {
     for (const waiter of this.pendingSessionFinishedWaiters) {
       waiter(event);
     }
+  }
+
+  private resolveDrainWaitersIfIdle(): void {
+    if (this.consumerRunning || this.queuedOperations.length > 0) {
+      return;
+    }
+    for (const waiter of this.drainWaiters) {
+      waiter();
+    }
+    this.drainWaiters.clear();
   }
 }

@@ -559,7 +559,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     pathRelationEvictionTimer,
     materializationRouter,
     signalService,
-    edgeClassifyQueueRepoHolder
+    edgeClassifyQueueRepoHolder,
+    recallReadWorkerClient
   } = await createRecallMaterializationWiring({
     database,
     configEnv,
@@ -973,6 +974,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       globalMemoryRecallInvalidationSubscription,
       requestProtection,
       database,
+      recallReadWorkerClient,
       intervalsToClear: [pathRelationEvictionTimer]
     },
     serviceExports: {

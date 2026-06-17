@@ -105,8 +105,16 @@ function createDependencies(params: {
     [StorageTier.WARM, params.warm ?? []],
     [StorageTier.COLD, params.cold ?? []]
   ]);
-  const findByWorkspaceIdSpy = vi.fn(async (_workspaceId: string, tier?: StorageTier) => {
-    return byTier.get(tier ?? StorageTier.HOT) ?? [];
+  const findByWorkspaceIdSpy = vi.fn(async (
+    _workspaceId: string,
+    tier?: StorageTier,
+    page?: { readonly limit: number; readonly offset: number }
+  ) => {
+    const entries = byTier.get(tier ?? StorageTier.HOT) ?? [];
+    if (page === undefined) {
+      return entries;
+    }
+    return entries.slice(page.offset, page.offset + page.limit);
   });
 
   return {
@@ -205,7 +213,11 @@ describe("RecallService tier cascade", () => {
     });
 
     expect(cascade.findByWorkspaceIdSpy).toHaveBeenCalledTimes(1);
-    expect(cascade.findByWorkspaceIdSpy).toHaveBeenCalledWith("workspace-1", StorageTier.HOT);
+    expect(cascade.findByWorkspaceIdSpy).toHaveBeenCalledWith(
+      "workspace-1",
+      StorageTier.HOT,
+      expect.objectContaining({ offset: 0 })
+    );
     expect(graphSupportSpy).toHaveBeenCalledTimes(MIN_RECALL_RESULTS);
     // phase_latency_ms is non-deterministic wall-clock telemetry, orthogonal to
     // what is recalled; drop it before the byte-identical comparison.
@@ -220,6 +232,26 @@ describe("RecallService tier cascade", () => {
     expect(cascade.result.degradation_reason).toBeNull();
     expect(cascade.result.candidates.flatMap((candidate) => candidate.source_channels ?? [])).not.toContain("warm_cascade");
     expect(cascade.result.candidates.flatMap((candidate) => candidate.source_channels ?? [])).not.toContain("cold_cascade");
+  });
+
+  it("loads a large HOT tier through bounded pages", async () => {
+    const hot = Array.from({ length: 600 }, (_, index) =>
+      createMemoryEntry({
+        object_id: `hot-${String(index).padStart(3, "0")}`,
+        activation_score: 0.9 - index * 0.001,
+        storage_tier: StorageTier.HOT
+      })
+    );
+
+    const { result, findByWorkspaceIdSpy } = await recallWith({ hot });
+    const hotCalls = findByWorkspaceIdSpy.mock.calls.filter(
+      (call) => call[1] === StorageTier.HOT
+    );
+
+    expect(result.candidates.length).toBeGreaterThan(0);
+    expect(hotCalls).toHaveLength(2);
+    expect(hotCalls[0]?.[2]).toEqual({ limit: 512, offset: 0 });
+    expect(hotCalls[1]?.[2]).toEqual({ limit: 512, offset: 512 });
   });
 
   it("uses WARM once when HOT is empty and decays delivered relevance", async () => {
@@ -247,8 +279,18 @@ describe("RecallService tier cascade", () => {
     }, 3);
 
     expect(warm.findByWorkspaceIdSpy).toHaveBeenCalledTimes(2);
-    expect(warm.findByWorkspaceIdSpy).toHaveBeenNthCalledWith(1, "workspace-1", StorageTier.HOT);
-    expect(warm.findByWorkspaceIdSpy).toHaveBeenNthCalledWith(2, "workspace-1", StorageTier.WARM);
+    expect(warm.findByWorkspaceIdSpy).toHaveBeenNthCalledWith(
+      1,
+      "workspace-1",
+      StorageTier.HOT,
+      expect.objectContaining({ offset: 0 })
+    );
+    expect(warm.findByWorkspaceIdSpy).toHaveBeenNthCalledWith(
+      2,
+      "workspace-1",
+      StorageTier.WARM,
+      expect.objectContaining({ offset: 0 })
+    );
     // 3 WARM candidates merged through the final assess, no HOT-only assess.
     expect(cascadeGraphSpy).toHaveBeenCalledTimes(3);
     expect(warm.result.degradation_reason).toBe("warm_cascade_engaged");
@@ -275,7 +317,12 @@ describe("RecallService tier cascade", () => {
     });
 
     expect(cold.findByWorkspaceIdSpy).toHaveBeenCalledTimes(3);
-    expect(cold.findByWorkspaceIdSpy).toHaveBeenNthCalledWith(3, "workspace-1", StorageTier.COLD);
+    expect(cold.findByWorkspaceIdSpy).toHaveBeenNthCalledWith(
+      3,
+      "workspace-1",
+      StorageTier.COLD,
+      expect.objectContaining({ offset: 0 })
+    );
     expect(cold.result.degradation_reason).toBe("cold_cascade_engaged");
     expect(cold.result.candidates).toHaveLength(1);
     expect(cold.result.candidates[0]?.source_channels).toContain("cold_cascade");
@@ -305,7 +352,7 @@ describe("RecallService tier cascade", () => {
     });
 
     expect(findByWorkspaceIdSpy).toHaveBeenCalledTimes(2);
-    expect(findByWorkspaceIdSpy).not.toHaveBeenCalledWith("workspace-1", StorageTier.COLD);
+    expect(findByWorkspaceIdSpy.mock.calls.some((call) => call[1] === StorageTier.COLD)).toBe(false);
     expect(result.degradation_reason).toBe("warm_cascade_engaged");
     expect(result.candidates).toHaveLength(6);
   });

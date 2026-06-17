@@ -1216,7 +1216,7 @@ function createEmptyChunkedJsonRequest(url: string): Request {
 }
 
 async function withResponseTimeout(
-  responsePromise: Promise<Response>,
+  responsePromise: Response | Promise<Response>,
   timeoutMs = 200
 ): Promise<Response> {
   let timer: ReturnType<typeof setTimeout> | undefined;

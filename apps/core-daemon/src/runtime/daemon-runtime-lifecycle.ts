@@ -34,6 +34,7 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   securityStatusService: Readonly<{ close(): void }>;
   daemonMcpRuntimeRegistry: Readonly<{ close(): Promise<void> }>;
   globalMemoryRecallInvalidationSubscription: Readonly<{ dispose(): void }> | null;
+  recallReadWorkerClient?: Readonly<{ close(): Promise<void> }> | null;
   database: Readonly<{ close(): void }>;
   requestProtection: RequestProtectionConfig;
   intervalsToClear?: ReadonlyArray<NodeJS.Timeout>;
@@ -120,6 +121,16 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
       if (server !== null) {
         await closeServer(server);
         server = null;
+      }
+
+      if (input.recallReadWorkerClient !== undefined && input.recallReadWorkerClient !== null) {
+        try {
+          await input.recallReadWorkerClient.close();
+        } catch (error) {
+          input.warnLogger.warn("recall read worker shutdown failed", {
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
 
       input.database.close();

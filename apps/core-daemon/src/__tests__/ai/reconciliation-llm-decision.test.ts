@@ -118,6 +118,21 @@ describe("createReconciliationLlmDecisionPort", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("fails visible when the model returns malformed decision JSON", async () => {
+    const llmComplete = vi.fn(async () => "{not-json");
+    const port = createReconciliationLlmDecisionPort({
+      config: baseConfig,
+      cacheRoot,
+      llmComplete
+    });
+
+    await expect(port!.decide({
+      incomingContent: "works in Munich",
+      candidates: [{ objectId: "memory-a", content: "The user lives in Berlin" }]
+    })).rejects.toThrow("garden reconciliation decision response was not valid JSON");
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+  });
+
   it("content-anchored cache hit resolves the target to the current object_id", async () => {
     const llmComplete = vi.fn(async () =>
       JSON.stringify({ kind: "update", target_object_id: "memory-old", reason: "refine" })

@@ -5,6 +5,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    "useUnknownInCatchVariables": true,
     "composite": true,
     "declaration": true,
     "declarationMap": true,

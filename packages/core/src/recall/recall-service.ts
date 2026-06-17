@@ -38,7 +38,8 @@ import type {
   RecallResult,
   RecallServiceDependencies,
   RecallServiceWarnPort,
-  RecallTokenEconomy
+  RecallTokenEconomy,
+  RecallMemoryListPageOptions
 } from "./recall-service-types.js";
 import { makeTokenEstimator } from "./recall-service-types.js";
 import {
@@ -104,19 +105,23 @@ import {
 export { classifyGlobalCandidate } from "./recall-service-helpers.js";
 export type {
   KeywordSearchResult,
+  RecallMemoryListPageOptions,
   RecallCandidate,
   RecallResult,
   RecallServiceBudgetPenaltyPort,
   RecallServiceActiveConstraintsPort,
   RecallServiceClaimResolverPort,
   RecallServiceDependencies,
+  RecallServiceEvidenceSearchPort,
   RecallServiceEmbeddingRecallPort,
   RecallServiceEventLogRepoPort,
   RecallServiceGraphSupportPort,
   RecallServiceMemoryRepoPort,
   RecallServicePathExpansionPort,
+  RecallServicePathPlasticityPort,
   RecallServiceProjectMappingPort,
   RecallServiceSlotRepoPort,
+  RecallServiceSynthesisSearchPort,
   RecallServiceWarnPort,
   RecallTokenEconomy,
   TokenEstimator
@@ -127,6 +132,7 @@ export { RECALL_FUSION_STREAMS, recallDeliveryReserveTestInternals } from "./fus
 
 const DYNAMIC_RECALL_PLANE_CAP = 240;
 const DYNAMIC_RECALL_TOTAL_CANDIDATE_CAP = 1000;
+const RECALL_TIER_MEMORY_PAGE_SIZE = 512;
 // anchor: entity_seed caps. The per-entity ceiling keeps a single common
 // surface (e.g. "config") from flooding the plane; total admit caps
 // bound the FTS-call fan-out per recall.
@@ -143,6 +149,19 @@ const RECALLS_EDGE_COLD_THRESHOLD = 50;
 // so the per-plane admit ceiling is the structural truth and the multi-seed
 // path inherits the same bound. see also: DYNAMIC_RECALL_PLANE_CAP
 const MULTI_SEED_GRAPH_FAN_OUT_CAP = DYNAMIC_RECALL_PLANE_CAP;
+
+function buildMemoryPageSignature(
+  page: readonly Readonly<MemoryEntry>[]
+): string | null {
+  if (page.length === 0) {
+    return null;
+  }
+  return [
+    page.length,
+    page[0]?.object_id ?? "",
+    page[page.length - 1]?.object_id ?? ""
+  ].join(":");
+}
 
 export class RecallService {
   private readonly generateRuntimeId: () => string;
@@ -479,6 +498,61 @@ export class RecallService {
     });
   }
 
+  private async loadTierMemoriesForRecall(
+    workspaceId: string,
+    tier: StorageTier
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const memories: Readonly<MemoryEntry>[] = [];
+    let offset = 0;
+    let previousPageSignature: string | null = null;
+
+    for (;;) {
+      const page: RecallMemoryListPageOptions = {
+        limit: RECALL_TIER_MEMORY_PAGE_SIZE,
+        offset
+      };
+      const pageMemories = await this.dependencies.memoryRepo.findByWorkspaceId(
+        workspaceId,
+        tier,
+        page
+      );
+      if (pageMemories.length > RECALL_TIER_MEMORY_PAGE_SIZE) {
+        this.warn("recall memory repo returned an oversized page", {
+          workspace_id: workspaceId,
+          tier,
+          limit: RECALL_TIER_MEMORY_PAGE_SIZE,
+          returned_count: pageMemories.length
+        });
+        memories.push(...pageMemories);
+        break;
+      }
+
+      const pageSignature = buildMemoryPageSignature(pageMemories);
+      if (
+        offset > 0 &&
+        pageSignature !== null &&
+        pageSignature === previousPageSignature
+      ) {
+        this.warn("recall memory repo returned a duplicate page", {
+          workspace_id: workspaceId,
+          tier,
+          limit: RECALL_TIER_MEMORY_PAGE_SIZE,
+          offset
+        });
+        break;
+      }
+
+      memories.push(...pageMemories);
+      if (pageMemories.length < RECALL_TIER_MEMORY_PAGE_SIZE) {
+        break;
+      }
+      offset += pageMemories.length;
+      previousPageSignature = pageSignature;
+    }
+
+    return Object.freeze(memories);
+  }
+
   private async coarseFilter(
     workspaceId: string,
     config: Readonly<RecallPolicy>["coarse_filter"],
@@ -519,7 +593,7 @@ export class RecallService {
   }> {
     const tier = options.tier ?? StorageTier.HOT;
     const [rawTierMemories, projectMappings] = await Promise.all([
-      this.dependencies.memoryRepo.findByWorkspaceId(workspaceId, tier),
+      this.loadTierMemoriesForRecall(workspaceId, tier),
       options.projectMappings ?? this.dependencies.projectMappingPort?.findByWorkspace(workspaceId) ?? Promise.resolve([])
     ]);
     // Apply optional time-window filter as a pre-filter so the score function

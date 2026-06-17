@@ -470,7 +470,7 @@ describe("RecallService", () => {
     expect(querySupplementIfReady).not.toHaveBeenCalled();
   });
 
-  it("handles overlapped embedding preparation rejection when assessment fails", async () => {
+  it("handles overlapped embedding preparation rejection when vector precheck fails", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-lexical",
@@ -491,14 +491,6 @@ describe("RecallService", () => {
     });
     const service = new RecallService({
       ...dependencies,
-      graphSupportPort: {
-        countInboundSupports: vi.fn(async () => {
-          throw new Error("graph support unavailable");
-        }),
-        countInboundEdgesWeighted: vi.fn(async () => {
-          throw new Error("graph support unavailable");
-        })
-      },
       embeddingRecallService: {
         hasStoredVectors,
         prepareQueryEmbedding: vi.fn(() => createPreparedQueryHandle("prepared-query-unused")),
@@ -531,7 +523,7 @@ describe("RecallService", () => {
           strategy: "analyze",
           policyOverride: policy
         })
-      ).rejects.toThrow("graph support unavailable");
+      ).rejects.toThrow("unexpected vector precheck failure");
       await new Promise((resolve) => setTimeout(resolve, 25));
       expect(hasStoredVectors).toHaveBeenCalled();
       expect(unhandled).toEqual([]);

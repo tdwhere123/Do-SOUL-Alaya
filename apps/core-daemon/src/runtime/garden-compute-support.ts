@@ -119,7 +119,7 @@ export function createConflictDetectionLlmPort(): ConflictDetectionLlmPort | nul
   ) {
     return null;
   }
-  const model = process.env.ALAYA_CONFLICT_LLM_MODEL?.trim() ?? "gpt-5.4-mini";
+  const model = process.env.ALAYA_CONFLICT_LLM_MODEL?.trim() || "gpt-5.4-mini";
   const parsedTimeout = Number.parseInt(
     process.env.ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "",
     10
@@ -144,6 +144,7 @@ export function createConflictDetectionLlmPort(): ConflictDetectionLlmPort | nul
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
+      timer.unref?.();
       try {
         const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
           method: "POST",

@@ -44,8 +44,17 @@ export interface KeywordSearchResult {
   readonly trigram_rank?: number;
 }
 
+export interface RecallMemoryListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
+}
+
 export interface RecallServiceMemoryRepoPort {
-  findByWorkspaceId(workspaceId: string, tier?: StorageTierType): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByWorkspaceId(
+    workspaceId: string,
+    tier?: StorageTierType,
+    page?: RecallMemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   findByDimension(workspaceId: string, dimension: MemoryDimensionType): Promise<readonly Readonly<MemoryEntry>[]>;
   findByScopeClass(workspaceId: string, scopeClass: ScopeClass): Promise<readonly Readonly<MemoryEntry>[]>;
   searchByKeyword?(workspaceId: string, queryText: string, limit: number): Promise<readonly KeywordSearchResult[]>;
