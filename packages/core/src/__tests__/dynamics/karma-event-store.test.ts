@@ -35,12 +35,12 @@ class FakeKarmaEventRepo implements KarmaEventStoreRepoPort {
 }
 
 describe("SqliteKarmaEventStore", () => {
-  it("does not grow an in-memory event array across many records", () => {
+  it("does not grow an in-memory event array across many records", async () => {
     const repo = new FakeKarmaEventRepo();
     const store = new SqliteKarmaEventStore(repo);
 
     for (let i = 0; i < 1000; i++) {
-      store.record(makeEvent(`obj-${i}`, `evt-${i}`));
+      await store.record(makeEvent(`obj-${i}`, `evt-${i}`));
     }
 
     // No `events` field should exist on the production store, and no own
@@ -52,13 +52,13 @@ describe("SqliteKarmaEventStore", () => {
     expect((store as unknown as { events?: unknown }).events).toBeUndefined();
   });
 
-  it("reads return correct rows resolved from the repo", () => {
+  it("reads return correct rows resolved from the repo", async () => {
     const repo = new FakeKarmaEventRepo();
     const store = new SqliteKarmaEventStore(repo);
 
-    store.record(makeEvent("obj-a", "evt-a1"));
-    store.record(makeEvent("obj-b", "evt-b1"));
-    store.record(makeEvent("obj-a", "evt-a2"));
+    await store.record(makeEvent("obj-a", "evt-a1"));
+    await store.record(makeEvent("obj-b", "evt-b1"));
+    await store.record(makeEvent("obj-a", "evt-a2"));
 
     const found = store.findByObjectId("obj-a");
     expect(found.map((event) => event.event_id)).toEqual(["evt-a1", "evt-a2"]);
@@ -68,7 +68,7 @@ describe("SqliteKarmaEventStore", () => {
     expect(store.findByObjectId("obj-a")).toHaveLength(0);
   });
 
-  it("emits an operator-visible warning when async persistence fails", async () => {
+  it("emits an operator-visible warning and rejects when async persistence fails", async () => {
     const warn = { warn: vi.fn() };
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
     const store = new SqliteKarmaEventStore(
@@ -81,8 +81,7 @@ describe("SqliteKarmaEventStore", () => {
       warn
     );
 
-    store.record(makeEvent("obj-fail", "evt-fail"));
-    await Promise.resolve();
+    await expect(store.record(makeEvent("obj-fail", "evt-fail"))).rejects.toThrow("sqlite busy");
 
     expect(warn.warn).toHaveBeenCalledWith(
       "[SqliteKarmaEventStore] Failed to persist karma event",
@@ -100,22 +99,22 @@ describe("SqliteKarmaEventStore", () => {
     emitWarning.mockRestore();
   });
 
-  it("InMemoryKarmaEventStore remains the explicit in-memory test double", () => {
+  it("InMemoryKarmaEventStore remains the explicit in-memory test double", async () => {
     const store = new InMemoryKarmaEventStore();
-    store.record(makeEvent("obj-x", "evt-x1"));
-    store.record(makeEvent("obj-x", "evt-x2"));
+    await store.record(makeEvent("obj-x", "evt-x1"));
+    await store.record(makeEvent("obj-x", "evt-x2"));
     expect(store.findByObjectId("obj-x").map((event) => event.event_id)).toEqual([
       "evt-x1",
       "evt-x2"
     ]);
   });
 
-  it("InMemoryKarmaEventStore caps retained events, evicting oldest-first", () => {
+  it("InMemoryKarmaEventStore caps retained events, evicting oldest-first", async () => {
     const store = new InMemoryKarmaEventStore();
     const cap = (store as unknown as { events: KarmaEvent[] }).events;
     // Push well past the 10000-event cap.
     for (let i = 0; i < 10005; i++) {
-      store.record(makeEvent("obj-cap", `evt-${i}`));
+      await store.record(makeEvent("obj-cap", `evt-${i}`));
     }
     expect(cap).toHaveLength(10000);
     // Oldest five (evt-0..evt-4) evicted; newest retained.

@@ -16,6 +16,7 @@
   },
   "scripts": {
     "build": "tsc -b",
+    "test": "pnpm exec vitest run --project @do-soul/alaya-eval",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {

@@ -4,6 +4,7 @@ import {
   type WorkspaceRunEvent
 } from "@do-soul/alaya-protocol";
 import type { RuntimeNotifier } from "@do-soul/alaya-core";
+import { createWarnLogger } from "./daemon-runtime-helpers.js";
 
 export interface RuntimeNotifierSubscription {
   dispose(): void;
@@ -21,6 +22,8 @@ export interface AlayaRuntimeNotifier extends RuntimeNotifier {
 export function createRuntimeNotifier(): AlayaRuntimeNotifier {
   return new InProcessRuntimeNotifier();
 }
+
+const runtimeNotifierWarnLogger = createWarnLogger();
 
 class InProcessRuntimeNotifier implements AlayaRuntimeNotifier {
   private readonly runListeners = new Map<string, Set<RuntimeEventListener>>();
@@ -118,8 +121,9 @@ async function notifyAll<TValue>(listeners: ReadonlySet<(value: TValue) => void 
     try {
       await listener(value);
     } catch (error) {
-      console.warn("[runtime-notifier] listener threw; continuing fan-out", {
-        error: error instanceof Error ? { name: error.name, message: error.message } : String(error)
+      runtimeNotifierWarnLogger.warn("[runtime-notifier] listener threw; continuing fan-out", {
+        errorName: error instanceof Error ? error.name : "NonError",
+        errorMessageRedacted: true
       });
     }
   }

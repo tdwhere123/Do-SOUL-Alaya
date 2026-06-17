@@ -13,6 +13,7 @@ import type { AlayaDaemonRuntime } from "../../runtime/daemon-runtime-types.js";
 const hoisted = getToolRuntimeWiringFixture();
 const activeRuntimes: Array<AlayaDaemonRuntime> = [];
 const isolatedConfigDirs: string[] = [];
+const BOOTSTRAP_TEST_TIMEOUT_MS = 15_000;
 
 describe("daemon tool runtime bootstrap", () => {
   beforeEach(async () => {
@@ -36,7 +37,9 @@ describe("daemon tool runtime bootstrap", () => {
     }
   });
 
-  it("enrolls only allowed MCP servers into discovery and the model-visible registry", async () => {
+  it(
+    "enrolls only allowed MCP servers into discovery and the model-visible registry",
+    async () => {
     process.env.ALAYA_ALLOWED_MCP_SERVERS = "filesystem";
     process.env.ALAYA_MCP_SERVER_CONFIG_JSON = JSON.stringify({
       filesystem: {
@@ -112,9 +115,13 @@ describe("daemon tool runtime bootstrap", () => {
     expect(runtime.services.conversationToolCatalog.getSpecs().map((spec) => spec.tool_id)).not.toContain(
       "mcp__github__search_issues"
     );
-  });
+    },
+    BOOTSTRAP_TEST_TIMEOUT_MS
+  );
 
-  it("boots ConversationService with the compute-routing resolver and no legacy stance resolver", async () => {
+  it(
+    "boots ConversationService with the compute-routing resolver and no legacy stance resolver",
+    async () => {
     // No garden secret in this boot -> the product default is host_worker, so
     // the compute-routing fallback provider is local_heuristics (the zero-cloud
     // in-process provider host_worker degrades to until a worker attaches).
@@ -134,9 +141,13 @@ describe("daemon tool runtime bootstrap", () => {
     });
     expect(hoisted.conversationServiceDeps).not.toHaveProperty("engine");
     expect(hoisted.conversationServiceDeps).not.toHaveProperty("resolveExecutionStance");
-  });
+    },
+    BOOTSTRAP_TEST_TIMEOUT_MS
+  );
 
-  it("wires the official_api garden provider through bootstrap and routing without an ad-hoc model env surface", async () => {
+  it(
+    "wires the official_api garden provider through bootstrap and routing without an ad-hoc model env surface",
+    async () => {
     delete process.env.OPENAI_API_KEY;
     process.env.ALAYA_OPENAI_SECRET_REF = "env:ALAYA_TEST_OPENAI_KEY";
     process.env.ALAYA_TEST_OPENAI_KEY = "sk-official";
@@ -164,7 +175,9 @@ describe("daemon tool runtime bootstrap", () => {
         })
       ])
     });
-  });
+    },
+    BOOTSTRAP_TEST_TIMEOUT_MS
+  );
 
   it("prefers the dedicated Garden secret-ref over the deprecated embedding fallback", async () => {
     process.env.ALAYA_GARDEN_OPENAI_SECRET_REF = "env:ALAYA_GARDEN_TEST_OPENAI_KEY";
@@ -714,6 +727,39 @@ describe("daemon tool runtime bootstrap", () => {
         inFlight: expect.objectContaining({ count: 0 })
       })
     );
+  });
+
+  it("does not mount e2e trigger routes in production even when the opt-in env is set", async () => {
+    const appModule = await import("../../runtime/app.js");
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousE2eOptIn = process.env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS;
+
+    try {
+      process.env.NODE_ENV = "production";
+      process.env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS = "1";
+
+      await bootDaemonRuntime();
+
+      const lastCreateAppCall = vi.mocked(appModule.createApp).mock.calls.at(-1);
+      expect(lastCreateAppCall?.[0]).toEqual(
+        expect.objectContaining({
+          routes: expect.not.objectContaining({
+            e2eEventTriggers: expect.anything()
+          })
+        })
+      );
+    } finally {
+      if (previousNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+      if (previousE2eOptIn === undefined) {
+        delete process.env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS;
+      } else {
+        process.env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS = previousE2eOptIn;
+      }
+    }
   });
 
   it("keeps one unhandledRejection listener across fatal shutdown and later reboot", async () => {

@@ -312,7 +312,7 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
         workspaceService: input.workspaceService,
         arbitrationService: input.arbitrationService
       },
-      ...(input.env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS === "1"
+      ...(shouldEnableE2eEventTriggers(input.env)
         ? {
             e2eEventTriggers: {
               runService: input.runService,
@@ -327,6 +327,10 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
   } satisfies CoreDaemonAppServices;
 
   return createApp(services, input.lifecycleState);
+}
+
+export function shouldEnableE2eEventTriggers(env: NodeJS.ProcessEnv): boolean {
+  return env.NODE_ENV !== "production" && env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS === "1";
 }
 
 function createE2eEventLogRepo(eventLogRepo: E2eEventLogInputPort): E2eEventLogRepo {

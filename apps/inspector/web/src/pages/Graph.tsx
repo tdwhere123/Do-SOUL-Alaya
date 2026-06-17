@@ -28,6 +28,13 @@ interface ProposalCreateEnvelope {
   };
 }
 
+interface GraphKeyboardState {
+  readonly matchCount: number;
+  readonly searchTerm: string;
+  readonly selectedNode: GraphNode | null;
+  readonly spotlightActive: boolean;
+}
+
 const LARGE_GRAPH_NODE_THRESHOLD = 500;
 
 /**
@@ -44,11 +51,15 @@ export default function GraphPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const fg2dRef = useRef<ForceGraphMethods2D<GraphNode, GraphLink> | undefined>(undefined);
   const fg3dRef = useRef<ForceGraphMethods3D<GraphNode, GraphLink> | undefined>(undefined);
+  const keyboardStateRef = useRef<GraphKeyboardState>({
+    matchCount: 0,
+    searchTerm: "",
+    selectedNode: null,
+    spotlightActive: false
+  });
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
   const [webglSupported] = useState(() => probeWebgl());
-  const [now, setNow] = useState(() => Date.now());
-
   const viewport = useViewportSize(viewportRef);
   const { data, error, loading } = useGraphData(workspaceId);
   const {
@@ -78,13 +89,21 @@ export default function GraphPage() {
     viewMode
   });
 
-  useEffect(() => {
-    const timerId = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(timerId);
-  }, []);
+  keyboardStateRef.current = {
+    matchCount,
+    searchTerm,
+    selectedNode,
+    spotlightActive
+  };
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      const {
+        matchCount: currentMatchCount,
+        searchTerm: currentSearchTerm,
+        selectedNode: currentSelectedNode,
+        spotlightActive: currentSpotlightActive
+      } = keyboardStateRef.current;
       const target = event.target as HTMLElement | null;
       const isTyping =
         target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
@@ -99,9 +118,9 @@ export default function GraphPage() {
       }
 
       if (event.key === "Escape") {
-        if (selectedNode) {
+        if (currentSelectedNode) {
           setSelectedNode(null);
-        } else if (searchTerm) {
+        } else if (currentSearchTerm) {
           setSearchTerm("");
         }
         return;
@@ -109,30 +128,30 @@ export default function GraphPage() {
 
       if (
         event.key === "ArrowDown" &&
-        spotlightActive &&
-        matchCount > 0 &&
+        currentSpotlightActive &&
+        currentMatchCount > 0 &&
         isTyping &&
         target === searchInputRef.current
       ) {
         event.preventDefault();
-        setMatchCursor((cursor) => (cursor + 1) % matchCount);
+        setMatchCursor((cursor) => (cursor + 1) % currentMatchCount);
       }
 
       if (
         event.key === "ArrowUp" &&
-        spotlightActive &&
-        matchCount > 0 &&
+        currentSpotlightActive &&
+        currentMatchCount > 0 &&
         isTyping &&
         target === searchInputRef.current
       ) {
         event.preventDefault();
-        setMatchCursor((cursor) => (cursor - 1 + matchCount) % matchCount);
+        setMatchCursor((cursor) => (cursor - 1 + currentMatchCount) % currentMatchCount);
       }
     };
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [matchCount, searchTerm, selectedNode, setMatchCursor, setSearchTerm, spotlightActive]);
+  }, [setMatchCursor, setSearchTerm]);
 
   const copyToClipboard = useCallback(
     (text: string) => {
@@ -235,7 +254,6 @@ export default function GraphPage() {
           largeGraphMode={largeGraphMode}
           matchIds={matchIds}
           nodeSpotlightState={nodeSpotlightState}
-          now={now}
           onBackgroundClick={() => setSelectedNode(null)}
           onEngineTick={handleGraphEngineTick}
           onNodeClick={handleNodeClick}

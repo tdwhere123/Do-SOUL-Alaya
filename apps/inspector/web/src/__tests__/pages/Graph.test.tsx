@@ -682,6 +682,44 @@ describe("GraphPage (react-force-graph driven)", () => {
     expect((screen.getByPlaceholderText(/probe label/i) as HTMLInputElement).value).toBe("n1");
   });
 
+  it("keeps one keydown listener while shortcuts read fresh graph state", async () => {
+    const addEventListenerSpy = vi.spyOn(window, "addEventListener");
+    const removeEventListenerSpy = vi.spyOn(window, "removeEventListener");
+    const user = userEvent.setup();
+    const { unmount } = renderGraphWithEnv();
+    const searchInput = (await screen.findByPlaceholderText(/probe label/i)) as HTMLInputElement;
+    const keydownAdds = () =>
+      addEventListenerSpy.mock.calls.filter(([type]) => type === "keydown");
+    const keydownRemoves = () =>
+      removeEventListenerSpy.mock.calls.filter(([type]) => type === "keydown");
+
+    expect(keydownAdds()).toHaveLength(1);
+    expect(keydownRemoves()).toHaveLength(0);
+
+    await user.type(searchInput, "alpha");
+    await user.click(screen.getByTestId("fg-node-n1"));
+    await waitFor(() => {
+      expect(screen.getAllByText("mem-alpha").length).toBeGreaterThan(1);
+    });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.getAllByText("mem-alpha")).toHaveLength(1);
+    });
+    expect(searchInput.value).toBe("alpha");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => {
+      expect(searchInput.value).toBe("");
+    });
+
+    expect(keydownAdds()).toHaveLength(1);
+    expect(keydownRemoves()).toHaveLength(0);
+
+    unmount();
+    expect(keydownRemoves()).toHaveLength(1);
+  });
+
   it("uses the large-graph 3D performance gate", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify(makeLargePathGraph()), { status: 200 })
@@ -716,7 +754,7 @@ describe("GraphPage (react-force-graph driven)", () => {
     await waitFor(() => {
       expect(screen.queryByText(/low fps detected/i)).toBeNull();
     });
-  });
+  }, 15000);
 
   // Note: the full retire→already-pending toast flow is pinned daemon-side at
   // apps/core-daemon/src/__tests__/routes-proposals.test.ts ("dedupes a

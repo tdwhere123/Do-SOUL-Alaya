@@ -2,6 +2,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Hono } from "hono";
 
+const STATIC_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const STATIC_HTML_CACHE_CONTROL = "no-cache";
+
 export function registerInspectorStaticRoutes(app: Hono, options: { readonly staticRoot: string }): void {
   app.get("/assets/*", async (context) => {
     const requestedPath = context.req.path.replace(/^\/assets\//u, "");
@@ -15,7 +18,10 @@ export function registerInspectorStaticRoutes(app: Hono, options: { readonly sta
     }
     return new Response(content, {
       status: 200,
-      headers: { "content-type": contentTypeFor(filePath) }
+      headers: {
+        "content-type": contentTypeFor(filePath),
+        "cache-control": STATIC_ASSET_CACHE_CONTROL
+      }
     });
   });
 
@@ -33,7 +39,10 @@ export function registerInspectorStaticRoutes(app: Hono, options: { readonly sta
     }
     return new Response(content, {
       status: 200,
-      headers: { "content-type": "text/html; charset=utf-8" }
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": STATIC_HTML_CACHE_CONTROL
+      }
     });
   });
 }

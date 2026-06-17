@@ -5,7 +5,7 @@ import { parseNonEmptyString } from "../shared/validators.js";
 export type { KarmaEvent, KarmaEventKind } from "@do-soul/alaya-protocol";
 
 export interface KarmaEventStore {
-  record(event: KarmaEvent): void;
+  record(event: KarmaEvent): Promise<void>;
   findByObjectId(objectId: string): readonly KarmaEvent[];
 }
 
@@ -29,7 +29,7 @@ const MAX_RETAINED_EVENTS = 10000;
 export class InMemoryKarmaEventStore implements KarmaEventStore {
   protected readonly events: KarmaEvent[] = [];
 
-  public record(event: KarmaEvent): void {
+  public async record(event: KarmaEvent): Promise<void> {
     const parsed = parseKarmaEvent(event);
     if (this.events.length >= MAX_RETAINED_EVENTS) {
       this.events.shift();
@@ -55,10 +55,12 @@ export class SqliteKarmaEventStore implements KarmaEventStore {
     private readonly warn?: KarmaEventStoreWarnPort
   ) {}
 
-  public record(event: KarmaEvent): void {
+  public async record(event: KarmaEvent): Promise<void> {
     const parsed = parseKarmaEvent(event);
 
-    void this.repo.create(parsed).catch((error) => {
+    try {
+      await this.repo.create(parsed);
+    } catch (error) {
       this.warn?.warn("[SqliteKarmaEventStore] Failed to persist karma event", {
         error
       });
@@ -72,7 +74,8 @@ export class SqliteKarmaEventStore implements KarmaEventStore {
           error: error instanceof Error ? error.message : String(error)
         })
       });
-    });
+      throw error;
+    }
   }
 
   public findByObjectId(objectId: string): readonly KarmaEvent[] {

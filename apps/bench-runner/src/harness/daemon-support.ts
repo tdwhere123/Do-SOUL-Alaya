@@ -534,10 +534,12 @@ export function emitBenchContextLensAssembledEvent(
 
 // @anchor queryTokenMetrics: event-sourced token-economy reader. Mirrors
 // readMaterializedMemoryId — opens the bench DB via the cached connection
-// and reads EventLog rows, never in-memory bench state. The pure event ->
-// metrics fold lives in harness/token-economy.ts deriveBenchTokenMetrics
-// so it is unit-testable against a stubbed EventLog. The connection is NOT
-// closed here.
+// and reads EventLog rows, never in-memory bench state. SOUL_SIGNAL_EMITTED
+// rows now carry only a redacted raw_payload summary (hash + bench numeric
+// token counts), so the fold derives token economy without re-exposing the
+// seeded text through EventLog. The pure event -> metrics fold lives in
+// harness/token-economy.ts deriveBenchTokenMetrics so it is unit-testable
+// against a stubbed EventLog. The connection is NOT closed here.
 // invariant: scope the event read to the question's workspace. The bench
 // daemon-per-run model shares ONE alaya.db across every attached workspace,
 // so an unscoped queryByType returns every prior question's events too —

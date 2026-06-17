@@ -22,6 +22,14 @@ export function registerInspectorMemoryEntryRoutes(
     if (dimension !== undefined && dimension.length > 0) {
       search.set("dimension", dimension);
     }
+    const scopeClass = context.req.query("scope_class");
+    if (scopeClass !== undefined && scopeClass.length > 0) {
+      search.set("scope_class", scopeClass);
+    }
+    const hasConflict = context.req.query("has_conflict");
+    if (hasConflict !== undefined && hasConflict.length > 0) {
+      search.set("has_conflict", hasConflict);
+    }
     const limit = context.req.query("limit");
     if (limit !== undefined && limit.length > 0) {
       search.set("limit", limit);

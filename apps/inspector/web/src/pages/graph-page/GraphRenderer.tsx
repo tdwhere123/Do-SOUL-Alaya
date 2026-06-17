@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import type { ForceGraphMethods as ForceGraphMethods2D } from "react-force-graph-2d";
 import type ForceGraph3DType from "react-force-graph-3d";
@@ -43,7 +43,6 @@ interface GraphRendererProps {
   readonly largeGraphMode: boolean;
   readonly matchIds: ReadonlySet<string>;
   readonly nodeSpotlightState: (id: string) => SpotlightState;
-  readonly now: number;
   readonly onBackgroundClick: () => void;
   readonly onEngineTick: (mode: ViewMode) => void;
   readonly onNodeClick: (node: GraphNode, event?: MouseEvent) => void;
@@ -60,7 +59,6 @@ export default function GraphRenderer({
   largeGraphMode,
   matchIds,
   nodeSpotlightState,
-  now,
   onBackgroundClick,
   onEngineTick,
   onNodeClick,
@@ -69,6 +67,12 @@ export default function GraphRenderer({
   viewport
 }: GraphRendererProps) {
   const { t } = useI18n();
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timerId = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timerId);
+  }, []);
 
   const computeNodeColor = useCallback(
     (node: GraphNode): string => {

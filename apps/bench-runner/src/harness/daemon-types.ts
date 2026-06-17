@@ -206,16 +206,16 @@ export interface BenchReportContextUsageInput {
  * ad hoc against in-memory state. The reader (queryTokenMetrics) scans:
  *
  * - SOUL_SIGNAL_EMITTED — every seed signal carries a bench-stamped KPI
- *   block in raw_payload: `bench_full_turn_content` is the verbatim full
- *   ingested turn, `bench_stored_content` is the durable fact the harness
- *   seeded as memory_entry.content, `bench_turn_seed_index` is the source
- *   turn's index. raw_history_tokens counts `bench_full_turn_content`
+ *   block in raw_payload. The live EventLog row stores only the redacted
+ *   numeric summary (`bench_summary_seeded`,
+ *   `bench_summary_turn_seed_index`, `bench_full_turn_tokens`,
+ *   `bench_stored_content_tokens`) plus an audit hash, never the full
+ *   source text. Test fixtures may still use the older raw marker/index
+ *   fields and string fields (`bench_full_turn_content`,
+ *   `bench_stored_content`). raw_history_tokens counts one source turn
  *   exactly ONCE per distinct turn index (a turn that fans out into N fact
- *   signals is not counted N times); stored_memory_tokens sums
- *   `bench_stored_content` over every fact signal (each is a distinct
- *   memory_entry). These keys are written on BOTH the credentialled
- *   compile path and the no-credentials fallback, so the figure is correct
- *   regardless of which seed path ran.
+ *   signals is not counted N times); stored_memory_tokens sums one durable
+ *   fact token count per fact signal (each is a distinct memory_entry).
  * - SOUL_CONTEXT_LENS_ASSEMBLED — its total_token_estimate is the tokens
  *   actually delivered for one recall. The harness emits this event from
  *   the bench recall path (the bench bypasses ContextLensAssembler).

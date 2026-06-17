@@ -1,3 +1,7 @@
+import { createWarnLogger } from "../runtime/daemon-runtime-helpers.js";
+
+const defaultBackgroundWarnLogger = createWarnLogger();
+
 export interface BackgroundServiceConfig {
   readonly name: string;
   readonly intervalMs: number;
@@ -84,7 +88,7 @@ export class BackgroundServiceManager {
 
 const defaultBackgroundServiceLogger: BackgroundServiceLogger = Object.freeze({
   warn(message: string, meta: Record<string, unknown>) {
-    console.warn(message, meta);
+    defaultBackgroundWarnLogger.warn(message, meta);
   }
 });
 

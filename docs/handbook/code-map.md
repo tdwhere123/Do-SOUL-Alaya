@@ -76,6 +76,25 @@ without the host filing proposals.
 | Handbook | `docs/handbook/*` | present (P0-3) |
 | v0.1 task cards | `docs/archive/v0.1-port-record/INDEX.md`, `docs/archive/v0.1-port-record/phase-{0..5}-briefs/` | populated by P0-3e + P0-4 |
 | Project genealogy | `CLAUDE.md` §Project Genealogy + `docs/archive/port-protocol-historical.md` | port closed at upstream commit `6ed8463`; snapshot directory removed by Phase E vendor cleanup |
+
+`knip.json` suppressions are intentional and must stay documented here when the
+config changes.
+
+| Suppression | Rationale |
+|---|---|
+| `vendor/**` + `ignoreWorkspaces: ["vendor/**"]` | Hygiene scopes maintained first-party workspaces only; vendored or archival trees are excluded from the unused-code gate. |
+| `dist/**` | Generated build outputs are not source-of-truth code. |
+| `coverage/**` | Generated test coverage output is not source-of-truth code. |
+| `apps/core-daemon/src/runtime/worker-runtime-wiring.ts` | Public daemon runtime wiring surface exported through `apps/core-daemon/src/runtime/index.ts`; kept for semver-stable runtime composition even when no repo-internal caller imports it directly. |
+| `scripts/analyze-recall-bias.mjs` | Operator-only archive diagnostics helper, invoked manually by path with a diagnostics artifact. |
+| `scripts/append-bench-degradation-backlog.mjs` | Operator-only maintenance helper that appends bench regressions into the backlog on demand. |
+| `scripts/compute-bench-quality-metrics.mjs` | Operator-only report calculator for bench-quality rollups, not part of the runtime or package entry graph. |
+| `scripts/compute-cohort-from-archive.mjs` | Operator-only archive analysis helper, run manually against a selected history export. |
+| `scripts/fetch-local-embedding-model.mjs` | Operator bootstrap helper that preloads the local embedding model cache outside the runtime entry graph. |
+| `scripts/run-full-bench-v0311.mjs` | Pinned release-wave bench orchestrator preserved for reproducible v0.3.11 ship-gate reruns; launched manually, not imported. |
+| `packages/core.ignoreDependencies["@huggingface/transformers"]` | Optional peer loaded only by dynamic import in `local-onnx-embedding-client.ts` for the local ONNX embedding path. |
+| `apps/core-daemon.ignoreDependencies["pino-pretty"]` | Dev-only Pino transport resolved by runtime string target in `daemon-runtime-helpers.ts`, not a static import edge. |
+
 | Protocol types | `packages/protocol/src/` | ported; `schema-ready` (P1-protocol). Source is domainized under `shared/`, `workspace/`, `runtime/`, `events/`, `soul/`, `tools/`, `workers/`, `engine/`, `conversation/`, `config/`, and `signals/`; top-level `src/` keeps the package `index.ts` only. Post-port hygiene renamed former `events/phase-*` modules and `Phase*` event symbols to domain names such as `workspace-run`, `memory-governance`, `runtime-governance`, and `compute-recall-garden`, preserving event string values. `packages/protocol/src/soul/mcp-types.ts` also carries the P4-mcp-memory-tools public `soul.*` memory tool contract seed, including recall delivery metadata and usage-proof schemas. |
 | Storage skeleton + DB helpers | `packages/storage/{package.json,tsconfig.json,src/shared/{index.ts,errors.ts},src/sqlite/{index.ts,db.ts},src/index.ts}` | ported; `schema-ready` (P1-storage-skeleton) |
 | Storage shared utilities | `packages/storage/src/repos/shared/`, `packages/storage/src/__tests__/repos/shared/{deep-freeze.test.ts,fts-lane-routing.test.ts}` | ported; `implementation-ready` (P1-storage-shared) |

@@ -70,4 +70,62 @@ describe("BackgroundServiceManager", () => {
     expect(JSON.stringify(failureMeta)).not.toContain("abcd1234");
     vi.useRealTimers();
   });
+
+  it("falls back to the structured warn logger when no logger is injected", async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    const warn = vi.fn();
+    vi.doMock("../../runtime/daemon-runtime-helpers.js", async () => {
+      const actual = await vi.importActual<typeof import("../../runtime/daemon-runtime-helpers.js")>(
+        "../../runtime/daemon-runtime-helpers.js"
+      );
+      return {
+        ...actual,
+        createWarnLogger: () => ({
+          trace: vi.fn(),
+          debug: vi.fn(),
+          info: vi.fn(),
+          warn,
+          error: vi.fn(),
+          fatal: vi.fn()
+        })
+      };
+    });
+    const { BackgroundServiceManager: IsolatedBackgroundServiceManager } = await import(
+      "../../background/bootstrap.js"
+    );
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const manager = new IsolatedBackgroundServiceManager([
+      {
+        name: "default-logger-service",
+        intervalMs: 100,
+        task: async () => {
+          throw new Error("token abcd1234");
+        }
+      }
+    ]);
+
+    try {
+      manager.start();
+      await vi.advanceTimersByTimeAsync(100);
+      await manager.stop({ timeoutMs: null });
+
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith("background service task failed", {
+        service: "default-logger-service",
+        errorName: "Error",
+        errorMessageRedacted: true
+      });
+      expect(warn).toHaveBeenCalledWith("background service started", {
+        service: "default-logger-service",
+        intervalMs: 100
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("abcd1234");
+    } finally {
+      consoleWarnSpy.mockRestore();
+      vi.doUnmock("../../runtime/daemon-runtime-helpers.js");
+      vi.resetModules();
+      vi.useRealTimers();
+    }
+  });
 });

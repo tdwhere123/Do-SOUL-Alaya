@@ -67,6 +67,10 @@ export interface GardenTaskRow {
   readonly last_error_text: string | null;
 }
 
+interface InMemoryGardenTaskRow extends GardenTaskRow {
+  readonly descriptor: GardenTaskDescriptor;
+}
+
 export interface GardenTaskBacklogCount {
   readonly role: GardenRoleValue;
   readonly status: Extract<GardenTaskStatus, "pending" | "claimed">;
@@ -374,15 +378,24 @@ export class GardenScheduler {
       return false;
     }
 
-    return Date.parse(nowIso) - Date.parse(lastRunAt) < this.coolingPeriodMs;
+    const nowMs = parseIsoTimestampMs(nowIso);
+    const lastRunMs = parseIsoTimestampMs(lastRunAt);
+    if (nowMs === null || lastRunMs === null) {
+      return true;
+    }
+
+    return nowMs - lastRunMs < this.coolingPeriodMs;
   }
 
   private pruneExpiredCoolingEntries(nowIso: string): void {
-    const nowMs = Date.parse(nowIso);
+    const nowMs = parseIsoTimestampMs(nowIso);
+    if (nowMs === null) {
+      return;
+    }
 
     for (const [key, lastRunAt] of this.coolingMap.entries()) {
-      const lastRunMs = Date.parse(lastRunAt);
-      if (!Number.isFinite(lastRunMs) || nowMs - lastRunMs >= this.coolingPeriodMs) {
+      const lastRunMs = parseIsoTimestampMs(lastRunAt);
+      if (lastRunMs === null || nowMs - lastRunMs >= this.coolingPeriodMs) {
         this.coolingMap.delete(key);
       }
     }
@@ -498,7 +511,7 @@ function compareTasks(left: GardenTaskDescriptor, right: GardenTaskDescriptor): 
   }
 
   if (left.created_at !== right.created_at) {
-    return left.created_at.localeCompare(right.created_at);
+    return left.created_at < right.created_at ? -1 : 1;
   }
 
   return left.task_id.localeCompare(right.task_id);
@@ -508,8 +521,18 @@ function buildCoolingKey(taskKind: GardenTaskDescriptor["task_kind"], targetRef:
   return `${taskKind}:${targetRef}`;
 }
 
-function parseTaskDescriptorFromRow(row: GardenTaskRow): GardenTaskDescriptor {
+function parseTaskDescriptorFromRow(
+  row: GardenTaskRow | InMemoryGardenTaskRow
+): GardenTaskDescriptor {
+  if ("descriptor" in row) {
+    return row.descriptor;
+  }
   return GardenTaskDescriptorSchema.parse(row.payload);
+}
+
+function parseIsoTimestampMs(timestamp: string): number | null {
+  const value = Date.parse(timestamp);
+  return Number.isFinite(value) ? value : null;
 }
 
 function roleForTier(tier: GardenTierValue): GardenRoleValue {
@@ -536,9 +559,13 @@ function countByStatus(
     .reduce((total, count) => total + count.count, 0);
 }
 
+function canRolePeekPending(role: GardenRoleValue, taskRole: GardenRoleValue): boolean {
+  return TIER_ORDER[tierForRole(taskRole)] <= TIER_ORDER[GARDEN_ROLE_TIER_MAP[role]];
+}
+
 /** Default in-process queue used when callers do not provide a GardenTaskRepoPort. */
 export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
-  private readonly rows: GardenTaskRow[] = [];
+  private readonly rows: InMemoryGardenTaskRow[] = [];
 
   public constructor(private readonly eventLog: GardenSchedulerEventLogPort) {}
 
@@ -550,6 +577,7 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
     readonly payload: unknown;
     readonly created_at?: string;
   }): { readonly task_id: string } {
+    const descriptor = GardenTaskDescriptorSchema.parse(input.payload);
     const taskId = input.id ?? `garden-task-${this.rows.length + 1}`;
     const createdAt = input.created_at ?? new Date().toISOString();
     this.rows.push({
@@ -557,28 +585,28 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
       workspace_id: input.workspace_id,
       role: input.role,
       kind: input.kind,
-      payload: input.payload,
+      payload: descriptor,
       status: "pending",
       claimed_by: null,
       claimed_at: null,
       created_at: createdAt,
       completed_at: null,
       attempt_count: 0,
-      last_error_text: null
+      last_error_text: null,
+      descriptor
     });
-    this.rows.sort((left, right) =>
-      compareTasks(parseTaskDescriptorFromRow(left), parseTaskDescriptorFromRow(right))
-    );
+    this.rows.sort((left, right) => compareTasks(left.descriptor, right.descriptor));
     return { task_id: taskId };
   }
 
   public peekPending(
-    _role: GardenRoleValue,
+    role: GardenRoleValue,
     workspace_id?: string,
     limit = 10
   ): readonly GardenTaskRow[] {
     return this.rows
       .filter((row) => row.status === "pending")
+      .filter((row) => canRolePeekPending(role, row.role))
       .filter((row) => workspace_id === undefined || row.workspace_id === workspace_id)
       .slice(0, limit);
   }
@@ -640,9 +668,7 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
       const current = this.rows.find((candidate) => candidate.id === taskId);
       if (current !== undefined) {
         replaceRow(this.rows, current, preClaimState);
-        this.rows.sort((left, right) =>
-          compareTasks(parseTaskDescriptorFromRow(left), parseTaskDescriptorFromRow(right))
-        );
+        this.rows.sort((left, right) => compareTasks(left.descriptor, right.descriptor));
       }
       throw error;
     }
@@ -704,7 +730,7 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
       readonly event: GardenTaskEventInput;
     }[]
   ): Promise<number> {
-    const rowsToReclaim: GardenTaskRow[] = [];
+    const rowsToReclaim: InMemoryGardenTaskRow[] = [];
     for (const reclaim of reclaims) {
       const row = this.rows.find((candidate) => candidate.id === reclaim.task_id);
       if (
@@ -743,7 +769,7 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
   public countBacklog(workspace_id?: string): readonly GardenTaskBacklogCount[] {
     const counts = new Map<string, GardenTaskBacklogCount>();
     for (const row of this.rows) {
-      if (row.status !== "pending") {
+      if (row.status !== "pending" && row.status !== "claimed") {
         continue;
       }
       if (workspace_id !== undefined && row.workspace_id !== workspace_id) {
@@ -771,14 +797,16 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
       claimed_by: null,
       claimed_at: null
     });
-    this.rows.sort((left, right) =>
-      compareTasks(parseTaskDescriptorFromRow(left), parseTaskDescriptorFromRow(right))
-    );
+    this.rows.sort((left, right) => compareTasks(left.descriptor, right.descriptor));
     return true;
   }
 }
 
-function replaceRow(rows: GardenTaskRow[], oldRow: GardenTaskRow, newRow: GardenTaskRow): void {
+function replaceRow(
+  rows: InMemoryGardenTaskRow[],
+  oldRow: InMemoryGardenTaskRow,
+  newRow: InMemoryGardenTaskRow
+): void {
   const index = rows.indexOf(oldRow);
   if (index >= 0) {
     rows[index] = newRow;

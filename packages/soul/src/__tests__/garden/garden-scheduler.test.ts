@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   GardenRole,
+  GardenTaskDescriptorSchema,
   GardenTaskKind,
   GardenTier,
   GardenEventType,
@@ -39,14 +40,19 @@ describe("GardenScheduler", () => {
   });
 
   it("rejects tier violations, records health journal diagnostics, and removes the task", async () => {
-    const { eventLog, healthJournal, scheduler } = createScheduler();
-    scheduler.enqueue(
-      createTask({
-        task_id: "task-tier-1",
-        task_kind: GardenTaskKind.GREEN_MAINTENANCE,
-        required_tier: GardenTier.TIER_1
-      })
-    );
+    const eventLog = {
+      append: vi.fn(async () => undefined)
+    };
+    const healthJournal = {
+      record: vi.fn(async () => undefined)
+    };
+    const repo = new InMemoryGardenTaskRepo(eventLog);
+    const scheduler = new GardenScheduler(eventLog, {}, healthJournal, repo);
+    enqueueVisibleTierViolation(repo, {
+      task_id: "task-tier-1",
+      task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+      required_tier: GardenTier.TIER_1
+    });
 
     await expect(scheduler.dispatchNext(GardenRole.JANITOR)).resolves.toBeNull();
 
@@ -76,20 +82,20 @@ describe("GardenScheduler", () => {
         throw new Error("journal unavailable");
       })
     };
+    const repo = new InMemoryGardenTaskRepo(eventLog);
     const scheduler = new GardenScheduler(
       eventLog,
       {
         warn
       },
-      healthJournal
+      healthJournal,
+      repo
     );
-    scheduler.enqueue(
-      createTask({
-        task_id: "task-tier-1",
-        task_kind: GardenTaskKind.GREEN_MAINTENANCE,
-        required_tier: GardenTier.TIER_1
-      })
-    );
+    enqueueVisibleTierViolation(repo, {
+      task_id: "task-tier-1",
+      task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+      required_tier: GardenTier.TIER_1
+    });
 
     await expect(scheduler.dispatchNext(GardenRole.JANITOR)).resolves.toBeNull();
 
@@ -105,15 +111,17 @@ describe("GardenScheduler", () => {
   });
 
   it("rejects a higher-priority tier violation before dispatching a later valid task", async () => {
-    const { scheduler } = createScheduler();
-    scheduler.enqueue(
-      createTask({
-        task_id: "task-tier-1",
-        task_kind: GardenTaskKind.GREEN_MAINTENANCE,
-        required_tier: GardenTier.TIER_1,
-        priority: 50
-      })
-    );
+    const eventLog = {
+      append: vi.fn(async () => undefined)
+    };
+    const repo = new InMemoryGardenTaskRepo(eventLog);
+    const scheduler = new GardenScheduler(eventLog, {}, null, repo);
+    enqueueVisibleTierViolation(repo, {
+      task_id: "task-tier-1",
+      task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+      required_tier: GardenTier.TIER_1,
+      priority: 50
+    });
     scheduler.enqueue(
       createTask({
         task_id: "task-tier-0",
@@ -158,6 +166,58 @@ describe("GardenScheduler", () => {
     await expect(scheduler.dispatchNext(GardenRole.LIBRARIAN)).resolves.toMatchObject({
       task_id: "task-tier-2"
     });
+  });
+
+  it("applies role visibility in the in-memory fallback queue", () => {
+    const eventLog = {
+      append: vi.fn(async () => undefined)
+    };
+    const repo = new InMemoryGardenTaskRepo(eventLog);
+
+    repo.enqueue({
+      id: "task-tier-0",
+      workspace_id: "workspace-1",
+      role: GardenRole.JANITOR,
+      kind: GardenTaskKind.TTL_CLEANUP,
+      payload: createTask({
+        task_id: "task-tier-0",
+        task_kind: GardenTaskKind.TTL_CLEANUP,
+        required_tier: GardenTier.TIER_0
+      })
+    });
+    repo.enqueue({
+      id: "task-tier-1",
+      workspace_id: "workspace-1",
+      role: GardenRole.AUDITOR,
+      kind: GardenTaskKind.GREEN_MAINTENANCE,
+      payload: createTask({
+        task_id: "task-tier-1",
+        task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+        required_tier: GardenTier.TIER_1
+      })
+    });
+    repo.enqueue({
+      id: "task-tier-2",
+      workspace_id: "workspace-1",
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.MERGE_PROPOSAL,
+      payload: createTask({
+        task_id: "task-tier-2",
+        task_kind: GardenTaskKind.MERGE_PROPOSAL,
+        required_tier: GardenTier.TIER_2
+      })
+    });
+
+    expect(repo.peekPending(GardenRole.JANITOR).map((task) => task.id)).toEqual(["task-tier-0"]);
+    expect(repo.peekPending(GardenRole.AUDITOR).map((task) => task.id)).toEqual([
+      "task-tier-0",
+      "task-tier-1"
+    ]);
+    expect(repo.peekPending(GardenRole.LIBRARIAN).map((task) => task.id)).toEqual([
+      "task-tier-0",
+      "task-tier-1",
+      "task-tier-2"
+    ]);
   });
 
   it("dispatches matching task kinds without lower-role tier rejection", async () => {
@@ -284,6 +344,36 @@ describe("GardenScheduler", () => {
     await expect(scheduler.dispatchNext(GardenRole.AUDITOR)).resolves.toMatchObject({ task_id: "task-fallback" });
     now = "2026-03-27T00:02:00.000Z";
     await expect(scheduler.dispatchNext(GardenRole.AUDITOR)).resolves.toMatchObject({ task_id: "task-cooling" });
+  });
+
+  it("keeps tier-1 cooling active when the scheduler clock becomes invalid", async () => {
+    let now = "2026-03-27T00:00:00.000Z";
+    const { scheduler } = createScheduler({
+      coolingPeriodMs: 60_000,
+      now: () => now
+    });
+
+    await scheduler.reportCompletion(
+      createResult({
+        task_id: "task-green-1",
+        task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+        role: GardenRole.AUDITOR,
+        tier: GardenTier.TIER_1,
+        objects_affected: ["memory-1"]
+      })
+    );
+    scheduler.enqueue(
+      createTask({
+        task_id: "task-green-2",
+        task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+        required_tier: GardenTier.TIER_1,
+        target_object_refs: ["memory-1"]
+      })
+    );
+
+    now = "not-a-timestamp";
+    await expect(scheduler.dispatchNext(GardenRole.AUDITOR)).resolves.toBeNull();
+    expect(readCoolingMap(scheduler).size).toBe(1);
   });
 
   it("does not apply cooling to tier-2 work", async () => {
@@ -445,6 +535,10 @@ describe("GardenScheduler", () => {
     expect(scheduler.peekBacklogWarningTransition()).toBeNull();
 
     await scheduler.dispatchNext(GardenRole.LIBRARIAN);
+    expect(scheduler.getBacklogSnapshot()).toMatchObject({
+      queue_depth_total: 1,
+      in_flight_total: 1
+    });
     expect(scheduler.peekBacklogWarningTransition()).toBeNull();
 
     await scheduler.dispatchNext(GardenRole.LIBRARIAN);
@@ -461,7 +555,7 @@ describe("GardenScheduler", () => {
           tier_1: 0,
           tier_2: 0
         },
-        in_flight_total: 0,
+        in_flight_total: 2,
         warning_active: false
       }
     });
@@ -598,22 +692,26 @@ describe("GardenScheduler", () => {
     const eventLog = {
       append: vi.fn(async () => undefined)
     };
-    const scheduler = new GardenScheduler(eventLog, {
-      now: () => "2026-04-23T08:00:00.000Z",
-      backlogWarningThresholds: {
-        warning_queue_depth: 1,
-        warning_rearm_depth: 1
-      }
-    });
-
-    scheduler.enqueue(
-      createTask({
-        task_id: "task-invalid",
-        task_kind: GardenTaskKind.GREEN_MAINTENANCE,
-        required_tier: GardenTier.TIER_1,
-        priority: 50
-      })
+    const repo = new InMemoryGardenTaskRepo(eventLog);
+    const scheduler = new GardenScheduler(
+      eventLog,
+      {
+        now: () => "2026-04-23T08:00:00.000Z",
+        backlogWarningThresholds: {
+          warning_queue_depth: 1,
+          warning_rearm_depth: 1
+        }
+      },
+      null,
+      repo
     );
+
+    enqueueVisibleTierViolation(repo, {
+      task_id: "task-invalid",
+      task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+      required_tier: GardenTier.TIER_1,
+      priority: 50
+    });
     scheduler.enqueue(
       createTask({
         task_id: "task-valid",
@@ -644,6 +742,25 @@ describe("GardenScheduler", () => {
     await expect(scheduler.dispatchNext(GardenRole.JANITOR)).resolves.toMatchObject({
       task_id: "task-valid"
     });
+  });
+
+  it("reuses cached descriptors after enqueue in the in-memory fallback queue", async () => {
+    const eventLog = {
+      append: vi.fn(async () => undefined)
+    };
+    const repo = new InMemoryGardenTaskRepo(eventLog);
+    const scheduler = new GardenScheduler(eventLog, {}, null, repo);
+
+    scheduler.enqueue(createTask({ task_id: "task-a" }));
+    scheduler.enqueue(createTask({ task_id: "task-b" }));
+
+    const parseSpy = vi.spyOn(GardenTaskDescriptorSchema, "parse");
+
+    await scheduler.dispatchNext(GardenRole.LIBRARIAN);
+    await scheduler.dispatchNext(GardenRole.LIBRARIAN);
+
+    expect(parseSpy).not.toHaveBeenCalled();
+    parseSpy.mockRestore();
   });
 });
 
@@ -699,6 +816,21 @@ function createResult(overrides: Partial<GardenTaskResult> = {}): GardenTaskResu
     completed_at: "2026-03-27T00:00:00.000Z",
     ...overrides
   };
+}
+
+function enqueueVisibleTierViolation(
+  repo: InMemoryGardenTaskRepo,
+  overrides: Partial<GardenTaskDescriptor> = {}
+): void {
+  const descriptor = createTask(overrides);
+  repo.enqueue({
+    id: descriptor.task_id,
+    workspace_id: descriptor.workspace_id,
+    role: GardenRole.JANITOR,
+    kind: descriptor.task_kind,
+    payload: descriptor,
+    created_at: descriptor.created_at
+  });
 }
 
 function readCoolingMap(scheduler: GardenScheduler): Map<string, string> {
