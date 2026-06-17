@@ -26,6 +26,45 @@ afterEach(() => {
 });
 
 describe("createConflictDetectionLlmPort", () => {
+  it("unrefs the conflict request timeout so classification does not pin shutdown", async () => {
+    configureConflictLlmEnv();
+    const unref = vi.fn();
+    const originalSetTimeout = globalThis.setTimeout;
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
+      ((...args: Parameters<typeof setTimeout>) => {
+        const handle = originalSetTimeout(...args);
+        return Object.assign(handle, { unref }) as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout
+    );
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: "none" } }]
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    const port = createConflictDetectionLlmPort();
+
+    await expect(port?.classifyPair(createPairInput())).resolves.toBe("none");
+    expect(setTimeoutSpy).toHaveBeenCalled();
+    expect(unref).toHaveBeenCalled();
+  });
+
+  it("uses the default conflict model when the model env var is blank", async () => {
+    configureConflictLlmEnv();
+    process.env.ALAYA_CONFLICT_LLM_MODEL = "   ";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: "none" } }]
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    const port = createConflictDetectionLlmPort();
+
+    await expect(port?.classifyPair(createPairInput())).resolves.toBe("none");
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as { readonly model?: string };
+    expect(body.model).toBe("gpt-5.4-mini");
+  });
+
   it("rejects transport failures instead of returning a no-conflict verdict", async () => {
     configureConflictLlmEnv();
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));

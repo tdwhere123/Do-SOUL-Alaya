@@ -2,6 +2,13 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { registerMemoryRoutes } from "../../routes/memories.js";
 
+type MemoryRouteFixture = {
+  readonly object_id: string;
+  readonly dimension?: string;
+  readonly scope_class?: string;
+  readonly contradiction_count?: number;
+};
+
 // HTTP GET /memories/:id is intentionally absent because it previously
 // bypassed workspace scoping. This test pins the removal so a future
 // re-introduction must explicitly update the assertion.
@@ -19,7 +26,7 @@ describe("memory routes (HTTP surface narrowed)", () => {
       countByWorkspaceId: vi.fn(async () => 3),
       findByDimension: vi.fn(async () => [{ object_id: "m2" }]),
       countByDimension: vi.fn(async () => 1),
-      findByScopeClass: vi.fn(async () => []),
+      findByScopeClass: vi.fn(async (): Promise<MemoryRouteFixture[]> => []),
       findByRunId: vi.fn(async () => [{ object_id: "m3" }]),
       countByRunId: vi.fn(async () => 1),
       findById: vi.fn(async () => {

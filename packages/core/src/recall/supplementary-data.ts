@@ -27,6 +27,7 @@ import { computeMaxWeightTransferAmount } from "./scoring.js";
 import { anchorMemoryId, uniqueStrings } from "./path-relations.js";
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
+export const SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY = 16;
 
 export async function collectSupplementaryData(params: {
   readonly dependencies: Pick<
@@ -62,38 +63,46 @@ export async function collectSupplementaryData(params: {
   // graph_support is a weighted inbound aggregate across edge types; the
   // storage repo owns the concrete edge_type weight map.
   const graphSupportCounts: Record<string, number> = Object.fromEntries(
-    await Promise.all(
-      candidates.map(async (candidate): Promise<readonly [string, number]> => {
-        const count =
-          params.dependencies.graphSupportPort === undefined
-            ? 0
-            : await params.dependencies.graphSupportPort.countInboundEdgesWeighted(
-                candidate.object_id,
-                params.workspaceId
-              );
-        return [
+    await mapWithConcurrency(candidates, SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY, async (candidate) => {
+      if (params.dependencies.graphSupportPort === undefined) {
+        return [candidate.object_id, 0] as const;
+      }
+      try {
+        const count = await params.dependencies.graphSupportPort.countInboundEdgesWeighted(
           candidate.object_id,
-          count
-        ];
-      })
-    )
+          params.workspaceId
+        );
+        return [candidate.object_id, count] as const;
+      } catch (error) {
+        params.warn("graph support lookup failed", {
+          workspace_id: params.workspaceId,
+          memory_id: candidate.object_id,
+          error: toErrorMessage(error)
+        });
+        return [candidate.object_id, 0] as const;
+      }
+    })
   );
   const recallEdgeCounts: Record<string, number> = Object.fromEntries(
-    await Promise.all(
-      candidates.map(async (candidate): Promise<readonly [string, number]> => {
-        const count =
-          params.dependencies.graphSupportPort?.countInboundRecalls === undefined
-            ? 0
-            : await params.dependencies.graphSupportPort.countInboundRecalls(
-                candidate.object_id,
-                params.workspaceId
-              );
-        return [
+    await mapWithConcurrency(candidates, SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY, async (candidate) => {
+      if (params.dependencies.graphSupportPort?.countInboundRecalls === undefined) {
+        return [candidate.object_id, 0] as const;
+      }
+      try {
+        const count = await params.dependencies.graphSupportPort.countInboundRecalls(
           candidate.object_id,
-          count
-        ];
-      })
-    )
+          params.workspaceId
+        );
+        return [candidate.object_id, count] as const;
+      } catch (error) {
+        params.warn("recall edge count lookup failed", {
+          workspace_id: params.workspaceId,
+          memory_id: candidate.object_id,
+          error: toErrorMessage(error)
+        });
+        return [candidate.object_id, 0] as const;
+      }
+    })
   );
 
   let budgetPenaltyFactor = 0;
@@ -304,6 +313,31 @@ async function collectEvidenceGistsByMemoryId(params: {
     });
     return Object.freeze({});
   }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) {
+    return [];
+  }
+  const limit = Math.max(1, Math.min(concurrency, items.length));
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  await Promise.all(
+    Array.from({ length: limit }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(items[index]!, index);
+      }
+    })
+  );
+
+  return results;
 }
 
 // invariant: governance_class is a HARD CEILING on recall manifestation.

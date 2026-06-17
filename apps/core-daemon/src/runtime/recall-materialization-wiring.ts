@@ -93,6 +93,7 @@ import {
   normalizeRecallTimeConcernWindowDigest,
   resolveGardenSecretRefValue
 } from "./garden-compute-support.js";
+import { createRecallReadWorkerClient } from "./recall-read-worker-client.js";
 import {
   createGlobalMemoryRecallCachePort,
   createGlobalMemoryRecallPort,
@@ -170,7 +171,12 @@ export async function createRecallMaterializationWiring(input: {
         });
   const globalMemoryRecallInvalidationSubscription: GlobalMemoryRecallSubscription | null =
     globalMemoryRecallService?.subscribeToInvalidations(input.runtimeNotifier) ?? null;
+  const recallReadWorkerClient = createRecallReadWorkerClient({
+    databaseFilename: input.database.filename,
+    warn: input.warn
+  });
 
+  try {
   const {
     embeddingStatusService,
     embeddingRecallService,
@@ -195,9 +201,29 @@ export async function createRecallMaterializationWiring(input: {
     "embedding provider warmup observer failed"
   );
 
-  const recallPathPlasticityPort = createRecallPathPlasticityPort({
-    pathRelationRepo: input.pathRelationRepo
-  });
+  const recallPathExpansionPort =
+    recallReadWorkerClient?.pathExpansionPort ?? {
+      findByAnchors: input.pathRelationRepo.findByAnchors.bind(input.pathRelationRepo),
+      findByTimeConcernWindowDigests: async (
+        workspaceId: string,
+        windowDigests: readonly string[]
+      ) => {
+        const normalized = new Set(windowDigests.map(normalizeRecallTimeConcernWindowDigest));
+        const paths = await input.pathRelationRepo.findByWorkspace(workspaceId);
+        return paths.filter((path) =>
+          isPathActiveForRecall(path.lifecycle.status) &&
+          [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
+            anchor.kind === "time_concern" &&
+            normalized.has(normalizeRecallTimeConcernWindowDigest(anchor.window_digest))
+          )
+        );
+      }
+    };
+  const recallPathPlasticityPort =
+    recallReadWorkerClient?.pathPlasticityPort ??
+    createRecallPathPlasticityPort({
+      pathRelationRepo: input.pathRelationRepo
+    });
   const pathActivationReaderPort: PathActivationCandidateProducerPathReaderPort = {
     async findActiveByAnchorObjectIds(workspaceId, memoryObjectIds) {
       if (memoryObjectIds.length === 0) {
@@ -207,7 +233,7 @@ export async function createRecallMaterializationWiring(input: {
         kind: "object" as const,
         object_id: objectId
       }));
-      const paths = await input.pathRelationRepo.findByAnchors(workspaceId, anchors);
+      const paths = await recallPathExpansionPort.findByAnchors(workspaceId, anchors);
       return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
     }
   };
@@ -289,23 +315,35 @@ export async function createRecallMaterializationWiring(input: {
       return delivery === null ? null : delivery.delivered_object_ids;
     }
   };
-  const recallPathExpansionPort = {
-    findByAnchors: input.pathRelationRepo.findByAnchors.bind(input.pathRelationRepo),
-    findByTimeConcernWindowDigests: async (
-      workspaceId: string,
-      windowDigests: readonly string[]
-    ) => {
-      const normalized = new Set(windowDigests.map(normalizeRecallTimeConcernWindowDigest));
-      const paths = await input.pathRelationRepo.findByWorkspace(workspaceId);
-      return paths.filter((path) =>
-        isPathActiveForRecall(path.lifecycle.status) &&
-        [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
-          anchor.kind === "time_concern" &&
-          normalized.has(normalizeRecallTimeConcernWindowDigest(anchor.window_digest))
-        )
-      );
-    }
-  };
+  const recallMemoryRepo = recallReadWorkerClient?.memoryRepo ?? input.memoryEntryRepo;
+  const recallEvidenceSearchPort =
+    recallReadWorkerClient?.evidenceSearchPort ?? {
+      searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
+        input.evidenceCapsuleRepo.searchByKeyword === undefined
+          ? []
+          : await input.evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
+      findByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) => {
+        const results = await input.evidenceCapsuleRepo.findByIds(evidenceObjectIds);
+        return results.filter((evidence) => evidence.workspace_id === workspaceId);
+      }
+    };
+  const recallSynthesisSearchPort =
+    recallReadWorkerClient?.synthesisSearchPort ?? {
+      searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
+        input.synthesisCapsuleRepo.searchByKeyword === undefined
+          ? []
+          : await input.synthesisCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
+      findByIds: async (objectIds: readonly string[]) => {
+        const scoped = [];
+        for (const objectId of objectIds) {
+          const synthesis = await input.synthesisCapsuleRepo.findById(objectId);
+          if (synthesis !== null) {
+            scoped.push(synthesis);
+          }
+        }
+        return scoped;
+      }
+    };
   const recallActiveConstraintsPort = {
     findActiveConstraints: async (
       activeConstraintsInput: Readonly<{ readonly workspaceId: string; readonly cap?: number | null }>
@@ -345,7 +383,7 @@ export async function createRecallMaterializationWiring(input: {
     process.env.ALAYA_RECALL_SOURCE_REF_ROBUST === "1" ||
     process.env.ALAYA_RECALL_SOURCE_REF_ROBUST === "true";
   const recallService = new RecallService({
-    memoryRepo: input.memoryEntryRepo,
+    memoryRepo: recallMemoryRepo,
     slotRepo: input.slotRepo,
     eventLogRepo: input.eventLogRepo,
     graphSupportPort: input.graphExploreService,
@@ -354,32 +392,8 @@ export async function createRecallMaterializationWiring(input: {
     pathExpansionPort: recallPathExpansionPort,
     activeConstraintsPort: recallActiveConstraintsPort,
     robustSourceRefParsing,
-    evidenceSearchPort: {
-      searchByKeyword: async (workspaceId, queryText, limit) =>
-        input.evidenceCapsuleRepo.searchByKeyword === undefined
-          ? []
-          : await input.evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
-      findByIds: async (workspaceId, evidenceObjectIds) => {
-        const results = await input.evidenceCapsuleRepo.findByIds(evidenceObjectIds);
-        return results.filter((evidence) => evidence.workspace_id === workspaceId);
-      }
-    },
-    synthesisSearchPort: {
-      searchByKeyword: async (workspaceId, queryText, limit) =>
-        input.synthesisCapsuleRepo.searchByKeyword === undefined
-          ? []
-          : await input.synthesisCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
-      findByIds: async (objectIds) => {
-        const scoped = [];
-        for (const objectId of objectIds) {
-          const synthesis = await input.synthesisCapsuleRepo.findById(objectId);
-          if (synthesis !== null) {
-            scoped.push(synthesis);
-          }
-        }
-        return scoped;
-      }
-    },
+    evidenceSearchPort: recallEvidenceSearchPort,
+    synthesisSearchPort: recallSynthesisSearchPort,
     ...(input.globalMemoryRepo === null
       ? {}
       : {
@@ -842,6 +856,35 @@ export async function createRecallMaterializationWiring(input: {
     pathRelationEvictionTimer,
     materializationRouter,
     signalService,
-    edgeClassifyQueueRepoHolder
+    edgeClassifyQueueRepoHolder,
+    recallReadWorkerClient
   };
+  } catch (error) {
+    return await closeRecallReadWorkerAfterStartupFailure({
+      recallReadWorkerClient,
+      warn: input.warn,
+      error
+    });
+  }
 }
+
+async function closeRecallReadWorkerAfterStartupFailure(input: {
+  readonly recallReadWorkerClient: Readonly<{ close(): Promise<void> }> | null;
+  readonly warn: (message: string, meta: Record<string, unknown>) => void;
+  readonly error: unknown;
+}): Promise<never> {
+  if (input.recallReadWorkerClient !== null) {
+    try {
+      await input.recallReadWorkerClient.close();
+    } catch (closeError) {
+      input.warn("recall read worker startup cleanup failed", {
+        error: closeError instanceof Error ? closeError.message : String(closeError)
+      });
+    }
+  }
+  throw input.error;
+}
+
+export const recallMaterializationWiringTestInternals = Object.freeze({
+  closeRecallReadWorkerAfterStartupFailure
+});

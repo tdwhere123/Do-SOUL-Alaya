@@ -156,16 +156,16 @@ export function fineAssess(params: FineAssessParams): Readonly<{
   const rankAfterStructuralReserve = buildStageRankMap(deliveryOrderedCandidates);
 
   type FineAssessmentAccumulator = {
-    readonly selected: readonly Readonly<RecallCandidate>[];
-    readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
-    readonly seen: ReadonlySet<string>;
-    readonly perDimensionCounts: ReadonlyMap<MemoryDimensionType, number>;
-    readonly totalTokens: number;
+    readonly selected: Readonly<RecallCandidate>[];
+    readonly diagnostics: Readonly<RecallCandidateDiagnostic>[];
+    readonly seen: Set<string>;
+    readonly perDimensionCounts: Map<MemoryDimensionType, number>;
+    totalTokens: number;
   };
 
   const initialAccumulator: FineAssessmentAccumulator = {
-    selected: Object.freeze([]),
-    diagnostics: Object.freeze([]),
+    selected: [],
+    diagnostics: [],
     seen: new Set<string>(),
     perDimensionCounts: new Map<MemoryDimensionType, number>(),
     totalTokens: 0
@@ -250,13 +250,8 @@ export function fineAssess(params: FineAssessParams): Readonly<{
     };
 
     if (accumulator.seen.has(candidateKey)) {
-      return {
-        ...accumulator,
-        diagnostics: Object.freeze([
-          ...accumulator.diagnostics,
-          createDiagnostic("duplicate", null)
-        ])
-      };
+      accumulator.diagnostics.push(createDiagnostic("duplicate", null));
+      return accumulator;
     }
 
     const tokenEstimate = tokenEstimator.estimate(entry.content);
@@ -266,33 +261,18 @@ export function fineAssess(params: FineAssessParams): Readonly<{
     const nextTokenCount = accumulator.totalTokens + tokenEstimate;
 
     if (dimensionLimit !== null && dimensionCount >= dimensionLimit) {
-      return {
-        ...accumulator,
-        diagnostics: Object.freeze([
-          ...accumulator.diagnostics,
-          createDiagnostic("dimension_limit", null)
-        ])
-      };
+      accumulator.diagnostics.push(createDiagnostic("dimension_limit", null));
+      return accumulator;
     }
 
     if (nextEntryCount > config.budgets.max_entries) {
-      return {
-        ...accumulator,
-        diagnostics: Object.freeze([
-          ...accumulator.diagnostics,
-          createDiagnostic("max_entries", null)
-        ])
-      };
+      accumulator.diagnostics.push(createDiagnostic("max_entries", null));
+      return accumulator;
     }
 
     if (nextTokenCount > config.budgets.max_total_tokens) {
-      return {
-        ...accumulator,
-        diagnostics: Object.freeze([
-          ...accumulator.diagnostics,
-          createDiagnostic("max_total_tokens", null)
-        ])
-      };
+      accumulator.diagnostics.push(createDiagnostic("max_total_tokens", null));
+      return accumulator;
     }
 
     const nextCandidate = buildRecallCandidate({
@@ -309,19 +289,12 @@ export function fineAssess(params: FineAssessParams): Readonly<{
       governanceCeiling: supplementaryData.governanceCeilingByMemoryId[entry.object_id]
     });
 
-    return {
-      selected: Object.freeze([...accumulator.selected, nextCandidate]),
-      diagnostics: Object.freeze([
-        ...accumulator.diagnostics,
-        createDiagnostic(null, accumulator.selected.length + 1)
-      ]),
-      seen: new Set([...accumulator.seen, candidateKey]),
-      perDimensionCounts: new Map([
-        ...accumulator.perDimensionCounts,
-        [entry.dimension, dimensionCount + 1]
-      ]),
-      totalTokens: nextTokenCount
-    };
+    accumulator.selected.push(nextCandidate);
+    accumulator.diagnostics.push(createDiagnostic(null, accumulator.selected.length));
+    accumulator.seen.add(candidateKey);
+    accumulator.perDimensionCounts.set(entry.dimension, dimensionCount + 1);
+    accumulator.totalTokens = nextTokenCount;
+    return accumulator;
   };
 
   const finalAccumulator = deliveryOrderedCandidates.reduce(

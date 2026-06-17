@@ -275,21 +275,23 @@ function parseDecision(
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawJson);
-  } catch {
-    // A malformed response is treated as ADD — the core service then
-    // adds the fact with a conflict scan rather than dropping it.
-    return { kind: "add", reason: "LLM decision response was not valid JSON" };
+  } catch (error) {
+    throw new Error("garden reconciliation decision response was not valid JSON", {
+      cause: error
+    });
   }
   if (typeof parsed !== "object" || parsed === null) {
-    return { kind: "add", reason: "LLM decision response was not an object" };
+    throw new Error("garden reconciliation decision response was not an object");
   }
   const record = parsed as {
     readonly kind?: unknown;
     readonly target_object_id?: unknown;
     readonly reason?: unknown;
   };
-  const kind =
-    record.kind === "update" || record.kind === "noop" ? record.kind : "add";
+  if (record.kind !== "add" && record.kind !== "update" && record.kind !== "noop") {
+    throw new Error("garden reconciliation decision kind was invalid");
+  }
+  const kind = record.kind;
   const reason = typeof record.reason === "string" ? record.reason : undefined;
   if (kind === "add") {
     return { kind, ...(reason === undefined ? {} : { reason }) };

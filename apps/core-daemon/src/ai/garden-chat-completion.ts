@@ -42,6 +42,7 @@ async function requestGardenChatCompletionContentOnce(
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.timeoutMs);
+  timer.unref?.();
   try {
     let response: Response;
     try {
