@@ -37,8 +37,8 @@ describe("qa-harness context stitching", () => {
       { objectId: "b", content: "" },
       { objectId: "c", content: "second fact" }
     ]);
-    // empty content is dropped; order preserved.
-    expect(ctx).toBe("first fact\n\nsecond fact");
+    // empty content is dropped; order preserved; each survivor gets a header.
+    expect(ctx).toBe("[Memory 1 | rank=1]\nfirst fact\n\n[Memory 2 | rank=2]\nsecond fact");
   });
 
   it("caps the stitched context at 60000 chars by default", () => {
@@ -47,16 +47,22 @@ describe("qa-harness context stitching", () => {
     expect(ctx.length).toBe(60_000);
   });
 
-  it("prefixes each candidate with its event date when present, drops empty", () => {
+  it("headers each candidate with recorded date, session, and rank; drops empty", () => {
     const ctx = buildQaAnswerContext([
-      { objectId: "a", content: "visited MoMA", eventDate: "2023/01/08 (Sun) 12:49" },
+      {
+        objectId: "a",
+        content: "visited MoMA",
+        eventDate: "2023/01/08 (Sun) 12:49",
+        sessionId: "session-3",
+        sourceRank: 7
+      },
       { objectId: "b", content: "", eventDate: "2023/01/10 (Tue) 09:00" },
       { objectId: "c", content: "no date fact" }
     ]);
-    // dated candidate gets a [Recorded on …] anchor; empty content is dropped
-    // even with a date; an undated candidate stays bare (back-compat).
+    // header carries the present fields; empty content is dropped even with a
+    // date; an undated/sessionless candidate still gets a positional rank.
     expect(ctx).toBe(
-      "[Recorded on 2023/01/08 (Sun) 12:49]\nvisited MoMA\n\nno date fact"
+      "[Memory 1 | recorded=2023/01/08 (Sun) 12:49 | session=session-3 | rank=7]\nvisited MoMA\n\n[Memory 2 | rank=2]\nno date fact"
     );
   });
 });

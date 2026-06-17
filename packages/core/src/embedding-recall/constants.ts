@@ -44,3 +44,15 @@ export const QUERY_EMBEDDING_WARMUP_BATCH_SIZE = 16;
 // large enough that benches keep deterministic coverage and small enough that
 // the per-recall O(scan) cost stays bounded.
 export const EMBEDDING_WORKSPACE_SCAN_CAP = 5_000;
+
+// listByWorkspace orders by object_id ASC before the limit, so a workspace
+// larger than the cap drops gold vectors by id rather than relevance. The env
+// override lets large conversational corpora (LoCoMo) lift the ceiling for a
+// run without a code change.
+export function resolveEmbeddingWorkspaceScanCap(): number {
+  const raw = Number(process.env.ALAYA_EMBEDDING_WORKSPACE_SCAN_CAP);
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.floor(raw);
+  }
+  return EMBEDDING_WORKSPACE_SCAN_CAP;
+}

@@ -280,9 +280,15 @@ function installArgsSchema(): AlayaCliArgsSchema<InstallArgs> {
   };
 }
 
+// Default on-device model id, mirrored from packages/core LocalOnnxEmbeddingClient.
+const DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
+
+type EmbeddingProviderKind = "openai" | "local_onnx";
+
 interface ExistingInstallConfig {
   readonly db_path: string | null;
   readonly embedding_enabled: boolean | null;
+  readonly embedding_provider: EmbeddingProviderKind | null;
   readonly provider_base_url: string | null;
   readonly model_id: string | null;
   readonly default_workspace: string | null;
@@ -294,6 +300,7 @@ interface ExistingInstallConfig {
 interface ResolvedInstallConfig {
   readonly db_path: string;
   readonly embedding_enabled: boolean;
+  readonly embedding_provider: EmbeddingProviderKind;
   readonly provider_base_url: string | null;
   readonly model_id: string;
   readonly default_workspace: string;
@@ -314,8 +321,14 @@ async function readExistingInstallConfig(paths: AlayaConfigPaths): Promise<Exist
     default_workspace: toml === null ? null : readTomlString(toml, "runtime", "default_workspace"),
     worktree_enabled: toml === null ? null : readTomlBoolean(toml, "runtime", "worktree_enabled"),
     secret_ref: env === null ? null : readEnvValue(env, "ALAYA_OPENAI_SECRET_REF"),
+    embedding_provider: env === null ? null : readEmbeddingProviderEnv(env),
     garden_provider_kind: env === null ? null : readEnvValue(env, GARDEN_PROVIDER_KIND_ENV)
   };
+}
+
+function readEmbeddingProviderEnv(env: string): EmbeddingProviderKind | null {
+  const raw = readEnvValue(env, "ALAYA_EMBEDDING_PROVIDER");
+  return raw === "local_onnx" || raw === "openai" ? raw : null;
 }
 
 function resolveInstallAnswers(
@@ -323,24 +336,41 @@ function resolveInstallAnswers(
   existing: ExistingInstallConfig,
   paths: AlayaConfigPaths
 ): ResolvedInstallConfig {
-  const embeddingEnabled = answers.embedding_enabled ?? existing.embedding_enabled ?? false;
+  // Provider resolution + migration guard: an explicit answer wins; otherwise
+  // any OpenAI signal (api key source, persisted secret, or persisted openai
+  // provider) keeps openai, and a fresh install with no such signal defaults to
+  // the no-key on-device local_onnx path.
+  const embeddingProvider: EmbeddingProviderKind =
+    answers.embedding_provider ??
+    (answers.api_key_source !== undefined ||
+    existing.secret_ref !== null ||
+    existing.embedding_provider === "openai"
+      ? "openai"
+      : "local_onnx");
+  const usesOpenAi = embeddingProvider === "openai";
+  const embeddingEnabled =
+    answers.embedding_enabled ?? existing.embedding_enabled ?? embeddingProvider === "local_onnx";
   const keySource = answers.api_key_source ?? (existing.secret_ref === null ? "env" : undefined);
   const pastedSecret =
-    embeddingEnabled && keySource === "paste"
+    embeddingEnabled && usesOpenAi && keySource === "paste"
       ? {
           path: path.join(paths.secretsDir, "openai"),
           value: requireNonEmpty(answers.pasted_key, "pasted_key")
         }
       : null;
-  const secretRef = embeddingEnabled
-    ? resolveInstallSecretRef(answers, existing, pastedSecret)
-    : existing.secret_ref;
+  const secretRef = usesOpenAi
+    ? embeddingEnabled
+      ? resolveInstallSecretRef(answers, existing, pastedSecret)
+      : existing.secret_ref
+    : null;
+  const defaultModelId = usesOpenAi ? "text-embedding-3-small" : DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL;
 
   return {
     db_path: path.resolve(answers.db_path ?? existing.db_path ?? path.join(paths.configDir, "alaya.db")),
     embedding_enabled: embeddingEnabled,
-    provider_base_url: normalizeNullableString(answers.provider_base_url, existing.provider_base_url),
-    model_id: requireNonEmpty(answers.model_id ?? existing.model_id ?? "text-embedding-3-small", "model_id"),
+    embedding_provider: embeddingProvider,
+    provider_base_url: usesOpenAi ? normalizeNullableString(answers.provider_base_url, existing.provider_base_url) : null,
+    model_id: requireNonEmpty(answers.model_id ?? existing.model_id ?? defaultModelId, "model_id"),
     default_workspace: requireNonEmpty(
       answers.default_workspace ?? existing.default_workspace ?? "default",
       "default_workspace"
@@ -405,12 +435,17 @@ function renderAlayaToml(config: ResolvedInstallConfig): string {
 
 function renderEnvFile(config: ResolvedInstallConfig): string {
   const lines = [`ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=${config.embedding_enabled ? "true" : "false"}`];
-  if (config.secret_ref !== null) {
-    lines.push(`ALAYA_OPENAI_SECRET_REF=${config.secret_ref}`);
-  }
-  lines.push(`OPENAI_EMBEDDING_MODEL=${config.model_id}`);
-  if (config.provider_base_url !== null) {
-    lines.push(`OPENAI_EMBEDDING_PROVIDER_URL=${config.provider_base_url}`);
+  if (config.embedding_provider === "local_onnx") {
+    lines.push("ALAYA_EMBEDDING_PROVIDER=local_onnx");
+    lines.push(`ALAYA_LOCAL_EMBEDDING_MODEL=${config.model_id}`);
+  } else {
+    if (config.secret_ref !== null) {
+      lines.push(`ALAYA_OPENAI_SECRET_REF=${config.secret_ref}`);
+    }
+    lines.push(`OPENAI_EMBEDDING_MODEL=${config.model_id}`);
+    if (config.provider_base_url !== null) {
+      lines.push(`OPENAI_EMBEDDING_PROVIDER_URL=${config.provider_base_url}`);
+    }
   }
   if (config.garden_provider_kind !== null) {
     lines.push(`${GARDEN_PROVIDER_KIND_ENV}=${config.garden_provider_kind}`);

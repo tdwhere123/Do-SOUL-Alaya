@@ -44,6 +44,7 @@ import {
 import type { LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import type { QaChatFn } from "./qa-chat.js";
 import { selectRelevantMemories } from "./qa-llm-filter.js";
+import { buildQaSupportPack } from "./qa-support-pack.js";
 
 const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
 const WIDE_QA_DELIVERY_QUESTION_TYPES = new Set([
@@ -506,7 +507,7 @@ export async function runLongMemEvalQuestion(input: {
       const memoryEntryResults = results.filter(
         (pointer) => (pointer.object_kind ?? "memory_entry") === "memory_entry"
       );
-      const memoryEntryCandidates = memoryEntryResults.map((result) => {
+      const memoryEntryCandidates = memoryEntryResults.map((result, index) => {
         const entry = sidecar.get(
           buildLongMemEvalSidecarKey("memory_entry", result.object_id)
         );
@@ -514,6 +515,7 @@ export async function runLongMemEvalQuestion(input: {
           objectId: result.object_id,
           content: entry?.content ?? "",
           sessionId: entry?.sessionId ?? null,
+          sourceRank: index + 1,
           ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
         };
       });
@@ -565,6 +567,17 @@ export async function runLongMemEvalQuestion(input: {
             : selected.slice(0, filterM);
         }
       }
+      // Support pack: deterministically expand the filtered anchors with their
+      // same-session neighbours so a needed date/number/before-after value the
+      // filter skipped still reaches the reader. Default-off; agent-sim layer.
+      if (!goldOnlyRequested && process.env.ALAYA_BENCH_QA_SUPPORT_PACK !== undefined) {
+        delivered = buildQaSupportPack({
+          questionType: input.question.question_type,
+          selected: delivered,
+          widePool: memoryEntryCandidates,
+          maxDeliver: readPositiveIntEnv("ALAYA_BENCH_QA_SUPPORT_PACK_MAX", 16)
+        });
+      }
       // Diagnostic oracle: replace delivered recall with ONLY the materialized
       // gold memories (no distractors), to isolate ingestion-drop from recall
       // ranking/noise. Gold not materialized at ingestion is absent here too.
@@ -592,6 +605,24 @@ export async function runLongMemEvalQuestion(input: {
       // reader answered wrong" (reader). Pairs with DELIVER_GOLD_ONLY to isolate
       // the oracle ceiling. Default off; set ALAYA_BENCH_QA_DUMP to a file path.
       if (process.env.ALAYA_BENCH_QA_DUMP !== undefined) {
+        // Failure split: locate gold in the wide pool vs the delivered set so a
+        // wrong answer is attributable to recall (gold never retrieved), the
+        // selector/support layer (retrieved but not delivered), or the reader
+        // (delivered but answered wrong). Finer judge/ingestion splits stay for
+        // manual review off the raw gold-presence fields.
+        const goldIdSet = new Set(goldMemoryIds);
+        const widePoolGoldRanks = memoryEntryCandidates
+          .filter((c) => goldIdSet.has(c.objectId) && normalizeQaDeliveryContent(c.content).length > 0)
+          .map((c) => c.sourceRank);
+        const goldInWidePool = widePoolGoldRanks.length > 0;
+        const goldInDelivered = delivered.some((d) => goldIdSet.has(d.objectId));
+        const failureClass = qaVerdict.correct
+          ? null
+          : !goldInWidePool
+            ? "recall_miss"
+            : !goldInDelivered
+              ? "support_selector_miss"
+              : "reader_miss";
         appendFileSync(
           process.env.ALAYA_BENCH_QA_DUMP,
           JSON.stringify({
@@ -603,11 +634,17 @@ export async function runLongMemEvalQuestion(input: {
             modelAnswer: qaVerdict.modelAnswer,
             judgeVerdict: qaVerdict.judgeVerdict,
             correct: qaVerdict.correct,
+            goldInWidePool,
+            goldInDelivered,
+            failureClass,
+            widePoolGoldRanks,
             deliveredGoldOnly:
               process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined,
             delivered: delivered.map((d) => ({
               objectId: d.objectId,
               ...(d.eventDate === undefined ? {} : { eventDate: d.eventDate }),
+              ...(d.sessionId == null ? {} : { sessionId: d.sessionId }),
+              ...(d.sourceRank === undefined ? {} : { sourceRank: d.sourceRank }),
               content: d.content.replace(/\s+/gu, " ")
             }))
           }) + "\n"

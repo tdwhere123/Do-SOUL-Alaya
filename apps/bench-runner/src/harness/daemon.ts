@@ -97,6 +97,7 @@ const MANAGED_ENV_KEYS = [
   "ALAYA_EMBEDDING_PROVIDER",
   "ALAYA_LOCAL_EMBEDDING_CACHE_DIR",
   "ALAYA_LOCAL_EMBEDDING_MODEL",
+  "ALAYA_RECALL_SOURCE_REF_ROBUST",
   "ALAYA_CONFIG_DIR",
   "CODEX_HOME",
   "HOME",
@@ -247,6 +248,10 @@ export async function startBenchDaemon(
     process.env.HOME = join(dataDir, "home");
     process.env.ALAYA_REVIEWER_IDENTITY = REVIEWER_IDENTITY;
     process.env.ALAYA_REVIEWER_TOKEN = REVIEWER_TOKEN;
+    // Conversational corpora seed round-labeled evidence refs (s{si}-r{ri}); the
+    // robust parser is what makes source_proximity resolve them. Default it on
+    // for bench while production keeps env control.
+    process.env.ALAYA_RECALL_SOURCE_REF_ROBUST = savedEnv.ALAYA_RECALL_SOURCE_REF_ROBUST ?? "true";
 
     runtime = await createAlayaDaemonRuntime();
     // The bench daemon deliberately does NOT call runtime.startBackgroundServices().

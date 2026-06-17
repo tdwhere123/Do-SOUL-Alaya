@@ -127,7 +127,7 @@ const DEFAULT_RUNTIME_EMBEDDING_CONFIG: RuntimeEmbeddingConfig = {
   provider_url: null,
   secret_ref: null,
   model_id: null,
-  embedding_enabled: false
+  embedding_enabled: true
 };
 
 export function createConfigService(dependencies: {

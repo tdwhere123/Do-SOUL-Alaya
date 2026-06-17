@@ -11,8 +11,8 @@ import {
 import {
   DEFAULT_QUERY_EMBEDDING_CACHE_SIZE,
   DEFAULT_QUERY_TIMEOUT_MS,
-  EMBEDDING_WORKSPACE_SCAN_CAP,
-  QUERY_EMBEDDING_WARMUP_BATCH_SIZE
+  QUERY_EMBEDDING_WARMUP_BATCH_SIZE,
+  resolveEmbeddingWorkspaceScanCap
 } from "./constants.js";
 import { resolveEmbeddingRecallTiers } from "./tier-config.js";
 import {
@@ -605,15 +605,27 @@ export class EmbeddingRecallService {
       // a workspace that has switched providers would burn the cap on
       // unusable vectors before the JS-side filter could drop them.
       // see also: packages/core/src/embedding-recall/tier-config.ts:resolveEmbeddingRecallTiers.
-      storedVectors = await this.dependencies.embeddingRepo.listByWorkspace(
+      const scanCap = resolveEmbeddingWorkspaceScanCap();
+      // Fetch one past the cap so a truncated scan (more vectors than the cap)
+      // is observable instead of silently dropping gold by object_id order.
+      const scanned = await this.dependencies.embeddingRepo.listByWorkspace(
         params.workspaceId,
         {
           tierFilter: resolveEmbeddingRecallTiers(),
-          limit: EMBEDDING_WORKSPACE_SCAN_CAP,
+          limit: scanCap + 1,
           providerKind: this.dependencies.provider.providerKind,
           modelId: this.dependencies.provider.modelId
         }
       );
+      if (scanned.length > scanCap) {
+        this.warn("embedding workspace scan truncated by cap", {
+          workspace_id: params.workspaceId,
+          run_id: params.runId,
+          scan_cap: scanCap,
+          returned: scanned.length
+        });
+      }
+      storedVectors = scanned.length > scanCap ? scanned.slice(0, scanCap) : scanned;
     } catch (error) {
       this.warn("embedding workspace neighbor scan failed", {
         workspace_id: params.workspaceId,

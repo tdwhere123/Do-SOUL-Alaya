@@ -39,14 +39,26 @@ export function createDaemonEmbeddingRuntime(input: {
   const configuredEmbeddingProviderUrl = readNonEmptyEnv(
     readConfigEnvValue(input.configEnv, "OPENAI_EMBEDDING_PROVIDER_URL")
   );
-  // Provider selection: "openai" (default) reaches an API embedding endpoint;
-  // "local_onnx" runs an on-device ONNX model with no network dependency.
-  // Vectors are isolated by provider_kind + model_id at recall read time, so
-  // switching providers re-backfills rather than mixing cosine spaces.
+  // Provider selection: "local_onnx" runs an on-device ONNX model with no
+  // network dependency; "openai" reaches an API embedding endpoint. Vectors are
+  // isolated by provider_kind + model_id at recall read time, so switching
+  // providers re-backfills rather than mixing cosine spaces.
+  // invariant: the unconfigured default is local_onnx, but an installed OpenAI
+  // user (secret ref or openai model present) keeps openai so a default never
+  // silently re-points their vectors.
+  const explicitEmbeddingProvider = readNonEmptyEnv(
+    readConfigEnvValue(input.configEnv, "ALAYA_EMBEDDING_PROVIDER")
+  );
+  const hasExistingOpenAiConfig =
+    (rawEmbeddingSecretRef?.trim().length ?? 0) > 0 || configuredEmbeddingModel !== undefined;
   const embeddingProviderKind =
-    readNonEmptyEnv(readConfigEnvValue(input.configEnv, "ALAYA_EMBEDDING_PROVIDER")) === "local_onnx"
+    explicitEmbeddingProvider === "local_onnx"
       ? "local_onnx"
-      : "openai";
+      : explicitEmbeddingProvider === "openai"
+        ? "openai"
+        : hasExistingOpenAiConfig
+          ? "openai"
+          : "local_onnx";
   const localEmbeddingCacheDir = readNonEmptyEnv(
     readConfigEnvValue(input.configEnv, "ALAYA_LOCAL_EMBEDDING_CACHE_DIR")
   );
@@ -57,12 +69,15 @@ export function createDaemonEmbeddingRuntime(input: {
     input.configEnv,
     "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT"
   );
-  // A configured on-device local ONNX provider (no API key, no network) is a
-  // first-class recall stream: default-on unless explicitly disabled. An API
-  // provider stays strict opt-in (cost/network), so it still requires "true".
+  // An explicitly-configured on-device local ONNX provider (no API key, no
+  // network) is a first-class recall stream: default-on unless explicitly
+  // disabled. The auto-on gate keys on the EXPLICIT provider, not the resolved
+  // default, so an unconfigured context (no provider env, no openai config)
+  // keeps embedding off; production opts in via install writing the flag. An
+  // API provider stays strict opt-in (cost/network), so it still requires "true".
   const embeddingSupplementOptInEnabled =
     embeddingOptInRaw === "true" ||
-    (embeddingProviderKind === "local_onnx" && embeddingOptInRaw !== "false");
+    (explicitEmbeddingProvider === "local_onnx" && embeddingOptInRaw !== "false");
   const recallPolicyEmbeddingEnabled = embeddingSupplementOptInEnabled;
   const embeddingProvider: EmbeddingProviderPort | null = resolveEmbeddingProvider({
     providerKind: embeddingProviderKind,

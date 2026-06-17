@@ -30,6 +30,7 @@ import {
   reserveSynthesisDeliverySlots,
   synthesisReserveCount
 } from "./fusion-delivery.js";
+import { applyCoverageDeliverySelection } from "./coverage-delivery.js";
 import { uniqueStrings } from "./path-relations.js";
 import {
   computeEffectiveScoreDetails,
@@ -112,8 +113,16 @@ export function fineAssess(params: FineAssessParams): Readonly<{
     supplementaryData,
     config.budgets.max_entries
   );
-  const coverageOrderedCandidates = applySessionCoverageRerank(
+  // Coverage selector (default-off): rewrites the top-K from the top-M pool to
+  // cover buried second-session/source/evidence gold; no-op when disabled, so
+  // the window rerank below still owns the enabled-off path byte-for-byte.
+  const coverageSelectedCandidates = applyCoverageDeliverySelection(
     prioritizedCandidates,
+    supplementaryData,
+    config.budgets.max_entries
+  );
+  const coverageOrderedCandidates = applySessionCoverageRerank(
+    coverageSelectedCandidates,
     config.budgets.max_entries
   );
   const synthesisReservedCandidates = reserveSynthesisDeliverySlots(

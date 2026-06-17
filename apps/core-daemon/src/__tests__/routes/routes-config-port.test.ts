@@ -528,7 +528,7 @@ describe("routes-config port batch", () => {
       provider_url: null,
       secret_ref: null,
       model_id: null,
-      embedding_enabled: false
+      embedding_enabled: true
     });
     expect(harness.publishedEvents).toHaveLength(0);
   });
@@ -551,7 +551,7 @@ describe("routes-config port batch", () => {
       provider_url: null,
       secret_ref: null,
       model_id: null,
-      embedding_enabled: false
+      embedding_enabled: true
     });
     expect(harness.publishedEvents).toHaveLength(0);
   });

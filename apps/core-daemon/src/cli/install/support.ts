@@ -13,6 +13,7 @@ import type {
 export interface InstallAnswers {
   readonly db_path?: string;
   readonly embedding_enabled?: boolean;
+  readonly embedding_provider?: "openai" | "local_onnx";
   readonly provider_base_url?: string | null;
   readonly model_id?: string;
   readonly api_key_source?: "env" | "file" | "paste";

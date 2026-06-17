@@ -19,7 +19,16 @@ vi.mock("../../locomo/fetch.js", () => ({
   loadLocomo: loadLocomoMock
 }));
 
-import { runLocomo } from "../../locomo/runner.js";
+import { runLocomo, resolveLocomoQaQuestionType } from "../../locomo/runner.js";
+
+// Bench evidence refs are now <sample>-s<si>-r<ri> (parseable by
+// source_proximity). These single-session fixtures use dia_ids d1,d2 in turn
+// order, so r<ri> maps to d<ri+1>; fall back to the trailing segment otherwise.
+function benchRefToDiaId(evidenceRef: string): string {
+  const match = /-s\d+-r(\d+)/u.exec(evidenceRef);
+  if (match !== null) return `d${Number.parseInt(match[1]!, 10) + 1}`;
+  return evidenceRef.split("-").at(-1) ?? "unknown";
+}
 
 let tmpDir: string;
 
@@ -55,6 +64,19 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
 
+describe("resolveLocomoQaQuestionType", () => {
+  it("maps category 4 to locomo-open-domain and others to their typed prompts", () => {
+    const qa = (category: number) =>
+      ({ question: "q", answer: "a", evidence: [], category }) as Parameters<
+        typeof resolveLocomoQaQuestionType
+      >[0];
+    expect(resolveLocomoQaQuestionType(qa(4))).toBe("locomo-open-domain");
+    expect(resolveLocomoQaQuestionType(qa(2))).toBe("temporal-reasoning");
+    expect(resolveLocomoQaQuestionType(qa(3))).toBe("locomo-aggregation");
+    expect(resolveLocomoQaQuestionType(qa(1))).toBe("locomo-factual");
+  });
+});
+
 describe("LoCoMo runner", () => {
   it("maps multi-fact extracted seeds back to the source dia_id for scoring", async () => {
     const createCompileSeedRunnerSpy = vi
@@ -81,7 +103,7 @@ describe("LoCoMo runner", () => {
           lastCacheKey: null
         },
         seedTurn: vi.fn(async ({ evidenceRefBase }: { evidenceRefBase: string }) => {
-          if (evidenceRefBase.endsWith("-d1")) {
+          if (benchRefToDiaId(evidenceRefBase) === "d1") {
             return {
               seeds: [
                 {
@@ -493,7 +515,7 @@ describe("LoCoMo runner", () => {
           lastCacheKey: null
         },
         seedTurn: vi.fn(async ({ evidenceRefBase }: { evidenceRefBase: string }) => {
-          if (evidenceRefBase.endsWith("-d1")) {
+          if (benchRefToDiaId(evidenceRefBase) === "d1") {
             return { seeds: [], turnTruncated: false, charsClipped: 0 };
           }
           return {
@@ -689,7 +711,7 @@ function buildMockDaemon(overrides: {
       model_id: "text-embedding-3-small"
     }));
   const proposeMemory = vi.fn(async (_content: string, evidenceRef: string) => {
-    const diaId = evidenceRef.split("-").at(-1) ?? "unknown";
+    const diaId = benchRefToDiaId(evidenceRef);
     return {
       memoryId: `memory-${diaId}`,
       signalId: `signal-${diaId}`,
@@ -699,7 +721,7 @@ function buildMockDaemon(overrides: {
     };
   });
   const proposeMemoryFromSignal = vi.fn(async (input: { evidenceRef: string }) => {
-    const diaId = input.evidenceRef.split("-").at(-1) ?? "unknown";
+    const diaId = benchRefToDiaId(input.evidenceRef);
     return {
       memoryId: `memory-${diaId}`,
       signalId: `signal-${diaId}`,

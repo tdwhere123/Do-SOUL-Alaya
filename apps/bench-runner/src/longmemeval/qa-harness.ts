@@ -91,6 +91,28 @@ const ANSWER_SYSTEM_AGGREGATION =
   "Commit to the total the enumerated items support; do not answer 'I don't know' when relevant memories are present — only abstain when no relevant memory exists at all. " +
   "Show the brief enumeration and calculation, then end with the final answer in one short sentence.";
 
+/** knowledge-update 口径 (v2): the attribute has changed over time, so the
+ * answer is the LATEST recorded value, not the first one found. Gated by
+ * ALAYA_BENCH_QA_V2_PROMPTS so the matrix can isolate the prompt lever. */
+const ANSWER_SYSTEM_KNOWLEDGE_UPDATE =
+  "Answer using ONLY the provided memory context. The asked attribute or item may have been updated over time. " +
+  "First gather every memory about that attribute/item, sort them by recorded date, and answer with the value from the MOST RECENT applicable memory. " +
+  "Mention an older value only if the question asks for history. Do not answer with a stale value when a later update exists.";
+/** factual/list 口径 (v2): a list question is wrong if partial. Forces an
+ * exhaustive enumeration before the final answer. */
+const ANSWER_SYSTEM_FACTUAL =
+  "Answer using ONLY the provided memory context. First identify the exact memory or memories that contain the answer. " +
+  "If the question asks for a list or set, enumerate ALL matching items found anywhere in the context before answering — a partial list is wrong. " +
+  "Then give the final answer concisely.";
+/** LoCoMo open-domain 口径 (v2): category 4 may ask for general world knowledge
+ * about an entity the conversation identifies, so ONLY-context wrongly
+ * suppresses the model's own knowledge. Memory anchors the entity; general
+ * knowledge may answer — but never invent conversation-specific facts. */
+const ANSWER_SYSTEM_LOCOMO_OPEN_DOMAIN =
+  "Use the memory context to identify the entity or event the user asks about. " +
+  "If the question then asks for general world knowledge about that entity, answer from your general knowledge, but never invent conversation-specific facts that the memory does not support. " +
+  "If the memory context does not identify the entity, say you don't know.";
+
 /** Judge口径: one-word yes/no, matching LongMemEval's anscheck metric. */
 const JUDGE_SYSTEM =
   "You are a strict grader for a question-answering system. Follow the instruction exactly and reply with one word: yes or no.";
@@ -106,6 +128,12 @@ export interface QaDeliveredCandidate {
    * "now"; the conversation text itself never carries an absolute date.
    */
   readonly eventDate?: string;
+  /** Session this memory belongs to; surfaced in the header for cross-session
+   * enumeration (aggregation) and failure-split analysis. */
+  readonly sessionId?: string | null;
+  /** 1-based natural recall rank of this candidate; surfaced so the reader and
+   * the dump can see delivery order independent of array position. */
+  readonly sourceRank?: number;
 }
 
 export interface QaQuestionInput {
@@ -161,11 +189,17 @@ export function buildQaAnswerContext(
 ): string {
   const text = delivered
     .filter((candidate) => candidate.content.length > 0)
-    .map((candidate) =>
-      candidate.eventDate !== undefined && candidate.eventDate.length > 0
-        ? `[Recorded on ${candidate.eventDate}]\n${candidate.content}`
-        : candidate.content
-    )
+    .map((candidate, index) => {
+      const parts = [`Memory ${index + 1}`];
+      if (candidate.eventDate !== undefined && candidate.eventDate.length > 0) {
+        parts.push(`recorded=${candidate.eventDate}`);
+      }
+      if (typeof candidate.sessionId === "string" && candidate.sessionId.length > 0) {
+        parts.push(`session=${candidate.sessionId}`);
+      }
+      parts.push(`rank=${candidate.sourceRank ?? index + 1}`);
+      return `[${parts.join(" | ")}]\n${candidate.content}`;
+    })
     .join("\n\n");
   return text.slice(0, qaContextCharCap());
 }
@@ -184,8 +218,15 @@ export function judgeIsCorrect(verdict: string): boolean {
 /** Pick the answer system prompt: preference needs personalization, temporal
  * needs license to compute from dates. Abstention always keeps the default
  * (those questions must be recognized as unanswerable, not computed through). */
-function answerSystemFor(questionType: string, isAbstention: boolean): string {
+function v2PromptsEnabled(): boolean {
+  const raw = process.env.ALAYA_BENCH_QA_V2_PROMPTS;
+  return raw !== undefined && raw !== "0" && raw.toLowerCase() !== "false" && raw.toLowerCase() !== "off";
+}
+
+export function answerSystemFor(questionType: string, isAbstention: boolean): string {
   if (isAbstention) {
+    // Strict: abstention never inherits a v2 prompt — the gold behaviour is to
+    // say "I don't know", so the default 口径 must win even when v2 is on.
     return ANSWER_SYSTEM_DEFAULT;
   }
   if (questionType === "single-session-preference") {
@@ -195,6 +236,13 @@ function answerSystemFor(questionType: string, isAbstention: boolean): string {
     return process.env.ALAYA_BENCH_QA_TEMPORAL_ENUM !== undefined
       ? ANSWER_SYSTEM_TEMPORAL_ENUM
       : ANSWER_SYSTEM_TEMPORAL;
+  }
+  const v2 = v2PromptsEnabled();
+  if (v2 && questionType === "knowledge-update") {
+    return ANSWER_SYSTEM_KNOWLEDGE_UPDATE;
+  }
+  if (v2 && questionType === "locomo-open-domain") {
+    return ANSWER_SYSTEM_LOCOMO_OPEN_DOMAIN;
   }
   // multi-session is LongMemEval's aggregation/comparison category; the
   // aggregation 口径 is the default for it (like temporal/preference), opt out
@@ -206,6 +254,14 @@ function answerSystemFor(questionType: string, isAbstention: boolean): string {
     process.env.ALAYA_BENCH_QA_AGG_PROMPT !== "off"
   ) {
     return ANSWER_SYSTEM_AGGREGATION;
+  }
+  if (
+    v2 &&
+    (questionType === "single-session-user" ||
+      questionType === "single-session-assistant" ||
+      questionType === "locomo-factual")
+  ) {
+    return ANSWER_SYSTEM_FACTUAL;
   }
   return ANSWER_SYSTEM_DEFAULT;
 }

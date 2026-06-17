@@ -47,6 +47,8 @@ import {
   type QaDeliveredCandidate
 } from "../longmemeval/qa-harness.js";
 import { type QaChatFn, QaChatError } from "../longmemeval/qa-chat.js";
+import { selectRelevantMemories } from "../longmemeval/qa-llm-filter.js";
+import { buildQaSupportPack } from "../longmemeval/qa-support-pack.js";
 import {
   createCompileSeedRunner,
   computeNextTurnSeedRefs,
@@ -479,6 +481,7 @@ async function runOneConversation(
     // session date. Populated always (cheap); consumed only when opts.qa is set.
     const contentByMemoryId = new Map<string, string>();
     const dateByMemoryId = new Map<string, string | null>();
+    const sessionByMemoryId = new Map<string, string>();
     const sessions = extractSessions(conversation.conversation);
     // Best-effort "now" for temporal QA: the latest session date in the convo.
     const conversationNowDate =
@@ -498,9 +501,13 @@ async function runOneConversation(
       // anchor: same-session co-recall members, seed order. see also:
       //   apps/bench-runner/src/longmemeval/runner.ts sessionMemberMemoryIds
       const sessionMemberMemoryIds: string[] = [];
+      let turnOrdinal = 0;
       for (const turn of session.turns) {
         const seedContent = buildLocomoSeedContent(turn);
-        const evidenceRef = `${conversation.sample_id}-${turn.dia_id}`;
+        // Round-labeled ref so parseEvidenceSourceChunkRef resolves sourceKey +
+        // chunkIndex and source_proximity can pull neighboring turns. dia_id keeps
+        // driving gold scoring via the maps below, so grading is unchanged.
+        const evidenceRef = `${conversation.sample_id}-s${sessionOrdinal}-r${turnOrdinal}`;
         const seedResult = await seedRunner.seedTurn({
           daemon: workspace,
           turnContent: seedContent,
@@ -523,9 +530,11 @@ async function runOneConversation(
           memoryIdsByDiaId.set(turn.dia_id, current);
           contentByMemoryId.set(seed.memoryId, seedContent);
           dateByMemoryId.set(seed.memoryId, session.date_time);
+          sessionByMemoryId.set(seed.memoryId, `${conversation.sample_id}-s${sessionOrdinal}`);
           sessionMemberMemoryIds.push(seed.memoryId);
         }
         previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
+        turnOrdinal += 1;
       }
       // invariant: same-session EARNED co-recall accrual. Mirror of the
       // LongMemEval seed path so LoCoMo's graph/path plane earns the production
@@ -643,18 +652,43 @@ async function runOneConversation(
       // answerless rows still count in the retrieval denominator when they
       // carry gold evidence; abstention only changes the QA judge prompt.
       if (opts.qa !== undefined) {
-        const delivered: QaDeliveredCandidate[] = result.pointers.map((pointer) => {
+        const widePool: QaDeliveredCandidate[] = result.pointers.map((pointer, index) => {
           const date = dateByMemoryId.get(pointer.object_id);
           return {
             objectId: pointer.object_id,
             content: contentByMemoryId.get(pointer.object_id) ?? "",
+            sessionId: sessionByMemoryId.get(pointer.object_id) ?? null,
+            sourceRank: index + 1,
             ...(date === undefined || date === null ? {} : { eventDate: date })
           };
         });
+        const locomoQuestionType = resolveLocomoQaQuestionType(qa);
+        let delivered: QaDeliveredCandidate[] = widePool;
+        // Q1: shared LLM relevance filter (default-off; mirrors LongMemEval).
+        if (process.env.ALAYA_BENCH_QA_LLM_FILTER !== undefined) {
+          const filterK = readPositiveEnv("ALAYA_BENCH_QA_LLM_FILTER_K", 30);
+          const filterM = readPositiveEnv("ALAYA_BENCH_QA_LLM_FILTER_M", 8);
+          const selected = await selectRelevantMemories(
+            qa.question,
+            widePool.slice(0, filterK),
+            filterM,
+            opts.qa.chat
+          );
+          if (selected.length > 0) delivered = selected;
+        }
+        // Q2: deterministic same-session support pack (default-off).
+        if (process.env.ALAYA_BENCH_QA_SUPPORT_PACK !== undefined) {
+          delivered = buildQaSupportPack({
+            questionType: locomoQuestionType,
+            selected: delivered,
+            widePool,
+            maxDeliver: readPositiveEnv("ALAYA_BENCH_QA_SUPPORT_PACK_MAX", 16)
+          });
+        }
         const qaVerdict = await scoreQaQuestion(
           {
             questionId,
-            questionType: resolveLocomoQaQuestionType(qa),
+            questionType: locomoQuestionType,
             isAbstention,
             question: qa.question,
             questionDate: conversationNowDate,
@@ -898,14 +932,22 @@ function shouldRunLocomoRecall(
   return hasLocomoRetrievalEvidence(qa) || opts.qa !== undefined;
 }
 
-function resolveLocomoQaQuestionType(qa: LocomoQa): string {
+export function resolveLocomoQaQuestionType(qa: LocomoQa): string {
   if (qa.category === 2) {
     return "temporal-reasoning";
   }
   if (qa.category === 3) {
     return "locomo-aggregation";
   }
+  if (qa.category === 4) {
+    return "locomo-open-domain";
+  }
   return "locomo-factual";
+}
+
+function readPositiveEnv(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
 }
 
 function buildLocomoQuestionId(sampleId: string, qaIndex: number): string {
