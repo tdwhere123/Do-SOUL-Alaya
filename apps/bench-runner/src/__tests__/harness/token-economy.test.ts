@@ -11,10 +11,10 @@ import {
   aggregateBenchTokenMetrics,
   assertBenchTokenEconomyContract,
   deriveBenchTokenMetrics,
-  BENCH_FULL_TURN_CONTENT_KEY,
-  BENCH_SEED_MARKER_KEY,
-  BENCH_STORED_CONTENT_KEY,
-  BENCH_TURN_SEED_INDEX_KEY,
+  BENCH_FULL_TURN_TOKENS_KEY,
+  BENCH_SUMMARY_SEED_MARKER_KEY,
+  BENCH_SUMMARY_TURN_SEED_INDEX_KEY,
+  BENCH_STORED_CONTENT_TOKENS_KEY,
   type TokenEconomyEventRow
 } from "../../harness/token-economy.js";
 
@@ -32,55 +32,44 @@ function emittedRow(rawPayload: Record<string, unknown>): TokenEconomyEventRow {
   };
 }
 
+function benchTokens(charCount: number): number {
+  return Math.ceil(charCount / 4);
+}
+
 /**
- * Build a credentialled-shape seed event raw_payload: it carries explicit
- * bench_full_turn_content / bench_stored_content keys because on the
- * credentialled path `excerpt` is only a narrow turn_content_excerpt window,
- * never the full turn. `extra` lets a test add the production-shaped fields
- * (turn_content_excerpt / excerpt) the fold must NOT mistake for the full
- * turn when the bench content keys are present.
+ * Build the redacted EventLog-summary raw_payload shape that SignalService
+ * persists for bench seed events.
  */
-function seedPayload(input: {
-  readonly fullTurn: string;
-  readonly stored: string;
+function summarySeedPayload(input: {
+  readonly fullTurnTokens: number;
+  readonly storedTokens: number;
   readonly turnSeedIndex?: number;
-  readonly extra?: Record<string, unknown>;
 }): Record<string, unknown> {
   return {
-    ...(input.extra ?? {}),
-    [BENCH_SEED_MARKER_KEY]: true,
-    [BENCH_FULL_TURN_CONTENT_KEY]: input.fullTurn,
-    [BENCH_STORED_CONTENT_KEY]: input.stored,
+    [BENCH_SUMMARY_SEED_MARKER_KEY]: true,
+    [BENCH_FULL_TURN_TOKENS_KEY]: input.fullTurnTokens,
+    [BENCH_STORED_CONTENT_TOKENS_KEY]: input.storedTokens,
     ...(input.turnSeedIndex === undefined
       ? {}
-      : { [BENCH_TURN_SEED_INDEX_KEY]: input.turnSeedIndex })
+      : { [BENCH_SUMMARY_TURN_SEED_INDEX_KEY]: input.turnSeedIndex })
   };
 }
 
 /**
- * Build a no-credentials-shape seed event raw_payload: it carries NO
- * bench_full_turn_content / bench_stored_content keys because the
- * benchTokenEconomyPayload helper omits them when they would byte-duplicate
- * `excerpt` / `distilled_fact` — on the no-creds path `excerpt` IS the full
- * turn and `distilled_fact` IS the durable fact. The fold must fall back to
- * those sibling fields. Only the content-free bench_seed marker (and the
- * turn-seed index) survive.
+ * Build a summarized no-credentials seed. The source raw payload may have
+ * only excerpt / distilled_fact, but deriveBenchTokenMetrics now consumes the
+ * EventLog summary after SignalService redaction.
  */
-function noCredsSeedPayload(input: {
-  readonly excerpt: string;
-  readonly distilledFact?: string;
+function summarizedNoCredsSeedPayload(input: {
+  readonly excerptChars: number;
+  readonly distilledFactChars?: number;
   readonly turnSeedIndex?: number;
 }): Record<string, unknown> {
-  return {
-    [BENCH_SEED_MARKER_KEY]: true,
-    excerpt: input.excerpt,
-    ...(input.distilledFact === undefined
-      ? {}
-      : { distilled_fact: input.distilledFact }),
-    ...(input.turnSeedIndex === undefined
-      ? {}
-      : { [BENCH_TURN_SEED_INDEX_KEY]: input.turnSeedIndex })
-  };
+  return summarySeedPayload({
+    fullTurnTokens: benchTokens(input.excerptChars),
+    storedTokens: benchTokens(input.distilledFactChars ?? input.excerptChars),
+    turnSeedIndex: input.turnSeedIndex
+  });
 }
 
 function lensRow(totalTokenEstimate: number): TokenEconomyEventRow {
@@ -99,17 +88,22 @@ function lensRow(totalTokenEstimate: number): TokenEconomyEventRow {
 }
 
 describe("deriveBenchTokenMetrics", () => {
-  it("derives raw_history from the full turn and stored_memory from the stored fact", () => {
-    // full turn 80 chars -> 20 tokens; stored fact 8 chars -> 2 tokens.
+  it("prefers redacted numeric token summaries over full text when present", () => {
     const metrics = deriveBenchTokenMetrics(
       [
-        emittedRow(
-          seedPayload({
-            fullTurn: "x".repeat(80),
-            stored: "y".repeat(8),
-            turnSeedIndex: 0
-          })
-        )
+        emittedRow(summarySeedPayload({ fullTurnTokens: 20, storedTokens: 7, turnSeedIndex: 0 }))
+      ],
+      []
+    );
+    expect(metrics.raw_history_tokens).toBe(20);
+    expect(metrics.stored_memory_tokens).toBe(7);
+    expect(metrics.seed_event_count).toBe(1);
+  });
+
+  it("derives raw_history from summarized full-turn tokens and stored_memory from summarized fact tokens", () => {
+    const metrics = deriveBenchTokenMetrics(
+      [
+        emittedRow(summarySeedPayload({ fullTurnTokens: 20, storedTokens: 2, turnSeedIndex: 0 }))
       ],
       []
     );
@@ -123,18 +117,11 @@ describe("deriveBenchTokenMetrics", () => {
     // the same turn_seed_index and the same full turn. raw_history must be
     // the full turn counted once, not N times; stored_memory sums every
     // distinct fact.
-    const fullTurn = "h".repeat(400); // 100 tokens
     const metrics = deriveBenchTokenMetrics(
       [
-        emittedRow(
-          seedPayload({ fullTurn, stored: "a".repeat(40), turnSeedIndex: 7 })
-        ),
-        emittedRow(
-          seedPayload({ fullTurn, stored: "b".repeat(20), turnSeedIndex: 7 })
-        ),
-        emittedRow(
-          seedPayload({ fullTurn, stored: "c".repeat(16), turnSeedIndex: 7 })
-        )
+        emittedRow(summarySeedPayload({ fullTurnTokens: 100, storedTokens: 10, turnSeedIndex: 7 })),
+        emittedRow(summarySeedPayload({ fullTurnTokens: 100, storedTokens: 5, turnSeedIndex: 7 })),
+        emittedRow(summarySeedPayload({ fullTurnTokens: 100, storedTokens: 4, turnSeedIndex: 7 }))
       ],
       []
     );
@@ -143,22 +130,15 @@ describe("deriveBenchTokenMetrics", () => {
     expect(metrics.seed_event_count).toBe(3);
   });
 
-  it("ignores the production turn_content_excerpt window in favour of the bench full turn", () => {
-    // The compile path's production raw_payload carries only a narrow
-    // turn_content_excerpt window; the fold must read the bench full-turn
-    // key, never the window.
+  it("ignores unrelated raw_payload fields and trusts the summarized token counts", () => {
     const metrics = deriveBenchTokenMetrics(
       [
         emittedRow(
-          seedPayload({
-            fullTurn: "f".repeat(800), // 200 tokens — the true turn
-            stored: "s".repeat(40),
-            turnSeedIndex: 1,
-            extra: {
-              turn_content_excerpt: "w".repeat(80), // 20 tokens — the window
-              matched_text: "m".repeat(12)
-            }
-          })
+          {
+            ...summarySeedPayload({ fullTurnTokens: 200, storedTokens: 10, turnSeedIndex: 1 }),
+            turn_content_excerpt: "w".repeat(80),
+            matched_text: "m".repeat(12)
+          }
         )
       ],
       []
@@ -167,35 +147,20 @@ describe("deriveBenchTokenMetrics", () => {
     expect(metrics.stored_memory_tokens).toBe(10);
   });
 
-  it("falls back to excerpt / distilled_fact on a no-credentials-shape seed event", () => {
-    // The no-creds seed path stamps NO bench_full_turn_content /
-    // bench_stored_content (they would byte-duplicate excerpt /
-    // distilled_fact). The fold must reconstruct raw_history from `excerpt`
-    // and stored_memory from `distilled_fact`.
-    const fullTurn = "n".repeat(160); // 40 tokens
-    const fact = "d".repeat(20); // 5 tokens
-    const row = noCredsSeedPayload({
-      excerpt: fullTurn,
-      distilledFact: fact,
+  it("counts no-credentials summaries that preserved only numeric token totals", () => {
+    const row = summarizedNoCredsSeedPayload({
+      excerptChars: 160,
+      distilledFactChars: 20,
       turnSeedIndex: 0
     });
-    // The no-creds raw_payload must NOT carry a duplicated full turn.
-    expect(row[BENCH_FULL_TURN_CONTENT_KEY]).toBeUndefined();
-    expect(row[BENCH_STORED_CONTENT_KEY]).toBeUndefined();
     const metrics = deriveBenchTokenMetrics([emittedRow(row)], []);
     expect(metrics.raw_history_tokens).toBe(40);
     expect(metrics.stored_memory_tokens).toBe(5);
     expect(metrics.seed_event_count).toBe(1);
   });
 
-  it("falls back to excerpt for stored_memory when a no-creds seed has no distilled_fact", () => {
-    // The generic proposeMemory no-creds seed omits distilled_fact; the
-    // harness then treats the seeded content itself as the durable fact, so
-    // the fold's stored fallback chain terminates at `excerpt`.
-    const fullTurn = "g".repeat(80); // 20 tokens
-    const row = noCredsSeedPayload({ excerpt: fullTurn });
-    expect(row[BENCH_FULL_TURN_CONTENT_KEY]).toBeUndefined();
-    expect(row[BENCH_STORED_CONTENT_KEY]).toBeUndefined();
+  it("treats excerpt-backed no-credentials summaries as durable-fact tokens when no distilled fact exists", () => {
+    const row = summarizedNoCredsSeedPayload({ excerptChars: 80 });
     const metrics = deriveBenchTokenMetrics([emittedRow(row)], []);
     expect(metrics.raw_history_tokens).toBe(20);
     expect(metrics.stored_memory_tokens).toBe(20);
@@ -205,12 +170,10 @@ describe("deriveBenchTokenMetrics", () => {
   it("counts a no-creds turn's raw_history exactly once (one signal per turn)", () => {
     // The no-creds path emits one signal per turn, each with its own
     // turn-seed index. Two distinct turns must each be counted once.
-    const turnA = "a".repeat(40); // 10 tokens
-    const turnB = "b".repeat(120); // 30 tokens
     const metrics = deriveBenchTokenMetrics(
       [
-        emittedRow(noCredsSeedPayload({ excerpt: turnA, turnSeedIndex: 0 })),
-        emittedRow(noCredsSeedPayload({ excerpt: turnB, turnSeedIndex: 1 }))
+        emittedRow(summarizedNoCredsSeedPayload({ excerptChars: 40, turnSeedIndex: 0 })),
+        emittedRow(summarizedNoCredsSeedPayload({ excerptChars: 120, turnSeedIndex: 1 }))
       ],
       []
     );
@@ -218,20 +181,10 @@ describe("deriveBenchTokenMetrics", () => {
     expect(metrics.seed_event_count).toBe(2);
   });
 
-  it("prefers the bench full-turn key over excerpt on a credentialled-shape event", () => {
-    // The credentialled path stamps bench_full_turn_content (the real full
-    // turn) and leaves `excerpt` as the narrow window. The fold must use the
-    // bench key, never the window.
+  it("counts summarized credentialled events without consulting excerpt windows", () => {
     const metrics = deriveBenchTokenMetrics(
       [
-        emittedRow(
-          seedPayload({
-            fullTurn: "f".repeat(800), // 200 tokens — the true turn
-            stored: "s".repeat(40), // 10 tokens
-            turnSeedIndex: 2,
-            extra: { excerpt: "w".repeat(40) } // 10 tokens — the window
-          })
-        )
+        emittedRow(summarySeedPayload({ fullTurnTokens: 200, storedTokens: 10, turnSeedIndex: 2 }))
       ],
       []
     );
@@ -240,19 +193,11 @@ describe("deriveBenchTokenMetrics", () => {
   });
 
   it("counts distinct turns separately and de-duplicates within a turn", () => {
-    const turnA = "a".repeat(400); // 100 tokens
-    const turnB = "b".repeat(800); // 200 tokens
     const metrics = deriveBenchTokenMetrics(
       [
-        emittedRow(
-          seedPayload({ fullTurn: turnA, stored: "x".repeat(8), turnSeedIndex: 0 })
-        ),
-        emittedRow(
-          seedPayload({ fullTurn: turnA, stored: "y".repeat(4), turnSeedIndex: 0 })
-        ),
-        emittedRow(
-          seedPayload({ fullTurn: turnB, stored: "z".repeat(8), turnSeedIndex: 1 })
-        )
+        emittedRow(summarySeedPayload({ fullTurnTokens: 100, storedTokens: 2, turnSeedIndex: 0 })),
+        emittedRow(summarySeedPayload({ fullTurnTokens: 100, storedTokens: 1, turnSeedIndex: 0 })),
+        emittedRow(summarySeedPayload({ fullTurnTokens: 200, storedTokens: 2, turnSeedIndex: 1 }))
       ],
       []
     );
@@ -266,8 +211,8 @@ describe("deriveBenchTokenMetrics", () => {
     // a self-contained turn and is counted on its own.
     const metrics = deriveBenchTokenMetrics(
       [
-        emittedRow(seedPayload({ fullTurn: "a".repeat(40), stored: "f".repeat(8) })),
-        emittedRow(seedPayload({ fullTurn: "b".repeat(80), stored: "g".repeat(4) }))
+        emittedRow(summarySeedPayload({ fullTurnTokens: 10, storedTokens: 2 })),
+        emittedRow(summarySeedPayload({ fullTurnTokens: 20, storedTokens: 1 }))
       ],
       []
     );
@@ -406,31 +351,31 @@ describe("assertBenchTokenEconomyContract", () => {
 });
 
 /**
- * LoCoMo seeds each turn through workspace.proposeMemory, whose raw_payload
- * is the no-credentials shape: bench_seed marker + excerpt (the full turn),
- * no distilled_fact, no turn-seed index. This pins the LoCoMo path end to
- * end: fold -> aggregate -> contract -> token_economy + saved ratio.
+ * LoCoMo seeds each turn through workspace.proposeMemory, then SignalService
+ * persists the redacted EventLog summary. This pins the EventLog-summary
+ * contract end to end: fold -> aggregate -> contract -> token_economy +
+ * saved ratio.
  * see also: apps/bench-runner/src/locomo/runner.ts runOneConversation
  */
 describe("LoCoMo proposeMemory seed -> kpi token economy", () => {
-  function locomoSeedRow(speakerTurn: string): TokenEconomyEventRow {
-    return emittedRow({
-      [BENCH_SEED_MARKER_KEY]: true,
-      excerpt: speakerTurn
-    });
+  function locomoSeedRow(charCount: number): TokenEconomyEventRow {
+    return emittedRow(
+      summarySeedPayload({
+        fullTurnTokens: benchTokens(charCount),
+        storedTokens: benchTokens(charCount)
+      })
+    );
   }
 
   it("derives raw_history + a saved ratio from no-creds proposeMemory seeds", () => {
     // Two LoCoMo turns (each its own self-contained turn: no turn-seed index)
     // plus one recall delivering a small context window.
-    const turnA = "Caroline: ".padEnd(200, "x"); // 50 tokens
-    const turnB = "Melanie: ".padEnd(120, "y"); // 30 tokens
     const metrics = deriveBenchTokenMetrics(
-      [locomoSeedRow(turnA), locomoSeedRow(turnB)],
+      [locomoSeedRow(200), locomoSeedRow(120)],
       [lensRow(40)]
     );
     expect(metrics.raw_history_tokens).toBe(80); // 50 + 30, each turn once
-    expect(metrics.stored_memory_tokens).toBe(80); // excerpt is the durable fact
+    expect(metrics.stored_memory_tokens).toBe(80);
     expect(metrics.seed_event_count).toBe(2);
 
     const input = aggregateBenchTokenMetrics([metrics]);
@@ -446,10 +391,10 @@ describe("LoCoMo proposeMemory seed -> kpi token economy", () => {
     expect(ratio).toBeCloseTo(0.5, 10);
   });
 
-  it("contract fails a LoCoMo-shape run whose seeds never stamped the marker", () => {
-    // A regression where proposeMemory dropped benchTokenEconomyPayload: the
-    // seed signals carry only production fields, the fold skips them, and the
-    // aggregate has zero raw_history despite real recalls.
+  it("contract fails a LoCoMo-shape run whose EventLog summary never stamped the marker", () => {
+    // A regression where SignalService dropped the bench summary marker: the
+    // fold skips the row, and the aggregate has zero raw_history despite real
+    // recalls.
     const metrics = deriveBenchTokenMetrics(
       [emittedRow({ excerpt: "Caroline: hi", turn_content_excerpt: "hi" })],
       [lensRow(40)]

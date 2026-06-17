@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import MemoryBrowserPage from "../../pages/MemoryBrowser";
+import MemoryBrowserPage, { retainLoadedMemoryRowWindow } from "../../pages/MemoryBrowser";
 import { ToastProvider } from "../../components/Toast";
 import { setInspectorToken, setWorkspaceId } from "../../api";
 
@@ -32,6 +32,16 @@ function jsonResponse(
     status,
     headers: { "content-type": "application/json", ...headers }
   });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 const SAMPLE_ROWS = [
@@ -158,5 +168,428 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
       expect.stringContaining("/api/memory-entries/ws1?limit=200&offset=200"),
       expect.any(Object)
     );
+  });
+
+  it("refetches scope/conflict filters from the server instead of filtering only retained rows", async () => {
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (url.includes("scope_class=global_core") && url.includes("has_conflict=true")) {
+        return jsonResponse(
+          {
+            success: true,
+            data: [
+              {
+                ...SAMPLE_ROWS[0]!,
+                object_id: "mem-global-conflict",
+                content: "global core conflicting memory",
+                scope_class: "global_core",
+                contradiction_count: 1
+              }
+            ]
+          },
+          200,
+          {
+            "x-total-count": "1",
+            "x-limit": "200",
+            "x-offset": "0"
+          }
+        );
+      }
+      if (url.includes("scope_class=global_core")) {
+        return jsonResponse(
+          {
+            success: true,
+            data: [
+              {
+                ...SAMPLE_ROWS[0]!,
+                object_id: "mem-global-clear",
+                content: "global core memory",
+                scope_class: "global_core",
+                contradiction_count: 0
+              }
+            ]
+          },
+          200,
+          {
+            "x-total-count": "1",
+            "x-limit": "200",
+            "x-offset": "0"
+          }
+        );
+      }
+      if (url.includes("/memory-entries/ws1")) {
+        return jsonResponse(
+          {
+            success: true,
+            data: [
+              {
+                ...SAMPLE_ROWS[0]!,
+                object_id: "mem-project-only",
+                content: "project memory"
+              }
+            ]
+          },
+          200,
+          {
+            "x-total-count": "1",
+            "x-limit": "200",
+            "x-offset": "0"
+          }
+        );
+      }
+      return jsonResponse({}, 404);
+    });
+
+    renderMemoryBrowser();
+
+    expect(await screen.findByText("project memory")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "global_core" }));
+    fireEvent.click(screen.getByRole("button", { name: "has_conflict" }));
+
+    expect(await screen.findByText("global core conflicting memory")).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/api/memory-entries/ws1?scope_class=global_core&has_conflict=true&limit=200&offset=0"
+      ),
+      expect.any(Object)
+    );
+  });
+
+  it("drops stale load-more results after a refresh starts a new pagination generation", async () => {
+    const loadMoreDeferred = deferred<Response>();
+    const refreshDeferred = deferred<Response>();
+    let offsetZeroCalls = 0;
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (url.includes("/memory-entries/ws1") && url.includes("offset=1")) {
+        return await loadMoreDeferred.promise;
+      }
+      if (url.includes("/memory-entries/ws1") && url.includes("offset=0")) {
+        offsetZeroCalls += 1;
+        if (offsetZeroCalls === 1) {
+          return jsonResponse(
+            {
+              success: true,
+              data: [
+                {
+                  ...SAMPLE_ROWS[0]!,
+                  object_id: "mem-initial",
+                  content: "initial page row"
+                }
+              ]
+            },
+            200,
+            {
+              "x-total-count": "2",
+              "x-limit": "200",
+              "x-offset": "0"
+            }
+          );
+        }
+        return await refreshDeferred.promise;
+      }
+      return jsonResponse({}, 404);
+    });
+
+    renderMemoryBrowser();
+
+    expect(await screen.findByText("initial page row")).not.toBeNull();
+    fireEvent.click(screen.getByTestId("memory-load-more"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    refreshDeferred.resolve(
+      jsonResponse(
+        {
+          success: true,
+          data: [
+            {
+              ...SAMPLE_ROWS[0]!,
+              object_id: "mem-refresh",
+              content: "refreshed page row"
+            }
+          ]
+        },
+        200,
+        {
+          "x-total-count": "1",
+          "x-limit": "200",
+          "x-offset": "0"
+        }
+      )
+    );
+    expect(await screen.findByText("refreshed page row")).not.toBeNull();
+
+    loadMoreDeferred.resolve(
+      jsonResponse(
+        {
+          success: true,
+          data: [
+            {
+              ...SAMPLE_ROWS[0]!,
+              object_id: "mem-stale-load-more",
+              content: "stale load more row"
+            }
+          ]
+        },
+        200,
+        {
+          "x-total-count": "2",
+          "x-limit": "200",
+          "x-offset": "1"
+        }
+      )
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("stale load more row")).toBeNull();
+      expect(screen.getByTestId("memory-pagination-status").textContent).toContain("1 of 1 loaded");
+    });
+  });
+
+  it("closes the evidence panel when a refresh removes the selected row from the first page", async () => {
+    let offsetZeroCalls = 0;
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (!url.includes("/memory-entries/ws1") || !url.includes("offset=0")) {
+        return jsonResponse({}, 404);
+      }
+      offsetZeroCalls += 1;
+      if (offsetZeroCalls === 1) {
+        return jsonResponse(
+          {
+            success: true,
+            data: [
+              {
+                ...SAMPLE_ROWS[0]!,
+                object_id: "mem-selected",
+                content: "selected memory row"
+              }
+            ]
+          },
+          200,
+          {
+            "x-total-count": "1",
+            "x-limit": "200",
+            "x-offset": "0"
+          }
+        );
+      }
+      return jsonResponse(
+        {
+          success: true,
+          data: [
+            {
+              ...SAMPLE_ROWS[0]!,
+              object_id: "mem-replacement",
+              content: "replacement memory row"
+            }
+          ]
+        },
+        200,
+        {
+          "x-total-count": "1",
+          "x-limit": "200",
+          "x-offset": "0"
+        }
+      );
+    });
+
+    renderMemoryBrowser();
+
+    fireEvent.click(await screen.findByText("selected memory row"));
+    expect(await screen.findByText("Evidence")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(await screen.findByText("replacement memory row")).not.toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByText("Evidence")).toBeNull();
+    });
+  });
+
+  it("clears an already-open evidence pointer when refresh replaces the selected row data in place", async () => {
+    let offsetZeroCalls = 0;
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (url.includes("/pointers/ws1/ev-old")) {
+        return jsonResponse({
+          success: true,
+          data: {
+            object_id: "ev-old",
+            object_kind: "evidence_capsule",
+            gist: "old gist"
+          }
+        });
+      }
+      if (!url.includes("/memory-entries/ws1") || !url.includes("offset=0")) {
+        return jsonResponse({}, 404);
+      }
+      offsetZeroCalls += 1;
+      if (offsetZeroCalls === 1) {
+        return jsonResponse(
+          {
+            success: true,
+            data: [
+              {
+                ...SAMPLE_ROWS[0]!,
+                object_id: "mem-same",
+                content: "selected memory before refresh",
+                evidence_refs: ["ev-old"]
+              }
+            ]
+          },
+          200,
+          {
+            "x-total-count": "1",
+            "x-limit": "200",
+            "x-offset": "0"
+          }
+        );
+      }
+      return jsonResponse(
+        {
+          success: true,
+          data: [
+            {
+              ...SAMPLE_ROWS[0]!,
+              object_id: "mem-same",
+              content: "selected memory after refresh",
+              evidence_refs: ["ev-new"]
+            }
+          ]
+        },
+        200,
+        {
+          "x-total-count": "1",
+          "x-limit": "200",
+          "x-offset": "0"
+        }
+      );
+    });
+
+    renderMemoryBrowser();
+
+    fireEvent.click(await screen.findByText("selected memory before refresh"));
+    fireEvent.click(screen.getByRole("button", { name: /ev-old/u }));
+    expect(await screen.findByText("old gist")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect((await screen.findAllByText("selected memory after refresh")).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.queryByText("old gist")).toBeNull();
+    });
+  });
+
+  it("invalidates an in-flight evidence request as soon as refresh starts", async () => {
+    const pointerDeferred = deferred<Response>();
+    const refreshDeferred = deferred<Response>();
+    let offsetZeroCalls = 0;
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (url.includes("/pointers/ws1/ev-old")) {
+        return await pointerDeferred.promise;
+      }
+      if (!url.includes("/memory-entries/ws1") || !url.includes("offset=0")) {
+        return jsonResponse({}, 404);
+      }
+      offsetZeroCalls += 1;
+      if (offsetZeroCalls === 1) {
+        return jsonResponse(
+          {
+            success: true,
+            data: [
+              {
+                ...SAMPLE_ROWS[0]!,
+                object_id: "mem-same",
+                content: "selected memory before refresh",
+                evidence_refs: ["ev-old"]
+              }
+            ]
+          },
+          200,
+          {
+            "x-total-count": "1",
+            "x-limit": "200",
+            "x-offset": "0"
+          }
+        );
+      }
+      return await refreshDeferred.promise;
+    });
+
+    renderMemoryBrowser();
+
+    fireEvent.click(await screen.findByText("selected memory before refresh"));
+    fireEvent.click(screen.getByRole("button", { name: /ev-old/u }));
+    expect(screen.getByText("Loading evidence capsule...")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    pointerDeferred.resolve(
+      jsonResponse({
+        success: true,
+        data: {
+          object_id: "ev-old",
+          object_kind: "evidence_capsule",
+          gist: "stale gist from old request"
+        }
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("stale gist from old request")).toBeNull();
+    });
+
+    refreshDeferred.resolve(
+      jsonResponse(
+        {
+          success: true,
+          data: [
+            {
+              ...SAMPLE_ROWS[0]!,
+              object_id: "mem-same",
+              content: "selected memory after refresh",
+              evidence_refs: ["ev-new"]
+            }
+          ]
+        },
+        200,
+        {
+          "x-total-count": "1",
+          "x-limit": "200",
+          "x-offset": "0"
+        }
+      )
+    );
+
+    expect((await screen.findAllByText("selected memory after refresh")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("stale gist from old request")).toBeNull();
+  });
+});
+
+describe("retainLoadedMemoryRowWindow", () => {
+  it("keeps a bounded sliding window when paginated rows exceed the cap", () => {
+    const previous = Array.from({ length: 4 }, (_, index) => ({
+      ...SAMPLE_ROWS[0]!,
+      object_id: `prev-${index}`,
+      content: `prev ${index}`
+    }));
+    const pageRows = Array.from({ length: 3 }, (_, index) => ({
+      ...SAMPLE_ROWS[0]!,
+      object_id: `next-${index}`,
+      content: `next ${index}`
+    }));
+
+    const retained = retainLoadedMemoryRowWindow(previous, pageRows, 5);
+
+    expect(retained.map((row) => row.object_id)).toEqual([
+      "prev-2",
+      "prev-3",
+      "next-0",
+      "next-1",
+      "next-2"
+    ]);
   });
 });

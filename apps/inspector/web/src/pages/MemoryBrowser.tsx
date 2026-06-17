@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCcw, X } from "lucide-react";
 import { apiFetch, apiFetchWithHeaders, getWorkspaceId, type ApiError } from "../api";
 import { useApiQuery } from "../hooks/useApiQuery";
@@ -68,13 +68,14 @@ const DIMENSION_OPTIONS: readonly string[] = [
   "outcome"
 ];
 
-const SCOPE_OPTIONS: readonly string[] = ["project", "global_domain", "session"];
+const SCOPE_OPTIONS: readonly string[] = ["project", "global_domain", "global_core"];
 
 const MEMORY_PAGE_SIZE = 200;
+const MEMORY_RETAINED_ROWS_MAX = 5_000;
 
 /**
- * MemoryBrowserPage lists memory entries with client-side scope/conflict
- * filters, paginated daemon reads, and evidence drill-in from the side panel.
+ * MemoryBrowserPage lists memory entries with daemon-authoritative filters,
+ * paginated reads, and evidence drill-in from the side panel.
  */
 export default function MemoryBrowserPage() {
   const { t } = useI18n();
@@ -82,6 +83,7 @@ export default function MemoryBrowserPage() {
   const workspaceId = getWorkspaceId();
   const isMountedRef = useRef(true);
   const queryVersionRef = useRef(0);
+  const pointerVersionRef = useRef(0);
   const [rows, setRows] = useState<readonly MemoryEntryRow[]>([]);
   const [totalRows, setTotalRows] = useState<number | null>(null);
   const [nextOffset, setNextOffset] = useState(0);
@@ -101,6 +103,12 @@ export default function MemoryBrowserPage() {
     if (dimensionFilter !== "all") {
       search.set("dimension", dimensionFilter);
     }
+    if (scopeFilter !== "all") {
+      search.set("scope_class", scopeFilter);
+    }
+    if (conflictFilter === "has_conflict") {
+      search.set("has_conflict", "true");
+    }
     search.set("limit", String(MEMORY_PAGE_SIZE));
     search.set("offset", "0");
     const query = search.toString();
@@ -118,14 +126,14 @@ export default function MemoryBrowserPage() {
       nextOffset: loadedCount,
       hasMoreRows: total === null ? pageRows.length === MEMORY_PAGE_SIZE : loadedCount < total
     };
-  }, [dimensionFilter, workspaceId]);
+  }, [conflictFilter, dimensionFilter, scopeFilter, workspaceId]);
 
   const {
     data: firstPage,
     error,
     loading,
     refetch
-  } = useApiQuery(fetchRows, [workspaceId, dimensionFilter], {
+  } = useApiQuery(fetchRows, [workspaceId, dimensionFilter, scopeFilter, conflictFilter], {
     enabled: workspaceId !== null,
     onError: (message) => {
       showToast({ message: `Memory list fetch failed: ${message}`, type: "error" });
@@ -139,46 +147,68 @@ export default function MemoryBrowserPage() {
     };
   }, []);
 
-  useEffect(() => {
-    queryVersionRef.current += 1;
-    setRows([]);
-    setTotalRows(null);
-    setNextOffset(0);
-    setHasMoreRows(false);
-    setSelectedRow(null);
+  const invalidatePointerState = useCallback(() => {
+    pointerVersionRef.current += 1;
     setPointer(null);
-  }, [dimensionFilter, workspaceId]);
+    setPointerLoading(false);
+  }, []);
+
+  const startRowGeneration = useCallback(
+    (options: { readonly clearRows: boolean; readonly clearSelection: boolean }) => {
+      queryVersionRef.current += 1;
+      setNextOffset(0);
+      setHasMoreRows(false);
+      setLoadingMore(false);
+      if (options.clearRows) {
+        setRows([]);
+        setTotalRows(null);
+      }
+      if (options.clearSelection) {
+        setSelectedRow(null);
+        invalidatePointerState();
+      }
+    },
+    [invalidatePointerState]
+  );
+
+  useEffect(() => {
+    startRowGeneration({ clearRows: true, clearSelection: true });
+  }, [conflictFilter, dimensionFilter, scopeFilter, startRowGeneration, workspaceId]);
 
   useEffect(() => {
     if (!firstPage) return;
-    setRows(firstPage.rows);
+    setRows(retainLoadedMemoryRowWindow([], firstPage.rows));
     setTotalRows(firstPage.totalRows);
     setNextOffset(firstPage.nextOffset);
     setHasMoreRows(firstPage.hasMoreRows);
   }, [firstPage]);
 
-  const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
-      if (scopeFilter !== "all" && row.scope_class !== scopeFilter) {
-        return false;
-      }
-      if (conflictFilter === "has_conflict" && (row.contradiction_count ?? 0) === 0) {
-        return false;
-      }
-      return true;
-    });
-  }, [conflictFilter, rows, scopeFilter]);
+  useEffect(() => {
+    if (selectedRow === null) return;
+    const replacement = rows.find((row) => row.object_id === selectedRow.object_id) ?? null;
+    if (replacement === null) {
+      setSelectedRow(null);
+      invalidatePointerState();
+      return;
+    }
+    if (replacement !== selectedRow) {
+      setSelectedRow(replacement);
+      invalidatePointerState();
+    }
+  }, [invalidatePointerState, rows, selectedRow]);
 
   const handleRefresh = useCallback(async () => {
+    startRowGeneration({ clearRows: false, clearSelection: false });
+    invalidatePointerState();
     setRefreshing(true);
     await refetch("background");
     if (isMountedRef.current) {
       setRefreshing(false);
     }
-  }, [refetch]);
+  }, [invalidatePointerState, refetch, startRowGeneration]);
 
   const loadMore = useCallback(async () => {
-    if (workspaceId === null) return;
+    if (workspaceId === null || refreshing) return;
 
     const version = queryVersionRef.current;
     setLoadingMore(true);
@@ -186,6 +216,12 @@ export default function MemoryBrowserPage() {
       const search = new URLSearchParams();
       if (dimensionFilter !== "all") {
         search.set("dimension", dimensionFilter);
+      }
+      if (scopeFilter !== "all") {
+        search.set("scope_class", scopeFilter);
+      }
+      if (conflictFilter === "has_conflict") {
+        search.set("has_conflict", "true");
       }
       search.set("limit", String(MEMORY_PAGE_SIZE));
       search.set("offset", String(nextOffset));
@@ -198,7 +234,7 @@ export default function MemoryBrowserPage() {
       const pageRows = result.payload.data;
       const total = readOptionalIntegerHeader(result.headers, "x-total-count");
       const loadedCount = nextOffset + pageRows.length;
-      setRows((previous) => [...previous, ...pageRows]);
+      setRows((previous) => retainLoadedMemoryRowWindow(previous, pageRows));
       setTotalRows(total);
       setNextOffset(loadedCount);
       setHasMoreRows(total === null ? pageRows.length === MEMORY_PAGE_SIZE : loadedCount < total);
@@ -211,12 +247,12 @@ export default function MemoryBrowserPage() {
         setLoadingMore(false);
       }
     }
-  }, [dimensionFilter, nextOffset, showToast, workspaceId]);
+  }, [conflictFilter, dimensionFilter, nextOffset, refreshing, scopeFilter, showToast, workspaceId]);
 
   const selectRow = useCallback((row: MemoryEntryRow) => {
     setSelectedRow(row);
-    setPointer(null);
-  }, []);
+    invalidatePointerState();
+  }, [invalidatePointerState]);
 
   const promoteToStrictlyGoverned = useCallback(
     async (memoryId: string) => {
@@ -250,20 +286,21 @@ export default function MemoryBrowserPage() {
   const openEvidence = useCallback(
     async (evidenceId: string) => {
       if (workspaceId === null) return;
+      const pointerVersion = ++pointerVersionRef.current;
       setPointerLoading(true);
       setPointer(null);
       try {
         const envelope = await apiFetch<EvidenceEnvelope>(
           `/pointers/${workspaceId}/${encodeURIComponent(evidenceId)}`
         );
-        if (!isMountedRef.current) return;
+        if (!isMountedRef.current || pointerVersion !== pointerVersionRef.current) return;
         setPointer(envelope.data);
       } catch (err) {
-        if (!isMountedRef.current) return;
+        if (!isMountedRef.current || pointerVersion !== pointerVersionRef.current) return;
         const message = err instanceof Error ? err.message : "unknown error";
         showToast({ message: `Evidence open failed: ${message}`, type: "error" });
       } finally {
-        if (isMountedRef.current) {
+        if (isMountedRef.current && pointerVersion === pointerVersionRef.current) {
           setPointerLoading(false);
         }
       }
@@ -274,6 +311,12 @@ export default function MemoryBrowserPage() {
   if (workspaceId === null) {
     return <div className="p-8 font-mono text-sm text-ink-600">Workspace binding missing.</div>;
   }
+
+  const droppedLoadedRows = Math.max(0, nextOffset - rows.length);
+  const paginationStatus =
+    droppedLoadedRows === 0
+      ? `Showing ${rows.length}${totalRows === null ? "" : ` of ${totalRows}`} loaded`
+      : `Showing ${rows.length} retained window of ${nextOffset}${totalRows === null ? "" : ` of ${totalRows}`} loaded`;
 
   return (
     <div className="flex h-full flex-col">
@@ -320,7 +363,7 @@ export default function MemoryBrowserPage() {
             <div className="p-8 font-mono text-sm text-ink-500">Loading memories...</div>
           ) : error !== null ? (
             <div className="p-8 font-mono text-sm text-red-600">Error: {error}</div>
-          ) : filteredRows.length === 0 ? (
+          ) : rows.length === 0 ? (
             <div className="p-8 font-mono text-sm text-ink-500">
               No memories match the current filters.
             </div>
@@ -338,7 +381,7 @@ export default function MemoryBrowserPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((row) => (
+                {rows.map((row) => (
                   <tr
                     key={row.object_id}
                     className={`cursor-pointer border-t border-beige-200 hover:bg-beige-50 ${
@@ -361,15 +404,12 @@ export default function MemoryBrowserPage() {
 
           {!loading && error === null ? (
             <div className="flex items-center justify-between gap-3 border-t border-beige-200 bg-beige-50 px-4 py-3 font-mono text-[11px] text-ink-500">
-              <span data-testid="memory-pagination-status">
-                Showing {filteredRows.length} filtered / {rows.length}
-                {totalRows === null ? "" : ` of ${totalRows}`} loaded
-              </span>
+              <span data-testid="memory-pagination-status">{paginationStatus}</span>
               {hasMoreRows ? (
                 <button
                   type="button"
                   data-testid="memory-load-more"
-                  disabled={loadingMore}
+                  disabled={loadingMore || refreshing}
                   onClick={() => void loadMore()}
                   className="border border-beige-300 px-3 py-1 text-[10px] uppercase hover:bg-beige-100 disabled:opacity-50"
                 >
@@ -388,7 +428,7 @@ export default function MemoryBrowserPage() {
                 type="button"
                 onClick={() => {
                   setSelectedRow(null);
-                  setPointer(null);
+                  invalidatePointerState();
                 }}
                 className="p-1 hover:bg-beige-200"
               >
@@ -516,6 +556,18 @@ function truncate(text: string, max: number): string {
 function formatRatio(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return value.toFixed(2);
+}
+
+export function retainLoadedMemoryRowWindow(
+  previous: readonly MemoryEntryRow[],
+  pageRows: readonly MemoryEntryRow[],
+  maxRows = MEMORY_RETAINED_ROWS_MAX
+): readonly MemoryEntryRow[] {
+  const merged = [...previous, ...pageRows];
+  if (merged.length <= maxRows) {
+    return merged;
+  }
+  return merged.slice(merged.length - maxRows);
 }
 
 function readOptionalIntegerHeader(headers: Headers, name: string): number | null {

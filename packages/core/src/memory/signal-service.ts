@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
   SignalEventType,
@@ -11,6 +12,19 @@ import {
   type SignalState as SignalStateValue
 } from "@do-soul/alaya-protocol";
 import { stableStringify } from "../shared/stable-stringify.js";
+
+const RAW_PAYLOAD_REDACTED_KEY = "raw_payload_redacted";
+const RAW_PAYLOAD_SHA256_KEY = "raw_payload_sha256";
+const RAW_PAYLOAD_KEY_COUNT_KEY = "raw_payload_key_count";
+const BENCH_SEED_MARKER_KEY = "bench_seed";
+const BENCH_TURN_SEED_INDEX_KEY = "bench_turn_seed_index";
+const BENCH_SUMMARY_SEED_MARKER_KEY = "bench_summary_seeded";
+const BENCH_SUMMARY_TURN_SEED_INDEX_KEY = "bench_summary_turn_seed_index";
+const BENCH_FULL_TURN_CONTENT_KEY = "bench_full_turn_content";
+const BENCH_STORED_CONTENT_KEY = "bench_stored_content";
+const BENCH_FULL_TURN_TOKENS_KEY = "bench_full_turn_tokens";
+const BENCH_STORED_CONTENT_TOKENS_KEY = "bench_stored_content_tokens";
+const BENCH_TOKEN_CHARS_PER_TOKEN = 4;
 
 export interface SignalServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
@@ -113,7 +127,7 @@ export class SignalService {
         exception_to_refs: parsedSignal.exception_to_refs,
         contradicts_refs: parsedSignal.contradicts_refs,
         incompatible_with_refs: parsedSignal.incompatible_with_refs,
-        raw_payload: parsedSignal.raw_payload
+        raw_payload: buildEventLogRawPayloadSummary(parsedSignal.raw_payload)
       })
     });
 
@@ -431,6 +445,56 @@ function buildSignalReplayFingerprint(signal: CandidateMemorySignal): string {
     raw_payload: signal.raw_payload,
     source_delivery_ids: signal.source_delivery_ids
   });
+}
+
+function buildEventLogRawPayloadSummary(
+  rawPayload: CandidateMemorySignal["raw_payload"]
+): Record<string, unknown> {
+  return {
+    [RAW_PAYLOAD_REDACTED_KEY]: true,
+    [RAW_PAYLOAD_SHA256_KEY]: `sha256:${createHash("sha256")
+      .update(stableStringify(rawPayload), "utf8")
+      .digest("hex")}`,
+    [RAW_PAYLOAD_KEY_COUNT_KEY]: Object.keys(rawPayload).length,
+    ...buildBenchTokenPayloadSummary(rawPayload)
+  };
+}
+
+function buildBenchTokenPayloadSummary(
+  rawPayload: CandidateMemorySignal["raw_payload"]
+): Record<string, unknown> {
+  if (rawPayload[BENCH_SEED_MARKER_KEY] !== true) {
+    return {};
+  }
+
+  const summary: Record<string, unknown> = {
+    [BENCH_SUMMARY_SEED_MARKER_KEY]: true
+  };
+  const turnSeedIndex = rawPayload[BENCH_TURN_SEED_INDEX_KEY];
+  if (typeof turnSeedIndex === "number" && Number.isFinite(turnSeedIndex)) {
+    summary[BENCH_SUMMARY_TURN_SEED_INDEX_KEY] = turnSeedIndex;
+  }
+
+  const excerptSibling = readNonEmptyString(rawPayload.excerpt);
+  const fullTurnContent =
+    readNonEmptyString(rawPayload[BENCH_FULL_TURN_CONTENT_KEY]) ?? excerptSibling;
+  const storedContent =
+    readNonEmptyString(rawPayload[BENCH_STORED_CONTENT_KEY]) ??
+    readNonEmptyString(rawPayload.distilled_fact) ??
+    excerptSibling;
+
+  if (fullTurnContent !== null) {
+    summary[BENCH_FULL_TURN_TOKENS_KEY] = estimateBenchTokens(fullTurnContent);
+  }
+  if (storedContent !== null) {
+    summary[BENCH_STORED_CONTENT_TOKENS_KEY] = estimateBenchTokens(storedContent);
+  }
+
+  return summary;
+}
+
+function estimateBenchTokens(text: string): number {
+  return Math.ceil(text.length / BENCH_TOKEN_CHARS_PER_TOKEN);
 }
 
 function hasInvalidSchemaGrounding(signal: CandidateMemorySignal): boolean {

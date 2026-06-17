@@ -98,6 +98,82 @@ describe("SignalService", () => {
     });
   });
 
+  it("redacts emitted EventLog raw_payload while preserving the stored signal payload", async () => {
+    const storedEvents: EventLogEntry[] = [];
+    const signalRepo = {
+      create: vi.fn(async (signal: CandidateMemorySignal) => ({
+        ...signal,
+        signal_state: "emitted" as const
+      })),
+      getById: vi.fn(async () => null),
+      listByRun: vi.fn(async () => []),
+      updateState: vi.fn(async (signalId: string, state: CandidateMemorySignal["signal_state"]) =>
+        createSignal({ signal_id: signalId, signal_state: state })
+      )
+    };
+    const service = new SignalService({
+      eventLogRepo: {
+        append: vi.fn(async (event) => {
+          const stored: EventLogEntry = {
+            event_id: `evt_${storedEvents.length + 1}`,
+            created_at: `2026-03-18T00:00:0${storedEvents.length + 1}.000Z`,
+            revision: storedEvents.length,
+            ...event
+          };
+          storedEvents.push(stored);
+          return stored;
+        }),
+        queryByEntity: vi.fn(async () => [])
+      },
+      signalRepo,
+      runtimeNotifier: {
+        notifyEntry: vi.fn(async () => {})
+      }
+    });
+    const rawPayload = {
+      excerpt: "Never print secrets.",
+      matched_text: "Never print secrets.",
+      bench_seed: true,
+      bench_turn_seed_index: 3,
+      bench_full_turn_content: "Never print secrets in CI logs.",
+      bench_stored_content: "Never print secrets."
+    };
+
+    await service.receiveSignal(createSignal({ raw_payload: rawPayload }));
+
+    expect(signalRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        raw_payload: rawPayload
+      })
+    );
+    expect(storedEvents[0]).toMatchObject({
+      event_type: "soul.signal.emitted",
+      payload_json: {
+        raw_payload: {
+          raw_payload_redacted: true,
+          raw_payload_sha256: expect.stringMatching(/^sha256:/u),
+          raw_payload_key_count: 6,
+          bench_summary_seeded: true,
+          bench_summary_turn_seed_index: 3,
+          bench_full_turn_tokens: Math.ceil("Never print secrets in CI logs.".length / 4),
+          bench_stored_content_tokens: Math.ceil("Never print secrets.".length / 4)
+        }
+      }
+    });
+    expect(
+      (storedEvents[0]!.payload_json as { raw_payload: Record<string, unknown> }).raw_payload
+    ).not.toHaveProperty("excerpt");
+    expect(
+      (storedEvents[0]!.payload_json as { raw_payload: Record<string, unknown> }).raw_payload
+    ).not.toHaveProperty("matched_text");
+    expect(
+      (storedEvents[0]!.payload_json as { raw_payload: Record<string, unknown> }).raw_payload
+    ).not.toHaveProperty("bench_seed");
+    expect(
+      (storedEvents[0]!.payload_json as { raw_payload: Record<string, unknown> }).raw_payload
+    ).not.toHaveProperty("bench_turn_seed_index");
+  });
+
   it("threads source delivery anchors into the emitted EventLog payload", async () => {
     const storedEvents: EventLogEntry[] = [];
     const service = new SignalService({

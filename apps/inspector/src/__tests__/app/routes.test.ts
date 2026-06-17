@@ -219,6 +219,82 @@ describe("inspector routes", () => {
     expect(await response.json()).toEqual({ error: "daemon_unavailable" });
   });
 
+  it("returns daemon timeout when the daemon fetch hangs", async () => {
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      daemonTimeoutMs: 5,
+      fetchImpl: async () => await new Promise<Response>(() => {})
+    });
+
+    const response = await authenticatedRequest(app, "/api/graph/ws1", {
+      headers: { "x-request-id": "req-timeout" }
+    });
+
+    expect(response.status).toBe(504);
+    expect(await response.json()).toEqual({ error: "daemon_timeout" });
+    expect(response.headers.get("x-request-id")).toBe("req-timeout");
+    expect(response.headers.get("x-correlation-id")).toBe("req-timeout");
+  });
+
+  it("returns daemon timeout when the daemon response body stalls after headers", async () => {
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      daemonTimeoutMs: 5,
+      fetchImpl: async (_input, init) => {
+        const signal = init?.signal;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("{\"partial\":"));
+            signal?.addEventListener("abort", () => {
+              controller.error(Object.assign(new Error("aborted"), { name: "AbortError" }));
+            });
+          }
+        });
+        return new Response(body, {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-request-id": "daemon-body-timeout"
+          }
+        });
+      }
+    });
+
+    const response = await authenticatedRequest(app, "/api/graph/ws1");
+
+    expect(response.status).toBe(504);
+    expect(await response.json()).toEqual({ error: "daemon_timeout" });
+    expect(response.headers.get("x-request-id")).toBe("daemon-body-timeout");
+    expect(response.headers.get("x-correlation-id")).toBe("daemon-body-timeout");
+  });
+
+  it("sets cache headers for static assets and the html shell", async () => {
+    const staticRoot = await mkdtemp(path.join(tmpdir(), "inspector-static-cache-"));
+    await mkdir(path.join(staticRoot, "assets"), { recursive: true });
+    await writeFile(path.join(staticRoot, "assets", "app.js"), 'console.log("ok");', "utf8");
+    await writeFile(path.join(staticRoot, "index.html"), "<!doctype html><html></html>", "utf8");
+
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      staticRoot,
+      fetchImpl: async () => Response.json({}, { status: 500 })
+    });
+
+    const assetResponse = await authenticatedRequest(app, "/assets/app.js");
+    expect(assetResponse.status).toBe(200);
+    expect(assetResponse.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+
+    const htmlResponse = await authenticatedRequest(app, "/");
+    expect(htmlResponse.status).toBe(200);
+    expect(htmlResponse.headers.get("cache-control")).toBe("no-cache");
+  });
+
   it("forwards request ids to the daemon and preserves them on the inspector response", async () => {
     let forwardedRequestId: string | null = null;
     const app = createInspectorApp({
@@ -319,6 +395,53 @@ describe("inspector routes", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "invalid_request" });
     expect(called).toBe(false);
+  });
+
+  it("rejects streaming no-body inspector proposal actions without waiting for EOF", async () => {
+    let called = false;
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async () => {
+        called = true;
+        return Response.json({ success: true, data: { ok: true } });
+      }
+    });
+
+    const response = await withResponseTimeout(
+      app.request(
+        createNeverEndingChunkedJsonRequest(
+          "http://localhost/api/proposals/ws1/memory/mem-1/keep",
+          JSON.stringify({ payload: "x" })
+        )
+      )
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
+    expect(called).toBe(false);
+  });
+
+  it("treats an empty attached no-body inspector stream as no body and still proxies", async () => {
+    let called = false;
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async () => {
+        called = true;
+        return Response.json({ success: true, data: { ok: true } });
+      }
+    });
+
+    const response = await app.request(
+      createEmptyChunkedJsonRequest("http://localhost/api/proposals/ws1/memory/mem-1/keep")
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, data: { ok: true } });
+    expect(called).toBe(true);
   });
 
   it("sanitizes daemon validation errors for embedding paste requests", async () => {
@@ -623,7 +746,7 @@ describe("inspector routes", () => {
     expect(calls).toEqual(["http://daemon.local/workspaces/ws1/evidence/obj%2F1"]);
   });
 
-  it("forwards memory pagination query parameters and preserves pagination headers", async () => {
+  it("forwards memory list filters/pagination query parameters and preserves pagination headers", async () => {
     const calls: string[] = [];
     const app = createInspectorApp({
       token: "token",
@@ -646,12 +769,12 @@ describe("inspector routes", () => {
 
     const response = await authenticatedRequest(
       app,
-      "/api/memory-entries/ws1?dimension=fact&limit=200&offset=200"
+      "/api/memory-entries/ws1?dimension=fact&scope_class=project&has_conflict=true&limit=200&offset=200"
     );
 
     expect(response.status).toBe(200);
     expect(calls).toEqual([
-      "http://daemon.local/workspaces/ws1/memories?dimension=fact&limit=200&offset=200"
+      "http://daemon.local/workspaces/ws1/memories?dimension=fact&scope_class=project&has_conflict=true&limit=200&offset=200"
     ]);
     expect(response.headers.get("x-total-count")).toBe("250");
     expect(response.headers.get("x-limit")).toBe("200");
@@ -1051,4 +1174,62 @@ function createChunkedJsonRequest(url: string, bodyText: string): Request {
     }),
     duplex: "half"
   });
+}
+
+function createNeverEndingChunkedJsonRequest(url: string, bodyText: string): Request {
+  const bytes = new TextEncoder().encode(bodyText);
+  let sent = false;
+
+  return new Request(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-alaya-inspector-token": "token"
+    },
+    body: new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) {
+          return;
+        }
+        sent = true;
+        controller.enqueue(bytes);
+      }
+    }),
+    duplex: "half"
+  });
+}
+
+function createEmptyChunkedJsonRequest(url: string): Request {
+  return new Request(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-alaya-inspector-token": "token"
+    },
+    body: new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.close();
+      }
+    }),
+    duplex: "half"
+  });
+}
+
+async function withResponseTimeout(
+  responsePromise: Promise<Response>,
+  timeoutMs = 200
+): Promise<Response> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      responsePromise,
+      new Promise<Response>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`response timed out after ${timeoutMs}ms`)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
 }

@@ -8,10 +8,15 @@ export interface InspectorProxyOptions {
   readonly daemonUrl: string;
   readonly workspaceId?: string;
   readonly fetchImpl?: typeof fetch;
+  readonly daemonTimeoutMs?: number;
   readonly daemonRequestToken?: string;
   readonly reviewerToken?: string;
   readonly reviewerIdentity?: string;
 }
+
+const DEFAULT_DAEMON_PROXY_TIMEOUT_MS = 10_000;
+const REQUEST_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
+const REQUEST_BODY_PRESENCE_PROBE_TIMEOUT_MS = 0;
 
 export function isRequestBodyTooLargeError(error: unknown): boolean {
   return readStatusCode(error) === 413 || readErrorName(error) === "BodyLimitError";
@@ -69,6 +74,8 @@ export async function proxyDaemonJson(
 ): Promise<Response> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const daemonUrl = new URL(request.path, normalizeBaseUrl(options.daemonUrl));
+  const controller = new AbortController();
+  const timeoutMs = options.daemonTimeoutMs ?? DEFAULT_DAEMON_PROXY_TIMEOUT_MS;
   const headers = new Headers();
   let hasHeaders = false;
   if (request.body !== undefined) {
@@ -86,38 +93,79 @@ export async function proxyDaemonJson(
     headers.set(INSPECTOR_CORRELATION_ID_HEADER, requestId);
     hasHeaders = true;
   }
-  const response = await fetchImpl(daemonUrl, {
-    method: request.method,
-    headers: hasHeaders ? headers : undefined,
-    body: request.body === undefined ? undefined : JSON.stringify(request.body)
-  }).catch(() => null);
-
-  if (response === null) {
-    return context.json({ error: "daemon_unavailable" }, 503);
+  const timeout = startDaemonTimeout(controller, timeoutMs);
+  let response: Response | null;
+  try {
+    const responseOrTimeout = await Promise.race([
+      fetchDaemonJson({
+        fetchImpl,
+        url: daemonUrl,
+        method: request.method,
+        headers: hasHeaders ? headers : undefined,
+        body: request.body === undefined ? undefined : JSON.stringify(request.body),
+        signal: controller.signal
+      }).catch((error) => {
+        if (timeout.didTimeout() && isAbortError(error)) {
+          return "timeout" as const;
+        }
+        throw error;
+      }),
+      timeout.timeout
+    ]);
+    if (responseOrTimeout === "timeout") {
+      copyFallbackTraceHeaders(context, requestId);
+      return context.json({ error: "daemon_timeout" }, 504);
+    }
+    response = responseOrTimeout;
+  } catch (error) {
+    throw error;
   }
 
-  if (!response.ok) {
-    // By default we sanitise daemon error bodies so free-text daemon
-    // validation messages cannot leak user-supplied secrets through the
-    // inspector. Routes that route through the MCP memory-tool handler
-    // can opt in to verbatim forwarding because that workflow returns a
-    // closed {success: false, error: {code, message}} envelope. The
-    // forwarder still narrows to the canonical envelope shape; anything
-    // else falls back to the sanitised body.
-    if (request.forwardStructuredError === true) {
-      const safe = await tryReadStructuredErrorEnvelope(response);
-      if (safe !== null) {
-        copyTraceHeaders(context, response, requestId);
-        return context.json(safe, response.status as 400 | 401 | 403 | 404 | 409 | 422 | 500);
+  try {
+    if (response === null) {
+      copyFallbackTraceHeaders(context, requestId);
+      return context.json({ error: "daemon_unavailable" }, 503);
+    }
+
+    if (!response.ok) {
+      // By default we sanitise daemon error bodies so free-text daemon
+      // validation messages cannot leak user-supplied secrets through the
+      // inspector. Routes that route through the MCP memory-tool handler
+      // can opt in to verbatim forwarding because that workflow returns a
+      // closed {success: false, error: {code, message}} envelope. The
+      // forwarder still narrows to the canonical envelope shape; anything
+      // else falls back to the sanitised body.
+      if (request.forwardStructuredError === true) {
+        const safe = await Promise.race([
+          tryReadStructuredErrorEnvelope(response, timeout.didTimeout),
+          timeout.timeout
+        ]);
+        if (safe === "timeout") {
+          copyTraceHeaders(context, response, requestId);
+          return context.json({ error: "daemon_timeout" }, 504);
+        }
+        if (safe !== null) {
+          copyTraceHeaders(context, response, requestId);
+          return context.json(safe, response.status as 400 | 401 | 403 | 404 | 409 | 422 | 500);
+        }
       }
+      copyTraceHeaders(context, response, requestId);
+      return context.json({ error: `daemon_${response.status}` }, response.status as 400 | 401 | 403 | 404 | 409 | 422 | 500 | 503);
+    }
+
+    const payload = await Promise.race([
+      readDaemonJson(response, timeout.didTimeout),
+      timeout.timeout
+    ]);
+    if (payload === "timeout") {
+      copyTraceHeaders(context, response, requestId);
+      return context.json({ error: "daemon_timeout" }, 504);
     }
     copyTraceHeaders(context, response, requestId);
-    return context.json({ error: `daemon_${response.status}` }, response.status as 400 | 401 | 403 | 404 | 409 | 422 | 500 | 503);
+    return context.json(payload, response.status as 200);
+  } finally {
+    timeout.clear();
   }
-
-  const payload = await response.json() as unknown;
-  copyTraceHeaders(context, response, requestId);
-  return context.json(payload, response.status as 200);
 }
 
 const KNOWN_WORKFLOW_ERROR_CODES = new Set([
@@ -128,13 +176,14 @@ const KNOWN_WORKFLOW_ERROR_CODES = new Set([
 ]);
 
 async function tryReadStructuredErrorEnvelope(
-  response: Response
-): Promise<{ readonly success: false; readonly error: { readonly code: string; readonly message: string } } | null> {
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    return null;
+  response: Response,
+  didTimeout: () => boolean
+): Promise<
+  { readonly success: false; readonly error: { readonly code: string; readonly message: string } } | null | "timeout"
+> {
+  const payload = await readDaemonJson(response, didTimeout);
+  if (payload === "timeout") {
+    return "timeout";
   }
   if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
     return null;
@@ -164,9 +213,82 @@ function normalizeBaseUrl(value: string): string {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
+async function fetchDaemonJson(input: {
+  readonly fetchImpl: typeof fetch;
+  readonly url: URL;
+  readonly method: "GET" | "PATCH" | "POST";
+  readonly headers?: Headers;
+  readonly body?: string;
+  readonly signal: AbortSignal;
+}): Promise<Response | null> {
+  try {
+    return await input.fetchImpl(input.url, {
+      method: input.method,
+      headers: input.headers,
+      body: input.body,
+      signal: input.signal
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    return null;
+  }
+}
+
+async function readDaemonJson(
+  response: Response,
+  didTimeout: () => boolean
+): Promise<unknown | "timeout"> {
+  try {
+    return await response.json();
+  } catch (error) {
+    if (didTimeout() && isAbortError(error)) {
+      return "timeout";
+    }
+    throw error;
+  }
+}
+
+function startDaemonTimeout(
+  controller: AbortController,
+  timeoutMs: number
+): {
+  readonly clear: () => void;
+  readonly didTimeout: () => boolean;
+  readonly timeout: Promise<"timeout">;
+} {
+  let timedOut = false;
+  let clearTimer = () => {};
+  const timeout = new Promise<"timeout">((resolve) => {
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      resolve("timeout");
+    }, timeoutMs);
+    clearTimer = () => clearTimeout(timer);
+  });
+  return {
+    clear: () => clearTimer(),
+    didTimeout: () => timedOut,
+    timeout
+  };
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
 function readRequestId(context: Context): string | undefined {
   const requestId = context.get("requestId");
   return typeof requestId === "string" && requestId.length > 0 ? requestId : undefined;
+}
+
+function copyFallbackTraceHeaders(context: Context, requestId: string | undefined): void {
+  if (requestId !== undefined && requestId.length > 0) {
+    context.header(INSPECTOR_REQUEST_ID_HEADER, requestId);
+    context.header(INSPECTOR_CORRELATION_ID_HEADER, requestId);
+  }
 }
 
 function copyTraceHeaders(context: Context, response: Response, fallbackRequestId: string | undefined): void {
@@ -192,39 +314,72 @@ function copyHeaderIfPresent(context: Context, response: Response, name: string)
 
 async function inspectUnexpectedRequestBody(context: Context): Promise<"none" | "unexpected" | "too_large"> {
   const declaredLength = readDeclaredLength(context.req.header("content-length"));
-  if (declaredLength !== null && declaredLength > 10 * 1024 * 1024) {
-    return "too_large";
-  }
-
   const transferEncoding = normalizeOptionalHeader(context.req.header("transfer-encoding"));
   const body = context.req.raw.body;
   if (body === null) {
+    if (declaredLength !== null && declaredLength > REQUEST_BODY_LIMIT_BYTES) {
+      return "too_large";
+    }
     if ((declaredLength ?? 0) > 0 || transferEncoding !== undefined) {
       return "unexpected";
     }
     return "none";
   }
 
-  const reader = body.getReader();
-  let total = 0;
+  if (declaredLength !== null && declaredLength > REQUEST_BODY_LIMIT_BYTES) {
+    await cancelRequestBodyStream(body, context);
+    return "too_large";
+  }
+  return await probeRequestBodyStream(body, context);
+}
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      total += value.byteLength;
-      if (total > 10 * 1024 * 1024) {
-        return "too_large";
-      }
+async function cancelRequestBodyStream(
+  body: ReadableStream<Uint8Array>,
+  context: Context
+): Promise<void> {
+  const reader = body.getReader();
+  await reader.cancel().catch((error: unknown) => {
+    if (isRequestBodyTooLargeError(error)) {
+      return;
     }
+    console.warn("[routes/shared] request body reader cancel failed after inspection", {
+      method: context.req.method,
+      path: context.req.path,
+      error
+    });
+  });
+}
+
+async function probeRequestBodyStream(
+  body: ReadableStream<Uint8Array>,
+  context: Context
+): Promise<"none" | "unexpected" | "too_large"> {
+  const reader = body.getReader();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read().then(({ done, value }) => {
+        if (done) {
+          return "none" as const;
+        }
+        if (value.byteLength > REQUEST_BODY_LIMIT_BYTES) {
+          return "too_large" as const;
+        }
+        return "unexpected" as const;
+      }),
+      new Promise<"unexpected">((resolve) => {
+        timer = setTimeout(() => resolve("unexpected"), REQUEST_BODY_PRESENCE_PROBE_TIMEOUT_MS);
+      })
+    ]);
   } catch (error) {
     if (isRequestBodyTooLargeError(error)) {
       return "too_large";
     }
     throw error;
   } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
     await reader.cancel().catch((error: unknown) => {
       if (isRequestBodyTooLargeError(error)) {
         return;
@@ -236,12 +391,6 @@ async function inspectUnexpectedRequestBody(context: Context): Promise<"none" | 
       });
     });
   }
-
-  if (total > 0 || (declaredLength ?? 0) > 0 || transferEncoding !== undefined) {
-    return "unexpected";
-  }
-
-  return "none";
 }
 
 function readStatusCode(error: unknown): number | null {

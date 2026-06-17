@@ -329,6 +329,65 @@ describe("createApp", () => {
     });
     expect(deleteEdge).not.toHaveBeenCalled();
   });
+
+  it("rejects streaming DELETE bodies without waiting for EOF", async () => {
+    const deleteEdge = vi.fn(async () => undefined);
+    const app = createApp({
+      routes: {
+        conflictMatrix: {
+          workspaceService: { getById: vi.fn() } as any,
+          arbitrationService: {
+            deleteEdge,
+            createEdge: vi.fn(),
+            listEdgesByWorkspace: vi.fn(),
+            rebuildConflictMatrix: vi.fn()
+          } as any
+        }
+      }
+    });
+
+    const response = await withResponseTimeout(
+      app.request(
+        createNeverEndingChunkedJsonRequest(
+          "http://localhost/conflict-matrix-edges/edge-1",
+          "DELETE",
+          JSON.stringify({ payload: "x" })
+        )
+      )
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Request body is not allowed for this route"
+    });
+    expect(deleteEdge).not.toHaveBeenCalled();
+  });
+
+  it("treats an empty attached DELETE stream as no body and dispatches the route", async () => {
+    const deleteEdge = vi.fn(async () => undefined);
+    const app = createApp({
+      routes: {
+        conflictMatrix: {
+          workspaceService: { getById: vi.fn() } as any,
+          arbitrationService: {
+            deleteEdge,
+            createEdge: vi.fn(),
+            listEdgesByWorkspace: vi.fn(),
+            rebuildConflictMatrix: vi.fn()
+          } as any
+        }
+      }
+    });
+
+    const response = await app.request(
+      createEmptyChunkedJsonRequest("http://localhost/conflict-matrix-edges/edge-1", "DELETE")
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true, data: null });
+    expect(deleteEdge).toHaveBeenCalledWith("edge-1");
+  });
 });
 
 function createChunkedJsonRequest(
@@ -359,4 +418,71 @@ function createChunkedJsonRequest(
     }),
     duplex: "half"
   });
+}
+
+function createNeverEndingChunkedJsonRequest(
+  url: string,
+  method: "PATCH" | "DELETE",
+  bodyText: string,
+  extraHeaders: Record<string, string> = {}
+): Request {
+  const bytes = new TextEncoder().encode(bodyText);
+  let sent = false;
+
+  return new Request(url, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      ...extraHeaders
+    },
+    body: new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) {
+          return;
+        }
+        sent = true;
+        controller.enqueue(bytes);
+      }
+    }),
+    duplex: "half"
+  });
+}
+
+function createEmptyChunkedJsonRequest(
+  url: string,
+  method: "PATCH" | "DELETE",
+  extraHeaders: Record<string, string> = {}
+): Request {
+  return new Request(url, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      ...extraHeaders
+    },
+    body: new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.close();
+      }
+    }),
+    duplex: "half"
+  });
+}
+
+async function withResponseTimeout(
+  responsePromise: Promise<Response>,
+  timeoutMs = 200
+): Promise<Response> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      responsePromise,
+      new Promise<Response>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`response timed out after ${timeoutMs}ms`)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
 }

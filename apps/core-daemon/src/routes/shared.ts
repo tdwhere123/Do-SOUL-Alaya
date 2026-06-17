@@ -3,6 +3,8 @@ import { CoreError } from "@do-soul/alaya-core";
 
 export const REQUEST_BODY_TOO_LARGE_MESSAGE = "Request body exceeds the 10 MB limit";
 export const REQUEST_BODY_NOT_ALLOWED_MESSAGE = "Request body is not allowed for this route";
+const REQUEST_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
+const REQUEST_BODY_PRESENCE_PROBE_TIMEOUT_MS = 0;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 500;
 
@@ -160,39 +162,72 @@ export async function rejectUnexpectedRequestBody(context: Context): Promise<Res
 
 async function inspectUnexpectedRequestBody(context: Context): Promise<"none" | "unexpected" | "too_large"> {
   const declaredLength = readDeclaredLength(context.req.header("content-length"));
-  if (declaredLength !== null && declaredLength > 10 * 1024 * 1024) {
-    return "too_large";
-  }
-
   const transferEncoding = normalizeOptionalHeader(context.req.header("transfer-encoding"));
   const body = context.req.raw.body;
   if (body === null) {
+    if (declaredLength !== null && declaredLength > REQUEST_BODY_LIMIT_BYTES) {
+      return "too_large";
+    }
     if ((declaredLength ?? 0) > 0 || transferEncoding !== undefined) {
       return "unexpected";
     }
     return "none";
   }
 
-  const reader = body.getReader();
-  let total = 0;
+  if (declaredLength !== null && declaredLength > REQUEST_BODY_LIMIT_BYTES) {
+    await cancelRequestBodyStream(body, context);
+    return "too_large";
+  }
+  return await probeRequestBodyStream(body, context);
+}
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      total += value.byteLength;
-      if (total > 10 * 1024 * 1024) {
-        return "too_large";
-      }
+async function cancelRequestBodyStream(
+  body: ReadableStream<Uint8Array>,
+  context: Context
+): Promise<void> {
+  const reader = body.getReader();
+  await reader.cancel().catch((error: unknown) => {
+    if (isRequestBodyTooLargeError(error)) {
+      return;
     }
+    console.warn("[routes/shared] request body reader cancel failed after inspection", {
+      method: context.req.method,
+      path: context.req.path,
+      error
+    });
+  });
+}
+
+async function probeRequestBodyStream(
+  body: ReadableStream<Uint8Array>,
+  context: Context
+): Promise<"none" | "unexpected" | "too_large"> {
+  const reader = body.getReader();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read().then(({ done, value }) => {
+        if (done) {
+          return "none" as const;
+        }
+        if (value.byteLength > REQUEST_BODY_LIMIT_BYTES) {
+          return "too_large" as const;
+        }
+        return "unexpected" as const;
+      }),
+      new Promise<"unexpected">((resolve) => {
+        timer = setTimeout(() => resolve("unexpected"), REQUEST_BODY_PRESENCE_PROBE_TIMEOUT_MS);
+      })
+    ]);
   } catch (error) {
     if (isRequestBodyTooLargeError(error)) {
       return "too_large";
     }
     throw error;
   } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
     await reader.cancel().catch((error: unknown) => {
       if (isRequestBodyTooLargeError(error)) {
         return;
@@ -204,12 +239,6 @@ async function inspectUnexpectedRequestBody(context: Context): Promise<"none" | 
       });
     });
   }
-
-  if (total > 0 || (declaredLength ?? 0) > 0 || transferEncoding !== undefined) {
-    return "unexpected";
-  }
-
-  return "none";
 }
 
 function readDeclaredLength(header: string | undefined): number | null {

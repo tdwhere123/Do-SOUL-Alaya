@@ -16,8 +16,8 @@ import type { BenchTokenMetrics } from "./daemon.js";
 const BENCH_CHARS_PER_TOKEN = 4;
 
 /**
- * @anchor bench-token-economy-payload-keys — the raw_payload keys the seed
- * paths stamp on every SOUL_SIGNAL_EMITTED event and the fold reads back.
+ * @anchor bench-token-economy-payload-keys — the seed raw_payload keys and
+ * their EventLog-summary counterparts used by the bench token-economy flow.
  *
  * The production raw_payload only carries `turn_content_excerpt`, a narrow
  * matched-text window — never the full turn — so the fold cannot derive
@@ -26,23 +26,18 @@ const BENCH_CHARS_PER_TOKEN = 4;
  * would not byte-duplicate a sibling field (`excerpt` / `distilled_fact`):
  * on the no-credentials path `excerpt` IS the full turn and `distilled_fact`
  * IS the durable fact, so a second copy would near-double raw_payload and
- * risk an over-cap drop. The fold therefore falls back to those siblings
- * when the bench content key is absent.
- *
- * BENCH_SEED_MARKER_KEY is the always-present, content-free marker: it lets
- * the fold recognise a bench seed row even when all three other keys are
- * absent (the proposeMemory no-creds seed with no distilled fact), without
- * scanning content. They live under distinct `bench_` names so they never
- * collide with a production extractor field.
+ * risk an over-cap drop. SignalService then converts that raw shape into a
+ * redacted EventLog summary that preserves only bench_summary_* markers plus
+ * numeric token counts, and deriveBenchTokenMetrics reads that summary shape.
  */
 export const BENCH_FULL_TURN_CONTENT_KEY = "bench_full_turn_content";
 export const BENCH_STORED_CONTENT_KEY = "bench_stored_content";
 export const BENCH_TURN_SEED_INDEX_KEY = "bench_turn_seed_index";
 export const BENCH_SEED_MARKER_KEY = "bench_seed";
-
-function estimateBenchTokens(text: string): number {
-  return Math.ceil(text.length / BENCH_CHARS_PER_TOKEN);
-}
+export const BENCH_SUMMARY_SEED_MARKER_KEY = "bench_summary_seeded";
+export const BENCH_SUMMARY_TURN_SEED_INDEX_KEY = "bench_summary_turn_seed_index";
+export const BENCH_FULL_TURN_TOKENS_KEY = "bench_full_turn_tokens";
+export const BENCH_STORED_CONTENT_TOKENS_KEY = "bench_stored_content_tokens";
 
 /**
  * The minimal shape of an EventLog row the token-economy derivation reads.
@@ -54,12 +49,12 @@ export interface TokenEconomyEventRow {
   readonly payload_json: unknown;
 }
 
-function readRawString(
+function readRawNumber(
   rawPayload: Record<string, unknown>,
   key: string
-): string | null {
+): number | null {
   const value = rawPayload[key];
-  return typeof value === "string" ? value : null;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /**
@@ -68,16 +63,17 @@ function readRawString(
  * Every figure is derived FROM EVENTS, never recomputed from in-memory
  * bench state:
  *
- * - SOUL_SIGNAL_EMITTED — each seed signal carries the bench KPI block,
- *   identified by BENCH_SEED_MARKER_KEY. The full turn is read from
- *   BENCH_FULL_TURN_CONTENT_KEY, falling back to `excerpt` when that key is
- *   absent (the no-creds path's `excerpt` IS the full turn); the durable
- *   fact is read from BENCH_STORED_CONTENT_KEY, falling back to
- *   `distilled_fact` then `excerpt`. raw_history_tokens counts the full turn
- *   ONCE per distinct turn-seed index — a source turn that fans out into N
- *   fact signals contributes its full-turn token count exactly once, not N
- *   times. A row without a turn-seed index (the generic proposeMemory seed,
- *   where each call is its own self-contained turn) is counted on its own.
+ * - SOUL_SIGNAL_EMITTED — each seed signal carries the bench KPI block, and
+ *   SignalService persists the redacted EventLog summary:
+ *   BENCH_SUMMARY_SEED_MARKER_KEY identifies a bench row,
+ *   BENCH_SUMMARY_TURN_SEED_INDEX_KEY carries the turn fan-out identity,
+ *   and BENCH_FULL_TURN_TOKENS_KEY / BENCH_STORED_CONTENT_TOKENS_KEY carry
+ *   numeric token counts without storing the source text. raw_history_tokens
+ *   counts one source turn ONCE per distinct turn-seed index — a source turn
+ *   that fans out into N fact signals contributes its full-turn token count
+ *   exactly once, not N times. A row without a turn-seed index (the generic
+ *   proposeMemory seed, where each call is its own self-contained turn) is
+ *   counted on its own.
  *   stored_memory_tokens sums the durable-fact token count over EVERY fact
  *   signal, since each fact materializes a distinct memory_entry.
  * - SOUL_CONTEXT_LENS_ASSEMBLED — total_token_estimate is the tokens
@@ -97,7 +93,7 @@ export function deriveBenchTokenMetrics(
   // raw_history is counted once per source turn. Rows that share a
   // bench_turn_seed_index are the same turn's fact fan-out; rows without an
   // index are each their own turn and get a unique synthetic key.
-  const fullTurnByKey = new Map<string, string>();
+  const fullTurnByKey = new Map<string, number>();
   let anonymousTurnSeq = 0;
   for (const row of signalEmittedRows) {
     if (row.event_type !== SignalEventType.SOUL_SIGNAL_EMITTED) {
@@ -108,42 +104,31 @@ export function deriveBenchTokenMetrics(
       continue;
     }
     const rawPayload = parsed.data.raw_payload;
-    if (rawPayload[BENCH_SEED_MARKER_KEY] !== true) {
+    if (rawPayload[BENCH_SUMMARY_SEED_MARKER_KEY] !== true) {
       continue;
     }
     seedEventCount += 1;
-    // The content keys are stamped only when they differ from the sibling
-    // raw_payload field (see benchTokenEconomyPayload). When absent, the
-    // no-creds `excerpt` IS the full turn and `distilled_fact` (else
-    // `excerpt`) IS the durable fact, so the fold reconstructs the same
-    // ground truth without a second serialized copy.
-    const excerptSibling = readRawString(rawPayload, "excerpt");
-    const fullTurnContent =
-      readRawString(rawPayload, BENCH_FULL_TURN_CONTENT_KEY) ?? excerptSibling;
-    const storedContent =
-      readRawString(rawPayload, BENCH_STORED_CONTENT_KEY) ??
-      readRawString(rawPayload, "distilled_fact") ??
-      excerptSibling;
-    if (storedContent !== null) {
-      storedMemoryTokens += estimateBenchTokens(storedContent);
+    const fullTurnTokens = readRawNumber(rawPayload, BENCH_FULL_TURN_TOKENS_KEY);
+    const storedContentTokens = readRawNumber(rawPayload, BENCH_STORED_CONTENT_TOKENS_KEY);
+    if (storedContentTokens !== null) {
+      storedMemoryTokens += storedContentTokens;
     }
-    if (fullTurnContent !== null) {
-      const indexValue = rawPayload[BENCH_TURN_SEED_INDEX_KEY];
+    const indexValue = rawPayload[BENCH_SUMMARY_TURN_SEED_INDEX_KEY];
+    if (fullTurnTokens !== null) {
       const turnKey =
         typeof indexValue === "number"
           ? `turn:${indexValue}`
           : `anon:${anonymousTurnSeq++}`;
       // First signal of a turn wins; later facts of the same turn carry the
-      // identical full turn, so the value is stable and the turn is counted
-      // once.
+      // identical token count, so the turn is counted once.
       if (!fullTurnByKey.has(turnKey)) {
-        fullTurnByKey.set(turnKey, fullTurnContent);
+        fullTurnByKey.set(turnKey, fullTurnTokens);
       }
     }
   }
   let rawHistoryTokens = 0;
   for (const fullTurn of fullTurnByKey.values()) {
-    rawHistoryTokens += estimateBenchTokens(fullTurn);
+    rawHistoryTokens += fullTurn;
   }
 
   let recalledContextTokensTotal = 0;
