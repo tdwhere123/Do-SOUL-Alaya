@@ -19,15 +19,12 @@ import type {
 } from "./recall-service-types.js";
 import { buildEvidenceSearchQueries } from "./coarse-candidates.js";
 import { normalizeEmbeddingProviderDegradationReason } from "./diagnostics.js";
-import { recallFusionRetuneEnabled } from "./recall-retune-flags.js";
 
 const EMBEDDING_INJECTION_SIMILARITY_FLOOR = 0.5;
 // Default pure-semantic injection cap (policy.semantic_supplement.injection_cap
 // overrides). Sized to the delivery window so a vocab-disjoint gold can surface,
 // not just 1-2 neighbors.
 const EMBEDDING_MAX_INJECTED_DELIVERY = 10;
-// Retune flag relaxes the cosine floor; a policy floor override still wins.
-const EMBEDDING_INJECTION_SIMILARITY_FLOOR_RETUNED = 0.35;
 
 export function emptyEmbeddingSupplementResult(): EmbeddingRecallSupplementResult {
   return Object.freeze({
@@ -138,13 +135,9 @@ export async function collectEmbeddingCoarseInjection(params: {
   }
 
   const poolObjectIdSet = new Set(poolObjectIds);
-  const retune = recallFusionRetuneEnabled();
   const semantic = params.policy.coarse_filter.semantic_supplement;
   const injectionFloor =
-    semantic.injection_similarity_floor ??
-    (retune
-      ? EMBEDDING_INJECTION_SIMILARITY_FLOOR_RETUNED
-      : EMBEDDING_INJECTION_SIMILARITY_FLOOR);
+    semantic.injection_similarity_floor ?? EMBEDDING_INJECTION_SIMILARITY_FLOOR;
   const maxInjected = semantic.injection_cap ?? EMBEDDING_MAX_INJECTED_DELIVERY;
   // Gate the injected neighbors on the query cosine floor and hard-cap the
   // count: the semantic facet contributes at most maxInjected pool-external

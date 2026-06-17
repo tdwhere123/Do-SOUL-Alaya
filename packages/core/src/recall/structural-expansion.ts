@@ -22,7 +22,6 @@ import {
   type GraphExpansionFrontierNode
 } from "./graph-expansion.js";
 import { collectPathGraphNeighbors } from "./path-relations.js";
-import { recallFusionRetuneEnabled } from "./recall-retune-flags.js";
 import { clamp01, toErrorMessage } from "./recall-service-helpers.js";
 import type {
   RecallAdmissionPlane,
@@ -31,9 +30,6 @@ import type {
   RecallServiceWarnPort
 } from "./recall-service-types.js";
 
-// Entity-seed score retained at this fraction per unit of lexical overlap under
-// the retune flag, instead of a hard zero.
-const ENTITY_LEXICAL_OVERLAP_DECAY = 0.5;
 
 type CoarseCandidateAdder = (
   entry: Readonly<MemoryEntry>,
@@ -131,12 +127,10 @@ export async function collectEntityDerivedSeeds(params: Readonly<{
       if (rawScore <= 0) {
         continue;
       }
-      // Default zeros entity-seed on any lexical overlap so one surface term
-      // cannot claim two fusion-stream slots; retune decays it additively instead.
+      // Zero entity-seed on any lexical overlap so one surface term cannot claim
+      // two fusion-stream slots.
       const lexicalWeight = clamp01(params.lexicalFtsRanks.get(hit.object_id) ?? 0);
-      const score = recallFusionRetuneEnabled()
-        ? rawScore * (1 - lexicalWeight * ENTITY_LEXICAL_OVERLAP_DECAY)
-        : (lexicalWeight > 0 ? 0 : rawScore);
+      const score = lexicalWeight > 0 ? 0 : rawScore;
       params.addCandidate(entry, "entity_seed", score, "entity_seed", undefined, entity.confidence);
       const previous = seedConfidenceById.get(entry.object_id) ?? 0;
       if (entity.confidence > previous) {

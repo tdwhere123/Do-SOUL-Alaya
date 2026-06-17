@@ -25,7 +25,6 @@ import {
   scoreEvidenceAnchorMatch,
   scoreQueryEvidenceMatch
 } from "./query-evidence-scoring.js";
-import { recallFusionRetuneEnabled } from "./recall-retune-flags.js";
 
 const STRONG_LEXICAL_DELIVERY_RANK = 0.85;
 const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;
@@ -70,44 +69,6 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   workspace_activation: 0
 });
 
-// Near-collinear lexical lanes (all driven by query-term overlap) folded into
-// one mean-rank composite under the retune flag so the lexical block stops
-// out-voting discriminative gold. embedding_similarity and synthesis_fts stay
-// independent: the former is semantic and weight-raised, capsules score only on
-// the latter.
-const LEXICAL_COMPOSITE_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
-  "lexical_fts",
-  "trigram_fts",
-  "evidence_fts",
-  "evidence_structural_agreement",
-  "structural",
-  "existing_score"
-]);
-
-// Retune weights. Folded composite members drop to 0 (lexical_fts stays the
-// composite carrier); embedding is raised; temporal stays 0 here and is
-// date-gated in resolveRrfFusionWeights.
-const RECALL_FUSION_RETUNED_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
-  lexical_fts: 3,
-  trigram_fts: 0,
-  synthesis_fts: 1,
-  evidence_fts: 0,
-  evidence_structural_agreement: 0,
-  source_proximity: 1,
-  source_evidence_agreement: 1,
-  subject_alignment: 1,
-  structural: 0,
-  existing_score: 0,
-  embedding_similarity: 3,
-  graph_expansion: 3,
-  entity_seed: 1,
-  path_expansion: 3,
-  temporal_recency: 0,
-  workspace_activation: 0
-});
-
-const RECALL_RETUNE_TEMPORAL_DATE_WEIGHT = 2;
-
 const SYNTHESIS_ANCHOR_BONUS = 0.1;
 
 type RecallFusionCandidateInput = Readonly<CoarseRecallCandidate & {
@@ -129,9 +90,7 @@ export function buildRecallFusionDetails(params: Readonly<{
   readonly supplementaryData: RecallSupplementaryData;
   readonly nowIso: string;
 }>): ReadonlyMap<string, RecallFusionBreakdown> {
-  const retune = recallFusionRetuneEnabled();
-  const hasDateTerms = params.supplementaryData.queryProbes.date_terms.length > 0;
-  const resolved = resolveRrfFusionWeights(params.policy, hasDateTerms);
+  const resolved = resolveRrfFusionWeights(params.policy);
   const ranksByStream = new Map<RecallFusionStream, ReadonlyMap<string, number>>();
 
   for (const stream of RECALL_FUSION_STREAMS) {
@@ -162,10 +121,6 @@ export function buildRecallFusionDetails(params: Readonly<{
     for (const stream of RECALL_FUSION_STREAMS) {
       const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
       perStreamRank[stream] = rank;
-      // Folded lexical lanes contribute once through the composite below.
-      if (retune && LEXICAL_COMPOSITE_STREAMS.has(stream)) {
-        continue;
-      }
       if (rank !== null) {
         let contribution = resolved.weights[stream] / (resolved.k + rank);
         // invariant: embedding path modulation is boost-only; missing or neutral cosine leaves graph/path fusion byte-identical.
@@ -176,14 +131,6 @@ export function buildRecallFusionDetails(params: Readonly<{
           contribution *= m;
         }
         contributions[stream] = contribution;
-        fusedScore += contribution;
-      }
-    }
-    if (retune) {
-      const compositeRank = meanLexicalCompositeRank(perStreamRank);
-      if (compositeRank !== null) {
-        const contribution = resolved.weights.lexical_fts / (resolved.k + compositeRank);
-        contributions.lexical_fts = contribution;
         fusedScore += contribution;
       }
     }
@@ -901,11 +848,9 @@ function buildEmptyFusionStreamContributions(): Record<RecallFusionStream, numbe
 }
 
 function resolveRrfFusionWeights(
-  policy: Readonly<RecallPolicy>,
-  hasDateTerms: boolean
+  policy: Readonly<RecallPolicy>
 ): ResolvedRecallFusionWeights {
-  const retune = recallFusionRetuneEnabled();
-  const base = retune ? RECALL_FUSION_RETUNED_WEIGHTS : RECALL_FUSION_DEFAULT_WEIGHTS;
+  const base = RECALL_FUSION_DEFAULT_WEIGHTS;
   const overrides = policy.scoring_weight_overrides?.fusion_weights;
   const kOverride = overrides?.RRF_K ?? overrides?.rrf_k;
   const k = typeof kOverride === "number" && Number.isFinite(kOverride) && kOverride > 0
@@ -913,10 +858,7 @@ function resolveRrfFusionWeights(
     : RECALL_RRF_DEFAULT_K;
   const weights = Object.fromEntries(
     RECALL_FUSION_STREAMS.map((stream) => {
-      // Date-gate temporal only under retune; created_at recency stays off otherwise.
-      const baseWeight = stream === "temporal_recency" && retune && hasDateTerms
-        ? RECALL_RETUNE_TEMPORAL_DATE_WEIGHT
-        : base[stream];
+      const baseWeight = base[stream];
       return [stream, Math.max(0, overrides?.[stream] ?? baseWeight)];
     })
   ) as Record<RecallFusionStream, number>;
@@ -924,23 +866,6 @@ function resolveRrfFusionWeights(
     k: Math.max(1, k),
     weights: Object.freeze(weights)
   });
-}
-
-// Mean rank across the folded lexical lanes, ignoring lanes the candidate did
-// not match (null). One composite contribution replaces six per-lane ones.
-function meanLexicalCompositeRank(
-  perStreamRank: Record<RecallFusionStream, number | null>
-): number | null {
-  let sum = 0;
-  let count = 0;
-  for (const stream of LEXICAL_COMPOSITE_STREAMS) {
-    const rank = perStreamRank[stream];
-    if (rank !== null) {
-      sum += rank;
-      count += 1;
-    }
-  }
-  return count > 0 ? sum / count : null;
 }
 
 function scoreTemporalRecency(entry: Readonly<MemoryEntry>, nowIso: string): number {
