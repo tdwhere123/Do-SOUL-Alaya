@@ -59,17 +59,24 @@ export function buildFtsMatchExpression(tokens: readonly string[]): string {
 
 /**
  * Scope a token set to one workspace inside the MATCH itself:
- * `workspace_id:"<ws>" AND (<"t1" OR "t2" ...>)`. With workspace_id an INDEXED
- * FTS column (migration 092) the term search runs over one workspace's rows
- * instead of the whole index followed by a workspace_id post-filter — O(global
- * content) -> O(workspace). The redundant `workspace_id = ?` WHERE clause at
- * each call site stays as a safety net.
+ * `workspace_id:"<ws>" AND content:(<"t1" OR "t2" ...>)`. With workspace_id an
+ * INDEXED FTS column (migration 092) the term search runs over one workspace's
+ * rows instead of the whole index followed by a workspace_id post-filter —
+ * O(global content) -> O(workspace). The redundant `workspace_id = ?` WHERE
+ * clause at each call site stays as a safety net.
+ *
+ * The terms MUST be column-restricted to `content`: workspace_id is now indexed,
+ * so a bare term that is also a workspace_id token (e.g. query "workspace" vs
+ * workspace "workspace-1") would otherwise match the workspace_id column of every
+ * row in the workspace, polluting the candidate set and flattening bm25.
+ * `content:(...)` keeps term matching content-only, exactly as it was when
+ * workspace_id was UNINDEXED.
  */
 export function buildWorkspaceScopedFtsMatch(
   workspaceId: string,
   tokens: readonly string[]
 ): string {
-  return `workspace_id:"${workspaceId.replace(/"/g, '""')}" AND (${buildFtsMatchExpression(tokens)})`;
+  return `workspace_id:"${workspaceId.replace(/"/g, '""')}" AND content:(${buildFtsMatchExpression(tokens)})`;
 }
 
 /**
