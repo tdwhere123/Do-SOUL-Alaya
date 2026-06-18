@@ -488,7 +488,9 @@ describe("LoCoMo runner", () => {
     expect(result.payload.sample_size).toBe(1);
     expect(result.payload.evaluated_count).toBe(1);
     expect(result.payload.kpi.r_at_5).toBe(1);
-    expect(recall.mock.calls[0]?.[1]).toMatchObject({ maxResults: 20 });
+    expect(
+      (recall.mock.calls[0] as unknown as unknown[] | undefined)?.[1]
+    ).toMatchObject({ maxResults: 20 });
     expect(result.payload.kpi.qa_metrics).toMatchObject({
       answer_model: "answer-test",
       judge_model: "judge-test",
