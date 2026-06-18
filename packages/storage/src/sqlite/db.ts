@@ -22,11 +22,30 @@ export class StorageDatabase {
     this.connection = connection;
   }
 
+  // Refresh query-planner statistics. Without stats SQLite mis-picks a
+  // low-selectivity index (e.g. storage_tier) over workspace_id and near-full-
+  // scans growing tables, so recall latency degrades O(total rows). analysis_limit
+  // (set at init) caps sampling so this stays in the millisecond range even on a
+  // multi-GB database; callers run it periodically as the database grows.
+  public optimize(): void {
+    if (this.closed) {
+      return;
+    }
+    this.connection.pragma("optimize");
+  }
+
   public close(): void {
     if (this.closed) {
       return;
     }
 
+    // Final stats refresh on close (SQLite-recommended) so a reopened DB starts
+    // with a healthy plan.
+    try {
+      this.connection.pragma("optimize");
+    } catch {
+      // best-effort; never block close on optimize
+    }
     this.connection.close();
     this.closed = true;
 
@@ -59,6 +78,9 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
     database.pragma("journal_mode = WAL");
     database.pragma("busy_timeout = 5000");
     database.pragma("synchronous = NORMAL");
+    // Cap PRAGMA optimize/ANALYZE sampling so a stats refresh stays fast (ms)
+    // on a large DB instead of a multi-second full scan. Persists per connection.
+    database.pragma("analysis_limit = 400");
     runMigrations(database);
   } catch (error) {
     database.close();

@@ -671,6 +671,17 @@ export interface BenchFastPragmaResult {
   readonly pragmas: readonly string[];
 }
 
+// Refresh SQLite query-planner stats on the daemon's live connection (initDatabase
+// caches by path) so workspace-scoped recall keeps the workspace_id index instead
+// of near-full-scanning the growing shared bench DB. Best-effort.
+export function optimizeBenchDb(dataDir: string): void {
+  try {
+    initDatabase({ filename: join(dataDir, "alaya.db") }).optimize();
+  } catch {
+    // never fail a recall on a stats refresh
+  }
+}
+
 export function applyBenchFastPragmaIfRequested(
   dataDir: string
 ): BenchFastPragmaResult {

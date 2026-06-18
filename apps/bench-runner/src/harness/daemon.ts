@@ -72,6 +72,7 @@ import {
   closeBenchDaemonResources,
   emitBenchContextLensAssembledEvent,
   makeDispatchCli,
+  optimizeBenchDb,
   queryEdgeProposalKpiRows,
   queryTokenMetrics,
   readEmbeddingWarmupSummary,
@@ -365,6 +366,12 @@ export async function startBenchDaemon(
   const activeServer = server;
   const activeMcpClient = mcpClient;
   const activeDispatchCli = dispatchCliFn;
+  // The bench shares one DB across all questions, so as it fills the SQLite
+  // planner (without fresh stats) mis-picks a low-selectivity index and
+  // near-full-scans growing tables — recall latency degrades O(rows). Refresh
+  // stats periodically so workspace-scoped queries keep the workspace_id index.
+  let benchRecallsSinceOptimize = 0;
+  const BENCH_OPTIMIZE_EVERY = 25;
   const {
     proposeMemory,
     proposeMemoryFromSignal,
@@ -385,6 +392,11 @@ export async function startBenchDaemon(
     query: string,
     recallOpts: BenchRecallOptions = {}
   ): Promise<SoulMemorySearchResponse & { readonly diagnostics?: unknown }> {
+    benchRecallsSinceOptimize += 1;
+    if (benchRecallsSinceOptimize >= BENCH_OPTIMIZE_EVERY) {
+      benchRecallsSinceOptimize = 0;
+      optimizeBenchDb(dataDir);
+    }
     const maxResults = recallOpts.maxResults ?? 10;
     const conflictAwareness = recallOpts.conflictAwareness ?? true;
     const taskSurface = TaskObjectSurfaceSchema.parse({
