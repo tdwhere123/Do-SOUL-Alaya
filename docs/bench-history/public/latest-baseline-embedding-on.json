@@ -1,5 +1,4 @@
 {
-  "slug": "2026-05-17T104037Z-294070f",
-  "kpi_path": "docs/bench-history/public/2026-05-17T104037Z-294070f/kpi.json",
-  "note": "First clean embedding-on baseline at v0.3.9. yunwu:text-embedding-3-small provider. R@1=14% R@5=17% R@10=66%; p50=82ms p95=1049ms. Compared to the disabled-100 sibling (2026-05-17T065105Z-75d418c, R@5=1%), embedding rescues ~16pp at top-5 but plane-admission skew remains (74.6% of delivered gold lands at final_rank 6-10; temporal_proximity = 33.8% of admissions). See docs/v0.3/v0.3.9/reports/v0.3.9-closeout.md carry-forward #23."
+  "slug": "2026-06-01T133207Z-24801be-policy-chat",
+  "kpi_path": "2026-06-01T133207Z-24801be-policy-chat/kpi.json"
 }

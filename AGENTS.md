@@ -127,10 +127,23 @@ rtk pnpm exec alaya tools call --json # CLI fallback: call a memory tool
 - `CLAUDE.md §Project Genealogy` — upstream commit reference and port
   lineage
 
+## Benchmark Artifacts
+
+Two homes; wrong placement clutters the tree. Full policy in
+`docs/bench-history/README.md` §Storage policy.
+
+- Experiments / A/B / limit-N / probes → gitignored `.do-it/bench-runs/`
+  (tools under `scripts/`); never commit. Confirmed **full-dataset**
+  baselines only → tracked `docs/bench-history/` via the archive +
+  `latest-*.json` pointer mechanism (compact sidecars only).
+- No hand-named dated dirs in `docs/bench-history/` (cf. the retired
+  `v0311-lever-ab-2026-06-17/`). Retention: tracked = current pointer
+  targets + ≤7 days; scratch = ≤7 days, keep `scripts/`.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Do-SOUL-Alaya** (25168 symbols, 42571 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Do-SOUL-Alaya** (25860 symbols, 43868 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

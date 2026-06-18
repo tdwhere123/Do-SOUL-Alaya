@@ -22,6 +22,40 @@ The premise: a single one-off benchmark number is theatre. A feedback
 loop — same harness, same data, diffed against previous baselines, with
 regression thresholds and an Inspector trend line — is engineering.
 
+## Storage policy & retention (READ FIRST)
+
+Benchmark output has exactly two homes. Putting a run in the wrong one is
+the mess this policy exists to stop (e.g. the retired
+`v0311-lever-ab-2026-06-17/` ad-hoc dir — a limit-100 A/B that never
+belonged in the tracked tree).
+
+- **Tracked — `docs/bench-history/` = confirmed full-dataset baselines ONLY.**
+  A run lands here only if it is release-grade (full split: LongMemEval-S
+  = 500, LoCoMo = 1982) and written through the archive+pointer mechanism
+  (`<root>/<slug>/kpi.json` + `latest-*.json`). Commit **compact diagnostics
+  sidecars only**; full per-question diagnostics live outside this tree
+  (gitignored, see below). Never commit limit-N runs, A/B sweeps, oracle /
+  QA / temporal probes, or hand-named dated dirs here.
+- **Gitignored scratch — everything else.** Two sinks, both ignored:
+  - `.do-it/bench-runs/` — manual experiments, A/B sweeps, probes, drivers,
+    `scripts/` (reusable analysis tools), run logs. This is where
+    experimental work goes.
+  - `.bench-artifacts/` — the harness's auto-emitted full diagnostics
+    (regenerable; `full_diagnostics_artifact_path` points here).
+
+**Retention.**
+
+- Tracked: keep only the archives referenced by the current `latest-run*`
+  / `latest-passing*` / `latest-baseline*` pointers, plus anything ≤ 7 days
+  old. Prune the rest (delete the archive; never leave a pointer dangling —
+  repoint or delete it too).
+- Gitignored scratch: prune to ≤ 7 days. Always keep
+  `.do-it/bench-runs/scripts/` (tools, age-independent), writeups under
+  `.do-it/findings/`, and the most recent full run.
+- The canonical baseline writeup (`baseline-<date>.md`) is **replaced** on
+  each new full baseline, not accumulated — one current baseline doc, not a
+  pile of dated ones.
+
 ## Why this exists
 
 - An external reader can re-run

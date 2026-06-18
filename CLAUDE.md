@@ -171,10 +171,24 @@ pnpm does not auto-expose private root bins to `node_modules/.bin/`, so
 
 Do not treat generated paths as source truth.
 
+## Benchmark Artifacts
+
+Benchmark output has two homes — putting a run in the wrong one is how the
+tree gets cluttered. Full policy + retention in
+`docs/bench-history/README.md` §Storage policy.
+
+- Experiments / A/B sweeps / limit-N / oracle-QA-temporal probes → gitignored
+  `.do-it/bench-runs/` (reusable tools under `scripts/`). Never commit these.
+- Only confirmed **full-dataset** baselines → tracked `docs/bench-history/`,
+  via the archive + `latest-*.json` pointer mechanism, compact sidecars only.
+- Do NOT create hand-named dated dirs in `docs/bench-history/` (e.g. the
+  retired `v0311-lever-ab-2026-06-17/`). Retention: tracked = current pointer
+  targets + ≤7 days; gitignored scratch = ≤7 days, keeping `scripts/`.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Do-SOUL-Alaya** (25168 symbols, 42571 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Do-SOUL-Alaya** (25860 symbols, 43868 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
