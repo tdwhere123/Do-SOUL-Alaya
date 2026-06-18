@@ -37,7 +37,8 @@ export function emptyWorkspaceNeighborResult(): Readonly<EmbeddingWorkspaceNeigh
   return Object.freeze({
     hits: Object.freeze([]) as readonly Readonly<EmbeddingNeighborHit>[],
     embedding_inference_calls: 0,
-    query_embedding_cache_hit: true
+    query_embedding_cache_hit: true,
+    workspace_scan_truncated: false
   });
 }
 

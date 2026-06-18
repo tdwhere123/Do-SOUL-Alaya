@@ -270,9 +270,10 @@ export class RecallService {
       queryText,
       queryProbes,
       hotCoarseFilter,
-      hotFineAssessmentCount: hotCoarseFilter.candidates.length,
+      hotCoarseCandidateCount: hotCoarseFilter.candidates.length,
       winnerMemoryIds,
-      timeFilter: params.timeFilter
+      timeFilter: params.timeFilter,
+      warn: this.warn
     });
     const recallAfterCoarse = performance.now();
     const synthesisCoarseFilter = await collectSynthesisCoarseCandidates({

@@ -16,7 +16,13 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     readonly queryEmbedding: Float32Array;
     readonly listByWorkspace?: (
       workspaceId: string,
-      options?: { readonly tierFilter?: readonly ("hot" | "warm" | "cold")[]; readonly limit?: number }
+      options?: {
+        readonly tierFilter?: readonly ("hot" | "warm" | "cold")[];
+        readonly limit?: number;
+        readonly providerKind?: string;
+        readonly modelId?: string;
+        readonly schemaVersion?: number;
+      }
     ) => Promise<readonly EmbeddingVectorRecord[]>;
   }): EmbeddingRecallService {
     return new EmbeddingRecallService({
@@ -222,6 +228,72 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
         limit: EMBEDDING_WORKSPACE_SCAN_CAP + 1
       })
     );
+  });
+
+  it("pushes the provider schema_version into the workspace scan options", async () => {
+    const listByWorkspace = vi.fn(async () => [
+      createEmbeddingRecord({ object_id: "near", embedding: new Float32Array([0.05, 0.99]) })
+    ]);
+    const service = buildService({
+      queryEmbedding: new Float32Array([0, 1]),
+      workspaceVectors: [],
+      listByWorkspace
+    });
+    await service.collectWorkspaceNeighbors({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "query",
+      excludeObjectIds: [],
+      maxNeighbors: 5
+    });
+    expect(listByWorkspace).toHaveBeenCalledWith(
+      "workspace-1",
+      expect.objectContaining({ schemaVersion: 1 })
+    );
+  });
+
+  it("keeps gold reachable when cross-schema rows would otherwise consume the scan cap", async () => {
+    const gold = createEmbeddingRecord({
+      object_id: "gold",
+      embedding: new Float32Array([0.05, 0.99])
+    });
+    const staleSchemaRows = Array.from({ length: EMBEDDING_WORKSPACE_SCAN_CAP }, (_value, index) =>
+      createEmbeddingRecord({
+        object_id: `stale-${index}`,
+        schema_version: 2,
+        embedding: new Float32Array([0.05, 0.99])
+      })
+    );
+    const listByWorkspace = vi.fn(
+      async (
+        _workspaceId: string,
+        options?: {
+          readonly schemaVersion?: number;
+          readonly limit?: number;
+        }
+      ) => {
+        const matching = [gold, ...staleSchemaRows].filter(
+          (record) =>
+            options?.schemaVersion === undefined ||
+            record.schema_version === options.schemaVersion
+        );
+        const cap = options?.limit;
+        return cap === undefined ? matching : matching.slice(0, cap);
+      }
+    );
+    const service = buildService({
+      queryEmbedding: new Float32Array([0, 1]),
+      workspaceVectors: [],
+      listByWorkspace
+    });
+    const neighbors = await service.collectWorkspaceNeighbors({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "query",
+      excludeObjectIds: [],
+      maxNeighbors: 5
+    });
+    expect(neighbors.map((hit) => hit.object_id)).toEqual(["gold"]);
   });
 
   it("skips the workspace scan entirely when the provider is unavailable", async () => {

@@ -143,6 +143,10 @@ function readCandidates(
       rankAfterLexicalPriority: readNumber(record.rank_after_lexical_priority),
       rankAfterSynthesisReserve: readNumber(record.rank_after_synthesis_reserve),
       rankAfterStructuralReserve: readNumber(record.rank_after_structural_reserve),
+      rankAfterCoverageSelector: readNumber(record.rank_after_coverage_selector),
+      rankAfterSessionCoverage: readNumber(record.rank_after_session_coverage),
+      coverageSelectorAction: readString(record.coverage_selector_action),
+      sessionCoverageAction: readString(record.session_coverage_action),
       reservedBy: readString(record.reserved_by)
     };
     const objectIdentityKey = buildObjectIdentityKey(candidate.objectKind, candidate.objectId);

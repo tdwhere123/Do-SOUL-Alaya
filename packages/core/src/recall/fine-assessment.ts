@@ -152,8 +152,16 @@ export function fineAssess(params: FineAssessParams): Readonly<{
   const rankAfterFusion = buildStageRankMap(rankedCandidates);
   const rankAfterFeatureRerank = buildStageRankMap(featureRerankedCandidates);
   const rankAfterLexicalPriority = buildStageRankMap(prioritizedCandidates);
+  const rankAfterCoverageSelector = buildStageRankMap(coverageSelectedCandidates);
+  const rankAfterSessionCoverage = buildStageRankMap(coverageOrderedCandidates);
   const rankAfterSynthesisReserve = buildStageRankMap(synthesisReservedCandidates);
   const rankAfterStructuralReserve = buildStageRankMap(deliveryOrderedCandidates);
+  // Both stages return the input array by reference when they no-op, so a same
+  // reference proves the stage did not run for this recall.
+  const coverageSelectorAction: "applied" | "noop" =
+    coverageSelectedCandidates === prioritizedCandidates ? "noop" : "applied";
+  const sessionCoverageAction: "applied" | "noop" =
+    coverageOrderedCandidates === coverageSelectedCandidates ? "noop" : "applied";
 
   type FineAssessmentAccumulator = {
     readonly selected: Readonly<RecallCandidate>[];
@@ -243,6 +251,10 @@ export function fineAssess(params: FineAssessParams): Readonly<{
         rank_after_fusion: rankAfterFusion.get(candidateKey),
         rank_after_feature_rerank: rankAfterFeatureRerank.get(candidateKey),
         rank_after_lexical_priority: rankAfterLex,
+        rank_after_coverage_selector: rankAfterCoverageSelector.get(candidateKey),
+        rank_after_session_coverage: rankAfterSessionCoverage.get(candidateKey),
+        coverage_selector_action: coverageSelectorAction,
+        session_coverage_action: sessionCoverageAction,
         rank_after_synthesis_reserve: rankAfterSyn,
         rank_after_structural_reserve: rankAfterStruct,
         reserved_by: reservedBy

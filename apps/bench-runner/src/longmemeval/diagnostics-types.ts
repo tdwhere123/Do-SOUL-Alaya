@@ -221,6 +221,10 @@ export interface CandidateDiagnostic {
   readonly rankAfterLexicalPriority: number | null;
   readonly rankAfterSynthesisReserve: number | null;
   readonly rankAfterStructuralReserve: number | null;
+  readonly rankAfterCoverageSelector: number | null;
+  readonly rankAfterSessionCoverage: number | null;
+  readonly coverageSelectorAction: string | null;
+  readonly sessionCoverageAction: string | null;
   readonly reservedBy: string | null;
 }
 
