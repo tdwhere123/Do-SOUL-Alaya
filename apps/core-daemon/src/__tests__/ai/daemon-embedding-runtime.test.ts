@@ -12,11 +12,16 @@ type RuntimeInput = Parameters<typeof createDaemonEmbeddingRuntime>[0];
 type HealthSvc = RuntimeInput["healthJournalService"];
 type WarnFn = RuntimeInput["warn"];
 
-// invariant: this test guards the daemon's recall-policy decorator wiring
-// (Blocking 1 fix in v0.3.11 Phase 3 WS-D). Three assertions:
-//   - local_onnx mode with a configured provider attaches a decorator
-//   - the decorator pushes fusion_weights.embedding_similarity = 6 (or the
-//     ALAYA_EMBEDDING_FUSION_WEIGHT_ON override)
+// invariant: this test guards the daemon's recall-policy decorator wiring.
+// makeBasePolicy mirrors the production STRATEGY_RECALL_DEFAULTS shape
+// (embedding_enabled:false, no injection_cap/floor) so the decorator's
+// gate-opening + defaulting path is exercised, not masked. Assertions:
+//   - local_onnx mode with a configured provider attaches a decorator that
+//     opens semantic_supplement (enabled + embedding_enabled true) and
+//     defaults injection_cap/floor while pushing
+//     fusion_weights.embedding_similarity = 6 (or the env override)
+//   - an explicit injection_cap/floor on the incoming policy is preserved
+//   - ALAYA_DISABLE_POLICY_EMBEDDING_DECORATOR forces a full passthrough
 //   - embedding-off mode leaves the decorator absent and policies untouched
 // The decorator reads provider.isAvailable lazily so the test exercises the
 // happy "configured" path and the dynamic-degradation pass-through.
@@ -40,9 +45,9 @@ function makeBasePolicy(): RecallPolicy {
         min_activation_score: null
       },
       semantic_supplement: {
-        enabled: true,
+        enabled: false,
         max_supplement: 10,
-        embedding_enabled: true
+        embedding_enabled: false
       }
     },
     fine_assessment: {
@@ -90,6 +95,7 @@ const MANAGED_KEYS = [
   "ALAYA_LOCAL_EMBEDDING_CACHE_DIR",
   "ALAYA_LOCAL_EMBEDDING_MODEL",
   "ALAYA_EMBEDDING_FUSION_WEIGHT_ON",
+  "ALAYA_DISABLE_POLICY_EMBEDDING_DECORATOR",
   "ALAYA_OPENAI_SECRET_REF",
   "OPENAI_API_KEY"
 ] as const;
@@ -139,6 +145,11 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         const fusionWeights =
           decorated.scoring_weight_overrides?.fusion_weights ?? {};
         expect(fusionWeights.embedding_similarity).toBe(6);
+        const semantic = decorated.coarse_filter.semantic_supplement;
+        expect(semantic.embedding_enabled).toBe(true);
+        expect(semantic.enabled).toBe(true);
+        expect(semantic.injection_cap).toBe(10);
+        expect(semantic.injection_similarity_floor).toBe(0.5);
       } finally {
         teardown(fixture);
         restoreEnv();
@@ -146,6 +157,76 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
     },
     15_000
   );
+
+  it("does not clobber an incoming policy that already specifies injection_cap / injection_similarity_floor", async () => {
+    saveEnv();
+    const fixture = buildFixture();
+    try {
+      const configEnv = new Map<string, string>([
+        ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+        ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
+      ]);
+      const { defaultPolicyDecorator } = createDaemonEmbeddingRuntime({
+        database: fixture.database,
+        configEnv,
+        eventLogRepo: fixture.eventLogRepo,
+        healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+        memoryEntryRepo: fixture.memoryEntryRepo,
+        warn: fixture.warn as unknown as WarnFn
+      });
+
+      expect(defaultPolicyDecorator).toBeDefined();
+      const base = makeBasePolicy();
+      const overridden: RecallPolicy = {
+        ...base,
+        coarse_filter: {
+          ...base.coarse_filter,
+          semantic_supplement: {
+            ...base.coarse_filter.semantic_supplement,
+            injection_cap: 3,
+            injection_similarity_floor: 0.8
+          }
+        }
+      };
+      const decorated = defaultPolicyDecorator!(overridden);
+      const semantic = decorated.coarse_filter.semantic_supplement;
+      expect(semantic.embedding_enabled).toBe(true);
+      expect(semantic.enabled).toBe(true);
+      expect(semantic.injection_cap).toBe(3);
+      expect(semantic.injection_similarity_floor).toBe(0.8);
+    } finally {
+      teardown(fixture);
+      restoreEnv();
+    }
+  });
+
+  it("passes the policy through unchanged when ALAYA_DISABLE_POLICY_EMBEDDING_DECORATOR is truthy", async () => {
+    saveEnv();
+    const fixture = buildFixture();
+    try {
+      const configEnv = new Map<string, string>([
+        ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+        ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"],
+        ["ALAYA_DISABLE_POLICY_EMBEDDING_DECORATOR", "1"]
+      ]);
+      const { defaultPolicyDecorator } = createDaemonEmbeddingRuntime({
+        database: fixture.database,
+        configEnv,
+        eventLogRepo: fixture.eventLogRepo,
+        healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+        memoryEntryRepo: fixture.memoryEntryRepo,
+        warn: fixture.warn as unknown as WarnFn
+      });
+
+      expect(defaultPolicyDecorator).toBeDefined();
+      const decorated = defaultPolicyDecorator!(makeBasePolicy());
+      expect(decorated.coarse_filter.semantic_supplement.embedding_enabled).toBe(false);
+      expect(decorated.scoring_weight_overrides?.fusion_weights?.embedding_similarity).toBeUndefined();
+    } finally {
+      teardown(fixture);
+      restoreEnv();
+    }
+  });
 
   it("respects ALAYA_EMBEDDING_FUSION_WEIGHT_ON env override on the injected fusion weight", async () => {
     saveEnv();
@@ -217,37 +298,50 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
     }
   });
 
-  it(
-    "defaults embedding ON for a configured local_onnx provider even without the opt-in flag",
-    async () => {
-      saveEnv();
-      const fixture = buildFixture();
-      try {
-        const configEnv = new Map<string, string>([
-          // No ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: a configured on-device local
-          // ONNX provider is a first-class recall stream, on by default.
-          ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
-        ]);
-        const { defaultPolicyDecorator, providerWarmup } = createDaemonEmbeddingRuntime({
-          database: fixture.database,
-          configEnv,
-          eventLogRepo: fixture.eventLogRepo,
-          healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
-          memoryEntryRepo: fixture.memoryEntryRepo,
-          warn: fixture.warn as unknown as WarnFn
-        });
+  it("defaults embedding ON for a configured local_onnx provider even without the opt-in flag", () => {
+    saveEnv();
+    const fixture = buildFixture();
+    try {
+      // Inject an available provider so the auto-on default-on path runs without
+      // a real on-device ONNX warmup (the opt-in is computed from env: local_onnx
+      // with no flag => on; the override only supplies availability).
+      const provider = {
+        providerKind: "local_onnx",
+        modelId: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+        schemaVersion: 1,
+        get isAvailable() {
+          return true;
+        },
+        embedTexts: vi.fn(async () => [new Float32Array([1])])
+      };
+      const configEnv = new Map<string, string>([
+        // No ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: a configured on-device local
+        // ONNX provider is a first-class recall stream, on by default.
+        ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
+      ]);
+      const { defaultPolicyDecorator } = createDaemonEmbeddingRuntime({
+        database: fixture.database,
+        configEnv,
+        eventLogRepo: fixture.eventLogRepo,
+        healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+        memoryEntryRepo: fixture.memoryEntryRepo,
+        warn: fixture.warn as unknown as WarnFn,
+        embeddingProviderOverride: provider
+      });
 
-        expect(defaultPolicyDecorator).toBeDefined();
-        await expect(providerWarmup).resolves.toBeDefined();
-        const decorated = defaultPolicyDecorator!(makeBasePolicy());
-        expect(decorated.scoring_weight_overrides?.fusion_weights?.embedding_similarity).toBe(6);
-      } finally {
-        teardown(fixture);
-        restoreEnv();
-      }
-    },
-    15_000
-  );
+      expect(defaultPolicyDecorator).toBeDefined();
+      const decorated = defaultPolicyDecorator!(makeBasePolicy());
+      expect(decorated.scoring_weight_overrides?.fusion_weights?.embedding_similarity).toBe(6);
+      const semantic = decorated.coarse_filter.semantic_supplement;
+      expect(semantic.enabled).toBe(true);
+      expect(semantic.embedding_enabled).toBe(true);
+      expect(semantic.injection_cap).toBe(10);
+      expect(semantic.injection_similarity_floor).toBe(0.5);
+    } finally {
+      teardown(fixture);
+      restoreEnv();
+    }
+  });
 
   it("keeps an API embedding provider strict opt-in (decorator absent without the flag)", () => {
     saveEnv();

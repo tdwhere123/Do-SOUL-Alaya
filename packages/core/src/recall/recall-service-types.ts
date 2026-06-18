@@ -435,6 +435,10 @@ export interface RecallCandidateDiagnostic {
   readonly rank_after_lexical_priority?: number;
   readonly rank_after_synthesis_reserve?: number;
   readonly rank_after_structural_reserve?: number;
+  readonly rank_after_coverage_selector?: number;
+  readonly rank_after_session_coverage?: number;
+  readonly coverage_selector_action?: "applied" | "noop";
+  readonly session_coverage_action?: "applied" | "noop";
   readonly reserved_by?: "none" | "synthesis" | "structural";
 }
 

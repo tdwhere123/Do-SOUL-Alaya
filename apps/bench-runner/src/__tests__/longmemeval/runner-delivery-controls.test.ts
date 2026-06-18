@@ -3,7 +3,8 @@ import { recallOptionsForPolicyShape } from "../../longmemeval/runner-helpers.js
 import {
   dedupeQaDeliveredCandidates,
   resolveQaDeliveryBudget,
-  shouldDedupQaDelivery
+  shouldDedupQaDelivery,
+  WIDE_QA_DELIVERY_QUESTION_TYPES
 } from "../../longmemeval/runner-question.js";
 
 afterEach(() => {
@@ -58,6 +59,22 @@ describe("resolveQaDeliveryBudget", () => {
     vi.stubEnv("ALAYA_BENCH_QA_DELIVER_K", "17");
     expect(resolveQaDeliveryBudget("temporal-reasoning")).toEqual({
       deliverK: 17,
+      useWideDelivery: true
+    });
+  });
+
+  it("includes locomo-aggregation in the wide-delivery set", () => {
+    expect(WIDE_QA_DELIVERY_QUESTION_TYPES.has("locomo-aggregation")).toBe(true);
+  });
+
+  it("widens locomo-aggregation only when ALAYA_BENCH_QA_WIDE_AGG is set", () => {
+    expect(resolveQaDeliveryBudget("locomo-aggregation")).toEqual({
+      deliverK: 10,
+      useWideDelivery: false
+    });
+    vi.stubEnv("ALAYA_BENCH_QA_WIDE_AGG", "1");
+    expect(resolveQaDeliveryBudget("locomo-aggregation")).toEqual({
+      deliverK: 20,
       useWideDelivery: true
     });
   });

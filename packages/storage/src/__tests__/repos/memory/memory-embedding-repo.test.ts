@@ -206,6 +206,43 @@ describe("Memory embedding storage repo", () => {
     ]);
   });
 
+  it("pushes the schema_version filter into listByWorkspace so cross-schema rows are dropped at the SQL layer", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "11111111-1111-4111-8111-111111111111",
+        workspace_id: workspaceId,
+        schema_version: 1,
+        embedding: new Float32Array([1, 0, 0])
+      })
+    );
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "22222222-2222-4222-8222-222222222222",
+        workspace_id: workspaceId,
+        schema_version: 2,
+        embedding: new Float32Array([0, 1, 0])
+      })
+    );
+
+    const schemaOneRows = await repo.listByWorkspace(workspaceId, { schemaVersion: 1 });
+    expect(schemaOneRows.map((row) => row.object_id)).toEqual([
+      "11111111-1111-4111-8111-111111111111"
+    ]);
+
+    const schemaTwoRows = await repo.listByWorkspace(workspaceId, { schemaVersion: 2 });
+    expect(schemaTwoRows.map((row) => row.object_id)).toEqual([
+      "22222222-2222-4222-8222-222222222222"
+    ]);
+
+    const unfiltered = await repo.listByWorkspace(workspaceId);
+    expect(unfiltered.map((row) => row.object_id).sort()).toEqual([
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222"
+    ]);
+  });
+
   it("skips guarded upserts when the current memory content no longer matches the candidate hash", async () => {
     const { repo, memoryRepo, workspaceId } = await createRepoContext();
     const objectId = "11111111-1111-4111-8111-111111111111";
@@ -336,6 +373,7 @@ async function createRepoContext(): Promise<{
         readonly limit?: number;
         readonly providerKind?: string;
         readonly modelId?: string;
+        readonly schemaVersion?: number;
       }
     ): Promise<readonly Readonly<MemoryEmbeddingRecord>[]>;
     listByObjectIds(

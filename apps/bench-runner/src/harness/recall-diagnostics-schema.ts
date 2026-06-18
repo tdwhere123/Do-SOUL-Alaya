@@ -87,6 +87,10 @@ const RecallCandidateDiagnosticSchema = z
     rank_after_lexical_priority: z.number().int().positive().optional(),
     rank_after_synthesis_reserve: z.number().int().positive().optional(),
     rank_after_structural_reserve: z.number().int().positive().optional(),
+    rank_after_coverage_selector: z.number().int().positive().optional(),
+    rank_after_session_coverage: z.number().int().positive().optional(),
+    coverage_selector_action: z.enum(["applied", "noop"]).optional(),
+    session_coverage_action: z.enum(["applied", "noop"]).optional(),
     reserved_by: z.enum(["none", "synthesis", "structural"]).optional()
   })
   .strict()

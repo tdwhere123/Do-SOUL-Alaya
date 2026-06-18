@@ -595,6 +595,7 @@ export class EmbeddingRecallService {
     }
 
     let storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
+    let workspaceScanTruncated = false;
     try {
       // invariant: the tier whitelist (default HOT+WARM, env-configurable) bounds
       // which vectors the coarse-injection scan considers. Cap the scan so a
@@ -614,9 +615,11 @@ export class EmbeddingRecallService {
           tierFilter: resolveEmbeddingRecallTiers(),
           limit: scanCap + 1,
           providerKind: this.dependencies.provider.providerKind,
-          modelId: this.dependencies.provider.modelId
+          modelId: this.dependencies.provider.modelId,
+          schemaVersion: this.dependencies.provider.schemaVersion
         }
       );
+      workspaceScanTruncated = scanned.length > scanCap;
       if (scanned.length > scanCap) {
         this.warn("embedding workspace scan truncated by cap", {
           workspace_id: params.workspaceId,
@@ -672,7 +675,8 @@ export class EmbeddingRecallService {
       return Object.freeze({
         hits: Object.freeze([]) as readonly Readonly<EmbeddingNeighborHit>[],
         embedding_inference_calls: 0,
-        query_embedding_cache_hit: queryEmbeddingCacheHit
+        query_embedding_cache_hit: queryEmbeddingCacheHit,
+        workspace_scan_truncated: workspaceScanTruncated
       });
     }
 
@@ -694,7 +698,8 @@ export class EmbeddingRecallService {
         return [
           Object.freeze({
             object_id: record.object_id,
-            normalized_similarity: normalizedSimilarity
+            normalized_similarity: normalizedSimilarity,
+            content_hash: record.content_hash
           })
         ];
       })
@@ -707,7 +712,8 @@ export class EmbeddingRecallService {
     return Object.freeze({
       hits: Object.freeze(hits),
       embedding_inference_calls: embeddingInferenceCalls,
-      query_embedding_cache_hit: queryEmbeddingCacheHit
+      query_embedding_cache_hit: queryEmbeddingCacheHit,
+      workspace_scan_truncated: workspaceScanTruncated
     });
   }
 

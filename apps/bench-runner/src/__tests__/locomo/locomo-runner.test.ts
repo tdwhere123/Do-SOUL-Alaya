@@ -33,6 +33,7 @@ function benchRefToDiaId(evidenceRef: string): string {
 let tmpDir: string;
 
 beforeEach(async () => {
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "test-extraction-model");
   tmpDir = await mkdtemp(join(tmpdir(), "locomo-runner-test-"));
   loadLocomoMock.mockResolvedValue([
     {

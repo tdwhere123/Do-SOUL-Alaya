@@ -103,6 +103,10 @@ export const LongMemEvalGoldDiagnosticSchema = z
     rank_after_lexical_priority: z.number().nullable().default(null),
     rank_after_synthesis_reserve: z.number().nullable().default(null),
     rank_after_structural_reserve: z.number().nullable().default(null),
+    rank_after_coverage_selector: z.number().nullable().default(null),
+    rank_after_session_coverage: z.number().nullable().default(null),
+    coverage_selector_action: z.string().nullable().default(null),
+    session_coverage_action: z.string().nullable().default(null),
     reserved_by: z.string().nullable().default(null)
   })
   .readonly();
