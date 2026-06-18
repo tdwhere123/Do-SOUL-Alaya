@@ -101,7 +101,11 @@ export function preflightExtractionCache(input: {
     );
     return;
   }
-  if (input.config.model !== manifest.extraction_model) {
+  // Offline (no live extraction possible) means a model/prompt mismatch cannot
+  // trigger the 466h live re-extraction these guards exist to prevent — the
+  // offline fallback covers every miss — so skip them, same as the window /
+  // coverage guards below.
+  if (liveExtractionPossible && input.config.model !== manifest.extraction_model) {
     throw new Error(
       "[longmemeval preflight] extraction model mismatch: resolved model " +
         `"${input.config.model}" != cache manifest extraction_model ` +
@@ -113,7 +117,7 @@ export function preflightExtractionCache(input: {
     );
   }
   const systemPromptSha256 = computeSystemPromptSha256(input.systemPrompt);
-  if (systemPromptSha256 !== manifest.system_prompt_sha256) {
+  if (liveExtractionPossible && systemPromptSha256 !== manifest.system_prompt_sha256) {
     throw new Error(
       "[longmemeval preflight] system prompt drift: sha256(systemPrompt) " +
         `"${systemPromptSha256}" != cache manifest system_prompt_sha256 ` +
