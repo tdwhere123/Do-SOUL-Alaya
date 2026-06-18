@@ -58,6 +58,21 @@ export function buildFtsMatchExpression(tokens: readonly string[]): string {
 }
 
 /**
+ * Scope a token set to one workspace inside the MATCH itself:
+ * `workspace_id:"<ws>" AND (<"t1" OR "t2" ...>)`. With workspace_id an INDEXED
+ * FTS column (migration 092) the term search runs over one workspace's rows
+ * instead of the whole index followed by a workspace_id post-filter — O(global
+ * content) -> O(workspace). The redundant `workspace_id = ?` WHERE clause at
+ * each call site stays as a safety net.
+ */
+export function buildWorkspaceScopedFtsMatch(
+  workspaceId: string,
+  tokens: readonly string[]
+): string {
+  return `workspace_id:"${workspaceId.replace(/"/g, '""')}" AND (${buildFtsMatchExpression(tokens)})`;
+}
+
+/**
  * Run one FTS lane statement and score its rows by ordinal rank.
  *
  * Rows arrive ordered by raw bm25 (best first). Score by ordinal rank, not
@@ -75,7 +90,7 @@ export function queryFtsLane(
   laneTokens: readonly string[],
   limit: number
 ): readonly FtsLaneHit[] {
-  const matchExpression = buildFtsMatchExpression(laneTokens);
+  const matchExpression = buildWorkspaceScopedFtsMatch(workspaceId, laneTokens);
   const rows = statement.all(workspaceId, matchExpression, limit) as ReadonlyArray<{
     readonly object_id: string;
     readonly raw_rank: number;

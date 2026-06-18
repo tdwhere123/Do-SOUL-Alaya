@@ -1,5 +1,6 @@
 import { StorageError } from "../../shared/errors.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { buildWorkspaceScopedFtsMatch } from "../shared/fts-lane-routing.js";
 import {
   buildObjectIdFilterSql,
   countQueryCodepoints,
@@ -225,7 +226,7 @@ function searchTrigramKeywordRowsWithinObjectIds(
     LIMIT ?
   `).all(
     workspaceId,
-    tokens.map((token) => `"${token}"`).join(" OR "),
+    buildWorkspaceScopedFtsMatch(workspaceId, tokens),
     ...objectIdFilter.params,
     limit
   ) as readonly FtsKeywordSearchRow[];
@@ -254,7 +255,7 @@ function searchTrigramKeywordRows(
 
   return this.searchByKeywordStatement.all(
     workspaceId,
-    tokens.map((token) => `"${token}"`).join(" OR "),
+    buildWorkspaceScopedFtsMatch(workspaceId, tokens),
     limit
   ) as readonly FtsKeywordSearchRow[];
 }
@@ -287,7 +288,7 @@ function searchPorterKeywordRowsWithinObjectIds(
     LIMIT ?
   `).all(
     workspaceId,
-    tokens.map((token) => `"${token}"`).join(" OR "),
+    buildWorkspaceScopedFtsMatch(workspaceId, tokens),
     ...objectIdFilter.params,
     limit
   ) as readonly FtsKeywordSearchRow[];
@@ -316,7 +317,7 @@ function searchPorterKeywordRows(
 
   return this.searchByKeywordPorterStatement.all(
     workspaceId,
-    tokens.map((token) => `"${token}"`).join(" OR "),
+    buildWorkspaceScopedFtsMatch(workspaceId, tokens),
     limit
   ) as readonly FtsKeywordSearchRow[];
 }
