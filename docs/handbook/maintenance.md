@@ -19,10 +19,9 @@ When implementation changes:
   repos, migrations, or service ownership changed.
 - Update `docs/handbook/runtime-status.md` if wiring, phase readiness,
   or known runtime gaps changed.
-- Update `docs/handbook/backlog.md` only for unresolved issues. Keep it
-  as a short cross-phase issue index with owner docs and close
-  conditions; task-level acceptance detail belongs in the owning phase
-  README or task card.
+- Update `docs/handbook/backlog.md` only for unresolved issues. When
+  closing an issue, move its entry to
+  `docs/archive/backlog-resolved-historical.md`.
 - Update the relevant `docs/archive/v0.1-port-record/` task card or report if the change
   belongs to a v0.1 delivery card.
 

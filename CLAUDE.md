@@ -18,34 +18,16 @@ plain CLI commands. (Use "memory plane" in public-facing copy per
 invariants §21a; "memory core" was the pre-v0.1-closeout phrasing and
 is retired.)
 
-Important invariants (full set in `docs/handbook/invariants.md`):
+Key invariants (full set: `docs/handbook/invariants.md`):
 
-- Memory ontology is durable truth; projections, surfaces, and views are
-  not truth.
-- Durable memories require source and evidence.
-- Governance, configuration, import/export, backup, and session trust
-  changes are auditable.
-- Embedding is a recall supplement; it never decides durable truth.
-- LLMs and connected agents propose candidates; Alaya decides durable
-  truth.
-- Alaya has **no agent-frontend GUI and no conversation TUI**. Agent
-  surfaces are MCP (for agent attach) and the `alaya` CLI (13 verbs:
-  `doctor / install / attach / detach / status / inspect / update /
-  tools list / tools call --json / backup / export / import / mcp stdio /
-  review pending|accept|reject|edges`). The `review` verb is one CLI
-  verb with subcommands; v0.3.11 extends it with `review edges
-  pending|accept|reject` for edge-proposal governance — this is a
-  subcommand surface extension, not a new top-level verb, so the verb
-  count remains 13. The live MCP tool catalog is 16 (13 `soul.*` + 3
-  `garden.*`); v0.3.11 added three edge-proposal `soul.*` tools
-  (`soul.propose_edge`, `soul.list_pending_edge_proposals`,
-  `soul.batch_review_edge_proposals`) inside that catalog. The Memory
-  Inspector is an additional memory-tooling loopback surface, not an
-  agent surface, and never participates in agent control flow.
-- Public-facing copy must describe Alaya as a memory plane for CLI
-  agents (Codex / Claude Code / similar) and must not invite
-  non-engineering users to install or operate Alaya. See
-  invariants §21a.
+- Memory ontology is durable truth; projections and surfaces are not truth.
+- Embedding is recall supplement only; it never decides durable truth.
+- LLMs and agents propose; Alaya decides durable truth through governance.
+- **No agent-frontend GUI, no conversation TUI.** Agent surfaces: MCP (attach)
+  and the `alaya` CLI (13 verbs). Memory Inspector is a memory-tooling
+  loopback surface, not an agent surface.
+- Public-facing copy describes Alaya as a memory plane for CLI agents only
+  (invariant §21a).
 
 ## Project Genealogy
 
@@ -54,10 +36,7 @@ project `do-what-new`, frozen at upstream commit
 `6ed846341f66ff98bfcddbb940db74cfc10133ca` (snapshotted 2026-04-28).
 The port wave closed with v0.1.0 and the working snapshot directory
 has been removed. For port-time archaeology see
-`docs/archive/port-protocol-historical.md` and the historical task
-cards under `docs/archive/v0.1-port-record/phase-*-briefs/` (their `vendor/...` paths
-point to the removed snapshot — use `git log` against the v0.1.0 tag
-for source verification when needed).
+`docs/archive/port-protocol-historical.md`.
 
 Work on `main` after v0.1.0 is normal forward development; the
 port-mode framework (`trivial-copy` / `adapt-and-port` /
@@ -116,6 +95,24 @@ See `docs/handbook/workflow/review-protocol.md` for severity (Blocking
   "as discussed"). Prefer smaller, well-named functions over a long
   comment explaining long code — if a block needs a paragraph to explain,
   split or rename it instead.
+- **Single Responsibility (SRP).** Every module, class, and function must
+  have exactly one reason to change. Concrete thresholds:
+  - Source files: keep under 500 lines. Files over 800 lines are a
+    High-severity finding — split them before adding more logic.
+    Current hotspots: `packages/core/src/recall/recall-service.ts`
+    (1079L), `packages/core/src/memory/memory-service/service.ts`
+    (1040L), `apps/core-daemon/src/index.ts` (1013L), and all
+    audit-flagged files in `docs/handbook/backlog.md`.
+  - Functions: keep under 50 lines. Functions over 100 lines are a
+    High-severity finding — extract phases before extending.
+    Current hotspots: `processKarmaEvent` (210L), `dispatch` in
+    serial-delegation-service (230L), `materializeAcceptedSignal`
+    (145L), `runCycle` (146L).
+  - **Split rule:** a function that mixes DB queries, computation,
+    I/O, event-log appends, and side-effect triggers is an automatic
+    SRP violation — extract compute / apply / audit phases.
+  - **Before extending a large unit, split it first.** New logic
+    lands in a new, focused unit; the original unit shrinks.
 
 ## Architecture (one line)
 
@@ -139,10 +136,8 @@ rtk pnpm exec vitest run --project @do-soul/alaya-<package>
 rtk pnpm --dir apps/core-daemon dev   # daemon dev
 ```
 
-`rtk pnpm alaya` is a root npm script (`scripts.alaya = "node ./bin/alaya.mjs"`).
-pnpm does not auto-expose private root bins to `node_modules/.bin/`, so
-`pnpm exec alaya` will not work in-repo. Use `pnpm link --global` to add
-`alaya` to PATH outside the monorepo.
+`rtk pnpm alaya` wraps the root npm script. pnpm does not auto-expose private
+root bins; use `pnpm link --global` to add `alaya` to PATH outside the monorepo.
 
 ## Pointers
 
@@ -159,9 +154,7 @@ pnpm does not auto-expose private root bins to `node_modules/.bin/`, so
 - `docs/handbook/workflow/subagent-dispatch.md` — dispatch policy,
   failure modes
 - `docs/handbook/backlog.md` — unresolved issues
-- `docs/archive/v0.1-port-record/INDEX.md` — historical v0.1 task-card index (port era)
-- `docs/archive/port-protocol-historical.md` — retired Port-First
-  discipline (kept for archaeology)
+- `docs/archive/port-protocol-historical.md` — retired Port-First discipline (archaeology)
 
 ## Generated Paths
 

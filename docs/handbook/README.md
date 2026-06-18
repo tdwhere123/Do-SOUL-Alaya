@@ -39,8 +39,8 @@ Reading Matrix`. Do not treat this page as a second workflow table.
   wiring gaps.
 - `governance-routes.md` defines the four governance route families and
   maps the five compatible runtime surfaces onto them.
-- `backlog.md` tracks unresolved cross-area issues. Each issue carries
-  an explicit close condition.
+- `backlog.md` tracks unresolved cross-area issues. Resolved issues are
+  archived to `docs/archive/backlog-resolved-historical.md`.
 - `glossary.md` defines the Alaya / SOUL vocabulary.
 - `task-card-template.md` is the post-v0.1.0 lightweight task-card
   template for non-trivial work.
