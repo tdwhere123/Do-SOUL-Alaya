@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { BenchRecallDiagnosticsSchema } from "../../harness/recall-diagnostics-schema.js";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../longmemeval/diagnostics-schema.js";
+import {
+  LongMemEvalGoldDiagnosticSchema,
+  LongMemEvalQuestionDiagnosticSchema
+} from "../../longmemeval/diagnostics-schema.js";
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
@@ -38,6 +41,12 @@ describe("LongMemEval recall diagnostics", () => {
       delivered_count: 0,
       embedding_provider_status: "provider_not_requested",
       provider_degradation_reason: null,
+      embedding_workspace_scan_cap: 10000,
+      embedding_workspace_scanned_count: 10001,
+      embedding_workspace_truncated: true,
+      embedding_workspace_provider_kind: "openai",
+      embedding_workspace_model_id: "text-embedding-3-small",
+      embedding_workspace_schema_version: 1,
       graph_expansion_plane_count_per_hop: [1, 2],
       graph_expansion_plane_count_per_edge_type: {
         derives_from: 1,
@@ -69,6 +78,59 @@ describe("LongMemEval recall diagnostics", () => {
       coarse_filter: 1.25,
       fusion: 2.5
     });
+    expect(parsed.embedding_workspace_truncated).toBe(true);
+    expect(parsed.embedding_workspace_scanned_count).toBe(10001);
+  });
+
+  it("round-trips per-candidate coverage/session actions through gold diagnostics", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-coverage-action",
+      goldMemoryIds: ["gold-a"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidates: [
+            {
+              object_id: "gold-a",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:gold-a",
+              pre_budget_rank: 7,
+              selection_order: 7,
+              fused_rank: 7,
+              fused_score: 0.4,
+              final_rank: null,
+              dropped_reason: "max_entries",
+              coverage_selector_action: "promoted",
+              session_coverage_action: "displaced",
+              session_key: "session-a",
+              source_cohort_key: "source-a"
+            }
+          ]
+        }
+      }
+    });
+
+    expect(row.gold[0]).toMatchObject({
+      coverage_selector_action: "promoted",
+      session_coverage_action: "displaced",
+      session_key: "session-a",
+      source_cohort_key: "source-a"
+    });
+    const parsed = LongMemEvalQuestionDiagnosticSchema.parse(row);
+    expect(parsed.gold[0]?.coverage_selector_action).toBe("promoted");
+    expect(() =>
+      LongMemEvalGoldDiagnosticSchema.parse({
+        ...parsed.gold[0],
+        coverage_selector_action: "applied"
+      })
+    ).toThrow();
   });
 
   it("persists phase latency into per-question diagnostics", () => {

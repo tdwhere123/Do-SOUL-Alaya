@@ -223,10 +223,14 @@ export interface CandidateDiagnostic {
   readonly rankAfterStructuralReserve: number | null;
   readonly rankAfterCoverageSelector: number | null;
   readonly rankAfterSessionCoverage: number | null;
-  readonly coverageSelectorAction: string | null;
-  readonly sessionCoverageAction: string | null;
+  readonly coverageSelectorAction: DeliveryStageAction | null;
+  readonly sessionCoverageAction: DeliveryStageAction | null;
+  readonly sessionKey: string | null;
+  readonly sourceCohortKey: string | null;
   readonly reservedBy: string | null;
 }
+
+export type DeliveryStageAction = "noop" | "kept" | "promoted" | "displaced";
 
 export interface ReadCandidateDiagnosticsResult {
   readonly byObjectId: ReadonlyMap<string, CandidateDiagnostic>;

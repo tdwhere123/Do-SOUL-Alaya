@@ -81,6 +81,7 @@ import { type LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import { EXTRACTION_CACHE_ROOT } from "./compile-seed.js";
 import {
   aggregateQaVerdicts,
+  buildQaDeliverySettings,
   type QaQuestionVerdict
 } from "./qa-harness.js";
 import { QaChatError, type QaChatFn } from "./qa-chat.js";
@@ -540,6 +541,7 @@ export async function runLongMemEval(
     opts.qa !== undefined && qaVerdicts.length > 0
       ? {
           ...aggregateQaVerdicts(qaVerdicts),
+          delivery_settings: buildQaDeliverySettings(),
           answer_model: opts.qa.answerModel,
           judge_model: opts.qa.judgeModel
         }

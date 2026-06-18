@@ -1,5 +1,6 @@
 import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
 import type {
+  EmbeddingWorkspaceNeighborResult,
   EmbeddingRecallSupplementResult,
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingSupplement
@@ -15,6 +16,8 @@ import {
 } from "./recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
+  RecallEmbeddingProviderStatus,
+  RecallEmbeddingWorkspaceScanDiagnostics,
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "./recall-service-types.js";
@@ -68,11 +71,17 @@ export async function collectEmbeddingCoarseInjection(params: {
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly similarityScores: Readonly<Record<string, number>>;
   readonly embeddingInferenceCalls: number;
+  readonly embeddingProviderStatus: RecallEmbeddingProviderStatus | null;
+  readonly providerDegradationReason: string | null;
+  readonly workspaceScan: Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null;
 }>> {
   const empty = Object.freeze({
     candidates: Object.freeze([]) as readonly Readonly<CoarseRecallCandidate>[],
     similarityScores: Object.freeze({}),
-    embeddingInferenceCalls: 0
+    embeddingInferenceCalls: 0,
+    embeddingProviderStatus: null,
+    providerDegradationReason: null,
+    workspaceScan: null
   });
   const embeddingRecallService = params.dependencies.embeddingRecallService;
   const maxSupplement = params.policy.coarse_filter.semantic_supplement.max_supplement;
@@ -93,6 +102,9 @@ export async function collectEmbeddingCoarseInjection(params: {
   const injectionCap =
     params.policy.coarse_filter.semantic_supplement.injection_cap ??
     EMBEDDING_MAX_INJECTED_DELIVERY;
+  if (injectionCap <= 0) {
+    return empty;
+  }
   const fetchNeighbors = Math.max(maxSupplement, injectionCap);
   const poolObjectIds = params.poolCandidates.map((candidate) => candidate.entry.object_id);
   const neighborResult =
@@ -113,13 +125,21 @@ export async function collectEmbeddingCoarseInjection(params: {
             maxNeighbors: fetchNeighbors
           }),
           embedding_inference_calls: 0,
-          query_embedding_cache_hit: true
+          query_embedding_cache_hit: true,
+          query_embedding_status: "provider_not_requested" as const,
+          query_embedding_degradation_reason: null
         };
+  const workspaceScan = readWorkspaceScanDiagnostics(neighborResult);
+  const embeddingProviderStatus = neighborResult.query_embedding_status ?? null;
+  const providerDegradationReason = neighborResult.query_embedding_degradation_reason ?? null;
   const neighbors = neighborResult.hits;
   if (neighbors.length === 0) {
     return Object.freeze({
       ...empty,
-      embeddingInferenceCalls: neighborResult.embedding_inference_calls
+      embeddingInferenceCalls: neighborResult.embedding_inference_calls,
+      embeddingProviderStatus,
+      providerDegradationReason,
+      workspaceScan
     });
   }
 
@@ -142,7 +162,10 @@ export async function collectEmbeddingCoarseInjection(params: {
     });
     return Object.freeze({
       ...empty,
-      embeddingInferenceCalls: neighborResult.embedding_inference_calls
+      embeddingInferenceCalls: neighborResult.embedding_inference_calls,
+      embeddingProviderStatus,
+      providerDegradationReason,
+      workspaceScan
     });
   }
 
@@ -197,7 +220,10 @@ export async function collectEmbeddingCoarseInjection(params: {
   if (candidates.length === 0) {
     return Object.freeze({
       ...empty,
-      embeddingInferenceCalls: neighborResult.embedding_inference_calls
+      embeddingInferenceCalls: neighborResult.embedding_inference_calls,
+      embeddingProviderStatus,
+      providerDegradationReason,
+      workspaceScan
     });
   }
 
@@ -210,7 +236,39 @@ export async function collectEmbeddingCoarseInjection(params: {
   return Object.freeze({
     candidates: Object.freeze([...candidates]),
     similarityScores: Object.freeze(similarityScores),
-    embeddingInferenceCalls: neighborResult.embedding_inference_calls
+    embeddingInferenceCalls: neighborResult.embedding_inference_calls,
+    embeddingProviderStatus,
+    providerDegradationReason,
+    workspaceScan
+  });
+}
+
+function readWorkspaceScanDiagnostics(
+  result: Readonly<EmbeddingWorkspaceNeighborResult>
+): Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null {
+  if (
+    result.workspace_scan_truncated === undefined &&
+    result.workspace_scan_cap === undefined &&
+    result.workspace_scanned_count === undefined &&
+    result.provider_kind === undefined &&
+    result.model_id === undefined &&
+    result.schema_version === undefined
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    ...(result.workspace_scan_truncated === undefined
+      ? {}
+      : { workspace_scan_truncated: result.workspace_scan_truncated }),
+    ...(result.workspace_scan_cap === undefined
+      ? {}
+      : { workspace_scan_cap: result.workspace_scan_cap }),
+    ...(result.workspace_scanned_count === undefined
+      ? {}
+      : { workspace_scanned_count: result.workspace_scanned_count }),
+    ...(result.provider_kind === undefined ? {} : { provider_kind: result.provider_kind }),
+    ...(result.model_id === undefined ? {} : { model_id: result.model_id }),
+    ...(result.schema_version === undefined ? {} : { schema_version: result.schema_version })
   });
 }
 

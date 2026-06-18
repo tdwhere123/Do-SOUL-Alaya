@@ -378,7 +378,11 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
         return Object.freeze(rows.map((row) => parseMemoryEmbeddingRow(row)));
       }
 
-      const clauses: string[] = ["e.workspace_id = ?"];
+      const clauses: string[] = [
+        "e.workspace_id = ?",
+        "m.lifecycle_state = 'active'",
+        "COALESCE(m.retention_state, '') != 'tombstoned'"
+      ];
       const args: (string | number)[] = [parsedWorkspaceId];
       if (tierFilter !== undefined && tierFilter.length > 0) {
         const placeholders = tierFilter.map(() => "?").join(", ");

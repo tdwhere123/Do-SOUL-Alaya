@@ -149,10 +149,42 @@ export function buildQaDeliveredCandidates(input: {
   readonly results: readonly QaSourceRecallPointer[];
   readonly goldMemoryIds: readonly string[];
   readonly lookupMemoryEntry: (objectId: string) => QaSidecarContent | undefined;
+  readonly lookupCandidate?: (
+    objectKind: "memory_entry" | "synthesis_capsule",
+    objectId: string
+  ) => QaSidecarContent | undefined;
 }): {
+  readonly deliveryCandidates: QaSourceCandidate[];
   readonly memoryEntryCandidates: QaSourceCandidate[];
   readonly goldOnly: QaSourceCandidate[];
 } {
+  const lookupCandidate = (
+    objectKind: "memory_entry" | "synthesis_capsule",
+    objectId: string
+  ): QaSidecarContent | undefined =>
+    input.lookupCandidate?.(objectKind, objectId) ??
+    (objectKind === "memory_entry" ? input.lookupMemoryEntry(objectId) : undefined);
+  const deliveryCandidates = input.results
+    .map((result, index) => ({ result, originalRank: index + 1 }))
+    .filter(
+      ({ result }) =>
+        (result.object_kind ?? "memory_entry") === "memory_entry" ||
+        result.object_kind === "synthesis_capsule"
+    )
+    .map(({ result, originalRank }) => {
+      const objectKind = (result.object_kind ?? "memory_entry") as
+        | "memory_entry"
+        | "synthesis_capsule";
+      const entry = lookupCandidate(objectKind, result.object_id);
+      return {
+        objectId: result.object_id,
+        objectKind,
+        content: entry?.content ?? "",
+        sessionId: entry?.sessionId ?? null,
+        sourceRank: originalRank,
+        ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+      };
+    });
   const memoryEntryCandidates = input.results
     .map((result, index) => ({ result, originalRank: index + 1 }))
     .filter(
@@ -170,6 +202,9 @@ export function buildQaDeliveredCandidates(input: {
     });
   const originalRankById = new Map<string, number>();
   input.results.forEach((pointer, index) => {
+    if ((pointer.object_kind ?? "memory_entry") !== "memory_entry") {
+      return;
+    }
     // keep the best (earliest) rank if an object_id recurs in results
     if (!originalRankById.has(pointer.object_id)) {
       originalRankById.set(pointer.object_id, index + 1);
@@ -187,7 +222,7 @@ export function buildQaDeliveredCandidates(input: {
       ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
     };
   });
-  return { memoryEntryCandidates, goldOnly };
+  return { deliveryCandidates, memoryEntryCandidates, goldOnly };
 }
 
 /** Round-robin across the source sessions of the recalled pool so one
@@ -220,6 +255,20 @@ function selectSessionSpread<T extends { readonly sessionId: string | null }>(
     if (!progressed) break;
   }
   return picked;
+}
+
+function buildQaSupportCandidatesFromSidecar(
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>
+): QaSourceCandidate[] {
+  return [...sidecar.values()]
+    .filter((entry) => entry.objectKind === "memory_entry")
+    .map((entry) => ({
+      objectId: entry.objectId,
+      objectKind: "memory_entry" as const,
+      content: entry.content ?? "",
+      sessionId: entry.sessionId,
+      ...(entry.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+    }));
 }
 
 function isBenchProfileEnabled(): boolean {
@@ -394,7 +443,8 @@ export async function runLongMemEvalQuestion(input: {
               objectId: synthesisResult.synthesisId,
               objectKind: "synthesis_capsule",
               sessionId,
-              hasAnswer: sessionHasAnswer
+              hasAnswer: sessionHasAnswer,
+              content: synthesisInput.summary
             }
           );
         }
@@ -572,18 +622,21 @@ export async function runLongMemEvalQuestion(input: {
       // candidates, so they stay narrow. ALAYA_BENCH_QA_WIDE_AGG turns on the
       // type-aware budget; ALAYA_BENCH_QA_DELIVER_K is a global A/B override.
       const { deliverK } = resolveQaDeliveryBudget(input.question.question_type);
-      const { memoryEntryCandidates, goldOnly } = buildQaDeliveredCandidates({
+      const { deliveryCandidates, memoryEntryCandidates, goldOnly } = buildQaDeliveredCandidates({
         results,
         goldMemoryIds,
         lookupMemoryEntry: (objectId) =>
-          sidecar.get(buildLongMemEvalSidecarKey("memory_entry", objectId))
+          sidecar.get(buildLongMemEvalSidecarKey("memory_entry", objectId)),
+        lookupCandidate: (objectKind, objectId) =>
+          sidecar.get(buildLongMemEvalSidecarKey(objectKind, objectId))
       });
+      const supportCandidates = buildQaSupportCandidatesFromSidecar(sidecar);
       const goldOnlyRequested =
         process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined;
       const deliveryPool =
         process.env.ALAYA_BENCH_QA_SESSION_SPREAD !== undefined
-          ? selectSessionSpread(memoryEntryCandidates)
-          : memoryEntryCandidates;
+          ? selectSessionSpread(deliveryCandidates)
+          : deliveryCandidates;
       let delivered: QaDeliveredCandidate[] = goldOnlyRequested
         ? goldOnly
         : shouldDedupQaDelivery()
@@ -601,8 +654,8 @@ export async function runLongMemEvalQuestion(input: {
         const filterK = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_K", 30);
         const filterM = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_M", 8);
         const widePool: QaDeliveredCandidate[] = shouldDedupQaDelivery()
-          ? dedupeQaDeliveredCandidates(memoryEntryCandidates, filterK)
-          : memoryEntryCandidates
+          ? dedupeQaDeliveredCandidates(deliveryCandidates, filterK)
+          : deliveryCandidates
               .filter((cand) => normalizeQaDeliveryContent(cand.content).length > 0)
               .slice(0, filterK);
         const selected = await selectRelevantMemories(
@@ -624,7 +677,8 @@ export async function runLongMemEvalQuestion(input: {
         delivered = buildQaSupportPack({
           questionType: input.question.question_type,
           selected: delivered,
-          widePool: memoryEntryCandidates,
+          widePool: deliveryCandidates,
+          supportPool: supportCandidates,
           maxDeliver: readPositiveIntEnv("ALAYA_BENCH_QA_SUPPORT_PACK_MAX", 16)
         });
       }

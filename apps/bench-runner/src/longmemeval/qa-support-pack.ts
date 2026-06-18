@@ -25,14 +25,18 @@ export function buildQaSupportPack(params: {
   readonly questionType: string;
   readonly selected: readonly QaDeliveredCandidate[];
   readonly widePool: readonly QaDeliveredCandidate[];
+  readonly supportPool?: readonly QaDeliveredCandidate[];
   readonly maxDeliver: number;
 }): QaDeliveredCandidate[] {
   const budget = Math.min(params.maxDeliver, supportPackBudgetFor(params.questionType));
   const result: QaDeliveredCandidate[] = [];
   const seen = new Set<string>();
+  const candidateKey = (candidate: QaDeliveredCandidate): string =>
+    `${candidate.objectKind ?? "memory_entry"}:${candidate.objectId}`;
   const add = (candidate: QaDeliveredCandidate): void => {
-    if (result.length >= budget || seen.has(candidate.objectId)) return;
-    seen.add(candidate.objectId);
+    const key = candidateKey(candidate);
+    if (result.length >= budget || seen.has(key)) return;
+    seen.add(key);
     result.push(candidate);
   };
 
@@ -46,7 +50,7 @@ export function buildQaSupportPack(params: {
       .filter((session): session is string => typeof session === "string" && session.length > 0)
   );
   if (anchorSessions.size > 0) {
-    for (const candidate of params.widePool) {
+    for (const candidate of params.supportPool ?? params.widePool) {
       if (typeof candidate.sessionId === "string" && anchorSessions.has(candidate.sessionId)) {
         add(candidate);
       }

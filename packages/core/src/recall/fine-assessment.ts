@@ -158,10 +158,23 @@ export function fineAssess(params: FineAssessParams): Readonly<{
   const rankAfterStructuralReserve = buildStageRankMap(deliveryOrderedCandidates);
   // Both stages return the input array by reference when they no-op, so a same
   // reference proves the stage did not run for this recall.
-  const coverageSelectorAction: "applied" | "noop" =
-    coverageSelectedCandidates === prioritizedCandidates ? "noop" : "applied";
-  const sessionCoverageAction: "applied" | "noop" =
-    coverageOrderedCandidates === coverageSelectedCandidates ? "noop" : "applied";
+  const coverageSelectorNoop = coverageSelectedCandidates === prioritizedCandidates;
+  const sessionCoverageNoop = coverageOrderedCandidates === coverageSelectedCandidates;
+  const deliveryStageAction = (
+    before: number | undefined,
+    after: number | undefined,
+    nooped: boolean
+  ): "noop" | "kept" | "promoted" | "displaced" => {
+    if (nooped) {
+      return "noop";
+    }
+    if (before === undefined || after === undefined || before === after) {
+      return "kept";
+    }
+    return after < before ? "promoted" : "displaced";
+  };
+  const sessionKeyOf = (entry: Readonly<CoarseRecallCandidate["entry"]>): string =>
+    entry.surface_id ?? entry.run_id ?? "<no-session>";
 
   type FineAssessmentAccumulator = {
     readonly selected: Readonly<RecallCandidate>[];
@@ -204,6 +217,8 @@ export function fineAssess(params: FineAssessParams): Readonly<{
       );
       const maxEntries = config.budgets.max_entries;
       const rankAfterLex = rankAfterLexicalPriority.get(candidateKey);
+      const rankAfterCoverage = rankAfterCoverageSelector.get(candidateKey);
+      const rankAfterSession = rankAfterSessionCoverage.get(candidateKey);
       const rankAfterSyn = rankAfterSynthesisReserve.get(candidateKey);
       const rankAfterStruct = rankAfterStructuralReserve.get(candidateKey);
       // A candidate is "reserved" by the stage that first pulled it inside the
@@ -251,10 +266,20 @@ export function fineAssess(params: FineAssessParams): Readonly<{
         rank_after_fusion: rankAfterFusion.get(candidateKey),
         rank_after_feature_rerank: rankAfterFeatureRerank.get(candidateKey),
         rank_after_lexical_priority: rankAfterLex,
-        rank_after_coverage_selector: rankAfterCoverageSelector.get(candidateKey),
-        rank_after_session_coverage: rankAfterSessionCoverage.get(candidateKey),
-        coverage_selector_action: coverageSelectorAction,
-        session_coverage_action: sessionCoverageAction,
+        rank_after_coverage_selector: rankAfterCoverage,
+        rank_after_session_coverage: rankAfterSession,
+        coverage_selector_action: deliveryStageAction(
+          rankAfterLex,
+          rankAfterCoverage,
+          coverageSelectorNoop
+        ),
+        session_coverage_action: deliveryStageAction(
+          rankAfterCoverage,
+          rankAfterSession,
+          sessionCoverageNoop
+        ),
+        session_key: sessionKeyOf(entry),
+        source_cohort_key: supplementaryData.sourceCohortKeys[entry.object_id] ?? null,
         rank_after_synthesis_reserve: rankAfterSyn,
         rank_after_structural_reserve: rankAfterStruct,
         reserved_by: reservedBy

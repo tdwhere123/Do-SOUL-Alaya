@@ -138,7 +138,15 @@ describe("RecallService embedding-on coarse injection", () => {
         Object.freeze({ object_id: lexicallyAbsentMemory.object_id, normalized_similarity: 0.95 })
       ],
       embedding_inference_calls: 1,
-      query_embedding_cache_hit: false
+      query_embedding_cache_hit: false,
+      workspace_scan_truncated: true,
+      workspace_scan_cap: 1,
+      workspace_scanned_count: 2,
+      provider_kind: "openai",
+      model_id: "text-embedding-3-small",
+      schema_version: 1,
+      query_embedding_status: "provider_returned" as const,
+      query_embedding_degradation_reason: null
     }));
     const findByIds = vi.fn(async () => [lexicallyAbsentMemory]);
     const service = buildEmbeddingScopedService({
@@ -155,6 +163,13 @@ describe("RecallService embedding-on coarse injection", () => {
 
     expect(collectWorkspaceNeighborsWithMetadata).toHaveBeenCalledTimes(1);
     expect(result.diagnostics?.token_economy?.embedding_inference_calls).toBe(1);
+    expect(result.diagnostics?.embedding_provider_status).toBe("provider_returned");
+    expect(result.diagnostics?.embedding_workspace_truncated).toBe(true);
+    expect(result.diagnostics?.embedding_workspace_scan_cap).toBe(1);
+    expect(result.diagnostics?.embedding_workspace_scanned_count).toBe(2);
+    expect(result.diagnostics?.embedding_workspace_provider_kind).toBe("openai");
+    expect(result.diagnostics?.embedding_workspace_model_id).toBe("text-embedding-3-small");
+    expect(result.diagnostics?.embedding_workspace_schema_version).toBe(1);
   });
 
   it("recalls nothing extra when the embedding service exposes no neighbor scan", async () => {
@@ -407,6 +422,8 @@ describe("RecallService embedding coarse-injection fetch budget and stale-vector
     expect(
       result.candidates.some((candidate) => candidate.object_id === neighborMemory.object_id)
     ).toBe(false);
+    expect(collectWorkspaceNeighborsWithMetadata).not.toHaveBeenCalled();
+    expect(findByIds).not.toHaveBeenCalled();
   });
 
   it("drops a neighbor whose content_hash no longer matches the resolved memory content", async () => {

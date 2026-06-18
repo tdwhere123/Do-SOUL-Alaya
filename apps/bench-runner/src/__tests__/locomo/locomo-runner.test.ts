@@ -449,6 +449,7 @@ describe("LoCoMo runner", () => {
   });
 
   it("routes category-3 LoCoMo QA through the aggregation answer prompt", async () => {
+    vi.stubEnv("ALAYA_BENCH_QA_WIDE_AGG", "1");
     loadLocomoMock.mockResolvedValue([
       {
         sample_id: "sample-1",
@@ -475,17 +476,26 @@ describe("LoCoMo runner", () => {
       if (system.includes("strict grader")) return "yes";
       return "2";
     });
-    startBenchDaemonMock.mockResolvedValue(buildMockDaemon({}));
+    const recall = vi.fn(async () => buildRecallResult("memory-d1"));
+    startBenchDaemonMock.mockResolvedValue(buildMockDaemon({ recall }));
 
     const result = await runLocomo({
       variant: "locomo10",
       historyRoot: tmpDir,
-      qa: { chat: qaChat }
+      qa: { chat: qaChat, answerModel: "answer-test", judgeModel: "judge-test" }
     });
 
     expect(result.payload.sample_size).toBe(1);
     expect(result.payload.evaluated_count).toBe(1);
     expect(result.payload.kpi.r_at_5).toBe(1);
+    expect(recall.mock.calls[0]?.[1]).toMatchObject({ maxResults: 20 });
+    expect(result.payload.kpi.qa_metrics).toMatchObject({
+      answer_model: "answer-test",
+      judge_model: "judge-test",
+      delivery_settings: expect.objectContaining({
+        wide_agg_enabled: true
+      })
+    });
     const aggregationAnswerSystem =
       ((qaChat.mock.calls[0] as unknown as string[] | undefined)?.[0] ?? "");
     expect(aggregationAnswerSystem).toContain("aggregate across the whole history");

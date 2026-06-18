@@ -595,6 +595,8 @@ export class EmbeddingRecallService {
     }
 
     let storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
+    const workspaceScanCap = resolveEmbeddingWorkspaceScanCap();
+    let workspaceScannedCount = 0;
     let workspaceScanTruncated = false;
     try {
       // invariant: the tier whitelist (default HOT+WARM, env-configurable) bounds
@@ -606,29 +608,31 @@ export class EmbeddingRecallService {
       // a workspace that has switched providers would burn the cap on
       // unusable vectors before the JS-side filter could drop them.
       // see also: packages/core/src/embedding-recall/tier-config.ts:resolveEmbeddingRecallTiers.
-      const scanCap = resolveEmbeddingWorkspaceScanCap();
       // Fetch one past the cap so a truncated scan (more vectors than the cap)
       // is observable instead of silently dropping gold by object_id order.
       const scanned = await this.dependencies.embeddingRepo.listByWorkspace(
         params.workspaceId,
         {
           tierFilter: resolveEmbeddingRecallTiers(),
-          limit: scanCap + 1,
+          limit: workspaceScanCap + 1,
           providerKind: this.dependencies.provider.providerKind,
           modelId: this.dependencies.provider.modelId,
           schemaVersion: this.dependencies.provider.schemaVersion
         }
       );
-      workspaceScanTruncated = scanned.length > scanCap;
-      if (scanned.length > scanCap) {
+      workspaceScannedCount = scanned.length;
+      workspaceScanTruncated = scanned.length > workspaceScanCap;
+      if (scanned.length > workspaceScanCap) {
         this.warn("embedding workspace scan truncated by cap", {
           workspace_id: params.workspaceId,
           run_id: params.runId,
-          scan_cap: scanCap,
+          scan_cap: workspaceScanCap,
           returned: scanned.length
         });
       }
-      storedVectors = scanned.length > scanCap ? scanned.slice(0, scanCap) : scanned;
+      storedVectors = scanned.length > workspaceScanCap
+        ? scanned.slice(0, workspaceScanCap)
+        : scanned;
     } catch (error) {
       this.warn("embedding workspace neighbor scan failed", {
         workspace_id: params.workspaceId,
@@ -639,12 +643,23 @@ export class EmbeddingRecallService {
       return emptyWorkspaceNeighborResult();
     }
     if (storedVectors.length === 0) {
-      return emptyWorkspaceNeighborResult();
+      return Object.freeze({
+        ...emptyWorkspaceNeighborResult(),
+        workspace_scan_cap: workspaceScanCap,
+        workspace_scanned_count: workspaceScannedCount,
+        workspace_scan_truncated: workspaceScanTruncated,
+        provider_kind: this.dependencies.provider.providerKind,
+        model_id: this.dependencies.provider.modelId,
+        schema_version: this.dependencies.provider.schemaVersion
+      });
     }
 
     let queryEmbedding: Float32Array;
     let queryEmbeddingCacheHit = true;
     let embeddingInferenceCalls = 0;
+    let queryEmbeddingStatus: EmbeddingWorkspaceNeighborResult["query_embedding_status"] =
+      "provider_not_requested";
+    let queryEmbeddingDegradationReason: string | null = null;
     try {
       const preparedQuery = this.prepareQueryEmbedding({
         workspaceId: params.workspaceId,
@@ -659,24 +674,40 @@ export class EmbeddingRecallService {
           : initialSnapshot;
       if (snapshot.status !== "ready") {
         if (snapshot.status === "failed") {
+          queryEmbeddingStatus = "provider_failed";
+          queryEmbeddingDegradationReason = snapshot.reason;
           throw new Error(snapshot.error_message ?? snapshot.reason);
         }
+        queryEmbeddingStatus = "provider_pending";
+        queryEmbeddingDegradationReason = "query_embedding_pending";
         throw new Error("query_embedding_pending");
       }
       queryEmbedding = snapshot.embedding;
       embeddingInferenceCalls = preparedQuery.cacheHit ? 0 : 1;
+      queryEmbeddingStatus = "provider_returned";
     } catch (error) {
+      if (queryEmbeddingStatus === "provider_not_requested") {
+        queryEmbeddingStatus = "provider_failed";
+        queryEmbeddingDegradationReason = "query_embedding_failed";
+      }
       this.warn("embedding workspace neighbor scan failed", {
         workspace_id: params.workspaceId,
         run_id: params.runId,
-        reason: "query_embedding_failed",
+        reason: queryEmbeddingDegradationReason ?? "query_embedding_failed",
         error: toErrorMessage(error)
       });
       return Object.freeze({
         hits: Object.freeze([]) as readonly Readonly<EmbeddingNeighborHit>[],
         embedding_inference_calls: 0,
         query_embedding_cache_hit: queryEmbeddingCacheHit,
-        workspace_scan_truncated: workspaceScanTruncated
+        workspace_scan_truncated: workspaceScanTruncated,
+        workspace_scan_cap: workspaceScanCap,
+        workspace_scanned_count: workspaceScannedCount,
+        provider_kind: this.dependencies.provider.providerKind,
+        model_id: this.dependencies.provider.modelId,
+        schema_version: this.dependencies.provider.schemaVersion,
+        query_embedding_status: queryEmbeddingStatus,
+        query_embedding_degradation_reason: queryEmbeddingDegradationReason
       });
     }
 
@@ -713,7 +744,14 @@ export class EmbeddingRecallService {
       hits: Object.freeze(hits),
       embedding_inference_calls: embeddingInferenceCalls,
       query_embedding_cache_hit: queryEmbeddingCacheHit,
-      workspace_scan_truncated: workspaceScanTruncated
+      workspace_scan_truncated: workspaceScanTruncated,
+      workspace_scan_cap: workspaceScanCap,
+      workspace_scanned_count: workspaceScannedCount,
+      provider_kind: this.dependencies.provider.providerKind,
+      model_id: this.dependencies.provider.modelId,
+      schema_version: this.dependencies.provider.schemaVersion,
+      query_embedding_status: queryEmbeddingStatus,
+      query_embedding_degradation_reason: queryEmbeddingDegradationReason
     });
   }
 

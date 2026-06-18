@@ -97,6 +97,8 @@ export function buildQuestionDiagnostic(input: {
       rank_after_session_coverage: candidate?.rankAfterSessionCoverage ?? null,
       coverage_selector_action: candidate?.coverageSelectorAction ?? null,
       session_coverage_action: candidate?.sessionCoverageAction ?? null,
+      session_key: candidate?.sessionKey ?? null,
+      source_cohort_key: candidate?.sourceCohortKey ?? null,
       reserved_by: candidate?.reservedBy ?? null
     };
   });

@@ -362,6 +362,15 @@ export type RecallEmbeddingProviderStatus =
   | "provider_failed"
   | "provider_not_requested";
 
+export interface RecallEmbeddingWorkspaceScanDiagnostics {
+  readonly workspace_scan_truncated?: boolean;
+  readonly workspace_scan_cap?: number;
+  readonly workspace_scanned_count?: number;
+  readonly provider_kind?: string;
+  readonly model_id?: string;
+  readonly schema_version?: number;
+}
+
 export type RecallFusionStream =
   | "lexical_fts"
   | "trigram_fts"
@@ -437,8 +446,10 @@ export interface RecallCandidateDiagnostic {
   readonly rank_after_structural_reserve?: number;
   readonly rank_after_coverage_selector?: number;
   readonly rank_after_session_coverage?: number;
-  readonly coverage_selector_action?: "applied" | "noop";
-  readonly session_coverage_action?: "applied" | "noop";
+  readonly coverage_selector_action?: "noop" | "kept" | "promoted" | "displaced";
+  readonly session_coverage_action?: "noop" | "kept" | "promoted" | "displaced";
+  readonly session_key?: string;
+  readonly source_cohort_key?: string | null;
   readonly reserved_by?: "none" | "synthesis" | "structural";
 }
 
@@ -557,6 +568,12 @@ export interface RecallDiagnostics {
   readonly delivered_count: number;
   readonly embedding_provider_status: RecallEmbeddingProviderStatus;
   readonly provider_degradation_reason: string | null;
+  readonly embedding_workspace_scan_cap?: number;
+  readonly embedding_workspace_scanned_count?: number;
+  readonly embedding_workspace_truncated?: boolean;
+  readonly embedding_workspace_provider_kind?: string;
+  readonly embedding_workspace_model_id?: string;
+  readonly embedding_workspace_schema_version?: number;
   readonly graph_expansion_plane_count_per_hop: RecallGraphExpansionPlaneCountPerHop;
   readonly graph_expansion_plane_count_per_edge_type: RecallGraphExpansionPlaneCountPerEdgeType;
   // Optional. Only present when the entity_seed plane drove 1+ entity-derived

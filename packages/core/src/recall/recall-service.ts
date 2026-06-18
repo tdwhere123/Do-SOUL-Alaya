@@ -378,16 +378,26 @@ export class RecallService {
             warn: this.warn
           });
     const recallAfterFusion = performance.now();
-    const embeddingProviderStatus = resolveEmbeddingProviderStatus(
+    const preparedEmbeddingProviderStatus = resolveEmbeddingProviderStatus(
       policy,
       preparedEmbeddingQuery.handle,
       preparedEmbeddingQuery.degradedReason
     );
-    const providerDegradationReason = resolveEmbeddingProviderDegradationReason(
+    const preparedProviderDegradationReason = resolveEmbeddingProviderDegradationReason(
       policy,
       preparedEmbeddingQuery.handle,
       preparedEmbeddingQuery.degradedReason
     );
+    const embeddingProviderStatus =
+      preparedEmbeddingProviderStatus === "provider_not_requested" &&
+      embeddingCoarseInjection.embeddingProviderStatus !== null
+        ? embeddingCoarseInjection.embeddingProviderStatus
+        : preparedEmbeddingProviderStatus;
+    const providerDegradationReason =
+      preparedProviderDegradationReason === null &&
+      preparedEmbeddingProviderStatus === "provider_not_requested"
+        ? embeddingCoarseInjection.providerDegradationReason
+        : preparedProviderDegradationReason;
     const candidates = await applyManifestationBiasSidecar({
       manifestationSidecarPort: this.dependencies.manifestationSidecarPort,
       warn: this.warn,
@@ -484,6 +494,7 @@ export class RecallService {
         graphExpansionDiagnostics: coarseFilter.graphExpansionDiagnostics,
         candidates: candidateDiagnostics,
         tokenEconomy,
+        embeddingWorkspaceScan: embeddingCoarseInjection.workspaceScan,
         phaseLatencyMs
       })
     });

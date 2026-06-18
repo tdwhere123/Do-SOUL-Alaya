@@ -184,6 +184,40 @@ describe("buildQaDeliveredCandidates sourceRank honesty", () => {
     expect(absentGold?.sessionId).toBe("session-absent");
     expect(absentGold?.sourceRank).toBeUndefined();
   });
+
+  it("does not borrow a same-id synthesis capsule rank for memory gold-only delivery", () => {
+    const results = [
+      { object_id: "shared-object", object_kind: "synthesis_capsule" }
+    ];
+    const memorySidecar = new Map<string, { content?: string; sessionId?: string | null }>([
+      ["shared-object", { content: "memory gold fact", sessionId: "session-gold" }]
+    ]);
+    const synthesisSidecar = new Map<string, { content?: string; sessionId?: string | null }>([
+      ["shared-object", { content: "session summary", sessionId: "session-gold" }]
+    ]);
+
+    const { deliveryCandidates, goldOnly } = buildQaDeliveredCandidates({
+      results,
+      goldMemoryIds: ["shared-object"],
+      lookupMemoryEntry: (objectId) => memorySidecar.get(objectId),
+      lookupCandidate: (objectKind, objectId) =>
+        objectKind === "synthesis_capsule"
+          ? synthesisSidecar.get(objectId)
+          : memorySidecar.get(objectId)
+    });
+
+    expect(deliveryCandidates[0]).toMatchObject({
+      objectId: "shared-object",
+      objectKind: "synthesis_capsule",
+      sourceRank: 1
+    });
+    expect(goldOnly[0]).toMatchObject({
+      objectId: "shared-object",
+      content: "memory gold fact",
+      sessionId: "session-gold"
+    });
+    expect(goldOnly[0]?.sourceRank).toBeUndefined();
+  });
 });
 
 function buildSeed(memoryId: string) {

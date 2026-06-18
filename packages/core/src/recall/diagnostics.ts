@@ -5,6 +5,7 @@ import type {
   RecallCandidateDiagnostic,
   RecallDiagnostics,
   RecallEmbeddingProviderStatus,
+  RecallEmbeddingWorkspaceScanDiagnostics,
   RecallGraphExpansionDiagnostics,
   RecallTokenEconomy
 } from "./recall-service-types.js";
@@ -21,8 +22,10 @@ export function buildRecallDiagnostics(params: Readonly<{
   readonly graphExpansionDiagnostics: Readonly<RecallGraphExpansionDiagnostics>;
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly tokenEconomy: Readonly<RecallTokenEconomy>;
+  readonly embeddingWorkspaceScan?: Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null;
   readonly phaseLatencyMs?: Readonly<Record<string, number>>;
 }>): Readonly<RecallDiagnostics> {
+  const embeddingWorkspaceScan = params.embeddingWorkspaceScan ?? null;
   return Object.freeze({
     query_probes: Object.freeze({
       object_ids: Object.freeze([...params.queryProbes.object_ids]),
@@ -49,6 +52,24 @@ export function buildRecallDiagnostics(params: Readonly<{
     delivered_count: params.deliveredCount,
     embedding_provider_status: params.embeddingProviderStatus,
     provider_degradation_reason: params.providerDegradationReason,
+    ...(embeddingWorkspaceScan?.workspace_scan_cap === undefined
+      ? {}
+      : { embedding_workspace_scan_cap: embeddingWorkspaceScan.workspace_scan_cap }),
+    ...(embeddingWorkspaceScan?.workspace_scanned_count === undefined
+      ? {}
+      : { embedding_workspace_scanned_count: embeddingWorkspaceScan.workspace_scanned_count }),
+    ...(embeddingWorkspaceScan?.workspace_scan_truncated === undefined
+      ? {}
+      : { embedding_workspace_truncated: embeddingWorkspaceScan.workspace_scan_truncated }),
+    ...(embeddingWorkspaceScan?.provider_kind === undefined
+      ? {}
+      : { embedding_workspace_provider_kind: embeddingWorkspaceScan.provider_kind }),
+    ...(embeddingWorkspaceScan?.model_id === undefined
+      ? {}
+      : { embedding_workspace_model_id: embeddingWorkspaceScan.model_id }),
+    ...(embeddingWorkspaceScan?.schema_version === undefined
+      ? {}
+      : { embedding_workspace_schema_version: embeddingWorkspaceScan.schema_version }),
     graph_expansion_plane_count_per_hop:
       params.graphExpansionDiagnostics.graph_expansion_plane_count_per_hop,
     graph_expansion_plane_count_per_edge_type:

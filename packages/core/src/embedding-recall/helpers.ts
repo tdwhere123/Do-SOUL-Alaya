@@ -38,7 +38,9 @@ export function emptyWorkspaceNeighborResult(): Readonly<EmbeddingWorkspaceNeigh
     hits: Object.freeze([]) as readonly Readonly<EmbeddingNeighborHit>[],
     embedding_inference_calls: 0,
     query_embedding_cache_hit: true,
-    workspace_scan_truncated: false
+    workspace_scan_truncated: false,
+    query_embedding_status: "provider_not_requested",
+    query_embedding_degradation_reason: null
   });
 }
 
