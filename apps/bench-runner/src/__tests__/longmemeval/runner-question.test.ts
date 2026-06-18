@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LongMemEvalQuestion } from "../../longmemeval/dataset.js";
 import type { BenchDaemonHandle, BenchWorkspaceHandle } from "../../harness/daemon.js";
-import { runLongMemEvalQuestion } from "../../longmemeval/runner-question.js";
+import {
+  buildQaDeliveredCandidates,
+  runLongMemEvalQuestion
+} from "../../longmemeval/runner-question.js";
 import { buildRecallResult } from "./longmemeval-runner-fixture.js";
 
 afterEach(() => {
@@ -123,6 +126,97 @@ describe("runLongMemEvalQuestion QA delivery", () => {
     expect(countOccurrences(answerPrompt, "Duplicated gold turn.")).toBe(1);
     expect(countOccurrences(answerPrompt, "Unique gold turn.")).toBe(1);
     expect(answerPrompt).not.toContain("Distractor turn.");
+  });
+});
+
+describe("buildQaDeliveredCandidates sourceRank honesty", () => {
+  it("ranks memory_entry candidates against the full recall list, not the filtered subsequence", () => {
+    // A non-memory_entry pointer (synthesis_capsule) sits at rank 1, ABOVE the
+    // first memory_entry at rank 2. The delivered candidate's sourceRank must be
+    // its original full-list position (2), not its memory-entry-filtered position (1).
+    const results = [
+      { object_id: "capsule-1", object_kind: "synthesis_capsule" },
+      { object_id: "memory-1", object_kind: "memory_entry" },
+      { object_id: "memory-2", object_kind: "memory_entry" }
+    ];
+    const sidecar = new Map<string, { content?: string; sessionId?: string | null }>([
+      ["memory-1", { content: "first fact", sessionId: "session-a" }],
+      ["memory-2", { content: "second fact", sessionId: "session-b" }]
+    ]);
+
+    const { memoryEntryCandidates } = buildQaDeliveredCandidates({
+      results,
+      goldMemoryIds: [],
+      lookupMemoryEntry: (objectId) => sidecar.get(objectId)
+    });
+
+    expect(memoryEntryCandidates.map((c) => c.objectId)).toEqual([
+      "memory-1",
+      "memory-2"
+    ]);
+    expect(memoryEntryCandidates[0]?.sourceRank).toBe(2);
+    expect(memoryEntryCandidates[1]?.sourceRank).toBe(3);
+  });
+
+  it("carries sessionId and the gold's original recall rank in the gold-only path", () => {
+    const results = [
+      { object_id: "capsule-1", object_kind: "synthesis_capsule" },
+      { object_id: "memory-gold", object_kind: "memory_entry" },
+      { object_id: "memory-decoy", object_kind: "memory_entry" }
+    ];
+    const sidecar = new Map<string, { content?: string; sessionId?: string | null }>([
+      ["memory-gold", { content: "gold fact", sessionId: "session-gold" }],
+      ["memory-absent", { content: "absent gold", sessionId: "session-absent" }]
+    ]);
+
+    const { goldOnly } = buildQaDeliveredCandidates({
+      results,
+      goldMemoryIds: ["memory-gold", "memory-absent"],
+      lookupMemoryEntry: (objectId) => sidecar.get(objectId)
+    });
+
+    const recalledGold = goldOnly.find((c) => c.objectId === "memory-gold");
+    expect(recalledGold?.sessionId).toBe("session-gold");
+    expect(recalledGold?.sourceRank).toBe(2);
+
+    // Gold absent from results carries its session but no recall rank.
+    const absentGold = goldOnly.find((c) => c.objectId === "memory-absent");
+    expect(absentGold?.sessionId).toBe("session-absent");
+    expect(absentGold?.sourceRank).toBeUndefined();
+  });
+
+  it("does not borrow a same-id synthesis capsule rank for memory gold-only delivery", () => {
+    const results = [
+      { object_id: "shared-object", object_kind: "synthesis_capsule" }
+    ];
+    const memorySidecar = new Map<string, { content?: string; sessionId?: string | null }>([
+      ["shared-object", { content: "memory gold fact", sessionId: "session-gold" }]
+    ]);
+    const synthesisSidecar = new Map<string, { content?: string; sessionId?: string | null }>([
+      ["shared-object", { content: "session summary", sessionId: "session-gold" }]
+    ]);
+
+    const { deliveryCandidates, goldOnly } = buildQaDeliveredCandidates({
+      results,
+      goldMemoryIds: ["shared-object"],
+      lookupMemoryEntry: (objectId) => memorySidecar.get(objectId),
+      lookupCandidate: (objectKind, objectId) =>
+        objectKind === "synthesis_capsule"
+          ? synthesisSidecar.get(objectId)
+          : memorySidecar.get(objectId)
+    });
+
+    expect(deliveryCandidates[0]).toMatchObject({
+      objectId: "shared-object",
+      objectKind: "synthesis_capsule",
+      sourceRank: 1
+    });
+    expect(goldOnly[0]).toMatchObject({
+      objectId: "shared-object",
+      content: "memory gold fact",
+      sessionId: "session-gold"
+    });
+    expect(goldOnly[0]?.sourceRank).toBeUndefined();
   });
 });
 

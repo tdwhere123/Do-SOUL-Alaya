@@ -59,15 +59,31 @@ export interface EmbeddingWorkspaceScanOptions {
   // the JS-side filter would discard.
   readonly providerKind?: string;
   readonly modelId?: string;
+  // invariant: cosine space is valid only within one embedding schema_version.
+  readonly schemaVersion?: number;
 }
 
 export interface EmbeddingNeighborHit {
   readonly object_id: string;
   readonly normalized_similarity: number;
+  readonly content_hash?: string;
 }
 
 export interface EmbeddingWorkspaceNeighborResult {
   readonly hits: readonly Readonly<EmbeddingNeighborHit>[];
+  // True when the workspace vector scan hit its cap and dropped tail rows.
+  readonly workspace_scan_truncated?: boolean;
+  readonly workspace_scan_cap?: number;
+  readonly workspace_scanned_count?: number;
+  readonly provider_kind?: string;
+  readonly model_id?: string;
+  readonly schema_version?: number;
+  readonly query_embedding_status?:
+    | "provider_returned"
+    | "provider_pending"
+    | "provider_failed"
+    | "provider_not_requested";
+  readonly query_embedding_degradation_reason?: string | null;
   // Fresh query-embedding inference calls consumed by this workspace-neighbor
   // scan. A cache hit or unavailable provider contributes 0; a successful
   // fresh provider call contributes 1 even when no neighbor survives filters.

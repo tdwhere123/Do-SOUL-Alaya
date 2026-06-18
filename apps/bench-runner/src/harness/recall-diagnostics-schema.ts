@@ -87,6 +87,12 @@ const RecallCandidateDiagnosticSchema = z
     rank_after_lexical_priority: z.number().int().positive().optional(),
     rank_after_synthesis_reserve: z.number().int().positive().optional(),
     rank_after_structural_reserve: z.number().int().positive().optional(),
+    rank_after_coverage_selector: z.number().int().positive().optional(),
+    rank_after_session_coverage: z.number().int().positive().optional(),
+    coverage_selector_action: z.enum(["noop", "kept", "promoted", "displaced"]).optional(),
+    session_coverage_action: z.enum(["noop", "kept", "promoted", "displaced"]).optional(),
+    session_key: z.string().min(1).optional(),
+    source_cohort_key: z.string().min(1).nullable().optional(),
     reserved_by: z.enum(["none", "synthesis", "structural"]).optional()
   })
   .strict()
@@ -172,6 +178,12 @@ export const BenchRecallDiagnosticsSchema = z
       "provider_not_requested"
     ]),
     provider_degradation_reason: z.string().nullable(),
+    embedding_workspace_scan_cap: z.number().int().nonnegative().optional(),
+    embedding_workspace_scanned_count: z.number().int().nonnegative().optional(),
+    embedding_workspace_truncated: z.boolean().optional(),
+    embedding_workspace_provider_kind: z.string().min(1).optional(),
+    embedding_workspace_model_id: z.string().min(1).optional(),
+    embedding_workspace_schema_version: z.number().int().nonnegative().optional(),
     graph_expansion_plane_count_per_hop:
       RecallGraphExpansionPlaneCountPerHopSchema,
     graph_expansion_plane_count_per_edge_type:

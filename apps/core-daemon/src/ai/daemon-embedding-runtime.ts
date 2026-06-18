@@ -143,16 +143,38 @@ export function createDaemonEmbeddingRuntime(input: {
   // provider-switch runtime detection lives in doctor and runtime-status.
   // see also: docs/handbook/runtime-status.md provider-switch handling.
   const embeddingPolicyConfigured =
-    embeddingRecallService !== undefined && embeddingProvider !== null;
+    embeddingRecallService !== undefined &&
+    embeddingProvider !== null &&
+    recallPolicyEmbeddingEnabled;
   const embeddingFusionWeight = readEmbeddingFusionWeightOverride(input.configEnv);
+  // Escape hatch (read once at startup): when truthy the decorator is a full
+  // passthrough — no gate open, no fusion-weight injection — so an operator can
+  // pin the no-embedding recall baseline without unwinding the provider config.
+  const policyDecoratorDisabled = readPolicyDecoratorDisabled(input.configEnv);
   const defaultPolicyDecorator = embeddingPolicyConfigured
     ? (policy: Readonly<RecallPolicy>): Readonly<RecallPolicy> => {
-        if (embeddingProvider === null || !embeddingProvider.isAvailable) {
+        if (
+          policyDecoratorDisabled ||
+          embeddingProvider === null ||
+          !embeddingProvider.isAvailable
+        ) {
           return policy;
         }
         const existingFusionWeights = policy.scoring_weight_overrides?.fusion_weights ?? {};
+        const semantic = policy.coarse_filter.semantic_supplement;
         return {
           ...policy,
+          coarse_filter: {
+            ...policy.coarse_filter,
+            semantic_supplement: {
+              ...semantic,
+              enabled: true,
+              embedding_enabled: true,
+              injection_cap: semantic.injection_cap ?? DEFAULT_EMBEDDING_INJECTION_CAP,
+              injection_similarity_floor:
+                semantic.injection_similarity_floor ?? DEFAULT_EMBEDDING_INJECTION_FLOOR
+            }
+          },
           scoring_weight_overrides: {
             ...(policy.scoring_weight_overrides ?? {}),
             fusion_weights: {
@@ -196,6 +218,16 @@ export function createDaemonEmbeddingRuntime(input: {
 }
 
 const DEFAULT_EMBEDDING_FUSION_WEIGHT_ON = 6;
+// mirror: packages/core/src/recall/supplements.ts EMBEDDING_MAX_INJECTED_DELIVERY / EMBEDDING_INJECTION_SIMILARITY_FLOOR
+const DEFAULT_EMBEDDING_INJECTION_CAP = 10;
+const DEFAULT_EMBEDDING_INJECTION_FLOOR = 0.5;
+
+function readPolicyDecoratorDisabled(configEnv: ReadonlyMap<string, string>): boolean {
+  const raw = readNonEmptyEnv(
+    readConfigEnvValue(configEnv, "ALAYA_DISABLE_POLICY_EMBEDDING_DECORATOR")
+  )?.toLowerCase();
+  return raw === "1" || raw === "true";
+}
 
 function readEmbeddingFusionWeightOverride(
   configEnv: ReadonlyMap<string, string>

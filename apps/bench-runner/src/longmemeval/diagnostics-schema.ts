@@ -25,6 +25,13 @@ const DiagnosticStreamContributionsSchema = z
 
 const DiagnosticScoreFactorsSchema = z.record(z.string(), z.unknown()).readonly();
 
+const DeliveryStageActionSchema = z.enum([
+  "noop",
+  "kept",
+  "promoted",
+  "displaced"
+]);
+
 const GraphExpansionPlaneCountPerHopSchema = z
   .tuple([
     z.number().int().nonnegative(),
@@ -103,6 +110,12 @@ export const LongMemEvalGoldDiagnosticSchema = z
     rank_after_lexical_priority: z.number().nullable().default(null),
     rank_after_synthesis_reserve: z.number().nullable().default(null),
     rank_after_structural_reserve: z.number().nullable().default(null),
+    rank_after_coverage_selector: z.number().nullable().default(null),
+    rank_after_session_coverage: z.number().nullable().default(null),
+    coverage_selector_action: DeliveryStageActionSchema.nullable().default(null),
+    session_coverage_action: DeliveryStageActionSchema.nullable().default(null),
+    session_key: z.string().nullable().default(null),
+    source_cohort_key: z.string().nullable().default(null),
     reserved_by: z.string().nullable().default(null)
   })
   .readonly();

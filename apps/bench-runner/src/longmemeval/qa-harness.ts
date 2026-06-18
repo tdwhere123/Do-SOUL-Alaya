@@ -120,6 +120,7 @@ const JUDGE_SYSTEM =
 /** One delivered recall result with its full memory content, in rank order. */
 export interface QaDeliveredCandidate {
   readonly objectId: string;
+  readonly objectKind?: "memory_entry" | "synthesis_capsule";
   /** Full seeded content for this object_id (empty when unmapped). */
   readonly content: string;
   /**
@@ -181,6 +182,61 @@ export interface QaAggregate {
   /** Per `question_type` accuracy — how SOTA tables report; verifies no
    * category (e.g. preference) is silently scoring zero. */
   readonly qa_by_type: Record<string, QaTypeTally>;
+}
+
+export interface QaDeliverySettings {
+  readonly deliver_k_override: number | null;
+  readonly wide_agg_enabled: boolean;
+  readonly gold_only_enabled: boolean;
+  readonly dedup_delivery_enabled: boolean;
+  readonly session_spread_enabled: boolean;
+  readonly llm_filter_enabled: boolean;
+  readonly llm_filter_k: number | null;
+  readonly llm_filter_m: number | null;
+  readonly support_pack_enabled: boolean;
+  readonly support_pack_max: number | null;
+  readonly v2_prompts_enabled: boolean;
+  readonly temporal_enum_enabled: boolean;
+}
+
+function positiveIntEnv(name: string): number | null {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : null;
+}
+
+function envEnabled(name: string): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "off";
+}
+
+function envExplicitlyDisabled(name: string): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "0" || normalized === "false" || normalized === "off";
+}
+
+export function buildQaDeliverySettings(): QaDeliverySettings {
+  const llmFilterEnabled = envEnabled("ALAYA_BENCH_QA_LLM_FILTER");
+  const supportPackEnabled = envEnabled("ALAYA_BENCH_QA_SUPPORT_PACK");
+  return {
+    deliver_k_override: positiveIntEnv("ALAYA_BENCH_QA_DELIVER_K"),
+    wide_agg_enabled: envEnabled("ALAYA_BENCH_QA_WIDE_AGG"),
+    gold_only_enabled: envEnabled("ALAYA_BENCH_DELIVER_GOLD_ONLY"),
+    dedup_delivery_enabled: !envExplicitlyDisabled("ALAYA_BENCH_QA_DEDUP_DELIVERY"),
+    session_spread_enabled: envEnabled("ALAYA_BENCH_QA_SESSION_SPREAD"),
+    llm_filter_enabled: llmFilterEnabled,
+    llm_filter_k: llmFilterEnabled ? positiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_K") ?? 30 : null,
+    llm_filter_m: llmFilterEnabled ? positiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_M") ?? 8 : null,
+    support_pack_enabled: supportPackEnabled,
+    support_pack_max: supportPackEnabled
+      ? positiveIntEnv("ALAYA_BENCH_QA_SUPPORT_PACK_MAX") ?? 16
+      : null,
+    v2_prompts_enabled: envEnabled("ALAYA_BENCH_QA_V2_PROMPTS"),
+    temporal_enum_enabled: envEnabled("ALAYA_BENCH_QA_TEMPORAL_ENUM")
+  };
 }
 
 /** Stitch delivered top-k content into a single role-blind memory context. */

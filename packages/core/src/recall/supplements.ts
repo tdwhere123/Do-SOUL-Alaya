@@ -1,9 +1,11 @@
 import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
 import type {
+  EmbeddingWorkspaceNeighborResult,
   EmbeddingRecallSupplementResult,
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingSupplement
 } from "../embedding-recall/embedding-recall-service.js";
+import { hashMemoryContent } from "../embedding-recall/helpers.js";
 import { buildSynthesisCoarseRecallCandidate } from "./recall-candidate-builder.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import {
@@ -14,6 +16,8 @@ import {
 } from "./recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
+  RecallEmbeddingProviderStatus,
+  RecallEmbeddingWorkspaceScanDiagnostics,
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "./recall-service-types.js";
@@ -67,11 +71,17 @@ export async function collectEmbeddingCoarseInjection(params: {
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly similarityScores: Readonly<Record<string, number>>;
   readonly embeddingInferenceCalls: number;
+  readonly embeddingProviderStatus: RecallEmbeddingProviderStatus | null;
+  readonly providerDegradationReason: string | null;
+  readonly workspaceScan: Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null;
 }>> {
   const empty = Object.freeze({
     candidates: Object.freeze([]) as readonly Readonly<CoarseRecallCandidate>[],
     similarityScores: Object.freeze({}),
-    embeddingInferenceCalls: 0
+    embeddingInferenceCalls: 0,
+    embeddingProviderStatus: null,
+    providerDegradationReason: null,
+    workspaceScan: null
   });
   const embeddingRecallService = params.dependencies.embeddingRecallService;
   const maxSupplement = params.policy.coarse_filter.semantic_supplement.max_supplement;
@@ -87,6 +97,15 @@ export async function collectEmbeddingCoarseInjection(params: {
     return empty;
   }
 
+  // The fetch must surface enough neighbors to fill the delivery cap, which can
+  // exceed max_supplement; the floor stage then trims to the hard slice below.
+  const injectionCap =
+    params.policy.coarse_filter.semantic_supplement.injection_cap ??
+    EMBEDDING_MAX_INJECTED_DELIVERY;
+  if (injectionCap <= 0) {
+    return empty;
+  }
+  const fetchNeighbors = Math.max(maxSupplement, injectionCap);
   const poolObjectIds = params.poolCandidates.map((candidate) => candidate.entry.object_id);
   const neighborResult =
     typeof embeddingRecallService.collectWorkspaceNeighborsWithMetadata === "function"
@@ -95,7 +114,7 @@ export async function collectEmbeddingCoarseInjection(params: {
           runId: params.runId,
           queryText: params.queryText,
           excludeObjectIds: poolObjectIds,
-          maxNeighbors: maxSupplement
+          maxNeighbors: fetchNeighbors
         })
       : {
           hits: await embeddingRecallService.collectWorkspaceNeighbors!({
@@ -103,21 +122,34 @@ export async function collectEmbeddingCoarseInjection(params: {
             runId: params.runId,
             queryText: params.queryText,
             excludeObjectIds: poolObjectIds,
-            maxNeighbors: maxSupplement
+            maxNeighbors: fetchNeighbors
           }),
           embedding_inference_calls: 0,
-          query_embedding_cache_hit: true
+          query_embedding_cache_hit: true,
+          query_embedding_status: "provider_not_requested" as const,
+          query_embedding_degradation_reason: null
         };
+  const workspaceScan = readWorkspaceScanDiagnostics(neighborResult);
+  const embeddingProviderStatus = neighborResult.query_embedding_status ?? null;
+  const providerDegradationReason = neighborResult.query_embedding_degradation_reason ?? null;
   const neighbors = neighborResult.hits;
   if (neighbors.length === 0) {
     return Object.freeze({
       ...empty,
-      embeddingInferenceCalls: neighborResult.embedding_inference_calls
+      embeddingInferenceCalls: neighborResult.embedding_inference_calls,
+      embeddingProviderStatus,
+      providerDegradationReason,
+      workspaceScan
     });
   }
 
   const similarityByObjectId = new Map(
     neighbors.map((neighbor) => [neighbor.object_id, neighbor.normalized_similarity] as const)
+  );
+  const contentHashByObjectId = new Map(
+    neighbors
+      .filter((neighbor) => neighbor.content_hash !== undefined)
+      .map((neighbor) => [neighbor.object_id, neighbor.content_hash as string] as const)
   );
   let neighborEntries: readonly Readonly<MemoryEntry>[];
   try {
@@ -130,7 +162,10 @@ export async function collectEmbeddingCoarseInjection(params: {
     });
     return Object.freeze({
       ...empty,
-      embeddingInferenceCalls: neighborResult.embedding_inference_calls
+      embeddingInferenceCalls: neighborResult.embedding_inference_calls,
+      embeddingProviderStatus,
+      providerDegradationReason,
+      workspaceScan
     });
   }
 
@@ -138,19 +173,26 @@ export async function collectEmbeddingCoarseInjection(params: {
   const semantic = params.policy.coarse_filter.semantic_supplement;
   const injectionFloor =
     semantic.injection_similarity_floor ?? EMBEDDING_INJECTION_SIMILARITY_FLOOR;
-  const maxInjected = semantic.injection_cap ?? EMBEDDING_MAX_INJECTED_DELIVERY;
+  const maxInjected = injectionCap;
   // Gate the injected neighbors on the query cosine floor and hard-cap the
   // count: the semantic facet contributes at most maxInjected pool-external
   // objects, each clearing the cosine floor. The cosine floor IS the relevance
   // gate — these are pure-semantic objects with zero lexical overlap, so no
   // lexical/deterministic filter applies.
+  let staleVectorDrops = 0;
   const candidates = neighborEntries
-    .filter(
-      (entry) =>
+    .filter((entry) => {
+      const knownHash = contentHashByObjectId.get(entry.object_id);
+      if (knownHash !== undefined && knownHash !== hashMemoryContent(entry.content)) {
+        staleVectorDrops += 1;
+        return false;
+      }
+      return (
         entry.workspace_id === params.workspaceId &&
         !poolObjectIdSet.has(entry.object_id) &&
         (similarityByObjectId.get(entry.object_id) ?? 0) >= injectionFloor
-    )
+      );
+    })
     .sort(
       (left, right) =>
         (similarityByObjectId.get(right.object_id) ?? 0) -
@@ -168,10 +210,20 @@ export async function collectEmbeddingCoarseInjection(params: {
         structuralScore: 0
       })
   ) as readonly Readonly<CoarseRecallCandidate>[];
+  if (staleVectorDrops > 0) {
+    params.warn("embedding coarse injection dropped stale vectors", {
+      workspace_id: params.workspaceId,
+      run_id: params.runId,
+      stale_vector_drops: staleVectorDrops
+    });
+  }
   if (candidates.length === 0) {
     return Object.freeze({
       ...empty,
-      embeddingInferenceCalls: neighborResult.embedding_inference_calls
+      embeddingInferenceCalls: neighborResult.embedding_inference_calls,
+      embeddingProviderStatus,
+      providerDegradationReason,
+      workspaceScan
     });
   }
 
@@ -184,7 +236,39 @@ export async function collectEmbeddingCoarseInjection(params: {
   return Object.freeze({
     candidates: Object.freeze([...candidates]),
     similarityScores: Object.freeze(similarityScores),
-    embeddingInferenceCalls: neighborResult.embedding_inference_calls
+    embeddingInferenceCalls: neighborResult.embedding_inference_calls,
+    embeddingProviderStatus,
+    providerDegradationReason,
+    workspaceScan
+  });
+}
+
+function readWorkspaceScanDiagnostics(
+  result: Readonly<EmbeddingWorkspaceNeighborResult>
+): Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null {
+  if (
+    result.workspace_scan_truncated === undefined &&
+    result.workspace_scan_cap === undefined &&
+    result.workspace_scanned_count === undefined &&
+    result.provider_kind === undefined &&
+    result.model_id === undefined &&
+    result.schema_version === undefined
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    ...(result.workspace_scan_truncated === undefined
+      ? {}
+      : { workspace_scan_truncated: result.workspace_scan_truncated }),
+    ...(result.workspace_scan_cap === undefined
+      ? {}
+      : { workspace_scan_cap: result.workspace_scan_cap }),
+    ...(result.workspace_scanned_count === undefined
+      ? {}
+      : { workspace_scanned_count: result.workspace_scanned_count }),
+    ...(result.provider_kind === undefined ? {} : { provider_kind: result.provider_kind }),
+    ...(result.model_id === undefined ? {} : { model_id: result.model_id }),
+    ...(result.schema_version === undefined ? {} : { schema_version: result.schema_version })
   });
 }
 

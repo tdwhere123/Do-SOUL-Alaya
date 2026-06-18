@@ -562,6 +562,18 @@ async function runFetchLocomoCommand(opts: ParsedFlags): Promise<number> {
 async function runLocomoCommand(opts: ParsedFlags): Promise<number> {
   try {
     applyBenchEdgePlaneFlag(opts);
+    const qaOption = opts.qa
+      ? (() => {
+          const config = resolveQaChatConfig();
+          const judgeConfig = resolveQaJudgeChatConfig();
+          return {
+            chat: createGardenChatFn(config),
+            judgeChat: createGardenChatFn(judgeConfig),
+            answerModel: config.model,
+            judgeModel: judgeConfig.model
+          };
+        })()
+      : undefined;
     process.stdout.write(
       `Running LoCoMo10` +
         (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
@@ -577,14 +589,7 @@ async function runLocomoCommand(opts: ParsedFlags): Promise<number> {
       dataDir: opts.dataDir,
       embeddingMode: opts.embeddingMode,
       embeddingProviderKind: opts.embeddingProviderKind,
-      ...(opts.qa
-        ? {
-            qa: {
-              chat: createGardenChatFn(resolveQaChatConfig()),
-              judgeChat: createGardenChatFn(resolveQaJudgeChatConfig())
-            }
-          }
-        : {})
+      ...(qaOption === undefined ? {} : { qa: qaOption })
     });
     const kpi = result.payload.kpi;
     process.stdout.write(

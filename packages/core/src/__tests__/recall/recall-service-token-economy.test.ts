@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import { RecallService, computeRecallTokenEconomy } from "../../recall/recall-service.js";
 import { createActiveConstraint, createDependencies, createMemoryEntry, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
@@ -299,5 +299,60 @@ describe("RecallService", () => {
     // The diagnostics envelope itself must remain present so callers can
     // still read query_probes, candidates, and token accounting.
     expect(result.diagnostics).toBeDefined();
+  });
+});
+
+describe("RecallService coverage-stage diagnostics", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const buildTwoSessionMemories = () => [
+    createMemoryEntry({ object_id: "11111111-1111-4111-8111-111111111111", surface_id: "sA", activation_score: 0.99, content: "Use pnpm pnpm pnpm" }),
+    createMemoryEntry({ object_id: "22222222-2222-4222-8222-222222222222", surface_id: "sA", activation_score: 0.9, content: "Use pnpm here pnpm" }),
+    createMemoryEntry({ object_id: "33333333-3333-4333-8333-333333333333", surface_id: "sA", activation_score: 0.88, content: "pnpm again pnpm" }),
+    createMemoryEntry({ object_id: "44444444-4444-4444-8444-444444444444", surface_id: "sA", activation_score: 0.86, content: "pnpm more pnpm" }),
+    createMemoryEntry({ object_id: "55555555-5555-4555-8555-555555555555", surface_id: "sA", activation_score: 0.84, content: "pnpm yet pnpm" }),
+    createMemoryEntry({ object_id: "66666666-6666-4666-8666-666666666666", surface_id: "sA", activation_score: 0.82, content: "pnpm six pnpm" }),
+    createMemoryEntry({ object_id: "77777777-7777-4777-8777-777777777777", surface_id: "sB", activation_score: 0.7, content: "pnpm second session pnpm pnpm" })
+  ];
+
+  it("marks the coverage selector noop and leaves its rank untouched when disabled", async () => {
+    const { dependencies } = createDependencies(buildTwoSessionMemories());
+    const service = new RecallService(dependencies);
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+    const candidates = result.diagnostics?.candidates ?? [];
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const candidate of candidates) {
+      expect(candidate.coverage_selector_action).toBe("noop");
+      expect(candidate.rank_after_coverage_selector).toBe(candidate.rank_after_lexical_priority);
+      expect(candidate.session_key).toBeDefined();
+    }
+  });
+
+  it("marks the coverage selector applied and promotes a buried second-session rank when enabled", async () => {
+    vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "1");
+    const { dependencies } = createDependencies(buildTwoSessionMemories());
+    const service = new RecallService(dependencies);
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+    const candidates = result.diagnostics?.candidates ?? [];
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const candidate of candidates) {
+      expect(["kept", "promoted", "displaced"]).toContain(candidate.coverage_selector_action);
+      expect(candidate.rank_after_coverage_selector).toBeDefined();
+      expect(candidate.session_key).toBeDefined();
+    }
+    const secondSession = candidates.find((candidate) => candidate.object_id === "77777777-7777-4777-8777-777777777777");
+    expect(secondSession?.coverage_selector_action).toBe("promoted");
+    expect(secondSession?.session_key).toBe("sB");
+    expect(secondSession?.rank_after_coverage_selector).toBeLessThan(secondSession?.rank_after_lexical_priority ?? Number.POSITIVE_INFINITY);
   });
 });

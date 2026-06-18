@@ -245,16 +245,22 @@ export async function expandTierCascade(params: Readonly<{
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly hotCoarseFilter: CoarseFilterResult;
-  readonly hotFineAssessmentCount: number;
+  readonly hotCoarseCandidateCount: number;
   readonly winnerMemoryIds: ReadonlySet<string>;
   readonly timeFilter?: RecallTimeFilter;
+  readonly warn: RecallServiceWarnPort;
 }>): Promise<CoarseFilterResult> {
   const targetCount = Math.min(MIN_RECALL_RESULTS, params.fineAssessmentConfig.budgets.max_entries);
   if (targetCount === 0) {
     return params.hotCoarseFilter;
   }
 
-  if (params.hotFineAssessmentCount >= targetCount) {
+  if (params.hotCoarseCandidateCount >= targetCount) {
+    params.warn("tier cascade skipped", {
+      reason: "hot_coarse_candidates_sufficient",
+      hot_coarse_candidate_count: params.hotCoarseCandidateCount,
+      target_count: targetCount
+    });
     return params.hotCoarseFilter;
   }
 

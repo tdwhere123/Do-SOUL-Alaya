@@ -93,6 +93,12 @@ export function buildQuestionDiagnostic(input: {
       rank_after_lexical_priority: candidate?.rankAfterLexicalPriority ?? null,
       rank_after_synthesis_reserve: candidate?.rankAfterSynthesisReserve ?? null,
       rank_after_structural_reserve: candidate?.rankAfterStructuralReserve ?? null,
+      rank_after_coverage_selector: candidate?.rankAfterCoverageSelector ?? null,
+      rank_after_session_coverage: candidate?.rankAfterSessionCoverage ?? null,
+      coverage_selector_action: candidate?.coverageSelectorAction ?? null,
+      session_coverage_action: candidate?.sessionCoverageAction ?? null,
+      session_key: candidate?.sessionKey ?? null,
+      source_cohort_key: candidate?.sourceCohortKey ?? null,
       reserved_by: candidate?.reservedBy ?? null
     };
   });

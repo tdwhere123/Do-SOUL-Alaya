@@ -55,6 +55,8 @@ const DIAGNOSTIC_SOURCE_LABELS = new Set<string>([
   "evidence_fts"
 ]);
 
+const DELIVERY_STAGE_ACTIONS = new Set(["noop", "kept", "promoted", "displaced"]);
+
 export function readRecallDiagnostics(
   recallResult: unknown,
   embeddingMode: "disabled" | "env"
@@ -143,6 +145,12 @@ function readCandidates(
       rankAfterLexicalPriority: readNumber(record.rank_after_lexical_priority),
       rankAfterSynthesisReserve: readNumber(record.rank_after_synthesis_reserve),
       rankAfterStructuralReserve: readNumber(record.rank_after_structural_reserve),
+      rankAfterCoverageSelector: readNumber(record.rank_after_coverage_selector),
+      rankAfterSessionCoverage: readNumber(record.rank_after_session_coverage),
+      coverageSelectorAction: readDeliveryStageAction(record.coverage_selector_action),
+      sessionCoverageAction: readDeliveryStageAction(record.session_coverage_action),
+      sessionKey: readString(record.session_key),
+      sourceCohortKey: readString(record.source_cohort_key),
       reservedBy: readString(record.reserved_by)
     };
     const objectIdentityKey = buildObjectIdentityKey(candidate.objectKind, candidate.objectId);
@@ -174,6 +182,16 @@ function readCandidates(
     byCandidateKey: Object.freeze(byCandidateKey),
     keysByObjectId: Object.freeze(keysByObjectId)
   };
+}
+
+function readDeliveryStageAction(
+  value: unknown
+): "noop" | "kept" | "promoted" | "displaced" | null {
+  const raw = readString(value);
+  if (raw === null || !DELIVERY_STAGE_ACTIONS.has(raw)) {
+    return null;
+  }
+  return raw as "noop" | "kept" | "promoted" | "displaced";
 }
 
 export function buildObjectIdentityKey(objectKind: string, objectId: string): string {

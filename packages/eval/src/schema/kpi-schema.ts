@@ -601,6 +601,23 @@ const QaMetricsSchema = z
         })
         .strict()
     ),
+    delivery_settings: z
+      .object({
+        deliver_k_override: z.number().int().positive().nullable(),
+        wide_agg_enabled: z.boolean(),
+        gold_only_enabled: z.boolean(),
+        dedup_delivery_enabled: z.boolean(),
+        session_spread_enabled: z.boolean(),
+        llm_filter_enabled: z.boolean(),
+        llm_filter_k: z.number().int().positive().nullable(),
+        llm_filter_m: z.number().int().positive().nullable(),
+        support_pack_enabled: z.boolean(),
+        support_pack_max: z.number().int().positive().nullable(),
+        v2_prompts_enabled: z.boolean(),
+        temporal_enum_enabled: z.boolean()
+      })
+      .strict()
+      .optional(),
     answer_model: z.string().min(1),
     judge_model: z.string().min(1)
   })

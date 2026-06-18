@@ -206,6 +206,84 @@ describe("Memory embedding storage repo", () => {
     ]);
   });
 
+  it("pushes the schema_version filter into listByWorkspace so cross-schema rows are dropped at the SQL layer", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "11111111-1111-4111-8111-111111111111",
+        workspace_id: workspaceId,
+        schema_version: 1,
+        embedding: new Float32Array([1, 0, 0])
+      })
+    );
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "22222222-2222-4222-8222-222222222222",
+        workspace_id: workspaceId,
+        schema_version: 2,
+        embedding: new Float32Array([0, 1, 0])
+      })
+    );
+
+    const schemaOneRows = await repo.listByWorkspace(workspaceId, { schemaVersion: 1 });
+    expect(schemaOneRows.map((row) => row.object_id)).toEqual([
+      "11111111-1111-4111-8111-111111111111"
+    ]);
+
+    const schemaTwoRows = await repo.listByWorkspace(workspaceId, { schemaVersion: 2 });
+    expect(schemaTwoRows.map((row) => row.object_id)).toEqual([
+      "22222222-2222-4222-8222-222222222222"
+    ]);
+
+    const unfiltered = await repo.listByWorkspace(workspaceId);
+    expect(unfiltered.map((row) => row.object_id).sort()).toEqual([
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222"
+    ]);
+  });
+
+  it("drops dormant and tombstoned backing memories from filtered workspace scans", async () => {
+    const { workspaceId, repo, memoryRepo } = await createRepoContext();
+    const activeId = "11111111-1111-4111-8111-111111111111";
+    const dormantId = "33333333-3333-4333-8333-333333333333";
+    const tombstonedId = "44444444-4444-4444-8444-444444444444";
+
+    await memoryRepo.create(createMemoryEntry({
+      object_id: dormantId,
+      lifecycle_state: "dormant"
+    }));
+    await memoryRepo.create(createMemoryEntry({
+      object_id: tombstonedId,
+      lifecycle_state: "tombstone",
+      retention_state: "tombstoned"
+    }));
+    for (const objectId of [activeId, dormantId, tombstonedId]) {
+      await repo.upsert(
+        createEmbeddingRecord({
+          object_id: objectId,
+          workspace_id: workspaceId,
+          embedding: new Float32Array([1, 0, 0])
+        })
+      );
+    }
+
+    const filtered = await repo.listByWorkspace(workspaceId, {
+      tierFilter: ["hot"],
+      providerKind: "openai",
+      modelId: "text-embedding-3-small",
+      schemaVersion: 1
+    });
+    expect(filtered.map((row) => row.object_id)).toEqual([activeId]);
+
+    const unfiltered = await repo.listByWorkspace(workspaceId);
+    expect(unfiltered.map((row) => row.object_id).sort()).toEqual([
+      activeId,
+      dormantId,
+      tombstonedId
+    ]);
+  });
+
   it("skips guarded upserts when the current memory content no longer matches the candidate hash", async () => {
     const { repo, memoryRepo, workspaceId } = await createRepoContext();
     const objectId = "11111111-1111-4111-8111-111111111111";
@@ -336,6 +414,7 @@ async function createRepoContext(): Promise<{
         readonly limit?: number;
         readonly providerKind?: string;
         readonly modelId?: string;
+        readonly schemaVersion?: number;
       }
     ): Promise<readonly Readonly<MemoryEmbeddingRecord>[]>;
     listByObjectIds(

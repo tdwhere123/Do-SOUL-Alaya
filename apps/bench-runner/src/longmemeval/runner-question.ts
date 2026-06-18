@@ -47,9 +47,10 @@ import { selectRelevantMemories } from "./qa-llm-filter.js";
 import { buildQaSupportPack } from "./qa-support-pack.js";
 
 const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
-const WIDE_QA_DELIVERY_QUESTION_TYPES = new Set([
+export const WIDE_QA_DELIVERY_QUESTION_TYPES = new Set([
   "knowledge-update",
-  "multi-session"
+  "multi-session",
+  "locomo-aggregation"
 ]);
 
 /** Read a positive-integer env override, else the fallback. */
@@ -122,6 +123,108 @@ export function dedupeQaDeliveredCandidates(
   return unique;
 }
 
+interface QaSourceRecallPointer {
+  readonly object_id: string;
+  readonly object_kind?: string;
+}
+
+interface QaSidecarContent {
+  readonly content?: string;
+  readonly sessionId?: string | null;
+  readonly eventDate?: string;
+}
+
+// sessionId stays a present string | null (not optional) so the session-spread
+// generic still narrows; the looser QaDeliveredCandidate is a supertype.
+interface QaSourceCandidate extends QaDeliveredCandidate {
+  readonly sessionId: string | null;
+}
+
+/** Build the QA delivery candidate sets, ranking against the FULL recall list
+ * rather than the memory_entry-filtered subsequence so a non-memory_entry
+ * pointer ranked above does not understate sourceRank (and the gold-only path
+ * carries sessionId + the gold's original recall rank). Pure: callers select
+ * the final delivered set from these. */
+export function buildQaDeliveredCandidates(input: {
+  readonly results: readonly QaSourceRecallPointer[];
+  readonly goldMemoryIds: readonly string[];
+  readonly lookupMemoryEntry: (objectId: string) => QaSidecarContent | undefined;
+  readonly lookupCandidate?: (
+    objectKind: "memory_entry" | "synthesis_capsule",
+    objectId: string
+  ) => QaSidecarContent | undefined;
+}): {
+  readonly deliveryCandidates: QaSourceCandidate[];
+  readonly memoryEntryCandidates: QaSourceCandidate[];
+  readonly goldOnly: QaSourceCandidate[];
+} {
+  const lookupCandidate = (
+    objectKind: "memory_entry" | "synthesis_capsule",
+    objectId: string
+  ): QaSidecarContent | undefined =>
+    input.lookupCandidate?.(objectKind, objectId) ??
+    (objectKind === "memory_entry" ? input.lookupMemoryEntry(objectId) : undefined);
+  const deliveryCandidates = input.results
+    .map((result, index) => ({ result, originalRank: index + 1 }))
+    .filter(
+      ({ result }) =>
+        (result.object_kind ?? "memory_entry") === "memory_entry" ||
+        result.object_kind === "synthesis_capsule"
+    )
+    .map(({ result, originalRank }) => {
+      const objectKind = (result.object_kind ?? "memory_entry") as
+        | "memory_entry"
+        | "synthesis_capsule";
+      const entry = lookupCandidate(objectKind, result.object_id);
+      return {
+        objectId: result.object_id,
+        objectKind,
+        content: entry?.content ?? "",
+        sessionId: entry?.sessionId ?? null,
+        sourceRank: originalRank,
+        ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+      };
+    });
+  const memoryEntryCandidates = input.results
+    .map((result, index) => ({ result, originalRank: index + 1 }))
+    .filter(
+      ({ result }) => (result.object_kind ?? "memory_entry") === "memory_entry"
+    )
+    .map(({ result, originalRank }) => {
+      const entry = input.lookupMemoryEntry(result.object_id);
+      return {
+        objectId: result.object_id,
+        content: entry?.content ?? "",
+        sessionId: entry?.sessionId ?? null,
+        sourceRank: originalRank,
+        ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+      };
+    });
+  const originalRankById = new Map<string, number>();
+  input.results.forEach((pointer, index) => {
+    if ((pointer.object_kind ?? "memory_entry") !== "memory_entry") {
+      return;
+    }
+    // keep the best (earliest) rank if an object_id recurs in results
+    if (!originalRankById.has(pointer.object_id)) {
+      originalRankById.set(pointer.object_id, index + 1);
+    }
+  });
+  const goldOnly = input.goldMemoryIds.map((id) => {
+    const entry = input.lookupMemoryEntry(id);
+    const goldRank = originalRankById.get(id);
+    return {
+      objectId: id,
+      content: entry?.content ?? "",
+      sessionId: entry?.sessionId ?? null,
+      // gold absent from results => no recall rank; leave sourceRank unset.
+      ...(goldRank === undefined ? {} : { sourceRank: goldRank }),
+      ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+    };
+  });
+  return { deliveryCandidates, memoryEntryCandidates, goldOnly };
+}
+
 /** Round-robin across the source sessions of the recalled pool so one
  * high-match session can't bury other answer sessions' gold below the delivery
  * budget. Reshapes QA delivery selection only (post-recall); recall-service is
@@ -152,6 +255,20 @@ function selectSessionSpread<T extends { readonly sessionId: string | null }>(
     if (!progressed) break;
   }
   return picked;
+}
+
+function buildQaSupportCandidatesFromSidecar(
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>
+): QaSourceCandidate[] {
+  return [...sidecar.values()]
+    .filter((entry) => entry.objectKind === "memory_entry")
+    .map((entry) => ({
+      objectId: entry.objectId,
+      objectKind: "memory_entry" as const,
+      content: entry.content ?? "",
+      sessionId: entry.sessionId,
+      ...(entry.eventDate === undefined ? {} : { eventDate: entry.eventDate })
+    }));
 }
 
 function isBenchProfileEnabled(): boolean {
@@ -326,7 +443,8 @@ export async function runLongMemEvalQuestion(input: {
               objectId: synthesisResult.synthesisId,
               objectKind: "synthesis_capsule",
               sessionId,
-              hasAnswer: sessionHasAnswer
+              hasAnswer: sessionHasAnswer,
+              content: synthesisInput.summary
             }
           );
         }
@@ -504,38 +622,23 @@ export async function runLongMemEvalQuestion(input: {
       // candidates, so they stay narrow. ALAYA_BENCH_QA_WIDE_AGG turns on the
       // type-aware budget; ALAYA_BENCH_QA_DELIVER_K is a global A/B override.
       const { deliverK } = resolveQaDeliveryBudget(input.question.question_type);
-      const memoryEntryResults = results.filter(
-        (pointer) => (pointer.object_kind ?? "memory_entry") === "memory_entry"
-      );
-      const memoryEntryCandidates = memoryEntryResults.map((result, index) => {
-        const entry = sidecar.get(
-          buildLongMemEvalSidecarKey("memory_entry", result.object_id)
-        );
-        return {
-          objectId: result.object_id,
-          content: entry?.content ?? "",
-          sessionId: entry?.sessionId ?? null,
-          sourceRank: index + 1,
-          ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
-        };
+      const { deliveryCandidates, memoryEntryCandidates, goldOnly } = buildQaDeliveredCandidates({
+        results,
+        goldMemoryIds,
+        lookupMemoryEntry: (objectId) =>
+          sidecar.get(buildLongMemEvalSidecarKey("memory_entry", objectId)),
+        lookupCandidate: (objectKind, objectId) =>
+          sidecar.get(buildLongMemEvalSidecarKey(objectKind, objectId))
       });
+      const supportCandidates = buildQaSupportCandidatesFromSidecar(sidecar);
       const goldOnlyRequested =
         process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined;
       const deliveryPool =
         process.env.ALAYA_BENCH_QA_SESSION_SPREAD !== undefined
-          ? selectSessionSpread(memoryEntryCandidates)
-          : memoryEntryCandidates;
+          ? selectSessionSpread(deliveryCandidates)
+          : deliveryCandidates;
       let delivered: QaDeliveredCandidate[] = goldOnlyRequested
-        ? goldMemoryIds.map((id) => {
-          const entry = sidecar.get(
-            buildLongMemEvalSidecarKey("memory_entry", id)
-          );
-          return {
-            objectId: id,
-            content: entry?.content ?? "",
-            ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
-          };
-        })
+        ? goldOnly
         : shouldDedupQaDelivery()
           ? dedupeQaDeliveredCandidates(deliveryPool, deliverK)
           : deliveryPool.slice(0, deliverK);
@@ -551,8 +654,8 @@ export async function runLongMemEvalQuestion(input: {
         const filterK = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_K", 30);
         const filterM = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_M", 8);
         const widePool: QaDeliveredCandidate[] = shouldDedupQaDelivery()
-          ? dedupeQaDeliveredCandidates(memoryEntryCandidates, filterK)
-          : memoryEntryCandidates
+          ? dedupeQaDeliveredCandidates(deliveryCandidates, filterK)
+          : deliveryCandidates
               .filter((cand) => normalizeQaDeliveryContent(cand.content).length > 0)
               .slice(0, filterK);
         const selected = await selectRelevantMemories(
@@ -574,7 +677,8 @@ export async function runLongMemEvalQuestion(input: {
         delivered = buildQaSupportPack({
           questionType: input.question.question_type,
           selected: delivered,
-          widePool: memoryEntryCandidates,
+          widePool: deliveryCandidates,
+          supportPool: supportCandidates,
           maxDeliver: readPositiveIntEnv("ALAYA_BENCH_QA_SUPPORT_PACK_MAX", 16)
         });
       }

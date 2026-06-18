@@ -47,6 +47,8 @@ export interface MemoryEmbeddingListByWorkspaceOptions {
   // see also: packages/core/src/embedding-recall/constants.ts:EMBEDDING_WORKSPACE_SCAN_CAP
   readonly providerKind?: string;
   readonly modelId?: string;
+  // invariant: cosine space is valid only within one embedding schema_version.
+  readonly schemaVersion?: number;
 }
 
 export interface MemoryEmbeddingRepo {
@@ -362,19 +364,25 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     const limit = options?.limit;
     const providerKind = options?.providerKind;
     const modelId = options?.modelId;
+    const schemaVersion = options?.schemaVersion;
 
     try {
       if (
         tierFilter === undefined &&
         (limit === undefined || limit <= 0) &&
         providerKind === undefined &&
-        modelId === undefined
+        modelId === undefined &&
+        schemaVersion === undefined
       ) {
         const rows = this.listByWorkspaceStatement.all(parsedWorkspaceId) as MemoryEmbeddingRow[];
         return Object.freeze(rows.map((row) => parseMemoryEmbeddingRow(row)));
       }
 
-      const clauses: string[] = ["e.workspace_id = ?"];
+      const clauses: string[] = [
+        "e.workspace_id = ?",
+        "m.lifecycle_state = 'active'",
+        "COALESCE(m.retention_state, '') != 'tombstoned'"
+      ];
       const args: (string | number)[] = [parsedWorkspaceId];
       if (tierFilter !== undefined && tierFilter.length > 0) {
         const placeholders = tierFilter.map(() => "?").join(", ");
@@ -390,6 +398,10 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
       if (modelId !== undefined) {
         clauses.push("e.model_id = ?");
         args.push(parseModelId(modelId));
+      }
+      if (schemaVersion !== undefined) {
+        clauses.push("e.schema_version = ?");
+        args.push(Math.floor(schemaVersion));
       }
       let sql = `
         SELECT

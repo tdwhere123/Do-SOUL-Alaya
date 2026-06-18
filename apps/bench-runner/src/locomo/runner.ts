@@ -43,12 +43,14 @@ import { resolveBenchEmbeddingProviderLabel } from "../longmemeval/runner.js";
 import {
   scoreQaQuestion,
   aggregateQaVerdicts,
+  buildQaDeliverySettings,
   type QaQuestionVerdict,
   type QaDeliveredCandidate
 } from "../longmemeval/qa-harness.js";
 import { type QaChatFn, QaChatError } from "../longmemeval/qa-chat.js";
 import { selectRelevantMemories } from "../longmemeval/qa-llm-filter.js";
 import { buildQaSupportPack } from "../longmemeval/qa-support-pack.js";
+import { resolveQaDeliveryBudget } from "../longmemeval/runner-question.js";
 import {
   createCompileSeedRunner,
   computeNextTurnSeedRefs,
@@ -87,7 +89,12 @@ export interface LocomoRunOptions {
   readonly pinnedMetaRoot?: string;
   readonly offset?: number;
   // End-to-end QA: present only with --qa. Supplies the answer-LLM/judge chat fn.
-  readonly qa?: { readonly chat: QaChatFn; readonly judgeChat?: QaChatFn };
+  readonly qa?: {
+    readonly chat: QaChatFn;
+    readonly judgeChat?: QaChatFn;
+    readonly answerModel?: string;
+    readonly judgeModel?: string;
+  };
 }
 
 export interface LocomoRunResult {
@@ -236,14 +243,24 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const rAt10 = totalQa === 0 ? 0 : totalHitAt10 / totalQa;
 
   // End-to-end QA aggregate (only when --qa ran). Printed for parity with the
-  // longmemeval harness; not persisted to the KPI schema.
+  // longmemeval harness and persisted with delivery settings so agent-sim
+  // levers are not conflated with recall-only runs.
   const allQaVerdicts = conversationResults.flatMap((result) => result.qaVerdicts);
+  const qaMetrics =
+    opts.qa !== undefined && allQaVerdicts.length > 0
+      ? {
+          ...aggregateQaVerdicts(allQaVerdicts),
+          delivery_settings: buildQaDeliverySettings(),
+          answer_model: opts.qa.answerModel ?? "unknown",
+          judge_model: opts.qa.judgeModel ?? opts.qa.answerModel ?? "unknown"
+        }
+      : undefined;
   if (allQaVerdicts.length > 0) {
-    const qaAgg = aggregateQaVerdicts(allQaVerdicts);
     process.stdout.write(
-      `LoCoMo QA accuracy=${(qaAgg.qa_accuracy * 100).toFixed(1)}% (${qaAgg.qa_correct}/${qaAgg.qa_total})\n`
+      `LoCoMo QA accuracy=${((qaMetrics?.qa_accuracy ?? 0) * 100).toFixed(1)}% ` +
+        `(${qaMetrics?.qa_correct ?? 0}/${qaMetrics?.qa_total ?? 0})\n`
     );
-    for (const [type, tally] of Object.entries(qaAgg.qa_by_type)) {
+    for (const [type, tally] of Object.entries(qaMetrics?.qa_by_type ?? {})) {
       process.stdout.write(`  ${type}: ${tally.correct}/${tally.total}\n`);
     }
     // Per raw LoCoMo category (1 single-hop / 2 temporal / 3 multi-hop /
@@ -354,6 +371,7 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
         cold_cascade_engaged: 0,
         recall_explainability_partial: 0
       },
+      ...(qaMetrics === undefined ? {} : { qa_metrics: qaMetrics }),
       seed_truncation: {
         seed_turns_truncated: 0,
         answer_turns_truncated: 0,
@@ -763,10 +781,11 @@ async function runQuestion(
   workspace: BenchWorkspaceHandle,
   qa: LocomoQa
 ): Promise<QaResult> {
+  const { deliverK } = resolveQaDeliveryBudget(resolveLocomoQaQuestionType(qa));
   const recallStart = monotonicNowNs();
-  const recallResult = await workspace.recall(qa.question, { maxResults: 10 });
+  const recallResult = await workspace.recall(qa.question, { maxResults: deliverK });
   const latencyMs = monotonicElapsedMs(recallStart);
-  const pointers = recallResult.results.slice(0, 10).map((pointer) => ({
+  const pointers = recallResult.results.slice(0, deliverK).map((pointer) => ({
     object_id: pointer.object_id,
     relevance_score: pointer.relevance_score
   }));
