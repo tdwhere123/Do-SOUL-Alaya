@@ -44,7 +44,7 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
   private readonly findByTargetMemoryStatement: SqliteStatement;
   private readonly deleteExpiredStatement: SqliteStatement;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(db: StorageDatabase) {
     const statements = prepareOrphanRadarStatements(db);
     this.createStatement = statements.createStatement;
     this.createEventLogOrphanStatement = statements.createEventLogOrphanStatement;

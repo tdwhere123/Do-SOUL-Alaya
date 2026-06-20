@@ -339,7 +339,7 @@ async function recordRecallSideEffects(
 async function appendRecallCompletedEvent(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
+  _prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
   manifested: ManifestedRecallResult
 ): Promise<void> {

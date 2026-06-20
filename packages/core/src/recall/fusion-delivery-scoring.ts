@@ -22,7 +22,6 @@ import type {
 import {
   normalizeEvidenceText} from "./query-evidence-scoring.js";
 
-const STRONG_LEXICAL_DELIVERY_RANK = 0.85;
 const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;
 const EMBEDDING_PATH_MODULATION_GAIN = 0.25;
 const RECALL_RRF_DEFAULT_K = 60;
@@ -40,8 +39,6 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   structural: 1, existing_score: 1, embedding_similarity: 1, graph_expansion: 3,
   entity_seed: 1, path_expansion: 3, temporal_recency: 0, workspace_activation: 0
 });
-
-const SYNTHESIS_ANCHOR_BONUS = 0.1;
 
 type RecallFusionCandidateInput = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;

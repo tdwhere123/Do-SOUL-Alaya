@@ -66,27 +66,11 @@ export class SqliteMemoryEntryRepo
   // (not the unnameable BetterSqlite3.Statement) so the declaration emit stays
   // self-contained and each field matches its workflow-host requirement exactly.
   public readonly findByIdStatement: SqliteGetStatement;
-  private readonly findByWorkspaceHotStatement;
-  private readonly findByWorkspaceHotPagedStatement;
-  private readonly countByWorkspaceHotStatement;
-  private readonly findByWorkspaceTierStatement;
-  private readonly findByWorkspaceTierPagedStatement;
-  private readonly countByWorkspaceTierStatement;
-  private readonly findByRunIdStatement;
-  private readonly findByRunIdPagedStatement;
-  private readonly countByRunIdStatement;
-  private readonly findByDimensionHotStatement;
-  private readonly findByDimensionHotPagedStatement;
-  private readonly countByDimensionHotStatement;
-  private readonly findByScopeClassHotStatement;
-  private readonly findByScopeClassHotPagedStatement;
   public readonly updateStatement: SqliteRunStatement;
   public readonly updateScopedStatement: SqliteRunStatement;
   public readonly searchByKeywordStatement: SqliteAllStatement;
   // see also: packages/storage/src/migrations/077-memory-content-fts-dual.sql
   public readonly searchByKeywordPorterStatement: SqliteAllStatement;
-  private readonly findLowActivityActiveMemoriesStatement;
-  private readonly findTombstonedMemoriesStatement;
   public readonly transitionLifecycleStatement: SqliteRunStatement;
   // invariant (I3): a revived / non-tombstone transition clears the terminal
   // forget marker so an active/dormant row never carries a removal disposition.
@@ -97,9 +81,7 @@ export class SqliteMemoryEntryRepo
   public readonly demoteActiveToDormantStatement: SqliteRunStatement;
   public readonly archiveStatement: SqliteRunStatement;
   public readonly hardDeleteTombstonedStatement: SqliteRunStatement;
-  private readonly findDormantMemoriesStatement;
   public readonly autonomousTombstoneStatement: SqliteRunStatement;
-  private readonly findTombstonedWithDispositionStatement;
   public readonly hardDeleteTombstonedWithDispositionStatement: SqliteRunStatement;
   // invariant: compressed delete rechecks capsule liveness atomically with removal.
   public readonly hardDeleteTombstonedCompressedGuardedStatement: SqliteRunStatement;
@@ -117,35 +99,17 @@ export class SqliteMemoryEntryRepo
     const statements = prepareMemoryEntryStatements(db);
     this.createStatement = statements.createStatement;
     this.findByIdStatement = statements.findByIdStatement;
-    this.findByWorkspaceHotStatement = statements.findByWorkspaceHotStatement;
-    this.findByWorkspaceHotPagedStatement = statements.findByWorkspaceHotPagedStatement;
-    this.countByWorkspaceHotStatement = statements.countByWorkspaceHotStatement;
-    this.findByWorkspaceTierStatement = statements.findByWorkspaceTierStatement;
-    this.findByWorkspaceTierPagedStatement = statements.findByWorkspaceTierPagedStatement;
-    this.countByWorkspaceTierStatement = statements.countByWorkspaceTierStatement;
-    this.findByRunIdStatement = statements.findByRunIdStatement;
-    this.findByRunIdPagedStatement = statements.findByRunIdPagedStatement;
-    this.countByRunIdStatement = statements.countByRunIdStatement;
-    this.findByDimensionHotStatement = statements.findByDimensionHotStatement;
-    this.findByDimensionHotPagedStatement = statements.findByDimensionHotPagedStatement;
-    this.countByDimensionHotStatement = statements.countByDimensionHotStatement;
-    this.findByScopeClassHotStatement = statements.findByScopeClassHotStatement;
-    this.findByScopeClassHotPagedStatement = statements.findByScopeClassHotPagedStatement;
     this.updateStatement = statements.updateStatement;
     this.updateScopedStatement = statements.updateScopedStatement;
     this.searchByKeywordStatement = statements.searchByKeywordStatement;
     this.searchByKeywordPorterStatement = statements.searchByKeywordPorterStatement;
-    this.findLowActivityActiveMemoriesStatement = statements.findLowActivityActiveMemoriesStatement;
-    this.findTombstonedMemoriesStatement = statements.findTombstonedMemoriesStatement;
     this.transitionLifecycleStatement = statements.transitionLifecycleStatement;
     this.transitionLifecycleClearForgetStatement = statements.transitionLifecycleClearForgetStatement;
     this.reviveDormantStatement = statements.reviveDormantStatement;
     this.demoteActiveToDormantStatement = statements.demoteActiveToDormantStatement;
     this.archiveStatement = statements.archiveStatement;
     this.hardDeleteTombstonedStatement = statements.hardDeleteTombstonedStatement;
-    this.findDormantMemoriesStatement = statements.findDormantMemoriesStatement;
     this.autonomousTombstoneStatement = statements.autonomousTombstoneStatement;
-    this.findTombstonedWithDispositionStatement = statements.findTombstonedWithDispositionStatement;
     this.hardDeleteTombstonedWithDispositionStatement = statements.hardDeleteTombstonedWithDispositionStatement;
     this.hardDeleteTombstonedCompressedGuardedStatement = statements.hardDeleteTombstonedCompressedGuardedStatement;
     this.hardDeleteTombstonedJudgedUselessGuardedStatement = statements.hardDeleteTombstonedJudgedUselessGuardedStatement;

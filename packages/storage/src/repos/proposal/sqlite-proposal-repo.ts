@@ -20,14 +20,12 @@ import {
 import {
   parseProposalId,
   parseProposalResolutionState,
-  parseProposalReviewerAssignmentRow,
   parseProposalRow,
   parseUpdatedAt} from "./mappers.js";
 import { ProposalCreateWorkflow } from "./proposal-create-workflow.js";
 import { ProposalReadQueries } from "./proposal-read-queries.js";
 import { prepareProposalStatements } from "./sqlite-proposal-statements.js";
 import {
-  type ProposalReviewerAssignmentRow,
   type ProposalRow
 } from "./rows.js";
 import {
@@ -56,17 +54,7 @@ interface ParsedPendingResolutionUpdate {
 }
 
 export class SqliteProposalRepo implements ProposalRepo {
-  private readonly createStatement;
   private readonly findByIdStatement;
-  private readonly findByWorkspaceIdStatement;
-  private readonly findByWorkspaceIdPagedStatement;
-  private readonly countByWorkspaceIdStatement;
-  private readonly findPendingStatement;
-  private readonly findPendingPagedStatement;
-  private readonly countPendingStatement;
-  private readonly findPendingByRunIdStatement;
-  private readonly assignReviewerStatement;
-  private readonly findReviewerAssignmentStatement;
   private readonly updateResolutionStatement;
   private readonly updateResolutionWithIdentityStatement;
   private readonly updatePendingResolutionStatement;
@@ -92,17 +80,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     // Defaults from migration 058 keep legacy callers compatible if
     // they pass undefined for those fields.
     const statements = prepareProposalStatements(db);
-    this.createStatement = statements.createStatement;
     this.findByIdStatement = statements.findByIdStatement;
-    this.findByWorkspaceIdStatement = statements.findByWorkspaceIdStatement;
-    this.findByWorkspaceIdPagedStatement = statements.findByWorkspaceIdPagedStatement;
-    this.countByWorkspaceIdStatement = statements.countByWorkspaceIdStatement;
-    this.findPendingStatement = statements.findPendingStatement;
-    this.findPendingPagedStatement = statements.findPendingPagedStatement;
-    this.countPendingStatement = statements.countPendingStatement;
-    this.findPendingByRunIdStatement = statements.findPendingByRunIdStatement;
-    this.assignReviewerStatement = statements.assignReviewerStatement;
-    this.findReviewerAssignmentStatement = statements.findReviewerAssignmentStatement;
     this.updateResolutionStatement = statements.updateResolutionStatement;
     this.updateResolutionWithIdentityStatement = statements.updateResolutionWithIdentityStatement;
     this.updatePendingResolutionStatement = statements.updatePendingResolutionStatement;
@@ -443,14 +421,6 @@ export class SqliteProposalRepo implements ProposalRepo {
     }
 
     return new StorageError("CONFLICT", `Proposal ${proposalId} is already ${row.resolution_state}.`);
-  }
-
-
-  private findReviewerAssignmentRow(proposalId: string): Readonly<ProposalReviewerAssignment> | null {
-    const row = this.findReviewerAssignmentStatement.get(proposalId) as
-      | ProposalReviewerAssignmentRow
-      | undefined;
-    return row === undefined ? null : parseProposalReviewerAssignmentRow(row);
   }
 }
 
