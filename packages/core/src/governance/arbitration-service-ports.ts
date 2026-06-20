@@ -1,10 +1,10 @@
-
 import {
   ClaimLifecycleState,
   ConflictEdgeType,
   ConflictEdgeTypeSchema,
   ConflictMatrixEdgeSchema,
   SlotEventType,
+  SoulConflictMatrixEdgeCreatedPayloadSchema,
   SoulSlotWinnerChangedPayloadSchema,
   TransitionCausedBy,
   type ClaimForm,
@@ -16,15 +16,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import { CoreError } from "../shared/errors.js";
-
 import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
-type ArbitrationServiceMethodOwner = {
-  generateObjectId: () => string;
-  now: () => string;
-  dependencies: ArbitrationServiceDependencies;
-  [key: string]: any;
-};
-
 
 export interface ArbitrationServiceSlotRepoPort {
   findById(objectId: string): Promise<Readonly<Slot> | null>;
@@ -105,14 +97,14 @@ export interface ConflictMatrixRebuildResult {
   readonly valid_edges: number;
 }
 
-interface ArbitrationSelection {
+export interface ArbitrationSelection {
   readonly decision: "winner_changed" | "contested" | "no_change";
   readonly winnerClaimId: string | null;
   readonly contestedClaimIds: readonly string[];
   readonly reason: string;
 }
 
-interface WinnerChangeOptions {
+export interface WinnerChangeOptions {
   readonly causedBy: TransitionCausedBy;
   readonly lifecycleReasonPrefix: string;
   readonly eventReasonCode: string;
@@ -141,7 +133,7 @@ const originTierPriority: Readonly<Record<ClaimForm["origin_tier"], number>> = {
   seed: 1
 };
 
-function parseEdgeInput(value: ConflictMatrixEdgeInput): ConflictMatrixEdgeInput {
+export function parseEdgeInput(value: ConflictMatrixEdgeInput): ConflictMatrixEdgeInput {
   const sourceClaimId = parseObjectId(value.source_claim_id, "source_claim_id");
   const targetClaimId = parseObjectId(value.target_claim_id, "target_claim_id");
 
@@ -165,7 +157,7 @@ function parseEdgeType(value: ConflictEdgeTypeType): ConflictEdgeTypeType {
   }
 }
 
-function parseEdge(value: ConflictMatrixEdge): Readonly<ConflictMatrixEdge> {
+export function parseEdge(value: ConflictMatrixEdge): Readonly<ConflictMatrixEdge> {
   try {
     return ConflictMatrixEdgeSchema.parse(value);
   } catch (error) {
@@ -173,7 +165,7 @@ function parseEdge(value: ConflictMatrixEdge): Readonly<ConflictMatrixEdge> {
   }
 }
 
-function isCandidateForSlot(claim: Readonly<ClaimForm>, slot: Readonly<Slot>): boolean {
+export function isCandidateForSlot(claim: Readonly<ClaimForm>, slot: Readonly<Slot>): boolean {
   return (
     claim.workspace_id === slot.workspace_id &&
     claim.claim_kind === slot.claim_kind &&
@@ -185,7 +177,7 @@ function isCandidateForSlot(claim: Readonly<ClaimForm>, slot: Readonly<Slot>): b
   );
 }
 
-function collectIncompatibleClaimIds(
+export function collectIncompatibleClaimIds(
   edges: readonly Readonly<ConflictMatrixEdge>[],
   candidateIds: ReadonlySet<string>
 ): readonly string[] {
@@ -208,7 +200,7 @@ function collectIncompatibleClaimIds(
   return [...ids].sort((left, right) => left.localeCompare(right));
 }
 
-function hasNonConflictCoverage(
+export function hasNonConflictCoverage(
   candidates: readonly Readonly<ClaimForm>[],
   edges: readonly Readonly<ConflictMatrixEdge>[]
 ): boolean {
@@ -241,7 +233,7 @@ function hasNonConflictCoverage(
   return coveredPairs.size === totalPairs;
 }
 
-function pickHighestPriorityClaim(
+export function pickHighestPriorityClaim(
   claims: readonly Readonly<ClaimForm>[],
   edges: readonly Readonly<ConflictMatrixEdge>[]
 ): Readonly<ClaimForm> | null {
@@ -319,102 +311,124 @@ function compareScores(
   return 0;
 }
 
-export async function arbitrationServiceApplyWinnerChange(owner: ArbitrationServiceMethodOwner, slot: Readonly<Slot>, candidates: readonly Readonly<ClaimForm>[], winnerClaimId: string | null, options: WinnerChangeOptions): Promise<Readonly<Slot> | null> {
-    if (winnerClaimId === null) {
-      return null;
+export function collectDecisiveChallengers(
+  candidates: readonly Readonly<ClaimForm>[],
+  edges: readonly Readonly<ConflictMatrixEdge>[],
+  incumbentId: string | null
+): readonly Readonly<ClaimForm>[] {
+  return candidates.filter((candidate) => {
+    if (incumbentId === null || candidate.object_id === incumbentId) {
+      return false;
     }
-
-    const winnerClaim = candidates.find((claim) => claim.object_id === winnerClaimId) ?? null;
-    const incumbentClaim =
-      slot.winner_claim_id === null
-        ? null
-        : candidates.find((claim) => claim.object_id === slot.winner_claim_id) ?? null;
-
-    await transitionIncumbentClaimIfNeeded(owner, incumbentClaim, winnerClaimId, options);
-    await transitionWinnerClaimIfNeeded(owner, winnerClaim, options);
-    const timestamp = owner.now();
-    const event = await appendWinnerChangedEvent(owner, slot, winnerClaimId, options, timestamp);
-    const updatedSlot = await owner.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, timestamp, timestamp);
-    await owner.dependencies.runtimeNotifier.notifyEntry(event);
-    return updatedSlot;
-  }
-
-export async function arbitrationServiceLoadEdgesForCandidates(owner: ArbitrationServiceMethodOwner, candidates: readonly Readonly<ClaimForm>[]): Promise<readonly Readonly<ConflictMatrixEdge>[]> {
-    if (candidates.length === 0) {
-      return [];
-    }
-
-    const candidateIds = new Set(candidates.map((claim) => claim.object_id));
-    const workspaceId = candidates[0].workspace_id;
-    const workspaceEdges = await owner.dependencies.conflictMatrixRepo.findByWorkspace(workspaceId);
-    const edgesById = new Map<string, Readonly<ConflictMatrixEdge>>();
-
-    for (const edge of workspaceEdges) {
-      if (!candidateIds.has(edge.source_claim_id) || !candidateIds.has(edge.target_claim_id)) {
-        continue;
-      }
-
-      edgesById.set(edge.object_id, edge);
-    }
-
-    return [...edgesById.values()];
-  }
-
-async function transitionIncumbentClaimIfNeeded(
-  owner: ArbitrationServiceMethodOwner,
-  incumbentClaim: Readonly<ClaimForm> | null,
-  winnerClaimId: string,
-  options: WinnerChangeOptions
-): Promise<void> {
-  if (
-    incumbentClaim === null ||
-    incumbentClaim.object_id === winnerClaimId ||
-    (incumbentClaim.claim_status !== ClaimLifecycleState.WINNER &&
-      incumbentClaim.claim_status !== ClaimLifecycleState.ACTIVE)
-  ) {
-    return;
-  }
-
-  await owner.dependencies.claimService.transitionLifecycle(
-    incumbentClaim.object_id,
-    ClaimLifecycleState.SUPERSEDED,
-    `${options.lifecycleReasonPrefix}_superseded`,
-    options.causedBy,
-    { skipSlotElection: true }
-  );
+    return edges.some(
+      (edge) =>
+        edge.source_claim_id === candidate.object_id &&
+        edge.target_claim_id === incumbentId &&
+        decisiveEdgeTypes.has(edge.edge_type)
+    );
+  });
 }
 
-async function transitionWinnerClaimIfNeeded(
-  owner: ArbitrationServiceMethodOwner,
-  winnerClaim: Readonly<ClaimForm> | null,
-  options: WinnerChangeOptions
-): Promise<void> {
-  if (
-    winnerClaim === null ||
-    winnerClaim.claim_status === ClaimLifecycleState.WINNER ||
-    (winnerClaim.claim_status !== ClaimLifecycleState.ACTIVE &&
-      winnerClaim.claim_status !== ClaimLifecycleState.CONTESTED)
-  ) {
-    return;
+export function buildNoChallengerDecision(
+  candidates: readonly Readonly<ClaimForm>[],
+  edges: readonly Readonly<ConflictMatrixEdge>[],
+  incumbentId: string | null
+): ArbitrationSelection {
+  if (hasNonConflictCoverage(candidates, edges)) {
+    return {
+      decision: "no_change",
+      winnerClaimId: incumbentId,
+      contestedClaimIds: [],
+      reason: "non_conflict_edges"
+    };
   }
-
-  await owner.dependencies.claimService.transitionLifecycle(
-    winnerClaim.object_id,
-    ClaimLifecycleState.WINNER,
-    `${options.lifecycleReasonPrefix}_winner`,
-    options.causedBy,
-    { skipSlotElection: true }
-  );
+  return {
+    decision: candidates.length > 1 ? "contested" : "no_change",
+    winnerClaimId: incumbentId,
+    contestedClaimIds: candidates.length > 1 ? candidates.map((claim) => claim.object_id) : [],
+    reason: candidates.length > 1 ? "same_scope_no_decisive_edge" : "single_candidate"
+  };
 }
 
-async function appendWinnerChangedEvent(
-  owner: ArbitrationServiceMethodOwner,
+export function buildSelectedWinnerDecision(
+  selectedWinner: Readonly<ClaimForm> | null,
+  decisiveChallengers: readonly Readonly<ClaimForm>[],
+  incumbentId: string | null
+): ArbitrationSelection {
+  if (selectedWinner === null) {
+    return {
+      decision: "contested",
+      winnerClaimId: incumbentId,
+      contestedClaimIds: decisiveChallengers.map((claim) => claim.object_id),
+      reason: "priority_tie"
+    };
+  }
+  if (selectedWinner.object_id === incumbentId) {
+    return {
+      decision: "no_change",
+      winnerClaimId: incumbentId,
+      contestedClaimIds: [],
+      reason: "incumbent_retained"
+    };
+  }
+  return {
+    decision: "winner_changed",
+    winnerClaimId: selectedWinner.object_id,
+    contestedClaimIds: [],
+    reason: "decisive_edge_priority"
+  };
+}
+
+export function buildConflictMatrixEdge(
+  generateObjectId: () => string,
+  input: ConflictMatrixEdgeInput,
+  workspaceId: string,
+  timestamp: string
+): Readonly<ConflictMatrixEdge> {
+  return parseEdge({
+    object_id: generateObjectId(),
+    object_kind: "conflict_matrix_edge",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: timestamp,
+    updated_at: timestamp,
+    created_by: input.created_by,
+    source_claim_id: input.source_claim_id,
+    target_claim_id: input.target_claim_id,
+    edge_type: input.edge_type,
+    workspace_id: workspaceId
+  });
+}
+
+export function buildConflictMatrixEdgeCreatedEntry(
+  edge: Readonly<ConflictMatrixEdge>
+): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+  return {
+    event_type: SlotEventType.SOUL_CONFLICT_MATRIX_EDGE_CREATED,
+    entity_type: "conflict_matrix_edge",
+    entity_id: edge.object_id,
+    workspace_id: edge.workspace_id,
+    run_id: null,
+    caused_by: edge.created_by,
+    payload_json: SoulConflictMatrixEdgeCreatedPayloadSchema.parse({
+      object_id: edge.object_id,
+      object_kind: edge.object_kind,
+      workspace_id: edge.workspace_id,
+      run_id: null,
+      source_claim_id: edge.source_claim_id,
+      target_claim_id: edge.target_claim_id,
+      edge_type: edge.edge_type
+    })
+  };
+}
+
+export function buildWinnerChangedEntry(
   slot: Readonly<Slot>,
   winnerClaimId: string,
   options: WinnerChangeOptions,
   timestamp: string
-): Promise<EventLogEntry> {
-  return await owner.dependencies.eventLogRepo.append({
+): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+  return {
     event_type: SlotEventType.SOUL_SLOT_WINNER_CHANGED,
     entity_type: "slot",
     entity_id: slot.object_id,
@@ -433,5 +447,5 @@ async function appendWinnerChangedEvent(
       evidence_refs: null,
       occurred_at: timestamp
     })
-  });
+  };
 }

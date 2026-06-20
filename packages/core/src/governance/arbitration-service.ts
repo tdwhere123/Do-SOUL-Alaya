@@ -1,187 +1,346 @@
 import { randomUUID } from "node:crypto";
+
 import {
-  ConflictEdgeType,
+  ClaimLifecycleState,
   TransitionCausedBy,
   type ClaimForm,
-  type ClaimLifecycleState as ClaimLifecycleStateType,
-  type ConflictEdgeType as ConflictEdgeTypeType,
   type ConflictMatrixEdge,
-  type EventLogEntry,
   type Slot
 } from "@do-soul/alaya-protocol";
 
-import { arbitrationServiceListEdgesByWorkspace, arbitrationServiceCreateEdge, arbitrationServiceDeleteEdge, arbitrationServiceRebuildConflictMatrix, arbitrationServiceArbitrateSlot } from "./arbitration-service-methods-1.js";
-import { arbitrationServiceResolveSlotConflict, arbitrationServiceSelectArbitrationDecision, arbitrationServiceApplySelection, arbitrationServiceMarkClaimsContested } from "./arbitration-service-methods-2.js";
-import { arbitrationServiceApplyWinnerChange, arbitrationServiceLoadEdgesForCandidates } from "./arbitration-service-methods-3.js";
+import { CoreError } from "../shared/errors.js";
+import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 
-export interface ArbitrationServiceSlotRepoPort {
-  findById(objectId: string): Promise<Readonly<Slot> | null>;
-  updateWinner(
-    objectId: string,
-    winnerClaimId: string | null,
-    incumbentSince: string | null,
-    updatedAt: string
-  ): Promise<Readonly<Slot>>;
-}
+import {
+  buildConflictMatrixEdge,
+  buildConflictMatrixEdgeCreatedEntry,
+  buildNoChallengerDecision,
+  buildSelectedWinnerDecision,
+  buildWinnerChangedEntry,
+  collectDecisiveChallengers,
+  collectIncompatibleClaimIds,
+  isCandidateForSlot,
+  parseEdgeInput,
+  pickHighestPriorityClaim,
+  type ArbitrationResult,
+  type ArbitrationSelection,
+  type ArbitrationServiceDependencies,
+  type ConflictMatrixEdgeInput,
+  type ConflictMatrixRebuildResult,
+  type WinnerChangeOptions
+} from "./arbitration-service-ports.js";
 
-export interface ArbitrationServiceClaimRepoPort {
-  findById(objectId: string): Promise<Readonly<ClaimForm> | null>;
-  findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]>;
-}
-
-export interface ArbitrationServiceConflictMatrixRepoPort {
-  create(edge: Readonly<ConflictMatrixEdge>): Promise<Readonly<ConflictMatrixEdge>>;
-  findById(objectId: string): Promise<Readonly<ConflictMatrixEdge> | null>;
-  findByWorkspace(workspaceId: string): Promise<readonly Readonly<ConflictMatrixEdge>[]>;
-  findBetweenClaims(
-    sourceClaimId: string,
-    targetClaimId: string
-  ): Promise<readonly Readonly<ConflictMatrixEdge>[]>;
-  delete(objectId: string): Promise<void>;
-}
-
-export interface ArbitrationServiceClaimServicePort {
-  transitionLifecycle(
-    objectId: string,
-    newState: ClaimLifecycleStateType,
-    reason: string,
-    causedBy: TransitionCausedBy,
-    options?: {
-      readonly skipSlotElection?: boolean;
-    }
-  ): Promise<Readonly<ClaimForm>>;
-}
-
-export interface ArbitrationServiceEventLogRepoPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
-  queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
-}
-
-export interface ArbitrationRuntimeNotifierPort {
-  notifyEntry(entry: EventLogEntry): void | Promise<void>;
-}
-
-export interface ArbitrationServiceDependencies {
-  readonly slotRepo: ArbitrationServiceSlotRepoPort;
-  readonly claimRepo: ArbitrationServiceClaimRepoPort;
-  readonly conflictMatrixRepo: ArbitrationServiceConflictMatrixRepoPort;
-  readonly claimService: ArbitrationServiceClaimServicePort;
-  readonly eventLogRepo: ArbitrationServiceEventLogRepoPort;
-  readonly runtimeNotifier: ArbitrationRuntimeNotifierPort;
-  readonly generateObjectId?: () => string;
-  readonly now?: () => string;
-}
-
-export interface ConflictMatrixEdgeInput {
-  readonly source_claim_id: string;
-  readonly target_claim_id: string;
-  readonly edge_type: ConflictEdgeTypeType;
-  readonly created_by: string;
-}
-
-export interface ArbitrationResult {
-  readonly slot: Readonly<Slot>;
-  readonly decision: "winner_changed" | "contested" | "no_change";
-  readonly winner_claim_id: string | null;
-  readonly contested_claim_ids: readonly string[];
-  readonly reason: string;
-}
-
-export interface ConflictMatrixRebuildResult {
-  readonly total_edges: number;
-  readonly orphaned_deleted: number;
-  readonly valid_edges: number;
-}
-
-interface ArbitrationSelection {
-  readonly decision: "winner_changed" | "contested" | "no_change";
-  readonly winnerClaimId: string | null;
-  readonly contestedClaimIds: readonly string[];
-  readonly reason: string;
-}
-
-interface WinnerChangeOptions {
-  readonly causedBy: TransitionCausedBy;
-  readonly lifecycleReasonPrefix: string;
-  readonly eventReasonCode: string;
-}
-
-const decisiveEdgeTypes = new Set<ConflictEdgeTypeType>([
-  ConflictEdgeType.EXCEPTION_TO,
-  ConflictEdgeType.SUPERSEDES,
-  ConflictEdgeType.OVERRIDES_WITHIN_SCOPE
-]);
-
-const nonConflictEdgeTypes = new Set<ConflictEdgeTypeType>([
-  ConflictEdgeType.SUPPORTS,
-  ConflictEdgeType.DERIVES_FROM
-]);
-
-const incompatibleEdgeType = ConflictEdgeType.INCOMPATIBLE_WITH;
-
-const securityDomains = new Set(["security", "compliance", "safety"]);
-
-const originTierPriority: Readonly<Record<ClaimForm["origin_tier"], number>> = {
-  user_explicit: 5,
-  review_accepted: 4,
-  compiler_extracted: 3,
-  imported: 2,
-  seed: 1
-};
+export type {
+  ArbitrationResult,
+  ArbitrationRuntimeNotifierPort,
+  ArbitrationServiceClaimRepoPort,
+  ArbitrationServiceClaimServicePort,
+  ArbitrationServiceConflictMatrixRepoPort,
+  ArbitrationServiceDependencies,
+  ArbitrationServiceEventLogRepoPort,
+  ArbitrationServiceSlotRepoPort,
+  ConflictMatrixEdgeInput,
+  ConflictMatrixRebuildResult
+} from "./arbitration-service-ports.js";
 
 export class ArbitrationService {
-public readonly generateObjectId: () => string;
+  public readonly generateObjectId: () => string;
 
-public readonly now: () => string;
+  public readonly now: () => string;
 
-public constructor(public readonly dependencies: ArbitrationServiceDependencies) {
+  public constructor(public readonly dependencies: ArbitrationServiceDependencies) {
     this.generateObjectId = dependencies.generateObjectId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
   }
 
   public async listEdgesByWorkspace(workspaceId: string): Promise<readonly Readonly<ConflictMatrixEdge>[]> {
-    return arbitrationServiceListEdgesByWorkspace(this, workspaceId);
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
+    return await this.dependencies.conflictMatrixRepo.findByWorkspace(parsedWorkspaceId);
   }
 
   public async createEdge(input: ConflictMatrixEdgeInput): Promise<Readonly<ConflictMatrixEdge>> {
-    return arbitrationServiceCreateEdge(this, input);
+    const parsedInput = parseEdgeInput(input);
+    const { sourceClaim } = await this.requireClaimsForEdge(parsedInput);
+    const timestamp = this.now();
+    const edge = buildConflictMatrixEdge(this.generateObjectId, parsedInput, sourceClaim.workspace_id, timestamp);
+    const event = await this.dependencies.eventLogRepo.append(buildConflictMatrixEdgeCreatedEntry(edge));
+    const created = await this.dependencies.conflictMatrixRepo.create(edge);
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
+    return created;
   }
 
   public async deleteEdge(edgeId: string): Promise<void> {
-    return arbitrationServiceDeleteEdge(this, edgeId);
+    const parsedEdgeId = parseObjectId(edgeId, "edge_id");
+    const existing = await this.dependencies.conflictMatrixRepo.findById(parsedEdgeId);
+
+    if (existing === null) {
+      throw new CoreError("NOT_FOUND", "Conflict matrix edge not found");
+    }
+
+    await this.dependencies.conflictMatrixRepo.delete(parsedEdgeId);
   }
 
   public async rebuildConflictMatrix(workspaceId: string): Promise<ConflictMatrixRebuildResult> {
-    return arbitrationServiceRebuildConflictMatrix(this, workspaceId);
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
+    const [edges, claims] = await Promise.all([
+      this.dependencies.conflictMatrixRepo.findByWorkspace(parsedWorkspaceId),
+      this.dependencies.claimRepo.findByWorkspaceId(parsedWorkspaceId)
+    ]);
+
+    const claimIds = new Set(claims.map((claim) => claim.object_id));
+    const orphanedEdges = edges.filter(
+      (edge) => !claimIds.has(edge.source_claim_id) || !claimIds.has(edge.target_claim_id)
+    );
+
+    for (const edge of orphanedEdges) {
+      await this.dependencies.conflictMatrixRepo.delete(edge.object_id);
+    }
+
+    return {
+      total_edges: edges.length,
+      orphaned_deleted: orphanedEdges.length,
+      valid_edges: edges.length - orphanedEdges.length
+    };
   }
 
   public async arbitrateSlot(slotId: string, options: {
       readonly dryRun?: boolean;
     } = {}): Promise<ArbitrationResult> {
-    return arbitrationServiceArbitrateSlot(this, slotId, options);
+    const parsedSlotId = parseObjectId(slotId, "slot_id");
+    const slot = await this.dependencies.slotRepo.findById(parsedSlotId);
+
+    if (slot === null) {
+      throw new CoreError("NOT_FOUND", "Slot not found");
+    }
+
+    const workspaceClaims = await this.dependencies.claimRepo.findByWorkspaceId(slot.workspace_id);
+    const candidates = workspaceClaims.filter((claim) => isCandidateForSlot(claim, slot));
+
+    const selection = await this.selectArbitrationDecision(slot, candidates);
+
+    if (options.dryRun !== true) {
+      await this.applySelection(slot, candidates, selection);
+    }
+
+    const updatedSlot =
+      selection.decision === "winner_changed" && options.dryRun !== true
+        ? await this.dependencies.slotRepo.findById(slot.object_id)
+        : slot;
+
+    return {
+      slot: updatedSlot ?? slot,
+      decision: selection.decision,
+      winner_claim_id: selection.winnerClaimId,
+      contested_claim_ids: selection.contestedClaimIds,
+      reason: selection.reason
+    };
   }
 
   public async resolveSlotConflict(slotId: string, winnerClaimId: string): Promise<Readonly<Slot>> {
-    return arbitrationServiceResolveSlotConflict(this, slotId, winnerClaimId);
+    const parsedSlotId = parseObjectId(slotId, "slot_id");
+    const parsedWinnerClaimId = parseObjectId(winnerClaimId, "winner_claim_id");
+
+    const slot = await this.dependencies.slotRepo.findById(parsedSlotId);
+
+    if (slot === null) {
+      throw new CoreError("NOT_FOUND", "Slot not found");
+    }
+
+    const workspaceClaims = await this.dependencies.claimRepo.findByWorkspaceId(slot.workspace_id);
+    const candidates = workspaceClaims.filter((claim) => isCandidateForSlot(claim, slot));
+
+    const winnerCandidate = candidates.find((claim) => claim.object_id === parsedWinnerClaimId) ?? null;
+
+    if (winnerCandidate === null) {
+      throw new CoreError("VALIDATION", "winner_claim_id must match a candidate claim in slot");
+    }
+
+    await this.applyWinnerChange(slot, candidates, parsedWinnerClaimId, {
+      causedBy: TransitionCausedBy.REVIEW,
+      lifecycleReasonPrefix: "manual_resolution",
+      eventReasonCode: "manual_resolution"
+    });
+
+    const updated = await this.dependencies.slotRepo.findById(slot.object_id);
+
+    if (updated === null) {
+      throw new CoreError("CONFLICT", "Slot disappeared during conflict resolution");
+    }
+
+    return updated;
   }
 
   private async selectArbitrationDecision(slot: Readonly<Slot>, candidates: readonly Readonly<ClaimForm>[]): Promise<ArbitrationSelection> {
-    return arbitrationServiceSelectArbitrationDecision(this, slot, candidates);
+    if (candidates.length === 0) {
+      return {
+        decision: "no_change",
+        winnerClaimId: slot.winner_claim_id,
+        contestedClaimIds: [],
+        reason: "no_candidates"
+      };
+    }
+
+    const candidateIds = new Set(candidates.map((claim) => claim.object_id));
+    const edges = await this.loadEdgesForCandidates(candidates);
+
+    const incompatibleIds = collectIncompatibleClaimIds(edges, candidateIds);
+    if (incompatibleIds.length > 0) {
+      return {
+        decision: "contested",
+        winnerClaimId: slot.winner_claim_id,
+        contestedClaimIds: incompatibleIds,
+        reason: "incompatible_with"
+      };
+    }
+
+    const incumbentId = slot.winner_claim_id;
+    const decisiveChallengers = collectDecisiveChallengers(candidates, edges, incumbentId);
+
+    if (decisiveChallengers.length === 0) {
+      return buildNoChallengerDecision(candidates, edges, incumbentId);
+    }
+
+    const selectedWinner = pickHighestPriorityClaim(decisiveChallengers, edges);
+    return buildSelectedWinnerDecision(selectedWinner, decisiveChallengers, incumbentId);
   }
 
   private async applySelection(slot: Readonly<Slot>, candidates: readonly Readonly<ClaimForm>[], selection: ArbitrationSelection): Promise<void> {
-    return arbitrationServiceApplySelection(this, slot, candidates, selection);
+    if (selection.decision === "contested") {
+      await this.markClaimsContested(candidates, new Set(selection.contestedClaimIds));
+      return;
+    }
+
+    if (selection.decision === "winner_changed") {
+      await this.applyWinnerChange(slot, candidates, selection.winnerClaimId, {
+        causedBy: TransitionCausedBy.SYSTEM,
+        lifecycleReasonPrefix: "arbitration",
+        eventReasonCode: `arbitration_${selection.reason}`
+      });
+      return;
+    }
   }
 
   private async markClaimsContested(candidates: readonly Readonly<ClaimForm>[], contestedIds: ReadonlySet<string>): Promise<void> {
-    return arbitrationServiceMarkClaimsContested(this, candidates, contestedIds);
+    for (const claim of candidates) {
+      if (!contestedIds.has(claim.object_id)) {
+        continue;
+      }
+
+      if (claim.claim_status === ClaimLifecycleState.ACTIVE) {
+        await this.dependencies.claimService.transitionLifecycle(
+          claim.object_id,
+          ClaimLifecycleState.CONTESTED,
+          "arbitration_contested",
+          TransitionCausedBy.SYSTEM,
+          { skipSlotElection: true }
+        );
+      }
+    }
   }
 
   private async applyWinnerChange(slot: Readonly<Slot>, candidates: readonly Readonly<ClaimForm>[], winnerClaimId: string | null, options: WinnerChangeOptions): Promise<Readonly<Slot> | null> {
-    return arbitrationServiceApplyWinnerChange(this, slot, candidates, winnerClaimId, options);
+    if (winnerClaimId === null) {
+      return null;
+    }
+
+    const winnerClaim = candidates.find((claim) => claim.object_id === winnerClaimId) ?? null;
+    const incumbentClaim =
+      slot.winner_claim_id === null
+        ? null
+        : candidates.find((claim) => claim.object_id === slot.winner_claim_id) ?? null;
+
+    await this.transitionIncumbentClaimIfNeeded(incumbentClaim, winnerClaimId, options);
+    await this.transitionWinnerClaimIfNeeded(winnerClaim, options);
+    const timestamp = this.now();
+    const event = await this.dependencies.eventLogRepo.append(
+      buildWinnerChangedEntry(slot, winnerClaimId, options, timestamp)
+    );
+    const updatedSlot = await this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, timestamp, timestamp);
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
+    return updatedSlot;
   }
 
   private async loadEdgesForCandidates(candidates: readonly Readonly<ClaimForm>[]): Promise<readonly Readonly<ConflictMatrixEdge>[]> {
-    return arbitrationServiceLoadEdgesForCandidates(this, candidates);
+    if (candidates.length === 0) {
+      return [];
+    }
+
+    const candidateIds = new Set(candidates.map((claim) => claim.object_id));
+    const workspaceId = candidates[0].workspace_id;
+    const workspaceEdges = await this.dependencies.conflictMatrixRepo.findByWorkspace(workspaceId);
+    const edgesById = new Map<string, Readonly<ConflictMatrixEdge>>();
+
+    for (const edge of workspaceEdges) {
+      if (!candidateIds.has(edge.source_claim_id) || !candidateIds.has(edge.target_claim_id)) {
+        continue;
+      }
+
+      edgesById.set(edge.object_id, edge);
+    }
+
+    return [...edgesById.values()];
+  }
+
+  private async requireClaimsForEdge(input: ConflictMatrixEdgeInput): Promise<{
+    readonly sourceClaim: Readonly<ClaimForm>;
+    readonly targetClaim: Readonly<ClaimForm>;
+  }> {
+    const sourceClaim = await this.dependencies.claimRepo.findById(input.source_claim_id);
+    const targetClaim = await this.dependencies.claimRepo.findById(input.target_claim_id);
+    if (sourceClaim === null) {
+      throw new CoreError("NOT_FOUND", "Source claim not found");
+    }
+    if (targetClaim === null) {
+      throw new CoreError("NOT_FOUND", "Target claim not found");
+    }
+    if (sourceClaim.workspace_id !== targetClaim.workspace_id) {
+      throw new CoreError("VALIDATION", "Claims must belong to the same workspace");
+    }
+    return { sourceClaim, targetClaim };
+  }
+
+  private async transitionIncumbentClaimIfNeeded(
+    incumbentClaim: Readonly<ClaimForm> | null,
+    winnerClaimId: string,
+    options: WinnerChangeOptions
+  ): Promise<void> {
+    if (
+      incumbentClaim === null ||
+      incumbentClaim.object_id === winnerClaimId ||
+      (incumbentClaim.claim_status !== ClaimLifecycleState.WINNER &&
+        incumbentClaim.claim_status !== ClaimLifecycleState.ACTIVE)
+    ) {
+      return;
+    }
+
+    await this.dependencies.claimService.transitionLifecycle(
+      incumbentClaim.object_id,
+      ClaimLifecycleState.SUPERSEDED,
+      `${options.lifecycleReasonPrefix}_superseded`,
+      options.causedBy,
+      { skipSlotElection: true }
+    );
+  }
+
+  private async transitionWinnerClaimIfNeeded(
+    winnerClaim: Readonly<ClaimForm> | null,
+    options: WinnerChangeOptions
+  ): Promise<void> {
+    if (
+      winnerClaim === null ||
+      winnerClaim.claim_status === ClaimLifecycleState.WINNER ||
+      (winnerClaim.claim_status !== ClaimLifecycleState.ACTIVE &&
+        winnerClaim.claim_status !== ClaimLifecycleState.CONTESTED)
+    ) {
+      return;
+    }
+
+    await this.dependencies.claimService.transitionLifecycle(
+      winnerClaim.object_id,
+      ClaimLifecycleState.WINNER,
+      `${options.lifecycleReasonPrefix}_winner`,
+      options.causedBy,
+      { skipSlotElection: true }
+    );
   }
 }
