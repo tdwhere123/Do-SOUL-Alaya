@@ -19,7 +19,7 @@ export const LOW_SIGNAL_REASONS = new Set<RevokeReasonType>([RevokeReason.REVIEW
 
 export const ACTIVE_LIFECYCLE = "active";
 
-export const GRACE_HOURS_BY_DIMENSION: Readonly<Record<MemoryDimensionType, number | null>> = {
+const GRACE_HOURS_BY_DIMENSION: Readonly<Record<MemoryDimensionType, number | null>> = {
   [MemoryDimension.PREFERENCE]: null,
   [MemoryDimension.CONSTRAINT]: 24,
   [MemoryDimension.DECISION]: 24,
@@ -30,7 +30,7 @@ export const GRACE_HOURS_BY_DIMENSION: Readonly<Record<MemoryDimensionType, numb
   [MemoryDimension.EPISODE]: null
 } as const;
 
-export const NON_RECOVERABLE_REVOKE_REASONS = new Set<RevokeReasonType>([
+const NON_RECOVERABLE_REVOKE_REASONS = new Set<RevokeReasonType>([
   RevokeReason.EXTERNAL_INVALIDATION,
   RevokeReason.SECURITY_HIT,
   RevokeReason.REVIEW_OVERDUE,
@@ -216,7 +216,7 @@ export function calculateGraceUntil(dimension: MemoryDimensionType, nowIso: stri
   return addHours(nowIso, hours);
 }
 
-export function addHours(nowIso: string, hours: number): string {
+function addHours(nowIso: string, hours: number): string {
   const timestamp = new Date(nowIso);
   timestamp.setTime(timestamp.getTime() + hours * 60 * 60 * 1000);
   return timestamp.toISOString();

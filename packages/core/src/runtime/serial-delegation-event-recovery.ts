@@ -20,9 +20,7 @@ import type {
   TerminalEventRecoveryParams
 } from "./serial-delegation-recovery-ports.js";
 
-// Runtime-event and terminal-event recovery: normalize/complete/abort on
-// session_finished, plus the freeze-then-abort escalation when a failed event
-// cannot settle the worker.
+// Escalates to freeze-then-abort when a failed runtime event cannot settle the worker.
 export class SerialDelegationEventRecovery {
   public constructor(private readonly primitives: RecoveryPrimitivesPort) {}
 

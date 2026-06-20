@@ -25,8 +25,6 @@ import {
   type SurfaceBindingDriftGovernancePort
 } from "./surface-binding-drift-coordinator.js";
 
-export type { SurfaceBindingDriftGovernancePort };
-
 const BINDING_STATE_TRANSITIONS: Readonly<Record<BindingStateType, readonly BindingStateType[]>> = {
   [BindingState.ACTIVE]: [BindingState.STALE, BindingState.DETACHED],
   [BindingState.STALE]: [BindingState.ACTIVE, BindingState.DETACHED],

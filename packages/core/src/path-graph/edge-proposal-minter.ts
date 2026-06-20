@@ -27,9 +27,7 @@ export interface EdgeProposalMinterDependencies {
 
 type AcceptedStatus = typeof EdgeProposalStatus.ACCEPTED | typeof EdgeProposalStatus.AUTO_ACCEPTED;
 
-// Accept-owed path mint: seed-profile submit, transient/permanent failure
-// classification, the durable mint-failed audit + review-row compensation, and
-// the best-effort operator-triage inbox projection.
+// Compensates a failed mint with a durable mint-failed audit + review-row rollback.
 export class EdgeProposalMinter {
   public constructor(private readonly deps: EdgeProposalMinterDependencies) {}
 

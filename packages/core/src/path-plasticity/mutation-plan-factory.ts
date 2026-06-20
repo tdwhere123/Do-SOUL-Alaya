@@ -81,8 +81,7 @@ interface CreateRedirectedPlanParams {
   readonly occurredAt: string;
 }
 
-// Builds the concrete PathPlasticityMutationPlan + governance event inputs for
-// each lifecycle outcome. Pure: no IO, no clock; payloads come from the params.
+// Pure: no IO, no clock; payloads come from the params.
 export class MutationPlanFactory {
   public createReinforcedPlan(params: CreateReinforcedPlanParams): PathPlasticityMutationPlan {
     const payload = parseRuntimeGovernanceEventPayload(

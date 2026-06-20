@@ -28,8 +28,6 @@ import {
   type SurfaceDriftGovernancePort
 } from "./surface-drift-coordinator.js";
 
-export type { SurfaceDriftGovernancePort };
-
 const SURFACE_STATUS_TRANSITIONS: Readonly<Record<SurfaceStatusType, readonly SurfaceStatusType[]>> = {
   [SurfaceStatus.ACTIVE]: [SurfaceStatus.WEAKLY_BOUND, SurfaceStatus.ORPHANED, SurfaceStatus.REVOKED],
   [SurfaceStatus.WEAKLY_BOUND]: [SurfaceStatus.ACTIVE, SurfaceStatus.ORPHANED, SurfaceStatus.REVOKED],

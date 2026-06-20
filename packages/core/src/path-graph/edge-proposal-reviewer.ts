@@ -21,8 +21,7 @@ export interface EdgeProposalReviewerDependencies {
 
 type AcceptedStatus = typeof EdgeProposalStatus.ACCEPTED | typeof EdgeProposalStatus.AUTO_ACCEPTED;
 
-// Review-verdict transitions: anchor re-validation, the atomic reviewed
-// audit + review-row write, the owed-path mint hand-off, and the reject path.
+// Writes the reviewed audit + review row atomically before the owed-path mint hand-off.
 export class EdgeProposalReviewer {
   public constructor(private readonly deps: EdgeProposalReviewerDependencies) {}
 

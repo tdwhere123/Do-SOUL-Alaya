@@ -37,7 +37,7 @@ interface BootstrapPlantResult {
 type WorkspaceCreateArgs = Parameters<WorkspaceRepoPort["create"]>[0];
 type WorkspaceBootstrapPlan = Awaited<ReturnType<WorkspaceBootstrappingPlannerPort["planBootstrap"]>>;
 
-export interface WorkspaceBootstrapEventPublisherPort
+interface WorkspaceBootstrapEventPublisherPort
   extends Pick<EventPublisher, "appendManyWithMutation"> {}
 
 export interface WorkspaceBootstrapCoordinatorDependencies {

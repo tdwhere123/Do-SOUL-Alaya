@@ -30,7 +30,6 @@ export interface GreenGrantGuardDependencies {
   readonly warn: GreenWarnPort;
 }
 
-// Governance/precondition checks gating a Green grant or pierce.
 export class GreenGrantGuard {
   private hasWarnedMissingStatusResolver = false;
 

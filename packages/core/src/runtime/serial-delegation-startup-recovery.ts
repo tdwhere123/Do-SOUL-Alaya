@@ -17,8 +17,7 @@ interface PreDispatchRecoveryContext {
   readonly shouldReportOriginalError: boolean;
 }
 
-// Startup / pre-dispatch recovery: cancel the runtime then freeze-or-rollback
-// the worker, escalating to abort when freeze cannot settle it.
+// Escalates to abort when a pre-dispatch freeze cannot settle the worker.
 export class SerialDelegationStartupRecovery {
   public constructor(private readonly primitives: RecoveryPrimitivesPort) {}
 

@@ -31,8 +31,7 @@ export interface BuildSupplementFromQueryEmbeddingParams {
   readonly maxSupplement: number;
 }
 
-// Ranks stored vectors against the query embedding, emits queried/merged
-// telemetry, and selects the additive supplement set.
+// Selects an additive supplement set: it never displaces base candidates.
 export class EmbeddingSupplementBuilder {
   public constructor(private readonly deps: SupplementBuilderDependencies) {}
 

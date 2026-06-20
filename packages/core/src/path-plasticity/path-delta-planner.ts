@@ -42,7 +42,7 @@ export interface PathDeltaPlannerDependencies {
 
 // Pure strength/lifecycle state machine: turns aggregated usage counts for one
 // path into a mutation plan (reinforce / weaken / retire / dormant / revive /
-// redirect) or null. Builds concrete plans through the MutationPlanFactory.
+// redirect) or null.
 export class PathDeltaPlanner {
   private readonly factory: MutationPlanFactory;
   private readonly now: () => string;

@@ -157,7 +157,7 @@ function parseEdgeType(value: ConflictEdgeTypeType): ConflictEdgeTypeType {
   }
 }
 
-export function parseEdge(value: ConflictMatrixEdge): Readonly<ConflictMatrixEdge> {
+function parseEdge(value: ConflictMatrixEdge): Readonly<ConflictMatrixEdge> {
   try {
     return ConflictMatrixEdgeSchema.parse(value);
   } catch (error) {
@@ -200,7 +200,7 @@ export function collectIncompatibleClaimIds(
   return [...ids].sort((left, right) => left.localeCompare(right));
 }
 
-export function hasNonConflictCoverage(
+function hasNonConflictCoverage(
   candidates: readonly Readonly<ClaimForm>[],
   edges: readonly Readonly<ConflictMatrixEdge>[]
 ): boolean {

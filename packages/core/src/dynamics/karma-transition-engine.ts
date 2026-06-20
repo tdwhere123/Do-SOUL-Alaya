@@ -40,8 +40,7 @@ export interface KarmaTransitionEngineDependencies {
   readonly now: () => string;
 }
 
-// Karma-event ingestion: transition math, DB apply, dormant revival, audit
-// events, and the fire-and-forget Green re-evaluation.
+// Applies transition math to DB before a fire-and-forget Green re-evaluation.
 export class KarmaTransitionEngine {
   public constructor(private readonly deps: KarmaTransitionEngineDependencies) {}
 

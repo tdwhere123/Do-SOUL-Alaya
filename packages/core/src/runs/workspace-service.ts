@@ -28,7 +28,6 @@ import type {
 } from "./workspace-service-ports.js";
 
 export type {
-  BuildWorkspaceEngineConfigInput,
   CreateWorkspaceInput,
   WorkspaceBootstrapReconcileResult,
   WorkspaceBootstrappingPlannerPort,

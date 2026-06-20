@@ -4,12 +4,13 @@ import {
   type DriftAlert,
   type DriftClassification,
   type GovernanceDriftLease,
-  type SurfaceDriftOperationType
+  type SurfaceDriftOperationType,
+  type SurfaceStatus as SurfaceStatusType
 } from "@do-soul/alaya-protocol";
 
 import { DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS } from "./surface-drift-service.js";
 
-export const SURFACE_STATUS_GOVERNANCE_SUBJECT = canonicalGovernanceSubject("surface_governance", {
+const SURFACE_STATUS_GOVERNANCE_SUBJECT = canonicalGovernanceSubject("surface_governance", {
   entity: "status"
 }).canonical_key;
 
@@ -101,8 +102,8 @@ export class SurfaceDriftCoordinator {
     readonly workspaceId: string;
     readonly operationType: SurfaceDriftOperationType;
     readonly surfaceId: string;
-    readonly fromStatus: string;
-    readonly toStatus: string;
+    readonly fromStatus: SurfaceStatusType;
+    readonly toStatus: SurfaceStatusType;
     readonly driftType: DriftType;
   }): Promise<void> {
     try {
@@ -122,8 +123,8 @@ export class SurfaceDriftCoordinator {
   private async classifyStatusDrift(params: {
     readonly workspaceId: string;
     readonly surfaceId: string;
-    readonly fromStatus: string;
-    readonly toStatus: string;
+    readonly fromStatus: SurfaceStatusType;
+    readonly toStatus: SurfaceStatusType;
     readonly driftType: DriftType;
   }): Promise<void> {
     const driftService = this.surfaceDriftService;

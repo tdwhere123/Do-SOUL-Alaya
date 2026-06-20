@@ -9,7 +9,7 @@ import {
 
 import { DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS } from "./surface-drift-service.js";
 
-export const SURFACE_BINDING_GOVERNANCE_SUBJECT = canonicalGovernanceSubject("surface_governance", {
+const SURFACE_BINDING_GOVERNANCE_SUBJECT = canonicalGovernanceSubject("surface_governance", {
   entity: "binding"
 }).canonical_key;
 

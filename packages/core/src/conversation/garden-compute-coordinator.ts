@@ -40,7 +40,7 @@ export interface GardenComputeCoordinatorDependencies {
   readonly releaseGovernanceLeaseSafely: (runId: string, workspaceId: string, phase: string) => Promise<void>;
 }
 
-// Fire-and-forget Garden compile: provider resolution, telemetry, signal materialization, lease release.
+// Fire-and-forget Garden compile: errors are swallowed to warn, never propagated to the caller.
 export class GardenComputeCoordinator {
   public constructor(private readonly deps: GardenComputeCoordinatorDependencies) {}
 

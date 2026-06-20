@@ -84,7 +84,6 @@ export interface SerialDelegationRecoveryDependencies {
   ) => void | Promise<void>;
 }
 
-// Shared low-level recovery transitions used by both startup and event phases.
 export interface RecoveryPrimitivesPort {
   readonly deps: SerialDelegationRecoveryDependencies;
   freezeWorkerRun(
