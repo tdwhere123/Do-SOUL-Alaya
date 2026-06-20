@@ -16,8 +16,7 @@ export interface EmbeddingRecallTelemetryDependencies {
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }
 
-// Event-log + health-journal sink for the embedding supplement path. Every
-// write is best-effort: a sink failure warns but never aborts recall.
+// Every write is best-effort: a sink failure warns but never aborts recall.
 export class EmbeddingRecallTelemetry {
   public constructor(private readonly deps: EmbeddingRecallTelemetryDependencies) {}
 

@@ -297,7 +297,6 @@ export class SurfaceService {
       "surface.transition_status",
       parsedCausedBy
     );
-    let operationCompleted = false;
 
     try {
       const occurredAt = this.now();
@@ -328,7 +327,6 @@ export class SurfaceService {
         occurredAt,
         event
       );
-      operationCompleted = true;
 
       await this.dependencies.runtimeNotifier.notifyEntry(updated.event);
 
@@ -356,9 +354,7 @@ export class SurfaceService {
         leaseId: driftLeaseId,
         workspaceId: existing.workspace_id,
         operationType: "surface.transition_status",
-        releasedBy: parsedCausedBy,
-        failureMessage: "Surface status transition applied but drift lease release failed.",
-        propagateFailure: operationCompleted
+        releasedBy: parsedCausedBy
       });
     }
   }

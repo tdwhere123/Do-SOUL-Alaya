@@ -88,7 +88,7 @@ async function loadWorkspaceBootstrapPlan(
   workspaceId: string
 ): Promise<WorkspaceBootstrapPlan | null> {
   const existingBootstrappingRecord =
-    await bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(workspaceId);
+    bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(workspaceId);
   return existingBootstrappingRecord === null
     ? await bootstrappingDeps.bootstrappingPlanner.planBootstrap(workspaceId)
     : null;
@@ -120,6 +120,23 @@ function corruptBootstrapRecordResult(workspaceId: string, recordId: string): Wo
     record_id: recordId,
     relation_count: 0,
     reason: "bootstrapping_record_without_relations"
+  };
+}
+
+async function resolveBootstrapRaceResult(
+  bootstrappingDeps: WorkspaceBootstrappingDependencies,
+  workspaceId: string,
+  racedRecordId: string
+): Promise<WorkspaceBootstrapReconcileResult> {
+  const racedRelations = await bootstrappingDeps.pathRelationRepo.findByWorkspace(workspaceId);
+  if (racedRelations.length === 0) {
+    return corruptBootstrapRecordResult(workspaceId, racedRecordId);
+  }
+  return {
+    status: "already_planted",
+    workspace_id: workspaceId,
+    record_id: racedRecordId,
+    relation_count: racedRelations.length
   };
 }
 
@@ -317,21 +334,4 @@ export class WorkspaceBootstrapCoordinator {
     }
     return Object.freeze({ plantedCount, racedRecordId });
   }
-}
-
-async function resolveBootstrapRaceResult(
-  bootstrappingDeps: WorkspaceBootstrappingDependencies,
-  workspaceId: string,
-  racedRecordId: string
-): Promise<WorkspaceBootstrapReconcileResult> {
-  const racedRelations = await bootstrappingDeps.pathRelationRepo.findByWorkspace(workspaceId);
-  if (racedRelations.length === 0) {
-    return corruptBootstrapRecordResult(workspaceId, racedRecordId);
-  }
-  return {
-    status: "already_planted",
-    workspace_id: workspaceId,
-    record_id: racedRecordId,
-    relation_count: racedRelations.length
-  };
 }

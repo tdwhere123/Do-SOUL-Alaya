@@ -178,8 +178,7 @@ export class QueryEmbeddingEngine {
     });
   }
 
-  // Synchronous provider inference for the supplement path; degradation
-  // recording stays in the caller so this stays a pure resolver.
+  // Degradation recording stays in the caller so this stays a pure resolver.
   public async resolveQueryEmbeddingNow(queryText: string): Promise<Float32Array> {
     const embeddings = await this.deps.provider.embedTexts([queryText], {
       timeoutMs: this.deps.queryTimeoutMs

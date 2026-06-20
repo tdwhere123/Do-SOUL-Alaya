@@ -172,7 +172,6 @@ export class SurfaceBindingService {
       "surface.bind_object",
       parsedInput.created_by
     );
-    let operationCompleted = false;
 
     try {
       const bindingId = this.generateObjectId();
@@ -180,7 +179,6 @@ export class SurfaceBindingService {
       const binding = this.buildBinding(parsedInput, timestamp);
       const event = this.buildBindingCreatedEvent(bindingId, binding);
       const created = await this.persistBindingWithEvent(binding, bindingId, event);
-      operationCompleted = true;
       await this.driftCoordinator.classifyDriftSafely({
         workspaceId: created.binding.workspace_id,
         operationType: "surface.bind_object",
@@ -193,9 +191,7 @@ export class SurfaceBindingService {
         leaseId: driftLeaseId,
         workspaceId: parsedInput.workspace_id,
         operationType: "surface.bind_object",
-        releasedBy: parsedInput.created_by,
-        failureMessage: "Surface binding creation applied but drift lease release failed.",
-        propagateFailure: operationCompleted
+        releasedBy: parsedInput.created_by
       });
     }
   }
@@ -222,7 +218,6 @@ export class SurfaceBindingService {
       "surface.transition_binding_state",
       parsedCausedBy
     );
-    let operationCompleted = false;
 
     try {
       const occurredAt = this.now();
@@ -252,7 +247,6 @@ export class SurfaceBindingService {
           occurredAt
         )
       );
-      operationCompleted = true;
 
       await this.driftCoordinator.classifyDriftSafely({
         workspaceId: existing.binding.workspace_id,
@@ -266,9 +260,7 @@ export class SurfaceBindingService {
         leaseId: driftLeaseId,
         workspaceId: existing.binding.workspace_id,
         operationType: "surface.transition_binding_state",
-        releasedBy: parsedCausedBy,
-        failureMessage: "Surface binding transition applied but drift lease release failed.",
-        propagateFailure: operationCompleted
+        releasedBy: parsedCausedBy
       });
     }
   }

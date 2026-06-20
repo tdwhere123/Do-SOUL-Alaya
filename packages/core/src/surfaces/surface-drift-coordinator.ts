@@ -75,8 +75,6 @@ export class SurfaceDriftCoordinator {
     readonly workspaceId: string;
     readonly operationType: SurfaceDriftOperationType;
     readonly releasedBy: string;
-    readonly failureMessage: string;
-    readonly propagateFailure: boolean;
   }): Promise<void> {
     if (params.leaseId === null || this.surfaceDriftService === undefined) {
       return;
