@@ -439,14 +439,3 @@ function isTimeoutLike(error: unknown): boolean {
 
   return /timeout|timed out|abort/u.test(`${error.name} ${error.message}`.toLowerCase());
 }
-
-function normalizeOpenAiBaseUrl(endpoint: string): string {
-  const withoutTrailingSlash = endpoint.trim().replace(/\/+$/u, "");
-  return withoutTrailingSlash.endsWith("/chat/completions")
-    ? withoutTrailingSlash.slice(0, -"/chat/completions".length)
-    : withoutTrailingSlash;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
