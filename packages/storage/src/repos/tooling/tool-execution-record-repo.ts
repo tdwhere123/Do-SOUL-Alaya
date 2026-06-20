@@ -194,7 +194,6 @@ function parseToolExecutionRecord(value: ToolExecutionRecord): Readonly<ToolExec
 
 function parseToolExecutionRecordRow(row: ToolExecutionRecordRow): Readonly<ToolExecutionRecord> {
   const requestingRunId = row.requesting_principal_run_id ?? row.requesting_worker_run_id;
-
   if (requestingRunId === null) {
     throw new StorageError(
       "VALIDATION_FAILED",
@@ -202,10 +201,43 @@ function parseToolExecutionRecordRow(row: ToolExecutionRecordRow): Readonly<Tool
     );
   }
 
-  let postEffectRefs: readonly string[];
-
   try {
-    postEffectRefs = JSON.parse(row.post_effect_refs_json) as readonly string[];
+    return deepFreeze(ToolExecutionRecordSchema.parse(buildToolExecutionRecordFromRow(row, requestingRunId)));
+  } catch (error) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      "Failed to validate tool execution record row.",
+      error
+    );
+  }
+}
+
+function buildToolExecutionRecordFromRow(
+  row: ToolExecutionRecordRow,
+  requestingRunId: string
+): ToolExecutionRecord {
+  const affectedPaths = parseAffectedPaths(row.affected_paths_json);
+  return {
+    execution_id: row.execution_id,
+    tool_id: row.tool_id,
+    requested_by: row.requested_by,
+    requesting_run_id: requestingRunId,
+    node_id: row.node_id ?? undefined,
+    governance_decision_ref: row.governance_decision_ref,
+    permission_result: row.permission_result,
+    executed: row.executed !== 0,
+    started_at: row.started_at ?? undefined,
+    ended_at: row.ended_at ?? undefined,
+    result_summary: row.result_summary ?? undefined,
+    rollback_status: row.rollback_status,
+    post_effect_refs: parsePostEffectRefs(row.post_effect_refs_json),
+    ...(affectedPaths === undefined ? {} : { affected_paths: affectedPaths })
+  };
+}
+
+function parsePostEffectRefs(value: string): readonly string[] {
+  try {
+    return JSON.parse(value) as readonly string[];
   } catch (error) {
     throw new StorageError(
       "VALIDATION_FAILED",
@@ -213,46 +245,18 @@ function parseToolExecutionRecordRow(row: ToolExecutionRecordRow): Readonly<Tool
       error
     );
   }
+}
 
-  let affectedPaths: readonly string[] | null | undefined;
-
-  if (row.affected_paths_json === null) {
-    affectedPaths = undefined;
-  } else {
-    try {
-      affectedPaths = JSON.parse(row.affected_paths_json) as readonly string[] | null;
-    } catch (error) {
-      throw new StorageError(
-        "VALIDATION_FAILED",
-        "Failed to parse tool execution record affected_paths_json.",
-        error
-      );
-    }
+function parseAffectedPaths(value: string | null): readonly string[] | null | undefined {
+  if (value === null) {
+    return undefined;
   }
-
   try {
-    return deepFreeze(
-      ToolExecutionRecordSchema.parse({
-        execution_id: row.execution_id,
-        tool_id: row.tool_id,
-        requested_by: row.requested_by,
-        requesting_run_id: requestingRunId,
-        node_id: row.node_id ?? undefined,
-        governance_decision_ref: row.governance_decision_ref,
-        permission_result: row.permission_result,
-        executed: row.executed !== 0,
-        started_at: row.started_at ?? undefined,
-        ended_at: row.ended_at ?? undefined,
-        result_summary: row.result_summary ?? undefined,
-        rollback_status: row.rollback_status,
-        post_effect_refs: postEffectRefs,
-        ...(affectedPaths === undefined ? {} : { affected_paths: affectedPaths })
-      })
-    );
+    return JSON.parse(value) as readonly string[] | null;
   } catch (error) {
     throw new StorageError(
       "VALIDATION_FAILED",
-      "Failed to validate tool execution record row.",
+      "Failed to parse tool execution record affected_paths_json.",
       error
     );
   }

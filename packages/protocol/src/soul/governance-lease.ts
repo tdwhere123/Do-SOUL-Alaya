@@ -22,6 +22,7 @@ export const PiercingConditionSchema = z
     condition_kind: GovernanceLeasePiercingConditionKindSchema,
     description: NonEmptyStringSchema
   })
+  .strict()
   .readonly();
 
 export const GovernanceLeaseSchema = ControlPlaneEnvelopeSchema.unwrap()
@@ -31,6 +32,7 @@ export const GovernanceLeaseSchema = ControlPlaneEnvelopeSchema.unwrap()
     holder: NonEmptyStringSchema,
     piercing_conditions: z.array(PiercingConditionSchema).readonly()
   })
+  .strict()
   .readonly();
 
 export type GovernanceLeasePiercingConditionKind = z.infer<typeof GovernanceLeasePiercingConditionKindSchema>;

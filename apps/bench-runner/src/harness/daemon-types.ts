@@ -9,6 +9,43 @@ import type {
 import type { CoRecallWarmupSummary } from "./co-recall-warmup.js";
 import type { BenchRecallWeightOverrides } from "./recall-weight-overrides.js";
 import type { SeedObjectKind } from "./seed-rotation.js";
+import type {
+  BenchEmbeddingWarmupOptions,
+  BenchEmbeddingWarmupSummary,
+  BenchQueryEmbeddingWarmupSummary
+} from "./embedding-warmup.js";
+import type {
+  BenchReportContextUsageInput,
+  BenchSignalSeedInput,
+  BenchSynthesisSeedInput,
+  CompileSeedBatchResult,
+  SeededMemoryResult,
+  SeededSynthesisResult
+} from "./daemon-seed-types.js";
+import type { BenchTokenMetrics } from "./token-metrics.js";
+export type {
+  BenchContextUsageObject,
+  BenchReportContextUsageInput,
+  BenchSignalSeedInput,
+  BenchSynthesisSeedInput,
+  CompileSeedBatchResult,
+  CompileSeedDropReason,
+  CompileSeedSignalDrop,
+  SeededMemoryResult,
+  SeededSynthesisResult
+} from "./daemon-seed-types.js";
+export type {
+  BenchEmbeddingWarmupOptions,
+  BenchEmbeddingWarmupSummary,
+  BenchQueryEmbeddingWarmupSummary,
+  DrainEmbeddingWarmupPassesInput,
+  DrainEmbeddingWarmupPassesResult
+} from "./embedding-warmup.js";
+export {
+  drainEmbeddingWarmupPasses,
+  formatEmbeddingWarmupNotReadyError
+} from "./embedding-warmup.js";
+export type { BenchTokenMetrics } from "./token-metrics.js";
 
 export interface BenchDaemonOptions {
   readonly dataDirRoot?: string;
@@ -22,313 +59,12 @@ export interface BenchDaemonOptions {
   // "disabled". see also: apps/core-daemon/src/daemon-embedding-runtime.ts
   readonly embeddingProviderKind?: BenchEmbeddingProviderKind;
   readonly recallWeightOverrides?: BenchRecallWeightOverrides;
+  readonly reviewerIdentity?: string;
+  readonly reviewerToken?: string;
 }
 
 export type BenchEmbeddingMode = "disabled" | "env";
 export type BenchEmbeddingProviderKind = "openai" | "local_onnx";
-
-export interface SeededMemoryResult {
-  /** Durable memory object_id assigned by the signal materializer. */
-  readonly memoryId: string;
-  /** Signal id that produced the memory (audit trail anchor). */
-  readonly signalId: string;
-  /** Proposal id created by soul.propose_memory_update on the new memory. */
-  readonly proposalId: string;
-  /**
-   * evidence_capsule object_id the same signal materialized, or null when
-   * no evidence row was created. The session-level potential_synthesis seed
-   * points its evidence_refs at these real evidence ids.
-   */
-  readonly evidenceId: string | null;
-  /** true iff the source content exceeded SEED_CONTENT_MAX and was truncated. */
-  readonly truncated: boolean;
-  /** chars clipped from source content; 0 when not truncated. */
-  readonly charsClipped: number;
-}
-
-/**
- * One session-level synthesis seed input. The bench, after seeding a
- * session's turns, emits one potential_synthesis signal so the L2
- * synthesis_capsule layer is exercised on the no-LLM bench path.
- */
-export interface BenchSynthesisSeedInput {
-  /** >= 2 real evidence_capsule object_ids the session's turns materialized. */
-  readonly evidenceRefs: readonly string[];
-  /** Deterministic, LLM-free digest of the session content → synthesis summary. */
-  readonly summary: string;
-  /** Topic key grouping the synthesis (bench session id). */
-  readonly topicKey: string;
-}
-
-export interface SeededSynthesisResult {
-  /** Durable synthesis_capsule object_id created by SynthesisService.create. */
-  readonly synthesisId: string | null;
-}
-
-/**
- * Why one compile-seed signal failed to produce a durable memory_entry.
- *
- * - `candidate_absent`: the signal was received and triaged, but the
- *   MaterializationRouter routed it to evidence_only / deferred — no
- *   memory_entry was created. This is an expected sub-threshold outcome, not
- *   an error; it surfaces a seed-quality (candidate-absent) signal.
- * - `materialization_error`: the signal THREW before materializing a
- *   memory_entry. Historically this aborted the whole turn batch (its healthy
- *   batch-mates were lost too — the 1963-signal archive drop); it is now
- *   isolated per-signal so one bad pre-materialization signal never drops its
- *   mates. A failure after memory_entry creation is not a drop: the bench fails
- *   closed so scoring cannot include recallable but unscored seed memories.
- */
-export type CompileSeedDropReason = "candidate_absent" | "materialization_error";
-
-/**
- * One per-signal drop record from proposeMemoriesFromCompileSignals. `detail`
- * carries the routing_reason (candidate_absent) or the error message
- * (materialization_error) so the caller can persist a root-causable reason
- * into the run KPI instead of only logging to stderr. Post-materialization
- * accept/review failures throw and abort scoring instead.
- */
-export interface CompileSeedSignalDrop {
-  readonly reason: CompileSeedDropReason;
-  readonly detail: string;
-}
-
-/**
- * Result of seeding ONE turn's batch of compile-extracted signals. Carries the
- * materialized seeds AND a per-signal drop ledger so the caller no longer
- * infers drops from a `inputs.length - seeds.length` subtraction (which could
- * not distinguish an expected candidate_absent skip from a thrown
- * materialization error, and which silently lost an entire batch when any one
- * signal threw).
- *
- * invariant: seeds.length + dropped.length === inputs.length. Every input is
- * accounted for exactly once.
- */
-export interface CompileSeedBatchResult {
-  readonly seeds: readonly SeededMemoryResult[];
-  readonly dropped: readonly CompileSeedSignalDrop[];
-}
-
-/**
- * One production-extracted candidate signal to seed as a memory_entry.
- *
- * The compile-based LongMemEval seed path (longmemeval/compile-seed.ts) runs
- * each haystack turn through the production OfficialApiGardenProvider.compile,
- * then feeds each resulting CandidateMemorySignal here. signalKind /
- * objectKind are the kinds the production extractor actually chose;
- * distilledFact is the resolved one-assertion fact it produced.
- */
-export interface BenchSignalSeedInput {
-  /** signal_kind from the production-extracted CandidateMemorySignal. */
-  readonly signalKind: string;
-  /** object_kind from the production-extracted CandidateMemorySignal. */
-  readonly objectKind: string;
-  /** confidence from the production-extracted CandidateMemorySignal. */
-  readonly confidence: number;
-  /** Resolved one-assertion fact → memory_entry.content via buildDistilledFact. */
-  readonly distilledFact: string;
-  /** The full source turn → evidence_capsule gist/excerpt (non-lossy layer). */
-  readonly turnContent: string;
-  /** Verbatim triggering span, when the extractor supplied one. */
-  readonly matchedText?: string;
-  /** Per-session surface_id stamp; when set the seeded memory_entry carries it
-   *  so delivery-time session coverage can group by surface. */
-  readonly surfaceId?: string | null;
-  /**
-   * The exact raw_payload the production OfficialApiGardenProvider.compile
-   * attached to this signal — matched_text / turn_content_excerpt /
-   * schema_grounding / detected_object / field_candidates /
-   * validation_result. When present it is emitted verbatim so the bench
-   * signal is byte-faithful to the production POST_TURN_EXTRACT signal:
-   * materialization's buildSignalSummary reads field_candidates[0].value
-   * (the matched_text span) and the bench evidence_capsule carries that
-   * SAME span, not a richer full-turn excerpt. Absent only on the
-   * no-credentials / extraction-failure fallback, where the bench builds a
-   * full-turn payload (that path is the degraded one and is labelled so).
-   */
-  readonly productionRawPayload?: Readonly<Record<string, unknown>>;
-  /** Distinct evidence ref so the per-fact materialized object_id stays 1:1. */
-  readonly evidenceRef: string;
-  /**
-   * Monotonic per-turn index within the bench run's daemon. One source turn
-   * fans out into N fact signals; every signal of the same turn carries the
-   * same turnSeedIndex. The token-economy fold uses it to count one turn's
-   * full-turn token size exactly ONCE, not once per fact.
-   */
-  readonly turnSeedIndex: number;
-  /** Which extraction path produced this fact (audit / report disclosure). */
-  readonly extractionProvider: "official_api_compile" | "no_credentials_fallback";
-  /**
-   * @anchor bench-derives-from-injection
-   *
-   * Memory-entry object_ids whose previous-turn seed this signal derives
-   * from. The harness stamps top-level `source_memory_refs = [...]` so
-   * materialization-router/router.ts createAllMemoryRefEdges builds derives_from
-   * proposals between adjacent turns of the same session. The rule is
-   * holistic: any conversational memory system should treat adjacent
-   * turns within one session as derives_from neighbors. Empty / absent
-   * means no inherited refs (e.g. session's first turn).
-   *
-   * These refs are first-class CandidateMemorySignal fields, not
-   * raw_payload conventions; every memory-creating materialization branch
-   * consumes them.
-   * see also: packages/soul/src/garden/materialization-router/router.ts
-   *   createAllMemoryRefEdges
-   */
-  readonly sourceMemoryRefs?: readonly string[];
-}
-
-export interface BenchContextUsageObject {
-  readonly objectId: string;
-  readonly objectKind?: string;
-  readonly usageStatus: "used" | "skipped" | "not_applicable";
-}
-
-export interface BenchReportContextUsageInput {
-  readonly deliveryId: string;
-  readonly usageState: "used" | "skipped" | "not_applicable";
-  readonly usedObjectIds?: readonly string[];
-  readonly deliveredObjects?: readonly BenchContextUsageObject[];
-  readonly turnIndex?: number;
-  readonly turnDigest?: {
-    readonly lastMessages: readonly {
-      readonly role: string;
-      readonly contentExcerpt: string;
-    }[];
-  };
-  readonly reason?: string;
-}
-
-/**
- * @anchor BenchTokenMetrics — event-sourced token-economy figures.
- *
- * Every field is DERIVED from the bench run's EventLog, never recomputed
- * ad hoc against in-memory state. The reader (queryTokenMetrics) scans:
- *
- * - SOUL_SIGNAL_EMITTED — every seed signal carries a bench-stamped KPI
- *   block in raw_payload. The live EventLog row stores only the redacted
- *   numeric summary (`bench_summary_seeded`,
- *   `bench_summary_turn_seed_index`, `bench_full_turn_tokens`,
- *   `bench_stored_content_tokens`) plus an audit hash, never the full
- *   source text. Test fixtures may still use the older raw marker/index
- *   fields and string fields (`bench_full_turn_content`,
- *   `bench_stored_content`). raw_history_tokens counts one source turn
- *   exactly ONCE per distinct turn index (a turn that fans out into N fact
- *   signals is not counted N times); stored_memory_tokens sums one durable
- *   fact token count per fact signal (each is a distinct memory_entry).
- * - SOUL_CONTEXT_LENS_ASSEMBLED — its total_token_estimate is the tokens
- *   actually delivered for one recall. The harness emits this event from
- *   the bench recall path (the bench bypasses ContextLensAssembler).
- *
- * raw_history_tokens   — token size of the full ingested haystack: what an
- *                        agent would otherwise carry as raw context,
- *                        counted once per source turn.
- * stored_memory_tokens — tokens held in the materialized durable memory,
- *                        summed over every seeded fact.
- * recalled_context_tokens_total — tokens delivered summed over all recalls.
- * recall_event_count   — number of SOUL_CONTEXT_LENS_ASSEMBLED events.
- * recalled_context_tokens_mean — total / count (0 when count is 0): the
- *                        tokens an agent receives for ONE recall.
- */
-export interface BenchTokenMetrics {
-  readonly raw_history_tokens: number;
-  readonly stored_memory_tokens: number;
-  readonly recalled_context_tokens_total: number;
-  readonly recall_event_count: number;
-  readonly recalled_context_tokens_mean: number;
-  /** Count of SOUL_SIGNAL_EMITTED events the reader derived seeds from. */
-  readonly seed_event_count: number;
-}
-
-export interface BenchEmbeddingWarmupOptions {
-  readonly maxPasses?: number;
-}
-
-export interface BenchEmbeddingWarmupSummary {
-  readonly status: "not_requested" | "ready";
-  readonly expected_count: number;
-  readonly ready_count: number;
-  readonly ready_rate: number;
-  readonly pass_count: number;
-  readonly missing_object_ids: readonly string[];
-  readonly provider_kind: string | null;
-  readonly model_id: string | null;
-}
-
-export interface DrainEmbeddingWarmupPassesInput {
-  readonly maxPasses: number;
-  readonly maxStallPasses: number;
-  readonly runPass: () => Promise<void>;
-  readonly readSummary: (passCount: number) => Promise<BenchEmbeddingWarmupSummary>;
-}
-
-export interface DrainEmbeddingWarmupPassesResult {
-  readonly summary: BenchEmbeddingWarmupSummary;
-  readonly lastPassError: string | null;
-}
-
-export function formatEmbeddingWarmupNotReadyError(
-  summary: BenchEmbeddingWarmupSummary,
-  lastPassError: string | null
-): string {
-  const preview = summary.missing_object_ids.slice(0, 5).join(", ");
-  return (
-    `embedding warm cache not ready after ${summary.pass_count} pass(es): ` +
-    `ready=${summary.ready_count} expected=${summary.expected_count} ` +
-    `missing=${summary.missing_object_ids.length}` +
-    (preview.length === 0 ? "" : ` first_missing=${preview}`) +
-    (lastPassError === null ? "" : ` last_error=${lastPassError}`)
-  );
-}
-
-// invariant: drains by progress against an injected runPass(). For embedding
-// warmup, runPass() is runGardenEmbeddingBackfillPass — a targeted
-// EMBEDDING_BACKFILL-only drain whose O(n) handler embeds the whole workspace
-// hot corpus in one productive pass (no single-Librarian-slot competition with
-// other Garden kinds). A pass that raises ready_count resets the stall budget;
-// a pass that does not (a stuck or failing embedding) spends one stall unit.
-// Exits when ready_count === expected_count, or the stall budget / maxPasses
-// ceiling is hit; both guarantee termination on a stuck embedding.
-// see also: apps/core-daemon/src/garden-runtime.ts runEmbeddingBackfillPass
-export async function drainEmbeddingWarmupPasses(
-  input: DrainEmbeddingWarmupPassesInput
-): Promise<DrainEmbeddingWarmupPassesResult> {
-  let passCount = 0;
-  let stallPasses = 0;
-  let lastPassError: string | null = null;
-  let summary = await input.readSummary(passCount);
-
-  while (
-    summary.ready_count < summary.expected_count &&
-    passCount < input.maxPasses &&
-    stallPasses < input.maxStallPasses
-  ) {
-    const readyBefore = summary.ready_count;
-    try {
-      await input.runPass();
-      lastPassError = null;
-    } catch (error) {
-      lastPassError = error instanceof Error ? error.message : String(error);
-    }
-    passCount++;
-    summary = await input.readSummary(passCount);
-    stallPasses = summary.ready_count > readyBefore ? 0 : stallPasses + 1;
-  }
-
-  return { summary, lastPassError };
-}
-
-export interface BenchQueryEmbeddingWarmupSummary {
-  readonly status: "not_requested" | "ready";
-  readonly requested_count: number;
-  readonly ready_count: number;
-  readonly cache_hit_count: number;
-  readonly provider_requested_count: number;
-  readonly missing_count: number;
-  readonly provider_kind: string | null;
-  readonly model_id: string | null;
-  readonly last_error?: string;
-}
 
 export interface BenchRecallOptions {
   readonly maxResults?: number;

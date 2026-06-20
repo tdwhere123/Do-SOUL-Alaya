@@ -19,6 +19,7 @@ export const VerificationResultSchema = ControlPlaneEnvelopeSchema.unwrap()
     micro_correction_hint: NonEmptyStringSchema.nullable(),
     necessary_patch: NonEmptyStringSchema.nullable()
   })
+  .strict()
   .readonly();
 
 export type VerificationVerdict = z.infer<typeof VerificationVerdictSchema>;

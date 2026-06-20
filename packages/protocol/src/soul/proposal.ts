@@ -49,6 +49,7 @@ export const ProposalOptionSchema = z
     unresolved_after_apply: z.array(NonEmptyStringSchema).readonly(),
     requires_confirmation: z.boolean()
   })
+  .strict()
   .readonly();
 
 export const ProposalSchema = ControlPlaneEnvelopeSchema.unwrap()
@@ -62,6 +63,7 @@ export const ProposalSchema = ControlPlaneEnvelopeSchema.unwrap()
     expires_at: IsoDatetimeStringSchema.nullable(),
     last_updated_at: IsoDatetimeStringSchema
   })
+  .strict()
   .readonly();
 
 export type ProposalOptionKind = z.infer<typeof ProposalOptionKindSchema>;

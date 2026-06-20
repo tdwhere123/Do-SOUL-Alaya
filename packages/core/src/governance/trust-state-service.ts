@@ -37,9 +37,11 @@ export function collectCounts(
   }>
 ): SummaryCounts & Readonly<{ last_delivery_at: string | null; last_usage_report_at: string | null }> {
   let deliveredCount = 0;
-  let usedCount = 0;
-  let skippedCount = 0;
-  let notApplicableCount = 0;
+  const usageCounts = {
+    usedCount: 0,
+    skippedCount: 0,
+    notApplicableCount: 0
+  };
   let lastDeliveryAt: string | null = null;
   let lastUsageReportAt: string | null = null;
 
@@ -52,18 +54,7 @@ export function collectCounts(
       continue;
     }
 
-    switch (usage.usage_state) {
-      case "used":
-        usedCount += 1;
-        break;
-      case "skipped":
-        skippedCount += 1;
-        break;
-      case "not_applicable":
-        notApplicableCount += 1;
-        break;
-    }
-
+    recordUsageState(usageCounts, usage);
     lastUsageReportAt = maxIso(lastUsageReportAt, usage.reported_at);
   }
 
@@ -71,9 +62,9 @@ export function collectCounts(
     installed_count: seed.installed_count,
     configured_count: seed.configured_count,
     delivered_count: deliveredCount,
-    used_count: usedCount,
-    skipped_count: skippedCount,
-    not_applicable_count: notApplicableCount,
+    used_count: usageCounts.usedCount,
+    skipped_count: usageCounts.skippedCount,
+    not_applicable_count: usageCounts.notApplicableCount,
     unverifiable_count: seed.unverifiable_count,
     last_delivery_at: lastDeliveryAt,
     last_usage_report_at: lastUsageReportAt
@@ -81,15 +72,7 @@ export function collectCounts(
 }
 
 export function reduceTrustState(counts: SummaryCounts): TrustState {
-  if (
-    counts.delivered_count === 0 &&
-    counts.configured_count === 0 &&
-    counts.installed_count === 0
-  ) {
-    return "installed";
-  }
-
-  if (counts.installed_count > 0 && counts.configured_count === 0) {
+  if (isInstalledOnlyState(counts)) {
     return "installed";
   }
 
@@ -97,13 +80,7 @@ export function reduceTrustState(counts: SummaryCounts): TrustState {
     return "configured";
   }
 
-  if (
-    counts.delivered_count > 0 &&
-    counts.used_count === 0 &&
-    counts.skipped_count === 0 &&
-    counts.not_applicable_count === 0 &&
-    counts.unverifiable_count === 0
-  ) {
+  if (hasDeliveryWithoutOutcome(counts)) {
     return "delivered";
   }
 
@@ -127,18 +104,7 @@ export function reduceTrustState(counts: SummaryCounts): TrustState {
     return "unverifiable";
   }
 
-  const outcomes = [
-    counts.used_count,
-    counts.skipped_count,
-    counts.not_applicable_count,
-    counts.unverifiable_count
-  ].filter((value) => value > 0).length;
-
-  if (outcomes >= 2) {
-    return "mixed";
-  }
-
-  if (outcomes > 0) {
+  if (countOutcomeBuckets(counts) > 0) {
     return "mixed";
   }
 
@@ -187,4 +153,52 @@ function maxIso(current: string | null, next: string): string {
   }
 
   return Date.parse(next) > Date.parse(current) ? next : current;
+}
+
+function recordUsageState(
+  counts: {
+    usedCount: number;
+    skippedCount: number;
+    notApplicableCount: number;
+  },
+  usage: Readonly<UsageProofRecord>
+): void {
+  switch (usage.usage_state) {
+    case "used":
+      counts.usedCount += 1;
+      return;
+    case "skipped":
+      counts.skippedCount += 1;
+      return;
+    case "not_applicable":
+      counts.notApplicableCount += 1;
+  }
+}
+
+function isInstalledOnlyState(counts: SummaryCounts): boolean {
+  return (
+    (counts.delivered_count === 0 &&
+      counts.configured_count === 0 &&
+      counts.installed_count === 0) ||
+    (counts.installed_count > 0 && counts.configured_count === 0)
+  );
+}
+
+function hasDeliveryWithoutOutcome(counts: SummaryCounts): boolean {
+  return (
+    counts.delivered_count > 0 &&
+    counts.used_count === 0 &&
+    counts.skipped_count === 0 &&
+    counts.not_applicable_count === 0 &&
+    counts.unverifiable_count === 0
+  );
+}
+
+function countOutcomeBuckets(counts: SummaryCounts): number {
+  return [
+    counts.used_count,
+    counts.skipped_count,
+    counts.not_applicable_count,
+    counts.unverifiable_count
+  ].filter((value) => value > 0).length;
 }

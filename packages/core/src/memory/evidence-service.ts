@@ -30,11 +30,29 @@ export interface EvidenceServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
 }
 
+export interface EvidenceListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
+}
+
 export interface EvidenceServiceEvidenceCapsuleRepoPort {
   create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
+  findByIds?(objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByRunIdPage?(
+    runId: string,
+    page: EvidenceListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByRunId(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByWorkspaceIdPage?(
+    workspaceId: string,
+    page: EvidenceListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByHealthPage?(
+    health: EvidenceHealthState,
+    page: EvidenceListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByHealth(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]>;
   updateHealth(
     objectId: string,
@@ -228,6 +246,17 @@ export class EvidenceService {
     return this.dependencies.evidenceCapsuleRepo.findById(objectId);
   }
 
+  public async findByIds(objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    const findByIds = this.dependencies.evidenceCapsuleRepo.findByIds;
+    if (findByIds === undefined) {
+      const rows = await Promise.all(
+        [...new Set(objectIds)].map(async (objectId) => await this.dependencies.evidenceCapsuleRepo.findById(objectId))
+      );
+      return rows.filter((row): row is Readonly<EvidenceCapsule> => row !== null);
+    }
+    return await findByIds.call(this.dependencies.evidenceCapsuleRepo, objectIds);
+  }
+
   // SECURITY: scoped lookup blocks cross-workspace pointer resolution at
   // the service layer (parallel to MemoryService.findByIdScoped). Used by
   // soul.open_pointer to dereference evidence_refs back to raw turn
@@ -243,15 +272,45 @@ export class EvidenceService {
     return evidence;
   }
 
-  public findByRunId(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
+  public findByRunId(
+    runId: string,
+    page?: EvidenceListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    if (page !== undefined) {
+      const findByRunIdPage = this.dependencies.evidenceCapsuleRepo.findByRunIdPage;
+      if (findByRunIdPage === undefined) {
+        throw new CoreError("CONFLICT", "Evidence repository does not support paged run listing");
+      }
+      return findByRunIdPage.call(this.dependencies.evidenceCapsuleRepo, runId, page);
+    }
     return this.dependencies.evidenceCapsuleRepo.findByRunId(runId);
   }
 
-  public findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
+  public findByWorkspaceId(
+    workspaceId: string,
+    page?: EvidenceListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    if (page !== undefined) {
+      const findByWorkspaceIdPage = this.dependencies.evidenceCapsuleRepo.findByWorkspaceIdPage;
+      if (findByWorkspaceIdPage === undefined) {
+        throw new CoreError("CONFLICT", "Evidence repository does not support paged workspace listing");
+      }
+      return findByWorkspaceIdPage.call(this.dependencies.evidenceCapsuleRepo, workspaceId, page);
+    }
     return this.dependencies.evidenceCapsuleRepo.findByWorkspaceId(workspaceId);
   }
 
-  public findByHealth(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]> {
+  public findByHealth(
+    health: EvidenceHealthState,
+    page?: EvidenceListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    if (page !== undefined) {
+      const findByHealthPage = this.dependencies.evidenceCapsuleRepo.findByHealthPage;
+      if (findByHealthPage === undefined) {
+        throw new CoreError("CONFLICT", "Evidence repository does not support paged health listing");
+      }
+      return findByHealthPage.call(this.dependencies.evidenceCapsuleRepo, health, page);
+    }
     return this.dependencies.evidenceCapsuleRepo.findByHealth(health);
   }
 }

@@ -1,21 +1,11 @@
-import { describe, expect, it, vi, type Mock } from "vitest";
-import { MemoryDimension, GreenGovernanceEventType, RetentionPolicy, type EventLogEntry, type SessionOverride } from "@do-soul/alaya-protocol";
+import { describe, expect, it, vi } from "vitest";
+import { MemoryDimension, GreenGovernanceEventType } from "@do-soul/alaya-protocol";
+import { SessionOverrideRemediation } from "../../garden/session-override-remediation.js";
 import {
-  SessionOverrideRemediation,
-  type SessionOverrideRemediationDependencies
-} from "../../garden/session-override-remediation.js";
-
-type RemediationMemoryCreate = SessionOverrideRemediationDependencies["memoryService"]["create"];
-type RemediationClaimCreate = SessionOverrideRemediationDependencies["claimService"]["create"];
-type RemediationEventLogAppend = SessionOverrideRemediationDependencies["eventLogRepo"]["append"];
-type RemediationEventLogQueryByEntity =
-  SessionOverrideRemediationDependencies["eventLogRepo"]["queryByEntity"];
-type RemediationEventLogQueryByWorkspace =
-  SessionOverrideRemediationDependencies["eventLogRepo"]["queryByWorkspace"];
-type RemediationResolveDimension = NonNullable<
-  SessionOverrideRemediationDependencies["targetObjectResolver"]
->["resolveDimension"];
-type RemediationWarn = NonNullable<SessionOverrideRemediationDependencies["warn"]>;
+  createDeps, createOverride,
+  type RemediationCountDistinctAppliedSessionOverrideRuns, type RemediationHasSessionOverridePromotion,
+  type RemediationResolveDimension
+} from "./session-override-remediation-fixtures.js";
 
 describe("SessionOverrideRemediation", () => {
   it("promotes preference overrides to durable memory when base and trigger conditions pass", async () => {
@@ -238,31 +228,9 @@ describe("SessionOverrideRemediation", () => {
 
   it("evaluates only pending overrides during run-level promotion", async () => {
     const deps = createDeps({
-      queryByEntity: vi
-        .fn<RemediationEventLogQueryByEntity>(async (entityType, entityId) =>
-          entityType === "session_override" && entityId === "override-complete"
-            ? [
-                {
-                  event_id: "event-existing",
-                  created_at: "2026-03-24T00:00:00.000Z",
-                  event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
-                  entity_type: "session_override",
-                  entity_id: "override-complete",
-                  workspace_id: "workspace-1",
-                  run_id: "run-1",
-                  caused_by: "system",
-                  revision: 0,
-                  payload_json: {
-                    override_id: "override-complete",
-                    target_object: "memory:build-style",
-                    dimension: "preference",
-                    promotion_outcome: "durable",
-                    occurred_at: "2026-03-24T00:00:00.000Z"
-                  }
-                }
-              ]
-            : []
-        )
+      hasSessionOverridePromotion: vi.fn<RemediationHasSessionOverridePromotion>(
+        async (overrideId) => overrideId === "override-complete"
+      )
     });
     const remediation = new SessionOverrideRemediation(deps);
 
@@ -314,50 +282,8 @@ describe("SessionOverrideRemediation", () => {
 
   it("promotes repeated overrides across distinct runs", async () => {
     const deps = createDeps({
-      queryByWorkspace: vi.fn<RemediationEventLogQueryByWorkspace>(async () => [
-        {
-          event_id: "event-repeat-1",
-          created_at: "2026-03-24T00:00:00.000Z",
-          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
-          entity_type: "session_override",
-          entity_id: "override-repeat-1",
-          workspace_id: "workspace-1",
-          run_id: "run-1",
-          caused_by: "user_action",
-          revision: 0,
-          payload_json: {
-            override_id: "override-repeat-1",
-            target_object: "memory:build-style",
-            correction: "Use pnpm instead of npm.",
-            priority: 2,
-            run_id: "run-1",
-            expires_at: "2026-03-24T01:00:00.000Z",
-            derived_from: null,
-            occurred_at: "2026-03-24T00:00:00.000Z"
-          }
-        },
-        {
-          event_id: "event-repeat-2",
-          created_at: "2026-03-24T00:05:00.000Z",
-          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
-          entity_type: "session_override",
-          entity_id: "override-repeat-2",
-          workspace_id: "workspace-1",
-          run_id: "run-2",
-          caused_by: "user_action",
-          revision: 0,
-          payload_json: {
-            override_id: "override-repeat-2",
-            target_object: "memory:build-style",
-            correction: "Use pnpm instead of npm.",
-            priority: 2,
-            run_id: "run-2",
-            expires_at: "2026-03-24T01:05:00.000Z",
-            derived_from: null,
-            occurred_at: "2026-03-24T00:05:00.000Z"
-          }
-        }
-      ])
+      countDistinctAppliedSessionOverrideRuns:
+        vi.fn<RemediationCountDistinctAppliedSessionOverrideRuns>(async () => 2)
     });
     const remediation = new SessionOverrideRemediation(deps);
 
@@ -384,50 +310,8 @@ describe("SessionOverrideRemediation", () => {
 
   it("ignores malformed applied-event payloads when checking recurring overrides", async () => {
     const deps = createDeps({
-      queryByWorkspace: vi.fn<RemediationEventLogQueryByWorkspace>(async () => [
-        {
-          event_id: "event-repeat-1",
-          created_at: "2026-03-24T00:00:00.000Z",
-          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
-          entity_type: "session_override",
-          entity_id: "override-repeat-1",
-          workspace_id: "workspace-1",
-          run_id: "run-1",
-          caused_by: "user_action",
-          revision: 0,
-          payload_json: {
-            override_id: "override-repeat-1",
-            target_object: "memory:build-style",
-            correction: "Use pnpm instead of npm.",
-            priority: 2,
-            run_id: "run-1",
-            expires_at: "2026-03-24T01:00:00.000Z",
-            derived_from: null,
-            occurred_at: "2026-03-24T00:00:00.000Z"
-          }
-        },
-        {
-          event_id: "event-repeat-malformed",
-          created_at: "2026-03-24T00:05:00.000Z",
-          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
-          entity_type: "session_override",
-          entity_id: "override-repeat-malformed",
-          workspace_id: "workspace-1",
-          run_id: "run-2",
-          caused_by: "user_action",
-          revision: 0,
-          payload_json: {
-            override_id: "override-repeat-malformed",
-            target_object: "memory:build-style",
-            correction: 42,
-            priority: 2,
-            run_id: "run-2",
-            expires_at: "2026-03-24T01:05:00.000Z",
-            derived_from: null,
-            occurred_at: "2026-03-24T00:05:00.000Z"
-          }
-        }
-      ])
+      countDistinctAppliedSessionOverrideRuns:
+        vi.fn<RemediationCountDistinctAppliedSessionOverrideRuns>(async () => 1)
     });
     const remediation = new SessionOverrideRemediation(deps);
 
@@ -508,81 +392,3 @@ describe("SessionOverrideRemediation", () => {
     );
   });
 });
-
-function createDeps(
-  overrides: Partial<{
-    queryByEntity: Mock<RemediationEventLogQueryByEntity>;
-    queryByWorkspace: Mock<RemediationEventLogQueryByWorkspace>;
-    resolveDimension: Mock<RemediationResolveDimension>;
-    includeResolver: boolean;
-  }> = {}
-) {
-  const storedEvents: EventLogEntry[] = [];
-  const warn = vi.fn<RemediationWarn>();
-
-  const deps = {
-    memoryService: {
-      create: vi.fn<RemediationMemoryCreate>(async () => ({
-        object_kind: "memory_entry",
-        object_id: "memory-1"
-      }))
-    },
-    claimService: {
-      create: vi.fn<RemediationClaimCreate>(async () => ({
-        object_kind: "claim_form",
-        object_id: "claim-1"
-      }))
-    },
-    eventLogRepo: {
-      append: vi.fn<RemediationEventLogAppend>(async (event) => {
-        const stored: EventLogEntry = {
-          event_id: `event-${storedEvents.length + 1}`,
-          created_at: "2026-03-24T00:00:00.000Z",
-          revision: 0,
-          ...event
-        };
-        storedEvents.push(stored);
-        return stored;
-      }),
-      queryByEntity:
-        overrides.queryByEntity ??
-        vi.fn<RemediationEventLogQueryByEntity>(async (entityType, entityId) =>
-          storedEvents.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
-        ),
-      queryByWorkspace:
-        overrides.queryByWorkspace ??
-        vi.fn<RemediationEventLogQueryByWorkspace>(async (workspaceId) =>
-          storedEvents.filter((event) => event.workspace_id === workspaceId)
-        )
-    },
-    warn
-  };
-
-  return {
-    ...deps,
-    ...(overrides.includeResolver === false
-      ? {}
-      : {
-          targetObjectResolver: {
-            resolveDimension:
-              overrides.resolveDimension ?? vi.fn<RemediationResolveDimension>(async () => null)
-          }
-        })
-  };
-}
-
-function createOverride(overrides: Partial<SessionOverride> = {}): SessionOverride {
-  return {
-    runtime_id: "11111111-1111-4111-8111-111111111111",
-    object_kind: "session_override",
-    task_surface_ref: null,
-    expires_at: "2026-03-24T01:00:00.000Z",
-    derived_from: "msg-user-1",
-    retention_policy: RetentionPolicy.SESSION_ONLY,
-    scope: "session_only",
-    target_object: "memory:build-style",
-    correction: "Use pnpm instead of npm.",
-    priority: 2,
-    ...overrides
-  };
-}

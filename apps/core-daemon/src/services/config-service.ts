@@ -4,15 +4,10 @@ import {
   DEFAULT_ENVIRONMENT_CONFIG,
   DEFAULT_SOUL_CONFIG,
   DEFAULT_STRATEGY_CONFIG,
-  DYNAMICS_CONSTANTS,
   EnvironmentConfigSchema,
-  HealthEventKind,
   GardenEventType,
+  HealthEventKind,
   ManifestationBudgetConfigSchema,
-  RuntimeGardenComputeConfigSchema,
-  RuntimeGardenProviderKindSchema,
-  RuntimeEmbeddingConfigSchema,
-  secretRefScheme,
   SoulConfigSchema,
   SoulHealthJournalRecordedPayloadSchema,
   StrategyConfigSchema,
@@ -24,33 +19,21 @@ import {
   type SoulConfig,
   type StrategyConfig
 } from "@do-soul/alaya-protocol";
-import { OFFICIAL_API_GARDEN_MODEL } from "@do-soul/alaya-soul";
 import type { ConfigRepo } from "@do-soul/alaya-storage";
-import {
-  ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV,
-  selectGardenCredentialProvenance,
-  type GardenCredentialProvenance
-} from "../garden/index.js";
-export type { GardenCredentialProvenance } from "../garden/index.js";
 import type { AlayaConfigPaths } from "../cli/config-files.js";
+import type { GardenCredentialProvenance } from "../garden/index.js";
+export type { GardenCredentialProvenance } from "../garden/index.js";
 import {
-  loadConfigEnv,
-  readConfigEnvValue,
-  readNonEmptyEnv
-} from "../runtime/index.js";
+  getGardenCredentialProvenance,
+  getRuntimeEmbeddingConfig,
+  getRuntimeGardenComputeConfig,
+  patchRuntimeEmbeddingConfig,
+  patchRuntimeGardenComputeConfig
+} from "./config-service-runtime.js";
 import {
-  ALAYA_GARDEN_PROVIDER_KIND_ENV,
-  ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV,
-  ALAYA_OPENAI_SECRET_REF_ENV,
-  applyRuntimeGardenComputeConfigFiles,
-  applyRuntimeEmbeddingConfigFiles,
-  normalizeRuntimeEmbeddingConfigPatch,
-  normalizeRuntimeGardenComputeConfigPatch,
-  OFFICIAL_API_GARDEN_MODEL_ENV,
-  OFFICIAL_API_GARDEN_PROVIDER_URL_ENV,
-  type NormalizedRuntimeGardenComputeConfigPatch,
-  type NormalizedRuntimeEmbeddingConfigPatch
-} from "./env-file-service.js";
+  buildManifestationBudgetChangeSummary,
+  defaultManifestationBudgetConfig
+} from "./config-service-manifestation-support.js";
 
 export interface AppConfigService {
   getSoulConfig(workspaceId: string): Promise<SoulConfig>;
@@ -84,51 +67,12 @@ const SoulConfigPatchSchema = SoulConfigSchema.unwrap().partial();
 const StrategyConfigPatchSchema = StrategyConfigSchema.unwrap().partial();
 const EnvironmentConfigPatchSchema = EnvironmentConfigSchema.unwrap().partial();
 
-const RUNTIME_EMBEDDING_CONFIG_KEY = "runtime:embedding-supplement";
-const RUNTIME_GARDEN_COMPUTE_CONFIG_KEY = "runtime:garden-compute";
 const MANIFESTATION_BUDGET_CONFIG_SECTION = "manifestation_budget";
-const RUNTIME_EMBEDDING_ENTITY_TYPE = "runtime_config";
-const RUNTIME_EMBEDDING_ENTITY_ID = "runtime:embedding-supplement";
-const RUNTIME_GARDEN_COMPUTE_ENTITY_ID = "runtime:garden-compute";
-const RUNTIME_CONFIG_WORKSPACE_ID = "runtime";
 const WORKSPACE_CONFIG_ENTITY_TYPE = "workspace_config";
-const RUNTIME_EMBEDDING_CONFIG_FIELDS = [
-  "provider_url",
-  "secret_ref",
-  "model_id",
-  "embedding_enabled"
-] as const;
-const RUNTIME_GARDEN_COMPUTE_CONFIG_FIELDS = [
-  "provider_kind",
-  "provider_url",
-  "secret_ref",
-  "model_id",
-  "enabled"
-] as const;
-const MANIFESTATION_BUDGET_CAP_FIELDS = [
-  "stance_bias_cap",
-  "dialogue_nudge_cap",
-  "lens_entry_cap"
-] as const;
-const MANIFESTATION_ESCALATION_POLICY_FIELDS = [
-  "nudge_min_pressure",
-  "nudge_min_confidence",
-  "lens_min_pressure",
-  "lens_min_confidence",
-  "lens_requires_task_coupling",
-  "lens_requires_governance_ceiling"
-] as const;
 const CURRENT_CONFIG_VERSION = DEFAULT_SOUL_CONFIG.config_version ?? 1;
+
 type ConfigPatchObject = Record<string, unknown>;
 type VersionedConfigObject = ConfigPatchObject & { readonly config_version?: number };
-
-const DEFAULT_RUNTIME_EMBEDDING_CONFIG: RuntimeEmbeddingConfig = {
-  config_version: CURRENT_CONFIG_VERSION,
-  provider_url: null,
-  secret_ref: null,
-  model_id: null,
-  embedding_enabled: true
-};
 
 export function createConfigService(dependencies: {
   readonly configRepo: ConfigRepo;
@@ -156,47 +100,45 @@ export function createConfigService(dependencies: {
   } = dependencies;
 
   return {
-    getSoulConfig: async (workspaceId) =>
-      await getSectionConfig(configRepo, keyFor(workspaceId, "soul"), SoulConfigSchema, DEFAULT_SOUL_CONFIG),
-    patchSoulConfig: async (workspaceId, patch) =>
-      await patchSectionConfig(
-        configRepo,
-        keyFor(workspaceId, "soul"),
-        SoulConfigSchema,
-        SoulConfigPatchSchema,
-        DEFAULT_SOUL_CONFIG,
-        patch,
-        "Invalid soul config patch"
-      ),
-    getStrategyConfig: async (workspaceId) =>
-      await getSectionConfig(configRepo, keyFor(workspaceId, "strategy"), StrategyConfigSchema, DEFAULT_STRATEGY_CONFIG),
-    patchStrategyConfig: async (workspaceId, patch) =>
-      await patchSectionConfig(
-        configRepo,
-        keyFor(workspaceId, "strategy"),
-        StrategyConfigSchema,
-        StrategyConfigPatchSchema,
-        DEFAULT_STRATEGY_CONFIG,
-        patch,
-        "Invalid strategy config patch"
-      ),
-    getEnvironmentConfig: async (workspaceId) =>
-      await getSectionConfig(
-        configRepo,
-        keyFor(workspaceId, "environment"),
-        EnvironmentConfigSchema,
-        DEFAULT_ENVIRONMENT_CONFIG
-      ),
-    patchEnvironmentConfig: async (workspaceId, patch) =>
-      await patchSectionConfig(
-        configRepo,
-        keyFor(workspaceId, "environment"),
-        EnvironmentConfigSchema,
-        EnvironmentConfigPatchSchema,
-        DEFAULT_ENVIRONMENT_CONFIG,
-        patch,
-        "Invalid environment config patch"
-      ),
+    ...createWorkspaceSectionConfigMethods(configRepo),
+    ...createManifestationBudgetMethods(configRepo, eventPublisher, clock, generateAuditId),
+    ...createRuntimeConfigMethods({
+      configRepo,
+      eventPublisher,
+      configPathsProvider,
+      clock,
+      platform,
+      generateTempId,
+      generateAuditId,
+      envProvider,
+      warn
+    })
+  };
+}
+
+function createWorkspaceSectionConfigMethods(configRepo: ConfigRepo): Pick<
+  AppConfigService,
+  | "getSoulConfig"
+  | "patchSoulConfig"
+  | "getStrategyConfig"
+  | "patchStrategyConfig"
+  | "getEnvironmentConfig"
+  | "patchEnvironmentConfig"
+> {
+  return {
+    ...createSoulConfigMethods(configRepo),
+    ...createStrategyConfigMethods(configRepo),
+    ...createEnvironmentConfigMethods(configRepo)
+  };
+}
+
+function createManifestationBudgetMethods(
+  configRepo: ConfigRepo,
+  eventPublisher: ConfigEventPublisher,
+  clock: () => string,
+  generateAuditId: () => string
+): Pick<AppConfigService, "getManifestationBudgetConfig" | "patchManifestationBudgetConfig"> {
+  return {
     getManifestationBudgetConfig: async (workspaceId) =>
       await getManifestationBudgetConfig(configRepo, workspaceId, clock),
     patchManifestationBudgetConfig: async (workspaceId, patch) =>
@@ -207,42 +149,38 @@ export function createConfigService(dependencies: {
         patch,
         clock,
         generateAuditId
-      }),
-    getRuntimeEmbeddingConfig: async () => await getRuntimeEmbeddingConfig(configRepo),
-    patchRuntimeEmbeddingConfig: async (patch) =>
-      await patchRuntimeEmbeddingConfig({
-        repo: configRepo,
-        eventPublisher,
-        paths: configPathsProvider(),
-        patch,
-        clock,
-        platform,
-        generateTempId,
-        generateAuditId
-      }),
-    getGardenCredentialProvenance: async () =>
-      await getGardenCredentialProvenance({
-        paths: configPathsProvider(),
-        env: envProvider()
-      }),
-    getRuntimeGardenComputeConfig: async () =>
-      await getRuntimeGardenComputeConfig(configRepo, configPathsProvider(), warn),
-    patchRuntimeGardenComputeConfig: async (patch) =>
-      await patchRuntimeGardenComputeConfig({
-        repo: configRepo,
-        eventPublisher,
-        paths: configPathsProvider(),
-        patch,
-        clock,
-        platform,
-        generateTempId,
-        generateAuditId,
-        warn
       })
   };
 }
 
-function keyFor(workspaceId: string, section: "soul" | "strategy" | "environment" | typeof MANIFESTATION_BUDGET_CONFIG_SECTION): string {
+function createRuntimeConfigMethods(input: {
+  readonly configRepo: ConfigRepo;
+  readonly eventPublisher: ConfigEventPublisher;
+  readonly configPathsProvider: () => AlayaConfigPaths;
+  readonly clock: () => string;
+  readonly platform: NodeJS.Platform;
+  readonly generateTempId: () => string;
+  readonly generateAuditId: () => string;
+  readonly envProvider: () => NodeJS.ProcessEnv;
+  readonly warn: (message: string) => void;
+}): Pick<
+  AppConfigService,
+  | "getRuntimeEmbeddingConfig"
+  | "patchRuntimeEmbeddingConfig"
+  | "getGardenCredentialProvenance"
+  | "getRuntimeGardenComputeConfig"
+  | "patchRuntimeGardenComputeConfig"
+> {
+  return {
+    ...createRuntimeConfigReadMethods(input),
+    ...createRuntimeConfigPatchMethods(input)
+  };
+}
+
+function keyFor(
+  workspaceId: string,
+  section: "soul" | "strategy" | "environment" | typeof MANIFESTATION_BUDGET_CONFIG_SECTION
+): string {
   return `workspace:${workspaceId}:${section}`;
 }
 
@@ -252,46 +190,42 @@ async function getSectionConfig<T extends VersionedConfigObject>(
   schema: { parse(value: unknown): T },
   defaults: T
 ): Promise<T> {
-  // ConfigRepo.get is synchronous (sqlite prepared statement); no await needed.
-  const raw = repo.get<unknown>(key);
-  return schema.parse(
-    normalizeLegacyConfigVersion(raw ?? defaults, readConfigVersion(defaults))
+  const version = readConfigVersion(defaults);
+  return (
+    repo.getParsed(key, {
+      parse: (value) => schema.parse(normalizeLegacyConfigVersion(value, version))
+    }) ?? schema.parse(defaults)
   );
 }
 
 async function patchSectionConfig<T extends VersionedConfigObject>(
   repo: ConfigRepo,
   key: string,
-  fullSchema: { parse(value: unknown): T },
-  patchSchema: { safeParse(value: unknown): { success: true; data: Partial<T> } | { success: false; error: unknown } },
+  fullSchema: {
+    parse(value: unknown): T;
+  },
+  patchSchema: {
+    safeParse(value: unknown):
+      | { success: true; data: Partial<T> }
+      | { success: false; error: unknown };
+  },
   defaults: T,
   patch: unknown,
   validationMessage: string
 ): Promise<T> {
   const parsedPatch = patchSchema.safeParse(patch);
-
   if (!parsedPatch.success) {
     throw new CoreError("VALIDATION", validationMessage, { cause: parsedPatch.error });
   }
 
-  // ConfigRepo.patch is synchronous (sqlite read-modify-write); no await needed.
-  const next = repo.patch(
+  return repo.patchParsed(
     key,
     withConfigVersion(parsedPatch.data, readConfigVersion(defaults)),
-    defaults
-  );
-  return fullSchema.parse(
-    normalizeLegacyConfigVersion(next, readConfigVersion(defaults))
-  );
-}
-
-async function getRuntimeEmbeddingConfig(repo: ConfigRepo): Promise<RuntimeEmbeddingConfig> {
-  // ConfigRepo.get is synchronous; no await needed.
-  return RuntimeEmbeddingConfigSchema.parse(
-    normalizeLegacyConfigVersion(
-      repo.get<unknown>(RUNTIME_EMBEDDING_CONFIG_KEY) ?? DEFAULT_RUNTIME_EMBEDDING_CONFIG,
-      readConfigVersion(DEFAULT_RUNTIME_EMBEDDING_CONFIG)
-    )
+    defaults,
+    {
+      parse: (value) =>
+        fullSchema.parse(normalizeLegacyConfigVersion(value, readConfigVersion(defaults)))
+    }
   );
 }
 
@@ -300,9 +234,9 @@ async function getManifestationBudgetConfig(
   workspaceId: string,
   clock: () => string
 ): Promise<ManifestationBudgetConfigRead> {
-  // ConfigRepo.get is synchronous; no await needed.
-  const stored = repo.get<ManifestationBudgetConfig>(
-    keyFor(workspaceId, MANIFESTATION_BUDGET_CONFIG_SECTION)
+  const stored = repo.getParsed(
+    keyFor(workspaceId, MANIFESTATION_BUDGET_CONFIG_SECTION),
+    ManifestationBudgetConfigSchema
   );
   return {
     config: ManifestationBudgetConfigSchema.parse(
@@ -325,123 +259,175 @@ async function patchManifestationBudgetConfig(input: {
     patch.escalation_policy,
     "Invalid manifestation budget config patch"
   );
-  const current = (
-    await getManifestationBudgetConfig(input.repo, input.workspaceId, input.clock)
-  ).config;
   const occurredAt = parseIsoTimestamp(input.clock(), "Invalid manifestation budget config patch");
-  const next = ManifestationBudgetConfigSchema.parse({
+  const next = await buildNextManifestationBudgetConfig(input.repo, input.workspaceId, input.clock, patch, escalationPolicyPatch, occurredAt);
+  const auditEntryId = input.generateAuditId();
+  const configKey = keyFor(input.workspaceId, MANIFESTATION_BUDGET_CONFIG_SECTION);
+
+  return await input.eventPublisher.appendManyWithMutation(
+    [buildManifestationBudgetAuditEvent(input.workspaceId, configKey, patch, escalationPolicyPatch, occurredAt, auditEntryId)],
+    () => {
+      input.repo.setParsed(configKey, next, ManifestationBudgetConfigSchema);
+      return next;
+    }
+  );
+}
+
+function createSoulConfigMethods(configRepo: ConfigRepo): Pick<AppConfigService, "getSoulConfig" | "patchSoulConfig"> {
+  return {
+    getSoulConfig: async (workspaceId) =>
+      await getSectionConfig(configRepo, keyFor(workspaceId, "soul"), SoulConfigSchema, DEFAULT_SOUL_CONFIG),
+    patchSoulConfig: async (workspaceId, patch) =>
+      await patchSectionConfig(
+        configRepo,
+        keyFor(workspaceId, "soul"),
+        SoulConfigSchema,
+        SoulConfigPatchSchema,
+        DEFAULT_SOUL_CONFIG,
+        patch,
+        "Invalid soul config patch"
+      )
+  };
+}
+
+function createStrategyConfigMethods(configRepo: ConfigRepo): Pick<AppConfigService, "getStrategyConfig" | "patchStrategyConfig"> {
+  return {
+    getStrategyConfig: async (workspaceId) =>
+      await getSectionConfig(configRepo, keyFor(workspaceId, "strategy"), StrategyConfigSchema, DEFAULT_STRATEGY_CONFIG),
+    patchStrategyConfig: async (workspaceId, patch) =>
+      await patchSectionConfig(
+        configRepo,
+        keyFor(workspaceId, "strategy"),
+        StrategyConfigSchema,
+        StrategyConfigPatchSchema,
+        DEFAULT_STRATEGY_CONFIG,
+        patch,
+        "Invalid strategy config patch"
+      )
+  };
+}
+
+function createEnvironmentConfigMethods(
+  configRepo: ConfigRepo
+): Pick<AppConfigService, "getEnvironmentConfig" | "patchEnvironmentConfig"> {
+  return {
+    getEnvironmentConfig: async (workspaceId) =>
+      await getSectionConfig(configRepo, keyFor(workspaceId, "environment"), EnvironmentConfigSchema, DEFAULT_ENVIRONMENT_CONFIG),
+    patchEnvironmentConfig: async (workspaceId, patch) =>
+      await patchSectionConfig(
+        configRepo,
+        keyFor(workspaceId, "environment"),
+        EnvironmentConfigSchema,
+        EnvironmentConfigPatchSchema,
+        DEFAULT_ENVIRONMENT_CONFIG,
+        patch,
+        "Invalid environment config patch"
+      )
+  };
+}
+
+function createRuntimeConfigReadMethods(input: {
+  readonly configRepo: ConfigRepo;
+  readonly configPathsProvider: () => AlayaConfigPaths;
+  readonly envProvider: () => NodeJS.ProcessEnv;
+  readonly warn: (message: string) => void;
+}): Pick<
+  AppConfigService,
+  "getRuntimeEmbeddingConfig" | "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig"
+> {
+  return {
+    getRuntimeEmbeddingConfig: async () => await getRuntimeEmbeddingConfig(input.configRepo),
+    getGardenCredentialProvenance: async () =>
+      await getGardenCredentialProvenance({
+        paths: input.configPathsProvider(),
+        env: input.envProvider()
+      }),
+    getRuntimeGardenComputeConfig: async () =>
+      await getRuntimeGardenComputeConfig(input.configRepo, input.configPathsProvider(), input.warn)
+  };
+}
+
+function createRuntimeConfigPatchMethods(input: {
+  readonly configRepo: ConfigRepo;
+  readonly eventPublisher: ConfigEventPublisher;
+  readonly configPathsProvider: () => AlayaConfigPaths;
+  readonly clock: () => string;
+  readonly platform: NodeJS.Platform;
+  readonly generateTempId: () => string;
+  readonly generateAuditId: () => string;
+  readonly warn: (message: string) => void;
+}): Pick<AppConfigService, "patchRuntimeEmbeddingConfig" | "patchRuntimeGardenComputeConfig"> {
+  return {
+    patchRuntimeEmbeddingConfig: async (patch) =>
+      await patchRuntimeEmbeddingConfig({
+        repo: input.configRepo,
+        eventPublisher: input.eventPublisher,
+        paths: input.configPathsProvider(),
+        patch,
+        clock: input.clock,
+        platform: input.platform,
+        generateTempId: input.generateTempId,
+        generateAuditId: input.generateAuditId
+      }),
+    patchRuntimeGardenComputeConfig: async (patch) =>
+      await patchRuntimeGardenComputeConfig({
+        repo: input.configRepo,
+        eventPublisher: input.eventPublisher,
+        paths: input.configPathsProvider(),
+        patch,
+        clock: input.clock,
+        platform: input.platform,
+        generateTempId: input.generateTempId,
+        generateAuditId: input.generateAuditId,
+        warn: input.warn
+      })
+  };
+}
+
+async function buildNextManifestationBudgetConfig(
+  repo: ConfigRepo,
+  workspaceId: string,
+  clock: () => string,
+  patch: ConfigPatchObject,
+  escalationPolicyPatch: ConfigPatchObject,
+  occurredAt: string
+): Promise<ManifestationBudgetConfig> {
+  const current = (await getManifestationBudgetConfig(repo, workspaceId, clock)).config;
+  return ManifestationBudgetConfigSchema.parse({
     ...current,
     ...patch,
-    workspace_id: input.workspaceId,
+    workspace_id: workspaceId,
     escalation_policy: {
       ...current.escalation_policy,
       ...escalationPolicyPatch
     },
     updated_at: occurredAt
   });
-  const auditEntryId = input.generateAuditId();
-  const configKey = keyFor(input.workspaceId, MANIFESTATION_BUDGET_CONFIG_SECTION);
-
-  return await input.eventPublisher.appendManyWithMutation(
-    [
-      {
-        event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
-        entity_type: WORKSPACE_CONFIG_ENTITY_TYPE,
-        entity_id: configKey,
-        workspace_id: input.workspaceId,
-        run_id: null,
-        caused_by: "inspector",
-        payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
-            entry_id: auditEntryId,
-            event_kind: HealthEventKind.RECALL_TUNING,
-            workspace_id: input.workspaceId,
-            occurred_at: occurredAt,
-            change_summary: buildManifestationBudgetChangeSummary(patch, escalationPolicyPatch)
-          })
-        }
-      ],
-    () => {
-      input.repo.set(configKey, next);
-      return next;
-    }
-  );
 }
 
-function defaultManifestationBudgetConfig(
+function buildManifestationBudgetAuditEvent(
   workspaceId: string,
-  clock: () => string
-): ManifestationBudgetConfig {
-  return ManifestationBudgetConfigSchema.parse({
-    workspace_id: workspaceId,
-    stance_bias_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_stance_bias_cap,
-    dialogue_nudge_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_dialogue_nudge_cap,
-    lens_entry_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_lens_entry_cap,
-    escalation_policy: {
-      nudge_min_pressure: DYNAMICS_CONSTANTS.manifestation_budget.default_nudge_min_pressure,
-      nudge_min_confidence: DYNAMICS_CONSTANTS.manifestation_budget.default_nudge_min_confidence,
-      lens_min_pressure: DYNAMICS_CONSTANTS.manifestation_budget.default_lens_min_pressure,
-      lens_min_confidence: DYNAMICS_CONSTANTS.manifestation_budget.default_lens_min_confidence,
-      lens_requires_task_coupling: true,
-      lens_requires_governance_ceiling: true
-    },
-    updated_at: clock()
-  });
-}
-
-function buildManifestationBudgetChangeSummary(
+  configKey: string,
   patch: ConfigPatchObject,
-  escalationPolicyPatch: ConfigPatchObject
-): {
-  readonly fields_changed: readonly string[];
-} {
-  const fieldsChanged = [
-    ...MANIFESTATION_BUDGET_CAP_FIELDS.filter((field) => patch[field] !== undefined),
-    ...MANIFESTATION_ESCALATION_POLICY_FIELDS
-      .filter((field) => escalationPolicyPatch[field] !== undefined)
-      .map((field) => `escalation_policy.${field}`)
-  ];
-  return { fields_changed: fieldsChanged };
-}
-
-async function getRuntimeGardenComputeConfig(
-  repo: ConfigRepo,
-  paths: AlayaConfigPaths,
-  warn: (message: string) => void
-): Promise<RuntimeGardenComputeConfig> {
-  // ConfigRepo.get is synchronous; defaultRuntimeGardenComputeConfig is the
-  // genuinely-async fallback (reads files), so only the latter is awaited.
-  const persisted = repo.get<RuntimeGardenComputeConfig>(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY);
-  const raw = persisted ?? (await defaultRuntimeGardenComputeConfig(paths, warn));
-  return parseGardenComputeConfigWithLegacyFallback(raw, "garden-compute config", warn);
-}
-
-// Keep malformed rows from making runtime config unreadable. Keychain refs
-// that are schema-compatible but operationally invalid are handled later by
-// resolveSecretRef/doctor so this parser does not narrow the runtime config schema.
-function parseGardenComputeConfigWithLegacyFallback(
-  input: unknown,
-  source: string,
-  warn: (message: string) => void
-): RuntimeGardenComputeConfig {
-  const normalizedInput = normalizeLegacyConfigVersion(input, CURRENT_CONFIG_VERSION);
-  const direct = RuntimeGardenComputeConfigSchema.safeParse(normalizedInput);
-  if (direct.success) {
-    return direct.data;
-  }
-  const issues = direct.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
-  warn(
-    `${source}: rejected by schema (${issues}); dropping secret_ref and falling back to local_heuristics. ` +
-      "Re-run `alaya install --keychain` (or fix the offending env/SQL value) to restore Garden compute."
-  );
-  const fallbackBase = isRecord(normalizedInput) ? normalizedInput : {};
-  const fallback = {
-    ...fallbackBase,
-    config_version: CURRENT_CONFIG_VERSION,
-    secret_ref: null,
-    enabled: false,
-    provider_kind: "local_heuristics"
+  escalationPolicyPatch: ConfigPatchObject,
+  occurredAt: string,
+  auditEntryId: string
+): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+  return {
+    event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+    entity_type: WORKSPACE_CONFIG_ENTITY_TYPE,
+    entity_id: configKey,
+    workspace_id: workspaceId,
+    run_id: null,
+    caused_by: "inspector",
+    payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
+      entry_id: auditEntryId,
+      event_kind: HealthEventKind.RECALL_TUNING,
+      workspace_id: workspaceId,
+      occurred_at: occurredAt,
+      change_summary: buildManifestationBudgetChangeSummary(patch, escalationPolicyPatch)
+    })
   };
-  return RuntimeGardenComputeConfigSchema.parse(fallback);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -452,11 +438,13 @@ function parseConfigPatchObject(value: unknown, validationMessage: string): Conf
   if (!isRecord(value)) {
     throw new CoreError("VALIDATION", validationMessage);
   }
-
   return value;
 }
 
-function parseOptionalConfigPatchObject(value: unknown, validationMessage: string): ConfigPatchObject {
+function parseOptionalConfigPatchObject(
+  value: unknown,
+  validationMessage: string
+): ConfigPatchObject {
   return value === undefined ? {} : parseConfigPatchObject(value, validationMessage);
 }
 
@@ -468,7 +456,6 @@ function normalizeLegacyConfigVersion(value: unknown, configVersion: number): un
   if (!isRecord(value) || value.config_version !== undefined) {
     return value;
   }
-
   return {
     ...value,
     config_version: configVersion
@@ -485,214 +472,10 @@ function withConfigVersion<T extends VersionedConfigObject>(
   };
 }
 
-async function patchRuntimeEmbeddingConfig(input: {
-  readonly repo: ConfigRepo;
-  readonly eventPublisher: ConfigEventPublisher;
-  readonly paths: AlayaConfigPaths;
-  readonly patch: unknown;
-  readonly clock: () => string;
-  readonly platform: NodeJS.Platform;
-  readonly generateTempId: () => string;
-  readonly generateAuditId: () => string;
-}): Promise<RuntimeEmbeddingConfig> {
-  const normalized = normalizeRuntimeEmbeddingConfigPatch(input.patch, input.paths, input.platform);
-  const occurredAt = parseIsoTimestamp(input.clock());
-  const auditEntryId = input.generateAuditId();
-
-  // invariant: the FS write half of this operation (env file + optional
-  // pasted secret) is genuinely async and cannot live inside a SQLite
-  // transaction. The structure is:
-  //
-  //   1. applyRuntimeEmbeddingConfigFiles writes the FS files inside its
-  //      cross-process lock and snapshots the previous content.
-  //   2. The persist callback runs the atomic publish + sync SQL patch via
-  //      EventPublisher.appendManyWithMutation. If publish/SQL throws inside
-  //      this callback, applyRuntimeEmbeddingConfigFiles' built-in
-  //      restore-on-throw cleans up the FS files atomically with the
-  //      EventLog rollback. End-state: behaves as a single transaction
-  //      across FS + EventLog + SQL even though FS is not part of the
-  //      SQLite transaction itself.
-  //
-  // This keeps the FS/SQL rollback contract atomic for the runtime-config
-  // SQL row.
-  return await applyRuntimeEmbeddingConfigFiles({
-    paths: input.paths,
-    normalized,
-    generateTempId: input.generateTempId,
-    persist: async () =>
-      await input.eventPublisher.appendManyWithMutation(
-        [
-          {
-            event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
-            entity_type: RUNTIME_EMBEDDING_ENTITY_TYPE,
-            entity_id: RUNTIME_EMBEDDING_ENTITY_ID,
-            workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
-            run_id: null,
-            caused_by: "inspector",
-            payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
-              entry_id: auditEntryId,
-              event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
-              workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
-              occurred_at: occurredAt,
-              change_summary: buildRuntimeEmbeddingChangeSummary(normalized)
-            })
-          }
-        ],
-        () => {
-          const next = input.repo.patch(
-            RUNTIME_EMBEDDING_CONFIG_KEY,
-            withConfigVersion(normalized.patch, readConfigVersion(DEFAULT_RUNTIME_EMBEDDING_CONFIG)),
-            DEFAULT_RUNTIME_EMBEDDING_CONFIG
-          );
-          return RuntimeEmbeddingConfigSchema.parse(
-            normalizeLegacyConfigVersion(next, readConfigVersion(DEFAULT_RUNTIME_EMBEDDING_CONFIG))
-          );
-        }
-      )
-  });
-}
-
-function buildRuntimeEmbeddingChangeSummary(normalized: NormalizedRuntimeEmbeddingConfigPatch): {
-  readonly fields_changed: readonly string[];
-  readonly secret_ref_kind?: "env" | "file" | "keychain" | null;
-} {
-  const fieldsChanged = RUNTIME_EMBEDDING_CONFIG_FIELDS.filter((field) => normalized.patch[field] !== undefined);
-  return {
-    fields_changed: fieldsChanged,
-    ...(normalized.patch.secret_ref !== undefined ? { secret_ref_kind: (normalized.patch.secret_ref === null ? null : secretRefScheme(normalized.patch.secret_ref)) } : {})
-  };
-}
-
-async function patchRuntimeGardenComputeConfig(input: {
-  readonly repo: ConfigRepo;
-  readonly eventPublisher: ConfigEventPublisher;
-  readonly paths: AlayaConfigPaths;
-  readonly patch: unknown;
-  readonly clock: () => string;
-  readonly platform: NodeJS.Platform;
-  readonly generateTempId: () => string;
-  readonly generateAuditId: () => string;
-  readonly warn: (message: string) => void;
-}): Promise<RuntimeGardenComputeConfig> {
-  const normalized = normalizeRuntimeGardenComputeConfigPatch(input.patch, input.paths, input.platform);
-  const occurredAt = parseIsoTimestamp(input.clock(), "Invalid runtime garden compute config patch");
-  const auditEntryId = input.generateAuditId();
-  const defaults = await defaultRuntimeGardenComputeConfig(input.paths, input.warn);
-
-  return await applyRuntimeGardenComputeConfigFiles({
-    paths: input.paths,
-    normalized,
-    generateTempId: input.generateTempId,
-    persist: async () =>
-      await input.eventPublisher.appendManyWithMutation(
-        [
-          {
-            event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
-            entity_type: RUNTIME_EMBEDDING_ENTITY_TYPE,
-            entity_id: RUNTIME_GARDEN_COMPUTE_ENTITY_ID,
-            workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
-            run_id: null,
-            caused_by: "inspector",
-            payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
-              entry_id: auditEntryId,
-              event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
-              workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
-              occurred_at: occurredAt,
-              change_summary: buildRuntimeGardenComputeChangeSummary(normalized)
-            })
-          }
-        ],
-        () => {
-          const next = input.repo.patch(
-            RUNTIME_GARDEN_COMPUTE_CONFIG_KEY,
-            withConfigVersion(normalized.patch, readConfigVersion(defaults)),
-            defaults
-          );
-          // Route through the same malformed-row fallback the read path uses
-          // so an Inspector patch never throws inside the EventLog mutation
-          // because of an unreadable runtime config row.
-          return parseGardenComputeConfigWithLegacyFallback(next, "garden-compute config patch", input.warn);
-        }
-      )
-  });
-}
-
-function buildRuntimeGardenComputeChangeSummary(normalized: NormalizedRuntimeGardenComputeConfigPatch): {
-  readonly fields_changed: readonly string[];
-  readonly secret_ref_kind?: "env" | "file" | "keychain" | null;
-  readonly provider_url?: string | null;
-  readonly model_id?: string | null;
-} {
-  const fieldsChanged = RUNTIME_GARDEN_COMPUTE_CONFIG_FIELDS.filter((field) => normalized.patch[field] !== undefined);
-  return {
-    fields_changed: fieldsChanged,
-    ...(normalized.patch.secret_ref !== undefined ? { secret_ref_kind: (normalized.patch.secret_ref === null ? null : secretRefScheme(normalized.patch.secret_ref)) } : {}),
-    ...(normalized.patch.provider_url !== undefined ? { provider_url: normalized.patch.provider_url } : {}),
-    ...(normalized.patch.model_id !== undefined ? { model_id: normalized.patch.model_id } : {})
-  };
-}
-
-async function defaultRuntimeGardenComputeConfig(
-  paths: AlayaConfigPaths,
-  warn: (message: string) => void
-): Promise<RuntimeGardenComputeConfig> {
-  const configEnv = await loadConfigEnv(paths.envPath);
-  const gardenSecretRef =
-    readRawSecretRef(configEnv, ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV) ??
-    readRawSecretRef(configEnv, ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV);
-  const embeddingFallbackSecretRef = readRawSecretRef(configEnv, ALAYA_OPENAI_SECRET_REF_ENV);
-  const secretRef = gardenSecretRef ?? embeddingFallbackSecretRef;
-  const modelId = readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_MODEL_ENV)) ?? OFFICIAL_API_GARDEN_MODEL;
-  // invariant: the product DEFAULT compute mode is host_worker — the attached
-  // CLI agent (Codex / Claude Code / similar) is the compute, so Alaya owns no
-  // LLM and makes no edge-LLM cloud call out of the box. An explicit
-  // ALAYA_GARDEN_PROVIDER_KIND wins over inference and is how an operator (or
-  // the bench harness, via the same env tier) opts INTO official_api or pins
-  // local_heuristics. A garden/embedding secret_ref being present is treated as
-  // an explicit official_api opt-in (an operator who configured a key wants
-  // cloud); otherwise — fresh install, no secret — the default is host_worker,
-  // NOT local_heuristics. An unrecognized declared value falls back to this
-  // inference rather than crashing boot.
-  const declaredProviderKind = RuntimeGardenProviderKindSchema.safeParse(
-    readNonEmptyEnv(readConfigEnvValue(configEnv, ALAYA_GARDEN_PROVIDER_KIND_ENV))
-  );
-  const providerKind = declaredProviderKind.success
-    ? declaredProviderKind.data
-    : secretRef === null
-      ? "host_worker"
-      : "official_api";
-
-  return parseGardenComputeConfigWithLegacyFallback(
-    {
-      config_version: CURRENT_CONFIG_VERSION,
-      provider_kind: providerKind,
-      model_id: modelId,
-      provider_url: readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_PROVIDER_URL_ENV)),
-      secret_ref: secretRef,
-      enabled: providerKind === "official_api" && secretRef !== null
-    },
-    "garden-compute env defaults",
-    warn
-  );
-}
-
-function readRawSecretRef(configEnv: ReadonlyMap<string, string>, key: string): string | null {
-  return readNonEmptyEnv(readConfigEnvValue(configEnv, key));
-}
-
-
-async function getGardenCredentialProvenance(input: {
-  readonly paths: AlayaConfigPaths;
-  readonly env: NodeJS.ProcessEnv;
-}): Promise<GardenCredentialProvenance> {
-  const configEnv = await loadConfigEnv(input.paths.envPath);
-  return selectGardenCredentialProvenance({
-    env: input.env,
-    configEnv
-  });
-}
-
-function parseIsoTimestamp(value: string, validationMessage = "Invalid runtime embedding config patch"): string {
+function parseIsoTimestamp(
+  value: string,
+  validationMessage = "Invalid runtime embedding config patch"
+): string {
   if (Number.isNaN(Date.parse(value))) {
     throw new CoreError("VALIDATION", validationMessage);
   }

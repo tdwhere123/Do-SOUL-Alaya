@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
   SignalEventType,
@@ -8,88 +7,43 @@ import {
   SoulSignalTriagedPayloadSchema,
   readErrorMessage,
   type CandidateMemorySignal,
-  type EventLogEntry,
-  type SignalState as SignalStateValue
+  type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { stableStringify } from "../shared/stable-stringify.js";
+import {
+  assertReplayMatchesExistingSignal,
+  buildEventLogRawPayloadSummary,
+  hasInvalidSchemaGrounding,
+  mapExistingSignalStateToTriage,
+  mapTriageResultToSignalState
+} from "./signal-service-helpers.js";
+import type {
+  SignalListPageOptions,
+  SignalMaterializationResult,
+  SignalServiceDependencies,
+  SignalServicePostTriageMaterializer,
+  SignalServiceReceiveResult,
+  SignalServiceWarnPort,
+  SignalTriageResult
+} from "./signal-service-types.js";
+export type {
+  SignalListPageOptions,
+  SignalMaterializationResult,
+  SignalMaterializationTargetKind,
+  SignalMaterializedObject,
+  SignalRuntimeNotifier,
+  SignalServiceDependencies,
+  SignalServiceEventLogRepoPort,
+  SignalServicePostTriageMaterializer,
+  SignalServiceReceiveResult,
+  SignalServiceSignalRepoPort,
+  SignalServiceWarnPort,
+  SignalTriageResult
+} from "./signal-service-types.js";
 
-const RAW_PAYLOAD_REDACTED_KEY = "raw_payload_redacted";
-const RAW_PAYLOAD_SHA256_KEY = "raw_payload_sha256";
-const RAW_PAYLOAD_KEY_COUNT_KEY = "raw_payload_key_count";
-const BENCH_SEED_MARKER_KEY = "bench_seed";
-const BENCH_TURN_SEED_INDEX_KEY = "bench_turn_seed_index";
-const BENCH_SUMMARY_SEED_MARKER_KEY = "bench_summary_seeded";
-const BENCH_SUMMARY_TURN_SEED_INDEX_KEY = "bench_summary_turn_seed_index";
-const BENCH_FULL_TURN_CONTENT_KEY = "bench_full_turn_content";
-const BENCH_STORED_CONTENT_KEY = "bench_stored_content";
-const BENCH_FULL_TURN_TOKENS_KEY = "bench_full_turn_tokens";
-const BENCH_STORED_CONTENT_TOKENS_KEY = "bench_stored_content_tokens";
-const BENCH_TOKEN_CHARS_PER_TOKEN = 4;
-
-export interface SignalServiceEventLogRepoPort {
-  append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
-  queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
-}
-
-export interface SignalServiceSignalRepoPort {
-  create(signal: CandidateMemorySignal): Promise<CandidateMemorySignal>;
-  getById(signalId: string): Promise<CandidateMemorySignal | null>;
-  listByRun(runId: string, page?: SignalListPageOptions): Promise<readonly CandidateMemorySignal[]>;
-  countByRun?(runId: string): Promise<number>;
-  updateState(signalId: string, state: SignalStateValue): Promise<CandidateMemorySignal>;
-}
-
-export interface SignalListPageOptions {
-  readonly limit: number;
-  readonly offset: number;
-}
-
-export interface SignalRuntimeNotifier {
-  notifyEntry(entry: EventLogEntry): void | Promise<void>;
-}
-
-export type SignalTriageResult = "accepted" | "dropped" | "deferred";
-export type SignalMaterializationTargetKind =
-  | "memory_and_claim"
-  | "synthesis"
-  | "handoff_gap"
-  | "evidence_only"
-  | "deferred";
-
-export interface SignalMaterializedObject {
-  readonly object_kind: string;
-  readonly object_id: string;
-}
-
-export interface SignalMaterializationResult {
-  readonly signal_id: string;
-  readonly target_kind: SignalMaterializationTargetKind;
-  readonly routing_reason: string;
-  readonly created_objects: readonly SignalMaterializedObject[];
-  readonly success: boolean;
-  readonly error?: string;
-}
-
-export interface SignalServicePostTriageMaterializer {
-  materialize(signal: CandidateMemorySignal): Promise<SignalMaterializationResult>;
-}
-
-export interface SignalServiceReceiveResult {
-  readonly signal: CandidateMemorySignal;
-  readonly triage_result: SignalTriageResult;
-  readonly materialization: SignalMaterializationResult | null;
-}
-
-export interface SignalServiceWarnPort {
-  (message: string, meta: Record<string, unknown>): void;
-}
-
-export interface SignalServiceDependencies {
-  readonly eventLogRepo: SignalServiceEventLogRepoPort;
-  readonly signalRepo: SignalServiceSignalRepoPort;
-  readonly runtimeNotifier: SignalRuntimeNotifier;
-  readonly postTriageMaterializer?: SignalServicePostTriageMaterializer;
-  readonly warn?: SignalServiceWarnPort;
+interface MaterializationAttempt {
+  readonly materializingSignal: CandidateMemorySignal;
+  readonly materialization: SignalMaterializationResult;
+  readonly caughtMaterializationError: boolean;
 }
 
 export class SignalService {
@@ -233,18 +187,37 @@ export class SignalService {
       };
     }
 
-    let materialization: SignalMaterializationResult;
-    let caughtMaterializationError = false;
+    const attempt = await this.runMaterializationAttempt(triagedSignal, materializer);
+    const matEvent = await this.appendMaterializationEvent(triagedSignal, attempt.materialization);
+
+    if (attempt.materialization.success !== true) {
+      return await this.completeFailedMaterialization(triagedSignal, triageResult, attempt, matEvent);
+    }
+
+    if (attempt.materialization.target_kind === "deferred") {
+      return await this.completeDeferredMaterialization(triagedSignal, attempt.materialization, matEvent);
+    }
+
+    return await this.completeSuccessfulMaterialization(triageResult, attempt, matEvent);
+  }
+
+  private async runMaterializationAttempt(
+    triagedSignal: CandidateMemorySignal,
+    materializer: SignalServicePostTriageMaterializer
+  ): Promise<MaterializationAttempt> {
     const materializingSignal = await this.dependencies.signalRepo.updateState(
       triagedSignal.signal_id,
       SignalState.COMPILED
     );
 
     try {
-      materialization = await materializer.materialize(materializingSignal);
+      return {
+        materializingSignal,
+        materialization: await materializer.materialize(materializingSignal),
+        caughtMaterializationError: false
+      };
     } catch (error) {
-      caughtMaterializationError = true;
-      materialization = {
+      const materialization = {
         signal_id: triagedSignal.signal_id,
         target_kind: "evidence_only",
         routing_reason: "materialization_exception",
@@ -259,8 +232,20 @@ export class SignalService {
         run_id: triagedSignal.run_id,
         error
       });
+
+      return {
+        materializingSignal,
+        materialization,
+        caughtMaterializationError: true
+      };
     }
-    const matEvent = await this.dependencies.eventLogRepo.append({
+  }
+
+  private async appendMaterializationEvent(
+    triagedSignal: CandidateMemorySignal,
+    materialization: SignalMaterializationResult
+  ): Promise<EventLogEntry> {
+    return await this.dependencies.eventLogRepo.append({
       event_type: materialization.success
         ? SignalEventType.SOUL_SIGNAL_MATERIALIZED
         : SignalEventType.SOUL_SIGNAL_MATERIALIZATION_FAILED,
@@ -278,92 +263,92 @@ export class SignalService {
         ...(materialization.error !== undefined ? { error: materialization.error } : {})
       })
     });
+  }
 
-    if (materialization.success !== true) {
-      const failedSignal = await this.dependencies.signalRepo.updateState(
-        materializingSignal.signal_id,
-        SignalState.FAILED
-      );
-      // Failure is terminal for automatic replay: materializers can create
-      // durable side effects before returning/throwing, so a later retry must
-      // not run the same materializer again unless a separate repair path
-      // explicitly resets the signal.
-      if (matEvent.run_id !== null) {
-        await this.dependencies.runtimeNotifier.notifyEntry(matEvent);
-      }
+  private async completeFailedMaterialization(
+    triagedSignal: CandidateMemorySignal,
+    triageResult: SignalTriageResult,
+    attempt: MaterializationAttempt,
+    matEvent: EventLogEntry
+  ): Promise<SignalServiceReceiveResult> {
+    const failedSignal = await this.dependencies.signalRepo.updateState(
+      attempt.materializingSignal.signal_id,
+      SignalState.FAILED
+    );
+    await this.notifyRunBoundEvent(matEvent);
 
-      if (!caughtMaterializationError) {
-        this.warn("Signal materialization returned unsuccessful result.", {
-          signal_id: triagedSignal.signal_id,
-          workspace_id: triagedSignal.workspace_id,
-          run_id: triagedSignal.run_id,
-          materialization
-        });
-      }
-
-      return {
-        signal: failedSignal,
-        triage_result: triageResult,
-        materialization
-      };
-    }
-
-    // Deferred signals should stay in DEFERRED state, not be promoted to MATERIALIZED.
-    if (materialization.target_kind === "deferred") {
-      // EventLog-first: DB update then runtime notification (invariant #7).
-      const deferredSignal = await this.dependencies.signalRepo.updateState(
-        triagedSignal.signal_id,
-        SignalState.DEFERRED
-      );
-
-      if (matEvent.run_id !== null) {
-        await this.dependencies.runtimeNotifier.notifyEntry(matEvent);
-      }
-
-      // Emit a corrective triage event so EventLog/runtime notification consumers see the final state.
-      // The initial triaged event was notified with triage_result "accepted"; this
-      // second event corrects the record. Consumers should treat the latest as authoritative.
-      const deferredEvent = await this.dependencies.eventLogRepo.append({
-        event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
-        entity_type: "candidate_memory_signal",
-        entity_id: triagedSignal.signal_id,
+    if (!attempt.caughtMaterializationError) {
+      this.warn("Signal materialization returned unsuccessful result.", {
+        signal_id: triagedSignal.signal_id,
         workspace_id: triagedSignal.workspace_id,
         run_id: triagedSignal.run_id,
-        caused_by: "materialization_router",
-        payload_json: SoulSignalTriagedPayloadSchema.parse({
-          signal_id: triagedSignal.signal_id,
-          workspace_id: triagedSignal.workspace_id,
-          run_id: triagedSignal.run_id,
-          triage_result: "deferred"
-        })
+        materialization: attempt.materialization
       });
-
-      if (deferredEvent.run_id !== null) {
-        await this.dependencies.runtimeNotifier.notifyEntry(deferredEvent);
-      }
-
-      return {
-        signal: deferredSignal,
-        triage_result: "deferred",
-        materialization
-      };
     }
 
-    // EventLog-first: DB update then runtime notification (invariant #7).
+    return {
+      signal: failedSignal,
+      triage_result: triageResult,
+      materialization: attempt.materialization
+    };
+  }
+
+  private async completeDeferredMaterialization(
+    triagedSignal: CandidateMemorySignal,
+    materialization: SignalMaterializationResult,
+    matEvent: EventLogEntry
+  ): Promise<SignalServiceReceiveResult> {
+    const deferredSignal = await this.dependencies.signalRepo.updateState(
+      triagedSignal.signal_id,
+      SignalState.DEFERRED
+    );
+    await this.notifyRunBoundEvent(matEvent);
+
+    const deferredEvent = await this.dependencies.eventLogRepo.append({
+      event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
+      entity_type: "candidate_memory_signal",
+      entity_id: triagedSignal.signal_id,
+      workspace_id: triagedSignal.workspace_id,
+      run_id: triagedSignal.run_id,
+      caused_by: "materialization_router",
+      payload_json: SoulSignalTriagedPayloadSchema.parse({
+        signal_id: triagedSignal.signal_id,
+        workspace_id: triagedSignal.workspace_id,
+        run_id: triagedSignal.run_id,
+        triage_result: "deferred"
+      })
+    });
+    await this.notifyRunBoundEvent(deferredEvent);
+
+    return {
+      signal: deferredSignal,
+      triage_result: "deferred",
+      materialization
+    };
+  }
+
+  private async completeSuccessfulMaterialization(
+    triageResult: SignalTriageResult,
+    attempt: MaterializationAttempt,
+    matEvent: EventLogEntry
+  ): Promise<SignalServiceReceiveResult> {
     const materializedSignal = await this.dependencies.signalRepo.updateState(
-      materializingSignal.signal_id,
+      attempt.materializingSignal.signal_id,
       SignalState.MATERIALIZED
     );
-
-    if (matEvent.run_id !== null) {
-      await this.dependencies.runtimeNotifier.notifyEntry(matEvent);
-    }
+    await this.notifyRunBoundEvent(matEvent);
 
     return {
       signal: materializedSignal,
       triage_result: triageResult,
-      materialization
+      materialization: attempt.materialization
     };
+  }
+
+  private async notifyRunBoundEvent(event: EventLogEntry): Promise<void> {
+    if (event.run_id !== null) {
+      await this.dependencies.runtimeNotifier.notifyEntry(event);
+    }
   }
 
   private evaluateTriage(signal: CandidateMemorySignal): SignalTriageResult {
@@ -384,180 +369,5 @@ export class SignalService {
     }
 
     return "accepted";
-  }
-}
-
-function mapTriageResultToSignalState(triageResult: SignalTriageResult): SignalStateValue {
-  switch (triageResult) {
-    case "accepted":
-      return SignalState.TRIAGED;
-    case "deferred":
-      return SignalState.DEFERRED;
-    case "dropped":
-      return SignalState.DROPPED;
-    default: {
-      const exhaustiveCheck: never = triageResult;
-      return exhaustiveCheck;
-    }
-  }
-}
-
-function mapExistingSignalStateToTriage(state: SignalStateValue): SignalTriageResult {
-  switch (state) {
-    case SignalState.DROPPED:
-      return "dropped";
-    case SignalState.DEFERRED:
-      return "deferred";
-    default:
-      return "accepted";
-  }
-}
-
-function assertReplayMatchesExistingSignal(
-  existingSignal: CandidateMemorySignal,
-  incomingSignal: CandidateMemorySignal
-): void {
-  if (buildSignalReplayFingerprint(existingSignal) !== buildSignalReplayFingerprint(incomingSignal)) {
-    throw new SignalReplayMismatchError(
-      `Candidate signal replay does not match existing signal content: ${incomingSignal.signal_id}`
-    );
-  }
-}
-
-function buildSignalReplayFingerprint(signal: CandidateMemorySignal): string {
-  return stableStringify({
-    signal_id: signal.signal_id,
-    workspace_id: signal.workspace_id,
-    run_id: signal.run_id,
-    surface_id: signal.surface_id,
-    source: signal.source,
-    signal_kind: signal.signal_kind,
-    object_kind: signal.object_kind,
-    scope_hint: signal.scope_hint,
-    domain_tags: signal.domain_tags,
-    confidence: signal.confidence,
-    evidence_refs: signal.evidence_refs,
-    source_memory_refs: signal.source_memory_refs,
-    supersedes_refs: signal.supersedes_refs,
-    exception_to_refs: signal.exception_to_refs,
-    contradicts_refs: signal.contradicts_refs,
-    incompatible_with_refs: signal.incompatible_with_refs,
-    raw_payload: signal.raw_payload,
-    source_delivery_ids: signal.source_delivery_ids
-  });
-}
-
-function buildEventLogRawPayloadSummary(
-  rawPayload: CandidateMemorySignal["raw_payload"]
-): Record<string, unknown> {
-  return {
-    [RAW_PAYLOAD_REDACTED_KEY]: true,
-    [RAW_PAYLOAD_SHA256_KEY]: `sha256:${createHash("sha256")
-      .update(stableStringify(rawPayload), "utf8")
-      .digest("hex")}`,
-    [RAW_PAYLOAD_KEY_COUNT_KEY]: Object.keys(rawPayload).length,
-    ...buildBenchTokenPayloadSummary(rawPayload)
-  };
-}
-
-function buildBenchTokenPayloadSummary(
-  rawPayload: CandidateMemorySignal["raw_payload"]
-): Record<string, unknown> {
-  if (rawPayload[BENCH_SEED_MARKER_KEY] !== true) {
-    return {};
-  }
-
-  const summary: Record<string, unknown> = {
-    [BENCH_SUMMARY_SEED_MARKER_KEY]: true
-  };
-  const turnSeedIndex = rawPayload[BENCH_TURN_SEED_INDEX_KEY];
-  if (typeof turnSeedIndex === "number" && Number.isFinite(turnSeedIndex)) {
-    summary[BENCH_SUMMARY_TURN_SEED_INDEX_KEY] = turnSeedIndex;
-  }
-
-  const excerptSibling = readNonEmptyString(rawPayload.excerpt);
-  const fullTurnContent =
-    readNonEmptyString(rawPayload[BENCH_FULL_TURN_CONTENT_KEY]) ?? excerptSibling;
-  const storedContent =
-    readNonEmptyString(rawPayload[BENCH_STORED_CONTENT_KEY]) ??
-    readNonEmptyString(rawPayload.distilled_fact) ??
-    excerptSibling;
-
-  if (fullTurnContent !== null) {
-    summary[BENCH_FULL_TURN_TOKENS_KEY] = estimateBenchTokens(fullTurnContent);
-  }
-  if (storedContent !== null) {
-    summary[BENCH_STORED_CONTENT_TOKENS_KEY] = estimateBenchTokens(storedContent);
-  }
-
-  return summary;
-}
-
-function estimateBenchTokens(text: string): number {
-  return Math.ceil(text.length / BENCH_TOKEN_CHARS_PER_TOKEN);
-}
-
-function hasInvalidSchemaGrounding(signal: CandidateMemorySignal): boolean {
-  const rawPayload = signal.raw_payload;
-  if (
-    rawPayload.schema_grounding === undefined &&
-    rawPayload.detected_object === undefined &&
-    rawPayload.field_candidates === undefined &&
-    rawPayload.validation_result === undefined
-  ) {
-    return false;
-  }
-
-  const detectedObject = readRecord(rawPayload.detected_object);
-  const detectedObjectKind = readNonEmptyString(detectedObject?.object_kind);
-  if (detectedObjectKind !== signal.object_kind) {
-    return true;
-  }
-
-  const fields = Array.isArray(rawPayload.field_candidates)
-    ? rawPayload.field_candidates
-    : [];
-  if (fields.length === 0) {
-    return true;
-  }
-
-  for (const field of fields) {
-    const record = readRecord(field);
-    if (
-      record === null ||
-      readNonEmptyString(record.field_name) === null ||
-      readNonEmptyString(record.value) === null ||
-      readNonEmptyString(record.evidence) === null
-    ) {
-      return true;
-    }
-  }
-
-  const validationResult = readRecord(rawPayload.validation_result);
-  const validationStatus = readNonEmptyString(validationResult?.status);
-  return validationStatus !== "valid";
-}
-
-function readRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : null;
-}
-
-function readNonEmptyString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? null : trimmed;
-}
-
-class SignalReplayMismatchError extends Error {
-  public readonly code = "VALIDATION";
-
-  public constructor(message: string) {
-    super(message);
-    this.name = "SignalReplayMismatchError";
   }
 }

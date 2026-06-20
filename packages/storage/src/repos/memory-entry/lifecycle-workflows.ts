@@ -29,34 +29,25 @@ export interface MemoryEntryLifecycleWorkflowHost {
   readonly findById: (objectId: string) => Promise<Readonly<MemoryEntry> | null>;
 }
 
+interface ParsedAutonomousTombstoneRequest {
+  readonly disposition: ReturnType<typeof parseForgetDisposition>;
+  readonly updatedAt: string;
+}
+
 export async function autonomousTombstone(
   this: MemoryEntryLifecycleWorkflowHost,
   input: AutonomousTombstoneInput,
   options?: { readonly onTransition?: () => void }
 ): Promise<Readonly<MemoryEntry>> {
-  const parsedDisposition = parseForgetDisposition(input.disposition);
-  // invariant: disposition refs are validated before writing the durable marker.
-  if (parsedDisposition === "judged_useless" && input.dispositionRef !== null) {
-    throw new StorageError(
-      "VALIDATION_FAILED",
-      "judged_useless disposition must not carry a disposition ref."
-    );
-  }
-  if (parsedDisposition === "compressed" && input.dispositionRef === null) {
-    throw new StorageError(
-      "VALIDATION_FAILED",
-      "compressed disposition requires a live synthesis-capsule ref."
-    );
-  }
-  const parsedUpdatedAt = parseUpdatedAt(input.updatedAt);
+  const request = parseAutonomousTombstoneRequest(input);
   const onTransition = options?.onTransition;
 
   try {
     return this.db.connection.transaction(() => {
       const result = this.autonomousTombstoneStatement.run(
-        parsedDisposition,
+        request.disposition,
         input.dispositionRef,
-        parsedUpdatedAt,
+        request.updatedAt,
         input.objectId
       );
 
@@ -69,15 +60,7 @@ export async function autonomousTombstone(
 
       onTransition?.();
 
-      const updated = this.findByIdStatement.get(input.objectId) as MemoryEntryRow | undefined;
-      if (updated === undefined) {
-        throw new StorageError(
-          "NOT_FOUND",
-          `Memory entry ${input.objectId} was not found after autonomous tombstone.`
-        );
-      }
-
-      return parseMemoryEntryRow(updated);
+      return loadMemoryEntryAfterTransition(this, input.objectId, "autonomous tombstone");
     })();
   } catch (error) {
     if (error instanceof StorageError) {
@@ -90,6 +73,40 @@ export async function autonomousTombstone(
       error
     );
   }
+}
+
+function parseAutonomousTombstoneRequest(
+  input: AutonomousTombstoneInput
+): ParsedAutonomousTombstoneRequest {
+  const disposition = parseForgetDisposition(input.disposition);
+  if (disposition === "judged_useless" && input.dispositionRef !== null) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      "judged_useless disposition must not carry a disposition ref."
+    );
+  }
+  if (disposition === "compressed" && input.dispositionRef === null) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      "compressed disposition requires a live synthesis-capsule ref."
+    );
+  }
+  return { disposition, updatedAt: parseUpdatedAt(input.updatedAt) };
+}
+
+function loadMemoryEntryAfterTransition(
+  host: MemoryEntryLifecycleWorkflowHost,
+  objectId: string,
+  transitionName: string
+): Readonly<MemoryEntry> {
+  const updated = host.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
+  if (updated === undefined) {
+    throw new StorageError(
+      "NOT_FOUND",
+      `Memory entry ${objectId} was not found after ${transitionName}.`
+    );
+  }
+  return parseMemoryEntryRow(updated);
 }
 
 export async function hardDeleteTombstonedWithDisposition(
@@ -113,39 +130,11 @@ export async function hardDeleteTombstonedWithDisposition(
     }
 
     return this.db.connection.transaction(() => {
-      // invariant: compressed deletion rechecks capsule preservation in the DELETE.
       if (requireLiveCapsuleRef) {
-        const guarded = this.hardDeleteTombstonedCompressedGuardedStatement.run(objectId);
-        if (guarded.changes === 0) {
-          return false;
-        }
-        // invariant: terminal-removal audit appends only after a real delete in this transaction.
-        onDeleted?.();
-        this.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
-        this.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
-        return true;
+        return deleteCompressedTombstone(this, objectId, onDeleted);
       }
 
-      const result = requireJudgedUselessVerdict
-        ? this.hardDeleteTombstonedJudgedUselessGuardedStatement.run(objectId)
-        : this.hardDeleteTombstonedWithDispositionStatement.run(objectId);
-
-      if (result.changes === 0) {
-        if (requireJudgedUselessVerdict) {
-          return false;
-        }
-        throw new StorageError(
-          "NOT_FOUND",
-          `Tombstoned memory entry ${objectId} was not found, lacks a forget disposition, or is within the grace window (not eligible for autonomous GC).`
-        );
-      }
-
-      onDeleted?.();
-
-      // invariant: topology is pruned only after the disposition-gated row is deleted.
-      this.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
-      this.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
-      return true;
+      return deleteDispositionTombstone(this, objectId, requireJudgedUselessVerdict, onDeleted);
     })();
   } catch (error) {
     if (error instanceof StorageError) {
@@ -158,6 +147,55 @@ export async function hardDeleteTombstonedWithDisposition(
       error
     );
   }
+}
+
+function deleteCompressedTombstone(
+  host: MemoryEntryLifecycleWorkflowHost,
+  objectId: string,
+  onDeleted: (() => void) | undefined
+): boolean {
+  const guarded = host.hardDeleteTombstonedCompressedGuardedStatement.run(objectId);
+  if (guarded.changes === 0) {
+    return false;
+  }
+  pruneDeletedMemoryGraph(host, objectId, onDeleted);
+  return true;
+}
+
+function deleteDispositionTombstone(
+  host: MemoryEntryLifecycleWorkflowHost,
+  objectId: string,
+  requireJudgedUselessVerdict: boolean,
+  onDeleted: (() => void) | undefined
+): boolean {
+  const result = requireJudgedUselessVerdict
+    ? host.hardDeleteTombstonedJudgedUselessGuardedStatement.run(objectId)
+    : host.hardDeleteTombstonedWithDispositionStatement.run(objectId);
+  if (result.changes === 0) {
+    return handleDispositionDeleteMiss(objectId, requireJudgedUselessVerdict);
+  }
+  pruneDeletedMemoryGraph(host, objectId, onDeleted);
+  return true;
+}
+
+function handleDispositionDeleteMiss(objectId: string, guardedDelete: boolean): false {
+  if (guardedDelete) {
+    return false;
+  }
+  throw new StorageError(
+    "NOT_FOUND",
+    `Tombstoned memory entry ${objectId} was not found, lacks a forget disposition, or is within the grace window (not eligible for autonomous GC).`
+  );
+}
+
+function pruneDeletedMemoryGraph(
+  host: MemoryEntryLifecycleWorkflowHost,
+  objectId: string,
+  onDeleted: (() => void) | undefined
+): void {
+  onDeleted?.();
+  host.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
+  host.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
 }
 
 export async function archiveMemoryEntry(

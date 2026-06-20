@@ -1,5 +1,10 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { prepareEnrichPendingStatements } from "./enrich-pending-statements.js";
+import {
+  createClaimBatchTransaction,
+  createRecordFailedAttemptTransaction
+} from "./enrich-pending-transactions.js";
 
 // invariant: durable hand-off queue between the synchronous write-path and the
 // asynchronous Garden BULK_ENRICH worker. Materialization enqueues one row per
@@ -89,31 +94,13 @@ export interface EnrichPendingRepo {
   reclaimStale(now: string, staleAfterMs: number): number;
 }
 
-interface ClaimRow {
-  readonly workspace_id: string;
-  readonly memory_id: string;
-  readonly run_id: string | null;
-  readonly source_signal_id: string | null;
-  readonly enqueued_at: string;
-}
-
 interface CountRow {
   readonly pending: number;
 }
 
-interface AttemptRow {
-  readonly attempt_count: number;
-}
-
 export class SqliteEnrichPendingRepo implements EnrichPendingRepo {
   private readonly enqueueStatement;
-  private readonly selectClaimableStatement;
-  private readonly claimStatement;
   private readonly markProcessedStatement;
-  private readonly incrementAttemptStatement;
-  private readonly selectAttemptStatement;
-  private readonly releaseClaimStatement;
-  private readonly abandonStatement;
   private readonly deleteStatement;
   private readonly countPendingStatement;
   private readonly reclaimStaleStatement;
@@ -131,165 +118,14 @@ export class SqliteEnrichPendingRepo implements EnrichPendingRepo {
   ) => EnrichPendingFailedAttemptResult;
 
   public constructor(db: StorageDatabase) {
-    // ON CONFLICT keeps the original enqueued_at and clears any prior claim /
-    // processed marker so a memory re-materialized after a processed cycle is
-    // re-enriched. A still-pending duplicate is left untouched (no churn).
-    this.enqueueStatement = db.connection.prepare(`
-      INSERT INTO enrich_pending (
-        workspace_id,
-        memory_id,
-        run_id,
-        source_signal_id,
-        enqueued_at,
-        claimed_at,
-        processed_at
-      ) VALUES (?, ?, ?, ?, ?, NULL, NULL)
-      ON CONFLICT(workspace_id, memory_id) DO UPDATE SET
-        run_id = excluded.run_id,
-        source_signal_id = excluded.source_signal_id,
-        claimed_at = NULL,
-        processed_at = NULL
-      WHERE enrich_pending.processed_at IS NOT NULL
-    `);
-
-    // invariant: a dead-lettered marker (abandoned_at set) and a marker already
-    // at/over the attempt cap are excluded so an exhausted retry never re-consumes
-    // a slot of the per-pass claim budget — the bounded-liveness half of B4-R1.
-    this.selectClaimableStatement = db.connection.prepare(`
-      SELECT workspace_id, memory_id, run_id, source_signal_id, enqueued_at
-      FROM enrich_pending
-      WHERE workspace_id = ?
-        AND processed_at IS NULL
-        AND claimed_at IS NULL
-        AND abandoned_at IS NULL
-        AND attempt_count < ?
-      ORDER BY enqueued_at ASC, memory_id ASC
-      LIMIT ?
-    `);
-
-    this.claimStatement = db.connection.prepare(`
-      UPDATE enrich_pending
-      SET claimed_at = ?
-      WHERE workspace_id = ? AND memory_id = ? AND processed_at IS NULL AND claimed_at IS NULL
-    `);
-
-    this.markProcessedStatement = db.connection.prepare(`
-      UPDATE enrich_pending
-      SET processed_at = ?
-      WHERE workspace_id = ? AND memory_id = ?
-    `);
-
-    // invariant: bump the transient-failure counter for a claimed, not-yet-settled
-    // marker. The processed_at / abandoned_at guards keep a settled marker's count
-    // frozen, so a re-mark after markProcessed or abandon is a no-op.
-    this.incrementAttemptStatement = db.connection.prepare(`
-      UPDATE enrich_pending
-      SET attempt_count = attempt_count + 1
-      WHERE workspace_id = ? AND memory_id = ? AND processed_at IS NULL AND abandoned_at IS NULL
-    `);
-
-    this.selectAttemptStatement = db.connection.prepare(`
-      SELECT attempt_count
-      FROM enrich_pending
-      WHERE workspace_id = ? AND memory_id = ?
-    `);
-
-    this.releaseClaimStatement = db.connection.prepare(`
-      UPDATE enrich_pending
-      SET claimed_at = NULL
-      WHERE workspace_id = ? AND memory_id = ? AND processed_at IS NULL AND abandoned_at IS NULL
-    `);
-
-    // invariant: terminal dead-letter — set abandoned_at so the claimable index
-    // and selectClaimable exclude the marker permanently. Leaves claimed_at as-is
-    // (the row is no longer claimable regardless) and never touches a marker that
-    // already settled (processed_at set).
-    this.abandonStatement = db.connection.prepare(`
-      UPDATE enrich_pending
-      SET abandoned_at = ?
-      WHERE workspace_id = ? AND memory_id = ? AND processed_at IS NULL AND abandoned_at IS NULL
-    `);
-
-    this.deleteStatement = db.connection.prepare(`
-      DELETE FROM enrich_pending
-      WHERE workspace_id = ? AND memory_id = ?
-    `);
-
-    this.countPendingStatement = db.connection.prepare(`
-      SELECT COUNT(*) AS pending
-      FROM enrich_pending
-      WHERE workspace_id = ? AND processed_at IS NULL
-    `);
-
-    // invariant: workspace-agnostic crash-recovery sweep — a claim stranded by a
-    // crash between claimBatch and markProcessed has no live claimant (the single
-    // in-process worker died), so once it is older than the TTL it is re-armed
-    // regardless of workspace. Mirrors garden-task-repo's stale-claim UPDATE.
-    this.reclaimStaleStatement = db.connection.prepare(`
-      UPDATE enrich_pending
-      SET claimed_at = NULL
-      WHERE claimed_at IS NOT NULL AND processed_at IS NULL AND abandoned_at IS NULL AND claimed_at < ?
-    `);
-
-    // invariant: select-then-claim in one transaction so two concurrent
-    // BULK_ENRICH cycles can never claim the same row. The per-row UPDATE
-    // re-checks claimed_at IS NULL, so even if the SELECT raced the row is
-    // only handed out once (changes === 1).
-    this.claimBatchTransaction = db.connection.transaction(
-      (
-        workspaceId: string,
-        limit: number,
-        claimedAt: string,
-        maxAttempts: number
-      ): readonly EnrichPendingClaim[] => {
-        const candidates = this.selectClaimableStatement.all(
-          workspaceId,
-          maxAttempts,
-          limit
-        ) as ClaimRow[];
-        const claimed: EnrichPendingClaim[] = [];
-        for (const row of candidates) {
-          const result = this.claimStatement.run(claimedAt, row.workspace_id, row.memory_id);
-          if (result.changes === 1) {
-            claimed.push({
-              workspaceId: row.workspace_id,
-              memoryId: row.memory_id,
-              runId: row.run_id,
-              sourceSignalId: row.source_signal_id,
-              enqueuedAt: row.enqueued_at
-            });
-          }
-        }
-        return claimed;
-      }
-    );
-
-    // invariant: increment-then-branch in one transaction so the abandon decision
-    // is taken against the just-incremented count with no interleaving claim.
-    // Under the cap -> release for retry; at/over the cap -> dead-letter. The
-    // attempt counter only advances for a TRANSIENT failure (this is the only
-    // caller); a permanent rejection settles via markProcessed and never lands
-    // here, and a re-mark after settle is a no-op (the UPDATE guards exclude it).
-    this.recordFailedAttemptTransaction = db.connection.transaction(
-      (
-        workspaceId: string,
-        memoryId: string,
-        maxAttempts: number,
-        abandonedAt: string
-      ): EnrichPendingFailedAttemptResult => {
-        this.incrementAttemptStatement.run(workspaceId, memoryId);
-        const attemptRow = this.selectAttemptStatement.get(workspaceId, memoryId) as
-          | AttemptRow
-          | undefined;
-        const attemptCount = attemptRow?.attempt_count ?? 0;
-        if (attemptCount >= maxAttempts) {
-          this.abandonStatement.run(abandonedAt, workspaceId, memoryId);
-          return { attemptCount, abandoned: true };
-        }
-        this.releaseClaimStatement.run(workspaceId, memoryId);
-        return { attemptCount, abandoned: false };
-      }
-    );
+    const statements = prepareEnrichPendingStatements(db);
+    this.enqueueStatement = statements.enqueueStatement;
+    this.markProcessedStatement = statements.markProcessedStatement;
+    this.deleteStatement = statements.deleteStatement;
+    this.countPendingStatement = statements.countPendingStatement;
+    this.reclaimStaleStatement = statements.reclaimStaleStatement;
+    this.claimBatchTransaction = createClaimBatchTransaction(db, statements);
+    this.recordFailedAttemptTransaction = createRecordFailedAttemptTransaction(db, statements);
   }
 
   public enqueue(input: EnrichPendingEnqueueInput): void {

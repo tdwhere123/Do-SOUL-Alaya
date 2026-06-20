@@ -1,6 +1,7 @@
 export {
   SqliteEvidenceCapsuleRepo,
   type EvidenceCapsuleKeywordHit,
+  type EvidenceCapsuleListPageOptions,
   type EvidenceCapsuleRepo
 } from "./evidence-capsule-repo.js";
 export {

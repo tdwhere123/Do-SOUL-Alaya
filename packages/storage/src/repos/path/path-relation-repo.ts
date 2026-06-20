@@ -1,231 +1,47 @@
-import {
-  PathAnchorRefSchema,
-  PathRelationSchema,
-  serializePathAnchorRef,
-  type PathAnchorRef,
-  type PathLifecycleStatus,
-  type PathRelation
-} from "@do-soul/alaya-protocol";
+import type { PathAnchorRef, PathRelation } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString } from "../shared/validators.js";
+import {
+  findActivePathRelationPage,
+  findActivePathRelations,
+  findAllActivePathRelations,
+  findAllDormantPathRelations,
+  findAllPathRelationsByWorkspace,
+  findDormantPathRelationPage,
+  findDormantPathRelations,
+  findPathRelationById,
+  findPathRelationsByAnchor,
+  findPathRelationsByAnchors,
+  findPathRelationsByBackingObjectId,
+  findPathRelationsByTargetAnchor,
+  findPathRelationsByWorkspace,
+  findPathRelationsByWorkspacePage,
+  type PathRelationQueryContext
+} from "./path-relation-read-queries.js";
+import {
+  PARSED_ROW_CACHE_MAX,
+  comparePathRelationOrder,
+  parseParsedRowCacheMax,
+  parsePathRelation,
+  parsePathRelationRow,
+  type PathRelationRow
+} from "./path-relation-rows.js";
+import { findByAnchorsSql } from "./path-relation-sql.js";
+import {
+  preparePathRelationStatements,
+  type PathRelationStatements
+} from "./path-relation-statements.js";
+import type { PathRelationPageOptions, PathRelationRepo } from "./path-relation-types.js";
 
-export interface PathRelationRepo {
-  create(relation: PathRelation): Readonly<PathRelation>;
-  update(
-    pathId: string,
-    updates: Partial<
-      Pick<
-        PathRelation,
-        "constitution" | "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at"
-      >
-    >
-  ): Readonly<PathRelation>;
-  findById(pathId: string): Promise<Readonly<PathRelation> | null>;
-  findByWorkspace(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
-  findByAnchor(
-    workspaceId: string,
-    anchorRef: PathAnchorRef
-  ): Promise<readonly Readonly<PathRelation>[]>;
-  findByTargetAnchor(
-    workspaceId: string,
-    anchorRef: PathAnchorRef
-  ): Promise<readonly Readonly<PathRelation>[]>;
-  findByAnchors(
-    workspaceId: string,
-    anchorRefs: readonly PathAnchorRef[]
-  ): Promise<readonly Readonly<PathRelation>[]>;
-  findByBackingObjectId(
-    workspaceId: string,
-    objectId: string
-  ): Promise<readonly Readonly<PathRelation>[]>;
-  findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
-  /**
-   * Dormant paths whose last mutation (`updated_at`) is strictly older than
-   * `olderThanIso`. The consolidation planner uses this to find merge/retire
-   * candidates that have stayed dormant past the consolidation age window —
-   * a path is never consolidated in the same window it went dormant.
-   * see also: packages/core/src/memory/consolidation-planner.ts planCycle.
-   */
-  findDormant(
-    workspaceId: string,
-    olderThanIso: string
-  ): Promise<readonly Readonly<PathRelation>[]>;
-  delete(pathId: string): Promise<void>;
-}
-
-const PATH_RELATION_SELECT_COLUMNS = `
-      path_id,
-      workspace_id,
-      anchors_json,
-      constitution_json,
-      effect_vector_json,
-      plasticity_state_json,
-      lifecycle_json,
-      legitimacy_json,
-      created_at,
-      updated_at
-`;
-
-// invariant: byte-identical to the CASE/json_array expressions indexed in
-// migrations/048-path-relations-and-event-log-indexes.sql. SQLite only uses an
-// expression index when the query predicate matches the indexed expression, so
-// the anchor-key SQL here MUST stay in lockstep with that index, and the bound
-// parameter MUST equal serializePathAnchorRef(...) — json_array(...) renders the
-// same text JSON.stringify(["object", id]) produces.
-// cross-file ref: migrations/048-path-relations-and-event-log-indexes.sql
-// cross-file ref: @do-soul/alaya-protocol serializePathAnchorRef (bound-param side)
-function anchorKeySql(anchorPath: "source_anchor" | "target_anchor"): string {
-  return `CASE json_extract(anchors_json, '$.${anchorPath}.kind')
-      WHEN 'object' THEN json_array('object', json_extract(anchors_json, '$.${anchorPath}.object_id'))
-      WHEN 'object_facet' THEN json_array(
-        'object_facet',
-        json_extract(anchors_json, '$.${anchorPath}.object_id'),
-        json_extract(anchors_json, '$.${anchorPath}.facet_key')
-      )
-      WHEN 'obligation' THEN json_array(
-        'obligation',
-        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
-        json_extract(anchors_json, '$.${anchorPath}.obligation_digest')
-      )
-      WHEN 'risk_concern' THEN json_array(
-        'risk_concern',
-        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
-        json_extract(anchors_json, '$.${anchorPath}.concern_digest')
-      )
-      WHEN 'time_concern' THEN json_array(
-        'time_concern',
-        json_extract(anchors_json, '$.${anchorPath}.source_object_id'),
-        json_extract(anchors_json, '$.${anchorPath}.window_digest')
-      )
-    END`;
-}
-
-// invariant: exported so a foreign repo that must match the mint's
-// findByAnchorMemoryId/anchorPointsAt dedup against the SAME indexed expression
-// reuses this byte-identical text rather than re-spelling the CASE/json_array
-// (which would silently drift from migration 048 and lose the expression index).
-// see also: edge-proposal-repo.ts listAcceptedAwaitingPath (await-path NOT EXISTS).
-export const PATH_RELATION_SOURCE_ANCHOR_KEY_SQL = anchorKeySql("source_anchor");
-export const PATH_RELATION_TARGET_ANCHOR_KEY_SQL = anchorKeySql("target_anchor");
-const SOURCE_ANCHOR_KEY_SQL = PATH_RELATION_SOURCE_ANCHOR_KEY_SQL;
-const TARGET_ANCHOR_KEY_SQL = PATH_RELATION_TARGET_ANCHOR_KEY_SQL;
-
-// invariant: SQL mirror of getPathAnchorBackingObjectId() — object/object_facet
-// anchors back on object_id; obligation/risk_concern/time_concern anchors back on
-// source_object_id. Consumed by cascade-delete and accepted-edge reconciliation
-// to match rows by the backing memory object, not by the full anchor identity.
-// Deliberately does NOT ride the composite anchor-key expression indexes: a key
-// match would miss memory ids carried as source_object_id by the concern kinds.
-// cross-file ref: packages/protocol/src/soul/path-relation.ts getPathAnchorBackingObjectId
-// cross-file ref: packages/storage/src/repos/path/cascade-delete.ts pruneOrphanedPathTopology
-// cross-file ref: packages/storage/src/repos/path/edge-proposal-repo.ts listAcceptedAwaitingPath
-function anchorBackingObjectIdSql(anchorPath: "source_anchor" | "target_anchor"): string {
-  return `CASE json_extract(anchors_json, '$.${anchorPath}.kind')
-      WHEN 'object' THEN json_extract(anchors_json, '$.${anchorPath}.object_id')
-      WHEN 'object_facet' THEN json_extract(anchors_json, '$.${anchorPath}.object_id')
-      WHEN 'obligation' THEN json_extract(anchors_json, '$.${anchorPath}.source_object_id')
-      WHEN 'risk_concern' THEN json_extract(anchors_json, '$.${anchorPath}.source_object_id')
-      WHEN 'time_concern' THEN json_extract(anchors_json, '$.${anchorPath}.source_object_id')
-    END`;
-}
-
-export const PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL = anchorBackingObjectIdSql("source_anchor");
-export const PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL = anchorBackingObjectIdSql("target_anchor");
-
-// Single source for the dynamic `findByAnchors` statement so the production
-// query and the prepared-statement EXPLAIN guard execute byte-identical SQL.
-// cross-file ref: packages/storage/src/__tests__/path-relation-repo.test.ts
-function findByAnchorsSql(keyCount: number): string {
-  const placeholders = Array.from({ length: keyCount }, () => "?").join(", ");
-  return `
-      SELECT${PATH_RELATION_SELECT_COLUMNS}
-      FROM path_relations
-      WHERE workspace_id = ?
-        AND (
-          ${SOURCE_ANCHOR_KEY_SQL} IN (${placeholders})
-          OR ${TARGET_ANCHOR_KEY_SQL} IN (${placeholders})
-        )
-      ORDER BY created_at ASC, path_id ASC
-    `;
-}
-
-function findByBackingObjectIdSql(): string {
-  return `
-      SELECT${PATH_RELATION_SELECT_COLUMNS}
-      FROM path_relations
-      WHERE workspace_id = ?
-        AND ${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} = ?
-      UNION ALL
-      SELECT${PATH_RELATION_SELECT_COLUMNS}
-      FROM path_relations
-      WHERE workspace_id = ?
-        AND ${PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL} = ?
-      ORDER BY created_at ASC, path_id ASC
-    `;
-}
-
-const WAVE_1_ACTIVE_LIFECYCLE_SQL = `CASE
-      WHEN json_valid(lifecycle_json) = 0 THEN 0
-      WHEN json_type(lifecycle_json, '$.retirement_rule') IS NULL
-        OR json_type(lifecycle_json, '$.retirement_rule') != 'text' THEN 0
-      WHEN json_type(lifecycle_json, '$.cooldown_rule') IS NOT NULL
-        AND json_type(lifecycle_json, '$.cooldown_rule') != 'text' THEN 0
-      WHEN json_type(lifecycle_json, '$.override_rule') IS NOT NULL
-        AND json_type(lifecycle_json, '$.override_rule') != 'text' THEN 0
-      WHEN json_type(lifecycle_json, '$.status') IS NOT NULL
-        AND json_type(lifecycle_json, '$.status') != 'text' THEN 0
-      WHEN COALESCE(json_extract(lifecycle_json, '$.status'), 'active') != 'active' THEN 0
-      WHEN EXISTS (
-        SELECT 1
-        FROM json_each(lifecycle_json)
-        WHERE key NOT IN ('status', 'retirement_rule', 'cooldown_rule', 'override_rule')
-      ) THEN 0
-      ELSE 1
-    END`;
-
-// Mirrors WAVE_1_ACTIVE_LIFECYCLE_SQL but matches the dormant landing state:
-// a well-formed lifecycle whose status is exactly "dormant". Unlike active,
-// dormant must be set explicitly (no unset-defaults-to-dormant fallback).
-const WAVE_1_DORMANT_LIFECYCLE_SQL = `CASE
-      WHEN json_valid(lifecycle_json) = 0 THEN 0
-      WHEN json_type(lifecycle_json, '$.retirement_rule') IS NULL
-        OR json_type(lifecycle_json, '$.retirement_rule') != 'text' THEN 0
-      WHEN json_type(lifecycle_json, '$.cooldown_rule') IS NOT NULL
-        AND json_type(lifecycle_json, '$.cooldown_rule') != 'text' THEN 0
-      WHEN json_type(lifecycle_json, '$.override_rule') IS NOT NULL
-        AND json_type(lifecycle_json, '$.override_rule') != 'text' THEN 0
-      WHEN json_type(lifecycle_json, '$.status') IS NULL
-        OR json_type(lifecycle_json, '$.status') != 'text' THEN 0
-      WHEN json_extract(lifecycle_json, '$.status') != 'dormant' THEN 0
-      WHEN EXISTS (
-        SELECT 1
-        FROM json_each(lifecycle_json)
-        WHERE key NOT IN ('status', 'retirement_rule', 'cooldown_rule', 'override_rule')
-      ) THEN 0
-      ELSE 1
-    END`;
-
-interface PathRelationRow {
-  readonly path_id: string;
-  readonly workspace_id: string;
-  readonly anchors_json: string;
-  readonly constitution_json: string;
-  readonly effect_vector_json: string;
-  readonly plasticity_state_json: string;
-  readonly lifecycle_json: string;
-  readonly legitimacy_json: string;
-  readonly created_at: string;
-  readonly updated_at: string;
-}
-
-type PathLifecycleWithStatus = PathRelation["lifecycle"] & {
-  readonly status?: PathLifecycleStatus;
-};
-
-// Memoized parse cap: clears wholesale when exceeded (rare; entries are small).
-const PARSED_ROW_CACHE_MAX = 50_000;
+export type { PathRelationPageOptions, PathRelationRepo } from "./path-relation-types.js";
+export {
+  PATH_RELATION_SOURCE_ANCHOR_KEY_SQL,
+  PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
+  PATH_RELATION_TARGET_ANCHOR_KEY_SQL,
+  PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
+} from "./path-relation-sql.js";
 
 export class SqlitePathRelationRepo implements PathRelationRepo {
   // Parsed rows keyed by path_id, validated against updated_at on every hit.
@@ -237,140 +53,24 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     string,
     { readonly updatedAt: string; readonly relation: Readonly<PathRelation> }
   >();
+  private readonly parsedRowCacheMax: number;
+  private readonly statements: PathRelationStatements;
 
-  private readonly createStatement;
-  private readonly updateStatement;
-  private readonly findByIdStatement;
-  private readonly findByWorkspaceStatement;
-  private readonly findBySourceAnchorStatement;
-  private readonly findByTargetAnchorStatement;
-  private readonly findByBackingObjectIdStatement;
-  private readonly findActiveStatement;
-  private readonly findDormantStatement;
-  private readonly deleteStatement;
-
-  public constructor(private readonly db: StorageDatabase) {
-    this.createStatement = db.connection.prepare(`
-      INSERT INTO path_relations (
-        path_id,
-        workspace_id,
-        anchors_json,
-        constitution_json,
-        effect_vector_json,
-        plasticity_state_json,
-        lifecycle_json,
-        legitimacy_json,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    this.updateStatement = db.connection.prepare(`
-      UPDATE path_relations
-      SET constitution_json = ?,
-          effect_vector_json = ?,
-          plasticity_state_json = ?,
-          lifecycle_json = ?,
-          legitimacy_json = ?,
-          updated_at = ?
-      WHERE path_id = ?
-    `);
-
-    this.findByIdStatement = db.connection.prepare(`
-      SELECT${PATH_RELATION_SELECT_COLUMNS}
-      FROM path_relations
-      WHERE path_id = ?
-      LIMIT 1
-    `);
-
-    this.findByWorkspaceStatement = db.connection.prepare(`
-      SELECT${PATH_RELATION_SELECT_COLUMNS}
-      FROM path_relations
-      WHERE workspace_id = ?
-      ORDER BY created_at ASC, path_id ASC
-    `);
-
-    this.findBySourceAnchorStatement = db.connection.prepare(`
-      SELECT${PATH_RELATION_SELECT_COLUMNS}
-      FROM path_relations
-      WHERE workspace_id = ?
-        AND ${SOURCE_ANCHOR_KEY_SQL} = ?
-      ORDER BY created_at ASC, path_id ASC
-    `);
-
-    this.findByTargetAnchorStatement = db.connection.prepare(`
-      SELECT${PATH_RELATION_SELECT_COLUMNS}
-      FROM path_relations
-      WHERE workspace_id = ?
-        AND ${TARGET_ANCHOR_KEY_SQL} = ?
-      ORDER BY created_at ASC, path_id ASC
-    `);
-
-    this.findByBackingObjectIdStatement = db.connection.prepare(findByBackingObjectIdSql());
-
-    this.findActiveStatement = db.connection.prepare(`
-      SELECT${PATH_RELATION_SELECT_COLUMNS}
-      FROM path_relations
-      WHERE workspace_id = ?
-        AND ${WAVE_1_ACTIVE_LIFECYCLE_SQL} = 1
-      ORDER BY created_at ASC, path_id ASC
-    `);
-
-    this.findDormantStatement = db.connection.prepare(`
-      SELECT${PATH_RELATION_SELECT_COLUMNS}
-      FROM path_relations
-      WHERE workspace_id = ?
-        AND ${WAVE_1_DORMANT_LIFECYCLE_SQL} = 1
-        AND updated_at < ?
-      ORDER BY created_at ASC, path_id ASC
-    `);
-
-    this.deleteStatement = db.connection.prepare(`
-      DELETE FROM path_relations
-      WHERE path_id = ?
-    `);
-  }
-
-  private parseRowCached(row: PathRelationRow): Readonly<PathRelation> {
-    const cached = this.parsedRowCache.get(row.path_id);
-    if (cached !== undefined && cached.updatedAt === row.updated_at) {
-      return cached.relation;
-    }
-    const relation = parsePathRelationRow(row);
-    if (this.parsedRowCache.size >= PARSED_ROW_CACHE_MAX) {
-      this.parsedRowCache.clear();
-    }
-    this.parsedRowCache.set(row.path_id, { updatedAt: row.updated_at, relation });
-    return relation;
-  }
-
-  private parseRowsCached(
-    rows: readonly PathRelationRow[],
+  public constructor(
+    private readonly db: StorageDatabase,
     options: {
-      readonly dedupe?: boolean;
+      readonly parsedRowCacheMax?: number;
     } = {}
-  ): readonly Readonly<PathRelation>[] {
-    const relations = rows.map((row) => this.parseRowCached(row));
-
-    if (!options.dedupe) {
-      return deepFreeze(relations);
-    }
-
-    const deduped = new Map<string, Readonly<PathRelation>>();
-    for (const relation of relations) {
-      deduped.set(relation.path_id, relation);
-    }
-
-    return deepFreeze(
-      [...deduped.values()].sort((left, right) => comparePathRelationOrder(left, right))
-    );
+  ) {
+    this.parsedRowCacheMax = parseParsedRowCacheMax(options.parsedRowCacheMax ?? PARSED_ROW_CACHE_MAX);
+    this.statements = preparePathRelationStatements(db);
   }
 
   public create(relation: PathRelation): Readonly<PathRelation> {
     const parsedRelation = parsePathRelation(relation);
 
     try {
-      this.createStatement.run(
+      this.statements.createStatement.run(
         parsedRelation.path_id,
         parsedRelation.workspace_id,
         JSON.stringify(parsedRelation.anchors),
@@ -392,7 +92,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
 
     let row: PathRelationRow | undefined;
     try {
-      row = this.findByIdStatement.get(parsedRelation.path_id) as PathRelationRow | undefined;
+      row = this.statements.findByIdStatement.get(parsedRelation.path_id) as PathRelationRow | undefined;
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -427,20 +127,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     >
   ): Readonly<PathRelation> {
     const parsedPathId = parseNonEmptyString(pathId, "path id");
-
-    let existingRow: PathRelationRow | undefined;
-    try {
-      existingRow = this.findByIdStatement.get(parsedPathId) as PathRelationRow | undefined;
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to load path relation ${parsedPathId}.`, error);
-    }
-
-    if (existingRow === undefined) {
-      throw new StorageError("NOT_FOUND", `Path relation ${parsedPathId} was not found.`);
-    }
-
-    const existing = this.parseRowCached(existingRow);
-
+    const existing = this.loadExistingRelationForUpdate(parsedPathId);
     const nextRelation = parsePathRelation({
       ...existing,
       constitution: updates.constitution ?? existing.constitution,
@@ -452,7 +139,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     });
 
     try {
-      const changes = this.updateStatement.run(
+      const changes = this.statements.updateStatement.run(
         JSON.stringify(nextRelation.constitution),
         JSON.stringify(nextRelation.effect_vector),
         JSON.stringify(nextRelation.plasticity_state),
@@ -477,9 +164,146 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       );
     }
 
+    return this.reloadUpdatedRelation(parsedPathId);
+  }
+
+  public async findById(pathId: string): Promise<Readonly<PathRelation> | null> {
+    return await findPathRelationById(this.queryContext(), pathId);
+  }
+
+  public async findByWorkspace(workspaceId: string): Promise<readonly Readonly<PathRelation>[]> {
+    return await findPathRelationsByWorkspace(this.queryContext(), workspaceId);
+  }
+
+  public async findByWorkspaceAll(workspaceId: string): Promise<readonly Readonly<PathRelation>[]> {
+    return await findAllPathRelationsByWorkspace(this.queryContext(), workspaceId);
+  }
+
+  public async findByWorkspacePage(
+    workspaceId: string,
+    page: PathRelationPageOptions
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    return await findPathRelationsByWorkspacePage(this.queryContext(), workspaceId, page);
+  }
+
+  public async findByAnchor(
+    workspaceId: string,
+    anchorRef: PathAnchorRef
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    return await findPathRelationsByAnchor(this.queryContext(), workspaceId, anchorRef);
+  }
+
+  public async findByTargetAnchor(
+    workspaceId: string,
+    anchorRef: PathAnchorRef
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    return await findPathRelationsByTargetAnchor(this.queryContext(), workspaceId, anchorRef);
+  }
+
+  public async findByAnchors(
+    workspaceId: string,
+    anchorRefs: readonly PathAnchorRef[]
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    return await findPathRelationsByAnchors(this.queryContext(), workspaceId, anchorRefs);
+  }
+
+  public async findByBackingObjectId(
+    workspaceId: string,
+    objectId: string
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    return await findPathRelationsByBackingObjectId(this.queryContext(), workspaceId, objectId);
+  }
+
+  /**
+   * Default active-path list for bounded surfaces. Topology/graph repair flows
+   * must use `findActiveAll`.
+   */
+  public async findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]> {
+    return await findActivePathRelations(this.queryContext(), workspaceId);
+  }
+
+  public async findActiveAll(workspaceId: string): Promise<readonly Readonly<PathRelation>[]> {
+    return await findAllActivePathRelations(this.queryContext(), workspaceId);
+  }
+
+  public async findActivePage(
+    workspaceId: string,
+    page: PathRelationPageOptions
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    return await findActivePathRelationPage(this.queryContext(), workspaceId, page);
+  }
+
+  /**
+   * Default dormant-path list for bounded surfaces. Consolidation planning must
+   * use `findDormantAll`.
+   */
+  public async findDormant(
+    workspaceId: string,
+    olderThanIso: string
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    return await findDormantPathRelations(this.queryContext(), workspaceId, olderThanIso);
+  }
+
+  public async findDormantAll(
+    workspaceId: string,
+    olderThanIso: string
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    return await findAllDormantPathRelations(this.queryContext(), workspaceId, olderThanIso);
+  }
+
+  public async findDormantPage(
+    workspaceId: string,
+    olderThanIso: string,
+    page: PathRelationPageOptions
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    return await findDormantPathRelationPage(this.queryContext(), workspaceId, olderThanIso, page);
+  }
+
+  public async delete(pathId: string): Promise<void> {
+    const parsedPathId = parseNonEmptyString(pathId, "path id");
+
+    try {
+      this.statements.deleteStatement.run(parsedPathId);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to delete path relation ${parsedPathId}.`, error);
+    }
+
+    this.parsedRowCache.delete(parsedPathId);
+  }
+
+  public __anchorLookupSqlForTest(): Readonly<{
+    readonly findBySourceAnchor: string;
+    readonly findByTargetAnchor: string;
+    readonly findByAnchors: (keyCount: number) => string;
+    readonly findByBackingObjectId: string;
+  }> {
+    return Object.freeze({
+      findBySourceAnchor: this.statements.findBySourceAnchorStatement.source,
+      findByTargetAnchor: this.statements.findByTargetAnchorStatement.source,
+      findByAnchors: (keyCount: number) => findByAnchorsSql(keyCount),
+      findByBackingObjectId: this.statements.findByBackingObjectIdStatement.source
+    });
+  }
+
+  private loadExistingRelationForUpdate(parsedPathId: string): Readonly<PathRelation> {
+    let existingRow: PathRelationRow | undefined;
+    try {
+      existingRow = this.statements.findByIdStatement.get(parsedPathId) as PathRelationRow | undefined;
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to load path relation ${parsedPathId}.`, error);
+    }
+
+    if (existingRow === undefined) {
+      throw new StorageError("NOT_FOUND", `Path relation ${parsedPathId} was not found.`);
+    }
+
+    return this.parseRowCached(existingRow);
+  }
+
+  private reloadUpdatedRelation(parsedPathId: string): Readonly<PathRelation> {
     let updatedRow: PathRelationRow | undefined;
     try {
-      updatedRow = this.findByIdStatement.get(parsedPathId) as PathRelationRow | undefined;
+      updatedRow = this.statements.findByIdStatement.get(parsedPathId) as PathRelationRow | undefined;
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -501,320 +325,55 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     return this.parseRowCached(updatedRow);
   }
 
-  public async findById(pathId: string): Promise<Readonly<PathRelation> | null> {
-    const parsedPathId = parseNonEmptyString(pathId, "path id");
+  private queryContext(): PathRelationQueryContext {
+    return {
+      db: this.db,
+      statements: this.statements,
+      parseRow: (row) => this.parseRowCached(row),
+      parseRows: (rows, options) => this.parseRowsCached(rows, options)
+    };
+  }
 
-    try {
-      const row = this.findByIdStatement.get(parsedPathId) as PathRelationRow | undefined;
-      return row === undefined ? null : this.parseRowCached(row);
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
+  private parseRowCached(row: PathRelationRow): Readonly<PathRelation> {
+    const cached = this.parsedRowCache.get(row.path_id);
+    if (cached !== undefined && cached.updatedAt === row.updated_at) {
+      this.parsedRowCache.delete(row.path_id);
+      this.parsedRowCache.set(row.path_id, cached);
+      return cached.relation;
+    }
+    const relation = parsePathRelationRow(row);
+    if (this.parsedRowCache.has(row.path_id)) {
+      this.parsedRowCache.delete(row.path_id);
+    }
+    if (this.parsedRowCache.size >= this.parsedRowCacheMax) {
+      const oldestKey = this.parsedRowCache.keys().next().value;
+      if (typeof oldestKey === "string") {
+        this.parsedRowCache.delete(oldestKey);
       }
-
-      throw new StorageError("QUERY_FAILED", `Failed to load path relation ${parsedPathId}.`, error);
     }
+    this.parsedRowCache.set(row.path_id, { updatedAt: row.updated_at, relation });
+    return relation;
   }
 
-  public async findByWorkspace(workspaceId: string): Promise<readonly Readonly<PathRelation>[]> {
-    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+  private parseRowsCached(
+    rows: readonly PathRelationRow[],
+    options: {
+      readonly dedupe?: boolean;
+    } = {}
+  ): readonly Readonly<PathRelation>[] {
+    const relations = rows.map((row) => this.parseRowCached(row));
 
-    try {
-      const rows = this.findByWorkspaceStatement.all(parsedWorkspaceId) as PathRelationRow[];
-      return this.parseRowsCached(rows);
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to list path relations for workspace ${parsedWorkspaceId}.`,
-        error
-      );
-    }
-  }
-
-  public async findByAnchor(
-    workspaceId: string,
-    anchorRef: PathAnchorRef
-  ): Promise<readonly Readonly<PathRelation>[]> {
-    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
-    const parsedAnchor = parsePathAnchorRef(anchorRef);
-    const anchorKey = serializePathAnchorRef(parsedAnchor);
-
-    try {
-      const sourceRows = this.findBySourceAnchorStatement.all(parsedWorkspaceId, anchorKey) as PathRelationRow[];
-      const targetRows = this.findByTargetAnchorStatement.all(parsedWorkspaceId, anchorKey) as PathRelationRow[];
-      return this.parseRowsCached([...sourceRows, ...targetRows], { dedupe: true });
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError("QUERY_FAILED", "Failed to list path relations by anchor.", error);
-    }
-  }
-
-  // Inbound-only lookup: rows whose TARGET anchor equals the given ref. Unlike
-  // `findByAnchor` (source+target union) this scopes to the inbound half, which
-  // recall graph_support needs to count paths arriving at a candidate memory.
-  // No lifecycle filter is applied here; callers apply isPathRecallEligible.
-  // see also: packages/core/src/path-graph/graph-explore-service.ts countInbound*.
-  public async findByTargetAnchor(
-    workspaceId: string,
-    anchorRef: PathAnchorRef
-  ): Promise<readonly Readonly<PathRelation>[]> {
-    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
-    const parsedAnchor = parsePathAnchorRef(anchorRef);
-    const anchorKey = serializePathAnchorRef(parsedAnchor);
-
-    try {
-      const rows = this.findByTargetAnchorStatement.all(parsedWorkspaceId, anchorKey) as PathRelationRow[];
-      return this.parseRowsCached(rows);
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError("QUERY_FAILED", "Failed to list path relations by target anchor.", error);
-    }
-  }
-
-  public async findByAnchors(
-    workspaceId: string,
-    anchorRefs: readonly PathAnchorRef[]
-  ): Promise<readonly Readonly<PathRelation>[]> {
-    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
-    const anchorKeys = [...new Set(anchorRefs.map((anchorRef) => serializePathAnchorRef(parsePathAnchorRef(anchorRef))))];
-
-    if (anchorKeys.length === 0) {
-      return deepFreeze([]);
+    if (!options.dedupe) {
+      return deepFreeze(relations);
     }
 
-    const statement = this.db.connection.prepare(findByAnchorsSql(anchorKeys.length));
-
-    try {
-      const rows = statement.all(
-        parsedWorkspaceId,
-        ...anchorKeys,
-        ...anchorKeys
-      ) as PathRelationRow[];
-      return this.parseRowsCached(rows, { dedupe: true });
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError("QUERY_FAILED", "Failed to list path relations by anchors.", error);
-    }
-  }
-
-  public async findByBackingObjectId(
-    workspaceId: string,
-    objectId: string
-  ): Promise<readonly Readonly<PathRelation>[]> {
-    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
-    const parsedObjectId = parseNonEmptyString(objectId, "object id");
-
-    try {
-      const rows = this.findByBackingObjectIdStatement.all(
-        parsedWorkspaceId,
-        parsedObjectId,
-        parsedWorkspaceId,
-        parsedObjectId
-      ) as PathRelationRow[];
-      return this.parseRowsCached(rows, { dedupe: true });
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to list path relations by backing object id for workspace ${parsedWorkspaceId}.`,
-        error
-      );
-    }
-  }
-
-  public async findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]> {
-    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
-
-    try {
-      const rows = this.findActiveStatement.all(parsedWorkspaceId) as PathRelationRow[];
-      return this.parseRowsCached(rows);
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to list active path relations for workspace ${parsedWorkspaceId}.`,
-        error
-      );
-    }
-  }
-
-  public async findDormant(
-    workspaceId: string,
-    olderThanIso: string
-  ): Promise<readonly Readonly<PathRelation>[]> {
-    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
-    const parsedOlderThanIso = parseNonEmptyString(olderThanIso, "older-than timestamp");
-
-    try {
-      const rows = this.findDormantStatement.all(
-        parsedWorkspaceId,
-        parsedOlderThanIso
-      ) as PathRelationRow[];
-      return this.parseRowsCached(rows);
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to list dormant path relations for workspace ${parsedWorkspaceId}.`,
-        error
-      );
-    }
-  }
-
-  public async delete(pathId: string): Promise<void> {
-    const parsedPathId = parseNonEmptyString(pathId, "path id");
-
-    try {
-      this.deleteStatement.run(parsedPathId);
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to delete path relation ${parsedPathId}.`, error);
+    const deduped = new Map<string, Readonly<PathRelation>>();
+    for (const relation of relations) {
+      deduped.set(relation.path_id, relation);
     }
 
-    this.parsedRowCache.delete(parsedPathId);
-  }
-
-  // Test-only seam: the SQL text the repo actually prepared for its anchor
-  // lookups. Returning .source from the live prepared statements lets the
-  // EXPLAIN QUERY PLAN guard prove the planner rides the migration 048
-  // expression indexes against the REAL statements, not a reconstruction that
-  // could silently drift from them. findByAnchors builds its statement per
-  // call, so it is rendered through the same shared findByAnchorsSql builder.
-  // cross-file ref: packages/storage/src/__tests__/path-relation-repo.test.ts
-  public __anchorLookupSqlForTest(): Readonly<{
-    readonly findBySourceAnchor: string;
-    readonly findByTargetAnchor: string;
-    readonly findByAnchors: (keyCount: number) => string;
-    readonly findByBackingObjectId: string;
-  }> {
-    return Object.freeze({
-      findBySourceAnchor: (this.findBySourceAnchorStatement as { readonly source: string }).source,
-      findByTargetAnchor: (this.findByTargetAnchorStatement as { readonly source: string }).source,
-      findByAnchors: (keyCount: number) => findByAnchorsSql(keyCount),
-      findByBackingObjectId: (this.findByBackingObjectIdStatement as { readonly source: string }).source
-    });
-  }
-}
-
-function parsePathRelation(value: PathRelation): Readonly<PathRelation> {
-  try {
-    return deepFreeze(PathRelationSchema.parse(value));
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate path relation.", error);
-  }
-}
-
-function parsePathAnchorRef(value: PathAnchorRef): Readonly<PathAnchorRef> {
-  try {
-    return deepFreeze(PathAnchorRefSchema.parse(value));
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate path anchor ref.", error);
-  }
-}
-
-
-function parsePathRelationRow(row: PathRelationRow): Readonly<PathRelation> {
-  return parsePathRelation({
-    path_id: row.path_id,
-    workspace_id: row.workspace_id,
-    anchors: parseJsonFieldWithSchema(row.anchors_json, "anchors", pathRelationFieldSchemas.anchors),
-    constitution: parseJsonFieldWithSchema(
-      row.constitution_json,
-      "constitution",
-      pathRelationFieldSchemas.constitution
-    ),
-    effect_vector: parseJsonFieldWithSchema(
-      row.effect_vector_json,
-      "effect_vector",
-      pathRelationFieldSchemas.effect_vector
-    ),
-    plasticity_state: parseJsonFieldWithSchema(
-      row.plasticity_state_json,
-      "plasticity_state",
-      pathRelationFieldSchemas.plasticity_state
-    ),
-    lifecycle: normalizeLifecycle(
-      parseJsonFieldWithSchema(row.lifecycle_json, "lifecycle", pathRelationFieldSchemas.lifecycle)
-    ),
-    legitimacy: parseJsonFieldWithSchema(
-      row.legitimacy_json,
-      "legitimacy",
-      pathRelationFieldSchemas.legitimacy
-    ),
-    created_at: row.created_at,
-    updated_at: row.updated_at
-  });
-}
-
-function normalizeLifecycle(lifecycle: PathRelation["lifecycle"]): PathRelation["lifecycle"] {
-  const lifecycleWithStatus = lifecycle as PathLifecycleWithStatus;
-  return {
-    status: lifecycleWithStatus.status ?? "active",
-    retirement_rule: lifecycle.retirement_rule,
-    ...(lifecycle.cooldown_rule === undefined ? {} : { cooldown_rule: lifecycle.cooldown_rule }),
-    ...(lifecycle.override_rule === undefined ? {} : { override_rule: lifecycle.override_rule })
-  } as PathRelation["lifecycle"];
-}
-
-function comparePathRelationOrder(left: Readonly<PathRelation>, right: Readonly<PathRelation>): number {
-  if (left.created_at === right.created_at) {
-    return left.path_id.localeCompare(right.path_id);
-  }
-
-  return left.created_at.localeCompare(right.created_at);
-}
-
-// Per-field schemas reused verbatim from PathRelationSchema (no duplicate
-// definitions, no widening of the protocol export surface). unwrap() peels the
-// outer .readonly() so .shape exposes each column's validator.
-const pathRelationFieldSchemas = PathRelationSchema.unwrap().shape;
-
-// Validate each JSON column against its own schema so a corrupted column raises
-// a precise, field-named error instead of letting an unchecked `as T` cast lie
-// until the whole-object parse fails generically.
-function parseJsonFieldWithSchema<T>(
-  value: string,
-  fieldName: string,
-  schema: { parse(input: unknown): T }
-): T {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch (error) {
-    throw new StorageError(
-      "VALIDATION_FAILED",
-      `Failed to parse path relation ${fieldName}.`,
-      error
-    );
-  }
-  try {
-    return schema.parse(parsed);
-  } catch (error) {
-    throw new StorageError(
-      "VALIDATION_FAILED",
-      `Invalid path relation ${fieldName}.`,
-      error
+    return deepFreeze(
+      [...deduped.values()].sort((left, right) => comparePathRelationOrder(left, right))
     );
   }
 }

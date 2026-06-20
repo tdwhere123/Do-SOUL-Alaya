@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
+  IsoDatetimeStringSchema
+} from "../shared/schema-primitives.js";
 import { ToolPermissionResultSchema, ToolRequestedBySchema } from "./tool-governance.js";
 import { ToolAffectedPathsSchema } from "./tool-affected-path.js";
 
@@ -7,19 +12,19 @@ export const ToolExecutionRollbackStatusSchema = z.enum(["none", "attempted", "s
 
 export const ToolExecutionRecordSchema = z
   .object({
-    execution_id: NonEmptyStringSchema,
-    tool_id: NonEmptyStringSchema,
+    execution_id: BoundedIdSchema,
+    tool_id: BoundedLabelSchema,
     requested_by: ToolRequestedBySchema,
-    requesting_run_id: NonEmptyStringSchema,
-    node_id: NonEmptyStringSchema.optional(),
-    governance_decision_ref: NonEmptyStringSchema,
+    requesting_run_id: BoundedIdSchema,
+    node_id: BoundedIdSchema.optional(),
+    governance_decision_ref: BoundedIdSchema,
     permission_result: ToolPermissionResultSchema,
     executed: z.boolean(),
     started_at: IsoDatetimeStringSchema.optional(),
     ended_at: IsoDatetimeStringSchema.optional(),
-    result_summary: z.string().optional(),
+    result_summary: BoundedReasonSchema.optional(),
     rollback_status: ToolExecutionRollbackStatusSchema,
-    post_effect_refs: z.array(NonEmptyStringSchema).readonly().optional(),
+    post_effect_refs: z.array(BoundedIdSchema).readonly().optional(),
     affected_paths: ToolAffectedPathsSchema.nullable().optional()
   })
   .strict()

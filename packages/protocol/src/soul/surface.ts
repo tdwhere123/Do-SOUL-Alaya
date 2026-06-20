@@ -39,6 +39,7 @@ export const SurfaceIdentitySchema = PersistentObjectEnvelopeSchema.unwrap()
     surface_status: SurfaceStatusSchema,
     workspace_id: NonEmptyStringSchema
   })
+  .strict()
   .readonly();
 
 export const SurfaceAnchorSchema = PersistentObjectEnvelopeSchema.unwrap()
@@ -49,6 +50,7 @@ export const SurfaceAnchorSchema = PersistentObjectEnvelopeSchema.unwrap()
     anchor_value: NonEmptyStringSchema,
     workspace_id: NonEmptyStringSchema
   })
+  .strict()
   .readonly();
 
 export const SurfaceBindingSchema = PersistentObjectEnvelopeSchema.unwrap()
@@ -60,6 +62,7 @@ export const SurfaceBindingSchema = PersistentObjectEnvelopeSchema.unwrap()
     binding_state: BindingStateSchema,
     workspace_id: NonEmptyStringSchema
   })
+  .strict()
   .readonly();
 
 export type SurfaceStatus = z.infer<typeof SurfaceStatusSchema>;

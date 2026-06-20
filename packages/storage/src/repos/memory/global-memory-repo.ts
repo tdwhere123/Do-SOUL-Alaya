@@ -7,17 +7,32 @@ import {
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
-import { parseNonEmptyString } from "../shared/validators.js";
+import {
+  DEFAULT_REPO_LIST_PAGE_LIMIT,
+  parseNonEmptyString,
+  parsePageLimit,
+  parsePageOffset
+} from "../shared/validators.js";
 
 export interface GlobalMemoryRepoListFilters {
   readonly dimension?: GlobalMemoryEntry["dimension"];
   readonly scope_class?: GlobalMemoryEntry["scope_class"];
 }
 
+export interface GlobalMemoryRepoListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
+}
+
 export interface GlobalMemoryRepo {
   upsert(entry: GlobalMemoryEntry): Promise<Readonly<GlobalMemoryEntry>>;
   findByGlobalObjectId(globalObjectId: string): Promise<Readonly<GlobalMemoryEntry> | null>;
+  listPage?(
+    filters: GlobalMemoryRepoListFilters | undefined,
+    page: GlobalMemoryRepoListPageOptions
+  ): Promise<readonly Readonly<GlobalMemoryEntry>[]>;
   list(filters?: GlobalMemoryRepoListFilters): Promise<readonly Readonly<GlobalMemoryEntry>[]>;
+  listAll?(filters?: GlobalMemoryRepoListFilters): Promise<readonly Readonly<GlobalMemoryEntry>[]>;
 }
 
 interface GlobalMemoryEntryRow {
@@ -34,6 +49,11 @@ interface GlobalMemoryEntryRow {
   readonly created_at: string;
   readonly updated_at: string;
 }
+
+const DEFAULT_GLOBAL_MEMORY_PAGE = Object.freeze({
+  limit: DEFAULT_REPO_LIST_PAGE_LIMIT,
+  offset: 0
+});
 
 const GLOBAL_MEMORY_ENTRY_SELECT_COLUMNS = `
       global_object_id,
@@ -151,8 +171,24 @@ export class SqliteGlobalMemoryRepo implements GlobalMemoryRepo {
     }
   }
 
-  public async list(
-    filters: GlobalMemoryRepoListFilters = {}
+  public async list(filters: GlobalMemoryRepoListFilters = {}): Promise<readonly Readonly<GlobalMemoryEntry>[]> {
+    return this.listInternal(filters, DEFAULT_GLOBAL_MEMORY_PAGE);
+  }
+
+  public async listAll(filters: GlobalMemoryRepoListFilters = {}): Promise<readonly Readonly<GlobalMemoryEntry>[]> {
+    return this.listInternal(filters, undefined);
+  }
+
+  public async listPage(
+    filters: GlobalMemoryRepoListFilters = {},
+    page: GlobalMemoryRepoListPageOptions
+  ): Promise<readonly Readonly<GlobalMemoryEntry>[]> {
+    return this.listInternal(filters, parseGlobalMemoryListPage(page));
+  }
+
+  private async listInternal(
+    filters: GlobalMemoryRepoListFilters,
+    page: Readonly<GlobalMemoryRepoListPageOptions> | undefined
   ): Promise<readonly Readonly<GlobalMemoryEntry>[]> {
     const conditions: string[] = [];
     const values: unknown[] = [];
@@ -168,11 +204,16 @@ export class SqliteGlobalMemoryRepo implements GlobalMemoryRepo {
     }
 
     const whereClause = conditions.length === 0 ? "" : `WHERE ${conditions.join(" AND ")}`;
+    const pageClause = page === undefined ? "" : "LIMIT ? OFFSET ?";
+    if (page !== undefined) {
+      values.push(page.limit, page.offset);
+    }
     const statement = this.db.connection.prepare(`
       SELECT${GLOBAL_MEMORY_ENTRY_SELECT_COLUMNS}
       FROM global_memory_entries
       ${whereClause}
       ORDER BY global_object_id ASC
+      ${pageClause}
     `);
 
     try {
@@ -252,3 +293,12 @@ function parseScopeClass(value: GlobalMemoryEntry["scope_class"]): GlobalMemoryE
 }
 
 const parseGlobalObjectId = (value: string): string => parseNonEmptyString(value, "global_object_id");
+
+function parseGlobalMemoryListPage(
+  page: GlobalMemoryRepoListPageOptions
+): Readonly<GlobalMemoryRepoListPageOptions> {
+  return Object.freeze({
+    limit: parsePageLimit(page.limit, "global memory page limit"),
+    offset: parsePageOffset(page.offset, "global memory page offset")
+  });
+}

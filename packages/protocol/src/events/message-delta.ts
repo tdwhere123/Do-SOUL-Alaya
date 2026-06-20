@@ -1,7 +1,10 @@
 import { z } from "zod";
 import {
+  BoundedContentSchema,
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
   IsoDatetimeStringSchema,
-  NonEmptyStringSchema,
   NonNegativeIntSchema,
 } from "../shared/schema-primitives.js";
 
@@ -23,11 +26,12 @@ export type StreamingEventTypeValue = z.infer<typeof StreamingEventTypeSchema>;
 // MessageCreatedEvent — published when a run message exists before streaming deltas arrive
 export const MessageCreatedEventSchema = z
   .object({
-    messageId: NonEmptyStringSchema,
-    runId: NonEmptyStringSchema,
+    messageId: BoundedIdSchema,
+    runId: BoundedIdSchema,
     role: z.enum(["user", "assistant"]),
     createdAt: IsoDatetimeStringSchema.optional(),
   })
+  .strict()
   .readonly();
 
 export type MessageCreatedEvent = Readonly<z.infer<typeof MessageCreatedEventSchema>>;
@@ -36,13 +40,14 @@ export type MessageCreatedEvent = Readonly<z.infer<typeof MessageCreatedEventSch
 export const MessageDeltaEventSchema = z
   .object({
     type: z.literal("message.delta"),
-    runId: NonEmptyStringSchema,
-    messageId: NonEmptyStringSchema,
-    delta: z.string(),
+    runId: BoundedIdSchema,
+    messageId: BoundedIdSchema,
+    delta: BoundedContentSchema,
     index: NonNegativeIntSchema,
     finishReason: z.enum(["stop", "length", "error"]).nullable().optional(),
     timestamp: IsoDatetimeStringSchema,
   })
+  .strict()
   .readonly();
 
 export type MessageDeltaEvent = Readonly<z.infer<typeof MessageDeltaEventSchema>>;
@@ -51,12 +56,13 @@ export type MessageDeltaEvent = Readonly<z.infer<typeof MessageDeltaEventSchema>
 export const MessageCompletedEventSchema = z
   .object({
     type: z.literal("message.completed"),
-    runId: NonEmptyStringSchema,
-    messageId: NonEmptyStringSchema,
-    content: z.string(),
+    runId: BoundedIdSchema,
+    messageId: BoundedIdSchema,
+    content: BoundedContentSchema,
     finishReason: z.enum(["stop", "length", "error"]),
     timestamp: IsoDatetimeStringSchema,
   })
+  .strict()
   .readonly();
 
 export type MessageCompletedEvent = Readonly<z.infer<typeof MessageCompletedEventSchema>>;
@@ -64,10 +70,11 @@ export type MessageCompletedEvent = Readonly<z.infer<typeof MessageCompletedEven
 // RunStateChangedEvent — hot-state update emitted on run SSE channels
 export const RunStateChangedEventSchema = z
   .object({
-    runId: NonEmptyStringSchema,
-    state: NonEmptyStringSchema,
-    previousState: NonEmptyStringSchema.optional(),
+    runId: BoundedIdSchema,
+    state: BoundedLabelSchema,
+    previousState: BoundedLabelSchema.optional(),
   })
+  .strict()
   .readonly();
 
 export type RunStateChangedEvent = Readonly<z.infer<typeof RunStateChangedEventSchema>>;
@@ -75,10 +82,11 @@ export type RunStateChangedEvent = Readonly<z.infer<typeof RunStateChangedEventS
 // RunErrorEvent — hot-state error update emitted on run SSE channels
 export const RunErrorEventSchema = z
   .object({
-    runId: NonEmptyStringSchema,
-    errorMessage: NonEmptyStringSchema,
-    errorCode: NonEmptyStringSchema.optional(),
+    runId: BoundedIdSchema,
+    errorMessage: BoundedReasonSchema,
+    errorCode: BoundedLabelSchema.optional(),
   })
+  .strict()
   .readonly();
 
 export type RunErrorEvent = Readonly<z.infer<typeof RunErrorEventSchema>>;

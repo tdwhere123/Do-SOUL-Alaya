@@ -18,6 +18,16 @@ interface GlobalMemoryRepoLike {
     dimension?: GlobalMemoryEntry["dimension"];
     scope_class?: GlobalMemoryEntry["scope_class"];
   }): Promise<readonly Readonly<GlobalMemoryEntry>[]>;
+  listPage?(
+    filters: {
+      dimension?: GlobalMemoryEntry["dimension"];
+      scope_class?: GlobalMemoryEntry["scope_class"];
+    } | undefined,
+    page: {
+      limit: number;
+      offset: number;
+    }
+  ): Promise<readonly Readonly<GlobalMemoryEntry>[]>;
 }
 
 interface GlobalMemoryRecallCacheRecord {
@@ -106,6 +116,7 @@ describe("Global memory storage repos", () => {
     await expect(globalMemoryRepo.list()).resolves.toEqual([first, second]);
     await expect(globalMemoryRepo.list({ dimension: MemoryDimension.CONSTRAINT })).resolves.toEqual([second]);
     await expect(globalMemoryRepo.list({ scope_class: ScopeClass.GLOBAL_CORE })).resolves.toEqual([first]);
+    await expect(globalMemoryRepo.listPage?.({}, { limit: 1, offset: 1 })).resolves.toEqual([second]);
   });
 
   it("updates existing global entries in place on upsert", async () => {
@@ -206,6 +217,93 @@ describe("Global memory storage repos", () => {
       updated_at: "2026-04-23T02:00:00.000Z"
     });
     await expect(recallCacheRepo.listByWorkspace("workspace-1")).resolves.toEqual([updated]);
+  });
+
+  it("reloads only touched recall-cache keys after single and batched upserts", async () => {
+    const { database, globalMemoryRepo, recallCacheRepo } = await createRepos();
+
+    await globalMemoryRepo.upsert(
+      createGlobalMemoryEntry({
+        global_object_id: "unrelated-memory",
+        canonical_identity: "docs::workflow::unrelated",
+        content: "Unrelated memory row."
+      })
+    );
+    await globalMemoryRepo.upsert(
+      createGlobalMemoryEntry({
+        global_object_id: "global-memory-2",
+        canonical_identity: "docs::workflow::global-memory-2",
+        content: "Second touched memory row."
+      })
+    );
+    await globalMemoryRepo.upsert(
+      createGlobalMemoryEntry({
+        global_object_id: "global-memory-3",
+        canonical_identity: "docs::workflow::global-memory-3",
+        content: "Third touched memory row."
+      })
+    );
+
+    await recallCacheRepo.upsert({
+      workspace_id: "workspace-1",
+      global_object_id: "unrelated-memory",
+      classification: "excluded",
+      updated_at: "2026-04-23T00:00:00.000Z"
+    });
+
+    await expect(
+      recallCacheRepo.upsert({
+        workspace_id: "workspace-1",
+        global_object_id: "global-memory-1",
+        classification: "included",
+        updated_at: "2026-04-23T02:00:00.000Z"
+      })
+    ).resolves.toEqual({
+      workspace_id: "workspace-1",
+      global_object_id: "global-memory-1",
+      classification: "included",
+      updated_at: "2026-04-23T02:00:00.000Z"
+    });
+
+    const afterSingle = database.connection
+      .prepare(
+        "SELECT global_object_id, classification FROM global_memory_recall_cache WHERE workspace_id = ? ORDER BY global_object_id ASC"
+      )
+      .all("workspace-1") as Array<{ readonly global_object_id: string; readonly classification: string }>;
+    expect(afterSingle).toEqual([
+      { global_object_id: "global-memory-1", classification: "included" },
+      { global_object_id: "unrelated-memory", classification: "excluded" }
+    ]);
+
+    await expect(
+      recallCacheRepo.upsertMany([
+        {
+          workspace_id: "workspace-1",
+          global_object_id: "global-memory-2",
+          classification: "included",
+          updated_at: "2026-04-23T03:00:00.000Z"
+        },
+        {
+          workspace_id: "workspace-1",
+          global_object_id: "global-memory-3",
+          classification: "excluded",
+          updated_at: "2026-04-23T03:00:00.000Z"
+        }
+      ])
+    ).resolves.toEqual([
+      {
+        workspace_id: "workspace-1",
+        global_object_id: "global-memory-2",
+        classification: "included",
+        updated_at: "2026-04-23T03:00:00.000Z"
+      },
+      {
+        workspace_id: "workspace-1",
+        global_object_id: "global-memory-3",
+        classification: "excluded",
+        updated_at: "2026-04-23T03:00:00.000Z"
+      }
+    ]);
   });
 
   it("persists recall-cache classifications atomically across a batch", async () => {

@@ -1,21 +1,28 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedJsonObjectSchema,
+  BoundedLabelSchema,
+  IsoDatetimeStringSchema,
+  NonEmptyStringSchema
+} from "../shared/schema-primitives.js";
 
-const AuditEventDetailSchema = z.record(z.string(), z.unknown()).readonly();
+const AuditEventDetailSchema = BoundedJsonObjectSchema;
 
 export const AuditEventSchema = z
   .object({
-    event_type: NonEmptyStringSchema,
+    event_type: BoundedLabelSchema,
     occurred_at: IsoDatetimeStringSchema,
     actor: NonEmptyStringSchema,
     detail: AuditEventDetailSchema
   })
+  .strict()
   .readonly();
 
 export const AuditTrailSchema = z
   .object({
     events: z.array(AuditEventSchema).min(1).readonly()
   })
+  .strict()
   .readonly();
 
 export type ObjectSpec<TSpec extends object> = Readonly<TSpec & { readonly _brand: "spec" }>;

@@ -14,6 +14,10 @@ import {
   tokenizeFtsQuery
 } from "../shared/fts-lane-routing.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
+import {
+  prepareSynthesisCapsuleStatements,
+  type SqliteStatement
+} from "./synthesis-capsule-statements.js";
 
 export interface SynthesisCapsuleKeywordHit {
   readonly object_id: string;
@@ -45,24 +49,6 @@ export interface SynthesisCapsuleRepo {
   ): Promise<readonly SynthesisCapsuleKeywordHit[]>;
 }
 
-const SYNTHESIS_SELECT_COLUMNS = `
-        object_id,
-        object_kind,
-        schema_version,
-        lifecycle_state,
-        created_at,
-        updated_at,
-        created_by,
-        topic_key,
-        synthesis_type,
-        summary,
-        evidence_refs,
-        source_memory_refs,
-        workspace_id,
-        run_id,
-        synthesis_status
-`;
-
 interface SynthesisCapsuleRow {
   readonly object_id: string;
   readonly object_kind: string;
@@ -81,109 +67,32 @@ interface SynthesisCapsuleRow {
   readonly synthesis_status: string;
 }
 
-// see also: ./shared/fts-lane-routing.ts — the porter/trigram dual-lane
-// query split and ordinal-rank merge shared with evidence-capsule-repo.ts.
+// see also: packages/protocol/src/soul/fts-search-policy.ts — porter/trigram
+// split and ordinal-rank merge shared with evidence-capsule-repo.ts.
 export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
-  private readonly createStatement;
-  private readonly findByIdStatement;
-  private readonly findByWorkspaceIdStatement;
-  private readonly findByTopicKeyStatement;
-  private readonly updateEvidenceRefsStatement;
-  private readonly updateSourceMemoryRefsStatement;
-  private readonly updateStatusStatement;
+  private readonly createStatement: SqliteStatement;
+  private readonly findByIdStatement: SqliteStatement;
+  private readonly findByWorkspaceIdStatement: SqliteStatement;
+  private readonly findByTopicKeyStatement: SqliteStatement;
+  private readonly updateEvidenceRefsStatement: SqliteStatement;
+  private readonly updateSourceMemoryRefsStatement: SqliteStatement;
+  private readonly updateStatusStatement: SqliteStatement;
   // see also: 079-synthesis-capsule-fts-dual.sql — porter unicode61 word lane.
-  private readonly searchByKeywordStatement;
+  private readonly searchByKeywordStatement: SqliteStatement;
   // see also: 079-synthesis-capsule-fts-dual.sql — trigram CJK/substring lane.
-  private readonly searchByKeywordTrigramStatement;
+  private readonly searchByKeywordTrigramStatement: SqliteStatement;
 
   public constructor(db: StorageDatabase) {
-    this.createStatement = db.connection.prepare(`
-      INSERT INTO synthesis_capsules (
-        object_id,
-        object_kind,
-        schema_version,
-        lifecycle_state,
-        created_at,
-        updated_at,
-        created_by,
-        topic_key,
-        synthesis_type,
-        summary,
-        evidence_refs,
-        source_memory_refs,
-        workspace_id,
-        run_id,
-        synthesis_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    this.findByIdStatement = db.connection.prepare(`
-      SELECT${SYNTHESIS_SELECT_COLUMNS}
-      FROM synthesis_capsules
-      WHERE object_id = ?
-      LIMIT 1
-    `);
-
-    this.findByWorkspaceIdStatement = db.connection.prepare(`
-      SELECT${SYNTHESIS_SELECT_COLUMNS}
-      FROM synthesis_capsules
-      WHERE workspace_id = ?
-      ORDER BY created_at ASC, object_id ASC
-    `);
-
-    this.findByTopicKeyStatement = db.connection.prepare(`
-      SELECT${SYNTHESIS_SELECT_COLUMNS}
-      FROM synthesis_capsules
-      WHERE workspace_id = ?
-        AND topic_key = ?
-      ORDER BY created_at ASC, object_id ASC
-    `);
-
-    this.updateEvidenceRefsStatement = db.connection.prepare(`
-      UPDATE synthesis_capsules
-      SET evidence_refs = ?, updated_at = ?
-      WHERE object_id = ?
-    `);
-
-    this.updateSourceMemoryRefsStatement = db.connection.prepare(`
-      UPDATE synthesis_capsules
-      SET source_memory_refs = ?, updated_at = ?
-      WHERE object_id = ?
-    `);
-
-    this.updateStatusStatement = db.connection.prepare(`
-      UPDATE synthesis_capsules
-      SET synthesis_status = ?, updated_at = ?
-      WHERE object_id = ?
-    `);
-
-    this.searchByKeywordStatement = db.connection.prepare(`
-      SELECT
-        synthesis_capsule_fts.object_id,
-        bm25(synthesis_capsule_fts) AS raw_rank
-      FROM synthesis_capsule_fts
-      JOIN synthesis_capsules ON synthesis_capsules.object_id = synthesis_capsule_fts.object_id
-      WHERE
-        synthesis_capsule_fts.workspace_id = ?
-        AND synthesis_capsule_fts MATCH ?
-        AND COALESCE(synthesis_capsules.lifecycle_state, '') != 'retired'
-      ORDER BY raw_rank ASC, synthesis_capsule_fts.object_id ASC
-      LIMIT ?
-    `);
-    this.searchByKeywordTrigramStatement = db.connection.prepare(`
-      SELECT
-        synthesis_capsule_fts_trigram.object_id,
-        bm25(synthesis_capsule_fts_trigram) AS raw_rank
-      FROM synthesis_capsule_fts_trigram
-      JOIN synthesis_capsules
-        ON synthesis_capsules.object_id = synthesis_capsule_fts_trigram.object_id
-      WHERE
-        synthesis_capsule_fts_trigram.workspace_id = ?
-        AND synthesis_capsule_fts_trigram MATCH ?
-        AND COALESCE(synthesis_capsules.lifecycle_state, '') != 'retired'
-      ORDER BY raw_rank ASC, synthesis_capsule_fts_trigram.object_id ASC
-      LIMIT ?
-    `);
+    const statements = prepareSynthesisCapsuleStatements(db);
+    this.createStatement = statements.createStatement;
+    this.findByIdStatement = statements.findByIdStatement;
+    this.findByWorkspaceIdStatement = statements.findByWorkspaceIdStatement;
+    this.findByTopicKeyStatement = statements.findByTopicKeyStatement;
+    this.updateEvidenceRefsStatement = statements.updateEvidenceRefsStatement;
+    this.updateSourceMemoryRefsStatement = statements.updateSourceMemoryRefsStatement;
+    this.updateStatusStatement = statements.updateStatusStatement;
+    this.searchByKeywordStatement = statements.searchByKeywordStatement;
+    this.searchByKeywordTrigramStatement = statements.searchByKeywordTrigramStatement;
   }
 
   public async searchByKeyword(

@@ -1,4 +1,4 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { CoreError, type ConversationService, type RunHotStateService, type RunService } from "@do-soul/alaya-core";
 import {
   parseJsonBody,
@@ -26,6 +26,7 @@ export interface RunRouteServices {
   readonly runHotStateService: RunHotStateService;
   readonly eventLogRepo?: {
     queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
+    queryByRunAll(runId: string): Promise<readonly EventLogEntry[]>;
     /**
      * Returns events for the run with rowid strictly after the row whose
      * event_id equals lastEventId. When lastEventId does not exist in the DB
@@ -64,6 +65,12 @@ export interface RunRouteServices {
 }
 
 export function registerRunRoutes(app: Hono, services: RunRouteServices): void {
+  registerRunCollectionRoutes(app, services);
+  registerRunMessageRoutes(app, services);
+  registerRunLifecycleRoutes(app, services);
+}
+
+function registerRunCollectionRoutes(app: Hono, services: RunRouteServices): void {
   app.post("/workspaces/:id/runs", async (context) => {
     const run = await services.runService.create(
       context.req.param("id"),
@@ -86,7 +93,9 @@ export function registerRunRoutes(app: Hono, services: RunRouteServices): void {
     const run = await services.runService.getById(context.req.param("id"));
     return context.json({ success: true, data: run }, 200);
   });
+}
 
+function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
   app.get("/runs/:id/messages", async (context) => {
     const runId = context.req.param("id");
     const pagination = parseListPagination(context);
@@ -113,7 +122,9 @@ export function registerRunRoutes(app: Hono, services: RunRouteServices): void {
 
     return context.json({ success: true, data: response }, 200);
   });
+}
 
+function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void {
   app.post("/runs/:id/interrupt", async (context) => {
     const unexpectedBody = await rejectUnexpectedRequestBody(context);
     if (unexpectedBody !== null) return unexpectedBody;
@@ -124,37 +135,7 @@ export function registerRunRoutes(app: Hono, services: RunRouteServices): void {
   });
 
   app.get("/runs/:id/snapshot", async (context) => {
-    const runId = context.req.param("id");
-    await services.runService.getById(runId);
-    const snapshot = await services.runHotStateService.getSnapshot(runId);
-
-    if (snapshot === null) {
-      throw new CoreError("NOT_FOUND", "Run not found");
-    }
-
-    try {
-      return context.json(
-        { success: true, data: await enrichRunSnapshot(snapshot, runId, services.eventLogRepo, services.warn) },
-        200
-      );
-    } catch (error) {
-      if (error instanceof SnapshotCompactionError) {
-        logRunRouteWarning(services.warn, "[daemon] snapshot compaction failed", {
-          runId,
-          message: error.message
-        });
-
-        return context.json(
-          {
-            success: false,
-            error: "Failed to compact run snapshot"
-          },
-          500
-        );
-      }
-
-      throw error;
-    }
+    return await getRunSnapshot(context, services);
   });
 
   app.patch("/runs/:id", async (context) => {
@@ -165,21 +146,54 @@ export function registerRunRoutes(app: Hono, services: RunRouteServices): void {
   });
 
   app.delete("/runs/:id", async (context) => {
-    const unexpectedBody = await rejectUnexpectedRequestBody(context);
-    if (unexpectedBody !== null) return unexpectedBody;
-    const runId = context.req.param("id");
-    const run = await services.runService.delete(runId);
-    deleteRunSnapshotCache(runId);
-    services.sessionOverrideService?.clearRun(runId);
-    services.budgetBankruptcyService?.clearRun(runId);
-    services.contextLensAssembler?.clearLens(runId);
-
-    // The run delete is already durable; lease release must stay best-effort so
-    // stale in-process state cannot survive a successful delete.
-    await services.governanceLeaseService?.release(runId).catch(() => undefined);
-
-    return context.json({ success: true, data: run }, 200);
+    return await deleteRun(context, services);
   });
+}
+
+async function getRunSnapshot(context: Context, services: RunRouteServices): Promise<Response> {
+  const runId = context.req.param("id")!;
+  await services.runService.getById(runId);
+  const snapshot = await services.runHotStateService.getSnapshot(runId);
+  if (snapshot === null) throw new CoreError("NOT_FOUND", "Run not found");
+  try {
+    return context.json(
+      { success: true, data: await enrichRunSnapshot(snapshot, runId, services.eventLogRepo, services.warn) },
+      200
+    );
+  } catch (error) {
+    if (error instanceof SnapshotCompactionError) return snapshotCompactionFailure(context, services, runId, error);
+    throw error;
+  }
+}
+
+function snapshotCompactionFailure(
+  context: Context,
+  services: RunRouteServices,
+  runId: string,
+  error: SnapshotCompactionError
+): Response {
+  logRunRouteWarning(services.warn, "[daemon] snapshot compaction failed", {
+    runId,
+    message: error.message
+  });
+  return context.json({ success: false, error: "Failed to compact run snapshot" }, 500);
+}
+
+async function deleteRun(context: Context, services: RunRouteServices): Promise<Response> {
+  const unexpectedBody = await rejectUnexpectedRequestBody(context);
+  if (unexpectedBody !== null) return unexpectedBody;
+  const runId = context.req.param("id")!;
+  const run = await services.runService.delete(runId);
+  clearRunLocalState(services, runId);
+  await services.governanceLeaseService?.release(runId).catch(() => undefined);
+  return context.json({ success: true, data: run }, 200);
+}
+
+function clearRunLocalState(services: RunRouteServices, runId: string): void {
+  deleteRunSnapshotCache(runId);
+  services.sessionOverrideService?.clearRun(runId);
+  services.budgetBankruptcyService?.clearRun(runId);
+  services.contextLensAssembler?.clearLens(runId);
 }
 
 function logRunRouteWarning(

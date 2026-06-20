@@ -13,8 +13,8 @@ const docsRoot = path.join(repositoryRoot, "docs");
 // records and remain in the allowed set.
 const allowedBl014References = [
   {
-    file: "docs/handbook/backlog.md",
-    line: "### #BL-014 — Resolved (atomic fix-commit hygiene proven by p5-system-review-r1+r2)"
+    file: "docs/archive/backlog-resolved-historical.md",
+    line: "- **#BL-014** — Atomic fix-commit hygiene proven (30+ atomic commits)"
   },
   {
     file: "docs/archive/v0.1-port-record/phase-4-briefs/README.md",

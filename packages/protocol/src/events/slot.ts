@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { NonEmptyStringSchema, NonNegativeIntSchema, IsoDatetimeStringSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  IsoDatetimeStringSchema,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 import { ClaimKindSchema } from "../soul/claim-form.js";
 import { ConflictEdgeTypeSchema } from "../soul/conflict-matrix.js";
 import { GovernanceSubjectSchema } from "../soul/governance-subject.js";
@@ -21,31 +26,31 @@ export const SlotEventType = {
 export const SlotEventTypeSchema = z.enum(slotEventTypeValues);
 
 const SlotObjectPayloadObjectSchema = z.object({
-  object_id: NonEmptyStringSchema,
-  object_kind: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema.nullable()
-});
+  object_id: BoundedIdSchema,
+  object_kind: BoundedLabelSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema.nullable()
+}).strict();
 
 export const SoulSlotCreatedPayloadSchema = SlotObjectPayloadObjectSchema.extend({
   governance_subject: GovernanceSubjectSchema,
   claim_kind: ClaimKindSchema,
   scope_class: ScopeClassSchema,
-  winner_claim_id: NonEmptyStringSchema.nullable()
+  winner_claim_id: BoundedIdSchema.nullable()
 }).readonly();
 
 export const SoulSlotWinnerChangedPayloadSchema = SlotObjectPayloadObjectSchema.extend({
-  from_claim_id: NonEmptyStringSchema.nullable(),
-  to_claim_id: NonEmptyStringSchema.nullable(),
-  reason_code: NonEmptyStringSchema,
+  from_claim_id: BoundedIdSchema.nullable(),
+  to_claim_id: BoundedIdSchema.nullable(),
+  reason_code: BoundedLabelSchema,
   caused_by: TransitionCausedBySchema,
-  evidence_refs: z.array(NonEmptyStringSchema).readonly().nullable(),
+  evidence_refs: z.array(BoundedIdSchema).readonly().nullable(),
   occurred_at: IsoDatetimeStringSchema
 }).readonly();
 
 export const SoulConflictMatrixEdgeCreatedPayloadSchema = SlotObjectPayloadObjectSchema.extend({
-  source_claim_id: NonEmptyStringSchema,
-  target_claim_id: NonEmptyStringSchema,
+  source_claim_id: BoundedIdSchema,
+  target_claim_id: BoundedIdSchema,
   edge_type: ConflictEdgeTypeSchema
 }).readonly();
 
@@ -56,15 +61,15 @@ const slotPayloadSchemas = {
 } as const;
 
 const SlotEventBaseObjectSchema = z.object({
-  event_id: NonEmptyStringSchema,
-  entity_type: z.string(),
-  entity_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema.nullable(),
-  caused_by: z.string().nullable(),
+  event_id: BoundedIdSchema,
+  entity_type: BoundedLabelSchema,
+  entity_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema.nullable(),
+  caused_by: BoundedIdSchema.nullable(),
   revision: NonNegativeIntSchema,
   created_at: IsoDatetimeStringSchema
-});
+}).strict();
 
 export const SlotEventBaseSchema = SlotEventBaseObjectSchema.readonly();
 

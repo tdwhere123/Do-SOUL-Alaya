@@ -41,6 +41,8 @@ export * from "./soul/staged-warning.js";
 export * from "./soul/resolution.js";
 export * from "./soul/recall-candidate.js";
 export * from "./soul/recall-policy.js";
+export * from "./soul/fts-search-policy.js";
+export * from "./soul/active-constraints-policy.js";
 export * from "./soul/embedding-status.js";
 export * from "./soul/context-lens.js";
 export * from "./soul/verification.js";

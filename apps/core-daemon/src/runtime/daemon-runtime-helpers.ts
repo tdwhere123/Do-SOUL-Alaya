@@ -6,7 +6,10 @@ import {
 import type { WorkspaceService } from "@do-soul/alaya-core";
 
 type ConfigRepoPort = {
-  get<TValue>(key: string): TValue | null | Promise<TValue | null>;
+  getParsed<TValue>(
+    key: string,
+    parser: { parse(value: unknown): TValue }
+  ): TValue | null | Promise<TValue | null>;
 };
 
 type CurrencyRecord = Readonly<{
@@ -292,7 +295,7 @@ export function createManifestationBudgetConfigProvider(configRepo: ConfigRepoPo
   return Object.freeze({
     getConfig: async (workspaceId: string): Promise<Readonly<ManifestationBudgetConfig> | null> => {
       const configKey = `workspace:${workspaceId}:manifestation_budget`;
-      const rawConfig = await configRepo.get<ManifestationBudgetConfig>(configKey);
+      const rawConfig = await configRepo.getParsed(configKey, ManifestationBudgetConfigSchema);
       return rawConfig === null ? null : ManifestationBudgetConfigSchema.parse(rawConfig);
     }
   });

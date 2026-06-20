@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedContentSchema,
+  BoundedJsonObjectSchema,
+  BoundedReasonSchema,
+  IsoDatetimeStringSchema,
+  NonEmptyStringSchema,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 
 const gardenRoleValues = ["janitor", "auditor", "librarian"] as const;
 const gardenTierValues = ["tier_0", "tier_1", "tier_2"] as const;
@@ -167,7 +174,7 @@ export const GardenTaskDescriptorSchema = z
     priority: NonNegativeIntSchema.max(100),
     created_at: IsoDatetimeStringSchema,
     turn_index: NonNegativeIntSchema.optional(),
-    turn_digest: z.unknown().optional()
+    turn_digest: BoundedJsonObjectSchema.optional()
   })
   .strict()
   .readonly();
@@ -182,7 +189,7 @@ export const GardenTaskResultSchema = z
     success: z.boolean(),
     objects_affected: z.array(NonEmptyStringSchema).readonly(),
     audit_entries: z.array(NonEmptyStringSchema).readonly(),
-    error_message: z.string().nullable(),
+    error_message: BoundedReasonSchema.nullable(),
     completed_at: IsoDatetimeStringSchema
   })
   .strict()
@@ -203,7 +210,7 @@ export type GardenTaskResult = z.infer<typeof GardenTaskResultSchema>;
 const EdgeClassifyMemoryRefSchema = z
   .object({
     object_id: NonEmptyStringSchema,
-    content: z.string().max(4000),
+    content: BoundedContentSchema.max(4000),
     domain_tags: z.array(NonEmptyStringSchema).max(64).readonly()
   })
   .strict()
@@ -240,7 +247,7 @@ export const EdgeClassifyVerdictSchema = z
     neighbor_object_id: NonEmptyStringSchema,
     edge_type: z.enum(["supports", "derives_from", "none"]),
     confidence: z.number().min(0).max(1),
-    rationale: z.string().max(2000)
+    rationale: BoundedReasonSchema.max(2000)
   })
   .strict()
   .readonly();

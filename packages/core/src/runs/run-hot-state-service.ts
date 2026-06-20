@@ -14,6 +14,7 @@ export interface RunHotStateRunRepoPort {
 
 export interface RunHotStateEventLogRepoPort {
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
+  queryByRunAll(runId: string): Promise<readonly EventLogEntry[]>;
 }
 
 export interface RunHotStateServiceDependencies {
@@ -187,7 +188,7 @@ async function findLastMessageAt(
   runId: string,
   eventLogRepo: RunHotStateEventLogRepoPort
 ): Promise<string | null> {
-  const events = await eventLogRepo.queryByRun(runId);
+  const events = await eventLogRepo.queryByRunAll(runId);
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];

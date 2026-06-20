@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
+  IsoDatetimeStringSchema
+} from "../shared/schema-primitives.js";
 import {
   SoulContextObjectIdentitySchema,
   SoulContextPerAnchorUsageSchema,
@@ -35,33 +40,35 @@ export const TrustStateSchema = z.enum([
 
 export const ContextDeliveryRecordSchema = z
   .object({
-    delivery_id: NonEmptyStringSchema,
-    agent_target: NonEmptyStringSchema,
-    workspace_id: NonEmptyStringSchema.nullable(),
-    run_id: NonEmptyStringSchema.nullable(),
-    delivered_object_ids: z.array(NonEmptyStringSchema).readonly(),
+    delivery_id: BoundedIdSchema,
+    agent_target: BoundedLabelSchema,
+    workspace_id: BoundedIdSchema.nullable(),
+    run_id: BoundedIdSchema.nullable(),
+    delivered_object_ids: z.array(BoundedIdSchema).readonly(),
     delivered_objects: z.array(SoulContextObjectIdentitySchema).readonly().optional(),
-    delivered_at: z.string().datetime(),
-    audit_event_id: NonEmptyStringSchema
+    delivered_at: IsoDatetimeStringSchema,
+    audit_event_id: BoundedIdSchema
   })
+  .strict()
   .readonly();
 
 export const UsageProofRecordSchema = z
   .object({
-    delivery_id: NonEmptyStringSchema,
+    delivery_id: BoundedIdSchema,
     usage_state: SoulContextUsageStateSchema,
-    used_object_ids: z.array(NonEmptyStringSchema).readonly(),
+    used_object_ids: z.array(BoundedIdSchema).readonly(),
     per_anchor_usage: z.array(SoulContextPerAnchorUsageSchema).readonly().optional(),
     trust_mode: SoulContextUsageTrustModeSchema.optional(),
-    reason: z.string().nullable(),
-    reported_at: z.string().datetime(),
-    audit_event_id: NonEmptyStringSchema
+    reason: BoundedReasonSchema.nullable(),
+    reported_at: IsoDatetimeStringSchema,
+    audit_event_id: BoundedIdSchema
   })
+  .strict()
   .readonly();
 
 export const TrustSummarySchema = z
   .object({
-    agent_target: NonEmptyStringSchema,
+    agent_target: BoundedLabelSchema,
     state: TrustStateSchema,
     installed_count: z.number().int().nonnegative(),
     configured_count: z.number().int().nonnegative(),
@@ -70,9 +77,10 @@ export const TrustSummarySchema = z
     skipped_count: z.number().int().nonnegative(),
     not_applicable_count: z.number().int().nonnegative(),
     unverifiable_count: z.number().int().nonnegative(),
-    last_delivery_at: z.string().datetime().nullable(),
-    last_usage_report_at: z.string().datetime().nullable()
+    last_delivery_at: IsoDatetimeStringSchema.nullable(),
+    last_usage_report_at: IsoDatetimeStringSchema.nullable()
   })
+  .strict()
   .readonly();
 
 export type TrustState = z.infer<typeof TrustStateSchema>;

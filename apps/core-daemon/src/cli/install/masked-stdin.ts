@@ -24,86 +24,8 @@ async function readMaskedTtySecretLine(
   stdin: NodeJS.ReadableStream,
   stderr: NodeJS.WritableStream
 ): Promise<string> {
-  const input = asRawModeReadable(stdin);
-  const hadRawMode = input?.isRaw === true;
-  const canSetRawMode = input !== null;
-  let rawModeChanged = false;
-  try {
-    if (canSetRawMode && !hadRawMode) {
-      input.setRawMode(true);
-      rawModeChanged = true;
-    }
-    input?.setEncoding("utf8");
-    input?.resume();
-  } catch (error) {
-    restoreInput(input, rawModeChanged);
-    throw error;
-  }
-
-  return await new Promise((resolve, reject) => {
-    let secret = "";
-    let settled = false;
-    const readable = input ?? stdin;
-    let listenersAttached = false;
-
-    const cleanup = (): void => {
-      if (listenersAttached) {
-        readable.off("data", onData);
-        readable.off("error", onError);
-        readable.off("end", onEnd);
-        readable.off("close", onClose);
-      }
-      restoreInput(input, rawModeChanged);
-      stderr.write("\n");
-    };
-
-    const finish = (value: string): void => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve(value);
-    };
-
-    const fail = (error: Error): void => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(error);
-    };
-
-    const onError = (error: Error): void => fail(error);
-    const onEnd = (): void => fail(new Error("install --keychain secret input ended before newline"));
-    const onClose = (): void => fail(new Error("install --keychain secret input closed before newline"));
-    const onData = (chunk: Buffer | string): void => {
-      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      for (const char of text) {
-        if (char === "\r" || char === "\n") {
-          finish(secret);
-          return;
-        }
-        if (char === "\u0003") {
-          fail(new Error("install --keychain canceled"));
-          return;
-        }
-        if (char === "\u007f" || char === "\b") {
-          secret = secret.slice(0, -1);
-          continue;
-        }
-        secret += char;
-      }
-    };
-
-    try {
-      readable.on("data", onData);
-      readable.on("error", onError);
-      readable.on("end", onEnd);
-      readable.on("close", onClose);
-      listenersAttached = true;
-    } catch (error) {
-      cleanup();
-      reject(error);
-    }
-  });
+  const preparedInput = prepareMaskedInput(stdin);
+  return await new MaskedSecretLineReader(preparedInput, stderr).read();
 }
 
 function asRawModeReadable(stdin: NodeJS.ReadableStream): RawModeReadable | null {
@@ -117,4 +39,124 @@ function restoreInput(input: RawModeReadable | null, rawModeChanged: boolean): v
     input.setRawMode(false);
   }
   input?.pause();
+}
+
+function prepareMaskedInput(stdin: NodeJS.ReadableStream): Readonly<{
+  input: RawModeReadable | null;
+  readable: NodeJS.ReadableStream;
+  rawModeChanged: boolean;
+}> {
+  const input = asRawModeReadable(stdin);
+  const hadRawMode = input?.isRaw === true;
+  let rawModeChanged = false;
+  try {
+    if (input !== null && !hadRawMode) {
+      input.setRawMode(true);
+      rawModeChanged = true;
+    }
+    input?.setEncoding("utf8");
+    input?.resume();
+    return { input, readable: input ?? stdin, rawModeChanged };
+  } catch (error) {
+    restoreInput(input, rawModeChanged);
+    throw error;
+  }
+}
+
+class MaskedSecretLineReader {
+  private secret = "";
+  private resolve: ((value: string) => void) | null = null;
+  private reject: ((error: Error) => void) | null = null;
+  private settled = false;
+  private listenersAttached = false;
+
+  public constructor(
+    private readonly preparedInput: Readonly<{
+      input: RawModeReadable | null;
+      readable: NodeJS.ReadableStream;
+      rawModeChanged: boolean;
+    }>,
+    private readonly stderr: NodeJS.WritableStream
+  ) {}
+
+  public async read(): Promise<string> {
+    return await new Promise<string>((resolve, reject) => {
+      this.resolve = resolve;
+      this.reject = reject;
+      try {
+        this.attachListeners();
+      } catch (error) {
+        this.cleanup();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
+  private attachListeners(): void {
+    this.preparedInput.readable.on("data", this.onData);
+    this.preparedInput.readable.on("error", this.onError);
+    this.preparedInput.readable.on("end", this.onEnd);
+    this.preparedInput.readable.on("close", this.onClose);
+    this.listenersAttached = true;
+  }
+
+  private cleanup(): void {
+    if (this.listenersAttached) {
+      this.preparedInput.readable.off("data", this.onData);
+      this.preparedInput.readable.off("error", this.onError);
+      this.preparedInput.readable.off("end", this.onEnd);
+      this.preparedInput.readable.off("close", this.onClose);
+    }
+    restoreInput(this.preparedInput.input, this.preparedInput.rawModeChanged);
+    this.stderr.write("\n");
+  }
+
+  private finish(value: string): void {
+    if (this.settled) {
+      return;
+    }
+    this.settled = true;
+    this.cleanup();
+    this.resolve?.(value);
+  }
+
+  private fail(error: Error): void {
+    if (this.settled) {
+      return;
+    }
+    this.settled = true;
+    this.cleanup();
+    this.reject?.(error);
+  }
+
+  private readonly onError = (error: Error): void => {
+    this.fail(error);
+  };
+
+  private readonly onEnd = (): void => {
+    this.fail(new Error("install --keychain secret input ended before newline"));
+  };
+
+  private readonly onClose = (): void => {
+    this.fail(new Error("install --keychain secret input closed before newline"));
+  };
+
+  private readonly onData = (chunk: Buffer | string): void => {
+    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    for (const char of text) {
+      if (char === "\r" || char === "\n") {
+        this.finish(this.secret);
+        return;
+      }
+      if (char === "\u0003") {
+        this.fail(new Error("install --keychain canceled"));
+        return;
+      }
+      if (char === "\u007f" || char === "\b") {
+        this.secret = this.secret.slice(0, -1);
+        continue;
+      }
+      this.secret += char;
+    }
+  };
 }

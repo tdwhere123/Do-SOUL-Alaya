@@ -22,6 +22,7 @@ export const CrossCuttingPermissionSchema = PersistentObjectEnvelopeSchema.unwra
     allowed_surfaces: z.array(NonEmptyStringSchema).readonly(),
     workspace_id: NonEmptyStringSchema
   })
+  .strict()
   .readonly();
 
 export type CrossCuttingState = z.infer<typeof CrossCuttingStateSchema>;

@@ -20,8 +20,10 @@ import { SoulGardenEventLogOrphanDetectedEventTypeSchema } from "./event-log-orp
 import { StreamingEventTypeSchema } from "./message-delta.js";
 import { TrustStateEventTypeSchema } from "../soul/trust-state.js";
 import {
+  BoundedIdSchema,
+  BoundedJsonObjectSchema,
+  BoundedLabelSchema,
   IsoDatetimeStringSchema,
-  NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
 
@@ -84,17 +86,17 @@ export const EventTypeSchema = z.union([
  * every event phase and violate the open/closed principle.
  */
 export const EventLogEntrySchema = z.object({
-  event_id: NonEmptyStringSchema,
+  event_id: BoundedIdSchema,
   event_type: EventTypeSchema,
-  entity_type: z.string(),
-  entity_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema.nullable(),
-  caused_by: z.string().nullable(),
+  entity_type: BoundedLabelSchema,
+  entity_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema.nullable(),
+  caused_by: BoundedIdSchema.nullable(),
   revision: NonNegativeIntSchema,
-  payload_json: z.record(z.string(), z.unknown()),
+  payload_json: BoundedJsonObjectSchema,
   created_at: IsoDatetimeStringSchema
-}).readonly();
+}).strict().readonly();
 
 export type WorkspaceRunEventType = z.infer<typeof WorkspaceRunEventTypeSchema>;
 export type EventType = z.infer<typeof EventTypeSchema>;

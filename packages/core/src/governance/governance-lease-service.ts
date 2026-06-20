@@ -41,6 +41,7 @@ export interface GovernanceLeaseServiceEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
+  queryByRunAll(runId: string): Promise<readonly EventLogEntry[]>;
 }
 
 export interface GovernanceLeaseServiceDependencies {
@@ -211,14 +212,7 @@ export class GovernanceLeaseService {
     const cached = this.store.get(runId) ?? null;
 
     if (cached !== null) {
-      if (isExpired(cached.lease.expires_at, referenceTime)) {
-        this.bumpCacheVersion(runId);
-        this.store.delete(runId);
-        this.clearCacheMetadataIfIdle(runId);
-        return null;
-      }
-
-      return cached;
+      return this.resolveCachedLease(runId, cached, referenceTime);
     }
 
     const pending = this.pendingLoads.get(runId);
@@ -228,37 +222,7 @@ export class GovernanceLeaseService {
     }
 
     const versionBeforeLoad = this.getCacheVersion(runId);
-    const loadPromise = this.rehydrateFromEventLog(runId)
-      .then((rehydrated) => {
-        const normalized =
-          rehydrated !== null && isExpired(rehydrated.lease.expires_at, referenceTime)
-            ? null
-            : rehydrated;
-
-        if (this.getCacheVersion(runId) !== versionBeforeLoad) {
-          // A concurrent acquire/release already updated process-local truth.
-          return this.store.get(runId) ?? null;
-        }
-
-        const cachedAfterLoad = this.store.get(runId) ?? null;
-
-        if (cachedAfterLoad !== null) {
-          return cachedAfterLoad;
-        }
-
-        if (normalized !== null) {
-          this.store.set(runId, normalized);
-        }
-
-        return normalized;
-      })
-      .finally(() => {
-        if (this.pendingLoads.get(runId) === loadPromise) {
-          this.pendingLoads.delete(runId);
-        }
-
-        this.clearCacheMetadataIfIdle(runId);
-      });
+    const loadPromise = this.createLoadPromise(runId, referenceTime, versionBeforeLoad);
 
     this.pendingLoads.set(runId, loadPromise);
     return loadPromise;
@@ -267,65 +231,14 @@ export class GovernanceLeaseService {
   private async rehydrateFromEventLog(runId: string): Promise<StoredLease | null> {
     let events: readonly EventLogEntry[];
     try {
-      events = await this.dependencies.eventLogRepo.queryByRun(runId);
+      events = await queryRunEventLog(this.dependencies.eventLogRepo, runId);
     } catch {
       return null;
     }
     let active: StoredLease | null = null;
-
     for (const event of events) {
-      if (event.entity_type !== "governance_lease") {
-        continue;
-      }
-
-      if (event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED) {
-        const parsed = parsePersistedGovernanceLeasePayload(
-          SoulGovernanceLeaseAcquiredPayloadSchema,
-          event,
-          GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED
-        );
-
-        active = {
-          workspaceId: event.workspace_id,
-          lease: parseGovernanceLease({
-            runtime_id: parsed.lease_id,
-            object_kind: ControlPlaneObjectKind.GOVERNANCE_LEASE,
-            task_surface_ref: null,
-            expires_at: parsed.expires_at,
-            derived_from: null,
-            retention_policy: RetentionPolicy.SESSION_ONLY,
-            lease_id: parsed.lease_id,
-            holder: parsed.holder,
-            piercing_conditions: HIGH_SIGNAL_PIERCING_CONDITIONS
-          })
-        };
-        continue;
-      }
-
-      if (event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED) {
-        const parsed = parsePersistedGovernanceLeasePayload(
-          SoulGovernanceLeaseReleasedPayloadSchema,
-          event,
-          GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED
-        );
-        if (active?.lease.lease_id === parsed.lease_id) {
-          active = null;
-        }
-        continue;
-      }
-
-      if (event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED) {
-        const parsed = parsePersistedGovernanceLeasePayload(
-          SoulGovernanceLeasePiercedPayloadSchema,
-          event,
-          GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED
-        );
-        if (active?.lease.lease_id === parsed.lease_id) {
-          active = null;
-        }
-      }
+      active = this.applyPersistedLeaseEvent(active, event);
     }
-
     return active;
   }
 
@@ -335,6 +248,122 @@ export class GovernanceLeaseService {
 
   private bumpCacheVersion(runId: string): void {
     this.cacheVersions.set(runId, this.getCacheVersion(runId) + 1);
+  }
+
+  private resolveCachedLease(
+    runId: string,
+    cached: StoredLease,
+    referenceTime: string
+  ): StoredLease | null {
+    if (!isExpired(cached.lease.expires_at, referenceTime)) {
+      return cached;
+    }
+
+    this.bumpCacheVersion(runId);
+    this.store.delete(runId);
+    this.clearCacheMetadataIfIdle(runId);
+    return null;
+  }
+
+  private createLoadPromise(
+    runId: string,
+    referenceTime: string,
+    versionBeforeLoad: number
+  ): Promise<StoredLease | null> {
+    const loadPromise = this.rehydrateFromEventLog(runId)
+      .then((rehydrated) => this.finishLeaseLoad(runId, referenceTime, versionBeforeLoad, rehydrated))
+      .finally(() => {
+        if (this.pendingLoads.get(runId) === loadPromise) {
+          this.pendingLoads.delete(runId);
+        }
+        this.clearCacheMetadataIfIdle(runId);
+      });
+    return loadPromise;
+  }
+
+  private finishLeaseLoad(
+    runId: string,
+    referenceTime: string,
+    versionBeforeLoad: number,
+    rehydrated: StoredLease | null
+  ): StoredLease | null {
+    const normalized =
+      rehydrated !== null && isExpired(rehydrated.lease.expires_at, referenceTime)
+        ? null
+        : rehydrated;
+    if (this.getCacheVersion(runId) !== versionBeforeLoad) {
+      return this.store.get(runId) ?? null;
+    }
+
+    const cachedAfterLoad = this.store.get(runId) ?? null;
+    if (cachedAfterLoad !== null) {
+      return cachedAfterLoad;
+    }
+
+    if (normalized !== null) {
+      this.store.set(runId, normalized);
+    }
+    return normalized;
+  }
+
+  private applyPersistedLeaseEvent(
+    active: StoredLease | null,
+    event: Readonly<EventLogEntry>
+  ): StoredLease | null {
+    if (event.entity_type !== "governance_lease") {
+      return active;
+    }
+    if (event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED) {
+      return this.buildStoredLeaseFromAcquire(event);
+    }
+    if (
+      event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED ||
+      event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED
+    ) {
+      return this.clearMatchingStoredLease(active, event);
+    }
+    return active;
+  }
+
+  private buildStoredLeaseFromAcquire(event: Readonly<EventLogEntry>): StoredLease {
+    const parsed = parsePersistedGovernanceLeasePayload(
+      SoulGovernanceLeaseAcquiredPayloadSchema,
+      event,
+      GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED
+    );
+    return {
+      workspaceId: event.workspace_id,
+      lease: parseGovernanceLease({
+        runtime_id: parsed.lease_id,
+        object_kind: ControlPlaneObjectKind.GOVERNANCE_LEASE,
+        task_surface_ref: null,
+        expires_at: parsed.expires_at,
+        derived_from: null,
+        retention_policy: RetentionPolicy.SESSION_ONLY,
+        lease_id: parsed.lease_id,
+        holder: parsed.holder,
+        piercing_conditions: HIGH_SIGNAL_PIERCING_CONDITIONS
+      })
+    };
+  }
+
+  private clearMatchingStoredLease(
+    active: StoredLease | null,
+    event: Readonly<EventLogEntry>
+  ): StoredLease | null {
+    const parsed =
+      event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED
+        ? parsePersistedGovernanceLeasePayload(
+            SoulGovernanceLeaseReleasedPayloadSchema,
+            event,
+            GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED
+          )
+        : parsePersistedGovernanceLeasePayload(
+            SoulGovernanceLeasePiercedPayloadSchema,
+            event,
+            GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED
+          );
+    return active?.lease.lease_id === parsed.lease_id ? null : active;
   }
 
   private clearCacheMetadataIfIdle(runId: string): void {
@@ -355,6 +384,13 @@ function parseGovernanceLease(value: GovernanceLease): Readonly<GovernanceLease>
   } catch (error) {
     throw new CoreError("VALIDATION", "Invalid governance lease payload", { cause: error });
   }
+}
+
+async function queryRunEventLog(
+  eventLogRepo: GovernanceLeaseServiceEventLogPort,
+  runId: string
+): Promise<readonly EventLogEntry[]> {
+  return await eventLogRepo.queryByRunAll(runId);
 }
 
 function parsePersistedGovernanceLeasePayload<T>(

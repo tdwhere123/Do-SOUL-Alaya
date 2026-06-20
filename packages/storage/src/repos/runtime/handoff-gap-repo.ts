@@ -2,114 +2,51 @@ import { GapRecordSchema, HandoffRecordSchema, type GapRecord, type HandoffRecor
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import {
+  parseGapRow,
+  parseHandoffRow,
+  type ExpiredObjectRow,
+  type GapRecordRow,
+  type HandoffRecordRow
+} from "./handoff-gap-rows.js";
 
-// ---------------------------------------------------------------------------
-// Row interfaces for SQLite raw rows
-// ---------------------------------------------------------------------------
+const INSERT_HANDOFF_RECORD_SQL = `INSERT INTO handoff_records (
+            runtime_id,
+            object_kind,
+            task_surface_ref,
+            expires_at,
+            derived_from,
+            retention_policy,
+            handoff_kind,
+            source_run_id,
+            target_run_id,
+            surface_id,
+            ttl_ms,
+            recurrence_runs,
+            recurrence_surfaces,
+            governance_impact,
+            unresolved_age_ms,
+            upgrade_candidate
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-interface HandoffRecordRow {
-  readonly runtime_id: string;
-  readonly object_kind: string;
-  readonly task_surface_ref: string | null;
-  readonly expires_at: string | null;
-  readonly derived_from: string | null;
-  readonly retention_policy: string;
-  readonly handoff_kind: string;
-  readonly source_run_id: string;
-  readonly target_run_id: string | null;
-  readonly surface_id: string | null;
-  readonly ttl_ms: number | null;
-  readonly recurrence_runs: number | null;
-  readonly recurrence_surfaces: number | null;
-  readonly governance_impact: number | null;
-  readonly unresolved_age_ms: number | null;
-  readonly upgrade_candidate: number | null;
-}
-
-interface GapRecordRow {
-  readonly runtime_id: string;
-  readonly object_kind: string;
-  readonly task_surface_ref: string | null;
-  readonly expires_at: string | null;
-  readonly derived_from: string | null;
-  readonly retention_policy: string;
-  readonly gap_kind: string;
-  readonly detected_in_run_id: string;
-  readonly surface_id: string | null;
-  readonly description: string;
-  readonly ttl_ms: number | null;
-  readonly recurrence_runs: number | null;
-  readonly recurrence_surfaces: number | null;
-  readonly governance_impact: number | null;
-  readonly unresolved_age_ms: number | null;
-  readonly upgrade_candidate: number | null;
-}
-
-interface ExpiredObjectRow {
-  readonly object_kind: string;
-  readonly object_id: string;
-  readonly expires_at: string;
-}
-
-// ---------------------------------------------------------------------------
-// Row parsers
-// ---------------------------------------------------------------------------
-
-function parseHandoffRow(row: HandoffRecordRow): Readonly<HandoffRecord> {
-  try {
-    return deepFreeze(
-      HandoffRecordSchema.parse({
-        runtime_id: row.runtime_id,
-        object_kind: row.object_kind,
-        task_surface_ref: row.task_surface_ref,
-        expires_at: row.expires_at,
-        derived_from: row.derived_from,
-        retention_policy: row.retention_policy,
-        handoff_kind: row.handoff_kind,
-        source_run_id: row.source_run_id,
-        target_run_id: row.target_run_id,
-        surface_id: row.surface_id,
-        ttl_ms: row.ttl_ms,
-        recurrence_runs: row.recurrence_runs,
-        recurrence_surfaces: row.recurrence_surfaces,
-        governance_impact: row.governance_impact,
-        unresolved_age_ms: row.unresolved_age_ms,
-        upgrade_candidate:
-          row.upgrade_candidate === null ? null : row.upgrade_candidate === 1
-      })
-    );
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse handoff record row.", error);
-  }
-}
-
-function parseGapRow(row: GapRecordRow): Readonly<GapRecord> {
-  try {
-    return deepFreeze(
-      GapRecordSchema.parse({
-        runtime_id: row.runtime_id,
-        object_kind: row.object_kind,
-        task_surface_ref: row.task_surface_ref,
-        expires_at: row.expires_at,
-        derived_from: row.derived_from,
-        retention_policy: row.retention_policy,
-        gap_kind: row.gap_kind,
-        detected_in_run_id: row.detected_in_run_id,
-        surface_id: row.surface_id,
-        description: row.description,
-        ttl_ms: row.ttl_ms,
-        recurrence_runs: row.recurrence_runs,
-        recurrence_surfaces: row.recurrence_surfaces,
-        governance_impact: row.governance_impact,
-        unresolved_age_ms: row.unresolved_age_ms,
-        upgrade_candidate:
-          row.upgrade_candidate === null ? null : row.upgrade_candidate === 1
-      })
-    );
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse gap record row.", error);
-  }
-}
+const INSERT_GAP_RECORD_SQL = `INSERT INTO gap_records (
+            runtime_id,
+            object_kind,
+            task_surface_ref,
+            expires_at,
+            derived_from,
+            retention_policy,
+            gap_kind,
+            detected_in_run_id,
+            surface_id,
+            description,
+            ttl_ms,
+            recurrence_runs,
+            recurrence_surfaces,
+            governance_impact,
+            unresolved_age_ms,
+            upgrade_candidate
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 // ---------------------------------------------------------------------------
 // SqliteHandoffGapRepo
@@ -127,58 +64,10 @@ export class SqliteHandoffGapRepo {
   // -------------------------------------------------------------------------
 
   public createHandoff(record: HandoffRecord): Readonly<HandoffRecord> {
-    let parsed: Readonly<HandoffRecord>;
+    const parsed = parseHandoffRecordForCreate(record);
 
     try {
-      parsed = deepFreeze(HandoffRecordSchema.parse(record));
-    } catch (error) {
-      throw new StorageError(
-        "VALIDATION_FAILED",
-        "Failed to validate handoff record.",
-        error
-      );
-    }
-
-    try {
-      this.database.connection
-        .prepare(
-          `INSERT INTO handoff_records (
-            runtime_id,
-            object_kind,
-            task_surface_ref,
-            expires_at,
-            derived_from,
-            retention_policy,
-            handoff_kind,
-            source_run_id,
-            target_run_id,
-            surface_id,
-            ttl_ms,
-            recurrence_runs,
-            recurrence_surfaces,
-            governance_impact,
-            unresolved_age_ms,
-            upgrade_candidate
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          parsed.runtime_id,
-          parsed.object_kind,
-          parsed.task_surface_ref,
-          parsed.expires_at,
-          parsed.derived_from,
-          parsed.retention_policy,
-          parsed.handoff_kind,
-          parsed.source_run_id,
-          parsed.target_run_id,
-          parsed.surface_id,
-          parsed.ttl_ms,
-          parsed.recurrence_runs,
-          parsed.recurrence_surfaces,
-          parsed.governance_impact,
-          parsed.unresolved_age_ms,
-          parsed.upgrade_candidate === null ? null : parsed.upgrade_candidate ? 1 : 0
-        );
+      insertHandoffRecord(this.database, parsed);
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -187,62 +76,14 @@ export class SqliteHandoffGapRepo {
       );
     }
 
-    return parsed;
+    return requirePersistedHandoff(parsed.runtime_id, this.findHandoffById(parsed.runtime_id));
   }
 
   public createGap(record: GapRecord): Readonly<GapRecord> {
-    let parsed: Readonly<GapRecord>;
+    const parsed = parseGapRecordForCreate(record);
 
     try {
-      parsed = deepFreeze(GapRecordSchema.parse(record));
-    } catch (error) {
-      throw new StorageError(
-        "VALIDATION_FAILED",
-        "Failed to validate gap record.",
-        error
-      );
-    }
-
-    try {
-      this.database.connection
-        .prepare(
-          `INSERT INTO gap_records (
-            runtime_id,
-            object_kind,
-            task_surface_ref,
-            expires_at,
-            derived_from,
-            retention_policy,
-            gap_kind,
-            detected_in_run_id,
-            surface_id,
-            description,
-            ttl_ms,
-            recurrence_runs,
-            recurrence_surfaces,
-            governance_impact,
-            unresolved_age_ms,
-            upgrade_candidate
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          parsed.runtime_id,
-          parsed.object_kind,
-          parsed.task_surface_ref,
-          parsed.expires_at,
-          parsed.derived_from,
-          parsed.retention_policy,
-          parsed.gap_kind,
-          parsed.detected_in_run_id,
-          parsed.surface_id,
-          parsed.description,
-          parsed.ttl_ms,
-          parsed.recurrence_runs,
-          parsed.recurrence_surfaces,
-          parsed.governance_impact,
-          parsed.unresolved_age_ms,
-          parsed.upgrade_candidate === null ? null : parsed.upgrade_candidate ? 1 : 0
-        );
+      insertGapRecord(this.database, parsed);
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -251,7 +92,7 @@ export class SqliteHandoffGapRepo {
       );
     }
 
-    return parsed;
+    return requirePersistedGap(parsed.runtime_id, this.findGapById(parsed.runtime_id));
   }
 
   // -------------------------------------------------------------------------
@@ -490,4 +331,86 @@ export class SqliteHandoffGapRepo {
       throw new StorageError("QUERY_FAILED", "Failed to find expired objects by workspace.", error);
     }
   }
+}
+
+function parseHandoffRecordForCreate(record: HandoffRecord): Readonly<HandoffRecord> {
+  try {
+    return deepFreeze(HandoffRecordSchema.parse(record));
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate handoff record.", error);
+  }
+}
+
+function parseGapRecordForCreate(record: GapRecord): Readonly<GapRecord> {
+  try {
+    return deepFreeze(GapRecordSchema.parse(record));
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate gap record.", error);
+  }
+}
+
+function insertHandoffRecord(database: StorageDatabase, parsed: Readonly<HandoffRecord>): void {
+  database.connection.prepare(INSERT_HANDOFF_RECORD_SQL).run(
+    parsed.runtime_id,
+    parsed.object_kind,
+    parsed.task_surface_ref,
+    parsed.expires_at,
+    parsed.derived_from,
+    parsed.retention_policy,
+    parsed.handoff_kind,
+    parsed.source_run_id,
+    parsed.target_run_id,
+    parsed.surface_id,
+    parsed.ttl_ms,
+    parsed.recurrence_runs,
+    parsed.recurrence_surfaces,
+    parsed.governance_impact,
+    parsed.unresolved_age_ms,
+    toNullableBooleanInt(parsed.upgrade_candidate)
+  );
+}
+
+function insertGapRecord(database: StorageDatabase, parsed: Readonly<GapRecord>): void {
+  database.connection.prepare(INSERT_GAP_RECORD_SQL).run(
+    parsed.runtime_id,
+    parsed.object_kind,
+    parsed.task_surface_ref,
+    parsed.expires_at,
+    parsed.derived_from,
+    parsed.retention_policy,
+    parsed.gap_kind,
+    parsed.detected_in_run_id,
+    parsed.surface_id,
+    parsed.description,
+    parsed.ttl_ms,
+    parsed.recurrence_runs,
+    parsed.recurrence_surfaces,
+    parsed.governance_impact,
+    parsed.unresolved_age_ms,
+    toNullableBooleanInt(parsed.upgrade_candidate)
+  );
+}
+
+function requirePersistedHandoff(
+  runtimeId: string,
+  persisted: Readonly<HandoffRecord> | null
+): Readonly<HandoffRecord> {
+  if (persisted === null) {
+    throw new StorageError("NOT_FOUND", `Handoff record ${runtimeId} was not found after insert.`);
+  }
+  return persisted;
+}
+
+function requirePersistedGap(
+  runtimeId: string,
+  persisted: Readonly<GapRecord> | null
+): Readonly<GapRecord> {
+  if (persisted === null) {
+    throw new StorageError("NOT_FOUND", `Gap record ${runtimeId} was not found after insert.`);
+  }
+  return persisted;
+}
+
+function toNullableBooleanInt(value: boolean | null): 0 | 1 | null {
+  return value === null ? null : value ? 1 : 0;
 }

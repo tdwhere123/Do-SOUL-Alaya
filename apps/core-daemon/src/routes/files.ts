@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import {
   FileApprovalEventType,
   type EventLogEntry,
@@ -112,147 +112,111 @@ export interface FileRouteServices {
 
 export function registerFileRoutes(app: Hono, services: FileRouteServices): void {
   app.post("/files", async (context) => {
-    const body = await context.req.parseBody();
-    const file = getUploadedFile(body.file);
-
-    if (file === null) {
-      return context.json(
-        {
-          success: false,
-          error: "file is required"
-        },
-        400
-      );
-    }
-
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      return context.json(
-        {
-          success: false,
-          error: "File exceeds the 20 MB limit"
-        },
-        422
-      );
-    }
-
-    const normalizedMimeType = normalizeMimeType(file.name, file.type);
-
-    if (normalizedMimeType === null) {
-      return context.json(
-        {
-          success: false,
-          error: "Unsupported file type"
-        },
-        422
-      );
-    }
-
-    const requestedWorkspaceId = normalizeOptionalBodyString(body.workspace_id);
-    const requestedRunId = normalizeOptionalBodyString(body.run_id);
-
-    if (requestedRunId === null && requestedWorkspaceId === null) {
-      return context.json(
-        {
-          success: false,
-          error: "run_id or workspace_id is required"
-        },
-        400
-      );
-    }
-
-    const scope = await resolveScope(services, requestedRunId, requestedWorkspaceId);
-
-    if (
-      requestedRunId !== null &&
-      requestedWorkspaceId !== null &&
-      requestedWorkspaceId !== scope.workspace_id
-    ) {
-      return context.json(
-        {
-          success: false,
-          error: "workspace_id does not match the run workspace"
-        },
-        422
-      );
-    }
-
-    const fileId = randomUUID();
-    const storagePath = `${fileId}${extname(file.name).toLowerCase()}`;
-    const absolutePath = join(services.filesDirectory, storagePath);
-    const createdAt = new Date().toISOString();
-    const record: FileRecord = {
-      file_id: fileId,
-      filename: file.name,
-      mime_type: normalizedMimeType,
-      size_bytes: file.size,
-      storage_path: storagePath,
-      workspace_id: scope.workspace_id,
-      run_id: scope.run_id,
-      created_at: createdAt
-    };
-
-    await mkdir(services.filesDirectory, { recursive: true });
-    await writeFile(absolutePath, Buffer.from(await file.arrayBuffer()));
-
-    try {
-      const stored = await persistFileRecord(services, record);
-
-      return context.json(
-        {
-          success: true,
-          data: toUploadResponse(stored.record)
-        },
-        201
-      );
-    } catch (error) {
-      await bestEffortDelete(absolutePath);
-      throw error;
-    }
+    return await uploadFile(context, services);
   });
 
   app.get("/files/:id", async (context) => {
-    const fileId = context.req.param("id").trim();
-    const record = await services.fileRepo.findById(fileId);
-
-    if (record === null) {
-      return context.json(
-        {
-          success: false,
-          error: "File not found"
-        },
-        404
-      );
-    }
-
-    const absolutePath = resolveStoredFilePath(services.filesDirectory, record.storage_path);
-
-    if (absolutePath === null) {
-      return context.json(
-        {
-          success: false,
-          error: "File not found"
-        },
-        404
-      );
-    }
-
-    try {
-      const bytes = await readFile(absolutePath);
-      context.header("Content-Type", record.mime_type);
-      context.header("Content-Length", String(bytes.byteLength));
-      context.header("Content-Disposition", buildDispositionHeader(record.filename));
-      context.header("X-Content-Type-Options", "nosniff");
-      return context.body(bytes);
-    } catch {
-      return context.json(
-        {
-          success: false,
-          error: "File not found"
-        },
-        404
-      );
-    }
+    return await downloadFile(context, services);
   });
+}
+
+async function uploadFile(context: Context, services: FileRouteServices): Promise<Response> {
+  const upload = await readUploadRequest(context);
+  if (upload instanceof Response) return upload;
+  const scope = await resolveScope(services, upload.requestedRunId, upload.requestedWorkspaceId);
+  const mismatch = rejectWorkspaceRunMismatch(context, upload, scope);
+  if (mismatch !== null) return mismatch;
+  const record = buildFileRecord(upload.file, upload.normalizedMimeType, scope);
+  const absolutePath = join(services.filesDirectory, record.storage_path);
+  await mkdir(services.filesDirectory, { recursive: true });
+  await writeFile(absolutePath, Buffer.from(await upload.file.arrayBuffer()));
+  try {
+    const stored = await persistFileRecord(services, record);
+    return context.json({ success: true, data: toUploadResponse(stored.record) }, 201);
+  } catch (error) {
+    await bestEffortDelete(absolutePath);
+    throw error;
+  }
+}
+
+async function readUploadRequest(context: Context): Promise<FileUploadRequest | Response> {
+  const body = await context.req.parseBody();
+  const file = getUploadedFile(body.file);
+  if (file === null) return context.json({ success: false, error: "file is required" }, 400);
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    return context.json({ success: false, error: "File exceeds the 20 MB limit" }, 422);
+  }
+  const normalizedMimeType = normalizeMimeType(file.name, file.type);
+  if (normalizedMimeType === null) {
+    return context.json({ success: false, error: "Unsupported file type" }, 422);
+  }
+  const requestedWorkspaceId = normalizeOptionalBodyString(body.workspace_id);
+  const requestedRunId = normalizeOptionalBodyString(body.run_id);
+  if (requestedRunId === null && requestedWorkspaceId === null) {
+    return context.json({ success: false, error: "run_id or workspace_id is required" }, 400);
+  }
+  return { file, normalizedMimeType, requestedWorkspaceId, requestedRunId };
+}
+
+type FileUploadRequest = {
+  readonly file: File;
+  readonly normalizedMimeType: SupportedMimeType;
+  readonly requestedWorkspaceId: string | null;
+  readonly requestedRunId: string | null;
+};
+
+function rejectWorkspaceRunMismatch(
+  context: Context,
+  upload: FileUploadRequest,
+  scope: Readonly<{ workspace_id: string | null; run_id: string | null }>
+): Response | null {
+  if (upload.requestedRunId === null || upload.requestedWorkspaceId === null) return null;
+  if (upload.requestedWorkspaceId === scope.workspace_id) return null;
+  return context.json({ success: false, error: "workspace_id does not match the run workspace" }, 422);
+}
+
+function buildFileRecord(
+  file: File,
+  normalizedMimeType: SupportedMimeType,
+  scope: Readonly<{ workspace_id: string | null; run_id: string | null }>
+): FileRecord {
+  const fileId = randomUUID();
+  return {
+    file_id: fileId,
+    filename: file.name,
+    mime_type: normalizedMimeType,
+    size_bytes: file.size,
+    storage_path: `${fileId}${extname(file.name).toLowerCase()}`,
+    workspace_id: scope.workspace_id,
+    run_id: scope.run_id,
+    created_at: new Date().toISOString()
+  };
+}
+
+async function downloadFile(context: Context, services: FileRouteServices): Promise<Response> {
+  const fileId = context.req.param("id")!.trim();
+  const record = await services.fileRepo.findById(fileId);
+  if (record === null) return fileNotFound(context);
+  const absolutePath = resolveStoredFilePath(services.filesDirectory, record.storage_path);
+  if (absolutePath === null) return fileNotFound(context);
+  try {
+    return await sendStoredFile(context, record, absolutePath);
+  } catch {
+    return fileNotFound(context);
+  }
+}
+
+async function sendStoredFile(context: Context, record: FileRecord, absolutePath: string): Promise<Response> {
+  const bytes = await readFile(absolutePath);
+  context.header("Content-Type", record.mime_type);
+  context.header("Content-Length", String(bytes.byteLength));
+  context.header("Content-Disposition", buildDispositionHeader(record.filename));
+  context.header("X-Content-Type-Options", "nosniff");
+  return context.body(bytes);
+}
+
+function fileNotFound(context: Context): Response {
+  return context.json({ success: false, error: "File not found" }, 404);
 }
 
 function getUploadedFile(value: UploadBodyValue | UploadBodyValue[] | undefined): File | null {

@@ -9,7 +9,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 export const FRESHNESS_DECAY_DAYS = 30;
 export const INITIAL_ACTIVATION_FROM_CONFIDENCE_FACTOR = 0.6;
 

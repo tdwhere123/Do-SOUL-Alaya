@@ -80,198 +80,194 @@ export function computeEffectiveScoreDetails(params: Readonly<{
   readonly now: () => string;
   readonly warn: RecallServiceWarnPort;
 }>): Readonly<{ readonly score: number; readonly factors: RecallScoreFactors }> {
-  const {
-    entry,
-    policy,
-    winnerMemoryIds,
-    supplementaryData,
-    originPlane,
-    isAdvisory,
-    now,
-    warn
-  } = params;
-  const scoreMultiplier = params.scoreMultiplier ?? 1;
+  const context = resolveEffectiveScoreContext(params);
+  const signals = collectEffectiveScoreSignals(context);
+  const calibration = computeScoreCalibration(context, signals);
+  const weighted = computeWeightedScoreParts(context, signals, calibration);
+  return buildEffectiveScoreResult(context, signals, calibration, weighted);
+}
+
+type EffectiveScoreParams = Parameters<typeof computeEffectiveScoreDetails>[0];
+type EffectiveScoreContext = Readonly<EffectiveScoreParams & {
+  readonly scoreMultiplier: number;
+  readonly objectKind: RecallCandidate["object_kind"];
+  readonly additiveWeights: Readonly<ResolvedAdditiveScoringWeights>;
+  readonly weights: ActivationWeights;
+  readonly canUseMemorySupplement: boolean;
+}>;
+
+interface EffectiveScoreSignals {
+  readonly activationScore: number;
+  readonly relevanceFactor: number;
+  readonly graphSupportFactor: number;
+  readonly embeddingSimilarityFactor: number;
+  readonly budgetPenalty: number;
+  readonly plasticityFactor: number;
+  readonly conflictPenalty: number;
+  readonly contradictionPenalty: number;
+  readonly confidenceFactor: number;
+  readonly baseWeight: number;
+  readonly pathPlasticityWeight: number;
+}
+
+interface ScoreCalibration {
+  readonly queryEvidenceTransfer: number;
+  readonly evidenceContributionCalibration: number;
+  readonly priorEvidenceCalibration: number;
+  readonly calibratedRelevanceFactor: number;
+  readonly effectiveRelevanceWeight: number;
+  readonly adjustedBaseWeight: number;
+}
+
+interface WeightedScoreParts {
+  readonly weightedActivation: number;
+  readonly weightedRelevance: number;
+  readonly weightedRelevanceDirect: number;
+  readonly weightedQueryEvidenceTransfer: number;
+  readonly weightedGraphSupport: number;
+  readonly weightedPathPlasticity: number;
+  readonly weightedConfidence: number;
+  readonly weightedBudgetPenalty: number;
+  readonly weightedConflictPenalty: number;
+  readonly score: number;
+}
+
+function resolveEffectiveScoreContext(params: EffectiveScoreParams): EffectiveScoreContext {
+  const additiveWeights = resolveAdditiveScoringWeights(params.policy);
   const objectKind = params.objectKind ?? "memory_entry";
-  const config = policy.fine_assessment;
-  const additiveWeights = resolveAdditiveScoringWeights(policy);
-  const weights = resolveDynamicActivationWeights(
-    resolveEffectiveActivationWeights(entry, policy, warn),
-    supplementaryData.graphAndPathColdScore,
-    additiveWeights.PATH_PLASTICITY_WEIGHT
-  );
-  const isGlobalCandidate = originPlane === "global";
+  const isGlobalCandidate = params.originPlane === "global";
   const isSynthesisCandidate = objectKind === "synthesis_capsule";
-  const canUseMemorySupplement = !isGlobalCandidate && !isSynthesisCandidate;
-  // invariant: freshness is counted ONCE. The stored activation_score
-  // already bakes a freshness sub-term (weight
-  // activation_weights_phase1b.freshness, computed at store time). Multiplying
-  // the whole composite by a read-time freshness factor double-counts
-  // freshness and wrongly decays the scope/domain/retention sub-terms. Instead
-  // decay only the freshness band: the non-freshness floor (stored minus at-most the
-  // freshness weight) is preserved, and the freshness band is re-weighted by
-  // the read-time factor. last_used_at is the "last reinforced" proxy; created_at
-  // floors a never-used memory's age at birth. Bounded: the result is <= stored
-  // and at full idle collapses ONLY the <=0.19 freshness contribution (plus the
-  // legitimate idle decay), never the whole composite. Only memory entries carry
-  // these timestamps, so leave global/synthesis activation un-decayed.
-  const storedActivationScore = normalizeActivationScore(entry.activation_score);
-  const shouldTimeDecay =
-    canUseMemorySupplement && typeof entry.created_at === "string" && entry.created_at.length > 0;
-  const freshnessFactorNow = shouldTimeDecay
-    ? computeFreshnessFactor({
-        lastUsedAt: entry.last_used_at ?? null,
-        createdAt: entry.created_at,
-        now: now()
-      })
-    : 1;
+  return Object.freeze({
+    ...params,
+    scoreMultiplier: params.scoreMultiplier ?? 1,
+    objectKind,
+    additiveWeights,
+    weights: resolveDynamicActivationWeights(
+      resolveEffectiveActivationWeights(params.entry, params.policy, params.warn),
+      params.supplementaryData.graphAndPathColdScore,
+      additiveWeights.PATH_PLASTICITY_WEIGHT
+    ),
+    canUseMemorySupplement: !isGlobalCandidate && !isSynthesisCandidate
+  });
+}
+
+function collectEffectiveScoreSignals(context: EffectiveScoreContext): EffectiveScoreSignals {
+  const evidence = collectQueryEvidenceSignals(context);
+  const penalties = collectPenaltySignals(context);
+  const baseWeight = (context.isAdvisory ? 0 : context.weights.scope_match) + context.weights.domain_match + context.weights.retention + context.weights.freshness;
+  return Object.freeze({
+    activationScore: computeRecallActivationScore(context),
+    ...evidence,
+    budgetPenalty: context.supplementaryData.budgetPenaltyFactor,
+    ...penalties,
+    confidenceFactor: clamp01(context.entry.confidence ?? 0),
+    baseWeight,
+    pathPlasticityWeight: context.additiveWeights.PATH_PLASTICITY_WEIGHT * (1 - context.supplementaryData.graphAndPathColdScore)
+  });
+}
+
+function computeRecallActivationScore(context: EffectiveScoreContext): number {
+  const storedActivationScore = normalizeActivationScore(context.entry.activation_score);
+  const shouldTimeDecay = context.canUseMemorySupplement && typeof context.entry.created_at === "string" && context.entry.created_at.length > 0;
+  if (!shouldTimeDecay) {
+    return storedActivationScore;
+  }
   const freshnessWeight = DYNAMICS_CONSTANTS.activation_weights_phase1b.freshness;
   const nonFreshnessFloor = Math.max(0, storedActivationScore - freshnessWeight);
-  const activationScore = shouldTimeDecay
-    ? Math.min(storedActivationScore, clamp01(nonFreshnessFloor + freshnessWeight * freshnessFactorNow))
-    : storedActivationScore;
-  const ftsFactor = canUseMemorySupplement ? supplementaryData.ftsRanks[entry.object_id] ?? 0 : 0;
-  const synthesisFtsFactor =
-    isGlobalCandidate || !isSynthesisCandidate
-      ? 0
-      : supplementaryData.synthesisFtsRanks[entry.object_id] ?? 0;
-  const structuralFactor = canUseMemorySupplement ? supplementaryData.structuralScores[entry.object_id] ?? 0 : 0;
+  const freshnessFactorNow = computeFreshnessFactor({
+    lastUsedAt: context.entry.last_used_at ?? null,
+    createdAt: context.entry.created_at,
+    now: context.now()
+  });
+  return Math.min(storedActivationScore, clamp01(nonFreshnessFloor + freshnessWeight * freshnessFactorNow));
+}
+
+function collectQueryEvidenceSignals(context: EffectiveScoreContext): Readonly<Pick<EffectiveScoreSignals, "relevanceFactor" | "graphSupportFactor" | "embeddingSimilarityFactor" | "plasticityFactor">> {
+  const ftsFactor = context.canUseMemorySupplement ? context.supplementaryData.ftsRanks[context.entry.object_id] ?? 0 : 0;
+  const synthesisFtsFactor = context.objectKind === "synthesis_capsule" && context.originPlane !== "global" ? context.supplementaryData.synthesisFtsRanks[context.entry.object_id] ?? 0 : 0;
+  const structuralFactor = context.canUseMemorySupplement ? context.supplementaryData.structuralScores[context.entry.object_id] ?? 0 : 0;
   const queryFtsFactor = Math.max(ftsFactor, synthesisFtsFactor);
-  const relevanceFactor =
-    queryFtsFactor > 0 && structuralFactor > 0
-      ? clamp01(queryFtsFactor * 0.24 + structuralFactor * 0.76)
-      : Math.max(queryFtsFactor * 0.62, structuralFactor);
-  const graphSupportFactor = canUseMemorySupplement
-    ? normalizeGraphSupport(supplementaryData.graphSupportCounts[entry.object_id] ?? 0)
-    : 0;
-  const embeddingSimilarityFactor = canUseMemorySupplement
-    ? clamp01(supplementaryData.embeddingSimilarityScores[entry.object_id] ?? 0)
-    : 0;
-  const budgetPenalty = supplementaryData.budgetPenaltyFactor;
-  // PathPlasticity is supplementary, like the embedding similarity hint:
-  // it boosts the score additively but the final value is still clamp01,
-  // so a small plasticity boost cannot override a large lexical-rank gap.
-  const plasticityFactor = canUseMemorySupplement
-    ? clamp01(supplementaryData.plasticityFactors[entry.object_id] ?? 0)
-    : 0;
-  const conflictPenalty =
-    config.conflict_awareness &&
-    isClaimLikeDimension(entry.dimension) &&
-    !winnerMemoryIds.has(entry.object_id)
-      ? 1
-      : 0;
-  // invariant: contradiction-history degradation. ConflictDetectionService
-  // increments MemoryEntry.contradiction_count each time a new memory
-  // supersedes or contradicts this one. Recall scoring subtracts a small
-  // bounded factor so memories that keep losing arbitration drift down
-  // without being tombstoned. Cap at 5 to keep the penalty bounded.
-  const contradictionCount = entry.contradiction_count ?? 0;
-  const contradictionPenalty = clamp01(0.05 * Math.min(contradictionCount, 5));
-  const confidenceFactor = clamp01(entry.confidence ?? 0);
-
-  const baseWeight =
-    (isAdvisory ? 0 : weights.scope_match) +
-    weights.domain_match +
-    weights.retention +
-    weights.freshness;
-  const pathPlasticityWeight =
-    additiveWeights.PATH_PLASTICITY_WEIGHT * (1 - supplementaryData.graphAndPathColdScore);
-  const fusionWeights = resolveFusionScoringWeights(policy);
-  const queryEvidenceTransfer = computeQueryEvidenceBaseTransfer(
-    baseWeight,
-    relevanceFactor,
-    fusionWeights
-  );
-  const queryEvidenceCalibrationStrength = Math.max(
-    relevanceFactor,
-    graphSupportFactor,
-    embeddingSimilarityFactor
-  );
-  // invariant: calibration only fires when query-grounded evidence is
-  // BELOW WEAK_EVIDENCE_CALIBRATION_GATE. At-or-above the gate evidence
-  // is treated as sufficient and the score shape is preserved. A prior-side
-  // signal (plasticity / confidence) must also be present; without one
-  // there is no prior term to dampen.
-  const shouldCalibrateWeakEvidence =
-    queryEvidenceCalibrationStrength < WEAK_EVIDENCE_CALIBRATION_GATE &&
-    (plasticityFactor > 0 || (confidenceFactor > 0 && queryEvidenceCalibrationStrength > 0));
-  const evidenceContributionCalibration = shouldCalibrateWeakEvidence
-    ? queryEvidenceCalibrationStrength
-    : 1;
-  const priorEvidenceCalibration =
-    shouldCalibrateWeakEvidence
-      ? WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR +
-        (1 - WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR) * queryEvidenceCalibrationStrength
-      : 1;
-  const calibratedRelevanceFactor = relevanceFactor * evidenceContributionCalibration;
-  const effectiveRelevanceWeight =
-    (weights.relevance +
-      additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT +
-      queryEvidenceTransfer) *
-    evidenceContributionCalibration;
-  const adjustedBaseWeight = Math.max(0, baseWeight - queryEvidenceTransfer) * priorEvidenceCalibration;
-  const weightedActivation = activationScore * adjustedBaseWeight;
-  const weightedRelevance = calibratedRelevanceFactor * weights.relevance;
-  const weightedRelevanceDirect =
-    calibratedRelevanceFactor * additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT;
-  const weightedQueryEvidenceTransfer = calibratedRelevanceFactor * queryEvidenceTransfer;
-  const weightedGraphSupport = graphSupportFactor * weights.graph_support;
-  // Embedding adds no flat additive term here: its signal enters exactly once
-  // through the rank-bounded `embedding_similarity` RRF stream.
-  // see also: packages/core/src/recall/fusion-delivery.ts:buildRecallFusionDetails.
-  // The `embeddingSimilarityFactor` is retained only as the
-  // `embedding_similarity` diagnostic factor below — it no longer double-counts
-  // into rawScore.
-  const weightedPathPlasticity = plasticityFactor * pathPlasticityWeight;
-  const weightedConfidence =
-    confidenceFactor * additiveWeights.CONFIDENCE_DIRECT_WEIGHT * priorEvidenceCalibration;
-  const weightedBudgetPenalty = budgetPenalty * weights.budget_penalty;
-  const weightedConflictPenalty = conflictPenalty * weights.conflict_penalty;
-
-  const rawScore = clamp01(
-    weightedActivation +
-      weightedRelevance +
-      weightedRelevanceDirect +
-      weightedQueryEvidenceTransfer +
-      weightedGraphSupport +
-      weightedPathPlasticity +
-      weightedConfidence -
-      weightedBudgetPenalty -
-      weightedConflictPenalty -
-      contradictionPenalty
-  );
-  const score = clamp01(rawScore * scoreMultiplier);
-
   return Object.freeze({
-    score,
+    relevanceFactor: queryFtsFactor > 0 && structuralFactor > 0 ? clamp01(queryFtsFactor * 0.24 + structuralFactor * 0.76) : Math.max(queryFtsFactor * 0.62, structuralFactor),
+    graphSupportFactor: context.canUseMemorySupplement ? normalizeGraphSupport(context.supplementaryData.graphSupportCounts[context.entry.object_id] ?? 0) : 0,
+    embeddingSimilarityFactor: context.canUseMemorySupplement ? clamp01(context.supplementaryData.embeddingSimilarityScores[context.entry.object_id] ?? 0) : 0,
+    plasticityFactor: context.canUseMemorySupplement ? clamp01(context.supplementaryData.plasticityFactors[context.entry.object_id] ?? 0) : 0
+  });
+}
+
+function collectPenaltySignals(context: EffectiveScoreContext): Readonly<Pick<EffectiveScoreSignals, "conflictPenalty" | "contradictionPenalty">> {
+  const conflictPenalty = context.policy.fine_assessment.conflict_awareness && isClaimLikeDimension(context.entry.dimension) && !context.winnerMemoryIds.has(context.entry.object_id) ? 1 : 0;
+  const contradictionCount = context.entry.contradiction_count ?? 0;
+  return Object.freeze({
+    conflictPenalty,
+    contradictionPenalty: clamp01(0.05 * Math.min(contradictionCount, 5))
+  });
+}
+
+function computeScoreCalibration(context: EffectiveScoreContext, signals: EffectiveScoreSignals): ScoreCalibration {
+  const queryEvidenceTransfer = computeQueryEvidenceBaseTransfer(signals.baseWeight, signals.relevanceFactor, resolveFusionScoringWeights(context.policy));
+  const strength = Math.max(signals.relevanceFactor, signals.graphSupportFactor, signals.embeddingSimilarityFactor);
+  const shouldCalibrate = strength < WEAK_EVIDENCE_CALIBRATION_GATE && (signals.plasticityFactor > 0 || (signals.confidenceFactor > 0 && strength > 0));
+  const evidenceContributionCalibration = shouldCalibrate ? strength : 1;
+  const priorEvidenceCalibration = shouldCalibrate ? WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR + (1 - WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR) * strength : 1;
+  return Object.freeze({
+    queryEvidenceTransfer,
+    evidenceContributionCalibration,
+    priorEvidenceCalibration,
+    calibratedRelevanceFactor: signals.relevanceFactor * evidenceContributionCalibration,
+    effectiveRelevanceWeight: (context.weights.relevance + context.additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT + queryEvidenceTransfer) * evidenceContributionCalibration,
+    adjustedBaseWeight: Math.max(0, signals.baseWeight - queryEvidenceTransfer) * priorEvidenceCalibration
+  });
+}
+
+function computeWeightedScoreParts(context: EffectiveScoreContext, signals: EffectiveScoreSignals, calibration: ScoreCalibration): WeightedScoreParts {
+  const parts = Object.freeze({
+    weightedActivation: signals.activationScore * calibration.adjustedBaseWeight,
+    weightedRelevance: calibration.calibratedRelevanceFactor * context.weights.relevance,
+    weightedRelevanceDirect: calibration.calibratedRelevanceFactor * context.additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT,
+    weightedQueryEvidenceTransfer: calibration.calibratedRelevanceFactor * calibration.queryEvidenceTransfer,
+    weightedGraphSupport: signals.graphSupportFactor * context.weights.graph_support,
+    weightedPathPlasticity: signals.plasticityFactor * signals.pathPlasticityWeight,
+    weightedConfidence: signals.confidenceFactor * context.additiveWeights.CONFIDENCE_DIRECT_WEIGHT * calibration.priorEvidenceCalibration,
+    weightedBudgetPenalty: signals.budgetPenalty * context.weights.budget_penalty,
+    weightedConflictPenalty: signals.conflictPenalty * context.weights.conflict_penalty
+  });
+  const rawScore = clamp01(parts.weightedActivation + parts.weightedRelevance + parts.weightedRelevanceDirect + parts.weightedQueryEvidenceTransfer + parts.weightedGraphSupport + parts.weightedPathPlasticity + parts.weightedConfidence - parts.weightedBudgetPenalty - parts.weightedConflictPenalty - signals.contradictionPenalty);
+  return Object.freeze({ ...parts, score: clamp01(rawScore * context.scoreMultiplier) });
+}
+
+function buildEffectiveScoreResult(context: EffectiveScoreContext, signals: EffectiveScoreSignals, calibration: ScoreCalibration, weighted: WeightedScoreParts): Readonly<{ readonly score: number; readonly factors: RecallScoreFactors }> {
+  return Object.freeze({
+    score: weighted.score,
     factors: Object.freeze({
-      activation: activationScore,
-      relevance: score,
-      graph_support: graphSupportFactor,
-      ...(embeddingSimilarityFactor > 0 ? { embedding_similarity: embeddingSimilarityFactor } : {}),
-      path_plasticity: plasticityFactor,
-      budget_penalty: budgetPenalty,
-      content_relevance: relevanceFactor,
-      base_weight: baseWeight,
-      weighted_activation: weightedActivation,
-      weighted_relevance: weightedRelevance,
-      weighted_relevance_direct: weightedRelevanceDirect,
-      weighted_query_evidence_transfer: weightedQueryEvidenceTransfer,
-      weighted_graph_support: weightedGraphSupport,
-      weighted_path_plasticity: weightedPathPlasticity,
-      weighted_confidence: weightedConfidence,
-      weighted_budget_penalty: weightedBudgetPenalty,
-      weighted_conflict_penalty: weightedConflictPenalty,
-      weighted_contradiction_penalty: contradictionPenalty,
-      query_evidence_transfer: queryEvidenceTransfer,
-      adjusted_base_weight: adjustedBaseWeight,
-      effective_relevance_weight: effectiveRelevanceWeight,
-      conflict_penalty: conflictPenalty,
-      contradiction_penalty: contradictionPenalty,
-      confidence: confidenceFactor,
-      graph_path_cold_score: supplementaryData.graphAndPathColdScore,
-      recalls_edge_count: supplementaryData.recallsEdgeCount,
-      weight_transfer_amount: supplementaryData.weightTransferAmount,
-      resolved_activation_weights: weights
+      activation: signals.activationScore,
+      relevance: weighted.score,
+      graph_support: signals.graphSupportFactor,
+      ...(signals.embeddingSimilarityFactor > 0 ? { embedding_similarity: signals.embeddingSimilarityFactor } : {}),
+      path_plasticity: signals.plasticityFactor,
+      budget_penalty: signals.budgetPenalty,
+      content_relevance: signals.relevanceFactor,
+      base_weight: signals.baseWeight,
+      weighted_activation: weighted.weightedActivation,
+      weighted_relevance: weighted.weightedRelevance,
+      weighted_relevance_direct: weighted.weightedRelevanceDirect,
+      weighted_query_evidence_transfer: weighted.weightedQueryEvidenceTransfer,
+      weighted_graph_support: weighted.weightedGraphSupport,
+      weighted_path_plasticity: weighted.weightedPathPlasticity,
+      weighted_confidence: weighted.weightedConfidence,
+      weighted_budget_penalty: weighted.weightedBudgetPenalty,
+      weighted_conflict_penalty: weighted.weightedConflictPenalty,
+      weighted_contradiction_penalty: signals.contradictionPenalty,
+      query_evidence_transfer: calibration.queryEvidenceTransfer,
+      adjusted_base_weight: calibration.adjustedBaseWeight,
+      effective_relevance_weight: calibration.effectiveRelevanceWeight,
+      conflict_penalty: signals.conflictPenalty,
+      contradiction_penalty: signals.contradictionPenalty,
+      confidence: signals.confidenceFactor,
+      graph_path_cold_score: context.supplementaryData.graphAndPathColdScore,
+      recalls_edge_count: context.supplementaryData.recallsEdgeCount,
+      weight_transfer_amount: context.supplementaryData.weightTransferAmount,
+      resolved_activation_weights: context.weights
     })
   });
 }

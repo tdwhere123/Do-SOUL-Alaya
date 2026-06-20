@@ -30,32 +30,20 @@ export function useFpsMonitor({
     let lowFrames = 0;
     let recoveredFrames = 0;
     let visible = false;
-
-    const update = (next: boolean) => {
-      if (visible === next) return;
-      visible = next;
-      setLowFpsDetected(next);
-    };
-
     const sampleFrame = (timestamp: number) => {
-      if (last > 0) {
-        const delta = timestamp - last;
-        const fps = delta > 0 ? 1000 / delta : threshold;
-        if (fps < threshold) {
-          lowFrames += 1;
-          recoveredFrames = 0;
-          if (lowFrames >= lowFrameCount) {
-            update(true);
-          }
-        } else {
-          lowFrames = 0;
-          recoveredFrames += 1;
-          if (recoveredFrames >= recoveredFrameCount) {
-            update(false);
-          }
-        }
+      const next = nextFpsSample(timestamp, last, {
+        lowFrames,
+        lowFrameCount,
+        recoveredFrames,
+        recoveredFrameCount,
+        threshold,
+        visible
+      });
+      if (next !== null) {
+        lowFrames = next.lowFrames;
+        recoveredFrames = next.recoveredFrames;
+        visible = updateFpsVisibility(visible, next.visible, setLowFpsDetected);
       }
-
       last = timestamp;
       frameId = window.requestAnimationFrame(sampleFrame);
     };
@@ -65,4 +53,61 @@ export function useFpsMonitor({
   }, [enabled, lowFrameCount, recoveredFrameCount, threshold]);
 
   return lowFpsDetected;
+}
+
+function nextFpsSample(
+  timestamp: number,
+  last: number,
+  state: {
+    readonly lowFrames: number;
+    readonly lowFrameCount: number;
+    readonly recoveredFrames: number;
+    readonly recoveredFrameCount: number;
+    readonly threshold: number;
+    readonly visible: boolean;
+  }
+): { readonly lowFrames: number; readonly recoveredFrames: number; readonly visible: boolean } | null {
+  if (last <= 0) return null;
+  const fps = frameFps(timestamp, last, state.threshold);
+  return fps < state.threshold ? lowFpsSample(state) : recoveredFpsSample(state);
+}
+
+function lowFpsSample(state: {
+  readonly lowFrames: number;
+  readonly lowFrameCount: number;
+  readonly visible: boolean;
+}) {
+  const lowFrames = state.lowFrames + 1;
+  return {
+    lowFrames,
+    recoveredFrames: 0,
+    visible: lowFrames >= state.lowFrameCount ? true : state.visible
+  };
+}
+
+function recoveredFpsSample(state: {
+  readonly recoveredFrames: number;
+  readonly recoveredFrameCount: number;
+  readonly visible: boolean;
+}) {
+  const recoveredFrames = state.recoveredFrames + 1;
+  return {
+    lowFrames: 0,
+    recoveredFrames,
+    visible: recoveredFrames >= state.recoveredFrameCount ? false : state.visible
+  };
+}
+
+function updateFpsVisibility(
+  current: boolean,
+  next: boolean,
+  setLowFpsDetected: (value: boolean) => void
+): boolean {
+  if (current !== next) setLowFpsDetected(next);
+  return next;
+}
+
+function frameFps(timestamp: number, last: number, threshold: number): number {
+  const delta = timestamp - last;
+  return delta > 0 ? 1000 / delta : threshold;
 }

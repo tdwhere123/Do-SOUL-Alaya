@@ -10,6 +10,7 @@ export const TaskObjectSurfaceSchema = ControlPlaneEnvelopeSchema.unwrap()
     display_name: NonEmptyStringSchema,
     context_refs: z.array(NonEmptyStringSchema).readonly()
   })
+  .strict()
   .readonly();
 
 export type TaskObjectSurface = z.infer<typeof TaskObjectSurfaceSchema>;

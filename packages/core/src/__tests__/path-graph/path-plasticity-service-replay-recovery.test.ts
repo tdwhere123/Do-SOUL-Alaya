@@ -295,9 +295,23 @@ describe("PathPlasticityService", () => {
     expect(onMutationBoundaryEntered).toHaveBeenCalledTimes(1);
     await Promise.resolve();
     await Promise.resolve();
-    expect(notifyEntry).toHaveBeenCalledTimes(1);
+    expect(notifyEntry).toHaveBeenCalledTimes(2);
     expect(harness.repoUpdates).toHaveLength(1);
-    expect(harness.publishedEvents).toHaveLength(1);
+    expect(harness.publishedEvents).toHaveLength(2);
+    expect(harness.publishedEvents[0]?.event_type).toBe(
+      RuntimeGovernanceEventType.PATH_RELATION_REINFORCED
+    );
+    expect(harness.publishedEvents[1]).toMatchObject({
+      event_type: RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED,
+      entity_type: "path_relation",
+      entity_id: "path-propagation-committed-1",
+      workspace_id: "workspace-1"
+    });
+    expect(harness.publishedEvents[1]?.payload_json).toMatchObject({
+      source: "EventPublisher",
+      operation: "detached_propagation",
+      error_message: "notify exploded after commit"
+    });
   });
 
   it("returns after durable path mutation when post-commit propagation never settles", async () => {

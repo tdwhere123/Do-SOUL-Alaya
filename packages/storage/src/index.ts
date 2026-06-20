@@ -14,12 +14,14 @@ export {
 export {
   SqliteEventLogRepo,
   type EventLogAppendInput,
+  type EventLogPageOptions,
   type EventLogRepo
 } from "./repos/runtime/index.js";
 export { SqliteSignalRepo, type SignalRepo } from "./repos/signal/index.js";
 export {
   SqliteEvidenceCapsuleRepo,
   type EvidenceCapsuleRepo,
+  type EvidenceCapsuleListPageOptions,
   type EvidenceCapsuleKeywordHit
 } from "./repos/capsules/index.js";
 export {
@@ -41,12 +43,14 @@ export {
 export {
   SqliteGlobalMemoryRepo,
   type GlobalMemoryRepo,
-  type GlobalMemoryRepoListFilters
+  type GlobalMemoryRepoListFilters,
+  type GlobalMemoryRepoListPageOptions
 } from "./repos/memory/index.js";
 export {
   SqliteKarmaEventRepo,
   type KarmaEvent,
   type KarmaEventKind,
+  type KarmaEventListPageOptions,
   type KarmaEventRepo
 } from "./repos/signal/index.js";
 export {
@@ -107,6 +111,7 @@ export {
 } from "./repos/memory/index.js";
 export {
   SqlitePathRelationRepo,
+  type PathRelationPageOptions,
   type PathRelationRepo
 } from "./repos/path/index.js";
 export {

@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedLabelSchema,
+  BoundedPathSchema,
+  IsoDatetimeStringSchema,
+  NonEmptyStringSchema,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 import { GardenRoleSchema, GardenTaskKindSchema, GardenTierSchema } from "../soul/garden-tier.js";
 import { HealthEventKindSchema } from "../soul/health-journal.js";
 
@@ -116,7 +122,7 @@ export const SoulEnrichAbandonedPayloadSchema = z
     attempt_count: NonNegativeIntSchema,
     // The last transient failure that drove the marker over the cap, captured
     // for audit (an Error message string).
-    last_failure_kind: z.string(),
+    last_failure_kind: BoundedLabelSchema,
     occurred_at: IsoDatetimeStringSchema
   })
   .readonly();
@@ -131,9 +137,10 @@ export const SoulHealthJournalRecordedPayloadSchema = z
       .object({
         fields_changed: z.array(NonEmptyStringSchema).readonly(),
         secret_ref_kind: z.enum(["env", "file", "keychain"]).nullable().optional(),
-        provider_url: z.string().nullable().optional(),
-        model_id: z.string().nullable().optional()
+        provider_url: BoundedPathSchema.url().nullable().optional(),
+        model_id: BoundedLabelSchema.nullable().optional()
       })
+      .strict()
       .readonly()
       .optional()
   })

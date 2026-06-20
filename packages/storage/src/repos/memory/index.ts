@@ -1,5 +1,6 @@
 export {
   SqliteGlobalMemoryRepo,
+  type GlobalMemoryRepoListPageOptions,
   type GlobalMemoryRepo,
   type GlobalMemoryRepoListFilters
 } from "./global-memory-repo.js";

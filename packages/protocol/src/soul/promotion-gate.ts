@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BoundedLabelSchema } from "../shared/schema-primitives.js";
 import { ControlPlaneEnvelopeSchema } from "./envelope.js";
 import { ControlPlaneObjectKind } from "./object-kind.js";
 
@@ -26,14 +27,16 @@ export const PromotionConditionSchema = z
     threshold: z.number().min(0).nullable(),
     required: z.boolean()
   })
+  .strict()
   .readonly();
 
 export const PromotionGateSchema = ControlPlaneEnvelopeSchema.unwrap()
   .extend({
     object_kind: z.literal(ControlPlaneObjectKind.PROMOTION_GATE),
     conditions: z.array(PromotionConditionSchema).readonly(),
-    per_dimension_defaults: z.record(z.string(), z.array(PromotionConditionSchema).readonly()).readonly().nullable()
+    per_dimension_defaults: z.record(BoundedLabelSchema, z.array(PromotionConditionSchema).readonly()).readonly().nullable()
   })
+  .strict()
   .readonly();
 
 export type PromotionConditionKind = z.infer<typeof PromotionConditionKindSchema>;

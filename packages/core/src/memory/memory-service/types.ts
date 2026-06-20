@@ -77,19 +77,33 @@ export interface MemoryServiceMemoryEntryRepoPort {
     tier?: MemoryEntry["storage_tier"],
     page?: MemoryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByWorkspaceIdAll?(
+    workspaceId: string,
+    tier?: MemoryEntry["storage_tier"]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   countByWorkspaceId?(workspaceId: string, tier?: MemoryEntry["storage_tier"]): Promise<number>;
   findByRunId(
     runId: string,
     page?: MemoryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByRunIdAll?(runId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   countByRunId?(runId: string): Promise<number>;
   findByDimension(
     workspaceId: string,
     dimension: MemoryEntry["dimension"],
     page?: MemoryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByDimensionAll?(
+    workspaceId: string,
+    dimension: MemoryEntry["dimension"]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   countByDimension?(workspaceId: string, dimension: MemoryEntry["dimension"]): Promise<number>;
   findByScopeClass(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByScopeClassAll?(
     workspaceId: string,
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]>;
@@ -137,6 +151,7 @@ export interface MemoryServiceMemoryEntryRepoPort {
 
 export interface MemoryServiceEvidenceServicePort {
   findById(objectId: string): Promise<unknown | null>;
+  findByIds?(objectIds: readonly string[]): Promise<readonly { readonly object_id: string }[]>;
 }
 
 // invariant: compressed physical delete re-verifies live capsule preservation

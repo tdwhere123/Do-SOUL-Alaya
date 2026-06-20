@@ -3,15 +3,13 @@ import {
   ExtensionDescriptorRegistrationCompensationFailedPayloadSchema,
   ExtensionDescriptorRegistrationRevertedPayloadSchema,
   RuntimeGovernanceEventType,
-  ToolSpecSchema,
   type EventLogEntry,
   type SkillPackage,
   type ToolProvider,
-  type ToolProviderToolSpec,
   type ToolSpec
 } from "@do-soul/alaya-protocol";
+import { reportAsyncSideEffectFailure } from "../runtime/async-side-effect-auditor.js";
 import { CoreError } from "../shared/errors.js";
-import type { ToolSpecService } from "./tool-spec-service.js";
 import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import {
@@ -19,48 +17,28 @@ import {
   parseExtensionToolProvider
 } from "../shared/extension-descriptor-parsers.js";
 import { readNow } from "../shared/time.js";
-
-type ExtensionRegistryToolSpecPort = Pick<
-  ToolSpecService,
-  "findById" | "register" | "update" | "delete"
->;
-
-interface ToolSpecRollbackSnapshot {
-  readonly toolId: string;
-  readonly previous: Readonly<ToolSpec> | null;
-}
-
-interface ProviderCacheSnapshot {
-  readonly providerCacheById: ReadonlyMap<string, Readonly<ToolProvider>>;
-  readonly providerCacheByToolId: ReadonlyMap<string, Readonly<ToolProvider>>;
-  readonly providerList: readonly Readonly<ToolProvider>[];
-}
-
-export interface ExtensionStorePort {
-  registerToolProvider(provider: ToolProvider): Promise<Readonly<ToolProvider>>;
-  deleteToolProvider(providerId: string): Promise<void>;
-  registerSkillPackage(pkg: SkillPackage): Promise<Readonly<SkillPackage>>;
-  findToolProviders(): Promise<readonly Readonly<ToolProvider>[]>;
-  findToolProviderById(providerId: string): Promise<Readonly<ToolProvider> | null>;
-}
-
-export interface ExtensionRegistryDependencies {
-  readonly extensionStore: ExtensionStorePort;
-  readonly toolSpecService: ExtensionRegistryToolSpecPort;
-  readonly eventLogWriter: {
-    append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
-  };
-  readonly runtimeNotifier?: {
-    notifyEntry(entry: EventLogEntry): void | Promise<void>;
-  };
-  readonly now?: () => string;
-  readonly buildToolSpecForProviderTool?: (
-    provider: Readonly<ToolProvider>,
-    tool: Readonly<ToolProviderToolSpec>,
-    existing: Readonly<ToolSpec> | null
-  ) => ToolSpec;
-  readonly defaultWorkspaceId?: string;
-}
+import {
+  buildDefaultToolSpec,
+  createProviderCacheSnapshot,
+  listRemovedToolIds,
+  mergeProviderIntoCacheSnapshot,
+  normalizeProvider,
+  parseToolSpec,
+  providerOwnsTool,
+  toError
+} from "./extension-registry-service-helpers.js";
+import type {
+  ExtensionRegistryDependencies,
+  ProviderCacheSnapshot,
+  ToolSpecRollbackSnapshot
+} from "./extension-registry-service-types.js";
+export type {
+  ExtensionRegistryDependencies,
+  ExtensionRegistryToolSpecPort,
+  ExtensionStorePort,
+  ProviderCacheSnapshot,
+  ToolSpecRollbackSnapshot
+} from "./extension-registry-service-types.js";
 
 export class ExtensionRegistryService {
   private providerCacheSnapshot: Readonly<ProviderCacheSnapshot> | null = null;
@@ -464,30 +442,38 @@ export class ExtensionRegistryService {
         this.publishProviderCache(mergedSnapshot);
         return mergedSnapshot;
       })
-      .catch((error) => {
+      .catch(async (error) => {
         // Degrade to last-good (or empty) cache so a failed provider merge
         // cannot wedge the cache load for later callers.
-        process.emitWarning("[ExtensionRegistryService] provider cache merge failed; degrading to last-good", {
-          code: "ALAYA_EXTENSION_CACHE_MERGE_DEGRADED",
-          detail: JSON.stringify({
-            provider_id: normalizedProvider.provider_id,
-            error: error instanceof Error ? error.message : String(error)
-          })
-        });
+        await reportAsyncSideEffectFailure(
+          {
+            source: "ExtensionRegistryService",
+            operation: "provider_cache_merge",
+            subjectType: "extension_descriptor",
+            subjectId: normalizedProvider.provider_id,
+            workspaceId: this.systemWorkspaceId,
+            runId: null,
+            causedBy: "system",
+            warningCode: "ALAYA_EXTENSION_CACHE_MERGE_DEGRADED",
+            warningMessage: "[ExtensionRegistryService] provider cache merge failed; degrading to last-good",
+            eventLogRepo: this.deps.eventLogWriter,
+            runtimeNotifier: this.deps.runtimeNotifier,
+            now: this.deps.now
+          },
+          error
+        );
         return this.providerCacheSnapshot ?? createProviderCacheSnapshot([]);
       });
     this.providerCacheLoadPromise = mergedPromise;
 
     if (existingLoadPromise !== null) {
-      // mergedPromise self-degrades above; this guards any residual rejection.
-      void mergedPromise.catch((error) => {
-        process.emitWarning("[ExtensionRegistryService] detached provider cache merge rejected (fire-and-forget)", {
-          code: "ALAYA_EXTENSION_CACHE_MERGE_DETACHED_FAILED",
-          detail: JSON.stringify({
-            provider_id: normalizedProvider.provider_id,
-            error: error instanceof Error ? error.message : String(error)
-          })
-        });
+      void mergedPromise.then((snapshot) => {
+        if (this.providerCacheLoadPromise === mergedPromise) {
+          this.providerCacheLoadPromise = null;
+        }
+        if (this.providerCacheSnapshot === null) {
+          this.publishProviderCache(snapshot);
+        }
       });
       return;
     }
@@ -504,129 +490,4 @@ export class ExtensionRegistryService {
   private publishProviderCache(snapshot: Readonly<ProviderCacheSnapshot>): void {
     this.providerCacheSnapshot = snapshot;
   }
-}
-
-function normalizeProvider(provider: Readonly<ToolProvider>): Readonly<ToolProvider> {
-  return Object.isFrozen(provider) ? provider : parseExtensionToolProvider(provider);
-}
-
-function parseToolSpec(value: ToolSpec): Readonly<ToolSpec> {
-  try {
-    return deepFreeze(ToolSpecSchema.parse(value));
-  } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid tool spec payload", { cause: error });
-  }
-}
-
-function buildDefaultToolSpec(
-  provider: Readonly<ToolProvider>,
-  tool: Readonly<ToolProviderToolSpec>,
-  existing: Readonly<ToolSpec> | null
-): ToolSpec {
-  if (existing !== null && provider.source === "builtin") {
-    return existing;
-  }
-
-  if (existing !== null) {
-    return {
-      ...existing,
-      description: tool.description
-    };
-  }
-
-  return {
-    tool_id: tool.tool_id,
-    category: "exec",
-    description: tool.description,
-    scope_guard: "project",
-    read_only: false,
-    destructive: false,
-    concurrency_safe: false,
-    interrupt_behavior: "wait",
-    requires_confirmation: false,
-    requires_evidence_reopen: false,
-    rollback_support: "none",
-    fast_path_eligible: false
-  };
-}
-
-function freezeProviderList(
-  providers: Iterable<Readonly<ToolProvider>>
-): readonly Readonly<ToolProvider>[] {
-  return Object.freeze(
-    [...providers].sort((left, right) => {
-      if (left.registered_at !== right.registered_at) {
-        return left.registered_at.localeCompare(right.registered_at);
-      }
-      return left.provider_id.localeCompare(right.provider_id);
-    })
-  );
-}
-
-function createProviderCacheSnapshot(
-  providers: readonly Readonly<ToolProvider>[]
-): Readonly<ProviderCacheSnapshot> {
-  const providerList = freezeProviderList(providers);
-  const providerCacheById = new Map<string, Readonly<ToolProvider>>();
-  const providerCacheByToolId = new Map<string, Readonly<ToolProvider>>();
-
-  for (const provider of providerList) {
-    providerCacheById.set(provider.provider_id, provider);
-    for (const tool of provider.tool_specs) {
-      const existingOwner = providerCacheByToolId.get(tool.tool_id);
-      if (existingOwner !== undefined) {
-        throw new CoreError(
-          "CONFLICT",
-          `Tool ${tool.tool_id} is already owned by provider ${existingOwner.provider_id}; provider ${provider.provider_id} cannot claim it.`
-        );
-      }
-
-      providerCacheByToolId.set(tool.tool_id, provider);
-    }
-  }
-
-  return Object.freeze({
-    providerCacheById,
-    providerCacheByToolId,
-    providerList
-  });
-}
-
-function mergeProviderIntoCacheSnapshot(
-  currentSnapshot: Readonly<ProviderCacheSnapshot>,
-  normalizedProvider: Readonly<ToolProvider>
-): Readonly<ProviderCacheSnapshot> {
-  const nextProviders = [
-    ...currentSnapshot.providerList.filter(
-      (provider) => provider.provider_id !== normalizedProvider.provider_id
-    ),
-    normalizedProvider
-  ];
-
-  return createProviderCacheSnapshot(nextProviders);
-}
-
-function providerOwnsTool(
-  provider: Readonly<ToolProvider> | null,
-  toolId: string
-): boolean {
-  return provider?.tool_specs.some((tool) => tool.tool_id === toolId) ?? false;
-}
-
-function listRemovedToolIds(
-  previousProvider: Readonly<ToolProvider> | null,
-  nextProvider: Readonly<ToolProvider>
-): readonly string[] {
-  if (previousProvider === null) {
-    return [];
-  }
-
-  const nextToolIds = new Set(nextProvider.tool_specs.map((tool) => tool.tool_id));
-  return previousProvider.tool_specs
-    .map((tool) => tool.tool_id)
-    .filter((toolId) => !nextToolIds.has(toolId));
-}
-
-function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
 }

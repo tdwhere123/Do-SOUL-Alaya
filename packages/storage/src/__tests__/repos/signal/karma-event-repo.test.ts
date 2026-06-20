@@ -61,6 +61,7 @@ describe("SqliteKarmaEventRepo", () => {
 
     await expect(repo.create(event)).resolves.toEqual(event);
     await expect(repo.findByObjectId(event.object_id)).resolves.toEqual([event]);
+    await expect(repo.findByObjectIdPage?.(event.object_id, { limit: 1, offset: 0 })).resolves.toEqual([event]);
   });
 
   it("findByObjectIdSync returns the same rows as the async read", async () => {
@@ -166,6 +167,9 @@ describe("SqliteKarmaEventRepo", () => {
     const events = await repo.findByWorkspaceId("workspace-1");
     expect(events).toHaveLength(1);
     expect(events[0].workspace_id).toBe("workspace-1");
+    await expect(repo.findByWorkspaceIdPage?.("workspace-1", { limit: 1, offset: 0 })).resolves.toMatchObject([
+      { event_id: "event-w1" }
+    ]);
   });
 });
 

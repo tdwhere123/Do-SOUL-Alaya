@@ -33,6 +33,13 @@ export interface GlobalMemoryRecallCandidate {
 
 export interface GlobalMemoryRecallSourcePort {
   list(): Promise<readonly Readonly<GlobalMemoryEntry>[]>;
+  listAll?(): Promise<readonly Readonly<GlobalMemoryEntry>[]>;
+  listPage?(page: GlobalMemoryRecallSourcePageOptions): Promise<readonly Readonly<GlobalMemoryEntry>[]>;
+}
+
+export interface GlobalMemoryRecallSourcePageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 export interface GlobalMemoryRecallRecord {
@@ -84,27 +91,16 @@ export async function loadGlobalRecallCandidates(params: {
   readonly records: readonly Readonly<GlobalMemoryRecallRecord>[];
 }> {
   if (params.globalRecallPort === undefined) {
-    return Object.freeze({
-      total_scanned: 0,
-      candidates: Object.freeze([]),
-      records: Object.freeze([])
-    });
+    return emptyGlobalRecallCandidatesResult();
   }
-
   const surfacedEntries = await params.globalRecallPort.recall({
     workspaceId: params.workspaceId,
     queryText: params.queryText,
     limit: params.limit
   });
-
   if (surfacedEntries.length === 0) {
-    return Object.freeze({
-      total_scanned: 0,
-      candidates: Object.freeze([]),
-      records: Object.freeze([])
-    });
+    return emptyGlobalRecallCandidatesResult();
   }
-
   const orderedGlobalObjectIds = uniqueGlobalObjectIds(surfacedEntries);
   const anchorMap = await loadAnchorMap({
     globalObjectIds: orderedGlobalObjectIds,
@@ -112,37 +108,82 @@ export async function loadGlobalRecallCandidates(params: {
     createdBy: params.createdBy ?? "system",
     projectMappingPort: params.projectMappingPort
   });
-  const matchesTimeFilter = params.entryMatchesTimeFilter;
-  const candidates: GlobalMemoryRecallCandidate[] = [];
-  const records = surfacedEntries.map((entry) => {
-    const classification = params.classifyGlobalCandidate(entry, anchorMap);
-    let candidate: Readonly<GlobalMemoryRecallCandidate> | null = null;
-
-    if (classification.include) {
-      const pseudoEntry = createPseudoMemoryEntry(entry, params.workspaceId);
-      const passesTimeWindow =
-        matchesTimeFilter === undefined ? true : matchesTimeFilter(pseudoEntry, params.timeFilter);
-
-      if (passesTimeWindow) {
-        candidate = Object.freeze({
-          entry: pseudoEntry,
-          originPlane: "global" as const,
-          isAdvisory: false
-        });
-        candidates.push(candidate);
-      }
-    }
-
-    return Object.freeze({
-      globalObjectId: entry.global_object_id,
-      candidate
-    });
-  });
-
+  const selection = buildGlobalRecallSelection(params, surfacedEntries, anchorMap);
   return Object.freeze({
     total_scanned: surfacedEntries.length,
+    candidates: Object.freeze(selection.candidates),
+    records: Object.freeze(selection.records)
+  });
+}
+
+function emptyGlobalRecallCandidatesResult(): Readonly<{
+  readonly total_scanned: number;
+  readonly candidates: readonly Readonly<GlobalMemoryRecallCandidate>[];
+  readonly records: readonly Readonly<GlobalMemoryRecallRecord>[];
+}> {
+  return Object.freeze({
+    total_scanned: 0,
+    candidates: Object.freeze([]),
+    records: Object.freeze([])
+  });
+}
+
+function buildGlobalRecallSelection(
+  params: Parameters<typeof loadGlobalRecallCandidates>[0],
+  surfacedEntries: readonly Readonly<GlobalMemoryRecallEntry>[],
+  anchorMap: ReadonlyMap<string, Readonly<ProjectMappingAnchor>>
+): Readonly<{
+  readonly candidates: readonly Readonly<GlobalMemoryRecallCandidate>[];
+  readonly records: readonly Readonly<GlobalMemoryRecallRecord>[];
+}> {
+  const candidates: GlobalMemoryRecallCandidate[] = [];
+  const records = surfacedEntries.map((entry) =>
+    buildGlobalRecallRecord(params, entry, anchorMap, candidates)
+  );
+  return Object.freeze({
     candidates: Object.freeze(candidates),
     records: Object.freeze(records)
+  });
+}
+
+function buildGlobalRecallRecord(
+  params: Parameters<typeof loadGlobalRecallCandidates>[0],
+  entry: Readonly<GlobalMemoryRecallEntry>,
+  anchorMap: ReadonlyMap<string, Readonly<ProjectMappingAnchor>>,
+  candidates: GlobalMemoryRecallCandidate[]
+): Readonly<GlobalMemoryRecallRecord> {
+  const classification = params.classifyGlobalCandidate(entry, anchorMap);
+  const candidate = buildGlobalRecallCandidate(params, entry, classification);
+  if (candidate !== null) {
+    candidates.push(candidate);
+  }
+  return Object.freeze({
+    globalObjectId: entry.global_object_id,
+    candidate
+  });
+}
+
+function buildGlobalRecallCandidate(
+  params: Parameters<typeof loadGlobalRecallCandidates>[0],
+  entry: Readonly<GlobalMemoryRecallEntry>,
+  classification: GlobalCandidateClassification
+): Readonly<GlobalMemoryRecallCandidate> | null {
+  if (!classification.include) {
+    return null;
+  }
+  const pseudoEntry = createPseudoMemoryEntry(entry, params.workspaceId);
+  const matchesTimeFilter = params.entryMatchesTimeFilter;
+  const passesTimeWindow =
+    matchesTimeFilter === undefined
+      ? true
+      : matchesTimeFilter(pseudoEntry, params.timeFilter);
+  if (!passesTimeWindow) {
+    return null;
+  }
+  return Object.freeze({
+    entry: pseudoEntry,
+    originPlane: "global" as const,
+    isAdvisory: false
   });
 }
 
@@ -152,12 +193,9 @@ export function createGlobalMemoryRecallPort(params: {
   return new GlobalMemoryRecallService(params.globalMemorySource);
 }
 
-// LRU bound on the query cache. Keys are (workspaceId, queryText, limit) and a
-// new workspace per recall means keys never collide, so without a cap the map
-// grows unbounded for a long-lived daemon. The cache is a recall SUPPLEMENT:
-// an evicted entry just forces a recompute, never a correctness change. Mirrors
-// the embedding-recall query-embedding cache LRU (DEFAULT_QUERY_EMBEDDING_CACHE_SIZE).
+// Bounded LRU supplement cache keyed by workspaceId, queryText, and limit.
 const GLOBAL_RECALL_QUERY_CACHE_SIZE = 512;
+const GLOBAL_RECALL_CORPUS_PAGE_LIMIT = 500;
 
 class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
   private readonly cacheByQuery = new Map<string, readonly Readonly<GlobalMemoryRecallEntry>[]>();
@@ -179,7 +217,7 @@ class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
     }
 
     const normalizedQuery = normalizeGlobalMemoryQuery(params.queryText);
-    const entries = await this.globalMemorySource.list();
+    const entries = await loadGlobalMemoryRecallCorpus(this.globalMemorySource);
     const matchedEntries =
       normalizedQuery === null
         ? entries
@@ -235,6 +273,31 @@ class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
   }
 }
 
+async function loadGlobalMemoryRecallCorpus(
+  source: GlobalMemoryRecallSourcePort
+): Promise<readonly Readonly<GlobalMemoryEntry>[]> {
+  if (source.listAll !== undefined) {
+    return await source.listAll();
+  }
+
+  if (source.listPage === undefined) {
+    return await source.list();
+  }
+
+  const entries: Readonly<GlobalMemoryEntry>[] = [];
+  for (let offset = 0; ; offset += GLOBAL_RECALL_CORPUS_PAGE_LIMIT) {
+    const page = await source.listPage({
+      limit: GLOBAL_RECALL_CORPUS_PAGE_LIMIT,
+      offset
+    });
+    entries.push(...page);
+    if (page.length < GLOBAL_RECALL_CORPUS_PAGE_LIMIT) {
+      break;
+    }
+  }
+  return Object.freeze(entries);
+}
+
 async function loadAnchorMap(params: {
   readonly globalObjectIds: readonly string[];
   readonly workspaceId: string;
@@ -273,10 +336,7 @@ function uniqueGlobalObjectIds(
 }
 
 function normalizeGlobalMemoryQuery(queryText: string | null): readonly string[] | null {
-  if (queryText === null) {
-    return null;
-  }
-
+  if (queryText === null) return null;
   const tokens = queryText
     .trim()
     .toLowerCase()
@@ -295,12 +355,8 @@ function createRecallCacheKey(params: {
 }
 
 const memoryInvalidationEventTypes = new Set([
-  "memory.created",
-  "memory.updated",
-  "memory.deleted",
-  "soul.memory.created",
-  "soul.memory.updated",
-  "soul.memory.archived"
+  "memory.created", "memory.updated", "memory.deleted",
+  "soul.memory.created", "soul.memory.updated", "soul.memory.archived"
 ]);
 
 function parseMemoryInvalidationEntry(

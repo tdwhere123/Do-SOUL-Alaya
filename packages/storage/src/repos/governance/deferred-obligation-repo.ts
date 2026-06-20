@@ -52,6 +52,13 @@ interface DeferredObligationRow {
   readonly fulfilled_at: string | null;
 }
 
+interface ParsedDeferredObligationStateUpdate {
+  readonly obligationId: string;
+  readonly expectedState: DeferredObligationState;
+  readonly nextState: DeferredObligationState;
+  readonly fulfilledAt: string | null;
+}
+
 export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
   private readonly getByIdStatement;
   private readonly insertStatement;
@@ -185,52 +192,57 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
       readonly fulfilledAt?: string;
     }
   ): Readonly<DeferredObligation> {
-    const parsedObligationId = parseNonEmptyString(obligationId, "obligation id");
-    const parsedExpectedState = DeferredObligationStateSchema.parse(expectedState);
-    const parsedNextState = DeferredObligationStateSchema.parse(nextState);
-    const fulfilledAt =
-      parsedNextState === "fulfilled"
-        ? parseIsoDatetimeNow(options?.fulfilledAt ?? new Date().toISOString())
-        : null;
+    const parsed = parseDeferredObligationStateUpdate(obligationId, expectedState, nextState, options);
 
-    let changes = 0;
     try {
-      changes = this.updateStateStatement.run(
-        parsedNextState,
-        fulfilledAt,
-        parsedObligationId,
-        parsedExpectedState
-      ).changes;
+      const changes = this.runStateUpdate(parsed);
+      if (changes === 0) {
+        this.throwStateUpdateFailure(parsed);
+      }
+      return this.readRequiredAfterStateUpdate(parsed.obligationId);
     } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
       throw new StorageError(
         "QUERY_FAILED",
-        `Failed to update deferred obligation ${parsedObligationId}.`,
+        `Failed to update deferred obligation ${parsed.obligationId}.`,
         error
       );
     }
+  }
 
-    if (changes === 0) {
-      const existing = this.readById(parsedObligationId);
+  private runStateUpdate(parsed: ParsedDeferredObligationStateUpdate): number {
+    return this.updateStateStatement.run(
+      parsed.nextState,
+      parsed.fulfilledAt,
+      parsed.obligationId,
+      parsed.expectedState
+    ).changes;
+  }
 
-      if (existing === null) {
-        throw new StorageError(
-          "NOT_FOUND",
-          `Deferred obligation ${parsedObligationId} was not found.`
-        );
-      }
-
+  private throwStateUpdateFailure(parsed: ParsedDeferredObligationStateUpdate): never {
+    const existing = this.readById(parsed.obligationId);
+    if (existing === null) {
       throw new StorageError(
-        "CONFLICT",
-        `CAS failed for deferred obligation ${parsedObligationId}: expected ${parsedExpectedState}, found ${existing.state}.`
+        "NOT_FOUND",
+        `Deferred obligation ${parsed.obligationId} was not found.`
       );
     }
 
-    const updated = this.readById(parsedObligationId);
+    throw new StorageError(
+      "CONFLICT",
+      `CAS failed for deferred obligation ${parsed.obligationId}: expected ${parsed.expectedState}, found ${existing.state}.`
+    );
+  }
+
+  private readRequiredAfterStateUpdate(obligationId: string): Readonly<DeferredObligation> {
+    const updated = this.readById(obligationId);
 
     if (updated === null) {
       throw new StorageError(
         "NOT_FOUND",
-        `Deferred obligation ${parsedObligationId} was not found after update.`
+        `Deferred obligation ${obligationId} was not found after update.`
       );
     }
 
@@ -306,6 +318,25 @@ function parseDeferredObligation(value: unknown): Readonly<DeferredObligation> {
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate deferred obligation.", error);
   }
+}
+
+function parseDeferredObligationStateUpdate(
+  obligationId: string,
+  expectedState: DeferredObligationState,
+  nextState: DeferredObligationState,
+  options?: { readonly fulfilledAt?: string }
+): ParsedDeferredObligationStateUpdate {
+  const parsedNextState = DeferredObligationStateSchema.parse(nextState);
+  return {
+    obligationId: parseNonEmptyString(obligationId, "obligation id"),
+    expectedState: DeferredObligationStateSchema.parse(expectedState),
+    nextState: parsedNextState,
+    fulfilledAt: parseFulfilledAtForState(parsedNextState, options?.fulfilledAt)
+  };
+}
+
+function parseFulfilledAtForState(nextState: DeferredObligationState, value: string | undefined): string | null {
+  return nextState === "fulfilled" ? parseIsoDatetimeNow(value ?? new Date().toISOString()) : null;
 }
 
 function parseIsoDatetimeNow(now: string): string {

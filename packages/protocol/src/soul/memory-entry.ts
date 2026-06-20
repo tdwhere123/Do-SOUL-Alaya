@@ -6,8 +6,8 @@ import {
   BoundedIdSchema,
   BoundedLabelSchema,
   IsoDatetimeStringSchema,
-  NonEmptyStringSchema,
-  NonNegativeIntSchema
+  NonNegativeIntSchema,
+  RatioSchema
 } from "../shared/schema-primitives.js";
 import { PersistentObjectEnvelopeSchema } from "./envelope.js";
 import { ScopeClassSchema } from "./object-kind.js";
@@ -143,7 +143,7 @@ const MemoryEntryMutableFieldsBaseSchema = z.object({
   storage_tier: StorageTierSchema.optional(),
   confidence: z.number().min(0).max(1).optional(),
   retention_state: RetentionStateSchema.optional()
-});
+}).strict();
 
 export const MemoryEntryMutableFieldsSchema = MemoryEntryMutableFieldsBaseSchema.readonly();
 
@@ -158,7 +158,7 @@ export const PublicMemoryEntryMutableFieldsSchema =
 
 export const MemoryEntryRepoUpdateFieldsSchema = MemoryEntryMutableFieldsBaseSchema.extend({
   updated_at: IsoDatetimeStringSchema
-}).readonly();
+}).strict().readonly();
 export const MemoryEntrySchema = PersistentObjectEnvelopeSchema.unwrap()
   .extend({
     object_kind: z.literal("memory_entry"),
@@ -166,30 +166,56 @@ export const MemoryEntrySchema = PersistentObjectEnvelopeSchema.unwrap()
     source_kind: SourceKindSchema,
     formation_kind: FormationKindSchema,
     scope_class: ScopeClassSchema,
-    content: NonEmptyStringSchema,
-    domain_tags: z.array(NonEmptyStringSchema).readonly(),
-    evidence_refs: z.array(NonEmptyStringSchema).readonly(),
-    workspace_id: NonEmptyStringSchema,
-    run_id: NonEmptyStringSchema,
-    surface_id: NonEmptyStringSchema.nullable(),
+    content: BoundedContentSchema,
+    domain_tags: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+    evidence_refs: z.array(BoundedIdSchema).max(BOUNDED_EVIDENCE_ARRAY_MAX).readonly(),
+    workspace_id: BoundedIdSchema,
+    run_id: BoundedIdSchema,
+    surface_id: BoundedIdSchema.nullable(),
     storage_tier: StorageTierSchema,
-    activation_score: z.number().min(0).max(1).nullable(),
-    retention_score: z.number().min(0).max(1).nullable(),
+    activation_score: RatioSchema.nullable(),
+    retention_score: RatioSchema.nullable(),
     manifestation_state: ManifestationStateSchema.nullable(),
     retention_state: RetentionStateSchema.nullable(),
     decay_profile: DecayProfileSchema.nullable(),
-    confidence: z.number().min(0).max(1).nullable(),
+    confidence: RatioSchema.nullable(),
     last_used_at: IsoDatetimeStringSchema.nullable(),
     last_hit_at: IsoDatetimeStringSchema.nullable(),
     reinforcement_count: NonNegativeIntSchema.nullable(),
     contradiction_count: NonNegativeIntSchema.nullable(),
-    superseded_by: NonEmptyStringSchema.nullable(),
+    superseded_by: BoundedIdSchema.nullable(),
     // invariant: optional on the wire (legacy rows + most constructors omit it),
     // but the storage layer always materializes it as null|value. Safety treats
     // undefined and null identically as "no disposition" — non-null/defined is
     // the hard precondition for autonomous terminal removal.
     forget_disposition: ForgetDispositionSchema.nullable().optional(),
-    forget_disposition_ref: NonEmptyStringSchema.nullable().optional()
+    forget_disposition_ref: BoundedIdSchema.nullable().optional()
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const disposition = value.forget_disposition ?? null;
+    const dispositionRef = value.forget_disposition_ref ?? null;
+    if (disposition === "compressed" && dispositionRef === null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["forget_disposition_ref"],
+        message: "compressed forget_disposition requires forget_disposition_ref."
+      });
+    }
+    if (disposition === "judged_useless" && dispositionRef !== null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["forget_disposition_ref"],
+        message: "judged_useless forget_disposition must not carry forget_disposition_ref."
+      });
+    }
+    if (disposition === null && dispositionRef !== null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["forget_disposition_ref"],
+        message: "forget_disposition_ref requires forget_disposition."
+      });
+    }
   })
   .readonly();
 

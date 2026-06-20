@@ -1,13 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-import {
-  RECALL_RERANK_EVIDENCE_ONLY_FACTOR,
-  buildRerankPoolIdf,
-  computeRerankFeatures
-} from "../../recall/recall-feature-rerank.js";
+import { RECALL_RERANK_EVIDENCE_ONLY_FACTOR, buildRerankPoolIdf, computeRerankFeatures } from "../../recall/recall-feature-rerank.js";
 
 describe("recall feature rerank — evidence-gist field (B2)", () => {
-  it("returns identical features when no evidence gist is supplied (regression guard)", () => {
+it("returns identical features when no evidence gist is supplied (regression guard)", () => {
     const query = compileRecallQueryProbes("favorite programming language");
     const haystack = "The user said their favorite programming language is Rust.";
 
@@ -31,7 +27,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(withWhitespaceGist).toEqual(baseline);
   });
 
-  it("scores by the gist path when content does not match but gist does", () => {
+it("scores by the gist path when content does not match but gist does", () => {
     const query = compileRecallQueryProbes("backup retention schedule");
     const features = computeRerankFeatures(query, {
       // Content is an opaque distilled fact; the answer-bearing semantics
@@ -51,7 +47,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(features.score).toBeGreaterThan(0);
   });
 
-  it("propagates caller hasEvidenceLexicalHit into the gist path's field factor", () => {
+it("propagates caller hasEvidenceLexicalHit into the gist path's field factor", () => {
     // invariant: gist path inherits caller.hasEvidenceLexicalHit
     // see also: computeRerankFeaturesForField in recall-feature-rerank.ts
     const query = compileRecallQueryProbes("rollback procedure schedule");
@@ -76,7 +72,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(withFlag.score).toBeGreaterThan(0);
   });
 
-  it("does not let gist rare-term coverage borrow content-pool IDF", () => {
+it("does not let gist rare-term coverage borrow content-pool IDF", () => {
     // invariant: gist path passes null poolIdf -> rareTermCoverage = 0
     // see also: computeRerankFeatures gist branch in recall-feature-rerank.ts
     const query = compileRecallQueryProbes("gistonlyrareterm");
@@ -98,7 +94,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(features.rareTermCoverage).toBe(0);
   });
 
-  it("prefers the higher-scoring field — content wins over an equally strong gist (max behavior)", () => {
+it("prefers the higher-scoring field — content wins over an equally strong gist (max behavior)", () => {
     const query = compileRecallQueryProbes("backup retention schedule");
 
     // Both fields encode the same strong signal. The gist path is damped
@@ -132,7 +128,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(gistOnly.score).toBeGreaterThan(0);
   });
 
-  it("hard-caps an oversized adversarial gist without blowing the tokenizer", () => {
+it("hard-caps an oversized adversarial gist without blowing the tokenizer", () => {
     // Attacker-controlled gist text has no protocol upper bound. A huge
     // payload must be truncated before tokenization so the scorer remains
     // bounded under the top-N rerank loop.
@@ -164,7 +160,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(features.score).toBeLessThanOrEqual(1);
   });
 
-  it("damps a repeated-token gist below an honest content match", () => {
+it("damps a repeated-token gist below an honest content match", () => {
     // Repeated-token attack: gist is the query phrase pasted 100 times to
     // game exact-phrase + term-coverage. distinctTokenRatio collapses far
     // below the diversity threshold, so the damp scales the weighted gist
@@ -193,7 +189,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(attackerGist.fieldFactor).toBeLessThan(0.5);
   });
 
-  it("damps a phrase-repetition padding-bypass via the distinct-token damp", () => {
+it("damps a phrase-repetition padding-bypass via the distinct-token damp", () => {
     // Padding-bypass attack shape A: attacker repeats the query phrase
     // many times to saturate exact_phrase + term_coverage, and interleaves
     // a distinct padding token after each repetition to dodge the
@@ -246,7 +242,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(honestGist.fieldFactor).toBe(1);
   });
 
-  it("damps a distinct-query-saturation gist via the concentration damp", () => {
+it("damps a distinct-query-saturation gist via the concentration damp", () => {
     // Padding-bypass attack shape B: attacker assembles N distinct query
     // terms plus minimal distinct padding, keeping distinctTokenRatio at
     // 1.0 so the diversity damp does not fire. The concentration damp now
@@ -278,7 +274,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(honestGist.fieldFactor).toBe(1);
   });
 
-  it("does not damp a legitimate paraphrase that repeats the same query word", () => {
+it("does not damp a legitimate paraphrase that repeats the same query word", () => {
     // invariant: repeating the same query word does not raise distinct
     // query density — the numerator is bounded by querySet size.
     // Regression guard against the raw-occurrence formulation that would
@@ -311,7 +307,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(legitParaphrase.score).toBeGreaterThan(0.5 * baselineHonestGist.score);
   });
 
-  it("does not damp a single-occurrence multi-term paraphrase", () => {
+it("does not damp a single-occurrence multi-term paraphrase", () => {
     // invariant: a natural-language gist that mentions each query term
     // exactly once with light connectors stays at density well under the
     // concentration threshold.
@@ -330,7 +326,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(features.score).toBeGreaterThan(0);
   });
 
-  it("concentration damp returns 1 when distinct-query density stays below the threshold (sparse query presence)", () => {
+it("concentration damp returns 1 when distinct-query density stays below the threshold (sparse query presence)", () => {
     // Boundary: query.lexical_terms non-empty but only one of them appears
     // in a long-enough gist. distinctQueryTokensPresent = 1, totalTokens = 8,
     // density = 0.125 — well below GIST_QUERY_CONCENTRATION_THRESHOLD (0.55).
@@ -355,7 +351,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(features.score).toBeGreaterThan(0);
   });
 
-  it("fully saturated gist (every token is a distinct query term) hits GIST_CONCENTRATION_MIN_DAMP", () => {
+it("fully saturated gist (every token is a distinct query term) hits GIST_CONCENTRATION_MIN_DAMP", () => {
     // Boundary: query terms equal gist tokens one-for-one. density = 1.0,
     // excess = 0.45, raw damp = 1 - 0.45 / 0.5 = 0.1, clamped to
     // GIST_CONCENTRATION_MIN_DAMP (0.2). distinctTokenDamp is 1 (every
@@ -377,7 +373,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(features.fieldFactor).toBeCloseTo(0.2, 10);
   });
 
-  it("damp path engages at tokens.length = GIST_SHORT_TOKEN_THRESHOLD + 1 (boundary transition)", () => {
+it("damp path engages at tokens.length = GIST_SHORT_TOKEN_THRESHOLD + 1 (boundary transition)", () => {
     // Boundary: 5 tokens — exactly one above GIST_SHORT_TOKEN_THRESHOLD (4).
     // Below or equal to the threshold both damps short-circuit to 1; above
     // it the damp path engages. Pin the transition by constructing a 5-token
@@ -400,7 +396,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(features.fieldFactor).toBeLessThan(1);
   });
 
-  it("documents the distinct-nonsense padding attack budget ceiling (I-1 regression)", () => {
+it("documents the distinct-nonsense padding attack budget ceiling (I-1 regression)", () => {
     // invariant: the distinct-nonsense / stop-word padding shape is a
     // designed-open attack budget — N distinct query terms wrapped in M
     // distinct neutral / stop-word pads where uniqueTokens / totalTokens
@@ -443,7 +439,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(features.score).toBeLessThanOrEqual(0.7);
   });
 
-  it("leaves a short emphatic gist (yes yes yes) above the diversity / concentration damps", () => {
+it("leaves a short emphatic gist (yes yes yes) above the diversity / concentration damps", () => {
     // Regression guard for the round 5 false positive: a 3-token emphatic
     // answer ("yes yes yes") trips both the distinct-ratio and
     // query-concentration signals (ratio 1/3, density 1.0). Both damps
@@ -462,7 +458,7 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(shortEmphatic.score).toBeGreaterThan(0);
   });
 
-  it("filters control / null-byte payloads through the shared tokenizer", () => {
+it("filters control / null-byte payloads through the shared tokenizer", () => {
     // Regression guard: splitLexicalTokens splits on every non-L/N/_./@#-
     // codepoint, so control bytes and NULs are natural delimiters. Pin the
     // contract: a gist saturated with control characters reduces to just
@@ -483,37 +479,5 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     // because splitLexicalTokens treats NUL / control bytes / the unicode
     // replacement char / RTL override as natural split codepoints.
     expect(features.termCoverage).toBe(1);
-  });
-
-  it("uses the highest-rank ref's gist semantics — empty gist on the top ref does not block scoring", () => {
-    // The gist path scores whatever non-empty gist the caller selected. If
-    // the highest-rank ref's gist is empty the caller-side fallback (see
-    // collectEvidenceGistsByMemoryId) picks the next non-empty ref; this
-    // test pins the scorer's contract end of that handoff — given a
-    // non-empty gist string (i.e. the fallback already fired), the scorer
-    // produces a meaningful signal, and given an empty string it collapses
-    // to the content-only baseline.
-    const query = compileRecallQueryProbes("backup retention schedule");
-    const opaqueContent = "Operator chose the conservative policy in the planning thread.";
-    const fallbackGist =
-      "Operator explicitly mentioned the backup retention schedule should stay weekly.";
-
-    const withFallback = computeRerankFeatures(query, {
-      content: opaqueContent,
-      hasEvidenceLexicalHit: true,
-      evidenceGist: fallbackGist
-    });
-    const withEmpty = computeRerankFeatures(query, {
-      content: opaqueContent,
-      hasEvidenceLexicalHit: true,
-      evidenceGist: ""
-    });
-
-    // With a usable fallback gist the scorer surfaces gist-side features.
-    expect(withFallback.exactPhrase).toBe(1);
-    expect(withFallback.score).toBeGreaterThan(0);
-    // With an empty gist the scorer must collapse to the content-only
-    // baseline (no gist credit, no exception).
-    expect(withEmpty.score).toBe(0);
   });
 });

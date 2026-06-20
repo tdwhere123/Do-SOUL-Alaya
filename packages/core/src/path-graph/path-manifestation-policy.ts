@@ -381,57 +381,65 @@ export function planPromotion(input: PlanPromotionInput): PromotionPlan {
   const path = input.path;
   const currentStability = path.plasticity_state.stability_class;
   const currentGovernance = path.legitimacy.governance_class;
-
-  // invariant: negative paths (effect_vector.recall_bias < 0) never gain
-  // governance_class through plasticity. The support-events ladder is
-  // agent-pumpable (report_context_usage co-usage receipts drive
-  // support_events_count with no sign filter), so without this guard an agent
-  // could seed an attention_only negative, pump support >= 8, auto-promote it
-  // to recall_allowed, and clear the suppression governance gate
-  // (packages/core/src/recall/recall-service.ts:collectNegativePathSuppressions). A negative path's
-  // recall_allowed must come only from its birth seed (a conflict llm-verdict),
-  // never from reinforcement. Positive paths still promote via support_events
-  // (Hebbian intent preserved). Stability/strength/lifecycle still evolve for
-  // negative paths; only governance promotion is suppressed.
-  // see also: packages/core/src/path-plasticity/service.ts:PathPlasticityService.planDeltasForPath.
-  // see also: packages/core/src/recall/recall-service.ts:collectNegativePathSuppressions.
-  const governanceLadderAllowed = path.effect_vector.recall_bias >= 0;
-  const nextGovernance = governanceLadderAllowed
-    ? evolveGovernanceClass({
-        current: currentGovernance,
-        support_events_count: input.nextSupportEventsCount,
-        contradiction_events_count: input.nextContradictionEventsCount
-      })
-    : currentGovernance;
-
+  const nextGovernance = resolveNextPromotionGovernance(path, input, currentGovernance);
   const nextStability = evolveStabilityClass({
     current: currentStability,
     governance_class: nextGovernance,
     support_events_count: input.nextSupportEventsCount
   });
-
   return Object.freeze({
-    stability:
-      nextStability === currentStability
-        ? null
-        : Object.freeze({
-            kind: "stability_promotion" as const,
-            path_id: path.path_id,
-            previous: currentStability,
-            next: nextStability,
-            support_events_count: input.nextSupportEventsCount,
-            contradiction_events_count: input.nextContradictionEventsCount
-          }),
-    governance:
-      nextGovernance === currentGovernance
-        ? null
-        : Object.freeze({
-            kind: "governance_promotion" as const,
-            path_id: path.path_id,
-            previous: currentGovernance,
-            next: nextGovernance,
-            support_events_count: input.nextSupportEventsCount,
-            contradiction_events_count: input.nextContradictionEventsCount
-          })
+    stability: buildPromotionPlanStep(
+      "stability_promotion",
+      path.path_id,
+      currentStability,
+      nextStability,
+      input
+    ),
+    governance: buildPromotionPlanStep(
+      "governance_promotion",
+      path.path_id,
+      currentGovernance,
+      nextGovernance,
+      input
+    )
+  });
+}
+
+function resolveNextPromotionGovernance(
+  path: Readonly<PathRelation>,
+  input: PlanPromotionInput,
+  currentGovernance: PathGovernanceClassValue
+): PathGovernanceClassValue {
+  // invariant: negative paths (effect_vector.recall_bias < 0) never gain
+  // governance_class through plasticity. The support-events ladder is
+  // agent-pumpable, so only birth seeds may grant a negative path
+  // recall_allowed.
+  if (path.effect_vector.recall_bias < 0) {
+    return currentGovernance;
+  }
+  return evolveGovernanceClass({
+    current: currentGovernance,
+    support_events_count: input.nextSupportEventsCount,
+    contradiction_events_count: input.nextContradictionEventsCount
+  });
+}
+
+function buildPromotionPlanStep(
+  kind: PromotionPlanStep["kind"],
+  pathId: string,
+  previous: PathGovernanceClassValue | StabilityClassValue,
+  next: PathGovernanceClassValue | StabilityClassValue,
+  input: PlanPromotionInput
+): PromotionPlanStep | null {
+  if (next === previous) {
+    return null;
+  }
+  return Object.freeze({
+    kind,
+    path_id: pathId,
+    previous,
+    next,
+    support_events_count: input.nextSupportEventsCount,
+    contradiction_events_count: input.nextContradictionEventsCount
   });
 }

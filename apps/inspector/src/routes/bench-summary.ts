@@ -70,6 +70,11 @@ export function registerInspectorBenchSummaryRoutes(
   app: Hono,
   options: BenchSummaryOptions
 ): void {
+  registerBenchSummaryRoute(app, options);
+  registerBenchTrendRoute(app, options);
+}
+
+function registerBenchSummaryRoute(app: Hono, options: BenchSummaryOptions): void {
   app.get("/api/bench-summary", async (context) => {
     const [selfResult, publicResult, publicMultiturnResult, liveResult] =
       await Promise.all([
@@ -97,7 +102,9 @@ export function registerInspectorBenchSummaryRoutes(
       200
     );
   });
+}
 
+function registerBenchTrendRoute(app: Hono, options: BenchSummaryOptions): void {
   app.get("/api/bench-trend", async (context) => {
     const limit = parseLimit(context.req.query("limit"));
     const entries = await Promise.all(
@@ -207,44 +214,47 @@ async function summarizeTrend(
   const selectedSlugs = slugs.slice(-limit);
   const points = (
     await Promise.all(
-      selectedSlugs.map(async (slug): Promise<BenchTrendPoint | null> => {
-        const payload = await readEntry(layout, benchName, slug);
-        if (payload === null) {
-          return null;
-        }
-        const expansion = await readExpansionShares(historyRoot, benchName, slug);
-        return {
-          slug,
-          bench_name: benchName,
-          split: payload.split,
-          run_at: payload.run_at,
-          alaya_commit: payload.alaya_commit,
-          embedding_provider: payload.embedding_provider,
-          policy_shape: payload.policy_shape ?? "stress",
-          simulate_report: payload.simulate_report ?? "none",
-          evaluated_count: payload.evaluated_count,
-          sample_size: payload.sample_size,
-          r_at_1: payload.kpi.r_at_1,
-          r_at_5: payload.kpi.r_at_5,
-          r_at_10: payload.kpi.r_at_10,
-          latency_ms_p95: payload.kpi.latency_ms_p95,
-          token_saved_ratio_vs_full_prompt: payload.kpi.token_saved_ratio_vs_full_prompt,
-          raw_history_tokens: payload.kpi.token_economy?.raw_history_tokens ?? null,
-          stored_memory_tokens:
-            payload.kpi.token_economy?.stored_memory_tokens ?? null,
-          recalled_context_tokens_mean:
-            payload.kpi.token_economy?.recalled_context_tokens_mean ?? null,
-          seed_event_count: payload.kpi.token_economy?.seed_event_count ?? null,
-          path_expansion_share: expansion.pathExpansionShare,
-          graph_expansion_share: expansion.graphExpansionShare
-        };
-      })
+      selectedSlugs.map((slug) => readTrendPoint(historyRoot, layout, benchName, slug))
     )
   ).filter((point): point is BenchTrendPoint => point !== null);
   return {
     bench_name: benchName,
     history_count: slugs.length,
     points
+  };
+}
+
+async function readTrendPoint(
+  historyRoot: string,
+  layout: { readonly historyRoot: string },
+  benchName: BenchName,
+  slug: string
+): Promise<BenchTrendPoint | null> {
+  const payload = await readEntry(layout, benchName, slug);
+  if (payload === null) return null;
+  const expansion = await readExpansionShares(historyRoot, benchName, slug);
+  return {
+    slug,
+    bench_name: benchName,
+    split: payload.split,
+    run_at: payload.run_at,
+    alaya_commit: payload.alaya_commit,
+    embedding_provider: payload.embedding_provider,
+    policy_shape: payload.policy_shape ?? "stress",
+    simulate_report: payload.simulate_report ?? "none",
+    evaluated_count: payload.evaluated_count,
+    sample_size: payload.sample_size,
+    r_at_1: payload.kpi.r_at_1,
+    r_at_5: payload.kpi.r_at_5,
+    r_at_10: payload.kpi.r_at_10,
+    latency_ms_p95: payload.kpi.latency_ms_p95,
+    token_saved_ratio_vs_full_prompt: payload.kpi.token_saved_ratio_vs_full_prompt,
+    raw_history_tokens: payload.kpi.token_economy?.raw_history_tokens ?? null,
+    stored_memory_tokens: payload.kpi.token_economy?.stored_memory_tokens ?? null,
+    recalled_context_tokens_mean: payload.kpi.token_economy?.recalled_context_tokens_mean ?? null,
+    seed_event_count: payload.kpi.token_economy?.seed_event_count ?? null,
+    path_expansion_share: expansion.pathExpansionShare,
+    graph_expansion_share: expansion.graphExpansionShare
   };
 }
 

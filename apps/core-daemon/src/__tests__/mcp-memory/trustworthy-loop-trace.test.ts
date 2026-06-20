@@ -1,7 +1,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import {
   FormationKind,
   GardenRole,
@@ -27,7 +31,9 @@ import {
   type SoulReportContextUsageResponse,
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
+
 import { EventPublisher, SignalService } from "@do-soul/alaya-core";
+
 import {
   initDatabase,
   SqliteEventLogRepo,
@@ -40,15 +46,19 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+
 import { createAlayaMcpServer } from "../../mcp/mcp-server.js";
+
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext
 } from "../../mcp-memory/tool-handler.js";
+
 import {
   SourceDeliveryAnchorValidationError,
   createMcpMemoryProposalWorkflow
 } from "../../mcp-memory/proposal-workflow.js";
+
 import { createTrustStateRecorder } from "../../trust/state.js";
 
 const TRACE_SQL = `
@@ -91,166 +101,10 @@ ORDER BY e.rowid
 
 const harnesses = new Set<TrustworthyLoopHarness>();
 
-afterEach(async () => {
-  for (const harness of harnesses) {
-    await harness.close();
-  }
-  harnesses.clear();
-});
-
-describe("trustworthy-loop-trace", () => {
-  it("reconstructs the agent-driven five-event chain with delivery-id membership SQL only", async () => {
-    assertTraceSqlUsesMembershipOnly();
-    const harness = await createTrustworthyLoopHarness();
-
-    const recall = await harness.callTool<SoulMemorySearchResponse>("soul.recall", {
-      query: "pnpm workspace commands",
-      scope_class: ScopeClass.PROJECT,
-      dimension: MemoryDimension.PREFERENCE,
-      domain_tags: null,
-      max_results: 3
-    });
-    const objectId = recall.results[0]!.object_id;
-
-    const usage = await harness.callTool<SoulReportContextUsageResponse>("soul.report_context_usage", {
-      delivery_id: recall.delivery_id,
-      usage_state: "used",
-      used_object_ids: [objectId],
-      reason: "Trace test consumed recalled memory."
-    });
-    expect(usage.status).toBe("recorded");
-
-    const signal = await harness.callTool<SoulEmitCandidateSignalResponse>("soul.emit_candidate_signal", {
-      signal_kind: "potential_preference",
-      object_kind: "memory_entry",
-      scope_hint: ScopeClass.PROJECT,
-      domain_tags: ["tooling"],
-      confidence: 0.95,
-      evidence_refs: [objectId],
-      raw_payload: { observation: "Use pnpm for workspace commands." },
-      source_delivery_ids: [recall.delivery_id]
-    });
-    expect(signal.status).toBe("emitted");
-
-    const proposal = await harness.callTool<SoulProposeMemoryUpdateResponse>("soul.propose_memory_update", {
-      target_object_id: objectId,
-      proposed_changes: { content: "Use pnpm and report memory usage." },
-      reason: "Trace test proposal.",
-      source_delivery_ids: [recall.delivery_id]
-    });
-    expect(proposal.status).toBe("created");
-
-    const review = await harness.callTool<SoulReviewMemoryProposalResponse>("soul.review_memory_proposal", {
-      proposal_id: proposal.proposal_id,
-      verdict: "reject",
-      reason: "Trace test rejects synthetic proposal.",
-      reviewer_identity: TRACE_REVIEWER_IDENTITY,
-      reviewer_token: TRACE_REVIEWER_TOKEN
-    });
-    expect(review.resolution_state).toBe(ProposalResolutionState.REJECTED);
-
-    const rows = queryRows(harness.database, TRACE_SQL, recall.delivery_id);
-    expect(rows.map((row) => row.event_type)).toEqual([
-      RecallContextEventType.SOUL_RECALL_DELIVERED,
-      RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
-      SignalEventType.SOUL_SIGNAL_EMITTED,
-      MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
-      MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED
-    ]);
-    expect(rows.map((row) => parsePayload(row).delivery_id).filter(Boolean)).toEqual([
-      recall.delivery_id,
-      recall.delivery_id
-    ]);
-    expect(
-      rows
-        .filter((row) =>
-          row.event_type === SignalEventType.SOUL_SIGNAL_EMITTED ||
-          row.event_type === MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED ||
-          row.event_type === MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED
-        )
-        .map((row) => parsePayload(row).source_delivery_ids)
-    ).toEqual([[recall.delivery_id], [recall.delivery_id], [recall.delivery_id]]);
-  });
-
-  it("links multi-delivery proposal events by array membership through the public request path", async () => {
-    const harness = await createTrustworthyLoopHarness();
-    const first = await harness.callTool<SoulMemorySearchResponse>("soul.recall", {
-      query: "first delivery",
-      scope_class: ScopeClass.PROJECT,
-      dimension: MemoryDimension.PREFERENCE,
-      domain_tags: null,
-      max_results: 3
-    });
-    const second = await harness.callTool<SoulMemorySearchResponse>("soul.recall", {
-      query: "second delivery",
-      scope_class: ScopeClass.PROJECT,
-      dimension: MemoryDimension.PREFERENCE,
-      domain_tags: null,
-      max_results: 3
-    });
-    const sourceDeliveryIds = [first.delivery_id, second.delivery_id] as const;
-
-    const proposal = await harness.callTool<SoulProposeMemoryUpdateResponse>("soul.propose_memory_update", {
-      target_object_id: PRIMARY_MEMORY_ID,
-      proposed_changes: { content: "Use pnpm from either recalled delivery." },
-      reason: "Multi-delivery trace test.",
-      source_delivery_ids: sourceDeliveryIds
-    });
-    await harness.callTool<SoulReviewMemoryProposalResponse>("soul.review_memory_proposal", {
-      proposal_id: proposal.proposal_id,
-      verdict: "reject",
-      reason: "Trace test rejects synthetic proposal.",
-      reviewer_identity: TRACE_REVIEWER_IDENTITY,
-      reviewer_token: TRACE_REVIEWER_TOKEN
-    });
-
-    for (const deliveryId of sourceDeliveryIds) {
-      const rows = queryRows(harness.database, PROPOSAL_MEMBERSHIP_SQL, deliveryId);
-      expect(rows.map((row) => row.event_type)).toEqual([
-        MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
-        MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED
-      ]);
-      expect(rows.map((row) => parsePayload(row).source_delivery_ids)).toEqual([
-        sourceDeliveryIds,
-        sourceDeliveryIds
-      ]);
-    }
-  });
-
-  it("keeps Garden-originated signals unanchored and does not warn for GARDEN_COMPILE", async () => {
-    const warn = vi.fn();
-    const harness = await createTrustworthyLoopHarness({ warn });
-    harness.enqueueGardenTask("garden-task-1");
-
-    await harness.callTool("garden.claim_task", { task_id: "garden-task-1" });
-    await harness.callTool("garden.complete_task", {
-      task_id: "garden-task-1",
-      status: "completed",
-      result_envelope: {
-        candidate_signals: [
-          {
-            signal_kind: "potential_preference",
-            object_kind: "memory_entry",
-            scope_hint: ScopeClass.PROJECT,
-            domain_tags: ["garden"],
-            confidence: 0.9,
-            evidence_refs: [PRIMARY_MEMORY_ID],
-            raw_payload: { observation: "Garden extracted an unanchored signal." }
-          }
-        ]
-      }
-    });
-
-    const gardenSignals = (await harness.eventLogRepo.queryByType(SignalEventType.SOUL_SIGNAL_EMITTED))
-      .filter((entry) => (entry.payload_json as { source?: unknown }).source === "garden_compile");
-    expect(gardenSignals).toHaveLength(1);
-    expect(gardenSignals[0]!.payload_json).not.toHaveProperty("source_delivery_ids");
-    expect(warn).not.toHaveBeenCalled();
-  });
-});
-
 const PRIMARY_MEMORY_ID = "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
+
 const TRACE_REVIEWER_IDENTITY = "user:trace-reviewer";
+
 const TRACE_REVIEWER_TOKEN = "trace-review-token";
 
 interface TraceRow {
@@ -526,3 +380,86 @@ function createUuidGenerator(): () => string {
 }
 
 type _UsedTypes = Server;
+
+afterEach(async () => {
+  for (const harness of harnesses) {
+    await harness.close();
+  }
+  harnesses.clear();
+});
+
+describe("trustworthy-loop-trace", () => {
+
+  it("reconstructs the agent-driven five-event chain with delivery-id membership SQL only", async () => {
+    assertTraceSqlUsesMembershipOnly();
+    const harness = await createTrustworthyLoopHarness();
+
+    const recall = await harness.callTool<SoulMemorySearchResponse>("soul.recall", {
+      query: "pnpm workspace commands",
+      scope_class: ScopeClass.PROJECT,
+      dimension: MemoryDimension.PREFERENCE,
+      domain_tags: null,
+      max_results: 3
+    });
+    const objectId = recall.results[0]!.object_id;
+
+    const usage = await harness.callTool<SoulReportContextUsageResponse>("soul.report_context_usage", {
+      delivery_id: recall.delivery_id,
+      usage_state: "used",
+      used_object_ids: [objectId],
+      reason: "Trace test consumed recalled memory."
+    });
+    expect(usage.status).toBe("recorded");
+
+    const signal = await harness.callTool<SoulEmitCandidateSignalResponse>("soul.emit_candidate_signal", {
+      signal_kind: "potential_preference",
+      object_kind: "memory_entry",
+      scope_hint: ScopeClass.PROJECT,
+      domain_tags: ["tooling"],
+      confidence: 0.95,
+      evidence_refs: [objectId],
+      raw_payload: { observation: "Use pnpm for workspace commands." },
+      source_delivery_ids: [recall.delivery_id]
+    });
+    expect(signal.status).toBe("emitted");
+
+    const proposal = await harness.callTool<SoulProposeMemoryUpdateResponse>("soul.propose_memory_update", {
+      target_object_id: objectId,
+      proposed_changes: { content: "Use pnpm and report memory usage." },
+      reason: "Trace test proposal.",
+      source_delivery_ids: [recall.delivery_id]
+    });
+    expect(proposal.status).toBe("created");
+
+    const review = await harness.callTool<SoulReviewMemoryProposalResponse>("soul.review_memory_proposal", {
+      proposal_id: proposal.proposal_id,
+      verdict: "reject",
+      reason: "Trace test rejects synthetic proposal.",
+      reviewer_identity: TRACE_REVIEWER_IDENTITY,
+      reviewer_token: TRACE_REVIEWER_TOKEN
+    });
+    expect(review.resolution_state).toBe(ProposalResolutionState.REJECTED);
+
+    const rows = queryRows(harness.database, TRACE_SQL, recall.delivery_id);
+    expect(rows.map((row) => row.event_type)).toEqual([
+      RecallContextEventType.SOUL_RECALL_DELIVERED,
+      RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+      SignalEventType.SOUL_SIGNAL_EMITTED,
+      MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
+      MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED
+    ]);
+    expect(rows.map((row) => parsePayload(row).delivery_id).filter(Boolean)).toEqual([
+      recall.delivery_id,
+      recall.delivery_id
+    ]);
+    expect(
+      rows
+        .filter((row) =>
+          row.event_type === SignalEventType.SOUL_SIGNAL_EMITTED ||
+          row.event_type === MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED ||
+          row.event_type === MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED
+        )
+        .map((row) => parsePayload(row).source_delivery_ids)
+    ).toEqual([[recall.delivery_id], [recall.delivery_id], [recall.delivery_id]]);
+  });
+});

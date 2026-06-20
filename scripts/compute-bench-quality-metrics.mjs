@@ -10,6 +10,24 @@ import {
   statSync
 } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
+import {
+  asArray,
+  asStringArray,
+  buildCohort,
+  buildCountDistribution,
+  buildPerPlaneRecallCoverage,
+  countActiveConstraints,
+  countPlane,
+  createCohortCounters,
+  errorMessage,
+  hasOwnField,
+  isRecord,
+  isScoreOrderNonMonotonic,
+  readNumber,
+  readPlaneWithPresence,
+  readString,
+  share
+} from "./compute-bench-quality-metrics-utils.mjs";
 
 const argv = process.argv.slice(2);
 if (argv.length === 0) {
@@ -151,10 +169,28 @@ function detectArchiveKind(archive, selectedPath) {
 
 function applyLongMemEvalDiagnostics(archive, output) {
   const questions = asArray(archive?.questions);
+  const questionStats = accumulateQuestionStats(questions);
+  const goldStats = accumulateGoldStats(questionStats.allGold);
+  const activeConstraints = countActiveConstraints(archive);
+
+  assignDiagnosticsOutput(output, {
+    questions,
+    questionStats,
+    goldStats,
+    activeConstraints
+  });
+  pushDiagnosticsWarnings(output, {
+    questions,
+    questionStats,
+    goldStats,
+    activeConstraints
+  });
+}
+
+function accumulateQuestionStats(questions) {
   const allGold = [];
   const firstAdmitted = createCohortCounters();
   const winningAdmission = createCohortCounters();
-  const budgetDropCounts = new Map();
 
   let deliveredCount = 0;
   let goldHitCount = 0;
@@ -163,9 +199,6 @@ function applyLongMemEvalDiagnostics(archive, output) {
   let nonMonotonicMissingScores = 0;
   let planeFirstFields = 0;
   let planeWinningFields = 0;
-  let budgetDropFieldCount = 0;
-  let highLexicalDemotedCount = 0;
-  let highLexicalDenominator = 0;
 
   for (const question of questions) {
     const deliveredResults = asArray(question?.delivered_results);
@@ -224,8 +257,29 @@ function applyLongMemEvalDiagnostics(archive, output) {
     }
   }
 
+  return {
+    allGold,
+    firstAdmitted,
+    winningAdmission,
+    deliveredCount,
+    goldHitCount,
+    nonMonotonicCount,
+    nonMonotonicEvaluable,
+    nonMonotonicMissingScores,
+    planeFirstFields,
+    planeWinningFields
+  };
+}
+
+function accumulateGoldStats(allGold) {
+  const budgetDropCounts = new Map();
   const planeGoldCounts = new Map();
   const planeHitAt5Counts = new Map();
+
+  let budgetDropFieldCount = 0;
+  let highLexicalDemotedCount = 0;
+  let highLexicalDenominator = 0;
+
   for (const gold of allGold) {
     if (hasOwnField(gold, "budget_drop_reason")) {
       budgetDropFieldCount += 1;
@@ -256,18 +310,30 @@ function applyLongMemEvalDiagnostics(archive, output) {
     }
   }
 
-  const firstRows = buildCohort(firstAdmitted, goldHitCount);
-  const winningRows = buildCohort(winningAdmission, goldHitCount);
-  const activeConstraints = countActiveConstraints(archive);
-
-  output.non_monotonic_rate = share(nonMonotonicCount, questions.length);
-  output.budget_drop_distribution = buildCountDistribution(
+  return {
     budgetDropCounts,
+    planeGoldCounts,
+    planeHitAt5Counts,
+    budgetDropFieldCount,
+    highLexicalDemotedCount,
+    highLexicalDenominator
+  };
+}
+
+function assignDiagnosticsOutput(output, ctx) {
+  const { questions, questionStats, goldStats, activeConstraints } = ctx;
+  const allGold = questionStats.allGold;
+  const firstRows = buildCohort(questionStats.firstAdmitted, questionStats.goldHitCount);
+  const winningRows = buildCohort(questionStats.winningAdmission, questionStats.goldHitCount);
+
+  output.non_monotonic_rate = share(questionStats.nonMonotonicCount, questions.length);
+  output.budget_drop_distribution = buildCountDistribution(
+    goldStats.budgetDropCounts,
     allGold.length
   );
   output.high_lexical_demoted_rate = share(
-    highLexicalDemotedCount,
-    highLexicalDenominator
+    goldStats.highLexicalDemotedCount,
+    goldStats.highLexicalDenominator
   );
   output.cohort_first_admitted = firstRows;
   output.cohort_winning_admission = winningRows;
@@ -277,52 +343,57 @@ function applyLongMemEvalDiagnostics(archive, output) {
     0;
   output.active_constraints_count = activeConstraints.count;
   output.per_plane_recall_coverage = buildPerPlaneRecallCoverage(
-    planeGoldCounts,
-    planeHitAt5Counts
+    goldStats.planeGoldCounts,
+    goldStats.planeHitAt5Counts
   );
 
   output.metadata.longmemeval = {
     questions_count: questions.length,
-    delivered_results_count: deliveredCount,
+    delivered_results_count: questionStats.deliveredCount,
     gold_count: allGold.length,
-    gold_hit_count: goldHitCount,
-    non_monotonic_count: nonMonotonicCount,
+    gold_hit_count: questionStats.goldHitCount,
+    non_monotonic_count: questionStats.nonMonotonicCount,
     non_monotonic_denominator: questions.length,
-    non_monotonic_evaluable_questions: nonMonotonicEvaluable,
-    non_monotonic_missing_score_questions: nonMonotonicMissingScores,
+    non_monotonic_evaluable_questions: questionStats.nonMonotonicEvaluable,
+    non_monotonic_missing_score_questions: questionStats.nonMonotonicMissingScores,
     budget_drop_denominator: allGold.length,
-    budget_drop_field_count: budgetDropFieldCount,
-    high_lexical_demoted_count: highLexicalDemotedCount,
-    high_lexical_demoted_denominator: highLexicalDenominator,
-    plane_first_admitted_field_count: planeFirstFields,
-    plane_winning_admission_field_count: planeWinningFields
+    budget_drop_field_count: goldStats.budgetDropFieldCount,
+    high_lexical_demoted_count: goldStats.highLexicalDemotedCount,
+    high_lexical_demoted_denominator: goldStats.highLexicalDenominator,
+    plane_first_admitted_field_count: questionStats.planeFirstFields,
+    plane_winning_admission_field_count: questionStats.planeWinningFields
   };
   output.metadata.active_constraints_sources = activeConstraints.sources;
+}
+
+function pushDiagnosticsWarnings(output, ctx) {
+  const { questions, questionStats, goldStats, activeConstraints } = ctx;
+  const allGold = questionStats.allGold;
 
   if (questions.length === 0) {
     output.warnings.push("questions[] missing or empty; non_monotonic_rate set to 0");
   }
-  if (deliveredCount > 0 && nonMonotonicEvaluable === 0) {
+  if (questionStats.deliveredCount > 0 && questionStats.nonMonotonicEvaluable === 0) {
     output.warnings.push(
       "delivered_results[].relevance_score missing or incomplete; non_monotonic_rate set to 0"
     );
   }
-  if (allGold.length > 0 && budgetDropFieldCount === 0) {
+  if (allGold.length > 0 && goldStats.budgetDropFieldCount === 0) {
     output.warnings.push(
       "gold[].budget_drop_reason missing; budget_drop_distribution set to empty"
     );
   }
-  if (highLexicalDenominator === 0) {
+  if (goldStats.highLexicalDenominator === 0) {
     output.warnings.push(
       "no gold rows with numeric lexical_rank and final_rank; high_lexical_demoted_rate set to 0"
     );
   }
-  if (planeFirstFields === 0) {
+  if (questionStats.planeFirstFields === 0) {
     output.warnings.push(
       "plane_first_admitted missing from delivered_results[]/gold[]; cohort_first_admitted set to empty"
     );
   }
-  if (planeWinningFields === 0) {
+  if (questionStats.planeWinningFields === 0) {
     output.warnings.push(
       "plane_winning_admission missing from delivered_results[]/gold[]; cohort_winning_admission set to empty"
     );
@@ -442,188 +513,4 @@ function applyGenericArchiveMetrics(archive, output) {
       "active_constraints[] or active_constraints_count not present; active_constraints_count set to 0"
     );
   }
-}
-
-function createCohortCounters() {
-  return {
-    delivered: new Map(),
-    gold: new Map()
-  };
-}
-
-function countPlane(counters, plane, isGoldHit) {
-  const key = plane ?? "null";
-  counters.delivered.set(key, (counters.delivered.get(key) ?? 0) + 1);
-  if (isGoldHit) {
-    counters.gold.set(key, (counters.gold.get(key) ?? 0) + 1);
-  }
-}
-
-function buildCohort(counters, goldHitCount) {
-  const keys = new Set([...counters.delivered.keys(), ...counters.gold.keys()]);
-  const deliveredDenominator = [...counters.delivered.values()].reduce(
-    (sum, count) => sum + count,
-    0
-  );
-  return Object.fromEntries(
-    [...keys]
-      .sort((a, b) => {
-        const countDelta =
-          (counters.delivered.get(b) ?? 0) - (counters.delivered.get(a) ?? 0);
-        return countDelta === 0 ? a.localeCompare(b) : countDelta;
-      })
-      .map((plane) => [
-        plane,
-        {
-          delivered_count: counters.delivered.get(plane) ?? 0,
-          delivered_share: share(
-            counters.delivered.get(plane) ?? 0,
-            deliveredDenominator
-          ),
-          delivered_denominator: deliveredDenominator,
-          gold_hit_count: counters.gold.get(plane) ?? 0,
-          gold_hit_share: share(counters.gold.get(plane) ?? 0, goldHitCount),
-          gold_hit_denominator: goldHitCount
-        }
-      ])
-  );
-}
-
-// invariant: plane keys are whatever source_planes the gold candidates
-// exposed; no static plane list. Mirrors diagnostics.ts buildPerPlaneRecallCoverage.
-function buildPerPlaneRecallCoverage(goldCounts, hitAt5Counts) {
-  return Object.fromEntries(
-    [...goldCounts.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([plane, goldCount]) => {
-        const hitCount = hitAt5Counts.get(plane) ?? 0;
-        return [
-          plane,
-          {
-            gold_count: goldCount,
-            hit_at_5_count: hitCount,
-            hit_at_5_rate: share(hitCount, goldCount)
-          }
-        ];
-      })
-  );
-}
-
-function buildCountDistribution(counts, denominator) {
-  return Object.fromEntries(
-    [...counts.entries()]
-      .sort((a, b) => {
-        const countDelta = b[1] - a[1];
-        return countDelta === 0 ? a[0].localeCompare(b[0]) : countDelta;
-      })
-      .map(([key, count]) => [
-        key,
-        {
-          count,
-          share: share(count, denominator),
-          denominator
-        }
-      ])
-  );
-}
-
-function isScoreOrderNonMonotonic(scores) {
-  for (let i = 1; i < scores.length; i++) {
-    if (scores[i] > scores[i - 1]) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function readPlaneWithPresence(deliveredResult, goldDiagnostic, field) {
-  if (hasOwnField(deliveredResult, field)) {
-    return { present: true, value: normalizePlane(deliveredResult?.[field]) };
-  }
-  if (hasOwnField(goldDiagnostic, field)) {
-    return { present: true, value: normalizePlane(goldDiagnostic?.[field]) };
-  }
-  return { present: false, value: null };
-}
-
-function normalizePlane(value) {
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null;
-}
-
-function countActiveConstraints(root) {
-  const arraySources = [];
-  const countSources = [];
-
-  walk(root, "$");
-
-  if (arraySources.length > 0) {
-    return {
-      count: arraySources.reduce((sum, source) => sum + source.count, 0),
-      sources: arraySources
-    };
-  }
-
-  return {
-    count: countSources.reduce((sum, source) => sum + source.count, 0),
-    sources: countSources
-  };
-
-  function walk(value, path) {
-    if (Array.isArray(value)) {
-      value.forEach((item, index) => walk(item, `${path}[${index}]`));
-      return;
-    }
-    if (!isRecord(value)) return;
-
-    for (const [key, child] of Object.entries(value)) {
-      const childPath = `${path}.${key}`;
-      if (key === "active_constraints" && Array.isArray(child)) {
-        arraySources.push({ path: childPath, count: child.length });
-      } else if (key === "active_constraints_count") {
-        const count = readNumber(child);
-        if (count !== null) {
-          countSources.push({ path: childPath, count });
-        }
-      }
-      walk(child, childPath);
-    }
-  }
-}
-
-function asArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function asStringArray(value) {
-  return asArray(value).filter((item) => typeof item === "string");
-}
-
-function readString(value) {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
-function readNumber(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function hasOwnField(value, field) {
-  return isRecord(value) && Object.prototype.hasOwnProperty.call(value, field);
-}
-
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function share(count, total) {
-  return total === 0 ? 0 : round(count / total);
-}
-
-function round(value) {
-  return Number(value.toFixed(6));
-}
-
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
 }

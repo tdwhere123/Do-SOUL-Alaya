@@ -139,194 +139,244 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
       requestToken: input.requestProtection.requestToken,
       allowDesktopOriginlessRequests: !input.remoteDaemonOptInEnabled
     },
-    routes: {
-      workspaces: {
-        workspaceService: input.workspaceService,
-        engineBindingService: input.engineBindingService,
-        codingEngineAvailable: input.principalCodingEngineAvailable,
-        workspaceGitBindingRepo: input.workspaceGitBindingRepo
-      },
-      workspaceFiles: {
-        workspaceService: input.workspaceService,
-        runService: input.runService,
-        workerRunRepo: input.workerRunRepo,
-        toolExecutionRecordRepo: input.toolExecutionRecordRepo,
-        gitBindingValidation: {
-          currentWorkingDirectory: input.repoRoot
-        }
-      },
-      securityStatus: {
-        workspaceService: input.workspaceService,
-        securityStatusService: input.securityStatusService
-      },
-      embeddingStatus: {
-        workspaceService: input.workspaceService,
-        embeddingStatusService: input.embeddingStatusService
-      },
-      runs: {
-        runService: input.runService,
-        conversationService: input.conversationService,
-        runHotStateService: input.runHotStateService,
-        eventLogRepo: input.eventLogRepo,
-        governanceLeaseService: input.governanceLeaseService,
-        sessionOverrideService: input.sessionOverrideService,
-        budgetBankruptcyService: input.budgetBankruptcyService,
-        contextLensAssembler: input.contextLensAssembler,
-        warn: input.warn
-      },
-      signals: {
-        runService: input.runService,
-        signalService: input.signalService
-      },
-      evidence: {
-        workspaceService: input.workspaceService,
-        runService: input.runService,
-        evidenceService: input.evidenceService
-      },
-      gardenBacklog: {
-        gardenBacklogTelemetryService: input.gardenBacklogTelemetryService
-      },
-      memories: {
-        workspaceService: input.workspaceService,
-        runService: input.runService,
-        memoryService: input.memoryService
-      },
-      greenStatus: {
-        workspaceService: input.workspaceService,
-        greenService: input.greenService
-      },
-      healthJournal: {
-        workspaceService: input.workspaceService,
-        healthJournalService: input.healthJournalService
-      },
-      config: {
-        workspaceService: input.workspaceService,
-        configService: input.configService,
-        environmentStatusService: input.environmentStatusService
-      },
-      overrides: {
-        sessionOverrideService: input.sessionOverrideService,
-        runService: input.runService
-      },
-      governance: {
-        greenService: input.greenService,
-        sessionOverrideService: input.sessionOverrideService,
-        governanceLeaseService: input.governanceLeaseService,
-        runService: input.runService
-      },
-      budget: {
-        budgetBankruptcyService: input.budgetBankruptcyService,
-        runService: input.runService
-      },
-      slots: {
-        workspaceService: input.workspaceService,
-        slotService: input.slotService,
-        arbitrationService: input.arbitrationService
-      },
-      recall: {
-        recallService: input.recallService,
-        taskSurfaceBuilder: input.taskSurfaceBuilder,
-        runService: input.runService,
-        workspaceService: input.workspaceService
-      },
-      recallStats: {
-        workspaceService: input.workspaceService,
-        recallUtilizationService: input.recallUtilizationService
-      },
-      recallUtilization: {
-        workspaceService: input.workspaceService,
-        eventLogRepo: input.eventLogRepo,
-        ...(input.singleUsedAnchorEmitter === undefined
-          ? {}
-          : { singleUsedAnchorEmitter: input.singleUsedAnchorEmitter }),
-        ...(input.deliveryAnchorReader === undefined
-          ? {}
-          : { deliveryAnchorReader: input.deliveryAnchorReader })
-      },
-      syntheses: {
-        workspaceService: input.workspaceService,
-        synthesisService: input.synthesisService
-      },
-      claims: {
-        workspaceService: input.workspaceService,
-        claimService: input.claimService
-      },
-      proposals: {
-        workspaceService: input.workspaceService,
-        memoryService: input.memoryService,
-        proposalService: input.proposalService,
-        proposalRepo: input.proposalRepo,
-        runtimeNotifier: input.runtimeNotifier,
-        mcpMemoryToolHandler: input.mcpMemoryToolHandler
-      },
-      healthInbox: {
-        workspaceService: input.workspaceService,
-        healthIssueGroupRepo: input.healthIssueGroupRepo
-      },
-      files: {
-        workspaceService: input.workspaceService,
-        runService: input.runService,
-        fileRepo: input.fileRepo,
-        runtimeNotifier: input.runtimeNotifier,
-        filesDirectory: input.filesDirectory
-      },
-      soul: {
-        workspaceService: input.workspaceService,
-        ...(input.topologyAuditService === undefined
-          ? {}
-          : { topologyAuditService: createTopologyAuditPort(input.topologyAuditService) }),
-        graphExploreService: input.graphExploreService,
-        topologyService: input.topologyService,
-        approvalService: input.soulApprovalService
-      },
-      soulGraph: {
-        workspaceService: input.workspaceService,
-        soulGraphService: input.soulGraphService
-      },
-      pathGraph: {
-        workspaceService: input.workspaceService,
-        graphContractService: input.graphContractService
-      },
-      soulSearch: {
-        workspaceService: input.workspaceService,
-        mcpMemoryToolHandler: input.mcpMemoryToolHandler
-      },
-      status: {
-        startupStepsProvider: () => input.startupSteps.map((step) => step.step),
-        principalCodingEngineAvailableProvider: () => input.principalCodingEngineAvailable,
-        mcp: input.mcp
-      },
-      projectMapping: {
-        workspaceService: input.workspaceService,
-        projectMappingService: input.projectMappingService
-      },
-      ...(input.globalMemoryService === undefined
-        ? {}
-        : {
-            globalMemory: {
-              workspaceService: input.workspaceService,
-              globalMemoryService: input.globalMemoryService
-            }
-          }),
-      conflictMatrix: {
-        workspaceService: input.workspaceService,
-        arbitrationService: input.arbitrationService
-      },
-      ...(shouldEnableE2eEventTriggers(input.env)
-        ? {
-            e2eEventTriggers: {
-              runService: input.runService,
-              eventLogRepo: createE2eEventLogRepo(input.eventLogRepo),
-              runtimeNotifier: input.runtimeNotifier
-            }
-          }
-        : {})
-    },
+    routes: createRouteServices(input),
     principalCodingEngineAvailable: input.principalCodingEngineAvailable,
     listServerHardConstraints: input.listServerHardConstraints
   } satisfies CoreDaemonAppServices;
 
   return createApp(services, input.lifecycleState);
+}
+
+function createRouteServices(input: CreateCoreDaemonAppInput) {
+  return {
+    ...createGeneralRouteServices(input),
+    ...createRecallRouteServices(input),
+    ...createGovernanceRouteServices(input),
+    ...createSoulRouteServices(input),
+    ...createOptionalRouteServices(input)
+  };
+}
+
+function createGeneralRouteServices(input: CreateCoreDaemonAppInput) {
+  return {
+    ...createWorkspaceLifecycleRoutes(input),
+    ...createRunLifecycleRoutes(input),
+    ...createMemoryGovernanceRoutes(input)
+  };
+}
+
+function createWorkspaceLifecycleRoutes(input: CreateCoreDaemonAppInput) {
+  return {
+    workspaces: {
+      workspaceService: input.workspaceService,
+      engineBindingService: input.engineBindingService,
+      codingEngineAvailable: input.principalCodingEngineAvailable,
+      workspaceGitBindingRepo: input.workspaceGitBindingRepo
+    },
+    workspaceFiles: {
+      workspaceService: input.workspaceService,
+      runService: input.runService,
+      workerRunRepo: input.workerRunRepo,
+      toolExecutionRecordRepo: input.toolExecutionRecordRepo,
+      gitBindingValidation: { currentWorkingDirectory: input.repoRoot }
+    },
+    securityStatus: {
+      workspaceService: input.workspaceService,
+      securityStatusService: input.securityStatusService
+    },
+    embeddingStatus: {
+      workspaceService: input.workspaceService,
+      embeddingStatusService: input.embeddingStatusService
+    },
+    config: {
+      workspaceService: input.workspaceService,
+      configService: input.configService,
+      environmentStatusService: input.environmentStatusService
+    }
+  };
+}
+
+function createRunLifecycleRoutes(input: CreateCoreDaemonAppInput) {
+  return {
+    runs: {
+      runService: input.runService,
+      conversationService: input.conversationService,
+      runHotStateService: input.runHotStateService,
+      eventLogRepo: input.eventLogRepo,
+      governanceLeaseService: input.governanceLeaseService,
+      sessionOverrideService: input.sessionOverrideService,
+      budgetBankruptcyService: input.budgetBankruptcyService,
+      contextLensAssembler: input.contextLensAssembler,
+      warn: input.warn
+    },
+    signals: {
+      runService: input.runService,
+      signalService: input.signalService
+    },
+    evidence: {
+      workspaceService: input.workspaceService,
+      runService: input.runService,
+      evidenceService: input.evidenceService
+    },
+    gardenBacklog: {
+      gardenBacklogTelemetryService: input.gardenBacklogTelemetryService
+    },
+    overrides: {
+      sessionOverrideService: input.sessionOverrideService,
+      runService: input.runService
+    },
+    budget: {
+      budgetBankruptcyService: input.budgetBankruptcyService,
+      runService: input.runService
+    }
+  };
+}
+
+function createMemoryGovernanceRoutes(input: CreateCoreDaemonAppInput) {
+  return {
+    memories: {
+      workspaceService: input.workspaceService,
+      runService: input.runService,
+      memoryService: input.memoryService
+    },
+    greenStatus: {
+      workspaceService: input.workspaceService,
+      greenService: input.greenService
+    },
+    healthJournal: {
+      workspaceService: input.workspaceService,
+      healthJournalService: input.healthJournalService
+    },
+    governance: {
+      greenService: input.greenService,
+      sessionOverrideService: input.sessionOverrideService,
+      governanceLeaseService: input.governanceLeaseService,
+      runService: input.runService
+    },
+    slots: {
+      workspaceService: input.workspaceService,
+      slotService: input.slotService,
+      arbitrationService: input.arbitrationService
+    }
+  };
+}
+
+function createRecallRouteServices(input: CreateCoreDaemonAppInput) {
+  return {
+    recall: {
+      recallService: input.recallService,
+      taskSurfaceBuilder: input.taskSurfaceBuilder,
+      runService: input.runService,
+      workspaceService: input.workspaceService
+    },
+    recallStats: {
+      workspaceService: input.workspaceService,
+      recallUtilizationService: input.recallUtilizationService
+    },
+    recallUtilization: {
+      workspaceService: input.workspaceService,
+      eventLogRepo: input.eventLogRepo,
+      ...(input.singleUsedAnchorEmitter === undefined
+        ? {}
+        : { singleUsedAnchorEmitter: input.singleUsedAnchorEmitter }),
+      ...(input.deliveryAnchorReader === undefined
+        ? {}
+        : { deliveryAnchorReader: input.deliveryAnchorReader })
+    },
+    syntheses: {
+      workspaceService: input.workspaceService,
+      synthesisService: input.synthesisService
+    }
+  };
+}
+
+function createGovernanceRouteServices(input: CreateCoreDaemonAppInput) {
+  return {
+    claims: {
+      workspaceService: input.workspaceService,
+      claimService: input.claimService
+    },
+    proposals: {
+      workspaceService: input.workspaceService,
+      memoryService: input.memoryService,
+      proposalService: input.proposalService,
+      proposalRepo: input.proposalRepo,
+      runtimeNotifier: input.runtimeNotifier,
+      mcpMemoryToolHandler: input.mcpMemoryToolHandler
+    },
+    healthInbox: {
+      workspaceService: input.workspaceService,
+      healthIssueGroupRepo: input.healthIssueGroupRepo
+    },
+    files: {
+      workspaceService: input.workspaceService,
+      runService: input.runService,
+      fileRepo: input.fileRepo,
+      runtimeNotifier: input.runtimeNotifier,
+      filesDirectory: input.filesDirectory
+    },
+    projectMapping: {
+      workspaceService: input.workspaceService,
+      projectMappingService: input.projectMappingService
+    },
+    conflictMatrix: {
+      workspaceService: input.workspaceService,
+      arbitrationService: input.arbitrationService
+    }
+  };
+}
+
+function createSoulRouteServices(input: CreateCoreDaemonAppInput) {
+  return {
+    soul: {
+      workspaceService: input.workspaceService,
+      ...(input.topologyAuditService === undefined
+        ? {}
+        : { topologyAuditService: createTopologyAuditPort(input.topologyAuditService) }),
+      graphExploreService: input.graphExploreService,
+      topologyService: input.topologyService,
+      approvalService: input.soulApprovalService
+    },
+    soulGraph: {
+      workspaceService: input.workspaceService,
+      soulGraphService: input.soulGraphService
+    },
+    pathGraph: {
+      workspaceService: input.workspaceService,
+      graphContractService: input.graphContractService
+    },
+    soulSearch: {
+      workspaceService: input.workspaceService,
+      mcpMemoryToolHandler: input.mcpMemoryToolHandler
+    },
+    status: {
+      startupStepsProvider: () => input.startupSteps.map((step) => step.step),
+      principalCodingEngineAvailableProvider: () => input.principalCodingEngineAvailable,
+      mcp: input.mcp
+    }
+  };
+}
+
+function createOptionalRouteServices(input: CreateCoreDaemonAppInput) {
+  return {
+    ...(input.globalMemoryService === undefined
+      ? {}
+      : {
+          globalMemory: {
+            workspaceService: input.workspaceService,
+            globalMemoryService: input.globalMemoryService
+          }
+        }),
+    ...(shouldEnableE2eEventTriggers(input.env)
+      ? {
+          e2eEventTriggers: {
+            runService: input.runService,
+            eventLogRepo: createE2eEventLogRepo(input.eventLogRepo),
+            runtimeNotifier: input.runtimeNotifier
+          }
+        }
+      : {})
+  };
 }
 
 export function shouldEnableE2eEventTriggers(env: NodeJS.ProcessEnv): boolean {

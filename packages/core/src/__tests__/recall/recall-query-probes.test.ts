@@ -3,6 +3,8 @@ import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
 import { buildSynonymExpansionTable, compileRecallQueryProbes, expandLexicalTerms, splitLexicalTokens } from "../../recall/recall-query-probes.js";
 import {
   __resetCjkSegmentationStateForTests,
+  __setCjkSegmentationLoaderForTests,
+  segmentCjkRun,
   warmCjkSegmentation
 } from "../../shared/cjk-segmentation.js";
 
@@ -179,6 +181,7 @@ describe("splitLexicalTokens CJK segmentation fail-soft", () => {
     // anchor: restore the cached jieba state between assertions in this
     // block so a later suite that depends on warm jieba is unaffected.
     __resetCjkSegmentationStateForTests();
+    vi.restoreAllMocks();
   });
 
   it("falls back to the surface token when jieba has not been loaded yet", () => {
@@ -191,6 +194,29 @@ describe("splitLexicalTokens CJK segmentation fail-soft", () => {
     // No jieba pieces yet — the load is still in-flight.
     expect(tokens).not.toContain("喜欢");
     expect(tokens).not.toContain("咖啡");
+  });
+
+  it("emits a structured warning once when jieba native loading fails", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    __setCjkSegmentationLoaderForTests(async () => {
+      throw new Error("mock jieba load failure");
+    });
+
+    await expect(warmCjkSegmentation()).resolves.toBe(false);
+    expect(segmentCjkRun("我喜欢咖啡")).toEqual(["我喜欢咖啡"]);
+    await expect(warmCjkSegmentation()).resolves.toBe(false);
+
+    expect(emitWarning).toHaveBeenCalledTimes(1);
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[CjkSegmentation] @node-rs/jieba unavailable; using surface-token fallback",
+      expect.objectContaining({
+        code: "ALAYA_CORE_CJK_SEGMENTATION_FALLBACK",
+        detail: JSON.stringify({
+          layer: "core",
+          error: "mock jieba load failure"
+        })
+      })
+    );
   });
 });
 

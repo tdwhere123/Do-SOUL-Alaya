@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
+  IsoDatetimeStringSchema,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 import { TransitionCausedBySchema } from "./memory-governance.js";
 import { BindingStateSchema, SurfaceAnchorKindSchema, SurfaceStatusSchema } from "../soul/surface.js";
 import { CrossCuttingStateSchema } from "../soul/cross-cutting.js";
@@ -27,72 +33,75 @@ export const SurfaceEventType = {
 export const SurfaceEventTypeSchema = z.enum(surfaceEventTypeValues);
 
 const SurfaceObjectPayloadObjectSchema = z.object({
-  object_id: NonEmptyStringSchema,
-  object_kind: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema.nullable()
-});
+  object_id: BoundedIdSchema,
+  object_kind: BoundedLabelSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema.nullable()
+}).strict();
 
 export const SoulSurfaceCreatedPayloadSchema = SurfaceObjectPayloadObjectSchema.extend({
-  surface_id: NonEmptyStringSchema,
-  surface_kind: NonEmptyStringSchema,
+  surface_id: BoundedIdSchema,
+  surface_kind: BoundedLabelSchema,
   surface_status: SurfaceStatusSchema
 }).readonly();
 
 export const SoulSurfaceStatusChangedPayloadSchema = SurfaceObjectPayloadObjectSchema.extend({
-  surface_id: NonEmptyStringSchema,
+  surface_id: BoundedIdSchema,
   from_status: SurfaceStatusSchema,
   to_status: SurfaceStatusSchema,
-  reason_code: NonEmptyStringSchema,
+  reason_code: BoundedLabelSchema,
   caused_by: TransitionCausedBySchema,
   occurred_at: IsoDatetimeStringSchema
 }).readonly();
 
 export const SoulSurfaceAnchorCreatedPayloadSchema = SurfaceObjectPayloadObjectSchema.extend({
-  surface_id: NonEmptyStringSchema,
+  surface_id: BoundedIdSchema,
   anchor_kind: SurfaceAnchorKindSchema,
-  anchor_value: NonEmptyStringSchema
+  anchor_value: BoundedReasonSchema
 }).readonly();
 
 export const SoulSurfaceAnchorDeletedPayloadSchema = z
   .object({
-    anchor_id: NonEmptyStringSchema,
-    surface_id: NonEmptyStringSchema,
-    workspace_id: NonEmptyStringSchema
+    anchor_id: BoundedIdSchema,
+    surface_id: BoundedIdSchema,
+    workspace_id: BoundedIdSchema
   })
+  .strict()
   .readonly();
 
 export const SoulSurfaceBindingCreatedPayloadSchema = SurfaceObjectPayloadObjectSchema.extend({
-  binding_id: NonEmptyStringSchema,
-  surface_id: NonEmptyStringSchema,
+  binding_id: BoundedIdSchema,
+  surface_id: BoundedIdSchema,
   is_primary: z.boolean(),
   binding_state: BindingStateSchema
 }).readonly();
 
 export const SoulSurfaceBindingStateChangedPayloadSchema = z
   .object({
-    binding_id: NonEmptyStringSchema,
-    object_id: NonEmptyStringSchema,
-    surface_id: NonEmptyStringSchema,
+    binding_id: BoundedIdSchema,
+    object_id: BoundedIdSchema,
+    surface_id: BoundedIdSchema,
     from_state: BindingStateSchema,
     to_state: BindingStateSchema,
-    reason: NonEmptyStringSchema,
+    reason: BoundedReasonSchema,
     occurred_at: IsoDatetimeStringSchema,
-    workspace_id: NonEmptyStringSchema
+    workspace_id: BoundedIdSchema
   })
+  .strict()
   .readonly();
 
 export const SoulCrossCuttingStateChangedPayloadSchema = z
   .object({
-    permission_id: NonEmptyStringSchema,
-    object_id: NonEmptyStringSchema,
+    permission_id: BoundedIdSchema,
+    object_id: BoundedIdSchema,
     from_state: CrossCuttingStateSchema.nullable(),
     to_state: CrossCuttingStateSchema,
-    allowed_surfaces: z.array(NonEmptyStringSchema).readonly(),
-    reason: NonEmptyStringSchema,
+    allowed_surfaces: z.array(BoundedIdSchema).readonly(),
+    reason: BoundedReasonSchema,
     occurred_at: IsoDatetimeStringSchema,
-    workspace_id: NonEmptyStringSchema
+    workspace_id: BoundedIdSchema
   })
+  .strict()
   .readonly();
 
 const surfacePayloadSchemas = {
@@ -106,15 +115,15 @@ const surfacePayloadSchemas = {
 } as const;
 
 const SurfaceEventBaseObjectSchema = z.object({
-  event_id: NonEmptyStringSchema,
-  entity_type: z.string(),
-  entity_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema.nullable(),
-  caused_by: z.string().nullable(),
+  event_id: BoundedIdSchema,
+  entity_type: BoundedLabelSchema,
+  entity_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema.nullable(),
+  caused_by: BoundedIdSchema.nullable(),
   revision: NonNegativeIntSchema,
   created_at: IsoDatetimeStringSchema
-});
+}).strict();
 
 export const SurfaceEventBaseSchema = SurfaceEventBaseObjectSchema.readonly();
 

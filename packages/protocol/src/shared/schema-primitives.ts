@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-export const NonEmptyStringSchema = z.string().min(1);
-export const IsoDatetimeStringSchema = z.string().datetime();
+export const NonEmptyStringSchema = z.string().min(1).max(65536);
+export const IsoDatetimeStringSchema = z.string().min(1).max(64).datetime();
 export const NonNegativeIntSchema = z.number().int().nonnegative();
 export const PositiveIntSchema = z.number().int().positive();
 
@@ -20,9 +20,14 @@ export const PositiveIntSchema = z.number().int().positive();
  */
 export const BoundedString = (max: number) => z.string().min(1).max(max);
 export const BoundedIdSchema = BoundedString(256);
+export const BoundedNameSchema = BoundedString(256);
+export const BoundedPathSchema = BoundedString(4096);
 export const BoundedQuerySchema = BoundedString(4096);
 export const BoundedReasonSchema = BoundedString(16384);
 export const BoundedLabelSchema = BoundedString(1024);
+export const RatioSchema = z.number().finite().min(0).max(1);
+export const SignedRatioSchema = z.number().finite().min(-1).max(1);
+export const NonNegativeFiniteNumberSchema = z.number().finite().nonnegative();
 /** Memory entry content body. 65536 chars covers long-form notes
  * (a few research paper sections) without giving any single MCP call
  * the ability to pin daemon memory with arbitrarily large strings. */

@@ -1,149 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  MemoryDimension,
-  ScopeClass,
-  type EventLogEntry,
-  type MemoryEntry
-} from "@do-soul/alaya-protocol";
-import {
-  ReconciliationService,
-  createRuleOnlyReconciliationDecisionPort,
-  type ReconciliationDecision,
-  type ReconciliationLlmDecisionPort,
-  type ReconciliationServiceDependencies,
-  type ReconciliationVerdictApplier
-} from "../../governance/reconciliation-service.js";
+import { type MemoryEntry } from "@do-soul/alaya-protocol";
+import { ReconciliationService } from "../../governance/reconciliation-service.js";
 
-// invariant: covers the ingest-reconciliation decision contract — the
-// three-band gate (ADD below the floor, NOOP for a normalized-string-
-// identical neighbor, LLM judge for any other neighbor at or above the
-// floor), the LLM port returning each of ADD / UPDATE / NOOP, the
-// LLM-failure degrade-to-ADD path, the evidence relink + domain_tags
-// refresh on UPDATE, the NOOP audit-event emission, and the decide-then-
-// create discipline (NOOP creates no evidence_capsule; a re-seed of the
-// same fact does not grow the surviving row's evidence_refs).
-// see also: packages/core/src/governance/reconciliation-service.ts
-
-function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
-  return {
-    object_id: "memory-existing",
-    object_kind: "memory_entry",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-05-16T00:00:00.000Z",
-    updated_at: "2026-05-16T00:00:00.000Z",
-    created_by: "test",
-    dimension: MemoryDimension.FACT,
-    source_kind: "compiler",
-    formation_kind: "extracted",
-    scope_class: ScopeClass.PROJECT,
-    content: "The user lives in Berlin.",
-    domain_tags: ["bench-seed"],
-    evidence_refs: ["evidence-1"],
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
-    storage_tier: "hot",
-    activation_score: 0.6,
-    retention_score: 0.6,
-    manifestation_state: "excerpt",
-    retention_state: "working",
-    decay_profile: "stable",
-    confidence: 0.9,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: 0,
-    contradiction_count: 0,
-    superseded_by: null,
-    ...overrides
-  };
-}
-
-type UpdateFn = ReconciliationServiceDependencies["memoryUpdate"]["update"];
-type SearchFn = ReconciliationServiceDependencies["keywordSearch"]["searchByKeyword"];
-type AppendFn = ReconciliationServiceDependencies["eventLog"]["append"];
-type DecideFn = ReconciliationLlmDecisionPort["decide"];
-
-function createDeps(
-  neighbors: readonly MemoryEntry[],
-  overrides: Partial<ReconciliationServiceDependencies> = {}
-): {
-  readonly deps: ReconciliationServiceDependencies;
-  readonly update: ReturnType<typeof vi.fn<UpdateFn>>;
-  readonly searchByKeyword: ReturnType<typeof vi.fn<SearchFn>>;
-  readonly append: ReturnType<typeof vi.fn<AppendFn>>;
-  readonly decide: ReturnType<typeof vi.fn<DecideFn>>;
-} {
-  const findByIds = async (ids: readonly string[]) =>
-    neighbors.filter((entry) => ids.includes(entry.object_id));
-  const update = vi.fn<UpdateFn>(async (objectId, fields) =>
-    createMemoryEntry({
-      object_id: objectId,
-      ...(fields.content === undefined ? {} : { content: fields.content }),
-      ...(fields.domain_tags === undefined ? {} : { domain_tags: [...fields.domain_tags] }),
-      ...(fields.evidence_refs === undefined ? {} : { evidence_refs: [...fields.evidence_refs] })
-    })
-  );
-  const searchByKeyword = vi.fn<SearchFn>(async () =>
-    neighbors.map((entry) => ({ object_id: entry.object_id }))
-  );
-  const append = vi.fn<AppendFn>(
-    async (event) => ({ ...event, event_id: "event-1", created_at: "2026-05-16T00:00:00.000Z", revision: 0 }) as EventLogEntry
-  );
-  const decide = vi.fn<DecideFn>(async () => ({ kind: "add" as const, reason: "distinct" }));
-  const deps: ReconciliationServiceDependencies = {
-    keywordSearch: { searchByKeyword },
-    memoryRepo: { findByIds },
-    memoryUpdate: { update },
-    eventLog: { append },
-    llmDecision: { decide },
-    ...overrides
-  };
-  return { deps, update, searchByKeyword, append, decide };
-}
-
-const baseInput = {
-  workspaceId: "workspace-1",
-  runId: "run-1",
-  signalId: "signal-1"
-} as const;
-
-// invariant: drives runWithDecision with an applyVerdict callback that
-// stands in for the materialization router — it mints a fresh
-// evidence_capsule id on ADD / UPDATE (NOOP creates nothing), exactly
-// like the live router. Tracks which verdicts were applied and how many
-// evidence capsules were minted so the decide-then-create discipline can
-// be asserted.
-function drive(
-  service: ReconciliationService,
-  input: { incomingContent: string; incomingDomainTags: readonly string[] },
-  options: { evidenceRefForVerdict?: (kind: string) => string } = {}
-): {
-  readonly decision: Promise<ReconciliationDecision>;
-  readonly appliedVerdicts: string[];
-  readonly evidenceMinted: () => number;
-} {
-  const appliedVerdicts: string[] = [];
-  let evidenceCounter = 0;
-  const applyVerdict: ReconciliationVerdictApplier = async (verdict) => {
-    appliedVerdicts.push(verdict.kind);
-    if (verdict.kind === "noop") {
-      return {};
-    }
-    evidenceCounter += 1;
-    const ref =
-      options.evidenceRefForVerdict?.(verdict.kind) ?? `evidence-mint-${evidenceCounter}`;
-    return { incomingEvidenceRef: ref };
-  };
-  return {
-    decision: service.runWithDecision({ ...baseInput, ...input }, applyVerdict),
-    appliedVerdicts,
-    evidenceMinted: () => evidenceCounter
-  };
-}
+import { DecideFn, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
 
 describe("ReconciliationService", () => {
-  it("ADD: appends a genuinely new fact when no similar memory exists", async () => {
+it("ADD: appends a genuinely new fact when no similar memory exists", async () => {
     const { deps, update, decide } = createDeps([]);
     const service = new ReconciliationService(deps);
 
@@ -163,7 +25,7 @@ describe("ReconciliationService", () => {
     expect(driven.evidenceMinted()).toBe(1);
   });
 
-  it("ADD: empty incoming content returns early without retrieval", async () => {
+it("ADD: empty incoming content returns early without retrieval", async () => {
     const { deps, searchByKeyword } = createDeps([createMemoryEntry()]);
     const service = new ReconciliationService(deps);
 
@@ -176,7 +38,7 @@ describe("ReconciliationService", () => {
     expect(searchByKeyword).not.toHaveBeenCalled();
   });
 
-  it("ADD: a neighbor below the similarity floor never reaches the LLM", async () => {
+it("ADD: a neighbor below the similarity floor never reaches the LLM", async () => {
     const neighbor = createMemoryEntry({
       content: "The user owns three cats.",
       domain_tags: ["pets"]
@@ -193,7 +55,7 @@ describe("ReconciliationService", () => {
     expect(decide).not.toHaveBeenCalled();
   });
 
-  it("NOOP: a normalized-string-identical duplicate collapses with zero LLM call and creates nothing", async () => {
+it("NOOP: a normalized-string-identical duplicate collapses with zero LLM call and creates nothing", async () => {
     const neighbor = createMemoryEntry({
       content: "The user lives in Berlin.",
       evidence_refs: ["evidence-old"]
@@ -230,7 +92,7 @@ describe("ReconciliationService", () => {
     );
   });
 
-  it("a genuine ADD followed by a byte-identical re-seed collapses to NOOP and does not grow evidence_refs", async () => {
+it("a genuine ADD followed by a byte-identical re-seed collapses to NOOP and does not grow evidence_refs", async () => {
     // The store starts EMPTY. The first ingest is a genuine ADD that
     // mints exactly one evidence capsule and creates a row; that row is
     // then fed back into the neighbor pool. The second ingest of the
@@ -283,7 +145,7 @@ describe("ReconciliationService", () => {
     expect(append).toHaveBeenCalledTimes(1);
   });
 
-  it("case-distinct identifiers route to the LLM judge — not a silent NOOP", async () => {
+it("case-distinct identifiers route to the LLM judge — not a silent NOOP", async () => {
     // "pod-A" vs "pod-a" are genuinely different facts; the zero-LLM
     // NOOP gate requires byte-identity (modulo whitespace) and must NOT
     // case-fold. The case-distinct fact reaches the semantic judge
@@ -306,7 +168,7 @@ describe("ReconciliationService", () => {
     expect(decision.kind).toBe("add");
   });
 
-  it("a near-Jaccard-but-not-identical neighbor routes to the LLM, not a silent NOOP", async () => {
+it("a near-Jaccard-but-not-identical neighbor routes to the LLM, not a silent NOOP", async () => {
     const neighbor = createMemoryEntry({ content: "The user lives in Berlin" });
     const { deps, decide } = createDeps([neighbor]);
     decide.mockResolvedValueOnce({ kind: "add", reason: "distinct enough" });
@@ -321,7 +183,7 @@ describe("ReconciliationService", () => {
     expect(decision.kind).toBe("add");
   });
 
-  it("a single-char discriminator pair is NOT collapsed — token set stays distinct", async () => {
+it("a single-char discriminator pair is NOT collapsed — token set stays distinct", async () => {
     const neighbor = createMemoryEntry({
       content: "The user is admin of project A",
       domain_tags: ["projects"]
@@ -341,7 +203,7 @@ describe("ReconciliationService", () => {
     expect(decision.kind).toBe("add");
   });
 
-  it("a neighbor at or above the floor routes into the LLM ambiguous band", async () => {
+it("a neighbor at or above the floor routes into the LLM ambiguous band", async () => {
     const neighbor = createMemoryEntry({ content: "alpha beta gamma delta" });
     const { deps, decide } = createDeps([neighbor], {
       thresholds: { similarityFloor: 0.5 }
@@ -357,7 +219,7 @@ describe("ReconciliationService", () => {
     expect(decide).toHaveBeenCalledTimes(1);
   });
 
-  it("ambiguous-band fact: LLM ADD verdict appends without an UPDATE", async () => {
+it("ambiguous-band fact: LLM ADD verdict appends without an UPDATE", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",
       content: "The user lives in Berlin city center"
@@ -380,7 +242,7 @@ describe("ReconciliationService", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it("ambiguous-band fact: LLM UPDATE verdict rewrites content, refreshes tags, relinks evidence", async () => {
+it("ambiguous-band fact: LLM UPDATE verdict rewrites content, refreshes tags, relinks evidence", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",
       content: "The user lives in Berlin city center",
@@ -421,7 +283,7 @@ describe("ReconciliationService", () => {
     });
   });
 
-  it("ambiguous-band fact: LLM NOOP verdict drops the fact, audits it, creates nothing", async () => {
+it("ambiguous-band fact: LLM NOOP verdict drops the fact, audits it, creates nothing", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",
       content: "The user lives in Berlin city center",
@@ -455,7 +317,7 @@ describe("ReconciliationService", () => {
     );
   });
 
-  it("a max-length distilled fact round-trips through the NOOP audit row untruncated", async () => {
+it("a max-length distilled fact round-trips through the NOOP audit row untruncated", async () => {
     // The audit cap (AUDIT_DROPPED_CONTENT_MAX_CHARS = 500) must stay at
     // or above the distilled-fact cap (DISTILLED_FACT_MAX_CHARS = 500) so
     // a dropped fact at the longest length the ingest path can produce is
@@ -479,7 +341,7 @@ describe("ReconciliationService", () => {
     expect(decodeURIComponent(encoded)).toBe(maxLengthFact);
   });
 
-  it("LLM failure degrades to ADD with the conflict scan flagged", async () => {
+it("LLM failure degrades to ADD with the conflict scan flagged", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",
       content: "The user lives in Berlin city center"
@@ -503,7 +365,7 @@ describe("ReconciliationService", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it("LLM UPDATE that cannot be applied degrades to ADD with the conflict scan flagged", async () => {
+it("LLM UPDATE that cannot be applied degrades to ADD with the conflict scan flagged", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",
       content: "The user lives in Berlin city center"
@@ -536,7 +398,7 @@ describe("ReconciliationService", () => {
     expect(driven.appliedVerdicts).toEqual(["update", "add"]);
   });
 
-  it("LLM UPDATE with an invalid target degrades to ADD", async () => {
+it("LLM UPDATE with an invalid target degrades to ADD", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",
       content: "The user lives in Berlin city center"
@@ -560,7 +422,7 @@ describe("ReconciliationService", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it("multi-neighbor: the highest-similarity neighbor is the LLM's first candidate", async () => {
+it("multi-neighbor: the highest-similarity neighbor is the LLM's first candidate", async () => {
     const weak = createMemoryEntry({
       object_id: "memory-weak",
       content: "The user lives in Berlin"
@@ -584,7 +446,7 @@ describe("ReconciliationService", () => {
     expect(candidates[0]?.objectId).toBe("memory-strong");
   });
 
-  it("flags runConflictScan for a same-topic divergent fact below the floor", async () => {
+it("flags runConflictScan for a same-topic divergent fact below the floor", async () => {
     const neighbor = createMemoryEntry({
       content: "The user prefers tea over coffee.",
       domain_tags: ["beverage-preference"]
@@ -601,7 +463,7 @@ describe("ReconciliationService", () => {
     expect(decision.runConflictScan).toBe(true);
   });
 
-  it("scopes neighbors to the workspace and skips archived rows", async () => {
+it("scopes neighbors to the workspace and skips archived rows", async () => {
     const foreign = createMemoryEntry({
       object_id: "memory-foreign",
       workspace_id: "workspace-other",
@@ -621,289 +483,5 @@ describe("ReconciliationService", () => {
     }).decision;
 
     expect(decision.kind).toBe("add");
-  });
-
-  it("degrades to ADD when keyword search throws", async () => {
-    const { deps } = createDeps([], {
-      keywordSearch: {
-        searchByKeyword: async () => {
-          throw new Error("fts unavailable");
-        }
-      }
-    });
-    const service = new ReconciliationService(deps);
-
-    const decision = await drive(service, {
-      incomingContent: "The user lives in Berlin.",
-      incomingDomainTags: ["bench-seed"]
-    }).decision;
-
-    expect(decision.kind).toBe("add");
-  });
-
-  it("serializes concurrent reconciles for the same workspace", async () => {
-    let active = 0;
-    let maxActive = 0;
-    const neighbor = createMemoryEntry({ content: "unrelated content here" });
-    const { deps } = createDeps([neighbor], {
-      keywordSearch: {
-        searchByKeyword: async () => {
-          active += 1;
-          maxActive = Math.max(maxActive, active);
-          await new Promise((resolve) => setTimeout(resolve, 5));
-          active -= 1;
-          return [];
-        }
-      }
-    });
-    const service = new ReconciliationService(deps);
-
-    await Promise.all([
-      drive(service, { incomingContent: "fact one", incomingDomainTags: [] }).decision,
-      drive(service, { incomingContent: "fact two", incomingDomainTags: [] }).decision,
-      drive(service, { incomingContent: "fact three", incomingDomainTags: [] }).decision
-    ]);
-
-    // The keyed mutex must keep at most one critical section running per
-    // workspace key — the decide -> create window stays closed.
-    expect(maxActive).toBe(1);
-  });
-});
-
-describe("ReconciliationService storage-level lease", () => {
-  it("acquires and releases the lease around a normal decide->write pass", async () => {
-    const { deps } = createDeps([]);
-    const acquireCalls: string[] = [];
-    const releaseCalls: string[] = [];
-    const lease = {
-      tryAcquire: (leaseKey: string, ownerToken: string) => {
-        acquireCalls.push(`${leaseKey}:${ownerToken}`);
-        return { owner_token: ownerToken };
-      },
-      release: (leaseKey: string, ownerToken: string) => {
-        releaseCalls.push(`${leaseKey}:${ownerToken}`);
-      }
-    };
-    const service = new ReconciliationService({ ...deps, lease });
-
-    const driven = drive(service, {
-      incomingContent: "The user prefers tabs over spaces.",
-      incomingDomainTags: ["bench-seed"]
-    });
-    const decision = await driven.decision;
-
-    expect(decision.kind).toBe("add");
-    expect(acquireCalls).toHaveLength(1);
-    // The lease is released after the pass, by the same owner token.
-    expect(releaseCalls).toEqual(acquireCalls);
-  });
-
-  it("degrades to ADD with a conflict scan when the lease is held by another process", async () => {
-    // A neighbor that would normally NOOP — proving the lease-busy path
-    // short-circuits BEFORE the decision so it never reaches the gate.
-    const neighbor = createMemoryEntry({ content: "The user lives in Berlin." });
-    const { deps, decide, searchByKeyword } = createDeps([neighbor]);
-    const lease = {
-      tryAcquire: () => null,
-      release: vi.fn()
-    };
-    const service = new ReconciliationService({ ...deps, lease });
-
-    const driven = drive(service, {
-      incomingContent: "The user lives in Berlin.",
-      incomingDomainTags: ["bench-seed"]
-    });
-    const decision = await driven.decision;
-
-    expect(decision.kind).toBe("add");
-    expect(decision.runConflictScan).toBe(true);
-    expect(driven.appliedVerdicts).toEqual(["add"]);
-    // The decide path was never entered — no retrieval, no LLM judge.
-    expect(searchByKeyword).not.toHaveBeenCalled();
-    expect(decide).not.toHaveBeenCalled();
-    // A lease that was never acquired is never released.
-    expect(lease.release).not.toHaveBeenCalled();
-  });
-
-  it("releases the lease even when the decide->write pass throws", async () => {
-    const { deps } = createDeps([]);
-    const releaseCalls: string[] = [];
-    const lease = {
-      tryAcquire: (_leaseKey: string, ownerToken: string) => ({ owner_token: ownerToken }),
-      release: (leaseKey: string, ownerToken: string) => {
-        releaseCalls.push(`${leaseKey}:${ownerToken}`);
-      }
-    };
-    const service = new ReconciliationService({ ...deps, lease });
-
-    const applyVerdict: ReconciliationVerdictApplier = async () => {
-      throw new Error("synthetic applyVerdict failure");
-    };
-
-    await expect(
-      service.runWithDecision(
-        { ...baseInput, incomingContent: "a brand new fact", incomingDomainTags: [] },
-        applyVerdict
-      )
-    ).rejects.toThrow("synthetic applyVerdict failure");
-    // The finally block releases the lease so a crash cannot wedge ingest.
-    expect(releaseCalls).toHaveLength(1);
-  });
-});
-
-// invariant: the rule-only, zero-cloud decision basis. Reconciliation
-// must dedup out of the box without any cloud/LLM call: the identity
-// NOOP and the below-floor ADD are decided before the port is consulted,
-// and the ambiguous band resolves conservatively to ADD (never a
-// rule-based UPDATE/NOOP — that needs the semantic-judge upgrade). These
-// tests wire the real rule-only port behind a spy whose `decide` does no
-// network I/O, so any spy invocation is the ambiguous-band path and the
-// absence of a real garden-LLM call is asserted by construction.
-// see also: packages/core/src/governance/reconciliation-service.ts
-//   createRuleOnlyReconciliationDecisionPort
-describe("ReconciliationService rule-only (zero-cloud) basis", () => {
-  function createRuleOnlyDeps(
-    neighbors: readonly MemoryEntry[],
-    overrides: Partial<ReconciliationServiceDependencies> = {}
-  ): {
-    readonly deps: ReconciliationServiceDependencies;
-    readonly ruleOnlyDecide: ReturnType<typeof vi.fn<DecideFn>>;
-  } {
-    const base = createDeps(neighbors, overrides);
-    // Wrap the REAL rule-only port in a spy: the spy proves whether the
-    // ambiguous band consulted the port at all, while the wrapped real
-    // implementation proves the verdict is ADD with no network.
-    const realPort = createRuleOnlyReconciliationDecisionPort();
-    const ruleOnlyDecide = vi.fn<DecideFn>(realPort.decide);
-    const deps: ReconciliationServiceDependencies = {
-      ...base.deps,
-      llmDecision: { decide: ruleOnlyDecide },
-      ...overrides
-    };
-    return { deps, ruleOnlyDecide };
-  }
-
-  it("dedup: a normalized-string-identical fact NOOPs with zero port (and zero network) call", async () => {
-    const neighbor = createMemoryEntry({ content: "The user lives in Berlin." });
-    const { deps, ruleOnlyDecide } = createRuleOnlyDeps([neighbor]);
-    const service = new ReconciliationService(deps);
-
-    const driven = drive(service, {
-      incomingContent: "  The user lives in   Berlin.  ",
-      incomingDomainTags: ["bench-seed"]
-    });
-    const decision = await driven.decision;
-
-    // Dedup must work rule-only: the identity NOOP is decided before the
-    // port is ever consulted.
-    expect(decision.kind).toBe("noop");
-    expect(decision.survivingObjectId).toBe("memory-existing");
-    expect(driven.appliedVerdicts).toEqual(["noop"]);
-    expect(driven.evidenceMinted()).toBe(0);
-    expect(ruleOnlyDecide).not.toHaveBeenCalled();
-  });
-
-  it("ADD: a novel fact below the floor appends with zero port call", async () => {
-    const neighbor = createMemoryEntry({
-      content: "The user owns three cats.",
-      domain_tags: ["pets"]
-    });
-    const { deps, ruleOnlyDecide } = createRuleOnlyDeps([neighbor]);
-    const service = new ReconciliationService(deps);
-
-    const driven = drive(service, {
-      incomingContent: "The user works as a marine biologist.",
-      incomingDomainTags: ["career"]
-    });
-    const decision = await driven.decision;
-
-    expect(decision.kind).toBe("add");
-    expect(driven.appliedVerdicts).toEqual(["add"]);
-    expect(ruleOnlyDecide).not.toHaveBeenCalled();
-  });
-
-  it("ambiguous band: a non-identical above-floor neighbor resolves to ADD, never a rule-based UPDATE/NOOP", async () => {
-    const neighbor = createMemoryEntry({
-      object_id: "memory-neighbor",
-      content: "The user lives in Berlin city center"
-    });
-    const update = vi.fn<UpdateFn>(async (objectId) => createMemoryEntry({ object_id: objectId }));
-    const { deps, ruleOnlyDecide } = createRuleOnlyDeps([neighbor], {
-      thresholds: { similarityFloor: 0.2 },
-      memoryUpdate: { update }
-    });
-    const service = new ReconciliationService(deps);
-
-    const driven = drive(service, {
-      incomingContent: "The user lives in Berlin since 2019",
-      incomingDomainTags: ["bench-seed"]
-    });
-    const decision = await driven.decision;
-
-    // The ambiguous band consulted the rule-only port — and it resolved
-    // to ADD. No rule-based UPDATE (no in-place rewrite) and no NOOP drop.
-    expect(ruleOnlyDecide).toHaveBeenCalledTimes(1);
-    expect(decision.kind).toBe("add");
-    expect(driven.appliedVerdicts).toEqual(["add"]);
-    expect(update).not.toHaveBeenCalled();
-  });
-
-  it("the rule-only port resolves ADD for any candidate set and performs no I/O", async () => {
-    const port = createRuleOnlyReconciliationDecisionPort();
-    const verdict = await port.decide({
-      incomingContent: "The user lives in Berlin since 2019",
-      candidates: [{ objectId: "memory-neighbor", content: "The user lives in Berlin city center" }]
-    });
-    expect(verdict.kind).toBe("add");
-    expect(verdict.targetObjectId).toBeUndefined();
-  });
-
-  it("the per-workspace mutex still serializes concurrent reconciles in rule-only mode", async () => {
-    let active = 0;
-    let maxActive = 0;
-    const neighbor = createMemoryEntry({ content: "unrelated content here" });
-    const { deps } = createRuleOnlyDeps([neighbor], {
-      keywordSearch: {
-        searchByKeyword: async () => {
-          active += 1;
-          maxActive = Math.max(maxActive, active);
-          await new Promise((resolve) => setTimeout(resolve, 5));
-          active -= 1;
-          return [];
-        }
-      }
-    });
-    const service = new ReconciliationService(deps);
-
-    await Promise.all([
-      drive(service, { incomingContent: "fact one", incomingDomainTags: [] }).decision,
-      drive(service, { incomingContent: "fact two", incomingDomainTags: [] }).decision,
-      drive(service, { incomingContent: "fact three", incomingDomainTags: [] }).decision
-    ]);
-
-    expect(maxActive).toBe(1);
-  });
-
-  it("the storage-level lease still guards the decide->write section in rule-only mode", async () => {
-    const neighbor = createMemoryEntry({ content: "The user lives in Berlin." });
-    const { deps, ruleOnlyDecide } = createRuleOnlyDeps([neighbor]);
-    const lease = {
-      tryAcquire: () => null,
-      release: vi.fn()
-    };
-    const service = new ReconciliationService({ ...deps, lease });
-
-    const driven = drive(service, {
-      incomingContent: "The user lives in Berlin.",
-      incomingDomainTags: ["bench-seed"]
-    });
-    const decision = await driven.decision;
-
-    // Lease busy short-circuits to ADD before the decide path — the
-    // both-ADD race guard is load-bearing in rule-only mode too.
-    expect(decision.kind).toBe("add");
-    expect(decision.runConflictScan).toBe(true);
-    expect(ruleOnlyDecide).not.toHaveBeenCalled();
-    expect(lease.release).not.toHaveBeenCalled();
   });
 });

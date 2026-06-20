@@ -1,133 +1,48 @@
 import {
   MemoryGraphEdgeType,
-  type MemoryEntry,
-  type MemoryGraphEdgeTypeValue
+  type MemoryGraphEdgeTypeValue,
+  type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import {
-  CONTRADICTS_SEED_PROFILE,
-  INCOMPATIBLE_SEED_PROFILE,
   type PathMintOutcome,
-  type PathSeedProfile
 } from "../path-graph/path-relation-proposal-service.js";
-import type { PathCandidateSink } from "../path-graph/path-candidate-sink.js";
 import { CoreError } from "../shared/errors.js";
+import {
+  DEFAULT_LLM_MAX_PAIRS,
+  TAG_OVERLAP_CONTRADICTS_THRESHOLD,
+  TOKEN_JACCARD_CONTRADICTS_MAX,
+  errorMessage,
+  jaccardIndex,
+  negativeProfileForEdgeType,
+  readConflictDimensionCandidates,
+  tokenize,
+  type ConflictDetectionServiceDeps,
+  type ConflictVerdictSource
+} from "./conflict-detection-service-shared.js";
+export type {
+  ConflictDetectionKarmaEmitterPort,
+  ConflictDetectionLlmPort,
+  ConflictDetectionMemoryRepoPort,
+  ConflictDetectionServiceDeps
+} from "./conflict-detection-service-shared.js";
 
-// invariant: the trust tier of a conflict verdict. "rule" is the
-// agent-controllable Jaccard heuristic (weak, attention_only, no karma);
-// "llm" is the system-computed classifier verdict (recall_allowed/0.9,
-// fires supersede_penalty karma). writeEdge takes this so a single writer
-// cannot silently grant the rule path the LLM path's trust.
-type ConflictVerdictSource = "rule" | "llm";
-
-// invariant: ConflictDetectionService is the producer of the negative
-// lifecycle path families contradicts / incompatible_with (the supersedes
-// and exception_to writers live in materialization-router via
-// first-class candidate signal refs). Runs at memory materialization
-// time. Detection
-// failures must not break a successful memory creation; the caller
-// catches and warns.
-// invariant: scope = HOT tier only. findByDimension on memoryRepo reads
-// the hot tier index; cold/warm-tier memories do not participate in
-// rule-based conflict detection. New memories never raise contradicts
-// against tombstoned/archived peers — design intent because conflict
-// detection costs O(workspace_size) on every materialization and only
-// the live working set is recall-eligible.
-// invariant: LLM fallback is bypassed when rule-based detection already
-// produced at least one contradicts edge. The LLM run targets the
-// ambiguous-neighborhood case where rule thresholds did not trip; it
-// is not an "add a second opinion on top" path. The rule path is
-// disable-able via ruleEnabled=false (constructor) or
-// ALAYA_CONFLICT_RULE_ENABLED=false (env); when disabled the LLM port
-// becomes the sole producer of contradicts / incompatible_with edges.
-
-export interface ConflictDetectionMemoryRepoPort {
-  findByDimension(
-    workspaceId: string,
-    dimension: MemoryEntry["dimension"]
-  ): Promise<readonly Readonly<MemoryEntry>[]>;
-  // invariant: the INCOMPATIBLE_WITH scan candidate source. The gate
-  // requires jaccard(domain_tags) >= TAG_OVERLAP_CONTRADICTS_THRESHOLD,
-  // which implies the candidate shares >=1 of the new memory's
-  // domain_tags. So the shared-tag set is a strict SUPERSET of every
-  // gate-passing peer: scanning it instead of the full workspace yields
-  // byte-identical INCOMPATIBLE_WITH edges with a sub-linear candidate
-  // set. A new memory with zero tags has no shared-tag candidates, which
-  // also matches the full scan (jaccard with an empty set is 0 < 0.35).
-  findBySharedDomainTags(
-    workspaceId: string,
-    tags: readonly string[]
-  ): Promise<readonly Readonly<MemoryEntry>[]>;
+interface ConflictDetectionRequest {
+  readonly newMemoryId: string;
+  readonly newMemoryDimension: string;
+  readonly newMemoryScopeClass: string;
+  readonly newMemoryContent: string;
+  readonly newMemoryDomainTags: readonly string[];
+  readonly workspaceId: string;
+  readonly runId: string;
+  readonly strictNoDrop?: boolean;
 }
 
-// invariant: conflict-detection sink is the governed negative-family path
-// candidate intake (PathCandidateSink), not memory_graph_edges. A
-// contradicts/incompatible_with candidate is born with recall_bias -
-// (suppresses recall, never drops graph_support below baseline) and runs
-// the unified plasticity model. Trust is tiered by verdict source: the
-// LLM verdict seeds recall_allowed/0.9 and fires the karma supersede
-// signal alongside; the agent-controllable rule heuristic seeds
-// attention_only/0.5 and fires NO karma.
-// see also: path-candidate-sink.ts PathCandidateSink — the shared port.
-
-export interface ConflictDetectionLlmPort {
-  classifyPair(input: {
-    readonly newContent: string;
-    readonly existingContent: string;
-    readonly dimension: string;
-    readonly scopeClass: string;
-  }): Promise<"contradicts" | "incompatible_with" | "none">;
+interface ConflictCandidateContext {
+  readonly sameDimension: readonly Readonly<MemoryEntry>[];
+  readonly sharedTagCandidates: readonly Readonly<MemoryEntry>[];
+  readonly newTokens: ReadonlySet<string>;
+  readonly newTagSet: ReadonlySet<string>;
 }
-
-// invariant: see also: DynamicsService.emitKarmaEvent — the
-// supersede_penalty karma kind fires from this service only on an
-// LLM-verdict CONTRADICTS link, never on a rule-heuristic hit. The
-// target_memory_id (the older peer) takes the penalty because the new
-// memory is the supersede candidate. The rule path is omitted because its
-// hit conditions are agent-controllable content.
-export interface ConflictDetectionKarmaEmitterPort {
-  emitKarmaEvent(input: {
-    readonly kind: "supersede_penalty";
-    readonly objectId: string;
-    readonly workspaceId: string;
-    readonly runId?: string | null;
-  }): Promise<void>;
-}
-
-export interface ConflictDetectionServiceDeps {
-  readonly memoryRepo: ConflictDetectionMemoryRepoPort;
-  readonly pathCandidatePort: PathCandidateSink;
-  readonly llmPort?: ConflictDetectionLlmPort;
-  readonly karmaEmitter?: ConflictDetectionKarmaEmitterPort;
-  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
-  readonly llmMaxPairsPerNewMemory?: number;
-  readonly ruleEnabled?: boolean;
-}
-
-// Rule-based comparator constants. Values tuned for short distilled facts
-// (≤ DISTILLED_FACT_MAX_CHARS per buildDistilledFact). High tag overlap + low content
-// overlap = contradicts. Cross-scope or cross-dimension classification
-// is reported by the caller before invoking; this service refines on
-// content evidence within the same dimension.
-// invariant: TAG_OVERLAP_CONTRADICTS_THRESHOLD is the rule-path gate for
-// when two same-dimension memories are "about the same thing" enough to
-// even be a contradicts candidate. 0.35 (down from a prior 0.5) is set
-// because shorter distilled facts carry fewer tags: the 0.5 floor
-// rejected real contradicts where the new and old fact each carried
-// two tags with only one in common (overlap=1/3 ≈ 0.33). At 0.35 the
-// rule path also lets the {coffee,alpha} vs {coffee,beta}
-// ambiguous-band case through, while still rejecting single-tag
-// drive-bys (1/N where N≥3) — those flow to the LLM ambiguous path
-// when enabled. invariant: a rule hit does not write durable truth — it
-// submits to PathCandidateSink in a verdict-tiered birth band. A RULE
-// verdict is born attention_only (not recall-eligible at birth, earns
-// recall only via plasticity), so a generous threshold cannot inject a
-// recall-eligible suppression. The LLM verdict is born recall_allowed/0.9
-// (recall-eligible negative/suppressive judgment, recallBiasSign -1),
-// bounded by the auto-build ceiling + EventLog audit and carrying no
-// review gate, because the system computed that classification itself.
-const TAG_OVERLAP_CONTRADICTS_THRESHOLD = 0.35;
-const TOKEN_JACCARD_CONTRADICTS_MAX = 0.35;
-const DEFAULT_LLM_MAX_PAIRS = 4;
 
 export class ConflictDetectionService {
   private readonly ruleEnabled: boolean;
@@ -136,32 +51,28 @@ export class ConflictDetectionService {
     this.ruleEnabled = deps.ruleEnabled ?? true;
   }
 
-  public async detectAndLinkConflicts(params: {
-    readonly newMemoryId: string;
-    readonly newMemoryDimension: string;
-    readonly newMemoryScopeClass: string;
-    readonly newMemoryContent: string;
-    readonly newMemoryDomainTags: readonly string[];
-    readonly workspaceId: string;
-    readonly runId: string;
-    // invariant: strict no-drop mode for the bulk-enrich worker. When true,
-    // a candidate-query failure and a transient path-mint "failed" both throw
-    // instead of degrading to an empty candidate set / swallowed warn, so the
-    // worker releases the enrich claim and a later cycle retries. Default
-    // false preserves the best-effort inline-materialization contract (a
-    // detection failure must never break a successful memory creation).
-    readonly strictNoDrop?: boolean;
-  }): Promise<void> {
+  public async detectAndLinkConflicts(params: ConflictDetectionRequest): Promise<void> {
     const strictNoDrop = params.strictNoDrop ?? false;
-    // invariant: short-circuit when neither writer can fire. With
-    // ruleEnabled=false and no LLM port, both the findByDimension +
-    // findBySharedDomainTags fetches would be pure waste.
     if (!this.ruleEnabled && this.deps.llmPort === undefined) {
       return;
     }
+    const context = await this.loadConflictCandidateContext(params, strictNoDrop);
+    const contradictsCandidates = this.ruleEnabled
+      ? await this.linkRuleDetectedConflicts(params, context, strictNoDrop)
+      : [];
+    if (this.deps.llmPort !== undefined && contradictsCandidates.length === 0) {
+      await this.linkLlmDetectedConflicts(params, context, strictNoDrop);
+    }
+  }
+
+  private async loadConflictCandidateContext(
+    params: ConflictDetectionRequest,
+    strictNoDrop: boolean
+  ): Promise<ConflictCandidateContext> {
     const sameDimension = await this.fetchCandidates(
       () =>
-        this.deps.memoryRepo.findByDimension(
+        readConflictDimensionCandidates(
+          this.deps.memoryRepo,
           params.workspaceId,
           params.newMemoryDimension as MemoryEntry["dimension"]
         ),
@@ -187,125 +98,70 @@ export class ConflictDetectionService {
           strictNoDrop
         )
       : ([] as readonly Readonly<MemoryEntry>[]);
+    return Object.freeze({
+      sameDimension,
+      sharedTagCandidates,
+      newTokens: tokenize(params.newMemoryContent),
+      newTagSet: new Set(params.newMemoryDomainTags)
+    });
+  }
 
-    const newTokens = tokenize(params.newMemoryContent);
-    const newTagSet = new Set(params.newMemoryDomainTags);
-
-    const contradictsCandidates: Array<Readonly<MemoryEntry>> = [];
-
-    if (this.ruleEnabled) {
-      for (const existing of sameDimension) {
-        if (existing.object_id === params.newMemoryId) {
-          continue;
-        }
-        if (existing.scope_class !== params.newMemoryScopeClass) {
-          continue;
-        }
-        const existingTagSet = new Set(existing.domain_tags);
-        const tagOverlap = jaccardIndex(newTagSet, existingTagSet);
-        if (tagOverlap < TAG_OVERLAP_CONTRADICTS_THRESHOLD) {
-          continue;
-        }
-        const existingTokens = tokenize(existing.content);
-        const tokenOverlap = jaccardIndex(newTokens, existingTokens);
-        if (tokenOverlap >= TOKEN_JACCARD_CONTRADICTS_MAX) {
-          continue;
-        }
-        contradictsCandidates.push(existing);
-      }
-
-      for (const existing of contradictsCandidates) {
-        await this.writeEdge(
-          params.newMemoryId,
-          existing.object_id,
-          MemoryGraphEdgeType.CONTRADICTS,
-          params.workspaceId,
-          params.runId,
-          "rule",
-          strictNoDrop
-        );
-      }
-
-      for (const existing of sharedTagCandidates) {
-        if (existing.object_id === params.newMemoryId) {
-          continue;
-        }
-        const dimMismatch = existing.dimension !== params.newMemoryDimension;
-        const scopeMismatch = existing.scope_class !== params.newMemoryScopeClass;
-        if (!dimMismatch && !scopeMismatch) {
-          continue;
-        }
-        const existingTagSet = new Set(existing.domain_tags);
-        const tagOverlap = jaccardIndex(newTagSet, existingTagSet);
-        if (tagOverlap < TAG_OVERLAP_CONTRADICTS_THRESHOLD) {
-          continue;
-        }
-        await this.writeEdge(
-          params.newMemoryId,
-          existing.object_id,
-          MemoryGraphEdgeType.INCOMPATIBLE_WITH,
-          params.workspaceId,
-          params.runId,
-          "rule",
-          strictNoDrop
-        );
-      }
+  private async linkRuleDetectedConflicts(
+    params: ConflictDetectionRequest,
+    context: ConflictCandidateContext,
+    strictNoDrop: boolean
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const contradictsCandidates = context.sameDimension.filter((existing) =>
+      isRuleContradictsCandidate(params, context, existing)
+    );
+    for (const existing of contradictsCandidates) {
+      await this.writeEdge(params.newMemoryId, existing.object_id, MemoryGraphEdgeType.CONTRADICTS, params.workspaceId, params.runId, "rule", strictNoDrop);
     }
-
-    if (this.deps.llmPort !== undefined && contradictsCandidates.length === 0) {
-      const maxPairs = this.deps.llmMaxPairsPerNewMemory ?? DEFAULT_LLM_MAX_PAIRS;
-      const ambiguousNeighbors = sameDimension
-        .filter((existing) => existing.object_id !== params.newMemoryId)
-        .filter((existing) => existing.scope_class === params.newMemoryScopeClass)
-        .filter((existing) => {
-          const existingTagSet = new Set(existing.domain_tags);
-          const overlap = jaccardIndex(newTagSet, existingTagSet);
-          return overlap >= TAG_OVERLAP_CONTRADICTS_THRESHOLD * 0.5;
-        })
-        .slice(0, maxPairs);
-      for (const candidate of ambiguousNeighbors) {
-        try {
-          const verdict = await this.deps.llmPort.classifyPair({
-            newContent: params.newMemoryContent,
-            existingContent: candidate.content,
-            dimension: params.newMemoryDimension,
-            scopeClass: params.newMemoryScopeClass
-          });
-          if (verdict === "contradicts") {
-            await this.writeEdge(
-              params.newMemoryId,
-              candidate.object_id,
-              MemoryGraphEdgeType.CONTRADICTS,
-              params.workspaceId,
-              params.runId,
-              "llm",
-              strictNoDrop
-            );
-          } else if (verdict === "incompatible_with") {
-            await this.writeEdge(
-              params.newMemoryId,
-              candidate.object_id,
-              MemoryGraphEdgeType.INCOMPATIBLE_WITH,
-              params.workspaceId,
-              params.runId,
-              "llm",
-              strictNoDrop
-            );
-          }
-        } catch (err) {
-          // invariant: in strict no-drop mode an LLM-port failure is not a
-          // clean "none" verdict. The worker must release the claim so this
-          // owed ambiguity check can retry instead of silently dropping it.
-          if (strictNoDrop) {
-            throw err;
-          }
-          this.warn("conflict detection llm pair classify failed", {
-            new_memory_id: params.newMemoryId,
-            existing_memory_id: candidate.object_id,
-            error: errorMessage(err)
-          });
-        }
+    for (const existing of context.sharedTagCandidates) {
+      if (!isRuleIncompatibleCandidate(params, context, existing)) {
+        continue;
       }
+      await this.writeEdge(params.newMemoryId, existing.object_id, MemoryGraphEdgeType.INCOMPATIBLE_WITH, params.workspaceId, params.runId, "rule", strictNoDrop);
+    }
+    return Object.freeze(contradictsCandidates);
+  }
+
+  private async linkLlmDetectedConflicts(
+    params: ConflictDetectionRequest,
+    context: ConflictCandidateContext,
+    strictNoDrop: boolean
+  ): Promise<void> {
+    const maxPairs = this.deps.llmMaxPairsPerNewMemory ?? DEFAULT_LLM_MAX_PAIRS;
+    const ambiguousNeighbors = selectAmbiguousLlmNeighbors(params, context, maxPairs);
+    for (const candidate of ambiguousNeighbors) {
+      await this.linkSingleLlmCandidate(params, candidate, strictNoDrop);
+    }
+  }
+
+  private async linkSingleLlmCandidate(
+    params: ConflictDetectionRequest,
+    candidate: Readonly<MemoryEntry>,
+    strictNoDrop: boolean
+  ): Promise<void> {
+    try {
+      const verdict = await this.deps.llmPort!.classifyPair({
+        newContent: params.newMemoryContent,
+        existingContent: candidate.content,
+        dimension: params.newMemoryDimension,
+        scopeClass: params.newMemoryScopeClass
+      });
+      if (verdict === "contradicts" || verdict === "incompatible_with") {
+        await this.writeEdge(params.newMemoryId, candidate.object_id, verdict, params.workspaceId, params.runId, "llm", strictNoDrop);
+      }
+    } catch (err) {
+      if (strictNoDrop) {
+        throw err;
+      }
+      this.warn("conflict detection llm pair classify failed", {
+        new_memory_id: params.newMemoryId,
+        existing_memory_id: candidate.object_id,
+        error: errorMessage(err)
+      });
     }
   }
 
@@ -344,10 +200,37 @@ export class ConflictDetectionService {
     verdictSource: ConflictVerdictSource,
     strictNoDrop: boolean
   ): Promise<void> {
+    const outcome = await this.submitConflictPathCandidate(
+      sourceMemoryId,
+      targetMemoryId,
+      edgeType,
+      workspaceId,
+      runId,
+      verdictSource,
+      strictNoDrop
+    );
+    if (outcome === "failed") {
+      this.handlePathMintFailure(sourceMemoryId, targetMemoryId, edgeType, workspaceId, verdictSource, strictNoDrop);
+      return;
+    }
+    if (outcome === "rejected") {
+      return;
+    }
+    await this.emitTrustedSupersedePenalty(sourceMemoryId, targetMemoryId, edgeType, workspaceId, runId, verdictSource);
+  }
+
+  private async submitConflictPathCandidate(
+    sourceMemoryId: string,
+    targetMemoryId: string,
+    edgeType: MemoryGraphEdgeTypeValue,
+    workspaceId: string,
+    runId: string,
+    verdictSource: ConflictVerdictSource,
+    strictNoDrop: boolean
+  ): Promise<PathMintOutcome> {
     const profile = negativeProfileForEdgeType(edgeType, verdictSource);
-    let outcome: PathMintOutcome;
     try {
-      outcome = await this.deps.pathCandidatePort.submitCandidate({
+      return await this.deps.pathCandidatePort.submitCandidate({
         workspaceId,
         sourceAnchor: { kind: "object", object_id: sourceMemoryId },
         targetAnchor: { kind: "object", object_id: targetMemoryId },
@@ -357,67 +240,69 @@ export class ConflictDetectionService {
         evidenceBasis: profile.evidenceBasis,
         recallBiasSign: profile.recallBiasSign,
         recallBiasMagnitude: profile.recallBiasMagnitude,
-        why: [
-          `conflict detection ${profile.relationKind} candidate`,
-          `verdict=${verdictSource}`,
-          `run=${runId}`
-        ]
+        why: [`conflict detection ${profile.relationKind} candidate`, `verdict=${verdictSource}`, `run=${runId}`]
       });
     } catch (err) {
-      // submitCandidate is contracted to catch its own materialize errors and
-      // return "failed"; a thrown error is treated as the same transient class.
-      if (strictNoDrop) {
-        throw new CoreError(
-          "OBLIGATION_VIOLATION",
-          `Conflict detection path candidate failed transiently: ${sourceMemoryId}->${targetMemoryId}`,
-          { cause: err }
-        );
-      }
-      this.warn("conflict detection edge create failed", {
-        source_memory_id: sourceMemoryId,
-        target_memory_id: targetMemoryId,
-        edge_type: edgeType,
-        verdict_source: verdictSource,
-        workspace_id: workspaceId,
-        error: errorMessage(err)
-      });
-      return;
+      this.handlePathMintException(sourceMemoryId, targetMemoryId, edgeType, workspaceId, verdictSource, strictNoDrop, err);
+      return "failed";
     }
+  }
 
-    // invariant: a transient "failed" outcome owes a path. In strict no-drop
-    // mode it must surface so the bulk-enrich worker releases the claim; in
-    // best-effort inline mode it is warn-and-continue. A permanent "rejected"
-    // (bad anchor) and the success outcomes never block — retrying a rejected
-    // candidate cannot help, and applied / already_present settle the owed path.
-    if (outcome === "failed") {
-      if (strictNoDrop) {
-        throw new CoreError(
-          "OBLIGATION_VIOLATION",
-          `Conflict detection path candidate failed transiently: ${sourceMemoryId}->${targetMemoryId}`
-        );
-      }
-      this.warn("conflict detection edge create failed", {
-        source_memory_id: sourceMemoryId,
-        target_memory_id: targetMemoryId,
-        edge_type: edgeType,
-        verdict_source: verdictSource,
-        workspace_id: workspaceId,
-        error: "submitCandidate returned failed"
-      });
-      return;
+  private handlePathMintException(
+    sourceMemoryId: string,
+    targetMemoryId: string,
+    edgeType: MemoryGraphEdgeTypeValue,
+    workspaceId: string,
+    verdictSource: ConflictVerdictSource,
+    strictNoDrop: boolean,
+    err: unknown
+  ): void {
+    if (strictNoDrop) {
+      throw new CoreError("OBLIGATION_VIOLATION", `Conflict detection path candidate failed transiently: ${sourceMemoryId}->${targetMemoryId}`, { cause: err });
     }
-    if (outcome === "rejected") {
-      // Permanent anchor refusal: no path, no karma. Audited by the path
-      // service's path.relation_rejected event; nothing is owed here.
-      return;
-    }
+    this.warnPathMintFailure(sourceMemoryId, targetMemoryId, edgeType, workspaceId, verdictSource, errorMessage(err));
+  }
 
-    // invariant: supersede_penalty karma is strength-gated to the LLM
-    // verdict only. The rule path is an agent-controllable Jaccard
-    // heuristic; firing durable -0.2 karma against the victim on a
-    // rule hit would let an agent program a contradicts match to demote a
-    // peer's retention/activation score. Only the system-computed LLM
-    // verdict carries enough trust to write the karma penalty.
+  private handlePathMintFailure(
+    sourceMemoryId: string,
+    targetMemoryId: string,
+    edgeType: MemoryGraphEdgeTypeValue,
+    workspaceId: string,
+    verdictSource: ConflictVerdictSource,
+    strictNoDrop: boolean
+  ): void {
+    if (strictNoDrop) {
+      throw new CoreError("OBLIGATION_VIOLATION", `Conflict detection path candidate failed transiently: ${sourceMemoryId}->${targetMemoryId}`);
+    }
+    this.warnPathMintFailure(sourceMemoryId, targetMemoryId, edgeType, workspaceId, verdictSource, "submitCandidate returned failed");
+  }
+
+  private warnPathMintFailure(
+    sourceMemoryId: string,
+    targetMemoryId: string,
+    edgeType: MemoryGraphEdgeTypeValue,
+    workspaceId: string,
+    verdictSource: ConflictVerdictSource,
+    error: string
+  ): void {
+    this.warn("conflict detection edge create failed", {
+      source_memory_id: sourceMemoryId,
+      target_memory_id: targetMemoryId,
+      edge_type: edgeType,
+      verdict_source: verdictSource,
+      workspace_id: workspaceId,
+      error
+    });
+  }
+
+  private async emitTrustedSupersedePenalty(
+    sourceMemoryId: string,
+    targetMemoryId: string,
+    edgeType: MemoryGraphEdgeTypeValue,
+    workspaceId: string,
+    runId: string,
+    verdictSource: ConflictVerdictSource
+  ): Promise<void> {
     if (
       verdictSource === "llm" &&
       edgeType === MemoryGraphEdgeType.CONTRADICTS &&
@@ -434,6 +319,7 @@ export class ConflictDetectionService {
         this.warn("supersede_penalty karma emit failed", {
           target_memory_id: targetMemoryId,
           workspace_id: workspaceId,
+          source_memory_id: sourceMemoryId,
           error: errorMessage(err)
         });
       }
@@ -447,6 +333,51 @@ export class ConflictDetectionService {
   }
 }
 
+function isRuleContradictsCandidate(
+  params: ConflictDetectionRequest,
+  context: ConflictCandidateContext,
+  existing: Readonly<MemoryEntry>
+): boolean {
+  if (existing.object_id === params.newMemoryId || existing.scope_class !== params.newMemoryScopeClass) {
+    return false;
+  }
+  const tagOverlap = jaccardIndex(context.newTagSet, new Set(existing.domain_tags));
+  if (tagOverlap < TAG_OVERLAP_CONTRADICTS_THRESHOLD) {
+    return false;
+  }
+  return jaccardIndex(context.newTokens, tokenize(existing.content)) < TOKEN_JACCARD_CONTRADICTS_MAX;
+}
+
+function isRuleIncompatibleCandidate(
+  params: ConflictDetectionRequest,
+  context: ConflictCandidateContext,
+  existing: Readonly<MemoryEntry>
+): boolean {
+  if (existing.object_id === params.newMemoryId) {
+    return false;
+  }
+  const dimMismatch = existing.dimension !== params.newMemoryDimension;
+  const scopeMismatch = existing.scope_class !== params.newMemoryScopeClass;
+  if (!dimMismatch && !scopeMismatch) {
+    return false;
+  }
+  return jaccardIndex(context.newTagSet, new Set(existing.domain_tags)) >= TAG_OVERLAP_CONTRADICTS_THRESHOLD;
+}
+
+function selectAmbiguousLlmNeighbors(
+  params: ConflictDetectionRequest,
+  context: ConflictCandidateContext,
+  maxPairs: number
+): readonly Readonly<MemoryEntry>[] {
+  return context.sameDimension
+    .filter((existing) => existing.object_id !== params.newMemoryId)
+    .filter((existing) => existing.scope_class === params.newMemoryScopeClass)
+    .filter((existing) =>
+      jaccardIndex(context.newTagSet, new Set(existing.domain_tags)) >= TAG_OVERLAP_CONTRADICTS_THRESHOLD * 0.5
+    )
+    .slice(0, maxPairs);
+}
+
 // invariant: the rule path is a pure same-dimension Jaccard heuristic
 // whose hit conditions (tag overlap + low token overlap) are entirely
 // agent-controllable content. A rule verdict is therefore a WEAK claim,
@@ -458,72 +389,3 @@ export class ConflictDetectionService {
 // The recall_allowed/0.9 band is reserved for the LLM-verdict path, which
 // the system computed itself.
 // see also: edge-auto-producer-service.ts LOCAL_SUPERSEDES_SEED_PROFILE.
-const RULE_CONTRADICTS_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "contradicts",
-  initialStrength: 0.5,
-  governanceClass: "attention_only",
-  recallBiasSign: -1,
-  recallBiasMagnitude: 0.4,
-  evidenceBasis: Object.freeze(["contradiction_evidence"]) as readonly string[]
-});
-
-const RULE_INCOMPATIBLE_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "incompatible_with",
-  initialStrength: 0.5,
-  governanceClass: "attention_only",
-  recallBiasSign: -1,
-  recallBiasMagnitude: 0.3,
-  evidenceBasis: Object.freeze(["incompatibility_evidence"]) as readonly string[]
-});
-
-// invariant: maps the edge-type + verdict source to its negative
-// lifecycle seed profile (recall_bias -). contradicts and
-// incompatible_with are the only two this service mints; an unexpected
-// type defaults to contradicts so a mis-tuned caller still gets a
-// governed negative path, never a silent drop. verdictSource selects the
-// trust tier: "llm" → the shared recall_allowed/0.9 core profile; "rule"
-// → the weak attention_only/0.5 local profile.
-function negativeProfileForEdgeType(
-  edgeType: MemoryGraphEdgeTypeValue,
-  verdictSource: ConflictVerdictSource
-): PathSeedProfile {
-  if (verdictSource === "rule") {
-    return edgeType === MemoryGraphEdgeType.INCOMPATIBLE_WITH
-      ? RULE_INCOMPATIBLE_SEED_PROFILE
-      : RULE_CONTRADICTS_SEED_PROFILE;
-  }
-  return edgeType === MemoryGraphEdgeType.INCOMPATIBLE_WITH
-    ? INCOMPATIBLE_SEED_PROFILE
-    : CONTRADICTS_SEED_PROFILE;
-}
-
-function tokenize(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
-      .normalize("NFKC")
-      .split(/[^\p{L}\p{N}_]+/u)
-      .filter((token) => token.length >= 2)
-  );
-}
-
-function jaccardIndex(left: ReadonlySet<string>, right: ReadonlySet<string>): number {
-  if (left.size === 0 && right.size === 0) {
-    return 0;
-  }
-  let intersection = 0;
-  for (const value of left) {
-    if (right.has(value)) {
-      intersection += 1;
-    }
-  }
-  const union = left.size + right.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}

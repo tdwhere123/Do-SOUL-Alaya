@@ -1,161 +1,70 @@
-import { randomUUID } from "node:crypto";
 import {
-  ControlPlaneObjectKind,
-  type EventLogEntry,
-  MemoryGovernanceEventType,
-  ProposalOptionKind,
-  ProposalResolutionState,
-  ProposalSchema,
-  RecallContextEventType,
-  RetentionPolicy,
-  SoulActiveConstraintSchema,
-  SoulProposalCreatedPayloadSchema,
-  isPathActiveForRecall,
-  type CandidateMemorySignal,
-  type MemoryEntry
+  isPathActiveForRecall
 } from "@do-soul/alaya-protocol";
 import {
-  BudgetBankruptcyService,
-  ClaimService,
-  ConflictDetectionService,
-  ContextLensAssembler,
   DeferredObligationService,
-  DynamicsService,
-  EdgeAutoProducerService,
-  EdgeProposalService,
-  EvidenceService,
-  EventPublisher,
-  GraphExploreService,
-  HealthJournalService,
   ManifestationResolver,
-  type ManifestationBudgetConfigProviderPort,
-  MemoryService,
   PathActivationCandidateProducer,
-  type PathActivationCandidateProducerPathReaderPort,
-  PathRelationProposalService,
-  PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
-  ProjectMappingService,
-  RecallService,
-  ReconciliationService,
   ResolutionService,
-  RuleBasedEntityExtractor,
-  SessionOverrideService,
-  SignalService,
-  SynthesisService,
-  TaskSurfaceBuilder,
-  createRuleOnlyReconciliationDecisionPort,
   type GlobalMemoryRecallSubscription,
-  type PathCandidateSink,
-  type PathFailureHealthInboxPort
+  type PathActivationCandidateProducerPathReaderPort
 } from "@do-soul/alaya-core";
-import {
-  findActiveConstraints,
-  type SqliteClaimFormRepo,
-  type SqliteCoUsageCounterRepo,
-  type SqliteDeferredObligationRepo,
-  type GlobalMemoryRecallCacheRepo,
-  type GlobalMemoryRepo,
-  type SqliteEventLogRepo,
-  type SqliteEvidenceCapsuleRepo,
-  type SqliteGardenTaskRepo,
-  type SqliteHandoffGapRepo,
-  type SqliteMemoryEntryRepo,
-  type SqliteProposalRepo,
-  type SqliteReconciliationLeaseRepo,
-  type SqliteSignalRepo,
-  type SqliteSlotRepo,
-  type SqliteSynthesisCapsuleRepo,
-  type SqlitePathRelationRepo,
-  type StorageDatabase
-} from "@do-soul/alaya-storage";
-import {
-  DegradationPipeline,
-  MaterializationRouter,
-  OFFICIAL_API_GARDEN_MODEL,
-  type GraphEdgeCreationPort,
-  type PathRelationProposalPayload
-} from "@do-soul/alaya-soul";
+import { type GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../ai/daemon-embedding-runtime.js";
-import { createEdgeAutoProducerLlmPort } from "../ai/edge-auto-producer-llm-adapter.js";
-import { createReconciliationLlmDecisionPort } from "../ai/reconciliation-llm-decision.js";
-import { createEdgeClassifyQueueAdapter } from "../garden/edge-classify-queue-adapter.js";
 import { createRecallPathPlasticityPort } from "../garden/path-plasticity-runtime.js";
 import { SqliteHandoffGapAdapter } from "../handoff/gap-adapter.js";
-import { createManifestationContextLensAssembler } from "../manifestation/context-lens-assembler.js";
-import {
-  buildSingleUsedAnchorPayload,
-  type SingleUsedAnchorTelemetryEmitter
-} from "../routes/recall-utilization.js";
-import { createRecallUtilizationService } from "../services/recall-utilization-service.js";
-import {
-  canResolveOfficialGardenProvider,
-  createConflictDetectionLlmPort,
-  normalizeRecallTimeConcernWindowDigest,
-  resolveGardenSecretRefValue
-} from "./garden-compute-support.js";
+import { normalizeRecallTimeConcernWindowDigest } from "./garden-compute-support.js";
 import { createRecallReadWorkerClient } from "./recall-read-worker-client.js";
 import {
   createGlobalMemoryRecallCachePort,
   createGlobalMemoryRecallPort,
-  createGlobalMemoryRouteService,
-  resolveEdgeClassifyWiring
+  createGlobalMemoryRouteService
 } from "./daemon-runtime-support.js";
 import { warnOnRejectedBackgroundTask } from "./daemon-runtime-helpers.js";
-import type { AppConfigService } from "../services/config-service.js";
-import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
+import { createEdgeAndReconciliationRuntime } from "./recall-materialization-edge-reconciliation.js";
+import { createPathRelationRuntime } from "./recall-materialization-path-relation.js";
+import {
+  createRecallSearchRuntime,
+  createRecallServiceRuntime,
+  createRecallUtilizationRuntime
+} from "./recall-materialization-recall-runtime.js";
+import { createSignalMaterializationRuntime } from "./recall-materialization-router.js";
+import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
 
-export async function createRecallMaterializationWiring(input: {
-  readonly database: StorageDatabase;
-  readonly configEnv: ReadonlyMap<string, string>;
-  readonly rawConfigService: Pick<AppConfigService, "getRuntimeGardenComputeConfig">;
-  readonly eventLogRepo: SqliteEventLogRepo;
-  readonly eventPublisher: EventPublisher;
-  readonly runtimeNotifier: AlayaRuntimeNotifier;
-  readonly warn: (message: string, meta: Record<string, unknown>) => void;
-  readonly healthJournalService: HealthJournalService;
-  readonly memoryEntryRepo: SqliteMemoryEntryRepo;
-  readonly pathRelationRepo: SqlitePathRelationRepo;
-  readonly manifestationBudgetConfigProvider: ManifestationBudgetConfigProviderPort;
-  readonly projectMappingService: ProjectMappingService;
-  readonly claimFormRepo: SqliteClaimFormRepo;
-  readonly coUsageCounterRepo: SqliteCoUsageCounterRepo;
-  readonly evidenceCapsuleRepo: SqliteEvidenceCapsuleRepo;
-  readonly synthesisCapsuleRepo: SqliteSynthesisCapsuleRepo;
-  readonly globalMemoryRepo: GlobalMemoryRepo | null;
-  readonly globalMemoryRecallCacheRepo: GlobalMemoryRecallCacheRepo | null;
-  readonly budgetBankruptcyService: BudgetBankruptcyService;
-  readonly budgetNow: () => string;
-  readonly slotRepo: SqliteSlotRepo;
-  readonly graphExploreService: GraphExploreService;
-  readonly sessionOverrideService: SessionOverrideService;
-  readonly taskSurfaceBuilder: TaskSurfaceBuilder;
-  readonly trustStateRecorder: {
-    findDeliveryById(deliveryId: string): Promise<
-      | Readonly<{
-          readonly delivered_object_ids: readonly string[];
-        }>
-      | null
-    >;
-  };
-  readonly edgeProposalService: EdgeProposalService;
-  readonly dynamicsService: DynamicsService;
-  readonly memoryService: MemoryService;
-  readonly proposalRepo: SqliteProposalRepo;
-  readonly reconciliationLeaseRepo: SqliteReconciliationLeaseRepo;
-  readonly deferredObligationRepo: SqliteDeferredObligationRepo;
-  readonly claimService: ClaimService;
-  readonly synthesisService: SynthesisService;
-  readonly enqueueEnrichPending: (params: {
-    readonly workspaceId: string;
-    readonly memoryId: string;
-    readonly runId: string | null;
-    readonly sourceSignalId: string | null;
-  }) => void;
-  readonly sqliteHandoffGapRepo: SqliteHandoffGapRepo;
-  readonly signalRepo: SqliteSignalRepo;
-  readonly pathFailureHealthInboxPort: PathFailureHealthInboxPort;
-  readonly evidenceService: EvidenceService;
-}) {
+export async function createRecallMaterializationWiring(input: CreateRecallMaterializationWiringInput) {
+  const globalMemoryRuntime = createGlobalMemoryRuntime(input);
+  const recallReadWorkerClient = createRecallReadWorkerClient({
+    databaseFilename: input.database.filename,
+    warn: input.warn
+  });
+
+  try {
+    const recallReadRuntime = createRecallReadRuntime(
+      input,
+      globalMemoryRuntime,
+      recallReadWorkerClient
+    );
+    const materializationRuntime = await createRecallMaterializationRuntime(
+      input,
+      recallReadRuntime
+    );
+
+    return buildRecallMaterializationWiringResult(
+      globalMemoryRuntime,
+      recallReadRuntime,
+      materializationRuntime,
+      recallReadWorkerClient
+    );
+  } catch (error) {
+    return await closeRecallReadWorkerAfterStartupFailure({
+      recallReadWorkerClient,
+      warn: input.warn,
+      error
+    });
+  }
+}
+
+function createGlobalMemoryRuntime(input: CreateRecallMaterializationWiringInput) {
   const globalMemoryService =
     input.globalMemoryRepo === null
       ? undefined
@@ -171,19 +80,128 @@ export async function createRecallMaterializationWiring(input: {
         });
   const globalMemoryRecallInvalidationSubscription: GlobalMemoryRecallSubscription | null =
     globalMemoryRecallService?.subscribeToInvalidations(input.runtimeNotifier) ?? null;
-  const recallReadWorkerClient = createRecallReadWorkerClient({
-    databaseFilename: input.database.filename,
-    warn: input.warn
-  });
+  return {
+    globalMemoryService,
+    globalMemoryRecallService,
+    globalMemoryRecallInvalidationSubscription
+  };
+}
 
-  try {
-  const {
-    embeddingStatusService,
-    embeddingRecallService,
-    embeddingBackfillHandler,
-    defaultPolicyDecorator: embeddingDefaultPolicyDecorator,
-    providerWarmup: embeddingProviderWarmup
-  } = createDaemonEmbeddingRuntime({
+function createRecallReadRuntime(
+  input: CreateRecallMaterializationWiringInput,
+  globalMemoryRuntime: ReturnType<typeof createGlobalMemoryRuntime>,
+  recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>
+) {
+  const embeddingRuntime = createEmbeddingRuntimeWithWarmupObserver(input);
+  const recallPathRuntime = createRecallPathRuntime(input, recallReadWorkerClient);
+  const manifestationRuntime = createManifestationRuntime(
+    input,
+    recallPathRuntime.pathActivationCandidateProducer
+  );
+  const recallSearchRuntime = createRecallSearchRuntime(input, recallReadWorkerClient);
+  return {
+    embeddingRuntime,
+    recallPathRuntime,
+    recallUtilizationRuntime: createRecallUtilizationRuntime(input),
+    recallServiceRuntime: createRecallServiceRuntime({
+      input,
+      embeddingRuntime,
+      globalMemoryRuntime,
+      recallPathRuntime,
+      manifestationSidecarPort: manifestationRuntime.manifestationSidecarPort,
+      recallSearchRuntime
+    })
+  };
+}
+
+async function createRecallMaterializationRuntime(
+  input: CreateRecallMaterializationWiringInput,
+  recallReadRuntime: ReturnType<typeof createRecallReadRuntime>
+) {
+  const pathRelationRuntime = createPathRelationRuntime(input);
+  const edgeRuntime = await createEdgeAndReconciliationRuntime({
+    wiring: input,
+    pathCandidatePort: pathRelationRuntime.pathCandidatePort
+  });
+  const materializationRuntime = createSignalMaterializationRuntime({
+    wiring: input,
+    pathRelationProposalPort: pathRelationRuntime.pathRelationProposalPort,
+    pathCandidateSinkPort: pathRelationRuntime.pathCandidatePort,
+    conflictDetectionService: edgeRuntime.conflictDetectionService,
+    reconciliationService: edgeRuntime.reconciliationService,
+    handoffGapHandler: new SqliteHandoffGapAdapter(input.sqliteHandoffGapRepo)
+  });
+  return {
+    graphEdgePort: createGraphEdgePort(input),
+    edgeRuntime,
+    pathRelationRuntime,
+    resolutionService: createResolutionService(input),
+    materializationRuntime,
+    recallReadRuntime
+  };
+}
+
+function createGraphEdgePort(input: CreateRecallMaterializationWiringInput): GraphEdgeCreationPort {
+  return {
+    createEdge: async (params) => {
+      await input.edgeProposalService.proposeEdge(params);
+    }
+  };
+}
+
+function createResolutionService(input: CreateRecallMaterializationWiringInput) {
+  const deferredObligationService = new DeferredObligationService({
+    repo: input.deferredObligationRepo,
+    eventPublisher: input.eventPublisher
+  });
+  return new ResolutionService({
+    eventPublisher: input.eventPublisher,
+    claimRepo: input.claimFormRepo,
+    memoryRepo: input.memoryEntryRepo,
+    claimService: input.claimService,
+    memoryService: input.memoryService,
+    deferredObligationService
+  });
+}
+
+function buildRecallMaterializationWiringResult(
+  globalMemoryRuntime: ReturnType<typeof createGlobalMemoryRuntime>,
+  recallReadRuntime: ReturnType<typeof createRecallReadRuntime>,
+  materializationRuntime: Awaited<ReturnType<typeof createRecallMaterializationRuntime>>,
+  recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>
+) {
+  return {
+    globalMemoryService: globalMemoryRuntime.globalMemoryService,
+    globalMemoryRecallService: globalMemoryRuntime.globalMemoryRecallService,
+    globalMemoryRecallInvalidationSubscription:
+      globalMemoryRuntime.globalMemoryRecallInvalidationSubscription,
+    embeddingStatusService: recallReadRuntime.embeddingRuntime.embeddingStatusService,
+    embeddingRecallService: recallReadRuntime.embeddingRuntime.embeddingRecallService,
+    embeddingBackfillHandler: recallReadRuntime.embeddingRuntime.embeddingBackfillHandler,
+    embeddingDefaultPolicyDecorator: recallReadRuntime.embeddingRuntime.defaultPolicyDecorator,
+    recallUtilizationService: recallReadRuntime.recallUtilizationRuntime.recallUtilizationService,
+    singleUsedAnchorEmitter: recallReadRuntime.recallUtilizationRuntime.singleUsedAnchorEmitter,
+    deliveryAnchorReader: recallReadRuntime.recallUtilizationRuntime.deliveryAnchorReader,
+    recallService: recallReadRuntime.recallServiceRuntime.recallService,
+    contextLensAssembler: recallReadRuntime.recallServiceRuntime.contextLensAssembler,
+    conversationContextLensAssembler:
+      recallReadRuntime.recallServiceRuntime.conversationContextLensAssembler,
+    graphEdgePort: materializationRuntime.graphEdgePort,
+    edgeAutoProducerService: materializationRuntime.edgeRuntime.edgeAutoProducerService,
+    conflictDetectionService: materializationRuntime.edgeRuntime.conflictDetectionService,
+    reconciliationService: materializationRuntime.edgeRuntime.reconciliationService,
+    pathRelationProposalService: materializationRuntime.pathRelationRuntime.pathRelationProposalService,
+    resolutionService: materializationRuntime.resolutionService,
+    pathRelationEvictionTimer: materializationRuntime.pathRelationRuntime.pathRelationEvictionTimer,
+    materializationRouter: materializationRuntime.materializationRuntime.materializationRouter,
+    signalService: materializationRuntime.materializationRuntime.signalService,
+    edgeClassifyQueueRepoHolder: materializationRuntime.edgeRuntime.edgeClassifyQueueRepoHolder,
+    recallReadWorkerClient
+  };
+}
+
+function createEmbeddingRuntimeWithWarmupObserver(input: CreateRecallMaterializationWiringInput) {
+  const embeddingRuntime = createDaemonEmbeddingRuntime({
     database: input.database,
     configEnv: input.configEnv,
     eventLogRepo: input.eventLogRepo,
@@ -192,7 +210,7 @@ export async function createRecallMaterializationWiring(input: {
     warn: input.warn
   });
   void warnOnRejectedBackgroundTask(
-    embeddingProviderWarmup.then((status) => {
+    embeddingRuntime.providerWarmup.then((status) => {
       if (status === "ready") {
         input.warn("embedding provider warmup ready", { status });
       }
@@ -200,7 +218,13 @@ export async function createRecallMaterializationWiring(input: {
     input.warn,
     "embedding provider warmup observer failed"
   );
+  return embeddingRuntime;
+}
 
+function createRecallPathRuntime(
+  input: CreateRecallMaterializationWiringInput,
+  recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>
+) {
   const recallPathExpansionPort =
     recallReadWorkerClient?.pathExpansionPort ?? {
       findByAnchors: input.pathRelationRepo.findByAnchors.bind(input.pathRelationRepo),
@@ -209,7 +233,7 @@ export async function createRecallMaterializationWiring(input: {
         windowDigests: readonly string[]
       ) => {
         const normalized = new Set(windowDigests.map(normalizeRecallTimeConcernWindowDigest));
-        const paths = await input.pathRelationRepo.findByWorkspace(workspaceId);
+        const paths = await input.pathRelationRepo.findByWorkspaceAll(workspaceId);
         return paths.filter((path) =>
           isPathActiveForRecall(path.lifecycle.status) &&
           [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
@@ -240,6 +264,17 @@ export async function createRecallMaterializationWiring(input: {
   const pathActivationCandidateProducer = new PathActivationCandidateProducer({
     pathReader: pathActivationReaderPort
   });
+  return {
+    recallPathExpansionPort,
+    recallPathPlasticityPort,
+    pathActivationCandidateProducer
+  };
+}
+
+function createManifestationRuntime(
+  input: CreateRecallMaterializationWiringInput,
+  pathActivationCandidateProducer: PathActivationCandidateProducer
+) {
   let manifestationResolverInstance: ManifestationResolver | null = null;
   const getManifestationResolver = (): ManifestationResolver => {
     if (manifestationResolverInstance === null) {
@@ -252,620 +287,32 @@ export async function createRecallMaterializationWiring(input: {
     }
     return manifestationResolverInstance;
   };
-  const manifestationSidecarPort = {
-    buildBiasSidecar: async (params: Readonly<{
-      readonly workspaceId: string;
-      readonly runId: string;
-      readonly anchorMemoryObjectIds: readonly string[];
-      readonly taskSurfaceRef: Parameters<ManifestationResolver["resolveWithBias"]>[0]["taskSurfaceRef"];
-    }>) => {
-      const candidates = await pathActivationCandidateProducer.produce({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        anchorMemoryObjectIds: params.anchorMemoryObjectIds
-      });
-      if (candidates.length === 0) {
-        return [];
-      }
-      const result = await getManifestationResolver().resolveWithBias({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        candidates,
-        taskSurfaceRef: params.taskSurfaceRef
-      });
-      return result.biasSidecar;
-    }
-  };
-  const recallUtilizationService = createRecallUtilizationService({
-    eventLogRepo: input.eventLogRepo
-  });
-  const singleUsedAnchorEmitter: SingleUsedAnchorTelemetryEmitter = {
-    async emit(emitInput) {
-      const event = {
-        event_type: RecallContextEventType.SOUL_SINGLE_USED_ANCHOR,
-        entity_type: "context_delivery",
-        entity_id: emitInput.deliveryId,
-        workspace_id: emitInput.workspaceId,
-        run_id: emitInput.runId,
-        caused_by: emitInput.agentTarget,
-        payload_json: buildSingleUsedAnchorPayload({
-          deliveryId: emitInput.deliveryId,
-          sessionId: emitInput.sessionId,
-          runId: emitInput.runId,
-          agentTarget: emitInput.agentTarget,
-          workspaceId: emitInput.workspaceId,
-          occurredAt: emitInput.occurredAt,
-          usedAnchorObjectId: emitInput.usedAnchorObjectId
-        })
-      } as const;
-      try {
-        await input.eventPublisher.appendManyWithMutation([event], () => undefined);
-      } catch (error) {
-        input.warn("single used-anchor telemetry emission failed", {
-          deliveryId: emitInput.deliveryId,
-          usedAnchorObjectId: emitInput.usedAnchorObjectId,
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-    }
-  };
-  const deliveryAnchorReader = {
-    async findDeliveredObjectIds(deliveryId: string): Promise<readonly string[] | null> {
-      const delivery = await input.trustStateRecorder.findDeliveryById(deliveryId);
-      return delivery === null ? null : delivery.delivered_object_ids;
-    }
-  };
-  const recallMemoryRepo = recallReadWorkerClient?.memoryRepo ?? input.memoryEntryRepo;
-  const recallEvidenceSearchPort =
-    recallReadWorkerClient?.evidenceSearchPort ?? {
-      searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
-        input.evidenceCapsuleRepo.searchByKeyword === undefined
-          ? []
-          : await input.evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
-      findByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) => {
-        const results = await input.evidenceCapsuleRepo.findByIds(evidenceObjectIds);
-        return results.filter((evidence) => evidence.workspace_id === workspaceId);
-      }
-    };
-  const recallSynthesisSearchPort =
-    recallReadWorkerClient?.synthesisSearchPort ?? {
-      searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
-        input.synthesisCapsuleRepo.searchByKeyword === undefined
-          ? []
-          : await input.synthesisCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
-      findByIds: async (objectIds: readonly string[]) => {
-        const scoped = [];
-        for (const objectId of objectIds) {
-          const synthesis = await input.synthesisCapsuleRepo.findById(objectId);
-          if (synthesis !== null) {
-            scoped.push(synthesis);
-          }
-        }
-        return scoped;
-      }
-    };
-  const recallActiveConstraintsPort = {
-    findActiveConstraints: async (
-      activeConstraintsInput: Readonly<{ readonly workspaceId: string; readonly cap?: number | null }>
-    ) => {
-      const result = await findActiveConstraints({
-        workspaceId: activeConstraintsInput.workspaceId,
-        memoryRepo: input.memoryEntryRepo,
-        claimFormRepo: input.claimFormRepo,
-        pathRelationRepo: input.pathRelationRepo,
-        cap: activeConstraintsInput.cap
-      });
-      return Object.freeze({
-        constraints: Object.freeze(
-          result.constraints.map((record) =>
-            SoulActiveConstraintSchema.parse({
-              object_id: record.memory.object_id,
-              object_kind: record.memory.object_kind,
-              content: record.memory.content,
-              dimension: record.memory.dimension,
-              scope_class: record.memory.scope_class,
-              governance_state: {
-                claim_status: record.claim_status,
-                governance_class: record.governance_class,
-                source_channels: record.source_channels
-              }
-            })
-          )
-        ),
-        total_count: result.total_count
-      });
-    }
-  };
-  // Opt-in source-ref robustness: parse round-labeled / per-fact evidence refs
-  // (`s3-r2`, `s3-r2-f1`) so source proximity engages on conversational corpora
-  // whose refs aren't t/turn/chunk. Default off; the bench shares this wiring.
-  const robustSourceRefParsing =
-    process.env.ALAYA_RECALL_SOURCE_REF_ROBUST === "1" ||
-    process.env.ALAYA_RECALL_SOURCE_REF_ROBUST === "true";
-  const recallService = new RecallService({
-    memoryRepo: recallMemoryRepo,
-    slotRepo: input.slotRepo,
-    eventLogRepo: input.eventLogRepo,
-    graphSupportPort: input.graphExploreService,
-    projectMappingPort: input.projectMappingService,
-    pathPlasticityPort: recallPathPlasticityPort,
-    pathExpansionPort: recallPathExpansionPort,
-    activeConstraintsPort: recallActiveConstraintsPort,
-    robustSourceRefParsing,
-    evidenceSearchPort: recallEvidenceSearchPort,
-    synthesisSearchPort: recallSynthesisSearchPort,
-    ...(input.globalMemoryRepo === null
-      ? {}
-      : {
-          globalRecallPort: globalMemoryRecallService,
-          ...(input.globalMemoryRecallCacheRepo === null
-            ? {}
-            : {
-                globalRecallCachePort: createGlobalMemoryRecallCachePort({
-                  globalMemoryRecallCacheRepo: input.globalMemoryRecallCacheRepo,
-                  now: () => new Date().toISOString()
-                })
-              })
-        }),
-    budgetPenaltyPort: {
-      getSnapshot: async (runId: string) =>
-        await input.budgetBankruptcyService.getSnapshot(runId, input.budgetNow())
-    },
-    claimResolverPort: input.claimFormRepo,
-    embeddingRecallService,
-    manifestationSidecarPort,
-    ...(embeddingDefaultPolicyDecorator === undefined
-      ? {}
-      : { defaultPolicyDecorator: embeddingDefaultPolicyDecorator }),
-    entityExtractionPort: new RuleBasedEntityExtractor(),
-    warn: input.warn
-  });
-  const contextLensAssembler = new ContextLensAssembler({
-    recallService,
-    taskSurfaceBuilder: input.taskSurfaceBuilder,
-    slotRepo: input.slotRepo,
-    claimRepo: input.claimFormRepo,
-    memoryRepo: input.memoryEntryRepo,
-    eventLogRepo: input.eventLogRepo,
-    overrideService: input.sessionOverrideService,
-    degradationPipeline: new DegradationPipeline(),
-    bankruptcyService: input.budgetBankruptcyService,
-    warn: input.warn
-  });
-  const conversationContextLensAssembler = createManifestationContextLensAssembler({
-    delegate: contextLensAssembler
-  });
-  const sqliteHandoffGapAdapter = new SqliteHandoffGapAdapter(input.sqliteHandoffGapRepo);
-  const graphEdgePort = {
-    createEdge: async (params: Parameters<GraphEdgeCreationPort["createEdge"]>[0]) => {
-      await input.edgeProposalService.proposeEdge(params);
-    }
-  } satisfies GraphEdgeCreationPort;
-  const pathCandidatePort: PathCandidateSink = {
-    submitCandidate: async (candidateInput) =>
-      await pathRelationProposalService.submitCandidate(candidateInput)
-  };
-  const sharedGardenComputeConfig = await input.rawConfigService.getRuntimeGardenComputeConfig();
-  const edgeClassifyWiring = resolveEdgeClassifyWiring(process.env, sharedGardenComputeConfig);
-  const edgeAutoProducerLlmEnabled = edgeClassifyWiring.llmEnabled;
-  const edgeAutoProducerGardenComputeConfig = edgeAutoProducerLlmEnabled
-    ? sharedGardenComputeConfig
-    : null;
-  const edgeAutoProducerOfficialConfig =
-    edgeAutoProducerGardenComputeConfig !== null &&
-    canResolveOfficialGardenProvider(edgeAutoProducerGardenComputeConfig)
-      ? edgeAutoProducerGardenComputeConfig
-      : null;
-  const edgeAutoProducerGardenApiKey = ((): string | null => {
-    if (edgeAutoProducerOfficialConfig === null) {
-      return null;
-    }
-    const secretRef = edgeAutoProducerOfficialConfig.secret_ref;
-    if (secretRef === null) {
-      return null;
-    }
-    try {
-      return resolveGardenSecretRefValue(secretRef);
-    } catch {
-      return null;
-    }
-  })();
-  const edgeAutoProducerProviderUrl =
-    edgeAutoProducerGardenComputeConfig?.provider_url ?? null;
-  const edgeAutoProducerLlmPort =
-    edgeAutoProducerLlmEnabled &&
-    edgeAutoProducerGardenApiKey !== null &&
-    edgeAutoProducerProviderUrl !== null
-      ? createEdgeAutoProducerLlmPort({
-          config: {
-            providerUrl: edgeAutoProducerProviderUrl,
-            model:
-              edgeAutoProducerGardenComputeConfig?.model_id ?? OFFICIAL_API_GARDEN_MODEL,
-            apiKey: edgeAutoProducerGardenApiKey
-          }
-        })
-      : null;
-  const edgeClassifyQueueRepoHolder: {
-    current:
-      | {
-          enqueue: SqliteGardenTaskRepo["enqueue"];
-          findById(taskId: string): { readonly id: string } | null;
-        }
-      | undefined;
-  } = { current: undefined };
-  const edgeClassifyQueue = edgeClassifyWiring.hostWorkerEnabled
-    ? createEdgeClassifyQueueAdapter({
-        gardenTaskRepo: {
-          enqueue: (enqueueInput) => {
-            if (edgeClassifyQueueRepoHolder.current === undefined) {
-              throw new Error("EDGE_CLASSIFY queue used before the garden task repo was wired.");
-            }
-            return edgeClassifyQueueRepoHolder.current.enqueue(enqueueInput);
-          },
-          findById: (taskId) => edgeClassifyQueueRepoHolder.current?.findById(taskId) ?? null
-        },
-        now: () => new Date().toISOString(),
-        warn: input.warn
-      })
-    : null;
-  const edgeAutoProducerService = new EdgeAutoProducerService({
-    memoryRepo: input.memoryEntryRepo,
-    pathCandidatePort,
-    existingPathReader: {
-      findByBackingObjectId: (workspaceId, objectId) =>
-        input.pathRelationRepo.findByBackingObjectId(workspaceId, objectId)
-    },
-    ...(edgeClassifyQueue !== null
-      ? { edgeClassifyQueue }
-      : edgeAutoProducerLlmPort === null
-        ? {}
-        : { llmPort: edgeAutoProducerLlmPort }),
-    warn: input.warn
-  });
-  const conflictDetectionEnabled = (() => {
-    const raw = process.env.ALAYA_CONFLICT_DETECTION_ENABLED?.toLowerCase();
-    if (raw === undefined || raw === "") {
-      return true;
-    }
-    return raw !== "0" && raw !== "false";
-  })();
-  const conflictDetectionLlmPort = conflictDetectionEnabled
-    ? createConflictDetectionLlmPort()
-    : null;
-  const conflictDetectionRuleEnabled = (() => {
-    const raw = process.env.ALAYA_CONFLICT_RULE_ENABLED?.toLowerCase();
-    if (raw === undefined || raw === "") {
-      return true;
-    }
-    return raw !== "0" && raw !== "false";
-  })();
-  const conflictDetectionService = conflictDetectionEnabled
-    ? new (await import("@do-soul/alaya-core")).ConflictDetectionService({
-        memoryRepo: {
-          findByDimension: async (workspaceId, dimension) =>
-            await input.memoryEntryRepo.findByDimension(workspaceId, dimension),
-          findBySharedDomainTags: async (workspaceId, tags) =>
-            await input.memoryEntryRepo.findBySharedDomainTags(workspaceId, tags)
-        },
-        pathCandidatePort,
-        ...(conflictDetectionLlmPort === null ? {} : { llmPort: conflictDetectionLlmPort }),
-        karmaEmitter: {
-          emitKarmaEvent: (emitInput) => input.dynamicsService.emitKarmaEvent(emitInput)
-        },
-        ruleEnabled: conflictDetectionRuleEnabled,
-        warn: input.warn
-      })
-    : null;
-  const ingestReconciliationEnabled = (() => {
-    const raw = process.env.ALAYA_INGEST_RECONCILIATION_ENABLED?.trim().toLowerCase();
-    return raw !== "0" && raw !== "false";
-  })();
-  const reconciliationGardenComputeConfig =
-    ingestReconciliationEnabled
-      ? await input.rawConfigService.getRuntimeGardenComputeConfig()
-      : null;
-  const reconciliationOfficialConfig =
-    reconciliationGardenComputeConfig !== null &&
-    canResolveOfficialGardenProvider(reconciliationGardenComputeConfig)
-      ? reconciliationGardenComputeConfig
-      : null;
-  const reconciliationGardenApiKey = ((): string | null => {
-    if (reconciliationOfficialConfig === null) {
-      return null;
-    }
-    const secretRef = reconciliationOfficialConfig.secret_ref;
-    if (secretRef === null) {
-      return null;
-    }
-    try {
-      return resolveGardenSecretRefValue(secretRef);
-    } catch {
-      return null;
-    }
-  })();
-  const reconciliationProviderUrl = reconciliationGardenComputeConfig?.provider_url ?? null;
-  const reconciliationLlmDecisionPort =
-    ingestReconciliationEnabled &&
-    reconciliationGardenApiKey !== null &&
-    reconciliationProviderUrl !== null
-      ? createReconciliationLlmDecisionPort({
-          config: {
-            providerUrl: reconciliationProviderUrl,
-            model: reconciliationGardenComputeConfig?.model_id ?? OFFICIAL_API_GARDEN_MODEL,
-            apiKey: reconciliationGardenApiKey
-          }
-        })
-      : null;
-  const reconciliationService = ingestReconciliationEnabled
-    ? new ReconciliationService({
-        keywordSearch: {
-          searchByKeyword: async (workspaceId, queryText, limit) =>
-            await input.memoryEntryRepo.searchByKeyword(workspaceId, queryText, limit)
-        },
-        memoryRepo: {
-          findByIds: async (objectIds) => await input.memoryEntryRepo.findByIds(objectIds)
-        },
-        memoryUpdate: {
-          update: async (objectId, fields, reason) =>
-            await input.memoryService.update(objectId, fields, reason)
-        },
-        eventLog: {
-          append: (event) => input.eventLogRepo.append(event)
-        },
-        llmDecision:
-          reconciliationLlmDecisionPort ?? createRuleOnlyReconciliationDecisionPort(),
-        lease: input.reconciliationLeaseRepo,
-        warn: input.warn
-      })
-    : null;
-  const pathRelationCounterTtlMs = (() => {
-    const raw = process.env.ALAYA_PATHREL_COUNTER_TTL_MS;
-    if (raw === undefined || raw === "") {
-      return undefined;
-    }
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-  })();
-  const pathRelationCoUsageThreshold = (() => {
-    const raw = process.env.ALAYA_PATHREL_CO_USAGE_THRESHOLD;
-    if (raw === undefined || raw === "") {
-      return undefined;
-    }
-    const parsed = Number(raw);
-    return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
-  })();
-  const pathRelationProposalService = new PathRelationProposalService({
-    repo: {
-      create: (relation) => input.pathRelationRepo.create(relation),
-      findByAnchorMemoryId: async (memoryId, workspaceId) =>
-        await input.pathRelationRepo.findByBackingObjectId(workspaceId, memoryId)
-    },
-    counterStore: input.coUsageCounterRepo,
-    memoryExistence: {
-      workspaceOfObject: async (objectId) => {
-        const entry = await input.memoryEntryRepo.findById(objectId);
-        return entry === null ? null : entry.workspace_id;
-      }
-    },
-    eventPublisher: input.eventPublisher,
-    healthInboxPort: {
-      recordPathRelationFailure: (entry) =>
-        input.pathFailureHealthInboxPort.recordPathRelationFailure(entry)
-    },
-    ...(pathRelationCounterTtlMs === undefined ? {} : { counterTtlMs: pathRelationCounterTtlMs }),
-    ...(pathRelationCoUsageThreshold === undefined ? {} : { threshold: pathRelationCoUsageThreshold }),
-    warn: input.warn
-  });
-  const deferredObligationService = new DeferredObligationService({
-    repo: input.deferredObligationRepo,
-    eventPublisher: input.eventPublisher
-  });
-  const resolutionService = new ResolutionService({
-    eventPublisher: input.eventPublisher,
-    claimRepo: input.claimFormRepo,
-    memoryRepo: input.memoryEntryRepo,
-    claimService: input.claimService,
-    memoryService: input.memoryService,
-    deferredObligationService
-  });
-  const pathRelationEvictionIntervalMs = pathRelationCounterTtlMs ?? PATH_RELATION_COUNTER_DEFAULT_TTL_MS;
-  const pathRelationEvictionTimer = setInterval(() => {
-    void pathRelationProposalService.evictExpired().catch((error: unknown) => {
-      input.warn("PathRelation counter eviction failed", {
-        error: error instanceof Error ? error.message : String(error)
-      });
-    });
-  }, pathRelationEvictionIntervalMs);
-  pathRelationEvictionTimer.unref?.();
-  const pathRelationProposalPort = {
-    assertPathRelationProposalAvailable: async (proposalInput: { readonly workspaceId: string }) => {
-      await input.proposalRepo.countPending(proposalInput.workspaceId);
-    },
-    createPathRelationProposal: async (proposalInput: {
-      readonly workspaceId: string;
-      readonly runId: string | null;
-      readonly targetObjectId: string;
-      readonly reason: string;
-      readonly sourceSignalId: string;
-      readonly proposedPathRelation: PathRelationProposalPayload;
-    }) => {
-      const timestamp = new Date().toISOString();
-      const proposalId = randomUUID();
-      const proposal = ProposalSchema.parse({
-        runtime_id: proposalId,
-        object_kind: ControlPlaneObjectKind.PROPOSAL,
-        task_surface_ref: null,
-        expires_at: null,
-        derived_from: proposalInput.targetObjectId,
-        retention_policy: RetentionPolicy.SESSION_ONLY,
-        proposal_id: proposalId,
-        dossier_ref: null,
-        recommended_option_id: null,
-        proposal_options: [
-          {
-            option_id: `path_relation_${proposalId}`,
-            option_kind: ProposalOptionKind.REQUEST_CONFIRMATION,
-            preserves_protected_constraints: true,
-            dropped_candidates: [],
-            unresolved_after_apply: [],
-            requires_confirmation: true
-          }
-        ],
-        resolution_state: ProposalResolutionState.PENDING,
-        last_updated_at: timestamp
-      });
-      const created = await input.proposalRepo.createProposalWithEvents(
-        {
-          proposal,
-          workspace_id: proposalInput.workspaceId,
-          run_id: proposalInput.runId,
-          target_object_kind: "path_relation",
-          proposed_change_summary: `${proposalInput.reason} Source signal: ${proposalInput.sourceSignalId}.`,
-          proposed_path_relation: proposalInput.proposedPathRelation,
-          created_at: timestamp
-        },
-        [
-          {
-            event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
-            entity_type: "proposal",
-            entity_id: proposal.proposal_id,
-            workspace_id: proposalInput.workspaceId,
-            run_id: proposalInput.runId,
-            caused_by: "garden",
-            payload_json: SoulProposalCreatedPayloadSchema.parse({
-              object_id: proposal.runtime_id,
-              object_kind: proposal.object_kind,
-              workspace_id: proposalInput.workspaceId,
-              run_id: proposalInput.runId
-            })
-          }
-        ]
-      );
-      for (const event of created.events) {
-        await input.runtimeNotifier.notifyEntry(event);
-      }
-      return {
-        object_kind: "proposal",
-        object_id: created.proposal.proposal_id
-      };
-    }
-  } satisfies {
-    assertPathRelationProposalAvailable(input: { readonly workspaceId: string }): Promise<void>;
-    createPathRelationProposal(input: {
-      readonly workspaceId: string;
-      readonly runId: string | null;
-      readonly targetObjectId: string;
-      readonly reason: string;
-      readonly sourceSignalId: string;
-      readonly proposedPathRelation: PathRelationProposalPayload;
-    }): Promise<Readonly<{ readonly object_kind: string; readonly object_id: string }>>;
-  };
-  const enrichPendingPort = { enqueue: input.enqueueEnrichPending };
-  const materializationMemoryService = {
-    create: async (createInput: Parameters<typeof input.memoryService.create>[0]) => {
-      const created = await input.memoryService.create(createInput);
-      return {
-        object_kind: created.object_kind,
-        object_id: created.object_id,
-        enrichmentEnqueued: (createInput as { enqueueEnrichment?: unknown }).enqueueEnrichment !== undefined
-      };
-    }
-  };
-  // Production ingest config: keep high-confidence facts whose open-vocabulary
-  // object_kind falls outside routeByObjectKind as recallable memory_entries
-  // (rather than dropping them to evidence_only). The bench daemon shares this
-  // construction, so the benchmark exercises whatever production is configured
-  // to do. Default-ON (operator decision 2026-06-12): real proposers emit open
-  // vocabulary, and dropping those facts made the memory plane forget ~99.9%
-  // of them. Set ALAYA_RETAIN_UNROUTED_FACTS=0 to restore curated-only routing.
-  const retainUnroutedHighConfidenceFacts =
-    process.env.ALAYA_RETAIN_UNROUTED_FACTS !== "0" &&
-    process.env.ALAYA_RETAIN_UNROUTED_FACTS !== "false";
-  // Optional override for the materialization confidence floor (default 0.5).
-  const materializationConfidenceFloorRaw = Number(
-    process.env.ALAYA_MATERIALIZATION_CONF_FLOOR
-  );
-  const materializationConfidenceFloor =
-    Number.isFinite(materializationConfidenceFloorRaw) &&
-    materializationConfidenceFloorRaw >= 0 &&
-    materializationConfidenceFloorRaw <= 1
-      ? materializationConfidenceFloorRaw
-      : undefined;
-  // Evidence excerpt = the full source turn when a signal carries it in raw_payload
-  // (full_turn_content / bench_full_turn_content), else the matched-span summary; widens
-  // evidence_fts to query terms distillation drops. invariant: INERT in production — no
-  // core proposer sets full_turn_content, so only the bench harness exercises it today.
-  // ALAYA_EVIDENCE_FULL_TURN=0 forces off.
-  const fullTurnEvidenceExcerpt =
-    process.env.ALAYA_EVIDENCE_FULL_TURN !== "0" &&
-    process.env.ALAYA_EVIDENCE_FULL_TURN !== "false";
-  const materializationRouter = new MaterializationRouter({
-    evidenceService: input.evidenceService,
-    memoryService: materializationMemoryService,
-    synthesisService: input.synthesisService,
-    claimService: input.claimService,
-    pathRelationProposalPort,
-    pathCandidateSinkPort: {
-      submitCandidate: async (candidateInput) =>
-        await pathRelationProposalService.submitCandidate(candidateInput)
-    },
-    enrichPendingPort,
-    ...(conflictDetectionService === null
-      ? {}
-      : { conflictDetectionPort: conflictDetectionService }),
-    ...(reconciliationService === null
-      ? {}
-      : { reconciliationPort: reconciliationService }),
-    handoffGapHandler: sqliteHandoffGapAdapter,
-    retainUnroutedHighConfidenceFacts,
-    fullTurnEvidenceExcerpt,
-    ...(materializationConfidenceFloor === undefined
-      ? {}
-      : { materializationConfidenceFloor })
-  });
-  const signalService = new SignalService({
-    eventLogRepo: input.eventLogRepo,
-    signalRepo: input.signalRepo,
-    runtimeNotifier: input.runtimeNotifier,
-    postTriageMaterializer: {
-      materialize: async (signal: CandidateMemorySignal) =>
-        await materializationRouter.materializeSignal(signal)
-    }
-  });
-
   return {
-    globalMemoryService,
-    globalMemoryRecallService,
-    globalMemoryRecallInvalidationSubscription,
-    embeddingStatusService,
-    embeddingRecallService,
-    embeddingBackfillHandler,
-    embeddingDefaultPolicyDecorator,
-    recallUtilizationService,
-    singleUsedAnchorEmitter,
-    deliveryAnchorReader,
-    recallService,
-    contextLensAssembler,
-    conversationContextLensAssembler,
-    graphEdgePort,
-    edgeAutoProducerService,
-    conflictDetectionService,
-    reconciliationService,
-    pathRelationProposalService,
-    resolutionService,
-    pathRelationEvictionTimer,
-    materializationRouter,
-    signalService,
-    edgeClassifyQueueRepoHolder,
-    recallReadWorkerClient
+    manifestationSidecarPort: {
+      buildBiasSidecar: async (params: Readonly<{
+        readonly workspaceId: string;
+        readonly runId: string;
+        readonly anchorMemoryObjectIds: readonly string[];
+        readonly taskSurfaceRef: Parameters<ManifestationResolver["resolveWithBias"]>[0]["taskSurfaceRef"];
+      }>) => {
+        const candidates = await pathActivationCandidateProducer.produce({
+          workspaceId: params.workspaceId,
+          runId: params.runId,
+          anchorMemoryObjectIds: params.anchorMemoryObjectIds
+        });
+        if (candidates.length === 0) {
+          return [];
+        }
+        const result = await getManifestationResolver().resolveWithBias({
+          workspaceId: params.workspaceId,
+          runId: params.runId,
+          candidates,
+          taskSurfaceRef: params.taskSurfaceRef
+        });
+        return result.biasSidecar;
+      }
+    }
   };
-  } catch (error) {
-    return await closeRecallReadWorkerAfterStartupFailure({
-      recallReadWorkerClient,
-      warn: input.warn,
-      error
-    });
-  }
 }
 
 async function closeRecallReadWorkerAfterStartupFailure(input: {

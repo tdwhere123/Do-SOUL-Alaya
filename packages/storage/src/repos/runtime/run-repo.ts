@@ -2,6 +2,7 @@ import { RunSchema, RunStateSchema, type Run, type RunState } from "@do-soul/ala
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { cascadeDeleteRun } from "../path/cascade-delete.js";
+import { prepareRunStatements, type SqliteStatement } from "./run-statements.js";
 
 export type RunCreateInput = Omit<Run, "created_at" | "last_active_at">;
 
@@ -39,97 +40,23 @@ interface CountRow {
 }
 
 export class SqliteRunRepo implements RunRepo {
-  private readonly createStatement;
-  private readonly getByIdStatement;
-  private readonly listByWorkspaceStatement;
-  private readonly listByWorkspacePagedStatement;
-  private readonly countByWorkspaceStatement;
-  private readonly updateStateStatement;
-  private readonly updateTitleStatement;
+  private readonly createStatement: SqliteStatement;
+  private readonly getByIdStatement: SqliteStatement;
+  private readonly listByWorkspaceStatement: SqliteStatement;
+  private readonly listByWorkspacePagedStatement: SqliteStatement;
+  private readonly countByWorkspaceStatement: SqliteStatement;
+  private readonly updateStateStatement: SqliteStatement;
+  private readonly updateTitleStatement: SqliteStatement;
 
   public constructor(private readonly db: StorageDatabase) {
-    this.createStatement = db.connection.prepare(`
-      INSERT INTO runs (
-        run_id,
-        workspace_id,
-        title,
-        goal,
-        run_mode,
-        engine_binding_id,
-        engine_class,
-        run_state,
-        current_surface_id,
-        created_at,
-        last_active_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    this.getByIdStatement = db.connection.prepare(`
-      SELECT
-        run_id,
-        workspace_id,
-        title,
-        goal,
-        run_mode,
-        engine_binding_id,
-        engine_class,
-        run_state,
-        current_surface_id,
-        created_at,
-        last_active_at
-      FROM runs
-      WHERE run_id = ?
-      LIMIT 1
-    `);
-    this.listByWorkspaceStatement = db.connection.prepare(`
-      SELECT
-        run_id,
-        workspace_id,
-        title,
-        goal,
-        run_mode,
-        engine_binding_id,
-        engine_class,
-        run_state,
-        current_surface_id,
-        created_at,
-        last_active_at
-      FROM runs
-      WHERE workspace_id = ?
-      ORDER BY created_at ASC, run_id ASC
-    `);
-    this.listByWorkspacePagedStatement = db.connection.prepare(`
-      SELECT
-        run_id,
-        workspace_id,
-        title,
-        goal,
-        run_mode,
-        engine_binding_id,
-        engine_class,
-        run_state,
-        current_surface_id,
-        created_at,
-        last_active_at
-      FROM runs
-      WHERE workspace_id = ?
-      ORDER BY created_at ASC, run_id ASC
-      LIMIT ? OFFSET ?
-    `);
-    this.countByWorkspaceStatement = db.connection.prepare(`
-      SELECT COUNT(*) AS total
-      FROM runs
-      WHERE workspace_id = ?
-    `);
-    this.updateStateStatement = db.connection.prepare(`
-      UPDATE runs
-      SET run_state = ?, last_active_at = ?
-      WHERE run_id = ?
-    `);
-    this.updateTitleStatement = db.connection.prepare(`
-      UPDATE runs
-      SET title = ?
-      WHERE run_id = ?
-    `);
+    const statements = prepareRunStatements(db);
+    this.createStatement = statements.createStatement;
+    this.getByIdStatement = statements.getByIdStatement;
+    this.listByWorkspaceStatement = statements.listByWorkspaceStatement;
+    this.listByWorkspacePagedStatement = statements.listByWorkspacePagedStatement;
+    this.countByWorkspaceStatement = statements.countByWorkspaceStatement;
+    this.updateStateStatement = statements.updateStateStatement;
+    this.updateTitleStatement = statements.updateTitleStatement;
   }
 
   public create(data: RunCreateInput): Run {

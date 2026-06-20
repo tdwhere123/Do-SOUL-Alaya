@@ -11,7 +11,7 @@ const upgradeAssessmentAxisFields = {
   upgrade_candidate: z.boolean().nullable()
 } as const;
 
-export const UpgradeAssessmentAxisSchema = z.object(upgradeAssessmentAxisFields).readonly();
+export const UpgradeAssessmentAxisSchema = z.object(upgradeAssessmentAxisFields).strict().readonly();
 
 export const HandoffRecordSchema = ControlPlaneEnvelopeSchema.unwrap()
   .extend({
@@ -23,6 +23,7 @@ export const HandoffRecordSchema = ControlPlaneEnvelopeSchema.unwrap()
     ttl_ms: NonNegativeIntSchema.nullable(),
     ...upgradeAssessmentAxisFields
   })
+  .strict()
   .readonly();
 
 export const GapRecordSchema = ControlPlaneEnvelopeSchema.unwrap()
@@ -35,6 +36,7 @@ export const GapRecordSchema = ControlPlaneEnvelopeSchema.unwrap()
     ttl_ms: NonNegativeIntSchema.nullable(),
     ...upgradeAssessmentAxisFields
   })
+  .strict()
   .readonly();
 
 export type UpgradeAssessmentAxis = z.infer<typeof UpgradeAssessmentAxisSchema>;

@@ -1,5 +1,13 @@
 import { z } from "zod";
-import { NonEmptyStringSchema, NonNegativeIntSchema, PositiveIntSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedLabelSchema,
+  BoundedPathSchema,
+  BoundedReasonSchema,
+  NonNegativeIntSchema,
+  PositiveIntSchema
+} from "../shared/schema-primitives.js";
+
+const FileToolContentSchema = z.string().max(10 * 1024 * 1024);
 
 const fileToolErrorCodeValues = [
   "NOT_FOUND",
@@ -33,17 +41,17 @@ export const FileToolErrorCodeSchema = z.enum(fileToolErrorCodeValues);
 export const FileToolErrorSchema = z.object({
   ok: z.literal(false),
   code: FileToolErrorCodeSchema,
-  message: NonEmptyStringSchema
+  message: BoundedReasonSchema
 }).strict();
 
 export const ReadFileToolInputSchema = z.object({
-  path: NonEmptyStringSchema,
+  path: BoundedPathSchema,
   maxBytes: PositiveIntSchema.optional()
 }).strict();
 
 export const ReadFileToolSuccessSchema = z.object({
   ok: z.literal(true),
-  content: z.string(),
+  content: FileToolContentSchema,
   bytesRead: NonNegativeIntSchema
 }).strict();
 
@@ -53,12 +61,12 @@ export const ReadFileToolResultSchema = z.discriminatedUnion("ok", [
 ]);
 
 export const ListDirectoryEntrySchema = z.object({
-  name: NonEmptyStringSchema,
+  name: BoundedLabelSchema,
   isDirectory: z.boolean()
 }).strict();
 
 export const ListDirectoryToolInputSchema = z.object({
-  path: NonEmptyStringSchema
+  path: BoundedPathSchema
 }).strict();
 
 export const ListDirectoryToolSuccessSchema = z.object({
@@ -72,14 +80,14 @@ export const ListDirectoryToolResultSchema = z.discriminatedUnion("ok", [
 ]);
 
 export const SearchFilesToolInputSchema = z.object({
-  pattern: NonEmptyStringSchema,
-  baseDir: NonEmptyStringSchema,
+  pattern: BoundedReasonSchema,
+  baseDir: BoundedPathSchema,
   maxResults: PositiveIntSchema.optional()
 }).strict();
 
 export const SearchFilesToolSuccessSchema = z.object({
   ok: z.literal(true),
-  paths: z.array(NonEmptyStringSchema).readonly()
+  paths: z.array(BoundedPathSchema).readonly()
 }).strict();
 
 export const SearchFilesToolResultSchema = z.discriminatedUnion("ok", [
@@ -88,8 +96,8 @@ export const SearchFilesToolResultSchema = z.discriminatedUnion("ok", [
 ]);
 
 export const WriteFileToolInputSchema = z.object({
-  path: NonEmptyStringSchema,
-  content: z.string()
+  path: BoundedPathSchema,
+  content: FileToolContentSchema
 }).strict();
 
 export const WriteFileToolSuccessSchema = z.object({
@@ -103,16 +111,16 @@ export const WriteFileToolResultSchema = z.discriminatedUnion("ok", [
 ]);
 
 export const ExecShellToolInputSchema = z.object({
-  command: NonEmptyStringSchema,
-  args: z.array(z.string()).readonly().optional(),
+  command: BoundedReasonSchema,
+  args: z.array(BoundedReasonSchema).readonly().optional(),
   timeoutMs: PositiveIntSchema.optional()
 }).strict();
 
 export const ExecShellToolSuccessSchema = z.object({
   ok: z.literal(true),
   exitCode: NonNegativeIntSchema,
-  stdout: z.string(),
-  stderr: z.string()
+  stdout: FileToolContentSchema,
+  stderr: FileToolContentSchema
 }).strict();
 
 export const ExecShellToolResultSchema = z.discriminatedUnion("ok", [

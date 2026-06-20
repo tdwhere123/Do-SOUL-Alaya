@@ -7,11 +7,13 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { DEFAULT_REPO_LIST_PAGE_LIMIT, parsePageLimit, parsePageOffset } from "../shared/validators.js";
 
 export interface SignalRepo {
   create(signal: CandidateMemorySignal): Promise<CandidateMemorySignal>;
   getById(signalId: string): Promise<CandidateMemorySignal | null>;
   listByRun(runId: string, page?: SignalListPageOptions): Promise<readonly CandidateMemorySignal[]>;
+  listByRunAll?(runId: string): Promise<readonly CandidateMemorySignal[]>;
   countByRun(runId: string): Promise<number>;
   updateState(signalId: string, state: SignalStateType): Promise<CandidateMemorySignal>;
 }
@@ -47,16 +49,40 @@ interface CountRow {
   readonly total: number;
 }
 
-export class SqliteSignalRepo implements SignalRepo {
-  private readonly createStatement;
-  private readonly getByIdStatement;
-  private readonly listByRunStatement;
-  private readonly listByRunPagedStatement;
-  private readonly countByRunStatement;
-  private readonly updateStateStatement;
+interface SqliteStatement {
+  all(...params: unknown[]): unknown[];
+  get(...params: unknown[]): unknown;
+  run(...params: unknown[]): { readonly changes: number };
+}
 
-  public constructor(db: StorageDatabase) {
-    this.createStatement = db.connection.prepare(`
+const DEFAULT_SIGNAL_PAGE = Object.freeze({
+  limit: DEFAULT_REPO_LIST_PAGE_LIMIT,
+  offset: 0
+});
+
+const SIGNAL_SELECT_COLUMNS = `
+        signal_id,
+        workspace_id,
+        run_id,
+        surface_id,
+        source,
+        signal_kind,
+        object_kind,
+        scope_hint,
+        domain_tags_json,
+        confidence,
+        evidence_refs_json,
+        source_memory_refs_json,
+        supersedes_refs_json,
+        exception_to_refs_json,
+        contradicts_refs_json,
+        incompatible_with_refs_json,
+        raw_payload_json,
+        signal_state,
+        created_at
+`;
+
+const CREATE_SIGNAL_SQL = `
       INSERT INTO signals (
         signal_id,
         workspace_id,
@@ -78,93 +104,33 @@ export class SqliteSignalRepo implements SignalRepo {
         signal_state,
         created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    this.getByIdStatement = db.connection.prepare(`
-      SELECT
-        signal_id,
-        workspace_id,
-        run_id,
-        surface_id,
-        source,
-        signal_kind,
-        object_kind,
-        scope_hint,
-        domain_tags_json,
-        confidence,
-        evidence_refs_json,
-        source_memory_refs_json,
-        supersedes_refs_json,
-        exception_to_refs_json,
-        contradicts_refs_json,
-        incompatible_with_refs_json,
-        raw_payload_json,
-        signal_state,
-        created_at
-      FROM signals
-      WHERE signal_id = ?
-      LIMIT 1
-    `);
-    this.listByRunStatement = db.connection.prepare(`
-      SELECT
-        signal_id,
-        workspace_id,
-        run_id,
-        surface_id,
-        source,
-        signal_kind,
-        object_kind,
-        scope_hint,
-        domain_tags_json,
-        confidence,
-        evidence_refs_json,
-        source_memory_refs_json,
-        supersedes_refs_json,
-        exception_to_refs_json,
-        contradicts_refs_json,
-        incompatible_with_refs_json,
-        raw_payload_json,
-        signal_state,
-        created_at
-      FROM signals
-      WHERE run_id = ?
-      ORDER BY created_at ASC, signal_id ASC
-    `);
-    this.listByRunPagedStatement = db.connection.prepare(`
-      SELECT
-        signal_id,
-        workspace_id,
-        run_id,
-        surface_id,
-        source,
-        signal_kind,
-        object_kind,
-        scope_hint,
-        domain_tags_json,
-        confidence,
-        evidence_refs_json,
-        source_memory_refs_json,
-        supersedes_refs_json,
-        exception_to_refs_json,
-        contradicts_refs_json,
-        incompatible_with_refs_json,
-        raw_payload_json,
-        signal_state,
-        created_at
-      FROM signals
-      WHERE run_id = ?
-      ORDER BY created_at ASC, signal_id ASC
-      LIMIT ? OFFSET ?
-    `);
-    this.countByRunStatement = db.connection.prepare(`
-      SELECT COUNT(*) AS total
-      FROM signals
-      WHERE run_id = ?
-    `);
-    this.updateStateStatement = db.connection.prepare(`
-      UPDATE signals
-      SET signal_state = ?
-      WHERE signal_id = ?
-    `);
+`;
+
+interface SignalStatements {
+  readonly createStatement: SqliteStatement;
+  readonly getByIdStatement: SqliteStatement;
+  readonly listByRunStatement: SqliteStatement;
+  readonly listByRunPagedStatement: SqliteStatement;
+  readonly countByRunStatement: SqliteStatement;
+  readonly updateStateStatement: SqliteStatement;
+}
+
+export class SqliteSignalRepo implements SignalRepo {
+  private readonly createStatement;
+  private readonly getByIdStatement;
+  private readonly listByRunStatement;
+  private readonly listByRunPagedStatement;
+  private readonly countByRunStatement;
+  private readonly updateStateStatement;
+
+  public constructor(db: StorageDatabase) {
+    const statements = prepareSignalStatements(db);
+    this.createStatement = statements.createStatement;
+    this.getByIdStatement = statements.getByIdStatement;
+    this.listByRunStatement = statements.listByRunStatement;
+    this.listByRunPagedStatement = statements.listByRunPagedStatement;
+    this.countByRunStatement = statements.countByRunStatement;
+    this.updateStateStatement = statements.updateStateStatement;
   }
 
   public async create(signal: CandidateMemorySignal): Promise<CandidateMemorySignal> {
@@ -196,10 +162,12 @@ export class SqliteSignalRepo implements SignalRepo {
       throw new StorageError("QUERY_FAILED", `Failed to create signal ${parsedSignal.signal_id}.`, error);
     }
 
-    return {
-      ...parsedSignal,
-      signal_state: SignalState.EMITTED
-    };
+    const persisted = await this.getById(parsedSignal.signal_id);
+    if (persisted === null) {
+      throw new StorageError("NOT_FOUND", `Signal ${parsedSignal.signal_id} was not found after insert.`);
+    }
+
+    return persisted;
   }
 
   public async getById(signalId: string): Promise<CandidateMemorySignal | null> {
@@ -215,14 +183,21 @@ export class SqliteSignalRepo implements SignalRepo {
     runId: string,
     page?: SignalListPageOptions
   ): Promise<readonly CandidateMemorySignal[]> {
+    const parsedPage = parseSignalPage(page ?? DEFAULT_SIGNAL_PAGE);
     try {
-      const rows =
-        page === undefined
-          ? (this.listByRunStatement.all(runId) as SignalRow[])
-          : (this.listByRunPagedStatement.all(runId, page.limit, page.offset) as SignalRow[]);
+      const rows = this.listByRunPagedStatement.all(runId, parsedPage.limit, parsedPage.offset) as SignalRow[];
       return rows.map((row) => parseSignalRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list signals for run ${runId}.`, error);
+    }
+  }
+
+  public async listByRunAll(runId: string): Promise<readonly CandidateMemorySignal[]> {
+    try {
+      const rows = this.listByRunStatement.all(runId) as SignalRow[];
+      return rows.map((row) => parseSignalRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to list all signals for run ${runId}.`, error);
     }
   }
 
@@ -260,6 +235,41 @@ export class SqliteSignalRepo implements SignalRepo {
       throw new StorageError("QUERY_FAILED", `Failed to update signal state for ${signalId}.`, error);
     }
   }
+}
+
+function prepareSignalStatements(db: StorageDatabase): SignalStatements {
+  return {
+    createStatement: db.connection.prepare(CREATE_SIGNAL_SQL),
+    getByIdStatement: db.connection.prepare(`
+      SELECT${SIGNAL_SELECT_COLUMNS}
+      FROM signals
+      WHERE signal_id = ?
+      LIMIT 1
+    `),
+    listByRunStatement: db.connection.prepare(`
+      SELECT${SIGNAL_SELECT_COLUMNS}
+      FROM signals
+      WHERE run_id = ?
+      ORDER BY created_at ASC, signal_id ASC
+    `),
+    listByRunPagedStatement: db.connection.prepare(`
+      SELECT${SIGNAL_SELECT_COLUMNS}
+      FROM signals
+      WHERE run_id = ?
+      ORDER BY created_at ASC, signal_id ASC
+      LIMIT ? OFFSET ?
+    `),
+    countByRunStatement: db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM signals
+      WHERE run_id = ?
+    `),
+    updateStateStatement: db.connection.prepare(`
+      UPDATE signals
+      SET signal_state = ?
+      WHERE signal_id = ?
+    `)
+  };
 }
 
 function parseSignal(signal: CandidateMemorySignal): CandidateMemorySignal {
@@ -304,4 +314,11 @@ function parseSignalState(state: SignalStateType): SignalStateType {
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate signal state.", error);
   }
+}
+
+function parseSignalPage(page: SignalListPageOptions): Readonly<SignalListPageOptions> {
+  return Object.freeze({
+    limit: parsePageLimit(page.limit, "signal list page limit"),
+    offset: parsePageOffset(page.offset, "signal list page offset")
+  });
 }

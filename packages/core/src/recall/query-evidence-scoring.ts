@@ -13,9 +13,26 @@ export function scoreQueryEvidenceMatch(
   const content = normalizeEvidenceText(entry.content);
   const metadata = normalizeEvidenceText([...entry.domain_tags, ...entry.evidence_refs].join(" "));
   const terms = queryProbes.lexical_terms.slice(0, 32);
+  const hitStats = collectEvidenceTermHitStats(terms, content, metadata);
+  if (hitStats.hitWeight === 0) {
+    return 0;
+  }
+  const phraseHits = countEvidencePhraseHits(queryProbes, content);
+  const termCoverage = clamp01(hitStats.hitWeight / Math.max(1, terms.length));
+  const phraseScore = clamp01(phraseHits / 3);
+  const tokenCount = Math.max(8, splitEvidenceTokens(content).length);
+  const densityScore = clamp01(hitStats.contentHits / Math.sqrt(tokenCount));
+  const conciseScore = computeEvidenceConciseScore(hitStats.contentHits, content.length);
+  return clamp01(termCoverage * 0.48 + phraseScore * 0.12 + densityScore * 0.08 + conciseScore);
+}
+
+function collectEvidenceTermHitStats(
+  terms: readonly string[],
+  content: string,
+  metadata: string
+): Readonly<{ readonly hitWeight: number; readonly contentHits: number }> {
   let hitWeight = 0;
   let contentHits = 0;
-
   for (const term of terms) {
     const needle = normalizeEvidenceText(term);
     if (needle.length === 0) {
@@ -30,34 +47,27 @@ export function scoreQueryEvidenceMatch(
       hitWeight += 0.65;
     }
   }
+  return Object.freeze({ hitWeight, contentHits });
+}
 
-  if (hitWeight === 0) {
-    return 0;
-  }
-
-  const phraseHits = queryProbes.phrases
+function countEvidencePhraseHits(
+  queryProbes: Readonly<RecallQueryProbes>,
+  content: string
+): number {
+  return queryProbes.phrases
     .slice(0, 12)
     .filter((phrase) => containsEvidenceNeedle(content, normalizeEvidenceText(phrase)))
     .length;
-  const termCoverage = clamp01(hitWeight / Math.max(1, terms.length));
-  const phraseScore = clamp01(phraseHits / 3);
-  const tokenCount = Math.max(8, splitEvidenceTokens(content).length);
-  const densityScore = clamp01(contentHits / Math.sqrt(tokenCount));
-  const conciseScore =
-    contentHits > 0
-      ? content.length <= 420
-        ? 0.04
-        : content.length <= 1_200
-          ? 0.02
-          : 0
-      : 0;
+}
 
-  return clamp01(
-    termCoverage * 0.48 +
-      phraseScore * 0.12 +
-      densityScore * 0.08 +
-      conciseScore
-  );
+function computeEvidenceConciseScore(contentHits: number, contentLength: number): number {
+  if (contentHits <= 0) {
+    return 0;
+  }
+  if (contentLength <= 420) {
+    return 0.04;
+  }
+  return contentLength <= 1_200 ? 0.02 : 0;
 }
 
 export function normalizeEvidenceText(value: string): string {

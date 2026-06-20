@@ -62,6 +62,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { formatDuration, parseArgs, selectSteps } from "./run-full-bench-v0311-cli.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
@@ -187,69 +188,6 @@ Exit codes:
   1  one bench failed or archive verification failed
   2  bad CLI argument
 `;
-
-function parseArgs(argv) {
-  const args = {
-    benches: undefined,
-    policyShape: "chat",
-    limit: undefined,
-    dataDir: undefined,
-    historyRoot: DEFAULT_HISTORY_ROOT,
-    logRoot: LOG_ROOT,
-    dryRun: false,
-    resume: false
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const token = argv[i];
-    if (token === "--help" || token === "-h") {
-      args.help = true;
-    } else if (token === "--bench") {
-      args.benches = (argv[++i] ?? "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-    } else if (token === "--policy-shape") {
-      args.policyShape = argv[++i] ?? args.policyShape;
-    } else if (token === "--limit") {
-      const raw = argv[++i];
-      const parsed = Number.parseInt(raw ?? "", 10);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        throw new Error(`--limit requires positive integer, got '${raw}'`);
-      }
-      args.limit = parsed;
-    } else if (token === "--data-dir") {
-      args.dataDir = argv[++i];
-    } else if (token === "--history-root") {
-      args.historyRoot = path.resolve(argv[++i] ?? args.historyRoot);
-    } else if (token === "--log-root") {
-      args.logRoot = path.resolve(argv[++i] ?? args.logRoot);
-    } else if (token === "--dry-run") {
-      args.dryRun = true;
-    } else if (token === "--resume") {
-      args.resume = true;
-    } else {
-      throw new Error(`unknown argument: ${token}`);
-    }
-  }
-  return args;
-}
-
-function selectSteps(ids) {
-  if (!ids || ids.length === 0) return BENCH_STEPS;
-  const known = new Map(BENCH_STEPS.map((s) => [s.id, s]));
-  const picked = [];
-  for (const id of ids) {
-    const step = known.get(id);
-    if (!step) {
-      throw new Error(
-        `unknown bench id '${id}'. valid: ${BENCH_STEPS.map((s) => s.id).join(", ")}`
-      );
-    }
-    picked.push(step);
-  }
-  return picked;
-}
-
 function timestamp() {
   // ISO 8601 UTC, colon-stripped to be filesystem-safe (matches bench harness).
   return new Date().toISOString().replace(/[:.]/g, "").replace("Z", "Z");
@@ -398,21 +336,10 @@ async function runStep(step, ctx, args) {
   };
 }
 
-function formatDuration(ms) {
-  if (ms <= 0) return "0s";
-  const s = Math.floor(ms / 1000);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (h > 0) return `${h}h${m}m${sec}s`;
-  if (m > 0) return `${m}m${sec}s`;
-  return `${sec}s`;
-}
-
-async function main() {
+function resolveRunConfig() {
   let args;
   try {
-    args = parseArgs(process.argv.slice(2));
+    args = parseArgs(process.argv.slice(2), { defaultHistoryRoot: DEFAULT_HISTORY_ROOT, defaultLogRoot: LOG_ROOT });
   } catch (err) {
     process.stderr.write(`run-full-bench-v0311: ${err.message}\n`);
     process.exit(2);
@@ -420,12 +347,12 @@ async function main() {
 
   if (args.help) {
     process.stdout.write(HELP_TEXT);
-    return;
+    return { help: true };
   }
 
   let steps;
   try {
-    steps = selectSteps(args.benches);
+    steps = selectSteps(args.benches, BENCH_STEPS);
   } catch (err) {
     process.stderr.write(`run-full-bench-v0311: ${err.message}\n`);
     process.exit(2);
@@ -445,6 +372,10 @@ async function main() {
     }
   }
 
+  return { help: false, args, steps, ctx };
+}
+
+function printRunBanner(args, ctx, steps) {
   process.stdout.write(`run-full-bench-v0311 starting\n`);
   process.stdout.write(`  repo_root=${REPO_ROOT}\n`);
   process.stdout.write(`  data_dir=${ctx.dataDir}\n`);
@@ -455,9 +386,10 @@ async function main() {
   process.stdout.write(`  dry_run=${args.dryRun}\n`);
   process.stdout.write(`  resume=${args.resume}\n`);
   process.stdout.write(`  steps=${steps.map((s) => s.id).join(",")}\n`);
+}
 
+async function executeSteps(args, ctx, steps) {
   const results = [];
-  const overallStart = Date.now();
   let firstFailure = null;
 
   for (const step of steps) {
@@ -516,7 +448,10 @@ async function main() {
     }
   }
 
-  const totalMs = Date.now() - overallStart;
+  return { results, firstFailure };
+}
+
+function printSummary(args, results, totalMs) {
   process.stdout.write(`\n=== summary ===\n`);
   process.stdout.write(`total_wall_clock=${formatDuration(totalMs)}\n`);
   for (const r of results) {
@@ -534,6 +469,22 @@ async function main() {
       );
     }
   }
+}
+
+async function main() {
+  const config = resolveRunConfig();
+  if (config.help) {
+    return;
+  }
+  const { args, steps, ctx } = config;
+
+  printRunBanner(args, ctx, steps);
+
+  const overallStart = Date.now();
+  const { results, firstFailure } = await executeSteps(args, ctx, steps);
+
+  const totalMs = Date.now() - overallStart;
+  printSummary(args, results, totalMs);
 
   if (firstFailure) {
     process.exit(firstFailure.outcome.code === 0 ? 1 : firstFailure.outcome.code);

@@ -3,6 +3,10 @@ import {
   INSPECTOR_CORRELATION_ID_HEADER,
   INSPECTOR_REQUEST_ID_HEADER
 } from "../runtime/app.js";
+export {
+  isRequestBodyTooLargeError,
+  rejectUnexpectedRequestBody
+} from "./request-body-guard.js";
 
 export interface InspectorProxyOptions {
   readonly daemonUrl: string;
@@ -15,26 +19,6 @@ export interface InspectorProxyOptions {
 }
 
 const DEFAULT_DAEMON_PROXY_TIMEOUT_MS = 10_000;
-const REQUEST_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
-const REQUEST_BODY_PRESENCE_PROBE_TIMEOUT_MS = 0;
-
-export function isRequestBodyTooLargeError(error: unknown): boolean {
-  return readStatusCode(error) === 413 || readErrorName(error) === "BodyLimitError";
-}
-
-export async function rejectUnexpectedRequestBody(context: Context): Promise<Response | null> {
-  const outcome = await inspectUnexpectedRequestBody(context);
-
-  if (outcome === "none") {
-    return null;
-  }
-
-  if (outcome === "too_large") {
-    return context.json({ error: "request_body_too_large" }, 413);
-  }
-
-  return context.json({ error: "invalid_request" }, 400);
-}
 
 export function assertInspectorWorkspace(
   context: Context,
@@ -55,117 +39,169 @@ export function assertInspectorWorkspace(
   return null;
 }
 
+interface ProxyDaemonRequest {
+  // A1 (HITL daemon backbone): POST is added so the Inspector can
+  // forward accept/reject calls to the workspace-scoped daemon HTTP
+  // wrapper around soul.review_memory_proposal.
+  readonly method: "GET" | "PATCH" | "POST";
+  readonly path: string;
+  readonly body?: unknown;
+  // Opt in to forwarding the daemon's {success: false, error:
+  // {code, message}} envelope verbatim on 4xx/5xx so cross-surface
+  // parity holds for soul.* tools whose error messages are closed-set
+  // workflow strings. Default is sanitise.
+  readonly forwardStructuredError?: boolean;
+}
+
+interface ProxyInvocation {
+  readonly fetchImpl: typeof fetch;
+  readonly daemonUrl: URL;
+  readonly headers?: Headers;
+  readonly requestId: string | undefined;
+  readonly timeout: DaemonTimeoutHandle;
+  readonly controller: AbortController;
+}
+
+interface DaemonTimeoutHandle {
+  readonly clear: () => void;
+  readonly didTimeout: () => boolean;
+  readonly timeout: Promise<"timeout">;
+}
+
 export async function proxyDaemonJson(
   context: Context,
   options: InspectorProxyOptions,
-  request: {
-    // A1 (HITL daemon backbone): POST is added so the Inspector can
-    // forward accept/reject calls to the workspace-scoped daemon HTTP
-    // wrapper around soul.review_memory_proposal.
-    readonly method: "GET" | "PATCH" | "POST";
-    readonly path: string;
-    readonly body?: unknown;
-    // Opt in to forwarding the daemon's {success: false, error:
-    // {code, message}} envelope verbatim on 4xx/5xx so cross-surface
-    // parity holds for soul.* tools whose error messages are closed-set
-    // workflow strings. Default is sanitise.
-    readonly forwardStructuredError?: boolean;
-  }
+  request: ProxyDaemonRequest
 ): Promise<Response> {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const daemonUrl = new URL(request.path, normalizeBaseUrl(options.daemonUrl));
+  const invocation = createProxyInvocation(context, options, request);
+  try {
+    const response = await fetchProxyResponse(invocation, request);
+    if (response === "timeout") {
+      return daemonTimeoutResponse(context, invocation.requestId);
+    }
+    return await forwardProxyResponse(context, request, invocation, response);
+  } finally {
+    invocation.timeout.clear();
+  }
+}
+
+function createProxyInvocation(
+  context: Context,
+  options: InspectorProxyOptions,
+  request: ProxyDaemonRequest
+): ProxyInvocation {
   const controller = new AbortController();
   const timeoutMs = options.daemonTimeoutMs ?? DEFAULT_DAEMON_PROXY_TIMEOUT_MS;
+  const requestId = readRequestId(context);
+  return {
+    fetchImpl: options.fetchImpl ?? fetch,
+    daemonUrl: new URL(request.path, normalizeBaseUrl(options.daemonUrl)),
+    headers: buildProxyHeaders(options, request, requestId),
+    requestId,
+    timeout: startDaemonTimeout(controller, timeoutMs),
+    controller
+  };
+}
+
+function buildProxyHeaders(
+  options: InspectorProxyOptions,
+  request: ProxyDaemonRequest,
+  requestId: string | undefined
+): Headers | undefined {
   const headers = new Headers();
-  let hasHeaders = false;
   if (request.body !== undefined) {
     headers.set("content-type", "application/json");
-    hasHeaders = true;
   }
   if (options.daemonRequestToken !== undefined) {
     headers.set("x-request-token", options.daemonRequestToken);
     headers.set("x-alaya-desktop", "1");
-    hasHeaders = true;
   }
-  const requestId = readRequestId(context);
   if (requestId !== undefined) {
     headers.set(INSPECTOR_REQUEST_ID_HEADER, requestId);
     headers.set(INSPECTOR_CORRELATION_ID_HEADER, requestId);
-    hasHeaders = true;
   }
-  const timeout = startDaemonTimeout(controller, timeoutMs);
-  let response: Response | null;
-  try {
-    const responseOrTimeout = await Promise.race([
-      fetchDaemonJson({
-        fetchImpl,
-        url: daemonUrl,
-        method: request.method,
-        headers: hasHeaders ? headers : undefined,
-        body: request.body === undefined ? undefined : JSON.stringify(request.body),
-        signal: controller.signal
-      }).catch((error) => {
-        if (timeout.didTimeout() && isAbortError(error)) {
-          return "timeout" as const;
-        }
-        throw error;
-      }),
-      timeout.timeout
-    ]);
-    if (responseOrTimeout === "timeout") {
-      copyFallbackTraceHeaders(context, requestId);
-      return context.json({ error: "daemon_timeout" }, 504);
+  return Array.from(headers).length > 0 ? headers : undefined;
+}
+
+async function fetchProxyResponse(
+  invocation: ProxyInvocation,
+  request: ProxyDaemonRequest
+): Promise<Response | null | "timeout"> {
+  return await Promise.race([
+    fetchDaemonJson({
+      fetchImpl: invocation.fetchImpl,
+      url: invocation.daemonUrl,
+      method: request.method,
+      headers: invocation.headers,
+      body: request.body === undefined ? undefined : JSON.stringify(request.body),
+      signal: invocation.controller.signal
+    }).catch((error) => {
+      if (invocation.timeout.didTimeout() && isAbortError(error)) return "timeout" as const;
+      throw error;
+    }),
+    invocation.timeout.timeout
+  ]);
+}
+
+async function forwardProxyResponse(
+  context: Context,
+  request: ProxyDaemonRequest,
+  invocation: ProxyInvocation,
+  response: Response | null
+): Promise<Response> {
+  if (response === null) return daemonUnavailableResponse(context, invocation.requestId);
+  if (!response.ok) return await daemonErrorResponse(context, request, invocation, response);
+  return await daemonSuccessResponse(context, invocation, response);
+}
+
+async function daemonErrorResponse(
+  context: Context,
+  request: ProxyDaemonRequest,
+  invocation: ProxyInvocation,
+  response: Response
+): Promise<Response> {
+  if (request.forwardStructuredError === true) {
+    const safe = await readStructuredErrorWithTimeout(response, invocation.timeout);
+    if (safe === "timeout") return daemonTimeoutResponse(context, invocation.requestId, response);
+    if (safe !== null) {
+      copyTraceHeaders(context, response, invocation.requestId);
+      return context.json(safe, response.status as 400 | 401 | 403 | 404 | 409 | 422 | 500);
     }
-    response = responseOrTimeout;
-  } catch (error) {
-    throw error;
   }
+  copyTraceHeaders(context, response, invocation.requestId);
+  return context.json(
+    { error: `daemon_${response.status}` },
+    response.status as 400 | 401 | 403 | 404 | 409 | 422 | 500 | 503
+  );
+}
 
-  try {
-    if (response === null) {
-      copyFallbackTraceHeaders(context, requestId);
-      return context.json({ error: "daemon_unavailable" }, 503);
-    }
+async function daemonSuccessResponse(
+  context: Context,
+  invocation: ProxyInvocation,
+  response: Response
+): Promise<Response> {
+  const payload = await Promise.race([
+    readDaemonJson(response, invocation.timeout.didTimeout),
+    invocation.timeout.timeout
+  ]);
+  if (payload === "timeout") return daemonTimeoutResponse(context, invocation.requestId, response);
+  copyTraceHeaders(context, response, invocation.requestId);
+  return context.json(payload, response.status as 200);
+}
 
-    if (!response.ok) {
-      // By default we sanitise daemon error bodies so free-text daemon
-      // validation messages cannot leak user-supplied secrets through the
-      // inspector. Routes that route through the MCP memory-tool handler
-      // can opt in to verbatim forwarding because that workflow returns a
-      // closed {success: false, error: {code, message}} envelope. The
-      // forwarder still narrows to the canonical envelope shape; anything
-      // else falls back to the sanitised body.
-      if (request.forwardStructuredError === true) {
-        const safe = await Promise.race([
-          tryReadStructuredErrorEnvelope(response, timeout.didTimeout),
-          timeout.timeout
-        ]);
-        if (safe === "timeout") {
-          copyTraceHeaders(context, response, requestId);
-          return context.json({ error: "daemon_timeout" }, 504);
-        }
-        if (safe !== null) {
-          copyTraceHeaders(context, response, requestId);
-          return context.json(safe, response.status as 400 | 401 | 403 | 404 | 409 | 422 | 500);
-        }
-      }
-      copyTraceHeaders(context, response, requestId);
-      return context.json({ error: `daemon_${response.status}` }, response.status as 400 | 401 | 403 | 404 | 409 | 422 | 500 | 503);
-    }
+function daemonTimeoutResponse(
+  context: Context,
+  requestId: string | undefined,
+  response?: Response
+): Response {
+  if (response === undefined) copyFallbackTraceHeaders(context, requestId);
+  else copyTraceHeaders(context, response, requestId);
+  return context.json({ error: "daemon_timeout" }, 504);
+}
 
-    const payload = await Promise.race([
-      readDaemonJson(response, timeout.didTimeout),
-      timeout.timeout
-    ]);
-    if (payload === "timeout") {
-      copyTraceHeaders(context, response, requestId);
-      return context.json({ error: "daemon_timeout" }, 504);
-    }
-    copyTraceHeaders(context, response, requestId);
-    return context.json(payload, response.status as 200);
-  } finally {
-    timeout.clear();
-  }
+function daemonUnavailableResponse(context: Context, requestId: string | undefined): Response {
+  copyFallbackTraceHeaders(context, requestId);
+  return context.json({ error: "daemon_unavailable" }, 503);
 }
 
 const KNOWN_WORKFLOW_ERROR_CODES = new Set([
@@ -207,6 +243,18 @@ async function tryReadStructuredErrorEnvelope(
     success: false,
     error: { code: errorObject.code, message: errorObject.message }
   };
+}
+
+async function readStructuredErrorWithTimeout(
+  response: Response,
+  timeout: DaemonTimeoutHandle
+): Promise<
+  { readonly success: false; readonly error: { readonly code: string; readonly message: string } } | null | "timeout"
+> {
+  return await Promise.race([
+    tryReadStructuredErrorEnvelope(response, timeout.didTimeout),
+    timeout.timeout
+  ]);
 }
 
 function normalizeBaseUrl(value: string): string {
@@ -253,11 +301,7 @@ async function readDaemonJson(
 function startDaemonTimeout(
   controller: AbortController,
   timeoutMs: number
-): {
-  readonly clear: () => void;
-  readonly didTimeout: () => boolean;
-  readonly timeout: Promise<"timeout">;
-} {
+): DaemonTimeoutHandle {
   let timedOut = false;
   let clearTimer = () => {};
   const timeout = new Promise<"timeout">((resolve) => {
@@ -310,134 +354,4 @@ function copyHeaderIfPresent(context: Context, response: Response, name: string)
   if (value !== null && value.length > 0) {
     context.header(name, value);
   }
-}
-
-async function inspectUnexpectedRequestBody(context: Context): Promise<"none" | "unexpected" | "too_large"> {
-  const declaredLength = readDeclaredLength(context.req.header("content-length"));
-  const transferEncoding = normalizeOptionalHeader(context.req.header("transfer-encoding"));
-  const body = context.req.raw.body;
-  if (body === null) {
-    if (declaredLength !== null && declaredLength > REQUEST_BODY_LIMIT_BYTES) {
-      return "too_large";
-    }
-    if ((declaredLength ?? 0) > 0 || transferEncoding !== undefined) {
-      return "unexpected";
-    }
-    return "none";
-  }
-
-  if (declaredLength !== null && declaredLength > REQUEST_BODY_LIMIT_BYTES) {
-    await cancelRequestBodyStream(body, context);
-    return "too_large";
-  }
-  return await probeRequestBodyStream(body, context);
-}
-
-async function cancelRequestBodyStream(
-  body: ReadableStream<Uint8Array>,
-  context: Context
-): Promise<void> {
-  const reader = body.getReader();
-  await reader.cancel().catch((error: unknown) => {
-    if (isRequestBodyTooLargeError(error)) {
-      return;
-    }
-    console.warn("[routes/shared] request body reader cancel failed after inspection", {
-      method: context.req.method,
-      path: context.req.path,
-      error
-    });
-  });
-}
-
-async function probeRequestBodyStream(
-  body: ReadableStream<Uint8Array>,
-  context: Context
-): Promise<"none" | "unexpected" | "too_large"> {
-  const reader = body.getReader();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      reader.read().then(({ done, value }) => {
-        if (done) {
-          return "none" as const;
-        }
-        if (value.byteLength > REQUEST_BODY_LIMIT_BYTES) {
-          return "too_large" as const;
-        }
-        return "unexpected" as const;
-      }),
-      new Promise<"unexpected">((resolve) => {
-        timer = setTimeout(() => resolve("unexpected"), REQUEST_BODY_PRESENCE_PROBE_TIMEOUT_MS);
-      })
-    ]);
-  } catch (error) {
-    if (isRequestBodyTooLargeError(error)) {
-      return "too_large";
-    }
-    throw error;
-  } finally {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-    }
-    await reader.cancel().catch((error: unknown) => {
-      if (isRequestBodyTooLargeError(error)) {
-        return;
-      }
-      console.warn("[routes/shared] request body reader cancel failed after inspection", {
-        method: context.req.method,
-        path: context.req.path,
-        error
-      });
-    });
-  }
-}
-
-function readStatusCode(error: unknown): number | null {
-  if (error === null || typeof error !== "object") {
-    return null;
-  }
-
-  const candidate = error as {
-    readonly status?: unknown;
-    readonly statusCode?: unknown;
-    readonly cause?: unknown;
-  };
-
-  if (typeof candidate.status === "number") {
-    return candidate.status;
-  }
-
-  if (typeof candidate.statusCode === "number") {
-    return candidate.statusCode;
-  }
-
-  return candidate.cause === undefined ? null : readStatusCode(candidate.cause);
-}
-
-function readErrorName(error: unknown): string | null {
-  if (error instanceof Error) {
-    return error.name;
-  }
-
-  if (error === null || typeof error !== "object") {
-    return null;
-  }
-
-  const candidate = error as { readonly cause?: unknown };
-  return candidate.cause === undefined ? null : readErrorName(candidate.cause);
-}
-
-function readDeclaredLength(header: string | undefined): number | null {
-  if (header === undefined) {
-    return null;
-  }
-
-  const parsed = Number.parseInt(header, 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function normalizeOptionalHeader(value: string | undefined): string | undefined {
-  const normalized = value?.trim();
-  return normalized === undefined || normalized.length === 0 ? undefined : normalized;
 }

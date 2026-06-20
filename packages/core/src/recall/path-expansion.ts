@@ -57,7 +57,6 @@ export async function addPathExpansionCandidates(params: Readonly<{
   if (pathExpansionPort === undefined) {
     return;
   }
-
   let added = await addTimeConcernPathExpansionCandidates({
     workspaceId: params.workspaceId,
     byId: params.byId,
@@ -76,63 +75,14 @@ export async function addPathExpansionCandidates(params: Readonly<{
     return;
   }
   const seedIds = new Set(seeds.map((seed) => seed.entry.object_id));
-  const anchors: PathAnchorRef[] = seeds.map((seed) => ({
-    kind: "object",
-    object_id: seed.entry.object_id
-  }));
-  let paths: readonly Readonly<PathRelation>[];
-  try {
-    paths = await pathExpansionPort.findByAnchors(params.workspaceId, anchors);
-  } catch (error) {
-    params.warn("path expansion lookup failed", {
-      workspace_id: params.workspaceId,
-      seed_count: seeds.length,
-      error: toErrorMessage(error)
-    });
-    return;
-  }
-
-  for (const path of paths) {
-    if (added >= params.dynamicRecallPlaneCap) {
-      return;
-    }
-    if (isPathExcludedFromRecall(path)) {
-      continue;
-    }
-    // Gold-blind: the discriminator reads the EARNED path's relation_kind, not
-    // a gold label. Only the co_recalled fan-in carrier (minted past the R1
-    // threshold-3 counter gate) grants the reserve exemption; every other
-    // relation_kind admitted here stays relevance-gated downstream.
-    const reachedViaEarnedCoRecalledFanin =
-      path.constitution.relation_kind === EARNED_CO_RECALLED_FANIN_RELATION_KIND;
-    for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
-      const entry = params.byId.get(target.targetId);
-      if (entry === undefined) {
-        continue;
-      }
-      params.addCandidate(
-        entry,
-        "path_expansion",
-        scorePathRelationExpansion(path),
-        "path_expansion",
-        {
-          path_id: path.path_id,
-          seed_id: target.seedId,
-          seed_kind: "memory",
-          target_object_id: target.targetId,
-          source_channel: "path_expansion",
-          relation_kind: path.constitution.relation_kind,
-          facet_key: pathAnchorFacetKey(path)
-        },
-        undefined,
-        reachedViaEarnedCoRecalledFanin
-      );
-      added += 1;
-      if (added >= params.dynamicRecallPlaneCap) {
-        return;
-      }
-    }
-  }
+  const paths = await loadSeededPathExpansionPaths(
+    params.workspaceId,
+    seeds,
+    pathExpansionPort,
+    params.warn,
+    "path expansion lookup failed"
+  );
+  added = admitSeededPathExpansionCandidates(params, paths, seedIds, added);
 }
 
 export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
@@ -149,67 +99,12 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
   if (findByTimeConcernWindowDigests === undefined || params.queryProbes.date_terms.length === 0) {
     return 0;
   }
-
-  const windowDigests = uniqueStrings(
-    params.queryProbes.date_terms
-      .map((term) => normalizeTimeConcernWindowDigest(term))
-      .filter((term) => term.length > 0)
-  );
+  const windowDigests = collectTimeConcernWindowDigests(params.queryProbes);
   if (windowDigests.length === 0) {
     return 0;
   }
-
-  let paths: readonly Readonly<PathRelation>[];
-  try {
-    paths = await findByTimeConcernWindowDigests.call(
-      pathExpansionPort,
-      params.workspaceId,
-      windowDigests
-    );
-  } catch (error) {
-    params.warn("time concern path expansion lookup failed", {
-      workspace_id: params.workspaceId,
-      window_digest_count: windowDigests.length,
-      error: toErrorMessage(error)
-    });
-    return 0;
-  }
-
-  let added = 0;
-  for (const path of paths) {
-    if (added >= params.dynamicRecallPlaneCap) {
-      return added;
-    }
-    if (isPathExcludedFromRecall(path) || !pathMatchesTimeConcernWindowDigest(path, windowDigests)) {
-      continue;
-    }
-    for (const targetId of pathRelationMemoryIds(path)) {
-      const entry = params.byId.get(targetId);
-      if (entry === undefined) {
-        continue;
-      }
-      params.addCandidate(
-        entry,
-        "path_expansion",
-        scorePathRelationExpansion(path),
-        "time_concern",
-        {
-          path_id: path.path_id,
-          seed_id: firstTimeConcernSeedId(path, windowDigests),
-          seed_kind: "time_concern",
-          target_object_id: targetId,
-          source_channel: "time_concern",
-          relation_kind: path.constitution.relation_kind,
-          facet_key: pathAnchorFacetKey(path)
-        }
-      );
-      added += 1;
-      if (added >= params.dynamicRecallPlaneCap) {
-        return added;
-      }
-    }
-  }
-  return added;
+  const paths = await loadTimeConcernPathExpansionPaths(params, windowDigests);
+  return admitTimeConcernPathExpansionCandidates(params, paths, windowDigests);
 }
 
 // anchor: active sign-aware suppression collector. Reuses the same expansion
@@ -240,39 +135,193 @@ export async function collectNegativePathSuppressions(params: Readonly<{
     return;
   }
   const seedIds = new Set(seeds.map((seed) => seed.entry.object_id));
-  const anchors: PathAnchorRef[] = seeds.map((seed) => ({
-    kind: "object",
-    object_id: seed.entry.object_id
-  }));
-  let paths: readonly Readonly<PathRelation>[];
+  const paths = await loadSeededPathExpansionPaths(
+    params.workspaceId,
+    seeds,
+    pathExpansionPort,
+    params.warn,
+    "path suppression lookup failed"
+  );
+  applyNegativePathSuppressions(params, paths, seedIds);
+}
+
+function buildSeedPathAnchors(
+  seeds: readonly Readonly<{ readonly entry: Readonly<MemoryEntry> }>[]
+): readonly PathAnchorRef[] {
+  return seeds.map((seed) => ({ kind: "object", object_id: seed.entry.object_id }));
+}
+
+async function loadSeededPathExpansionPaths(
+  workspaceId: string,
+  seeds: readonly Readonly<{ readonly entry: Readonly<MemoryEntry> }>[],
+  pathExpansionPort: NonNullable<RecallServiceDependencies["pathExpansionPort"]>,
+  warn: RecallServiceWarnPort,
+  warningMessage: string
+): Promise<readonly Readonly<PathRelation>[]> {
   try {
-    paths = await pathExpansionPort.findByAnchors(params.workspaceId, anchors);
+    return await pathExpansionPort.findByAnchors(workspaceId, buildSeedPathAnchors(seeds));
   } catch (error) {
-    params.warn("path suppression lookup failed", {
-      workspace_id: params.workspaceId,
+    warn(warningMessage, {
+      workspace_id: workspaceId,
       seed_count: seeds.length,
       error: toErrorMessage(error)
     });
-    return;
+    return [];
   }
+}
+
+function admitSeededPathExpansionCandidates(
+  params: Parameters<typeof addPathExpansionCandidates>[0],
+  paths: readonly Readonly<PathRelation>[],
+  seedIds: ReadonlySet<string>,
+  initialAdded: number
+): number {
+  let added = initialAdded;
   for (const path of paths) {
-    // invariant: only active, strictly-negative, governance-trusted paths
-    // suppress. Active lifecycle reuses isPathActiveForRecall (dormant/retired
-    // never suppress). isPathGovernedForSuppression is the governance gate:
-    // attention_only / hint_only negatives are agent-reachable through
-    // co-occurrence seeding + strength reinforcement, so they may exclude (via
-    // isPathRecallEligible) but never actively demote - strength alone cannot
-    // license suppression. Only recall_allowed / strictly_governed negatives
-    // reach the strength-scaled delta below.
-    // see also: path-relation.ts isPathGovernedForSuppression.
-    if (
-      !isPathActiveForRecall(path.lifecycle.status) ||
-      path.effect_vector.recall_bias >= 0 ||
-      !isPathGovernedForSuppression(path)
-    ) {
+    if (added >= params.dynamicRecallPlaneCap || isPathExcludedFromRecall(path)) {
       continue;
     }
-    const delta = scorePathRelationSuppression(path);
+    added = admitPathExpansionTargets(params, path, seedIds, added);
+  }
+  return added;
+}
+
+function admitPathExpansionTargets(
+  params: Pick<Parameters<typeof addPathExpansionCandidates>[0], "byId" | "addCandidate" | "dynamicRecallPlaneCap">,
+  path: Readonly<PathRelation>,
+  seedIds: ReadonlySet<string>,
+  initialAdded: number
+): number {
+  let added = initialAdded;
+  const reachedViaEarnedCoRecalledFanin =
+    path.constitution.relation_kind === EARNED_CO_RECALLED_FANIN_RELATION_KIND;
+  for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
+    const entry = params.byId.get(target.targetId);
+    if (entry === undefined) {
+      continue;
+    }
+    params.addCandidate(
+      entry,
+      "path_expansion",
+      scorePathRelationExpansion(path),
+      "path_expansion",
+      buildMemoryPathExpansionSource(path, target.seedId, target.targetId),
+      undefined,
+      reachedViaEarnedCoRecalledFanin
+    );
+    added += 1;
+    if (added >= params.dynamicRecallPlaneCap) {
+      break;
+    }
+  }
+  return added;
+}
+
+function buildMemoryPathExpansionSource(
+  path: Readonly<PathRelation>,
+  seedId: string,
+  targetId: string
+): Readonly<RecallPathExpansionSourceDiagnostic> {
+  return Object.freeze({
+    path_id: path.path_id,
+    seed_id: seedId,
+    seed_kind: "memory",
+    target_object_id: targetId,
+    source_channel: "path_expansion",
+    relation_kind: path.constitution.relation_kind,
+    facet_key: pathAnchorFacetKey(path)
+  });
+}
+
+function collectTimeConcernWindowDigests(
+  queryProbes: Readonly<RecallQueryProbes>
+): readonly string[] {
+  return uniqueStrings(
+    queryProbes.date_terms
+      .map((term) => normalizeTimeConcernWindowDigest(term))
+      .filter((term) => term.length > 0)
+  );
+}
+
+async function loadTimeConcernPathExpansionPaths(
+  params: Parameters<typeof addTimeConcernPathExpansionCandidates>[0],
+  windowDigests: readonly string[]
+): Promise<readonly Readonly<PathRelation>[]> {
+  try {
+    return await params.pathExpansionPort!.findByTimeConcernWindowDigests!(
+      params.workspaceId,
+      windowDigests
+    );
+  } catch (error) {
+    params.warn("time concern path expansion lookup failed", {
+      workspace_id: params.workspaceId,
+      window_digest_count: windowDigests.length,
+      error: toErrorMessage(error)
+    });
+    return [];
+  }
+}
+
+function admitTimeConcernPathExpansionCandidates(
+  params: Parameters<typeof addTimeConcernPathExpansionCandidates>[0],
+  paths: readonly Readonly<PathRelation>[],
+  windowDigests: readonly string[]
+): number {
+  let added = 0;
+  for (const path of paths) {
+    if (added >= params.dynamicRecallPlaneCap) {
+      break;
+    }
+    if (isPathExcludedFromRecall(path) || !pathMatchesTimeConcernWindowDigest(path, windowDigests)) {
+      continue;
+    }
+    added = admitTimeConcernPathTargets(params, path, windowDigests, added);
+  }
+  return added;
+}
+
+function admitTimeConcernPathTargets(
+  params: Pick<Parameters<typeof addTimeConcernPathExpansionCandidates>[0], "byId" | "addCandidate" | "dynamicRecallPlaneCap">,
+  path: Readonly<PathRelation>,
+  windowDigests: readonly string[],
+  initialAdded: number
+): number {
+  let added = initialAdded;
+  for (const targetId of pathRelationMemoryIds(path)) {
+    const entry = params.byId.get(targetId);
+    if (entry === undefined) {
+      continue;
+    }
+    params.addCandidate(
+      entry,
+      "path_expansion",
+      scorePathRelationExpansion(path),
+      "time_concern",
+      Object.freeze({
+        path_id: path.path_id,
+        seed_id: firstTimeConcernSeedId(path, windowDigests),
+        seed_kind: "time_concern",
+        target_object_id: targetId,
+        source_channel: "time_concern",
+        relation_kind: path.constitution.relation_kind,
+        facet_key: pathAnchorFacetKey(path)
+      })
+    );
+    added += 1;
+    if (added >= params.dynamicRecallPlaneCap) {
+      break;
+    }
+  }
+  return added;
+}
+
+function applyNegativePathSuppressions(
+  params: Parameters<typeof collectNegativePathSuppressions>[0],
+  paths: readonly Readonly<PathRelation>[],
+  seedIds: ReadonlySet<string>
+): void {
+  for (const path of paths) {
+    const delta = resolveNegativePathSuppressionDelta(path);
     if (delta <= 0) {
       continue;
     }
@@ -280,16 +329,22 @@ export async function collectNegativePathSuppressions(params: Readonly<{
       if (!params.byId.has(target.targetId)) {
         continue;
       }
-      // invariant: per-target accumulation is capped at
-      // packages/core/src/recall/path-relations.ts:PATH_SUPPRESSION_MAX_PER_TARGET
-      // so converging negatives compound up to one reinforced-supersession
-      // delta but never gang into erasure.
-      const accumulated =
-        (params.suppressionScores.get(target.targetId) ?? 0) + delta;
+      const accumulated = (params.suppressionScores.get(target.targetId) ?? 0) + delta;
       params.suppressionScores.set(
         target.targetId,
         Math.min(accumulated, PATH_SUPPRESSION_MAX_PER_TARGET)
       );
     }
   }
+}
+
+function resolveNegativePathSuppressionDelta(path: Readonly<PathRelation>): number {
+  if (
+    !isPathActiveForRecall(path.lifecycle.status) ||
+    path.effect_vector.recall_bias >= 0 ||
+    !isPathGovernedForSuppression(path)
+  ) {
+    return 0;
+  }
+  return scorePathRelationSuppression(path);
 }

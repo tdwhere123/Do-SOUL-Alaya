@@ -51,7 +51,58 @@ export function buildQuestionDiagnostic(input: {
     activeConstraintResults.map((result) => [result.object_id, result.rank])
   );
 
-  const gold = input.goldMemoryIds.map((objectId): LongMemEvalGoldDiagnostic => {
+  const gold = buildGoldDiagnostics({
+    goldMemoryIds: input.goldMemoryIds,
+    deliveredRankById,
+    activeConstraintRankById,
+    diagnostics
+  });
+
+  return {
+    question_id: input.questionId,
+    round_index: input.roundIndex ?? null,
+    gold_memory_ids: input.goldMemoryIds,
+    answer_session_ids: input.answerSessionIds,
+    delivered_results: deliveredResults,
+    active_constraint_results: activeConstraintResults,
+    hit_at_1: input.hitAt1,
+    hit_at_5: input.hitAt5,
+    hit_at_10: input.hitAt10,
+    miss_classification: classifyMiss(
+      input.hitAt5,
+      gold,
+      diagnostics !== null,
+      input.isAbstention === true
+    ),
+    degradation_reason: input.degradationReason,
+    recall_diagnostics_present: diagnostics !== null,
+    recall_diagnostics_keys: diagnostics?.keys ?? [],
+    ...(diagnostics?.phaseLatencyMs === null || diagnostics?.phaseLatencyMs === undefined
+      ? {}
+      : { phase_latency_ms: diagnostics.phaseLatencyMs }),
+    provider_state:
+      diagnostics?.providerState ??
+      (input.embeddingMode === "disabled" ? "provider_not_requested" : "unknown"),
+    provider_degradation_reason: diagnostics?.providerDegradationReason ?? null,
+    graph_expansion_plane_count_per_hop:
+      diagnostics?.graphExpansionPlaneCountPerHop ??
+      createEmptyGraphExpansionPlaneCountPerHop(),
+    graph_expansion_plane_count_per_edge_type:
+      diagnostics?.graphExpansionPlaneCountPerEdgeType ??
+      createEmptyGraphExpansionPlaneCountPerEdgeType(),
+    candidate_key_collisions: buildCandidateKeyCollisions(diagnostics),
+    gold
+  };
+}
+
+function buildGoldDiagnostics(input: {
+  readonly goldMemoryIds: readonly string[];
+  readonly deliveredRankById: ReadonlyMap<string, number>;
+  readonly activeConstraintRankById: ReadonlyMap<string, number>;
+  readonly diagnostics: NarrowRecallDiagnostics | null;
+}): LongMemEvalGoldDiagnostic[] {
+  const { deliveredRankById, activeConstraintRankById, diagnostics } = input;
+  return input.goldMemoryIds.map((objectId): LongMemEvalGoldDiagnostic => {
     const deliveredRank = deliveredRankById.get(objectId) ?? null;
     const activeConstraintRank = activeConstraintRankById.get(objectId) ?? null;
     const candidate = diagnostics?.candidatesByObjectIdentity.get(
@@ -102,49 +153,20 @@ export function buildQuestionDiagnostic(input: {
       reserved_by: candidate?.reservedBy ?? null
     };
   });
+}
 
-  return {
-    question_id: input.questionId,
-    round_index: input.roundIndex ?? null,
-    gold_memory_ids: input.goldMemoryIds,
-    answer_session_ids: input.answerSessionIds,
-    delivered_results: deliveredResults,
-    active_constraint_results: activeConstraintResults,
-    hit_at_1: input.hitAt1,
-    hit_at_5: input.hitAt5,
-    hit_at_10: input.hitAt10,
-    miss_classification: classifyMiss(
-      input.hitAt5,
-      gold,
-      diagnostics !== null,
-      input.isAbstention === true
-    ),
-    degradation_reason: input.degradationReason,
-    recall_diagnostics_present: diagnostics !== null,
-    recall_diagnostics_keys: diagnostics?.keys ?? [],
-    ...(diagnostics?.phaseLatencyMs === null || diagnostics?.phaseLatencyMs === undefined
-      ? {}
-      : { phase_latency_ms: diagnostics.phaseLatencyMs }),
-    provider_state:
-      diagnostics?.providerState ??
-      (input.embeddingMode === "disabled" ? "provider_not_requested" : "unknown"),
-    provider_degradation_reason: diagnostics?.providerDegradationReason ?? null,
-    graph_expansion_plane_count_per_hop:
-      diagnostics?.graphExpansionPlaneCountPerHop ??
-      createEmptyGraphExpansionPlaneCountPerHop(),
-    graph_expansion_plane_count_per_edge_type:
-      diagnostics?.graphExpansionPlaneCountPerEdgeType ??
-      createEmptyGraphExpansionPlaneCountPerEdgeType(),
-    candidate_key_collisions: diagnostics === null
-      ? []
-      : [...diagnostics.candidateKeysByObjectId.entries()]
-          .filter(([, candidateKeys]) => candidateKeys.length > 1)
-          .map(([objectId, candidateKeys]) => ({
-            object_id: objectId,
-            candidate_keys: candidateKeys
-          })),
-    gold
-  };
+function buildCandidateKeyCollisions(
+  diagnostics: NarrowRecallDiagnostics | null
+): LongMemEvalQuestionDiagnostic["candidate_key_collisions"] {
+  if (diagnostics === null) {
+    return [];
+  }
+  return [...diagnostics.candidateKeysByObjectId.entries()]
+    .filter(([, candidateKeys]) => candidateKeys.length > 1)
+    .map(([objectId, candidateKeys]) => ({
+      object_id: objectId,
+      candidate_keys: candidateKeys
+    }));
 }
 
 function normalizeDeliveredResults(

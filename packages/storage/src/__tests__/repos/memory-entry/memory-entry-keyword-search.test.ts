@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   mergeKeywordSearchRows,
   tokenizeFtsQuery,
@@ -7,6 +7,8 @@ import {
 } from "../../../repos/memory-entry/keyword-search.js";
 import {
   __resetCjkSegmentationStateForTests,
+  __setCjkSegmentationLoaderForTests,
+  segmentCjkRun,
   warmCjkSegmentation
 } from "../../../repos/shared/cjk-segmentation.js";
 
@@ -105,6 +107,7 @@ describe("tokenizeFtsQuery multilingual segmentation", () => {
 describe("tokenizeFtsQuery CJK segmentation fail-soft", () => {
   afterEach(() => {
     __resetCjkSegmentationStateForTests();
+    vi.restoreAllMocks();
   });
 
   it("emits the surface CJK token when jieba is not yet warm so FTS5 still gets a match expression", () => {
@@ -112,5 +115,28 @@ describe("tokenizeFtsQuery CJK segmentation fail-soft", () => {
     const tokens = tokenizeFtsQuery("我喜欢咖啡");
     expect(tokens).toContain("我喜欢咖啡");
     expect(tokens).not.toContain("喜欢");
+  });
+
+  it("emits a structured warning once when jieba native loading fails", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    __setCjkSegmentationLoaderForTests(async () => {
+      throw new Error("mock jieba load failure");
+    });
+
+    await expect(warmCjkSegmentation()).resolves.toBe(false);
+    expect(segmentCjkRun("我喜欢咖啡")).toEqual(["我喜欢咖啡"]);
+    await expect(warmCjkSegmentation()).resolves.toBe(false);
+
+    expect(emitWarning).toHaveBeenCalledTimes(1);
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[CjkSegmentation] @node-rs/jieba unavailable; using surface-token fallback",
+      expect.objectContaining({
+        code: "ALAYA_STORAGE_CJK_SEGMENTATION_FALLBACK",
+        detail: JSON.stringify({
+          layer: "storage",
+          error: "mock jieba load failure"
+        })
+      })
+    );
   });
 });

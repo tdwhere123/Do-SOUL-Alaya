@@ -1,28 +1,20 @@
 import { randomUUID } from "node:crypto";
+
 import {
   ControlPlaneObjectKind,
-  GovernanceRoleState,
   GreenState,
   GreenStatusSchema,
-  MemoryDimension,
   GreenGovernanceEventType,
+  MemoryDimension,
   RevokeReason,
   SoulGreenGraceEnteredPayloadSchema,
   SoulGreenGrantedPayloadSchema,
   SoulGreenPiercedPayloadSchema,
-  SoulSessionOverrideAppliedPayloadSchema,
-  SoulSessionOverridePromotedPayloadSchema,
   SoulVerificationCompletedPayloadSchema,
-  VERIFICATION_VALID_UNTIL_BY_DIMENSION,
   VerificationBasis,
   VerificationResultSchema,
   VerificationVerdict,
-  VerifiedBy,
-  type EventLogEntry,
-  type GovernanceRoleState as GovernanceRoleStateType,
   type GreenStatus,
-  type MemoryDimension as MemoryDimensionType,
-  type MemoryEntry,
   type RevokeReason as RevokeReasonType,
   type ScopeClass,
   type VerificationBasis as VerificationBasisType,
@@ -30,99 +22,61 @@ import {
   type VerificationVerdict as VerificationVerdictType,
   type VerifiedBy as VerifiedByType
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../shared/errors.js";
+
 import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 
-const LOW_SIGNAL_REASONS = new Set<RevokeReasonType>([RevokeReason.REVIEW_OVERDUE, RevokeReason.NONE]);
-const ACTIVE_LIFECYCLE = "active";
+import { GreenGrantGuard } from "./green-grant-guard.js";
+import {
+  ACTIVE_LIFECYCLE,
+  LOW_SIGNAL_REASONS,
+  calculateGraceUntil,
+  calculateValidUntil,
+  determineReevaluationBasis,
+  determineVerifiedByForBasis,
+  isExpired,
+  normalizeBoundSurfaces,
+  resolveVerifiedBy,
+  type GreenServiceDependencies,
+  type GreenServiceReevaluationOutcome,
+  type GreenWarnPort
+} from "./green-service-ports.js";
 
-const GRACE_HOURS_BY_DIMENSION: Readonly<Record<MemoryDimensionType, number | null>> = {
-  [MemoryDimension.PREFERENCE]: null,
-  [MemoryDimension.CONSTRAINT]: 24,
-  [MemoryDimension.DECISION]: 24,
-  [MemoryDimension.PROCEDURE]: 24,
-  [MemoryDimension.FACT]: 72,
-  [MemoryDimension.HAZARD]: 6,
-  [MemoryDimension.GLOSSARY]: 72,
-  [MemoryDimension.EPISODE]: null
-} as const;
+export type {
+  GreenRuntimeNotifier,
+  GreenServiceDependencies,
+  GreenServiceEventLogRepoPort,
+  GreenServiceGreenStatusRepoPort,
+  GreenServiceLeasePort,
+  GreenServiceMemoryRepoPort,
+  GreenServiceReevaluationOutcome,
+  GreenServiceStatusResolverPort,
+  GreenWarnPort
+} from "./green-service-ports.js";
 
-const NON_RECOVERABLE_REVOKE_REASONS = new Set<RevokeReasonType>([
-  RevokeReason.EXTERNAL_INVALIDATION,
-  RevokeReason.SECURITY_HIT,
-  RevokeReason.REVIEW_OVERDUE,
-  RevokeReason.VERIFICATION_FAIL
-]);
-
-export interface GreenServiceGreenStatusRepoPort {
-  findByTargetObjectId(targetObjectId: string): Promise<Readonly<GreenStatus> | null>;
-  findEligible(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
-  findGrace(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
-  findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
-  upsert(greenStatus: Readonly<GreenStatus>): Promise<Readonly<GreenStatus>>;
-}
-
-export interface GreenServiceMemoryRepoPort {
-  findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
-}
-
-export interface GreenServiceEventLogRepoPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
-  queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
-  queryByWorkspace(workspaceId: string): Promise<readonly EventLogEntry[]>;
-  queryByType(eventType: string): Promise<readonly EventLogEntry[]>;
-}
-
-export interface GreenServiceLeasePort {
-  isHeld(runId: string): Promise<boolean>;
-}
-
-export interface GreenServiceStatusResolverPort {
-  getGovernanceRole(params: {
-    readonly targetObjectId: string;
-    readonly workspaceId: string;
-  }): Promise<GovernanceRoleStateType | null>;
-}
-
-export interface GreenRuntimeNotifier {
-  notifyEntry(entry: EventLogEntry): void | Promise<void>;
-}
-
-export interface GreenWarnPort {
-  (message: string, meta: Record<string, unknown>): void;
-}
-
-export type GreenServiceReevaluationOutcome = "granted" | "grace" | "unchanged" | "pierced";
-
-export interface GreenServiceDependencies {
-  readonly greenStatusRepo: GreenServiceGreenStatusRepoPort;
-  readonly memoryRepo: GreenServiceMemoryRepoPort;
-  readonly eventLogRepo: GreenServiceEventLogRepoPort;
-  readonly runtimeNotifier: GreenRuntimeNotifier;
-  readonly statusResolver?: GreenServiceStatusResolverPort;
-  readonly leaseService?: GreenServiceLeasePort;
-  readonly generateObjectId?: () => string;
-  readonly now?: () => string;
-  readonly warn?: GreenWarnPort;
-}
-
-/**
- * Green verification retry counters are process-local only.
- * Restarting the daemon resets consecutive `no_go` tracking for every object.
- */
 export class GreenService {
   public static readonly VERIFICATION_MAX_CONSECUTIVE_NO_GO = 3;
 
-  private readonly generateObjectId: () => string;
-  private readonly now: () => string;
-  private readonly warn: GreenWarnPort;
-  private readonly consecutiveNoGo = new Map<string, number>();
-  private hasWarnedMissingStatusResolver = false;
+  public readonly generateObjectId: () => string;
 
-  public constructor(private readonly dependencies: GreenServiceDependencies) {
+  public readonly now: () => string;
+
+  public readonly warn: GreenWarnPort;
+
+  public readonly consecutiveNoGo = new Map<string, number>();
+
+  private readonly guard: GreenGrantGuard;
+
+  public constructor(public readonly dependencies: GreenServiceDependencies) {
     this.generateObjectId = dependencies.generateObjectId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? ((message, meta) => console.warn(message, meta));
+    this.guard = new GreenGrantGuard({
+      memoryRepo: dependencies.memoryRepo,
+      eventLogRepo: dependencies.eventLogRepo,
+      statusResolver: dependencies.statusResolver,
+      now: this.now,
+      warn: this.warn
+    });
   }
 
   public async grant(params: {
@@ -136,9 +90,9 @@ export class GreenService {
   }): Promise<Readonly<GreenStatus>> {
     const targetObjectId = parseObjectId(params.targetObjectId);
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
-    const memory = await this.getMemoryOrThrow(targetObjectId);
+    const memory = await this.guard.getMemoryOrThrow(targetObjectId);
     const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
-    await this.assertGrantPreconditions({
+    await this.guard.assertGrantPreconditions({
       memory,
       workspaceId,
       basis: params.basis,
@@ -213,7 +167,7 @@ export class GreenService {
       return existing;
     }
 
-    const memory = await this.getMemoryOrThrow(targetObjectId);
+    const memory = await this.guard.getMemoryOrThrow(targetObjectId);
     const timestamp = this.now();
     const next = GreenStatusSchema.parse({
       ...existing,
@@ -301,7 +255,7 @@ export class GreenService {
   }): Promise<GreenServiceReevaluationOutcome> {
     const targetObjectId = parseObjectId(params.targetObjectId);
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
-    const memory = await this.getMemoryOrThrow(targetObjectId);
+    const memory = await this.guard.getMemoryOrThrow(targetObjectId);
     const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
     const nowIso = this.now();
 
@@ -335,7 +289,7 @@ export class GreenService {
     const piercingReason =
       existing === null
         ? null
-        : await this.evaluatePiercingReason({
+        : await this.guard.evaluatePiercingReason({
             existing,
             memory,
             workspaceId
@@ -386,7 +340,7 @@ export class GreenService {
   }): Promise<Readonly<VerificationResult>> {
     const targetObjectId = parseObjectId(params.targetObjectId);
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
-    const memory = await this.getMemoryOrThrow(targetObjectId);
+    const memory = await this.guard.getMemoryOrThrow(targetObjectId);
     const currentCount = this.consecutiveNoGo.get(targetObjectId) ?? 0;
     const timestamp = this.now();
 
@@ -394,8 +348,9 @@ export class GreenService {
     let hint = params.microCorrectionHint;
 
     if (params.verdict === VerificationVerdict.NO_GO) {
-      if (currentCount >= GreenService.VERIFICATION_MAX_CONSECUTIVE_NO_GO) {
-        count = GreenService.VERIFICATION_MAX_CONSECUTIVE_NO_GO;
+      const maxNoGo = GreenService.VERIFICATION_MAX_CONSECUTIVE_NO_GO;
+      if (currentCount >= maxNoGo) {
+        count = maxNoGo;
         hint = "max retries reached";
       } else {
         count = currentCount + 1;
@@ -472,306 +427,4 @@ export class GreenService {
   public async findAll(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]> {
     return await this.dependencies.greenStatusRepo.findByWorkspaceId(parseNonEmptyString(workspaceId, "workspaceId"));
   }
-
-  private async assertGrantPreconditions(params: {
-    readonly memory: Readonly<MemoryEntry>;
-    readonly workspaceId: string;
-    readonly basis: VerificationBasisType;
-    readonly boundSurfaces: readonly string[] | null;
-    readonly boundScopeClass: ScopeClass | null;
-  }): Promise<void> {
-    if (params.memory.workspace_id !== params.workspaceId) {
-      throw new CoreError("VALIDATION", "Memory entry does not belong to the workspace");
-    }
-
-    if (params.memory.lifecycle_state !== ACTIVE_LIFECYCLE) {
-      throw new CoreError("VALIDATION", "Only active memory entries can enter Green");
-    }
-
-    if (params.memory.evidence_refs.length === 0) {
-      throw new CoreError("VALIDATION", "Green status requires evidence_refs");
-    }
-
-    if (await this.isContested(params.memory.object_id, params.workspaceId)) {
-      throw new CoreError("CONFLICT", "Contested memory entries cannot enter Green");
-    }
-
-    if (await this.hasOpenCorrection(params.memory.object_id, params.workspaceId)) {
-      throw new CoreError("CONFLICT", "Open session overrides block Green grant");
-    }
-
-    if (await this.hasHighRiskGuardHit(params.memory.object_id, params.workspaceId)) {
-      throw new CoreError("CONFLICT", "Security guard hit blocks Green grant");
-    }
-
-    if (!basisAllowedForDimension(params.memory.dimension, params.basis)) {
-      throw new CoreError(
-        "VALIDATION",
-        `Verification basis ${params.basis} is not allowed for ${params.memory.dimension}`
-      );
-    }
-
-    if (
-      requiresSurfaceBinding(params.memory.dimension) &&
-      normalizeBoundSurfaces(params.boundSurfaces, params.memory.surface_id) === null
-    ) {
-      throw new CoreError("VALIDATION", `${params.memory.dimension} Green status requires a bound surface`);
-    }
-
-    if (params.boundScopeClass !== null && params.boundScopeClass !== params.memory.scope_class) {
-      throw new CoreError("VALIDATION", "boundScopeClass must match the target memory scope_class");
-    }
-  }
-
-  private async getMemoryOrThrow(targetObjectId: string): Promise<Readonly<MemoryEntry>> {
-    const memory = await this.dependencies.memoryRepo.findById(targetObjectId);
-
-    if (memory === null) {
-      throw new CoreError("NOT_FOUND", "Memory entry not found");
-    }
-
-    return memory;
-  }
-
-  private async isContested(targetObjectId: string, workspaceId: string): Promise<boolean> {
-    if (this.dependencies.statusResolver === undefined) {
-      this.warnMissingStatusResolver(workspaceId, targetObjectId);
-      return false;
-    }
-
-    const governanceRole = await this.dependencies.statusResolver.getGovernanceRole({
-      targetObjectId,
-      workspaceId
-    });
-    return governanceRole === GovernanceRoleState.CONTESTED;
-  }
-
-  private async hasOpenCorrection(targetObjectId: string, workspaceId: string): Promise<boolean> {
-    const workspaceEvents = await this.dependencies.eventLogRepo.queryByWorkspace(workspaceId);
-    const appliedEvents = workspaceEvents.filter(
-      (entry) => entry.event_type === GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED
-    );
-    const promotedEvents = workspaceEvents.filter(
-      (entry) => entry.event_type === GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED
-    );
-    const promotedOverrideIds = new Set(
-      promotedEvents
-        .map((entry) => SoulSessionOverridePromotedPayloadSchema.safeParse(entry.payload_json))
-        .flatMap((result) =>
-          result.success && result.data.promotion_outcome !== "not_promoted"
-            ? [result.data.override_id]
-            : []
-        )
-    );
-
-    return appliedEvents.some((entry) => {
-      const parsed = SoulSessionOverrideAppliedPayloadSchema.safeParse(entry.payload_json);
-
-      if (!parsed.success) {
-        return false;
-      }
-
-      return (
-        parsed.data.target_object === targetObjectId &&
-        !promotedOverrideIds.has(parsed.data.override_id) &&
-        !isExpired(parsed.data.expires_at, this.now())
-      );
-    });
-  }
-
-  private async hasHighRiskGuardHit(targetObjectId: string, workspaceId: string): Promise<boolean> {
-    const entityEvents = await this.dependencies.eventLogRepo.queryByEntity("memory_entry", targetObjectId);
-
-    if (entityEvents.some((entry) => hasSecurityHitRevokeReason(entry.payload_json))) {
-      return true;
-    }
-
-    const workspaceEvents = await this.dependencies.eventLogRepo.queryByWorkspace(workspaceId);
-    return workspaceEvents.some(
-      (entry) =>
-        entry.event_type === GreenGovernanceEventType.SOUL_GREEN_PIERCED &&
-        hasTargetObjectId(entry.payload_json, targetObjectId) &&
-        hasSecurityHitRevokeReason(entry.payload_json)
-    );
-  }
-
-  private async evaluatePiercingReason(params: {
-    readonly existing: Readonly<GreenStatus>;
-    readonly memory: Readonly<MemoryEntry>;
-    readonly workspaceId: string;
-  }): Promise<RevokeReasonType | null> {
-    if (await this.isContested(params.memory.object_id, params.workspaceId)) {
-      return RevokeReason.CONTESTED;
-    }
-
-    if (await this.hasOpenCorrection(params.memory.object_id, params.workspaceId)) {
-      return RevokeReason.CORRECTION_OPEN;
-    }
-
-    if (await this.hasHighRiskGuardHit(params.memory.object_id, params.workspaceId)) {
-      return RevokeReason.SECURITY_HIT;
-    }
-
-    if (isSurfaceDetached(params.existing, params.memory.surface_id)) {
-      return RevokeReason.SURFACE_DETACHED;
-    }
-
-    if (params.memory.lifecycle_state !== ACTIVE_LIFECYCLE || params.memory.evidence_refs.length === 0) {
-      return RevokeReason.EXTERNAL_INVALIDATION;
-    }
-
-    return null;
-  }
-
-  private warnMissingStatusResolver(workspaceId: string, targetObjectId: string): void {
-    if (this.hasWarnedMissingStatusResolver) {
-      return;
-    }
-
-    this.hasWarnedMissingStatusResolver = true;
-    this.warn("[GreenService] statusResolver missing; contested Green checks are disabled.", {
-      workspaceId,
-      targetObjectId
-    });
-  }
-}
-
-function basisAllowedForDimension(
-  dimension: MemoryDimensionType,
-  basis: VerificationBasisType
-): boolean {
-  switch (dimension) {
-    case MemoryDimension.PREFERENCE:
-    case MemoryDimension.EPISODE:
-      return true;
-    case MemoryDimension.FACT:
-    case MemoryDimension.GLOSSARY:
-    case MemoryDimension.DECISION:
-      return basis !== VerificationBasis.PASSIVE_STABLE;
-    case MemoryDimension.CONSTRAINT:
-    case MemoryDimension.PROCEDURE:
-      return basis === VerificationBasis.ACTIVE_VERIFICATION || basis === VerificationBasis.DETERMINISTIC_CHECK;
-    case MemoryDimension.HAZARD:
-      return basis === VerificationBasis.USER_RECONFIRM;
-    default:
-      return false;
-  }
-}
-
-function requiresSurfaceBinding(dimension: MemoryDimensionType): boolean {
-  return dimension === MemoryDimension.CONSTRAINT || dimension === MemoryDimension.PROCEDURE;
-}
-
-function normalizeBoundSurfaces(
-  boundSurfaces: readonly string[] | null | undefined,
-  surfaceId: string | null
-): readonly string[] | null {
-  if (boundSurfaces !== undefined && boundSurfaces !== null && boundSurfaces.length > 0) {
-    return Object.freeze([...new Set(boundSurfaces)]);
-  }
-
-  if (surfaceId !== null) {
-    return Object.freeze([surfaceId]);
-  }
-
-  return null;
-}
-
-function isSurfaceDetached(status: Readonly<GreenStatus>, surfaceId: string | null): boolean {
-  if (status.bound_surfaces === null || status.bound_surfaces.length === 0) {
-    return false;
-  }
-
-  return surfaceId === null || !status.bound_surfaces.includes(surfaceId);
-}
-
-function hasSecurityHitRevokeReason(payload: Readonly<Record<string, unknown>>): boolean {
-  return payload["revoke_reason"] === RevokeReason.SECURITY_HIT;
-}
-
-function hasTargetObjectId(payload: Readonly<Record<string, unknown>>, targetObjectId: string): boolean {
-  return payload["target_object_id"] === targetObjectId;
-}
-
-function resolveVerifiedBy(
-  dimension: MemoryDimensionType,
-  verifiedBy: VerifiedByType
-): VerifiedByType {
-  if (dimension === MemoryDimension.HAZARD) {
-    return VerifiedBy.USER;
-  }
-
-  return verifiedBy;
-}
-
-function determineVerifiedByForBasis(basis: VerificationBasisType): VerifiedByType {
-  switch (basis) {
-    case VerificationBasis.DETERMINISTIC_CHECK:
-      return VerifiedBy.DETERMINISTIC_CHECKER;
-    case VerificationBasis.USER_RECONFIRM:
-      return VerifiedBy.USER;
-    case VerificationBasis.PASSIVE_STABLE:
-    case VerificationBasis.ACTIVE_VERIFICATION:
-    default:
-      return VerifiedBy.REVIEW;
-  }
-}
-
-function determineReevaluationBasis(
-  memory: Readonly<MemoryEntry>,
-  existing: Readonly<GreenStatus> | null
-): VerificationBasisType | null {
-  if (existing === null) {
-    if (memory.dimension === MemoryDimension.PREFERENCE || memory.dimension === MemoryDimension.EPISODE) {
-      return VerificationBasis.PASSIVE_STABLE;
-    }
-
-    return null;
-  }
-
-  if (existing.green_state === GreenState.GRACE) {
-    return null;
-  }
-
-  if (existing.green_state === GreenState.REVOKED && NON_RECOVERABLE_REVOKE_REASONS.has(existing.revoke_reason)) {
-    return null;
-  }
-
-  return existing.verification_basis;
-}
-
-function calculateValidUntil(dimension: MemoryDimensionType, nowIso: string): string | null {
-  const days =
-    (VERIFICATION_VALID_UNTIL_BY_DIMENSION as Partial<Record<MemoryDimensionType, number | null>>)[dimension] ??
-    null;
-
-  if (days === null) {
-    return null;
-  }
-
-  return addHours(nowIso, days * 24);
-}
-
-function calculateGraceUntil(dimension: MemoryDimensionType, nowIso: string): string | null {
-  const hours = GRACE_HOURS_BY_DIMENSION[dimension];
-
-  if (hours === null) {
-    return null;
-  }
-
-  return addHours(nowIso, hours);
-}
-
-function addHours(nowIso: string, hours: number): string {
-  const timestamp = new Date(nowIso);
-  timestamp.setTime(timestamp.getTime() + hours * 60 * 60 * 1000);
-  return timestamp.toISOString();
-}
-
-function isExpired(timestamp: string | null, nowIso: string): boolean {
-  if (timestamp === null) {
-    return false;
-  }
-
-  return new Date(timestamp).getTime() <= new Date(nowIso).getTime();
 }

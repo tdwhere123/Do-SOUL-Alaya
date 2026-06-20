@@ -14,7 +14,7 @@ describe("GraphContractService", () => {
     const relation = createPathRelation();
     const service = new GraphContractService({
       pathRelationRepo: {
-        findActive: vi.fn(async () => [relation])
+        findActiveAll: vi.fn(async () => [relation])
       },
       snapshotHistory: {
         findHistory: vi.fn(async () => [createSnapshot("latest", 2), createSnapshot("baseline", 1)])
@@ -66,7 +66,7 @@ describe("GraphContractService", () => {
   it("omits optional snapshot trend when history reads fail", async () => {
     const service = new GraphContractService({
       pathRelationRepo: {
-        findActive: vi.fn(async () => [])
+        findActiveAll: vi.fn(async () => [])
       },
       snapshotHistory: {
         findHistory: vi.fn(async () => {
@@ -95,7 +95,7 @@ describe("GraphContractService", () => {
     let relations = [createPathRelation()];
     const service = new GraphContractService({
       pathRelationRepo: {
-        findActive: vi.fn(async () => relations)
+        findActiveAll: vi.fn(async () => relations)
       },
       now: () => new Date("2026-05-02T00:00:00.000Z")
     });

@@ -48,6 +48,7 @@ export const ClaimCandidateConditionsSchema = z
     scope_class_determined: z.boolean(),
     governance_subject_compilable: z.boolean()
   })
+  .strict()
   .readonly();
 
 // invariant: synthesis capsules describe synthesis-tier observations;
@@ -65,6 +66,7 @@ export const SynthesisCapsuleSchema = PersistentObjectEnvelopeSchema.unwrap()
     run_id: NonEmptyStringSchema,
     synthesis_status: SynthesisStatusSchema
   })
+  .strict()
   .readonly();
 
 export type SynthesisType = z.infer<typeof SynthesisTypeSchema>;

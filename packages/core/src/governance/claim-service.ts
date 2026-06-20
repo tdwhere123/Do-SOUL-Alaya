@@ -1,123 +1,64 @@
 import { randomUUID } from "node:crypto";
 import {
-  ClaimFormSchema,
   ClaimLifecycleState,
-  ClaimLifecycleStateSchema,
   MemoryGovernanceEventType,
-  PrecedenceBasis,
   SoulClaimContestedPayloadSchema,
-  SoulClaimCreatedPayloadSchema,
   SoulClaimLifecycleChangedPayloadSchema,
   TransitionCausedBy,
-  TransitionCausedBySchema,
-  canonicalGovernanceSubject,
-  isValidClaimTransition,
   type ClaimForm,
   type ClaimLifecycleState as ClaimLifecycleStateType,
-  type EnforcementLevel as EnforcementLevelType,
   type EventLogEntry,
-  type PrecedenceBasis as PrecedenceBasisType,
   type TransitionCausedBy as TransitionCausedByType
 } from "@do-soul/alaya-protocol";
-import type { CanonicalAliasService } from "./canonical-alias-service.js";
 import { CoreError } from "../shared/errors.js";
-import type { EventPublisher, EventPublisherInput } from "../runtime/event-publisher.js";
+import type { EventPublisherInput } from "../runtime/event-publisher.js";
 import { parseObjectId } from "../shared/validators.js";
-import type { SlotElectionResult } from "../surfaces/slot-service.js";
+import {
+  createClaimCreatedEventInput,
+  ensureAllowedLifecycleTransition,
+  parseClaimForm,
+  parseClaimLifecycleState,
+  parseGovernanceSubject,
+  parseReason,
+  parseTransitionCausedBy
+} from "./claim-service-helpers.js";
+import type {
+  ClaimFormInput,
+  ClaimServiceDependencies
+} from "./claim-service-types.js";
 
-export type ClaimFormInput = Omit<
-  ClaimForm,
-  | "object_id"
-  | "object_kind"
-  | "schema_version"
-  | "lifecycle_state"
-  | "created_at"
-  | "updated_at"
-  | "governance_subject"
-  | "claim_status"
-> & {
-  readonly governance_subject_domain: string;
-  readonly governance_subject_qualifiers?: Record<string, string>;
-};
+export type {
+  ClaimFormInput,
+  ClaimRuntimeNotifierPort,
+  ClaimServiceClaimFormRepoPort,
+  ClaimServiceDependencies,
+  ClaimServiceEventLogRepoPort,
+  ClaimServiceSlotServicePort,
+  PrecedenceBasisDecisionInput
+} from "./claim-service-types.js";
+export { derivePrecedenceBasis } from "./claim-service-helpers.js";
 
-// invariant: shared producer-side rule for picking precedence_basis on a
-// newly minted claim. Priority order (highest wins):
-//   user_override  > authority > recency > evidence_strength
-// Consumers: arbitration-service.scoreClaim treats user_override as a
-// score boost; surfaces/slot-service.evaluateSameScopeElection short-circuits to
-// auto-win when the challenger carries user_override; the other three
-// values are governance metadata for downstream review/audit.
-// see also: packages/soul/src/garden/materialization-router/inputs.ts buildClaimInput
-// see also: packages/soul/src/garden/session-override-remediation.ts (USER_OVERRIDE)
-export interface PrecedenceBasisDecisionInput {
-  readonly source: string;
-  readonly enforcement_level: EnforcementLevelType;
-  readonly is_supersede?: boolean;
-  readonly user_override?: boolean;
+interface ClaimCanonicalizationPlan {
+  readonly governanceSubject: ClaimForm["governance_subject"];
+  readonly eventInputs: readonly EventPublisherInput[];
 }
 
-export function derivePrecedenceBasis(
-  input: PrecedenceBasisDecisionInput
-): PrecedenceBasisType {
-  if (input.user_override === true || input.source === "user_seed") {
-    return PrecedenceBasis.USER_OVERRIDE;
-  }
-  if (input.enforcement_level === "strict") {
-    return PrecedenceBasis.AUTHORITY;
-  }
-  if (input.is_supersede === true) {
-    return PrecedenceBasis.RECENCY;
-  }
-  return PrecedenceBasis.EVIDENCE_STRENGTH;
+interface ClaimCreationContext {
+  readonly claim: Readonly<ClaimForm>;
+  readonly claimCreatedEventInput: EventPublisherInput;
+  readonly canonicalizationPlan: ClaimCanonicalizationPlan | undefined;
 }
 
-export interface ClaimServiceEventLogRepoPort {
-  append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
-  queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+interface ClaimLifecycleTransitionInput {
+  readonly objectId: string;
+  readonly newState: ClaimLifecycleStateType;
+  readonly reason: string;
+  readonly causedBy: TransitionCausedByType;
 }
 
-export interface ClaimServiceClaimFormRepoPort {
-  create(claim: ClaimForm): Readonly<ClaimForm>;
-  findById(objectId: string): Promise<Readonly<ClaimForm> | null>;
-  findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]>;
-  findByStatus(workspaceId: string, status: ClaimLifecycleStateType): Promise<readonly Readonly<ClaimForm>[]>;
-  findByCanonicalKey(workspaceId: string, canonicalKey: string): Promise<readonly Readonly<ClaimForm>[]>;
-  // invariant: expectedFromStatus is the optimistic-concurrency guard.
-  // Storage writes WHERE object_id = ? AND claim_status = ?; a zero-
-  // row result means another transition raced ahead and the caller
-  // must retry or surface CONFLICT.
-  // see also: packages/storage/src/repos/claim-form-repo.ts
-  updateStatus(
-    objectId: string,
-    status: ClaimLifecycleStateType,
-    updatedAt: string,
-    expectedFromStatus: ClaimLifecycleStateType
-  ): Promise<Readonly<ClaimForm>>;
-  updateStatusSync?(
-    objectId: string,
-    status: ClaimLifecycleStateType,
-    updatedAt: string,
-    expectedFromStatus: ClaimLifecycleStateType
-  ): Readonly<ClaimForm>;
-}
-
-export interface ClaimServiceSlotServicePort {
-  onClaimActivated(claim: Readonly<ClaimForm>, deferredNotificationEvents?: EventLogEntry[]): Promise<SlotElectionResult>;
-}
-
-export interface ClaimRuntimeNotifierPort {
-  notifyEntry(entry: EventLogEntry): void | Promise<void>;
-}
-
-export interface ClaimServiceDependencies {
-  readonly claimFormRepo: ClaimServiceClaimFormRepoPort;
-  readonly eventLogRepo: ClaimServiceEventLogRepoPort;
-  readonly runtimeNotifier: ClaimRuntimeNotifierPort;
-  readonly canonicalAliasService?: Pick<CanonicalAliasService, "planGovernanceSubjectCanonicalization">;
-  readonly eventPublisher?: Pick<EventPublisher, "appendManyWithMutation">;
-  readonly slotService?: ClaimServiceSlotServicePort;
-  readonly generateObjectId?: () => string;
-  readonly now?: () => string;
+interface LifecycleAuditComposition {
+  readonly additionalEventInputs?: readonly EventPublisherInput[];
+  readonly additionalEventsSink?: EventLogEntry[];
 }
 
 export class ClaimService {
@@ -130,70 +71,14 @@ export class ClaimService {
   }
 
   public async create(input: ClaimFormInput): Promise<Readonly<ClaimForm>> {
-    const timestamp = this.now();
-    const objectId = this.generateObjectId();
-    const canonicalizationPlan = this.dependencies.canonicalAliasService?.planGovernanceSubjectCanonicalization(
-      input.governance_subject_domain,
-      input.governance_subject_qualifiers ?? {},
-      {
-        entityType: "claim_form",
-        entityId: objectId,
-        workspaceId: input.workspace_id,
-        runId: null,
-        causedBy: input.created_by,
-        startingRevision: 0
-      }
-    );
-    const governanceSubject =
-      canonicalizationPlan?.governanceSubject ??
-      parseGovernanceSubject(input.governance_subject_domain, input.governance_subject_qualifiers ?? {});
-
-    const claim = parseClaimForm({
-      object_id: objectId,
-      object_kind: "claim_form",
-      schema_version: 1,
-      lifecycle_state: "active",
-      created_at: timestamp,
-      updated_at: timestamp,
-      created_by: input.created_by,
-      governance_subject: governanceSubject,
-      claim_kind: input.claim_kind,
-      scope_class: input.scope_class,
-      enforcement_level: input.enforcement_level,
-      origin_tier: input.origin_tier,
-      precedence_basis: input.precedence_basis,
-      proposition_digest: input.proposition_digest,
-      evidence_refs: input.evidence_refs,
-      source_object_refs: input.source_object_refs,
-      workspace_id: input.workspace_id,
-      claim_status: ClaimLifecycleState.DRAFT
-    });
-
-    const claimCreatedEventInput = createClaimCreatedEventInput(claim);
-
-    if (canonicalizationPlan !== undefined && this.dependencies.eventPublisher !== undefined) {
-      return await this.dependencies.eventPublisher.appendManyWithMutation(
-        [...canonicalizationPlan.eventInputs, claimCreatedEventInput],
-        () => this.dependencies.claimFormRepo.create(claim)
-      );
+    const creation = this.buildClaimCreationContext(input, this.now());
+    if (
+      creation.canonicalizationPlan !== undefined &&
+      this.dependencies.eventPublisher !== undefined
+    ) {
+      return await this.createClaimAtomically(creation);
     }
-
-    const appendedEvents: EventLogEntry[] = [];
-
-    if (canonicalizationPlan !== undefined) {
-      for (const eventInput of canonicalizationPlan.eventInputs) {
-        appendedEvents.push(await this.dependencies.eventLogRepo.append(eventInput));
-      }
-    }
-
-    const createdEvent = await this.dependencies.eventLogRepo.append(claimCreatedEventInput);
-    const created = await this.dependencies.claimFormRepo.create(claim);
-
-    for (const event of [...appendedEvents, createdEvent]) {
-      await this.dependencies.runtimeNotifier.notifyEntry(event);
-    }
-
-    return created;
+    return await this.createClaimWithEventLog(creation);
   }
 
   public async transitionLifecycle(
@@ -204,88 +89,38 @@ export class ClaimService {
     options: {
       readonly skipSlotElection?: boolean;
       readonly deferredNotificationEvents?: EventLogEntry[];
-      // invariant: extra EventLog rows the caller needs appended in the
-      // SAME SQLite transaction as the lifecycle-change event and the
-      // claim_status mutation. The resolution audit event (ResolutionService
-      // confirm/reject) rides this seam so a crash cannot leave an activated
-      // claim without its governance-resolution audit row — governance
-      // changes stay atomically auditable (CLAUDE.md invariants §13).
-      // The persisted rows (with their final event_id) are pushed into
-      // `additionalEventsSink` in input order so the caller can read back
-      // the audit event id.
       readonly additionalEventInputs?: readonly EventPublisherInput[];
       readonly additionalEventsSink?: EventLogEntry[];
     } = {}
   ): Promise<Readonly<ClaimForm>> {
-    const parsedObjectId = parseObjectId(objectId);
-    const parsedNewState = parseClaimLifecycleState(newState);
-    const parsedReason = parseReason(reason);
-    const parsedCausedBy = parseTransitionCausedBy(causedBy);
+    const transition = this.parseLifecycleTransition(objectId, newState, reason, causedBy);
+    this.assertAdditionalAuditEventsAreAtomic(options);
 
-    const additionalEventInputs = options.additionalEventInputs ?? [];
-    // invariant: additional audit rows can only be guaranteed atomic with
-    // the claim mutation on the appendManyWithMutation path. If that path
-    // is unavailable (no eventPublisher / no synchronous status update) or
-    // is bypassed by deferredNotificationEvents, refuse rather than append
-    // the audit row in a separate, crash-exposed write.
-    if (additionalEventInputs.length > 0) {
-      const atomicTransitionAvailable =
-        this.dependencies.eventPublisher !== undefined &&
-        this.dependencies.claimFormRepo.updateStatusSync !== undefined &&
-        options.deferredNotificationEvents === undefined;
-      if (!atomicTransitionAvailable) {
-        throw new CoreError(
-          "CONFLICT",
-          "Atomic claim transition with additional audit events is not available"
-        );
-      }
-    }
+    const existing = await this.requireExistingClaim(transition.objectId);
+    ensureAllowedLifecycleTransition(existing.claim_status, transition.newState);
 
-    const existing = await this.dependencies.claimFormRepo.findById(parsedObjectId);
-
-    if (existing === null) {
-      throw new CoreError("NOT_FOUND", "Claim form not found");
-    }
-
-    ensureAllowedLifecycleTransition(existing.claim_status, parsedNewState);
-
-    const shouldRunSlotElection =
-      !options.skipSlotElection &&
-      parsedNewState === ClaimLifecycleState.ACTIVE &&
-      existing.claim_status === ClaimLifecycleState.DRAFT;
-    const slotService = this.dependencies.slotService;
-
-    if (shouldRunSlotElection && slotService === undefined) {
-      throw new CoreError("CONFLICT", "Slot service is required for claim activation");
-    }
+    const shouldRunSlotElection = this.shouldRunSlotElection(
+      existing,
+      transition.newState,
+      options.skipSlotElection === true
+    );
+    this.requireSlotServiceForActivation(shouldRunSlotElection);
 
     const updated = await this.applyLifecycleTransition(
-      existing, parsedNewState, parsedReason, parsedCausedBy, options.deferredNotificationEvents,
-      { additionalEventInputs, additionalEventsSink: options.additionalEventsSink }
+      existing,
+      transition.newState,
+      transition.reason,
+      transition.causedBy,
+      options.deferredNotificationEvents,
+      {
+        additionalEventInputs: options.additionalEventInputs,
+        additionalEventsSink: options.additionalEventsSink
+      }
     );
 
-    if (shouldRunSlotElection) {
-      if (slotService === undefined) {
-        throw new CoreError("CONFLICT", "Slot service is required for claim activation");
-      }
-
-      const election = await slotService.onClaimActivated(updated, options.deferredNotificationEvents);
-
-      if (election.decision === "contested") {
-        const contested = await this.applyLifecycleTransition(
-          updated,
-          ClaimLifecycleState.CONTESTED,
-          "slot_conflict_review_required",
-          TransitionCausedBy.SYSTEM,
-          options.deferredNotificationEvents
-        );
-
-        await this.emitContestedEvent(contested, election.slot.winner_claim_id, options.deferredNotificationEvents);
-        return contested;
-      }
-    }
-
-    return updated;
+    return shouldRunSlotElection
+      ? await this.resolveActivatedClaimElection(updated, options.deferredNotificationEvents)
+      : updated;
   }
 
   public findById(objectId: string): Promise<Readonly<ClaimForm> | null> {
@@ -306,102 +141,39 @@ export class ClaimService {
     reason: string,
     causedBy: TransitionCausedByType,
     deferredNotificationEvents?: EventLogEntry[],
-    auditComposition: {
-      readonly additionalEventInputs?: readonly EventPublisherInput[];
-      readonly additionalEventsSink?: EventLogEntry[];
-    } = {}
+    auditComposition: LifecycleAuditComposition = {}
   ): Promise<Readonly<ClaimForm>> {
     const occurredAt = this.now();
-    const eventInput = {
-      event_type: MemoryGovernanceEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
-      entity_type: "claim_form",
-      entity_id: existing.object_id,
-      workspace_id: existing.workspace_id,
-      run_id: null,
-      caused_by: causedBy,
-      payload_json: SoulClaimLifecycleChangedPayloadSchema.parse({
-        object_id: existing.object_id,
-        object_kind: existing.object_kind,
-        workspace_id: existing.workspace_id,
-        run_id: null,
-        from_state: existing.claim_status,
-        to_state: newState,
-        reason_code: reason,
-        caused_by: causedBy,
-        evidence_refs: null,
-        occurred_at: occurredAt
-      })
-    };
-
+    const eventInput = this.createLifecycleChangedEventInput(
+      existing,
+      newState,
+      reason,
+      causedBy,
+      occurredAt
+    );
     const additionalEventInputs = auditComposition.additionalEventInputs ?? [];
     const syncStatusUpdate = this.dependencies.claimFormRepo.updateStatusSync;
-    if (
-      this.dependencies.eventPublisher !== undefined &&
-      syncStatusUpdate !== undefined &&
-      deferredNotificationEvents === undefined
-    ) {
-      // invariant: ON THIS BRANCH the lifecycle-change event, every
-      // additional audit event the caller composed, and the claim_status
-      // mutation all land in one SQLite transaction. appendManyWithMutation
-      // appends in input order, so persistedEntries[1..] are the additional
-      // events 1:1 with input. The non-atomic branch below CANNOT honor
-      // additionalEventInputs and would silently drop them — that branch is
-      // never reached with additionalEventInputs because the public
-      // `transitionLifecycle` caller fail-closed rejects (CoreError CONFLICT)
-      // any call that carries additional audit events when this atomic path
-      // is unavailable. The guard lives in the public caller; this branch
-      // assumes it already passed.
-      return await this.dependencies.eventPublisher.appendManyWithMutation(
-        [eventInput, ...additionalEventInputs],
-        (persistedEntries) => {
-          if (auditComposition.additionalEventsSink !== undefined) {
-            for (let i = 0; i < additionalEventInputs.length; i += 1) {
-              const persisted = persistedEntries[i + 1];
-              if (persisted !== undefined) {
-                auditComposition.additionalEventsSink.push(persisted);
-              }
-            }
-          }
-          return syncStatusUpdate.call(
-            this.dependencies.claimFormRepo,
-            existing.object_id,
-            newState,
-            occurredAt,
-            existing.claim_status
-          );
-        }
+
+    if (this.canApplyAtomicLifecycleTransition(syncStatusUpdate, deferredNotificationEvents)) {
+      return await this.applyAtomicLifecycleTransition(
+        existing,
+        newState,
+        occurredAt,
+        eventInput,
+        additionalEventInputs,
+        auditComposition.additionalEventsSink,
+        syncStatusUpdate!
       );
     }
 
-    // invariant: the non-atomic branch cannot append additional audit
-    // events atomically with the claim mutation, so it must never silently
-    // drop them. The public `transitionLifecycle` caller already guards
-    // this; the assertion re-asserts it at the seam so a future internal
-    // caller that reaches applyLifecycleTransition directly fails closed
-    // instead of dropping a governance audit row.
-    if (additionalEventInputs.length > 0) {
-      throw new CoreError(
-        "CONFLICT",
-        "Atomic claim transition with additional audit events is not available"
-      );
-    }
-
-    const updated = await this.dependencies.claimFormRepo.updateStatus(
-      existing.object_id,
+    this.assertNoAdditionalEventInputs(additionalEventInputs);
+    return await this.applyNonAtomicLifecycleTransition(
+      existing,
       newState,
       occurredAt,
-      existing.claim_status
+      eventInput,
+      deferredNotificationEvents
     );
-
-    const event = await this.dependencies.eventLogRepo.append(eventInput);
-
-    if (deferredNotificationEvents !== undefined) {
-      deferredNotificationEvents.push(event);
-    } else {
-      await this.dependencies.runtimeNotifier.notifyEntry(event);
-    }
-
-    return updated;
   }
 
   private async emitContestedEvent(
@@ -433,70 +205,282 @@ export class ClaimService {
     }
   }
 
-}
+  private buildClaimCreationContext(input: ClaimFormInput, timestamp: string): ClaimCreationContext {
+    const objectId = this.generateObjectId();
+    const canonicalizationPlan = this.dependencies.canonicalAliasService?.planGovernanceSubjectCanonicalization(
+      input.governance_subject_domain,
+      input.governance_subject_qualifiers ?? {},
+      {
+        entityType: "claim_form",
+        entityId: objectId,
+        workspaceId: input.workspace_id,
+        runId: null,
+        causedBy: input.created_by,
+        startingRevision: 0
+      }
+    );
+    const governanceSubject =
+      canonicalizationPlan?.governanceSubject ??
+      parseGovernanceSubject(input.governance_subject_domain, input.governance_subject_qualifiers ?? {});
+    const claim = parseClaimForm({
+      object_id: objectId,
+      object_kind: "claim_form",
+      schema_version: 1,
+      lifecycle_state: "active",
+      created_at: timestamp,
+      updated_at: timestamp,
+      created_by: input.created_by,
+      governance_subject: governanceSubject,
+      claim_kind: input.claim_kind,
+      scope_class: input.scope_class,
+      enforcement_level: input.enforcement_level,
+      origin_tier: input.origin_tier,
+      precedence_basis: input.precedence_basis,
+      proposition_digest: input.proposition_digest,
+      evidence_refs: input.evidence_refs,
+      source_object_refs: input.source_object_refs,
+      workspace_id: input.workspace_id,
+      claim_status: ClaimLifecycleState.DRAFT
+    });
 
-function parseClaimForm(value: ClaimForm): ClaimForm {
-  try {
-    return ClaimFormSchema.parse(value);
-  } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid claim form payload", { cause: error });
+    return {
+      claim,
+      claimCreatedEventInput: createClaimCreatedEventInput(claim),
+      canonicalizationPlan
+    };
   }
-}
 
-function parseGovernanceSubject(domain: string, qualifiers: Record<string, string>) {
-  try {
-    return canonicalGovernanceSubject(domain, qualifiers);
-  } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid governance subject input", { cause: error });
-  }
-}
-
-function createClaimCreatedEventInput(claim: Readonly<ClaimForm>): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
-  return {
-    event_type: MemoryGovernanceEventType.SOUL_CLAIM_CREATED,
-    entity_type: "claim_form",
-    entity_id: claim.object_id,
-    workspace_id: claim.workspace_id,
-    run_id: null,
-    caused_by: claim.created_by,
-    payload_json: SoulClaimCreatedPayloadSchema.parse({
-      object_id: claim.object_id,
-      object_kind: claim.object_kind,
-      workspace_id: claim.workspace_id,
-      run_id: null
-    })
-  };
-}
-
-function parseReason(value: string): string {
-  if (value.trim().length === 0) {
-    throw new CoreError("VALIDATION", "Reason is required");
+  private async createClaimAtomically(
+    creation: ClaimCreationContext
+  ): Promise<Readonly<ClaimForm>> {
+    return await this.dependencies.eventPublisher!.appendManyWithMutation(
+      [...creation.canonicalizationPlan!.eventInputs, creation.claimCreatedEventInput],
+      () => this.dependencies.claimFormRepo.create(creation.claim)
+    );
   }
 
-  return value;
-}
-
-function parseClaimLifecycleState(value: ClaimLifecycleStateType): ClaimLifecycleStateType {
-  try {
-    return ClaimLifecycleStateSchema.parse(value);
-  } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid claim lifecycle state", { cause: error });
+  private async createClaimWithEventLog(
+    creation: ClaimCreationContext
+  ): Promise<Readonly<ClaimForm>> {
+    const appendedEvents = await this.appendCanonicalizationEvents(creation.canonicalizationPlan);
+    const createdEvent = await this.dependencies.eventLogRepo.append(creation.claimCreatedEventInput);
+    const created = await this.dependencies.claimFormRepo.create(creation.claim);
+    for (const event of [...appendedEvents, createdEvent]) {
+      await this.dependencies.runtimeNotifier.notifyEntry(event);
+    }
+    return created;
   }
-}
 
-function parseTransitionCausedBy(value: TransitionCausedByType): TransitionCausedByType {
-  try {
-    return TransitionCausedBySchema.parse(value);
-  } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid transition caused_by", { cause: error });
+  private async appendCanonicalizationEvents(
+    canonicalizationPlan: ClaimCanonicalizationPlan | undefined
+  ): Promise<EventLogEntry[]> {
+    const appendedEvents: EventLogEntry[] = [];
+    if (canonicalizationPlan === undefined) {
+      return appendedEvents;
+    }
+
+    for (const eventInput of canonicalizationPlan.eventInputs) {
+      appendedEvents.push(await this.dependencies.eventLogRepo.append(eventInput));
+    }
+
+    return appendedEvents;
   }
-}
 
-function ensureAllowedLifecycleTransition(
-  from: ClaimLifecycleStateType,
-  to: ClaimLifecycleStateType
-): void {
-  if (!isValidClaimTransition(from, to)) {
-    throw new CoreError("VALIDATION", `Invalid claim lifecycle transition: ${from} -> ${to}`);
+  private parseLifecycleTransition(
+    objectId: string,
+    newState: ClaimLifecycleStateType,
+    reason: string,
+    causedBy: TransitionCausedByType
+  ): ClaimLifecycleTransitionInput {
+    return {
+      objectId: parseObjectId(objectId),
+      newState: parseClaimLifecycleState(newState),
+      reason: parseReason(reason),
+      causedBy: parseTransitionCausedBy(causedBy)
+    };
+  }
+
+  private assertAdditionalAuditEventsAreAtomic(options: {
+    readonly additionalEventInputs?: readonly EventPublisherInput[];
+    readonly deferredNotificationEvents?: EventLogEntry[];
+  }): void {
+    const additionalEventInputs = options.additionalEventInputs ?? [];
+    if (additionalEventInputs.length === 0) {
+      return;
+    }
+
+    const atomicTransitionAvailable =
+      this.dependencies.eventPublisher !== undefined &&
+      this.dependencies.claimFormRepo.updateStatusSync !== undefined &&
+      options.deferredNotificationEvents === undefined;
+    if (!atomicTransitionAvailable) {
+      throw new CoreError(
+        "CONFLICT",
+        "Atomic claim transition with additional audit events is not available"
+      );
+    }
+  }
+
+  private async requireExistingClaim(objectId: string): Promise<Readonly<ClaimForm>> {
+    const existing = await this.dependencies.claimFormRepo.findById(objectId);
+    if (existing === null) {
+      throw new CoreError("NOT_FOUND", "Claim form not found");
+    }
+    return existing;
+  }
+
+  private shouldRunSlotElection(
+    existing: Readonly<ClaimForm>,
+    newState: ClaimLifecycleStateType,
+    skipSlotElection: boolean
+  ): boolean {
+    return (
+      !skipSlotElection &&
+      newState === ClaimLifecycleState.ACTIVE &&
+      existing.claim_status === ClaimLifecycleState.DRAFT
+    );
+  }
+
+  private requireSlotServiceForActivation(shouldRunSlotElection: boolean): void {
+    if (shouldRunSlotElection && this.dependencies.slotService === undefined) {
+      throw new CoreError("CONFLICT", "Slot service is required for claim activation");
+    }
+  }
+
+  private async resolveActivatedClaimElection(
+    updated: Readonly<ClaimForm>,
+    deferredNotificationEvents?: EventLogEntry[]
+  ): Promise<Readonly<ClaimForm>> {
+    const election = await this.dependencies.slotService!.onClaimActivated(
+      updated,
+      deferredNotificationEvents
+    );
+    if (election.decision !== "contested") {
+      return updated;
+    }
+
+    const contested = await this.applyLifecycleTransition(
+      updated,
+      ClaimLifecycleState.CONTESTED,
+      "slot_conflict_review_required",
+      TransitionCausedBy.SYSTEM,
+      deferredNotificationEvents
+    );
+    await this.emitContestedEvent(contested, election.slot.winner_claim_id, deferredNotificationEvents);
+    return contested;
+  }
+
+  private createLifecycleChangedEventInput(
+    existing: Readonly<ClaimForm>,
+    newState: ClaimLifecycleStateType,
+    reason: string,
+    causedBy: TransitionCausedByType,
+    occurredAt: string
+  ): EventPublisherInput {
+    return {
+      event_type: MemoryGovernanceEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
+      entity_type: "claim_form",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: null,
+      caused_by: causedBy,
+      payload_json: SoulClaimLifecycleChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: null,
+        from_state: existing.claim_status,
+        to_state: newState,
+        reason_code: reason,
+        caused_by: causedBy,
+        evidence_refs: null,
+        occurred_at: occurredAt
+      })
+    };
+  }
+
+  private canApplyAtomicLifecycleTransition(
+    syncStatusUpdate: ClaimServiceDependencies["claimFormRepo"]["updateStatusSync"],
+    deferredNotificationEvents?: EventLogEntry[]
+  ): boolean {
+    return (
+      this.dependencies.eventPublisher !== undefined &&
+      syncStatusUpdate !== undefined &&
+      deferredNotificationEvents === undefined
+    );
+  }
+
+  private async applyAtomicLifecycleTransition(
+    existing: Readonly<ClaimForm>,
+    newState: ClaimLifecycleStateType,
+    occurredAt: string,
+    eventInput: EventPublisherInput,
+    additionalEventInputs: readonly EventPublisherInput[],
+    additionalEventsSink: EventLogEntry[] | undefined,
+    syncStatusUpdate: NonNullable<ClaimServiceDependencies["claimFormRepo"]["updateStatusSync"]>
+  ): Promise<Readonly<ClaimForm>> {
+    return await this.dependencies.eventPublisher!.appendManyWithMutation(
+      [eventInput, ...additionalEventInputs],
+      (persistedEntries) => {
+        this.collectAdditionalEvents(persistedEntries, additionalEventInputs.length, additionalEventsSink);
+        return syncStatusUpdate.call(
+          this.dependencies.claimFormRepo,
+          existing.object_id,
+          newState,
+          occurredAt,
+          existing.claim_status
+        );
+      }
+    );
+  }
+
+  private collectAdditionalEvents(
+    persistedEntries: readonly EventLogEntry[],
+    additionalEventCount: number,
+    additionalEventsSink: EventLogEntry[] | undefined
+  ): void {
+    if (additionalEventsSink === undefined) {
+      return;
+    }
+
+    for (let index = 0; index < additionalEventCount; index += 1) {
+      const persisted = persistedEntries[index + 1];
+      if (persisted !== undefined) {
+        additionalEventsSink.push(persisted);
+      }
+    }
+  }
+
+  private assertNoAdditionalEventInputs(
+    additionalEventInputs: readonly EventPublisherInput[]
+  ): void {
+    if (additionalEventInputs.length > 0) {
+      throw new CoreError(
+        "CONFLICT",
+        "Atomic claim transition with additional audit events is not available"
+      );
+    }
+  }
+
+  private async applyNonAtomicLifecycleTransition(
+    existing: Readonly<ClaimForm>,
+    newState: ClaimLifecycleStateType,
+    occurredAt: string,
+    eventInput: EventPublisherInput,
+    deferredNotificationEvents?: EventLogEntry[]
+  ): Promise<Readonly<ClaimForm>> {
+    const updated = await this.dependencies.claimFormRepo.updateStatus(
+      existing.object_id,
+      newState,
+      occurredAt,
+      existing.claim_status
+    );
+    const event = await this.dependencies.eventLogRepo.append(eventInput);
+    if (deferredNotificationEvents !== undefined) {
+      deferredNotificationEvents.push(event);
+    } else {
+      await this.dependencies.runtimeNotifier.notifyEntry(event);
+    }
+    return updated;
   }
 }

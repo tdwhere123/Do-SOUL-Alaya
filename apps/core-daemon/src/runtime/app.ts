@@ -133,7 +133,35 @@ export function createApp(
   lifecycle?: CoreDaemonLifecycleState
 ): Hono {
   const app = new Hono();
+  const requestProtection = resolveRequestProtectionSettings(services.requestProtection);
+  const bodyLimits = createRequestBodyLimits();
 
+  registerRequestIdMiddleware(app);
+  registerDrainMiddleware(app, lifecycle);
+  registerCorsMiddleware(app, requestProtection.allowedOrigin);
+  registerProtectedRequestMiddleware(app, services.requestProtection, requestProtection);
+  registerFileUploadLimitMiddleware(app, bodyLimits.fileUploadBodyLimit);
+  registerRequestBodyLimitMiddleware(app, bodyLimits.requestBodyLimit);
+
+  registerErrorHandler(app, services.logger ?? createWarnLogger());
+  registerLivenessRoute(app);
+  registerConfiguredRoutes(app, services.routes);
+
+  return app;
+}
+
+// Standard unauthenticated liveness probe for deployment health checks.
+// Only the liveness path is exempt from the request-token gate, and the drain
+// middleware skips LIVENESS_PATH, so this stays cheap and never touches the DB
+// or any provider — liveness means "process is up".
+const LIVENESS_PATH = "/health";
+
+type ResolvedRequestProtectionSettings = Readonly<{
+  allowedOrigin: string;
+  allowDesktopOriginlessRequests: boolean;
+}>;
+
+function registerRequestIdMiddleware(app: Hono): void {
   app.use("*", async (context, next) => {
     const requestId = resolveRequestId(
       context.req.header(REQUEST_ID_HEADER),
@@ -148,68 +176,66 @@ export function createApp(
     context.header(CORRELATION_ID_HEADER, requestId);
     await next();
   });
+}
 
-  if (lifecycle !== undefined) {
-    app.use("*", async (context, next) => {
-      // Liveness must stay green during graceful drain so the orchestrator
-      // does not force-kill the process while it finishes in-flight work.
-      if (context.req.path === LIVENESS_PATH) {
-        await next();
-        return;
-      }
-      if (lifecycle.drainState.isDraining) {
-        return context.json(
-          { success: false, error: "daemon is draining" },
-          503
-        );
-      }
-      lifecycle.inFlight.count += 1;
-      try {
-        await next();
-      } finally {
-        lifecycle.inFlight.count -= 1;
-      }
-    });
+function registerDrainMiddleware(
+  app: Hono,
+  lifecycle: CoreDaemonLifecycleState | undefined
+): void {
+  if (lifecycle === undefined) {
+    return;
   }
 
-  const allowedOrigin =
-    services.requestProtection?.allowedOrigin ?? process.env.ALLOWED_ORIGIN ?? "http://localhost:5173";
-  const allowDesktopOriginlessRequests =
-    services.requestProtection?.allowDesktopOriginlessRequests ?? true;
-  const fileUploadBodyLimit = bodyLimit({
-    maxSize: MAX_FILE_SIZE_BYTES,
-    onError: (context) =>
-      context.json(
-        {
-          success: false,
-          error: "File exceeds the 20 MB limit"
-        },
-        413
-      )
+  app.use("*", async (context, next) => {
+    if (context.req.path === LIVENESS_PATH) {
+      await next();
+      return;
+    }
+    if (lifecycle.drainState.isDraining) {
+      return context.json({ success: false, error: "daemon is draining" }, 503);
+    }
+    lifecycle.inFlight.count += 1;
+    try {
+      await next();
+    } finally {
+      lifecycle.inFlight.count -= 1;
+    }
   });
-  const requestBodyLimit = bodyLimit({
-    maxSize: MAX_REQUEST_BODY_BYTES,
-    onError: (context) =>
-      context.json(
-        {
-          success: false,
-          error: "Request body exceeds the 10 MB limit"
-        },
-        413
-      )
-  });
+}
+
+function resolveRequestProtectionSettings(
+  requestProtection: RequestProtectionConfig | undefined
+): ResolvedRequestProtectionSettings {
+  return {
+    allowedOrigin:
+      requestProtection?.allowedOrigin ??
+      process.env.ALLOWED_ORIGIN ??
+      "http://localhost:5173",
+    allowDesktopOriginlessRequests:
+      requestProtection?.allowDesktopOriginlessRequests ?? true
+  };
+}
+
+function createRequestBodyLimits() {
+  return {
+    fileUploadBodyLimit: bodyLimit({
+      maxSize: MAX_FILE_SIZE_BYTES,
+      onError: (context) =>
+        context.json({ success: false, error: "File exceeds the 20 MB limit" }, 413)
+    }),
+    requestBodyLimit: bodyLimit({
+      maxSize: MAX_REQUEST_BODY_BYTES,
+      onError: (context) =>
+        context.json({ success: false, error: "Request body exceeds the 10 MB limit" }, 413)
+    })
+  };
+}
+
+function registerCorsMiddleware(app: Hono, allowedOrigin: string): void {
   app.use(
     "*",
     cors({
-      origin: (origin) => {
-        const normalizedOrigin = normalizeOrigin(origin);
-
-        if (normalizedOrigin === allowedOrigin) {
-          return allowedOrigin;
-        }
-
-        return "";
-      },
+      origin: (origin) => resolveCorsOrigin(origin, allowedOrigin),
       allowHeaders: [
         "Content-Type",
         "X-Request-Token",
@@ -226,105 +252,102 @@ export function createApp(
       ]
     })
   );
+}
 
-  if (services.requestProtection !== undefined) {
-    const { requestToken } = services.requestProtection;
+function resolveCorsOrigin(origin: string | undefined, allowedOrigin: string): string {
+  return normalizeOrigin(origin) === allowedOrigin ? allowedOrigin : "";
+}
 
-    app.use("*", async (context, next) => {
-      if (!isProtectedRequest(context.req.method, context.req.path)) {
-        await next();
-        return;
-      }
-
-      const origin = normalizeOrigin(context.req.header("origin"));
-      const localOperatorRequest = isLocalOperatorRequest(context.req.header("x-alaya-desktop"));
-
-      if (!isAllowedProtectedRequest(origin, allowedOrigin, localOperatorRequest, allowDesktopOriginlessRequests)) {
-        return context.json(
-          {
-            success: false,
-            error: "Origin is not allowed"
-          },
-          403
-        );
-      }
-
-      const providedRequestToken = context.req.header("x-request-token")?.trim();
-
-      if (providedRequestToken === undefined || providedRequestToken.length === 0) {
-        return context.json(
-          {
-            success: false,
-            error: "X-Request-Token is required"
-          },
-          403
-        );
-      }
-
-      if (!matchesRequestToken(providedRequestToken, requestToken)) {
-        return context.json(
-          {
-            success: false,
-            error: "Invalid X-Request-Token"
-          },
-          403
-        );
-      }
-
-      await next();
-    });
+function registerProtectedRequestMiddleware(
+  app: Hono,
+  requestProtection: RequestProtectionConfig | undefined,
+  settings: ResolvedRequestProtectionSettings
+): void {
+  if (requestProtection === undefined) {
+    return;
   }
 
+  app.use("*", async (context, next) => {
+    if (!isProtectedRequest(context.req.method, context.req.path)) {
+      await next();
+      return;
+    }
+
+    const origin = normalizeOrigin(context.req.header("origin"));
+    const localOperatorRequest = isLocalOperatorRequest(
+      context.req.header("x-alaya-desktop")
+    );
+
+    if (
+      !isAllowedProtectedRequest(
+        origin,
+        settings.allowedOrigin,
+        localOperatorRequest,
+        settings.allowDesktopOriginlessRequests
+      )
+    ) {
+      return context.json({ success: false, error: "Origin is not allowed" }, 403);
+    }
+
+    const tokenError = validateRequestTokenHeader(
+      context.req.header("x-request-token"),
+      requestProtection.requestToken
+    );
+    if (tokenError !== null) {
+      return context.json({ success: false, error: tokenError }, 403);
+    }
+
+    await next();
+  });
+}
+
+function validateRequestTokenHeader(
+  providedRequestTokenHeader: string | undefined,
+  expectedRequestToken: string
+): string | null {
+  const providedRequestToken = providedRequestTokenHeader?.trim();
+  if (providedRequestToken === undefined || providedRequestToken.length === 0) {
+    return "X-Request-Token is required";
+  }
+  return matchesRequestToken(providedRequestToken, expectedRequestToken)
+    ? null
+    : "Invalid X-Request-Token";
+}
+
+function registerFileUploadLimitMiddleware(
+  app: Hono,
+  fileUploadBodyLimit: ReturnType<typeof bodyLimit>
+): void {
   app.use("/files", async (context, next) => {
     if (context.req.method !== "POST") {
       await next();
       return;
     }
-
     if (hasDeclaredOversizeBody(context.req.header("content-length"), MAX_FILE_SIZE_BYTES)) {
-      return context.json(
-        {
-          success: false,
-          error: "File exceeds the 20 MB limit"
-        },
-        413
-      );
+      return context.json({ success: false, error: "File exceeds the 20 MB limit" }, 413);
     }
-
     await fileUploadBodyLimit(context, next);
   });
+}
 
+function registerRequestBodyLimitMiddleware(
+  app: Hono,
+  requestBodyLimit: ReturnType<typeof bodyLimit>
+): void {
   app.use("*", async (context, next) => {
     if (!isBodyLimitedMethod(context.req.method) || context.req.path === "/files") {
       await next();
       return;
     }
-
     if (hasDeclaredOversizeBody(context.req.header("content-length"), MAX_REQUEST_BODY_BYTES)) {
       return context.json(
-        {
-          success: false,
-          error: "Request body exceeds the 10 MB limit"
-        },
+        { success: false, error: "Request body exceeds the 10 MB limit" },
         413
       );
     }
-
     await requestBodyLimit(context, next);
   });
-
-  registerErrorHandler(app, services.logger ?? createWarnLogger());
-  registerLivenessRoute(app);
-  registerConfiguredRoutes(app, services.routes);
-
-  return app;
 }
-
-// Standard unauthenticated liveness probe for deployment health checks.
-// Only the liveness path is exempt from the request-token gate, and the drain
-// middleware skips LIVENESS_PATH, so this stays cheap and never touches the DB
-// or any provider — liveness means "process is up".
-const LIVENESS_PATH = "/health";
 
 function registerLivenessRoute(app: Hono): void {
   const { version } = readBuildInfo();

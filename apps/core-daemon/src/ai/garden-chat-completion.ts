@@ -36,58 +36,77 @@ export async function requestGardenChatCompletionContent(
 async function requestGardenChatCompletionContentOnce(
   input: GardenChatCompletionRequest
 ): Promise<string> {
-  const { config } = input;
-  if (config.apiKey === null) {
-    throw new Error("garden API key is unavailable");
-  }
+  const apiKey = requireGardenApiKey(input.config.apiKey);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.timeoutMs);
   timer.unref?.();
   try {
-    let response: Response;
-    try {
-      response = await fetch(`${normalizeBaseUrl(config.providerUrl)}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${config.apiKey}`
-        },
-        body: JSON.stringify({
-          model: config.model,
-          temperature: 0,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: input.systemPrompt },
-            { role: "user", content: input.userPrompt }
-          ]
-        }),
-        signal: controller.signal
-      });
-    } catch (error) {
-      throw new GardenChatCompletionTransportError(
-        `${input.failureLabel} transport failed`,
-        redactSecretFromCause(error, config.apiKey)
-      );
-    }
-    if (!response.ok) {
-      throw new GardenChatCompletionHttpError(
-        `${input.failureLabel} HTTP ${response.status} ${response.statusText}`,
-        response.status
-      );
-    }
-    const payload = (await response.json()) as {
-      readonly choices?: readonly {
-        readonly message?: { readonly content?: unknown };
-      }[];
-    };
-    const content = payload.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || content.trim().length === 0) {
-      throw new Error(`${input.failureLabel} returned no content`);
-    }
-    return content;
+    const response = await requestGardenChatCompletionResponse(input, apiKey, controller.signal);
+    return await parseGardenChatCompletionContent(response, input.failureLabel);
   } finally {
     clearTimeout(timer);
   }
+}
+
+function requireGardenApiKey(apiKey: string | null): string {
+  if (apiKey === null) {
+    throw new Error("garden API key is unavailable");
+  }
+  return apiKey;
+}
+
+async function requestGardenChatCompletionResponse(
+  input: GardenChatCompletionRequest,
+  apiKey: string,
+  signal: AbortSignal
+): Promise<Response> {
+  try {
+    return await fetch(`${normalizeBaseUrl(input.config.providerUrl)}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(buildGardenChatCompletionPayload(input)),
+      signal
+    });
+  } catch (error) {
+    throw new GardenChatCompletionTransportError(
+      `${input.failureLabel} transport failed`,
+      redactSecretFromCause(error, apiKey)
+    );
+  }
+}
+
+function buildGardenChatCompletionPayload(input: GardenChatCompletionRequest): Record<string, unknown> {
+  return {
+    model: input.config.model,
+    temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: input.systemPrompt },
+      { role: "user", content: input.userPrompt }
+    ]
+  };
+}
+
+async function parseGardenChatCompletionContent(response: Response, failureLabel: string): Promise<string> {
+  if (!response.ok) {
+    throw new GardenChatCompletionHttpError(
+      `${failureLabel} HTTP ${response.status} ${response.statusText}`,
+      response.status
+    );
+  }
+  const payload = (await response.json()) as {
+    readonly choices?: readonly {
+      readonly message?: { readonly content?: unknown };
+    }[];
+  };
+  const content = payload.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || content.trim().length === 0) {
+    throw new Error(`${failureLabel} returned no content`);
+  }
+  return content;
 }
 
 class GardenChatCompletionHttpError extends Error {

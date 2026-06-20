@@ -271,18 +271,18 @@ describe("GovernanceLeaseService", () => {
   });
 
   it("degrades to no active lease when EventLog rehydrate read fails", async () => {
-    const queryByRun = vi.fn(async () => {
+    const queryByRunAll = vi.fn(async () => {
       throw new Error("event log read failed");
     });
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo({ queryByRun })
+      eventLogRepo: createEventLogRepo({ queryByRunAll })
     });
 
     await expect(service.getActive("run-1")).resolves.toBeNull();
     await expect(service.isHeld("run-1")).resolves.toBe(false);
-    expect(queryByRun).toHaveBeenCalledWith("run-1");
+    expect(queryByRunAll).toHaveBeenCalledWith("run-1");
   });
 
   it("fails replay when a persisted governance lease event payload is malformed", async () => {
@@ -290,7 +290,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({
-        queryByRun: vi.fn(async () => [
+        queryByRunAll: vi.fn(async () => [
           createEventLogEntry({
             event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
             entity_type: "governance_lease",
@@ -338,7 +338,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({
-        queryByRun: vi.fn(async () => await queryDeferred.promise)
+        queryByRunAll: vi.fn(async () => await queryDeferred.promise)
       })
     });
 
@@ -359,9 +359,13 @@ describe("GovernanceLeaseService", () => {
 function createEventLogRepo(overrides: Partial<{
   append: (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => Promise<EventLogEntry>;
   queryByRun: (runId: string) => Promise<readonly EventLogEntry[]>;
+  queryByRunAll: (runId: string) => Promise<readonly EventLogEntry[]>;
   queryByEntity: (entityType: string, entityId: string) => Promise<readonly EventLogEntry[]>;
 }> = {}) {
   const appendedEvents: EventLogEntry[] = [];
+  const queryByRunAll =
+    overrides.queryByRunAll ??
+    vi.fn(async (runId: string) => appendedEvents.filter((entry) => entry.run_id === runId));
 
   return {
     append:
@@ -376,9 +380,8 @@ function createEventLogRepo(overrides: Partial<{
       vi.fn(async (entityType: string, entityId: string) =>
         appendedEvents.filter((entry) => entry.entity_type === entityType && entry.entity_id === entityId)
       ),
-    queryByRun:
-      overrides.queryByRun ??
-      vi.fn(async (runId: string) => appendedEvents.filter((entry) => entry.run_id === runId))
+    queryByRun: overrides.queryByRun ?? queryByRunAll,
+    queryByRunAll
   };
 }
 

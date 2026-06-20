@@ -87,6 +87,7 @@ describe("P5 final-review status", () => {
     const index = readRepoFile("docs/archive/v0.1-port-record/INDEX.md");
     const runtimeStatus = readRepoFile("docs/handbook/runtime-status.md");
     const backlog = readRepoFile("docs/handbook/backlog.md");
+    const resolvedBacklog = readRepoFile("docs/archive/backlog-resolved-historical.md");
 
     expect(index).toContain("| Phase 5 | Wave 5: E2E + Graph Contract + Final Review");
     expect(index).toContain("Gate-5 passed");
@@ -98,10 +99,12 @@ describe("P5 final-review status", () => {
     expect(runtimeStatus).toContain("#BL-024");
     expect(runtimeStatus).not.toContain("Remaining v0.1.0 release work is Phase 5");
 
-    // #BL-024 / #BL-017 stay resolved in the handbook backlog; the
-    // archive records the exact historical review rounds and commits.
-    expect(backlog).toContain("### #BL-024 — Resolved");
-    expect(backlog).toContain("### #BL-017 — Resolved");
+    // #BL-024 / #BL-017 stay resolved in the resolved-issue archive; the
+    // handbook backlog keeps only currently open and permanently rejected items.
+    expect(backlog).toContain("Resolved issues");
+    expect(backlog).toContain("`docs/archive/backlog-resolved-historical.md`");
+    expect(resolvedBacklog).toContain("**#BL-024** — HTTP `POST /proposals/:id/review` route removed");
+    expect(resolvedBacklog).toContain("**#BL-017** — Post-port hygiene wave executed");
   });
 
   // Behavior assertion, not docs-to-docs evidence. The MCP catalog must

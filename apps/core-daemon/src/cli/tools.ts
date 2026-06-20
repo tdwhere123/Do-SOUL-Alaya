@@ -57,19 +57,30 @@ async function executeToolsCommand(
   deps: ToolsCommandDependencies
 ): Promise<AlayaCliResult> {
   if (args.action === "list") {
-    const tools = listAlayaMemoryTools();
-    if (ctx.jsonRequested !== true) {
-      for (const tool of tools) {
-        const mode = tool.annotations.readOnlyHint ? "read-only" : "stateful";
-        ctx.stdout.write(`${tool.name}\t${mode}\t${tool.description}\n`);
-      }
-    }
-    return {
-      exitCode: ALAYA_SYSEXITS.OK,
-      json: { tools }
-    };
+    return listToolsCommand(ctx);
   }
+  return await callToolsCommand(ctx, args, deps);
+}
 
+function listToolsCommand(ctx: AlayaCliContext): AlayaCliResult {
+  const tools = listAlayaMemoryTools();
+  if (ctx.jsonRequested !== true) {
+    for (const tool of tools) {
+      const mode = tool.annotations.readOnlyHint ? "read-only" : "stateful";
+      ctx.stdout.write(`${tool.name}\t${mode}\t${tool.description}\n`);
+    }
+  }
+  return {
+    exitCode: ALAYA_SYSEXITS.OK,
+    json: { tools }
+  };
+}
+
+async function callToolsCommand(
+  ctx: AlayaCliContext,
+  args: ToolsArgs,
+  deps: ToolsCommandDependencies
+): Promise<AlayaCliResult> {
   if (args.toolName === null) {
     ctx.stderr.write("tools call requires a tool name\n");
     return { exitCode: ALAYA_SYSEXITS.USAGE };
@@ -89,13 +100,18 @@ async function executeToolsCommand(
     );
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
-
   const result = await deps.handler.call({
     toolName: args.toolName,
     arguments: args.input,
     context: callContext
   });
+  return renderToolCallResult(ctx, result);
+}
 
+function renderToolCallResult(
+  ctx: AlayaCliContext,
+  result: Awaited<ReturnType<ToolsCommandDependencies["handler"]["call"]>>
+): AlayaCliResult {
   if (!result.ok) {
     ctx.stderr.write(`${result.error.code}: ${result.error.message}\n`);
     return {
@@ -153,33 +169,44 @@ function parseToolsArgs(input: readonly string[]):
   if (input.length === 0) {
     return { ok: false, message: "Usage: tools list | tools call <tool-name> [json] [--workspace <id>] [--run <id>] [--agent <target>]" };
   }
-
   const action = input[0];
-  const rest = input.slice(1);
-  const options = parseContextOptions(rest);
+  const options = parseContextOptions(input.slice(1));
   if (!options.ok) {
     return options;
   }
+  return action === "list"
+    ? parseListToolsArgs(options)
+    : parseCallToolsArgs(action, options);
+}
 
-  if (action === "list") {
-    if (options.positionals.length > 0) {
-      return { ok: false, message: "tools list does not accept positional arguments." };
-    }
-    return {
-      ok: true,
-      args: {
-        action: "list",
-        toolName: null,
-        input: {},
-        contextOverrides: options.contextOverrides
-      }
-    };
+function parseListToolsArgs(options: Readonly<{
+  positionals: readonly string[];
+  contextOverrides: ToolsArgs["contextOverrides"];
+}>): Readonly<{ ok: true; args: ToolsArgs }> | Readonly<{ ok: false; message: string }> {
+  if (options.positionals.length > 0) {
+    return { ok: false, message: "tools list does not accept positional arguments." };
   }
+  return {
+    ok: true,
+    args: {
+      action: "list",
+      toolName: null,
+      input: {},
+      contextOverrides: options.contextOverrides
+    }
+  };
+}
 
+function parseCallToolsArgs(
+  action: string | undefined,
+  options: Readonly<{
+    positionals: readonly string[];
+    contextOverrides: ToolsArgs["contextOverrides"];
+  }>
+): Readonly<{ ok: true; args: ToolsArgs }> | Readonly<{ ok: false; message: string }> {
   if (action !== "call") {
     return { ok: false, message: "Usage: tools list | tools call <tool-name> [json]" };
   }
-
   const [toolName, rawJson, ...extra] = options.positionals;
   if (toolName === undefined || toolName.trim().length === 0) {
     return { ok: false, message: "tools call requires a tool name." };
@@ -277,11 +304,7 @@ async function buildCallContext(
     context: {
       workspaceId: workspaceContext.workspaceId,
       runId: trustedRunId.runId,
-      agentTarget:
-        args.contextOverrides.agentTarget ??
-        deps.defaultAgentTarget ??
-        ctx.env.ALAYA_AGENT_TARGET ??
-        "tools-cli",
+      agentTarget: resolveToolsAgentTarget(ctx, args, deps),
       sessionId: `tools-cli-${randomUUID()}`
     }
   };
@@ -299,4 +322,15 @@ function resolveRequestedRunId(
     return { runId: deps.defaultRunId, sourceLabel: "defaultRunId" };
   }
   return { runId: ctx.env.ALAYA_RUN_ID, sourceLabel: "ALAYA_RUN_ID" };
+}
+
+function resolveToolsAgentTarget(
+  ctx: AlayaCliContext,
+  args: ToolsArgs,
+  deps: ToolsCommandDependencies
+): string {
+  return args.contextOverrides.agentTarget ??
+    deps.defaultAgentTarget ??
+    ctx.env.ALAYA_AGENT_TARGET ??
+    "tools-cli";
 }

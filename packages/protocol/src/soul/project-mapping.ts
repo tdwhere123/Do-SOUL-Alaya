@@ -54,6 +54,7 @@ export const ProjectMappingAnchorSchema = PersistentObjectEnvelopeSchema.unwrap(
     accepted_by: AcceptedBySchema.nullable(),
     last_transition_at: IsoDatetimeStringSchema
   })
+  .strict()
   .readonly();
 
 export function getConfirmationPolicy(dimension: MemoryDimension): ConfirmationPolicy {

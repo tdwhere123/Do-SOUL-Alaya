@@ -151,6 +151,10 @@ const ExtensionGovernanceCheckedEventObjectSchema = createRuntimeGovernanceEvent
   Payloads.RuntimeGovernanceEventType.EXTENSION_GOVERNANCE_CHECKED,
   Payloads.ExtensionGovernanceCheckedPayloadSchema
 );
+const RuntimeSideEffectFailedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
+  Payloads.RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED,
+  Payloads.RuntimeSideEffectFailedPayloadSchema
+);
 const ConstitutionalFragmentRegisteredEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   Payloads.RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
   Payloads.ConstitutionalFragmentRegisteredPayloadSchema
@@ -207,6 +211,8 @@ export const ExtensionToolDiscoveredEventSchema =
   ExtensionToolDiscoveredEventObjectSchema.readonly();
 export const ExtensionGovernanceCheckedEventSchema =
   ExtensionGovernanceCheckedEventObjectSchema.readonly();
+export const RuntimeSideEffectFailedEventSchema =
+  RuntimeSideEffectFailedEventObjectSchema.readonly();
 export const ConstitutionalFragmentRegisteredEventSchema =
   ConstitutionalFragmentRegisteredEventObjectSchema.readonly();
 
@@ -247,6 +253,7 @@ export const RuntimeGovernanceEventUnionSchema = z
     ExtensionDescriptorRegistrationCompensationFailedEventObjectSchema,
     ExtensionToolDiscoveredEventObjectSchema,
     ExtensionGovernanceCheckedEventObjectSchema,
+    RuntimeSideEffectFailedEventObjectSchema,
     ConstitutionalFragmentRegisteredEventObjectSchema
   ])
   .readonly();
@@ -331,6 +338,9 @@ export type ExtensionToolDiscoveredPayload = z.infer<
 >;
 export type ExtensionGovernanceCheckedPayload = z.infer<
   typeof Payloads.ExtensionGovernanceCheckedPayloadSchema
+>;
+export type RuntimeSideEffectFailedPayload = z.infer<
+  typeof Payloads.RuntimeSideEffectFailedPayloadSchema
 >;
 export type ConstitutionalFragmentRegisteredPayload = z.infer<
   typeof Payloads.ConstitutionalFragmentRegisteredPayloadSchema

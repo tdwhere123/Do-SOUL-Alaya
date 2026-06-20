@@ -4,6 +4,7 @@ import {
   LongMemEvalGoldDiagnosticSchema,
   LongMemEvalQuestionDiagnosticSchema
 } from "./diagnostics-schema.js";
+import type { BenchCommitResolution } from "../shared/version.js";
 import type { z } from "zod";
 
 export type BenchEmbeddingProviderState =
@@ -84,6 +85,12 @@ export interface LongMemEvalReportUsageSummary {
   readonly used_object_count: number;
 }
 
+export interface LongMemEvalQuestionFailureSummary {
+  readonly failed_count: number;
+  readonly completed_count: number;
+  readonly failed_question_ids: readonly string[];
+}
+
 export interface LongMemEvalReportSideEffectSnapshot {
   readonly question_id: string;
   readonly workspace_id: string;
@@ -144,12 +151,30 @@ export interface LongMemEvalDiagnosticsSidecar {
   readonly split: string;
   readonly run_at: string;
   readonly alaya_commit: string;
+  readonly commit_resolution?: BenchCommitResolution;
   readonly recall_pipeline_version?: string;
   readonly embedding_provider: string;
   readonly embedding_mode: "disabled" | "env";
   readonly policy_shape?: "stress" | "chat";
   readonly simulate_report?: "none" | "always-used" | "gold-only" | "mixed";
+  readonly seed_extraction_path?: {
+    readonly path: "official_api_compile" | "no_credentials_fallback";
+    readonly cache_hits: number;
+    readonly llm_calls: number;
+    readonly offline_fallbacks: number;
+    readonly live_extraction_failures: number;
+    readonly cached_extraction_failures: number;
+    readonly facts_produced: number;
+    readonly signals_dropped: number;
+    readonly parse_dropped: number;
+    readonly compile_overflow_dropped: number;
+    readonly signals_dropped_by_reason: {
+      readonly candidate_absent: number;
+      readonly materialization_error: number;
+    };
+  };
   readonly report_usage?: LongMemEvalReportUsageSummary;
+  readonly question_failures?: LongMemEvalQuestionFailureSummary;
   readonly report_side_effects?: LongMemEvalReportSideEffectSummary;
   readonly scored_recall_evidence?: LongMemEvalRecallEvidenceSummary;
   readonly embedding_vector_cache?: LongMemEvalEmbeddingVectorCacheSummary;
@@ -165,6 +190,7 @@ export interface LongMemEvalCompactDiagnosticsSidecar {
   readonly split: string;
   readonly run_at: string;
   readonly alaya_commit: string;
+  readonly commit_resolution?: BenchCommitResolution;
   readonly recall_pipeline_version?: string;
   readonly embedding_provider: string;
   readonly embedding_mode: "disabled" | "env";
@@ -173,7 +199,9 @@ export interface LongMemEvalCompactDiagnosticsSidecar {
   readonly question_count: number;
   readonly full_diagnostics_artifact_path: string;
   readonly provider_state_summary: ProviderStateSummary;
+  readonly seed_extraction_path?: LongMemEvalDiagnosticsSidecar["seed_extraction_path"];
   readonly report_usage?: LongMemEvalReportUsageSummary;
+  readonly question_failures?: LongMemEvalQuestionFailureSummary;
   readonly report_side_effects?: Omit<LongMemEvalReportSideEffectSummary, "snapshots"> & {
     readonly snapshot_count: number;
   };

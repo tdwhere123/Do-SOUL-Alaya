@@ -31,6 +31,7 @@ export const SemanticAnchorSchema = z
     keywords: z.array(NonEmptyStringSchema),
     summary: NonEmptyStringSchema
   })
+  .strict()
   .readonly();
 
 export const EventAnchorSchema = z
@@ -39,6 +40,7 @@ export const EventAnchorSchema = z
     event_id: NonEmptyStringSchema.nullable(),
     occurred_at: IsoDatetimeStringSchema
   })
+  .strict()
   .readonly();
 
 export const LineRangeSchema = z
@@ -46,9 +48,11 @@ export const LineRangeSchema = z
     start: z.number().int().nonnegative(),
     end: z.number().int().nonnegative()
   })
+  .strict()
   .refine((value) => value.start <= value.end, {
     message: "line_range.start must be less than or equal to line_range.end"
   })
+  .strict()
   .readonly();
 
 export const PhysicalAnchorSchema = z
@@ -76,7 +80,7 @@ export const EvidenceCapsuleSchema = PersistentObjectEnvelopeSchema.unwrap().ext
   run_id: NonEmptyStringSchema,
   workspace_id: NonEmptyStringSchema,
   surface_id: NonEmptyStringSchema.nullable()
-}).readonly();
+}).strict().readonly();
 
 export type EvidenceKind = z.infer<typeof EvidenceKindSchema>;
 export type SemanticAnchor = z.infer<typeof SemanticAnchorSchema>;

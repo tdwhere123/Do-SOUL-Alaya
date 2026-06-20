@@ -1,7 +1,7 @@
 import type { TrustSummary } from "@do-soul/alaya-protocol";
 import type { DaemonStartupStepRecord } from "../index.js";
 import type { RecallUtilizationService, RecallUtilizationStats } from "../services/recall-utilization-service.js";
-import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaSubcommandSpec } from "./bridge.js";
+import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaCliResult, type AlayaSubcommandSpec } from "./bridge.js";
 
 const DEFAULT_RECALL_STATS_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -50,154 +50,18 @@ const STARTUP_STEPS = [
 export function createStatusCommand(
   deps: StatusCommandDependencies
 ): AlayaSubcommandSpec<StatusArgs> {
-  const now = deps.clock ?? (() => new Date().toISOString());
-
   return {
     name: "status",
     description: "Report daemon readiness, trust summaries, and Garden status.",
     argsSchema: statusArgsSchema(),
     requiresDaemonReady: false,
-    handler: async (ctx, args) => {
-      const startupSteps =
-        deps.startupStepsProvider?.(ctx) ?? ctx.daemon.startupSteps;
-      const completedSteps = startupSteps.map((step) => step.step);
-      const missingSteps = STARTUP_STEPS.filter((step) => !completedSteps.includes(step));
-      const daemonUp = missingSteps.length === 0;
-
-      const configuredTargets = args.agentTargets.length > 0
-        ? args.agentTargets
-        : await normalizeAgentTargets(deps.resolveAgentTargets);
-      const trustSummaries = await Promise.all(
-        configuredTargets.map(async (target) => await deps.trustStateSummaryProvider(target))
-      );
-      const gardenStatus = deps.getGardenStatus
-        ? await deps.getGardenStatus()
-        : { last_pass_at: null };
-
-      let recallStats: RecallUtilizationStats | undefined;
-      if (args.recallStats) {
-        if (args.recallStatsWorkspaceId === null) {
-          ctx.stderr.write("--recall-stats requires --workspace <id>.\n");
-          return { exitCode: ALAYA_SYSEXITS.USAGE };
-        }
-        const checkedAt = now();
-        const sinceDefault = new Date(Date.parse(checkedAt) - DEFAULT_RECALL_STATS_LOOKBACK_MS).toISOString();
-        recallStats = await deps.recallUtilizationService.getStats({
-          workspaceId: args.recallStatsWorkspaceId,
-          since: args.recallStatsSince ?? sinceDefault,
-          until: args.recallStatsUntil ?? checkedAt
-        });
-      }
-
-      const report: StatusReport = {
-        checked_at: now(),
-        daemon: {
-          up: daemonUp,
-          completed_steps: completedSteps,
-          missing_steps: missingSteps
-        },
-        trust: trustSummaries,
-        garden: gardenStatus,
-        ...(recallStats === undefined ? {} : { recall_stats: recallStats })
-      };
-
-      if (ctx.jsonRequested !== true) {
-        writeHumanSummary(ctx.stdout, report);
-      }
-
-      return {
-        exitCode: daemonUp ? ALAYA_SYSEXITS.OK : ALAYA_SYSEXITS.TEMPFAIL,
-        json: report
-      };
-    }
+    handler: async (ctx, args) => await executeStatusCommand(ctx, args, deps)
   };
 }
 
 function statusArgsSchema(): AlayaCliArgsSchema<StatusArgs> {
   return {
-    safeParse(input) {
-      if (!Array.isArray(input) || input.some((token) => typeof token !== "string")) {
-        return {
-          success: false,
-          error: { issues: [{ path: [], message: "Expected a string argument list." }] }
-        } as const;
-      }
-
-      const agentTargets: string[] = [];
-      let recallStats = false;
-      let recallStatsWorkspaceId: string | null = null;
-      let recallStatsSince: string | null = null;
-      let recallStatsUntil: string | null = null;
-
-      for (let index = 0; index < input.length; index += 1) {
-        const token = input[index];
-
-        if (token === "--recall-stats") {
-          recallStats = true;
-          continue;
-        }
-
-        if (token === "--workspace" || token === "--since" || token === "--until" || token === "--agent") {
-          const value = input[index + 1];
-          if (typeof value !== "string" || value.trim().length === 0) {
-            return {
-              success: false,
-              error: { issues: [{ path: [index + 1], message: `Missing value for ${token}.` }] }
-            } as const;
-          }
-          if (token === "--agent") {
-            agentTargets.push(value.trim());
-          } else if (token === "--workspace") {
-            recallStatsWorkspaceId = value.trim();
-          } else if (token === "--since") {
-            if (Number.isNaN(Date.parse(value))) {
-              return {
-                success: false,
-                error: { issues: [{ path: [index + 1], message: "--since requires an ISO datetime." }] }
-              } as const;
-            }
-            recallStatsSince = value;
-          } else {
-            if (Number.isNaN(Date.parse(value))) {
-              return {
-                success: false,
-                error: { issues: [{ path: [index + 1], message: "--until requires an ISO datetime." }] }
-              } as const;
-            }
-            recallStatsUntil = value;
-          }
-          index += 1;
-          continue;
-        }
-
-        return {
-          success: false,
-          error: {
-            issues: [{ path: [index], message: `Unknown argument: ${token}` }]
-          }
-        } as const;
-      }
-
-      if (!recallStats && (recallStatsWorkspaceId !== null || recallStatsSince !== null || recallStatsUntil !== null)) {
-        return {
-          success: false,
-          error: {
-            issues: [{ path: [], message: "--workspace / --since / --until require --recall-stats." }]
-          }
-        } as const;
-      }
-
-      return {
-        success: true,
-        data: {
-          agentTargets,
-          recallStats,
-          recallStatsWorkspaceId,
-          recallStatsSince,
-          recallStatsUntil
-        }
-      } as const;
-    }
+    safeParse: safeParseStatusArgs
   };
 }
 
@@ -250,4 +114,188 @@ function formatRatio(value: number): string {
     return "n/a";
   }
   return `${(value * 100).toFixed(1)}%`;
+}
+
+async function executeStatusCommand(
+  ctx: AlayaCliContext,
+  args: StatusArgs,
+  deps: StatusCommandDependencies
+): Promise<AlayaCliResult> {
+  const reportResult = await buildStatusReport(ctx, args, deps);
+  if (!reportResult.ok) {
+    return reportResult.result;
+  }
+  if (ctx.jsonRequested !== true) {
+    writeHumanSummary(ctx.stdout, reportResult.report);
+  }
+  return {
+    exitCode: reportResult.daemonUp ? ALAYA_SYSEXITS.OK : ALAYA_SYSEXITS.TEMPFAIL,
+    json: reportResult.report
+  };
+}
+
+async function buildStatusReport(
+  ctx: AlayaCliContext,
+  args: StatusArgs,
+  deps: StatusCommandDependencies
+): Promise<
+  | Readonly<{ ok: true; daemonUp: boolean; report: StatusReport }>
+  | Readonly<{ ok: false; result: AlayaCliResult }>
+> {
+  const now = deps.clock ?? (() => new Date().toISOString());
+  const daemonStatus = summarizeDaemonStatus(ctx, deps);
+  const configuredTargets = args.agentTargets.length > 0
+    ? args.agentTargets
+    : await normalizeAgentTargets(deps.resolveAgentTargets);
+  const trustSummaries = await Promise.all(
+    configuredTargets.map(async (target) => await deps.trustStateSummaryProvider(target))
+  );
+  const recallStatsResult = await maybeLoadRecallStats(ctx, args, deps, now);
+  if (!recallStatsResult.ok) {
+    return recallStatsResult;
+  }
+  const report: StatusReport = {
+    checked_at: now(),
+    daemon: daemonStatus.summary,
+    trust: trustSummaries,
+    garden: deps.getGardenStatus ? await deps.getGardenStatus() : { last_pass_at: null },
+    ...(recallStatsResult.recallStats === undefined ? {} : { recall_stats: recallStatsResult.recallStats })
+  };
+  return { ok: true, daemonUp: daemonStatus.summary.up, report };
+}
+
+function summarizeDaemonStatus(
+  ctx: Pick<AlayaCliContext, "daemon">,
+  deps: StatusCommandDependencies
+): Readonly<{ summary: StatusReport["daemon"] }> {
+  const startupSteps = deps.startupStepsProvider?.(ctx) ?? ctx.daemon.startupSteps;
+  const completedSteps = startupSteps.map((step) => step.step);
+  const missingSteps = STARTUP_STEPS.filter((step) => !completedSteps.includes(step));
+  return {
+    summary: {
+      up: missingSteps.length === 0,
+      completed_steps: completedSteps,
+      missing_steps: missingSteps
+    }
+  };
+}
+
+async function maybeLoadRecallStats(
+  ctx: AlayaCliContext,
+  args: StatusArgs,
+  deps: StatusCommandDependencies,
+  now: () => string
+): Promise<
+  | Readonly<{ ok: true; recallStats?: RecallUtilizationStats }>
+  | Readonly<{ ok: false; result: AlayaCliResult }>
+> {
+  if (!args.recallStats) {
+    return { ok: true };
+  }
+  if (args.recallStatsWorkspaceId === null) {
+    ctx.stderr.write("--recall-stats requires --workspace <id>.\n");
+    return { ok: false, result: { exitCode: ALAYA_SYSEXITS.USAGE } };
+  }
+  const checkedAt = now();
+  const sinceDefault = new Date(Date.parse(checkedAt) - DEFAULT_RECALL_STATS_LOOKBACK_MS).toISOString();
+  return {
+    ok: true,
+    recallStats: await deps.recallUtilizationService.getStats({
+      workspaceId: args.recallStatsWorkspaceId,
+      since: args.recallStatsSince ?? sinceDefault,
+      until: args.recallStatsUntil ?? checkedAt
+    })
+  };
+}
+
+function safeParseStatusArgs(input: unknown):
+  | { readonly success: true; readonly data: StatusArgs }
+  | { readonly success: false; readonly error: { readonly issues: readonly { readonly path: readonly number[]; readonly message: string }[] } } {
+  if (!Array.isArray(input) || input.some((token) => typeof token !== "string")) {
+    return {
+      success: false,
+      error: { issues: [{ path: [], message: "Expected a string argument list." }] }
+    };
+  }
+  return parseStatusArgs(input);
+}
+
+function parseStatusArgs(
+  input: readonly string[]
+):
+  | { readonly success: true; readonly data: StatusArgs }
+  | { readonly success: false; readonly error: { readonly issues: readonly { readonly path: readonly number[]; readonly message: string }[] } } {
+  const state = {
+    agentTargets: [] as string[],
+    recallStats: false,
+    recallStatsWorkspaceId: null as string | null,
+    recallStatsSince: null as string | null,
+    recallStatsUntil: null as string | null
+  };
+  for (let index = 0; index < input.length; index += 1) {
+    const token = input[index]!;
+    if (token === "--recall-stats") {
+      state.recallStats = true;
+      continue;
+    }
+    const optionResult = applyStatusOption(state, token, input[index + 1], index);
+    if (!optionResult.ok) {
+      return { success: false, error: { issues: [{ path: optionResult.path, message: optionResult.message }] } };
+    }
+    if (!optionResult.handled) {
+      return { success: false, error: { issues: [{ path: [index], message: `Unknown argument: ${token}` }] } };
+    }
+    index += 1;
+  }
+  if (!state.recallStats && (state.recallStatsWorkspaceId !== null || state.recallStatsSince !== null || state.recallStatsUntil !== null)) {
+    return {
+      success: false,
+      error: { issues: [{ path: [], message: "--workspace / --since / --until require --recall-stats." }] }
+    };
+  }
+  return { success: true, data: state };
+}
+
+function applyStatusOption(
+  state: {
+    agentTargets: string[];
+    recallStats: boolean;
+    recallStatsWorkspaceId: string | null;
+    recallStatsSince: string | null;
+    recallStatsUntil: string | null;
+  },
+  token: string,
+  value: string | undefined,
+  index: number
+):
+  | Readonly<{ ok: true; handled: false }>
+  | Readonly<{ ok: true; handled: true }>
+  | Readonly<{ ok: false; path: readonly number[]; message: string }> {
+  if (token !== "--workspace" && token !== "--since" && token !== "--until" && token !== "--agent") {
+    return { ok: true, handled: false };
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return { ok: false, path: [index + 1], message: `Missing value for ${token}.` };
+  }
+  if (token === "--agent") {
+    state.agentTargets.push(value.trim());
+    return { ok: true, handled: true };
+  }
+  if (token === "--workspace") {
+    state.recallStatsWorkspaceId = value.trim();
+    return { ok: true, handled: true };
+  }
+  if (Number.isNaN(Date.parse(value))) {
+    return {
+      ok: false,
+      path: [index + 1],
+      message: token === "--since" ? "--since requires an ISO datetime." : "--until requires an ISO datetime."
+    };
+  }
+  if (token === "--since") {
+    state.recallStatsSince = value;
+  } else {
+    state.recallStatsUntil = value;
+  }
+  return { ok: true, handled: true };
 }

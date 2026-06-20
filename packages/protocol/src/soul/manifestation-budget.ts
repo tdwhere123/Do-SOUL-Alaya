@@ -1,8 +1,10 @@
 import { z } from "zod";
 import {
+  BoundedIdSchema,
+  BoundedReasonSchema,
   IsoDatetimeStringSchema,
-  NonEmptyStringSchema,
-  NonNegativeIntSchema
+  NonNegativeIntSchema,
+  RatioSchema
 } from "../shared/schema-primitives.js";
 
 const manifestationLevelValues = ["stance_bias", "dialogue_nudge", "lens_entry"] as const;
@@ -17,10 +19,10 @@ export const ManifestationLevelSchema = z.enum(manifestationLevelValues);
 
 export const ManifestationEscalationPolicySchema = z
   .object({
-    nudge_min_pressure: z.number(),
-    nudge_min_confidence: z.number(),
-    lens_min_pressure: z.number(),
-    lens_min_confidence: z.number(),
+    nudge_min_pressure: RatioSchema,
+    nudge_min_confidence: RatioSchema,
+    lens_min_pressure: RatioSchema,
+    lens_min_confidence: RatioSchema,
     lens_requires_task_coupling: z.boolean(),
     lens_requires_governance_ceiling: z.boolean()
   })
@@ -38,7 +40,7 @@ export const ManifestationBudgetRemainingSchema = z
 
 export const ManifestationBudgetConfigSchema = z
   .object({
-    workspace_id: NonEmptyStringSchema,
+    workspace_id: BoundedIdSchema,
     stance_bias_cap: NonNegativeIntSchema,
     dialogue_nudge_cap: NonNegativeIntSchema,
     lens_entry_cap: NonNegativeIntSchema,
@@ -50,10 +52,10 @@ export const ManifestationBudgetConfigSchema = z
 
 export const ManifestationDecisionSchema = z
   .object({
-    candidate_id: NonEmptyStringSchema,
-    source_path_id: NonEmptyStringSchema,
+    candidate_id: BoundedIdSchema,
+    source_path_id: BoundedIdSchema,
     assigned_level: ManifestationLevelSchema.nullable(),
-    reason: NonEmptyStringSchema,
+    reason: BoundedReasonSchema,
     budget_remaining: ManifestationBudgetRemainingSchema
   })
   .strict()

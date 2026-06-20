@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
   IsoDatetimeStringSchema,
-  NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
 
@@ -17,12 +19,12 @@ export const TrustAssessmentFactorSchema = z.enum([
 
 export const WorkerTrustAssessmentSchema = z
   .object({
-    assessment_id: NonEmptyStringSchema,
-    worker_run_id: NonEmptyStringSchema,
-    workspace_id: NonEmptyStringSchema,
+    assessment_id: BoundedIdSchema,
+    worker_run_id: BoundedIdSchema,
+    workspace_id: BoundedIdSchema,
     trust_level: WorkerTrustLevelSchema,
     factors: z.array(TrustAssessmentFactorSchema).readonly(),
-    factor_details: z.record(z.string(), z.string()).optional(),
+    factor_details: z.record(BoundedLabelSchema, BoundedReasonSchema).optional(),
     assessed_at: IsoDatetimeStringSchema
   })
   .strict()

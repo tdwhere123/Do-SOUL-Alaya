@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { EngineBindingInputSchema, EngineBindingSummarySchema } from "../engine/engine-binding.js";
 import { EngineClassSchema } from "../runtime/runtime-run.js";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedIdSchema,
+  BoundedNameSchema,
+  BoundedPathSchema,
+  IsoDatetimeStringSchema
+} from "../shared/schema-primitives.js";
 
 const workspaceKindValues = ["local_repo", "docs_only", "mixed"] as const;
 const workspaceStateValues = ["active", "archived"] as const;
@@ -21,17 +26,17 @@ export const WorkspaceKindSchema = z.enum(workspaceKindValues);
 export const WorkspaceStateSchema = z.enum(workspaceStateValues);
 
 export const WorkspaceSchema = z.object({
-  workspace_id: NonEmptyStringSchema,
-  name: z.string(),
-  root_path: z.string(),
+  workspace_id: BoundedIdSchema,
+  name: BoundedNameSchema,
+  root_path: BoundedPathSchema,
   workspace_kind: WorkspaceKindSchema,
-  repo_path: NonEmptyStringSchema.nullable(),
-  default_engine_binding: NonEmptyStringSchema.nullable(),
+  repo_path: BoundedPathSchema.nullable(),
+  default_engine_binding: BoundedIdSchema.nullable(),
   default_engine_class: EngineClassSchema.nullable().optional(),
   workspace_state: WorkspaceStateSchema,
   created_at: IsoDatetimeStringSchema,
   archived_at: IsoDatetimeStringSchema.nullable()
-}).readonly();
+}).strict().readonly();
 
 export const WorkspaceCreateInputSchema = WorkspaceSchema.unwrap()
   .pick({
@@ -44,27 +49,34 @@ export const WorkspaceCreateInputSchema = WorkspaceSchema.unwrap()
   .partial({
     repo_path: true,
     default_engine_binding: true
-  });
+  })
+  .strict()
+  .readonly();
 
 export const WorkspaceEngineConfigSchema = z
   .object({
-    workspace_id: NonEmptyStringSchema,
+    workspace_id: BoundedIdSchema,
     default_engine_class: EngineClassSchema.nullable(),
     conversation_binding: EngineBindingSummarySchema.nullable(),
     coding_engine_available: z.boolean()
   })
+  .strict()
   .readonly();
 
 export const WorkspaceEngineConfigUpdateSchema = z
   .union([
-    z.object({
-      default_engine_class: z.literal("conversation_engine"),
-      conversation_binding: EngineBindingInputSchema.optional()
-    }),
-    z.object({
-      default_engine_class: z.literal("coding_engine"),
-      conversation_binding: EngineBindingInputSchema.optional()
-    })
+    z
+      .object({
+        default_engine_class: z.literal("conversation_engine"),
+        conversation_binding: EngineBindingInputSchema.optional()
+      })
+      .strict(),
+    z
+      .object({
+        default_engine_class: z.literal("coding_engine"),
+        conversation_binding: EngineBindingInputSchema.optional()
+      })
+      .strict()
   ])
   .readonly();
 
@@ -74,17 +86,20 @@ export const WorkspaceGitBindingStatusSchema = z.enum(workspaceGitBindingStatusV
 
 export const WorkspaceGitBindingSchema = z
   .object({
-    workspace_id: NonEmptyStringSchema,
-    repo_path: NonEmptyStringSchema.nullable(),
+    workspace_id: BoundedIdSchema,
+    repo_path: BoundedPathSchema.nullable(),
     status: WorkspaceGitBindingStatusSchema,
-    reason: NonEmptyStringSchema.optional()
+    reason: BoundedNameSchema.optional()
   })
+  .strict()
   .readonly();
 
 export const WorkspaceGitBindingUpdateSchema = z
   .object({
-    repo_path: NonEmptyStringSchema.nullable()
-  });
+    repo_path: BoundedPathSchema.nullable()
+  })
+  .strict()
+  .readonly();
 
 export type WorkspaceKind = z.infer<typeof WorkspaceKindSchema>;
 export type WorkspaceState = z.infer<typeof WorkspaceStateSchema>;

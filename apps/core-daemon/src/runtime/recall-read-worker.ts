@@ -5,7 +5,8 @@ import {
   type PathAnchorRef,
   type PathRelation,
   ScopeClassSchema,
-  StorageTierSchema
+  StorageTierSchema,
+  type StorageTier
 } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
@@ -30,6 +31,7 @@ const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
 const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
 const synthesisCapsuleRepo = new SqliteSynthesisCapsuleRepo(database);
 const pathRelationRepo = new SqlitePathRelationRepo(database);
+const MEMORY_ENTRY_PAGE_LIMIT = 500;
 let closed = false;
 
 parentPort.on("message", (message: unknown) => {
@@ -59,7 +61,37 @@ async function runOperation(request: RecallReadWorkerRequest): Promise<unknown> 
   const payload = asPayload(request.payload);
   switch (request.operation) {
     case "memory.findByWorkspaceId":
-      return await memoryEntryRepo.findByWorkspaceId(
+    case "memory.findByDimension":
+    case "memory.findByScopeClass":
+    case "memory.searchByKeyword":
+    case "memory.searchByKeywordWithinObjectIds":
+    case "memory.findByEvidenceRefs":
+    case "memory.findByIds":
+      return await runMemoryOperation(request.operation, payload);
+    case "evidence.searchByKeyword":
+    case "evidence.findByIds":
+      return await runEvidenceOperation(request.operation, payload);
+    case "synthesis.searchByKeyword":
+    case "synthesis.findByIds":
+      return await runSynthesisOperation(request.operation, payload);
+    case "path.findByAnchors":
+    case "path.findByTimeConcernWindowDigests":
+    case "pathPlasticity.getStrengthByMemoryId":
+      return await runPathOperation(request.operation, payload);
+    case "close":
+      database.close();
+      closed = true;
+      return null;
+  }
+}
+
+async function runMemoryOperation(
+  operation: Extract<RecallReadWorkerRequest["operation"], `memory.${string}`>,
+  payload: Record<string, unknown>
+) {
+  switch (operation) {
+    case "memory.findByWorkspaceId":
+      return await findMemoryEntriesByWorkspaceId(
         readString(payload.workspaceId, "workspaceId"),
         payload.tier === undefined ? undefined : StorageTierSchema.parse(payload.tier),
         payload.page === undefined ? undefined : readPage(payload.page)
@@ -94,65 +126,109 @@ async function runOperation(request: RecallReadWorkerRequest): Promise<unknown> 
       );
     case "memory.findByIds":
       return await memoryEntryRepo.findByIds(readStringArray(payload.objectIds, "objectIds"));
-    case "evidence.searchByKeyword":
-      return await evidenceCapsuleRepo.searchByKeyword(
-        readString(payload.workspaceId, "workspaceId"),
-        readString(payload.queryText, "queryText"),
-        readNumber(payload.limit, "limit")
-      );
-    case "evidence.findByIds": {
-      const workspaceId = readString(payload.workspaceId, "workspaceId");
-      const results = await evidenceCapsuleRepo.findByIds(
-        readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
-      );
-      return results.filter((evidence) => evidence.workspace_id === workspaceId);
-    }
-    case "synthesis.searchByKeyword":
-      return await synthesisCapsuleRepo.searchByKeyword(
-        readString(payload.workspaceId, "workspaceId"),
-        readString(payload.queryText, "queryText"),
-        readNumber(payload.limit, "limit")
-      );
-    case "synthesis.findByIds": {
-      const scoped = [];
-      for (const objectId of readStringArray(payload.objectIds, "objectIds")) {
-        const synthesis = await synthesisCapsuleRepo.findById(objectId);
-        if (synthesis !== null) {
-          scoped.push(synthesis);
-        }
-      }
-      return scoped;
-    }
-    case "path.findByAnchors":
-      return await pathRelationRepo.findByAnchors(
-        readString(payload.workspaceId, "workspaceId"),
-        readAnchorRefs(payload.anchorRefs)
-      );
-    case "path.findByTimeConcernWindowDigests": {
-      const workspaceId = readString(payload.workspaceId, "workspaceId");
-      const normalized = new Set(
-        readStringArray(payload.windowDigests, "windowDigests")
-          .map(normalizeRecallTimeConcernWindowDigest)
-      );
-      const paths = await pathRelationRepo.findByWorkspace(workspaceId);
-      return paths.filter((path) =>
-        isPathActiveForRecall(path.lifecycle.status) &&
-        [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
-          anchor.kind === "time_concern" &&
-          normalized.has(normalizeRecallTimeConcernWindowDigest(anchor.window_digest))
-        )
-      );
-    }
-    case "pathPlasticity.getStrengthByMemoryId":
-      return getStrengthByMemoryId(
-        readString(payload.workspaceId, "workspaceId"),
-        readStringArray(payload.memoryIds, "memoryIds")
-      );
-    case "close":
-      database.close();
-      closed = true;
-      return null;
   }
+}
+
+async function runEvidenceOperation(
+  operation: Extract<RecallReadWorkerRequest["operation"], `evidence.${string}`>,
+  payload: Record<string, unknown>
+) {
+  if (operation === "evidence.searchByKeyword") {
+    return await evidenceCapsuleRepo.searchByKeyword(
+      readString(payload.workspaceId, "workspaceId"),
+      readString(payload.queryText, "queryText"),
+      readNumber(payload.limit, "limit")
+    );
+  }
+
+  const workspaceId = readString(payload.workspaceId, "workspaceId");
+  const results = await evidenceCapsuleRepo.findByIds(
+    readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
+  );
+  return results.filter((evidence) => evidence.workspace_id === workspaceId);
+}
+
+async function runSynthesisOperation(
+  operation: Extract<RecallReadWorkerRequest["operation"], `synthesis.${string}`>,
+  payload: Record<string, unknown>
+) {
+  if (operation === "synthesis.searchByKeyword") {
+    return await synthesisCapsuleRepo.searchByKeyword(
+      readString(payload.workspaceId, "workspaceId"),
+      readString(payload.queryText, "queryText"),
+      readNumber(payload.limit, "limit")
+    );
+  }
+
+  const scoped = [];
+  for (const objectId of readStringArray(payload.objectIds, "objectIds")) {
+    const synthesis = await synthesisCapsuleRepo.findById(objectId);
+    if (synthesis !== null) {
+      scoped.push(synthesis);
+    }
+  }
+  return scoped;
+}
+
+async function runPathOperation(
+  operation: Extract<RecallReadWorkerRequest["operation"], `path${string}`>,
+  payload: Record<string, unknown>
+) {
+  if (operation === "path.findByAnchors") {
+    return await pathRelationRepo.findByAnchors(
+      readString(payload.workspaceId, "workspaceId"),
+      readAnchorRefs(payload.anchorRefs)
+    );
+  }
+  if (operation === "pathPlasticity.getStrengthByMemoryId") {
+    return await getStrengthByMemoryId(
+      readString(payload.workspaceId, "workspaceId"),
+      readStringArray(payload.memoryIds, "memoryIds")
+    );
+  }
+
+  const workspaceId = readString(payload.workspaceId, "workspaceId");
+  const normalized = new Set(
+    readStringArray(payload.windowDigests, "windowDigests").map(
+      normalizeRecallTimeConcernWindowDigest
+    )
+  );
+  const paths = await pathRelationRepo.findByWorkspaceAll(workspaceId);
+  return paths.filter((path) =>
+    isPathActiveForRecall(path.lifecycle.status) &&
+    [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
+      anchor.kind === "time_concern" &&
+      normalized.has(normalizeRecallTimeConcernWindowDigest(anchor.window_digest))
+    )
+  );
+}
+
+async function findMemoryEntriesByWorkspaceId(
+  workspaceId: string,
+  tier: StorageTier | undefined,
+  page: { readonly limit: number; readonly offset: number } | undefined
+) {
+  if (page === undefined || page.limit <= MEMORY_ENTRY_PAGE_LIMIT) {
+    return await memoryEntryRepo.findByWorkspaceId(workspaceId, tier, page);
+  }
+
+  const rows = [];
+  let remaining = page.limit;
+  let offset = page.offset;
+  while (remaining > 0) {
+    const limit = Math.min(remaining, MEMORY_ENTRY_PAGE_LIMIT);
+    const chunk = await memoryEntryRepo.findByWorkspaceId(workspaceId, tier, {
+      limit,
+      offset
+    });
+    rows.push(...chunk);
+    if (chunk.length < limit) {
+      break;
+    }
+    remaining -= chunk.length;
+    offset += chunk.length;
+  }
+  return rows;
 }
 
 async function getStrengthByMemoryId(

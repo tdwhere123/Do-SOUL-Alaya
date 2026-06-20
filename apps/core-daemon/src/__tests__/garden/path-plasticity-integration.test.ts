@@ -1,7 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
+
 import { tmpdir } from "node:os";
+
 import { join } from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
+
 import {
   FormationKind,
   MemoryDimension,
@@ -19,6 +23,7 @@ import {
   type SoulMemorySearchResponse,
   type SoulReportContextUsageResponse
 } from "@do-soul/alaya-protocol";
+
 import {
   initDatabase,
   SqliteEventLogRepo,
@@ -28,441 +33,36 @@ import {
   SqliteTrustStateRepo,
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
+
 import { EventPublisher } from "@do-soul/alaya-core";
+
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
+
 import { createPathPlasticityService } from "../../garden/path-plasticity-runtime.js";
+
 import { createTrustStateRecorder } from "../../trust/state.js";
 
 const tempDirs: string[] = [];
+
 const originalDataDir = process.env.DATA_DIR;
+
 const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
+
 const originalAlayaOpenAiSecretRef = process.env.ALAYA_OPENAI_SECRET_REF;
+
 const originalEmbeddingSupplementOptIn = process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT;
+
 const originalAlayaConfigDir = process.env.ALAYA_CONFIG_DIR;
+
 const originalCodexHome = process.env.CODEX_HOME;
+
 const originalHome = process.env.HOME;
+
 const INTEGRATION_TEST_TIMEOUT_MS = 30_000;
+
 const SOURCE_MEMORY_ID = "11111111-1111-4111-8111-111111111111";
+
 const TARGET_MEMORY_ID = "22222222-2222-4222-8222-222222222222";
-
-afterEach(async () => {
-  restoreProcessEnv();
-
-  for (const directory of tempDirs.splice(0)) {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-describe("path plasticity daemon wiring", () => {
-  it("translates soul usage proof into strength and direction-bias redirection via the Librarian plasticity service (integration)", async () => {
-    // This test seeds the daemon database with a PathRelation and a
-    // real trust-state delivery+usage receipt, then directly invokes the
-    // wired PathPlasticityService (the same service the Garden Librarian's
-    // path_plasticity_update task dispatches). It proves the full chain
-    //   TrustStateRecorder.recordUsage → MEMORY_USAGE_REPORTED in event_log
-    //     → UsageProofReader.listRecentUsage returns the record
-    //       → PathRelation strength delta + PATH_RELATION_REDIRECTED audit row
-    //         + PATH_RELATION_REINFORCED audit row
-    // without going through the Garden scheduler timer (which is covered by
-    // the Librarian task tests).
-    const dataDir = await createTempDataDir();
-    const dbPath = join(dataDir, "alaya.db");
-    const database = initDatabase({ filename: dbPath });
-
-    try {
-      const eventLogRepo = new SqliteEventLogRepo(database);
-      const pathRelationRepo = new SqlitePathRelationRepo(database);
-      const trustStateRepo = new SqliteTrustStateRepo(database);
-      const workspaceRepo = new SqliteWorkspaceRepo(database);
-
-      // Workspace FK target.
-      await workspaceRepo.create({
-        workspace_id: "workspace-1",
-        name: "integration workspace",
-        root_path: "/tmp/alaya-integration",
-        workspace_kind: WorkspaceKind.LOCAL_REPO,
-        default_engine_binding: null,
-        workspace_state: WorkspaceState.ACTIVE
-      });
-
-      // Minimal EventPublisher (no-op runtime notifier / hot state).
-      const eventPublisher = new EventPublisher({
-        eventLogRepo,
-        runHotStateService: { apply: async () => undefined },
-        runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined }
-      });
-
-      // 1. Seed a PathRelation anchored on memory M.
-      const pathSeed: PathRelation = {
-        path_id: "path-integration-1",
-        workspace_id: "workspace-1",
-        anchors: {
-          source_anchor: { kind: "object", object_id: "memory-source" },
-          target_anchor: { kind: "object", object_id: "memory-target" }
-        },
-        constitution: {
-          relation_kind: "supports",
-          why_this_relation_exists: ["integration-seed"]
-        },
-        effect_vector: {
-          salience: 0.5,
-          recall_bias: 0,
-          verification_bias: 0,
-          unfinishedness_bias: 0,
-          default_manifestation_preference: "stance_bias"
-        },
-        plasticity_state: {
-          strength: 0.4,
-          direction_bias: "target_to_source",
-          stability_class: "normal",
-          support_events_count: 0,
-          contradiction_events_count: 0
-        },
-        lifecycle: { retirement_rule: "default" },
-        legitimacy: {
-          evidence_basis: ["evidence-integration-1"],
-          governance_class: "recall_allowed"
-        },
-        created_at: "2026-04-01T00:00:00.000Z",
-        updated_at: "2026-04-01T00:00:00.000Z"
-      };
-      await pathRelationRepo.create(pathSeed);
-
-      // 2. Persist a delivery + per-anchor usage receipt through the same
-      //    trust-state recorder used by soul.report_context_usage.
-      const trustStateRecorder = createTrustStateRecorder({
-        eventPublisher,
-        repo: trustStateRepo,
-        ready: true,
-        clock: () => "2026-05-04T11:30:00.000Z"
-      });
-      await trustStateRecorder.recordDelivery({
-        delivery_id: "delivery-integration-1",
-        agent_target: "integration-test",
-        workspace_id: "workspace-1",
-        run_id: null,
-        delivered_object_ids: ["memory-target"],
-        delivered_at: "2026-05-04T10:00:00.000Z"
-      });
-      await trustStateRecorder.recordUsage(
-        {
-          delivery_id: "delivery-integration-1",
-          usage_state: "used",
-          used_object_ids: ["memory-target"],
-          per_anchor_usage: [{ object_id: "memory-target", anchor_role: "target" }],
-          // Explicit `manual` to exercise the full-reinforcement weight:
-          // a usage proof with no trust_mode now fail-safes to `automatic`
-          // (lower weight). This test asserts the full 0.10 increment.
-          trust_mode: "manual",
-          reason: "integration use",
-          reported_at: "2026-05-04T11:00:00.000Z"
-        },
-        { expectedWorkspaceId: "workspace-1" }
-      );
-
-      // 3. Build the path plasticity service exactly as the daemon does
-      //    in apps/core-daemon/src/index.ts.
-      const pathPlasticityService = createPathPlasticityService({
-        eventLogRepo,
-        trustStateRepo,
-        pathRelationRepo,
-        eventPublisher,
-        now: () => "2026-05-04T12:00:00.000Z"
-      });
-
-      // 4. Execute the auditor-equivalent dispatch (sinceIso a few hours
-      //    before the receipt's reported_at).
-      const result = await pathPlasticityService.computeAndApplyPlasticity({
-        workspaceId: "workspace-1",
-        sinceIso: "2026-05-04T09:00:00.000Z"
-      });
-
-      // 5. Assert the loop closed: one reinforcement, the targeted path
-      //    is in the affected list, the durable row strength advanced.
-      expect(result.reinforced).toBe(1);
-      expect(result.weakened).toBe(0);
-      expect(result.retired).toBe(0);
-      expect(result.affectedPathIds).toEqual(["path-integration-1"]);
-
-      const updatedPath = await pathRelationRepo.findById("path-integration-1");
-      expect(updatedPath).not.toBeNull();
-      // Expected strength: 0.4 + reinforcement_increment (0.10 from the
-      // DYNAMICS_CONSTANTS.path_plasticity authoritative values).
-      expect(updatedPath?.plasticity_state.strength).toBeCloseTo(0.5, 10);
-      expect(updatedPath?.plasticity_state.direction_bias).toBe("source_to_target");
-      expect(updatedPath?.plasticity_state.support_events_count).toBe(1);
-      expect(updatedPath?.plasticity_state.last_reinforced_at).toBe(
-        "2026-05-04T12:00:00.000Z"
-      );
-
-      // 6. Audit rows exist in event log.
-      const reinforcementEvents = await eventLogRepo.queryByEntity(
-        "path_relation",
-        "path-integration-1"
-      );
-      const redirected = reinforcementEvents.filter(
-        (event: EventLogEntry) =>
-          event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED
-      );
-      const reinforced = reinforcementEvents.filter(
-        (event: EventLogEntry) =>
-          event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REINFORCED
-      );
-      expect(redirected).toHaveLength(1);
-      expect(redirected[0]?.payload_json).toMatchObject({
-        path_id: "path-integration-1",
-        previous_direction_bias: "target_to_source",
-        new_direction_bias: "source_to_target",
-        source_usage_count: 0,
-        target_usage_count: 1
-      });
-      expect(reinforced).toHaveLength(1);
-      expect(reinforced[0]?.payload_json).toMatchObject({
-        path_id: "path-integration-1",
-        previous_strength: 0.4,
-        new_strength: 0.5,
-        support_events_count: 1
-      });
-
-      // 7. Sanity: a second tick with sinceIso AFTER the receipt's
-      //    reported_at must be a no-op (exclusive watermark per Q4).
-      const secondResult = await pathPlasticityService.computeAndApplyPlasticity({
-        workspaceId: "workspace-1",
-        sinceIso: "2026-05-04T11:00:00.000Z"
-      });
-      expect(secondResult.reinforced).toBe(0);
-      expect(secondResult.affectedPathIds).toEqual([]);
-    } finally {
-      database.close();
-    }
-  });
-
-  it("does not weaken paths from synthesis-only same-id skipped deliveries", async () => {
-    const dataDir = await createTempDataDir();
-    const dbPath = join(dataDir, "alaya.db");
-    const database = initDatabase({ filename: dbPath });
-
-    try {
-      const eventLogRepo = new SqliteEventLogRepo(database);
-      const pathRelationRepo = new SqlitePathRelationRepo(database);
-      const trustStateRepo = new SqliteTrustStateRepo(database);
-      const workspaceRepo = new SqliteWorkspaceRepo(database);
-
-      await workspaceRepo.create({
-        workspace_id: "workspace-1",
-        name: "integration workspace",
-        root_path: "/tmp/alaya-integration",
-        workspace_kind: WorkspaceKind.LOCAL_REPO,
-        default_engine_binding: null,
-        workspace_state: WorkspaceState.ACTIVE
-      });
-
-      const eventPublisher = new EventPublisher({
-        eventLogRepo,
-        runHotStateService: { apply: async () => undefined },
-        runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined }
-      });
-
-      await pathRelationRepo.create({
-        path_id: "path-synthesis-only",
-        workspace_id: "workspace-1",
-        anchors: {
-          source_anchor: { kind: "object", object_id: "shared-object" },
-          target_anchor: { kind: "object", object_id: "other-object" }
-        },
-        constitution: {
-          relation_kind: "supports",
-          why_this_relation_exists: ["integration-seed"]
-        },
-        effect_vector: {
-          salience: 0.5,
-          recall_bias: 0,
-          verification_bias: 0,
-          unfinishedness_bias: 0,
-          default_manifestation_preference: "stance_bias"
-        },
-        plasticity_state: {
-          strength: 0.5,
-          direction_bias: "source_to_target",
-          stability_class: "normal",
-          support_events_count: 0,
-          contradiction_events_count: 0
-        },
-        lifecycle: { retirement_rule: "default" },
-        legitimacy: {
-          evidence_basis: ["evidence-integration-1"],
-          governance_class: "recall_allowed"
-        },
-        created_at: "2026-04-01T00:00:00.000Z",
-        updated_at: "2026-04-01T00:00:00.000Z"
-      });
-
-      const trustStateRecorder = createTrustStateRecorder({
-        eventPublisher,
-        repo: trustStateRepo,
-        ready: true,
-        clock: () => "2026-05-04T11:30:00.000Z"
-      });
-      await trustStateRecorder.recordDelivery({
-        delivery_id: "delivery-synthesis-only",
-        agent_target: "integration-test",
-        workspace_id: "workspace-1",
-        run_id: null,
-        delivered_object_ids: ["shared-object"],
-        delivered_objects: [
-          { object_id: "shared-object", object_kind: "synthesis_capsule" }
-        ],
-        delivered_at: "2026-05-04T10:00:00.000Z"
-      });
-      await trustStateRecorder.recordUsage(
-        {
-          delivery_id: "delivery-synthesis-only",
-          usage_state: "skipped",
-          used_object_ids: [],
-          reason: "synthesis capsule was not used",
-          reported_at: "2026-05-04T11:00:00.000Z"
-        },
-        { expectedWorkspaceId: "workspace-1" }
-      );
-
-      const pathPlasticityService = createPathPlasticityService({
-        eventLogRepo,
-        trustStateRepo,
-        pathRelationRepo,
-        eventPublisher,
-        now: () => "2026-05-04T12:00:00.000Z"
-      });
-
-      const result = await pathPlasticityService.computeAndApplyPlasticity({
-        workspaceId: "workspace-1",
-        sinceIso: "2026-05-04T09:00:00.000Z"
-      });
-
-      expect(result.weakened).toBe(0);
-      expect(result.affectedPathIds).toEqual([]);
-      const unchangedPath = await pathRelationRepo.findById("path-synthesis-only");
-      expect(unchangedPath?.plasticity_state.strength).toBe(0.5);
-      const events = await eventLogRepo.queryByEntity("path_relation", "path-synthesis-only");
-      expect(events).toEqual([]);
-    } finally {
-      database.close();
-    }
-  });
-
-  // SKIP: the redirect state machine works (strength/direction_bias/events all
-  // verified below), but recall fusion's path_expansion boost for a
-  // source_to_target redirect is too weak to lift TARGET above SOURCE's lexical
-  // lead, so the later-recall reordering payoff is effectively unwired. The gap
-  // is lexical-weight-independent (reproduces at lexical_fts=1). Re-enable once
-  // fusion honors a redirected path's direction_bias in final ranking.
-  it.skip(
-    "drives recall usage through Garden into a redirected later recall",
-    async () => {
-      const dataDir = await createTempDataDir();
-      setRuntimeEnv(dataDir);
-      await seedRuntimeRedirectionFixture(dataDir);
-
-      const runtime = await createAlayaDaemonRuntime();
-      try {
-        const firstRecall = await callRuntimeMemoryTool<SoulMemorySearchResponse>(
-          runtime,
-          "soul.recall",
-          {
-            query: "shared direction bias redirection",
-            scope_class: ScopeClass.PROJECT,
-            dimension: MemoryDimension.PREFERENCE,
-            domain_tags: null,
-            max_results: 2
-          }
-        );
-        const firstRecallIds = firstRecall.results.map((result) => result.object_id);
-        expect(firstRecallIds).toEqual(
-          expect.arrayContaining([SOURCE_MEMORY_ID, TARGET_MEMORY_ID])
-        );
-        expect(firstRecallIds.indexOf(SOURCE_MEMORY_ID)).toBeLessThan(
-          firstRecallIds.indexOf(TARGET_MEMORY_ID)
-        );
-
-        const usage = await callRuntimeMemoryTool<SoulReportContextUsageResponse>(
-          runtime,
-          "soul.report_context_usage",
-          {
-            delivery_id: firstRecall.delivery_id,
-            usage_state: "used",
-            used_object_ids: [TARGET_MEMORY_ID],
-            per_anchor_usage: [{ object_id: TARGET_MEMORY_ID, anchor_role: "target" }],
-            reason: "Target anchor carried the useful context."
-          }
-        );
-        expect(usage).toEqual({
-          delivery_id: firstRecall.delivery_id,
-          status: "recorded"
-        });
-
-        await runGardenPassesUntilPathRedirected(runtime, dataDir);
-
-        // initDatabase returns the daemon's cached connection for this file;
-        // runtime.shutdown owns closing it while the live recall proof continues.
-        const database = initDatabase({ filename: join(dataDir, "alaya.db") });
-        const pathRelationRepo = new SqlitePathRelationRepo(database);
-        const eventLogRepo = new SqliteEventLogRepo(database);
-
-        const updatedPath = await pathRelationRepo.findById("path-redirection-live");
-        expect(updatedPath).not.toBeNull();
-        expect(updatedPath?.plasticity_state.direction_bias).toBe("source_to_target");
-        // Expected strength: 0.6 + reinforcement_increment * automatic
-        // weight (0.10 * AUTOMATIC_TRUST_USED_MULTIPLIER 0.5 = 0.05). The
-        // MCP soul.report_context_usage surface records every self-report
-        // as `automatic` (server-derived trust_mode), so it carries the
-        // lower path-plasticity weight.
-        expect(updatedPath?.plasticity_state.strength).toBeCloseTo(0.65, 10);
-        expect(updatedPath?.plasticity_state.support_events_count).toBe(1);
-
-        const pathEvents = await eventLogRepo.queryByEntity(
-          "path_relation",
-          "path-redirection-live"
-        );
-        expect(
-          pathEvents.some(
-            (event) =>
-              event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED &&
-              event.payload_json.previous_direction_bias === "target_to_source" &&
-              event.payload_json.new_direction_bias === "source_to_target"
-          )
-        ).toBe(true);
-        expect(
-          pathEvents.some(
-            (event) =>
-              event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REINFORCED &&
-              event.payload_json.new_strength === 0.65
-          )
-        ).toBe(true);
-
-        const laterRecall = await callRuntimeMemoryTool<SoulMemorySearchResponse>(
-          runtime,
-          "soul.recall",
-          {
-            query: "shared direction bias redirection",
-            scope_class: ScopeClass.PROJECT,
-            dimension: MemoryDimension.PREFERENCE,
-            domain_tags: null,
-            max_results: 2
-          }
-        );
-        const laterRecallIds = laterRecall.results.map((result) => result.object_id);
-        expect(laterRecallIds).toEqual(
-          expect.arrayContaining([SOURCE_MEMORY_ID, TARGET_MEMORY_ID])
-        );
-        expect(laterRecallIds.indexOf(TARGET_MEMORY_ID)).toBeLessThan(
-          laterRecallIds.indexOf(SOURCE_MEMORY_ID)
-        );
-      } finally {
-        await runtime.shutdown();
-      }
-    },
-    INTEGRATION_TEST_TIMEOUT_MS
-  );
-});
 
 async function runGardenPassesUntilPathRedirected(
   runtime: AlayaDaemonRuntime,
@@ -653,3 +253,197 @@ function restoreEnvVar(name: string, value: string | undefined): void {
 
   process.env[name] = value;
 }
+
+afterEach(async () => {
+  restoreProcessEnv();
+
+  for (const directory of tempDirs.splice(0)) {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+describe("path plasticity daemon wiring", () => {
+
+  it("translates soul usage proof into strength and direction-bias redirection via the Librarian plasticity service (integration)", async () => {
+    // This test seeds the daemon database with a PathRelation and a
+    // real trust-state delivery+usage receipt, then directly invokes the
+    // wired PathPlasticityService (the same service the Garden Librarian's
+    // path_plasticity_update task dispatches). It proves the full chain
+    //   TrustStateRecorder.recordUsage → MEMORY_USAGE_REPORTED in event_log
+    //     → UsageProofReader.listRecentUsage returns the record
+    //       → PathRelation strength delta + PATH_RELATION_REDIRECTED audit row
+    //         + PATH_RELATION_REINFORCED audit row
+    // without going through the Garden scheduler timer (which is covered by
+    // the Librarian task tests).
+    const dataDir = await createTempDataDir();
+    const dbPath = join(dataDir, "alaya.db");
+    const database = initDatabase({ filename: dbPath });
+
+    try {
+      const eventLogRepo = new SqliteEventLogRepo(database);
+      const pathRelationRepo = new SqlitePathRelationRepo(database);
+      const trustStateRepo = new SqliteTrustStateRepo(database);
+      const workspaceRepo = new SqliteWorkspaceRepo(database);
+
+      // Workspace FK target.
+      await workspaceRepo.create({
+        workspace_id: "workspace-1",
+        name: "integration workspace",
+        root_path: "/tmp/alaya-integration",
+        workspace_kind: WorkspaceKind.LOCAL_REPO,
+        default_engine_binding: null,
+        workspace_state: WorkspaceState.ACTIVE
+      });
+
+      // Minimal EventPublisher (no-op runtime notifier / hot state).
+      const eventPublisher = new EventPublisher({
+        eventLogRepo,
+        runHotStateService: { apply: async () => undefined },
+        runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined }
+      });
+
+      // 1. Seed a PathRelation anchored on memory M.
+      const pathSeed: PathRelation = {
+        path_id: "path-integration-1",
+        workspace_id: "workspace-1",
+        anchors: {
+          source_anchor: { kind: "object", object_id: "memory-source" },
+          target_anchor: { kind: "object", object_id: "memory-target" }
+        },
+        constitution: {
+          relation_kind: "supports",
+          why_this_relation_exists: ["integration-seed"]
+        },
+        effect_vector: {
+          salience: 0.5,
+          recall_bias: 0,
+          verification_bias: 0,
+          unfinishedness_bias: 0,
+          default_manifestation_preference: "stance_bias"
+        },
+        plasticity_state: {
+          strength: 0.4,
+          direction_bias: "target_to_source",
+          stability_class: "normal",
+          support_events_count: 0,
+          contradiction_events_count: 0
+        },
+        lifecycle: { retirement_rule: "default" },
+        legitimacy: {
+          evidence_basis: ["evidence-integration-1"],
+          governance_class: "recall_allowed"
+        },
+        created_at: "2026-04-01T00:00:00.000Z",
+        updated_at: "2026-04-01T00:00:00.000Z"
+      };
+      await pathRelationRepo.create(pathSeed);
+
+      // 2. Persist a delivery + per-anchor usage receipt through the same
+      //    trust-state recorder used by soul.report_context_usage.
+      const trustStateRecorder = createTrustStateRecorder({
+        eventPublisher,
+        repo: trustStateRepo,
+        ready: true,
+        clock: () => "2026-05-04T11:30:00.000Z"
+      });
+      await trustStateRecorder.recordDelivery({
+        delivery_id: "delivery-integration-1",
+        agent_target: "integration-test",
+        workspace_id: "workspace-1",
+        run_id: null,
+        delivered_object_ids: ["memory-target"],
+        delivered_at: "2026-05-04T10:00:00.000Z"
+      });
+      await trustStateRecorder.recordUsage(
+        {
+          delivery_id: "delivery-integration-1",
+          usage_state: "used",
+          used_object_ids: ["memory-target"],
+          per_anchor_usage: [{ object_id: "memory-target", anchor_role: "target" }],
+          // Explicit `manual` to exercise the full-reinforcement weight:
+          // a usage proof with no trust_mode now fail-safes to `automatic`
+          // (lower weight). This test asserts the full 0.10 increment.
+          trust_mode: "manual",
+          reason: "integration use",
+          reported_at: "2026-05-04T11:00:00.000Z"
+        },
+        { expectedWorkspaceId: "workspace-1" }
+      );
+
+      // 3. Build the path plasticity service exactly as the daemon does
+      //    in apps/core-daemon/src/index.ts.
+      const pathPlasticityService = createPathPlasticityService({
+        eventLogRepo,
+        trustStateRepo,
+        pathRelationRepo,
+        eventPublisher,
+        now: () => "2026-05-04T12:00:00.000Z"
+      });
+
+      // 4. Execute the auditor-equivalent dispatch (sinceIso a few hours
+      //    before the receipt's reported_at).
+      const result = await pathPlasticityService.computeAndApplyPlasticity({
+        workspaceId: "workspace-1",
+        sinceIso: "2026-05-04T09:00:00.000Z"
+      });
+
+      // 5. Assert the loop closed: one reinforcement, the targeted path
+      //    is in the affected list, the durable row strength advanced.
+      expect(result.reinforced).toBe(1);
+      expect(result.weakened).toBe(0);
+      expect(result.retired).toBe(0);
+      expect(result.affectedPathIds).toEqual(["path-integration-1"]);
+
+      const updatedPath = await pathRelationRepo.findById("path-integration-1");
+      expect(updatedPath).not.toBeNull();
+      // Expected strength: 0.4 + reinforcement_increment (0.10 from the
+      // DYNAMICS_CONSTANTS.path_plasticity authoritative values).
+      expect(updatedPath?.plasticity_state.strength).toBeCloseTo(0.5, 10);
+      expect(updatedPath?.plasticity_state.direction_bias).toBe("source_to_target");
+      expect(updatedPath?.plasticity_state.support_events_count).toBe(1);
+      expect(updatedPath?.plasticity_state.last_reinforced_at).toBe(
+        "2026-05-04T12:00:00.000Z"
+      );
+
+      // 6. Audit rows exist in event log.
+      const reinforcementEvents = await eventLogRepo.queryByEntity(
+        "path_relation",
+        "path-integration-1"
+      );
+      const redirected = reinforcementEvents.filter(
+        (event: EventLogEntry) =>
+          event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED
+      );
+      const reinforced = reinforcementEvents.filter(
+        (event: EventLogEntry) =>
+          event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REINFORCED
+      );
+      expect(redirected).toHaveLength(1);
+      expect(redirected[0]?.payload_json).toMatchObject({
+        path_id: "path-integration-1",
+        previous_direction_bias: "target_to_source",
+        new_direction_bias: "source_to_target",
+        source_usage_count: 0,
+        target_usage_count: 1
+      });
+      expect(reinforced).toHaveLength(1);
+      expect(reinforced[0]?.payload_json).toMatchObject({
+        path_id: "path-integration-1",
+        previous_strength: 0.4,
+        new_strength: 0.5,
+        support_events_count: 1
+      });
+
+      // 7. Sanity: a second tick with sinceIso AFTER the receipt's
+      //    reported_at must be a no-op (exclusive watermark per Q4).
+      const secondResult = await pathPlasticityService.computeAndApplyPlasticity({
+        workspaceId: "workspace-1",
+        sinceIso: "2026-05-04T11:00:00.000Z"
+      });
+      expect(secondResult.reinforced).toBe(0);
+      expect(secondResult.affectedPathIds).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+});

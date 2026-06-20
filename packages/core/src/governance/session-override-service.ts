@@ -17,6 +17,7 @@ export interface SessionOverrideServiceEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
+  queryByRunAll(runId: string): Promise<readonly EventLogEntry[]>;
 }
 
 export interface SessionOverrideServiceDependencies {
@@ -54,43 +55,10 @@ export class SessionOverrideService {
     const occurredAt = this.now();
     const runId = parseNonEmptyString(params.runId, "runId");
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
-    const targetObject = parseNonEmptyString(params.targetObject, "targetObject");
-    const correction = parseNonEmptyString(params.correction, "correction");
-    const priority = parsePriority(params.priority ?? 0);
-    const expiresAt = normalizeExpiresAt(params.expiresAt ?? addHours(occurredAt, 1));
     const derivedFrom = await this.resolveDerivedFrom(runId, params.derivedFrom);
     const existing = await this.resolveStoredOverrides(runId);
-
-    const override = parseSessionOverride({
-      runtime_id: this.generateRuntimeId(),
-      object_kind: ControlPlaneObjectKind.SESSION_OVERRIDE,
-      task_surface_ref: null,
-      expires_at: expiresAt,
-      derived_from: derivedFrom,
-      retention_policy: RetentionPolicy.SESSION_ONLY,
-      scope: "session_only",
-      target_object: targetObject,
-      correction,
-      priority
-    });
-    await this.dependencies.eventLogRepo.append({
-      event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
-      entity_type: "session_override",
-      entity_id: override.runtime_id,
-      workspace_id: workspaceId,
-      run_id: runId,
-      caused_by: "user_action",
-      payload_json: SoulSessionOverrideAppliedPayloadSchema.parse({
-        override_id: override.runtime_id,
-        target_object: override.target_object,
-        correction: override.correction,
-        priority: override.priority,
-        run_id: runId,
-        expires_at: override.expires_at,
-        derived_from: override.derived_from,
-        occurred_at: occurredAt
-      })
-    });
+    const override = this.buildSessionOverride(params, derivedFrom, occurredAt);
+    await this.appendAppliedOverrideEvent(runId, workspaceId, occurredAt, override);
 
     this.clearExpiredAt(occurredAt);
     this.bumpCacheVersion(runId);
@@ -125,6 +93,56 @@ export class SessionOverrideService {
     this.clearExpiredAt(this.now());
   }
 
+  private buildSessionOverride(
+    params: {
+      readonly targetObject: string;
+      readonly correction: string;
+      readonly priority?: number;
+      readonly expiresAt?: string;
+    },
+    derivedFrom: string | null,
+    occurredAt: string
+  ): Readonly<SessionOverride> {
+    return parseSessionOverride({
+      runtime_id: this.generateRuntimeId(),
+      object_kind: ControlPlaneObjectKind.SESSION_OVERRIDE,
+      task_surface_ref: null,
+      expires_at: normalizeExpiresAt(params.expiresAt ?? addHours(occurredAt, 1)),
+      derived_from: derivedFrom,
+      retention_policy: RetentionPolicy.SESSION_ONLY,
+      scope: "session_only",
+      target_object: parseNonEmptyString(params.targetObject, "targetObject"),
+      correction: parseNonEmptyString(params.correction, "correction"),
+      priority: parsePriority(params.priority ?? 0)
+    });
+  }
+
+  private async appendAppliedOverrideEvent(
+    runId: string,
+    workspaceId: string,
+    occurredAt: string,
+    override: Readonly<SessionOverride>
+  ): Promise<void> {
+    await this.dependencies.eventLogRepo.append({
+      event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+      entity_type: "session_override",
+      entity_id: override.runtime_id,
+      workspace_id: workspaceId,
+      run_id: runId,
+      caused_by: "user_action",
+      payload_json: SoulSessionOverrideAppliedPayloadSchema.parse({
+        override_id: override.runtime_id,
+        target_object: override.target_object,
+        correction: override.correction,
+        priority: override.priority,
+        run_id: runId,
+        expires_at: override.expires_at,
+        derived_from: override.derived_from,
+        occurred_at: occurredAt
+      })
+    });
+  }
+
   private async resolveDerivedFrom(
     runId: string,
     explicitDerivedFrom: string | null | undefined
@@ -134,7 +152,7 @@ export class SessionOverrideService {
       return trimmed.length === 0 ? null : trimmed;
     }
 
-    const events = await this.dependencies.eventLogRepo.queryByRun(runId);
+    const events = await queryRunEventLog(this.dependencies.eventLogRepo, runId);
 
     for (let index = events.length - 1; index >= 0; index -= 1) {
       const event = events[index];
@@ -223,7 +241,7 @@ export class SessionOverrideService {
   private async rehydrateFromEventLog(runId: string): Promise<readonly Readonly<SessionOverride>[]> {
     let events: readonly EventLogEntry[];
     try {
-      events = await this.dependencies.eventLogRepo.queryByRun(runId);
+      events = await queryRunEventLog(this.dependencies.eventLogRepo, runId);
     } catch {
       return Object.freeze([]);
     }
@@ -304,6 +322,13 @@ function parseSessionOverride(value: SessionOverride): Readonly<SessionOverride>
   } catch (error) {
     throw new CoreError("VALIDATION", "Invalid session override payload", { cause: error });
   }
+}
+
+async function queryRunEventLog(
+  eventLogRepo: SessionOverrideServiceEventLogPort,
+  runId: string
+): Promise<readonly EventLogEntry[]> {
+  return await eventLogRepo.queryByRunAll(runId);
 }
 
 function parsePriority(value: number): number {

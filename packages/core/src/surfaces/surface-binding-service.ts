@@ -2,12 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   BindingState,
   BindingStateSchema,
-  canonicalGovernanceSubject,
   CrossCuttingState,
-  type DriftType,
-  type DriftAlert,
-  type DriftClassification,
-  type GovernanceDriftLease,
   SurfaceEventType,
   SoulSurfaceBindingCreatedPayloadSchema,
   SoulSurfaceBindingStateChangedPayloadSchema,
@@ -15,25 +10,26 @@ import {
   type BindingState as BindingStateType,
   type CrossCuttingPermission,
   type EventLogEntry,
-  type SurfaceDriftOperationType,
   type SurfaceBinding
 } from "@do-soul/alaya-protocol";
+
 import { CoreError } from "../shared/errors.js";
 import type { EventPublisher } from "../runtime/event-publisher.js";
 import { SYSTEM_ACTOR } from "../shared/actors.js";
 import { isUniqueConstraintError } from "../shared/event-utils.js";
 import { parseSurfaceUri } from "../shared/surface-uri.js";
 import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
-import { DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS } from "./surface-drift-service.js";
+
+import {
+  SurfaceBindingDriftCoordinator,
+  type SurfaceBindingDriftGovernancePort
+} from "./surface-binding-drift-coordinator.js";
 
 const BINDING_STATE_TRANSITIONS: Readonly<Record<BindingStateType, readonly BindingStateType[]>> = {
   [BindingState.ACTIVE]: [BindingState.STALE, BindingState.DETACHED],
   [BindingState.STALE]: [BindingState.ACTIVE, BindingState.DETACHED],
   [BindingState.DETACHED]: []
 };
-const SURFACE_BINDING_GOVERNANCE_SUBJECT = canonicalGovernanceSubject("surface_governance", {
-  entity: "binding"
-}).canonical_key;
 
 type SurfaceBindingEventDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
@@ -90,35 +86,73 @@ export interface SurfaceBindingServiceDependencies {
   readonly now?: () => string;
 }
 
-interface SurfaceBindingDriftGovernancePort {
-  acquireLease(params: {
-    readonly workspaceId: string;
-    readonly operationType: SurfaceDriftOperationType;
-    readonly grantedTo: string;
-    readonly ttlMs: number;
-    readonly driftId?: string | null;
-  }): Promise<Readonly<GovernanceDriftLease>>;
-  releaseLease(leaseId: string, workspaceId: string, releasedBy: string): Promise<void>;
-  classifyDrift(params: {
-    readonly workspaceId: string;
-    readonly driftType: DriftType;
-    readonly affectedSubject: string;
-    readonly description: string;
-  }): Promise<Readonly<DriftClassification>>;
-  alertOnCriticalDrift(
-    classification: Readonly<DriftClassification>
-  ): Promise<Readonly<DriftAlert> | null>;
+function parseBindObjectInput(input: {
+  readonly object_id: string;
+  readonly surface_id: string;
+  readonly is_primary: boolean;
+  readonly workspace_id: string;
+  readonly created_by: string;
+}) {
+  return {
+    object_id: parseNonEmptyString(input.object_id, "object_id"),
+    surface_id: parseSurfaceUri(input.surface_id, "surface_id"),
+    is_primary: input.is_primary,
+    workspace_id: parseNonEmptyString(input.workspace_id, "workspace_id"),
+    created_by: parseNonEmptyString(input.created_by, "created_by")
+  };
+}
+
+function parseBindingState(value: BindingStateType): BindingStateType {
+  try {
+    return BindingStateSchema.parse(value);
+  } catch (error) {
+    throw new CoreError("VALIDATION", "Invalid binding state", { cause: error });
+  }
+}
+
+function parseSurfaceBinding(value: SurfaceBinding): SurfaceBinding {
+  try {
+    return SurfaceBindingSchema.parse(value);
+  } catch (error) {
+    throw new CoreError("VALIDATION", "Invalid surface binding payload", { cause: error });
+  }
+}
+
+function parseReason(value: string): string {
+  return parseNonEmptyString(value, "reason");
+}
+
+function parseCausedBy(value: string): string {
+  return parseNonEmptyString(value, "caused_by");
+}
+
+function ensureValidBindingTransition(from: BindingStateType, to: BindingStateType): void {
+  if (from === to) {
+    throw new CoreError("VALIDATION", "Binding state transition must change state");
+  }
+
+  if (!BINDING_STATE_TRANSITIONS[from].includes(to)) {
+    throw new CoreError("VALIDATION", `Invalid binding state transition: ${from} -> ${to}`);
+  }
 }
 
 export class SurfaceBindingService {
-  private readonly generateObjectId: () => string;
-  private readonly now: () => string;
-  private readonly warn: (message: string, meta: Record<string, unknown>) => void;
+  public readonly generateObjectId: () => string;
 
-  public constructor(private readonly dependencies: SurfaceBindingServiceDependencies) {
+  public readonly now: () => string;
+
+  public readonly warn: (message: string, meta: Record<string, unknown>) => void;
+
+  private readonly driftCoordinator: SurfaceBindingDriftCoordinator;
+
+  public constructor(public readonly dependencies: SurfaceBindingServiceDependencies) {
     this.generateObjectId = dependencies.generateObjectId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? (() => {});
+    this.driftCoordinator = new SurfaceBindingDriftCoordinator({
+      surfaceDriftService: dependencies.surfaceDriftService,
+      warn: this.warn
+    });
   }
 
   public async bindObject(input: {
@@ -133,7 +167,7 @@ export class SurfaceBindingService {
     await this.ensurePrimaryBindingAllowed(parsedInput.object_id, parsedInput.workspace_id, parsedInput.is_primary);
     await this.ensureCrossCuttingAllowsBinding(parsedInput.object_id, parsedInput.workspace_id, parsedInput.surface_id);
 
-    const driftLeaseId = await this.acquireDriftLease(
+    const driftLeaseId = await this.driftCoordinator.acquireLease(
       parsedInput.workspace_id,
       "surface.bind_object",
       parsedInput.created_by
@@ -147,7 +181,7 @@ export class SurfaceBindingService {
       const event = this.buildBindingCreatedEvent(bindingId, binding);
       const created = await this.persistBindingWithEvent(binding, bindingId, event);
       operationCompleted = true;
-      await this.classifyBindingDriftSafely({
+      await this.driftCoordinator.classifyDriftSafely({
         workspaceId: created.binding.workspace_id,
         operationType: "surface.bind_object",
         driftType: "scope_change",
@@ -155,7 +189,7 @@ export class SurfaceBindingService {
       });
       return created;
     } finally {
-      await this.releaseDriftLeaseSafely({
+      await this.driftCoordinator.releaseLeaseSafely({
         leaseId: driftLeaseId,
         workspaceId: parsedInput.workspace_id,
         operationType: "surface.bind_object",
@@ -170,12 +204,7 @@ export class SurfaceBindingService {
     return await this.dependencies.surfaceBindingRepo.findByBindingId(parseObjectId(bindingId, "binding_id"));
   }
 
-  public async transitionBindingState(
-    bindingId: string,
-    newState: BindingStateType,
-    reason: string,
-    causedBy: string
-  ): Promise<Readonly<SurfaceBindingRecordView>> {
+  public async transitionBindingState(bindingId: string, newState: BindingStateType, reason: string, causedBy: string): Promise<Readonly<SurfaceBindingRecordView>> {
     const parsedBindingId = parseObjectId(bindingId, "binding_id");
     const parsedNewState = parseBindingState(newState);
     const parsedReason = parseReason(reason);
@@ -188,7 +217,7 @@ export class SurfaceBindingService {
     }
 
     ensureValidBindingTransition(existing.binding.binding_state, parsedNewState);
-    const driftLeaseId = await this.acquireDriftLease(
+    const driftLeaseId = await this.driftCoordinator.acquireLease(
       existing.binding.workspace_id,
       "surface.transition_binding_state",
       parsedCausedBy
@@ -200,11 +229,11 @@ export class SurfaceBindingService {
       const event: SurfaceBindingEventDraft = {
         event_type: SurfaceEventType.SOUL_SURFACE_BINDING_STATE_CHANGED,
         entity_type: "surface_binding",
-      entity_id: existing.binding_id,
-      workspace_id: existing.binding.workspace_id,
-      run_id: null,
-      caused_by: parsedCausedBy,
-      payload_json: SoulSurfaceBindingStateChangedPayloadSchema.parse({
+        entity_id: existing.binding_id,
+        workspace_id: existing.binding.workspace_id,
+        run_id: null,
+        caused_by: parsedCausedBy,
+        payload_json: SoulSurfaceBindingStateChangedPayloadSchema.parse({
           binding_id: existing.binding_id,
           object_id: existing.binding.object_id,
           surface_id: existing.binding.surface_id,
@@ -225,7 +254,7 @@ export class SurfaceBindingService {
       );
       operationCompleted = true;
 
-      await this.classifyBindingDriftSafely({
+      await this.driftCoordinator.classifyDriftSafely({
         workspaceId: existing.binding.workspace_id,
         operationType: "surface.transition_binding_state",
         driftType: parsedNewState === BindingState.DETACHED ? "policy_override" : "scope_change",
@@ -233,7 +262,7 @@ export class SurfaceBindingService {
       });
       return updated;
     } finally {
-      await this.releaseDriftLeaseSafely({
+      await this.driftCoordinator.releaseLeaseSafely({
         leaseId: driftLeaseId,
         workspaceId: existing.binding.workspace_id,
         operationType: "surface.transition_binding_state",
@@ -286,39 +315,27 @@ export class SurfaceBindingService {
     );
   }
 
-  public async findBindingsByObject(
-    objectId: string,
-    workspaceId: string
-  ): Promise<readonly Readonly<SurfaceBindingRecordView>[]> {
+  public async findBindingsByObject(objectId: string, workspaceId: string): Promise<readonly Readonly<SurfaceBindingRecordView>[]> {
     return await this.dependencies.surfaceBindingRepo.findByObjectId(
       parseNonEmptyString(objectId, "object_id"),
       parseNonEmptyString(workspaceId, "workspace_id")
     );
   }
 
-  public async findBindingsBySurface(
-    surfaceId: string,
-    workspaceId: string
-  ): Promise<readonly Readonly<SurfaceBindingRecordView>[]> {
+  public async findBindingsBySurface(surfaceId: string, workspaceId: string): Promise<readonly Readonly<SurfaceBindingRecordView>[]> {
     return await this.dependencies.surfaceBindingRepo.findBySurfaceId(
       parseNonEmptyString(surfaceId, "surface_id"),
       parseNonEmptyString(workspaceId, "workspace_id")
     );
   }
 
-  public async findBindingsByWorkspace(
-    workspaceId: string
-  ): Promise<readonly Readonly<SurfaceBindingRecordView>[]> {
+  public async findBindingsByWorkspace(workspaceId: string): Promise<readonly Readonly<SurfaceBindingRecordView>[]> {
     return await this.dependencies.surfaceBindingRepo.findByWorkspace(
       parseNonEmptyString(workspaceId, "workspace_id")
     );
   }
 
-  private async ensurePrimaryBindingAllowed(
-    objectId: string,
-    workspaceId: string,
-    isPrimary: boolean
-  ): Promise<void> {
+  private async ensurePrimaryBindingAllowed(objectId: string, workspaceId: string, isPrimary: boolean): Promise<void> {
     if (!isPrimary) {
       return;
     }
@@ -330,11 +347,7 @@ export class SurfaceBindingService {
     }
   }
 
-  private async ensureCrossCuttingAllowsBinding(
-    objectId: string,
-    workspaceId: string,
-    surfaceId: string
-  ): Promise<void> {
+  private async ensureCrossCuttingAllowsBinding(objectId: string, workspaceId: string, surfaceId: string): Promise<void> {
     const existingBindings = await this.dependencies.surfaceBindingRepo.findByObjectId(objectId, workspaceId);
     const effectiveBindings = existingBindings.filter(
       (record) => record.binding.binding_state !== BindingState.DETACHED
@@ -359,10 +372,7 @@ export class SurfaceBindingService {
     }
   }
 
-  private buildBinding(
-    input: ReturnType<typeof parseBindObjectInput>,
-    timestamp: string
-  ): Readonly<SurfaceBinding> {
+  private buildBinding(input: ReturnType<typeof parseBindObjectInput>, timestamp: string): Readonly<SurfaceBinding> {
     return parseSurfaceBinding({
       object_id: input.object_id,
       object_kind: "surface_binding",
@@ -378,10 +388,7 @@ export class SurfaceBindingService {
     });
   }
 
-  private buildBindingCreatedEvent(
-    bindingId: string,
-    binding: Readonly<SurfaceBinding>
-  ): SurfaceBindingEventDraft {
+  private buildBindingCreatedEvent(bindingId: string, binding: Readonly<SurfaceBinding>): SurfaceBindingEventDraft {
     return {
       event_type: SurfaceEventType.SOUL_SURFACE_BINDING_CREATED,
       entity_type: "surface_binding",
@@ -402,11 +409,7 @@ export class SurfaceBindingService {
     };
   }
 
-  private async persistBindingWithEvent(
-    binding: Readonly<SurfaceBinding>,
-    bindingId: string,
-    event: SurfaceBindingEventDraft
-  ): Promise<Readonly<SurfaceBindingRecordView>> {
+  private async persistBindingWithEvent(binding: Readonly<SurfaceBinding>, bindingId: string, event: SurfaceBindingEventDraft): Promise<Readonly<SurfaceBindingRecordView>> {
     try {
       return await this.requireEventPublisher().appendManyWithMutation([event], () =>
         this.dependencies.surfaceBindingRepo.create(binding, bindingId)
@@ -420,145 +423,7 @@ export class SurfaceBindingService {
     }
   }
 
-  private async acquireDriftLease(
-    workspaceId: string,
-    operationType: SurfaceDriftOperationType,
-    grantedTo: string
-  ): Promise<string | null> {
-    const driftService = this.dependencies.surfaceDriftService;
-
-    if (driftService === undefined) {
-      return null;
-    }
-
-    const lease = await driftService.acquireLease({
-      workspaceId,
-      operationType,
-      grantedTo,
-      ttlMs: DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS
-    });
-
-    return lease.lease_id;
-  }
-
-  private async releaseDriftLeaseSafely(params: {
-    readonly leaseId: string | null;
-    readonly workspaceId: string;
-    readonly operationType: SurfaceDriftOperationType;
-    readonly releasedBy: string;
-    readonly failureMessage: string;
-    readonly propagateFailure: boolean;
-  }): Promise<void> {
-    if (params.leaseId === null || this.dependencies.surfaceDriftService === undefined) {
-      return;
-    }
-
-    try {
-      await this.dependencies.surfaceDriftService.releaseLease(
-        params.leaseId,
-        params.workspaceId,
-        params.releasedBy
-      );
-    } catch (error) {
-      this.warn("Surface binding drift lease release failed after durable mutation", {
-        operationType: params.operationType,
-        workspaceId: params.workspaceId,
-        leaseId: params.leaseId,
-        error
-      });
-    }
-  }
-
-  private async classifyBindingDriftSafely(params: {
-    readonly workspaceId: string;
-    readonly operationType: SurfaceDriftOperationType;
-    readonly driftType: DriftType;
-    readonly description: string;
-  }): Promise<void> {
-    try {
-      await this.classifyBindingDrift(params);
-    } catch (error) {
-      this.warn("Surface binding drift telemetry failed after durable mutation", {
-        operationType: params.operationType,
-        workspaceId: params.workspaceId,
-        driftType: params.driftType,
-        error
-      });
-    }
-  }
-
-  private async classifyBindingDrift(params: {
-    readonly workspaceId: string;
-    readonly driftType: DriftType;
-    readonly description: string;
-  }): Promise<void> {
-    const driftService = this.dependencies.surfaceDriftService;
-
-    if (driftService === undefined) {
-      return;
-    }
-
-    const classification = await driftService.classifyDrift({
-      workspaceId: params.workspaceId,
-      driftType: params.driftType,
-      affectedSubject: SURFACE_BINDING_GOVERNANCE_SUBJECT,
-      description: params.description
-    });
-
-    await driftService.alertOnCriticalDrift(classification);
-  }
-
   private requireEventPublisher(): SurfaceBindingEventPublisherPort {
     return this.dependencies.eventPublisher;
-  }
-}
-
-function parseBindObjectInput(input: {
-  readonly object_id: string;
-  readonly surface_id: string;
-  readonly is_primary: boolean;
-  readonly workspace_id: string;
-  readonly created_by: string;
-}) {
-  return {
-    object_id: parseNonEmptyString(input.object_id, "object_id"),
-    surface_id: parseSurfaceUri(input.surface_id, "surface_id"),
-    is_primary: input.is_primary,
-    workspace_id: parseNonEmptyString(input.workspace_id, "workspace_id"),
-    created_by: parseNonEmptyString(input.created_by, "created_by")
-  };
-}
-
-function parseBindingState(value: BindingStateType): BindingStateType {
-  try {
-    return BindingStateSchema.parse(value);
-  } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid binding state", { cause: error });
-  }
-}
-
-function parseSurfaceBinding(value: SurfaceBinding): SurfaceBinding {
-  try {
-    return SurfaceBindingSchema.parse(value);
-  } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid surface binding payload", { cause: error });
-  }
-}
-
-function parseReason(value: string): string {
-  return parseNonEmptyString(value, "reason");
-}
-
-function parseCausedBy(value: string): string {
-  return parseNonEmptyString(value, "caused_by");
-}
-
-function ensureValidBindingTransition(from: BindingStateType, to: BindingStateType): void {
-  if (from === to) {
-    throw new CoreError("VALIDATION", "Binding state transition must change state");
-  }
-
-  if (!BINDING_STATE_TRANSITIONS[from].includes(to)) {
-    throw new CoreError("VALIDATION", `Invalid binding state transition: ${from} -> ${to}`);
   }
 }

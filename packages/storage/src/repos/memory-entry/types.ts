@@ -65,19 +65,33 @@ export interface MemoryEntryRepo {
     tier?: StorageTier,
     page?: MemoryEntryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByWorkspaceIdAll(
+    workspaceId: string,
+    tier?: StorageTier
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   countByWorkspaceId(workspaceId: string, tier?: StorageTier): Promise<number>;
   findByRunId(
     runId: string,
     page?: MemoryEntryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByRunIdAll(runId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   countByRunId(runId: string): Promise<number>;
   findByDimension(
     workspaceId: string,
     dimension: MemoryDimension,
     page?: MemoryEntryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByDimensionAll(
+    workspaceId: string,
+    dimension: MemoryDimension
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   countByDimension(workspaceId: string, dimension: MemoryDimension): Promise<number>;
   findByScopeClass(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByScopeClassAll(
     workspaceId: string,
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]>;

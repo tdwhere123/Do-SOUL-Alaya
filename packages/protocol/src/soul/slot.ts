@@ -29,6 +29,7 @@ export const FlipConditionSchema = z
     description: NonEmptyStringSchema,
     threshold: z.number().nullable()
   })
+  .strict()
   .readonly();
 
 export const SlotUniqueKeySchema = z
@@ -37,6 +38,7 @@ export const SlotUniqueKeySchema = z
     claim_kind: ClaimKindSchema,
     scope_class: ScopeClassSchema
   })
+  .strict()
   .readonly();
 
 export const SlotSchema = PersistentObjectEnvelopeSchema.unwrap()
@@ -50,6 +52,7 @@ export const SlotSchema = PersistentObjectEnvelopeSchema.unwrap()
     flip_conditions: z.array(FlipConditionSchema).readonly(),
     workspace_id: NonEmptyStringSchema
   })
+  .strict()
   .readonly();
 
 export type FlipConditionKind = z.infer<typeof FlipConditionKindSchema>;

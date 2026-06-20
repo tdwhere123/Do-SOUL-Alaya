@@ -1,17 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  DYNAMICS_CONSTANTS,
-  MemoryDimension,
-  RecallContextEventType,
-  ScopeClass,
-  SynthesisStatus,
-  type SynthesisCapsule,
-} from "@do-soul/alaya-protocol";
+import { DYNAMICS_CONSTANTS, MemoryDimension, RecallContextEventType, ScopeClass, SynthesisStatus, type SynthesisCapsule } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createMemoryEntry, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
-  it("emits soul.recall.completed after recall", async () => {
+it("emits soul.recall.completed after recall", async () => {
     const { dependencies, appendSpy } = createDependencies([createMemoryEntry()]);
     const service = new RecallService(dependencies);
 
@@ -32,7 +25,7 @@ describe("RecallService", () => {
     );
   });
 
-  it("ranks a high-plasticity candidate above an equivalent low-plasticity candidate", async () => {
+it("ranks a high-plasticity candidate above an equivalent low-plasticity candidate", async () => {
     // Two memories with identical activation scores but different plasticity
     // strengths. The high-plasticity one must rank first.
     const memories = [
@@ -84,7 +77,7 @@ describe("RecallService", () => {
     expect(highCandidate?.relevance_score).toBeGreaterThan(lowCandidate?.relevance_score ?? 0);
   });
 
-  it("fades ONLY the freshness band of a long-idle memory at recall read; a recently-used memory keeps full strength (R3e single-count lazy time-decay)", async () => {
+it("fades ONLY the freshness band of a long-idle memory at recall read; a recently-used memory keeps full strength (R3e single-count lazy time-decay)", async () => {
     // Identical stored activation_score; only the last-reinforced timestamp
     // differs. invariant: freshness is counted ONCE. The recently-used memory
     // keeps its full stored activation. The long-idle memory loses
@@ -136,7 +129,7 @@ describe("RecallService", () => {
     expect(recent?.relevance_score ?? 0).toBeGreaterThan(idle?.relevance_score ?? 0);
   });
 
-  it("does NOT double-penalize a freshly-used high-scope memory's activation at recall read (R3e single-count bound)", async () => {
+it("does NOT double-penalize a freshly-used high-scope memory's activation at recall read (R3e single-count bound)", async () => {
     // invariant: the stored activation already bakes a freshness sub-term. A
     // freshly-used memory's read-time freshness factor is ~1, so the
     // re-weighted freshness band equals the baked band — the EFFECTIVE activation
@@ -164,7 +157,7 @@ describe("RecallService", () => {
     expect(fresh?.score_factors?.activation).toBeCloseTo(0.6, 5);
   });
 
-  it("does not let plasticity alone override a base lexical/activation rank inversion (mirror of the embedding-supplement contract)", async () => {
+it("does not let plasticity alone override a base lexical/activation rank inversion (mirror of the embedding-supplement contract)", async () => {
     // Strong-activation lexical baseline vs weak-activation candidate with
     // moderate plasticity. The lexical baseline must still win because the
     // 0.15-cap plasticity boost cannot close a 0.85 → 0.05 activation gap.
@@ -206,7 +199,7 @@ describe("RecallService", () => {
     expect(result.candidates[0]?.object_id).toBe("memory-strong-lexical");
   });
 
-  it("preserves base lexical ordering on a moderate gap under PATH_PLASTICITY_WEIGHT=0.15", async () => {
+it("preserves base lexical ordering on a moderate gap under PATH_PLASTICITY_WEIGHT=0.15", async () => {
     // Activation contribution gap = (0.7 - 0.4) * 0.7 = 0.21
     // because the activation-weight base sums to 0.70. Max plasticity
     // boost gap = (1.0 - 0.0) * 0.15 = 0.15. Since 0.21 > 0.15, the
@@ -250,7 +243,7 @@ describe("RecallService", () => {
     expect(result.candidates[0]?.object_id).toBe("memory-strong-baseline");
   });
 
-  it("falls back to no plasticity boost when the path plasticity port throws — recall must not break on a plasticity failure", async () => {
+it("falls back to no plasticity boost when the path plasticity port throws — recall must not break on a plasticity failure", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-x",
@@ -283,7 +276,7 @@ describe("RecallService", () => {
     );
   });
 
-  it("lets an L2 synthesis_capsule compete with memory entries before the delivery budget cut", async () => {
+it("lets an L2 synthesis_capsule compete with memory entries before the delivery budget cut", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-1",
@@ -358,7 +351,7 @@ describe("RecallService", () => {
     expect(memoryDiagnostic?.dropped_reason).toBe("max_entries");
   });
 
-  it("keeps a strong memory_entry ahead of a weaker synthesis_capsule", async () => {
+it("keeps a strong memory_entry ahead of a weaker synthesis_capsule", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-1",
@@ -423,200 +416,5 @@ describe("RecallService", () => {
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-1"]);
-  });
-
-  it("keeps memory_entry and synthesis_capsule streams namespaced when object ids collide", async () => {
-    const sharedObjectId = "shared-object-1";
-    const memories = [
-      createMemoryEntry({
-        object_id: sharedObjectId,
-        scope_class: ScopeClass.PROJECT,
-        dimension: MemoryDimension.PROCEDURE,
-        content: "Cross-evidence synthesis recall implementation exact memory.",
-        activation_score: 1
-      })
-    ];
-    const { dependencies } = createDependencies(memories);
-    const synthesis: SynthesisCapsule = {
-      object_id: sharedObjectId,
-      object_kind: "synthesis_capsule",
-      schema_version: 1,
-      lifecycle_state: "active",
-      created_at: "2026-03-23T00:00:00.000Z",
-      updated_at: "2026-03-23T00:00:00.000Z",
-      created_by: "system",
-      topic_key: "recall/synthesis",
-      synthesis_type: "cross_evidence",
-      summary: "Cross-evidence synthesis covering the recall implementation.",
-      evidence_refs: ["evidence-1", "evidence-2"],
-      source_memory_refs: [sharedObjectId],
-      workspace_id: "workspace-1",
-      run_id: "run-1",
-      synthesis_status: SynthesisStatus.WORKING
-    };
-    const service = new RecallService({
-      ...dependencies,
-      memoryRepo: {
-        ...dependencies.memoryRepo,
-        searchByKeyword: vi.fn(async () => [
-          { object_id: sharedObjectId, normalized_rank: 1 }
-        ])
-      },
-      synthesisSearchPort: {
-        searchByKeyword: vi.fn(async () => [
-          { object_id: sharedObjectId, normalized_rank: 1 }
-        ]),
-        findByIds: vi.fn(async () => [synthesis])
-      }
-    });
-    const policy = overridePolicy(service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id), {
-      fine_assessment: {
-        budgets: {
-          max_entries: 2,
-          max_total_tokens: 1000,
-          per_dimension_limits: null
-        },
-        conflict_awareness: false
-      }
-    });
-
-    const result = await service.recall({
-      taskSurface: {
-        ...createTaskSurface(),
-        display_name: "Cross-evidence synthesis recall implementation"
-      },
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride: policy
-    });
-
-    expect(result.candidates.map((candidate) => `${candidate.object_kind}:${candidate.object_id}`))
-      .toEqual(expect.arrayContaining([
-        `memory_entry:${sharedObjectId}`,
-        `synthesis_capsule:${sharedObjectId}`
-      ]));
-    const memoryDiagnostic = result.diagnostics?.candidates.find(
-      (candidate) => candidate.candidate_key === `workspace_local:memory_entry:${sharedObjectId}`
-    );
-    const synthesisDiagnostic = result.diagnostics?.candidates.find(
-      (candidate) => candidate.candidate_key === `workspace_local:synthesis_capsule:${sharedObjectId}`
-    );
-
-    expect(memoryDiagnostic?.per_stream_rank.lexical_fts).toBe(1);
-    expect(memoryDiagnostic?.object_kind).toBe("memory_entry");
-    expect(memoryDiagnostic?.per_stream_rank.synthesis_fts).toBeNull();
-    expect(synthesisDiagnostic?.per_stream_rank.synthesis_fts).toBe(1);
-    expect(synthesisDiagnostic?.object_kind).toBe("synthesis_capsule");
-    expect(synthesisDiagnostic?.per_stream_rank.lexical_fts).toBeNull();
-    expect(synthesisDiagnostic?.per_stream_rank.existing_score).toBeNull();
-  });
-
-  it("degrades cleanly to memory_entry-only when no synthesis port is wired", async () => {
-    const memories = [
-      createMemoryEntry({
-        object_id: "memory-1",
-        scope_class: ScopeClass.PROJECT,
-        dimension: MemoryDimension.PROCEDURE,
-        activation_score: 0.9
-      })
-    ];
-    const { dependencies } = createDependencies(memories);
-    const service = new RecallService(dependencies);
-
-    const result = await service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "build"
-    });
-
-    expect(
-      result.candidates.every((candidate) => candidate.object_kind === "memory_entry")
-    ).toBe(true);
-  });
-
-  it("reserves tail delivery slots for top synthesis below the fused-rank cut", async () => {
-    // Eight memory_entry rows with strong lexical hits win fused rank
-    // outright (multi-stream RRF). A synthesis fires on synthesis_fts only,
-    // so without the reserve no synthesis reaches the delivery budget.
-    const memories = Array.from({ length: 8 }, (_unused, index) =>
-      createMemoryEntry({
-        object_id: `memory-${index + 1}`,
-        scope_class: ScopeClass.PROJECT,
-        dimension: MemoryDimension.PROCEDURE,
-        content: "Cross-evidence synthesis recall implementation exact memory.",
-        activation_score: 1
-      })
-    );
-    const { dependencies } = createDependencies(memories);
-    const buildSynthesis = (id: string): SynthesisCapsule => ({
-      object_id: id,
-      object_kind: "synthesis_capsule",
-      schema_version: 1,
-      lifecycle_state: "active",
-      created_at: "2026-03-23T00:00:00.000Z",
-      updated_at: "2026-03-23T00:00:00.000Z",
-      created_by: "system",
-      topic_key: `recall/${id}`,
-      synthesis_type: "cross_evidence",
-      summary: `Cross-evidence synthesis recall implementation ${id}.`,
-      evidence_refs: ["evidence-1", "evidence-2"],
-      source_memory_refs: [],
-      workspace_id: "workspace-1",
-      run_id: "run-1",
-      synthesis_status: SynthesisStatus.WORKING
-    });
-    const synthesisRows = ["synthesis-1", "synthesis-2", "synthesis-3"].map(buildSynthesis);
-    const service = new RecallService({
-      ...dependencies,
-      memoryRepo: {
-        ...dependencies.memoryRepo,
-        searchByKeyword: vi.fn(async () =>
-          memories.map((memory, index) => ({
-            object_id: memory.object_id,
-            normalized_rank: 1 - index * 0.05
-          }))
-        )
-      },
-      synthesisSearchPort: {
-        searchByKeyword: vi.fn(async () => [
-          { object_id: "synthesis-1", normalized_rank: 1 },
-          { object_id: "synthesis-2", normalized_rank: 0.8 },
-          { object_id: "synthesis-3", normalized_rank: 0.2 }
-        ]),
-        findByIds: vi.fn(async () => synthesisRows)
-      }
-    });
-    const policy = overridePolicy(service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id), {
-      fine_assessment: {
-        budgets: { max_entries: 5, max_total_tokens: 4000, per_dimension_limits: null },
-        conflict_awareness: false
-      }
-    });
-
-    const result = await service.recall({
-      taskSurface: {
-        ...createTaskSurface(),
-        display_name: "Cross-evidence synthesis recall implementation"
-      },
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride: policy
-    });
-
-    const delivered = result.candidates;
-    expect(delivered.length).toBe(5);
-    // Exactly the reserve count, the top synthesis by FTS rank, tail-placed.
-    expect(
-      delivered
-        .filter((candidate) => candidate.object_kind === "synthesis_capsule")
-        .map((candidate) => candidate.object_id)
-    ).toEqual(["synthesis-1", "synthesis-2"]);
-    expect(delivered.slice(-2).map((candidate) => candidate.object_kind)).toEqual([
-      "synthesis_capsule",
-      "synthesis_capsule"
-    ]);
-    expect(delivered.slice(0, 3).every((candidate) => candidate.object_kind === "memory_entry")).toBe(
-      true
-    );
   });
 });

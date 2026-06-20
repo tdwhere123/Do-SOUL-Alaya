@@ -2,17 +2,37 @@ import { parseKarmaEvent as parseProtocolKarmaEvent, type KarmaEvent } from "@do
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
-import { parseNonEmptyString } from "../shared/validators.js";
+import {
+  DEFAULT_REPO_LIST_PAGE_LIMIT,
+  parseNonEmptyString,
+  parsePageLimit,
+  parsePageOffset
+} from "../shared/validators.js";
 
 export type { KarmaEvent, KarmaEventKind } from "@do-soul/alaya-protocol";
 
 export interface KarmaEventRepo {
   create(event: Readonly<KarmaEvent>): Promise<Readonly<KarmaEvent>>;
+  findByObjectIdPage?(
+    objectId: string,
+    page: KarmaEventListPageOptions
+  ): Promise<readonly Readonly<KarmaEvent>[]>;
   findByObjectId(objectId: string): Promise<readonly Readonly<KarmaEvent>[]>;
   findByObjectIdSync(objectId: string): readonly Readonly<KarmaEvent>[];
+  findByObjectIdAllSync?(objectId: string): readonly Readonly<KarmaEvent>[];
+  findByWorkspaceIdPage?(
+    workspaceId: string,
+    page: KarmaEventListPageOptions
+  ): Promise<readonly Readonly<KarmaEvent>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<KarmaEvent>[]>;
+  findByWorkspaceIdAll?(workspaceId: string): Promise<readonly Readonly<KarmaEvent>[]>;
   sumByObjectId(objectId: string): Promise<number>;
   sumByObjectIds(objectIds: readonly string[]): Promise<Readonly<Record<string, number>>>;
+}
+
+export interface KarmaEventListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 interface KarmaEventRow {
@@ -30,10 +50,17 @@ interface KarmaEventSumRow {
   readonly total: number;
 }
 
+const DEFAULT_KARMA_EVENT_PAGE = Object.freeze({
+  limit: DEFAULT_REPO_LIST_PAGE_LIMIT,
+  offset: 0
+});
+
 export class SqliteKarmaEventRepo implements KarmaEventRepo {
   private readonly createStatement;
   private readonly findByObjectIdStatement;
+  private readonly findByObjectIdPagedStatement;
   private readonly findByWorkspaceIdStatement;
+  private readonly findByWorkspaceIdPagedStatement;
   private readonly sumByObjectIdStatement;
 
   public constructor(private readonly db: StorageDatabase) {
@@ -62,6 +89,20 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
       WHERE object_id = ?
       ORDER BY created_at ASC, event_id ASC
     `);
+    this.findByObjectIdPagedStatement = db.connection.prepare(`
+      SELECT
+        event_id,
+        kind,
+        object_id,
+        amount,
+        created_at,
+        workspace_id,
+        run_id
+      FROM karma_events
+      WHERE object_id = ?
+      ORDER BY created_at ASC, event_id ASC
+      LIMIT ? OFFSET ?
+    `);
 
     this.findByWorkspaceIdStatement = db.connection.prepare(`
       SELECT
@@ -75,6 +116,20 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
       FROM karma_events
       WHERE workspace_id = ?
       ORDER BY created_at ASC, event_id ASC
+    `);
+    this.findByWorkspaceIdPagedStatement = db.connection.prepare(`
+      SELECT
+        event_id,
+        kind,
+        object_id,
+        amount,
+        created_at,
+        workspace_id,
+        run_id
+      FROM karma_events
+      WHERE workspace_id = ?
+      ORDER BY created_at ASC, event_id ASC
+      LIMIT ? OFFSET ?
     `);
 
     this.sumByObjectIdStatement = db.connection.prepare(`
@@ -105,13 +160,24 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
   }
 
   public async findByObjectId(objectId: string): Promise<readonly Readonly<KarmaEvent>[]> {
-    return this.findByObjectIdSync(objectId);
+    return this.findByObjectIdPageSync(objectId, DEFAULT_KARMA_EVENT_PAGE);
+  }
+
+  public async findByObjectIdPage(
+    objectId: string,
+    page: KarmaEventListPageOptions
+  ): Promise<readonly Readonly<KarmaEvent>[]> {
+    return this.findByObjectIdPageSync(objectId, page);
   }
 
   // Synchronous read shared with the async wrapper; better-sqlite3 statements
   // execute synchronously, so the sync KarmaEventStore contract can read here
   // without retaining an in-memory event mirror.
   public findByObjectIdSync(objectId: string): readonly Readonly<KarmaEvent>[] {
+    return this.findByObjectIdPageSync(objectId, DEFAULT_KARMA_EVENT_PAGE);
+  }
+
+  public findByObjectIdAllSync(objectId: string): readonly Readonly<KarmaEvent>[] {
     const parsedObjectId = parseNonEmptyString(objectId, "object id");
 
     try {
@@ -126,7 +192,34 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
     }
   }
 
+  public findByObjectIdPageSync(
+    objectId: string,
+    page: KarmaEventListPageOptions
+  ): readonly Readonly<KarmaEvent>[] {
+    const parsedObjectId = parseNonEmptyString(objectId, "object id");
+    const parsedPage = parseKarmaEventPage(page);
+
+    try {
+      const rows = this.findByObjectIdPagedStatement.all(
+        parsedObjectId,
+        parsedPage.limit,
+        parsedPage.offset
+      ) as KarmaEventRow[];
+      return rows.map((row) => parseKarmaEventRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list paged karma events for object ${parsedObjectId}.`,
+        error
+      );
+    }
+  }
+
   public async findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<KarmaEvent>[]> {
+    return await this.findByWorkspaceIdPage(workspaceId, DEFAULT_KARMA_EVENT_PAGE);
+  }
+
+  public async findByWorkspaceIdAll(workspaceId: string): Promise<readonly Readonly<KarmaEvent>[]> {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
@@ -135,7 +228,30 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
-        `Failed to list karma events for workspace ${parsedWorkspaceId}.`,
+        `Failed to list all karma events for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async findByWorkspaceIdPage(
+    workspaceId: string,
+    page: KarmaEventListPageOptions
+  ): Promise<readonly Readonly<KarmaEvent>[]> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+    const parsedPage = parseKarmaEventPage(page);
+
+    try {
+      const rows = this.findByWorkspaceIdPagedStatement.all(
+        parsedWorkspaceId,
+        parsedPage.limit,
+        parsedPage.offset
+      ) as KarmaEventRow[];
+      return rows.map((row) => parseKarmaEventRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list paged karma events for workspace ${parsedWorkspaceId}.`,
         error
       );
     }
@@ -220,6 +336,13 @@ function parseKarmaEvent(value: unknown): Readonly<KarmaEvent> {
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate karma event.", error);
   }
+}
+
+function parseKarmaEventPage(page: KarmaEventListPageOptions): Readonly<KarmaEventListPageOptions> {
+  return Object.freeze({
+    limit: parsePageLimit(page.limit, "karma event page limit"),
+    offset: parsePageOffset(page.offset, "karma event page offset")
+  });
 }
 
 function parseKarmaEventRow(row: KarmaEventRow): Readonly<KarmaEvent> {

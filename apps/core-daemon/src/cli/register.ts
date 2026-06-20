@@ -28,7 +28,8 @@ import {
   resolveAlayaConfigDir,
   resolveAlayaConfigPaths
 } from "./config-files.js";
-import { createDoctorCommand, type GardenComputeStatus, type GardenKeychainCheck } from "./doctor.js";
+import { createDoctorCommand } from "./doctor.js";
+import { resolveGardenComputeStatus } from "./garden-compute-status.js";
 import { readBuildInfo } from "../runtime/build-info.js";
 import { createInstallCommand } from "./install.js";
 import { createInspectCommand } from "./inspect.js";
@@ -43,294 +44,17 @@ import {
   resolveTrustedCliRunId,
   resolveCliWorkspaceContext
 } from "./workspace-context.js";
-import { resolveSecretRef, type ResolvedSecret, type ResolveSecretError } from "../secrets/index.js";
-import {
-  parseSecretRefKeychainTarget,
-  SECRET_REF_ENV_PREFIX,
-  SECRET_REF_FILE_PREFIX,
-  secretRefScheme
-} from "@do-soul/alaya-protocol";
-
-type GardenSecretRefResolution = ResolvedSecret | ResolveSecretError;
+export { resolveGardenComputeStatus } from "./garden-compute-status.js";
 
 export function registerAlayaCliCommands(
   bridge: AlayaCliBridge,
   runtime: AlayaDaemonRuntime
 ): void {
-  bridge.registerSubcommand(createDoctorCommand({
-    getBuildInfo: readBuildInfo,
-    getToolchainStatus: async () => await runtime.services.environmentStatusService.getStatus(),
-    getEmbeddingStatus: async (workspaceId) => await runtime.services.embeddingStatusService.getStatus(workspaceId),
-    getMcpHealth: async () => ({
-      transport: "ready",
-      enrolled_tools: runtime.services.daemonMcpCatalog.listEnrolledToolIds().length
-    }),
-    getGardenHealth: async () => {
-      const gardenStatus = runtime.services.gardenStatus.getStatus();
-      return {
-        status: gardenStatus.last_pass_at === null ? "degraded" : "healthy",
-        last_pass_at: gardenStatus.last_pass_at
-      };
-    },
-    getGardenCredentialProvenance: async () =>
-      await runtime.services.configService.getGardenCredentialProvenance(),
-    // C2: derive Garden compute provider truth from the same env the daemon
-    // bootstrap reads. credential_source distinguishes the dedicated Garden
-    // secret_ref from the deprecated embedding-fallback path so operators
-    // can see which configuration is actually live.
-    getGardenCompute: async () =>
-      await resolveGardenComputeStatus(runtime),
-    getGraphHealth: async (workspaceId) =>
-      await runtime.services.graphHealthService.getStatus(workspaceId),
-    reconcileBootstrapPaths: async (workspaceId) =>
-      await runtime.services.workspaceService.reconcileBootstrapPaths(workspaceId, {
-        causedBy: "user_action"
-      }),
-    getPathPlasticityLookupTelemetry: () =>
-      defaultRecallPathPlasticityLookupTelemetry.snapshot(),
-    // schema_ok needs the live db. initDatabase is per-filename cached in
-    // alaya-storage, so reusing it here returns the connection the runtime
-    // already holds; we never close it.
-    getSchemaSummary: async (dbPath) => {
-      const database = initDatabase({ filename: dbPath });
-      const summary = getCurrentSchemaSummary(database);
-      return {
-        persistedMaxVersion: summary.persistedMaxVersion,
-        knownMaxVersion: summary.knownMaxVersion,
-        schemaOk: summary.schemaOk
-      };
-    }
-  }));
-  bridge.registerSubcommand(createStatusCommand({
-    trustStateSummaryProvider: async (agentTarget) => await runtime.services.trustStateRecorder.summarize(agentTarget),
-    getGardenStatus: async () => runtime.services.gardenStatus.getStatus(),
-    recallUtilizationService: runtime.services.recallUtilizationService
-  }));
-  bridge.registerSubcommand(createInstallCommand());
-  bridge.registerSubcommand(createInspectCommand({
-    getRequestToken: () => runtime.requestProtection.requestToken,
-    startDaemonServer: async (options) => await runtime.startHttpServer(options)
-  }));
-  bridge.registerSubcommand(createUpdateCommand());
-  bridge.registerSubcommand(createAttachCommand(runtime));
-  bridge.registerSubcommand(createDetachCommandSpec({
-    auditWriter: createProfileAuditWriter(process.env)
-  }));
-  bridge.registerSubcommand(createToolsCommand({
-    handler: runtime.services.mcpMemoryToolHandler,
-    ensureLocalWorkspace: runtime.services.workspaceService,
-    runService: runtime.services.runService
-  }));
-  // A1 (HITL daemon backbone) — `alaya review pending|accept|reject`
-  // routes through the same MCP handler attached agents use, so the
-  // CLI fallback and Codex/Claude attach surfaces share one code path.
-  bridge.registerSubcommand(createReviewCommand({
-    handler: runtime.services.mcpMemoryToolHandler,
-    ensureLocalWorkspace: runtime.services.workspaceService,
-    runService: runtime.services.runService
-  }));
+  registerPrimaryCommands(bridge, runtime);
+  registerAttachCommands(bridge, runtime);
+  registerMemoryCommands(bridge, runtime);
   bridge.registerSubcommand(createMcpCommand(runtime));
-  for (const command of createOperationCommandSpecs()) {
-    bridge.registerSubcommand(command);
-  }
-}
-
-/**
- * Derive the Garden compute snapshot the doctor command reports.
- *
- * Reading the saved RuntimeGardenComputeConfig (via configService) gives us
- * provider_kind / model_id / provider_url. The credential_source needs raw
- * env so we can distinguish the dedicated Garden key from an embedding key.
- * routing_decision stays separate from provider_kind so official_api can
- * degrade to local_heuristics when credentials are missing.
- */
-export async function resolveGardenComputeStatus(
-  runtime: AlayaDaemonRuntime
-): Promise<GardenComputeStatus> {
-  const config = await runtime.services.configService.getRuntimeGardenComputeConfig();
-  const provenance = await runtime.services.configService.getGardenCredentialProvenance();
-  // For keychain refs `resolveSecretRef` triggers a platform subprocess
-  // (`security` / `secret-tool` / PowerShell). The doctor pass needs the
-  // result for both `routing_decision` and `keychain_check`, so resolve
-  // at most once per pass and thread it to both consumers — a locked or
-  // missing keychain entry must not pay double cost to be reported.
-  const resolved: GardenSecretRefResolution | null =
-    config.secret_ref === null ? null : resolveSecretRef(config.secret_ref);
-  const credential =
-    provenance.kind === "embedding-fallback"
-      ? ({ kind: "embedding-fallback" } as const)
-      : resolveGardenCredentialSource(config.secret_ref);
-  return {
-    provider_kind: config.provider_kind,
-    model_id: config.model_id,
-    provider_url: config.provider_url,
-    credential_source: credential,
-    routing_decision: deriveGardenRoutingDecision(config, resolved),
-    ...keychainCheckField(config.secret_ref, resolved),
-    ...hostWorkerAdvisoryField(config.provider_kind, runtime)
-  };
-}
-
-// Under the host_worker product default, surface whether recall-driven
-// host-worker work (POST_TURN_EXTRACT and EDGE_CLASSIFY) is waiting for an
-// attached CLI agent (LLM quality) or being left to the zero-cloud heuristic
-// fallback. Omitted for every other provider_kind, and omitted when no garden
-// task repo is wired (non-sqlite harness).
-function hostWorkerAdvisoryField(
-  providerKind: GardenComputeStatus["provider_kind"],
-  runtime: AlayaDaemonRuntime
-): Pick<GardenComputeStatus, "host_worker_advisory"> {
-  if (providerKind !== "host_worker") {
-    return {};
-  }
-  const backlog = runtime.services.gardenStatus.getHostWorkerExtractBacklog();
-  if (backlog === null) {
-    return {};
-  }
-  return {
-    host_worker_advisory: {
-      pending_extract_tasks: backlog.pending,
-      stale_claimed_extract_tasks: backlog.stale,
-      pending_edge_classify_tasks: backlog.edgeClassifyPending,
-      stale_claimed_edge_classify_tasks: backlog.edgeClassifyStale,
-      attach_worker_recommended: backlog.pending > 0 || backlog.edgeClassifyPending > 0
-    }
-  };
-}
-
-function deriveGardenRoutingDecision(
-  config: Awaited<ReturnType<AlayaDaemonRuntime["services"]["configService"]["getRuntimeGardenComputeConfig"]>>,
-  resolved: GardenSecretRefResolution | null
-): GardenComputeStatus["routing_decision"] {
-  if (config.provider_kind !== "official_api") {
-    return config.provider_kind;
-  }
-
-  if (resolved === null) {
-    return "local_heuristics";
-  }
-
-  return "kind" in resolved ? "local_heuristics" : "official_api";
-}
-
-function keychainCheckField(
-  secretRef: string | null,
-  resolved: GardenSecretRefResolution | null
-): Pick<GardenComputeStatus, "keychain_check"> {
-  if (secretRef === null || !secretRef.startsWith("keychain:")) {
-    return {};
-  }
-  const parsed = parseSecretRefKeychainTarget(secretRef);
-  if (parsed === null) {
-    return {
-      keychain_check: {
-        ok: false,
-        service: "",
-        account: "",
-        error_kind: "malformed",
-        remediation:
-          "Keychain secret_ref must match keychain:<service>:<account> with each segment limited to [A-Za-z0-9._-]+."
-      }
-    };
-  }
-
-  // `resolved` is non-null whenever `secretRef` is non-null because they
-  // are derived from the same `config.secret_ref` in the parent pass.
-  // The null-fallback below preserves safety if the contract is ever
-  // broken (e.g. a future caller forgets to thread the resolution
-  // through) without re-spawning the keychain subprocess.
-  if (resolved !== null && !("kind" in resolved)) {
-    return {
-      keychain_check: {
-        ok: true,
-        service: parsed.service,
-        account: parsed.account
-      }
-    };
-  }
-
-  const error: ResolveSecretError =
-    resolved === null
-      ? { kind: "malformed", ref: secretRef, reason: "keychain secret_ref was not resolved during this doctor pass." }
-      : (resolved as ResolveSecretError);
-
-  return {
-    keychain_check: {
-      ok: false,
-      service: parsed.service,
-      account: parsed.account,
-      error_kind: keychainErrorKind(error),
-      remediation: keychainRemediation(error)
-    }
-  };
-}
-
-function keychainErrorKind(
-  error: ResolveSecretError
-): Extract<GardenKeychainCheck, { readonly ok: false }>["error_kind"] {
-  switch (error.kind) {
-    case "keychain_tooling_unavailable":
-    case "keychain_entry_not_found":
-    case "empty":
-    case "malformed":
-      return error.kind;
-    case "env_missing":
-    case "file_missing":
-    case "file_unreadable":
-      return "malformed";
-  }
-}
-
-function keychainRemediation(error: ResolveSecretError): string {
-  switch (error.kind) {
-    case "keychain_tooling_unavailable":
-    case "keychain_entry_not_found":
-      return error.reason;
-    case "empty":
-      return "The keychain entry exists but its stored secret is empty.";
-    case "malformed":
-      return error.reason;
-    case "env_missing":
-    case "file_missing":
-    case "file_unreadable":
-      return "Configured Garden secret_ref is not a keychain reference.";
-  }
-}
-
-function resolveGardenCredentialSource(
-  secretRef: string | null
-): GardenComputeStatus["credential_source"] {
-  if (secretRef === null || secretRef === "") {
-    // No dedicated Garden secret_ref. Embedding fallback only kicks in when
-    // the deprecated path was the active source — getRuntimeGardenComputeConfig
-    // surfaces that as a non-null secret_ref starting with "env:", "file:",
-    // or "keychain:",
-    // so a null here means Garden has no key at all.
-    return { kind: "none" };
-  }
-  switch (secretRefScheme(secretRef)) {
-    case "env":
-      return { kind: "env", name: secretRef.slice(SECRET_REF_ENV_PREFIX.length) };
-    case "file":
-      return { kind: "file", masked_path: maskPath(secretRef.slice(SECRET_REF_FILE_PREFIX.length)) };
-    case "keychain": {
-      const parsed = parseSecretRefKeychainTarget(secretRef);
-      if (parsed !== null) {
-        return { kind: "keychain", service: parsed.service, account: parsed.account };
-      }
-      return { kind: "none" };
-    }
-    case null:
-      return { kind: "none" };
-  }
-}
-
-function maskPath(path: string): string {
-  const segments = path.split("/").filter(Boolean);
-  if (segments.length <= 2) {
-    return path;
-  }
-  return `…/${segments[segments.length - 1]}`;
+  registerOperationCommands(bridge);
 }
 
 interface AttachArgs {
@@ -367,59 +91,7 @@ function createAttachCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<A
 
 function attachArgsSchema(): AlayaCliArgsSchema<AttachArgs> {
   return {
-    safeParse(input) {
-      if (!Array.isArray(input) || input.some((token) => typeof token !== "string")) {
-        return {
-          success: false,
-          error: { issues: [{ path: [], message: "Expected a string argument list." }] }
-        };
-      }
-
-      let yes = false;
-      let dryRun = false;
-      const positionals: string[] = [];
-      for (const token of input) {
-        if (token === "--yes") {
-          yes = true;
-          continue;
-        }
-        if (token === "--dry-run") {
-          dryRun = true;
-          continue;
-        }
-        if (token.startsWith("--")) {
-          return {
-            success: false,
-            error: { issues: [{ path: [], message: `Unknown attach option: ${token}` }] }
-          };
-        }
-        positionals.push(token);
-      }
-
-      if (positionals.length !== 1) {
-        return {
-          success: false,
-          error: { issues: [{ path: [], message: "Usage: attach codex|claude-code [--yes] [--dry-run]" }] }
-        };
-      }
-
-      const target = positionals[0] === "claude" ? "claude-code" : positionals[0];
-      if (target !== "codex" && target !== "claude-code") {
-        return {
-          success: false,
-          error: { issues: [{ path: [0], message: "Unsupported attach target." }] }
-        };
-      }
-
-      return {
-        success: true,
-        data: {
-          target,
-          yes,
-          dryRun
-        }
-      };
-    }
+    safeParse: safeParseAttachArgs
   };
 }
 
@@ -429,64 +101,7 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
     description: "Run the Alaya MCP server transport.",
     argsSchema: stringListArgsSchema(),
     requiresDaemonReady: true,
-    handler: async (ctx, args) => {
-      if (args.length !== 1 || args[0] !== "stdio") {
-        ctx.stderr.write("Usage: mcp stdio\n");
-        return { exitCode: ALAYA_SYSEXITS.USAGE };
-      }
-
-      let server: Awaited<ReturnType<typeof runAlayaMcpStdioServer>>;
-
-      try {
-        const workspaceContext = resolveCliWorkspaceContext(ctx);
-        await ensureImplicitLocalWorkspace(workspaceContext, runtime.services.workspaceService);
-        const trustedRunId = await resolveTrustedCliRunId({
-          runId: ctx.env.ALAYA_RUN_ID,
-          workspaceId: workspaceContext.workspaceId,
-          runService: runtime.services.runService,
-          sourceLabel: "ALAYA_RUN_ID"
-        });
-        if (!trustedRunId.ok) {
-          ctx.stderr.write(`${trustedRunId.message}\n`);
-          return { exitCode: ALAYA_SYSEXITS.DATAERR };
-        }
-
-        const resolvedAgentTarget = resolveMcpAgentTarget(ctx.env.ALAYA_AGENT_TARGET, (message) => {
-          ctx.stderr.write(`${message}\n`);
-        });
-
-        // invariant: one MCP stdio child process owns one stable attach session id.
-        const mcpSessionId = `mcp-session-${randomUUID()}`;
-        const mcpRunId = trustedRunId.runId ?? (await runtime.services.runService.ensureAttachedMcpSessionRun({
-          workspaceId: workspaceContext.workspaceId,
-          sessionId: mcpSessionId,
-          agentTarget: resolvedAgentTarget
-        })).run_id;
-        server = await runAlayaMcpStdioServer({
-          memoryToolHandler: runtime.services.mcpMemoryToolHandler,
-          contextProvider: () => ({
-            workspaceId: workspaceContext.workspaceId,
-            runId: mcpRunId,
-            agentTarget: resolvedAgentTarget,
-            sessionId: mcpSessionId
-          }),
-          stdin: ctx.stdin as unknown as Readable,
-          stdout: ctx.stdout as unknown as Writable
-        });
-        runtime.startBackgroundServices();
-      } catch (error) {
-        ctx.stderr.write(`MCP stdio startup failed: ${formatMcpStartupError(error)}\n`);
-        return { exitCode: ALAYA_SYSEXITS.SOFTWARE };
-      }
-
-      try {
-        await waitForInputClose(ctx.stdin);
-      } finally {
-        await server.close();
-      }
-
-      return { exitCode: ALAYA_SYSEXITS.OK };
-    }
+    handler: async (ctx, args) => await executeMcpCommand(ctx, args, runtime)
   };
 }
 
@@ -574,4 +189,199 @@ function createProfileAuditWriter(env: NodeJS.ProcessEnv): ProfileMutationAuditW
       }
     }
   };
+}
+
+function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRuntime): void {
+  bridge.registerSubcommand(createDoctorCommand({
+    getBuildInfo: readBuildInfo,
+    getToolchainStatus: async () => await runtime.services.environmentStatusService.getStatus(),
+    getEmbeddingStatus: async (workspaceId) => await runtime.services.embeddingStatusService.getStatus(workspaceId),
+    getMcpHealth: async () => ({
+      transport: "ready",
+      enrolled_tools: runtime.services.daemonMcpCatalog.listEnrolledToolIds().length
+    }),
+    getGardenHealth: async () => {
+      const gardenStatus = runtime.services.gardenStatus.getStatus();
+      return {
+        status: gardenStatus.last_pass_at === null ? "degraded" : "healthy",
+        last_pass_at: gardenStatus.last_pass_at
+      };
+    },
+    getGardenCredentialProvenance: async () =>
+      await runtime.services.configService.getGardenCredentialProvenance(),
+    getGardenCompute: async () => await resolveGardenComputeStatus(runtime),
+    getGraphHealth: async (workspaceId) =>
+      await runtime.services.graphHealthService.getStatus(workspaceId),
+    reconcileBootstrapPaths: async (workspaceId) =>
+      await runtime.services.workspaceService.reconcileBootstrapPaths(workspaceId, {
+        causedBy: "user_action"
+      }),
+    getPathPlasticityLookupTelemetry: () => defaultRecallPathPlasticityLookupTelemetry.snapshot(),
+    getSchemaSummary: async (dbPath) => {
+      const database = initDatabase({ filename: dbPath });
+      const summary = getCurrentSchemaSummary(database);
+      return {
+        persistedMaxVersion: summary.persistedMaxVersion,
+        knownMaxVersion: summary.knownMaxVersion,
+        schemaOk: summary.schemaOk
+      };
+    }
+  }));
+  bridge.registerSubcommand(createStatusCommand({
+    trustStateSummaryProvider: async (agentTarget) => await runtime.services.trustStateRecorder.summarize(agentTarget),
+    getGardenStatus: async () => runtime.services.gardenStatus.getStatus(),
+    recallUtilizationService: runtime.services.recallUtilizationService
+  }));
+  bridge.registerSubcommand(createInstallCommand());
+  bridge.registerSubcommand(createInspectCommand({
+    getRequestToken: () => runtime.requestProtection.requestToken,
+    startDaemonServer: async (options) => await runtime.startHttpServer(options)
+  }));
+  bridge.registerSubcommand(createUpdateCommand());
+}
+
+function registerAttachCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRuntime): void {
+  bridge.registerSubcommand(createAttachCommand(runtime));
+  bridge.registerSubcommand(createDetachCommandSpec({
+    auditWriter: createProfileAuditWriter(process.env)
+  }));
+}
+
+function registerMemoryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRuntime): void {
+  bridge.registerSubcommand(createToolsCommand({
+    handler: runtime.services.mcpMemoryToolHandler,
+    ensureLocalWorkspace: runtime.services.workspaceService,
+    runService: runtime.services.runService
+  }));
+  bridge.registerSubcommand(createReviewCommand({
+    handler: runtime.services.mcpMemoryToolHandler,
+    ensureLocalWorkspace: runtime.services.workspaceService,
+    runService: runtime.services.runService
+  }));
+}
+
+function registerOperationCommands(bridge: AlayaCliBridge): void {
+  for (const command of createOperationCommandSpecs()) {
+    bridge.registerSubcommand(command);
+  }
+}
+
+function safeParseAttachArgs(input: unknown):
+  | { readonly success: true; readonly data: AttachArgs }
+  | { readonly success: false; readonly error: { readonly issues: readonly { readonly path: readonly number[]; readonly message: string }[] } } {
+  if (!Array.isArray(input) || input.some((token) => typeof token !== "string")) {
+    return {
+      success: false,
+      error: { issues: [{ path: [], message: "Expected a string argument list." }] }
+    };
+  }
+  return parseAttachArgs(input);
+}
+
+function parseAttachArgs(
+  input: readonly string[]
+):
+  | { readonly success: true; readonly data: AttachArgs }
+  | { readonly success: false; readonly error: { readonly issues: readonly { readonly path: readonly number[]; readonly message: string }[] } } {
+  let yes = false;
+  let dryRun = false;
+  const positionals: string[] = [];
+  for (const token of input) {
+    if (token === "--yes") {
+      yes = true;
+      continue;
+    }
+    if (token === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+    if (token.startsWith("--")) {
+      return attachArgsError([], `Unknown attach option: ${token}`);
+    }
+    positionals.push(token);
+  }
+  if (positionals.length !== 1) {
+    return attachArgsError([], "Usage: attach codex|claude-code [--yes] [--dry-run]");
+  }
+  const target = positionals[0] === "claude" ? "claude-code" : positionals[0];
+  if (target !== "codex" && target !== "claude-code") {
+    return attachArgsError([0], "Unsupported attach target.");
+  }
+  return { success: true, data: { target, yes, dryRun } };
+}
+
+function attachArgsError(path: readonly number[], message: string): {
+  readonly success: false;
+  readonly error: { readonly issues: readonly { readonly path: readonly number[]; readonly message: string }[] };
+} {
+  return {
+    success: false,
+    error: { issues: [{ path, message }] }
+  };
+}
+
+async function executeMcpCommand(
+  ctx: Parameters<AlayaSubcommandSpec<readonly string[]>["handler"]>[0],
+  args: readonly string[],
+  runtime: AlayaDaemonRuntime
+): Promise<{ readonly exitCode: number }> {
+  if (args.length !== 1 || args[0] !== "stdio") {
+    ctx.stderr.write("Usage: mcp stdio\n");
+    return { exitCode: ALAYA_SYSEXITS.USAGE };
+  }
+  const workspaceContext = resolveCliWorkspaceContext(ctx);
+  await ensureImplicitLocalWorkspace(workspaceContext, runtime.services.workspaceService);
+  const trustedRunId = await resolveTrustedCliRunId({
+    runId: ctx.env.ALAYA_RUN_ID,
+    workspaceId: workspaceContext.workspaceId,
+    runService: runtime.services.runService,
+    sourceLabel: "ALAYA_RUN_ID"
+  });
+  if (!trustedRunId.ok) {
+    ctx.stderr.write(`${trustedRunId.message}\n`);
+    return { exitCode: ALAYA_SYSEXITS.DATAERR };
+  }
+  let server: Awaited<ReturnType<typeof runAlayaMcpStdioServer>>;
+  try {
+    server = await startMcpStdioSession(ctx, runtime, workspaceContext, trustedRunId.runId);
+  } catch (error) {
+    ctx.stderr.write(`MCP stdio startup failed: ${formatMcpStartupError(error)}\n`);
+    return { exitCode: ALAYA_SYSEXITS.SOFTWARE };
+  }
+  try {
+    await waitForInputClose(ctx.stdin);
+  } finally {
+    await server.close();
+  }
+  return { exitCode: ALAYA_SYSEXITS.OK };
+}
+
+async function startMcpStdioSession(
+  ctx: Parameters<AlayaSubcommandSpec<readonly string[]>["handler"]>[0],
+  runtime: AlayaDaemonRuntime,
+  workspaceContext: ReturnType<typeof resolveCliWorkspaceContext>,
+  trustedRunId: string | null
+): Promise<Awaited<ReturnType<typeof runAlayaMcpStdioServer>>> {
+  const resolvedAgentTarget = resolveMcpAgentTarget(ctx.env.ALAYA_AGENT_TARGET, (message) => {
+    ctx.stderr.write(`${message}\n`);
+  });
+  const mcpSessionId = `mcp-session-${randomUUID()}`;
+  const mcpRunId = trustedRunId ?? (await runtime.services.runService.ensureAttachedMcpSessionRun({
+    workspaceId: workspaceContext.workspaceId,
+    sessionId: mcpSessionId,
+    agentTarget: resolvedAgentTarget
+  })).run_id;
+  const server = await runAlayaMcpStdioServer({
+    memoryToolHandler: runtime.services.mcpMemoryToolHandler,
+    contextProvider: () => ({
+      workspaceId: workspaceContext.workspaceId,
+      runId: mcpRunId,
+      agentTarget: resolvedAgentTarget,
+      sessionId: mcpSessionId
+    }),
+    stdin: ctx.stdin as unknown as Readable,
+    stdout: ctx.stdout as unknown as Writable
+  });
+  runtime.startBackgroundServices();
+  return server;
 }

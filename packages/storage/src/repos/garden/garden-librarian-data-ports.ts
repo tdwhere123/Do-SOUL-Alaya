@@ -10,16 +10,15 @@ import {
   createPendingCandidateProposal,
   type GardenDataPortFactoryContext
 } from "./garden-data-port-shared.js";
+import {
+  prepareCompressionStatements,
+  prepareMergeStatements,
+  prepareSynthesisStatements,
+  type MergeStatements
+} from "./garden-librarian-statements.js";
 
-const MERGE_GROUP_LIMIT = 60;
-const MERGE_ROW_LIMIT = 600;
-const TEMPLATE_GROUP_LIMIT = 60;
-const TEMPLATE_ROW_LIMIT = 600;
 const NEIGHBOR_GROUP_LIMIT = 120;
 const NEIGHBOR_ROW_LIMIT = 1000;
-const COMPRESSION_CHAIN_LIMIT = 300;
-const SYNTHESIS_CLUSTER_LIMIT = 80;
-const SYNTHESIS_CLUSTER_ROW_LIMIT = 800;
 
 interface SubjectRow {
   readonly subject_key: string;
@@ -39,90 +38,12 @@ interface SynthesisRow {
 }
 
 export function createMergePort(context: GardenDataPortFactoryContext): GardenLibrarianMergeDetectionPort {
-  const mergeRowsStatement = context.database.connection.prepare(`
-    WITH keyed AS (
-      SELECT
-        object_id,
-        object_kind,
-        COALESCE(
-          NULLIF(CASE WHEN json_valid(content) THEN json_extract(content, '$.subject') END, ''),
-          lower(trim(substr(content, 1, 80)))
-        ) AS subject_key
-      FROM memory_entries
-      WHERE workspace_id = ?
-        AND lifecycle_state = '${ACTIVE_STATE}'
-    ),
-    candidate_subjects AS (
-      SELECT subject_key
-      FROM keyed
-      WHERE subject_key IS NOT NULL
-        AND subject_key <> ''
-      GROUP BY subject_key
-      HAVING COUNT(*) >= 2
-      ORDER BY COUNT(*) DESC, subject_key ASC
-      LIMIT ${MERGE_GROUP_LIMIT}
-    )
-    SELECT k.subject_key, k.object_id, k.object_kind
-    FROM keyed k
-    JOIN candidate_subjects s ON s.subject_key = k.subject_key
-    ORDER BY k.subject_key ASC, k.object_id ASC
-    LIMIT ${MERGE_ROW_LIMIT}
-  `);
-
-  const templateRowsStatement = context.database.connection.prepare(`
-    WITH templated AS (
-      SELECT
-        object_id,
-        dimension || ':' || COALESCE(
-          NULLIF(CASE WHEN json_valid(content) THEN json_extract(content, '$.subject') END, ''),
-          lower(trim(substr(content, 1, 60)))
-        ) AS pattern_description
-      FROM memory_entries
-      WHERE workspace_id = ?
-        AND lifecycle_state = '${ACTIVE_STATE}'
-    ),
-    candidate_clusters AS (
-      SELECT pattern_description
-      FROM templated
-      WHERE pattern_description IS NOT NULL
-        AND pattern_description <> ''
-      GROUP BY pattern_description
-      HAVING COUNT(*) >= ?
-      ORDER BY COUNT(*) DESC, pattern_description ASC
-      LIMIT ${TEMPLATE_GROUP_LIMIT}
-    )
-    SELECT t.pattern_description, t.object_id
-    FROM templated t
-    JOIN candidate_clusters c ON c.pattern_description = t.pattern_description
-    ORDER BY t.pattern_description ASC, t.object_id ASC
-    LIMIT ${TEMPLATE_ROW_LIMIT}
-  `);
-
-  const hasPendingStatement = context.database.connection.prepare(`
-    SELECT 1
-    FROM proposals
-    WHERE resolution_state = 'pending'
-      AND derived_from = ?
-    LIMIT 1
-  `);
+  const statements = prepareMergeStatements(context.database);
 
   return {
-    findMergeCandidates: async (workspaceId) => {
-      const rows = mergeRowsStatement.all(workspaceId) as readonly SubjectRow[];
-      const grouped = groupBySubject(rows);
-      return grouped.map((group) => {
-        const primary = group.objectIds[0];
-        const duplicates = group.objectIds.slice(1);
-        return {
-          primary_id: primary,
-          duplicate_ids: duplicates,
-          object_kind: group.objectKind,
-          similarity_score: Math.min(0.99, 0.8 + duplicates.length * 0.05)
-        };
-      });
-    },
+    findMergeCandidates: async (workspaceId) => findMergeCandidates(statements, workspaceId),
     hasPendingMergeProposal: async (primaryId) => {
-      const row = hasPendingStatement.get(buildDerivedKey("merge-primary", primaryId));
+      const row = statements.hasPendingStatement.get(buildDerivedKey("merge-primary", primaryId));
       return row !== undefined;
     },
     createMergeProposal: async (workspaceId, candidate) => {
@@ -134,21 +55,12 @@ export function createMergePort(context: GardenDataPortFactoryContext): GardenLi
       });
       return { proposal_id: proposalId };
     },
-    findTemplateClusters: async (workspaceId, minClusterSize) => {
-      const rows = templateRowsStatement.all(workspaceId, Math.max(2, minClusterSize)) as readonly {
-        readonly pattern_description: string;
-        readonly object_id: string;
-      }[];
-      const grouped = groupRows(rows, (row) => row.pattern_description, (row) => row.object_id);
-
-      return grouped.map((group) => ({
-        representative_id: group.objectIds[0],
-        member_ids: group.objectIds,
-        pattern_description: group.key
-      }));
-    },
+    findTemplateClusters: async (workspaceId, minClusterSize) =>
+      findTemplateClusters(statements, workspaceId, minClusterSize),
     hasPendingTemplateProposal: async (representativeId) => {
-      const row = hasPendingStatement.get(buildDerivedKey("template-representative", representativeId));
+      const row = statements.hasPendingStatement.get(
+        buildDerivedKey("template-representative", representativeId)
+      );
       return row !== undefined;
     },
     createTemplateCandidate: async (workspaceId, cluster) => {
@@ -161,6 +73,48 @@ export function createMergePort(context: GardenDataPortFactoryContext): GardenLi
       return { candidate_id: candidateId };
     }
   };
+}
+
+function findMergeCandidates(
+  statements: MergeStatements,
+  workspaceId: string
+): readonly {
+  readonly primary_id: string;
+  readonly duplicate_ids: readonly string[];
+  readonly object_kind: string;
+  readonly similarity_score: number;
+}[] {
+  const rows = statements.mergeRowsStatement.all(workspaceId) as readonly SubjectRow[];
+  return groupBySubject(rows).map((group) => {
+    const primary = group.objectIds[0];
+    const duplicates = group.objectIds.slice(1);
+    return {
+      primary_id: primary,
+      duplicate_ids: duplicates,
+      object_kind: group.objectKind,
+      similarity_score: Math.min(0.99, 0.8 + duplicates.length * 0.05)
+    };
+  });
+}
+
+function findTemplateClusters(
+  statements: MergeStatements,
+  workspaceId: string,
+  minClusterSize: number
+): readonly {
+  readonly representative_id: string;
+  readonly member_ids: readonly string[];
+  readonly pattern_description: string;
+}[] {
+  const rows = statements.templateRowsStatement.all(workspaceId, Math.max(2, minClusterSize)) as readonly {
+    readonly pattern_description: string;
+    readonly object_id: string;
+  }[];
+  return groupRows(rows, (row) => row.pattern_description, (row) => row.object_id).map((group) => ({
+    representative_id: group.objectIds[0],
+    member_ids: group.objectIds,
+    pattern_description: group.key
+  }));
 }
 
 export function createNeighborPort(context: GardenDataPortFactoryContext): GardenLibrarianNeighborDetectionPort {
@@ -210,41 +164,11 @@ export function createNeighborPort(context: GardenDataPortFactoryContext): Garde
 }
 
 export function createCompressionPort(context: GardenDataPortFactoryContext): GardenLibrarianPathCompressionPort {
-  // anchor object_id / relation_kind / recall_bias / lifecycle.status live in the
-  // path_relations JSON columns; see packages/protocol/src/soul/path-relation.ts.
-  // recall-eligible chain link = relation_kind 'recalls' AND active lifecycle AND
-  // recall_bias > 0 (mirrors isPathRecallEligible in the protocol).
-  const chainStatement = context.database.connection.prepare(`
-    WITH recalls_links AS (
-      SELECT
-        json_extract(anchors_json, '$.source_anchor.object_id') AS source_object_id,
-        json_extract(anchors_json, '$.target_anchor.object_id') AS target_object_id
-      FROM path_relations
-      WHERE workspace_id = ?
-        AND json_valid(constitution_json) = 1
-        AND json_valid(effect_vector_json) = 1
-        AND json_valid(lifecycle_json) = 1
-        AND json_extract(constitution_json, '$.relation_kind') = 'recalls'
-        AND COALESCE(json_extract(lifecycle_json, '$.status'), 'active') = 'active'
-        AND json_extract(effect_vector_json, '$.recall_bias') > 0
-        AND json_extract(anchors_json, '$.source_anchor.object_id') IS NOT NULL
-        AND json_extract(anchors_json, '$.target_anchor.object_id') IS NOT NULL
-    )
-    SELECT
-      l1.source_object_id AS chain_start,
-      l2.target_object_id AS chain_end,
-      l1.target_object_id AS intermediate_id
-    FROM recalls_links l1
-    JOIN recalls_links l2
-      ON l1.target_object_id = l2.source_object_id
-    WHERE l1.source_object_id <> l2.target_object_id
-    ORDER BY chain_start ASC, chain_end ASC, intermediate_id ASC
-    LIMIT ${COMPRESSION_CHAIN_LIMIT}
-  `);
+  const statements = prepareCompressionStatements(context.database);
 
   return {
     findCompressiblePaths: async (workspaceId) => {
-      const rows = chainStatement.all(workspaceId) as readonly ChainRow[];
+      const rows = statements.chainStatement.all(workspaceId) as readonly ChainRow[];
       const grouped = groupChains(rows);
       return grouped.map((entry) => ({
         chain_start: entry.chainStart,
@@ -265,59 +189,11 @@ export function createCompressionPort(context: GardenDataPortFactoryContext): Ga
 }
 
 export function createSynthesisPort(context: GardenDataPortFactoryContext): GardenLibrarianSynthesisThrottlePort {
-  const synthesisStatement = context.database.connection.prepare(`
-    WITH keyed AS (
-      SELECT
-        object_id AS evidence_id,
-        COALESCE(
-          NULLIF(CASE WHEN json_valid(semantic_anchor) THEN json_extract(semantic_anchor, '$.subject') END, ''),
-          NULLIF(CASE WHEN json_valid(semantic_anchor) THEN json_extract(semantic_anchor, '$.topic') END, ''),
-          lower(trim(substr(gist, 1, 80)))
-        ) AS subject
-      FROM evidence_capsules
-      WHERE workspace_id = ?
-        AND lifecycle_state = '${ACTIVE_STATE}'
-      UNION ALL
-      SELECT
-        object_id AS evidence_id,
-        COALESCE(
-          NULLIF(lower(trim(topic_key)), ''),
-          NULLIF(lower(trim(summary)), ''),
-          lower(trim(substr(object_id, 1, 80)))
-        ) AS subject
-      FROM synthesis_capsules
-      WHERE workspace_id = ?
-        AND lifecycle_state = '${ACTIVE_STATE}'
-    ),
-    candidate_subjects AS (
-      SELECT subject
-      FROM keyed
-      WHERE subject IS NOT NULL
-        AND subject <> ''
-      GROUP BY subject
-      HAVING COUNT(*) >= 2
-      ORDER BY COUNT(*) DESC, subject ASC
-      LIMIT ${SYNTHESIS_CLUSTER_LIMIT}
-    )
-    SELECT k.subject, k.evidence_id
-    FROM keyed k
-    JOIN candidate_subjects s ON s.subject = k.subject
-    ORDER BY k.subject ASC, k.evidence_id ASC
-    LIMIT ${SYNTHESIS_CLUSTER_ROW_LIMIT}
-  `);
-
-  const hasPendingStatement = context.database.connection.prepare(`
-    SELECT 1
-    FROM proposals
-    WHERE workspace_id = ?
-      AND resolution_state = 'pending'
-      AND derived_from = ?
-    LIMIT 1
-  `);
+  const statements = prepareSynthesisStatements(context.database);
 
   return {
     findSynthesisCandidateClusters: async (workspaceId) => {
-      const rows = synthesisStatement.all(workspaceId, workspaceId) as readonly SynthesisRow[];
+      const rows = statements.synthesisStatement.all(workspaceId, workspaceId) as readonly SynthesisRow[];
       const grouped = groupRows(rows, (row) => row.subject, (row) => row.evidence_id);
       return grouped.map((group) => ({
         subject: group.key,
@@ -325,7 +201,10 @@ export function createSynthesisPort(context: GardenDataPortFactoryContext): Gard
       }));
     },
     hasPendingSynthesisForSubject: async (workspaceId, subject) => {
-      const row = hasPendingStatement.get(workspaceId, buildDerivedKey("synthesis-subject", subject));
+      const row = statements.hasPendingStatement.get(
+        workspaceId,
+        buildDerivedKey("synthesis-subject", subject)
+      );
       return row !== undefined;
     },
     createSynthesisReviewCandidate: async (workspaceId, subject, evidenceIds) => {

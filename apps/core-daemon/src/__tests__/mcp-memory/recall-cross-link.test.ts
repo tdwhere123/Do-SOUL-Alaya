@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import {
   EdgeProposalService,
   EventPublisher,
@@ -6,11 +7,13 @@ import {
   PathRelationProposalService,
   type RuntimeNotifier
 } from "@do-soul/alaya-core";
+
 import {
   FormationKind,
   MemoryDimension,
   RunMode,
   RunState,
+  RuntimeGovernanceEventType,
   ScopeClass,
   SourceKind,
   StorageTier,
@@ -19,6 +22,7 @@ import {
   type MemoryEntry,
   type RecallCandidate
 } from "@do-soul/alaya-protocol";
+
 import {
   initDatabase,
   SqliteCoUsageCounterRepo,
@@ -31,212 +35,18 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+
 import { createMcpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
+
 import { createTrustStateRecorder } from "../../trust/state.js";
 
 const databases = new Set<StorageDatabase>();
 
-afterEach(() => {
-  for (const database of databases) {
-    database.close();
-  }
-  databases.clear();
-});
-
 const MEM_A = "11111111-aaaa-4aaa-8aaa-000000000001";
+
 const MEM_B = "11111111-aaaa-4aaa-8aaa-000000000002";
+
 const MEM_C = "11111111-aaaa-4aaa-8aaa-000000000003";
-
-describe("recall cross-link: report_context_usage(used) proposes RECALLS edges", () => {
-  it("proposes one RECALLS edge per ordered pair when 2 memories are reported used", async () => {
-    const harness = await createHarness([MEM_A, MEM_B]);
-
-    await reportUsed(harness, [MEM_A, MEM_B]);
-
-    // 2 memories -> 2 ordered pairs (A->B, B->A); each proposal fire-and-forget.
-    expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(2);
-    const pairs = harness.graphEdgePort.createEdge.mock.calls.map((call) => ({
-      source: call[0].sourceMemoryId,
-      target: call[0].targetMemoryId,
-      edgeType: call[0].edgeType
-    }));
-    expect(pairs).toEqual(
-      expect.arrayContaining([
-        { source: MEM_A, target: MEM_B, edgeType: "recalls" },
-        { source: MEM_B, target: MEM_A, edgeType: "recalls" }
-      ])
-    );
-  });
-
-  it("proposes N*(N-1) RECALLS edges for 3 used memories", async () => {
-    const harness = await createHarness([MEM_A, MEM_B, MEM_C]);
-
-    await reportUsed(harness, [MEM_A, MEM_B, MEM_C]);
-
-    expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(6);
-    for (const call of harness.graphEdgePort.createEdge.mock.calls) {
-      expect(call[0].edgeType).toBe("recalls");
-      expect(call[0].sourceMemoryId).not.toBe(call[0].targetMemoryId);
-      expect(call[0].workspaceId).toBe("workspace-1");
-    }
-  });
-
-  it("skips cross-link when only 1 memory is reported used", async () => {
-    const harness = await createHarness([MEM_A]);
-
-    await reportUsed(harness, [MEM_A]);
-
-    expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
-  });
-
-  it("skips cross-link for skipped/not_applicable reports (no used_object_ids semantics)", async () => {
-    const harness = await createHarness([MEM_A, MEM_B]);
-
-    await reportUsage(harness, "skipped", []);
-
-    expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
-  });
-
-  it("emits an observable warning when used_object_ids exceeds the fan-out cap", async () => {
-    // Create 10 memories so the used report exceeds MAX_CROSS_LINK_FANOUT = 8.
-    const memoryIds = Array.from({ length: 10 }, (_, idx) =>
-      `11111111-aaaa-4aaa-8aaa-0000000000${(idx + 1).toString().padStart(2, "0")}`
-    );
-    const warn = vi.fn();
-    const harness = await createHarness(memoryIds, { warn });
-
-    await reportUsed(harness, memoryIds);
-
-    // 8 ordered * 7 cross targets = 56 proposal writes; truncation warned once.
-    expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(56);
-    expect(warn).toHaveBeenCalledWith(
-      "mcp-memory-tool-handler: cross-link truncated to fanout cap",
-      expect.objectContaining({
-        usedObjectCount: 10,
-        truncatedTo: 8,
-        droppedCount: 2
-      })
-    );
-  });
-
-  it("keeps RECALLS proposals pending until explicit accept mints a governed path relation", async () => {
-    const harness = await createHarness([MEM_A, MEM_B, MEM_C], { realEdgeProposals: true });
-
-    await reportUsed(harness, [MEM_A, MEM_B]);
-
-    // Proposals are pending; no path minted yet.
-    expect(await harness.pathRelationRepo.findByWorkspace("workspace-1")).toEqual([]);
-    expect(harness.edgeProposalRepo.listPending("workspace-1").map((proposal) => ({
-      source: proposal.source_memory_id,
-      target: proposal.target_memory_id,
-      edgeType: proposal.edge_type,
-      triggerSource: proposal.trigger_source
-    }))).toEqual(
-      expect.arrayContaining([
-        { source: MEM_A, target: MEM_B, edgeType: "recalls", triggerSource: "recall_cross_link" },
-        { source: MEM_B, target: MEM_A, edgeType: "recalls", triggerSource: "recall_cross_link" }
-      ])
-    );
-
-    const reviewResult = await harness.handler.call({
-      toolName: "soul.batch_review_edge_proposals",
-      arguments: {
-        verdict: "accept",
-        filter: { edge_type: "recalls" },
-        reason: "accept recall cross-links",
-        reviewer_identity: "user:reviewer"
-      },
-      context: {
-        workspaceId: "workspace-1",
-        runId: "run-1",
-        agentTarget: "cli",
-        sessionId: "recall-cross-link-session"
-      }
-    });
-    expect(reviewResult).toMatchObject({ ok: true });
-
-    // invariant (accept->path, DB-level): accept mints governed path relations.
-    // A->B and B->A dedup to one undirected path.
-    const paths = await harness.pathRelationRepo.findByWorkspace("workspace-1");
-    expect(paths.length).toBeGreaterThanOrEqual(1);
-    for (const path of paths) {
-      expect(path.constitution.relation_kind).toBe("recalls");
-      expect(path.legitimacy.governance_class).toBe("recall_allowed");
-      expect(path.effect_vector.recall_bias).toBeGreaterThan(0);
-    }
-    const pathEndpoints = paths.map((path) => {
-      const source = path.anchors.source_anchor;
-      const target = path.anchors.target_anchor;
-      return {
-        source: source.kind === "object" ? source.object_id : null,
-        target: target.kind === "object" ? target.object_id : null
-      };
-    });
-    expect(pathEndpoints).toEqual(
-      expect.arrayContaining([{ source: MEM_A, target: MEM_B }])
-    );
-    expect(harness.edgeProposalRepo.listPending("workspace-1")).toEqual([]);
-  });
-
-  it("never fails the report when the graph edge port throws", async () => {
-    const harness = await createHarness([MEM_A, MEM_B]);
-    harness.graphEdgePort.createEdge.mockRejectedValueOnce(new Error("edge db down"));
-
-    // Must still resolve OK — graph proposals are supplementary, not load-bearing.
-    const result = await reportUsed(harness, [MEM_A, MEM_B]);
-
-    expect(result).toMatchObject({ ok: true });
-  });
-
-  it("emits an observable warning when co-recall fire-and-forget warning itself fails", async () => {
-    const warn = vi.fn((message: string) => {
-      if (message === "co-recall plasticity accrual failed") {
-        throw new Error("logger sink down");
-      }
-    });
-    const harness = await createHarness([MEM_A, MEM_B], {
-      warn,
-      recallCandidateIds: [MEM_A, MEM_B],
-      pathRelationProposalService: {
-        onCoUsage: vi.fn(async () => {}),
-        onCoRecall: vi.fn(async () => {
-          throw new Error("co-recall db down");
-        })
-      },
-      coRecallCoherenceGate: {
-        coherentPairKeys: vi.fn(async () => new Set([`${MEM_A}|${MEM_B}`]))
-      }
-    });
-
-    const result = await harness.handler.call({
-      toolName: "soul.recall",
-      arguments: {
-        query: "coffee",
-        scope_class: ScopeClass.PROJECT,
-        dimension: MemoryDimension.PREFERENCE,
-        domain_tags: ["recall"],
-        max_results: 2
-      },
-      context: {
-        workspaceId: "workspace-1",
-        runId: "run-1",
-        agentTarget: "cli",
-        sessionId: "recall-cross-link-session"
-      }
-    });
-
-    expect(result).toMatchObject({ ok: true });
-    await vi.waitFor(() => {
-      expect(warn).toHaveBeenCalledWith(
-        "co-recall plasticity fire-and-forget failed",
-        expect.objectContaining({
-          workspace_id: "workspace-1",
-          error: "logger sink down"
-        })
-      );
-    });
-  });
-});
 
 async function createHarness(
   memoryIds: readonly string[],
@@ -270,9 +80,10 @@ async function createHarness(
   const runRepo = new SqliteRunRepo(database);
   const trustStateRepo = new SqliteTrustStateRepo(database);
   const workspaceRepo = new SqliteWorkspaceRepo(database);
+  const notifyEntry = vi.fn();
   const runtimeNotifier: RuntimeNotifier = {
     notify: () => {},
-    notifyEntry: () => {}
+    notifyEntry
   };
   const eventPublisher = new EventPublisher({
     eventLogRepo,
@@ -393,6 +204,7 @@ async function createHarness(
     },
     trustStateRecorder,
     eventPublisher,
+    asyncSideEffectAudit: { eventLogRepo, runtimeNotifier },
     memoryEntryRepo,
     now: () => "2026-05-07T00:00:01.000Z",
     generateId: () => "00000000-0000-4000-8000-000000000001",
@@ -403,6 +215,7 @@ async function createHarness(
     edgeProposalRepo,
     eventLogRepo,
     graphEdgePort,
+    runtimeNotifier,
     pathRelationRepo,
     handler,
     memoryEntryRepo
@@ -488,3 +301,84 @@ function createRecallCandidate(objectId: string): RecallCandidate {
     origin_plane: "workspace_local"
   };
 }
+
+afterEach(() => {
+  for (const database of databases) {
+    database.close();
+  }
+  databases.clear();
+});
+
+describe("recall cross-link: report_context_usage(used) proposes RECALLS edges", () => {
+
+  it("proposes one RECALLS edge per ordered pair when 2 memories are reported used", async () => {
+    const harness = await createHarness([MEM_A, MEM_B]);
+
+    await reportUsed(harness, [MEM_A, MEM_B]);
+
+    // 2 memories -> 2 ordered pairs (A->B, B->A); each proposal fire-and-forget.
+    expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(2);
+    const pairs = harness.graphEdgePort.createEdge.mock.calls.map((call) => ({
+      source: call[0].sourceMemoryId,
+      target: call[0].targetMemoryId,
+      edgeType: call[0].edgeType
+    }));
+    expect(pairs).toEqual(
+      expect.arrayContaining([
+        { source: MEM_A, target: MEM_B, edgeType: "recalls" },
+        { source: MEM_B, target: MEM_A, edgeType: "recalls" }
+      ])
+    );
+  });
+
+  it("proposes N*(N-1) RECALLS edges for 3 used memories", async () => {
+    const harness = await createHarness([MEM_A, MEM_B, MEM_C]);
+
+    await reportUsed(harness, [MEM_A, MEM_B, MEM_C]);
+
+    expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(6);
+    for (const call of harness.graphEdgePort.createEdge.mock.calls) {
+      expect(call[0].edgeType).toBe("recalls");
+      expect(call[0].sourceMemoryId).not.toBe(call[0].targetMemoryId);
+      expect(call[0].workspaceId).toBe("workspace-1");
+    }
+  });
+
+  it("skips cross-link when only 1 memory is reported used", async () => {
+    const harness = await createHarness([MEM_A]);
+
+    await reportUsed(harness, [MEM_A]);
+
+    expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
+  });
+
+  it("skips cross-link for skipped/not_applicable reports (no used_object_ids semantics)", async () => {
+    const harness = await createHarness([MEM_A, MEM_B]);
+
+    await reportUsage(harness, "skipped", []);
+
+    expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
+  });
+
+  it("emits an observable warning when used_object_ids exceeds the fan-out cap", async () => {
+    // Create 10 memories so the used report exceeds MAX_CROSS_LINK_FANOUT = 8.
+    const memoryIds = Array.from({ length: 10 }, (_, idx) =>
+      `11111111-aaaa-4aaa-8aaa-0000000000${(idx + 1).toString().padStart(2, "0")}`
+    );
+    const warn = vi.fn();
+    const harness = await createHarness(memoryIds, { warn });
+
+    await reportUsed(harness, memoryIds);
+
+    // 8 ordered * 7 cross targets = 56 proposal writes; truncation warned once.
+    expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(56);
+    expect(warn).toHaveBeenCalledWith(
+      "mcp-memory-tool-handler: cross-link truncated to fanout cap",
+      expect.objectContaining({
+        usedObjectCount: 10,
+        truncatedTo: 8,
+        droppedCount: 2
+      })
+    );
+  });
+});

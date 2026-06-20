@@ -1,142 +1,52 @@
 import {
   GARDEN_ROLE_TIER_MAP,
-  GardenRole,
-  GardenTaskDescriptorSchema,
   GardenTier,
   type GardenBacklogQueueDepthByTier,
   type GardenBacklogSnapshot,
-  type GardenBacklogWarningTransition,
   GardenEventType,
   parseGardenEventPayload,
   type GardenRoleValue,
   type GardenTaskDescriptor,
-  type GardenTaskKindValue,
   type GardenTaskResult,
   type GardenTierValue,
-  type EventType,
   type HealthJournalRecordPort
 } from "@do-soul/alaya-protocol";
 import {
   evaluateBacklogPressure,
   type BacklogPressureThresholds
 } from "./backlog-telemetry.js";
+import { InMemoryGardenTaskRepo } from "./in-memory-garden-task-repo.js";
+import {
+  buildCoolingKey,
+  countByStatus,
+  parseIsoTimestampMs,
+  parseTaskDescriptorFromRow,
+  roleForTier,
+  tierForRole,
+  TIER_ORDER
+} from "./scheduler-helpers.js";
+import type {
+  GardenBacklogWarningTransitionSignal,
+  GardenSchedulerConfig,
+  GardenSchedulerEventLogPort,
+  GardenTaskBacklogCount,
+  GardenTaskEventInput,
+  GardenTaskRepoPort} from "./scheduler-types.js";
 
-const TIER_ORDER: Record<GardenTierValue, number> = {
-  tier_0: 0,
-  tier_1: 1,
-  tier_2: 2
-};
+export { InMemoryGardenTaskRepo } from "./in-memory-garden-task-repo.js";
+export type {
+  GardenBacklogWarningTransitionSignal,
+  GardenSchedulerConfig,
+  GardenSchedulerEventLogPort,
+  GardenTaskBacklogCount,
+  GardenTaskClaimResult,
+  GardenTaskEventInput,
+  GardenTaskRepoPort,
+  GardenTaskRow,
+  GardenTaskStatus
+} from "./scheduler-types.js";
+
 const IN_PROCESS_GARDEN_CLAIMANT = "in-process";
-
-export interface GardenSchedulerEventLogPort {
-  append(entry: {
-    readonly event_type: string;
-    readonly entity_type: string;
-    readonly entity_id: string;
-    readonly workspace_id: string;
-    readonly run_id: string | null;
-    readonly payload: Record<string, unknown>;
-  }): Promise<void>;
-}
-
-export type GardenTaskStatus = "pending" | "claimed" | "completed" | "failed";
-export type GardenTaskClaimResult = "claimed" | "already-claimed";
-
-export interface GardenTaskEventInput {
-  readonly event_type: EventType;
-  readonly entity_type: string;
-  readonly entity_id: string;
-  readonly workspace_id: string;
-  readonly run_id: string | null;
-  readonly caused_by: string | null;
-  readonly payload_json: Record<string, unknown>;
-}
-
-export interface GardenTaskRow {
-  readonly id: string;
-  readonly workspace_id: string;
-  readonly role: GardenRoleValue;
-  readonly kind: GardenTaskKindValue;
-  readonly payload: unknown;
-  readonly status: GardenTaskStatus;
-  readonly claimed_by: string | null;
-  readonly claimed_at: string | null;
-  readonly created_at: string;
-  readonly completed_at: string | null;
-  readonly attempt_count: number;
-  readonly last_error_text: string | null;
-}
-
-interface InMemoryGardenTaskRow extends GardenTaskRow {
-  readonly descriptor: GardenTaskDescriptor;
-}
-
-export interface GardenTaskBacklogCount {
-  readonly role: GardenRoleValue;
-  readonly status: Extract<GardenTaskStatus, "pending" | "claimed">;
-  readonly count: number;
-}
-
-export interface GardenTaskRepoPort {
-  enqueue(input: {
-    readonly id?: string;
-    readonly workspace_id: string;
-    readonly role: GardenRoleValue;
-    readonly kind: GardenTaskKindValue;
-    readonly payload: unknown;
-    readonly created_at?: string;
-  }): { readonly task_id: string };
-  peekPending(
-    role: GardenRoleValue,
-    workspace_id?: string,
-    limit?: number
-  ): readonly GardenTaskRow[];
-  findById(taskId: string): GardenTaskRow | null;
-  claimAtomic(taskId: string, claimedBy: string, claimedAt: string): GardenTaskClaimResult;
-  /**
-   * Claim a task and append the dispatch audit event in one atomic mutation.
-   */
-  claimAtomicWithEvents(
-    taskId: string,
-    claimedBy: string,
-    claimedAt: string,
-    dispatchedEvents: readonly GardenTaskEventInput[]
-  ): Promise<GardenTaskClaimResult>;
-  completeWithEvents(
-    taskId: string,
-    result: {
-      readonly status: "completed" | "failed";
-      readonly completed_at: string;
-      readonly last_error_text?: string;
-    },
-    events: readonly GardenTaskEventInput[],
-    claimedBy: string
-  ): Promise<void>;
-  peekAbandonedClaims(now: string, staleAfterMs: number): readonly GardenTaskRow[];
-  gcAbandonedClaims(
-    reclaims: readonly {
-      readonly task_id: string;
-      readonly claimed_by: string;
-      readonly claimed_at: string;
-      readonly event: GardenTaskEventInput;
-    }[]
-  ): Promise<number>;
-  countBacklog(workspace_id?: string): readonly GardenTaskBacklogCount[];
-  releaseClaim(taskId: string, claimedBy: string): boolean;
-}
-
-export interface GardenSchedulerConfig {
-  readonly coolingPeriodMs?: number;
-  readonly now?: () => string;
-  readonly backlogWarningThresholds?: BacklogPressureThresholds;
-  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
-}
-
-export interface GardenBacklogWarningTransitionSignal {
-  readonly transition_id: number;
-  readonly transition: GardenBacklogWarningTransition;
-  readonly snapshot: GardenBacklogSnapshot;
-}
 
 export class GardenScheduler {
   private readonly coolingMap = new Map<string, string>();
@@ -502,313 +412,5 @@ export class GardenScheduler {
         error: error instanceof Error ? error.message : String(error)
       });
     }
-  }
-}
-
-function compareTasks(left: GardenTaskDescriptor, right: GardenTaskDescriptor): number {
-  if (left.priority !== right.priority) {
-    return right.priority - left.priority;
-  }
-
-  if (left.created_at !== right.created_at) {
-    return left.created_at < right.created_at ? -1 : 1;
-  }
-
-  return left.task_id.localeCompare(right.task_id);
-}
-
-function buildCoolingKey(taskKind: GardenTaskDescriptor["task_kind"], targetRef: string): string {
-  return `${taskKind}:${targetRef}`;
-}
-
-function parseTaskDescriptorFromRow(
-  row: GardenTaskRow | InMemoryGardenTaskRow
-): GardenTaskDescriptor {
-  if ("descriptor" in row) {
-    return row.descriptor;
-  }
-  return GardenTaskDescriptorSchema.parse(row.payload);
-}
-
-function parseIsoTimestampMs(timestamp: string): number | null {
-  const value = Date.parse(timestamp);
-  return Number.isFinite(value) ? value : null;
-}
-
-function roleForTier(tier: GardenTierValue): GardenRoleValue {
-  switch (tier) {
-    case GardenTier.TIER_0:
-      return GardenRole.JANITOR;
-    case GardenTier.TIER_1:
-      return GardenRole.AUDITOR;
-    case GardenTier.TIER_2:
-      return GardenRole.LIBRARIAN;
-  }
-}
-
-function tierForRole(role: GardenRoleValue): GardenTierValue {
-  return GARDEN_ROLE_TIER_MAP[role];
-}
-
-function countByStatus(
-  counts: readonly GardenTaskBacklogCount[],
-  status: "pending" | "claimed"
-): number {
-  return counts
-    .filter((count) => count.status === status)
-    .reduce((total, count) => total + count.count, 0);
-}
-
-function canRolePeekPending(role: GardenRoleValue, taskRole: GardenRoleValue): boolean {
-  return TIER_ORDER[tierForRole(taskRole)] <= TIER_ORDER[GARDEN_ROLE_TIER_MAP[role]];
-}
-
-/** Default in-process queue used when callers do not provide a GardenTaskRepoPort. */
-export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
-  private readonly rows: InMemoryGardenTaskRow[] = [];
-
-  public constructor(private readonly eventLog: GardenSchedulerEventLogPort) {}
-
-  public enqueue(input: {
-    readonly id?: string;
-    readonly workspace_id: string;
-    readonly role: GardenRoleValue;
-    readonly kind: GardenTaskKindValue;
-    readonly payload: unknown;
-    readonly created_at?: string;
-  }): { readonly task_id: string } {
-    const descriptor = GardenTaskDescriptorSchema.parse(input.payload);
-    const taskId = input.id ?? `garden-task-${this.rows.length + 1}`;
-    const createdAt = input.created_at ?? new Date().toISOString();
-    this.rows.push({
-      id: taskId,
-      workspace_id: input.workspace_id,
-      role: input.role,
-      kind: input.kind,
-      payload: descriptor,
-      status: "pending",
-      claimed_by: null,
-      claimed_at: null,
-      created_at: createdAt,
-      completed_at: null,
-      attempt_count: 0,
-      last_error_text: null,
-      descriptor
-    });
-    this.rows.sort((left, right) => compareTasks(left.descriptor, right.descriptor));
-    return { task_id: taskId };
-  }
-
-  public peekPending(
-    role: GardenRoleValue,
-    workspace_id?: string,
-    limit = 10
-  ): readonly GardenTaskRow[] {
-    return this.rows
-      .filter((row) => row.status === "pending")
-      .filter((row) => canRolePeekPending(role, row.role))
-      .filter((row) => workspace_id === undefined || row.workspace_id === workspace_id)
-      .slice(0, limit);
-  }
-
-  public findById(taskId: string): GardenTaskRow | null {
-    const row = this.rows.find((candidate) => candidate.id === taskId);
-    return row === undefined ? null : { ...row };
-  }
-
-  public claimAtomic(
-    taskId: string,
-    claimedBy: string,
-    claimedAt: string
-  ): GardenTaskClaimResult {
-    const row = this.rows.find((candidate) => candidate.id === taskId);
-    if (row === undefined || row.status !== "pending") {
-      return "already-claimed";
-    }
-    replaceRow(this.rows, row, {
-      ...row,
-      status: "claimed",
-      claimed_by: claimedBy,
-      claimed_at: claimedAt,
-      attempt_count: row.attempt_count + 1
-    });
-    return "claimed";
-  }
-
-  // invariant: the in-memory repo restores the full row snapshot when dispatch
-  // audit append fails. Production scheduler use passes one dispatch event per
-  // claim; true multi-event atomicity belongs to the SQLite repo.
-  public async claimAtomicWithEvents(
-    taskId: string,
-    claimedBy: string,
-    claimedAt: string,
-    dispatchedEvents: readonly GardenTaskEventInput[]
-  ): Promise<GardenTaskClaimResult> {
-    const snapshot = this.rows.find((candidate) => candidate.id === taskId);
-    if (snapshot === undefined) {
-      return "already-claimed";
-    }
-    const preClaimState = { ...snapshot };
-    const result = this.claimAtomic(taskId, claimedBy, claimedAt);
-    if (result !== "claimed") {
-      return result;
-    }
-    try {
-      for (const event of dispatchedEvents) {
-        await this.eventLog.append({
-          event_type: event.event_type,
-          entity_type: event.entity_type,
-          entity_id: event.entity_id,
-          workspace_id: event.workspace_id,
-          run_id: event.run_id,
-          payload: event.payload_json
-        });
-      }
-    } catch (error) {
-      const current = this.rows.find((candidate) => candidate.id === taskId);
-      if (current !== undefined) {
-        replaceRow(this.rows, current, preClaimState);
-        this.rows.sort((left, right) => compareTasks(left.descriptor, right.descriptor));
-      }
-      throw error;
-    }
-    return "claimed";
-  }
-
-  public async completeWithEvents(
-    taskId: string,
-    result: {
-      readonly status: "completed" | "failed";
-      readonly completed_at: string;
-      readonly last_error_text?: string;
-    },
-    events: readonly GardenTaskEventInput[],
-    claimedBy: string
-  ): Promise<void> {
-    for (const event of events) {
-      await this.eventLog.append({
-        event_type: event.event_type,
-        entity_type: event.entity_type,
-        entity_id: event.entity_id,
-        workspace_id: event.workspace_id,
-        run_id: event.run_id,
-        payload: event.payload_json
-      });
-    }
-
-    const row = this.rows.find((candidate) => candidate.id === taskId);
-    if (row === undefined) {
-      return;
-    }
-    if (row.status !== "pending" && row.status !== "claimed") {
-      return;
-    }
-    if (row.claimed_by !== claimedBy) {
-      throw new Error(`Garden task ${taskId} is not claimed by the expected worker.`);
-    }
-    replaceRow(this.rows, row, {
-      ...row,
-      status: result.status,
-      completed_at: result.completed_at,
-      last_error_text: result.last_error_text ?? null
-    });
-  }
-
-  public peekAbandonedClaims(now: string, staleAfterMs: number): readonly GardenTaskRow[] {
-    const threshold = Date.parse(now) - staleAfterMs;
-    return this.rows
-      .filter((row) => row.status === "claimed" && row.claimed_at !== null)
-      .filter((row) => Date.parse(row.claimed_at!) < threshold)
-      .map((row) => ({ ...row }));
-  }
-
-  public async gcAbandonedClaims(
-    reclaims: readonly {
-      readonly task_id: string;
-      readonly claimed_by: string;
-      readonly claimed_at: string;
-      readonly event: GardenTaskEventInput;
-    }[]
-  ): Promise<number> {
-    const rowsToReclaim: InMemoryGardenTaskRow[] = [];
-    for (const reclaim of reclaims) {
-      const row = this.rows.find((candidate) => candidate.id === reclaim.task_id);
-      if (
-        row === undefined ||
-        row.status !== "claimed" ||
-        row.claimed_by !== reclaim.claimed_by ||
-        row.claimed_at !== reclaim.claimed_at
-      ) {
-        throw new Error(`Garden task ${reclaim.task_id} claim changed and cannot be reclaimed.`);
-      }
-      rowsToReclaim.push(row);
-    }
-
-    let reclaimed = 0;
-    for (const [index, reclaim] of reclaims.entries()) {
-      await this.eventLog.append({
-        event_type: reclaim.event.event_type,
-        entity_type: reclaim.event.entity_type,
-        entity_id: reclaim.event.entity_id,
-        workspace_id: reclaim.event.workspace_id,
-        run_id: reclaim.event.run_id,
-        payload: reclaim.event.payload_json
-      });
-      const row = rowsToReclaim[index]!;
-      replaceRow(this.rows, row, {
-        ...row,
-        status: "pending",
-        claimed_by: null,
-        claimed_at: null
-      });
-      reclaimed += 1;
-    }
-    return reclaimed;
-  }
-
-  public countBacklog(workspace_id?: string): readonly GardenTaskBacklogCount[] {
-    const counts = new Map<string, GardenTaskBacklogCount>();
-    for (const row of this.rows) {
-      if (row.status !== "pending" && row.status !== "claimed") {
-        continue;
-      }
-      if (workspace_id !== undefined && row.workspace_id !== workspace_id) {
-        continue;
-      }
-      const key = `${row.role}:${row.status}`;
-      const current = counts.get(key);
-      counts.set(key, {
-        role: row.role,
-        status: row.status,
-        count: (current?.count ?? 0) + 1
-      });
-    }
-    return [...counts.values()];
-  }
-
-  public releaseClaim(taskId: string, claimedBy: string): boolean {
-    const row = this.rows.find((candidate) => candidate.id === taskId);
-    if (row === undefined || row.status !== "claimed" || row.claimed_by !== claimedBy) {
-      return false;
-    }
-    replaceRow(this.rows, row, {
-      ...row,
-      status: "pending",
-      claimed_by: null,
-      claimed_at: null
-    });
-    this.rows.sort((left, right) => compareTasks(left.descriptor, right.descriptor));
-    return true;
-  }
-}
-
-function replaceRow(
-  rows: InMemoryGardenTaskRow[],
-  oldRow: InMemoryGardenTaskRow,
-  newRow: InMemoryGardenTaskRow
-): void {
-  const index = rows.indexOf(oldRow);
-  if (index >= 0) {
-    rows[index] = newRow;
   }
 }

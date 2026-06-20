@@ -1,5 +1,13 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedContentSchema,
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedPathSchema,
+  BoundedReasonSchema,
+  IsoDatetimeStringSchema,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 
 const workerRuntimeEventTypeValues = [
   "worker.session_started",
@@ -31,54 +39,54 @@ export const WorkerToolCallOutcomeSchema = z.enum(["success", "error", "cancelle
 export const WorkerIntegrationStatusLevelSchema = z.enum(["ignore_drift", "soft_stale", "hard_stale"]);
 
 const WorkerEventPayloadBaseSchema = z.object({
-  sessionId: NonEmptyStringSchema,
+  sessionId: BoundedIdSchema,
   emittedAt: IsoDatetimeStringSchema
-});
+}).strict();
 
 export const WorkerSessionStartedPayloadSchema = WorkerEventPayloadBaseSchema.strict().readonly();
 
 export const WorkerSessionFinishedPayloadSchema = WorkerEventPayloadBaseSchema.extend({
   status: WorkerSessionFinishedStatusSchema,
-  resultSummary: z.string().nullable()
+  resultSummary: BoundedReasonSchema.nullable()
 })
   .strict()
   .readonly();
 
 export const WorkerMessageDeltaPayloadSchema = WorkerEventPayloadBaseSchema.extend({
-  workerRunId: NonEmptyStringSchema.optional(),
-  delta: z.string(),
+  workerRunId: BoundedIdSchema.optional(),
+  delta: BoundedContentSchema,
   sequence: NonNegativeIntSchema
 })
   .strict()
   .readonly();
 
 export const WorkerToolCallStartedPayloadSchema = WorkerEventPayloadBaseSchema.extend({
-  callId: NonEmptyStringSchema,
-  toolId: NonEmptyStringSchema
+  callId: BoundedIdSchema,
+  toolId: BoundedLabelSchema
 })
   .strict()
   .readonly();
 
 export const WorkerToolCallFinishedPayloadSchema = WorkerEventPayloadBaseSchema.extend({
-  callId: NonEmptyStringSchema,
-  toolId: NonEmptyStringSchema,
+  callId: BoundedIdSchema,
+  toolId: BoundedLabelSchema,
   outcome: WorkerToolCallOutcomeSchema,
-  resultSummary: z.string().nullable()
+  resultSummary: BoundedReasonSchema.nullable()
 })
   .strict()
   .readonly();
 
 export const WorkerPermissionRequestedPayloadSchema = WorkerEventPayloadBaseSchema.extend({
-  requestId: NonEmptyStringSchema,
-  toolId: NonEmptyStringSchema,
-  reason: NonEmptyStringSchema
+  requestId: BoundedIdSchema,
+  toolId: BoundedLabelSchema,
+  reason: BoundedReasonSchema
 })
   .strict()
   .readonly();
 
 export const WorkerPatchEmittedPayloadSchema = WorkerEventPayloadBaseSchema.extend({
-  patchId: NonEmptyStringSchema,
-  pathHints: z.array(NonEmptyStringSchema).readonly()
+  patchId: BoundedIdSchema,
+  pathHints: z.array(BoundedPathSchema).readonly()
 })
   .strict()
   .readonly();
@@ -90,17 +98,17 @@ export const WorkerPatchEmittedPayloadSchema = WorkerEventPayloadBaseSchema.exte
  */
 export const WorkerIntegrationStatusPayloadSchema = z
   .object({
-    workerRunId: NonEmptyStringSchema,
+    workerRunId: BoundedIdSchema,
     level: WorkerIntegrationStatusLevelSchema,
-    reason: NonEmptyStringSchema,
+    reason: BoundedReasonSchema,
     detectedAt: IsoDatetimeStringSchema
   })
   .strict()
   .readonly();
 
 export const WorkerRuntimeErrorPayloadSchema = WorkerEventPayloadBaseSchema.extend({
-  errorCode: NonEmptyStringSchema,
-  message: NonEmptyStringSchema
+  errorCode: BoundedLabelSchema,
+  message: BoundedReasonSchema
 })
   .strict()
   .readonly();
@@ -121,7 +129,7 @@ export function createWorkerRuntimeEventObjectSchema<T extends keyof typeof work
   type: T,
   payloadSchema: (typeof workerRuntimePayloadSchemas)[T]
 ) {
-  return z.object({ type: z.literal(type), payload: payloadSchema });
+  return z.object({ type: z.literal(type), payload: payloadSchema }).strict();
 }
 
 const WorkerSessionStartedEventObjectSchema = createWorkerRuntimeEventObjectSchema(

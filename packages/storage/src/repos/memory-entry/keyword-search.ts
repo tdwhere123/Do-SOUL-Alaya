@@ -19,6 +19,10 @@ export interface FtsKeywordSearchRow {
   readonly raw_rank: number;
 }
 
+type RankedKeywordSearchResult = Readonly<
+  MemoryEntryKeywordSearchResult & { readonly sourcePriority: number; readonly sourceOrder: number }
+>;
+
 export function buildObjectIdFilterSql(
   objectIds: readonly string[] | undefined,
   columnName = "object_id"
@@ -51,93 +55,81 @@ export function mergeKeywordSearchRows(
   const exactScores = buildGroupedOrdinalScores(exactRows, (row) => row.matched_token_count);
   const trigramScores = buildGroupedOrdinalScores(trigramRows, (row) => row.raw_rank);
   const porterScores = buildGroupedOrdinalScores(porterRows, (row) => row.raw_rank);
-  // Per-object trigram-lane ordinal score, kept distinct from the merged
-  // normalized_rank so recall can read substring/CJK matches separately from
-  // word-level porter/exact ranks. see also: recall-service trigram_fts stream.
-  const trigramScoreByObjectId = new Map<string, number>();
-  trigramRows.forEach((row, index) => {
-    const score = trigramScores[index] ?? 0;
-    trigramScoreByObjectId.set(
-      row.object_id,
-      Math.max(trigramScoreByObjectId.get(row.object_id) ?? 0, score)
-    );
-  });
-  const byObjectId = new Map<
-    string,
-    Readonly<MemoryEntryKeywordSearchResult & { sourcePriority: number; sourceOrder: number }>
-  >();
-
-  // A lower sourcePriority wins ties: exact short-token matches (0) outrank
-  // word-level porter BM25 (1), which outranks trigram substring matches (2).
-  const considerRow = (
-    objectId: string,
-    normalizedRank: number,
-    sourcePriority: number,
-    sourceOrder: number
-  ): void => {
-    const existing = byObjectId.get(objectId);
-
-    if (
-      existing !== undefined &&
-      (existing.normalized_rank > normalizedRank ||
-        (existing.normalized_rank === normalizedRank && existing.sourcePriority <= sourcePriority))
-    ) {
-      return;
-    }
-
-    byObjectId.set(
-      objectId,
-      Object.freeze({
-        object_id: objectId,
-        normalized_rank: normalizedRank,
-        sourcePriority,
-        sourceOrder
-      })
-    );
-  };
+  const trigramScoreByObjectId = buildTrigramScoreByObjectId(trigramRows, trigramScores);
+  const byObjectId = new Map<string, RankedKeywordSearchResult>();
 
   exactRows.forEach((row, index) => {
-    considerRow(row.object_id, exactScores[index] ?? 0, 0, index);
+    considerKeywordRow(byObjectId, row.object_id, exactScores[index] ?? 0, 0, index);
   });
 
   porterRows.forEach((row, index) => {
-    considerRow(row.object_id, porterScores[index] ?? 0, 1, index);
+    considerKeywordRow(byObjectId, row.object_id, porterScores[index] ?? 0, 1, index);
   });
 
   trigramRows.forEach((row, index) => {
-    considerRow(row.object_id, trigramScores[index] ?? 0, 2, index);
+    considerKeywordRow(byObjectId, row.object_id, trigramScores[index] ?? 0, 2, index);
   });
 
   return Object.freeze(
     [...byObjectId.values()]
-      .sort((left, right) => {
-        const scoreDelta = right.normalized_rank - left.normalized_rank;
-        if (scoreDelta !== 0) {
-          return scoreDelta;
-        }
-
-        const sourceDelta = left.sourcePriority - right.sourcePriority;
-        if (sourceDelta !== 0) {
-          return sourceDelta;
-        }
-
-        const orderDelta = left.sourceOrder - right.sourceOrder;
-        if (orderDelta !== 0) {
-          return orderDelta;
-        }
-
-        return left.object_id.localeCompare(right.object_id);
-      })
+      .sort(compareKeywordRows)
       .slice(0, limit)
-      .map((row) => {
-        const trigramRank = trigramScoreByObjectId.get(row.object_id) ?? 0;
-        return Object.freeze({
-          object_id: row.object_id,
-          normalized_rank: row.normalized_rank,
-          ...(trigramRank > 0 ? { trigram_rank: trigramRank } : {})
-        });
-      })
+      .map((row) => toKeywordSearchResult(row, trigramScoreByObjectId))
   );
+}
+
+function buildTrigramScoreByObjectId(
+  trigramRows: readonly FtsKeywordSearchRow[],
+  trigramScores: readonly number[]
+): ReadonlyMap<string, number> {
+  const scoreByObjectId = new Map<string, number>();
+  trigramRows.forEach((row, index) => {
+    const score = trigramScores[index] ?? 0;
+    scoreByObjectId.set(row.object_id, Math.max(scoreByObjectId.get(row.object_id) ?? 0, score));
+  });
+  return scoreByObjectId;
+}
+
+function considerKeywordRow(
+  byObjectId: Map<string, RankedKeywordSearchResult>,
+  objectId: string,
+  normalizedRank: number,
+  sourcePriority: number,
+  sourceOrder: number
+): void {
+  const existing = byObjectId.get(objectId);
+  if (
+    existing !== undefined &&
+    (existing.normalized_rank > normalizedRank ||
+      (existing.normalized_rank === normalizedRank && existing.sourcePriority <= sourcePriority))
+  ) {
+    return;
+  }
+  byObjectId.set(
+    objectId,
+    Object.freeze({ object_id: objectId, normalized_rank: normalizedRank, sourcePriority, sourceOrder })
+  );
+}
+
+function compareKeywordRows(left: RankedKeywordSearchResult, right: RankedKeywordSearchResult): number {
+  return (
+    right.normalized_rank - left.normalized_rank ||
+    left.sourcePriority - right.sourcePriority ||
+    left.sourceOrder - right.sourceOrder ||
+    left.object_id.localeCompare(right.object_id)
+  );
+}
+
+function toKeywordSearchResult(
+  row: RankedKeywordSearchResult,
+  trigramScoreByObjectId: ReadonlyMap<string, number>
+): Readonly<MemoryEntryKeywordSearchResult> {
+  const trigramRank = trigramScoreByObjectId.get(row.object_id) ?? 0;
+  return Object.freeze({
+    object_id: row.object_id,
+    normalized_rank: row.normalized_rank,
+    ...(trigramRank > 0 ? { trigram_rank: trigramRank } : {})
+  });
 }
 
 export function buildGroupedOrdinalScores<T>(

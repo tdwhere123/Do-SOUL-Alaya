@@ -20,6 +20,13 @@ interface PreparedStatement {
   get(...params: readonly unknown[]): unknown;
 }
 
+interface WorkspaceEngineStatements {
+  readonly upsertBinding: PreparedStatement;
+  readonly updateWorkspace: PreparedStatement;
+  readonly getWorkspaceById: PreparedStatement;
+  readonly getBindingById: PreparedStatement;
+}
+
 interface WorkspaceRow {
   readonly workspace_id: string;
   readonly name: string;
@@ -52,10 +59,7 @@ export interface SqliteWorkspaceEngineConfigRepoOptions {
 }
 
 export class SqliteWorkspaceEngineConfigRepo implements WorkspaceEngineConfigRepoPort {
-  private upsertBindingStatement: PreparedStatement | null = null;
-  private updateWorkspaceStatement: PreparedStatement | null = null;
-  private getWorkspaceByIdStatement: PreparedStatement | null = null;
-  private getBindingByIdStatement: PreparedStatement | null = null;
+  private statements: WorkspaceEngineStatements | null = null;
 
   public constructor(
     private readonly db: StorageDatabase,
@@ -74,148 +78,178 @@ export class SqliteWorkspaceEngineConfigRepo implements WorkspaceEngineConfigRep
     const statements = this.ensureStatements();
 
     try {
-      statements.upsertBinding.run(
-        input.binding_id,
-        input.workspace_id,
-        input.binding.provider_type,
-        input.binding.base_url,
-        input.binding.api_key,
-        input.binding.model,
-        JSON.stringify(input.binding.config),
-        input.binding.enable_tools !== undefined ? (input.binding.enable_tools ? 1 : 0) : null,
-        now,
-        now
-      );
-      this.options.onAfterBindingUpsert?.();
-
-      const workspaceUpdate = statements.updateWorkspace.run(input.binding_id, input.workspace_id);
-      if (workspaceUpdate.changes === 0) {
-        throw new StorageError("NOT_FOUND", `Workspace ${input.workspace_id} was not found.`);
-      }
-
-      const workspaceRow = statements.getWorkspaceById.get(input.workspace_id) as WorkspaceRow | undefined;
-      if (workspaceRow === undefined) {
-        throw new StorageError("NOT_FOUND", `Workspace ${input.workspace_id} was not found after update.`);
-      }
-
-      const bindingRow = statements.getBindingById.get(input.binding_id) as EngineBindingRow | undefined;
-      if (bindingRow === undefined) {
-        throw new StorageError("NOT_FOUND", `Engine binding ${input.binding_id} was not found after upsert.`);
-      }
-
-      const workspace = parseWorkspace(workspaceRow);
-      const binding = parseEngineBinding(bindingRow);
-
-      if (binding.workspace_id !== workspace.workspace_id) {
-        throw new StorageError(
-          "QUERY_FAILED",
-          `Engine binding ${binding.binding_id} does not belong to workspace ${workspace.workspace_id}.`
-        );
-      }
-
-      return {
-        workspace,
-        binding
-      };
+      this.persistBindingRecord(statements, input, now);
+      this.updateWorkspaceDefaultBinding(statements, input.workspace_id, input.binding_id);
+      const workspace = this.readWorkspaceRecord(statements, input.workspace_id);
+      const binding = this.readBindingRecord(statements, input.binding_id);
+      this.assertBindingBelongsToWorkspace(workspace, binding);
+      return { workspace, binding };
     } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
+      throw this.wrapUpsertError(input.workspace_id, error);
+    }
+  }
 
+  private persistBindingRecord(
+    statements: WorkspaceEngineStatements,
+    input: {
+      readonly workspace_id: string;
+      readonly binding_id: string;
+      readonly binding: EngineBindingInput;
+    },
+    now: string
+  ): void {
+    statements.upsertBinding.run(
+      input.binding_id,
+      input.workspace_id,
+      input.binding.provider_type,
+      input.binding.base_url,
+      input.binding.api_key,
+      input.binding.model,
+      JSON.stringify(input.binding.config),
+      input.binding.enable_tools !== undefined ? (input.binding.enable_tools ? 1 : 0) : null,
+      now,
+      now
+    );
+    this.options.onAfterBindingUpsert?.();
+  }
+
+  private updateWorkspaceDefaultBinding(
+    statements: WorkspaceEngineStatements,
+    workspaceId: string,
+    bindingId: string
+  ): void {
+    const workspaceUpdate = statements.updateWorkspace.run(bindingId, workspaceId);
+    if (workspaceUpdate.changes === 0) {
+      throw new StorageError("NOT_FOUND", `Workspace ${workspaceId} was not found.`);
+    }
+  }
+
+  private readWorkspaceRecord(statements: WorkspaceEngineStatements, workspaceId: string): Workspace {
+    const workspaceRow = statements.getWorkspaceById.get(workspaceId) as WorkspaceRow | undefined;
+    if (workspaceRow === undefined) {
+      throw new StorageError("NOT_FOUND", `Workspace ${workspaceId} was not found after update.`);
+    }
+    return parseWorkspace(workspaceRow);
+  }
+
+  private readBindingRecord(statements: WorkspaceEngineStatements, bindingId: string): EngineBindingRecord {
+    const bindingRow = statements.getBindingById.get(bindingId) as EngineBindingRow | undefined;
+    if (bindingRow === undefined) {
+      throw new StorageError("NOT_FOUND", `Engine binding ${bindingId} was not found after upsert.`);
+    }
+    return parseEngineBinding(bindingRow);
+  }
+
+  private assertBindingBelongsToWorkspace(workspace: Workspace, binding: EngineBindingRecord): void {
+    if (binding.workspace_id !== workspace.workspace_id) {
       throw new StorageError(
         "QUERY_FAILED",
-        `Failed to atomically persist conversation engine config for workspace ${input.workspace_id}.`,
-        error
+        `Engine binding ${binding.binding_id} does not belong to workspace ${workspace.workspace_id}.`
       );
     }
   }
 
-  private ensureStatements(): {
-    readonly upsertBinding: PreparedStatement;
-    readonly updateWorkspace: PreparedStatement;
-    readonly getWorkspaceById: PreparedStatement;
-    readonly getBindingById: PreparedStatement;
-  } {
-    if (
-      this.upsertBindingStatement !== null &&
-      this.updateWorkspaceStatement !== null &&
-      this.getWorkspaceByIdStatement !== null &&
-      this.getBindingByIdStatement !== null
-    ) {
-      return {
-        upsertBinding: this.upsertBindingStatement,
-        updateWorkspace: this.updateWorkspaceStatement,
-        getWorkspaceById: this.getWorkspaceByIdStatement,
-        getBindingById: this.getBindingByIdStatement
-      };
+  private wrapUpsertError(workspaceId: string, error: unknown): StorageError {
+    if (error instanceof StorageError) {
+      return error;
     }
+    return new StorageError(
+      "QUERY_FAILED",
+      `Failed to atomically persist conversation engine config for workspace ${workspaceId}.`,
+      error
+    );
+  }
 
+  private ensureStatements(): WorkspaceEngineStatements {
+    if (this.statements !== null) {
+      return this.statements;
+    }
+    this.assertPrepareAvailable();
+    this.statements = createWorkspaceEngineStatements(this.db);
+    return this.statements;
+  }
+
+  private assertPrepareAvailable(): void {
     if (typeof this.db.connection.prepare !== "function") {
       throw new StorageError(
         "QUERY_FAILED",
         "SQLite connection does not provide prepare(); conversation engine-config persistence is unavailable."
       );
     }
-
-    this.upsertBindingStatement = this.db.connection.prepare(`
-      INSERT INTO engine_bindings (
-        binding_id,
-        workspace_id,
-        provider_type,
-        base_url,
-        api_key,
-        model,
-        config_json,
-        enable_tools,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    this.updateWorkspaceStatement = this.db.connection.prepare(`
-      UPDATE workspaces
-      SET default_engine_binding = ?, default_engine_class = 'conversation_engine'
-      WHERE workspace_id = ?
-    `);
-    this.getWorkspaceByIdStatement = this.db.connection.prepare(`
-      SELECT
-        workspace_id,
-        name,
-        root_path,
-        workspace_kind,
-        repo_path,
-        default_engine_binding,
-        default_engine_class,
-        workspace_state,
-        created_at,
-        archived_at
-      FROM workspaces
-      WHERE workspace_id = ?
-      LIMIT 1
-    `);
-    this.getBindingByIdStatement = this.db.connection.prepare(`
-      SELECT
-        binding_id,
-        workspace_id,
-        provider_type,
-        base_url,
-        api_key,
-        model,
-        config_json,
-        enable_tools,
-        created_at,
-        updated_at
-      FROM engine_bindings
-      WHERE binding_id = ?
-      LIMIT 1
-    `);
-
-    return {
-      upsertBinding: this.upsertBindingStatement,
-      updateWorkspace: this.updateWorkspaceStatement,
-      getWorkspaceById: this.getWorkspaceByIdStatement,
-      getBindingById: this.getBindingByIdStatement
-    };
   }
+
+}
+
+function createWorkspaceEngineStatements(db: StorageDatabase): WorkspaceEngineStatements {
+  return {
+    upsertBinding: prepareUpsertBindingStatement(db),
+    updateWorkspace: prepareUpdateWorkspaceStatement(db),
+    getWorkspaceById: prepareGetWorkspaceByIdStatement(db),
+    getBindingById: prepareGetBindingByIdStatement(db)
+  };
+}
+
+function prepareUpsertBindingStatement(db: StorageDatabase): PreparedStatement {
+  return db.connection.prepare(`
+    INSERT INTO engine_bindings (
+      binding_id,
+      workspace_id,
+      provider_type,
+      base_url,
+      api_key,
+      model,
+      config_json,
+      enable_tools,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+}
+
+function prepareUpdateWorkspaceStatement(db: StorageDatabase): PreparedStatement {
+  return db.connection.prepare(`
+    UPDATE workspaces
+    SET default_engine_binding = ?, default_engine_class = 'conversation_engine'
+    WHERE workspace_id = ?
+  `);
+}
+
+function prepareGetWorkspaceByIdStatement(db: StorageDatabase): PreparedStatement {
+  return db.connection.prepare(`
+    SELECT
+      workspace_id,
+      name,
+      root_path,
+      workspace_kind,
+      repo_path,
+      default_engine_binding,
+      default_engine_class,
+      workspace_state,
+      created_at,
+      archived_at
+    FROM workspaces
+    WHERE workspace_id = ?
+    LIMIT 1
+  `);
+}
+
+function prepareGetBindingByIdStatement(db: StorageDatabase): PreparedStatement {
+  return db.connection.prepare(`
+    SELECT
+      binding_id,
+      workspace_id,
+      provider_type,
+      base_url,
+      api_key,
+      model,
+      config_json,
+      enable_tools,
+      created_at,
+      updated_at
+    FROM engine_bindings
+    WHERE binding_id = ?
+    LIMIT 1
+  `);
 }
 
 function parseWorkspace(row: WorkspaceRow): Workspace {

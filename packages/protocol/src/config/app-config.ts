@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedLabelSchema,
+  BoundedPathSchema,
+  NonEmptyStringSchema,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 
 export const APP_CONFIG_VERSION = 1 as const;
 const AppConfigVersionSchema = z.literal(APP_CONFIG_VERSION);
@@ -10,6 +15,7 @@ function makeVersionedConfigSchema<T extends z.ZodRawShape>(shape: T) {
       config_version: AppConfigVersionSchema.optional(),
       ...shape
     })
+    .strict()
     .readonly();
 }
 
@@ -29,7 +35,7 @@ export const StrategyConfigSchema = makeVersionedConfigSchema({
 });
 
 export const EnvironmentVariablesSchema = z
-  .record(z.string(), z.string())
+  .record(BoundedLabelSchema, z.string().max(16384))
   .superRefine((value, context) => {
     for (const key of Object.keys(value)) {
       if (key.trim().length === 0) {
@@ -50,10 +56,10 @@ export const EnvironmentConfigSchema = makeVersionedConfigSchema({
 
 export const ToolchainStatusSchema = z
   .object({
-    tools: z.record(z.string(), z.boolean()).readonly(),
+    tools: z.record(BoundedLabelSchema, z.boolean()).readonly(),
     active_worktrees: NonNegativeIntSchema,
-    db_path: NonEmptyStringSchema,
-    files_dir: NonEmptyStringSchema
+    db_path: BoundedPathSchema,
+    files_dir: BoundedPathSchema
   })
   .readonly();
 
@@ -123,6 +129,8 @@ export function parseSecretRefKeychainTarget(ref: string): KeychainRefTarget | n
 
 const RuntimeSecretRefSchema = z
   .string()
+  .min(1)
+  .max(4096)
   .superRefine((value, context) => {
     if (value.startsWith(SECRET_REF_ENV_PREFIX)) {
       const envName = value.slice(SECRET_REF_ENV_PREFIX.length);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import { BoundedIdSchema, IsoDatetimeStringSchema } from "../shared/schema-primitives.js";
 
 const karmaEventKindValues = [
   "accept_gain",
@@ -21,17 +21,18 @@ export const KarmaEventKindSchema = z.enum(karmaEventKindValues);
 
 export const KarmaEventSchema = z
   .object({
-    event_id: NonEmptyStringSchema,
+    event_id: BoundedIdSchema,
     kind: KarmaEventKindSchema,
-    object_id: NonEmptyStringSchema,
+    object_id: BoundedIdSchema,
     amount: z.number().finite(),
     created_at: IsoDatetimeStringSchema,
-    workspace_id: NonEmptyStringSchema,
+    workspace_id: BoundedIdSchema,
     // Nullable run attribution: many karma events fire with no run
     // context (health-scan decay, evidence promotion). A run id is
     // recorded only when the emitting producer holds one.
-    run_id: z.string().nullable().optional()
+    run_id: BoundedIdSchema.nullable().optional()
   })
+  .strict()
   .readonly();
 
 export type KarmaEventKind = z.infer<typeof KarmaEventKindSchema>;

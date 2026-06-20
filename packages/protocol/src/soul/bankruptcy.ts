@@ -61,6 +61,7 @@ export const BudgetBankruptcyStateSchema = ControlPlaneEnvelopeSchema.unwrap()
     dossier_ref: NonEmptyStringSchema.nullable(),
     updated_at: IsoDatetimeStringSchema
   })
+  .strict()
   .readonly();
 
 export const BankruptcyDossierSchema = ControlPlaneEnvelopeSchema.unwrap()
@@ -77,6 +78,7 @@ export const BankruptcyDossierSchema = ControlPlaneEnvelopeSchema.unwrap()
     required_actions: z.array(BankruptcyActionSchema).min(1).readonly(),
     created_at: IsoDatetimeStringSchema
   })
+  .strict()
   .readonly();
 
 export type BankruptcyKind = z.infer<typeof BankruptcyKindSchema>;

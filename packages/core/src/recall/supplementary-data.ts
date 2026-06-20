@@ -28,8 +28,9 @@ import { anchorMemoryId, uniqueStrings } from "./path-relations.js";
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 export const SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY = 16;
+const MAX_REFS_PER_MEMORY = 8;
 
-export async function collectSupplementaryData(params: {
+interface CollectSupplementaryDataParams {
   readonly dependencies: Pick<
     RecallServiceDependencies,
     | "budgetPenaltyPort"
@@ -57,123 +58,18 @@ export async function collectSupplementaryData(params: {
   readonly coarseEntitySeedScores: Readonly<Record<string, number>>;
   readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
   readonly coarsePathSuppressionScores: Readonly<Record<string, number>>;
-}): Promise<RecallSupplementaryData> {
+}
+
+export async function collectSupplementaryData(
+  params: CollectSupplementaryDataParams
+): Promise<RecallSupplementaryData> {
   const candidates = params.candidates;
-
-  // graph_support is a weighted inbound aggregate across edge types; the
-  // storage repo owns the concrete edge_type weight map.
-  const graphSupportCounts: Record<string, number> = Object.fromEntries(
-    await mapWithConcurrency(candidates, SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY, async (candidate) => {
-      if (params.dependencies.graphSupportPort === undefined) {
-        return [candidate.object_id, 0] as const;
-      }
-      try {
-        const count = await params.dependencies.graphSupportPort.countInboundEdgesWeighted(
-          candidate.object_id,
-          params.workspaceId
-        );
-        return [candidate.object_id, count] as const;
-      } catch (error) {
-        params.warn("graph support lookup failed", {
-          workspace_id: params.workspaceId,
-          memory_id: candidate.object_id,
-          error: toErrorMessage(error)
-        });
-        return [candidate.object_id, 0] as const;
-      }
-    })
-  );
-  const recallEdgeCounts: Record<string, number> = Object.fromEntries(
-    await mapWithConcurrency(candidates, SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY, async (candidate) => {
-      if (params.dependencies.graphSupportPort?.countInboundRecalls === undefined) {
-        return [candidate.object_id, 0] as const;
-      }
-      try {
-        const count = await params.dependencies.graphSupportPort.countInboundRecalls(
-          candidate.object_id,
-          params.workspaceId
-        );
-        return [candidate.object_id, count] as const;
-      } catch (error) {
-        params.warn("recall edge count lookup failed", {
-          workspace_id: params.workspaceId,
-          memory_id: candidate.object_id,
-          error: toErrorMessage(error)
-        });
-        return [candidate.object_id, 0] as const;
-      }
-    })
-  );
-
-  let budgetPenaltyFactor = 0;
-  if (params.runId !== null && params.dependencies.budgetPenaltyPort !== undefined) {
-    const snapshot = await params.dependencies.budgetPenaltyPort.getSnapshot(params.runId);
-    budgetPenaltyFactor = mapBudgetPenalty(snapshot);
-  }
-
-  let plasticityFactors: Readonly<Record<string, number>> = Object.freeze({});
-  if (params.dependencies.pathPlasticityPort !== undefined && candidates.length > 0) {
-    try {
-      const strengthMap = await params.dependencies.pathPlasticityPort.getStrengthByMemoryId(
-        params.workspaceId,
-        candidates.map((candidate) => candidate.object_id)
-      );
-      plasticityFactors = Object.freeze(
-        Object.fromEntries(
-          [...strengthMap.entries()].map(([memoryId, strength]) => [memoryId, clamp01(strength)])
-        )
-      );
-    } catch (error) {
-      // Plasticity is a recall supplement; a port failure must not block
-      // the recall request. Fall back to no plasticity boost.
-      params.warn("path plasticity port lookup failed", {
-        workspace_id: params.workspaceId,
-        candidate_count: candidates.length,
-        error: toErrorMessage(error)
-      });
-    }
-  }
-
-  const graphAndPathCold =
-    candidates.length > 0 &&
-    candidates.every(
-      (candidate) =>
-        normalizeGraphSupport(graphSupportCounts[candidate.object_id] ?? 0) === 0 &&
-        clamp01(plasticityFactors[candidate.object_id] ?? 0) === 0
-    );
-  const recallsEdgeCount = Object.values(recallEdgeCounts).reduce((sum, count) => sum + count, 0);
-  const recallsColdScore =
-    params.dependencies.graphSupportPort?.countInboundRecalls === undefined
-      ? (graphAndPathCold ? 1 : 0)
-      : clamp01(1 - recallsEdgeCount / RECALLS_EDGE_COLD_THRESHOLD);
-  const graphAndPathColdScore = graphAndPathCold ? recallsColdScore : 0;
-  const weightTransferAmount = computeMaxWeightTransferAmount({
-    candidates,
-    policy: params.policy,
-    graphAndPathColdScore,
-    warn: params.warn
-  });
-
-  // Evidence gist piggy-back: for the small subset of candidates whose
-  // entry into the pool came through an evidence FTS hit, fetch the
-  // associated evidence capsules so the feature rerank can score against
-  // the gist paraphrase. A missing findByIds port (or fetch failure) is
-  // fail-soft → empty map → rerank falls back to content-only.
-  const evidenceGistsByMemoryId = await collectEvidenceGistsByMemoryId({
-    dependencies: params.dependencies,
-    warn: params.warn,
-    workspaceId: params.workspaceId,
-    candidates,
-    coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
-    coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
-  });
-
-  const governanceCeilingByMemoryId = await collectGovernanceCeilings({
-    dependencies: params.dependencies,
-    warn: params.warn,
-    workspaceId: params.workspaceId,
-    candidates
-  });
+  const graphSupportCounts = await collectGraphSupportCounts(params);
+  const recallEdgeCounts = await collectRecallEdgeCounts(params);
+  const budgetPenaltyFactor = await collectBudgetPenaltyFactor(params);
+  const plasticityFactors = await collectPlasticityFactors(params);
+  const coldMetrics = computeColdGraphPathMetrics(params, graphSupportCounts, recallEdgeCounts, plasticityFactors);
+  const evidenceAndGovernance = await collectEvidenceAndGovernanceData(params, candidates);
 
   return Object.freeze({
     queryProbes: params.queryProbes,
@@ -192,11 +88,119 @@ export async function collectSupplementaryData(params: {
     graphSupportCounts: Object.freeze(graphSupportCounts),
     budgetPenaltyFactor,
     plasticityFactors,
+    graphAndPathColdScore: coldMetrics.graphAndPathColdScore,
+    recallsEdgeCount: coldMetrics.recallsEdgeCount,
+    weightTransferAmount: coldMetrics.weightTransferAmount,
+    evidenceGistsByMemoryId: evidenceAndGovernance.evidenceGistsByMemoryId,
+    governanceCeilingByMemoryId: evidenceAndGovernance.governanceCeilingByMemoryId
+  });
+}
+
+async function collectEvidenceAndGovernanceData(
+  params: CollectSupplementaryDataParams,
+  candidates: readonly Readonly<MemoryEntry>[]
+): Promise<Readonly<{
+  readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
+  readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
+}>> {
+  const evidenceGistsByMemoryId = await collectEvidenceGistsByMemoryId({
+    dependencies: params.dependencies,
+    warn: params.warn,
+    workspaceId: params.workspaceId,
+    candidates,
+    coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
+    coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
+  });
+  const governanceCeilingByMemoryId = await collectGovernanceCeilings({
+    dependencies: params.dependencies,
+    warn: params.warn,
+    workspaceId: params.workspaceId,
+    candidates
+  });
+  return Object.freeze({ evidenceGistsByMemoryId, governanceCeilingByMemoryId });
+}
+
+async function collectGraphSupportCounts(
+  params: CollectSupplementaryDataParams
+): Promise<Record<string, number>> {
+  return Object.fromEntries(
+    await mapWithConcurrency(params.candidates, SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY, async (candidate) => {
+      if (params.dependencies.graphSupportPort === undefined) {
+        return [candidate.object_id, 0] as const;
+      }
+      try {
+        const count = await params.dependencies.graphSupportPort.countInboundEdgesWeighted(candidate.object_id, params.workspaceId);
+        return [candidate.object_id, count] as const;
+      } catch (error) {
+        params.warn("graph support lookup failed", { workspace_id: params.workspaceId, memory_id: candidate.object_id, error: toErrorMessage(error) });
+        return [candidate.object_id, 0] as const;
+      }
+    })
+  );
+}
+
+async function collectRecallEdgeCounts(
+  params: CollectSupplementaryDataParams
+): Promise<Record<string, number>> {
+  return Object.fromEntries(
+    await mapWithConcurrency(params.candidates, SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY, async (candidate) => {
+      if (params.dependencies.graphSupportPort?.countInboundRecalls === undefined) {
+        return [candidate.object_id, 0] as const;
+      }
+      try {
+        const count = await params.dependencies.graphSupportPort.countInboundRecalls(candidate.object_id, params.workspaceId);
+        return [candidate.object_id, count] as const;
+      } catch (error) {
+        params.warn("recall edge count lookup failed", { workspace_id: params.workspaceId, memory_id: candidate.object_id, error: toErrorMessage(error) });
+        return [candidate.object_id, 0] as const;
+      }
+    })
+  );
+}
+
+async function collectBudgetPenaltyFactor(params: CollectSupplementaryDataParams): Promise<number> {
+  if (params.runId === null || params.dependencies.budgetPenaltyPort === undefined) {
+    return 0;
+  }
+  return mapBudgetPenalty(await params.dependencies.budgetPenaltyPort.getSnapshot(params.runId));
+}
+
+async function collectPlasticityFactors(
+  params: CollectSupplementaryDataParams
+): Promise<Readonly<Record<string, number>>> {
+  if (params.dependencies.pathPlasticityPort === undefined || params.candidates.length === 0) {
+    return Object.freeze({});
+  }
+  try {
+    const strengthMap = await params.dependencies.pathPlasticityPort.getStrengthByMemoryId(
+      params.workspaceId,
+      params.candidates.map((candidate) => candidate.object_id)
+    );
+    return Object.freeze(Object.fromEntries([...strengthMap.entries()].map(([memoryId, strength]) => [memoryId, clamp01(strength)])));
+  } catch (error) {
+    params.warn("path plasticity port lookup failed", { workspace_id: params.workspaceId, candidate_count: params.candidates.length, error: toErrorMessage(error) });
+    return Object.freeze({});
+  }
+}
+
+function computeColdGraphPathMetrics(
+  params: CollectSupplementaryDataParams,
+  graphSupportCounts: Readonly<Record<string, number>>,
+  recallEdgeCounts: Readonly<Record<string, number>>,
+  plasticityFactors: Readonly<Record<string, number>>
+): Readonly<{ readonly graphAndPathColdScore: number; readonly recallsEdgeCount: number; readonly weightTransferAmount: number }> {
+  const graphAndPathCold = params.candidates.length > 0 && params.candidates.every(
+    (candidate) => normalizeGraphSupport(graphSupportCounts[candidate.object_id] ?? 0) === 0 && clamp01(plasticityFactors[candidate.object_id] ?? 0) === 0
+  );
+  const recallsEdgeCount = Object.values(recallEdgeCounts).reduce((sum, count) => sum + count, 0);
+  const recallsColdScore = params.dependencies.graphSupportPort?.countInboundRecalls === undefined
+    ? (graphAndPathCold ? 1 : 0)
+    : clamp01(1 - recallsEdgeCount / RECALLS_EDGE_COLD_THRESHOLD);
+  const graphAndPathColdScore = graphAndPathCold ? recallsColdScore : 0;
+  return Object.freeze({
     graphAndPathColdScore,
     recallsEdgeCount,
-    weightTransferAmount,
-    evidenceGistsByMemoryId,
-    governanceCeilingByMemoryId
+    weightTransferAmount: computeMaxWeightTransferAmount({ candidates: params.candidates, policy: params.policy, graphAndPathColdScore, warn: params.warn })
   });
 }
 
@@ -208,104 +212,32 @@ async function collectEvidenceGistsByMemoryId(params: {
   readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
 }): Promise<Readonly<Record<string, string>>> {
-  const candidates = params.candidates;
-  const coarseEvidenceFtsRanksPerRef = params.coarseEvidenceFtsRanksPerRef;
   const evidenceSearchPort = params.dependencies.evidenceSearchPort;
   if (evidenceSearchPort?.findByIds === undefined) {
     return Object.freeze({});
   }
-  // Restrict to candidates that already landed in the pool through an
-  // evidence FTS hit — their gists are the ones whose paraphrase carries
-  // recall-relevant semantics. Avoids an unbounded findByIds over every
-  // memory's full evidence_refs set.
-  const relevantCandidates = candidates.filter(
-    (entry) =>
-      entry.evidence_refs.length > 0 &&
-      (params.coarseEvidenceFtsRanks[entry.object_id] ?? 0) > 0
+  const relevantCandidates = collectRelevantEvidenceCandidates(
+    params.candidates,
+    params.coarseEvidenceFtsRanks
   );
   if (relevantCandidates.length === 0) {
     return Object.freeze({});
   }
-  // invariant: findByIds payload bounded by evidence-FTS hit set, not the
-  // candidate's full evidence_refs cardinality. see also: P2-R2-E.
-  //
-  // invariant: per-memory evidence_refs cardinality is capped at
-  // MAX_REFS_PER_MEMORY before the findByIds payload is built. A typical
-  // memory carries 1-3 evidence_refs; an outlier with thousands of refs
-  // (whether legitimate aggregation or adversarial) would dominate the
-  // tokenizer / new Set fan-out inside the rerank loop. Cap reflects the
-  // semantic assumption "one memory should not need more than this many
-  // evidence anchors to recall well" — refs beyond the cap are sorted by
-  // per-ref evidence-FTS rank and only the top MAX_REFS_PER_MEMORY are
-  // forwarded; the best-rank ref (used by the gist picker below) is
-  // always preserved.
-  const MAX_REFS_PER_MEMORY = 8;
-  const evidenceIds = uniqueStrings(
-    relevantCandidates.flatMap((entry) => {
-      const hitRefs = entry.evidence_refs.filter(
-        (ref) => (coarseEvidenceFtsRanksPerRef[ref] ?? 0) > 0
-      );
-      if (hitRefs.length <= MAX_REFS_PER_MEMORY) {
-        return hitRefs;
-      }
-      return [...hitRefs]
-        .sort(
-          (left, right) =>
-            (coarseEvidenceFtsRanksPerRef[right] ?? 0) -
-            (coarseEvidenceFtsRanksPerRef[left] ?? 0)
-        )
-        .slice(0, MAX_REFS_PER_MEMORY);
-    })
+  const evidenceIds = collectRelevantEvidenceIds(
+    relevantCandidates,
+    params.coarseEvidenceFtsRanksPerRef
   );
   if (evidenceIds.length === 0) {
     return Object.freeze({});
   }
   try {
     const evidenceCapsules = await evidenceSearchPort.findByIds(params.workspaceId, evidenceIds);
-    const gistById = new Map<string, string>();
-    for (const evidence of evidenceCapsules) {
-      if (evidence.workspace_id !== params.workspaceId) {
-        continue;
-      }
-      const gist = evidence.gist?.trim() ?? "";
-      if (gist.length > 0) {
-        gistById.set(evidence.object_id, gist);
-      }
-    }
-    const gistsByMemory: Record<string, string> = {};
-    for (const entry of relevantCandidates) {
-      // invariant: pick gist from the highest-ranked ref in evidence_refs
-      // (per coarseEvidenceFtsRanksPerRef); stable by evidence_refs order
-      // on ties. see also: P2-R2-B in collectEvidenceGistsByMemoryId callers.
-      const refsWithRank = entry.evidence_refs.map((ref) => Object.freeze({
-        ref,
-        rank: coarseEvidenceFtsRanksPerRef[ref] ?? 0
-      }));
-      const orderedRefs = [...refsWithRank].sort((left, right) => right.rank - left.rank);
-      for (const { ref } of orderedRefs) {
-        const gist = gistById.get(ref);
-        if (gist !== undefined && gist.length > 0) {
-          gistsByMemory[entry.object_id] = gist;
-          break;
-        }
-      }
-      // fallback: aggregated rank > 0 but no per-ref rank populated; mirrors
-      // legacy first-non-empty-gist rule so future producers that only
-      // populate the aggregate stay correct.
-      // unreachable under current producer (coarseEvidenceFtsRanksPerRef
-      // always populates every ref in evidence_refs); kept for forward-compat
-      // with future producers that only emit the aggregate rank.
-      if (gistsByMemory[entry.object_id] === undefined) {
-        for (const ref of entry.evidence_refs) {
-          const gist = gistById.get(ref);
-          if (gist !== undefined && gist.length > 0) {
-            gistsByMemory[entry.object_id] = gist;
-            break;
-          }
-        }
-      }
-    }
-    return Object.freeze(gistsByMemory);
+    const gistById = buildEvidenceGistById(params.workspaceId, evidenceCapsules);
+    return buildMemoryEvidenceGists(
+      relevantCandidates,
+      params.coarseEvidenceFtsRanksPerRef,
+      gistById
+    );
   } catch (error) {
     params.warn("evidence gist lookup for rerank failed", {
       workspace_id: params.workspaceId,
@@ -313,6 +245,119 @@ async function collectEvidenceGistsByMemoryId(params: {
     });
     return Object.freeze({});
   }
+}
+
+function collectRelevantEvidenceCandidates(
+  candidates: readonly Readonly<MemoryEntry>[],
+  coarseEvidenceFtsRanks: Readonly<Record<string, number>>
+): readonly Readonly<MemoryEntry>[] {
+  // Restrict to candidates that already landed in the pool through an
+  // evidence FTS hit — their gists are the ones whose paraphrase carries
+  // recall-relevant semantics. Avoids an unbounded findByIds over every
+  // memory's full evidence_refs set.
+  return candidates.filter(
+    (entry) =>
+      entry.evidence_refs.length > 0 &&
+      (coarseEvidenceFtsRanks[entry.object_id] ?? 0) > 0
+  );
+}
+
+function collectRelevantEvidenceIds(
+  candidates: readonly Readonly<MemoryEntry>[],
+  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
+): readonly string[] {
+  // invariant: findByIds payload bounded by evidence-FTS hit set, not the
+  // candidate's full evidence_refs cardinality. see also: P2-R2-E.
+  return uniqueStrings(
+    candidates.flatMap((entry) =>
+      selectRelevantEvidenceRefs(entry, coarseEvidenceFtsRanksPerRef)
+    )
+  );
+}
+
+function selectRelevantEvidenceRefs(
+  entry: Readonly<MemoryEntry>,
+  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
+): readonly string[] {
+  // invariant: per-memory evidence_refs cardinality is capped before the
+  // findByIds payload is built so a pathological memory cannot dominate the
+  // rerank loop's tokenizer / Set fan-out.
+  const hitRefs = entry.evidence_refs.filter(
+    (ref) => (coarseEvidenceFtsRanksPerRef[ref] ?? 0) > 0
+  );
+  if (hitRefs.length <= MAX_REFS_PER_MEMORY) {
+    return hitRefs;
+  }
+  return [...hitRefs]
+    .sort(
+      (left, right) =>
+        (coarseEvidenceFtsRanksPerRef[right] ?? 0) -
+        (coarseEvidenceFtsRanksPerRef[left] ?? 0)
+    )
+    .slice(0, MAX_REFS_PER_MEMORY);
+}
+
+function buildEvidenceGistById(
+  workspaceId: string,
+  evidenceCapsules: readonly Readonly<{ readonly workspace_id: string; readonly object_id: string; readonly gist?: string | null }>[]
+): ReadonlyMap<string, string> {
+  const gistById = new Map<string, string>();
+  for (const evidence of evidenceCapsules) {
+    if (evidence.workspace_id !== workspaceId) {
+      continue;
+    }
+    const gist = evidence.gist?.trim() ?? "";
+    if (gist.length > 0) {
+      gistById.set(evidence.object_id, gist);
+    }
+  }
+  return gistById;
+}
+
+function buildMemoryEvidenceGists(
+  candidates: readonly Readonly<MemoryEntry>[],
+  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>,
+  gistById: ReadonlyMap<string, string>
+): Readonly<Record<string, string>> {
+  const gistsByMemory: Record<string, string> = {};
+  for (const entry of candidates) {
+    const gist =
+      pickRankedEvidenceGist(entry, coarseEvidenceFtsRanksPerRef, gistById) ??
+      pickFallbackEvidenceGist(entry, gistById);
+    if (gist !== undefined) {
+      gistsByMemory[entry.object_id] = gist;
+    }
+  }
+  return Object.freeze(gistsByMemory);
+}
+
+function pickRankedEvidenceGist(
+  entry: Readonly<MemoryEntry>,
+  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>,
+  gistById: ReadonlyMap<string, string>
+): string | undefined {
+  // invariant: pick gist from the highest-ranked ref in evidence_refs
+  // (per coarseEvidenceFtsRanksPerRef); stable by evidence_refs order on ties.
+  const orderedRefs = [...entry.evidence_refs].sort(
+    (left, right) =>
+      (coarseEvidenceFtsRanksPerRef[right] ?? 0) -
+      (coarseEvidenceFtsRanksPerRef[left] ?? 0)
+  );
+  return orderedRefs
+    .map((ref) => gistById.get(ref))
+    .find((gist) => gist !== undefined && gist.length > 0);
+}
+
+function pickFallbackEvidenceGist(
+  entry: Readonly<MemoryEntry>,
+  gistById: ReadonlyMap<string, string>
+): string | undefined {
+  // fallback: aggregated rank > 0 but no per-ref rank populated; mirrors the
+  // legacy first-non-empty-gist rule for future producers that only emit the
+  // aggregate rank.
+  return entry.evidence_refs
+    .map((ref) => gistById.get(ref))
+    .find((gist) => gist !== undefined && gist.length > 0);
 }
 
 async function mapWithConcurrency<T, R>(
@@ -349,44 +394,53 @@ async function collectGovernanceCeilings(params: {
   readonly workspaceId: string;
   readonly candidates: readonly Readonly<MemoryEntry>[];
 }): Promise<Readonly<Record<string, ManifestationState>>> {
-  const candidates = params.candidates;
   const pathExpansionPort = params.dependencies.pathExpansionPort;
-  if (pathExpansionPort === undefined || candidates.length === 0) {
+  if (pathExpansionPort === undefined || params.candidates.length === 0) {
     return Object.freeze({});
   }
-  const candidateIds = new Set(candidates.map((candidate) => candidate.object_id));
-  const anchors: PathAnchorRef[] = [...candidateIds].map((object_id) => ({
-    kind: "object",
-    object_id
-  }));
+  const candidateIds = new Set(params.candidates.map((candidate) => candidate.object_id));
+  const anchors = buildGovernanceCandidateAnchors(candidateIds);
   let paths: readonly Readonly<PathRelation>[];
   try {
     paths = await pathExpansionPort.findByAnchors(params.workspaceId, anchors);
   } catch (error) {
     params.warn("governance ceiling path lookup failed", {
       workspace_id: params.workspaceId,
-      candidate_count: candidates.length,
+      candidate_count: params.candidates.length,
       error: toErrorMessage(error)
     });
-    // fail-CLOSED: cap every candidate to the safe band so a transient read
-    // error cannot lift a governed memory to its full strength tier.
-    const failsafeCeilings: Record<string, ManifestationState> = {};
-    for (const object_id of candidateIds) {
-      failsafeCeilings[object_id] = GOVERNANCE_CEILING_FAILSAFE_BAND;
-    }
-    return Object.freeze(failsafeCeilings);
+    return buildGovernanceFailsafeCeilings(candidateIds);
   }
+  const contributionsByMemoryId = collectGovernanceContributions(paths, candidateIds);
+  return buildGovernanceCeilingByMemoryId(contributionsByMemoryId);
+}
+
+function buildGovernanceCandidateAnchors(
+  candidateIds: ReadonlySet<string>
+): readonly PathAnchorRef[] {
+  return [...candidateIds].map((object_id) => ({ kind: "object", object_id }));
+}
+
+function buildGovernanceFailsafeCeilings(
+  candidateIds: ReadonlySet<string>
+): Readonly<Record<string, ManifestationState>> {
+  // fail-CLOSED: cap every candidate to the safe band so a transient read
+  // error cannot lift a governed memory to its full strength tier.
+  const failsafeCeilings: Record<string, ManifestationState> = {};
+  for (const object_id of candidateIds) {
+    failsafeCeilings[object_id] = GOVERNANCE_CEILING_FAILSAFE_BAND;
+  }
+  return Object.freeze(failsafeCeilings);
+}
+
+function collectGovernanceContributions(
+  paths: readonly Readonly<PathRelation>[],
+  candidateIds: ReadonlySet<string>
+): ReadonlyMap<string, PathGovernanceContribution[]> {
   const contributionsByMemoryId = new Map<string, PathGovernanceContribution[]>();
   for (const path of paths) {
-    if (!isPathRecallEligible(path)) {
-      continue;
-    }
-    // invariant: the ceiling is INBOUND — keyed on the path's target memory.
-    // findByAnchors also returns paths where the candidate is the SOURCE
-    // anchor; those govern the path's target, not the source, so they must
-    // not raise/lower the source memory's ceiling.
-    const targetMemoryId = anchorMemoryId(path.anchors.target_anchor);
-    if (targetMemoryId === undefined || !candidateIds.has(targetMemoryId)) {
+    const targetMemoryId = resolveGovernedTargetMemoryId(path, candidateIds);
+    if (targetMemoryId === undefined) {
       continue;
     }
     const contribution: PathGovernanceContribution = {
@@ -400,6 +454,29 @@ async function collectGovernanceCeilings(params: {
       contributions.push(contribution);
     }
   }
+  return contributionsByMemoryId;
+}
+
+function resolveGovernedTargetMemoryId(
+  path: Readonly<PathRelation>,
+  candidateIds: ReadonlySet<string>
+): string | undefined {
+  if (!isPathRecallEligible(path)) {
+    return undefined;
+  }
+  // invariant: the ceiling is INBOUND — keyed on the path's target memory.
+  // findByAnchors also returns paths where the candidate is the SOURCE anchor;
+  // those govern the path's target, not the source.
+  const targetMemoryId = anchorMemoryId(path.anchors.target_anchor);
+  if (targetMemoryId === undefined || !candidateIds.has(targetMemoryId)) {
+    return undefined;
+  }
+  return targetMemoryId;
+}
+
+function buildGovernanceCeilingByMemoryId(
+  contributionsByMemoryId: ReadonlyMap<string, readonly PathGovernanceContribution[]>
+): Readonly<Record<string, ManifestationState>> {
   const ceilingByMemoryId: Record<string, ManifestationState> = {};
   for (const [memoryId, contributions] of contributionsByMemoryId) {
     ceilingByMemoryId[memoryId] = memoryGovernanceCeiling(contributions);

@@ -3,6 +3,7 @@ import { EventTypeSchema } from "../../events/event-log.js";
 import {
   RuntimeGovernanceEventType,
   RuntimeGovernanceEventTypeSchema,
+  RuntimeSideEffectFailedPayloadSchema,
   SecurityPassthroughInitializationFailedPayloadSchema,
   parseRuntimeGovernanceEventPayload
 } from "../../events/runtime-governance.js";
@@ -56,6 +57,33 @@ describe("Phase C event validation", () => {
     expect(() =>
       SecurityPassthroughInitializationFailedPayloadSchema.parse({
         ...populatedPayload,
+        detail: "extra"
+      })
+    ).toThrow();
+  });
+
+  it("parses runtime side-effect failure events with strict keys", () => {
+    const payload = {
+      source: "EventPublisher",
+      operation: "detached_propagation",
+      subject_type: "memory_entry",
+      subject_id: "memory-1",
+      workspace_id: "workspace-1",
+      run_id: null,
+      committed_event_id: "event-1",
+      severity: "error",
+      error_name: "Error",
+      error_message: "listener failed",
+      failed_at: validTimestamp
+    } as const;
+
+    expect(RuntimeSideEffectFailedPayloadSchema.parse(payload)).toEqual(payload);
+    expect(
+      parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED, payload)
+    ).toEqual(payload);
+    expect(() =>
+      RuntimeSideEffectFailedPayloadSchema.parse({
+        ...payload,
         detail: "extra"
       })
     ).toThrow();

@@ -1,20 +1,27 @@
 import { Hono } from "hono";
+
 import { describe, expect, it, vi } from "vitest";
+
 import { CoreError } from "@do-soul/alaya-core";
+
 import {
   RecallContextEventType,
   type EventLogEntry,
   type RecallContextEventTypeValue
 } from "@do-soul/alaya-protocol";
+
 import {
   registerRecallUtilizationRoutes,
   type RecallUtilizationRouteServices,
   type SingleUsedAnchorTelemetryEmitter
 } from "../../routes/recall-utilization.js";
+
 import type { RecallUtilizationEventLogPort } from "../../services/recall-utilization-service.js";
+
 import { registerErrorHandler } from "../../middleware/error-handler.js";
 
 const WORKSPACE_ID = "ws-1";
+
 const ISO = "2026-05-10T00:00:00.000Z";
 
 function makeRow(input: {
@@ -127,6 +134,7 @@ interface RouteResponseShape {
 }
 
 describe("recall-utilization route", () => {
+
   it("returns empty cohorts when EventLog is empty", async () => {
     const app = buildApp({
       workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
@@ -383,129 +391,5 @@ describe("recall-utilization route", () => {
     expect(emitted[0]?.runId).toBe("run-1");
     const cohort = body.data.cohorts[0]!;
     expect(cohort.single_used_anchor_count).toBe(1);
-  });
-
-  it("does not emit single_used_anchor when the report is skipped or not_applicable", async () => {
-    const emitter: SingleUsedAnchorTelemetryEmitter = { emit: vi.fn().mockResolvedValue(undefined) };
-    const rows = [
-      makeRow({
-        type: RecallContextEventType.SOUL_RECALL_DELIVERED,
-        entityId: "d_single",
-        runId: "run-1",
-        payload: deliveredPayload({ deliveryId: "d_single", runId: "run-1", pointerCount: 1 })
-      }),
-      makeRow({
-        type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
-        entityId: "d_single",
-        runId: "run-1",
-        payload: usagePayload({
-          deliveryId: "d_single",
-          runId: "run-1",
-          usageState: "skipped"
-        })
-      })
-    ];
-    const app = buildApp({
-      workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
-      eventLogRepo: fakeEventLogRepo(rows),
-      singleUsedAnchorEmitter: emitter
-    });
-    await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
-    expect(emitter.emit).not.toHaveBeenCalled();
-  });
-
-  it("swallows emitter errors so the route response stays 200", async () => {
-    const emitter: SingleUsedAnchorTelemetryEmitter = {
-      emit: vi.fn().mockRejectedValue(new Error("publish failed"))
-    };
-    const rows = [
-      makeRow({
-        type: RecallContextEventType.SOUL_RECALL_DELIVERED,
-        entityId: "d_single",
-        runId: "run-1",
-        payload: deliveredPayload({ deliveryId: "d_single", runId: "run-1", pointerCount: 1 })
-      }),
-      makeRow({
-        type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
-        entityId: "d_single",
-        runId: "run-1",
-        payload: usagePayload({ deliveryId: "d_single", runId: "run-1", usageState: "used" })
-      })
-    ];
-    const app = buildApp({
-      workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
-      eventLogRepo: fakeEventLogRepo(rows),
-      singleUsedAnchorEmitter: emitter
-    });
-    const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
-    expect(response.status).toBe(200);
-    expect(emitter.emit).toHaveBeenCalledTimes(1);
-  });
-
-  it("counts orphan-report sessions as no_recall", async () => {
-    const rows = [
-      makeRow({
-        type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
-        entityId: "orphan_a",
-        runId: "run-1",
-        payload: usagePayload({
-          deliveryId: "orphan_a",
-          runId: "run-1",
-          usageState: "not_applicable",
-          sessionId: "sess-A"
-        })
-      }),
-      makeRow({
-        type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
-        entityId: "orphan_b",
-        runId: "run-1",
-        payload: usagePayload({
-          deliveryId: "orphan_b",
-          runId: "run-1",
-          usageState: "skipped",
-          sessionId: "sess-B"
-        })
-      })
-    ];
-    const app = buildApp({
-      workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
-      eventLogRepo: fakeEventLogRepo(rows)
-    });
-    const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
-    const body = (await response.json()) as RouteResponseShape;
-    const cohort = body.data.cohorts[0]!;
-    expect(cohort.buckets.no_recall).toBe(2);
-    expect(cohort.delivery_total).toBe(0);
-  });
-
-  it("respects since and until window filters", async () => {
-    const rows = [
-      makeRow({
-        type: RecallContextEventType.SOUL_RECALL_DELIVERED,
-        entityId: "d_in",
-        runId: "run-1",
-        payload: deliveredPayload({ deliveryId: "d_in", runId: "run-1", pointerCount: 3 }),
-        createdAt: "2026-05-10T12:00:00.000Z"
-      }),
-      makeRow({
-        type: RecallContextEventType.SOUL_RECALL_DELIVERED,
-        entityId: "d_out",
-        runId: "run-2",
-        payload: deliveredPayload({ deliveryId: "d_out", runId: "run-2", pointerCount: 7 }),
-        createdAt: "2026-04-01T00:00:00.000Z"
-      })
-    ];
-    const app = buildApp({
-      workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
-      eventLogRepo: fakeEventLogRepo(rows)
-    });
-    const response = await app.request(
-      `/workspaces/${WORKSPACE_ID}/recall-utilization?since=2026-05-01T00:00:00.000Z&until=2026-05-31T23:59:59.000Z`
-    );
-    const body = (await response.json()) as RouteResponseShape;
-    expect(body.data.cohorts).toHaveLength(1);
-    expect(body.data.cohorts[0]?.delivery_total).toBe(1);
-    expect(body.data.window.since).toBe("2026-05-01T00:00:00.000Z");
-    expect(body.data.window.until).toBe("2026-05-31T23:59:59.000Z");
   });
 });

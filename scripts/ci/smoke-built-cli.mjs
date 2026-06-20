@@ -14,6 +14,7 @@ import { spawnSync } from "node:child_process";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
 const binPath = path.join(repoRoot, "bin", "alaya.mjs");
+const benchRunnerBinPath = path.join(repoRoot, "apps", "bench-runner", "bin", "alaya-bench-runner.mjs");
 
 const workDir = mkdtempSync(path.join(tmpdir(), "alaya-cli-smoke-"));
 const env = {
@@ -23,7 +24,15 @@ const env = {
 };
 
 function run(args) {
-  const result = spawnSync(process.execPath, [binPath, ...args], {
+  return runNode(binPath, args);
+}
+
+function runBench(args) {
+  return runNode(benchRunnerBinPath, args);
+}
+
+function runNode(entrypoint, args) {
+  const result = spawnSync(process.execPath, [entrypoint, ...args], {
     cwd: repoRoot,
     env,
     encoding: "utf8",
@@ -88,8 +97,33 @@ try {
     fail("tools list returned an empty catalog", JSON.stringify(tools).slice(0, 500));
   }
 
+  // 4) Self benchmark is a release gate, not an advisory. The gate fails on
+  //    R@5 below the absolute floor, and on >5pp drop when history has a
+  //    comparable previous self/synthetic run.
+  const historyRoot = path.join(workDir, "bench-history");
+  const selfBench = runBench(["self", "--history-root", historyRoot]);
+  if (selfBench.status !== 0) {
+    fail(`alaya-bench-runner self exited ${selfBench.status}`, `${selfBench.stdout}\n${selfBench.stderr}`);
+  }
+  const selfGate = spawnSync(
+    process.execPath,
+    [path.join(scriptDir, "self-benchmark-gate.mjs"), "--history-root", historyRoot],
+    {
+      cwd: repoRoot,
+      env,
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024
+    }
+  );
+  if (selfGate.error) {
+    fail(`self benchmark gate spawn failed: ${selfGate.error.message}`);
+  }
+  if (selfGate.status !== 0) {
+    fail(`self benchmark gate exited ${selfGate.status}`, `${selfGate.stdout}\n${selfGate.stderr}`);
+  }
+
   console.log(
-    `[smoke-built-cli] OK: schema v${storage.schema_version_persisted}, ${catalog.length} tools, isolated under ${workDir}`
+    `[smoke-built-cli] OK: schema v${storage.schema_version_persisted}, ${catalog.length} tools, self benchmark gated, isolated under ${workDir}`
   );
 } finally {
   rmSync(workDir, { recursive: true, force: true });

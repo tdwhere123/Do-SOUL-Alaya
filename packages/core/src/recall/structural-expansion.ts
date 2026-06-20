@@ -1,8 +1,5 @@
 import {
-  isPathRecallEligible,
-  type MemoryEntry,
-  type PathAnchorRef,
-  type PathRelation
+  type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import {
   DYNAMIC_RECALL_SEED_CAP,
@@ -10,18 +7,14 @@ import {
   type CoarseCandidateDraft
 } from "./coarse-candidates.js";
 import {
-  EDGE_TYPE_HOP_DECAY,
   compareGraphExpansionCandidateDrafts,
   createMutableGraphExpansionDiagnostics,
   freezeGraphExpansionCandidatesResult,
-  graphTraversalScoreFromPath,
   shouldReplaceGraphExpansionCandidate,
   type GraphExpansionCandidateDraft,
   type GraphExpansionCandidateSourceDiagnostic,
-  type GraphExpansionCandidatesResult,
-  type GraphExpansionFrontierNode
+  type GraphExpansionCandidatesResult
 } from "./graph-expansion.js";
-import { collectPathGraphNeighbors } from "./path-relations.js";
 import { clamp01, toErrorMessage } from "./recall-service-helpers.js";
 import type {
   RecallAdmissionPlane,
@@ -29,6 +22,7 @@ import type {
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "./recall-service-types.js";
+import { expandGraphFrontier } from "./structural-expansion-graph-frontier.js";
 
 
 type CoarseCandidateAdder = (
@@ -56,95 +50,29 @@ export async function collectEntityDerivedSeeds(params: Readonly<{
   readonly entitySeedTotalAdmitCap: number;
   readonly entitySeedMinSurfaceLength: number;
 }>): Promise<readonly Readonly<{ memoryId: string; entityConfidence: number }>[]> {
-  const port = params.entityExtractionPort;
-  const memoryRepo = params.memoryRepo;
-  if (
-    port === undefined ||
-    params.queryText === null ||
-    params.byId.size === 0 ||
-    (memoryRepo.searchByKeyword === undefined && memoryRepo.searchByKeywordWithinObjectIds === undefined)
-  ) {
+  if (shouldSkipEntitySeedCollection(params)) {
     return [];
   }
-
-  let entities: readonly Readonly<{
-    readonly surface: string;
-    readonly normalized: string;
-    readonly confidence: number;
-  }>[];
-  try {
-    entities = await port.extract(params.queryText, { maxEntities: params.entityExtractionMaxEntities });
-  } catch (error) {
-    params.warn("entity extraction failed", {
-      workspace_id: params.workspaceId,
-      error: toErrorMessage(error)
-    });
-    return [];
-  }
+  const entities = await extractSeedEntities(params);
   if (entities.length === 0) {
     return [];
   }
-
   const seedConfidenceById = new Map<string, number>();
-  let admittedTotal = 0;
   const candidateIds = [...params.byId.keys()];
+  let admittedTotal = 0;
   for (const entity of entities) {
     if (admittedTotal >= params.entitySeedTotalAdmitCap) {
       break;
     }
-    const surface = entity.surface.trim();
-    if (surface.length < params.entitySeedMinSurfaceLength) {
-      continue;
-    }
-    const perEntityLimit = entity.confidence >= 0.85
-      ? params.entitySeedPerEntityTopKStrong
-      : params.entitySeedPerEntityTopKWeak;
-    let hits: readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[];
-    try {
-      hits =
-        memoryRepo.searchByKeywordWithinObjectIds !== undefined
-          ? await memoryRepo.searchByKeywordWithinObjectIds(
-              params.workspaceId,
-              surface,
-              perEntityLimit,
-              candidateIds
-            )
-          : await memoryRepo.searchByKeyword!(params.workspaceId, surface, perEntityLimit);
-    } catch (error) {
-      params.warn("entity seed lookup failed", {
-        workspace_id: params.workspaceId,
-        entity_surface: surface,
-        error: toErrorMessage(error)
-      });
-      continue;
-    }
-    for (const hit of hits) {
-      const entry = params.byId.get(hit.object_id);
-      if (entry === undefined) {
-        continue;
-      }
-      const rawScore = clamp01(hit.normalized_rank * entity.confidence);
-      if (rawScore <= 0) {
-        continue;
-      }
-      // Zero entity-seed on any lexical overlap so one surface term cannot claim
-      // two fusion-stream slots.
-      const lexicalWeight = clamp01(params.lexicalFtsRanks.get(hit.object_id) ?? 0);
-      const score = lexicalWeight > 0 ? 0 : rawScore;
-      params.addCandidate(entry, "entity_seed", score, "entity_seed", undefined, entity.confidence);
-      const previous = seedConfidenceById.get(entry.object_id) ?? 0;
-      if (entity.confidence > previous) {
-        seedConfidenceById.set(entry.object_id, entity.confidence);
-      }
-      admittedTotal += 1;
-      if (admittedTotal >= params.entitySeedTotalAdmitCap) {
-        break;
-      }
-    }
+    admittedTotal = await admitEntitySeedsForEntity(
+      params,
+      entity,
+      candidateIds,
+      seedConfidenceById,
+      admittedTotal
+    );
   }
-  return [...seedConfidenceById.entries()].map(([memoryId, entityConfidence]) =>
-    Object.freeze({ memoryId, entityConfidence })
-  );
+  return buildEntitySeedResults(seedConfidenceById);
 }
 
 export async function addGraphExpansionCandidates(params: Readonly<{
@@ -167,6 +95,29 @@ export async function addGraphExpansionCandidates(params: Readonly<{
     return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
   }
 
+  const { entitySeedEntries, entitySeedIdSet } = collectEntityGraphExpansionSeeds(params);
+  const draftSeedEntries = collectDraftGraphExpansionSeedEntries(params, entitySeedIdSet);
+  if (draftSeedEntries.length === 0 && entitySeedEntries.length === 0) {
+    return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
+  }
+
+  const bestCandidates = new Map<string, GraphExpansionCandidateDraft>();
+  await collectDraftGraphExpansionCandidates(params, pathExpansionPort, draftSeedEntries, bestCandidates);
+  await collectEntityGraphExpansionCandidates(params, pathExpansionPort, entitySeedEntries, bestCandidates, diagnostics);
+  admitGraphExpansionCandidates(params, bestCandidates, diagnostics, candidateSources);
+  return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
+}
+
+type AddGraphExpansionCandidatesParams = Parameters<typeof addGraphExpansionCandidates>[0];
+type MutableGraphExpansionDiagnostics = ReturnType<typeof createMutableGraphExpansionDiagnostics>;
+type PathExpansionPort = NonNullable<RecallServiceDependencies["pathExpansionPort"]>;
+
+function collectEntityGraphExpansionSeeds(
+  params: AddGraphExpansionCandidatesParams
+): Readonly<{
+  readonly entitySeedEntries: readonly Readonly<MemoryEntry>[];
+  readonly entitySeedIdSet: ReadonlySet<string>;
+}> {
   const entitySeedIdSet = new Set<string>();
   const entitySeedEntries: Readonly<MemoryEntry>[] = [];
   for (const id of params.extraSeedMemoryIds ?? []) {
@@ -183,22 +134,31 @@ export async function addGraphExpansionCandidates(params: Readonly<{
       break;
     }
   }
+  return Object.freeze({ entitySeedEntries, entitySeedIdSet });
+}
+
+function collectDraftGraphExpansionSeedEntries(
+  params: AddGraphExpansionCandidatesParams,
+  entitySeedIdSet: ReadonlySet<string>
+): readonly Readonly<MemoryEntry>[] {
   const draftSeedIdAllowList = params.draftSeedIds === undefined ? null : new Set(params.draftSeedIds);
   const draftSeedsAll = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
-  const draftSeeds = draftSeedsAll.filter(
-    (seed) =>
-      !entitySeedIdSet.has(seed.entry.object_id) &&
-      (draftSeedIdAllowList === null || draftSeedIdAllowList.has(seed.entry.object_id))
-  );
+  return draftSeedsAll
+    .filter(
+      (seed) =>
+        !entitySeedIdSet.has(seed.entry.object_id) &&
+        (draftSeedIdAllowList === null || draftSeedIdAllowList.has(seed.entry.object_id))
+    )
+    .map((seed) => seed.entry);
+}
 
-  if (draftSeeds.length === 0 && entitySeedEntries.length === 0) {
-    return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
-  }
-
-  const bestCandidates = new Map<string, GraphExpansionCandidateDraft>();
-
-  if (draftSeeds.length > 0) {
-    const draftSeedEntries = draftSeeds.map((seed) => seed.entry);
+async function collectDraftGraphExpansionCandidates(
+  params: AddGraphExpansionCandidatesParams,
+  pathExpansionPort: PathExpansionPort,
+  draftSeedEntries: readonly Readonly<MemoryEntry>[],
+  bestCandidates: Map<string, GraphExpansionCandidateDraft>
+): Promise<void> {
+  if (draftSeedEntries.length > 0) {
     await expandGraphFrontier({
       workspaceId: params.workspaceId,
       byId: params.byId,
@@ -215,45 +175,77 @@ export async function addGraphExpansionCandidates(params: Readonly<{
       }
     });
   }
+}
 
+async function collectEntityGraphExpansionCandidates(
+  params: AddGraphExpansionCandidatesParams,
+  pathExpansionPort: PathExpansionPort,
+  entitySeedEntries: readonly Readonly<MemoryEntry>[],
+  bestCandidates: Map<string, GraphExpansionCandidateDraft>,
+  diagnostics: MutableGraphExpansionDiagnostics
+): Promise<void> {
   if (entitySeedEntries.length > 0) {
     diagnostics.multi_seed_fan_in_distinct_seeds = entitySeedEntries.length;
     const perSeedCandidates: Map<string, GraphExpansionCandidateDraft>[] = [];
     for (const seedEntry of entitySeedEntries) {
-      const seedMap = new Map<string, GraphExpansionCandidateDraft>();
-      await expandGraphFrontier({
-        workspaceId: params.workspaceId,
-        byId: params.byId,
-        pathExpansionPort,
-        seedEntries: [seedEntry],
-        maxGraphHops: params.maxGraphHops,
-        dynamicRecallEdgeFanout: params.dynamicRecallEdgeFanout,
-        warn: params.warn,
-        onCandidate: (candidate) => {
-          const current = seedMap.get(candidate.entry.object_id);
-          if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
-            seedMap.set(candidate.entry.object_id, candidate);
-          }
-        }
-      });
+      const seedMap = await collectSingleEntitySeedGraphCandidates(params, pathExpansionPort, seedEntry);
       diagnostics.multi_seed_fan_in_candidates_per_seed.push(seedMap.size);
       perSeedCandidates.push(seedMap);
     }
-    const fanInSeen = new Set<string>();
-    for (const seedMap of perSeedCandidates) {
-      for (const [neighborId, candidate] of seedMap) {
-        if (fanInSeen.has(neighborId)) {
-          diagnostics.multi_seed_fan_in_dedup_collisions += 1;
-        }
-        fanInSeen.add(neighborId);
-        const current = bestCandidates.get(neighborId);
-        if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
-          bestCandidates.set(neighborId, candidate);
-        }
+    mergeEntityFanInCandidates(perSeedCandidates, bestCandidates, diagnostics);
+  }
+}
+
+async function collectSingleEntitySeedGraphCandidates(
+  params: AddGraphExpansionCandidatesParams,
+  pathExpansionPort: PathExpansionPort,
+  seedEntry: Readonly<MemoryEntry>
+): Promise<Map<string, GraphExpansionCandidateDraft>> {
+  const seedMap = new Map<string, GraphExpansionCandidateDraft>();
+  await expandGraphFrontier({
+    workspaceId: params.workspaceId,
+    byId: params.byId,
+    pathExpansionPort,
+    seedEntries: [seedEntry],
+    maxGraphHops: params.maxGraphHops,
+    dynamicRecallEdgeFanout: params.dynamicRecallEdgeFanout,
+    warn: params.warn,
+    onCandidate: (candidate) => {
+      const current = seedMap.get(candidate.entry.object_id);
+      if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
+        seedMap.set(candidate.entry.object_id, candidate);
+      }
+    }
+  });
+  return seedMap;
+}
+
+function mergeEntityFanInCandidates(
+  perSeedCandidates: readonly ReadonlyMap<string, GraphExpansionCandidateDraft>[],
+  bestCandidates: Map<string, GraphExpansionCandidateDraft>,
+  diagnostics: MutableGraphExpansionDiagnostics
+): void {
+  const fanInSeen = new Set<string>();
+  for (const seedMap of perSeedCandidates) {
+    for (const [neighborId, candidate] of seedMap) {
+      if (fanInSeen.has(neighborId)) {
+        diagnostics.multi_seed_fan_in_dedup_collisions += 1;
+      }
+      fanInSeen.add(neighborId);
+      const current = bestCandidates.get(neighborId);
+      if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
+        bestCandidates.set(neighborId, candidate);
       }
     }
   }
+}
 
+function admitGraphExpansionCandidates(
+  params: AddGraphExpansionCandidatesParams,
+  bestCandidates: ReadonlyMap<string, GraphExpansionCandidateDraft>,
+  diagnostics: MutableGraphExpansionDiagnostics,
+  candidateSources: Map<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>
+): void {
   const admitted = [...bestCandidates.values()]
     .sort(compareGraphExpansionCandidateDrafts)
     .slice(0, params.multiSeedGraphFanOutCap);
@@ -277,106 +269,126 @@ export async function addGraphExpansionCandidates(params: Readonly<{
       edgeType: candidate.edgeType
     }));
   }
-
-  return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
 }
 
-async function expandGraphFrontier(params: Readonly<{
-  readonly workspaceId: string;
+function shouldSkipEntitySeedCollection(params: Readonly<{
+  readonly entityExtractionPort?: RecallServiceDependencies["entityExtractionPort"];
+  readonly queryText: string | null;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
-  readonly pathExpansionPort: NonNullable<RecallServiceDependencies["pathExpansionPort"]>;
-  readonly seedEntries: readonly Readonly<MemoryEntry>[];
-  readonly maxGraphHops: number;
-  readonly dynamicRecallEdgeFanout: number;
-  readonly warn: RecallServiceWarnPort;
-  readonly onCandidate: (candidate: Readonly<GraphExpansionCandidateDraft>) => void;
-}>): Promise<void> {
-  if (params.seedEntries.length === 0) {
-    return;
-  }
-  const expandedIds = new Set<string>();
-  let frontier: readonly GraphExpansionFrontierNode[] = params.seedEntries.map((entry) => ({
-    memoryId: entry.object_id,
-    pathScore: 1,
-    arrivalRelationKind: null
-  }));
+  readonly memoryRepo: RecallServiceDependencies["memoryRepo"];
+}>): boolean {
+  return (
+    params.entityExtractionPort === undefined ||
+    params.queryText === null ||
+    params.byId.size === 0 ||
+    (params.memoryRepo.searchByKeyword === undefined &&
+      params.memoryRepo.searchByKeywordWithinObjectIds === undefined)
+  );
+}
 
-  for (let hop = 1; hop <= params.maxGraphHops && frontier.length > 0; hop += 1) {
-    const nextFrontier = new Map<string, GraphExpansionFrontierNode>();
-    const frontierIds = frontier
-      .map((node) => node.memoryId)
-      .filter((memoryId) => !expandedIds.has(memoryId));
-    if (frontierIds.length === 0) {
-      break;
-    }
-    const anchorRefs: PathAnchorRef[] = frontierIds.map((memoryId) => ({
-      kind: "object",
-      object_id: memoryId
-    }));
-    let paths: readonly Readonly<PathRelation>[];
-    try {
-      paths = await params.pathExpansionPort.findByAnchors(params.workspaceId, anchorRefs);
-    } catch (error) {
-      params.warn("graph expansion path lookup failed", {
-        workspace_id: params.workspaceId,
-        seed_count: frontierIds.length,
-        error: toErrorMessage(error)
-      });
-      break;
-    }
-    const eligiblePaths = paths.filter((path) => isPathRecallEligible(path));
-    const frontierIdSet = new Set(frontierIds);
-    for (const node of frontier) {
-      if (expandedIds.has(node.memoryId)) {
-        continue;
-      }
-      expandedIds.add(node.memoryId);
-      const nodeNeighbors = collectPathGraphNeighbors(eligiblePaths, node.memoryId)
-        .slice(0, params.dynamicRecallEdgeFanout);
-      for (const neighbor of nodeNeighbors) {
-        const edgeScore = graphTraversalScoreFromPath(neighbor.edgeType);
-        if (edgeScore <= 0) {
-          continue;
-        }
-        const neighborId = neighbor.neighborId;
-        if (expandedIds.has(neighborId)) {
-          continue;
-        }
-        const entry = params.byId.get(neighborId);
-        if (entry === undefined) {
-          continue;
-        }
-        if (
-          hop > 1 &&
-          node.arrivalRelationKind !== null &&
-          neighbor.relationKind === node.arrivalRelationKind
-        ) {
-          continue;
-        }
-        const candidateScore = hop === 1
-          ? edgeScore
-          : clamp01(node.pathScore * EDGE_TYPE_HOP_DECAY[neighbor.edgeType] * edgeScore);
-        if (candidateScore <= 0) {
-          continue;
-        }
-        params.onCandidate({
-          entry,
-          score: candidateScore,
-          hop: hop as 1 | 2,
-          edgeType: neighbor.edgeType
-        });
-        if (hop < params.maxGraphHops && !expandedIds.has(neighborId) && !frontierIdSet.has(neighborId)) {
-          const queued = nextFrontier.get(neighborId);
-          if (queued === undefined || candidateScore > queued.pathScore) {
-            nextFrontier.set(neighborId, {
-              memoryId: neighborId,
-              pathScore: candidateScore,
-              arrivalRelationKind: neighbor.relationKind
-            });
-          }
-        }
-      }
-    }
-    frontier = [...nextFrontier.values()].sort((a, b) => a.memoryId.localeCompare(b.memoryId));
+async function extractSeedEntities(params: Readonly<{
+  readonly workspaceId: string;
+  readonly queryText: string | null;
+  readonly entityExtractionPort?: RecallServiceDependencies["entityExtractionPort"];
+  readonly warn: RecallServiceWarnPort;
+  readonly entityExtractionMaxEntities: number;
+}>): Promise<readonly Readonly<{
+  readonly surface: string;
+  readonly normalized: string;
+  readonly confidence: number;
+}>[]> {
+  try {
+    return await params.entityExtractionPort!.extract(params.queryText!, {
+      maxEntities: params.entityExtractionMaxEntities
+    });
+  } catch (error) {
+    params.warn("entity extraction failed", {
+      workspace_id: params.workspaceId,
+      error: toErrorMessage(error)
+    });
+    return [];
   }
+}
+
+async function admitEntitySeedsForEntity(
+  params: Parameters<typeof collectEntityDerivedSeeds>[0],
+  entity: Readonly<{ readonly surface: string; readonly confidence: number }>,
+  candidateIds: readonly string[],
+  seedConfidenceById: Map<string, number>,
+  admittedTotal: number
+): Promise<number> {
+  const surface = entity.surface.trim();
+  if (surface.length < params.entitySeedMinSurfaceLength) {
+    return admittedTotal;
+  }
+  const hits = await searchEntitySeedHits(params, surface, entity.confidence, candidateIds);
+  return admitEntitySeedHits(params, entity.confidence, hits, seedConfidenceById, admittedTotal);
+}
+
+async function searchEntitySeedHits(
+  params: Parameters<typeof collectEntityDerivedSeeds>[0],
+  surface: string,
+  confidence: number,
+  candidateIds: readonly string[]
+): Promise<readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[]> {
+  const perEntityLimit = confidence >= 0.85
+    ? params.entitySeedPerEntityTopKStrong
+    : params.entitySeedPerEntityTopKWeak;
+  try {
+    return params.memoryRepo.searchByKeywordWithinObjectIds !== undefined
+      ? await params.memoryRepo.searchByKeywordWithinObjectIds(
+          params.workspaceId,
+          surface,
+          perEntityLimit,
+          candidateIds
+        )
+      : await params.memoryRepo.searchByKeyword!(params.workspaceId, surface, perEntityLimit);
+  } catch (error) {
+    params.warn("entity seed lookup failed", {
+      workspace_id: params.workspaceId,
+      entity_surface: surface,
+      error: toErrorMessage(error)
+    });
+    return [];
+  }
+}
+
+function admitEntitySeedHits(
+  params: Parameters<typeof collectEntityDerivedSeeds>[0],
+  entityConfidence: number,
+  hits: readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[],
+  seedConfidenceById: Map<string, number>,
+  admittedTotal: number
+): number {
+  let nextAdmittedTotal = admittedTotal;
+  for (const hit of hits) {
+    const entry = params.byId.get(hit.object_id);
+    if (entry === undefined) {
+      continue;
+    }
+    const rawScore = clamp01(hit.normalized_rank * entityConfidence);
+    if (rawScore <= 0) {
+      continue;
+    }
+    const lexicalWeight = clamp01(params.lexicalFtsRanks.get(hit.object_id) ?? 0);
+    const score = lexicalWeight > 0 ? 0 : rawScore;
+    params.addCandidate(entry, "entity_seed", score, "entity_seed", undefined, entityConfidence);
+    seedConfidenceById.set(
+      entry.object_id,
+      Math.max(seedConfidenceById.get(entry.object_id) ?? 0, entityConfidence)
+    );
+    nextAdmittedTotal += 1;
+    if (nextAdmittedTotal >= params.entitySeedTotalAdmitCap) {
+      break;
+    }
+  }
+  return nextAdmittedTotal;
+}
+
+function buildEntitySeedResults(
+  seedConfidenceById: ReadonlyMap<string, number>
+): readonly Readonly<{ memoryId: string; entityConfidence: number }>[] {
+  return [...seedConfidenceById.entries()].map(([memoryId, entityConfidence]) =>
+    Object.freeze({ memoryId, entityConfidence })
+  );
 }

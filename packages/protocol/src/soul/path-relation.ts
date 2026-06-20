@@ -1,7 +1,12 @@
 import { z } from "zod";
 import {
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
   IsoDatetimeStringSchema,
-  NonEmptyStringSchema,
+  NonNegativeFiniteNumberSchema,
+  RatioSchema,
+  SignedRatioSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
 
@@ -110,39 +115,39 @@ export function isPathGovernedForSuppression(path: PathRelation): boolean {
 const ObjectPathAnchorRefSchema = z
   .object({
     kind: z.literal("object"),
-    object_id: NonEmptyStringSchema
+    object_id: BoundedIdSchema
   })
   .strict();
 
 const ObjectFacetPathAnchorRefSchema = z
   .object({
     kind: z.literal("object_facet"),
-    object_id: NonEmptyStringSchema,
-    facet_key: NonEmptyStringSchema
+    object_id: BoundedIdSchema,
+    facet_key: BoundedLabelSchema
   })
   .strict();
 
 const ObligationPathAnchorRefSchema = z
   .object({
     kind: z.literal("obligation"),
-    source_object_id: NonEmptyStringSchema,
-    obligation_digest: NonEmptyStringSchema
+    source_object_id: BoundedIdSchema,
+    obligation_digest: BoundedLabelSchema
   })
   .strict();
 
 const RiskConcernPathAnchorRefSchema = z
   .object({
     kind: z.literal("risk_concern"),
-    source_object_id: NonEmptyStringSchema,
-    concern_digest: NonEmptyStringSchema
+    source_object_id: BoundedIdSchema,
+    concern_digest: BoundedLabelSchema
   })
   .strict();
 
 const TimeConcernPathAnchorRefSchema = z
   .object({
     kind: z.literal("time_concern"),
-    source_object_id: NonEmptyStringSchema,
-    window_digest: NonEmptyStringSchema
+    source_object_id: BoundedIdSchema,
+    window_digest: BoundedLabelSchema
   })
   .strict();
 
@@ -158,10 +163,10 @@ export const PathAnchorRefSchema = z
 
 export const PathEffectVectorSchema = z
   .object({
-    salience: z.number(),
-    recall_bias: z.number(),
-    verification_bias: z.number(),
-    unfinishedness_bias: z.number(),
+    salience: RatioSchema,
+    recall_bias: SignedRatioSchema,
+    verification_bias: RatioSchema,
+    unfinishedness_bias: RatioSchema,
     default_manifestation_preference: ManifestationPreferenceSchema
   })
   .strict()
@@ -169,7 +174,7 @@ export const PathEffectVectorSchema = z
 
 export const PathPlasticityStateSchema = z
   .object({
-    strength: z.number(),
+    strength: NonNegativeFiniteNumberSchema,
     direction_bias: DirectionBiasSchema,
     stability_class: StabilityClassSchema,
     support_events_count: NonNegativeIntSchema,
@@ -183,16 +188,16 @@ export const PathPlasticityStateSchema = z
 const PathLifecycleSchema = z
   .object({
     status: PathLifecycleStatusSchema.optional(),
-    retirement_rule: NonEmptyStringSchema,
-    cooldown_rule: NonEmptyStringSchema.optional(),
-    override_rule: NonEmptyStringSchema.optional()
+    retirement_rule: BoundedReasonSchema,
+    cooldown_rule: BoundedReasonSchema.optional(),
+    override_rule: BoundedReasonSchema.optional()
   })
   .strict()
   .readonly();
 
 const PathLegitimacySchema = z
   .object({
-    evidence_basis: z.array(NonEmptyStringSchema).readonly(),
+    evidence_basis: z.array(BoundedIdSchema).readonly(),
     governance_class: PathGovernanceClassSchema
   })
   .strict()
@@ -200,8 +205,8 @@ const PathLegitimacySchema = z
 
 export const PathRelationSchema = z
   .object({
-    path_id: NonEmptyStringSchema,
-    workspace_id: NonEmptyStringSchema,
+    path_id: BoundedIdSchema,
+    workspace_id: BoundedIdSchema,
     anchors: z
       .object({
         source_anchor: PathAnchorRefSchema,
@@ -211,8 +216,8 @@ export const PathRelationSchema = z
       .readonly(),
     constitution: z
       .object({
-        relation_kind: NonEmptyStringSchema,
-        why_this_relation_exists: z.array(NonEmptyStringSchema).readonly()
+        relation_kind: BoundedLabelSchema,
+        why_this_relation_exists: z.array(BoundedReasonSchema).readonly()
       })
       .strict()
       .readonly(),

@@ -12,6 +12,15 @@ export interface InitDatabaseOptions {
 
 const databaseCache = new Map<string, StorageDatabase>();
 
+interface MigrationStatements {
+  readonly isAppliedStatement: {
+    get(...args: readonly unknown[]): unknown;
+  };
+  readonly markAppliedStatement: {
+    run(...args: readonly unknown[]): unknown;
+  };
+}
+
 export class StorageDatabase {
   public readonly filename: string;
   public readonly connection: SqliteConnection;
@@ -111,31 +120,36 @@ function openDatabase(filename: string): SqliteConnection {
 
 function runMigrations(database: SqliteConnection): void {
   const migrationsDirectory = resolveMigrationsDirectory();
-  const migrationFiles = fs
+  const migrationFiles = listMigrationFiles(migrationsDirectory);
+  ensureSchemaVersionTable(database);
+  const knownMaxVersion = computeKnownMaxVersion(migrationFiles);
+  assertSchemaVersionNotAhead(database, knownMaxVersion);
+  const statements = prepareMigrationStatements(database);
+
+  for (const fileName of migrationFiles) {
+    applyMigrationIfPending(database, migrationsDirectory, statements, fileName);
+  }
+}
+
+function listMigrationFiles(migrationsDirectory: string): readonly string[] {
+  return fs
     .readdirSync(migrationsDirectory, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
     .map((entry) => entry.name)
     .sort();
+}
 
+function ensureSchemaVersionTable(database: SqliteConnection): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY,
       applied_at TEXT NOT NULL
     )
   `);
+}
 
-  // Forward-compatibility guard: if the database was previously written by a
-  // newer Alaya release whose migration set extends past what this binary
-  // ships, refuse to open it. Running missing-but-newer migrations would be
-  // impossible (we don't have the SQL), and continuing as if nothing happened
-  // would let an older binary mutate a newer schema. Best to fail loudly so
-  // the operator either upgrades the binary or restores a matching backup.
-  const knownMaxVersion = computeKnownMaxVersion(migrationFiles);
-  const persistedMaxVersionRow = database
-    .prepare("SELECT MAX(version) AS max_version FROM schema_version")
-    .get() as Readonly<{ max_version: number | null }> | undefined;
-  const persistedMaxVersion = persistedMaxVersionRow?.max_version ?? null;
-
+function assertSchemaVersionNotAhead(database: SqliteConnection, knownMaxVersion: number): void {
+  const persistedMaxVersion = readPersistedMaxVersion(database);
   if (persistedMaxVersion !== null && persistedMaxVersion > knownMaxVersion) {
     throw new StorageError(
       "STORAGE_VERSION_AHEAD" as StorageErrorCode,
@@ -143,39 +157,49 @@ function runMigrations(database: SqliteConnection): void {
         "Upgrade Alaya or restore a database matching this version."
     );
   }
+}
 
-  const isAppliedStatement = database.prepare(
-    "SELECT 1 FROM schema_version WHERE version = ? LIMIT 1"
-  );
-  const markAppliedStatement = database.prepare(
-    "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)"
-  );
+function readPersistedMaxVersion(database: SqliteConnection): number | null {
+  const row = database
+    .prepare("SELECT MAX(version) AS max_version FROM schema_version")
+    .get() as Readonly<{ max_version: number | null }> | undefined;
+  return row?.max_version ?? null;
+}
 
-  for (const fileName of migrationFiles) {
-    const versionMatch = /^(\d+)-.+\.sql$/.exec(fileName);
+function prepareMigrationStatements(database: SqliteConnection): MigrationStatements {
+  return {
+    isAppliedStatement: database.prepare("SELECT 1 FROM schema_version WHERE version = ? LIMIT 1"),
+    markAppliedStatement: database.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)")
+  };
+}
 
-    if (versionMatch === null) {
-      throw new StorageError("MIGRATION_FAILED", `Invalid migration filename: ${fileName}`);
-    }
-
-    const version = Number(versionMatch[1]);
-    const alreadyApplied = isAppliedStatement.get(version);
-
-    if (alreadyApplied !== undefined) {
-      continue;
-    }
-
-    const migrationSql = fs.readFileSync(path.join(migrationsDirectory, fileName), "utf8");
-
-    try {
-      database.transaction(() => {
-        database.exec(migrationSql);
-        markAppliedStatement.run(version, new Date().toISOString());
-      })();
-    } catch (error) {
-      throw new StorageError("MIGRATION_FAILED", `Failed to apply migration ${fileName}`, error);
-    }
+function applyMigrationIfPending(
+  database: SqliteConnection,
+  migrationsDirectory: string,
+  statements: MigrationStatements,
+  fileName: string
+): void {
+  const version = parseMigrationVersion(fileName);
+  if (statements.isAppliedStatement.get(version) !== undefined) {
+    return;
   }
+  const migrationSql = fs.readFileSync(path.join(migrationsDirectory, fileName), "utf8");
+  try {
+    database.transaction(() => {
+      database.exec(migrationSql);
+      statements.markAppliedStatement.run(version, new Date().toISOString());
+    })();
+  } catch (error) {
+    throw new StorageError("MIGRATION_FAILED", `Failed to apply migration ${fileName}`, error);
+  }
+}
+
+function parseMigrationVersion(fileName: string): number {
+  const versionMatch = /^(\d+)-.+\.sql$/.exec(fileName);
+  if (versionMatch === null) {
+    throw new StorageError("MIGRATION_FAILED", `Invalid migration filename: ${fileName}`);
+  }
+  return Number(versionMatch[1]);
 }
 
 /**

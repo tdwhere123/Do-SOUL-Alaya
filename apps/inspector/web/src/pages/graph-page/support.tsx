@@ -12,6 +12,64 @@ import {
 
 const DEFAULT_NODE_FALLBACK_COLOR = "#586E75";
 
+const LEGEND_NODE_ITEMS: ReadonlyArray<{
+  readonly kind: string;
+  readonly labelKey: DictKey;
+  readonly tipKey: DictKey;
+  readonly glyph: string;
+}> = [
+  {
+    kind: "memory",
+    labelKey: "graph:legend.node.memory",
+    tipKey: "graph:legend.node.memory.tip",
+    glyph: "M"
+  },
+  {
+    kind: "scope",
+    labelKey: "graph:legend.node.scope",
+    tipKey: "graph:legend.node.scope.tip",
+    glyph: "S"
+  }
+];
+
+const LEGEND_EDGE_ITEMS: ReadonlyArray<{
+  readonly family: string;
+  readonly representativeKind: string;
+  readonly labelKey: DictKey;
+  readonly tipKey: DictKey;
+}> = [
+  {
+    family: "supports",
+    representativeKind: "supports",
+    labelKey: "graph:legend.edge.supports",
+    tipKey: "graph:legend.edge.supports.tip"
+  },
+  {
+    family: "derives_from",
+    representativeKind: "derives_from",
+    labelKey: "graph:legend.edge.derives_from",
+    tipKey: "graph:legend.edge.derives_from.tip"
+  },
+  {
+    family: "recalls",
+    representativeKind: "recalls",
+    labelKey: "graph:legend.edge.associative",
+    tipKey: "graph:legend.edge.associative.tip"
+  },
+  {
+    family: "contradicts",
+    representativeKind: "contradicts",
+    labelKey: "graph:legend.edge.negative",
+    tipKey: "graph:legend.edge.negative.tip"
+  },
+  {
+    family: "exception_to",
+    representativeKind: "exception_to",
+    labelKey: "graph:legend.edge.exception_to",
+    tipKey: "graph:legend.edge.exception_to.tip"
+  }
+];
+
 interface PathGraphEnvelopeLike {
   readonly success: boolean;
   readonly data: SoulPathGraphContract;
@@ -65,104 +123,66 @@ export function ViewModeToggle({ mode, webglSupported, onChange }: ViewModeToggl
 // see also: ../utils/graph.ts NODE_KIND_BASE_COLOR / EDGE_TYPE_BASE_COLOR.
 export function GraphLegend() {
   const { t } = useI18n();
-  const nodeItems: ReadonlyArray<{
-    readonly kind: string;
-    readonly labelKey: DictKey;
-    readonly tipKey: DictKey;
-    readonly glyph: string;
-  }> = [
-    {
-      kind: "memory",
-      labelKey: "graph:legend.node.memory",
-      tipKey: "graph:legend.node.memory.tip",
-      glyph: "M"
-    },
-    {
-      kind: "scope",
-      labelKey: "graph:legend.node.scope",
-      tipKey: "graph:legend.node.scope.tip",
-      glyph: "S"
-    }
-  ];
-  const edgeItems: ReadonlyArray<{
-    readonly family: string;
-    readonly representativeKind: string;
-    readonly labelKey: DictKey;
-    readonly tipKey: DictKey;
-  }> = [
-    {
-      family: "supports",
-      representativeKind: "supports",
-      labelKey: "graph:legend.edge.supports",
-      tipKey: "graph:legend.edge.supports.tip"
-    },
-    {
-      family: "derives_from",
-      representativeKind: "derives_from",
-      labelKey: "graph:legend.edge.derives_from",
-      tipKey: "graph:legend.edge.derives_from.tip"
-    },
-    {
-      family: "recalls",
-      representativeKind: "recalls",
-      labelKey: "graph:legend.edge.associative",
-      tipKey: "graph:legend.edge.associative.tip"
-    },
-    {
-      family: "contradicts",
-      representativeKind: "contradicts",
-      labelKey: "graph:legend.edge.negative",
-      tipKey: "graph:legend.edge.negative.tip"
-    },
-    {
-      family: "exception_to",
-      representativeKind: "exception_to",
-      labelKey: "graph:legend.edge.exception_to",
-      tipKey: "graph:legend.edge.exception_to.tip"
-    }
-  ];
   return (
     <div className="absolute bottom-4 right-4 z-20 flex flex-col gap-2 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-2 text-[10px] font-mono uppercase text-ink-700/65 shadow-sm">
-      <div className="flex flex-col gap-1" data-testid="graph-legend-nodes">
-        <span className="text-ink-700/40">{t("graph:legend.nodes.heading")}</span>
-        {nodeItems.map((item) => {
-          const label = t(item.labelKey);
-          return (
-            <div key={item.kind} className="flex items-center gap-2" title={t(item.tipKey)}>
-              <span
-                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-bold text-beige-50"
-                style={{
-                  backgroundColor:
-                    NODE_KIND_BASE_COLOR[item.kind] ?? DEFAULT_NODE_FALLBACK_COLOR
-                }}
-                aria-label={`${label} (${item.glyph})`}
-              >
-                {item.glyph}
-              </span>
-              <span>{label}</span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex flex-col gap-1" data-testid="graph-legend-edges">
-        <span className="text-ink-700/40">{t("graph:legend.edges.heading")}</span>
-        {edgeItems.map((item) => {
-          const label = t(item.labelKey);
-          const rgb = EDGE_TYPE_BASE_COLOR[item.representativeKind] ?? [147, 161, 161];
-          return (
-            <div key={item.family} className="flex items-center gap-2" title={t(item.tipKey)}>
-              <span
-                className="inline-block h-1 w-4 rounded-full"
-                style={{ backgroundColor: rgba(rgb, 0.95) }}
-                aria-label={label}
-              />
-              <span>{label}</span>
-            </div>
-          );
-        })}
-      </div>
+      <NodeLegendGroup t={t} />
+      <EdgeLegendGroup t={t} />
     </div>
   );
+}
+
+function NodeLegendGroup({ t }: { readonly t: (key: DictKey) => string }) {
+  return (
+    <div className="flex flex-col gap-1" data-testid="graph-legend-nodes">
+      <span className="text-ink-700/40">{t("graph:legend.nodes.heading")}</span>
+      {LEGEND_NODE_ITEMS.map((item) => <NodeLegendItem key={item.kind} item={item} t={t} />)}
+    </div>
+  );
+}
+
+function NodeLegendItem(props: {
+  readonly item: (typeof LEGEND_NODE_ITEMS)[number];
+  readonly t: (key: DictKey) => string;
+}) {
+  const label = props.t(props.item.labelKey);
+  return (
+    <div className="flex items-center gap-2" title={props.t(props.item.tipKey)}>
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-bold text-beige-50" style={{ backgroundColor: nodeLegendColor(props.item.kind) }} aria-label={`${label} (${props.item.glyph})`}>
+        {props.item.glyph}
+      </span>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function EdgeLegendGroup({ t }: { readonly t: (key: DictKey) => string }) {
+  return (
+    <div className="flex flex-col gap-1" data-testid="graph-legend-edges">
+      <span className="text-ink-700/40">{t("graph:legend.edges.heading")}</span>
+      {LEGEND_EDGE_ITEMS.map((item) => <EdgeLegendItem key={item.family} item={item} t={t} />)}
+    </div>
+  );
+}
+
+function EdgeLegendItem(props: {
+  readonly item: (typeof LEGEND_EDGE_ITEMS)[number];
+  readonly t: (key: DictKey) => string;
+}) {
+  const label = props.t(props.item.labelKey);
+  return (
+    <div className="flex items-center gap-2" title={props.t(props.item.tipKey)}>
+      <span className="inline-block h-1 w-4 rounded-full" style={{ backgroundColor: edgeLegendColor(props.item.representativeKind) }} aria-label={label} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function nodeLegendColor(kind: string): string {
+  return NODE_KIND_BASE_COLOR[kind] ?? DEFAULT_NODE_FALLBACK_COLOR;
+}
+
+function edgeLegendColor(representativeKind: string): string {
+  return rgba(EDGE_TYPE_BASE_COLOR[representativeKind] ?? [147, 161, 161], 0.95);
 }
 
 export function formatGraphNodeTooltip(node: GraphNode): string {

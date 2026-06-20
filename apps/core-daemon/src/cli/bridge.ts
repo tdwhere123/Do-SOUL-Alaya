@@ -74,6 +74,19 @@ export interface AlayaCliBridgeOptions {
   readonly isDaemonReady?: (daemon: AlayaCliDaemonRuntime) => boolean;
 }
 
+interface AlayaCliBridgeState {
+  readonly daemon: AlayaCliDaemonRuntime;
+  readonly entries: AlayaSubcommandSpec<unknown>[];
+  readonly byName: Map<string, AlayaSubcommandSpec<unknown>>;
+  readonly cwd: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly stdin: NodeJS.ReadableStream;
+  readonly stdout: NodeJS.WritableStream;
+  readonly stderr: NodeJS.WritableStream;
+  readonly isTTY: boolean;
+  readonly isDaemonReady: (daemon: AlayaCliDaemonRuntime) => boolean;
+}
+
 export class DuplicateSubcommandError extends Error {
   readonly subcommand: string;
 
@@ -88,96 +101,11 @@ export function createAlayaCliBridge(
   daemon: AlayaCliDaemonRuntime,
   options: AlayaCliBridgeOptions = {}
 ): AlayaCliBridge {
-  const entries: AlayaSubcommandSpec<unknown>[] = [];
-  const byName = new Map<string, AlayaSubcommandSpec<unknown>>();
-  const cwd = options.cwd ?? process.cwd();
-  const env = options.env ?? process.env;
-  const stdin = options.stdin ?? process.stdin;
-  const stdout = options.stdout ?? process.stdout;
-  const stderr = options.stderr ?? process.stderr;
-  const isTTY = options.isTTY ?? Boolean((stdout as NodeJS.WriteStream).isTTY);
-  const isDaemonReady = options.isDaemonReady ?? defaultDaemonReadiness;
-
+  const state = createBridgeState(daemon, options);
   return {
-    registerSubcommand: (spec) => {
-      if (byName.has(spec.name)) {
-        throw new DuplicateSubcommandError(spec.name);
-      }
-      // The public registerSubcommand signature is generic over each
-      // caller's TArgs, but the bridge's internal store unifies entries as
-      // AlayaSubcommandSpec<unknown>. The cast is the single boundary
-      // between "caller-known TArgs" and "bridge-erased unknown"; the
-      // dispatch path only uses `argsSchema.safeParse` to recover TArgs.
-      const erased = spec as unknown as AlayaSubcommandSpec<unknown>;
-      entries.push(erased);
-      byName.set(spec.name, erased);
-    },
-
-    dispatch: async (argv) => {
-      if (argv.length === 0 || argv[0] === undefined) {
-        writeGeneralHelp(stderr, entries);
-        return { exitCode: ALAYA_SYSEXITS.USAGE };
-      }
-      if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
-        writeGeneralHelp(stdout, entries);
-        return { exitCode: ALAYA_SYSEXITS.OK };
-      }
-
-      const name = argv[0];
-      const spec = byName.get(name);
-      if (spec === undefined) {
-        writeLine(stderr, `Unknown subcommand: ${name}`);
-        writeGeneralHelp(stderr, entries);
-        return { exitCode: ALAYA_SYSEXITS.USAGE };
-      }
-
-      const rawArgs = argv.slice(1);
-      const parsedFlags = parseGlobalFlags(rawArgs);
-      if (parsedFlags.helpRequested) {
-        writeSubcommandHelp(stdout, spec);
-        return { exitCode: ALAYA_SYSEXITS.OK };
-      }
-
-      if (spec.requiresDaemonReady && !isDaemonReady(daemon)) {
-        writeLine(stderr, "daemon not ready");
-        return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
-      }
-
-      const parsedArgs = spec.argsSchema.safeParse(parsedFlags.argv);
-      if (!parsedArgs.success) {
-        writeLine(stderr, `Invalid arguments for ${spec.name}:`);
-        for (const issueLine of formatZodIssues(parsedArgs.error.issues)) {
-          writeLine(stderr, issueLine);
-        }
-        return { exitCode: ALAYA_SYSEXITS.USAGE };
-      }
-
-      const ctx: AlayaCliContext = {
-        cwd,
-        env,
-        argv: rawArgs,
-        stdin,
-        stdout,
-        stderr,
-        isTTY,
-        jsonRequested: parsedFlags.jsonRequested,
-        daemon
-      };
-
-      try {
-        const result = await spec.handler(ctx, parsedArgs.data);
-        if (parsedFlags.jsonRequested) {
-          const payload = result.json === undefined ? null : result.json;
-          writeLine(stdout, JSON.stringify(payload));
-        }
-        return result;
-      } catch (error) {
-        writeHandlerError(stderr, error, env);
-        return { exitCode: ALAYA_SYSEXITS.SOFTWARE };
-      }
-    },
-
-    list: () => entries.map(({ name, description }) => ({ name, description }))
+    registerSubcommand: (spec) => registerBridgeSubcommand(state, spec),
+    dispatch: async (argv) => await dispatchCliCommand(state, argv),
+    list: () => state.entries.map(({ name, description }) => ({ name, description }))
   };
 }
 
@@ -271,4 +199,166 @@ function sanitizeErrorMessage(error: unknown): string {
 
 function writeLine(stream: NodeJS.WritableStream, line: string): void {
   stream.write(`${line}\n`);
+}
+
+function createBridgeState(
+  daemon: AlayaCliDaemonRuntime,
+  options: AlayaCliBridgeOptions
+): AlayaCliBridgeState {
+  const stdout = options.stdout ?? process.stdout;
+  return {
+    daemon,
+    entries: [],
+    byName: new Map<string, AlayaSubcommandSpec<unknown>>(),
+    cwd: options.cwd ?? process.cwd(),
+    env: options.env ?? process.env,
+    stdin: options.stdin ?? process.stdin,
+    stdout,
+    stderr: options.stderr ?? process.stderr,
+    isTTY: options.isTTY ?? Boolean((stdout as NodeJS.WriteStream).isTTY),
+    isDaemonReady: options.isDaemonReady ?? defaultDaemonReadiness
+  };
+}
+
+function registerBridgeSubcommand<TArgs>(
+  state: AlayaCliBridgeState,
+  spec: AlayaSubcommandSpec<TArgs>
+): void {
+  if (state.byName.has(spec.name)) {
+    throw new DuplicateSubcommandError(spec.name);
+  }
+  const erased = spec as unknown as AlayaSubcommandSpec<unknown>;
+  state.entries.push(erased);
+  state.byName.set(spec.name, erased);
+}
+
+async function dispatchCliCommand(
+  state: AlayaCliBridgeState,
+  argv: readonly string[]
+): Promise<AlayaCliResult> {
+  const preambleResult = handleBridgePreamble(state, argv);
+  if (preambleResult !== null) {
+    return preambleResult;
+  }
+  const spec = resolveRegisteredSpec(state, argv[0]!);
+  if ("exitCode" in spec) {
+    return spec;
+  }
+  const rawArgs = argv.slice(1);
+  const parsedFlags = parseGlobalFlags(rawArgs);
+  const helpResult = handleSubcommandHelp(state, spec, parsedFlags.helpRequested);
+  if (helpResult !== null) {
+    return helpResult;
+  }
+  const readinessResult = ensureBridgeDaemonReady(state, spec);
+  if (readinessResult !== null) {
+    return readinessResult;
+  }
+  const parsedArgs = spec.argsSchema.safeParse(parsedFlags.argv);
+  if (!parsedArgs.success) {
+    return writeInvalidArgs(state.stderr, spec, parsedArgs.error.issues);
+  }
+  return await executeBridgeSubcommand(state, spec, rawArgs, parsedFlags.jsonRequested, parsedArgs.data);
+}
+
+function handleBridgePreamble(
+  state: AlayaCliBridgeState,
+  argv: readonly string[]
+): AlayaCliResult | null {
+  if (argv.length === 0 || argv[0] === undefined) {
+    writeGeneralHelp(state.stderr, state.entries);
+    return { exitCode: ALAYA_SYSEXITS.USAGE };
+  }
+  if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
+    writeGeneralHelp(state.stdout, state.entries);
+    return { exitCode: ALAYA_SYSEXITS.OK };
+  }
+  return null;
+}
+
+function resolveRegisteredSpec(
+  state: AlayaCliBridgeState,
+  name: string
+): AlayaSubcommandSpec<unknown> | AlayaCliResult {
+  const spec = state.byName.get(name);
+  if (spec !== undefined) {
+    return spec;
+  }
+  writeLine(state.stderr, `Unknown subcommand: ${name}`);
+  writeGeneralHelp(state.stderr, state.entries);
+  return { exitCode: ALAYA_SYSEXITS.USAGE };
+}
+
+function handleSubcommandHelp(
+  state: AlayaCliBridgeState,
+  spec: AlayaSubcommandSpec<unknown>,
+  helpRequested: boolean
+): AlayaCliResult | null {
+  if (!helpRequested) {
+    return null;
+  }
+  writeSubcommandHelp(state.stdout, spec);
+  return { exitCode: ALAYA_SYSEXITS.OK };
+}
+
+function ensureBridgeDaemonReady(
+  state: AlayaCliBridgeState,
+  spec: AlayaSubcommandSpec<unknown>
+): AlayaCliResult | null {
+  if (!spec.requiresDaemonReady || state.isDaemonReady(state.daemon)) {
+    return null;
+  }
+  writeLine(state.stderr, "daemon not ready");
+  return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
+}
+
+function writeInvalidArgs(
+  stderr: NodeJS.WritableStream,
+  spec: AlayaSubcommandSpec<unknown>,
+  issues: readonly AlayaCliSchemaIssue[]
+): AlayaCliResult {
+  writeLine(stderr, `Invalid arguments for ${spec.name}:`);
+  for (const issueLine of formatZodIssues(issues)) {
+    writeLine(stderr, issueLine);
+  }
+  return { exitCode: ALAYA_SYSEXITS.USAGE };
+}
+
+async function executeBridgeSubcommand(
+  state: AlayaCliBridgeState,
+  spec: AlayaSubcommandSpec<unknown>,
+  rawArgs: readonly string[],
+  jsonRequested: boolean,
+  parsedArgs: unknown
+): Promise<AlayaCliResult> {
+  const ctx = buildCliContext(state, rawArgs, jsonRequested);
+  try {
+    const result = await spec.handler(ctx, parsedArgs);
+    if (jsonRequested) {
+      const payload = result.json === undefined ? null : result.json;
+      writeLine(state.stdout, JSON.stringify(payload));
+    }
+    return result;
+  } catch (error) {
+    writeHandlerError(state.stderr, error, state.env);
+    return { exitCode: ALAYA_SYSEXITS.SOFTWARE };
+  }
+}
+
+function buildCliContext(
+  state: AlayaCliBridgeState,
+  rawArgs: readonly string[],
+  jsonRequested: boolean
+): AlayaCliContext {
+  return {
+    cwd: state.cwd,
+    env: state.env,
+    argv: rawArgs,
+    stdin: state.stdin,
+    stdout: state.stdout,
+    stderr: state.stderr,
+    isTTY: state.isTTY,
+    jsonRequested,
+    daemon: state.daemon
+  };
 }

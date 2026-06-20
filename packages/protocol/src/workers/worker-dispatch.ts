@@ -8,7 +8,7 @@ import {
 import { NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { ToolCategorySchema } from "../tools/tool-spec.js";
 
-const TrimmedNonEmptyStringSchema = z.string().trim().min(1);
+const TrimmedNonEmptyStringSchema = z.string().trim().min(1).max(65536);
 
 const NullableTrimmedNonEmptyStringInputSchema = z.preprocess(
   (value) => (value === undefined ? null : value),

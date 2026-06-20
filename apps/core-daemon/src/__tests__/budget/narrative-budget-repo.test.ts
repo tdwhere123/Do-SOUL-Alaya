@@ -17,16 +17,17 @@ function makeNarrativeDigest(overrides?: Partial<{
 }
 
 describe("createNarrativeBudgetRepo", () => {
-  it("reuses one queryByRun call for concurrent count/bytes checks and aggregates in one pass", async () => {
+  it("reuses one queryByRunAll call for concurrent count/bytes checks and aggregates in one pass", async () => {
     const digestA = makeNarrativeDigest({ digest_id: "digest-a" });
     const digestB = makeNarrativeDigest({ digest_id: "digest-b" });
-    const queryByRun = vi.fn(async () => [
+    const queryByRunAll = vi.fn(async () => [
       { payload_json: digestA },
       { payload_json: { unexpected: "shape" } },
       { payload_json: digestB }
     ]);
+    const queryByRun = vi.fn(async () => []);
     const repo = createNarrativeBudgetRepo({
-      eventLogRepo: { queryByRun }
+      eventLogRepo: { queryByRun, queryByRunAll }
     });
 
     const [count, totalBytes] = await Promise.all([
@@ -39,15 +40,16 @@ describe("createNarrativeBudgetRepo", () => {
       Buffer.byteLength(JSON.stringify(digestA), "utf8") +
         Buffer.byteLength(JSON.stringify(digestB), "utf8")
     );
-    expect(queryByRun).toHaveBeenCalledTimes(1);
-    expect(queryByRun).toHaveBeenCalledWith("run-1");
+    expect(queryByRunAll).toHaveBeenCalledTimes(1);
+    expect(queryByRunAll).toHaveBeenCalledWith("run-1");
   });
 
   it("reuses the same aggregate for sequential count/bytes reads in one call cycle", async () => {
     const digest = makeNarrativeDigest({ digest_id: "digest-sequential" });
-    const queryByRun = vi.fn(async () => [{ payload_json: digest }]);
+    const queryByRunAll = vi.fn(async () => [{ payload_json: digest }]);
+    const queryByRun = vi.fn(async () => []);
     const repo = createNarrativeBudgetRepo({
-      eventLogRepo: { queryByRun }
+      eventLogRepo: { queryByRun, queryByRunAll }
     });
 
     const count = await repo.countDigestsByRun("run-1");
@@ -55,6 +57,6 @@ describe("createNarrativeBudgetRepo", () => {
 
     expect(count).toBe(1);
     expect(totalBytes).toBe(Buffer.byteLength(JSON.stringify(digest), "utf8"));
-    expect(queryByRun).toHaveBeenCalledTimes(1);
+    expect(queryByRunAll).toHaveBeenCalledTimes(1);
   });
 });

@@ -22,87 +22,7 @@ export interface ErrorLoggerPort {
 }
 
 export function registerErrorHandler(app: Hono, logger: ErrorLoggerPort): void {
-  app.onError((error, context) => {
-    const requestId = readRequestId(context);
-    if (requestId !== undefined) {
-      context.header(REQUEST_ID_HEADER, requestId);
-      context.header(CORRELATION_ID_HEADER, requestId);
-    }
-
-    if (isRequestBodyTooLargeError(error)) {
-      logger.error(
-        "[daemon] sanitized request body limit error",
-        summarizeHandledError(
-          error instanceof Error ? error : new Error("request body too large"),
-          {
-            publicMessage: REQUEST_BODY_TOO_LARGE_MESSAGE,
-            request_id: requestId
-          }
-        )
-      );
-
-      return context.json(
-        {
-          success: false,
-          error: REQUEST_BODY_TOO_LARGE_MESSAGE
-        },
-        413
-      );
-    }
-
-    if (error instanceof CoreError) {
-      const publicMessage = publicMessageForCoreError(error);
-
-      if (error.code === "VALIDATION" && publicMessage !== error.message) {
-        logger.error(
-          "[daemon] sanitized core validation error",
-          summarizeHandledError(error, {
-            code: error.code,
-            publicMessage,
-            request_id: requestId
-          })
-        );
-      }
-
-      return context.json(
-        {
-          success: false,
-          error: publicMessage
-        },
-        statusForCoreError(error)
-      );
-    }
-
-    if (error instanceof EngineError) {
-      logger.error(
-        "[daemon] sanitized engine error",
-        summarizeHandledError(error, {
-          kind: error.kind,
-          publicMessage: publicMessageForEngineError(error),
-          request_id: requestId
-        })
-      );
-
-      return context.json(
-        {
-          success: false,
-          error: publicMessageForEngineError(error),
-          kind: error.kind
-        },
-        502
-      );
-    }
-
-    logger.error("[daemon] unhandled error", summarizeUnhandledError(error, requestId));
-
-    return context.json(
-      {
-        success: false,
-        error: "Internal server error"
-      },
-      500
-    );
-  });
+  app.onError((error, context) => handleDaemonError(error, context, logger));
 }
 
 function readRequestId(context: { get(name: string): unknown }): string | undefined {
@@ -208,4 +128,104 @@ function publicMessageForEngineError(error: EngineError): string {
     default:
       return "The conversation provider could not complete the request.";
   }
+}
+
+interface ErrorHandlerContext {
+  get(name: string): unknown;
+  header(name: string, value: string): void;
+  json(body: unknown, status?: number): Response;
+}
+
+function handleDaemonError(
+  error: unknown,
+  context: ErrorHandlerContext,
+  logger: ErrorLoggerPort
+): Response {
+  const requestId = applyRequestIdHeaders(context);
+  const bodyTooLargeResponse = handleRequestBodyTooLarge(error, context, logger, requestId);
+  if (bodyTooLargeResponse !== null) {
+    return bodyTooLargeResponse;
+  }
+  const coreErrorResponse = handleCoreDaemonError(error, context, logger, requestId);
+  if (coreErrorResponse !== null) {
+    return coreErrorResponse;
+  }
+  const engineErrorResponse = handleEngineDaemonError(error, context, logger, requestId);
+  if (engineErrorResponse !== null) {
+    return engineErrorResponse;
+  }
+  logger.error("[daemon] unhandled error", summarizeUnhandledError(error, requestId));
+  return context.json({ success: false, error: "Internal server error" }, 500);
+}
+
+function applyRequestIdHeaders(context: ErrorHandlerContext): string | undefined {
+  const requestId = readRequestId(context);
+  if (requestId !== undefined) {
+    context.header(REQUEST_ID_HEADER, requestId);
+    context.header(CORRELATION_ID_HEADER, requestId);
+  }
+  return requestId;
+}
+
+function handleRequestBodyTooLarge(
+  error: unknown,
+  context: ErrorHandlerContext,
+  logger: ErrorLoggerPort,
+  requestId?: string
+): Response | null {
+  if (!isRequestBodyTooLargeError(error)) {
+    return null;
+  }
+  logger.error(
+    "[daemon] sanitized request body limit error",
+    summarizeHandledError(error instanceof Error ? error : new Error("request body too large"), {
+      publicMessage: REQUEST_BODY_TOO_LARGE_MESSAGE,
+      request_id: requestId
+    })
+  );
+  return context.json({ success: false, error: REQUEST_BODY_TOO_LARGE_MESSAGE }, 413);
+}
+
+function handleCoreDaemonError(
+  error: unknown,
+  context: ErrorHandlerContext,
+  logger: ErrorLoggerPort,
+  requestId?: string
+): Response | null {
+  if (!(error instanceof CoreError)) {
+    return null;
+  }
+  const publicMessage = publicMessageForCoreError(error);
+  if (error.code === "VALIDATION" && publicMessage !== error.message) {
+    logger.error(
+      "[daemon] sanitized core validation error",
+      summarizeHandledError(error, {
+        code: error.code,
+        publicMessage,
+        request_id: requestId
+      })
+    );
+  }
+  return context.json({ success: false, error: publicMessage }, statusForCoreError(error));
+}
+
+function handleEngineDaemonError(
+  error: unknown,
+  context: ErrorHandlerContext,
+  logger: ErrorLoggerPort,
+  requestId?: string
+): Response | null {
+  if (!(error instanceof EngineError)) {
+    return null;
+  }
+  const publicMessage = publicMessageForEngineError(error);
+  logger.error(
+    "[daemon] sanitized engine error",
+    summarizeHandledError(error, {
+      kind: error.kind,
+      publicMessage,
+      request_id: requestId
+    })
+  );
+  return context.json({ success: false, error: publicMessage, kind: error.kind }, 502);
 }

@@ -6,7 +6,6 @@ import {
   GreenGovernanceEventType,
   PrecedenceBasis,
   ScopeClass,
-  SoulSessionOverrideAppliedPayloadSchema,
   SoulSessionOverridePromotedPayloadSchema,
   SourceKind,
   StorageTier,
@@ -82,8 +81,12 @@ export interface SessionOverrideRemediationWarnPort {
 
 export interface SessionOverrideRemediationEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): Promise<EventLogEntry>;
-  queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
-  queryByWorkspace(workspaceId: string): Promise<readonly EventLogEntry[]>;
+  hasSessionOverridePromotion(overrideId: string): Promise<boolean>;
+  countDistinctAppliedSessionOverrideRuns(query: {
+    readonly workspaceId: string;
+    readonly targetObject: string;
+    readonly correction: string;
+  }): Promise<number>;
 }
 
 export interface SessionOverrideRemediationDependencies {
@@ -238,8 +241,7 @@ export class SessionOverrideRemediation {
   }
 
   private async hasPromotionAudit(overrideId: string): Promise<boolean> {
-    const events = await this.dependencies.eventLogRepo.queryByEntity("session_override", overrideId);
-    return events.some((event) => event.event_type === GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED);
+    return await this.dependencies.eventLogRepo.hasSessionOverridePromotion(overrideId);
   }
 
   private async resolvePromotionDimension(
@@ -286,28 +288,12 @@ export class SessionOverrideRemediation {
     override: Readonly<SessionOverride>,
     workspaceId: string
   ): Promise<boolean> {
-    const events = await this.dependencies.eventLogRepo.queryByWorkspace(workspaceId);
-    const matchingRuns = new Set(
-      events.flatMap((event) => {
-        if (event.event_type !== GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED || event.run_id === null) {
-          return [];
-        }
-
-        const parsed = SoulSessionOverrideAppliedPayloadSchema.safeParse(event.payload_json);
-
-        if (
-          parsed.success &&
-          normalizeTriggerValue(parsed.data.target_object) === normalizeTriggerValue(override.target_object) &&
-          normalizeTriggerValue(parsed.data.correction) === normalizeTriggerValue(override.correction)
-        ) {
-          return [event.run_id];
-        }
-
-        return [];
-      })
-    );
-
-    return matchingRuns.size >= 2;
+    const recurringRuns = await this.dependencies.eventLogRepo.countDistinctAppliedSessionOverrideRuns({
+      workspaceId,
+      targetObject: override.target_object,
+      correction: override.correction
+    });
+    return recurringRuns >= 2;
   }
 
   private warnMissingTargetObjectResolver(targetObject: string): void {
@@ -412,8 +398,4 @@ function toClaimEnforcementLevel(dimension: MemoryDimensionValue): ClaimForm["en
     default:
       return EnforcementLevel.STRICT;
   }
-}
-
-function normalizeTriggerValue(value: string): string {
-  return value.trim().toLowerCase();
 }

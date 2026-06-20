@@ -109,43 +109,13 @@ export function createEdgeAutoProducerLlmPort(options: {
   const llmComplete = options.llmComplete ?? requestVerdictFromGarden;
 
   return {
-    classifyPair: async ({ newMemory, neighbor }) => {
-      const pair: PairInput = {
-        newContent: newMemory.content,
-        newTags: newMemory.domain_tags,
-        neighborContent: neighbor.content,
-        neighborTags: neighbor.domain_tags,
-        dimension: newMemory.dimension,
-        scopeClass: newMemory.scope_class
-      };
-      const requestKey = computeRequestKey(config.model, pair);
-      const cached = readCachedVerdict(cacheRoot, requestKey);
-      if (cached !== undefined) {
-        return materializeDecision(cached.edge_type, cached.confidence, cached.rationale);
-      }
-      let raw: string;
-      try {
-        raw = await llmComplete(buildPrompt(pair), config);
-      } catch {
-        // Transport failure degrades to null. The service falls back to
-        // the local heuristic for this neighbor and emits a warn event
-        // — we do not duplicate that observability here.
-        return null;
-      }
-      const parsed = parseVerdict(raw);
-      // Persist `none` verdicts too: they save just as much budget on a
-      // re-ingest of the same pair, and the cache is content-anchored
-      // so neighbor re-materialization does not poison it.
-      writeCachedVerdict(cacheRoot, requestKey, {
-        model: config.model,
-        request_hash: requestKey,
-        edge_type: parsed.edgeType,
-        confidence: parsed.confidence,
-        rationale: parsed.rationale,
-        decided_at: new Date().toISOString()
-      });
-      return materializeDecision(parsed.edgeType, parsed.confidence, parsed.rationale);
-    }
+    classifyPair: async ({ newMemory, neighbor }) =>
+      await classifyPairWithGardenCache(
+        config,
+        cacheRoot,
+        llmComplete,
+        buildPairInput(newMemory, neighbor)
+      )
   };
 }
 
@@ -177,6 +147,64 @@ function buildPrompt(pair: PairInput): string {
     `content: ${pair.neighborContent}`,
     `tags: ${pair.neighborTags.join(", ")}`
   ].join("\n");
+}
+
+function buildPairInput(
+  newMemory: Readonly<{
+    content: string;
+    domain_tags: readonly string[];
+    dimension: string;
+    scope_class: string;
+  }>,
+  neighbor: Readonly<{ content: string; domain_tags: readonly string[] }>
+): PairInput {
+  return {
+    newContent: newMemory.content,
+    newTags: newMemory.domain_tags,
+    neighborContent: neighbor.content,
+    neighborTags: neighbor.domain_tags,
+    dimension: newMemory.dimension,
+    scopeClass: newMemory.scope_class
+  };
+}
+
+async function classifyPairWithGardenCache(
+  config: EdgeAutoProducerLlmAdapterConfig,
+  cacheRoot: string,
+  llmComplete: (prompt: string, config: EdgeAutoProducerLlmAdapterConfig) => Promise<string>,
+  pair: PairInput
+): Promise<EdgeAutoProducerLlmDecision | null> {
+  const requestKey = computeRequestKey(config.model, pair);
+  const cached = readCachedVerdict(cacheRoot, requestKey);
+  if (cached !== undefined) {
+    return materializeDecision(cached.edge_type, cached.confidence, cached.rationale);
+  }
+  return await requestAndCachePairVerdict(config, cacheRoot, llmComplete, pair, requestKey);
+}
+
+async function requestAndCachePairVerdict(
+  config: EdgeAutoProducerLlmAdapterConfig,
+  cacheRoot: string,
+  llmComplete: (prompt: string, config: EdgeAutoProducerLlmAdapterConfig) => Promise<string>,
+  pair: PairInput,
+  requestKey: string
+): Promise<EdgeAutoProducerLlmDecision | null> {
+  let raw: string;
+  try {
+    raw = await llmComplete(buildPrompt(pair), config);
+  } catch {
+    return null;
+  }
+  const parsed = parseVerdict(raw);
+  writeCachedVerdict(cacheRoot, requestKey, {
+    model: config.model,
+    request_hash: requestKey,
+    edge_type: parsed.edgeType,
+    confidence: parsed.confidence,
+    rationale: parsed.rationale,
+    decided_at: new Date().toISOString()
+  });
+  return materializeDecision(parsed.edgeType, parsed.confidence, parsed.rationale);
 }
 
 // exported for the field-boundary collision regression test; production

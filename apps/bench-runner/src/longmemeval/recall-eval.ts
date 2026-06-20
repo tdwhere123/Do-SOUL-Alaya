@@ -4,22 +4,16 @@ import { join } from "node:path";
 import {
   benchArchiveDiscriminator,
   buildDiffVsPrevious,
-  buildTokenEconomy,
-  computeTokenSavedRatio,
   diffKpis,
   entrySlug,
   renderFindings,
   renderReport,
   writeEntry,
-  aggregateEdgeProposalAutoAccept,
-  aggregateEdgeProposalRate,
   type BenchPolicyShape,
   type BenchSimulateReportMode,
-  type BenchSplit,
   type EdgeProposalKpiEventRow,
   type HistoryLayout,
-  type KpiPayload,
-  type PerScenarioRow
+  type KpiPayload
 } from "@do-soul/alaya-eval";
 import {
   RECALL_PIPELINE_VERSION,
@@ -33,14 +27,6 @@ import {
   type BenchTokenMetrics,
   type BenchWorkspaceHandle
 } from "../harness/daemon.js";
-import {
-  aggregateBenchTokenMetrics,
-  assertBenchTokenEconomyContract
-} from "../harness/token-economy.js";
-import {
-  aggregateRecallTokenEconomy,
-  extractRecallTokenEconomy
-} from "./recall-token-economy.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
 import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
@@ -58,6 +44,8 @@ import {
   RECALL_EVAL_ARCHIVE_MARKER,
   selectRecallEvalBaseline
 } from "./recall-eval-archive.js";
+import { assembleRecallEvalKpi } from "./recall-eval-kpi.js";
+import { extractRecallTokenEconomy } from "./recall-token-economy.js";
 import { runLongMemEvalRecallCycle } from "./runner.js";
 import {
   buildLongMemEvalSidecarKey,
@@ -126,7 +114,7 @@ export interface RecallEvalResult {
   readonly perQuestionDelivered: ReadonlyMap<string, readonly string[]>;
 }
 
-interface RecallEvalQuestionResult {
+export interface RecallEvalQuestionResult {
   readonly questionId: string;
   readonly hitAt1: boolean;
   readonly hitAt5: boolean;
@@ -144,11 +132,20 @@ interface RecallEvalQuestionResult {
   readonly deliveredObjectIds: readonly string[];
 }
 
-const VARIANT_TO_SPLIT: Record<LongMemEvalVariant, BenchSplit> = {
-  longmemeval_oracle: "longmemeval-oracle",
-  longmemeval_s: "longmemeval-s",
-  longmemeval_m: "longmemeval-m"
-};
+interface RecallEvalRunContext {
+  readonly options: RecallEvalOptions;
+  readonly manifest: LongMemEvalSnapshotManifest;
+  readonly window: readonly LongMemEvalSnapshotQuestion[];
+  readonly sidecarQuestionCount: number;
+  readonly dataDirRoot: string;
+  readonly policyShape: BenchPolicyShape;
+  readonly simulateReport: BenchSimulateReportMode;
+  readonly recallOptions: BenchRecallOptions;
+  readonly alayaVersion: string;
+  readonly commitSha7: string;
+  readonly runAt: Date;
+  readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
+}
 
 /**
  * Run the recall-only feedback loop against a seeded-DB snapshot. Restores a
@@ -169,84 +166,115 @@ export async function runRecallEval(
     );
   }
 
+  const context = await prepareRecallEvalRun(options, recallWeightOverrides);
+  const collected = await executeRecallEvalRun(context);
+  return writeRecallEvalArtifacts(context, collected);
+}
+
+async function prepareRecallEvalRun(
+  options: RecallEvalOptions,
+  recallWeightOverrides: BenchRecallWeightOverrides | undefined
+): Promise<RecallEvalRunContext> {
   const manifest = readSnapshotManifest(options.snapshotDbPath);
   const sidecarFile = readSnapshotSidecar(options.snapshotDbPath);
-
   const dataDirRoot =
     options.dataDirRoot ?? (await mkdtemp(join(tmpdir(), "alaya-recall-eval-")));
   restoreSnapshotToDataDir({
     snapshotDbPath: options.snapshotDbPath,
     dataDirRoot
   });
-  // Version binding: refuse a snapshot whose recall pipeline / schema migration
-  // disagrees with this binary BEFORE recall reads stale materialized state.
   assertSnapshotVersionMatch(manifest, join(dataDirRoot, "alaya.db"));
-
-  const offset = Math.max(0, options.offset ?? 0);
-  const sliceEnd =
-    options.limit !== undefined ? offset + options.limit : sidecarFile.questions.length;
-  const window = sidecarFile.questions.slice(offset, sliceEnd);
-
-  const policyShape = options.policyShape ?? "stress";
-  const simulateReport = options.simulateReport ?? "none";
-  const recallOptions: BenchRecallOptions = {
-    maxResults: 10,
-    conflictAwareness: policyShape === "stress"
+  return {
+    options,
+    manifest,
+    window: selectRecallEvalWindow(sidecarFile.questions, options),
+    sidecarQuestionCount: sidecarFile.questions.length,
+    dataDirRoot,
+    policyShape: options.policyShape ?? "stress",
+    simulateReport: options.simulateReport ?? "none",
+    recallOptions: {
+      maxResults: 10,
+      conflictAwareness: (options.policyShape ?? "stress") === "stress"
+    },
+    alayaVersion: resolveBenchRunnerVersion(),
+    commitSha7: resolveBenchCommitSha7(),
+    runAt: new Date(),
+    recallWeightOverrides
   };
+}
 
-  const alayaVersion = resolveBenchRunnerVersion();
-  const commitSha7 = resolveBenchCommitSha7();
-  const runAt = new Date();
-
+async function executeRecallEvalRun(
+  context: RecallEvalRunContext
+): Promise<readonly RecallEvalQuestionResult[]> {
   const collected: RecallEvalQuestionResult[] = [];
   const daemon = await startBenchDaemon({
-    dataDirRoot,
+    dataDirRoot: context.dataDirRoot,
     embeddingMode: "disabled",
-    recallWeightOverrides
+    recallWeightOverrides: context.recallWeightOverrides
   });
   try {
-    for (let i = 0; i < window.length; i++) {
-      const question = window[i];
+    for (let i = 0; i < context.window.length; i += 1) {
+      const question = context.window[i];
       if (question === undefined) continue;
       const result = await recallEvalOneQuestion({
         daemon,
         question,
         turnIndex: i + 1,
-        recallOptions,
-        simulateReport
+        recallOptions: context.recallOptions,
+        simulateReport: context.simulateReport
       });
       collected.push(result);
-      process.stdout.write(
-        `[recall-eval ${i + 1}/${window.length}] ${question.questionId.slice(0, 8)} ` +
-          `R@5=${result.hitAt5 ? "✓" : "✗"} latency=${result.latencyMs}ms\n`
-      );
+      writeRecallEvalProgress(i, context.window.length, question.questionId, result);
     }
   } finally {
     await daemon.shutdown();
   }
+  return collected;
+}
 
+function selectRecallEvalWindow(
+  questions: readonly LongMemEvalSnapshotQuestion[],
+  options: RecallEvalOptions
+): readonly LongMemEvalSnapshotQuestion[] {
+  const offset = Math.max(0, options.offset ?? 0);
+  const sliceEnd = options.limit !== undefined ? offset + options.limit : questions.length;
+  return questions.slice(offset, sliceEnd);
+}
+
+function writeRecallEvalProgress(
+  questionIndex: number,
+  totalQuestions: number,
+  questionId: string,
+  result: RecallEvalQuestionResult
+): void {
+  process.stdout.write(
+    `[recall-eval ${questionIndex + 1}/${totalQuestions}] ${questionId.slice(0, 8)} ` +
+      `R@5=${result.hitAt5 ? "✓" : "✗"} latency=${result.latencyMs}ms\n`
+  );
+}
+
+async function writeRecallEvalArtifacts(
+  context: RecallEvalRunContext,
+  collected: readonly RecallEvalQuestionResult[]
+): Promise<RecallEvalResult> {
   const payload = assembleRecallEvalKpi({
     collected,
-    manifest,
-    variant: options.variant,
-    runAt,
-    commitSha7,
-    alayaVersion,
-    policyShape,
-    simulateReport,
-    sampleSize: sidecarFile.questions.length,
-    evaluatedCount: window.length,
-    recallWeightOverrides
+    manifest: context.manifest,
+    variant: context.options.variant,
+    runAt: context.runAt,
+    commitSha7: context.commitSha7,
+    alayaVersion: context.alayaVersion,
+    policyShape: context.policyShape,
+    simulateReport: context.simulateReport,
+    sampleSize: context.sidecarQuestionCount,
+    evaluatedCount: context.window.length,
+    recallWeightOverrides: context.recallWeightOverrides
   });
-
-  const layout: HistoryLayout = { historyRoot: options.historyRoot };
-  // @anchor recall-eval-archive-marker — diff a fast-loop run against the
-  // latest prior fast-loop archive (apple-to-apple), never against a full run
-  // whose passing pointer shares this bucket. cross-file: recall-eval-archive.ts
+  const layout: HistoryLayout = { historyRoot: context.options.historyRoot };
   const previous = await selectRecallEvalBaseline(layout, "public", {
     split: payload.split,
-    policyShape,
-    simulateReport,
+    policyShape: context.policyShape,
+    simulateReport: context.simulateReport,
     embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
@@ -255,30 +283,51 @@ export async function runRecallEval(
     previous,
     previous?.run_at ?? ""
   );
-  // @anchor recall-eval-archive-marker — the slug also carries the marker so a
-  // fast-loop archive is human/audit-distinguishable from a full run on disk.
-  const slug = entrySlug(
-    runAt,
-    commitSha7,
-    `${benchArchiveDiscriminator(policyShape, simulateReport)}-${RECALL_EVAL_ARCHIVE_MARKER}`
-  );
-  const report = renderReport(payload, previous, diff);
-  const findings = renderFindings(payload, diff);
-  const entry = await writeEntry(layout, "public", slug, payload, report, findings);
+  return persistRecallEvalArtifacts(context, collected, layout, payload, previous, diff);
+}
 
-  const perQuestionDelivered = new Map<string, readonly string[]>(
-    collected.map((res) => [res.questionId, res.deliveredObjectIds] as const)
+async function persistRecallEvalArtifacts(
+  context: RecallEvalRunContext,
+  collected: readonly RecallEvalQuestionResult[],
+  layout: HistoryLayout,
+  payload: KpiPayload,
+  previous: KpiPayload | null,
+  diff: ReturnType<typeof diffKpis>
+): Promise<RecallEvalResult> {
+  const slug = buildRecallEvalSlug(context);
+  const entry = await writeEntry(
+    layout,
+    "public",
+    slug,
+    payload,
+    renderReport(payload, previous, diff),
+    renderFindings(payload, diff)
   );
-
   return {
     slug,
     kpiPath: entry.kpiPath,
     reportPath: entry.reportPath,
     findingsPath: entry.findingsPath,
     payload,
-    snapshotManifest: manifest,
-    perQuestionDelivered
+    snapshotManifest: context.manifest,
+    perQuestionDelivered: buildPerQuestionDelivered(collected)
   };
+}
+
+function buildRecallEvalSlug(context: RecallEvalRunContext): string {
+  return entrySlug(
+    context.runAt,
+    context.commitSha7,
+    `${benchArchiveDiscriminator(context.policyShape, context.simulateReport)}-${RECALL_EVAL_ARCHIVE_MARKER}`
+  );
+}
+
+function buildPerQuestionDelivered(
+  collected: readonly RecallEvalQuestionResult[]
+): ReadonlyMap<string, readonly string[]> {
+  return new Map<string, readonly string[]>(
+    collected.map((result) => [result.questionId, result.deliveredObjectIds] as const)
+  );
 }
 
 async function recallEvalOneQuestion(input: {
@@ -288,244 +337,133 @@ async function recallEvalOneQuestion(input: {
   readonly recallOptions: BenchRecallOptions;
   readonly simulateReport: BenchSimulateReportMode;
 }): Promise<RecallEvalQuestionResult> {
-  const { question } = input;
-  const workspace: BenchWorkspaceHandle = await input.daemon.attachWorkspace({
-    workspaceId: question.workspaceId,
-    runId: question.runId
+  const workspace = await input.daemon.attachWorkspace({
+    workspaceId: input.question.workspaceId,
+    runId: input.question.runId
   });
   try {
-    // Rebuild the in-memory scoring sidecar from the persisted entries.
-    const sidecar = new Map<string, LongMemEvalSidecarEntry>();
-    for (const entry of question.sidecar) {
-      sidecar.set(buildLongMemEvalSidecarKey(entry.objectKind, entry.objectId), {
-        objectId: entry.objectId,
-        objectKind: entry.objectKind,
-        sessionId: entry.sessionId,
-        hasAnswer: entry.hasAnswer
-      });
-    }
-    const answerSessionSet = new Set(question.answerSessionIds);
+    const sidecar = buildSnapshotSidecar(input.question);
+    const answerSessionSet = new Set(input.question.answerSessionIds);
     const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
-
-    const recallCycle = await runLongMemEvalRecallCycle({
-      daemon: workspace,
-      query: question.question,
-      recallOptions: input.recallOptions,
-      simulateReport: input.simulateReport,
-      goldMemoryIds,
-      turnIndex: input.turnIndex,
-      questionText: question.question
-    });
-    const recallResult = recallCycle.scoredRecallResult;
-    const latencyMs = recallCycle.scoredRecallLatencyMs;
-    const results = recallResult.results;
-    const activeConstraintResults = (recallResult.active_constraints ?? []).map(
-      (constraint, index) => ({ object_id: constraint.object_id, rank: index + 1 })
-    );
-    const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
-      object_id: pointer.object_id,
-      object_kind: pointer.object_kind,
-      rank: index + 1,
-      relevance_score: pointer.relevance_score,
-      score_factors: pointer.score_factors ?? null
-    }));
-
-    const isAbstention = isAbstentionQuestionId(question.questionId);
-    const scoredHits = resolveLongMemEvalHitVerdict({
-      isAbstention,
-      results,
+    const recallCycle = await runRecallEvalQuestionCycle(input, workspace, goldMemoryIds);
+    return await buildRecallEvalQuestionResult(
+      input,
+      workspace,
       sidecar,
-      answerSessionIds: answerSessionSet
-    });
-    const diagnostics = buildQuestionDiagnostic({
-      questionId: question.questionId,
+      answerSessionSet,
       goldMemoryIds,
-      answerSessionIds: question.answerSessionIds,
-      deliveredResults,
-      activeConstraintResults,
-      hitAt1: scoredHits.hitAt1,
-      hitAt5: scoredHits.hitAt5,
-      hitAt10: scoredHits.hitAt10,
-      isAbstention,
-      degradationReason: recallResult.degradation_reason ?? null,
-      recallResult,
-      embeddingMode: "disabled"
-    });
-    const tokenMetrics = await workspace.queryTokenMetrics();
-    const recallTokenEconomy = extractRecallTokenEconomy(recallResult);
-    const edgeProposalKpiRows = await workspace.queryEdgeProposalKpiRows();
-
-    return {
-      questionId: question.questionId,
-      hitAt1: scoredHits.hitAt1,
-      hitAt5: scoredHits.hitAt5,
-      hitAt10: scoredHits.hitAt10,
-      firstTier: scoredHits.firstTier,
-      latencyMs,
-      degradationReason: recallResult.degradation_reason ?? null,
-      diagnostics,
-      tokenMetrics,
-      recallTokenEconomy,
-      edgeProposalKpiRows,
-      deliveredObjectIds: deliveredResults.map((result) => result.object_id)
-    };
+      recallCycle
+    );
   } finally {
     await workspace.detach();
   }
 }
 
-function assembleRecallEvalKpi(input: {
-  readonly collected: readonly RecallEvalQuestionResult[];
-  readonly manifest: LongMemEvalSnapshotManifest;
-  readonly variant: LongMemEvalVariant;
-  readonly runAt: Date;
-  readonly commitSha7: string;
-  readonly alayaVersion: string;
-  readonly policyShape: BenchPolicyShape;
-  readonly simulateReport: BenchSimulateReportMode;
-  readonly sampleSize: number;
-  readonly evaluatedCount: number;
-  readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
-}): KpiPayload {
-  const perScenario: PerScenarioRow[] = [];
-  const latencies: number[] = [];
-  const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
-  const tokenMetricsPerQuestion: BenchTokenMetrics[] = [];
-  const recallTokenEconomySamples: BenchRecallTokenEconomy[] = [];
-  const edgeProposalRowsAcross: EdgeProposalKpiEventRow[] = [];
-  const edgeProposalRowsPerQuestion: EdgeProposalKpiEventRow[][] = [];
-  let tierHot = 0;
-  let tierWarm = 0;
-  let tierCold = 0;
-  let degradeNone = 0;
-  let degradeWarm = 0;
-  let degradeCold = 0;
-  let degradePartial = 0;
-  let totalHitAt1 = 0;
-  let totalHitAt10 = 0;
-
-  for (const res of input.collected) {
-    questionDiagnostics.push(res.diagnostics);
-    latencies.push(res.latencyMs);
-    if (res.hitAt1) totalHitAt1++;
-    if (res.hitAt10) totalHitAt10++;
-    if (res.firstTier === "hot") tierHot++;
-    else if (res.firstTier === "warm") tierWarm++;
-    else tierCold++;
-    if (res.degradationReason === "warm_cascade_engaged") degradeWarm++;
-    else if (res.degradationReason === "cold_cascade_engaged") degradeCold++;
-    else if (res.degradationReason === "recall_explainability_partial") degradePartial++;
-    else degradeNone++;
-    tokenMetricsPerQuestion.push(res.tokenMetrics);
-    if (res.recallTokenEconomy !== null) {
-      recallTokenEconomySamples.push(res.recallTokenEconomy);
-    }
-    for (const row of res.edgeProposalKpiRows) {
-      edgeProposalRowsAcross.push(row);
-    }
-    edgeProposalRowsPerQuestion.push([...res.edgeProposalKpiRows]);
-    perScenario.push({
-      id: res.questionId,
-      version: 1,
-      hit_at_5: res.hitAt5,
-      tier: res.firstTier,
-      latency_ms: res.latencyMs
+function buildSnapshotSidecar(
+  question: LongMemEvalSnapshotQuestion
+): Map<string, LongMemEvalSidecarEntry> {
+  const sidecar = new Map<string, LongMemEvalSidecarEntry>();
+  for (const entry of question.sidecar) {
+    sidecar.set(buildLongMemEvalSidecarKey(entry.objectKind, entry.objectId), {
+      objectId: entry.objectId,
+      objectKind: entry.objectKind,
+      sessionId: entry.sessionId,
+      hasAnswer: entry.hasAnswer
     });
   }
+  return sidecar;
+}
 
-  const n = perScenario.length;
-  const rAt1 = n === 0 ? 0 : totalHitAt1 / n;
-  const rAt5 = n === 0 ? 0 : perScenario.filter((r) => r.hit_at_5).length / n;
-  const rAt10 = n === 0 ? 0 : totalHitAt10 / n;
-  const latencyP50 = computePercentile(latencies, 50);
-  const latencyP95 = computePercentile(latencies, 95);
+async function runRecallEvalQuestionCycle(
+  input: Parameters<typeof recallEvalOneQuestion>[0],
+  workspace: BenchWorkspaceHandle,
+  goldMemoryIds: readonly string[]
+) {
+  return runLongMemEvalRecallCycle({
+    daemon: workspace,
+    query: input.question.question,
+    recallOptions: input.recallOptions,
+    simulateReport: input.simulateReport,
+    goldMemoryIds,
+    turnIndex: input.turnIndex,
+    questionText: input.question.question
+  });
+}
 
-  const tokenEconomyInput = aggregateBenchTokenMetrics(tokenMetricsPerQuestion);
-  // see also: apps/bench-runner/src/harness/token-economy.ts assertBenchTokenEconomyContract
-  assertBenchTokenEconomyContract("public", tokenEconomyInput);
-  const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
-  const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
-  const recallTokenEconomy = aggregateRecallTokenEconomy(recallTokenEconomySamples);
-  const edgeProposalRate = aggregateEdgeProposalRate(
-    edgeProposalRowsAcross,
-    edgeProposalRowsPerQuestion
-  );
-  const edgeProposalAutoAccept = aggregateEdgeProposalAutoAccept(edgeProposalRowsAcross);
-
-  const provenance = input.manifest.extraction_provenance;
-
+async function buildRecallEvalQuestionResult(
+  input: Parameters<typeof recallEvalOneQuestion>[0],
+  workspace: BenchWorkspaceHandle,
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
+  answerSessionSet: ReadonlySet<string>,
+  goldMemoryIds: readonly string[],
+  recallCycle: Awaited<ReturnType<typeof runRecallEvalQuestionCycle>>
+): Promise<RecallEvalQuestionResult> {
+  const recallResult = recallCycle.scoredRecallResult;
+  const results = recallResult.results;
+  const scoredHits = resolveLongMemEvalHitVerdict({
+    isAbstention: isAbstentionQuestionId(input.question.questionId),
+    results,
+    sidecar,
+    answerSessionIds: answerSessionSet
+  });
   return {
-    bench_name: "public",
-    split: VARIANT_TO_SPLIT[input.variant],
-    run_at: input.runAt.toISOString(),
-    alaya_commit: input.commitSha7,
-    alaya_version: input.alayaVersion,
-    recall_pipeline_version: RECALL_PIPELINE_VERSION,
-    embedding_provider: "none",
-    chat_provider: "none",
-    policy_shape: input.policyShape,
-    simulate_report: input.simulateReport,
-    ...(input.recallWeightOverrides === undefined
-      ? {}
-      : { recall_weight_overrides: input.recallWeightOverrides.summary }),
-    dataset: {
-      name: input.variant,
-      size: input.sampleSize,
-      source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
-      // Provenance-inherited from the snapshot manifest's extraction provenance;
-      // recall-eval never re-reads the dataset, so the checksum is carried, not
-      // recomputed. "snapshot-inherited" marks a snapshot built without a
-      // pinned extraction manifest.
-      checksum_sha256: provenance?.dataset_revision ?? "snapshot-inherited",
-      // @anchor recall-eval-archive-marker (consumer: selectFullRunBaseline) —
-      // the checksum_source MUST start with RECALL_EVAL_ARCHIVE_MARKER so a
-      // full-run baseline scan can exclude this fast-loop archive.
-      checksum_source: `${RECALL_EVAL_ARCHIVE_MARKER} ${input.manifest.db_filename}`
-    },
-    sample_size: input.sampleSize,
-    evaluated_count: input.evaluatedCount,
-    harness_mode: "mcp_propose_review",
-    kpi: {
-      r_at_1: rAt1,
-      r_at_5: rAt5,
-      r_at_10: rAt10,
-      latency_ms_p50: latencyP50,
-      latency_ms_p95: latencyP95,
-      latency_source: "exact",
-      token_saved_ratio_vs_full_prompt: tokenSavedRatio,
-      token_economy: tokenEconomy,
-      ...(recallTokenEconomy === null
-        ? {}
-        : { recall_token_economy: recallTokenEconomy }),
-      tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
-      degradation_reasons: {
-        none: degradeNone,
-        warm_cascade_engaged: degradeWarm,
-        cold_cascade_engaged: degradeCold,
-        recall_explainability_partial: degradePartial
-      },
-      // Provenance-inherited (gate-only): recall-eval never re-seeds, so seed
-      // truncation cannot be measured this run. The snapshot's seed run is the
-      // gate authority; the fast loop reports zeros so the recall KPI shape
-      // stays valid without faking seed-time figures.
-      seed_truncation: {
-        seed_turns_truncated: 0,
-        answer_turns_truncated: 0,
-        seed_chars_clipped: 0
-      },
-      quality_metrics: buildLongMemEvalQualityMetrics(questionDiagnostics),
-      ...(edgeProposalRate === undefined ? {} : { edge_proposal_rate: edgeProposalRate }),
-      ...(edgeProposalAutoAccept === undefined
-        ? {}
-        : { edge_proposal_auto_accept: edgeProposalAutoAccept }),
-      per_scenario: perScenario
-    }
+    questionId: input.question.questionId,
+    hitAt1: scoredHits.hitAt1,
+    hitAt5: scoredHits.hitAt5,
+    hitAt10: scoredHits.hitAt10,
+    firstTier: scoredHits.firstTier,
+    latencyMs: recallCycle.scoredRecallLatencyMs,
+    degradationReason: recallResult.degradation_reason ?? null,
+    diagnostics: buildRecallEvalDiagnostics(input, recallResult, goldMemoryIds, scoredHits),
+    tokenMetrics: await workspace.queryTokenMetrics(),
+    recallTokenEconomy: extractRecallTokenEconomy(recallResult),
+    edgeProposalKpiRows: await workspace.queryEdgeProposalKpiRows(),
+    deliveredObjectIds: buildDeliveredResults(recallResult).map((result) => result.object_id)
   };
 }
 
-function computePercentile(values: readonly number[], p: number): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.ceil((p / 100) * sorted.length) - 1;
-  return sorted[Math.max(0, idx)] ?? 0;
+function buildRecallEvalDiagnostics(
+  input: Parameters<typeof recallEvalOneQuestion>[0],
+  recallResult: Awaited<ReturnType<typeof runLongMemEvalRecallCycle>>["scoredRecallResult"],
+  goldMemoryIds: readonly string[],
+  scoredHits: Pick<
+    RecallEvalQuestionResult,
+    "hitAt1" | "hitAt5" | "hitAt10"
+  >
+): LongMemEvalQuestionDiagnostic {
+  return buildQuestionDiagnostic({
+    questionId: input.question.questionId,
+    goldMemoryIds,
+    answerSessionIds: input.question.answerSessionIds,
+    deliveredResults: buildDeliveredResults(recallResult),
+    activeConstraintResults: buildActiveConstraintResults(recallResult),
+    hitAt1: scoredHits.hitAt1,
+    hitAt5: scoredHits.hitAt5,
+    hitAt10: scoredHits.hitAt10,
+    isAbstention: isAbstentionQuestionId(input.question.questionId),
+    degradationReason: recallResult.degradation_reason ?? null,
+    recallResult,
+    embeddingMode: "disabled"
+  });
+}
+
+function buildDeliveredResults(
+  recallResult: Awaited<ReturnType<typeof runLongMemEvalRecallCycle>>["scoredRecallResult"]
+) {
+  return recallResult.results.slice(0, 10).map((pointer, index) => ({
+    object_id: pointer.object_id,
+    object_kind: pointer.object_kind,
+    rank: index + 1,
+    relevance_score: pointer.relevance_score,
+    score_factors: pointer.score_factors ?? null
+  }));
+}
+
+function buildActiveConstraintResults(
+  recallResult: Awaited<ReturnType<typeof runLongMemEvalRecallCycle>>["scoredRecallResult"]
+) {
+  return (recallResult.active_constraints ?? []).map((constraint, index) => ({
+    object_id: constraint.object_id,
+    rank: index + 1
+  }));
 }

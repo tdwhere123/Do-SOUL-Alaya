@@ -103,44 +103,8 @@ export function createReconciliationLlmDecisionPort(options: {
   const llmComplete = options.llmComplete ?? requestDecisionFromGarden;
 
   return {
-    decide: async ({ incomingContent, candidates }) => {
-      const requestKey = computeRequestKey(config.model, incomingContent, candidates);
-      const cached = readCachedDecision(cacheRoot, requestKey);
-      if (cached !== undefined) {
-        // Resolve the content-anchored target back to a CURRENT
-        // candidate's object_id. If no current candidate carries that
-        // content the target is dropped — the core service then
-        // degrades the verdict to ADD rather than acting on a stale id.
-        const targetObjectId =
-          cached.target_content_hash === null
-            ? undefined
-            : resolveTargetByContentHash(cached.target_content_hash, candidates);
-        return {
-          kind: cached.kind,
-          ...(targetObjectId === undefined ? {} : { targetObjectId }),
-          reason: cached.reason
-        };
-      }
-
-      const prompt = buildDecisionPrompt(incomingContent, candidates);
-      const raw = await llmComplete(prompt, config);
-      const parsed = parseDecision(raw, candidates);
-
-      const targetContent =
-        parsed.targetObjectId === undefined
-          ? undefined
-          : candidates.find((candidate) => candidate.objectId === parsed.targetObjectId)?.content;
-      writeCachedDecision(cacheRoot, requestKey, {
-        model: config.model,
-        request_hash: requestKey,
-        kind: parsed.kind,
-        target_content_hash:
-          targetContent === undefined ? null : hashContent(targetContent),
-        reason: parsed.reason ?? "",
-        decided_at: new Date().toISOString()
-      });
-      return parsed;
-    }
+    decide: async ({ incomingContent, candidates }) =>
+      await decideWithGardenCache(config, cacheRoot, llmComplete, incomingContent, candidates)
   };
 }
 
@@ -181,6 +145,72 @@ function buildDecisionPrompt(
     "EXISTING CANDIDATES:",
     candidateLines
   ].join("\n");
+}
+
+async function decideWithGardenCache(
+  config: ReconciliationLlmDecisionConfig,
+  cacheRoot: string,
+  llmComplete: (prompt: string, config: ReconciliationLlmDecisionConfig) => Promise<string>,
+  incomingContent: string,
+  candidates: readonly { readonly objectId: string; readonly content: string }[]
+): Promise<Awaited<ReturnType<NonNullable<ReconciliationLlmDecisionPort>["decide"]>>> {
+  const requestKey = computeRequestKey(config.model, incomingContent, candidates);
+  const cached = readCachedDecision(cacheRoot, requestKey);
+  if (cached !== undefined) {
+    return materializeCachedReconciliationDecision(cached, candidates);
+  }
+  return await requestAndCacheReconciliationDecision(
+    config,
+    cacheRoot,
+    llmComplete,
+    incomingContent,
+    candidates,
+    requestKey
+  );
+}
+
+function materializeCachedReconciliationDecision(
+  cached: CachedDecision,
+  candidates: readonly { readonly objectId: string; readonly content: string }[]
+): { readonly kind: "add" | "update" | "noop"; readonly targetObjectId?: string; readonly reason: string } {
+  const targetObjectId =
+    cached.target_content_hash === null
+      ? undefined
+      : resolveTargetByContentHash(cached.target_content_hash, candidates);
+  return {
+    kind: cached.kind,
+    ...(targetObjectId === undefined ? {} : { targetObjectId }),
+    reason: cached.reason
+  };
+}
+
+async function requestAndCacheReconciliationDecision(
+  config: ReconciliationLlmDecisionConfig,
+  cacheRoot: string,
+  llmComplete: (prompt: string, config: ReconciliationLlmDecisionConfig) => Promise<string>,
+  incomingContent: string,
+  candidates: readonly { readonly objectId: string; readonly content: string }[],
+  requestKey: string
+): Promise<{ readonly kind: "add" | "update" | "noop"; readonly targetObjectId?: string; readonly reason: string }> {
+  const prompt = buildDecisionPrompt(incomingContent, candidates);
+  const raw = await llmComplete(prompt, config);
+  const parsed = parseDecision(raw, candidates);
+  const targetContent =
+    parsed.targetObjectId === undefined
+      ? undefined
+      : candidates.find((candidate) => candidate.objectId === parsed.targetObjectId)?.content;
+  writeCachedDecision(cacheRoot, requestKey, {
+    model: config.model,
+    request_hash: requestKey,
+    kind: parsed.kind,
+    target_content_hash: targetContent === undefined ? null : hashContent(targetContent),
+    reason: parsed.reason ?? "",
+    decided_at: new Date().toISOString()
+  });
+  return {
+    ...parsed,
+    reason: parsed.reason ?? ""
+  };
 }
 
 function computeRequestKey(
