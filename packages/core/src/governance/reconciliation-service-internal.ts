@@ -6,18 +6,6 @@ import {
 export type { EventLogEntry, MemoryEntry };
 
 import { KeyedMutex } from "../shared/keyed-mutex.js";
-export interface ReconciliationServiceMethodOwner {
-  readonly similarityFloor: number;
-  readonly conflictTagOverlapThreshold: number;
-  readonly topK: number;
-  readonly maxLlmCandidates: number;
-  readonly mutex: KeyedMutex;
-  readonly lease?: ReconciliationLeasePort;
-  readonly leaseTtlMs: number;
-  readonly now: () => Date;
-  readonly deps: ReconciliationServiceDependencies;
-}
-
 
 // invariant: ingest-time reconciliation. Decides ADD / UPDATE / NOOP for
 // an incoming distilled fact against the top-k lexically-similar existing
