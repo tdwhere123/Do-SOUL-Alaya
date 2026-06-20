@@ -51,8 +51,9 @@ export function registerAlayaCliCommands(
   runtime: AlayaDaemonRuntime
 ): void {
   registerPrimaryCommands(bridge, runtime);
-  registerAttachAndMcpCommands(bridge, runtime);
+  registerAttachCommands(bridge, runtime);
   registerMemoryCommands(bridge, runtime);
+  bridge.registerSubcommand(createMcpCommand(runtime));
   registerOperationCommands(bridge);
 }
 
@@ -239,12 +240,11 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
   bridge.registerSubcommand(createUpdateCommand());
 }
 
-function registerAttachAndMcpCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRuntime): void {
+function registerAttachCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRuntime): void {
   bridge.registerSubcommand(createAttachCommand(runtime));
   bridge.registerSubcommand(createDetachCommandSpec({
     auditWriter: createProfileAuditWriter(process.env)
   }));
-  bridge.registerSubcommand(createMcpCommand(runtime));
 }
 
 function registerMemoryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRuntime): void {
@@ -329,9 +329,21 @@ async function executeMcpCommand(
     ctx.stderr.write("Usage: mcp stdio\n");
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
+  const workspaceContext = resolveCliWorkspaceContext(ctx);
+  await ensureImplicitLocalWorkspace(workspaceContext, runtime.services.workspaceService);
+  const trustedRunId = await resolveTrustedCliRunId({
+    runId: ctx.env.ALAYA_RUN_ID,
+    workspaceId: workspaceContext.workspaceId,
+    runService: runtime.services.runService,
+    sourceLabel: "ALAYA_RUN_ID"
+  });
+  if (!trustedRunId.ok) {
+    ctx.stderr.write(`${trustedRunId.message}\n`);
+    return { exitCode: ALAYA_SYSEXITS.DATAERR };
+  }
   let server: Awaited<ReturnType<typeof runAlayaMcpStdioServer>>;
   try {
-    server = await startMcpStdioSession(ctx, runtime);
+    server = await startMcpStdioSession(ctx, runtime, workspaceContext, trustedRunId.runId);
   } catch (error) {
     ctx.stderr.write(`MCP stdio startup failed: ${formatMcpStartupError(error)}\n`);
     return { exitCode: ALAYA_SYSEXITS.SOFTWARE };
@@ -346,24 +358,15 @@ async function executeMcpCommand(
 
 async function startMcpStdioSession(
   ctx: Parameters<AlayaSubcommandSpec<readonly string[]>["handler"]>[0],
-  runtime: AlayaDaemonRuntime
+  runtime: AlayaDaemonRuntime,
+  workspaceContext: ReturnType<typeof resolveCliWorkspaceContext>,
+  trustedRunId: string | null
 ): Promise<Awaited<ReturnType<typeof runAlayaMcpStdioServer>>> {
-  const workspaceContext = resolveCliWorkspaceContext(ctx);
-  await ensureImplicitLocalWorkspace(workspaceContext, runtime.services.workspaceService);
-  const trustedRunId = await resolveTrustedCliRunId({
-    runId: ctx.env.ALAYA_RUN_ID,
-    workspaceId: workspaceContext.workspaceId,
-    runService: runtime.services.runService,
-    sourceLabel: "ALAYA_RUN_ID"
-  });
-  if (!trustedRunId.ok) {
-    throw new Error(trustedRunId.message);
-  }
   const resolvedAgentTarget = resolveMcpAgentTarget(ctx.env.ALAYA_AGENT_TARGET, (message) => {
     ctx.stderr.write(`${message}\n`);
   });
   const mcpSessionId = `mcp-session-${randomUUID()}`;
-  const mcpRunId = trustedRunId.runId ?? (await runtime.services.runService.ensureAttachedMcpSessionRun({
+  const mcpRunId = trustedRunId ?? (await runtime.services.runService.ensureAttachedMcpSessionRun({
     workspaceId: workspaceContext.workspaceId,
     sessionId: mcpSessionId,
     agentTarget: resolvedAgentTarget

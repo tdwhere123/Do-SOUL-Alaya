@@ -1,8 +1,5 @@
-import { randomUUID } from "node:crypto";
 
 import {
-  ControlPlaneObjectKind,
-  GovernanceRoleState,
   GreenState,
   GreenStatusSchema,
   MemoryDimension,
@@ -11,13 +8,8 @@ import {
   SoulGreenGraceEnteredPayloadSchema,
   SoulGreenGrantedPayloadSchema,
   SoulGreenPiercedPayloadSchema,
-  SoulSessionOverrideAppliedPayloadSchema,
-  SoulSessionOverridePromotedPayloadSchema,
-  SoulVerificationCompletedPayloadSchema,
   VERIFICATION_VALID_UNTIL_BY_DIMENSION,
   VerificationBasis,
-  VerificationResultSchema,
-  VerificationVerdict,
   VerifiedBy,
   type EventLogEntry,
   type GovernanceRoleState as GovernanceRoleStateType,
@@ -27,12 +19,9 @@ import {
   type RevokeReason as RevokeReasonType,
   type ScopeClass,
   type VerificationBasis as VerificationBasisType,
-  type VerificationResult,
-  type VerificationVerdict as VerificationVerdictType,
   type VerifiedBy as VerifiedByType
 } from "@do-soul/alaya-protocol";
 
-import { CoreError } from "../shared/errors.js";
 
 import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 type GreenServiceMethodOwner = {

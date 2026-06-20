@@ -1,31 +1,20 @@
-import { randomUUID } from "node:crypto";
 
 import {
   MemoryDimension,
   MemoryGovernanceEventType,
   RevokeReason,
-  SoulMemoryArchivedPayloadSchema,
-  SoulMemoryCreatedPayloadSchema,
-  SoulMemoryStateChangedPayloadSchema,
   SoulMemoryUpdatedPayloadSchema,
-  StorageTier,
-  type EventLogEntry,
   type FactualPolicyCondition,
   type MemoryEntry,
-  type ScopeClass,
-  type TransitionCausedBy
-} from "@do-soul/alaya-protocol";
+  type ScopeClass} from "@do-soul/alaya-protocol";
 
 import { CoreError } from "../../shared/errors.js";
 
-import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "../../manifestation/importance-gate.js";
 
-import { scheduleAuditedAsyncSideEffect } from "../../runtime/async-side-effect-auditor.js";
 
 import { parseNonEmptyString, parseObjectId } from "../../shared/validators.js";
 
 import type {
-  MemoryEntryInput,
   MemoryEntryRepoUpdateFields,
   MemoryEntryUpdateFields,
   MemoryListPageOptions,
@@ -33,15 +22,9 @@ import type {
 } from "./types.js";
 
 import {
-  ensureAllowedLifecycleTransition,
-  isPromiseLike,
-  isRepoGuardRefusal,
   parseFactualPolicyCondition,
-  parseLifecycleState,
   parseMemoryEntry,
   parseReason,
-  parseStorageTier,
-  parseTransitionCausedBy,
   parseUpdateFields,
   shouldRevokeGreenForEvidenceRewrite,
   toUpdatedFieldNames

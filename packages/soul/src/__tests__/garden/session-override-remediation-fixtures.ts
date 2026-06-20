@@ -21,6 +21,18 @@ export type RemediationResolveDimension = NonNullable<
 >["resolveDimension"];
 export type RemediationWarn = NonNullable<SessionOverrideRemediationDependencies["warn"]>;
 
+export interface RemediationTestDeps {
+  readonly memoryService: { readonly create: Mock<RemediationMemoryCreate> };
+  readonly claimService: { readonly create: Mock<RemediationClaimCreate> };
+  readonly eventLogRepo: {
+    readonly append: Mock<RemediationEventLogAppend>;
+    readonly hasSessionOverridePromotion: Mock<RemediationHasSessionOverridePromotion>;
+    readonly countDistinctAppliedSessionOverrideRuns: Mock<RemediationCountDistinctAppliedSessionOverrideRuns>;
+  };
+  readonly warn: Mock<RemediationWarn>;
+  readonly targetObjectResolver?: { readonly resolveDimension: Mock<RemediationResolveDimension> };
+}
+
 export function createDeps(
   overrides: Partial<{
     hasSessionOverridePromotion: Mock<RemediationHasSessionOverridePromotion>;
@@ -28,7 +40,7 @@ export function createDeps(
     resolveDimension: Mock<RemediationResolveDimension>;
     includeResolver: boolean;
   }> = {}
-) {
+): RemediationTestDeps {
   const storedEvents: EventLogEntry[] = [];
   const warn = vi.fn<RemediationWarn>();
 

@@ -1,32 +1,14 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
-  ComputeRecallGardenEventType,
-  HealthEventKind,
-  RecallEmbeddingSupplementDegradedPayloadSchema,
-  RecallEmbeddingSupplementMergedPayloadSchema,
-  RecallEmbeddingSupplementQueriedPayloadSchema,
   type EventLogEntry,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import {
   DEFAULT_QUERY_EMBEDDING_CACHE_SIZE,
-  DEFAULT_QUERY_TIMEOUT_MS,
-  QUERY_EMBEDDING_WARMUP_BATCH_SIZE,
-  resolveEmbeddingWorkspaceScanCap
-} from "./constants.js";
-import { resolveEmbeddingRecallTiers } from "./tier-config.js";
+  DEFAULT_QUERY_TIMEOUT_MS} from "./constants.js";
 import {
-  EMPTY_SUPPLEMENT_RESULT,
-  clamp01,
   clampQueryEmbeddingCacheSize,
-  clampQueryTimeout,
-  cosineSimilarity,
-  createPreparedEmbeddingQueryHandle,
-  emptyWorkspaceNeighborResult,
-  hashMemoryContent,
-  toErrorMessage,
-  waitForPreparedQuery
-} from "./helpers.js";
+  clampQueryTimeout} from "./helpers.js";
 import type {
   EmbeddingNeighborHit,
   EmbeddingQueryWarmupSummary,
@@ -35,7 +17,6 @@ import type {
   EmbeddingVectorRecord,
   EmbeddingWorkspaceNeighborResult,
   PreparedEmbeddingQueryHandle,
-  PreparedEmbeddingQuerySnapshot,
   PreparedEmbeddingSupplement
 } from "./types.js";
 

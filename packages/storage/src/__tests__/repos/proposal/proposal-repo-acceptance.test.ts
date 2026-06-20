@@ -12,16 +12,11 @@ import {
   countGreenPiercedEvents,
   countMemoryUpdatedEvents,
   countProposalEvents,
-  countSynthesisCapsules,
-  countSynthesisCreatedEvents,
-  createCreationEvents,
   createGreenStatus,
   createMemoryEntry,
   createProposal,
   createRepo,
   createReviewEvents,
-  createSynthesisCapsule,
-  createSynthesisProposal,
   trackedDatabases
 } from "./proposal-repo-fixture.js";
 

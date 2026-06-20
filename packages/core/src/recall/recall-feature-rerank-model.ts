@@ -1,4 +1,4 @@
-import { splitLexicalTokens, type RecallQueryProbes } from "./recall-query-probes.js";
+import { splitLexicalTokens } from "./recall-query-probes.js";
 
 // Deterministic, post-fusion feature rerank. Reorders the top-N of the
 // fusion-ranked candidate list using lexical features computed from the

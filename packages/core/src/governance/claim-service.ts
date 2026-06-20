@@ -15,7 +15,6 @@ import type { EventPublisherInput } from "../runtime/event-publisher.js";
 import { parseObjectId } from "../shared/validators.js";
 import {
   createClaimCreatedEventInput,
-  derivePrecedenceBasis,
   ensureAllowedLifecycleTransition,
   parseClaimForm,
   parseClaimLifecycleState,

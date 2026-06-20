@@ -1,18 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { StorageDatabase } from "../../sqlite/db.js";
-import { SqlitePathRelationRepo } from "../../repos/path/path-relation-repo.js";
 import {
   MIGRATION_085,
   applyMigration,
   closeOpenMigrationDbs,
   migrateThroughPre085,
   readPaths,
-  seedExistingPath,
   seedLegacyEdge,
   seedMemory,
-  seedWorkspace,
-  type PathRow
-} from "./migration-085-graph-edge-backfill-fixture.js";
+  seedWorkspace} from "./migration-085-graph-edge-backfill-fixture.js";
 
 // B2 regression: migration 085 retires memory_graph_edges. An upgraded DB
 // (initialized before the path/edge spine cutover) can still hold durable

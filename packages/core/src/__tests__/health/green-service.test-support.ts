@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import { FormationKind, GreenGovernanceEventType, MemoryDimension, RevokeReason, ScopeClass, SourceKind, StorageTier, type EventLogEntry, type GreenStatus, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { GreenService, type GreenServiceDependencies } from "../../health/green-service.js";
 
@@ -68,7 +68,15 @@ export function createHarness(options: {
   readonly governanceRole?: "standalone" | "claimed" | "contested" | "winner" | null;
   readonly leaseHeld?: boolean;
   readonly initialEvents?: readonly EventLogEntry[];
-} = {}) {
+} = {}): {
+  readonly service: GreenService;
+  readonly statuses: Map<string, GreenStatus>;
+  readonly events: EventLogEntry[];
+  readonly warn: Mock;
+  readonly notifyEntry: Mock;
+  readonly appendEvent: Mock;
+  readonly upsertStatus: Mock;
+} {
   const memory = options.memory ?? createMemoryEntry();
   const statuses = new Map<string, GreenStatus>();
   if (options.existingStatus !== undefined && options.existingStatus !== null) {

@@ -4,9 +4,7 @@ import {
   GardenTier,
   HealthEventKind,
   GraphAuditorEventType,
-  SoulGardenEventLogOrphanDetectedEventType,
   type EventLogEntry,
-  type OrphanRadar,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
 import { AUDITOR_CONSTANTS, Auditor, type AuditorDependencies } from "../../garden/auditor.js";
@@ -15,10 +13,6 @@ type AuditorEventLogPort = NonNullable<AuditorDependencies["eventLogRepo"]>;
 type AuditorPointerHealPort = NonNullable<AuditorDependencies["pointerHealPort"]>;
 type HealablePointerRecord = Awaited<
   ReturnType<AuditorPointerHealPort["findHealablePointers"]>
->[number];
-type AuditorOrphanDetectionPort = NonNullable<AuditorDependencies["orphanDetectionPort"]>;
-type EventLogOrphanRecord = Awaited<
-  ReturnType<NonNullable<AuditorOrphanDetectionPort["findEventLogOrphans"]>>
 >[number];
 
 const randomUuidMock = vi.hoisted(() => vi.fn());

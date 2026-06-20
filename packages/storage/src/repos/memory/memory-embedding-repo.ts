@@ -2,7 +2,6 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import {
   MEMORY_EMBEDDING_METADATA_COLUMNS,
-  MEMORY_EMBEDDING_SELECT_COLUMNS,
   chunkObjectIds,
   hashMemoryContent,
   parseMemoryEmbeddingMetadataRow,

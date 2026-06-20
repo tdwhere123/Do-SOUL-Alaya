@@ -4,21 +4,15 @@ import {
   MemoryGraphEdgeType,
   getPathAnchorBackingObjectId,
   type EdgeClassifyVerdict,
-  type EdgeProposalTriggerSourceValue,
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue,
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import type {
-  EdgeAutoProducerLlmDecision,
-  EdgeAutoProducerLlmPort
-} from "./edge-auto-producer-llm-port.js";
+  EdgeAutoProducerLlmDecision} from "./edge-auto-producer-llm-port.js";
 import {
-  DERIVES_FROM_SEED_PROFILE,
-  SUPPORTS_SEED_PROFILE,
   type PathSeedProfile
 } from "./path-relation-proposal-service.js";
-import type { PathCandidateSink } from "./path-candidate-sink.js";
 import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
 import type {

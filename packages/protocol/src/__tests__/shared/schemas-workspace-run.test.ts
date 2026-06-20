@@ -2,30 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   CandidateMemorySignalInputSchema,
   CandidateMemorySignalSchema,
-  EngineProvider,
-  EngineStatus,
   EmitCandidateSignalResponseSchema,
-  EventLogEntrySchema,
-  parseWorkspaceRunEventPayload,
   parseSignalEventPayload,
   WorkspaceRunEventBaseSchema,
   WorkspaceRunEventSchema,
   WorkspaceRunEventType,
-  SignalEventSchema,
   SignalEventType,
-  RunHotStateSchema,
   SignalKind,
   SignalSource,
-  SignalState,
-  RunMode,
-  RunSchema,
-  RunState,
   WorkspaceCreatedEventSchema,
-  WorkspaceCreateInputSchema,
-  WorkspaceEngineConfigSchema,
-  WorkspaceEngineConfigUpdateSchema,
   WorkspaceKind,
-  WorkspaceSchema,
   type CandidateMemorySignal,
   type WorkspaceRunEvent
 } from "../../index.js";
@@ -69,12 +55,7 @@ import {
   emitCandidateSignalResponseBase,
   eventLogEntryBase,
   invalidTimestamp,
-  runBase,
-  validTimestamp,
-  without,
-  workspaceBase,
-  workspaceEngineConfigBase
-} from "./schemas.fixtures.js";
+  without} from "./schemas.fixtures.js";
 
 describe("WorkspaceRunEventSchema", () => {
   const workspaceRunEventBase = without(without(eventLogEntryBase, "event_type"), "payload_json");

@@ -3,7 +3,6 @@ import type {
   RecallPolicy,
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
-import { rerankTopN, type RerankCandidate } from "./recall-feature-rerank.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import {
   buildRecallCandidateDedupeKey,
@@ -21,10 +20,7 @@ import type {
   RecallSupplementaryData
 } from "./recall-service-types.js";
 import {
-  normalizeEvidenceText,
-  scoreEvidenceAnchorMatch,
-  scoreQueryEvidenceMatch
-} from "./query-evidence-scoring.js";
+  normalizeEvidenceText} from "./query-evidence-scoring.js";
 
 const STRONG_LEXICAL_DELIVERY_RANK = 0.85;
 const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;

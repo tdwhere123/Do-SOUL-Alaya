@@ -54,8 +54,8 @@ describe("OpenAIEmbeddingClient", () => {
     });
     await overrideClient.embedTexts(["override"], { timeoutMs: 1000 });
 
-    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.openai.com/v1/embeddings");
-    expect(fetchImpl.mock.calls[1]?.[0]).toBe("https://embedding.example.test/v1/embeddings");
+    expect(vi.mocked(fetchImpl).mock.calls[0]?.[0]).toBe("https://api.openai.com/v1/embeddings");
+    expect(vi.mocked(fetchImpl).mock.calls[1]?.[0]).toBe("https://embedding.example.test/v1/embeddings");
   });
 
   it("retries transient transport failures before returning embeddings", async () => {

@@ -1,26 +1,13 @@
-import { clamp01 } from "../shared/clamp.js";
 import {
-  EdgeProposalTriggerSource,
-  MemoryGraphEdgeType,
-  getPathAnchorBackingObjectId,
-  type EdgeClassifyVerdict,
   type EdgeProposalTriggerSourceValue,
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue,
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import type {
-  EdgeAutoProducerLlmDecision,
   EdgeAutoProducerLlmPort
 } from "./edge-auto-producer-llm-port.js";
-import {
-  DERIVES_FROM_SEED_PROFILE,
-  SUPPORTS_SEED_PROFILE,
-  type PathSeedProfile
-} from "./path-relation-proposal-service.js";
 import type { PathCandidateSink } from "./path-candidate-sink.js";
-import { CoreError } from "../shared/errors.js";
-import { parseObjectId } from "../shared/validators.js";
 
 export interface EdgeAutoProducerMemorySearchHit {
   readonly object_id: string;

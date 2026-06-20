@@ -1,22 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   GardenRole,
-  GardenTaskDescriptorSchema,
   GardenTaskKind,
   GardenTier,
-  GardenEventType,
-  type GardenTaskDescriptor,
-  type GardenTaskResult
-} from "@do-soul/alaya-protocol";
+  GardenEventType} from "@do-soul/alaya-protocol";
 import { GardenScheduler, InMemoryGardenTaskRepo } from "../../garden/scheduler.js";
 
 import {
   createResult,
   createScheduler,
   createTask,
-  enqueueVisibleTierViolation,
-  readCoolingMap
-} from "./garden-scheduler-fixtures.js";
+  enqueueVisibleTierViolation} from "./garden-scheduler-fixtures.js";
 
 describe("GardenScheduler", () => {  it("dispatches a tier-0 task for janitor and emits a dispatch event", async () => {
     const { eventLog, scheduler } = createScheduler();

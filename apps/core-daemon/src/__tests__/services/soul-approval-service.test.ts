@@ -317,13 +317,14 @@ describe("SoulApprovalService", () => {
 function createEventLogRepo(
   entries: readonly Record<string, unknown>[]
 ): Parameters<typeof createSoulApprovalService>[0]["eventLogRepo"] {
+  type EventLogRepoPort = Parameters<typeof createSoulApprovalService>[0]["eventLogRepo"];
   return {
-    queryByRunAll: vi.fn(async () => entries),
+    queryByRunAll: vi.fn(async () => entries) as unknown as EventLogRepoPort["queryByRunAll"],
     append: vi.fn(async (entry: Record<string, unknown>) => ({
       event_id: "event-resolved-1",
       created_at: "2026-04-01T03:00:00.000Z",
       ...entry
-    }))
+    })) as unknown as EventLogRepoPort["append"]
   };
 }
 

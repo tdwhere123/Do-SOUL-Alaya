@@ -3,13 +3,6 @@ import {
   EDGE_TYPE_RECALL_MODEL,
   EdgeProposalStatus,
   EdgeProposalTriggerSource,
-  GraphAuditorEventType,
-  SoulGraphEdgeProposalCreatedPayloadSchema,
-  SoulGraphEdgeProposalPathMintFailedPayloadSchema,
-  SoulGraphEdgeProposalReviewedPayloadSchema,
-  SoulBatchReviewEdgeProposalsResponseSchema,
-  SoulListPendingEdgeProposalsResponseSchema,
-  SoulProposeEdgeResponseSchema,
   type EdgeProposal,
   type EdgeProposalFilter,
   type EdgeProposalTriggerSourceValue,
@@ -18,12 +11,10 @@ import {
   type SoulListPendingEdgeProposalsResponse,
   type SoulProposeEdgeResponse
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../shared/errors.js";
-import type { EventPublisher, EventPublisherInput } from "../runtime/event-publisher.js";
+import type { EventPublisher } from "../runtime/event-publisher.js";
 import type { PathCandidateSink } from "./path-candidate-sink.js";
 import type { PathFailureHealthInboxPort } from "./path-failure-health-inbox.js";
 import type { PathMintOutcome } from "./path-relation-proposal-service.js";
-import { parseObjectId } from "../shared/validators.js";
 
 import { edgeProposalServiceProposeEdge, edgeProposalServiceShouldAutoAccept, edgeProposalServiceListPending } from "./edge-proposal-service-methods-1.js";
 import { edgeProposalServiceBatchReview, edgeProposalServiceProposeExplicitEdge, edgeProposalServiceRequireMemoryInWorkspace } from "./edge-proposal-service-methods-2.js";

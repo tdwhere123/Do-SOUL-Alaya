@@ -31,9 +31,7 @@ import type {
   GardenSchedulerEventLogPort,
   GardenTaskBacklogCount,
   GardenTaskEventInput,
-  GardenTaskRepoPort,
-  GardenTaskRow
-} from "./scheduler-types.js";
+  GardenTaskRepoPort} from "./scheduler-types.js";
 
 export { InMemoryGardenTaskRepo } from "./in-memory-garden-task-repo.js";
 export type {

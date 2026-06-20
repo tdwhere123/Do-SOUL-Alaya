@@ -1,40 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
   ConversationMessageSchema,
-  ConversationRequestSchema,
-  EngineBindingSchema,
-  EngineBindingInputSchema,
-  EngineBindingRecordSchema,
-  EngineConnectionTestResultSchema,
   EngineError,
   EngineErrorKind,
   EngineErrorSchema,
-  EngineFinishReasonSchema,
-  EngineMessageSchema,
-  EnginePortMessageSchema,
-  EngineProvider,
   EngineResultSchema,
-  EngineStatus,
   ExecShellToolInputSchema,
   ExecShellToolResultSchema,
   FileToolErrorSchema,
-  WorkspaceRunEventType,
-  SignalEventType,
   ListDirectoryToolInputSchema,
   ListDirectoryToolResultSchema,
   ReadFileToolInputSchema,
   ReadFileToolResultSchema,
-  SignalKind,
-  SignalSource,
-  SignalState,
   SearchFilesToolInputSchema,
   SearchFilesToolResultSchema,
-  RunMode,
-  RunState,
   ToolUseBlockSchema,
   WriteFileToolInputSchema,
   WriteFileToolResultSchema,
-  WorkspaceKind,
   type CandidateMemorySignal,
   type WorkspaceRunEvent
 } from "../../index.js";
@@ -72,12 +54,6 @@ export type _CandidateMemorySignalReadonlyChecks = [
   AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "created_at">>
 ];
 
-import {
-  engineBindingBase,
-  engineBindingInputBase,
-  validTimestamp,
-  without
-} from "./schemas-engine.fixtures.js";
 
 describe("EngineResultSchema", () => {
   const message = { role: "assistant", content: "Hello", message_id: "message-1" } as const;

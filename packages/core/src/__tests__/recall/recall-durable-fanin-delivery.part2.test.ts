@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   MemoryDimension,
   ScopeClass,
@@ -15,14 +15,9 @@ import type {
 } from "../../recall/recall-service-types.js";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 const {
-  selectUncoveredSynthesisCapsules,
-  reserveSynthesisDeliverySlots,
   reserveStructuralDeliverySlots,
-  synthesisReserveCount,
   buildEmptyRecallFusionBreakdown,
-  isStructuralRescueCandidate,
-  applySessionCoverageRerank
-} = recallDeliveryReserveTestInternals;
+  isStructuralRescueCandidate} = recallDeliveryReserveTestInternals;
 function memory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     object_id: "00000000-0000-4000-8000-000000000000",
@@ -147,18 +142,6 @@ function supplementary(
     evidenceGistsByMemoryId: Object.freeze({}),
     governanceCeilingByMemoryId: Object.freeze({}),
     ...overrides
-  });
-}
-function coverageCandidate(input: {
-  readonly objectId: string;
-  readonly surfaceId: string | null;
-  readonly fusedScore: number;
-}): FusedCandidate {
-  const base = fusedCandidate({ objectId: input.objectId });
-  return Object.freeze({
-    ...base,
-    entry: memory({ object_id: input.objectId, surface_id: input.surfaceId }),
-    fusion: Object.freeze({ ...base.fusion, fused_score: input.fusedScore })
   });
 }
 

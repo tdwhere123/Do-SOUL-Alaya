@@ -2,211 +2,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ClaimLifecycleState,
   GovernanceResolutionEventType,
-  MemoryDimension,
-  ObjectLifecycleState,
   ScopeClass,
-  SoulResolutionKind,
   WorkspaceKind,
   WorkspaceState,
   canonicalGovernanceSubject,
   type ClaimForm,
-  type DeferredObligation,
-  type EventLogEntry,
-  type MemoryEntry
-} from "@do-soul/alaya-protocol";
+  type EventLogEntry} from "@do-soul/alaya-protocol";
 import {
   initDatabase,
   SqliteClaimFormRepo,
   SqliteEventLogRepo,
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
-import {
-  ResolutionService,
-  type ResolutionServiceClaimRepoPort,
-  type ResolutionServiceClaimServicePort,
-  type ResolutionServiceMemoryRepoPort,
-  type ResolutionServiceMemoryServicePort
-} from "../../governance/resolution-service.js";
 import { ClaimService } from "../../governance/claim-service.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
-import type { DeferredObligationService } from "../../governance/deferred-obligation-service.js";
 const FIXED_NOW = "2026-05-17T00:00:00.000Z";
-interface Harness {
-  readonly service: ResolutionService;
-  readonly claimRepo: ResolutionServiceClaimRepoPort & {
-    readonly findById: ReturnType<typeof vi.fn>;
-  };
-  readonly memoryRepo: ResolutionServiceMemoryRepoPort & {
-    readonly findById: ReturnType<typeof vi.fn>;
-  };
-  readonly claimService: ResolutionServiceClaimServicePort & {
-    readonly transitionLifecycle: ReturnType<typeof vi.fn>;
-  };
-  readonly memoryService: ResolutionServiceMemoryServicePort & {
-    readonly transitionLifecycle: ReturnType<typeof vi.fn>;
-  };
-  readonly deferredObligationService: Pick<DeferredObligationService, "create"> & {
-    readonly create: ReturnType<typeof vi.fn>;
-  };
-  readonly published: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>;
-}
-function createHarness(): Harness {
-  const published: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
-  let counter = 0;
-  const eventPublisher = {
-    publish: vi.fn(async (input: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
-      counter += 1;
-      published.push(input);
-      return {
-        ...input,
-        event_id: `evt-${counter}`,
-        created_at: FIXED_NOW,
-        revision: 0
-      } satisfies EventLogEntry;
-    })
-  } as unknown as EventPublisher;
-  const claimRepo = { findById: vi.fn(async (_id: string) => null as ClaimForm | null) };
-  const memoryRepo = { findById: vi.fn(async (_id: string) => null as MemoryEntry | null) };
-  const claimService = {
-    // The mock honors the atomic-audit-composition contract: additional
-    // event inputs are persisted (in the same logical transaction as the
-    // claim mutation) and the persisted rows are pushed into the sink in
-    // input order, exactly like ClaimService.transitionLifecycle does.
-    transitionLifecycle: vi.fn(async (
-      objectId: string,
-      newState: ClaimForm["claim_status"],
-      _reason: string,
-      _causedBy: "user" | "system" | "review" | "deterministic_rule" | "auditor" | "bootstrap",
-      options?: {
-        readonly additionalEventInputs?: readonly Omit<
-          EventLogEntry,
-          "event_id" | "created_at" | "revision"
-        >[];
-        readonly additionalEventsSink?: EventLogEntry[];
-      }
-    ): Promise<Readonly<ClaimForm>> => {
-      for (const eventInput of options?.additionalEventInputs ?? []) {
-        counter += 1;
-        published.push(eventInput);
-        options?.additionalEventsSink?.push({
-          ...eventInput,
-          event_id: `evt-${counter}`,
-          created_at: FIXED_NOW,
-          revision: 0
-        } satisfies EventLogEntry);
-      }
-      return buildClaim({ object_id: objectId, claim_status: newState });
-    })
-  };
-  const memoryService = {
-    transitionLifecycle: vi.fn(async (
-      objectId: string,
-      nextState: MemoryEntry["lifecycle_state"],
-      _reason: string,
-      _causedBy: "user" | "system" | "review" | "deterministic_rule" | "auditor" | "bootstrap"
-    ): Promise<Readonly<MemoryEntry>> =>
-      buildMemory({ object_id: objectId, lifecycle_state: nextState }))
-  };
-  const deferredObligationService = {
-    create: vi.fn(async (): Promise<Readonly<DeferredObligation>> => ({
-      obligation_id: "obligation-1",
-      kind: "evidence_refresh",
-      state: "pending",
-      description: "test-defer",
-      source_run_id: "run-1",
-      workspace_id: "ws-1",
-      target_entity_id: "claim-1",
-      created_at: FIXED_NOW,
-      expires_at: "2026-05-18T00:00:00.000Z"
-    }))
-  };
-  const service = new ResolutionService({
-    eventPublisher,
-    claimRepo,
-    memoryRepo,
-    claimService,
-    memoryService,
-    deferredObligationService,
-    now: () => FIXED_NOW
-  });
-  return {
-    service,
-    claimRepo,
-    memoryRepo,
-    claimService,
-    memoryService,
-    deferredObligationService,
-    published
-  };
-}
-function buildClaim(overrides: Partial<ClaimForm> = {}): Readonly<ClaimForm> {
-  return {
-    object_id: overrides.object_id ?? "claim-1",
-    object_kind: "claim_form",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: FIXED_NOW,
-    updated_at: FIXED_NOW,
-    created_by: "test",
-    governance_subject: {
-      domain: "test",
-      qualifiers: {},
-      canonical_key: "test:test"
-    },
-    claim_kind: "preference",
-    scope_class: ScopeClass.PROJECT,
-    enforcement_level: "advisory",
-    origin_tier: "consolidated",
-    precedence_basis: "evidence_strength",
-    proposition_digest: "digest",
-    evidence_refs: [],
-    source_object_refs: [],
-    workspace_id: "ws-1",
-    claim_status: ClaimLifecycleState.DRAFT,
-    ...overrides
-  } as ClaimForm;
-}
-function buildMemory(overrides: Partial<MemoryEntry> = {}): Readonly<MemoryEntry> {
-  return {
-    object_id: overrides.object_id ?? "mem-1",
-    object_kind: "memory_entry",
-    schema_version: 1,
-    created_at: FIXED_NOW,
-    updated_at: FIXED_NOW,
-    created_by: "test",
-    lifecycle_state: ObjectLifecycleState.ACTIVE,
-    dimension: MemoryDimension.PROCEDURE,
-    source_kind: "user",
-    formation_kind: "explicit",
-    scope_class: ScopeClass.PROJECT,
-    content: "content",
-    domain_tags: [],
-    evidence_refs: [],
-    workspace_id: "ws-1",
-    run_id: "run-1",
-    surface_id: null,
-    storage_tier: "hot",
-    activation_score: 0.5,
-    retention_score: 0.5,
-    manifestation_state: "excerpt",
-    retention_state: "working",
-    decay_profile: "stable",
-    confidence: 0.9,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: 0,
-    contradiction_count: 0,
-    superseded_by: null,
-    ...overrides
-  } as MemoryEntry;
-}
-const baseInput = {
-  targetObjectId: "claim-1",
-  workspaceId: "ws-1",
-  runId: "run-1",
-  agentTarget: "codex",
-  deliveryId: "delivery-1"
-};
 
 // invariant: B5 — proves the atomic-rollback contract on real SQLite,
 // not just the wiring. The resolution-confirm path composes its

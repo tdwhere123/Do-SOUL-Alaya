@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  StreamingEventType,
   WorkspaceRunEventType,
-  RunMode,
-  TrustStateEventType,
   WorkspaceKind
 } from "@do-soul/alaya-protocol";
 import { createEventLogRepos, trackedDatabases } from "./event-log-repo-fixture.js";

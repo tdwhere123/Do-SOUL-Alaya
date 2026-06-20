@@ -61,13 +61,9 @@ import {
 } from "./mcp-garden-task-types.js";
 import {
   SoulContextUsageStateSchema,
-  SoulContextUsageTrustModeSchema,
   SoulContextObjectIdentitySchema,
   SoulContextUsageAnchorRoleSchema,
   SoulContextPerAnchorUsageSchema,
-  SoulContextDeliveredObjectUsageSchema,
-  SoulContextUsageTurnMessageSchema,
-  SoulContextUsageTurnDigestSchema,
   SoulReportContextUsageRequestSchema,
   SoulReportContextUsageResponseSchema
 } from "./mcp-context-usage-types.js";

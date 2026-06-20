@@ -7,7 +7,6 @@ import {
 } from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 
-type ConflictDetectionPort = NonNullable<MaterializationRouterDeps["conflictDetectionPort"]>;
 type EvidenceCreate = MaterializationRouterDeps["evidenceService"]["create"];
 type MemoryCreate = MaterializationRouterDeps["memoryService"]["create"];
 type SynthesisCreate = MaterializationRouterDeps["synthesisService"]["create"];

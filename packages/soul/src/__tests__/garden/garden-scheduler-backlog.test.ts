@@ -3,20 +3,12 @@ import {
   GardenRole,
   GardenTaskDescriptorSchema,
   GardenTaskKind,
-  GardenTier,
-  GardenEventType,
-  type GardenTaskDescriptor,
-  type GardenTaskResult
-} from "@do-soul/alaya-protocol";
+  GardenTier} from "@do-soul/alaya-protocol";
 import { GardenScheduler, InMemoryGardenTaskRepo } from "../../garden/scheduler.js";
 
 import {
-  createResult,
-  createScheduler,
   createTask,
-  enqueueVisibleTierViolation,
-  readCoolingMap
-} from "./garden-scheduler-fixtures.js";
+  enqueueVisibleTierViolation} from "./garden-scheduler-fixtures.js";
 
 describe("GardenScheduler", () => {  it("does not remove a tier-violation task when the reject append fails", async () => {
     const eventLog = {

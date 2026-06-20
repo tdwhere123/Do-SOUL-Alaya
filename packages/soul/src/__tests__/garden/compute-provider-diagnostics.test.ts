@@ -5,7 +5,6 @@ import { join } from "node:path";
 import {
   GardenProviderError,
   GardenProviderKind,
-  OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider
 } from "../../garden/compute-provider.js";
 import {
@@ -13,9 +12,8 @@ import {
   type SignalExtractor,
   type SignalExtractorMeta
 } from "../../garden/pi-mono-extractor.js";
-import { DISTILLED_FACT_MAX_CHARS } from "../../garden/materialization-router.js";
 
-import { createContext, createExtractor } from "./compute-provider-fixtures.js";
+import { createContext } from "./compute-provider-fixtures.js";
 
 describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () => {
   let diagnosticDir: string;

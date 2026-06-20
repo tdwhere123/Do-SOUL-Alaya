@@ -1,13 +1,9 @@
-import { randomUUID } from "node:crypto";
 
 import {
   ClaimLifecycleState,
   ConflictEdgeType,
   ConflictEdgeTypeSchema,
   ConflictMatrixEdgeSchema,
-  SlotEventType,
-  SoulConflictMatrixEdgeCreatedPayloadSchema,
-  SoulSlotWinnerChangedPayloadSchema,
   TransitionCausedBy,
   type ClaimForm,
   type ClaimLifecycleState as ClaimLifecycleStateType,

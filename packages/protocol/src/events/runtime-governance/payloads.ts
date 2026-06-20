@@ -34,8 +34,6 @@ import {
   PathRelationRetiredPayloadSchema,
   PathRelationDormantPayloadSchema,
   PathRelationRevivedPayloadSchema,
-  MergedLoserRecallBiasSignSchema,
-  PathRelationMergedLoserSchema,
   PathRelationMergedPayloadSchema
 } from "./payloads/path-relation-payloads.js";
 import {

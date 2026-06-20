@@ -5,7 +5,6 @@ import {
   seedEvidenceCapsule,
   seedGreenStatus,
   seedMemoryEntry,
-  seedRecallsPath,
   seedSynthesisCapsule,
   trackedDatabases
 } from "./garden-data-ports-fixture.js";

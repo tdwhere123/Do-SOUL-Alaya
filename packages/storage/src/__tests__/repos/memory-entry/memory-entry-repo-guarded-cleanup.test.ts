@@ -1,19 +1,12 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  StorageTier,
   SynthesisStatus,
   type MemoryEntry,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
 import {
-  FIND_BY_EVIDENCE_REFS_INPUT_CAP,
-  SqliteMemoryEntryRepo,
-  type MemoryEntryRepoDiagnosticSink
-} from "../../../repos/memory-entry/index.js";
+  SqliteMemoryEntryRepo} from "../../../repos/memory-entry/index.js";
 import { SqliteSynthesisCapsuleRepo } from "../../../repos/capsules/synthesis-capsule-repo.js";
 import {
   createMemoryEntry,

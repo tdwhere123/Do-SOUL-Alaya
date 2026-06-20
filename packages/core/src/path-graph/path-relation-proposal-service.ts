@@ -2,35 +2,19 @@ import { randomUUID } from "node:crypto";
 import {
   getPathAnchorBackingObjectId,
   pathRelationMatchesIdentity,
-  type PathAnchorRef,
-  type PathGovernanceClass
-} from "@do-soul/alaya-protocol";
-import { EventPublisherPropagationError, type EventPublisher } from "../runtime/event-publisher.js";
+  type PathAnchorRef} from "@do-soul/alaya-protocol";
+import { EventPublisherPropagationError } from "../runtime/event-publisher.js";
 import {
-  AUTO_BUILD_GOVERNANCE_CEILING,
-  COHERES_WITH_SEED_PROFILE,
   CO_RECALLED_SEED_PROFILE,
-  CONTRADICTS_SEED_PROFILE,
-  DERIVES_FROM_SEED_PROFILE,
-  EXCEPTION_TO_SEED_PROFILE,
-  INCOMPATIBLE_SEED_PROFILE,
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   PATH_RELATION_PROPOSE_THRESHOLD,
-  SHARES_ENTITY_SEED_PROFILE,
-  SIGNAL_GRAPH_REF_SEED_PROFILE,
-  SUPERSEDES_SEED_PROFILE,
-  SUPPORTS_SEED_PROFILE,
   clampGovernanceToAutoBuildCeiling,
   errorMessage,
   type AnchorValidationFailure,
   type CoUsageCounterPort,
   type MemoryAnchorExistencePort,
   type PathMintOutcome,
-  type PathRelationProposalEventPublisherPort,
-  type PathRelationProposalRepoPort,
-  type PathRelationProposalServiceDeps,
-  type PathSeedProfile
-} from "./path-relation-proposal-service-shared.js";
+  type PathRelationProposalServiceDeps} from "./path-relation-proposal-service-shared.js";
 import {
   buildPathRelation,
   buildPathRelationCreatedEventInput,

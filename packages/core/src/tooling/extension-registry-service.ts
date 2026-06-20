@@ -6,7 +6,6 @@ import {
   type EventLogEntry,
   type SkillPackage,
   type ToolProvider,
-  type ToolProviderToolSpec,
   type ToolSpec
 } from "@do-soul/alaya-protocol";
 import { reportAsyncSideEffectFailure } from "../runtime/async-side-effect-auditor.js";

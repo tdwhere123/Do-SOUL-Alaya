@@ -1,17 +1,12 @@
-import { randomUUID } from "node:crypto";
 
 import {
   BindingState,
   BindingStateSchema,
   canonicalGovernanceSubject,
-  CrossCuttingState,
   type DriftType,
   type DriftAlert,
   type DriftClassification,
   type GovernanceDriftLease,
-  SurfaceEventType,
-  SoulSurfaceBindingCreatedPayloadSchema,
-  SoulSurfaceBindingStateChangedPayloadSchema,
   SurfaceBindingSchema,
   type BindingState as BindingStateType,
   type CrossCuttingPermission,
@@ -24,15 +19,12 @@ import { CoreError } from "../shared/errors.js";
 
 import type { EventPublisher } from "../runtime/event-publisher.js";
 
-import { SYSTEM_ACTOR } from "../shared/actors.js";
 
-import { isUniqueConstraintError } from "../shared/event-utils.js";
 
 import { parseSurfaceUri } from "../shared/surface-uri.js";
 
-import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 
-import { DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS } from "./surface-drift-service.js";
 type SurfaceBindingServiceMethodOwner = {
   generateObjectId: () => string;
   now: () => string;

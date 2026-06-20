@@ -10,7 +10,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { getEventLogWriter, insertEventLogEntry } from "../shared/event-log-writer.js";
-import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
+import { parseNonEmptyString } from "../shared/validators.js";
 import {
   acceptPendingMemoryUpdateWithEvents,
   acceptPendingPathRelationGovernanceWithEvents,
@@ -18,32 +18,19 @@ import {
   type SqliteProposalWorkflowContext
 } from "./accept-workflows.js";
 import {
-  parseNullableTimestamp,
-  parseProposal,
   parseProposalId,
   parseProposalResolutionState,
-  parseProposalReviewerAssignment,
   parseProposalReviewerAssignmentRow,
   parseProposalRow,
-  parseProposedChanges,
-  parseRunId,
-  parseSourceDeliveryIds,
-  parseUpdatedAt,
-  parseWorkspaceId,
-  serializeProposedChanges,
-  serializeSourceDeliveryIds
-} from "./mappers.js";
-import { parseProposedPathRelation, serializeProposedPathRelation } from "./path-relations.js";
+  parseUpdatedAt} from "./mappers.js";
 import { ProposalCreateWorkflow } from "./proposal-create-workflow.js";
 import { ProposalReadQueries } from "./proposal-read-queries.js";
 import { prepareProposalStatements } from "./sqlite-proposal-statements.js";
 import {
-  type PendingProposalSummaryRow,
   type ProposalReviewerAssignmentRow,
   type ProposalRow
 } from "./rows.js";
 import {
-  SQLITE_VARIABLE_CHUNK_SIZE,
   type AcceptedMemoryUpdateInput,
   type AcceptedPathRelationGovernanceInput,
   type AcceptedSynthesisCreateInput,

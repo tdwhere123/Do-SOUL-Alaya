@@ -2,9 +2,7 @@ import { describe, expect, it, vi, type Mock } from "vitest";
 import {
   InMemoryHandoffGapHandler,
   MaterializationRouter,
-  type MaterializationRouterDeps,
-  type RouteTarget
-} from "@do-soul/alaya-soul";
+  type MaterializationRouterDeps} from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 
 type ConflictDetectionPort = NonNullable<MaterializationRouterDeps["conflictDetectionPort"]>;
@@ -47,25 +45,7 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
   };
 }
 
-interface RoutingCase {
-  readonly object_kind: string;
-  readonly expected: RouteTarget;
-}
 
-const OBJECT_KIND_ROUTING_TABLE: readonly RoutingCase[] = [
-  { object_kind: "scope", expected: "signal_only" },
-  { object_kind: "task_scope", expected: "signal_only" },
-  { object_kind: "workflow_preference", expected: "signal_only" },
-  { object_kind: "activity", expected: "evidence_only" },
-  { object_kind: "review_scope", expected: "evidence_only" },
-  { object_kind: "workspace_status", expected: "evidence_short_ttl" },
-  { object_kind: "project_state", expected: "evidence_short_ttl" },
-  { object_kind: "preference", expected: "memory_and_claim_draft" },
-  { object_kind: "decision", expected: "memory_and_claim_draft" },
-  { object_kind: "outcome", expected: "memory_entry_only" },
-  { object_kind: "reference", expected: "memory_entry_only" },
-  { object_kind: "task_state", expected: "memory_entry_only" }
-];
 
 describe("MaterializationRouter potential_conflict routing", () => {
   it("routes potential_conflict to ConflictDetectionPort.evaluate (not questionable-evidence fallback)", async () => {

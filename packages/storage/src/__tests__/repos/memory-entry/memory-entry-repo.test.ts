@@ -6,6 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { SqliteEnrichPendingRepo } from "../../../repos/garden/enrich-pending-repo.js";
 import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
+import { prepareMemoryEntryStatements } from "../../../repos/memory-entry/sqlite-memory-entry-statements.js";
 import {
   createMemoryCreatedEventInput,
   createMemoryEntry,
@@ -14,20 +15,6 @@ import {
 } from "./memory-entry-repo-fixture.js";
 
 const databases = trackedDatabases;
-
-type StatementSource = {
-  readonly source: string;
-};
-
-type MemoryEntryRepoStatementsForTest = {
-  readonly findByWorkspaceHotStatement: StatementSource;
-  readonly findByWorkspaceTierStatement: StatementSource;
-  readonly countByWorkspaceHotStatement: StatementSource;
-  readonly countByWorkspaceTierStatement: StatementSource;
-  readonly findByRunIdStatement: StatementSource;
-  readonly findByDimensionHotStatement: StatementSource;
-  readonly findByScopeClassHotStatement: StatementSource;
-};
 
 afterEach(() => {
   for (const database of databases) {
@@ -213,8 +200,11 @@ describe("SqliteMemoryEntryRepo", () => {
   });
 
   it("uses active-row indexes for workspace, run, dimension, and scope list shapes", async () => {
-    const { database, repo } = await createRepo();
-    const statements = repo as unknown as MemoryEntryRepoStatementsForTest;
+    const { database } = await createRepo();
+    const statements = prepareMemoryEntryStatements(database) as unknown as Record<
+      keyof ReturnType<typeof prepareMemoryEntryStatements>,
+      { readonly source: string }
+    >;
     const indexRows = database.connection
       .prepare("PRAGMA index_list('memory_entries')")
       .all() as ReadonlyArray<{ readonly name: string }>;

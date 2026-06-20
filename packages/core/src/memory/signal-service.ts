@@ -20,11 +20,8 @@ import type {
   SignalListPageOptions,
   SignalMaterializationResult,
   SignalServiceDependencies,
-  SignalServiceEventLogRepoPort,
   SignalServicePostTriageMaterializer,
   SignalServiceReceiveResult,
-  SignalServiceSignalRepoPort,
-  SignalRuntimeNotifier,
   SignalServiceWarnPort,
   SignalTriageResult
 } from "./signal-service-types.js";

@@ -1,52 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { EventLogEntrySchema, EventTypeSchema } from "../../events/event-log.js";
 import {
-  BootstrappingPathsPlantedPayloadSchema,
-  CanonicalizationAliasResolvedPayloadSchema,
-  CanonicalizationAppliedPayloadSchema,
-  ComputeProviderRoutedPayloadSchema,
-  ConstitutionalFragmentRegisteredEventSchema,
-  ConstitutionalFragmentRegisteredPayloadSchema,
-  ExtensionDescriptorRegisteredPayloadSchema,
-  ExtensionDescriptorRegistrationCompensationFailedPayloadSchema,
-  ExtensionDescriptorRegistrationRevertedPayloadSchema,
-  ExtensionGovernanceCheckedPayloadSchema,
-  ExtensionToolDiscoveredPayloadSchema,
-  OutputCommandCompressedPayloadSchema,
-  OutputShapingAppliedPayloadSchema,
-  PathConsolidationCompletedPayloadSchema,
-  PathConsolidationFusedPayloadSchema,
-  PathGraphSnapshotCreatedPayloadSchema,
-  PathRelationCreatedPayloadSchema,
-  PathRelationLegitimacyUpdatedPayloadSchema,
-  PathRelationRedirectedPayloadSchema,
-  PathRelationReinforcedPayloadSchema,
-  PathRelationRetiredPayloadSchema,
-  PathRelationWeakenedPayloadSchema,
   RuntimeGovernanceEventType,
-  RuntimeGovernanceEventTypeSchema,
-  RuntimeGovernanceEventUnionSchema,
-  RuntimeSideEffectFailedPayloadSchema,
-  SecurityPassthroughInitializationFailedPayloadSchema,
-  SecurityPassthroughStatusChangedPayloadSchema,
-  SurfaceDriftAlertPayloadSchema,
-  SurfaceDriftDetectedPayloadSchema,
-  SurfaceDriftLeaseAcquiredPayloadSchema,
-  SurfaceDriftLeaseReleaseFailedPayloadSchema,
-  SurfaceDriftLeaseReleasedPayloadSchema,
-  StancePolicyEvaluatedPayloadSchema,
-  StanceResolutionChangedPayloadSchema,
   parseRuntimeGovernanceEventPayload
 } from "../../events/runtime-governance.js";
-import {
-  OutputShapingResultSchema,
-  OutputShapingRuleSchema
-} from "../../soul/output-shaping.js";
 
 import {
-  validTimestamp,
-  workerDispatchFragmentId,
-  expectedEventTypes,
   canonicalizationAppliedPayload,
   canonicalizationAliasResolvedPayload,
   stancePolicyPayload,
@@ -78,9 +36,7 @@ import {
   extensionGovernanceCheckedPayload,
   constitutionalFragmentPayload,
   computeProviderRoutedPayload,
-  bootstrappingPathsPlantedPayload,
-  runtimeSideEffectFailedPayload
-} from "./runtime-governance-event-registry.fixtures.js";
+  bootstrappingPathsPlantedPayload} from "./runtime-governance-event-registry.fixtures.js";
 
 describe("Phase C event registry", () => {
   it("validates parseRuntimeGovernanceEventPayload coverage", () => {

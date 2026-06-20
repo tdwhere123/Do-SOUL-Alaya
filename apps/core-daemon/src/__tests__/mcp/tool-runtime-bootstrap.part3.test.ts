@@ -141,7 +141,7 @@ describe("daemon tool runtime bootstrap", () => {
 
     expect(hoisted.toolSpecService.update).not.toHaveBeenCalled();
     expect(hoisted.toolSpecService.register).not.toHaveBeenCalled();
-  });
+  }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
   it("rethrows non-NOT_FOUND errors from conversation tool spec sync without falling through", async () => {
     hoisted.toolSpecService.findById.mockRejectedValueOnce(new Error("storage offline"));
@@ -150,7 +150,7 @@ describe("daemon tool runtime bootstrap", () => {
 
     expect(hoisted.toolSpecService.register).not.toHaveBeenCalled();
     expect(hoisted.toolSpecService.update).not.toHaveBeenCalled();
-  });
+  }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
   it("does not fall back to register when update fails after the spec already exists", async () => {
     const { CoreError } = await import("@do-soul/alaya-core");

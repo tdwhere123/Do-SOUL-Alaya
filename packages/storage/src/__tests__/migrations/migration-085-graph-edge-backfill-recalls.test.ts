@@ -1,6 +1,4 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { StorageDatabase } from "../../sqlite/db.js";
-import { SqlitePathRelationRepo } from "../../repos/path/path-relation-repo.js";
 import {
   MIGRATION_085,
   applyMigration,

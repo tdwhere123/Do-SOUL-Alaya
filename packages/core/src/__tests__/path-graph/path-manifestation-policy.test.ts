@@ -1,23 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   ManifestationLevel,
-  ManifestationState,
   PathGovernanceClass,
   StabilityClass,
-  type ManifestationState as ManifestationStateValue,
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import {
-  GOVERNANCE_CEILING_FAILSAFE_BAND,
   GOVERNANCE_PROMOTION_THRESHOLDS,
   STABILITY_PROMOTION_THRESHOLDS,
   clampLevelByGovernance,
-  clampManifestationByGovernance,
   evolveGovernanceClass,
   evolveStabilityClass,
   governanceAuthorisesLevel,
   manifestationAuthorityFor,
-  memoryGovernanceCeiling,
   planPromotion
 } from "../../path-graph/path-manifestation-policy.js";
 

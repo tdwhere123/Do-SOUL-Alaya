@@ -25,8 +25,9 @@ describe("createNarrativeBudgetRepo", () => {
       { payload_json: { unexpected: "shape" } },
       { payload_json: digestB }
     ]);
+    const queryByRun = vi.fn(async () => []);
     const repo = createNarrativeBudgetRepo({
-      eventLogRepo: { queryByRunAll }
+      eventLogRepo: { queryByRun, queryByRunAll }
     });
 
     const [count, totalBytes] = await Promise.all([
@@ -46,8 +47,9 @@ describe("createNarrativeBudgetRepo", () => {
   it("reuses the same aggregate for sequential count/bytes reads in one call cycle", async () => {
     const digest = makeNarrativeDigest({ digest_id: "digest-sequential" });
     const queryByRunAll = vi.fn(async () => [{ payload_json: digest }]);
+    const queryByRun = vi.fn(async () => []);
     const repo = createNarrativeBudgetRepo({
-      eventLogRepo: { queryByRunAll }
+      eventLogRepo: { queryByRun, queryByRunAll }
     });
 
     const count = await repo.countDigestsByRun("run-1");

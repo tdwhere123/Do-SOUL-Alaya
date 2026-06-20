@@ -22,7 +22,7 @@ describe("memory routes (HTTP surface narrowed)", () => {
       getById: vi.fn(async () => ({ run_id: "run-1", workspace_id: "ws-1" }))
     };
     const memoryService = {
-      findByWorkspaceId: vi.fn(async () => [{ object_id: "m1" }, { object_id: "m2" }, { object_id: "m3" }]),
+      findByWorkspaceId: vi.fn(async (): Promise<MemoryRouteFixture[]> => [{ object_id: "m1" }, { object_id: "m2" }, { object_id: "m3" }]),
       countByWorkspaceId: vi.fn(async () => 3),
       findByDimension: vi.fn(async () => [{ object_id: "m2" }]),
       countByDimension: vi.fn(async () => 1),

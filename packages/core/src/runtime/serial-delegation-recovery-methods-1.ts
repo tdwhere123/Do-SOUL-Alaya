@@ -6,7 +6,6 @@ import { CoreError } from "../shared/errors.js";
 
 import {
   isObligationViolationError,
-  isTerminalWorkerState,
   summarizeError,
   toErrorOptions
 } from "./serial-delegation-recovery-errors.js";

@@ -3,18 +3,8 @@ import {
   SignalExtractorError,
   createPiMonoExtractor,
   type PiMonoAssistantMessage,
-  type PiMonoContext,
-  type PiMonoModel,
-  type PiMonoStreamOptions
-} from "../../garden/pi-mono-extractor.js";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "../../garden/compute-provider.js";
+  type PiMonoModel} from "../../garden/pi-mono-extractor.js";
 
-// The `complete` seam shape — used as the explicit generic on vi.fn so
-// mock.calls[i] is typed as [PiMonoModel, PiMonoContext, PiMonoStreamOptions?]
-// instead of vitest's default `[]` inference from a zero-arg arrow.
-type PiMonoCompleteFn = NonNullable<
-  Parameters<typeof createPiMonoExtractor>[0]["complete"]
->;
 
 describe("pi-mono-extractor retry-with-jitter (Phase A.3)", () => {
   it("retries once after empty assistant text and surfaces retryCount=1 on success", async () => {

@@ -1,30 +1,9 @@
 import type {
-  MemoryEntry,
-  RecallPolicy,
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
-import { rerankTopN, type RerankCandidate } from "./recall-feature-rerank.js";
-import type { RecallQueryProbes } from "./recall-query-probes.js";
-import {
-  buildRecallCandidateDedupeKey,
-  clamp01,
-  compareMemoryEntries,
-  normalizeActivationScore,
-  normalizeGraphSupport
-} from "./recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
-  RecallFusionBreakdown,
-  RecallFusionStream,
-  RecallFusionStreamContributions,
-  RecallFusionStreamRanks,
-  RecallSupplementaryData
-} from "./recall-service-types.js";
-import {
-  normalizeEvidenceText,
-  scoreEvidenceAnchorMatch,
-  scoreQueryEvidenceMatch
-} from "./query-evidence-scoring.js";
+  RecallFusionBreakdown} from "./recall-service-types.js";
 
 type RecallFusionCandidateInput = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;

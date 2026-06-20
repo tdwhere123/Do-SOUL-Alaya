@@ -1,39 +1,10 @@
 import type {
-  BudgetSnapshot,
-  EventLogEntry,
-  EvidenceCapsule,
   ManifestationState,
-  MemoryDimension as MemoryDimensionType,
   MemoryEntry,
-  PathAnchorRef,
-  PathRelation,
-  ProjectMappingAnchor,
   RecallCandidate,
-  RecallScoreFactors,
   RecallOriginPlane,
   SoulActiveConstraint,
-  SoulRecallHostContext,
-  SoulRecallTokenizerHint,
-  SoulMemorySearchDegradationReason,
-  Slot,
-  StorageTier as StorageTierType,
-  SynthesisCapsule
-} from "@do-soul/alaya-protocol";
-import type { ScopeClass } from "@do-soul/alaya-protocol";
-import type {
-  EmbeddingNeighborHit,
-  EmbeddingWorkspaceNeighborResult,
-  EmbeddingRecallSupplementResult,
-  PreparedEmbeddingSupplement,
-  PreparedEmbeddingQueryHandle
-} from "../embedding-recall/embedding-recall-service.js";
-import type {
-  ManifestationBiasSidecarEntry
-} from "../manifestation/manifestation-resolver.js";
-import type {
-  GlobalMemoryRecallCachePort,
-  GlobalMemoryRecallPort
-} from "./global-memory-recall-port.js";
+  SoulMemorySearchDegradationReason} from "@do-soul/alaya-protocol";
 
 import type { RecallAdmissionPlane, RecallDiagnostics, RecallPathExpansionSourceDiagnostic } from "./recall-service-diagnostics.js";
 

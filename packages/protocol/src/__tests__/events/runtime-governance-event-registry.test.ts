@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { EventLogEntrySchema, EventTypeSchema } from "../../events/event-log.js";
 import {
   BootstrappingPathsPlantedPayloadSchema,
   CanonicalizationAliasResolvedPayloadSchema,
   CanonicalizationAppliedPayloadSchema,
   ComputeProviderRoutedPayloadSchema,
-  ConstitutionalFragmentRegisteredEventSchema,
   ConstitutionalFragmentRegisteredPayloadSchema,
   ExtensionDescriptorRegisteredPayloadSchema,
   ExtensionDescriptorRegistrationCompensationFailedPayloadSchema,
@@ -25,7 +23,6 @@ import {
   PathRelationWeakenedPayloadSchema,
   RuntimeGovernanceEventType,
   RuntimeGovernanceEventTypeSchema,
-  RuntimeGovernanceEventUnionSchema,
   RuntimeSideEffectFailedPayloadSchema,
   SecurityPassthroughInitializationFailedPayloadSchema,
   SecurityPassthroughStatusChangedPayloadSchema,
@@ -35,29 +32,23 @@ import {
   SurfaceDriftLeaseReleaseFailedPayloadSchema,
   SurfaceDriftLeaseReleasedPayloadSchema,
   StancePolicyEvaluatedPayloadSchema,
-  StanceResolutionChangedPayloadSchema,
-  parseRuntimeGovernanceEventPayload
-} from "../../events/runtime-governance.js";
+  StanceResolutionChangedPayloadSchema} from "../../events/runtime-governance.js";
 import {
   OutputShapingResultSchema,
   OutputShapingRuleSchema
 } from "../../soul/output-shaping.js";
 
 import {
-  validTimestamp,
-  workerDispatchFragmentId,
   expectedEventTypes,
   canonicalizationAppliedPayload,
   canonicalizationAliasResolvedPayload,
   stancePolicyPayload,
   stanceResolutionPayload,
   pathCreatedPayload,
-  pathRejectedPayload,
   reinforcedPayload,
   legitimacyUpdatedPayload,
   weakenedPayload,
   retiredPayload,
-  mergedPayload,
   redirectedPayload,
   driftDetectedPayload,
   driftLeaseAcquiredPayload,

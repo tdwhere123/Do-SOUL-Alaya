@@ -1,27 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  GreenGovernanceEventType,
-  GreenState,
-  MemoryGovernanceEventType,
-  RevokeReason
-} from "@do-soul/alaya-protocol";
-import { SqliteGreenStatusRepo } from "../../../repos/health/green-status-repo.js";
-import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
+  MemoryGovernanceEventType} from "@do-soul/alaya-protocol";
 
 import {
-  countGreenPiercedEvents,
-  countMemoryUpdatedEvents,
   countProposalEvents,
-  countSynthesisCapsules,
-  countSynthesisCreatedEvents,
   createCreationEvents,
-  createGreenStatus,
-  createMemoryEntry,
   createProposal,
   createRepo,
   createReviewEvents,
-  createSynthesisCapsule,
-  createSynthesisProposal,
   trackedDatabases
 } from "./proposal-repo-fixture.js";
 

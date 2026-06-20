@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 
 import {
   BankruptcyAction,
@@ -6,15 +5,12 @@ import {
   ControlPlaneObjectKind,
   ContextLensSchema,
   EnforcementLevel,
-  ObjectKind,
   RecallContextEventType,
   BudgetEventType,
   RetentionPolicy,
   RuntimeMode,
-  ScopeClass,
   SoulBudgetDegradedPayloadSchema,
   SoulContextLensAssembledPayloadSchema,
-  WorkingProjectionSchema,
   type BankruptcyAction as BankruptcyActionValue,
   type BankruptcyTriggerKind as BankruptcyTriggerKindValue,
   type ClaimForm,
@@ -35,7 +31,6 @@ import {
 
 import type { RecallCandidate, RecallResult } from "../recall/recall-service.js";
 
-import { makeTokenEstimator, type TokenEstimator } from "../recall/recall-service-types.js";
 
 import type { NodeStrategy } from "./task-surface-builder.js";
 type ContextLensAssemblerMethodOwner = {

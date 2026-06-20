@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  DYNAMICS_CONSTANTS,
-  EventTypeSchema,
   MemoryDimension,
-  SignalEventType,
-  WorkspaceRunEventType,
-  MemoryGovernanceEventType,
-  MemoryGovernanceEventTypeSchema,
   ScopeClass,
   SoulEmitCandidateSignalRequestSchema,
   SoulEmitCandidateSignalResponseSchema,
@@ -21,39 +15,10 @@ import {
   SoulReportContextUsageRequestSchema,
   SoulReportContextUsageResponseSchema,
   SoulReviewMemoryProposalRequestSchema,
-  SoulReviewMemoryProposalResponseSchema,
-  StorageTier,
-  TransitionCausedBy,
-  TransitionCausedBySchema,
-  TransitionRecordSchema,
-  parseMemoryGovernanceEventPayload
-} from "../../index.js";
+  SoulReviewMemoryProposalResponseSchema} from "../../index.js";
 
-const validTimestamp = "2026-03-20T00:00:00.000Z";
 
-const transitionBase = {
-  object_id: "object-1",
-  object_kind: "memory_entry",
-  workspace_id: "workspace-1",
-  run_id: "run-1",
-  from_state: "draft",
-  to_state: "active",
-  reason_code: "review_accepted",
-  caused_by: TransitionCausedBy.REVIEW,
-  evidence_refs: ["evidence-1"],
-  occurred_at: validTimestamp
-} as const;
 
-function transitionPayloadFor(eventType: string): Record<string, unknown> {
-  if (eventType === MemoryGovernanceEventType.SOUL_MEMORY_RETENTION_UPDATED) {
-    return {
-      ...transitionBase,
-      retention_score: 0.88
-    };
-  }
-
-  return { ...transitionBase };
-}
 
 describe("MCP tool request/response schemas", () => {
   it("parses all request payloads round-trip", () => {

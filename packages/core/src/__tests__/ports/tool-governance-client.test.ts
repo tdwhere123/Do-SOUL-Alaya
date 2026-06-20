@@ -202,11 +202,11 @@ describe("ToolGovernanceClient", () => {
       maxEntries: 2
     });
 
-    await client.query(createQuery({ requested_by: "first" }), "node-a");
-    await client.query(createQuery({ requested_by: "second" }), "node-b");
-    await client.query(createQuery({ requested_by: "first" }), "node-a");
-    await client.query(createQuery({ requested_by: "third" }), "node-c");
-    await client.query(createQuery({ requested_by: "second" }), "node-b");
+    await client.query(createQuery({ target_surface: "surface://task/first" }), "node-a");
+    await client.query(createQuery({ target_surface: "surface://task/second" }), "node-b");
+    await client.query(createQuery({ target_surface: "surface://task/first" }), "node-a");
+    await client.query(createQuery({ target_surface: "surface://task/third" }), "node-c");
+    await client.query(createQuery({ target_surface: "surface://task/second" }), "node-b");
 
     expect(port.querySpy).toHaveBeenCalledTimes(4);
   });

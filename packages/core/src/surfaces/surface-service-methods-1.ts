@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 
 import {
   canonicalGovernanceSubject,
@@ -32,7 +31,6 @@ import { isUniqueConstraintError } from "../shared/event-utils.js";
 
 import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 
-import { DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS } from "./surface-drift-service.js";
 type SurfaceServiceMethodOwner = {
   generateObjectId: () => string;
   now: () => string;

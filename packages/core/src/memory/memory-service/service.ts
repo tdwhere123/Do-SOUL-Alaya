@@ -1,13 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  MemoryDimension,
-  MemoryGovernanceEventType,
-  RevokeReason,
-  SoulMemoryArchivedPayloadSchema,
-  SoulMemoryCreatedPayloadSchema,
-  SoulMemoryStateChangedPayloadSchema,
-  SoulMemoryUpdatedPayloadSchema,
-  StorageTier,
   type EventLogEntry,
   type FactualPolicyCondition,
   type MemoryEntry,
@@ -15,9 +7,6 @@ import {
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
-import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "../../manifestation/importance-gate.js";
-import { scheduleAuditedAsyncSideEffect } from "../../runtime/async-side-effect-auditor.js";
-import { parseNonEmptyString, parseObjectId } from "../../shared/validators.js";
 import type {
   MemoryEntryInput,
   MemoryEntryRepoUpdateFields,
@@ -25,20 +14,6 @@ import type {
   MemoryListPageOptions,
   MemoryServiceDependencies
 } from "./types.js";
-import {
-  ensureAllowedLifecycleTransition,
-  isPromiseLike,
-  isRepoGuardRefusal,
-  parseFactualPolicyCondition,
-  parseLifecycleState,
-  parseMemoryEntry,
-  parseReason,
-  parseStorageTier,
-  parseTransitionCausedBy,
-  parseUpdateFields,
-  shouldRevokeGreenForEvidenceRewrite,
-  toUpdatedFieldNames
-} from "./validators.js";
 
 import { memoryServiceCreate, memoryServiceCreateRowMaybeAtomicallyEnqueued, memoryServiceAppendCreatedEventSynchronously, memoryServiceUpdate, memoryServiceUpdateScoped, memoryServiceValidateUpdate, memoryServiceArchive, memoryServiceTransitionLifecycle, memoryServiceDemoteActiveToDormantIfActive, memoryServiceHardDeleteTombstoned } from "./service-methods-1.js";
 import { memoryServiceAutonomousTombstone, memoryServiceClassifyAutonomousTombstoneRepoRefusal, memoryServiceAutonomousHardDeleteTombstoned, memoryServiceBuildAutonomousDeleteEventInput, memoryServiceAppendAuditEventSynchronously, memoryServiceEmitPreservationRevoked, memoryServiceEmitVerdictRevoked, memoryServiceCompressedPreservationStillValid, memoryServiceFindById, memoryServiceFindByIdScoped, memoryServiceFindByIdsScoped, memoryServiceFindByWorkspaceId, memoryServiceFindByWorkspaceIdAll, memoryServiceCountByWorkspaceId, memoryServiceFindByRunId, memoryServiceFindByRunIdAll, memoryServiceCountByRunId, memoryServiceFindByDimension } from "./service-methods-2.js";

@@ -1,26 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  CandidateMemorySignalInputSchema,
-  CandidateMemorySignalSchema,
   EngineProvider,
   EngineStatus,
-  EmitCandidateSignalResponseSchema,
   EventLogEntrySchema,
   parseWorkspaceRunEventPayload,
-  parseSignalEventPayload,
-  WorkspaceRunEventBaseSchema,
-  WorkspaceRunEventSchema,
   WorkspaceRunEventType,
-  SignalEventSchema,
   SignalEventType,
   RunHotStateSchema,
   SignalKind,
   SignalSource,
-  SignalState,
   RunMode,
   RunSchema,
   RunState,
-  WorkspaceCreatedEventSchema,
   WorkspaceCreateInputSchema,
   WorkspaceEngineConfigSchema,
   WorkspaceEngineConfigUpdateSchema,
@@ -64,14 +55,10 @@ export type _CandidateMemorySignalReadonlyChecks = [
 ];
 
 import {
-  candidateMemorySignalBase,
-  candidateMemorySignalInputBase,
-  emitCandidateSignalResponseBase,
   engineBindingInputBase,
   eventLogEntryBase,
   invalidTimestamp,
   runBase,
-  validTimestamp,
   without,
   workspaceBase,
   workspaceEngineConfigBase

@@ -1,19 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import {
   GardenProviderError,
   GardenProviderKind,
   OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider
 } from "../../garden/compute-provider.js";
-import {
-  SignalExtractorError,
-  type SignalExtractor,
-  type SignalExtractorMeta
-} from "../../garden/pi-mono-extractor.js";
-import { DISTILLED_FACT_MAX_CHARS } from "../../garden/materialization-router.js";
 
 import { createContext, createExtractor } from "./compute-provider-fixtures.js";
 

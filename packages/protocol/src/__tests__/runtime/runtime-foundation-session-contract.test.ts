@@ -1,24 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  laterTimestamp,
   loadRuntimeFoundationContracts,
-  requiredRuntimeFoundationExports,
   validTimestamp
 } from "./runtime-foundation-contract-support.js";
 
 describe("Phase A1 runtime foundation session schemas", () => {
   it("parses runtime session, config, event, and orphan contracts", async () => {
     const {
-      ToolSpecSchema,
-      ToolGovernanceQuerySchema,
-      ToolGovernanceDecisionSchema,
-      ToolExecutionRecordSchema,
-      PrincipalRunSchema,
-      DelegatedWorkerRunSchema,
-      StancePolicySchema,
-      StanceResolutionSchema,
-      NarrativeDigestSchema,
-      ConsolidationTriggerBudgetSchema,
       RuntimeSessionSchema,
       RuntimeTurnInputSchema,
       RuntimeCapabilitiesSchema,
@@ -28,13 +16,7 @@ describe("Phase A1 runtime foundation session schemas", () => {
       RuntimeNetworkPolicySchema,
       RuntimeCancelResultSchema,
       RuntimeEventSchema,
-      OrphanedMemoryRecordSchema,
-      NodeTemplateKindSchema,
-      FrozenNodeTemplateContractsSchema,
-      FROZEN_NODE_TEMPLATE_CONTRACTS,
-      FrozenNodeTemplateContracts,
-      assertFrozenNodeTemplateContracts
-    } = await loadRuntimeFoundationContracts();
+      OrphanedMemoryRecordSchema    } = await loadRuntimeFoundationContracts();
     expect(
       RuntimeSessionSchema.parse({
         session_id: "session-1"

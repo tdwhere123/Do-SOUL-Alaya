@@ -1,13 +1,9 @@
 import {
   RuntimeGovernanceEventType,
   parseRuntimeGovernanceEventPayload,
-  type PathAnchorRef,
   type PathPlasticityState,
-  type PathRelation,
-  type UsageProofRecord
-} from "@do-soul/alaya-protocol";
+  type PathRelation} from "@do-soul/alaya-protocol";
 
-import type { EventPublisherInput } from "../runtime/event-publisher.js";
 
 import { classifyPathImportance } from "../manifestation/importance-gate.js";
 
@@ -18,30 +14,16 @@ import { PATH_PLASTICITY_CONSTANTS } from "./constants.js";
 import {
   buildUpdatesWithPromotion,
   clampStrength,
-  computeUsedSignalWeight,
   createRedirectionPublication,
   isDormantPath,
-  isMemoryEntryAnchorUsage,
-  isObjectAnchor,
-  isRetiredPath,
-  maxIsoNullable,
   parsePlasticityState,
   selectDirectionBias,
   shouldRouteToDormant,
-  throwIfPathPlasticityAborted,
-  uniqueStrings,
-  withClearedSalience,
-  withRestoredSalience
-} from "./helpers.js";
+  throwIfPathPlasticityAborted} from "./helpers.js";
 
 import type {
-  DirectionalPathUsage,
-  MutableDirectionalPathUsage,
   MutableObjectUsageCounts,
-  PathAggregate,
-  PathPlasticityComputeResult,
   PathPlasticityMutationPlan,
-  PathPlasticityPromotionRecord,
   PathPlasticityServiceDependencies,
   RedirectionPublication
 } from "./types.js";

@@ -1,4 +1,4 @@
-import { StorageTier, type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
+import { type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { toErrorMessage } from "../recall/recall-service-helpers.js";
 import { resolveEmbeddingRecallTiers } from "./tier-config.js";
 import {

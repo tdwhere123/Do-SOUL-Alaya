@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuditorDependencies } from "../../garden/auditor.js";
 import {
-  GardenRole,
   GardenTaskKind,
   GardenTier,
   HealthEventKind,

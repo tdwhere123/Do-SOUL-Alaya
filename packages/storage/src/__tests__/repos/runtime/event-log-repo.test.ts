@@ -4,9 +4,7 @@ GreenGovernanceEventType,
 RevokeReason,
 StreamingEventType,
 WorkspaceRunEventType,
-RunMode,
-TrustStateEventType
-} from "@do-soul/alaya-protocol";
+RunMode} from "@do-soul/alaya-protocol";
 import {
 appendAppliedOverride,
 appendEngineResponseEvent,

@@ -1,35 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  laterTimestamp,
   loadRuntimeFoundationContracts,
-  requiredRuntimeFoundationExports,
   validTimestamp
 } from "./runtime-foundation-contract-support.js";
 
 describe("Phase A1 runtime foundation frozen templates", () => {
   it("parses frozen node template contracts", async () => {
     const {
-      ToolSpecSchema,
-      ToolGovernanceQuerySchema,
-      ToolGovernanceDecisionSchema,
-      ToolExecutionRecordSchema,
-      PrincipalRunSchema,
-      DelegatedWorkerRunSchema,
-      StancePolicySchema,
-      StanceResolutionSchema,
-      NarrativeDigestSchema,
-      ConsolidationTriggerBudgetSchema,
-      RuntimeSessionSchema,
-      RuntimeTurnInputSchema,
-      RuntimeCapabilitiesSchema,
-      RuntimeSessionConfigSchema,
-      RuntimeSandboxPolicySchema,
-      RuntimePermissionPolicySchema,
-      RuntimeNetworkPolicySchema,
-      RuntimeCancelResultSchema,
-      RuntimeEventSchema,
-      OrphanedMemoryRecordSchema,
-      NodeTemplateKindSchema,
       FrozenNodeTemplateContractsSchema,
       FROZEN_NODE_TEMPLATE_CONTRACTS,
       FrozenNodeTemplateContracts,

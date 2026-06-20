@@ -4,8 +4,6 @@ import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
-  HealthEventKind,
-  MemoryDimension,
   type BrokenPointerRecord,
   type ColdStartAssessment,
   type DraftCandidate,
@@ -332,14 +330,3 @@ function createTask(overrides: Partial<GardenTaskDescriptor> = {}): GardenTaskDe
   };
 }
 
-function createExpiringGreenStatus(
-  greenStatusId: string,
-  dimension: MemoryDimension
-): ExpiringGreenStatus {
-  return {
-    green_status_id: greenStatusId,
-    memory_entry_id: `${greenStatusId}-memory`,
-    dimension,
-    valid_until: "2026-03-28T00:00:00.000Z"
-  };
-}

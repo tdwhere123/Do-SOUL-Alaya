@@ -1,5 +1,5 @@
 import { SignalExtractorError } from "./pi-mono-errors.js";
-import type { PiMonoAssistantMessage, PiMonoComplete, PiMonoContext, PiMonoGetModel, PiMonoModel, PiMonoStreamOptions } from "./pi-mono-extractor.js";
+import type { PiMonoAssistantMessage, PiMonoContext, PiMonoGetModel, PiMonoModel, PiMonoStreamOptions } from "./pi-mono-extractor.js";
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 8_192;

@@ -23,23 +23,7 @@ describe("Phase A1 runtime foundation protocol schemas", () => {
       StancePolicySchema,
       StanceResolutionSchema,
       NarrativeDigestSchema,
-      ConsolidationTriggerBudgetSchema,
-      RuntimeSessionSchema,
-      RuntimeTurnInputSchema,
-      RuntimeCapabilitiesSchema,
-      RuntimeSessionConfigSchema,
-      RuntimeSandboxPolicySchema,
-      RuntimePermissionPolicySchema,
-      RuntimeNetworkPolicySchema,
-      RuntimeCancelResultSchema,
-      RuntimeEventSchema,
-      OrphanedMemoryRecordSchema,
-      NodeTemplateKindSchema,
-      FrozenNodeTemplateContractsSchema,
-      FROZEN_NODE_TEMPLATE_CONTRACTS,
-      FrozenNodeTemplateContracts,
-      assertFrozenNodeTemplateContracts
-    } = await loadRuntimeFoundationContracts();
+      ConsolidationTriggerBudgetSchema    } = await loadRuntimeFoundationContracts();
     const toolSpec = {
       tool_id: "tool.read_workspace",
       category: "read",

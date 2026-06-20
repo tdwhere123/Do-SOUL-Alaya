@@ -27,11 +27,6 @@ import {
 } from "./contracts.js";
 import { SIGNAL_REF_SEED_SPECS } from "./signal-ref-seeds.js";
 import { appendSummarySuffix, buildDistilledFact, buildSignalSummary, buildTopicKey } from "./distilled-fact.js";
-import {
-  buildTimeConcernPathRelationProposal,
-  buildFailedSignalRefPathRelationProposal,
-  buildFailedSignalRefPathRelationProposalReason
-} from "./path-relation-inputs.js";
 
 export { DISTILLED_FACT_MAX_CHARS, buildDistilledFact } from "./distilled-fact.js";
 export {

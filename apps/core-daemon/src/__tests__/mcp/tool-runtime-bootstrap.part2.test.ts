@@ -162,7 +162,7 @@ describe("daemon tool runtime bootstrap", () => {
       effective_mode: "degraded",
       degraded_reason: "provider_unconfigured"
     });
-  });
+  }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
   it("rejects malformed embedding secret refs during daemon bootstrap", async () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-malformed-embedding-"));

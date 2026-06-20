@@ -1,8 +1,7 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { diffKpis } from "../../history/diff.js";
 import {
   entrySlug,
   listEntries,
@@ -14,8 +13,6 @@ import {
   type HistoryLayout
 } from "../../history/history.js";
 import { KpiPayloadSchema, type KpiPayload } from "../../schema/kpi-schema.js";
-import { renderFindings } from "../../reporting/report.js";
-import { collectReleaseHardGates, releaseHardGateAllowsLatestPassing } from "../../gates/release-gates.js";
 import {
   buildFullLongMemEvalPayload,
   buildLivePayload,

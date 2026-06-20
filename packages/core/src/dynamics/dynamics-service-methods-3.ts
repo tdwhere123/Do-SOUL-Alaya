@@ -1,7 +1,5 @@
-import { randomUUID } from "node:crypto";
 
 import {
-  DYNAMICS_CONSTANTS,
   FORMATION_CONFIDENCE_MAP,
   MemoryGovernanceEventType,
   SoulMemoryManifestationChangedPayloadSchema,
@@ -12,24 +10,17 @@ import {
   parseKarmaEvent as parseProtocolKarmaEvent,
   type EventLogEntry,
   type KarmaEvent,
-  type KarmaEventKind,
   type ManifestationState,
   type MemoryDimension,
   type MemoryEntry,
-  type RetentionState,
-  type ScopeClass
-} from "@do-soul/alaya-protocol";
+  type RetentionState} from "@do-soul/alaya-protocol";
 
-import { scheduleAuditedAsyncSideEffect } from "../runtime/async-side-effect-auditor.js";
 
 import { CoreError } from "../shared/errors.js";
 
 import {
   DIMENSION_DEFAULT_DECAY_PROFILE,
-  INITIAL_ACTIVATION_FROM_CONFIDENCE_FACTOR,
   MS_PER_DAY,
-  clamp01,
-  computeFreshnessFactor,
   computeRetentionFromProfile,
   determineManifestation
 } from "./dynamics-constants-runtime.js";

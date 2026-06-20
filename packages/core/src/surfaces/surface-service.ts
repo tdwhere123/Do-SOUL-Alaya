@@ -1,17 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   canonicalGovernanceSubject,
-  SurfaceEventType,
-  SoulSurfaceAnchorCreatedPayloadSchema,
-  SoulSurfaceAnchorDeletedPayloadSchema,
-  SoulSurfaceCreatedPayloadSchema,
-  SoulSurfaceStatusChangedPayloadSchema,
-  SurfaceAnchorKindSchema,
-  SurfaceAnchorSchema,
-  SurfaceIdentitySchema,
   SurfaceStatus,
-  SurfaceStatusSchema,
-  TransitionCausedBySchema,
   type DriftType,
   type EventLogEntry,
   type DriftAlert,
@@ -24,10 +14,6 @@ import {
   type SurfaceStatus as SurfaceStatusType,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "../shared/errors.js";
-import { isUniqueConstraintError } from "../shared/event-utils.js";
-import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
-import { DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS } from "./surface-drift-service.js";
 
 import { surfaceServiceCreateSurface, surfaceServiceFindById, surfaceServiceFindBySurfaceId, surfaceServiceFindByWorkspace, surfaceServiceTransitionStatus, surfaceServiceAddAnchor, surfaceServiceRemoveAnchor } from "./surface-service-methods-1.js";
 import { surfaceServiceListAnchors, surfaceServiceAcquireSurfaceDriftLease, surfaceServiceReleaseSurfaceDriftLeaseSafely, surfaceServiceClassifySurfaceStatusDriftSafely, surfaceServiceClassifySurfaceStatusDrift } from "./surface-service-methods-2.js";

@@ -22,14 +22,7 @@ import {
   type MemoryEntrySearchWorkflowHost
 } from "./search-workflows.js";
 import {
-  MEMORY_ENTRY_SELECT_COLUMNS,
-  parseMemoryDimension,
-  parseMemoryEntry,
-  parseMemoryEntryRow,
-  parseScopeClass,
-  parseStorageTier,
-  type MemoryEntryRow
-} from "./row-mapper.js";
+  parseMemoryEntry} from "./row-mapper.js";
 import { MemoryEntryReadQueries } from "./memory-entry-read-queries.js";
 import { prepareMemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
 import type {
@@ -45,8 +38,6 @@ import {
   type MemoryEntryUpdateWorkflowHost
 } from "./update-workflows.js";
 import {
-  FIND_BY_EVIDENCE_REFS_INPUT_CAP,
-  FIND_BY_EVIDENCE_REFS_ROW_LIMIT,
   type AutonomousTombstoneInput,
   type MemoryEntryListPageOptions,
   type MemoryEntryKeywordSearchResult,

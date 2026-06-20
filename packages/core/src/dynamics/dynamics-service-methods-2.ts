@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 
 import {
   DYNAMICS_CONSTANTS,
@@ -12,7 +11,6 @@ import {
   parseKarmaEvent as parseProtocolKarmaEvent,
   type EventLogEntry,
   type KarmaEvent,
-  type KarmaEventKind,
   type ManifestationState,
   type MemoryDimension,
   type MemoryEntry,
@@ -25,16 +23,11 @@ import { scheduleAuditedAsyncSideEffect } from "../runtime/async-side-effect-aud
 import { CoreError } from "../shared/errors.js";
 
 import {
-  DIMENSION_DEFAULT_DECAY_PROFILE,
-  INITIAL_ACTIVATION_FROM_CONFIDENCE_FACTOR,
-  MS_PER_DAY,
   clamp01,
   computeFreshnessFactor,
-  computeRetentionFromProfile,
   determineManifestation
 } from "./dynamics-constants-runtime.js";
 
-import { parseNonEmptyString } from "../shared/validators.js";
 type DynamicsServiceMethodOwner = {
   now: () => string;
   generateEventId: () => string;
