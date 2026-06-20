@@ -1,4 +1,3 @@
-
 import {
   FORMATION_CONFIDENCE_MAP,
   StorageTier,
@@ -8,27 +7,18 @@ import {
   type ManifestationState,
   type MemoryDimension,
   type MemoryEntry,
-  type RetentionState} from "@do-soul/alaya-protocol";
-
+  type RetentionState
+} from "@do-soul/alaya-protocol";
 
 import { CoreError } from "../shared/errors.js";
 
+export const SCORE_CHANGE_EPSILON = 1e-9;
 
-type DynamicsServiceMethodOwner = {
-  now: () => string;
-  generateEventId: () => string;
-  dependencies: DynamicsServiceDependencies;
-  [key: string]: any;
-};
+export const ACTIVATION_WEIGHT_SUM_EPSILON = 1e-6;
 
+export const DYNAMICS_MEMORY_SCAN_PAGE_LIMIT = 500;
 
-const SCORE_CHANGE_EPSILON = 1e-9;
-
-const ACTIVATION_WEIGHT_SUM_EPSILON = 1e-6;
-
-const DYNAMICS_MEMORY_SCAN_PAGE_LIMIT = 500;
-
-interface KarmaTransitionComputation {
+export interface KarmaTransitionComputation {
   readonly now: string;
   readonly previousRetention: number;
   readonly previousRetentionState: RetentionState;
@@ -107,19 +97,21 @@ export interface DynamicsServiceGreenPort {
   }): Promise<unknown>;
 }
 
+export interface DynamicsServiceRuntimeNotifier {
+  notifyEntry(entry: EventLogEntry): void | Promise<void>;
+}
+
 export interface DynamicsServiceDependencies {
   readonly memoryRepo: DynamicsServiceMemoryRepoPort;
   readonly karmaEventRepo: DynamicsServiceKarmaEventRepoPort;
   readonly eventLogRepo: DynamicsServiceEventLogRepoPort;
-  readonly runtimeNotifier: {
-    notifyEntry(entry: EventLogEntry): void | Promise<void>;
-  };
+  readonly runtimeNotifier: DynamicsServiceRuntimeNotifier;
   readonly greenService?: DynamicsServiceGreenPort;
   readonly generateEventId?: () => string;
   readonly now?: () => string;
 }
 
-type KarmaDerivedFieldUpdates = Readonly<{
+export type KarmaDerivedFieldUpdates = Readonly<{
   readonly last_used_at?: string;
   readonly last_hit_at?: string;
   readonly reinforcement_count?: number;
@@ -127,7 +119,7 @@ type KarmaDerivedFieldUpdates = Readonly<{
   readonly superseded_by?: string;
 }>;
 
-function deriveKarmaFieldUpdates(
+export function deriveKarmaFieldUpdates(
   memory: Readonly<MemoryEntry>,
   event: Readonly<KarmaEvent>
 ): KarmaDerivedFieldUpdates {
@@ -155,7 +147,7 @@ function deriveKarmaFieldUpdates(
   });
 }
 
-function computeDomainMatch(memoryTags: readonly string[], currentTags: readonly string[]): number {
+export function computeDomainMatch(memoryTags: readonly string[], currentTags: readonly string[]): number {
   if (memoryTags.length === 0 || currentTags.length === 0) {
     return 0.5;
   }
@@ -165,11 +157,11 @@ function computeDomainMatch(memoryTags: readonly string[], currentTags: readonly
   return hasOverlap ? 1 : 0.3;
 }
 
-function hasScoreChanged(previous: number, next: number): boolean {
+export function hasScoreChanged(previous: number, next: number): boolean {
   return Math.abs(previous - next) > SCORE_CHANGE_EPSILON;
 }
 
-function parseKarmaEventInput(value: KarmaEvent): Readonly<KarmaEvent> {
+export function parseKarmaEventInput(value: KarmaEvent): Readonly<KarmaEvent> {
   try {
     return Object.freeze(parseProtocolKarmaEvent(value));
   } catch (error) {
@@ -177,7 +169,7 @@ function parseKarmaEventInput(value: KarmaEvent): Readonly<KarmaEvent> {
   }
 }
 
-function parseDimension(value: MemoryDimension): MemoryDimension {
+export function parseDimension(value: MemoryDimension): MemoryDimension {
   if (
     value === "preference" ||
     value === "constraint" ||
@@ -194,7 +186,7 @@ function parseDimension(value: MemoryDimension): MemoryDimension {
   throw new CoreError("VALIDATION", "Invalid memory dimension");
 }
 
-function parseFormationKind(value: MemoryEntry["formation_kind"]): MemoryEntry["formation_kind"] {
+export function parseFormationKind(value: MemoryEntry["formation_kind"]): MemoryEntry["formation_kind"] {
   if (
     value === "extracted" ||
     value === "explicit" ||
@@ -208,11 +200,11 @@ function parseFormationKind(value: MemoryEntry["formation_kind"]): MemoryEntry["
   throw new CoreError("VALIDATION", "Invalid formation kind");
 }
 
-function confidenceByFormationKind(kind: MemoryEntry["formation_kind"]): number {
+export function confidenceByFormationKind(kind: MemoryEntry["formation_kind"]): number {
   return FORMATION_CONFIDENCE_MAP[kind];
 }
 
-function assertActivationWeightsSumToOne(
+export function assertActivationWeightsSumToOne(
   weights: Readonly<Record<"scope_match" | "domain_match" | "retention" | "freshness", number>>
 ): void {
   const sum = weights.scope_match + weights.domain_match + weights.retention + weights.freshness;
@@ -222,7 +214,7 @@ function assertActivationWeightsSumToOne(
   }
 }
 
-async function collectWorkspaceMemories(
+export async function collectWorkspaceMemories(
   memoryRepo: DynamicsServiceMemoryRepoPort,
   workspaceId: string,
   tier: StorageTier
@@ -244,9 +236,3 @@ async function collectWorkspaceMemories(
   }
   return Object.freeze(rows);
 }
-
-export async function dynamicsServiceBroadcastEvents(owner: DynamicsServiceMethodOwner, events: readonly EventLogEntry[]): Promise<void> {
-    for (const event of events) {
-      await owner.dependencies.runtimeNotifier.notifyEntry(event);
-    }
-  }
