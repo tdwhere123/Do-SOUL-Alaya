@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
-  EDGE_TYPE_RECALL_MODEL,
   EdgeProposalStatus,
   EdgeProposalTriggerSource,
+  SoulBatchReviewEdgeProposalsResponseSchema,
+  SoulListPendingEdgeProposalsResponseSchema,
+  SoulProposeEdgeResponseSchema,
   type EdgeProposal,
   type EdgeProposalFilter,
   type EdgeProposalTriggerSourceValue,
@@ -11,135 +13,40 @@ import {
   type SoulListPendingEdgeProposalsResponse,
   type SoulProposeEdgeResponse
 } from "@do-soul/alaya-protocol";
-import type { EventPublisher } from "../runtime/event-publisher.js";
-import type { PathCandidateSink } from "./path-candidate-sink.js";
-import type { PathFailureHealthInboxPort } from "./path-failure-health-inbox.js";
-import type { PathMintOutcome } from "./path-relation-proposal-service.js";
+import { CoreError } from "../shared/errors.js";
+import { parseObjectId } from "../shared/validators.js";
+import { buildProposalCreatedEvent, buildProposalReviewedEvent } from "./edge-proposal-events.js";
+import { EdgeProposalMinter } from "./edge-proposal-minter.js";
+import { EdgeProposalReviewer } from "./edge-proposal-reviewer.js";
+import {
+  AUTO_ACCEPT_REVIEWER_IDENTITY,
+  AUTO_ACCEPT_REVIEW_REASON,
+  EDGE_PROPOSAL_DEFAULT_TTL_MS,
+  TTL_EXPIRY_REVIEWER_IDENTITY,
+  TTL_EXPIRY_REVIEW_REASON,
+  clampAgentReportedConfidence,
+  isConflictError,
+  toPendingSummary,
+  type EdgeProposalCreateEventInput,
+  type EdgeProposalCreateParams,
+  type EdgeProposalExpirySweepResult,
+  type EdgeProposalReconcileSweepResult,
+  type EdgeProposalServiceDependencies
+} from "./edge-proposal-service-ports.js";
 
-import { edgeProposalServiceProposeEdge, edgeProposalServiceShouldAutoAccept, edgeProposalServiceListPending } from "./edge-proposal-service-methods-1.js";
-import { edgeProposalServiceBatchReview, edgeProposalServiceProposeExplicitEdge, edgeProposalServiceRequireMemoryInWorkspace } from "./edge-proposal-service-methods-2.js";
-import { edgeProposalServiceRequireExplicitProposalIdsSelected, edgeProposalServiceAcceptProposal, edgeProposalServiceMintAcceptedPath } from "./edge-proposal-service-methods-3.js";
-import { edgeProposalServiceReconcileStuckAccepts, edgeProposalServiceDefaultExpiresAt } from "./edge-proposal-service-methods-4.js";
-import { edgeProposalServiceSweepExpired, edgeProposalServiceHandleMintFailure } from "./edge-proposal-service-methods-5.js";
-import { edgeProposalServiceRecordPathFailureToInbox, edgeProposalServiceRejectProposal } from "./edge-proposal-service-methods-6.js";
-
-export interface EdgeProposalMemoryRepoPort {
-  findById(objectId: string): Promise<{ readonly object_id: string; readonly workspace_id: string } | null>;
-}
-
-export interface EdgeProposalRepoPort {
-  create(input: {
-    readonly proposal_id: string;
-    readonly workspace_id: string;
-    readonly source_memory_id: string;
-    readonly target_memory_id: string;
-    readonly edge_type: MemoryGraphEdgeTypeValue;
-    readonly trigger_source: EdgeProposalTriggerSourceValue;
-    readonly confidence: number;
-    readonly reason: string | null;
-    readonly source_signal_id: string | null;
-    readonly run_id: string | null;
-    readonly created_at: string;
-    readonly expires_at: string | null;
-  }): EdgeProposal;
-  findPendingDuplicate(input: {
-    readonly workspaceId: string;
-    readonly sourceMemoryId: string;
-    readonly targetMemoryId: string;
-    readonly edgeType: MemoryGraphEdgeTypeValue;
-  }): EdgeProposal | null;
-  listPending(workspaceId: string, filter?: EdgeProposalFilter): readonly EdgeProposal[];
-  // invariant: pending proposals past their non-null expires_at, oldest-expiry
-  // first, bounded by limit. The TTL sweep flips each to `expired`. A null
-  // expires_at is never returned. see also: sweepExpired.
-  listExpiredPending(workspaceId: string, nowIso: string, limit: number): readonly EdgeProposal[];
-  // invariant: accepted / auto_accepted proposals owe a minted path. The
-  // daemon reconcile sweep reads these (oldest first, bounded) to recover a
-  // crash-window orphan — an accept whose review row committed but whose mint
-  // never landed (and so is invisible to listPending). re-driving the mint is
-  // idempotent (path dedup -> already_present).
-  // see also: edge-proposal-repo.ts listAcceptedAwaitingPath, reconcileStuckAccepts.
-  listAcceptedAwaitingPath(workspaceId: string, limit: number): readonly EdgeProposal[];
-  updateReview(input: {
-    readonly proposalId: string;
-    readonly status: "accepted" | "rejected" | "expired" | "auto_accepted";
-    readonly reviewerIdentity: string | null;
-    readonly reviewReason: string | null;
-    readonly reviewedAt: string;
-  }): EdgeProposal;
-  // invariant: compensating transition out of the just-committed accepted
-  // state when the owed path never minted. CAS-gated on `fromStatus` (the
-  // accepted/auto_accepted the accept just wrote) so a concurrent decision
-  // cannot be clobbered. A transient mint failure reverts the row to
-  // `pending` (retryable through the existing pending review surface); a
-  // permanent anchor rejection reverts it to terminal `rejected` so it leaves
-  // the pending list and cannot become a retry poison pill.
-  // see also: edge-proposal-repo.ts SqliteEdgeProposalRepo.reconcileAfterMintFailure.
-  reconcileAfterMintFailure(input: {
-    readonly proposalId: string;
-    readonly fromStatus: "accepted" | "auto_accepted";
-    readonly toStatus: "pending" | "rejected";
-    readonly reviewerIdentity: string | null;
-    readonly reviewReason: string | null;
-    readonly reviewedAt: string;
-    // invariant: terminal fallback stamped when a revert-to-pending would
-    // collide with a duplicate pending re-proposal (the pending-unique index).
-    // The repo moves the row to terminal `rejected` with these instead of
-    // letting the SQLITE_CONSTRAINT roll back the caller's audit transaction.
-    // see also: edge-proposal-repo.ts reconcileAfterMintFailure (collision fallback).
-    readonly supersededReviewerIdentity?: string | null;
-    readonly supersededReviewReason?: string | null;
-  }): EdgeProposal;
-}
-
-export interface EdgeProposalServiceDependencies {
-  readonly memoryRepo: EdgeProposalMemoryRepoPort;
-  readonly proposalRepo: EdgeProposalRepoPort;
-  // invariant: edge-proposal accept mints a governed PathRelation on the
-  // unified path plane; it never creates a memory_graph_edges row. The
-  // review gate is independent of the landing target: proposals stay
-  // pending -> accept/reject. submitCandidate applies the path governance
-  // clamp, durable dedup, and the PATH_RELATION_CREATED audit row.
-  // see also: path-candidate-sink.ts PathCandidateSink.
-  readonly pathCandidatePort: PathCandidateSink;
-  readonly eventPublisher: Pick<EventPublisher, "appendManyWithMutation">;
-  // invariant: D-EDGEAUDIT operator-triage surface. When wired, an accept-owed
-  // path mint failure ALSO upserts a `path_relation_failure` health_inbox group
-  // (in addition to the durable SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED event)
-  // so the failure is visible in the Inspector inbox, not only by forensic
-  // EventLog scan. Optional: when absent the EventLog audit stands alone.
-  // Best-effort — a port throw must never break the accept path.
-  // see also: path-relation-proposal-service.ts (the mint-side failure twin);
-  //   protocol HealthIssueCauseKind.PATH_RELATION_FAILURE.
-  readonly healthInboxPort?: PathFailureHealthInboxPort;
-  readonly generateId?: () => string;
-  readonly now?: () => string;
-}
-
-// invariant: edge_type -> path seed mapping for accept-minted relations.
-// relation_kind == edge_type so soul.explore_graph projects it back without
-// loss; recall_bias = sign x magnitude is anchored to
-// EDGE_TYPE_RECALL_MODEL.contribution_weight so an accept-minted path's
-// graph_support contribution is zero-drift vs a same-mapped-edge-type
-// auto-producer path (graph_support weights by mapped edge_type, not by
-// recall_bias). The paths are NOT otherwise numerically identical: auto-producer
-// seed profiles differ on recall_bias magnitude, strength, governance_class,
-// and relation_kind.
-// initial strength = |contribution_weight| clamped to a non-zero floor so a
-// neutral marker (exception_to, weight 0) is still a live, dedup-able path
-// row rather than a dead zero-strength relation.
-const ACCEPT_PATH_STRENGTH_FLOOR = 0.3;
-
-function edgeTypeToRecallBiasSign(edgeType: MemoryGraphEdgeTypeValue): 1 | 0 | -1 {
-  const weight = EDGE_TYPE_RECALL_MODEL[edgeType].contribution_weight;
-  if (weight > 0) {
-    return 1;
-  }
-  if (weight < 0) {
-    return -1;
-  }
-  return 0;
-}
+export type {
+  EdgeProposalCreateParams,
+  EdgeProposalExpirySweepResult,
+  EdgeProposalMemoryRepoPort,
+  EdgeProposalReconcileSweepResult,
+  EdgeProposalRepoPort,
+  EdgeProposalServiceDependencies
+} from "./edge-proposal-service-ports.js";
+export {
+  AUTO_ACCEPT_REVIEWER_IDENTITY,
+  EDGE_PROPOSAL_DEFAULT_TTL_MS,
+  TTL_EXPIRY_REVIEWER_IDENTITY
+} from "./edge-proposal-service-ports.js";
 
 // invariant: auto-accept floor table by trigger_source. This file is
 // the single source of truth for the mapping; no producer may inline its
@@ -168,105 +75,137 @@ export const AUTO_ACCEPT_FLOOR_BY_TRIGGER: Readonly<
   [EdgeProposalTriggerSource.RECALL_CROSS_LINK]: 0.8
 });
 
-// invariant: system-policy auto-accept emits SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED
-// with this reviewer_identity so KPI K3.4 (auto_accept rate) can attribute
-// the decision and so audit-trail consumers can distinguish auto vs human.
-export const AUTO_ACCEPT_REVIEWER_IDENTITY = "system:auto_accept_policy";
-
-const AUTO_ACCEPT_REVIEW_REASON = "auto-accepted by trigger floor policy";
-
-// invariant: default pending-proposal TTL. proposeEdge stamps
-// expires_at = created_at + this TTL when no caller value is given, so the
-// `expired` status + expires_at column are a live feature (producer here,
-// sweeper in sweepExpired) rather than dead schema. 30 days is conservative:
-// long enough for a human/agent reviewer, short enough that a stale
-// auto-produced proposal cannot pile up unbounded on a no-reviewer deployment.
-// An explicit caller expiresAt overrides this default.
-export const EDGE_PROPOSAL_DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-
-// invariant: reviewer_identity + review_reason stamped on a proposal the TTL
-// sweep moves pending -> expired. Distinguishes a policy expiry from a human
-// reject in the durable review columns so KPI attribution stays unambiguous.
-export const TTL_EXPIRY_REVIEWER_IDENTITY = "system:edge_proposal_ttl_policy";
-
-const TTL_EXPIRY_REVIEW_REASON = "auto-expired: pending proposal outlived its TTL with no review";
-
-// invariant: per-pass tally the TTL sweep returns so the daemon can LOG what it
-// expired (no silent cap). `scanned` rows examined; `expired` flipped to
-// terminal expired; `skipped` rows whose CAS lost (a concurrent decision moved
-// them off pending between list and updateReview).
-export interface EdgeProposalExpirySweepResult {
-  readonly scanned: number;
-  readonly expired: number;
-  readonly skipped: number;
-}
-
-// invariant: review_reason stamped on a proposal auto-rejected because its owed
-// path mint was permanently refused (a missing / foreign source or target
-// memory anchor). Distinguishes a mint-failure terminal rejection from an
-// operator/auto verdict rejection in the durable review_reason column.
-const PATH_MINT_FAILED_REVIEW_REASON = "permanent path-anchor refusal on accept";
-
-// invariant: review_reason stamped when a transient-mint-failed proposal cannot
-// revert to pending because a duplicate pending re-proposal already holds its
-// tuple (the pending-unique index). The re-proposal carries the retry, so this
-// row is reconciled to terminal rejected instead of being left stuck
-// accepted-without-path. see also: edge-proposal-repo.ts reconcileAfterMintFailure.
-const PATH_MINT_SUPERSEDED_REVIEW_REASON =
-  "auto-rejected: owed path mint failed transiently and a duplicate pending re-proposal supersedes the retry";
-
-// reviewer_identity stamped on the superseded terminal fallback so the
-// rejection is attributable to the mint-reconcile policy rather than an
-// operator verdict.
-const PATH_MINT_SUPERSEDED_REVIEWER_IDENTITY = "system:edge_proposal_mint_reconcile";
-
-// invariant: per-outcome tally the crash-window reconcile sweep returns so the
-// daemon can LOG what it reconciled (no silent cap). `reminted` paths that
-// genuinely landed this pass; `already_present` healthy accepts whose path
-// already existed (the steady-state no-op); `rejected` permanent anchor
-// refusals moved terminal; `transient_failed` reverted to pending for a later
-// retry. see also: reconcileStuckAccepts.
-export interface EdgeProposalReconcileSweepResult {
-  readonly scanned: number;
-  readonly reminted: number;
-  readonly already_present: number;
-  readonly rejected: number;
-  readonly transient_failed: number;
-}
-
-export interface EdgeProposalCreateParams {
+type DistinctMemoryIds = Readonly<{
   readonly sourceMemoryId: string;
   readonly targetMemoryId: string;
-  readonly edgeType: MemoryGraphEdgeTypeValue;
   readonly workspaceId: string;
-  readonly runId?: string | null;
-  readonly triggerSource?: EdgeProposalTriggerSourceValue;
-  readonly confidence?: number;
-  readonly reason?: string | null;
-  readonly sourceSignalId?: string | null;
-  readonly expiresAt?: string | null;
-}
+}>;
 
 export class EdgeProposalService {
-public readonly generateId: () => string;
+  public readonly generateId: () => string;
 
-public readonly now: () => string;
+  public readonly now: () => string;
 
-public constructor(public readonly dependencies: EdgeProposalServiceDependencies) {
+  private readonly minter: EdgeProposalMinter;
+
+  private readonly reviewer: EdgeProposalReviewer;
+
+  public constructor(public readonly dependencies: EdgeProposalServiceDependencies) {
     this.generateId = dependencies.generateId ?? randomUUID;
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.minter = new EdgeProposalMinter({
+      proposalRepo: dependencies.proposalRepo,
+      pathCandidatePort: dependencies.pathCandidatePort,
+      eventPublisher: dependencies.eventPublisher,
+      healthInboxPort: dependencies.healthInboxPort,
+      now: this.now
+    });
+    this.reviewer = new EdgeProposalReviewer({
+      memoryRepo: dependencies.memoryRepo,
+      proposalRepo: dependencies.proposalRepo,
+      eventPublisher: dependencies.eventPublisher,
+      minter: this.minter,
+      now: this.now
+    });
   }
 
   public async proposeEdge(params: EdgeProposalCreateParams): Promise<Readonly<EdgeProposal>> {
-    return edgeProposalServiceProposeEdge(this, params);
+    const ids = this.parseEdgeProposalObjectIds(params);
+    await this.assertDistinctProposalMemories(ids);
+    const duplicate = this.dependencies.proposalRepo.findPendingDuplicate({
+      workspaceId: ids.workspaceId,
+      sourceMemoryId: ids.sourceMemoryId,
+      targetMemoryId: ids.targetMemoryId,
+      edgeType: params.edgeType
+    });
+    if (duplicate !== null) {
+      return duplicate;
+    }
+    const createInput = this.buildEdgeProposalCreateInput(params, ids);
+    const created = await this.dependencies.eventPublisher.appendManyWithMutation(
+      [buildProposalCreatedEvent(createInput)],
+      () => this.dependencies.proposalRepo.create(createInput)
+    );
+    return this.maybeAutoAcceptEdgeProposal(created, createInput.trigger_source, createInput.confidence);
+  }
+
+  private parseEdgeProposalObjectIds(params: EdgeProposalCreateParams): DistinctMemoryIds {
+    return Object.freeze({
+      sourceMemoryId: parseObjectId(params.sourceMemoryId),
+      targetMemoryId: parseObjectId(params.targetMemoryId),
+      workspaceId: parseObjectId(params.workspaceId)
+    });
+  }
+
+  private async assertDistinctProposalMemories(ids: DistinctMemoryIds): Promise<void> {
+    if (ids.sourceMemoryId === ids.targetMemoryId) {
+      throw new CoreError("VALIDATION", "Source and target memory must be different.");
+    }
+    await this.reviewer.requireMemoryInWorkspace(ids.sourceMemoryId, "Source", ids.workspaceId);
+    await this.reviewer.requireMemoryInWorkspace(ids.targetMemoryId, "Target", ids.workspaceId);
+  }
+
+  private buildEdgeProposalCreateInput(
+    params: EdgeProposalCreateParams,
+    ids: DistinctMemoryIds
+  ): EdgeProposalCreateEventInput {
+    const createdAt = this.now();
+    const triggerSource = params.triggerSource ?? EdgeProposalTriggerSource.EXPLICIT;
+    const requestedConfidence = params.confidence ?? 0.5;
+    const confidence =
+      triggerSource === EdgeProposalTriggerSource.EXPLICIT
+        ? clampAgentReportedConfidence(requestedConfidence)
+        : requestedConfidence;
+    return {
+      proposal_id: `edge_prop_${this.generateId()}`,
+      workspace_id: ids.workspaceId,
+      source_memory_id: ids.sourceMemoryId,
+      target_memory_id: ids.targetMemoryId,
+      edge_type: params.edgeType,
+      trigger_source: triggerSource,
+      confidence,
+      reason: params.reason ?? null,
+      source_signal_id: params.sourceSignalId ?? null,
+      run_id: params.runId ?? null,
+      created_at: createdAt,
+      expires_at: params.expiresAt ?? this.defaultExpiresAt(createdAt)
+    };
+  }
+
+  private async maybeAutoAcceptEdgeProposal(
+    created: Readonly<EdgeProposal>,
+    triggerSource: EdgeProposalTriggerSourceValue,
+    confidence: number
+  ): Promise<Readonly<EdgeProposal>> {
+    if (!this.shouldAutoAccept(triggerSource, confidence)) {
+      return created;
+    }
+    return this.reviewer.acceptProposal(
+      created,
+      AUTO_ACCEPT_REVIEWER_IDENTITY,
+      AUTO_ACCEPT_REVIEW_REASON,
+      this.now(),
+      EdgeProposalStatus.AUTO_ACCEPTED
+    );
   }
 
   private shouldAutoAccept(triggerSource: EdgeProposalTriggerSourceValue, confidence: number): boolean {
-    return edgeProposalServiceShouldAutoAccept(this, triggerSource, confidence);
+    if (triggerSource === EdgeProposalTriggerSource.EXPLICIT) {
+      return false;
+    }
+    const floor = AUTO_ACCEPT_FLOOR_BY_TRIGGER[triggerSource];
+    if (floor === undefined) {
+      return false;
+    }
+    return confidence >= floor;
   }
 
   public listPending(workspaceId: string, filter: EdgeProposalFilter = {}): SoulListPendingEdgeProposalsResponse {
-    return edgeProposalServiceListPending(this, workspaceId, filter);
+    const proposals = this.dependencies.proposalRepo.listPending(parseObjectId(workspaceId), filter);
+    return SoulListPendingEdgeProposalsResponseSchema.parse({
+      proposals: proposals.map(toPendingSummary),
+      total_count: proposals.length
+    });
   }
 
   public async batchReview(input: {
@@ -276,7 +215,50 @@ public constructor(public readonly dependencies: EdgeProposalServiceDependencies
     readonly reason: string | null;
     readonly reviewerIdentity: string;
   }): Promise<SoulBatchReviewEdgeProposalsResponse> {
-    return edgeProposalServiceBatchReview(this, input);
+    const workspaceId = parseObjectId(input.workspaceId);
+    const proposals = this.dependencies.proposalRepo.listPending(workspaceId, input.filter);
+    this.requireExplicitProposalIdsSelected(input.filter, proposals);
+    const reviewedProposalIds: string[] = [];
+    let acceptedCount = 0;
+    let rejectedCount = 0;
+    const reviewedAt = this.now();
+
+    for (const proposal of proposals) {
+      if (input.verdict === "accept") {
+        await this.reviewer.acceptProposal(
+          proposal,
+          input.reviewerIdentity,
+          input.reason,
+          reviewedAt,
+          EdgeProposalStatus.ACCEPTED
+        );
+        acceptedCount += 1;
+      } else {
+        await this.reviewer.rejectProposal(proposal, input.reviewerIdentity, input.reason, reviewedAt);
+        rejectedCount += 1;
+      }
+      reviewedProposalIds.push(proposal.proposal_id);
+    }
+
+    return SoulBatchReviewEdgeProposalsResponseSchema.parse({
+      accepted_count: acceptedCount,
+      rejected_count: rejectedCount,
+      reviewed_proposal_ids: reviewedProposalIds
+    });
+  }
+
+  private requireExplicitProposalIdsSelected(filter: EdgeProposalFilter, proposals: readonly EdgeProposal[]): void {
+    if (filter.proposal_ids === undefined) {
+      return;
+    }
+    const selectedProposalIds = new Set(proposals.map((proposal) => proposal.proposal_id));
+    const missingProposalId = filter.proposal_ids.find((proposalId) => !selectedProposalIds.has(proposalId));
+    if (missingProposalId !== undefined) {
+      throw new CoreError(
+        "CONFLICT",
+        `Edge proposal is not pending or does not match review filter: ${missingProposalId}`
+      );
+    }
   }
 
   public async proposeExplicitEdge(input: {
@@ -288,52 +270,116 @@ public constructor(public readonly dependencies: EdgeProposalServiceDependencies
     readonly workspaceId: string;
     readonly runId: string | null;
   }): Promise<SoulProposeEdgeResponse> {
-    return edgeProposalServiceProposeExplicitEdge(this, input);
-  }
-
-  private async requireMemoryInWorkspace(memoryId: string, label: string, workspaceId: string): Promise<void> {
-    return edgeProposalServiceRequireMemoryInWorkspace(this, memoryId, label, workspaceId);
-  }
-
-  private requireExplicitProposalIdsSelected(filter: EdgeProposalFilter, proposals: readonly EdgeProposal[]): void {
-    return edgeProposalServiceRequireExplicitProposalIdsSelected(this, filter, proposals);
-  }
-
-  private async acceptProposal(proposal: EdgeProposal, reviewerIdentity: string, reviewReason: string | null, reviewedAt: string, acceptedStatus: typeof EdgeProposalStatus.ACCEPTED | typeof EdgeProposalStatus.AUTO_ACCEPTED): Promise<EdgeProposal> {
-    return edgeProposalServiceAcceptProposal(this, proposal, reviewerIdentity, reviewReason, reviewedAt, acceptedStatus);
-  }
-
-  private async mintAcceptedPath(proposal: EdgeProposal, reviewerIdentity: string, acceptedStatus: typeof EdgeProposalStatus.ACCEPTED | typeof EdgeProposalStatus.AUTO_ACCEPTED): Promise<PathMintOutcome> {
-    return edgeProposalServiceMintAcceptedPath(this, proposal, reviewerIdentity, acceptedStatus);
+    // confidence clamp now lives in `proposeEdge` (keyed on
+    // triggerSource === EXPLICIT) so any future caller invoking the
+    // core path with EXPLICIT also gets the agent self-report ceiling.
+    const proposal = await this.proposeEdge({
+      sourceMemoryId: input.sourceMemoryId,
+      targetMemoryId: input.targetMemoryId,
+      edgeType: input.edgeType,
+      workspaceId: input.workspaceId,
+      runId: input.runId,
+      triggerSource: EdgeProposalTriggerSource.EXPLICIT,
+      confidence: input.confidence,
+      reason: input.reason
+    });
+    return SoulProposeEdgeResponseSchema.parse({
+      proposal_id: proposal.proposal_id,
+      status: proposal.status
+    });
   }
 
   public async reconcileStuckAccepts(input: {
     readonly workspaceId: string;
     readonly limit: number;
   }): Promise<EdgeProposalReconcileSweepResult> {
-    return edgeProposalServiceReconcileStuckAccepts(this, input);
+    const workspaceId = parseObjectId(input.workspaceId);
+    const stranded = this.dependencies.proposalRepo.listAcceptedAwaitingPath(workspaceId, input.limit);
+    let alreadyPresent = 0;
+    let reminted = 0;
+    let rejected = 0;
+    let transientFailed = 0;
+    for (const proposal of stranded) {
+      const acceptedStatus =
+        proposal.status === EdgeProposalStatus.AUTO_ACCEPTED
+          ? EdgeProposalStatus.AUTO_ACCEPTED
+          : EdgeProposalStatus.ACCEPTED;
+      // The original reviewer is preserved on the durable row; the re-drive is
+      // attributed to its recorded identity (or the auto-accept policy identity
+      // when the row carries none).
+      const reviewerIdentity = proposal.reviewer_identity ?? AUTO_ACCEPT_REVIEWER_IDENTITY;
+      const outcome = await this.minter.mintAcceptedPath(proposal, reviewerIdentity, acceptedStatus);
+      if (outcome === "applied") {
+        reminted += 1;
+      } else if (outcome === "already_present") {
+        alreadyPresent += 1;
+      } else if (outcome === "rejected") {
+        rejected += 1;
+      } else {
+        transientFailed += 1;
+      }
+    }
+    return {
+      scanned: stranded.length,
+      reminted,
+      already_present: alreadyPresent,
+      rejected,
+      transient_failed: transientFailed
+    };
   }
 
   private defaultExpiresAt(createdAt: string): string {
-    return edgeProposalServiceDefaultExpiresAt(this, createdAt);
+    return new Date(new Date(createdAt).getTime() + EDGE_PROPOSAL_DEFAULT_TTL_MS).toISOString();
   }
 
   public async sweepExpired(input: {
     readonly workspaceId: string;
     readonly limit: number;
   }): Promise<EdgeProposalExpirySweepResult> {
-    return edgeProposalServiceSweepExpired(this, input);
-  }
-
-  private async handleMintFailure(proposal: EdgeProposal, acceptedStatus: typeof EdgeProposalStatus.ACCEPTED | typeof EdgeProposalStatus.AUTO_ACCEPTED, reviewerIdentity: string, failureKind: "submit_returned_false" | "submit_threw", mintOutcome: "failed" | "rejected", cause: unknown = null): Promise<void> {
-    return edgeProposalServiceHandleMintFailure(this, proposal, acceptedStatus, reviewerIdentity, failureKind, mintOutcome, cause);
-  }
-
-  private async recordPathFailureToInbox(workspaceId: string, targetObjectId: string): Promise<void> {
-    return edgeProposalServiceRecordPathFailureToInbox(this, workspaceId, targetObjectId);
-  }
-
-  private async rejectProposal(proposal: EdgeProposal, reviewerIdentity: string, reviewReason: string | null, reviewedAt: string): Promise<void> {
-    return edgeProposalServiceRejectProposal(this, proposal, reviewerIdentity, reviewReason, reviewedAt);
+    const workspaceId = parseObjectId(input.workspaceId);
+    const nowIso = this.now();
+    const candidates = this.dependencies.proposalRepo.listExpiredPending(workspaceId, nowIso, input.limit);
+    let expired = 0;
+    let skipped = 0;
+    for (const proposal of candidates) {
+      const reviewedAt = this.now();
+      try {
+        await this.dependencies.eventPublisher.appendManyWithMutation(
+          [
+            buildProposalReviewedEvent(
+              proposal,
+              EdgeProposalStatus.EXPIRED,
+              TTL_EXPIRY_REVIEWER_IDENTITY,
+              TTL_EXPIRY_REVIEW_REASON,
+              reviewedAt
+            )
+          ],
+          () => {
+            this.dependencies.proposalRepo.updateReview({
+              proposalId: proposal.proposal_id,
+              status: EdgeProposalStatus.EXPIRED,
+              reviewerIdentity: TTL_EXPIRY_REVIEWER_IDENTITY,
+              reviewReason: TTL_EXPIRY_REVIEW_REASON,
+              reviewedAt
+            });
+          }
+        );
+        expired += 1;
+      } catch (error) {
+        // invariant: CAS lost -> the row is no longer pending (a concurrent
+        // accept/reject won). updateReview is CAS-gated on status='pending' and
+        // raises a CONFLICT-coded error (CoreError or the repo's StorageError)
+        // when the predicate matches no row. The audit append + updateReview run
+        // in one txn, so the CONFLICT rolled the audit back too; nothing was
+        // written. Treat as skipped, not fatal, so one raced row never aborts the
+        // whole sweep. Duck-typed on `code` to avoid a core->storage import.
+        if (isConflictError(error)) {
+          skipped += 1;
+          continue;
+        }
+        throw error;
+      }
+    }
+    return { scanned: candidates.length, expired, skipped };
   }
 }
