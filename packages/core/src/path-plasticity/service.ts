@@ -1,140 +1,367 @@
 import {
-  type PathPlasticityState,
+  type PathAnchorRef,
   type PathRelation,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
-import type { EventPublisherInput } from "../runtime/event-publisher.js";
-import { type PromotionPlan } from "../path-graph/path-manifestation-policy.js";
+
+import {
+  computeUsedSignalWeight,
+  isMemoryEntryAnchorUsage,
+  isObjectAnchor,
+  isRetiredPath,
+  maxIsoNullable,
+  throwIfPathPlasticityAborted,
+  uniqueStrings
+} from "./helpers.js";
+import { MutationPlanFactory } from "./mutation-plan-factory.js";
+import { PathDeltaPlanner } from "./path-delta-planner.js";
 import type {
   DirectionalPathUsage,
+  MutableDirectionalPathUsage,
   MutableObjectUsageCounts,
   PathAggregate,
   PathPlasticityComputeResult,
   PathPlasticityMutationPlan,
-  PathPlasticityServiceDependencies,
-  RedirectionPublication
+  PathPlasticityPromotionRecord,
+  PathPlasticityServiceDependencies
 } from "./types.js";
 
-import { pathPlasticityServiceComputeAndApplyPlasticity, pathPlasticityServiceAggregatePathUsage, pathPlasticityServiceResolveDeliveredMemoryObjectIds, pathPlasticityServiceResolveDirectionalPathUsage } from "./service-methods-1.js";
-import { pathPlasticityServicePlanDeltasForPath, pathPlasticityServiceIsInactive, pathPlasticityServiceApplyMutationPlans, pathPlasticityServiceCreateReinforcedPlan, pathPlasticityServiceCreateWeakenedPlan, pathPlasticityServiceCreateRetiredPlan } from "./service-methods-2.js";
-import { pathPlasticityServiceCreateDormantPlan, pathPlasticityServiceCreateRevivedPlan, pathPlasticityServiceCreateRedirectedPlan, pathPlasticityServiceCreateRedirectionInputs } from "./service-methods-3.js";
+interface MutablePlasticityComputeSummary {
+  reinforced: number;
+  weakened: number;
+  retired: number;
+  dormant: number;
+  revived: number;
+  readonly affected: Set<string>;
+  readonly promotions: PathPlasticityPromotionRecord[];
+}
+
+interface ComputeAndApplyPlasticityParams {
+  readonly workspaceId: string;
+  readonly sinceIso: string;
+  readonly untilIso?: string;
+  readonly abortSignal?: AbortSignal;
+  readonly onMutationBoundaryEntered?: () => void;
+}
 
 export class PathPlasticityService {
-public readonly now: () => string;
+  public readonly now: () => string;
 
-public constructor(public readonly dependencies: PathPlasticityServiceDependencies) {
+  private readonly planner: PathDeltaPlanner;
+
+  public constructor(public readonly dependencies: PathPlasticityServiceDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.planner = new PathDeltaPlanner({ factory: new MutationPlanFactory(), now: this.now });
   }
 
-  public async computeAndApplyPlasticity(params: {
-    readonly workspaceId: string;
-    readonly sinceIso: string;
-    readonly untilIso?: string;
-    readonly abortSignal?: AbortSignal;
-    readonly onMutationBoundaryEntered?: () => void;
-  }): Promise<PathPlasticityComputeResult> {
-    return pathPlasticityServiceComputeAndApplyPlasticity(this, params);
+  public async computeAndApplyPlasticity(params: ComputeAndApplyPlasticityParams): Promise<PathPlasticityComputeResult> {
+    throwIfPathPlasticityAborted(params.abortSignal);
+    const usageRecords = await this.dependencies.usageProofReader.listRecentUsage(
+      params.workspaceId,
+      params.sinceIso,
+      params.untilIso
+    );
+    throwIfPathPlasticityAborted(params.abortSignal);
+
+    if (usageRecords.length === 0) {
+      return emptyPlasticityComputeResult();
+    }
+
+    const pathAggregates = await this.aggregatePathUsage(
+      params.workspaceId,
+      usageRecords,
+      params.abortSignal
+    );
+    throwIfPathPlasticityAborted(params.abortSignal);
+
+    const summary = createPlasticityComputeSummary();
+    const mutationPlans: PathPlasticityMutationPlan[] = [];
+    for (const { path, counts } of pathAggregates.values()) {
+      if (isRetiredPath(path)) {
+        continue;
+      }
+      const plan = this.planner.planDeltasForPath(path, counts, params.abortSignal);
+      if (plan === null) {
+        continue;
+      }
+      mutationPlans.push(plan);
+      applyPlanToComputeSummary(summary, plan);
+    }
+
+    this.applyMutationPlans(
+      mutationPlans,
+      params.abortSignal,
+      params.onMutationBoundaryEntered
+    );
+
+    return Object.freeze({
+      reinforced: summary.reinforced,
+      weakened: summary.weakened,
+      retired: summary.retired,
+      dormant: summary.dormant,
+      revived: summary.revived,
+      affectedPathIds: Object.freeze([...summary.affected]),
+      promotions: Object.freeze(summary.promotions)
+    });
   }
 
-  private async aggregatePathUsage(workspaceId: string, usageRecords: readonly Readonly<UsageProofRecord>[], abortSignal?: AbortSignal): Promise<ReadonlyMap<string, PathAggregate>> {
-    return pathPlasticityServiceAggregatePathUsage(this, workspaceId, usageRecords, abortSignal);
+  private async aggregatePathUsage(
+    workspaceId: string,
+    usageRecords: readonly Readonly<UsageProofRecord>[],
+    abortSignal?: AbortSignal
+  ): Promise<ReadonlyMap<string, PathAggregate>> {
+    const pathAggregates = new Map<string, PathAggregate>();
+    const seenAuditEventIds = new Set<string>();
+
+    for (const record of usageRecords) {
+      throwIfPathPlasticityAborted(abortSignal);
+      if (seenAuditEventIds.has(record.audit_event_id)) {
+        continue;
+      }
+      seenAuditEventIds.add(record.audit_event_id);
+      await this.aggregateSingleUsageRecord(workspaceId, record, pathAggregates, abortSignal);
+    }
+
+    return pathAggregates;
+  }
+
+  private async aggregateSingleUsageRecord(
+    workspaceId: string,
+    record: Readonly<UsageProofRecord>,
+    pathAggregates: Map<string, PathAggregate>,
+    abortSignal?: AbortSignal
+  ): Promise<void> {
+    const targetObjectIds = await this.resolveRecordTargetObjectIds(record, abortSignal);
+    if (targetObjectIds.length === 0) {
+      return;
+    }
+    const pathsTouchedByReceipt = await this.collectPathsTouchedByReceipt(
+      workspaceId,
+      targetObjectIds,
+      abortSignal
+    );
+    for (const [pathId, path] of pathsTouchedByReceipt.entries()) {
+      applyUsageStateCounts(pathAggregates, pathId, path, record);
+    }
+    const directionalUsage = await this.resolveDirectionalPathUsage(workspaceId, record, abortSignal);
+    for (const [pathId, usage] of directionalUsage.entries()) {
+      applyDirectionalUsageCounts(pathAggregates, pathId, usage, record);
+    }
+  }
+
+  private async resolveRecordTargetObjectIds(
+    record: Readonly<UsageProofRecord>,
+    abortSignal?: AbortSignal
+  ): Promise<readonly string[]> {
+    if (record.usage_state === "used") {
+      return uniqueStrings([
+        ...record.used_object_ids,
+        ...(record.per_anchor_usage ?? [])
+          .filter(isMemoryEntryAnchorUsage)
+          .map((usage) => usage.object_id)
+      ]);
+    }
+    if (record.usage_state !== "skipped" && record.usage_state !== "not_applicable") {
+      return [];
+    }
+    const targetObjectIds = record.used_object_ids.length > 0
+      ? record.used_object_ids
+      : await this.resolveDeliveredMemoryObjectIds(record.delivery_id);
+    throwIfPathPlasticityAborted(abortSignal);
+    return targetObjectIds;
+  }
+
+  private async collectPathsTouchedByReceipt(
+    workspaceId: string,
+    targetObjectIds: readonly string[],
+    abortSignal?: AbortSignal
+  ): Promise<ReadonlyMap<string, Readonly<PathRelation>>> {
+    const pathsTouchedByReceipt = new Map<string, Readonly<PathRelation>>();
+    for (const objectId of targetObjectIds) {
+      throwIfPathPlasticityAborted(abortSignal);
+      const anchorRef: PathAnchorRef = Object.freeze({ kind: "object", object_id: objectId });
+      const paths = await this.dependencies.pathRelationRepo.findByAnchor(workspaceId, anchorRef);
+      throwIfPathPlasticityAborted(abortSignal);
+      for (const path of paths) {
+        if (!pathsTouchedByReceipt.has(path.path_id)) {
+          pathsTouchedByReceipt.set(path.path_id, path);
+        }
+      }
+    }
+    return pathsTouchedByReceipt;
   }
 
   private async resolveDeliveredMemoryObjectIds(deliveryId: string): Promise<readonly string[]> {
-    return pathPlasticityServiceResolveDeliveredMemoryObjectIds(this, deliveryId);
+    const deliveredObjects =
+      await this.dependencies.usageProofReader.findDeliveredObjects?.(deliveryId);
+    if (deliveredObjects !== undefined && deliveredObjects !== null) {
+      return uniqueStrings(
+        deliveredObjects
+          .filter((object) => object.object_kind === "memory_entry")
+          .map((object) => object.object_id)
+      );
+    }
+
+    return (await this.dependencies.usageProofReader.findDeliveredObjectIds(deliveryId)) ?? [];
   }
 
-  private async resolveDirectionalPathUsage(workspaceId: string, record: Readonly<UsageProofRecord>, abortSignal?: AbortSignal): Promise<ReadonlyMap<string, DirectionalPathUsage>> {
-    return pathPlasticityServiceResolveDirectionalPathUsage(this, workspaceId, record, abortSignal);
+  private async resolveDirectionalPathUsage(
+    workspaceId: string,
+    record: Readonly<UsageProofRecord>,
+    abortSignal?: AbortSignal
+  ): Promise<ReadonlyMap<string, DirectionalPathUsage>> {
+    // invariant: only memory_entry anchors drive PathRelation direction bias.
+    // A synthesis_capsule shares the delivered-objects scope with memory and
+    // could collide with a path anchor object_id, so it is filtered here too,
+    // not only on the used/skipped strength-crediting paths above.
+    const perAnchorUsage = (record.per_anchor_usage ?? []).filter(isMemoryEntryAnchorUsage);
+    if (record.usage_state !== "used" || perAnchorUsage.length === 0) {
+      return new Map();
+    }
+
+    const directionalUsage = new Map<string, MutableDirectionalPathUsage>();
+    for (const usage of perAnchorUsage) {
+      throwIfPathPlasticityAborted(abortSignal);
+      const paths = await this.dependencies.pathRelationRepo.findByAnchor(
+        workspaceId,
+        Object.freeze({ kind: "object", object_id: usage.object_id })
+      );
+      throwIfPathPlasticityAborted(abortSignal);
+      for (const path of paths) {
+        const matchesSource =
+          usage.anchor_role === "source" &&
+          isObjectAnchor(path.anchors.source_anchor, usage.object_id);
+        const matchesTarget =
+          usage.anchor_role === "target" &&
+          isObjectAnchor(path.anchors.target_anchor, usage.object_id);
+        if (!matchesSource && !matchesTarget) {
+          continue;
+        }
+        const existing = directionalUsage.get(path.path_id) ?? {
+          path,
+          sourceUsed: false,
+          targetUsed: false
+        };
+        directionalUsage.set(path.path_id, {
+          path,
+          sourceUsed: existing.sourceUsed || matchesSource,
+          targetUsed: existing.targetUsed || matchesTarget
+        });
+      }
+    }
+
+    return directionalUsage;
   }
 
-  private planDeltasForPath(path: Readonly<PathRelation>, counts: MutableObjectUsageCounts, abortSignal?: AbortSignal): PathPlasticityMutationPlan | null {
-    return pathPlasticityServicePlanDeltasForPath(this, path, counts, abortSignal);
-  }
+  private applyMutationPlans(
+    plans: readonly PathPlasticityMutationPlan[],
+    abortSignal?: AbortSignal,
+    onMutationBoundaryEntered?: () => void
+  ): void {
+    if (plans.length === 0) {
+      return;
+    }
 
-  private isInactive(lastReinforcedAt: string | undefined, nowIso: string): boolean {
-    return pathPlasticityServiceIsInactive(this, lastReinforcedAt, nowIso);
+    throwIfPathPlasticityAborted(abortSignal);
+    onMutationBoundaryEntered?.();
+    throwIfPathPlasticityAborted(abortSignal);
+    this.dependencies.eventPublisher.appendManyWithMutationAndDetachPropagation(
+      plans.flatMap((plan) => plan.eventInputs),
+      () => {
+        for (const plan of plans) {
+          this.dependencies.pathRelationRepo.update(plan.pathId, plan.updates);
+        }
+      }
+    );
   }
+}
 
-  private applyMutationPlans(plans: readonly PathPlasticityMutationPlan[], abortSignal?: AbortSignal, onMutationBoundaryEntered?: () => void): void {
-    return pathPlasticityServiceApplyMutationPlans(this, plans, abortSignal, onMutationBoundaryEntered);
-  }
+function emptyPlasticityComputeResult(): PathPlasticityComputeResult {
+  return Object.freeze({
+    reinforced: 0,
+    weakened: 0,
+    retired: 0,
+    dormant: 0,
+    revived: 0,
+    affectedPathIds: [],
+    promotions: []
+  });
+}
 
-  private createReinforcedPlan(params: {
-    readonly path: Readonly<PathRelation>;
-    readonly previousStrength: number;
-    readonly nextStrength: number;
-    readonly nextPlasticity: Readonly<PathPlasticityState>;
-    readonly supportEventsCount: number;
-    readonly redirection?: RedirectionPublication;
-    readonly promotion: PromotionPlan;
-    readonly occurredAt: string;
-  }): PathPlasticityMutationPlan {
-    return pathPlasticityServiceCreateReinforcedPlan(this, params);
-  }
+function createPlasticityComputeSummary(): MutablePlasticityComputeSummary {
+  return {
+    reinforced: 0,
+    weakened: 0,
+    retired: 0,
+    dormant: 0,
+    revived: 0,
+    affected: new Set<string>(),
+    promotions: []
+  };
+}
 
-  private createWeakenedPlan(params: {
-    readonly path: Readonly<PathRelation>;
-    readonly previousStrength: number;
-    readonly nextStrength: number;
-    readonly nextPlasticity: Readonly<PathPlasticityState>;
-    readonly contradictionEventsCount: number;
-    readonly reason: string;
-    readonly redirection?: RedirectionPublication;
-    readonly promotion: PromotionPlan;
-    readonly occurredAt: string;
-  }): PathPlasticityMutationPlan {
-    return pathPlasticityServiceCreateWeakenedPlan(this, params);
+function applyPlanToComputeSummary(summary: MutablePlasticityComputeSummary, plan: Readonly<PathPlasticityMutationPlan>): void {
+  if (plan.outcome === "reinforced") {
+    summary.reinforced += 1;
+  } else if (plan.outcome === "weakened") {
+    summary.weakened += 1;
+  } else if (plan.outcome === "retired") {
+    summary.retired += 1;
+  } else if (plan.outcome === "dormant") {
+    summary.dormant += 1;
+  } else if (plan.outcome === "revived") {
+    summary.revived += 1;
   }
+  summary.affected.add(plan.pathId);
+  if (plan.promotion.governance !== null || plan.promotion.stability !== null) {
+    summary.promotions.push(Object.freeze({
+      path_id: plan.pathId,
+      governance_promoted: plan.promotion.governance,
+      stability_promoted: plan.promotion.stability
+    }));
+  }
+}
 
-  private createRetiredPlan(params: {
-    readonly path: Readonly<PathRelation>;
-    readonly finalStrength: number;
-    readonly nextPlasticity: Readonly<PathPlasticityState>;
-    readonly reason: string;
-    readonly redirection?: RedirectionPublication;
-    readonly promotion: PromotionPlan;
-    readonly occurredAt: string;
-  }): PathPlasticityMutationPlan {
-    return pathPlasticityServiceCreateRetiredPlan(this, params);
+function applyUsageStateCounts(pathAggregates: Map<string, PathAggregate>, pathId: string, path: Readonly<PathRelation>, record: Readonly<UsageProofRecord>): void {
+  const existing = pathAggregates.get(pathId);
+  const counts = existing?.counts ?? createEmptyObjectUsageCounts();
+  if (record.usage_state === "used") {
+    counts.usedWeight += computeUsedSignalWeight(record, counts.used);
+    counts.used += 1;
+  } else if (record.usage_state === "skipped") {
+    counts.skipped += 1;
+  } else if (record.usage_state === "not_applicable") {
+    counts.notApplicable += 1;
   }
+  counts.lastReportedAt = maxIsoNullable(counts.lastReportedAt, record.reported_at);
+  if (existing === undefined) {
+    pathAggregates.set(pathId, { path, counts });
+  }
+}
 
-  private createDormantPlan(params: {
-    readonly path: Readonly<PathRelation>;
-    readonly dormantStrength: number;
-    readonly nextPlasticity: Readonly<PathPlasticityState>;
-    readonly reason: string;
-    readonly redirection?: RedirectionPublication;
-    readonly promotion: PromotionPlan;
-    readonly occurredAt: string;
-  }): PathPlasticityMutationPlan {
-    return pathPlasticityServiceCreateDormantPlan(this, params);
+function applyDirectionalUsageCounts(pathAggregates: Map<string, PathAggregate>, pathId: string, usage: Readonly<DirectionalPathUsage>, record: Readonly<UsageProofRecord>): void {
+  const existing = pathAggregates.get(pathId);
+  const counts = existing?.counts ?? createEmptyObjectUsageCounts();
+  if (usage.sourceUsed) {
+    counts.sourceAnchorUsage += 1;
   }
+  if (usage.targetUsed) {
+    counts.targetAnchorUsage += 1;
+  }
+  counts.lastReportedAt = maxIsoNullable(counts.lastReportedAt, record.reported_at);
+  if (existing === undefined) {
+    pathAggregates.set(pathId, { path: usage.path, counts });
+  }
+}
 
-  private createRevivedPlan(params: {
-    readonly path: Readonly<PathRelation>;
-    readonly previousStrength: number;
-    readonly revivedStrength: number;
-    readonly nextPlasticity: Readonly<PathPlasticityState>;
-    readonly trigger: string;
-    readonly redirection?: RedirectionPublication;
-    readonly promotion: PromotionPlan;
-    readonly occurredAt: string;
-  }): PathPlasticityMutationPlan {
-    return pathPlasticityServiceCreateRevivedPlan(this, params);
-  }
-
-  private createRedirectedPlan(params: {
-    readonly path: Readonly<PathRelation>;
-    readonly nextPlasticity: Readonly<PathPlasticityState>;
-    readonly redirection: RedirectionPublication;
-    readonly promotion: PromotionPlan;
-    readonly occurredAt: string;
-  }): PathPlasticityMutationPlan {
-    return pathPlasticityServiceCreateRedirectedPlan(this, params);
-  }
-
-  private createRedirectionInputs(path: Readonly<PathRelation>, redirection: RedirectionPublication | undefined): readonly EventPublisherInput[] {
-    return pathPlasticityServiceCreateRedirectionInputs(this, path, redirection);
-  }
+function createEmptyObjectUsageCounts(): MutableObjectUsageCounts {
+  return {
+    used: 0,
+    usedWeight: 0,
+    skipped: 0,
+    notApplicable: 0,
+    sourceAnchorUsage: 0,
+    targetAnchorUsage: 0,
+    lastReportedAt: null
+  };
 }
