@@ -11,6 +11,7 @@ import {
   type Proposal
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
+import { createStoreEntry } from "./budget-bankruptcy-service-artifacts.js";
 import {
   normalizeOptionalString,
   parseDossier,
@@ -74,13 +75,7 @@ export async function requireDeclaredEvent(
 export function buildRecoveredEntry(
   dossierRef: string,
   proposalId: string,
-  declaredEvent: Readonly<EventLogEntry>,
-  createStoreEntry: (
-    state: ReturnType<typeof parseState>,
-    dossier: ReturnType<typeof parseDossier>,
-    proposalId: string,
-    pressureRatio: number
-  ) => BankruptcyStoreEntry
+  declaredEvent: Readonly<EventLogEntry>
 ): BankruptcyStoreEntry {
   const payload = SoulBudgetBankruptcyDeclaredPayloadSchema.parse(declaredEvent.payload_json);
   return createStoreEntry(
