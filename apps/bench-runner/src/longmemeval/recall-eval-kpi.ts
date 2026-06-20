@@ -28,19 +28,28 @@ const VARIANT_TO_SPLIT: Record<LongMemEvalVariant, BenchSplit> = {
   longmemeval_m: "longmemeval-m"
 };
 
-export function assembleRecallEvalKpi(input: {
-  readonly collected: readonly RecallEvalQuestionResult[];
-  readonly manifest: LongMemEvalSnapshotManifest;
-  readonly variant: LongMemEvalVariant;
-  readonly runAt: Date;
-  readonly commitSha7: string;
-  readonly alayaVersion: string;
-  readonly policyShape: BenchPolicyShape;
-  readonly simulateReport: BenchSimulateReportMode;
-  readonly sampleSize: number;
-  readonly evaluatedCount: number;
-  readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
-}): KpiPayload {
+interface RecallEvalAccumulator {
+  readonly perScenario: PerScenarioRow[];
+  readonly latencies: number[];
+  readonly questionDiagnostics: LongMemEvalQuestionDiagnostic[];
+  readonly tokenMetricsPerQuestion: BenchTokenMetrics[];
+  readonly recallTokenEconomySamples: BenchRecallTokenEconomy[];
+  readonly edgeProposalRowsAcross: EdgeProposalKpiEventRow[];
+  readonly edgeProposalRowsPerQuestion: EdgeProposalKpiEventRow[][];
+  readonly tierHot: number;
+  readonly tierWarm: number;
+  readonly tierCold: number;
+  readonly degradeNone: number;
+  readonly degradeWarm: number;
+  readonly degradeCold: number;
+  readonly degradePartial: number;
+  readonly totalHitAt1: number;
+  readonly totalHitAt10: number;
+}
+
+function accumulateRecallEvalRows(
+  collected: readonly RecallEvalQuestionResult[]
+): RecallEvalAccumulator {
   const perScenario: PerScenarioRow[] = [];
   const latencies: number[] = [];
   const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
@@ -58,7 +67,7 @@ export function assembleRecallEvalKpi(input: {
   let totalHitAt1 = 0;
   let totalHitAt10 = 0;
 
-  for (const res of input.collected) {
+  for (const res of collected) {
     questionDiagnostics.push(res.diagnostics);
     latencies.push(res.latencyMs);
     if (res.hitAt1) totalHitAt1++;
@@ -86,26 +95,76 @@ export function assembleRecallEvalKpi(input: {
       latency_ms: res.latencyMs
     });
   }
+  return {
+    perScenario,
+    latencies,
+    questionDiagnostics,
+    tokenMetricsPerQuestion,
+    recallTokenEconomySamples,
+    edgeProposalRowsAcross,
+    edgeProposalRowsPerQuestion,
+    tierHot,
+    tierWarm,
+    tierCold,
+    degradeNone,
+    degradeWarm,
+    degradeCold,
+    degradePartial,
+    totalHitAt1,
+    totalHitAt10
+  };
+}
 
-  const n = perScenario.length;
-  const rAt1 = n === 0 ? 0 : totalHitAt1 / n;
-  const rAt5 = n === 0 ? 0 : perScenario.filter((r) => r.hit_at_5).length / n;
-  const rAt10 = n === 0 ? 0 : totalHitAt10 / n;
-  const latencyP50 = computePercentile(latencies, 50);
-  const latencyP95 = computePercentile(latencies, 95);
+interface RecallEvalAggregates {
+  readonly rAt1: number;
+  readonly rAt5: number;
+  readonly rAt10: number;
+  readonly latencyP50: number;
+  readonly latencyP95: number;
+  readonly tokenEconomy: ReturnType<typeof buildTokenEconomy>;
+  readonly tokenSavedRatio: number;
+  readonly recallTokenEconomy: ReturnType<typeof aggregateRecallTokenEconomy>;
+  readonly edgeProposalRate: ReturnType<typeof aggregateEdgeProposalRate>;
+  readonly edgeProposalAutoAccept: ReturnType<typeof aggregateEdgeProposalAutoAccept>;
+}
 
-  const tokenEconomyInput = aggregateBenchTokenMetrics(tokenMetricsPerQuestion);
+function computeRecallEvalAggregates(acc: RecallEvalAccumulator): RecallEvalAggregates {
+  const n = acc.perScenario.length;
+  const tokenEconomyInput = aggregateBenchTokenMetrics(acc.tokenMetricsPerQuestion);
   // see also: apps/bench-runner/src/harness/token-economy.ts assertBenchTokenEconomyContract
   assertBenchTokenEconomyContract("public", tokenEconomyInput);
-  const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
-  const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
-  const recallTokenEconomy = aggregateRecallTokenEconomy(recallTokenEconomySamples);
-  const edgeProposalRate = aggregateEdgeProposalRate(
-    edgeProposalRowsAcross,
-    edgeProposalRowsPerQuestion
-  );
-  const edgeProposalAutoAccept = aggregateEdgeProposalAutoAccept(edgeProposalRowsAcross);
+  return {
+    rAt1: n === 0 ? 0 : acc.totalHitAt1 / n,
+    rAt5: n === 0 ? 0 : acc.perScenario.filter((r) => r.hit_at_5).length / n,
+    rAt10: n === 0 ? 0 : acc.totalHitAt10 / n,
+    latencyP50: computePercentile(acc.latencies, 50),
+    latencyP95: computePercentile(acc.latencies, 95),
+    tokenEconomy: buildTokenEconomy(tokenEconomyInput),
+    tokenSavedRatio: computeTokenSavedRatio(tokenEconomyInput),
+    recallTokenEconomy: aggregateRecallTokenEconomy(acc.recallTokenEconomySamples),
+    edgeProposalRate: aggregateEdgeProposalRate(
+      acc.edgeProposalRowsAcross,
+      acc.edgeProposalRowsPerQuestion
+    ),
+    edgeProposalAutoAccept: aggregateEdgeProposalAutoAccept(acc.edgeProposalRowsAcross)
+  };
+}
 
+export function assembleRecallEvalKpi(input: {
+  readonly collected: readonly RecallEvalQuestionResult[];
+  readonly manifest: LongMemEvalSnapshotManifest;
+  readonly variant: LongMemEvalVariant;
+  readonly runAt: Date;
+  readonly commitSha7: string;
+  readonly alayaVersion: string;
+  readonly policyShape: BenchPolicyShape;
+  readonly simulateReport: BenchSimulateReportMode;
+  readonly sampleSize: number;
+  readonly evaluatedCount: number;
+  readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
+}): KpiPayload {
+  const acc = accumulateRecallEvalRows(input.collected);
+  const agg = computeRecallEvalAggregates(acc);
   const provenance = input.manifest.extraction_provenance;
 
   return {
@@ -140,23 +199,23 @@ export function assembleRecallEvalKpi(input: {
     evaluated_count: input.evaluatedCount,
     harness_mode: "mcp_propose_review",
     kpi: {
-      r_at_1: rAt1,
-      r_at_5: rAt5,
-      r_at_10: rAt10,
-      latency_ms_p50: latencyP50,
-      latency_ms_p95: latencyP95,
+      r_at_1: agg.rAt1,
+      r_at_5: agg.rAt5,
+      r_at_10: agg.rAt10,
+      latency_ms_p50: agg.latencyP50,
+      latency_ms_p95: agg.latencyP95,
       latency_source: "exact",
-      token_saved_ratio_vs_full_prompt: tokenSavedRatio,
-      token_economy: tokenEconomy,
-      ...(recallTokenEconomy === null
+      token_saved_ratio_vs_full_prompt: agg.tokenSavedRatio,
+      token_economy: agg.tokenEconomy,
+      ...(agg.recallTokenEconomy === null
         ? {}
-        : { recall_token_economy: recallTokenEconomy }),
-      tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
+        : { recall_token_economy: agg.recallTokenEconomy }),
+      tier_distribution: { hot: acc.tierHot, warm: acc.tierWarm, cold: acc.tierCold },
       degradation_reasons: {
-        none: degradeNone,
-        warm_cascade_engaged: degradeWarm,
-        cold_cascade_engaged: degradeCold,
-        recall_explainability_partial: degradePartial
+        none: acc.degradeNone,
+        warm_cascade_engaged: acc.degradeWarm,
+        cold_cascade_engaged: acc.degradeCold,
+        recall_explainability_partial: acc.degradePartial
       },
       // Provenance-inherited (gate-only): recall-eval never re-seeds, so seed
       // truncation cannot be measured this run. The snapshot's seed run is the
@@ -167,12 +226,12 @@ export function assembleRecallEvalKpi(input: {
         answer_turns_truncated: 0,
         seed_chars_clipped: 0
       },
-      quality_metrics: buildLongMemEvalQualityMetrics(questionDiagnostics),
-      ...(edgeProposalRate === undefined ? {} : { edge_proposal_rate: edgeProposalRate }),
-      ...(edgeProposalAutoAccept === undefined
+      quality_metrics: buildLongMemEvalQualityMetrics(acc.questionDiagnostics),
+      ...(agg.edgeProposalRate === undefined ? {} : { edge_proposal_rate: agg.edgeProposalRate }),
+      ...(agg.edgeProposalAutoAccept === undefined
         ? {}
-        : { edge_proposal_auto_accept: edgeProposalAutoAccept }),
-      per_scenario: perScenario
+        : { edge_proposal_auto_accept: agg.edgeProposalAutoAccept }),
+      per_scenario: acc.perScenario
     }
   };
 }

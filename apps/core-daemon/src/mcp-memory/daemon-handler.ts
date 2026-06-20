@@ -16,7 +16,7 @@ import {
   type SoulResolveHandlerDependencies
 } from "./resolve-handler.js";
 
-export function createDaemonMcpMemoryToolHandler(input: {
+export interface DaemonMcpMemoryToolHandlerInput {
   readonly recallService: McpMemoryToolHandlerDependencies["recallService"];
   readonly memoryService: McpMemoryToolHandlerDependencies["memoryService"];
   readonly dynamicsService?: McpMemoryToolHandlerDependencies["dynamicsService"];
@@ -68,10 +68,15 @@ export function createDaemonMcpMemoryToolHandler(input: {
   // see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts
   //   assertDeliveryInScope
   readonly claimSourceReader?: SoulResolveHandlerDependencies["claimSourceReader"];
-}) {
-  const reviewerIdentityBinding =
-    input.reviewerIdentityBinding ?? createReviewerIdentityBindingFromEnv(process.env);
-  const soulResolveHandler = createSoulResolveHandler({
+}
+
+function buildSoulResolveHandler(
+  input: Pick<
+    DaemonMcpMemoryToolHandlerInput,
+    "resolutionService" | "trustStateRecorder" | "claimSourceReader"
+  >
+) {
+  return createSoulResolveHandler({
     resolutionService: input.resolutionService,
     trustStateRecorder: {
       findDeliveryById: async (deliveryId) => {
@@ -95,6 +100,59 @@ export function createDaemonMcpMemoryToolHandler(input: {
       ? {}
       : { claimSourceReader: input.claimSourceReader })
   });
+}
+
+function buildDaemonMcpMemoryProposalWorkflow(
+  input: Pick<
+    DaemonMcpMemoryToolHandlerInput,
+    | "eventLogRepo"
+    | "proposalRepo"
+    | "runtimeNotifier"
+    | "memoryService"
+    | "trustStateRecorder"
+    | "objectAnchorGate"
+    | "synthesisEvidenceReader"
+    | "synthesisMemberResolver"
+  >,
+  reviewerIdentityBinding: ReviewerIdentityBinding | undefined
+) {
+  return createMcpMemoryProposalWorkflow({
+    eventLogRepo: input.eventLogRepo,
+    proposalRepo: input.proposalRepo,
+    runtimeNotifier: input.runtimeNotifier,
+    memoryService: input.memoryService,
+    sourceDeliveryAnchorValidator: {
+      validate: async (sourceDeliveryIds, context) => {
+        for (const deliveryId of sourceDeliveryIds) {
+          const delivery = await input.trustStateRecorder.findDeliveryById(deliveryId);
+          if (
+            delivery === null ||
+            delivery.agent_target !== context.agentTarget ||
+            delivery.workspace_id !== context.workspaceId ||
+            delivery.run_id !== context.runId
+          ) {
+            throw new SourceDeliveryAnchorValidationError(
+              `source_delivery_ids contains an unknown or out-of-scope delivery_id: ${deliveryId}`
+            );
+          }
+        }
+      }
+    },
+    ...(input.objectAnchorGate === undefined ? {} : { objectAnchorGate: input.objectAnchorGate }),
+    ...(input.synthesisEvidenceReader === undefined
+      ? {}
+      : { synthesisEvidenceReader: input.synthesisEvidenceReader }),
+    ...(input.synthesisMemberResolver === undefined
+      ? {}
+      : { synthesisMemberResolver: input.synthesisMemberResolver }),
+    ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding })
+  });
+}
+
+export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandlerInput) {
+  const reviewerIdentityBinding =
+    input.reviewerIdentityBinding ?? createReviewerIdentityBindingFromEnv(process.env);
+  const soulResolveHandler = buildSoulResolveHandler(input);
   return createMcpMemoryToolHandler({
     recallService: input.recallService,
     memoryService: input.memoryService,
@@ -122,37 +180,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
       ? {}
       : { attachSurfaceRegistrar: input.attachSurfaceRegistrar }),
     soulResolveHandler,
-    proposalWorkflow: createMcpMemoryProposalWorkflow({
-      eventLogRepo: input.eventLogRepo,
-      proposalRepo: input.proposalRepo,
-      runtimeNotifier: input.runtimeNotifier,
-      memoryService: input.memoryService,
-      sourceDeliveryAnchorValidator: {
-        validate: async (sourceDeliveryIds, context) => {
-          for (const deliveryId of sourceDeliveryIds) {
-            const delivery = await input.trustStateRecorder.findDeliveryById(deliveryId);
-            if (
-              delivery === null ||
-              delivery.agent_target !== context.agentTarget ||
-              delivery.workspace_id !== context.workspaceId ||
-              delivery.run_id !== context.runId
-            ) {
-              throw new SourceDeliveryAnchorValidationError(
-                `source_delivery_ids contains an unknown or out-of-scope delivery_id: ${deliveryId}`
-              );
-            }
-          }
-        }
-      },
-      ...(input.objectAnchorGate === undefined ? {} : { objectAnchorGate: input.objectAnchorGate }),
-      ...(input.synthesisEvidenceReader === undefined
-        ? {}
-        : { synthesisEvidenceReader: input.synthesisEvidenceReader }),
-      ...(input.synthesisMemberResolver === undefined
-        ? {}
-        : { synthesisMemberResolver: input.synthesisMemberResolver }),
-      ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding })
-    })
+    proposalWorkflow: buildDaemonMcpMemoryProposalWorkflow(input, reviewerIdentityBinding)
   });
 }
 

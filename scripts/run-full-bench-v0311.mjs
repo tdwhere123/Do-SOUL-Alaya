@@ -336,7 +336,7 @@ async function runStep(step, ctx, args) {
   };
 }
 
-async function main() {
+function resolveRunConfig() {
   let args;
   try {
     args = parseArgs(process.argv.slice(2), { defaultHistoryRoot: DEFAULT_HISTORY_ROOT, defaultLogRoot: LOG_ROOT });
@@ -347,7 +347,7 @@ async function main() {
 
   if (args.help) {
     process.stdout.write(HELP_TEXT);
-    return;
+    return { help: true };
   }
 
   let steps;
@@ -372,6 +372,10 @@ async function main() {
     }
   }
 
+  return { help: false, args, steps, ctx };
+}
+
+function printRunBanner(args, ctx, steps) {
   process.stdout.write(`run-full-bench-v0311 starting\n`);
   process.stdout.write(`  repo_root=${REPO_ROOT}\n`);
   process.stdout.write(`  data_dir=${ctx.dataDir}\n`);
@@ -382,9 +386,10 @@ async function main() {
   process.stdout.write(`  dry_run=${args.dryRun}\n`);
   process.stdout.write(`  resume=${args.resume}\n`);
   process.stdout.write(`  steps=${steps.map((s) => s.id).join(",")}\n`);
+}
 
+async function executeSteps(args, ctx, steps) {
   const results = [];
-  const overallStart = Date.now();
   let firstFailure = null;
 
   for (const step of steps) {
@@ -443,7 +448,10 @@ async function main() {
     }
   }
 
-  const totalMs = Date.now() - overallStart;
+  return { results, firstFailure };
+}
+
+function printSummary(args, results, totalMs) {
   process.stdout.write(`\n=== summary ===\n`);
   process.stdout.write(`total_wall_clock=${formatDuration(totalMs)}\n`);
   for (const r of results) {
@@ -461,6 +469,22 @@ async function main() {
       );
     }
   }
+}
+
+async function main() {
+  const config = resolveRunConfig();
+  if (config.help) {
+    return;
+  }
+  const { args, steps, ctx } = config;
+
+  printRunBanner(args, ctx, steps);
+
+  const overallStart = Date.now();
+  const { results, firstFailure } = await executeSteps(args, ctx, steps);
+
+  const totalMs = Date.now() - overallStart;
+  printSummary(args, results, totalMs);
 
   if (firstFailure) {
     process.exit(firstFailure.outcome.code === 0 ? 1 : firstFailure.outcome.code);

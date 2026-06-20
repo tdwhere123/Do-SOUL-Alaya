@@ -39,22 +39,23 @@ export interface LiveBenchResult {
   readonly payload: KpiPayload;
 }
 
-export async function runLiveBench(
-  opts: LiveBenchOptions
-): Promise<LiveBenchResult> {
-  const sourcePath = opts.sourcePath ?? DEFAULT_SOURCE_PATH;
-  const sourceRaw = await readFile(sourcePath, "utf8");
-  const source = parseLiveCheckSource(sourceRaw, sourcePath);
-  const providerMode = resolveProviderMode(source.metrics.modes);
-  const keywordMode = source.metrics.modes.find((mode) => mode.mode === "keyword-local") ?? null;
+type LiveCheckSource = ReturnType<typeof parseLiveCheckSource>;
+type LiveProviderMode = ReturnType<typeof resolveProviderMode>;
+
+function buildLivePayload(input: {
+  readonly source: LiveCheckSource;
+  readonly providerMode: LiveProviderMode;
+  readonly sourcePath: string;
+  readonly runAt: Date;
+  readonly commitSha7: string;
+}): KpiPayload {
+  const { source, providerMode } = input;
   const providerMetrics = providerMode.recall_metrics;
-  const runAt = parseRunDate(source.generated_at);
-  const commitSha7 = resolveCommitSha7();
-  const payload: KpiPayload = {
+  return {
     bench_name: "live",
     split: "strict-real",
-    run_at: runAt.toISOString(),
-    alaya_commit: commitSha7,
+    run_at: input.runAt.toISOString(),
+    alaya_commit: input.commitSha7,
     alaya_version: resolveBenchRunnerVersion(),
     recall_pipeline_version: RECALL_PIPELINE_VERSION,
     embedding_provider: source.metrics.provider_health.embedding.ok
@@ -68,7 +69,7 @@ export async function runLiveBench(
     dataset: {
       name: "alaya-live-strict-real",
       size: source.metrics.samples.requested,
-      source: `${relativeToCwd(sourcePath)}#${source.latest_run_id}`
+      source: `${relativeToCwd(input.sourcePath)}#${source.latest_run_id}`
     },
     sample_size: source.metrics.samples.requested,
     evaluated_count: providerMetrics.total_queries,
@@ -100,16 +101,13 @@ export async function runLiveBench(
       per_scenario: []
     }
   };
+}
 
-  const layout: HistoryLayout = { historyRoot: opts.historyRoot };
-  const previous = await readLatest(layout, "live", {
-    split: "strict-real",
-    embeddingProvider: payload.embedding_provider,
-    pointerKind: "passing"
-  });
-  const diff = diffKpis(payload, previous);
-  const slug = entrySlug(runAt, commitSha7);
-  const report = renderLiveReport(payload, previous, diff, source, providerMode, keywordMode);
+function buildLiveFindings(
+  payload: KpiPayload,
+  diff: ReturnType<typeof diffKpis>,
+  source: LiveCheckSource
+): string | null {
   const baseFindings = renderFindings(payload, diff);
   const failedSourceGates = source.gates.filter((gate) => !gate.pass);
   const findingsParts: string[] = [];
@@ -141,8 +139,31 @@ export async function runLiveBench(
     }
     findingsParts.push(liveGateFindings.join("\n"));
   }
-  const findings =
-    findingsParts.length === 0 ? null : `${findingsParts.join("\n\n")}\n`;
+  return findingsParts.length === 0 ? null : `${findingsParts.join("\n\n")}\n`;
+}
+
+export async function runLiveBench(
+  opts: LiveBenchOptions
+): Promise<LiveBenchResult> {
+  const sourcePath = opts.sourcePath ?? DEFAULT_SOURCE_PATH;
+  const sourceRaw = await readFile(sourcePath, "utf8");
+  const source = parseLiveCheckSource(sourceRaw, sourcePath);
+  const providerMode = resolveProviderMode(source.metrics.modes);
+  const keywordMode = source.metrics.modes.find((mode) => mode.mode === "keyword-local") ?? null;
+  const runAt = parseRunDate(source.generated_at);
+  const commitSha7 = resolveCommitSha7();
+  const payload = buildLivePayload({ source, providerMode, sourcePath, runAt, commitSha7 });
+
+  const layout: HistoryLayout = { historyRoot: opts.historyRoot };
+  const previous = await readLatest(layout, "live", {
+    split: "strict-real",
+    embeddingProvider: payload.embedding_provider,
+    pointerKind: "passing"
+  });
+  const diff = diffKpis(payload, previous);
+  const slug = entrySlug(runAt, commitSha7);
+  const report = renderLiveReport(payload, previous, diff, source, providerMode, keywordMode);
+  const findings = buildLiveFindings(payload, diff, source);
   const entry = await writeEntry(layout, "live", slug, payload, report, findings, {
     sidecars: [
       {

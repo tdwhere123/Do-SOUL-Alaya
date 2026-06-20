@@ -264,18 +264,18 @@ export function createPhaseTimer(): PhaseTimer {
 }
 
 
-export async function scoreLongMemEvalQaIfRequested(input: {
+interface QaDeliverySelection {
+  readonly delivered: QaDeliveredCandidate[];
+  readonly memoryEntryCandidates: QaSourceCandidate[];
+}
+
+async function resolveQaDeliverySelection(input: {
   readonly question: LongMemEvalQuestion;
-  readonly qaChat?: QaChatFn;
-  readonly qaJudgeChat?: QaChatFn;
-  readonly isAbstention: boolean;
-  readonly results: readonly { readonly object_id: string; readonly object_kind?: string | null }[];
+  readonly qaChat: QaChatFn;
+  readonly results: readonly QaSourceRecallPointer[];
   readonly goldMemoryIds: readonly string[];
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
-}): Promise<QaQuestionVerdict | undefined> {
-  const { results, goldMemoryIds, sidecar, isAbstention } = input;
-let qaVerdict: QaQuestionVerdict | undefined;
-if (input.qaChat !== undefined) {
+}): Promise<QaDeliverySelection> {
   // QA delivery budget (default 10 = unchanged). ALAYA_BENCH_QA_DELIVER_K
   // widens it so the aggregation reader sees more of a counting question's
   // scattered gold; session-spread (default off) redistributes that budget
@@ -286,14 +286,14 @@ if (input.qaChat !== undefined) {
   // type-aware budget; ALAYA_BENCH_QA_DELIVER_K is a global A/B override.
   const { deliverK } = resolveQaDeliveryBudget(input.question.question_type);
   const { deliveryCandidates, memoryEntryCandidates, goldOnly } = buildQaDeliveredCandidates({
-    results,
-    goldMemoryIds,
+    results: input.results,
+    goldMemoryIds: input.goldMemoryIds,
     lookupMemoryEntry: (objectId) =>
-      sidecar.get(buildLongMemEvalSidecarKey("memory_entry", objectId)),
+      input.sidecar.get(buildLongMemEvalSidecarKey("memory_entry", objectId)),
     lookupCandidate: (objectKind, objectId) =>
-      sidecar.get(buildLongMemEvalSidecarKey(objectKind, objectId))
+      input.sidecar.get(buildLongMemEvalSidecarKey(objectKind, objectId))
   });
-  const supportCandidates = buildQaSupportCandidatesFromSidecar(sidecar);
+  const supportCandidates = buildQaSupportCandidatesFromSidecar(input.sidecar);
   const goldOnlyRequested =
     process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined;
   const deliveryPool =
@@ -305,33 +305,8 @@ if (input.qaChat !== undefined) {
     : shouldDedupQaDelivery()
       ? dedupeQaDeliveredCandidates(deliveryPool, deliverK)
       : deliveryPool.slice(0, deliverK);
-  // Agent-side LLM relevance filter: retrieve WIDE (catch precise-class gold
-  // buried at rank 12-15), let an LLM pick the few relevant memories, deliver
-  // NARROW clean context. Decouples retrieve-width from deliver-width — the
-  // semantic selection fusion ranking can't do (§D wall). Default off.
-  if (
-    !goldOnlyRequested &&
-    process.env.ALAYA_BENCH_QA_LLM_FILTER !== undefined &&
-    input.qaChat !== undefined
-  ) {
-    const filterK = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_K", 30);
-    const filterM = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_M", 8);
-    const widePool: QaDeliveredCandidate[] = shouldDedupQaDelivery()
-      ? dedupeQaDeliveredCandidates(deliveryCandidates, filterK)
-      : deliveryCandidates
-          .filter((cand) => normalizeQaDeliveryContent(cand.content).length > 0)
-          .slice(0, filterK);
-    const selected = await selectRelevantMemories(
-      input.question.question,
-      widePool,
-      filterM,
-      input.qaChat
-    );
-    if (selected.length > 0) {
-      delivered = shouldDedupQaDelivery()
-        ? dedupeQaDeliveredCandidates(selected, filterM)
-        : selected.slice(0, filterM);
-    }
+  if (!goldOnlyRequested && process.env.ALAYA_BENCH_QA_LLM_FILTER !== undefined) {
+    delivered = await applyQaLlmFilter(input.question.question, deliveryCandidates, delivered, input.qaChat);
   }
   // Support pack: deterministically expand the filtered anchors with their
   // same-session neighbours so a needed date/number/before-after value the
@@ -353,7 +328,115 @@ if (input.qaChat !== undefined) {
   if (goldOnlyRequested && shouldDedupQaDelivery()) {
     delivered = dedupeQaDeliveredCandidates(delivered);
   }
-  qaVerdict = await scoreQaQuestion(
+  return { delivered, memoryEntryCandidates };
+}
+
+// Agent-side LLM relevance filter: retrieve WIDE (catch precise-class gold
+// buried at rank 12-15), let an LLM pick the few relevant memories, deliver
+// NARROW clean context. Decouples retrieve-width from deliver-width — the
+// semantic selection fusion ranking can't do (§D wall). Default off.
+async function applyQaLlmFilter(
+  question: string,
+  deliveryCandidates: readonly QaDeliveredCandidate[],
+  delivered: QaDeliveredCandidate[],
+  qaChat: QaChatFn
+): Promise<QaDeliveredCandidate[]> {
+  const filterK = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_K", 30);
+  const filterM = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_M", 8);
+  const widePool: QaDeliveredCandidate[] = shouldDedupQaDelivery()
+    ? dedupeQaDeliveredCandidates(deliveryCandidates, filterK)
+    : deliveryCandidates
+        .filter((cand) => normalizeQaDeliveryContent(cand.content).length > 0)
+        .slice(0, filterK);
+  const selected = await selectRelevantMemories(question, widePool, filterM, qaChat);
+  if (selected.length === 0) {
+    return delivered;
+  }
+  return shouldDedupQaDelivery()
+    ? dedupeQaDeliveredCandidates(selected, filterM)
+    : selected.slice(0, filterM);
+}
+
+// Diagnostic: dump the delivered context + model answer + judge verdict as
+// JSONL, so failing questions can be read by hand to split "delivered text
+// lacks the answer" (ingestion-drop) from "delivered text has it but the
+// reader answered wrong" (reader). Pairs with DELIVER_GOLD_ONLY to isolate
+// the oracle ceiling. Default off; set ALAYA_BENCH_QA_DUMP to a file path.
+function dumpQaDiagnostic(input: {
+  readonly dumpPath: string;
+  readonly question: LongMemEvalQuestion;
+  readonly qaVerdict: QaQuestionVerdict;
+  readonly goldMemoryIds: readonly string[];
+  readonly memoryEntryCandidates: readonly QaSourceCandidate[];
+  readonly delivered: readonly QaDeliveredCandidate[];
+}): void {
+  // Failure split: locate gold in the wide pool vs the delivered set so a
+  // wrong answer is attributable to recall (gold never retrieved), the
+  // selector/support layer (retrieved but not delivered), or the reader
+  // (delivered but answered wrong). Finer judge/ingestion splits stay for
+  // manual review off the raw gold-presence fields.
+  const goldIdSet = new Set(input.goldMemoryIds);
+  const widePoolGoldRanks = input.memoryEntryCandidates
+    .filter((c) => goldIdSet.has(c.objectId) && normalizeQaDeliveryContent(c.content).length > 0)
+    .map((c) => c.sourceRank);
+  const goldInWidePool = widePoolGoldRanks.length > 0;
+  const goldInDelivered = input.delivered.some((d) => goldIdSet.has(d.objectId));
+  const failureClass = input.qaVerdict.correct
+    ? null
+    : !goldInWidePool
+      ? "recall_miss"
+      : !goldInDelivered
+        ? "support_selector_miss"
+        : "reader_miss";
+  appendFileSync(
+    input.dumpPath,
+    JSON.stringify({
+      questionId: input.question.question_id,
+      questionType: input.question.question_type,
+      question: input.question.question,
+      questionDate: input.question.question_date,
+      goldAnswer: input.question.answer,
+      modelAnswer: input.qaVerdict.modelAnswer,
+      judgeVerdict: input.qaVerdict.judgeVerdict,
+      correct: input.qaVerdict.correct,
+      goldInWidePool,
+      goldInDelivered,
+      failureClass,
+      widePoolGoldRanks,
+      deliveredGoldOnly:
+        process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined,
+      delivered: input.delivered.map((d) => ({
+        objectId: d.objectId,
+        ...(d.eventDate === undefined ? {} : { eventDate: d.eventDate }),
+        ...(d.sessionId == null ? {} : { sessionId: d.sessionId }),
+        ...(d.sourceRank === undefined ? {} : { sourceRank: d.sourceRank }),
+        content: d.content.replace(/\s+/gu, " ")
+      }))
+    }) + "\n"
+  );
+}
+
+export async function scoreLongMemEvalQaIfRequested(input: {
+  readonly question: LongMemEvalQuestion;
+  readonly qaChat?: QaChatFn;
+  readonly qaJudgeChat?: QaChatFn;
+  readonly isAbstention: boolean;
+  readonly results: readonly { readonly object_id: string; readonly object_kind?: string | null }[];
+  readonly goldMemoryIds: readonly string[];
+  readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
+}): Promise<QaQuestionVerdict | undefined> {
+  const { results, goldMemoryIds, sidecar, isAbstention } = input;
+  if (input.qaChat === undefined) {
+    return undefined;
+  }
+  const { delivered, memoryEntryCandidates } = await resolveQaDeliverySelection({
+    question: input.question,
+    qaChat: input.qaChat,
+    results,
+    goldMemoryIds,
+    sidecar
+  });
+  const qaVerdict = await scoreQaQuestion(
     {
       questionId: input.question.question_id,
       questionType: input.question.question_type,
@@ -366,57 +449,15 @@ if (input.qaChat !== undefined) {
     input.qaChat,
     input.qaJudgeChat ?? input.qaChat
   );
-  // Diagnostic: dump the delivered context + model answer + judge verdict as
-  // JSONL, so failing questions can be read by hand to split "delivered text
-  // lacks the answer" (ingestion-drop) from "delivered text has it but the
-  // reader answered wrong" (reader). Pairs with DELIVER_GOLD_ONLY to isolate
-  // the oracle ceiling. Default off; set ALAYA_BENCH_QA_DUMP to a file path.
   if (process.env.ALAYA_BENCH_QA_DUMP !== undefined) {
-    // Failure split: locate gold in the wide pool vs the delivered set so a
-    // wrong answer is attributable to recall (gold never retrieved), the
-    // selector/support layer (retrieved but not delivered), or the reader
-    // (delivered but answered wrong). Finer judge/ingestion splits stay for
-    // manual review off the raw gold-presence fields.
-    const goldIdSet = new Set(goldMemoryIds);
-    const widePoolGoldRanks = memoryEntryCandidates
-      .filter((c) => goldIdSet.has(c.objectId) && normalizeQaDeliveryContent(c.content).length > 0)
-      .map((c) => c.sourceRank);
-    const goldInWidePool = widePoolGoldRanks.length > 0;
-    const goldInDelivered = delivered.some((d) => goldIdSet.has(d.objectId));
-    const failureClass = qaVerdict.correct
-      ? null
-      : !goldInWidePool
-        ? "recall_miss"
-        : !goldInDelivered
-          ? "support_selector_miss"
-          : "reader_miss";
-    appendFileSync(
-      process.env.ALAYA_BENCH_QA_DUMP,
-      JSON.stringify({
-        questionId: input.question.question_id,
-        questionType: input.question.question_type,
-        question: input.question.question,
-        questionDate: input.question.question_date,
-        goldAnswer: input.question.answer,
-        modelAnswer: qaVerdict.modelAnswer,
-        judgeVerdict: qaVerdict.judgeVerdict,
-        correct: qaVerdict.correct,
-        goldInWidePool,
-        goldInDelivered,
-        failureClass,
-        widePoolGoldRanks,
-        deliveredGoldOnly:
-          process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined,
-        delivered: delivered.map((d) => ({
-          objectId: d.objectId,
-          ...(d.eventDate === undefined ? {} : { eventDate: d.eventDate }),
-          ...(d.sessionId == null ? {} : { sessionId: d.sessionId }),
-          ...(d.sourceRank === undefined ? {} : { sourceRank: d.sourceRank }),
-          content: d.content.replace(/\s+/gu, " ")
-        }))
-      }) + "\n"
-    );
+    dumpQaDiagnostic({
+      dumpPath: process.env.ALAYA_BENCH_QA_DUMP,
+      question: input.question,
+      qaVerdict,
+      goldMemoryIds,
+      memoryEntryCandidates,
+      delivered
+    });
   }
-}
   return qaVerdict;
 }

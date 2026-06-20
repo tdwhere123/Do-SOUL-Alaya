@@ -101,14 +101,39 @@ export function preflightExtractionCache(input: {
     );
     return;
   }
-  // Offline (no live extraction possible) means a model/prompt mismatch cannot
-  // trigger the 466h live re-extraction these guards exist to prevent — the
-  // offline fallback covers every miss — so skip them, same as the window /
-  // coverage guards below.
-  if (liveExtractionPossible && input.config.model !== manifest.extraction_model) {
+  if (liveExtractionPossible) {
+    assertExtractionConfigDrift(input.config.model, input.systemPrompt, manifest);
+  }
+  if (input.requiredTurnContents !== undefined) {
+    assertWindowContainment({
+      cacheRoot: input.cacheRoot,
+      model: input.config.model,
+      systemPrompt: input.systemPrompt,
+      requiredTurnContents: input.requiredTurnContents,
+      allowLiveExtraction: input.allowLiveExtraction,
+      liveExtractionPossible
+    });
+    return;
+  }
+  assertCoverageScalar(
+    manifest.coverage,
+    input.allowLiveExtraction === true,
+    liveExtractionPossible
+  );
+}
+
+// Offline (no live extraction possible) means a model/prompt mismatch cannot
+// trigger the 466h live re-extraction these guards exist to prevent — the
+// offline fallback covers every miss — so callers skip this when offline.
+function assertExtractionConfigDrift(
+  model: string,
+  systemPrompt: string,
+  manifest: ExtractionCacheManifest
+): void {
+  if (model !== manifest.extraction_model) {
     throw new Error(
       "[longmemeval preflight] extraction model mismatch: resolved model " +
-        `"${input.config.model}" != cache manifest extraction_model ` +
+        `"${model}" != cache manifest extraction_model ` +
         `"${manifest.extraction_model}". The cache would miss every key and ` +
         "this run would be a full live extraction (~466h). Set " +
         `${GARDEN_MODEL_ENV}=${manifest.extraction_model} in the bench ` +
@@ -116,8 +141,8 @@ export function preflightExtractionCache(input: {
         "cache for the new model."
     );
   }
-  const systemPromptSha256 = computeSystemPromptSha256(input.systemPrompt);
-  if (liveExtractionPossible && systemPromptSha256 !== manifest.system_prompt_sha256) {
+  const systemPromptSha256 = computeSystemPromptSha256(systemPrompt);
+  if (systemPromptSha256 !== manifest.system_prompt_sha256) {
     throw new Error(
       "[longmemeval preflight] system prompt drift: sha256(systemPrompt) " +
         `"${systemPromptSha256}" != cache manifest system_prompt_sha256 ` +
@@ -127,41 +152,54 @@ export function preflightExtractionCache(input: {
         "prompt change."
     );
   }
-  // Window-containment gate. When the caller hands the actual run window's
-  // distinct turns, validate THIS run's window directly against on-disk
-  // fixtures instead of trusting the manifest's coverage scalar. The scalar is
-  // denominated against whatever window the last extraction-fill recorded
-  // (extraction-fill.ts coverage = (requested - failures)/requested over that
-  // fill's --limit/--offset window), so a staged 100Q fill writing coverage=1.0
-  // would otherwise let a 500Q run pass preflight and silently live-extract the
-  // unfilled 400. Containment closes that sub-channel by asserting every turn
-  // this run needs has a fixture, regardless of the scalar.
-  if (input.requiredTurnContents !== undefined) {
-    const missing = countMissingTurnFixtures(
-      input.cacheRoot,
-      input.config.model,
-      input.systemPrompt,
-      input.requiredTurnContents
+}
+
+// Window-containment gate. When the caller hands the actual run window's
+// distinct turns, validate THIS run's window directly against on-disk
+// fixtures instead of trusting the manifest's coverage scalar. The scalar is
+// denominated against whatever window the last extraction-fill recorded
+// (extraction-fill.ts coverage = (requested - failures)/requested over that
+// fill's --limit/--offset window), so a staged 100Q fill writing coverage=1.0
+// would otherwise let a 500Q run pass preflight and silently live-extract the
+// unfilled 400. Containment closes that sub-channel by asserting every turn
+// this run needs has a fixture, regardless of the scalar.
+function assertWindowContainment(input: {
+  readonly cacheRoot: string;
+  readonly model: string;
+  readonly systemPrompt: string;
+  readonly requiredTurnContents: readonly string[];
+  readonly allowLiveExtraction?: boolean;
+  readonly liveExtractionPossible: boolean;
+}): void {
+  const missing = countMissingTurnFixtures(
+    input.cacheRoot,
+    input.model,
+    input.systemPrompt,
+    input.requiredTurnContents
+  );
+  if (
+    missing > 0 &&
+    input.allowLiveExtraction !== true &&
+    input.liveExtractionPossible
+  ) {
+    const total = input.requiredTurnContents.length;
+    throw new Error(
+      "[longmemeval preflight] extraction cache covers only part of this " +
+        `run's question window: ${missing} of ${total} distinct turns have ` +
+        "no fixture, so this run would live-extract the gap. The cache " +
+        "manifest's coverage scalar is relative to the window the last " +
+        "extraction-fill recorded, not this run's window. Run extraction-fill " +
+        "for the FULL --limit/--offset window of this run, or pass " +
+        "--allow-live-extraction to live-extract the gap on purpose."
     );
-    if (
-      missing > 0 &&
-      input.allowLiveExtraction !== true &&
-      liveExtractionPossible
-    ) {
-      const total = input.requiredTurnContents.length;
-      throw new Error(
-        "[longmemeval preflight] extraction cache covers only part of this " +
-          `run's question window: ${missing} of ${total} distinct turns have ` +
-          "no fixture, so this run would live-extract the gap. The cache " +
-          "manifest's coverage scalar is relative to the window the last " +
-          "extraction-fill recorded, not this run's window. Run extraction-fill " +
-          "for the FULL --limit/--offset window of this run, or pass " +
-          "--allow-live-extraction to live-extract the gap on purpose."
-      );
-    }
-    return;
   }
-  const coverage = manifest.coverage;
+}
+
+function assertCoverageScalar(
+  coverage: number | undefined,
+  allowLiveExtraction: boolean,
+  liveExtractionPossible: boolean
+): void {
   // A manifest WITHOUT a coverage field is itself a gap: a provenance-only
   // manifest (built before any fill recorded a denominator) cannot prove the
   // cache covers the dataset, so treating "coverage absent" as "coverage ok"
@@ -169,10 +207,8 @@ export function preflightExtractionCache(input: {
   // extraction-fill now always writes coverage, so a coverage-less manifest
   // means the cache was never filled against a known denominator. Require the
   // same explicit opt-in a low-coverage manifest requires.
-  // single source for the denominator: resolveCompileSeedExtractionConfig +
-  // ExtractionCacheManifest.coverage (extraction-fill.ts writes it).
   if (coverage === undefined) {
-    if (input.allowLiveExtraction !== true && liveExtractionPossible) {
+    if (!allowLiveExtraction && liveExtractionPossible) {
       throw new Error(
         "[longmemeval preflight] extraction cache manifest has no coverage " +
           "field; the cache was never filled against a known dataset " +
@@ -185,7 +221,7 @@ export function preflightExtractionCache(input: {
   }
   if (
     coverage < EXTRACTION_CACHE_COVERAGE_THRESHOLD &&
-    input.allowLiveExtraction !== true &&
+    !allowLiveExtraction &&
     liveExtractionPossible
   ) {
     const coveragePct = (coverage * 100).toFixed(1);

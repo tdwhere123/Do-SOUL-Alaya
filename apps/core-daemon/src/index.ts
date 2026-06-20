@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { initDatabase } from "@do-soul/alaya-storage";
@@ -211,13 +210,13 @@ async function createRecallAndCoreWiring(
   return { recallWiring, coreWiring };
 }
 
-async function createGardenAndFinalRuntime(
+async function buildGardenWiring(
   bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>,
   repositories: ReturnType<typeof createDaemonRepositoryWiring>,
   foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
   runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>
 ) {
-  const gardenWiring = await createGardenRuntimeWiring({
+  return await createGardenRuntimeWiring({
     database: bootstrap.database,
     startupSteps: bootstrap.startupSteps,
     eventLogRepo: repositories.eventLogRepo,
@@ -257,6 +256,15 @@ async function createGardenAndFinalRuntime(
     securedWorkspaceService: foundation.securedWorkspaceService,
     trustStateRecorder: foundation.trustStateRecorder
   });
+}
+
+async function finalizeRuntime(
+  bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>,
+  repositories: ReturnType<typeof createDaemonRepositoryWiring>,
+  foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
+  runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>,
+  gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>
+) {
   return await finalizeDaemonRuntimeFromWiring({
     requestProtection: bootstrap.requestProtection,
     runtimeNotifier: bootstrap.runtimeNotifier,
@@ -335,6 +343,16 @@ async function createGardenAndFinalRuntime(
     graphHealthService: foundation.graphHealthService,
     initialGardenLastPassAt: gardenWiring.initialGardenLastPassAt
   });
+}
+
+async function createGardenAndFinalRuntime(
+  bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>,
+  repositories: ReturnType<typeof createDaemonRepositoryWiring>,
+  foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
+  runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>
+) {
+  const gardenWiring = await buildGardenWiring(bootstrap, repositories, foundation, runtimeWiring);
+  return await finalizeRuntime(bootstrap, repositories, foundation, runtimeWiring, gardenWiring);
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {

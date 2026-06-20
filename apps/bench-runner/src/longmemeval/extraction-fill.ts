@@ -231,11 +231,59 @@ export async function runExtractionFill(
     stats
   });
 
+  const failures = await runExtractionPool({
+    extractor,
+    distinctTurns,
+    concurrency,
+    requestedTurns,
+    stats,
+    log
+  });
+  const cacheHits = stats.cacheHits;
+  const newlyExtracted = stats.llmCalls;
+
+  const coverage = requestedTurns === 0 ? 1 : (requestedTurns - failures) / requestedTurns;
+  const cachedTurns = countCacheShards(cacheRoot);
+  const manifest = buildFillManifest({
+    config,
+    variant: options.variant,
+    existingManifest,
+    requestedTurns,
+    cachedTurns,
+    coverage
+  });
+  writeExtractionCacheManifest(cacheRoot, manifest);
+
+  log(
+    `[extraction-fill] done: cache_hits=${cacheHits} ` +
+      `newly_extracted=${newlyExtracted} failures=${failures} ` +
+      `coverage=${(coverage * 100).toFixed(1)}% cached_turns=${cachedTurns}`
+  );
+
+  return {
+    requestedTurns,
+    cacheHits,
+    newlyExtracted,
+    failures,
+    coverage,
+    manifest
+  };
+}
+
+async function runExtractionPool(input: {
+  readonly extractor: BenchSignalExtractor;
+  readonly distinctTurns: readonly string[];
+  readonly concurrency: number;
+  readonly requestedTurns: number;
+  readonly stats: CompileSeedExtractionStats;
+  readonly log: (message: string) => void;
+}): Promise<number> {
+  const { extractor, stats, requestedTurns, log } = input;
   let failures = 0;
   let processed = 0;
   const progressEvery = Math.max(1, Math.floor(requestedTurns / 20));
 
-  await runBoundedPool(distinctTurns, concurrency, async (turnContent) => {
+  await runBoundedPool(input.distinctTurns, input.concurrency, async (turnContent) => {
     try {
       // The caching extractor returns a hit's stored rawJson with no delegate
       // call (stats.cacheHits++); on a miss it calls the delegate (live HTTP),
@@ -257,47 +305,33 @@ export async function runExtractionFill(
       }
     }
   });
-  const cacheHits = stats.cacheHits;
-  const newlyExtracted = stats.llmCalls;
+  return failures;
+}
 
-  // Recompute cached_turns from what is actually on disk (every shard, not just
-  // this run's window) so coverage is honest about the whole cache. coverage is
-  // this run's window denominator — the fraction of the requested window now
-  // covered. requested_turns / cached_turns let the preflight reason about
-  // gaps.
-  const cachedTurns = countCacheShards(cacheRoot);
-  const coverage = requestedTurns === 0 ? 1 : (requestedTurns - failures) / requestedTurns;
-  const datasetRevision = existingManifest?.dataset_revision ?? "unpinned";
-  const manifest: ExtractionCacheManifest = {
+// coverage is this run's window denominator; cached_turns is recomputed from
+// every shard on disk so the manifest is honest about the whole cache.
+function buildFillManifest(input: {
+  readonly config: CompileSeedExtractionConfig;
+  readonly variant: LongMemEvalVariant;
+  readonly existingManifest: ExtractionCacheManifest | undefined;
+  readonly requestedTurns: number;
+  readonly cachedTurns: number;
+  readonly coverage: number;
+}): ExtractionCacheManifest {
+  return {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
-    extraction_model: config.model,
-    provider_url: config.providerUrl,
+    extraction_model: input.config.model,
+    provider_url: input.config.providerUrl,
     system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
     cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
-    dataset: datasetVariantLabel(options.variant),
-    dataset_revision: datasetRevision,
-    requested_turns: requestedTurns,
-    cached_turns: cachedTurns,
-    coverage,
-    storage: existingManifest?.storage ?? "git-tracked",
+    dataset: datasetVariantLabel(input.variant),
+    dataset_revision: input.existingManifest?.dataset_revision ?? "unpinned",
+    requested_turns: input.requestedTurns,
+    cached_turns: input.cachedTurns,
+    coverage: input.coverage,
+    storage: input.existingManifest?.storage ?? "git-tracked",
     built_at: new Date().toISOString(),
     builder: "extraction-fill"
-  };
-  writeExtractionCacheManifest(cacheRoot, manifest);
-
-  log(
-    `[extraction-fill] done: cache_hits=${cacheHits} ` +
-      `newly_extracted=${newlyExtracted} failures=${failures} ` +
-      `coverage=${(coverage * 100).toFixed(1)}% cached_turns=${cachedTurns}`
-  );
-
-  return {
-    requestedTurns,
-    cacheHits,
-    newlyExtracted,
-    failures,
-    coverage,
-    manifest
   };
 }
 

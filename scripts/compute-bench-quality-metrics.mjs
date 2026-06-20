@@ -169,10 +169,28 @@ function detectArchiveKind(archive, selectedPath) {
 
 function applyLongMemEvalDiagnostics(archive, output) {
   const questions = asArray(archive?.questions);
+  const questionStats = accumulateQuestionStats(questions);
+  const goldStats = accumulateGoldStats(questionStats.allGold);
+  const activeConstraints = countActiveConstraints(archive);
+
+  assignDiagnosticsOutput(output, {
+    questions,
+    questionStats,
+    goldStats,
+    activeConstraints
+  });
+  pushDiagnosticsWarnings(output, {
+    questions,
+    questionStats,
+    goldStats,
+    activeConstraints
+  });
+}
+
+function accumulateQuestionStats(questions) {
   const allGold = [];
   const firstAdmitted = createCohortCounters();
   const winningAdmission = createCohortCounters();
-  const budgetDropCounts = new Map();
 
   let deliveredCount = 0;
   let goldHitCount = 0;
@@ -181,9 +199,6 @@ function applyLongMemEvalDiagnostics(archive, output) {
   let nonMonotonicMissingScores = 0;
   let planeFirstFields = 0;
   let planeWinningFields = 0;
-  let budgetDropFieldCount = 0;
-  let highLexicalDemotedCount = 0;
-  let highLexicalDenominator = 0;
 
   for (const question of questions) {
     const deliveredResults = asArray(question?.delivered_results);
@@ -242,8 +257,29 @@ function applyLongMemEvalDiagnostics(archive, output) {
     }
   }
 
+  return {
+    allGold,
+    firstAdmitted,
+    winningAdmission,
+    deliveredCount,
+    goldHitCount,
+    nonMonotonicCount,
+    nonMonotonicEvaluable,
+    nonMonotonicMissingScores,
+    planeFirstFields,
+    planeWinningFields
+  };
+}
+
+function accumulateGoldStats(allGold) {
+  const budgetDropCounts = new Map();
   const planeGoldCounts = new Map();
   const planeHitAt5Counts = new Map();
+
+  let budgetDropFieldCount = 0;
+  let highLexicalDemotedCount = 0;
+  let highLexicalDenominator = 0;
+
   for (const gold of allGold) {
     if (hasOwnField(gold, "budget_drop_reason")) {
       budgetDropFieldCount += 1;
@@ -274,18 +310,30 @@ function applyLongMemEvalDiagnostics(archive, output) {
     }
   }
 
-  const firstRows = buildCohort(firstAdmitted, goldHitCount);
-  const winningRows = buildCohort(winningAdmission, goldHitCount);
-  const activeConstraints = countActiveConstraints(archive);
-
-  output.non_monotonic_rate = share(nonMonotonicCount, questions.length);
-  output.budget_drop_distribution = buildCountDistribution(
+  return {
     budgetDropCounts,
+    planeGoldCounts,
+    planeHitAt5Counts,
+    budgetDropFieldCount,
+    highLexicalDemotedCount,
+    highLexicalDenominator
+  };
+}
+
+function assignDiagnosticsOutput(output, ctx) {
+  const { questions, questionStats, goldStats, activeConstraints } = ctx;
+  const allGold = questionStats.allGold;
+  const firstRows = buildCohort(questionStats.firstAdmitted, questionStats.goldHitCount);
+  const winningRows = buildCohort(questionStats.winningAdmission, questionStats.goldHitCount);
+
+  output.non_monotonic_rate = share(questionStats.nonMonotonicCount, questions.length);
+  output.budget_drop_distribution = buildCountDistribution(
+    goldStats.budgetDropCounts,
     allGold.length
   );
   output.high_lexical_demoted_rate = share(
-    highLexicalDemotedCount,
-    highLexicalDenominator
+    goldStats.highLexicalDemotedCount,
+    goldStats.highLexicalDenominator
   );
   output.cohort_first_admitted = firstRows;
   output.cohort_winning_admission = winningRows;
@@ -295,52 +343,57 @@ function applyLongMemEvalDiagnostics(archive, output) {
     0;
   output.active_constraints_count = activeConstraints.count;
   output.per_plane_recall_coverage = buildPerPlaneRecallCoverage(
-    planeGoldCounts,
-    planeHitAt5Counts
+    goldStats.planeGoldCounts,
+    goldStats.planeHitAt5Counts
   );
 
   output.metadata.longmemeval = {
     questions_count: questions.length,
-    delivered_results_count: deliveredCount,
+    delivered_results_count: questionStats.deliveredCount,
     gold_count: allGold.length,
-    gold_hit_count: goldHitCount,
-    non_monotonic_count: nonMonotonicCount,
+    gold_hit_count: questionStats.goldHitCount,
+    non_monotonic_count: questionStats.nonMonotonicCount,
     non_monotonic_denominator: questions.length,
-    non_monotonic_evaluable_questions: nonMonotonicEvaluable,
-    non_monotonic_missing_score_questions: nonMonotonicMissingScores,
+    non_monotonic_evaluable_questions: questionStats.nonMonotonicEvaluable,
+    non_monotonic_missing_score_questions: questionStats.nonMonotonicMissingScores,
     budget_drop_denominator: allGold.length,
-    budget_drop_field_count: budgetDropFieldCount,
-    high_lexical_demoted_count: highLexicalDemotedCount,
-    high_lexical_demoted_denominator: highLexicalDenominator,
-    plane_first_admitted_field_count: planeFirstFields,
-    plane_winning_admission_field_count: planeWinningFields
+    budget_drop_field_count: goldStats.budgetDropFieldCount,
+    high_lexical_demoted_count: goldStats.highLexicalDemotedCount,
+    high_lexical_demoted_denominator: goldStats.highLexicalDenominator,
+    plane_first_admitted_field_count: questionStats.planeFirstFields,
+    plane_winning_admission_field_count: questionStats.planeWinningFields
   };
   output.metadata.active_constraints_sources = activeConstraints.sources;
+}
+
+function pushDiagnosticsWarnings(output, ctx) {
+  const { questions, questionStats, goldStats, activeConstraints } = ctx;
+  const allGold = questionStats.allGold;
 
   if (questions.length === 0) {
     output.warnings.push("questions[] missing or empty; non_monotonic_rate set to 0");
   }
-  if (deliveredCount > 0 && nonMonotonicEvaluable === 0) {
+  if (questionStats.deliveredCount > 0 && questionStats.nonMonotonicEvaluable === 0) {
     output.warnings.push(
       "delivered_results[].relevance_score missing or incomplete; non_monotonic_rate set to 0"
     );
   }
-  if (allGold.length > 0 && budgetDropFieldCount === 0) {
+  if (allGold.length > 0 && goldStats.budgetDropFieldCount === 0) {
     output.warnings.push(
       "gold[].budget_drop_reason missing; budget_drop_distribution set to empty"
     );
   }
-  if (highLexicalDenominator === 0) {
+  if (goldStats.highLexicalDenominator === 0) {
     output.warnings.push(
       "no gold rows with numeric lexical_rank and final_rank; high_lexical_demoted_rate set to 0"
     );
   }
-  if (planeFirstFields === 0) {
+  if (questionStats.planeFirstFields === 0) {
     output.warnings.push(
       "plane_first_admitted missing from delivered_results[]/gold[]; cohort_first_admitted set to empty"
     );
   }
-  if (planeWinningFields === 0) {
+  if (questionStats.planeWinningFields === 0) {
     output.warnings.push(
       "plane_winning_admission missing from delivered_results[]/gold[]; cohort_winning_admission set to empty"
     );
