@@ -135,11 +135,11 @@ export function applyCoverageDeliverySelection<T extends CoverageCandidate>(
   if (!coverageSelectorEnabled() || maxEntries <= 1 || ordered.length <= 1) {
     return ordered;
   }
-  const targetK = Math.min(readPositiveIntEnv(COVERAGE_TARGET_K_ENV, DEFAULT_TARGET_K), maxEntries);
+  const targetK = resolveCoverageTargetK(maxEntries);
   if (targetK <= 1) {
     return ordered;
   }
-  const poolK = Math.min(ordered.length, Math.max(readPositiveIntEnv(COVERAGE_POOL_K_ENV, DEFAULT_POOL_K), targetK));
+  const poolK = resolveCoveragePoolK(ordered.length, targetK);
   const minScoreRatio = readRatioEnv(COVERAGE_MIN_SCORE_RATIO_ENV, DEFAULT_MIN_SCORE_RATIO);
   const pool = ordered.slice(0, poolK);
   const head = pool[0];
@@ -150,36 +150,87 @@ export function applyCoverageDeliverySelection<T extends CoverageCandidate>(
   const cohortOf = (candidate: T): string | null =>
     supplementaryData.sourceCohortKeys[candidate.entry.object_id] ?? null;
 
-  const covered: CoverageState = {
-    sessions: new Set<string>(),
-    sourceCohorts: new Set<string>(),
-    evidenceRefs: new Set<string>(),
-    dateBuckets: new Set<string>(),
-    dimensions: new Set<string>()
-  };
+  const covered = createCoverageState();
   const selected: T[] = [head];
   const selectedSet = new Set<T>([head]);
   markCovered(head, covered, cohortOf(head));
 
   while (selected.length < targetK) {
-    let best: T | undefined;
-    let bestUtility = Number.NEGATIVE_INFINITY;
-    for (let index = 0; index < pool.length; index += 1) {
-      const candidate = pool[index]!;
-      if (selectedSet.has(candidate)) continue;
-      if (!isAdmissible(candidate, index + 1, targetK, headScore, minScoreRatio)) continue;
-      const utility = coverageUtility(candidate, headScore, covered, cohortOf(candidate));
-      if (utility > bestUtility) {
-        bestUtility = utility;
-        best = candidate;
-      }
-    }
+    const best = selectBestCoverageCandidate(
+      pool,
+      selectedSet,
+      covered,
+      cohortOf,
+      targetK,
+      headScore,
+      minScoreRatio
+    );
     if (best === undefined) break;
     selected.push(best);
     selectedSet.add(best);
     markCovered(best, covered, cohortOf(best));
   }
 
+  return appendCoverageRemainder(ordered, selected, selectedSet);
+}
+
+function resolveCoverageTargetK(maxEntries: number): number {
+  return Math.min(
+    readPositiveIntEnv(COVERAGE_TARGET_K_ENV, DEFAULT_TARGET_K),
+    maxEntries
+  );
+}
+
+function resolveCoveragePoolK(orderedLength: number, targetK: number): number {
+  return Math.min(
+    orderedLength,
+    Math.max(readPositiveIntEnv(COVERAGE_POOL_K_ENV, DEFAULT_POOL_K), targetK)
+  );
+}
+
+function createCoverageState(): CoverageState {
+  return {
+    sessions: new Set<string>(),
+    sourceCohorts: new Set<string>(),
+    evidenceRefs: new Set<string>(),
+    dateBuckets: new Set<string>(),
+    dimensions: new Set<string>()
+  };
+}
+
+function selectBestCoverageCandidate<T extends CoverageCandidate>(
+  pool: readonly T[],
+  selectedSet: ReadonlySet<T>,
+  covered: Readonly<CoverageState>,
+  cohortOf: (candidate: T) => string | null,
+  targetK: number,
+  headScore: number,
+  minScoreRatio: number
+): T | undefined {
+  let best: T | undefined;
+  let bestUtility = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < pool.length; index += 1) {
+    const candidate = pool[index]!;
+    if (selectedSet.has(candidate)) {
+      continue;
+    }
+    if (!isAdmissible(candidate, index + 1, targetK, headScore, minScoreRatio)) {
+      continue;
+    }
+    const utility = coverageUtility(candidate, headScore, covered, cohortOf(candidate));
+    if (utility > bestUtility) {
+      bestUtility = utility;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function appendCoverageRemainder<T extends CoverageCandidate>(
+  ordered: readonly T[],
+  selected: readonly T[],
+  selectedSet: ReadonlySet<T>
+): readonly T[] {
   const remainder = ordered.filter((candidate) => !selectedSet.has(candidate));
   return Object.freeze([...selected, ...remainder]);
 }

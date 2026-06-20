@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedLabelSchema,
+  NonEmptyStringSchema,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 import { ControlPlaneEnvelopeSchema } from "./envelope.js";
 import { MemoryDimensionSchema } from "./memory-entry.js";
 import { ControlPlaneObjectKind, ScopeClassSchema } from "./object-kind.js";
@@ -10,6 +14,7 @@ export const DeterministicMatchConfigSchema = z
     dimension_filter: z.array(MemoryDimensionSchema).readonly().nullable(),
     domain_tag_filter: z.array(NonEmptyStringSchema).readonly().nullable()
   })
+  .strict()
   .readonly();
 
 export const PrecomputedRankConfigSchema = z
@@ -17,6 +22,7 @@ export const PrecomputedRankConfigSchema = z
     max_candidates: NonNegativeIntSchema,
     min_activation_score: z.number().min(0).max(1).nullable()
   })
+  .strict()
   .readonly();
 
 export const SemanticSupplementConfigSchema = z
@@ -31,6 +37,7 @@ export const SemanticSupplementConfigSchema = z
     injection_cap: NonNegativeIntSchema.optional(),
     injection_similarity_floor: z.number().min(0).max(1).optional()
   })
+  .strict()
   .readonly();
 
 export const CoarseFilterConfigSchema = z
@@ -39,14 +46,16 @@ export const CoarseFilterConfigSchema = z
     precomputed_rank: PrecomputedRankConfigSchema,
     semantic_supplement: SemanticSupplementConfigSchema
   })
+  .strict()
   .readonly();
 
 export const RecallBudgetsSchema = z
   .object({
     max_total_tokens: NonNegativeIntSchema,
     max_entries: NonNegativeIntSchema,
-    per_dimension_limits: z.record(z.string(), NonNegativeIntSchema).readonly().nullable()
+    per_dimension_limits: z.record(BoundedLabelSchema, NonNegativeIntSchema).readonly().nullable()
   })
+  .strict()
   .readonly();
 
 export const FineAssessmentConfigSchema = z
@@ -54,6 +63,7 @@ export const FineAssessmentConfigSchema = z
     budgets: RecallBudgetsSchema,
     conflict_awareness: z.boolean()
   })
+  .strict()
   .readonly();
 
 const ActivationWeightsShape = {
@@ -96,6 +106,7 @@ export const RecallPolicySchema = ControlPlaneEnvelopeSchema.unwrap()
     domain_weight_overrides: z.record(NonEmptyStringSchema, ActivationWeightsPatchSchema).optional(),
     scoring_weight_overrides: RecallScoringWeightOverridesSchema.optional()
   })
+  .strict()
   .readonly();
 
 export type DeterministicMatchConfig = z.infer<typeof DeterministicMatchConfigSchema>;

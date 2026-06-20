@@ -155,127 +155,164 @@ export class LocalHeuristics implements GardenComputeProvider {
       return [];
     }
 
-    const createdAt = new Date().toISOString();
-    const seenMatches = new Set<string>();
-    const signals: CandidateMemorySignal[] = [];
+    const state = createCompileState(normalizedTurnContent, context);
+    appendPatternSignals(state);
+    appendTimeConcernSignals(state);
+    return state.signals;
+  }
+}
 
-    for (const definition of PATTERNS) {
-      for (const match of normalizedTurnContent.matchAll(definition.pattern)) {
-        const matchedText = normalizeMatchedText(match[0]);
-        if (matchedText.length === 0) {
-          continue;
-        }
+interface CompileSignalState {
+  readonly normalizedTurnContent: string;
+  readonly context: GardenCompileContext;
+  readonly createdAt: string;
+  readonly seenMatches: Set<string>;
+  readonly signals: CandidateMemorySignal[];
+}
 
-        const dedupeKey = `${definition.signal_kind}:${matchedText.toLowerCase()}`;
-        if (seenMatches.has(dedupeKey)) {
-          continue;
-        }
+interface AppendCandidateInput {
+  readonly signalKind: SignalKind;
+  readonly objectKind: "preference" | "decision" | "constraint" | "fact";
+  readonly confidence: number;
+  readonly domainTags: readonly string[];
+  readonly rawPayload: Record<string, unknown>;
+}
 
-        seenMatches.add(dedupeKey);
-        // One over-budget raw_payload must not abort the turn's other signals.
-        try {
-          signals.push(
-            CandidateMemorySignalSchema.parse({
-              signal_id: randomUUID(),
-              workspace_id: context.workspace_id,
-              run_id: context.run_id,
-              surface_id: context.surface_id,
-              source: SignalSource.GARDEN_COMPILE,
-              signal_kind: definition.signal_kind,
-              object_kind: definition.object_kind,
-              scope_hint: null,
-              domain_tags: [],
-              confidence: definition.confidence,
-              evidence_refs: [],
-              raw_payload: buildSchemaGroundedRawPayload({
-                signalKind: definition.signal_kind,
-                objectKind: definition.object_kind,
-                confidence: definition.confidence,
-                rawPayload: {
-                  matched_text: matchedText,
-                  pattern_category: definition.pattern_category,
-                  turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, matchedText),
-                  // reader keys on full_turn_content (inputs.ts buildEvidenceInput
-                  // widening); clamp keeps raw_payload under the 16 KB cap.
-                  full_turn_content: clampFullTurnContent(normalizedTurnContent)
-                }
-              }),
-              created_at: createdAt
-            })
-          );
-        } catch (error) {
-          console.warn("garden/local-heuristics: dropped one heuristic signal", {
-            runId: context.run_id,
-            signalKind: definition.signal_kind,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
-      }
-    }
+function createCompileState(
+  normalizedTurnContent: string,
+  context: GardenCompileContext
+): CompileSignalState {
+  return {
+    normalizedTurnContent,
+    context,
+    createdAt: new Date().toISOString(),
+    seenMatches: new Set<string>(),
+    signals: []
+  };
+}
 
-    for (const timeConcern of extractTimeConcerns(normalizedTurnContent)) {
-      const dedupeKey = `potential_claim:time_concern:${timeConcern.window_digest}:${timeConcern.excerpt.toLowerCase()}`;
-      if (seenMatches.has(dedupeKey)) {
+function appendPatternSignals(state: CompileSignalState): void {
+  for (const definition of PATTERNS) {
+    for (const match of state.normalizedTurnContent.matchAll(definition.pattern)) {
+      const matchedText = normalizeMatchedText(match[0]);
+      if (
+        matchedText.length === 0 ||
+        !markSeenMatch(state, `${definition.signal_kind}:${matchedText.toLowerCase()}`)
+      ) {
         continue;
       }
-
-      seenMatches.add(dedupeKey);
-      // One over-budget raw_payload must not abort the turn's other signals.
-      try {
-        signals.push(
-          CandidateMemorySignalSchema.parse({
-            signal_id: randomUUID(),
-            workspace_id: context.workspace_id,
-            run_id: context.run_id,
-            surface_id: context.surface_id,
-            source: SignalSource.GARDEN_COMPILE,
-            signal_kind: "potential_claim",
-            object_kind: "fact",
-            scope_hint: null,
-            domain_tags: ["time_concern"],
-            confidence: 0.52,
-            evidence_refs: [],
-            raw_payload: buildSchemaGroundedRawPayload({
-              signalKind: "potential_claim",
-              objectKind: "fact",
-              confidence: 0.52,
-              rawPayload: {
-                matched_text: timeConcern.matched_text,
-                pattern_category: "time_concern",
-                detected_object: {
-                  object_kind: "fact",
-                  confidence: 0.52
-                },
-                time_concern: {
-                  window_digest: timeConcern.window_digest,
-                  matched_text: timeConcern.matched_text
-                },
-                distilled_fact: timeConcern.excerpt,
-                field_candidates: [
-                  {
-                    field_name: "fact",
-                    value: timeConcern.excerpt,
-                    evidence: timeConcern.excerpt,
-                    confidence: 0.52
-                  }
-                ],
-                turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, timeConcern.excerpt),
-                full_turn_content: clampFullTurnContent(normalizedTurnContent)
-              }
-            }),
-            created_at: createdAt
-          })
-        );
-      } catch (error) {
-        console.warn("garden/local-heuristics: dropped one heuristic signal", {
-          runId: context.run_id,
-          signalKind: "potential_claim",
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
+      appendPatternSignal(state, definition, matchedText);
     }
+  }
+}
 
-    return signals;
+function appendTimeConcernSignals(state: CompileSignalState): void {
+  for (const timeConcern of extractTimeConcerns(state.normalizedTurnContent)) {
+    const dedupeKey =
+      `potential_claim:time_concern:${timeConcern.window_digest}:` +
+      `${timeConcern.excerpt.toLowerCase()}`;
+    if (!markSeenMatch(state, dedupeKey)) {
+      continue;
+    }
+    appendTimeConcernSignal(state, timeConcern);
+  }
+}
+
+function markSeenMatch(state: CompileSignalState, dedupeKey: string): boolean {
+  if (state.seenMatches.has(dedupeKey)) {
+    return false;
+  }
+  state.seenMatches.add(dedupeKey);
+  return true;
+}
+
+function appendPatternSignal(
+  state: CompileSignalState,
+  definition: PatternDefinition,
+  matchedText: string
+): void {
+  appendCandidateSignal(state, {
+    signalKind: definition.signal_kind,
+    objectKind: definition.object_kind,
+    confidence: definition.confidence,
+    domainTags: [],
+    rawPayload: {
+      matched_text: matchedText,
+      pattern_category: definition.pattern_category,
+      turn_content_excerpt: buildTurnExcerpt(state.normalizedTurnContent, matchedText),
+      full_turn_content: clampFullTurnContent(state.normalizedTurnContent)
+    }
+  });
+}
+
+function appendTimeConcernSignal(
+  state: CompileSignalState,
+  timeConcern: TimeConcernMatch
+): void {
+  appendCandidateSignal(state, {
+    signalKind: "potential_claim",
+    objectKind: "fact",
+    confidence: 0.52,
+    domainTags: ["time_concern"],
+    rawPayload: {
+      matched_text: timeConcern.matched_text,
+      pattern_category: "time_concern",
+      detected_object: {
+        object_kind: "fact",
+        confidence: 0.52
+      },
+      time_concern: {
+        window_digest: timeConcern.window_digest,
+        matched_text: timeConcern.matched_text
+      },
+      distilled_fact: timeConcern.excerpt,
+      field_candidates: [
+        {
+          field_name: "fact",
+          value: timeConcern.excerpt,
+          evidence: timeConcern.excerpt,
+          confidence: 0.52
+        }
+      ],
+      turn_content_excerpt: buildTurnExcerpt(state.normalizedTurnContent, timeConcern.excerpt),
+      full_turn_content: clampFullTurnContent(state.normalizedTurnContent)
+    }
+  });
+}
+
+function appendCandidateSignal(
+  state: CompileSignalState,
+  input: AppendCandidateInput
+): void {
+  try {
+    state.signals.push(
+      CandidateMemorySignalSchema.parse({
+        signal_id: randomUUID(),
+        workspace_id: state.context.workspace_id,
+        run_id: state.context.run_id,
+        surface_id: state.context.surface_id,
+        source: SignalSource.GARDEN_COMPILE,
+        signal_kind: input.signalKind,
+        object_kind: input.objectKind,
+        scope_hint: null,
+        domain_tags: [...input.domainTags],
+        confidence: input.confidence,
+        evidence_refs: [],
+        raw_payload: buildSchemaGroundedRawPayload({
+          signalKind: input.signalKind,
+          objectKind: input.objectKind,
+          confidence: input.confidence,
+          rawPayload: input.rawPayload
+        }),
+        created_at: state.createdAt
+      })
+    );
+  } catch (error) {
+    console.warn("garden/local-heuristics: dropped one heuristic signal", {
+      runId: state.context.run_id,
+      signalKind: input.signalKind,
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
 }
 

@@ -25,6 +25,23 @@ export interface MemoryEntryUpdateWorkflowHost {
   readonly findById: (objectId: string) => Promise<Readonly<MemoryEntry> | null>;
 }
 
+interface ParsedTierUpdateRequest {
+  readonly objectId: string;
+  readonly workspaceId: string;
+  readonly fromTier: string;
+  readonly toTier: string;
+  readonly updatedAt: string;
+  readonly expectedUpdatedAt: string;
+  readonly lastUsedAt: string | undefined;
+  readonly lastHitAt: string | undefined;
+  readonly activationBump: number;
+}
+
+interface DynamicUpdateParts {
+  readonly setClauses: readonly string[];
+  readonly params: readonly (string | number | null)[];
+}
+
 export async function updateMemoryEntry(
   this: MemoryEntryUpdateWorkflowHost,
   objectId: string,
@@ -114,61 +131,71 @@ export function updateMemoryEntryTier(
   this: MemoryEntryUpdateWorkflowHost,
   input: MemoryEntryRepoTierUpdateInput
 ): Readonly<MemoryEntry> | null {
-  const objectId = parseNonEmptyString(input.objectId, "object_id");
-  const workspaceId = parseNonEmptyString(input.workspaceId, "workspace_id");
-  const fromTier = parseStorageTier(input.fromTier);
-  const toTier = parseStorageTier(input.toTier);
-  const updatedAt = parseUpdatedAt(input.updatedAt);
-  const expectedUpdatedAt = parseUpdatedAt(input.expectedUpdatedAt);
-  const lastUsedAt = input.lastUsedAt === undefined ? undefined : parseUpdatedAt(input.lastUsedAt);
-  const lastHitAt = input.lastHitAt === undefined ? undefined : parseUpdatedAt(input.lastHitAt);
-  const activationBump = input.activationBump ?? 0;
-  if (!Number.isFinite(activationBump) || activationBump < 0 || activationBump > 1) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate activation tier bump.");
-  }
+  const request = parseTierUpdateRequest(input);
 
   try {
-    const result = this.db.connection
-      .prepare(
-        `UPDATE memory_entries
-         SET storage_tier = ?,
-             activation_score = min(1.0, COALESCE(activation_score, 0.0) + ?),
-             last_used_at = COALESCE(?, last_used_at),
-             last_hit_at = COALESCE(?, last_hit_at),
-             updated_at = ?
-         WHERE object_id = ?
-           AND workspace_id = ?
-           AND storage_tier = ?
-           AND updated_at = ?`
-      )
-      .run(
-        toTier,
-        activationBump,
-        lastUsedAt ?? null,
-        lastHitAt ?? null,
-        updatedAt,
-        objectId,
-        workspaceId,
-        fromTier,
-        expectedUpdatedAt
-      );
+    const result = runTierUpdate(this, request);
 
     if (result.changes === 0) {
       return null;
     }
 
-    const row = this.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
-    if (row === undefined) {
-      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after tier update.`);
-    }
-    return parseMemoryEntryRow(row);
+    return loadUpdatedMemoryEntry(this, request.objectId, "tier update");
   } catch (error) {
     if (error instanceof StorageError) {
       throw error;
     }
 
-    throw new StorageError("QUERY_FAILED", `Failed to update memory entry tier for ${objectId}.`, error);
+    throw new StorageError("QUERY_FAILED", `Failed to update memory entry tier for ${request.objectId}.`, error);
   }
+}
+
+function parseTierUpdateRequest(input: MemoryEntryRepoTierUpdateInput): ParsedTierUpdateRequest {
+  const activationBump = input.activationBump ?? 0;
+  if (!Number.isFinite(activationBump) || activationBump < 0 || activationBump > 1) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate activation tier bump.");
+  }
+  return {
+    objectId: parseNonEmptyString(input.objectId, "object_id"),
+    workspaceId: parseNonEmptyString(input.workspaceId, "workspace_id"),
+    fromTier: parseStorageTier(input.fromTier),
+    toTier: parseStorageTier(input.toTier),
+    updatedAt: parseUpdatedAt(input.updatedAt),
+    expectedUpdatedAt: parseUpdatedAt(input.expectedUpdatedAt),
+    lastUsedAt: input.lastUsedAt === undefined ? undefined : parseUpdatedAt(input.lastUsedAt),
+    lastHitAt: input.lastHitAt === undefined ? undefined : parseUpdatedAt(input.lastHitAt),
+    activationBump
+  };
+}
+
+function runTierUpdate(
+  host: MemoryEntryUpdateWorkflowHost,
+  request: ParsedTierUpdateRequest
+): { readonly changes: number } {
+  return host.db.connection
+    .prepare(
+      `UPDATE memory_entries
+       SET storage_tier = ?,
+           activation_score = min(1.0, COALESCE(activation_score, 0.0) + ?),
+           last_used_at = COALESCE(?, last_used_at),
+           last_hit_at = COALESCE(?, last_hit_at),
+           updated_at = ?
+       WHERE object_id = ?
+         AND workspace_id = ?
+         AND storage_tier = ?
+         AND updated_at = ?`
+    )
+    .run(
+      request.toTier,
+      request.activationBump,
+      request.lastUsedAt ?? null,
+      request.lastHitAt ?? null,
+      request.updatedAt,
+      request.objectId,
+      request.workspaceId,
+      request.fromTier,
+      request.expectedUpdatedAt
+    );
 }
 
 export async function updateMemoryEntryDynamics(
@@ -179,43 +206,12 @@ export async function updateMemoryEntryDynamics(
 ): Promise<Readonly<MemoryEntry>> {
   const parsedFields = parseDynamicsUpdateFields(fields);
   const parsedUpdatedAt = parseUpdatedAt(updatedAt);
-
-  // invariant: dynamic SET preserves undefined-vs-null semantics for nullable fields.
-  const setClauses: string[] = [
-    "activation_score = ?",
-    "retention_score = ?",
-    "manifestation_state = ?"
-  ];
-  const params: Array<string | number | null> = [
-    parsedFields.activation_score,
-    parsedFields.retention_score,
-    parsedFields.manifestation_state as string
-  ];
-
-  const optionalFields: Array<readonly [string, string | number | null | undefined]> = [
-    ["retention_state", parsedFields.retention_state as string | null | undefined],
-    ["last_used_at", parsedFields.last_used_at],
-    ["last_hit_at", parsedFields.last_hit_at],
-    ["reinforcement_count", parsedFields.reinforcement_count],
-    ["contradiction_count", parsedFields.contradiction_count],
-    ["superseded_by", parsedFields.superseded_by]
-  ];
-
-  for (const [column, value] of optionalFields) {
-    if (value !== undefined) {
-      setClauses.push(`${column} = ?`);
-      params.push(value ?? null);
-    }
-  }
-
-  setClauses.push("updated_at = ?");
-  params.push(parsedUpdatedAt);
-  params.push(objectId);
+  const dynamicUpdate = buildDynamicUpdateParts(parsedFields, parsedUpdatedAt, objectId);
 
   try {
     const result = this.db.connection
-      .prepare(`UPDATE memory_entries SET ${setClauses.join(", ")} WHERE object_id = ?`)
-      .run(...params);
+      .prepare(`UPDATE memory_entries SET ${dynamicUpdate.setClauses.join(", ")} WHERE object_id = ?`)
+      .run(...dynamicUpdate.params);
 
     if (result.changes === 0) {
       throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
@@ -239,4 +235,63 @@ export async function updateMemoryEntryDynamics(
       error
     );
   }
+}
+
+function buildDynamicUpdateParts(
+  parsedFields: ReturnType<typeof parseDynamicsUpdateFields>,
+  updatedAt: string,
+  objectId: string
+): DynamicUpdateParts {
+  const setClauses: string[] = [
+    "activation_score = ?",
+    "retention_score = ?",
+    "manifestation_state = ?"
+  ];
+  const params: Array<string | number | null> = [
+    parsedFields.activation_score,
+    parsedFields.retention_score,
+    parsedFields.manifestation_state as string
+  ];
+  appendOptionalDynamicFields(setClauses, params, parsedFields);
+  setClauses.push("updated_at = ?");
+  params.push(updatedAt, objectId);
+  return { setClauses, params };
+}
+
+function appendOptionalDynamicFields(
+  setClauses: string[],
+  params: Array<string | number | null>,
+  parsedFields: ReturnType<typeof parseDynamicsUpdateFields>
+): void {
+  for (const [column, value] of getOptionalDynamicFields(parsedFields)) {
+    if (value !== undefined) {
+      setClauses.push(`${column} = ?`);
+      params.push(value ?? null);
+    }
+  }
+}
+
+function getOptionalDynamicFields(
+  parsedFields: ReturnType<typeof parseDynamicsUpdateFields>
+): readonly (readonly [string, string | number | null | undefined])[] {
+  return [
+    ["retention_state", parsedFields.retention_state as string | null | undefined],
+    ["last_used_at", parsedFields.last_used_at],
+    ["last_hit_at", parsedFields.last_hit_at],
+    ["reinforcement_count", parsedFields.reinforcement_count],
+    ["contradiction_count", parsedFields.contradiction_count],
+    ["superseded_by", parsedFields.superseded_by]
+  ];
+}
+
+function loadUpdatedMemoryEntry(
+  host: MemoryEntryUpdateWorkflowHost,
+  objectId: string,
+  operation: string
+): Readonly<MemoryEntry> {
+  const row = host.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
+  if (row === undefined) {
+    throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after ${operation}.`);
+  }
+  return parseMemoryEntryRow(row);
 }

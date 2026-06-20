@@ -2,6 +2,7 @@ import { WorkspaceSchema, type Workspace } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { cascadeDeleteWorkspace } from "../path/cascade-delete.js";
+import { prepareWorkspaceStatements, type SqliteStatement } from "./workspace-statements.js";
 
 // Walk the underlying better-sqlite3 error and any wrapped causes to detect
 // a UNIQUE-constraint collision on a specific qualified column. Driver
@@ -66,96 +67,25 @@ interface CountRow {
 }
 
 export class SqliteWorkspaceRepo implements WorkspaceRepo {
-  private readonly createStatement;
-  private readonly getByIdStatement;
-  private readonly listStatement;
-  private readonly listPagedStatement;
-  private readonly countStatement;
-  private readonly updateRepoPathStatement;
-  private readonly updateDefaultEngineBindingStatement;
-  private readonly updateDefaultEngineClassStatement;
+  private readonly createStatement: SqliteStatement;
+  private readonly getByIdStatement: SqliteStatement;
+  private readonly listStatement: SqliteStatement;
+  private readonly listPagedStatement: SqliteStatement;
+  private readonly countStatement: SqliteStatement;
+  private readonly updateRepoPathStatement: SqliteStatement;
+  private readonly updateDefaultEngineBindingStatement: SqliteStatement;
+  private readonly updateDefaultEngineClassStatement: SqliteStatement;
 
   public constructor(private readonly db: StorageDatabase) {
-    this.createStatement = db.connection.prepare(`
-      INSERT INTO workspaces (
-        workspace_id,
-        name,
-        root_path,
-        workspace_kind,
-        repo_path,
-        default_engine_binding,
-        default_engine_class,
-        workspace_state,
-        created_at,
-        archived_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    this.getByIdStatement = db.connection.prepare(`
-      SELECT
-        workspace_id,
-        name,
-        root_path,
-        workspace_kind,
-        repo_path,
-        default_engine_binding,
-        default_engine_class,
-        workspace_state,
-        created_at,
-        archived_at
-      FROM workspaces
-      WHERE workspace_id = ?
-      LIMIT 1
-    `);
-    this.listStatement = db.connection.prepare(`
-      SELECT
-        workspace_id,
-        name,
-        root_path,
-        workspace_kind,
-        repo_path,
-        default_engine_binding,
-        default_engine_class,
-        workspace_state,
-        created_at,
-        archived_at
-      FROM workspaces
-      ORDER BY created_at ASC, workspace_id ASC
-    `);
-    this.listPagedStatement = db.connection.prepare(`
-      SELECT
-        workspace_id,
-        name,
-        root_path,
-        workspace_kind,
-        repo_path,
-        default_engine_binding,
-        default_engine_class,
-        workspace_state,
-        created_at,
-        archived_at
-      FROM workspaces
-      ORDER BY created_at ASC, workspace_id ASC
-      LIMIT ? OFFSET ?
-    `);
-    this.countStatement = db.connection.prepare(`
-      SELECT COUNT(*) AS total
-      FROM workspaces
-    `);
-    this.updateRepoPathStatement = db.connection.prepare(`
-      UPDATE workspaces
-      SET repo_path = ?
-      WHERE workspace_id = ?
-    `);
-    this.updateDefaultEngineBindingStatement = db.connection.prepare(`
-      UPDATE workspaces
-      SET default_engine_binding = ?
-      WHERE workspace_id = ?
-    `);
-    this.updateDefaultEngineClassStatement = db.connection.prepare(`
-      UPDATE workspaces
-      SET default_engine_class = ?
-      WHERE workspace_id = ?
-    `);
+    const statements = prepareWorkspaceStatements(db);
+    this.createStatement = statements.createStatement;
+    this.getByIdStatement = statements.getByIdStatement;
+    this.listStatement = statements.listStatement;
+    this.listPagedStatement = statements.listPagedStatement;
+    this.countStatement = statements.countStatement;
+    this.updateRepoPathStatement = statements.updateRepoPathStatement;
+    this.updateDefaultEngineBindingStatement = statements.updateDefaultEngineBindingStatement;
+    this.updateDefaultEngineClassStatement = statements.updateDefaultEngineClassStatement;
   }
 
   public create(data: WorkspaceCreateInput): Workspace {

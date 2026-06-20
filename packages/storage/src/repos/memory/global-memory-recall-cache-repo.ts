@@ -1,7 +1,13 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
-import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
+import {
+  DEFAULT_REPO_LIST_PAGE_LIMIT,
+  parseNonEmptyString,
+  parsePageLimit,
+  parsePageOffset,
+  parseTimestamp
+} from "../shared/validators.js";
 
 const classificationValues = ["included", "excluded"] as const;
 
@@ -22,6 +28,20 @@ export interface GlobalMemoryRecallCacheRepo {
     workspaceId: string,
     classification?: GlobalMemoryRecallClassification
   ): Promise<readonly Readonly<GlobalMemoryRecallCacheRecord>[]>;
+  listByWorkspacePage?(
+    workspaceId: string,
+    classification: GlobalMemoryRecallClassification | undefined,
+    page: GlobalMemoryRecallCachePageOptions
+  ): Promise<readonly Readonly<GlobalMemoryRecallCacheRecord>[]>;
+  listByWorkspaceAll?(
+    workspaceId: string,
+    classification?: GlobalMemoryRecallClassification
+  ): Promise<readonly Readonly<GlobalMemoryRecallCacheRecord>[]>;
+}
+
+export interface GlobalMemoryRecallCachePageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
 interface GlobalMemoryRecallCacheRow {
@@ -30,6 +50,11 @@ interface GlobalMemoryRecallCacheRow {
   readonly classification: string;
   readonly updated_at: string;
 }
+
+const DEFAULT_GLOBAL_RECALL_CACHE_PAGE = Object.freeze({
+  limit: DEFAULT_REPO_LIST_PAGE_LIMIT,
+  offset: 0
+});
 
 const GLOBAL_MEMORY_RECALL_CACHE_SELECT_COLUMNS = `
       workspace_id,
@@ -40,8 +65,11 @@ const GLOBAL_MEMORY_RECALL_CACHE_SELECT_COLUMNS = `
 
 export class SqliteGlobalMemoryRecallCacheRepo implements GlobalMemoryRecallCacheRepo {
   private readonly upsertStatement;
+  private readonly getByWorkspaceAndObjectIdStatement;
   private readonly listByWorkspaceStatement;
+  private readonly listByWorkspacePagedStatement;
   private readonly listByWorkspaceAndClassificationStatement;
+  private readonly listByWorkspaceAndClassificationPagedStatement;
 
   public constructor(private readonly db: StorageDatabase) {
     this.upsertStatement = db.connection.prepare(`
@@ -55,6 +83,12 @@ export class SqliteGlobalMemoryRecallCacheRepo implements GlobalMemoryRecallCach
         classification = excluded.classification,
         updated_at = excluded.updated_at
     `);
+    this.getByWorkspaceAndObjectIdStatement = db.connection.prepare(`
+      SELECT${GLOBAL_MEMORY_RECALL_CACHE_SELECT_COLUMNS}
+      FROM global_memory_recall_cache
+      WHERE workspace_id = ? AND global_object_id = ?
+      LIMIT 1
+    `);
 
     this.listByWorkspaceStatement = db.connection.prepare(`
       SELECT${GLOBAL_MEMORY_RECALL_CACHE_SELECT_COLUMNS}
@@ -62,12 +96,26 @@ export class SqliteGlobalMemoryRecallCacheRepo implements GlobalMemoryRecallCach
       WHERE workspace_id = ?
       ORDER BY global_object_id ASC
     `);
+    this.listByWorkspacePagedStatement = db.connection.prepare(`
+      SELECT${GLOBAL_MEMORY_RECALL_CACHE_SELECT_COLUMNS}
+      FROM global_memory_recall_cache
+      WHERE workspace_id = ?
+      ORDER BY global_object_id ASC
+      LIMIT ? OFFSET ?
+    `);
 
     this.listByWorkspaceAndClassificationStatement = db.connection.prepare(`
       SELECT${GLOBAL_MEMORY_RECALL_CACHE_SELECT_COLUMNS}
       FROM global_memory_recall_cache
       WHERE workspace_id = ? AND classification = ?
       ORDER BY global_object_id ASC
+    `);
+    this.listByWorkspaceAndClassificationPagedStatement = db.connection.prepare(`
+      SELECT${GLOBAL_MEMORY_RECALL_CACHE_SELECT_COLUMNS}
+      FROM global_memory_recall_cache
+      WHERE workspace_id = ? AND classification = ?
+      ORDER BY global_object_id ASC
+      LIMIT ? OFFSET ?
     `);
   }
 
@@ -91,9 +139,10 @@ export class SqliteGlobalMemoryRecallCacheRepo implements GlobalMemoryRecallCach
       );
     }
 
-    const persistedRecords = await this.listByWorkspace(parsedRecord.workspace_id);
-    const persistedRecord =
-      persistedRecords.find((entry) => entry.global_object_id === parsedRecord.global_object_id) ?? null;
+    const persistedRecord = this.getByWorkspaceAndObjectId(
+      parsedRecord.workspace_id,
+      parsedRecord.global_object_id
+    );
 
     if (persistedRecord === null) {
       throw new StorageError(
@@ -141,15 +190,59 @@ export class SqliteGlobalMemoryRecallCacheRepo implements GlobalMemoryRecallCach
       );
     }
 
-    const persistedRecords = await this.listByWorkspace(parsedRecords[0]!.workspace_id);
-    const requestedIds = new Set(parsedRecords.map((record) => record.global_object_id));
-
-    return Object.freeze(
-      persistedRecords.filter((record) => requestedIds.has(record.global_object_id))
+    return this.listByWorkspaceAndObjectIds(
+      parsedRecords[0]!.workspace_id,
+      parsedRecords.map((record) => record.global_object_id)
     );
   }
 
   public async listByWorkspace(
+    workspaceId: string,
+    classification?: GlobalMemoryRecallClassification
+  ): Promise<readonly Readonly<GlobalMemoryRecallCacheRecord>[]> {
+    return await this.listByWorkspacePage(workspaceId, classification, DEFAULT_GLOBAL_RECALL_CACHE_PAGE);
+  }
+
+  public async listByWorkspacePage(
+    workspaceId: string,
+    classification: GlobalMemoryRecallClassification | undefined,
+    page: GlobalMemoryRecallCachePageOptions
+  ): Promise<readonly Readonly<GlobalMemoryRecallCacheRecord>[]> {
+    const parsedWorkspaceId = parseWorkspaceId(workspaceId);
+    const parsedClassification =
+      classification === undefined ? undefined : parseClassification(classification);
+    const parsedPage = parseGlobalRecallCachePage(page);
+
+    try {
+      const rows =
+        parsedClassification === undefined
+          ? (this.listByWorkspacePagedStatement.all(
+              parsedWorkspaceId,
+              parsedPage.limit,
+              parsedPage.offset
+            ) as GlobalMemoryRecallCacheRow[])
+          : (this.listByWorkspaceAndClassificationPagedStatement.all(
+              parsedWorkspaceId,
+              parsedClassification,
+              parsedPage.limit,
+              parsedPage.offset
+            ) as GlobalMemoryRecallCacheRow[]);
+
+      return rows.map((row) => parseGlobalMemoryRecallCacheRow(row));
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list paged global memory recall cache rows for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async listByWorkspaceAll(
     workspaceId: string,
     classification?: GlobalMemoryRecallClassification
   ): Promise<readonly Readonly<GlobalMemoryRecallCacheRecord>[]> {
@@ -174,7 +267,62 @@ export class SqliteGlobalMemoryRecallCacheRepo implements GlobalMemoryRecallCach
 
       throw new StorageError(
         "QUERY_FAILED",
-        `Failed to list global memory recall cache rows for workspace ${parsedWorkspaceId}.`,
+        `Failed to list all global memory recall cache rows for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
+  private getByWorkspaceAndObjectId(
+    workspaceId: string,
+    globalObjectId: string
+  ): Readonly<GlobalMemoryRecallCacheRecord> | null {
+    try {
+      const row = this.getByWorkspaceAndObjectIdStatement.get(workspaceId, globalObjectId) as
+        | GlobalMemoryRecallCacheRow
+        | undefined;
+      return row === undefined ? null : parseGlobalMemoryRecallCacheRow(row);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to reload global memory recall cache for ${workspaceId}/${globalObjectId}.`,
+        error
+      );
+    }
+  }
+
+  private listByWorkspaceAndObjectIds(
+    workspaceId: string,
+    globalObjectIds: readonly string[]
+  ): readonly Readonly<GlobalMemoryRecallCacheRecord>[] {
+    const uniqueIds = [...new Set(globalObjectIds.map((value) => parseGlobalObjectId(value)))];
+    if (uniqueIds.length === 0) {
+      return Object.freeze([]);
+    }
+
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    try {
+      const statement = this.db.connection.prepare(`
+        SELECT${GLOBAL_MEMORY_RECALL_CACHE_SELECT_COLUMNS}
+        FROM global_memory_recall_cache
+        WHERE workspace_id = ?
+          AND global_object_id IN (${placeholders})
+        ORDER BY global_object_id ASC
+      `);
+      const rows = statement.all(workspaceId, ...uniqueIds) as GlobalMemoryRecallCacheRow[];
+      return Object.freeze(rows.map((row) => parseGlobalMemoryRecallCacheRow(row)));
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to reload global memory recall cache batch for workspace ${workspaceId}.`,
         error
       );
     }
@@ -200,6 +348,15 @@ function parseGlobalMemoryRecallCacheRow(
     global_object_id: row.global_object_id,
     classification: row.classification as GlobalMemoryRecallClassification,
     updated_at: row.updated_at
+  });
+}
+
+function parseGlobalRecallCachePage(
+  page: GlobalMemoryRecallCachePageOptions
+): Readonly<GlobalMemoryRecallCachePageOptions> {
+  return Object.freeze({
+    limit: parsePageLimit(page.limit, "global memory recall cache page limit"),
+    offset: parsePageOffset(page.offset, "global memory recall cache page offset")
   });
 }
 

@@ -3,14 +3,14 @@ import {
   DelegatedWorkerRunSchema,
   type AgentRuntimePort,
   type DelegatedWorkerRun,
+  type RuntimeEvent,
   type RuntimeSessionConfig,
   type WorkerBaselineLock
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import {
   IntegrationGatePublicationError,
-  type IntegrationGate,
-  type IntegrationGateDecision
+  type IntegrationGate
 } from "../security/integration-gate.js";
 import { SerialDelegationEventIntake } from "./serial-delegation-event-intake.js";
 import type {
@@ -19,7 +19,6 @@ import type {
 } from "./runtime-event-normalizer.js";
 import {
   SerialDelegationRecovery,
-  type PreDispatchFreezeIntent
 } from "./serial-delegation-recovery.js";
 import type { ConstraintProxy } from "../security/constraint-proxy.js";
 import type { DirtyStatePanicService } from "./dirty-state-panic-service.js";
@@ -27,6 +26,18 @@ import type { StrongRefService } from "../memory/strong-ref-service.js";
 import type { WorkerSafetyGate } from "../security/worker-safety-gate.js";
 import type { WorkerRunLifecycleService } from "./worker-run-lifecycle-service.js";
 import type { ZeroDaySecurityLayer } from "../security/zero-day-security-layer.js";
+import {
+  applyAugmentedLockToWorkerRun,
+  captureIntegrationGateFailure,
+  createPreparedWorkerRunState,
+  createWorkerSessionState,
+  isConflictError,
+  isObligationViolationError,
+  requireWorkerBaselineLock,
+  triggerPreDispatchPanic,
+  type PreparedWorkerRunState,
+  type WorkerSessionState
+} from "./serial-delegation-service-helpers.js";
 
 export interface SerialDelegationWorkerRunRepoPort {
   getById(workerRunId: string): Promise<Readonly<DelegatedWorkerRun> | null>;
@@ -100,6 +111,15 @@ export interface DispatchWorkerInput {
   }) => string | Promise<string>;
 }
 
+interface RuntimeEventHandlingContext {
+  readonly context: NormalizerContext;
+  readonly eventIntake: SerialDelegationEventIntake;
+  readonly runtimeAdapter: AgentRuntimePort;
+  readonly runtimeUnsubscribe: () => void;
+  readonly sessionId: string;
+  readonly workerRunId: string;
+}
+
 export class SerialDelegationService {
   private readonly recovery: SerialDelegationRecovery;
 
@@ -108,8 +128,19 @@ export class SerialDelegationService {
   }
 
   public async dispatch(input: DispatchWorkerInput): Promise<Readonly<DelegatedWorkerRun>> {
-    const now = this.resolveNow();
-    const workerRun = DelegatedWorkerRunSchema.parse({
+    const workerRun = this.buildWorkerRun(input, this.resolveNow());
+    const runtimeAdapter = this.resolveRuntimeAdapter();
+    const preparedRun = await this.prepareWorkerRunForDispatch(input, workerRun, runtimeAdapter);
+    return await this.runWorkerSession(
+      input,
+      preparedRun.effectiveWorkerRun,
+      preparedRun.runtimePrompt,
+      runtimeAdapter
+    );
+  }
+
+  private buildWorkerRun(input: DispatchWorkerInput, now: string): DelegatedWorkerRun {
+    return DelegatedWorkerRunSchema.parse({
       worker_run_id: this.resolveWorkerRunId(),
       principal_run_id: input.principalRunId,
       workspace_id: input.workspaceId,
@@ -126,218 +157,268 @@ export class SerialDelegationService {
       created_at: now,
       updated_at: now
     });
-    let sessionId: string | null = null;
-    let unsubscribe: (() => void) | null = null;
-    const runtimeAdapter = this.resolveRuntimeAdapter();
-    const eventIntake = new SerialDelegationEventIntake();
-    let runtimePrompt = input.prompt;
-    let integrationDecision: IntegrationGateDecision | null = null;
-    let effectiveWorkerRun = workerRun;
-    let insertedWorkerRun = false;
-    let preDispatchConflict: CoreError | null = null;
-    let preDispatchFreezeIntent: PreDispatchFreezeIntent | null = null;
+  }
+
+  private async prepareWorkerRunForDispatch(
+    input: DispatchWorkerInput,
+    workerRun: DelegatedWorkerRun,
+    runtimeAdapter: AgentRuntimePort
+  ): Promise<{
+    readonly effectiveWorkerRun: DelegatedWorkerRun;
+    readonly runtimePrompt: string;
+  }> {
+    const state = createPreparedWorkerRunState(input.prompt, workerRun);
 
     try {
-      const baselineLock = requireWorkerBaselineLock(
-        await this.deps.workerSafetyGate.enforceBeforeDispatch(workerRun),
-        "worker baseline lock"
-      );
-      const augmentedBaselineLock = requireWorkerBaselineLock(
-        await this.deps.zeroDaySecurityLayer.augmentLock(baselineLock),
-        "augmented worker baseline lock"
-      );
-      effectiveWorkerRun = applyAugmentedLockToWorkerRun(workerRun, augmentedBaselineLock);
-      runtimePrompt =
-        (await input.resolveRuntimePromptFromFinalSecuritySnapshot?.({
-          workerRun: effectiveWorkerRun
-        })) ?? input.prompt;
-
-      await this.deps.workerRunRepo.insertIfNoActiveForPrincipal(input.principalRunId, effectiveWorkerRun);
-      insertedWorkerRun = true;
-
-      if (augmentedBaselineLock.hard_stop_refs.length > 0) {
-        const reason = `active hard_stop refs: ${augmentedBaselineLock.hard_stop_refs.join(", ")}`;
-        preDispatchFreezeIntent = {
-          panicSource: "worker_baseline_hard_stop",
-          summary: reason
-        };
-        preDispatchConflict = new CoreError(
-          "CONFLICT",
-          `Serial delegation blocked by worker baseline hard stop: ${reason}`
-        );
-
-        await this.deps.dirtyStatePanicService.triggerPanic({
-          workerRunId: effectiveWorkerRun.worker_run_id,
-          trigger: "safety_gate_failure",
-          panicSource: preDispatchFreezeIntent.panicSource,
-          summary: preDispatchFreezeIntent.summary,
-          affectedScope: augmentedBaselineLock.hard_stop_refs.map((ref) => ({
-            entity_type: "constraint_ref",
-            entity_id: ref
-          }))
-        });
-
-        throw preDispatchConflict;
-      }
-
-      integrationDecision = await this.deps.integrationGate.check(
-        effectiveWorkerRun,
-        runtimeAdapter.getCapabilities()
-      );
-
-      if (integrationDecision?.level === "hard_stale") {
-        preDispatchFreezeIntent = {
-          panicSource: "integration_gate",
-          summary: integrationDecision.reason
-        };
-        preDispatchConflict = new CoreError(
-          "CONFLICT",
-          `Serial delegation blocked by integration gate: ${integrationDecision.reason}`
-        );
-        await this.deps.dirtyStatePanicService.triggerPanic({
-          workerRunId: effectiveWorkerRun.worker_run_id,
-          trigger: "state_inconsistency",
-          panicSource: preDispatchFreezeIntent.panicSource,
-          summary: preDispatchFreezeIntent.summary,
-          affectedScope: [{ entity_type: "integration_decision", entity_id: integrationDecision.level }]
-        });
-
-        throw preDispatchConflict;
-      }
-
-      await this.protectCriticalConstraintRefs(effectiveWorkerRun);
+      const augmentedBaselineLock = await this.applyPreDispatchSecurity(input, state);
+      await this.insertPreparedWorkerRun(input.principalRunId, state);
+      await this.assertNoHardStop(state, augmentedBaselineLock);
+      await this.assertIntegrationGateAllows(runtimeAdapter, state);
+      await this.protectCriticalConstraintRefs(state.effectiveWorkerRun);
+      return {
+        effectiveWorkerRun: state.effectiveWorkerRun,
+        runtimePrompt: state.runtimePrompt
+      };
     } catch (error) {
-      if (error instanceof IntegrationGatePublicationError) {
-        if (error.decision.level === "hard_stale") {
-          preDispatchFreezeIntent ??= {
-            panicSource: "integration_gate",
-            summary: error.decision.reason
-          };
-          preDispatchConflict ??= new CoreError(
-            "CONFLICT",
-            `Serial delegation blocked by integration gate: ${error.decision.reason}`
-          );
-        } else if (error.durableDecisionCommitted) {
-          preDispatchFreezeIntent ??= {
-            panicSource: "integration_gate",
-            summary: error.decision.reason
-          };
-        }
-      }
-
-      if (insertedWorkerRun) {
-        await this.recovery.recoverPreDispatchFailure(
-          effectiveWorkerRun.worker_run_id,
-          error,
-          preDispatchFreezeIntent,
-          error instanceof IntegrationGatePublicationError && error.durableDecisionCommitted
-        );
-      }
-
-      if (preDispatchConflict !== null) {
-        throw preDispatchConflict;
-      }
-
-      if (error instanceof CoreError && error.code === "CONFLICT") {
-        throw error;
-      }
-
-      if (isConflictError(error)) {
-        throw new CoreError(
-          "CONFLICT",
-          `Serial delegation: principal ${input.principalRunId} already has an in-flight worker`,
-          error instanceof Error ? { cause: error } : undefined
-        );
-      }
-
-      throw error;
+      return await this.rethrowPreDispatchFailure(input.principalRunId, state, error);
     }
+  }
+
+  private async runWorkerSession(
+    input: DispatchWorkerInput,
+    effectiveWorkerRun: DelegatedWorkerRun,
+    runtimePrompt: string,
+    runtimeAdapter: AgentRuntimePort
+  ): Promise<Readonly<DelegatedWorkerRun>> {
+    const eventIntake = new SerialDelegationEventIntake();
+    const sessionState = createWorkerSessionState();
 
     try {
       const activeRun = await this.deps.workerRunLifecycle.dispatch(effectiveWorkerRun.worker_run_id);
       const session = await runtimeAdapter.createSession(input.sessionConfig);
-      sessionId = session.session_id;
-      const context: NormalizerContext = {
-        workspaceId: input.workspaceId,
-        principalRunId: input.principalRunId,
+      sessionState.sessionId = session.session_id;
+      sessionState.unsubscribe = this.wireRuntimeEvents({
+        context: {
+          workspaceId: input.workspaceId,
+          principalRunId: input.principalRunId,
+          workerRunId: effectiveWorkerRun.worker_run_id
+        },
+        eventIntake,
+        runtimeAdapter,
+        sessionId: session.session_id,
         workerRunId: effectiveWorkerRun.worker_run_id
-      };
+      });
+      await runtimeAdapter.prompt(session.session_id, { prompt: runtimePrompt });
+      await eventIntake.drain();
+      return activeRun;
+    } catch (error) {
+      await this.handleRunWorkerSessionFailure(
+        error,
+        effectiveWorkerRun.worker_run_id,
+        runtimeAdapter,
+        eventIntake,
+        sessionState
+      );
+      throw error;
+    }
+  }
 
-      const runtimeUnsubscribe = runtimeAdapter.onEvent((event) => {
-        if (!eventIntake.accepts(event, session.session_id)) {
+  private async applyPreDispatchSecurity(
+    input: DispatchWorkerInput,
+    state: PreparedWorkerRunState
+  ): Promise<WorkerBaselineLock> {
+    const baselineLock = requireWorkerBaselineLock(
+      await this.deps.workerSafetyGate.enforceBeforeDispatch(state.effectiveWorkerRun),
+      "worker baseline lock"
+    );
+    const augmentedBaselineLock = requireWorkerBaselineLock(
+      await this.deps.zeroDaySecurityLayer.augmentLock(baselineLock),
+      "augmented worker baseline lock"
+    );
+    state.effectiveWorkerRun = applyAugmentedLockToWorkerRun(
+      state.effectiveWorkerRun,
+      augmentedBaselineLock
+    );
+    state.runtimePrompt =
+      (await input.resolveRuntimePromptFromFinalSecuritySnapshot?.({
+        workerRun: state.effectiveWorkerRun
+      })) ?? input.prompt;
+    return augmentedBaselineLock;
+  }
+
+  private async insertPreparedWorkerRun(
+    principalRunId: string,
+    state: PreparedWorkerRunState
+  ): Promise<void> {
+    await this.deps.workerRunRepo.insertIfNoActiveForPrincipal(principalRunId, state.effectiveWorkerRun);
+    state.insertedWorkerRun = true;
+  }
+
+  private async assertNoHardStop(
+    state: PreparedWorkerRunState,
+    augmentedBaselineLock: WorkerBaselineLock
+  ): Promise<void> {
+    if (augmentedBaselineLock.hard_stop_refs.length === 0) {
+      return;
+    }
+
+    const reason = `active hard_stop refs: ${augmentedBaselineLock.hard_stop_refs.join(", ")}`;
+    await triggerPreDispatchPanic(
+      this.deps.dirtyStatePanicService,
+      state,
+      "worker_baseline_hard_stop",
+      "worker baseline hard stop",
+      reason,
+      "safety_gate_failure",
+      augmentedBaselineLock.hard_stop_refs.map((ref) => ({
+        entity_type: "constraint_ref",
+        entity_id: ref
+      }))
+    );
+    throw state.preDispatchConflict;
+  }
+
+  private async assertIntegrationGateAllows(
+    runtimeAdapter: AgentRuntimePort,
+    state: PreparedWorkerRunState
+  ): Promise<void> {
+    const integrationDecision = await this.deps.integrationGate.check(
+      state.effectiveWorkerRun,
+      runtimeAdapter.getCapabilities()
+    );
+    if (integrationDecision?.level !== "hard_stale") {
+      return;
+    }
+
+    await triggerPreDispatchPanic(
+      this.deps.dirtyStatePanicService,
+      state,
+      "integration_gate",
+      "integration gate",
+      integrationDecision.reason,
+      "state_inconsistency",
+      [{ entity_type: "integration_decision", entity_id: integrationDecision.level }]
+    );
+    throw state.preDispatchConflict;
+  }
+
+  private async rethrowPreDispatchFailure(
+    principalRunId: string,
+    state: PreparedWorkerRunState,
+    error: unknown
+  ): Promise<never> {
+    captureIntegrationGateFailure(state, error);
+    if (state.insertedWorkerRun) {
+      await this.recovery.recoverPreDispatchFailure(
+        state.effectiveWorkerRun.worker_run_id,
+        error,
+        state.preDispatchFreezeIntent,
+        error instanceof IntegrationGatePublicationError && error.durableDecisionCommitted
+      );
+    }
+    if (state.preDispatchConflict !== null) {
+      throw state.preDispatchConflict;
+    }
+    if (error instanceof CoreError && error.code === "CONFLICT") {
+      throw error;
+    }
+    if (isConflictError(error)) {
+      throw new CoreError(
+        "CONFLICT",
+        `Serial delegation: principal ${principalRunId} already has an in-flight worker`,
+        error instanceof Error ? { cause: error } : undefined
+      );
+    }
+    throw error;
+  }
+
+  private wireRuntimeEvents(
+    params: Omit<RuntimeEventHandlingContext, "runtimeUnsubscribe">
+  ): () => void {
+    const runtimeUnsubscribe = params.runtimeAdapter.onEvent((event) => {
+      if (!params.eventIntake.accepts(event, params.sessionId)) {
+        return;
+      }
+
+      params.eventIntake.note(event);
+      params.eventIntake.enqueue(async () => {
+        if (!params.eventIntake.isAcceptingEvents()) {
           return;
         }
 
-        eventIntake.note(event);
-
-        eventIntake.enqueue(async () => {
-          if (!eventIntake.isAcceptingEvents()) {
-            return;
-          }
-
-          try {
-            await this.recovery.handleRuntimeEvent(
-              event,
-              context,
-              effectiveWorkerRun.worker_run_id,
-              runtimeUnsubscribe,
-              () => eventIntake.stop()
-            );
-
-            if (event.type === "session_finished") {
-              eventIntake.clearPendingIfCurrent(event);
-            }
-          } catch (error) {
-            await this.recovery.handleRuntimeEventFailure({
-              error,
-              event,
-              context,
-              workerRunId: effectiveWorkerRun.worker_run_id,
-              sessionId: session.session_id,
-              runtimeAdapter,
-              unsubscribe: runtimeUnsubscribe,
-              stopEventIntake: () => eventIntake.stop(),
-              resumeEventIntake: () => eventIntake.resume(),
-              awaitPendingSessionFinishedEvent: () => eventIntake.awaitPendingSessionFinishedEvent(),
-              clearPendingSessionFinishedEvent: (sessionFinishedEvent) => {
-                eventIntake.clearPendingIfCurrent(sessionFinishedEvent);
-              }
-            });
-
-            if (isObligationViolationError(error)) {
-              throw error;
-            }
-          }
+        await this.processRuntimeEvent(event, {
+          ...params,
+          runtimeUnsubscribe
         });
       });
-      unsubscribe = runtimeUnsubscribe;
+    });
 
-      await runtimeAdapter.prompt(session.session_id, { prompt: runtimePrompt });
-      await eventIntake.drain();
+    return runtimeUnsubscribe;
+  }
 
-      return activeRun;
+  private async processRuntimeEvent(
+    event: RuntimeEvent,
+    params: RuntimeEventHandlingContext
+  ): Promise<void> {
+    try {
+      await this.recovery.handleRuntimeEvent(
+        event,
+        params.context,
+        params.workerRunId,
+        params.runtimeUnsubscribe,
+        () => params.eventIntake.stop()
+      );
+      if (event.type === "session_finished") {
+        params.eventIntake.clearPendingIfCurrent(event);
+      }
     } catch (error) {
-      if (isObligationViolationError(error)) {
-        eventIntake.stop();
-        unsubscribe?.();
-        if (sessionId !== null) {
-          this.deps.eventNormalizer.clearSessionState(sessionId);
+      await this.recovery.handleRuntimeEventFailure({
+        error,
+        event,
+        context: params.context,
+        workerRunId: params.workerRunId,
+        sessionId: params.sessionId,
+        runtimeAdapter: params.runtimeAdapter,
+        unsubscribe: params.runtimeUnsubscribe,
+        stopEventIntake: () => params.eventIntake.stop(),
+        resumeEventIntake: () => params.eventIntake.resume(),
+        awaitPendingSessionFinishedEvent: () => params.eventIntake.awaitPendingSessionFinishedEvent(),
+        clearPendingSessionFinishedEvent: (sessionFinishedEvent) => {
+          params.eventIntake.clearPendingIfCurrent(sessionFinishedEvent);
         }
+      });
+      if (isObligationViolationError(error)) {
         throw error;
       }
-
-      await this.recovery.handleStartupFailure({
-        error,
-        workerRunId: effectiveWorkerRun.worker_run_id,
-        sessionId,
-        runtimeAdapter,
-        unsubscribe,
-        stopEventIntake: () => eventIntake.stop(),
-        resumeEventIntake: () => eventIntake.resume(),
-        drainEventQueue: () => eventIntake.drain()
-      });
-      throw error;
     }
+  }
+
+  private async handleRunWorkerSessionFailure(
+    error: unknown,
+    workerRunId: string,
+    runtimeAdapter: AgentRuntimePort,
+    eventIntake: SerialDelegationEventIntake,
+    sessionState: WorkerSessionState
+  ): Promise<void> {
+    if (isObligationViolationError(error)) {
+      eventIntake.stop();
+      sessionState.unsubscribe?.();
+      if (sessionState.sessionId !== null) {
+        this.deps.eventNormalizer.clearSessionState(sessionState.sessionId);
+      }
+      return;
+    }
+
+    await this.recovery.handleStartupFailure({
+      error,
+      workerRunId,
+      sessionId: sessionState.sessionId,
+      runtimeAdapter,
+      unsubscribe: sessionState.unsubscribe,
+      stopEventIntake: () => eventIntake.stop(),
+      resumeEventIntake: () => eventIntake.resume(),
+      drainEventQueue: () => eventIntake.drain()
+    });
   }
 
   private resolveNow(): string {
@@ -380,55 +461,4 @@ export class SerialDelegationService {
       });
     }
   }
-}
-
-function applyAugmentedLockToWorkerRun(
-  workerRun: Readonly<DelegatedWorkerRun>,
-  lock: Readonly<WorkerBaselineLock>
-): DelegatedWorkerRun {
-  return DelegatedWorkerRunSchema.parse({
-    ...workerRun,
-    principal_security_snapshot: {
-      ...workerRun.principal_security_snapshot,
-      hard_constraint_refs: mergeUniqueStrings(
-        workerRun.principal_security_snapshot.hard_constraint_refs,
-        lock.hard_constraint_refs
-      ),
-      denied_tool_categories: mergeUniqueStrings(
-        workerRun.principal_security_snapshot.denied_tool_categories,
-        lock.denied_tool_categories
-      )
-    }
-  });
-}
-
-function mergeUniqueStrings(
-  existing: readonly string[],
-  additions: readonly string[]
-): readonly string[] {
-  return [...new Set([...existing, ...additions])];
-}
-
-function requireWorkerBaselineLock(
-  lock: WorkerBaselineLock | null | undefined,
-  lockName: string
-): WorkerBaselineLock {
-  if (lock == null) {
-    throw new CoreError("VALIDATION", `Serial delegation requires a non-null ${lockName}.`);
-  }
-
-  return lock;
-}
-
-function isConflictError(error: unknown): error is Error & { readonly code: "CONFLICT" } {
-  return (
-    (error instanceof Error &&
-      error.name === "StorageError" &&
-      "code" in error &&
-      (error as { readonly code?: unknown }).code === "CONFLICT")
-  );
-}
-
-function isObligationViolationError(error: unknown): error is CoreError {
-  return error instanceof CoreError && error.code === "OBLIGATION_VIOLATION";
 }

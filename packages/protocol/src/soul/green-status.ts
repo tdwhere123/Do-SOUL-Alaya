@@ -82,6 +82,7 @@ export const GreenStatusSchema = PersistentObjectEnvelopeSchema.unwrap()
     last_transition_at: IsoDatetimeStringSchema,
     workspace_id: NonEmptyStringSchema
   })
+  .strict()
   .readonly();
 
 export const VERIFICATION_VALID_UNTIL_BY_DIMENSION = Object.freeze({

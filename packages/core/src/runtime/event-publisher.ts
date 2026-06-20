@@ -1,4 +1,5 @@
 import { WorkspaceRunEventSchema, type EventLogEntry, type WorkspaceRunEvent } from "@do-soul/alaya-protocol";
+import { scheduleAuditedAsyncSideEffect } from "./async-side-effect-auditor.js";
 
 export type EventPublisherInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
@@ -99,19 +100,19 @@ export class EventPublisher {
   ): T {
     const { entries, mutateResult } = this.appendManyInTransaction(eventInputs, mutate);
     for (const entry of entries) {
-      void this.propagate(entry).catch((error) => {
-        process.emitWarning("[EventPublisher] Detached propagation failed after commit", {
-          code: "ALAYA_EVENT_PROPAGATION_DETACHED_FAILED",
-          detail: JSON.stringify({
-            event_id: entry.event_id,
-            event_type: entry.event_type,
-            entity_type: entry.entity_type,
-            entity_id: entry.entity_id,
-            run_id: entry.run_id,
-            workspace_id: entry.workspace_id,
-            error: error instanceof Error ? error.message : String(error)
-          })
-        });
+      scheduleAuditedAsyncSideEffect(this.propagate(entry), {
+        source: "EventPublisher",
+        operation: "detached_propagation",
+        subjectType: entry.entity_type,
+        subjectId: entry.entity_id,
+        workspaceId: entry.workspace_id,
+        runId: entry.run_id,
+        causedBy: entry.caused_by,
+        committedEventId: entry.event_id,
+        warningCode: "ALAYA_EVENT_PROPAGATION_DETACHED_FAILED",
+        warningMessage: "[EventPublisher] Detached propagation failed after commit",
+        eventLogRepo: this.dependencies.eventLogRepo,
+        runtimeNotifier: this.dependencies.runtimeNotifier
       });
     }
     return mutateResult;

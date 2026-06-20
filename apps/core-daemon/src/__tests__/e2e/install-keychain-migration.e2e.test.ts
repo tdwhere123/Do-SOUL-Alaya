@@ -155,13 +155,13 @@ describe("install keychain migration", () => {
       "utf8"
     );
     const configRepo = new SqliteConfigRepo(initDatabase({ filename: dbPath }));
-    configRepo.set<RuntimeGardenComputeConfig>("runtime:garden-compute", {
+    configRepo.setParsed<RuntimeGardenComputeConfig>("runtime:garden-compute", {
       provider_kind: "official_api",
       model_id: "gpt-4.1-mini",
       provider_url: "https://api.openai.test/v1",
       secret_ref: `file:${oldSecretPath}`,
       enabled: true
-    });
+    }, RuntimeGardenComputeConfigSchema);
     const command = createInstallCommand({
       configDirResolver: () => configDir,
       clock: createClock(),
@@ -183,9 +183,13 @@ describe("install keychain migration", () => {
     expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
     expect(await readFile(path.join(configDir, ".env"), "utf8")).toContain(envBefore);
 
-    const persisted = RuntimeGardenComputeConfigSchema.parse(
-      configRepo.get<RuntimeGardenComputeConfig>("runtime:garden-compute")
+    const persisted = configRepo.getParsed(
+      "runtime:garden-compute",
+      RuntimeGardenComputeConfigSchema
     );
+    if (persisted === null) {
+      throw new Error("Expected runtime garden compute config to be persisted");
+    }
     expect(persisted.secret_ref).toBe("keychain:alaya:openai");
     expect(persisted.provider_kind).toBe("official_api");
     expect(persisted.enabled).toBe(true);
@@ -241,13 +245,13 @@ describe("install keychain migration", () => {
     );
     const database = initDatabase({ filename: dbPath });
     const configRepo = new SqliteConfigRepo(database);
-    configRepo.set<RuntimeGardenComputeConfig>("runtime:garden-compute", {
+    configRepo.setParsed<RuntimeGardenComputeConfig>("runtime:garden-compute", {
       provider_kind: "host_worker",
       model_id: "gpt-4.1-mini",
       provider_url: "https://api.openai.test/v1",
       secret_ref: `file:${oldSecretPath}`,
       enabled: false
-    });
+    }, RuntimeGardenComputeConfigSchema);
     const command = createInstallCommand({
       configDirResolver: () => configDir,
       clock: createClock(),
@@ -266,9 +270,13 @@ describe("install keychain migration", () => {
     });
 
     expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
-    const persisted = RuntimeGardenComputeConfigSchema.parse(
-      configRepo.get<RuntimeGardenComputeConfig>("runtime:garden-compute")
+    const persisted = configRepo.getParsed(
+      "runtime:garden-compute",
+      RuntimeGardenComputeConfigSchema
     );
+    if (persisted === null) {
+      throw new Error("Expected runtime garden compute config to be persisted");
+    }
     expect(persisted).toMatchObject({
       provider_kind: "host_worker",
       enabled: false,

@@ -128,42 +128,50 @@ export async function parseSearchQuery(
     return { text: "", since: null, until: null, windowLabel: null };
   }
 
-  // Multi-day relative ranges win over single-day patterns when both match.
-  // Otherwise "5月20号 上周" silently collapses to a single-day window and
-  // the operator's "上周" intent disappears.
+  const zhRange = parseZhRelativeRange(trimmed, now);
+  if (zhRange !== null) return zhRange;
+  const zhDay = parseZhDay(trimmed, now);
+  if (zhDay !== null) return zhDay;
+  return (await parseChronoQuery(trimmed, now)) ?? keywordOnly(trimmed);
+}
+
+function parseZhRelativeRange(input: string, now: Date): ParsedSearchQuery | null {
   for (const range of ZH_RELATIVE_RANGES) {
-    const match = range.regex.exec(trimmed);
+    const match = range.regex.exec(input);
     if (!match) continue;
     const resolved = range.resolve(now);
     return {
-      text: stripMatch(trimmed, match),
+      text: stripMatch(input, match),
       since: resolved.since.toISOString(),
       until: resolved.until.toISOString(),
       windowLabel: resolved.label
     };
   }
+  return null;
+}
 
+function parseZhDay(input: string, now: Date): ParsedSearchQuery | null {
   for (const matcher of ZH_DAY_PATTERNS) {
-    const match = matcher.regex.exec(trimmed);
+    const match = matcher.regex.exec(input);
     if (!match) continue;
     const resolved = matcher.resolve(match, now);
     if (!resolved) continue;
     const since = new Date(resolved.year, resolved.month - 1, resolved.day, 0, 0, 0, 0);
     const until = new Date(resolved.year, resolved.month - 1, resolved.day, 23, 59, 59, 999);
     return {
-      text: stripMatch(trimmed, match),
+      text: stripMatch(input, match),
       since: since.toISOString(),
       until: until.toISOString(),
       windowLabel: resolved.label
     };
   }
+  return null;
+}
 
-  // Fall through to chrono-node for English expressions. chrono-node is
-  // lazy-loaded so 2D-only / zh-CN-only operators do not pay its bundle
-  // cost on first paint.
+async function parseChronoQuery(input: string, now: Date): Promise<ParsedSearchQuery | null> {
   try {
     const chrono = await ensureChrono();
-    const results = chrono.parse(trimmed, now, { forwardDate: false });
+    const results = chrono.parse(input, now, { forwardDate: false });
     if (results.length > 0) {
       const first = results[0]!;
       const startDate = first.start?.date();
@@ -173,7 +181,7 @@ export async function parseSearchQuery(
         const until = endDate ?? endOfDay(startDate);
         const stripStart = first.index;
         const stripEnd = first.index + first.text.length;
-        const cleaned = (trimmed.slice(0, stripStart) + trimmed.slice(stripEnd)).trim();
+        const cleaned = (input.slice(0, stripStart) + input.slice(stripEnd)).trim();
         return {
           text: cleaned,
           since: since.toISOString(),
@@ -185,8 +193,11 @@ export async function parseSearchQuery(
   } catch {
     // chrono-node failure is non-fatal; fall through to keyword-only.
   }
+  return null;
+}
 
-  return { text: trimmed, since: null, until: null, windowLabel: null };
+function keywordOnly(text: string): ParsedSearchQuery {
+  return { text, since: null, until: null, windowLabel: null };
 }
 
 function stripMatch(input: string, match: RegExpExecArray): string {

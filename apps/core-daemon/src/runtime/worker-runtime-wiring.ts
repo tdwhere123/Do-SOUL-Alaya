@@ -40,6 +40,39 @@ export function createWorkerRuntimeWiring(input: {
   readonly serialDelegationService: SerialDelegationService;
   readonly workerRunLifecycleService: WorkerRunLifecycleService;
 }> {
+  const supportServices = createWorkerSupportServices(input);
+  const workerSafetyGate = new WorkerSafetyGate({ safetyPort: input.workerSafetyPort });
+  const integrationGate = new IntegrationGate({
+    expectedProfile: VERIFIED_CLAUDE_RUNTIME_CAPABILITY_PROFILE,
+    eventPublisher: input.eventPublisher
+  });
+  const serialDelegationService = new SerialDelegationService({
+    workerRunLifecycle: supportServices.workerRunLifecycleService,
+    workerRunRepo: input.workerRunRepo,
+    runtimeAdapterFactory: input.runtimeAdapterFactory,
+    workerSafetyGate,
+    zeroDaySecurityLayer: input.zeroDaySecurityLayer,
+    integrationGate,
+    constraintProxy: supportServices.constraintProxy,
+    dirtyStatePanicService: supportServices.dirtyStatePanicService,
+    strongRefService: input.strongRefService,
+    eventNormalizer: supportServices.runtimeEventNormalizer
+  });
+
+  return Object.freeze({
+    ...supportServices,
+    serialDelegationService,
+  });
+}
+
+function createWorkerSupportServices(input: {
+  readonly deferredObligationRepo: SqliteDeferredObligationRepo;
+  readonly dirtyStateDossierRepo: SqliteDirtyStateDossierRepo;
+  readonly eventLogRepo: SqliteEventLogRepo;
+  readonly eventPublisher: EventPublisher;
+  readonly runtimeNotifier: RuntimeNotifier;
+  readonly workerRunRepo: SqliteWorkerRunRepo;
+}) {
   const runtimeEventNormalizer = new RuntimeEventNormalizer({
     eventLogRepo: input.eventLogRepo,
     runtimeNotifier: input.runtimeNotifier
@@ -61,32 +94,12 @@ export function createWorkerRuntimeWiring(input: {
     eventPublisher: input.eventPublisher,
     dossierRepo: input.dirtyStateDossierRepo
   });
-  const workerSafetyGate = new WorkerSafetyGate({
-    safetyPort: input.workerSafetyPort
-  });
-  const integrationGate = new IntegrationGate({
-    expectedProfile: VERIFIED_CLAUDE_RUNTIME_CAPABILITY_PROFILE,
-    eventPublisher: input.eventPublisher
-  });
-  const serialDelegationService = new SerialDelegationService({
-    workerRunLifecycle: workerRunLifecycleService,
-    workerRunRepo: input.workerRunRepo,
-    runtimeAdapterFactory: input.runtimeAdapterFactory,
-    workerSafetyGate,
-    zeroDaySecurityLayer: input.zeroDaySecurityLayer,
-    integrationGate,
-    constraintProxy,
-    dirtyStatePanicService,
-    strongRefService: input.strongRefService,
-    eventNormalizer: runtimeEventNormalizer
-  });
 
-  return Object.freeze({
+  return {
     constraintProxy,
     deferredObligationService,
     dirtyStatePanicService,
     runtimeEventNormalizer,
-    serialDelegationService,
     workerRunLifecycleService
-  });
+  };
 }

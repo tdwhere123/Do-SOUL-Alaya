@@ -1,10 +1,5 @@
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../shared/version.js";
-import { monotonicElapsedMs, monotonicNowNs } from "../shared/monotonic.js";
-import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
+import { join } from "node:path";
 import {
   diffKpis,
   entrySlug,
@@ -17,7 +12,10 @@ import {
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
 import { startBenchDaemon } from "../harness/daemon.js";
-import { SYNTHETIC_SCENARIOS } from "./scenarios.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../shared/version.js";
+import { monotonicElapsedMs, monotonicNowNs } from "../shared/monotonic.js";
+import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
+import { SYNTHETIC_SCENARIOS, type SyntheticScenario } from "./scenarios.js";
 
 export interface SelfBenchRunOptions {
   readonly historyRoot: string;
@@ -29,6 +27,27 @@ export interface SelfBenchRunResult {
   readonly reportPath: string;
   readonly findingsPath: string;
   readonly payload: KpiPayload;
+}
+
+interface SelfScenarioState {
+  readonly sidecar: Map<string, string>;
+  readonly expectedIdSet: Set<string>;
+  seedIndex: number;
+  seedTurnsTruncated: number;
+  answerTurnsTruncated: number;
+  seedCharsClipped: number;
+}
+
+interface SelfScenarioResult {
+  readonly row: PerScenarioRow;
+  readonly hitAt1: boolean;
+  readonly hitAt10: boolean;
+  readonly firstTier: "hot" | "warm" | "cold";
+  readonly latencyMs: number;
+  readonly degradationReason: string | null;
+  readonly seedTurnsTruncated: number;
+  readonly answerTurnsTruncated: number;
+  readonly seedCharsClipped: number;
 }
 
 /**
@@ -48,149 +67,189 @@ export interface SelfBenchRunResult {
  * see also: apps/bench-runner/src/self/scenarios.ts — setup + distractor pairs
  */
 export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBenchRunResult> {
-  const alayaVersion = resolveBenchRunnerVersion();
-  const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
+  const payload = buildSelfBenchPayload({
+    runAt,
+    alayaVersion: resolveBenchRunnerVersion(),
+    commitSha7: resolveCommitSha7(),
+    results: await runSelfBenchScenarios()
+  });
+  return writeSelfBenchRun(opts, runAt, payload);
+}
 
-  const perScenario: PerScenarioRow[] = [];
-  const latencies: number[] = [];
-  let tierHot = 0;
-  let tierWarm = 0;
-  let tierCold = 0;
-  let degradeNone = 0;
-  let degradeWarm = 0;
-  let degradeCold = 0;
-  let degradePartial = 0;
-  let totalHitAt1 = 0;
-  let totalHitAt10 = 0;
-  let truncSeedTotal = 0;
-  let truncAnswerTotal = 0;
-  let truncCharsTotal = 0;
-
+async function runSelfBenchScenarios(): Promise<readonly SelfScenarioResult[]> {
+  const results: SelfScenarioResult[] = [];
   for (const scenario of SYNTHETIC_SCENARIOS) {
-    const daemon = await startBenchDaemon({
-      workspaceId: `self-${scenario.id}`,
-      runId: `run-${scenario.id}`
+    results.push(await runSelfScenario(scenario));
+  }
+  return results;
+}
+
+async function runSelfScenario(
+  scenario: SyntheticScenario
+): Promise<SelfScenarioResult> {
+  const daemon = await startBenchDaemon({
+    workspaceId: `self-${scenario.id}`,
+    runId: `run-${scenario.id}`
+  });
+  try {
+    const state = createSelfScenarioState(scenario);
+    await seedSelfScenarioSetups(daemon, scenario, state);
+    await seedSelfScenarioDistractors(daemon, scenario, state);
+    return await recallSelfScenario(daemon, scenario, state);
+  } finally {
+    await daemon.shutdown();
+  }
+}
+
+function createSelfScenarioState(scenario: SyntheticScenario): SelfScenarioState {
+  return {
+    sidecar: new Map(),
+    expectedIdSet: new Set(scenario.expected_ids),
+    seedIndex: 0,
+    seedTurnsTruncated: 0,
+    answerTurnsTruncated: 0,
+    seedCharsClipped: 0
+  };
+}
+
+async function seedSelfScenarioSetups(
+  daemon: Awaited<ReturnType<typeof startBenchDaemon>>,
+  scenario: SyntheticScenario,
+  state: SelfScenarioState
+): Promise<void> {
+  for (let i = 0; i < scenario.setup.length; i += 1) {
+    const content = scenario.setup[i];
+    if (content === undefined) continue;
+    await seedSelfScenarioEntry(daemon, state, {
+      content,
+      evidenceRef: `${scenario.id}-setup-${i}`,
+      expectedId: `${scenario.id}-s${i}`,
+      trackExpectedId: true
     });
+  }
+}
 
-    try {
-      // Sidecar maps durable memory object_id -> the scenario's expected_id
-      // (e.g. "syn-001-s0"). Only setup seeds populate the sidecar.
-      const sidecar = new Map<string, string>();
-      const expectedIdSet = new Set(scenario.expected_ids);
-      // see also: apps/bench-runner/src/harness/seed-rotation.ts
-      let seedIndex = 0;
+async function seedSelfScenarioDistractors(
+  daemon: Awaited<ReturnType<typeof startBenchDaemon>>,
+  scenario: SyntheticScenario,
+  state: SelfScenarioState
+): Promise<void> {
+  for (let i = 0; i < scenario.distractors.length; i += 1) {
+    const content = scenario.distractors[i];
+    if (content === undefined) continue;
+    await seedSelfScenarioEntry(daemon, state, {
+      content,
+      evidenceRef: `${scenario.id}-distractor-${i}`,
+      trackExpectedId: false
+    });
+  }
+}
 
-      for (let i = 0; i < scenario.setup.length; i++) {
-        const content = scenario.setup[i];
-        if (content === undefined) continue;
-        const expectedId = `${scenario.id}-s${i}`;
-        const evidenceRef = `${scenario.id}-setup-${i}`;
-        const seed = await daemon.proposeMemory(content, evidenceRef, {
-          objectKind: rotatingSeedObjectKind(seedIndex)
-        });
-        seedIndex += 1;
-        if (seed.truncated) {
-          truncSeedTotal++;
-          truncAnswerTotal++;
-          truncCharsTotal += seed.charsClipped;
-        }
-        sidecar.set(seed.memoryId, expectedId);
-      }
+async function seedSelfScenarioEntry(
+  daemon: Awaited<ReturnType<typeof startBenchDaemon>>,
+  state: SelfScenarioState,
+  input: {
+    readonly content: string;
+    readonly evidenceRef: string;
+    readonly trackExpectedId: boolean;
+    readonly expectedId?: string;
+  }
+): Promise<void> {
+  const seed = await daemon.proposeMemory(input.content, input.evidenceRef, {
+    objectKind: rotatingSeedObjectKind(state.seedIndex)
+  });
+  state.seedIndex += 1;
+  recordSelfScenarioTruncation(state, seed, input.trackExpectedId);
+  if (input.trackExpectedId && input.expectedId !== undefined) {
+    state.sidecar.set(seed.memoryId, input.expectedId);
+  }
+}
 
-      // Distractors expand the recall search space. Their memoryId is not
-      // recorded. If the recall returns one, it occupies a top-K slot
-      // but the scoring loop sees `sidecar.get` return undefined and
-      // counts no hit.
-      for (let i = 0; i < scenario.distractors.length; i++) {
-        const content = scenario.distractors[i];
-        if (content === undefined) continue;
-        const evidenceRef = `${scenario.id}-distractor-${i}`;
-        const seed = await daemon.proposeMemory(content, evidenceRef, {
-          objectKind: rotatingSeedObjectKind(seedIndex)
-        });
-        seedIndex += 1;
-        if (seed.truncated) {
-          truncSeedTotal++;
-          truncCharsTotal += seed.charsClipped;
-        }
-      }
+function recordSelfScenarioTruncation(
+  state: SelfScenarioState,
+  seed: Awaited<
+    ReturnType<Awaited<ReturnType<typeof startBenchDaemon>>["proposeMemory"]>
+  >,
+  trackAnswerTurn: boolean
+): void {
+  if (!seed.truncated) return;
+  state.seedTurnsTruncated += 1;
+  state.seedCharsClipped += seed.charsClipped;
+  if (trackAnswerTurn) {
+    state.answerTurnsTruncated += 1;
+  }
+}
 
-      const recallStart = monotonicNowNs();
-      const recallResult = await daemon.recall(scenario.probe, { maxResults: 10 });
-      const latencyMs = monotonicElapsedMs(recallStart);
-      latencies.push(latencyMs);
+async function recallSelfScenario(
+  daemon: Awaited<ReturnType<typeof startBenchDaemon>>,
+  scenario: SyntheticScenario,
+  state: SelfScenarioState
+): Promise<SelfScenarioResult> {
+  const recallStart = monotonicNowNs();
+  const recallResult = await daemon.recall(scenario.probe, { maxResults: 10 });
+  const verdict = scoreSelfScenarioRecall(
+    recallResult.results,
+    state.sidecar,
+    state.expectedIdSet
+  );
+  return {
+    row: { id: scenario.id, version: 1, hit_at_5: verdict.hitAt5, tier: verdict.firstTier },
+    hitAt1: verdict.hitAt1,
+    hitAt10: verdict.hitAt10,
+    firstTier: verdict.firstTier,
+    latencyMs: monotonicElapsedMs(recallStart),
+    degradationReason: recallResult.degradation_reason ?? null,
+    seedTurnsTruncated: state.seedTurnsTruncated,
+    answerTurnsTruncated: state.answerTurnsTruncated,
+    seedCharsClipped: state.seedCharsClipped
+  };
+}
 
-      const results = recallResult.results;
+function scoreSelfScenarioRecall(
+  results: readonly { readonly object_id: string; readonly relevance_score: number }[],
+  sidecar: ReadonlyMap<string, string>,
+  expectedIdSet: ReadonlySet<string>
+): {
+  readonly hitAt1: boolean;
+  readonly hitAt5: boolean;
+  readonly hitAt10: boolean;
+  readonly firstTier: "hot" | "warm" | "cold";
+} {
+  let hitAt1 = false;
+  let hitAt5 = false;
+  let hitAt10 = false;
+  let firstTier: "hot" | "warm" | "cold" = "cold";
 
-      let hitAt1 = false;
-      let hitAt5 = false;
-      let hitAt10 = false;
-      let firstTier: "hot" | "warm" | "cold" = "cold";
-
-      for (let rank = 0; rank < results.length && rank < 10; rank++) {
-        const pointer = results[rank];
-        if (pointer === undefined) continue;
-
-        if (rank === 0) {
-          firstTier = inferTier(pointer.relevance_score);
-        }
-
-        // object_id equality scoring: a hit is a recall pointer whose
-        // sidecar-mapped expected_id appears in scenario.expected_ids.
-        const expectedId = sidecar.get(pointer.object_id);
-        const isHit = expectedId !== undefined && expectedIdSet.has(expectedId);
-
-        if (isHit) {
-          if (rank === 0) hitAt1 = true;
-          if (rank < 5) hitAt5 = true;
-          hitAt10 = true;
-        }
-      }
-
-      if (hitAt1) totalHitAt1++;
-      if (hitAt10) totalHitAt10++;
-
-      if (firstTier === "hot") tierHot++;
-      else if (firstTier === "warm") tierWarm++;
-      else tierCold++;
-
-      // degradation_reason is read directly off the daemon's recall response.
-      // For self-bench scenarios the workspace is small (2 setups +
-      // 3-5 distractors), so the warm/cold cascade fires for many probes
-      // That is real recall behavior, not a harness bug. See
-      // README "Bench harness - degradation diagnostics" for the
-      // operator-facing diagnosis.
-      const degradationReason = recallResult.degradation_reason ?? null;
-      if (degradationReason === "warm_cascade_engaged") degradeWarm++;
-      else if (degradationReason === "cold_cascade_engaged") degradeCold++;
-      else if (degradationReason === "recall_explainability_partial") degradePartial++;
-      else degradeNone++;
-
-      perScenario.push({
-        id: scenario.id,
-        version: 1,
-        hit_at_5: hitAt5,
-        tier: firstTier
-      });
-    } finally {
-      await daemon.shutdown();
+  for (let rank = 0; rank < results.length && rank < 10; rank += 1) {
+    const pointer = results[rank];
+    if (pointer === undefined) continue;
+    if (rank === 0) {
+      firstTier = inferTier(pointer.relevance_score);
     }
+    const expectedId = sidecar.get(pointer.object_id);
+    const isHit = expectedId !== undefined && expectedIdSet.has(expectedId);
+    if (!isHit) continue;
+    if (rank === 0) hitAt1 = true;
+    if (rank < 5) hitAt5 = true;
+    hitAt10 = true;
   }
 
-  const n = perScenario.length;
-  const rAt1 = n === 0 ? 0 : totalHitAt1 / n;
-  const rAt5 = n === 0 ? 0 : perScenario.filter((r) => r.hit_at_5).length / n;
-  const rAt10 = n === 0 ? 0 : totalHitAt10 / n;
-  const latencyP50 = computePercentile(latencies, 50);
-  const latencyP95 = computePercentile(latencies, 95);
+  return { hitAt1, hitAt5, hitAt10, firstTier };
+}
 
-  const payload: KpiPayload = {
+function buildSelfBenchPayload(input: {
+  readonly runAt: Date;
+  readonly alayaVersion: string;
+  readonly commitSha7: string;
+  readonly results: readonly SelfScenarioResult[];
+}): KpiPayload {
+  return {
     bench_name: "self",
     split: "synthetic",
-    run_at: runAt.toISOString(),
-    alaya_commit: commitSha7,
-    alaya_version: alayaVersion,
+    run_at: input.runAt.toISOString(),
+    alaya_commit: input.commitSha7,
+    alaya_version: input.alayaVersion,
     recall_pipeline_version: RECALL_PIPELINE_VERSION,
     embedding_provider: "none",
     chat_provider: "none",
@@ -204,42 +263,94 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
     sample_size: SYNTHETIC_SCENARIOS.length,
     evaluated_count: SYNTHETIC_SCENARIOS.length,
     harness_mode: "mcp_propose_review",
-    kpi: {
-      r_at_1: rAt1,
-      r_at_5: rAt5,
-      r_at_10: rAt10,
-      latency_ms_p50: latencyP50,
-      latency_ms_p95: latencyP95,
-      latency_source: "exact",
-      token_saved_ratio_vs_full_prompt: 0,
-      tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
-      degradation_reasons: {
-        none: degradeNone,
-        warm_cascade_engaged: degradeWarm,
-        cold_cascade_engaged: degradeCold,
-        recall_explainability_partial: degradePartial
-      },
-      seed_truncation: {
-        seed_turns_truncated: truncSeedTotal,
-        answer_turns_truncated: truncAnswerTotal,
-        seed_chars_clipped: truncCharsTotal
-      },
-      per_scenario: perScenario
-    }
+    kpi: buildSelfBenchKpi(input.results)
   };
+}
 
+function buildSelfBenchKpi(
+  results: readonly SelfScenarioResult[]
+): KpiPayload["kpi"] {
+  const total = results.length;
+  return {
+    r_at_1: ratio(results.filter((result) => result.hitAt1).length, total),
+    r_at_5: ratio(results.filter((result) => result.row.hit_at_5).length, total),
+    r_at_10: ratio(results.filter((result) => result.hitAt10).length, total),
+    latency_ms_p50: computePercentile(results.map((result) => result.latencyMs), 50),
+    latency_ms_p95: computePercentile(results.map((result) => result.latencyMs), 95),
+    latency_source: "exact",
+    token_saved_ratio_vs_full_prompt: 0,
+    tier_distribution: buildSelfTierDistribution(results),
+    degradation_reasons: buildSelfDegradationReasons(results),
+    seed_truncation: buildSelfTruncation(results),
+    per_scenario: results.map((result) => result.row)
+  };
+}
+
+function buildSelfTierDistribution(results: readonly SelfScenarioResult[]) {
+  let hot = 0;
+  let warm = 0;
+  let cold = 0;
+  for (const result of results) {
+    if (result.firstTier === "hot") hot += 1;
+    else if (result.firstTier === "warm") warm += 1;
+    else cold += 1;
+  }
+  return { hot, warm, cold };
+}
+
+function buildSelfDegradationReasons(results: readonly SelfScenarioResult[]) {
+  let none = 0;
+  let warm = 0;
+  let cold = 0;
+  let partial = 0;
+  for (const result of results) {
+    if (result.degradationReason === "warm_cascade_engaged") warm += 1;
+    else if (result.degradationReason === "cold_cascade_engaged") cold += 1;
+    else if (result.degradationReason === "recall_explainability_partial") partial += 1;
+    else none += 1;
+  }
+  return {
+    none,
+    warm_cascade_engaged: warm,
+    cold_cascade_engaged: cold,
+    recall_explainability_partial: partial
+  };
+}
+
+function buildSelfTruncation(results: readonly SelfScenarioResult[]) {
+  return {
+    seed_turns_truncated: results.reduce(
+      (sum, result) => sum + result.seedTurnsTruncated,
+      0
+    ),
+    answer_turns_truncated: results.reduce(
+      (sum, result) => sum + result.answerTurnsTruncated,
+      0
+    ),
+    seed_chars_clipped: results.reduce(
+      (sum, result) => sum + result.seedCharsClipped,
+      0
+    )
+  };
+}
+
+async function writeSelfBenchRun(
+  opts: SelfBenchRunOptions,
+  runAt: Date,
+  payload: KpiPayload
+): Promise<SelfBenchRunResult> {
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
-  // Diff against the latest entry of the SAME split. Self currently only
-  // has the "synthetic" split, but the API is split-aware so adding a
-  // "golden" split later does not silently cross-compare.
   const previous = await readLatest(layout, "self", { split: payload.split });
   const diff = diffKpis(payload, previous);
-  const slug = entrySlug(runAt, commitSha7);
-
-  const report = renderReport(payload, previous, diff);
-  const findings = renderFindings(payload, diff);
-
-  const entry = await writeEntry(layout, "self", slug, payload, report, findings);
+  const slug = entrySlug(runAt, payload.alaya_commit);
+  const entry = await writeEntry(
+    layout,
+    "self",
+    slug,
+    payload,
+    renderReport(payload, previous, diff),
+    renderFindings(payload, diff)
+  );
   return {
     slug,
     kpiPath: entry.kpiPath,
@@ -262,7 +373,9 @@ function computePercentile(values: number[], p: number): number {
   return sorted[Math.max(0, idx)] ?? 0;
 }
 
-// see also: apps/bench-runner/src/shared/version.ts
+function ratio(count: number, total: number): number {
+  return total === 0 ? 0 : count / total;
+}
 
 function resolveCommitSha7(): string {
   try {

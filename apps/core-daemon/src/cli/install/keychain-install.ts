@@ -1,13 +1,4 @@
-import path from "node:path";
-import { EventPublisher } from "@do-soul/alaya-core";
-import {
-  GardenEventType,
-  HealthEventKind,
-  RuntimeGardenComputeConfigSchema,
-  SoulHealthJournalRecordedPayloadSchema,
-  type RuntimeGardenComputeConfig
-} from "@do-soul/alaya-protocol";
-import { initDatabase, SqliteConfigRepo, SqliteEventLogRepo } from "@do-soul/alaya-storage";
+import type { RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
 import { ALAYA_SYSEXITS, type AlayaCliContext, type AlayaCliResult } from "../bridge.js";
 import {
   buildInstallAuditPath,
@@ -19,6 +10,7 @@ import { ensurePrivateDirectory, writePrivateTextAtomic } from "../../services/p
 import { resolveSecretRef as resolveRuntimeSecretRef, type ResolveSecretError } from "../../secrets/index.js";
 import {
   checkPlatformKeychainAvailable,
+  type KeychainReadResult,
   readPlatformKeychainSecret,
   writePlatformKeychainSecret,
   type KeychainAvailabilityResult,
@@ -31,10 +23,8 @@ import {
   KEYCHAIN_INSTALL_SERVICE,
   RUNTIME_GARDEN_COMPUTE_CONFIG_KEY,
   detectBlockingPriorAudit,
-  fileExists,
   normalizeFile,
   readOptional,
-  readTomlString,
   rollbackPartialState,
   sanitizeInstallError,
   writeInstallAudit,
@@ -45,6 +35,11 @@ import {
   type InstallCommandDependencies,
   type PartialStateEntry
 } from "./support.js";
+import {
+  patchPersistedGardenSecretRefIfPresent,
+  restorePersistedGardenConfig,
+  resolveExistingDbPath
+} from "./keychain-install-garden-config.js";
 
 export async function executeKeychainInstall(
   ctx: AlayaCliContext,
@@ -52,144 +47,283 @@ export async function executeKeychainInstall(
   deps: InstallCommandDependencies
 ): Promise<AlayaCliResult> {
   if (args.nonInteractive) {
-    ctx.stderr.write("install --keychain requires interactive input; --non-interactive is not supported for keychain secrets.\n");
-    return { exitCode: ALAYA_SYSEXITS.USAGE };
+    return reportKeychainInstallUsage(ctx.stderr);
   }
 
+  const session = await createKeychainInstallSession(ctx, deps);
+  const preflightResult = await prepareKeychainInstall(session, args.force);
+  if (preflightResult !== null) {
+    const preflightJson = preflightResult.json;
+    if (typeof preflightJson === "object" && preflightJson !== null && "error" in preflightJson) {
+      ctx.stderr.write(`${String(preflightJson.error)}\n`);
+    }
+    return preflightResult;
+  }
+
+  const secret = await promptKeychainSecret(ctx, session.keychainRef);
+  if (secret === null) {
+    return reportEmptyKeychainSecret(ctx.stderr);
+  }
+
+  return await persistKeychainInstall(ctx, deps, session, secret);
+}
+
+interface KeychainInstallSession {
+  readonly service: string;
+  readonly account: string;
+  readonly keychainRef: string;
+  readonly clock: () => string;
+  readonly paths: AlayaConfigPaths;
+  readonly startedAt: string;
+  readonly auditPath: string;
+  readonly partialState: PartialStateEntry[];
+  readonly checkAvailable: (service: string, account: string) => KeychainAvailabilityResult;
+  readonly writeKeychain: (service: string, account: string, value: string) => KeychainWriteResult;
+  readonly readKeychain: (service: string, account: string) => KeychainReadResult;
+  readonly platform: NodeJS.Platform;
+}
+
+function reportKeychainInstallUsage(stderr: NodeJS.WritableStream): AlayaCliResult {
+  stderr.write("install --keychain requires interactive input; --non-interactive is not supported for keychain secrets.\n");
+  return { exitCode: ALAYA_SYSEXITS.USAGE };
+}
+
+async function createKeychainInstallSession(
+  ctx: AlayaCliContext,
+  deps: InstallCommandDependencies
+): Promise<KeychainInstallSession> {
   const service = KEYCHAIN_INSTALL_SERVICE;
   const account = KEYCHAIN_INSTALL_ACCOUNT;
-  const keychainRef = `keychain:${service}:${account}`;
   const clock = deps.clock ?? (() => new Date().toISOString());
   const configDir = deps.configDirResolver?.(ctx) ?? resolveAlayaConfigDir({ env: ctx.env });
   const paths = resolveAlayaConfigPaths(configDir);
   const startedAt = clock();
-  const auditPath = buildInstallAuditPath(paths, startedAt);
-  const partialState: PartialStateEntry[] = [];
-  let auditInitialized = false;
-  let persistedGardenConfigBefore: RuntimeGardenComputeConfig | null | undefined;
-  let persistedGardenConfigChange: InstallAuditConfigChange | undefined;
-  let keychainOrphan: InstallAuditKeychainOrphan | undefined;
+  return {
+    service,
+    account,
+    keychainRef: `keychain:${service}:${account}`,
+    clock,
+    paths,
+    startedAt,
+    auditPath: buildInstallAuditPath(paths, startedAt),
+    partialState: [],
+    checkAvailable:
+      deps.keychain?.checkAvailable ??
+      ((svc, acct) => checkPlatformKeychainAvailable(svc, acct)),
+    writeKeychain:
+      deps.keychain?.writeKeychain ??
+      ((svc, acct, value) => writePlatformKeychainSecret(svc, acct, value)),
+    readKeychain:
+      deps.keychain?.readKeychain ??
+      ((svc, acct) => readPlatformKeychainSecret(svc, acct)),
+    platform: deps.platform ?? process.platform
+  };
+}
 
-  await Promise.all([ensurePrivateDirectory(paths.configDir), ensurePrivateDirectory(paths.auditDir)]);
-
-  if (!args.force) {
-    const blocking = await detectBlockingPriorAudit(paths);
+async function prepareKeychainInstall(
+  session: KeychainInstallSession,
+  force: boolean
+): Promise<AlayaCliResult | null> {
+  await Promise.all([
+    ensurePrivateDirectory(session.paths.configDir),
+    ensurePrivateDirectory(session.paths.auditDir)
+  ]);
+  if (!force) {
+    const blocking = await detectBlockingPriorAudit(session.paths);
     if (blocking !== null) {
-      ctx.stderr.write(
-        `previous install audit ${blocking.fileName} reports status="${blocking.status}"; ` +
-          `partial_state may be unrecovered. Re-run with --force to override.\n`
+      return reportKeychainInstallTempfail(
+        `previous install audit ${blocking.fileName} reports status=\"${blocking.status}\"; partial_state may be unrecovered. Re-run with --force to override.`
       );
-      return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
     }
   }
-
-  const checkAvailable = deps.keychain?.checkAvailable ?? ((svc, acct) => checkPlatformKeychainAvailable(svc, acct));
-  const writeKeychain = deps.keychain?.writeKeychain ?? ((svc, acct, value) => writePlatformKeychainSecret(svc, acct, value));
-  const readKeychain = deps.keychain?.readKeychain ?? ((svc, acct) => readPlatformKeychainSecret(svc, acct));
-
-  const availability = checkAvailable(service, account);
+  const availability = session.checkAvailable(session.service, session.account);
   if (!("ok" in availability)) {
-    ctx.stderr.write(`${formatKeychainInstallError(availability)}\n`);
-    return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
+    return reportKeychainInstallTempfail(formatKeychainInstallError(availability));
   }
+  return null;
+}
 
+function reportKeychainInstallTempfail(message: string): AlayaCliResult {
+  return {
+    exitCode: ALAYA_SYSEXITS.TEMPFAIL,
+    json: {
+      ok: false,
+      error: message
+    }
+  };
+}
+
+async function promptKeychainSecret(
+  ctx: AlayaCliContext,
+  keychainRef: string
+): Promise<string | null> {
   ctx.stderr.write(`Enter secret for ${keychainRef}: `);
   const secret = await readSecretLine(ctx.stdin, ctx.stderr, ctx.isTTY);
-  if (secret.trim().length === 0) {
-    ctx.stderr.write("install --keychain requires a non-empty secret value.\n");
-    return { exitCode: ALAYA_SYSEXITS.USAGE };
-  }
+  return secret.trim().length === 0 ? null : secret;
+}
 
+function reportEmptyKeychainSecret(stderr: NodeJS.WritableStream): AlayaCliResult {
+  stderr.write("install --keychain requires a non-empty secret value.\n");
+  return { exitCode: ALAYA_SYSEXITS.USAGE };
+}
+
+async function persistKeychainInstall(
+  ctx: AlayaCliContext,
+  deps: InstallCommandDependencies,
+  session: KeychainInstallSession,
+  secret: string
+): Promise<AlayaCliResult> {
+  const auditState = await initializeKeychainInstallAudit(session, deps.platform ?? process.platform);
+  let persistedGardenConfigBefore: RuntimeGardenComputeConfig | null | undefined;
   try {
-    await writeInstallAudit(auditPath, {
-      status: "started",
-      started_at: startedAt,
-      finished_at: null,
-      config_dir: paths.configDir,
-      partial_state: [],
-      error: null
-    });
-    auditInitialized = true;
-
-    const writeResult = writeKeychain(service, account, secret);
-    if (!("ok" in writeResult)) {
-      throw new Error(formatKeychainInstallError(writeResult));
-    }
-    keychainOrphan = buildKeychainOrphanAudit(keychainRef, service, account, deps.platform ?? process.platform);
-
-    const verified = resolveRuntimeSecretRef(keychainRef, {
-      readEnv: (name) => ctx.env[name],
-      readFile: () => {
-        throw new Error("unexpected file secret read during keychain verification");
-      },
-      readKeychain
-    });
-    if ("kind" in verified) {
-      throw new Error(`keychain write verification failed: ${formatSecretRefVerificationError(verified)}`);
-    }
-
-    const envBefore = await readOptional(paths.envPath);
-    const nextEnv = patchEnvWithGardenKeychainRef(envBefore, keychainRef);
-    if (normalizeFile(envBefore) !== normalizeFile(nextEnv)) {
-      await writePrivateTextAtomic(paths.envPath, nextEnv, 0o600);
-      partialState.push({ path: paths.envPath, beforeContent: envBefore ?? undefined });
-    }
-
-    const dbPath = await resolveExistingDbPath(paths);
-    const persistedPatch = await patchPersistedGardenSecretRefIfPresent(dbPath, keychainRef, startedAt);
+    writeAndVerifyKeychainSecret(ctx, session, secret);
+    const persistedPatch = await persistKeychainInstallFiles(session);
     persistedGardenConfigBefore = persistedPatch?.before;
-    persistedGardenConfigChange =
-      persistedPatch === null
-        ? undefined
-        : {
-            key: RUNTIME_GARDEN_COMPUTE_CONFIG_KEY,
-            before: summarizeGardenConfigForInstallAudit(persistedPatch.before),
-            after: summarizeGardenConfigForInstallAudit(persistedPatch.after)
-          };
-
-    await writeInstallAudit(auditPath, {
-      status: "succeeded",
-      started_at: startedAt,
-      finished_at: clock(),
-      config_dir: paths.configDir,
-      partial_state: partialState.map((entry) => entry.path),
-      error: null,
-      config_changes: persistedGardenConfigChange === undefined ? undefined : [persistedGardenConfigChange]
-    });
-
-    if (ctx.jsonRequested !== true) {
-      ctx.stdout.write(`installed Alaya keychain ref ${keychainRef} at ${paths.envPath}\n`);
-    }
-    return {
-      exitCode: ALAYA_SYSEXITS.OK,
-      json: {
-        ok: true,
-        config_dir: paths.configDir,
-        env_path: paths.envPath,
-        audit_path: auditPath,
-        secret_ref: keychainRef
-      }
-    };
+    const persistedGardenConfigChange = summarizePersistedGardenConfigChange(persistedPatch);
+    await finalizeKeychainInstallSuccess(ctx, session, persistedGardenConfigChange);
+    return buildKeychainInstallSuccessResult(session);
   } catch (error) {
-    const rollbackErrors = await rollbackPartialState(partialState);
-    if (auditInitialized) {
-      await writeInstallAudit(auditPath, {
-        status: "failed",
-        started_at: startedAt,
-        finished_at: clock(),
-        config_dir: paths.configDir,
-        partial_state: partialState.map((entry) => entry.path),
-        error: sanitizeInstallError(error),
-        rollback_errors: rollbackErrors.length > 0 ? rollbackErrors : undefined,
-        keychain_orphan: keychainOrphan
-      }).catch(() => undefined);
-    }
-    if (persistedGardenConfigBefore !== undefined) {
-      await restorePersistedGardenConfig(paths, persistedGardenConfigBefore).catch(() => undefined);
-    }
-    ctx.stderr.write(`${sanitizeInstallError(error)}\n`);
-    return { exitCode: ALAYA_SYSEXITS.CANTCREAT };
+    return await finalizeKeychainInstallFailure(
+      ctx,
+      session,
+      auditState.auditInitialized,
+      persistedGardenConfigBefore,
+      auditState.keychainOrphan,
+      error
+    );
   }
+}
+
+function writeAndVerifyKeychainSecret(
+  ctx: AlayaCliContext,
+  session: KeychainInstallSession,
+  secret: string
+): void {
+  const writeResult = session.writeKeychain(session.service, session.account, secret);
+  if (!("ok" in writeResult)) {
+    throw new Error(formatKeychainInstallError(writeResult));
+  }
+  verifyKeychainSecretRef(ctx, session);
+}
+
+function verifyKeychainSecretRef(
+  ctx: AlayaCliContext,
+  session: KeychainInstallSession
+): void {
+  const verified = resolveRuntimeSecretRef(session.keychainRef, {
+    readEnv: (name) => ctx.env[name],
+    readFile: () => {
+      throw new Error("unexpected file secret read during keychain verification");
+    },
+    readKeychain: session.readKeychain
+  });
+  if ("kind" in verified) {
+    throw new Error(`keychain write verification failed: ${formatSecretRefVerificationError(verified)}`);
+  }
+}
+
+async function persistKeychainInstallFiles(
+  session: KeychainInstallSession
+): Promise<{ readonly before: RuntimeGardenComputeConfig; readonly after: RuntimeGardenComputeConfig } | null> {
+  const envBefore = await readOptional(session.paths.envPath);
+  const nextEnv = patchEnvWithGardenKeychainRef(envBefore, session.keychainRef);
+  if (normalizeFile(envBefore) !== normalizeFile(nextEnv)) {
+    await writePrivateTextAtomic(session.paths.envPath, nextEnv, 0o600);
+    session.partialState.push({ path: session.paths.envPath, beforeContent: envBefore ?? undefined });
+  }
+  const dbPath = await resolveExistingDbPath(session.paths);
+  return await patchPersistedGardenSecretRefIfPresent(dbPath, session.keychainRef, session.startedAt);
+}
+
+async function initializeKeychainInstallAudit(
+  session: KeychainInstallSession,
+  platform: NodeJS.Platform
+): Promise<Readonly<{ auditInitialized: true; keychainOrphan: InstallAuditKeychainOrphan }>> {
+  await writeInstallAudit(session.auditPath, {
+    status: "started",
+    started_at: session.startedAt,
+    finished_at: null,
+    config_dir: session.paths.configDir,
+    partial_state: [],
+    error: null
+  });
+  return {
+    auditInitialized: true,
+    keychainOrphan: buildKeychainOrphanAudit(session.keychainRef, session.service, session.account, platform)
+  };
+}
+
+function summarizePersistedGardenConfigChange(
+  persistedPatch: { readonly before: RuntimeGardenComputeConfig; readonly after: RuntimeGardenComputeConfig } | null
+): InstallAuditConfigChange | undefined {
+  if (persistedPatch === null) {
+    return undefined;
+  }
+  return {
+    key: RUNTIME_GARDEN_COMPUTE_CONFIG_KEY,
+    before: summarizeGardenConfigForInstallAudit(persistedPatch.before),
+    after: summarizeGardenConfigForInstallAudit(persistedPatch.after)
+  };
+}
+
+async function finalizeKeychainInstallSuccess(
+  ctx: AlayaCliContext,
+  session: KeychainInstallSession,
+  persistedGardenConfigChange: InstallAuditConfigChange | undefined
+): Promise<void> {
+  await writeInstallAudit(session.auditPath, {
+    status: "succeeded",
+    started_at: session.startedAt,
+    finished_at: session.clock(),
+    config_dir: session.paths.configDir,
+    partial_state: session.partialState.map((entry) => entry.path),
+    error: null,
+    config_changes: persistedGardenConfigChange === undefined ? undefined : [persistedGardenConfigChange]
+  });
+  if (ctx.jsonRequested !== true) {
+    ctx.stdout.write(`installed Alaya keychain ref ${session.keychainRef} at ${session.paths.envPath}\n`);
+  }
+}
+
+function buildKeychainInstallSuccessResult(session: KeychainInstallSession): AlayaCliResult {
+  return {
+    exitCode: ALAYA_SYSEXITS.OK,
+    json: {
+      ok: true,
+      config_dir: session.paths.configDir,
+      env_path: session.paths.envPath,
+      audit_path: session.auditPath,
+      secret_ref: session.keychainRef
+    }
+  };
+}
+
+async function finalizeKeychainInstallFailure(
+  ctx: AlayaCliContext,
+  session: KeychainInstallSession,
+  auditInitialized: boolean,
+  persistedGardenConfigBefore: RuntimeGardenComputeConfig | null | undefined,
+  keychainOrphan: InstallAuditKeychainOrphan | undefined,
+  error: unknown
+): Promise<AlayaCliResult> {
+  const rollbackErrors = await rollbackPartialState(session.partialState);
+  if (auditInitialized) {
+    await writeInstallAudit(session.auditPath, {
+      status: "failed",
+      started_at: session.startedAt,
+      finished_at: session.clock(),
+      config_dir: session.paths.configDir,
+      partial_state: session.partialState.map((entry) => entry.path),
+      error: sanitizeInstallError(error),
+      rollback_errors: rollbackErrors.length > 0 ? rollbackErrors : undefined,
+      keychain_orphan: keychainOrphan
+    }).catch(() => undefined);
+  }
+  if (persistedGardenConfigBefore !== undefined) {
+    await restorePersistedGardenConfig(session.paths, persistedGardenConfigBefore).catch(() => undefined);
+  }
+  ctx.stderr.write(`${sanitizeInstallError(error)}\n`);
+  return { exitCode: ALAYA_SYSEXITS.CANTCREAT };
 }
 
 function summarizeGardenConfigForInstallAudit(config: RuntimeGardenComputeConfig): GardenConfigAuditSnapshot {
@@ -254,79 +388,6 @@ function patchEnvWithGardenKeychainRef(envBefore: string | null, keychainRef: st
     nextLines.push(assignment);
   }
   return `${nextLines.join("\n")}\n`;
-}
-
-async function patchPersistedGardenSecretRefIfPresent(
-  dbPath: string,
-  secretRef: string,
-  occurredAt: string
-): Promise<{ readonly before: RuntimeGardenComputeConfig; readonly after: RuntimeGardenComputeConfig } | null> {
-  if (!(await fileExists(dbPath))) {
-    return null;
-  }
-  const database = initDatabase({ filename: dbPath });
-  const configRepo = new SqliteConfigRepo(database);
-  const before = configRepo.get<RuntimeGardenComputeConfig>(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY);
-  if (before === null) {
-    return null;
-  }
-  const parsedBefore = RuntimeGardenComputeConfigSchema.parse(before);
-  const after = RuntimeGardenComputeConfigSchema.parse({
-    ...parsedBefore,
-    secret_ref: secretRef
-  });
-  const eventPublisher = new EventPublisher({
-    eventLogRepo: new SqliteEventLogRepo(database),
-    runHotStateService: { apply: () => undefined },
-    runtimeNotifier: {
-      notify: () => undefined,
-      notifyEntry: () => undefined
-    }
-  });
-  await eventPublisher.appendManyWithMutation(
-    [
-      {
-        event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
-        entity_type: "runtime_config",
-        entity_id: RUNTIME_GARDEN_COMPUTE_CONFIG_KEY,
-        workspace_id: "runtime",
-        run_id: null,
-        caused_by: "install",
-        payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
-          entry_id: `install-keychain:${occurredAt}`,
-          event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
-          workspace_id: "runtime",
-          occurred_at: occurredAt,
-          change_summary: {
-            fields_changed: ["secret_ref"],
-            secret_ref_kind: "keychain"
-          }
-        })
-      }
-    ],
-    () => {
-      configRepo.set(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, after);
-      return after;
-    }
-  );
-  return { before: parsedBefore, after };
-}
-
-async function restorePersistedGardenConfig(
-  paths: AlayaConfigPaths,
-  config: RuntimeGardenComputeConfig | null
-): Promise<void> {
-  const dbPath = await resolveExistingDbPath(paths);
-  if (!(await fileExists(dbPath)) || config === null) {
-    return;
-  }
-  new SqliteConfigRepo(initDatabase({ filename: dbPath })).set(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, config);
-}
-
-async function resolveExistingDbPath(paths: AlayaConfigPaths): Promise<string> {
-  const toml = await readOptional(paths.tomlPath);
-  const dbPath = toml === null ? null : readTomlString(toml, "storage", "db_path");
-  return path.resolve(dbPath ?? path.join(paths.configDir, "alaya.db"));
 }
 
 type KeychainInstallFailure =

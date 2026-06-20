@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedIdSchema,
+  BoundedJsonObjectSchema,
+  BoundedReasonSchema,
+  IsoDatetimeStringSchema
+} from "../shared/schema-primitives.js";
 
 const healthEventKindValues = [
   "bankruptcy",
@@ -39,12 +44,12 @@ export const HealthEventKindSchema = z.enum(healthEventKindValues);
 
 export const HealthJournalEntrySchema = z
   .object({
-    entry_id: NonEmptyStringSchema,
+    entry_id: BoundedIdSchema,
     event_kind: HealthEventKindSchema,
-    workspace_id: NonEmptyStringSchema,
-    run_id: NonEmptyStringSchema.nullable(),
-    summary: NonEmptyStringSchema,
-    detail_json: z.record(z.string(), z.unknown()),
+    workspace_id: BoundedIdSchema,
+    run_id: BoundedIdSchema.nullable(),
+    summary: BoundedReasonSchema,
+    detail_json: BoundedJsonObjectSchema,
     created_at: IsoDatetimeStringSchema
   })
   .strict()

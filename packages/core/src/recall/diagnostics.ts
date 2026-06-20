@@ -27,31 +27,58 @@ export function buildRecallDiagnostics(params: Readonly<{
 }>): Readonly<RecallDiagnostics> {
   const embeddingWorkspaceScan = params.embeddingWorkspaceScan ?? null;
   return Object.freeze({
-    query_probes: Object.freeze({
-      object_ids: Object.freeze([...params.queryProbes.object_ids]),
-      subject_hints: Object.freeze([...params.queryProbes.subject_hints]),
-      evidence_refs: Object.freeze([...params.queryProbes.evidence_refs]),
-      run_ids: Object.freeze([...params.queryProbes.run_ids]),
-      surface_ids: Object.freeze([...params.queryProbes.surface_ids]),
-      file_paths: Object.freeze([...params.queryProbes.file_paths]),
-      command_names: Object.freeze([...params.queryProbes.command_names]),
-      package_names: Object.freeze([...params.queryProbes.package_names]),
-      task_refs: Object.freeze([...params.queryProbes.task_refs]),
-      dimensions: Object.freeze([...params.queryProbes.dimensions]),
-      scope_classes: Object.freeze([...params.queryProbes.scope_classes]),
-      domain_tags: Object.freeze([...params.queryProbes.domain_tags]),
-      lexical_terms: Object.freeze([...params.queryProbes.lexical_terms]),
-      expanded_terms: Object.freeze([...params.queryProbes.expanded_terms]),
-      phrases: Object.freeze([...params.queryProbes.phrases]),
-      char_ngrams: Object.freeze([...params.queryProbes.char_ngrams]),
-      date_terms: Object.freeze([...params.queryProbes.date_terms])
-    }),
+    query_probes: freezeRecallQueryProbes(params.queryProbes),
     total_scanned: params.totalScanned,
     candidate_pool_count: params.candidatePoolCount,
     pre_budget_count: params.preBudgetCount,
     delivered_count: params.deliveredCount,
     embedding_provider_status: params.embeddingProviderStatus,
     provider_degradation_reason: params.providerDegradationReason,
+    ...buildEmbeddingWorkspaceScanDiagnostics(embeddingWorkspaceScan),
+    graph_expansion_plane_count_per_hop:
+      params.graphExpansionDiagnostics.graph_expansion_plane_count_per_hop,
+    graph_expansion_plane_count_per_edge_type:
+      params.graphExpansionDiagnostics.graph_expansion_plane_count_per_edge_type,
+    ...(params.graphExpansionDiagnostics.multi_seed_graph_fan_in === undefined
+      ? {}
+      : { multi_seed_graph_fan_in: params.graphExpansionDiagnostics.multi_seed_graph_fan_in }),
+    fusion_breakdown: freezeFusionBreakdown(params.candidates),
+    candidates: Object.freeze([...params.candidates]),
+    token_economy: params.tokenEconomy,
+    ...(params.phaseLatencyMs === undefined
+      ? {}
+      : { phase_latency_ms: Object.freeze({ ...params.phaseLatencyMs }) })
+  });
+}
+
+function freezeRecallQueryProbes(
+  queryProbes: Readonly<RecallQueryProbes>
+): Readonly<RecallDiagnostics["query_probes"]> {
+  return Object.freeze({
+    object_ids: Object.freeze([...queryProbes.object_ids]),
+    subject_hints: Object.freeze([...queryProbes.subject_hints]),
+    evidence_refs: Object.freeze([...queryProbes.evidence_refs]),
+    run_ids: Object.freeze([...queryProbes.run_ids]),
+    surface_ids: Object.freeze([...queryProbes.surface_ids]),
+    file_paths: Object.freeze([...queryProbes.file_paths]),
+    command_names: Object.freeze([...queryProbes.command_names]),
+    package_names: Object.freeze([...queryProbes.package_names]),
+    task_refs: Object.freeze([...queryProbes.task_refs]),
+    dimensions: Object.freeze([...queryProbes.dimensions]),
+    scope_classes: Object.freeze([...queryProbes.scope_classes]),
+    domain_tags: Object.freeze([...queryProbes.domain_tags]),
+    lexical_terms: Object.freeze([...queryProbes.lexical_terms]),
+    expanded_terms: Object.freeze([...queryProbes.expanded_terms]),
+    phrases: Object.freeze([...queryProbes.phrases]),
+    char_ngrams: Object.freeze([...queryProbes.char_ngrams]),
+    date_terms: Object.freeze([...queryProbes.date_terms])
+  });
+}
+
+function buildEmbeddingWorkspaceScanDiagnostics(
+  embeddingWorkspaceScan: Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null
+): Readonly<Partial<RecallDiagnostics>> {
+  return {
     ...(embeddingWorkspaceScan?.workspace_scan_cap === undefined
       ? {}
       : { embedding_workspace_scan_cap: embeddingWorkspaceScan.workspace_scan_cap }),
@@ -69,32 +96,25 @@ export function buildRecallDiagnostics(params: Readonly<{
       : { embedding_workspace_model_id: embeddingWorkspaceScan.model_id }),
     ...(embeddingWorkspaceScan?.schema_version === undefined
       ? {}
-      : { embedding_workspace_schema_version: embeddingWorkspaceScan.schema_version }),
-    graph_expansion_plane_count_per_hop:
-      params.graphExpansionDiagnostics.graph_expansion_plane_count_per_hop,
-    graph_expansion_plane_count_per_edge_type:
-      params.graphExpansionDiagnostics.graph_expansion_plane_count_per_edge_type,
-    ...(params.graphExpansionDiagnostics.multi_seed_graph_fan_in === undefined
-      ? {}
-      : { multi_seed_graph_fan_in: params.graphExpansionDiagnostics.multi_seed_graph_fan_in }),
-    fusion_breakdown: Object.freeze(
-      params.candidates.map((candidate) => Object.freeze({
-        candidate_key: candidate.candidate_key,
-        object_id: candidate.object_id,
-        object_kind: candidate.object_kind,
-        origin_plane: candidate.origin_plane,
-        per_stream_rank: candidate.per_stream_rank,
-        fused_rank: candidate.fused_rank,
-        fused_score: candidate.fused_score,
-        fused_rank_contribution_per_stream: candidate.fused_rank_contribution_per_stream
-      }))
-    ),
-    candidates: Object.freeze([...params.candidates]),
-    token_economy: params.tokenEconomy,
-    ...(params.phaseLatencyMs === undefined
-      ? {}
-      : { phase_latency_ms: Object.freeze({ ...params.phaseLatencyMs }) })
-  });
+      : { embedding_workspace_schema_version: embeddingWorkspaceScan.schema_version })
+  };
+}
+
+function freezeFusionBreakdown(
+  candidates: readonly Readonly<RecallCandidateDiagnostic>[]
+): Readonly<RecallDiagnostics["fusion_breakdown"]> {
+  return Object.freeze(
+    candidates.map((candidate) => Object.freeze({
+      candidate_key: candidate.candidate_key,
+      object_id: candidate.object_id,
+      object_kind: candidate.object_kind,
+      origin_plane: candidate.origin_plane,
+      per_stream_rank: candidate.per_stream_rank,
+      fused_rank: candidate.fused_rank,
+      fused_score: candidate.fused_score,
+      fused_rank_contribution_per_stream: candidate.fused_rank_contribution_per_stream
+    }))
+  );
 }
 
 /**

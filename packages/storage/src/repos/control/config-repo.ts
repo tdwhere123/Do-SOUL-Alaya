@@ -1,14 +1,23 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 
+export interface ConfigValueParser<T> {
+  parse(value: unknown): T;
+}
+
 interface ConfigRow {
   readonly value: string;
 }
 
 export interface ConfigRepo {
-  get<T>(key: string): T | null;
-  set<T>(key: string, value: T): void;
-  patch<T extends Record<string, unknown>>(key: string, partial: Partial<T>, defaults: T): T;
+  getParsed<T>(key: string, parser: ConfigValueParser<T>): T | null;
+  setParsed<T>(key: string, value: T, parser: ConfigValueParser<T>): T;
+  patchParsed<T extends Record<string, unknown>>(
+    key: string,
+    partial: Partial<T>,
+    defaults: T,
+    parser: ConfigValueParser<T>
+  ): T;
 }
 
 export class SqliteConfigRepo implements ConfigRepo {
@@ -32,21 +41,26 @@ export class SqliteConfigRepo implements ConfigRepo {
     `);
   }
 
-  public get<T>(key: string): T | null {
+  public getParsed<T>(key: string, parser: ConfigValueParser<T>): T | null {
     try {
-      const row = this.getStatement.get(key) as ConfigRow | undefined;
-
-      if (row === undefined) {
-        return null;
+      const raw = this.getRaw(key);
+      return raw === null ? null : parser.parse(raw);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
       }
 
-      return JSON.parse(row.value) as T;
-    } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load config for key ${key}.`, error);
     }
   }
 
-  public set<T>(key: string, value: T): void {
+  public setParsed<T>(key: string, value: T, parser: ConfigValueParser<T>): T {
+    const parsedValue = parser.parse(value);
+    this.setRaw(key, parsedValue);
+    return parsedValue;
+  }
+
+  private setRaw<T>(key: string, value: T): void {
     try {
       this.upsertStatement.run(key, JSON.stringify(value), new Date().toISOString());
     } catch (error) {
@@ -54,13 +68,31 @@ export class SqliteConfigRepo implements ConfigRepo {
     }
   }
 
-  public patch<T extends Record<string, unknown>>(key: string, partial: Partial<T>, defaults: T): T {
-    const current = this.get<T>(key) ?? defaults;
-    const next = {
+  public patchParsed<T extends Record<string, unknown>>(
+    key: string,
+    partial: Partial<T>,
+    defaults: T,
+    parser: ConfigValueParser<T>
+  ): T {
+    const current = this.getParsed(key, parser) ?? parser.parse(defaults);
+    const next = parser.parse({
       ...current,
       ...partial
-    } as T;
-    this.set(key, next);
+    });
+    this.setParsed(key, next, parser);
     return next;
+  }
+
+  private getRaw(key: string): unknown | null {
+    const row = this.getStatement.get(key) as ConfigRow | undefined;
+    return row === undefined ? null : parseStoredConfigValue(row.value);
+  }
+}
+
+function parseStoredConfigValue(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to parse stored config JSON.", error);
   }
 }

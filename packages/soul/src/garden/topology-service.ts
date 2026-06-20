@@ -19,7 +19,7 @@ type SnapshotHistoryPort = {
 
 export interface TopologyServiceDependencies {
   readonly pathRelationRepo: {
-    findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
+    findActiveAll(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
   };
   readonly snapshotHistory?: SnapshotHistoryPort;
   readonly now?: () => Date;
@@ -47,7 +47,7 @@ export class TopologyService {
   }
 
   public async explore(workspaceId: string): Promise<Readonly<TopologyExplorationResult>> {
-    const relations = await this.deps.pathRelationRepo.findActive(workspaceId);
+    const relations = await this.deps.pathRelationRepo.findActiveAll(workspaceId);
     const built = buildTopology(relations);
     const exploredAt = this.now().toISOString();
     const trend = await this.buildTrend(workspaceId);

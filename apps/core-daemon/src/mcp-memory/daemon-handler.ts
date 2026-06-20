@@ -46,6 +46,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly sessionOverrideService: McpMemoryToolHandlerDependencies["sessionOverrideService"];
   readonly trustStateRecorder: McpMemoryToolHandlerDependencies["trustStateRecorder"];
   readonly eventPublisher: NonNullable<McpMemoryToolHandlerDependencies["eventPublisher"]>;
+  readonly asyncSideEffectAudit?: McpMemoryToolHandlerDependencies["asyncSideEffectAudit"];
   readonly gardenTaskRepo?: McpMemoryToolHandlerDependencies["gardenTaskRepo"];
   // invariant: applies a host-worker EDGE_CLASSIFY verdict to the existing
   // heuristic path. see also: mcp-memory/tool-handler.ts completeEdgeClassifyTask.
@@ -114,6 +115,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
     sessionOverrideService: input.sessionOverrideService,
     trustStateRecorder: input.trustStateRecorder,
     eventPublisher: input.eventPublisher,
+    ...(input.asyncSideEffectAudit === undefined ? {} : { asyncSideEffectAudit: input.asyncSideEffectAudit }),
     ...(input.gardenTaskRepo === undefined ? {} : { gardenTaskRepo: input.gardenTaskRepo }),
     ...(input.edgeVerdictApplier === undefined ? {} : { edgeVerdictApplier: input.edgeVerdictApplier }),
     ...(input.attachSurfaceRegistrar === undefined

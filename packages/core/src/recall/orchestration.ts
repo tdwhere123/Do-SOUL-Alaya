@@ -4,63 +4,41 @@ import {
   RetentionPolicy,
   SoulRecallWeightTransferPayloadSchema,
   StorageTier,
-  type FineAssessmentConfig,
   type RecallCandidate,
-  type ProjectMappingAnchor,
   type RecallPolicy,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "../conversation/task-surface-builder.js";
 import { parseRecallPolicy } from "../shared/recall-policy.js";
-import type { ManifestationBiasSidecarEntry } from "../manifestation/manifestation-resolver.js";
-import { fineAssess } from "./fine-assessment.js";
-import { collectSupplementaryData } from "./supplementary-data.js";
+import {
+  applyManifestationBiasEntries,
+  collectCoarseFilterSupplementaryData,
+  collectManifestationAnchorMemoryObjectIds,
+  collectManifestationBiasEntriesByMemoryId,
+  collectUniqueCoarseCandidates,
+  loadManifestationBiasSidecar,
+  loadTierCascadeProjectMappings,
+  mergeCascadeGraphExpansion,
+  mergeReadonlyRecords,
+  mergeTierCascadeStage,
+  runCoarseFineAssessment,
+  type AssessCoarseFilterParams,
+  type AssessCoarseFilterResult,
+  type CoarseFilterResult,
+  type ExpandTierCascadeParams
+} from "./orchestration-helpers.js";
 import {
   COLD_CASCADE_DECAY,
   MIN_RECALL_RESULTS,
   WARM_CASCADE_DECAY,
-  buildRecallCandidateDedupeKey,
   clamp01,
-  toErrorMessage,
-  type RecallTimeFilter
+  toErrorMessage
 } from "./recall-service-helpers.js";
-import type { RecallQueryProbes } from "./recall-query-probes.js";
 import type {
-  CoarseRecallCandidate,
-  RecallCandidateDiagnostic,
-  RecallGraphExpansionDiagnostics,
   RecallResult,
   RecallServiceDependencies,
-  RecallServiceWarnPort,
-  RecallSupplementaryData,
-  TokenEstimator
+  RecallServiceWarnPort
 } from "./recall-service-types.js";
-import {
-  mergeGraphExpansionCandidateSources,
-  mergeGraphExpansionDiagnosticsAcrossCascade,
-  mergeGraphExpansionScores,
-  type GraphExpansionCandidateSourceDiagnostic
-} from "./graph-expansion.js";
-
-type CoarseFilterResult = Readonly<{
-  readonly total_scanned: number;
-  readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
-  readonly ftsRanks: Readonly<Record<string, number>>;
-  readonly trigramFtsRanks: Readonly<Record<string, number>>;
-  readonly synthesisFtsRanks: Readonly<Record<string, number>>;
-  readonly evidenceFtsRanks: Readonly<Record<string, number>>;
-  readonly evidenceFtsRanksPerRef: Readonly<Record<string, number>>;
-  readonly sourceProximityScores: Readonly<Record<string, number>>;
-  readonly sourceCohortKeys: Readonly<Record<string, string>>;
-  readonly structuralScores: Readonly<Record<string, number>>;
-  readonly graphExpansionScores: Readonly<Record<string, number>>;
-  readonly graphExpansionDiagnostics: Readonly<RecallGraphExpansionDiagnostics>;
-  readonly graphExpansionCandidateSources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
-  readonly entitySeedScores: Readonly<Record<string, number>>;
-  readonly pathExpansionScores: Readonly<Record<string, number>>;
-  readonly pathSuppressionScores: Readonly<Record<string, number>>;
-  readonly degradation_reason: RecallResult["degradation_reason"];
-}>;
 
 export function buildDefaultPolicy(params: Readonly<{
   readonly strategy: NodeStrategy;
@@ -130,64 +108,24 @@ export async function applyManifestationBiasSidecar(params: Readonly<{
     return params.candidates;
   }
 
-  const anchorMemoryObjectIds = Object.freeze(
-    [...new Set(params.candidates.map((candidate) => candidate.object_id))]
-  );
-
-  let sidecarEntries: readonly Readonly<ManifestationBiasSidecarEntry>[];
-  try {
-    sidecarEntries = await sidecarPort.buildBiasSidecar({
-      workspaceId: params.workspaceId,
-      runId: params.runId,
-      anchorMemoryObjectIds,
-      taskSurfaceRef: params.taskSurfaceRef
-    });
-  } catch (error) {
-    params.warn("manifestation bias sidecar build failed", {
-      workspace_id: params.workspaceId,
-      run_id: params.runId,
-      error: toErrorMessage(error)
-    });
-    return params.candidates;
-  }
-
-  if (sidecarEntries.length === 0) {
-    return params.candidates;
-  }
-
-  const byMemoryId = new Map<string, Readonly<ManifestationBiasSidecarEntry>>();
-  const sortedEntries = [...sidecarEntries].sort((left, right) => {
-    if (right.unfinishedness_bias !== left.unfinishedness_bias) {
-      return right.unfinishedness_bias - left.unfinishedness_bias;
-    }
-    return left.candidate_id.localeCompare(right.candidate_id);
+  const sidecarEntries = await loadManifestationBiasSidecar({
+    sidecarPort,
+    warn: params.warn,
+    workspaceId: params.workspaceId,
+    runId: params.runId,
+    taskSurfaceRef: params.taskSurfaceRef,
+    anchorMemoryObjectIds: collectManifestationAnchorMemoryObjectIds(params.candidates)
   });
-  for (const entry of sortedEntries) {
-    if (entry.target_memory_object_id === null) {
-      continue;
-    }
-    if (!byMemoryId.has(entry.target_memory_object_id)) {
-      byMemoryId.set(entry.target_memory_object_id, entry);
-    }
+  if (sidecarEntries === null || sidecarEntries.length === 0) {
+    return params.candidates;
   }
 
+  const byMemoryId = collectManifestationBiasEntriesByMemoryId(sidecarEntries);
   if (byMemoryId.size === 0) {
     return params.candidates;
   }
 
-  return Object.freeze(
-    params.candidates.map((candidate) => {
-      const sidecar = byMemoryId.get(candidate.object_id);
-      if (sidecar === undefined) {
-        return candidate;
-      }
-      return Object.freeze({
-        ...candidate,
-        pending_incomplete: sidecar.pending_incomplete,
-        unfinishedness_bias: sidecar.unfinishedness_bias
-      });
-    })
-  );
+  return applyManifestationBiasEntries(params.candidates, byMemoryId);
 }
 
 export async function recordGlobalRecallClassificationsSafely(params: Readonly<{
@@ -216,40 +154,7 @@ export async function recordGlobalRecallClassificationsSafely(params: Readonly<{
   }
 }
 
-export async function expandTierCascade(params: Readonly<{
-  readonly coarseFilter: (
-    workspaceId: string,
-    config: Readonly<RecallPolicy>["coarse_filter"],
-    queryText: string | null,
-    options: Readonly<{
-      readonly tier?: StorageTier;
-      readonly projectMappings?: readonly Readonly<ProjectMappingAnchor>[];
-      readonly sourceChannel?: string;
-      readonly scoreMultiplier?: number;
-      readonly timeFilter?: RecallTimeFilter;
-      readonly queryProbes?: Readonly<RecallQueryProbes>;
-      readonly winnerMemoryIds?: ReadonlySet<string>;
-      readonly deliveryMaxEntries?: number;
-    }>
-  ) => Promise<CoarseFilterResult>;
-  readonly projectMappingPort?: RecallServiceDependencies["projectMappingPort"];
-  readonly mergeCoarseFilters: (
-    current: CoarseFilterResult,
-    next: CoarseFilterResult,
-    degradationReason: NonNullable<RecallResult["degradation_reason"]>
-  ) => CoarseFilterResult;
-  readonly workspaceId: string;
-  readonly runId: string | null;
-  readonly config: Readonly<RecallPolicy>["coarse_filter"];
-  readonly fineAssessmentConfig: Readonly<FineAssessmentConfig>;
-  readonly queryText: string | null;
-  readonly queryProbes: Readonly<RecallQueryProbes>;
-  readonly hotCoarseFilter: CoarseFilterResult;
-  readonly hotCoarseCandidateCount: number;
-  readonly winnerMemoryIds: ReadonlySet<string>;
-  readonly timeFilter?: RecallTimeFilter;
-  readonly warn: RecallServiceWarnPort;
-}>): Promise<CoarseFilterResult> {
+export async function expandTierCascade(params: ExpandTierCascadeParams): Promise<CoarseFilterResult> {
   const targetCount = Math.min(MIN_RECALL_RESULTS, params.fineAssessmentConfig.budgets.max_entries);
   if (targetCount === 0) {
     return params.hotCoarseFilter;
@@ -264,86 +169,39 @@ export async function expandTierCascade(params: Readonly<{
     return params.hotCoarseFilter;
   }
 
-  const projectMappings =
-    params.projectMappingPort?.findByWorkspace === undefined
-      ? []
-      : await params.projectMappingPort.findByWorkspace(params.workspaceId);
-  const warmFilter = await params.coarseFilter(params.workspaceId, params.config, params.queryText, {
-    tier: StorageTier.WARM,
+  const projectMappings = await loadTierCascadeProjectMappings(
+    params.projectMappingPort,
+    params.workspaceId
+  );
+  const warmMerged = await mergeTierCascadeStage({
+    current: params.hotCoarseFilter,
+    params,
     projectMappings,
+    tier: StorageTier.WARM,
     sourceChannel: "warm_cascade",
     scoreMultiplier: WARM_CASCADE_DECAY,
-    timeFilter: params.timeFilter,
-    queryProbes: params.queryProbes,
-    winnerMemoryIds: params.winnerMemoryIds,
-    deliveryMaxEntries: params.fineAssessmentConfig.budgets.max_entries
+    degradationReason: "warm_cascade_engaged"
   });
-  const warmMerged = params.mergeCoarseFilters(params.hotCoarseFilter, warmFilter, "warm_cascade_engaged");
   if (warmMerged.candidates.length >= targetCount) {
     return warmMerged;
   }
 
-  const coldFilter = await params.coarseFilter(params.workspaceId, params.config, params.queryText, {
-    tier: StorageTier.COLD,
+  return mergeTierCascadeStage({
+    current: warmMerged,
+    params,
     projectMappings,
+    tier: StorageTier.COLD,
     sourceChannel: "cold_cascade",
     scoreMultiplier: COLD_CASCADE_DECAY,
-    timeFilter: params.timeFilter,
-    queryProbes: params.queryProbes,
-    winnerMemoryIds: params.winnerMemoryIds,
-    deliveryMaxEntries: params.fineAssessmentConfig.budgets.max_entries
+    degradationReason: "cold_cascade_engaged"
   });
-  return params.mergeCoarseFilters(warmMerged, coldFilter, "cold_cascade_engaged");
 }
 
-export async function assessCoarseFilter(params: Readonly<{
-  readonly dependencies: RecallServiceDependencies;
-  readonly warn: RecallServiceWarnPort;
-  readonly now: () => string;
-  readonly coarseFilter: CoarseFilterResult;
-  readonly workspaceId: string;
-  readonly runId: string | null;
-  readonly queryText: string | null;
-  readonly queryProbes: Readonly<RecallQueryProbes>;
-  readonly policy: Readonly<RecallPolicy>;
-  readonly winnerMemoryIds: ReadonlySet<string>;
-  readonly tokenEstimator: TokenEstimator;
-}>): Promise<Readonly<{
-  readonly supplementaryData: RecallSupplementaryData;
-  readonly candidates: readonly Readonly<RecallCandidate>[];
-  readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
-}>> {
-  const supplementaryData = await collectSupplementaryData({
-    dependencies: params.dependencies,
-    warn: params.warn,
-    candidates: params.coarseFilter.candidates.map((candidate) => candidate.entry),
-    workspaceId: params.workspaceId,
-    runId: params.runId,
-    queryText: params.queryText,
-    queryProbes: params.queryProbes,
-    policy: params.policy,
-    coarseFtsRanks: params.coarseFilter.ftsRanks,
-    coarseTrigramFtsRanks: params.coarseFilter.trigramFtsRanks,
-    coarseSynthesisFtsRanks: params.coarseFilter.synthesisFtsRanks,
-    coarseEvidenceFtsRanks: params.coarseFilter.evidenceFtsRanks,
-    coarseEvidenceFtsRanksPerRef: params.coarseFilter.evidenceFtsRanksPerRef,
-    coarseSourceProximityScores: params.coarseFilter.sourceProximityScores,
-    coarseSourceCohortKeys: params.coarseFilter.sourceCohortKeys,
-    coarseStructuralScores: params.coarseFilter.structuralScores,
-    coarseGraphExpansionScores: params.coarseFilter.graphExpansionScores,
-    coarseEntitySeedScores: params.coarseFilter.entitySeedScores,
-    coarsePathExpansionScores: params.coarseFilter.pathExpansionScores,
-    coarsePathSuppressionScores: params.coarseFilter.pathSuppressionScores
-  });
-  const assessment = fineAssess({
-    candidates: params.coarseFilter.candidates,
-    policy: params.policy,
-    winnerMemoryIds: params.winnerMemoryIds,
-    supplementaryData,
-    tokenEstimator: params.tokenEstimator,
-    now: params.now,
-    warn: params.warn
-  });
+export async function assessCoarseFilter(
+  params: AssessCoarseFilterParams
+): Promise<AssessCoarseFilterResult> {
+  const supplementaryData = await collectCoarseFilterSupplementaryData(params);
+  const assessment = runCoarseFineAssessment(params, supplementaryData);
 
   return Object.freeze({
     supplementaryData,
@@ -357,80 +215,39 @@ export function mergeCoarseFilters(
   next: CoarseFilterResult,
   degradationReason: NonNullable<RecallResult["degradation_reason"]>
 ): CoarseFilterResult {
-  const seen = new Set(current.candidates.map((candidate) => buildRecallCandidateDedupeKey(candidate)));
-  const nextCandidates = next.candidates.filter((candidate) => {
-    const key = buildRecallCandidateDedupeKey(candidate);
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
+  const nextCandidates = collectUniqueCoarseCandidates(current.candidates, next.candidates);
   const nextCandidateIds = new Set(nextCandidates.map((candidate) => candidate.entry.object_id));
-  const graphExpansionCandidateSources = mergeGraphExpansionCandidateSources(
-    current.graphExpansionCandidateSources,
-    next.graphExpansionCandidateSources,
-    nextCandidateIds
-  );
+  const graphExpansion = mergeCascadeGraphExpansion({ current, next, nextCandidateIds });
 
   return Object.freeze({
     total_scanned: current.total_scanned + next.total_scanned,
     candidates: Object.freeze([...current.candidates, ...nextCandidates]),
-    ftsRanks: Object.freeze({
-      ...current.ftsRanks,
-      ...next.ftsRanks
-    }),
-    trigramFtsRanks: Object.freeze({
-      ...current.trigramFtsRanks,
-      ...next.trigramFtsRanks
-    }),
-    synthesisFtsRanks: Object.freeze({
-      ...current.synthesisFtsRanks,
-      ...next.synthesisFtsRanks
-    }),
-    evidenceFtsRanks: Object.freeze({
-      ...current.evidenceFtsRanks,
-      ...next.evidenceFtsRanks
-    }),
-    evidenceFtsRanksPerRef: Object.freeze({
-      ...current.evidenceFtsRanksPerRef,
-      ...next.evidenceFtsRanksPerRef
-    }),
-    sourceProximityScores: Object.freeze({
-      ...current.sourceProximityScores,
-      ...next.sourceProximityScores
-    }),
-    sourceCohortKeys: Object.freeze({
-      ...current.sourceCohortKeys,
-      ...next.sourceCohortKeys
-    }),
-    structuralScores: Object.freeze({
-      ...current.structuralScores,
-      ...next.structuralScores
-    }),
-    graphExpansionScores: mergeGraphExpansionScores(
-      current.graphExpansionScores,
-      next.graphExpansionScores,
-      nextCandidateIds
+    ftsRanks: mergeReadonlyRecords(current.ftsRanks, next.ftsRanks),
+    trigramFtsRanks: mergeReadonlyRecords(current.trigramFtsRanks, next.trigramFtsRanks),
+    synthesisFtsRanks: mergeReadonlyRecords(current.synthesisFtsRanks, next.synthesisFtsRanks),
+    evidenceFtsRanks: mergeReadonlyRecords(current.evidenceFtsRanks, next.evidenceFtsRanks),
+    evidenceFtsRanksPerRef: mergeReadonlyRecords(
+      current.evidenceFtsRanksPerRef,
+      next.evidenceFtsRanksPerRef
     ),
-    graphExpansionDiagnostics: mergeGraphExpansionDiagnosticsAcrossCascade({
-      sources: graphExpansionCandidateSources,
-      currentFanIn: current.graphExpansionDiagnostics.multi_seed_graph_fan_in,
-      nextFanIn: next.graphExpansionDiagnostics.multi_seed_graph_fan_in
-    }),
-    graphExpansionCandidateSources,
-    entitySeedScores: Object.freeze({
-      ...current.entitySeedScores,
-      ...next.entitySeedScores
-    }),
-    pathExpansionScores: Object.freeze({
-      ...current.pathExpansionScores,
-      ...next.pathExpansionScores
-    }),
-    pathSuppressionScores: Object.freeze({
-      ...current.pathSuppressionScores,
-      ...next.pathSuppressionScores
-    }),
+    sourceProximityScores: mergeReadonlyRecords(
+      current.sourceProximityScores,
+      next.sourceProximityScores
+    ),
+    sourceCohortKeys: mergeReadonlyRecords(current.sourceCohortKeys, next.sourceCohortKeys),
+    structuralScores: mergeReadonlyRecords(current.structuralScores, next.structuralScores),
+    graphExpansionScores: graphExpansion.graphExpansionScores,
+    graphExpansionDiagnostics: graphExpansion.graphExpansionDiagnostics,
+    graphExpansionCandidateSources: graphExpansion.graphExpansionCandidateSources,
+    entitySeedScores: mergeReadonlyRecords(current.entitySeedScores, next.entitySeedScores),
+    pathExpansionScores: mergeReadonlyRecords(
+      current.pathExpansionScores,
+      next.pathExpansionScores
+    ),
+    pathSuppressionScores: mergeReadonlyRecords(
+      current.pathSuppressionScores,
+      next.pathSuppressionScores
+    ),
     degradation_reason: degradationReason
   });
 }

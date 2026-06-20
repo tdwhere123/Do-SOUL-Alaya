@@ -47,6 +47,11 @@ export interface CanonicalAliasServiceDependencies {
   readonly now?: () => string;
 }
 
+interface CanonicalizationAccumulator {
+  readonly eventInputs: Omit<EventLogEntry, "event_id" | "created_at" | "revision">[];
+  nextRevision: number;
+}
+
 export class CanonicalAliasService {
   // The service owns a private mutable lookup so runtime/bootstrap seams may
   // register additional aliases after construction without exposing caller-owned maps.
@@ -91,75 +96,26 @@ export class CanonicalAliasService {
     qualifiers: Record<string, string>,
     context: GovernanceSubjectCanonicalizationContext
   ): GovernanceSubjectCanonicalizationPlan {
-    const eventInputs: Omit<EventLogEntry, "event_id" | "created_at" | "revision">[] = [];
-    let nextRevision = context.startingRevision ?? 0;
-
-    const appendResolvedValueEvents = (rawInput: string, aliasDomain: string, resolution: ResolvedAliasValue) => {
-      if (rawInput.trim().length === 0 || resolution.canonical.length === 0) {
-        return;
-      }
-
-      eventInputs.push({
-        event_type: RuntimeGovernanceEventType.CANONICALIZATION_APPLIED,
-        entity_type: context.entityType,
-        entity_id: context.entityId,
-        workspace_id: context.workspaceId,
-        run_id: context.runId,
-        caused_by: context.causedBy,
-        payload_json: CanonicalizationAppliedPayloadSchema.parse({
-          input: rawInput,
-          canonical: resolution.canonical,
-          domain: aliasDomain,
-          was_alias_resolved: resolution.wasAliasResolved,
-          applied_at: this.now()
-        })
-      });
-      nextRevision += 1;
-
-      if (resolution.aliasEntry !== undefined) {
-        eventInputs.push({
-          event_type: RuntimeGovernanceEventType.CANONICALIZATION_ALIAS_RESOLVED,
-          entity_type: context.entityType,
-          entity_id: context.entityId,
-          workspace_id: context.workspaceId,
-          run_id: context.runId,
-          caused_by: context.causedBy,
-          payload_json: CanonicalizationAliasResolvedPayloadSchema.parse({
-            alias: rawInput,
-            canonical: resolution.canonical,
-            domain: aliasDomain,
-            language: resolution.aliasEntry.language,
-            resolved_at: this.now()
-          })
-        });
-        nextRevision += 1;
-      }
+    const accumulator: CanonicalizationAccumulator = {
+      eventInputs: [],
+      nextRevision: context.startingRevision ?? 0
     };
 
-    const domainResolution = this.resolveDetailed(domain, CanonicalAliasDomain.GOVERNANCE_SUBJECT_DOMAIN);
-    appendResolvedValueEvents(domain, CanonicalAliasDomain.GOVERNANCE_SUBJECT_DOMAIN, domainResolution);
-
-    for (const [rawKey, rawValue] of Object.entries(qualifiers)) {
-      const normalizedKey = canonicalizeToken(rawKey);
-
-      if (normalizedKey.length === 0) {
-        continue;
-      }
-
-      const valueResolution = this.resolveDetailed(rawValue, governanceSubjectQualifierAliasDomain(normalizedKey));
-      appendResolvedValueEvents(
-        rawValue,
-        governanceSubjectQualifierAliasDomain(normalizedKey),
-        valueResolution
-      );
-    }
+    this.appendResolvedValueEvents(
+      accumulator,
+      context,
+      domain,
+      CanonicalAliasDomain.GOVERNANCE_SUBJECT_DOMAIN,
+      this.resolveDetailed(domain, CanonicalAliasDomain.GOVERNANCE_SUBJECT_DOMAIN)
+    );
+    this.appendQualifierCanonicalizationEvents(accumulator, context, qualifiers);
 
     return Object.freeze({
       governanceSubject: canonicalGovernanceSubject(domain, qualifiers, {
         aliasResolver: this.resolve.bind(this)
       }),
-      eventInputs: Object.freeze(eventInputs),
-      nextRevision
+      eventInputs: Object.freeze(accumulator.eventInputs),
+      nextRevision: accumulator.nextRevision
     });
   }
 
@@ -205,5 +161,74 @@ export class CanonicalAliasService {
       wasAliasResolved: true,
       aliasEntry
     };
+  }
+
+  private appendQualifierCanonicalizationEvents(
+    accumulator: CanonicalizationAccumulator,
+    context: GovernanceSubjectCanonicalizationContext,
+    qualifiers: Record<string, string>
+  ): void {
+    for (const [rawKey, rawValue] of Object.entries(qualifiers)) {
+      const normalizedKey = canonicalizeToken(rawKey);
+      if (normalizedKey.length === 0) {
+        continue;
+      }
+      const aliasDomain = governanceSubjectQualifierAliasDomain(normalizedKey);
+      this.appendResolvedValueEvents(
+        accumulator,
+        context,
+        rawValue,
+        aliasDomain,
+        this.resolveDetailed(rawValue, aliasDomain)
+      );
+    }
+  }
+
+  private appendResolvedValueEvents(
+    accumulator: CanonicalizationAccumulator,
+    context: GovernanceSubjectCanonicalizationContext,
+    rawInput: string,
+    aliasDomain: string,
+    resolution: ResolvedAliasValue
+  ): void {
+    if (rawInput.trim().length === 0 || resolution.canonical.length === 0) {
+      return;
+    }
+
+    accumulator.eventInputs.push({
+      event_type: RuntimeGovernanceEventType.CANONICALIZATION_APPLIED,
+      entity_type: context.entityType,
+      entity_id: context.entityId,
+      workspace_id: context.workspaceId,
+      run_id: context.runId,
+      caused_by: context.causedBy,
+      payload_json: CanonicalizationAppliedPayloadSchema.parse({
+        input: rawInput,
+        canonical: resolution.canonical,
+        domain: aliasDomain,
+        was_alias_resolved: resolution.wasAliasResolved,
+        applied_at: this.now()
+      })
+    });
+    accumulator.nextRevision += 1;
+
+    if (resolution.aliasEntry !== undefined) {
+      accumulator.eventInputs.push({
+        event_type: RuntimeGovernanceEventType.CANONICALIZATION_ALIAS_RESOLVED,
+        entity_type: context.entityType,
+        entity_id: context.entityId,
+        workspace_id: context.workspaceId,
+        run_id: context.runId,
+        caused_by: context.causedBy,
+        payload_json: CanonicalizationAliasResolvedPayloadSchema.parse({
+          alias: rawInput,
+          canonical: resolution.canonical,
+          domain: aliasDomain,
+          language: resolution.aliasEntry.language,
+          resolved_at: this.now()
+        })
+      });
+      accumulator.nextRevision += 1;
+    }
   }
 }

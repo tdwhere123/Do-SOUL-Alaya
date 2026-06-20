@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DYNAMICS_CONSTANTS, type PathRelation } from "@do-soul/alaya-protocol";
 import {
+  __pickEvidenceRichestSurvivorForTests,
   ConsolidationPlanner,
   type ConsolidationPlannerPathRelationPort
 } from "../../memory/consolidation-planner.js";
@@ -57,7 +58,7 @@ interface PlannerHarness {
 function buildPlanner(dormantPaths: readonly PathRelation[]): PlannerHarness {
   const findDormantCalls: { workspaceId: string; olderThanIso: string }[] = [];
   const pathRelationRepo: ConsolidationPlannerPathRelationPort = {
-    findDormant: async (workspaceId: string, olderThanIso: string) => {
+    findDormantAll: async (workspaceId: string, olderThanIso: string) => {
       findDormantCalls.push({ workspaceId, olderThanIso });
       return dormantPaths;
     }
@@ -126,6 +127,12 @@ describe("ConsolidationPlanner", () => {
     expect(plan.merges?.[0]?.survivor_path_id).toBe("path-rich");
     // The poor (single-evidence, mergeable) path is the deletable loser.
     expect(plan.merges?.[0]?.merged_path_ids).toEqual(["path-poor"]);
+  });
+
+  it("fails explicitly when survivor selection receives an empty candidate set", () => {
+    expect(() => __pickEvidenceRichestSurvivorForTests([])).toThrow(
+      /requires at least one survivor-eligible candidate/u
+    );
   });
 
   it("never merges or deletes an override-pinned path", async () => {

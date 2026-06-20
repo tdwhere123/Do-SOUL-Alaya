@@ -14,6 +14,12 @@ import {
 // (see apps/core-daemon/src/routes/proposals.ts), which themselves
 // invoke the same MCP handler attached agents call.
 export function registerInspectorProposalRoutes(app: Hono, options: InspectorProxyOptions): void {
+  registerPendingProposalRoutes(app, options);
+  registerMemoryProposalActionRoutes(app, options);
+  registerPromoteStrictlyGovernedRoute(app, options);
+}
+
+function registerPendingProposalRoutes(app: Hono, options: InspectorProxyOptions): void {
   app.get("/api/proposals/:workspaceId/pending", async (context) => {
     const workspaceId = context.req.param("workspaceId");
     const forbidden = assertInspectorWorkspace(context, options, workspaceId);
@@ -55,7 +61,9 @@ export function registerInspectorProposalRoutes(app: Hono, options: InspectorPro
       forwardStructuredError: true
     });
   });
+}
 
+function registerMemoryProposalActionRoutes(app: Hono, options: InspectorProxyOptions): void {
   app.post("/api/proposals/:workspaceId/memory/:memoryId/keep", async (context) =>
     await proxyMemoryAction(context, options, "keep")
   );
@@ -68,7 +76,9 @@ export function registerInspectorProposalRoutes(app: Hono, options: InspectorPro
   app.post("/api/proposals/:workspaceId/memory/:memoryId/retire", async (context) =>
     await proxyMemoryAction(context, options, "retire")
   );
+}
 
+function registerPromoteStrictlyGovernedRoute(app: Hono, options: InspectorProxyOptions): void {
   // The MemoryBrowser "Promote to strictly_governed" action calls the
   // daemon-style path directly (see apps/inspector/web/src/pages/MemoryBrowser.tsx).
   // It forwards to the daemon endpoint that opens a path_relation governance

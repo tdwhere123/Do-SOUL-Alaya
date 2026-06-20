@@ -68,45 +68,34 @@ const SELECT_COLUMNS = `
   resolved_by
 `;
 
+const UPSERT_HEALTH_ISSUE_GROUP_SQL = `
+  INSERT INTO health_issue_groups (
+    group_id, workspace_id, target_object_id, target_object_kind,
+    cause_kind, severity, confidence, first_seen_at, last_seen_at,
+    count, suggested_actions_json, resolution_state, resolved_at, resolved_by
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT (workspace_id, target_object_id, cause_kind) DO UPDATE SET
+    severity = excluded.severity,
+    confidence = excluded.confidence,
+    last_seen_at = excluded.last_seen_at,
+    count = excluded.count,
+    suggested_actions_json = excluded.suggested_actions_json,
+    resolution_state = excluded.resolution_state,
+    resolved_at = excluded.resolved_at,
+    resolved_by = excluded.resolved_by
+`;
+
 export class SqliteHealthIssueGroupRepo implements HealthIssueGroupRepo {
-  public constructor(private readonly db: StorageDatabase) {}
+  private readonly upsertStatement;
+
+  public constructor(private readonly db: StorageDatabase) {
+    this.upsertStatement = db.connection.prepare(UPSERT_HEALTH_ISSUE_GROUP_SQL);
+  }
 
   public upsert(group: HealthIssueGroup): Readonly<HealthIssueGroup> {
     const parsed = parseGroup(group);
     try {
-      this.db.connection
-        .prepare(
-          `INSERT INTO health_issue_groups (
-            group_id, workspace_id, target_object_id, target_object_kind,
-            cause_kind, severity, confidence, first_seen_at, last_seen_at,
-            count, suggested_actions_json, resolution_state, resolved_at, resolved_by
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT (workspace_id, target_object_id, cause_kind) DO UPDATE SET
-            severity = excluded.severity,
-            confidence = excluded.confidence,
-            last_seen_at = excluded.last_seen_at,
-            count = excluded.count,
-            suggested_actions_json = excluded.suggested_actions_json,
-            resolution_state = excluded.resolution_state,
-            resolved_at = excluded.resolved_at,
-            resolved_by = excluded.resolved_by`
-        )
-        .run(
-          parsed.group_id,
-          parsed.workspace_id,
-          parsed.target_object_id,
-          parsed.target_object_kind,
-          parsed.cause_kind,
-          parsed.severity,
-          parsed.confidence,
-          parsed.first_seen_at,
-          parsed.last_seen_at,
-          parsed.count,
-          JSON.stringify(parsed.suggested_actions),
-          parsed.resolution_state,
-          parsed.resolved_at,
-          parsed.resolved_by
-        );
+      this.runUpsert(parsed);
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -115,15 +104,34 @@ export class SqliteHealthIssueGroupRepo implements HealthIssueGroupRepo {
       );
     }
 
-    const row = this.fetchByCompositeKey(
-      parsed.workspace_id,
-      parsed.target_object_id,
-      parsed.cause_kind
+    return this.fetchRequiredAfterUpsert(parsed);
+  }
+
+  private runUpsert(group: Readonly<HealthIssueGroup>): void {
+    this.upsertStatement.run(
+      group.group_id,
+      group.workspace_id,
+      group.target_object_id,
+      group.target_object_kind,
+      group.cause_kind,
+      group.severity,
+      group.confidence,
+      group.first_seen_at,
+      group.last_seen_at,
+      group.count,
+      JSON.stringify(group.suggested_actions),
+      group.resolution_state,
+      group.resolved_at,
+      group.resolved_by
     );
+  }
+
+  private fetchRequiredAfterUpsert(group: Readonly<HealthIssueGroup>): Readonly<HealthIssueGroup> {
+    const row = this.fetchByCompositeKey(group.workspace_id, group.target_object_id, group.cause_kind);
     if (row === null) {
       throw new StorageError(
         "NOT_FOUND",
-        `Health issue group not found after upsert for ${parsed.target_object_id}.`
+        `Health issue group not found after upsert for ${group.target_object_id}.`
       );
     }
     return row;

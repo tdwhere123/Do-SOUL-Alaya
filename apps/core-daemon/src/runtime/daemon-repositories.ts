@@ -52,51 +52,83 @@ export function createDaemonRepositories(input: {
   readonly database: StorageDatabase;
   readonly warn: WarnLogger["warn"];
 }) {
-  const workspaceRepo = new SqliteWorkspaceRepo(input.database);
-  const runRepo = new SqliteRunRepo(input.database);
-  const bindingRepo = new SqliteEngineBindingRepo(input.database);
-  const bootstrappingRecordRepo = new SqliteBootstrappingRecordRepo(input.database);
-  const configRepo = new SqliteConfigRepo(input.database);
-  const eventLogRepo = new SqliteEventLogRepo(input.database);
-  const reconciliationLeaseRepo = new SqliteReconciliationLeaseRepo(input.database);
-  const signalRepo = new SqliteSignalRepo(input.database);
-  const edgeProposalRepo = new SqliteEdgeProposalRepo(input.database);
-  const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(input.database);
+  const coreRepos = createCoreDaemonRepos(input.database);
+  const memoryRepos = createDaemonMemoryRepos(input);
+  const surfaceRepos = createDaemonSurfaceRepos(input.database);
+  const runtimeRepos = createDaemonRuntimeRepos(input.database);
+
+  return Object.freeze({
+    ...coreRepos,
+    ...memoryRepos,
+    ...surfaceRepos,
+    ...runtimeRepos
+  });
+}
+
+function createCoreDaemonRepos(database: StorageDatabase) {
+  return {
+    workspaceRepo: new SqliteWorkspaceRepo(database),
+    runRepo: new SqliteRunRepo(database),
+    bindingRepo: new SqliteEngineBindingRepo(database),
+    bootstrappingRecordRepo: new SqliteBootstrappingRecordRepo(database),
+    configRepo: new SqliteConfigRepo(database),
+    eventLogRepo: new SqliteEventLogRepo(database),
+    reconciliationLeaseRepo: new SqliteReconciliationLeaseRepo(database),
+    signalRepo: new SqliteSignalRepo(database),
+    edgeProposalRepo: new SqliteEdgeProposalRepo(database),
+    evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database),
+    projectMappingAnchorRepo: new SqliteProjectMappingAnchorRepo(database),
+    synthesisCapsuleRepo: new SqliteSynthesisCapsuleRepo(database),
+    claimFormRepo: new SqliteClaimFormRepo(database),
+    conflictMatrixRepo: new SqliteConflictMatrixRepo(database),
+    slotRepo: new SqliteSlotRepo(database),
+    proposalRepo: new SqliteProposalRepo(database),
+    greenStatusRepo: new SqliteGreenStatusRepo(database),
+    healthJournalRepo: new SqliteHealthJournalRepo(database),
+    fileRepo: new SqliteFileRepo(database),
+    karmaEventRepo: new SqliteKarmaEventRepo(database),
+    toolSpecRepo: new SqliteToolSpecRepo(database),
+    toolExecutionRecordRepo: new SqliteToolExecutionRecordRepo(database),
+    extensionDescriptorRepo: new SqliteExtensionDescriptorRepo(database),
+    trustStateRepo: new SqliteTrustStateRepo(database),
+    strongRefRepo: new SqliteStrongRefRepo(database)
+  };
+}
+
+function createDaemonMemoryRepos(input: {
+  readonly database: StorageDatabase;
+  readonly warn: WarnLogger["warn"];
+}) {
   const memoryEntryRepo = new SqliteMemoryEntryRepo(input.database, (message, meta) =>
     input.warn(message, meta)
   );
-  const globalMemoryRepo = createOptionalGlobalMemoryRepo(input.database);
-  const globalMemoryRecallCacheRepo = createOptionalGlobalMemoryRecallCacheRepo(input.database);
-  const orphanDetectionEnabled = process.env.ORPHAN_DETECTION_ENABLED !== "false";
-  const orphanRadarRepo = orphanDetectionEnabled ? new SqliteOrphanRadarRepo(input.database) : null;
-  const projectMappingAnchorRepo = new SqliteProjectMappingAnchorRepo(input.database);
-  const synthesisCapsuleRepo = new SqliteSynthesisCapsuleRepo(input.database);
-  const claimFormRepo = new SqliteClaimFormRepo(input.database);
-  const conflictMatrixRepo = new SqliteConflictMatrixRepo(input.database);
-  const slotRepo = new SqliteSlotRepo(input.database);
-  const surfaceIdentityRepo = new SqliteSurfaceIdentityRepo(input.database);
-  const surfaceAnchorRepo = new SqliteSurfaceAnchorRepo(input.database);
-  const surfaceBindingRepo = new SqliteSurfaceBindingRepo(input.database);
-  const crossCuttingPermissionRepo = new SqliteCrossCuttingPermissionRepo(input.database);
-  const proposalRepo = new SqliteProposalRepo(input.database);
-  const greenStatusRepo = new SqliteGreenStatusRepo(input.database);
-  const healthJournalRepo = new SqliteHealthJournalRepo(input.database);
-  const fileRepo = new SqliteFileRepo(input.database);
-  const karmaEventRepo = new SqliteKarmaEventRepo(input.database);
-  const toolSpecRepo = new SqliteToolSpecRepo(input.database);
-  const toolExecutionRecordRepo = new SqliteToolExecutionRecordRepo(input.database);
-  const extensionDescriptorRepo = new SqliteExtensionDescriptorRepo(input.database);
-  const trustStateRepo = new SqliteTrustStateRepo(input.database);
-  const strongRefRepo = new SqliteStrongRefRepo(input.database);
-  const pathRelationRepo = new SqlitePathRelationRepo(input.database);
-  const coUsageCounterRepo = new SqliteCoUsageCounterRepo(input.database);
   const enrichPendingRepo = new SqliteEnrichPendingRepo(input.database);
-  const enqueueEnrichPending = (params: {
+
+  return {
+    memoryEntryRepo,
+    globalMemoryRepo: createOptionalGlobalMemoryRepo(input.database),
+    globalMemoryRecallCacheRepo: createOptionalGlobalMemoryRecallCacheRepo(input.database),
+    orphanDetectionEnabled: process.env.ORPHAN_DETECTION_ENABLED !== "false",
+    orphanRadarRepo:
+      process.env.ORPHAN_DETECTION_ENABLED !== "false"
+        ? new SqliteOrphanRadarRepo(input.database)
+        : null,
+    pathRelationRepo: new SqlitePathRelationRepo(input.database),
+    coUsageCounterRepo: new SqliteCoUsageCounterRepo(input.database),
+    enrichPendingRepo,
+    enqueueEnrichPending: createEnrichPendingEnqueue(enrichPendingRepo),
+    pathPlasticityWatermarkRepo: new SqlitePathPlasticityWatermarkRepo(input.database),
+    pathGraphSnapshotRepo: new SqlitePathGraphSnapshotRepo(input.database)
+  };
+}
+
+function createEnrichPendingEnqueue(enrichPendingRepo: SqliteEnrichPendingRepo) {
+  return (params: {
     readonly workspaceId: string;
     readonly memoryId: string;
     readonly runId: string | null;
     readonly sourceSignalId: string | null;
-  }): void =>
+  }): void => {
     enrichPendingRepo.enqueue({
       workspaceId: params.workspaceId,
       memoryId: params.memoryId,
@@ -104,57 +136,23 @@ export function createDaemonRepositories(input: {
       sourceSignalId: params.sourceSignalId,
       enqueuedAt: new Date().toISOString()
     });
-  const pathPlasticityWatermarkRepo = new SqlitePathPlasticityWatermarkRepo(input.database);
-  const pathGraphSnapshotRepo = new SqlitePathGraphSnapshotRepo(input.database);
-  const deferredObligationRepo = new SqliteDeferredObligationRepo(input.database);
-  const workerRunRepo = new SqliteWorkerRunRepo(input.database);
-  const workspaceEngineConfigRepo = new SqliteWorkspaceEngineConfigRepo(input.database);
-  const sqliteHandoffGapRepo = new SqliteHandoffGapRepo(input.database);
+  };
+}
 
-  return Object.freeze({
-    workspaceRepo,
-    runRepo,
-    bindingRepo,
-    bootstrappingRecordRepo,
-    configRepo,
-    eventLogRepo,
-    reconciliationLeaseRepo,
-    signalRepo,
-    edgeProposalRepo,
-    evidenceCapsuleRepo,
-    memoryEntryRepo,
-    globalMemoryRepo,
-    globalMemoryRecallCacheRepo,
-    orphanDetectionEnabled,
-    orphanRadarRepo,
-    projectMappingAnchorRepo,
-    synthesisCapsuleRepo,
-    claimFormRepo,
-    conflictMatrixRepo,
-    slotRepo,
-    surfaceIdentityRepo,
-    surfaceAnchorRepo,
-    surfaceBindingRepo,
-    crossCuttingPermissionRepo,
-    proposalRepo,
-    greenStatusRepo,
-    healthJournalRepo,
-    fileRepo,
-    karmaEventRepo,
-    toolSpecRepo,
-    toolExecutionRecordRepo,
-    extensionDescriptorRepo,
-    trustStateRepo,
-    strongRefRepo,
-    pathRelationRepo,
-    coUsageCounterRepo,
-    enrichPendingRepo,
-    enqueueEnrichPending,
-    pathPlasticityWatermarkRepo,
-    pathGraphSnapshotRepo,
-    deferredObligationRepo,
-    workerRunRepo,
-    workspaceEngineConfigRepo,
-    sqliteHandoffGapRepo
-  });
+function createDaemonSurfaceRepos(database: StorageDatabase) {
+  return {
+    surfaceIdentityRepo: new SqliteSurfaceIdentityRepo(database),
+    surfaceAnchorRepo: new SqliteSurfaceAnchorRepo(database),
+    surfaceBindingRepo: new SqliteSurfaceBindingRepo(database),
+    crossCuttingPermissionRepo: new SqliteCrossCuttingPermissionRepo(database)
+  };
+}
+
+function createDaemonRuntimeRepos(database: StorageDatabase) {
+  return {
+    deferredObligationRepo: new SqliteDeferredObligationRepo(database),
+    workerRunRepo: new SqliteWorkerRunRepo(database),
+    workspaceEngineConfigRepo: new SqliteWorkspaceEngineConfigRepo(database),
+    sqliteHandoffGapRepo: new SqliteHandoffGapRepo(database)
+  };
 }

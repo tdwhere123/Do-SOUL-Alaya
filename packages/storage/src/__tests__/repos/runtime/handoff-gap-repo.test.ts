@@ -163,7 +163,7 @@ describe("SqliteHandoffGapRepo — HandoffRecord CRUD", () => {
     const { repo } = createRepo();
     const record = makeHandoffRecord();
 
-    repo.createHandoff(record);
+    expect(repo.createHandoff(record)).toEqual(record);
     const found = repo.findHandoffById(record.runtime_id);
 
     expect(found).not.toBeNull();
@@ -196,7 +196,7 @@ describe("SqliteHandoffGapRepo — GapRecord CRUD", () => {
     const { repo } = createRepo();
     const record = makeGapRecord();
 
-    repo.createGap(record);
+    expect(repo.createGap(record)).toEqual(record);
     const found = repo.findGapById(record.runtime_id);
 
     expect(found).not.toBeNull();

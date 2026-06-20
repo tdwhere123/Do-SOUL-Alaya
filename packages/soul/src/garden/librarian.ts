@@ -214,7 +214,7 @@ export class Librarian {
       });
 
       // Connect structurally related memories with recalls edges.
-      // Errors are silently swallowed — edge creation must not block the task.
+      // Edge creation is supplementary, but failures must still be visible.
       if (this.graphEdgePort !== null) {
         for (const group of groups) {
           if (group.object_ids.length < 2) {
@@ -234,8 +234,13 @@ export class Librarian {
                 confidence: 0.5,
                 reason: "librarian subject neighbor proposal"
               });
-            } catch {
-              // Fire-and-forget: edges are supplementary metadata, not critical.
+            } catch (error) {
+              emitLibrarianProjectionWarning("subject_neighbor_edge_create", error, {
+                workspace_id: task.workspace_id,
+                run_id: task.run_id,
+                source_memory_id: anchor,
+                target_memory_id: neighborId
+              });
             }
           }
         }
@@ -409,4 +414,19 @@ export class Librarian {
       completed_at: completedAt
     };
   }
+}
+
+function emitLibrarianProjectionWarning(
+  operation: string,
+  error: unknown,
+  detail: Record<string, unknown>
+): void {
+  process.emitWarning("[Librarian] best-effort projection failed", {
+    code: "ALAYA_LIBRARIAN_PROJECTION_FAILED",
+    detail: JSON.stringify({
+      operation,
+      error: error instanceof Error ? error.message : String(error),
+      ...detail
+    })
+  });
 }

@@ -200,4 +200,88 @@ describe("Auditor HealthIssueGroup wiring", () => {
     expect(group?.first_seen_at).toBe("2026-03-28T10:00:00.000Z");
     expect(group?.last_seen_at).toBe("2026-03-28T11:00:00.000Z");
   });
+
+  it("fails the task instead of creating a fresh group when existing-group lookup fails", async () => {
+    const { port, upserts } = createHealthIssueGroupPortHarness();
+    const scheduler = { reportCompletion: vi.fn(async () => undefined) };
+    const lookupError = new Error("lookup failed");
+    const auditor = createOrphanAuditor(
+      {
+        ...port,
+        findExistingGroup: vi.fn(() => {
+          throw lookupError;
+        })
+      },
+      scheduler
+    );
+
+    const result = await auditor.run(createTask());
+
+    expect(result.success).toBe(false);
+    expect(result.error_message).toBe("lookup failed");
+    expect(upserts).not.toHaveBeenCalled();
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, error_message: "lookup failed" })
+    );
+  });
+
+  it("fails the task when health issue group upsert fails", async () => {
+    const { port } = createHealthIssueGroupPortHarness();
+    const scheduler = { reportCompletion: vi.fn(async () => undefined) };
+    const upsertError = new Error("upsert failed");
+    const auditor = createOrphanAuditor(
+      {
+        ...port,
+        upsertHealthIssueGroup: vi.fn(() => {
+          throw upsertError;
+        })
+      },
+      scheduler
+    );
+
+    const result = await auditor.run(createTask());
+
+    expect(result.success).toBe(false);
+    expect(result.error_message).toBe("upsert failed");
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, error_message: "upsert failed" })
+    );
+  });
 });
+
+function createOrphanAuditor(
+  healthIssueGroupPort: AuditorHealthIssueGroupPort,
+  scheduler: { readonly reportCompletion: (result: unknown) => Promise<void> }
+): Auditor {
+  return new Auditor({
+    evidenceCheckPort: { findMemoriesWithStaleEvidence: vi.fn(async () => []) },
+    pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
+    orphanDetectionPort: {
+      findOrphanedMemories: vi.fn(async () => [
+        {
+          memory_id: "memory-a",
+          workspace_id: "workspace-1",
+          suspected_surface_gaps: ["surface://gap-a"],
+          orphan_confidence: 0.9
+        }
+      ]),
+      createOrphanRadarRecord: vi.fn(async () => undefined)
+    },
+    greenMaintenancePort: {
+      findExpiringGreenStatuses: vi.fn(async () => []),
+      renewGreenPassiveStable: vi.fn(() => undefined),
+      requestActiveVerification: vi.fn(() => undefined),
+      revokeGreen: vi.fn(() => ({ affected: 0 }))
+    },
+    bootstrappingPort: {
+      assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 5, claim_count: 5 })),
+      generateDraftCandidates: vi.fn(async () => []),
+      findHighFrequencyPatterns: vi.fn(async () => []),
+      createSynthesisCandidate: vi.fn(async () => ({ candidate_id: "candidate-1" })),
+      hasPendingSynthesisCandidate: vi.fn(async () => false)
+    },
+    scheduler,
+    healthIssueGroupPort,
+    now: () => "2026-03-28T10:00:00.000Z"
+  });
+}

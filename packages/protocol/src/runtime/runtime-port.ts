@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedContentSchema,
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedPathSchema,
+  BoundedReasonSchema,
+  IsoDatetimeStringSchema
+} from "../shared/schema-primitives.js";
 
 export const RuntimeCapabilitiesSchema = z
   .object({
@@ -22,26 +29,26 @@ export const PrincipalRuntimeToolProfileSchema = z.enum(["default", "principal_c
 export const WorkerRuntimeToolProfileSchema = z.enum(["default", "conversation_engine", "coding"]);
 
 const RuntimeSessionConfigBaseSchema = z.object({
-  workspace_id: NonEmptyStringSchema,
-  cwd: NonEmptyStringSchema,
-  writable_roots: z.array(NonEmptyStringSchema).readonly(),
-  allowed_mcp_servers: z.array(NonEmptyStringSchema).readonly(),
+  workspace_id: BoundedIdSchema,
+  cwd: BoundedPathSchema,
+  writable_roots: z.array(BoundedPathSchema).readonly(),
+  allowed_mcp_servers: z.array(BoundedLabelSchema).readonly(),
   sandbox_policy: RuntimeSandboxPolicySchema,
   permission_policy: RuntimePermissionPolicySchema,
   network_policy: RuntimeNetworkPolicySchema
-});
+}).strict();
 
 export const PrincipalRuntimeSessionConfigSchema = RuntimeSessionConfigBaseSchema.extend({
   role: z.literal("principal"),
   tool_profile: PrincipalRuntimeToolProfileSchema,
-  run_id: NonEmptyStringSchema
+  run_id: BoundedIdSchema
 })
   .strict();
 
 export const WorkerRuntimeSessionConfigSchema = RuntimeSessionConfigBaseSchema.extend({
   role: z.literal("worker"),
   tool_profile: WorkerRuntimeToolProfileSchema,
-  run_id: NonEmptyStringSchema.optional()
+  run_id: BoundedIdSchema.optional()
 })
   .strict();
 
@@ -51,14 +58,14 @@ export const RuntimeSessionConfigSchema = z
 
 export const RuntimeSessionSchema = z
   .object({
-    session_id: NonEmptyStringSchema
+    session_id: BoundedIdSchema
   })
   .strict()
   .readonly();
 
 export const RuntimeCancelResultSchema = z
   .object({
-    session_id: NonEmptyStringSchema,
+    session_id: BoundedIdSchema,
     status: z.enum(["cancelled", "not_found", "already_finished"])
   })
   .strict()
@@ -66,15 +73,15 @@ export const RuntimeCancelResultSchema = z
 
 export const RuntimeTurnInputSchema = z
   .object({
-    prompt: NonEmptyStringSchema
+    prompt: BoundedContentSchema
   })
   .strict()
   .readonly();
 
 const RuntimeEventBaseSchema = z.object({
-  session_id: NonEmptyStringSchema,
+  session_id: BoundedIdSchema,
   emitted_at: IsoDatetimeStringSchema
-});
+}).strict();
 
 export const RuntimeEventSchema = z
   .discriminatedUnion("type", [
@@ -84,40 +91,40 @@ export const RuntimeEventSchema = z
     RuntimeEventBaseSchema.extend({
       type: z.literal("session_finished"),
       status: z.enum(["completed", "cancelled", "failed"]),
-      result_summary: z.string().nullable()
+      result_summary: BoundedReasonSchema.nullable()
     }).strict(),
     RuntimeEventBaseSchema.extend({
       type: z.literal("message_delta"),
-      delta: z.string(),
+      delta: BoundedContentSchema,
       sequence: z.number().int().nonnegative()
     }).strict(),
     RuntimeEventBaseSchema.extend({
       type: z.literal("tool_call_started"),
-      call_id: NonEmptyStringSchema,
-      tool_id: NonEmptyStringSchema
+      call_id: BoundedIdSchema,
+      tool_id: BoundedLabelSchema
     }).strict(),
     RuntimeEventBaseSchema.extend({
       type: z.literal("tool_call_finished"),
-      call_id: NonEmptyStringSchema,
-      tool_id: NonEmptyStringSchema,
+      call_id: BoundedIdSchema,
+      tool_id: BoundedLabelSchema,
       outcome: z.enum(["success", "error", "cancelled"]),
-      result_summary: z.string().nullable()
+      result_summary: BoundedReasonSchema.nullable()
     }).strict(),
     RuntimeEventBaseSchema.extend({
       type: z.literal("permission_requested"),
-      request_id: NonEmptyStringSchema,
-      tool_id: NonEmptyStringSchema,
-      reason: NonEmptyStringSchema
+      request_id: BoundedIdSchema,
+      tool_id: BoundedLabelSchema,
+      reason: BoundedReasonSchema
     }).strict(),
     RuntimeEventBaseSchema.extend({
       type: z.literal("patch_emitted"),
-      patch_id: NonEmptyStringSchema,
-      path_hints: z.array(NonEmptyStringSchema).readonly()
+      patch_id: BoundedIdSchema,
+      path_hints: z.array(BoundedPathSchema).readonly()
     }).strict(),
     RuntimeEventBaseSchema.extend({
       type: z.literal("runtime_error"),
-      error_code: NonEmptyStringSchema,
-      message: NonEmptyStringSchema
+      error_code: BoundedLabelSchema,
+      message: BoundedReasonSchema
     }).strict()
   ])
   .readonly();

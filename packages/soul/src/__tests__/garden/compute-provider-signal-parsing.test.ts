@@ -1,0 +1,246 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  GardenProviderError,
+  GardenProviderKind,
+  OFFICIAL_API_SYSTEM_PROMPT,
+  OfficialApiGardenProvider
+} from "../../garden/compute-provider.js";
+import {
+  SignalExtractorError,
+  type SignalExtractor,
+  type SignalExtractorMeta
+} from "../../garden/pi-mono-extractor.js";
+import { DISTILLED_FACT_MAX_CHARS } from "../../garden/materialization-router.js";
+
+import { createContext, createExtractor } from "./compute-provider-fixtures.js";
+
+describe("OfficialApiGardenProvider", () => {  it("emits a per-turn count when the model omits distilled_fact", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const extractor = createExtractor(JSON.stringify({
+        signals: [
+          {
+            signal_kind: "potential_claim",
+            object_kind: "decision",
+            confidence: 0.7,
+            matched_text: "We decided to ship on Friday"
+          },
+          {
+            signal_kind: "potential_preference",
+            object_kind: "user_preference",
+            confidence: 0.8,
+            matched_text: "Call me Ash",
+            distilled_fact: "The operator prefers to be called Ash."
+          },
+          {
+            signal_kind: "potential_claim",
+            object_kind: "fact",
+            confidence: 0.6,
+            matched_text: "The build runs nightly"
+          }
+        ]
+      }));
+      const provider = new OfficialApiGardenProvider({
+        apiKey: "sk-test",
+        extractor,
+        generateSignalId: (() => {
+          let counter = 0;
+          return () => `signal-${++counter}`;
+        })()
+      });
+
+      const signals = await provider.compile("turn text", createContext());
+      expect(signals).toHaveLength(3);
+      expect(warn).toHaveBeenCalledWith(
+        "garden/compute-provider: official-API drafts missing distilled_fact",
+        expect.objectContaining({ runId: "run-1", omittedCount: 2, draftCount: 3 })
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+
+  it("emits one atomic signal per fact when the model splits a compound turn", async () => {
+    const extractor = createExtractor(JSON.stringify({
+      signals: [
+        {
+          signal_kind: "potential_preference",
+          object_kind: "user_preference",
+          confidence: 0.8,
+          matched_text: "I prefer dark mode",
+          distilled_fact: "The operator prefers dark mode in the editor."
+        },
+        {
+          signal_kind: "potential_claim",
+          object_kind: "decision",
+          confidence: 0.75,
+          matched_text: "we deploy on Tuesdays",
+          distilled_fact: "The team deploys releases on Tuesdays."
+        }
+      ]
+    }));
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor,
+      generateSignalId: (() => {
+        let counter = 0;
+        return () => `signal-${++counter}`;
+      })()
+    });
+
+    const signals = await provider.compile(
+      "I prefer dark mode, and we deploy on Tuesdays.",
+      createContext()
+    );
+    expect(signals).toHaveLength(2);
+    expect(signals.map((s) => (s.raw_payload as { distilled_fact: string }).distilled_fact)).toEqual([
+      "The operator prefers dark mode in the editor.",
+      "The team deploys releases on Tuesdays."
+    ]);
+  });
+
+
+  it("clamps an oversized distilled_fact to the field cap", async () => {
+    const oversized = "y".repeat(10_000);
+    const extractor = createExtractor(JSON.stringify({
+      signals: [
+        {
+          signal_kind: "potential_claim",
+          object_kind: "fact",
+          confidence: 0.6,
+          matched_text: "fact text",
+          distilled_fact: oversized
+        }
+      ]
+    }));
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor,
+      generateSignalId: () => "signal-clamp"
+    });
+
+    const signals = await provider.compile("fact text", createContext());
+    expect((signals[0]!.raw_payload as { distilled_fact: string }).distilled_fact.length).toBe(
+      DISTILLED_FACT_MAX_CHARS
+    );
+  });
+
+
+  it("passes structured turn content to the signal extractor", async () => {
+    const extractor = createExtractor(JSON.stringify({ signals: [] }));
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor
+    });
+
+    await expect(provider.compile("No durable memory here.", createContext())).resolves.toEqual([]);
+
+    expect(JSON.parse(vi.mocked(extractor.extract).mock.calls[0]![0].userPrompt)).toMatchObject({
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      surface_id: "surface-1",
+      turn_content: "No durable memory here."
+    });
+  });
+
+
+  it("fails closed when official provider credentials are missing", async () => {
+    const extractor = createExtractor(JSON.stringify({ signals: [] }));
+    const provider = new OfficialApiGardenProvider({
+      extractor
+    });
+
+    await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
+      name: "GardenProviderError",
+      kind: "auth",
+      message: "Official garden provider credentials are missing."
+    });
+    expect(extractor.extract).not.toHaveBeenCalled();
+  });
+
+
+  it("surfaces extractor transport failures as network errors", async () => {
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: {
+        extract: vi.fn(async () => {
+          throw new SignalExtractorError("transport_failure", "Signal extractor request failed.");
+        })
+      }
+    });
+
+    await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
+      name: "GardenProviderError",
+      kind: "network",
+      message: "Signal extractor request failed."
+    } satisfies Partial<GardenProviderError>);
+  });
+
+
+  it("surfaces timed out extractor requests as network errors with the timeout message", async () => {
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      requestTimeoutMs: 321,
+      extractor: {
+        extract: vi.fn(async () => {
+          throw new SignalExtractorError("timeout", "Signal extractor request timed out after 321ms.");
+        })
+      }
+    });
+
+    await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
+      name: "GardenProviderError",
+      kind: "network",
+      message: "Signal extractor request timed out after 321ms."
+    } satisfies Partial<GardenProviderError>);
+  });
+
+
+  it("rejects invalid official API payloads", async () => {
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: createExtractor(JSON.stringify({
+        signals: "not-an-array"
+      }))
+    });
+
+    await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
+      name: "GardenProviderError",
+      kind: "invalid_response",
+      message: "Official garden provider returned an invalid response."
+    } satisfies Partial<GardenProviderError>);
+  });
+
+
+  it("caps the signal count and clamps oversized fields from an official API response", async () => {
+    const oversizedMatchedText = "x".repeat(10_000);
+    const oversizedObjectKind = "k".repeat(1_000);
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      now: () => "2026-04-23T09:00:00.000Z",
+      generateSignalId: () => "signal-capped",
+      extractor: createExtractor(
+        JSON.stringify({
+          signals: Array.from({ length: 200 }, () => ({
+            signal_kind: "potential_preference",
+            object_kind: oversizedObjectKind,
+            confidence: 0.5,
+            matched_text: oversizedMatchedText,
+            reason: "r".repeat(1_000)
+          }))
+        })
+      )
+    });
+
+    const signals = await provider.compile("Call me Ash.", createContext());
+    expect(signals).toHaveLength(64);
+    expect(signals[0]!.object_kind.length).toBe(200);
+    expect((signals[0]!.raw_payload as { matched_text: string }).matched_text.length).toBe(4_000);
+    expect((signals[0]!.raw_payload as { extraction_reason: string }).extraction_reason.length).toBe(400);
+  });
+
+});

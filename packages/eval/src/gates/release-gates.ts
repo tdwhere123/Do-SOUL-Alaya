@@ -65,96 +65,12 @@ export function combineVerdicts(...verdicts: readonly Verdict[]): Verdict {
 function collectRecallQualityGates(
   current: KpiPayload
 ): readonly BenchmarkHardGate[] {
-  const embeddingEnabled = current.embedding_provider !== "none";
-  if (current.bench_name === "public" && current.split === "longmemeval-s") {
-    if (!embeddingEnabled && current.evaluated_count === 100) {
-      return [
-        minGate(
-          "longmemeval_s_100_embedding_off_r_at_5",
-          "LongMemEval-S 100 embedding-off R@5",
-          current.kpi.r_at_5,
-          0.7
-        )
-      ];
-    }
-    if (embeddingEnabled && current.evaluated_count === 100) {
-      return [
-        minGate(
-          "longmemeval_s_100_embedding_on_r_at_5",
-          "LongMemEval-S 100 embedding-on R@5",
-          current.kpi.r_at_5,
-          0.55
-        )
-      ];
-    }
-    if (
-      !embeddingEnabled &&
-      current.evaluated_count >= current.sample_size &&
-      current.sample_size >= 500
-    ) {
-      return [
-        minGate(
-          "longmemeval_s_500_embedding_off_r_at_5",
-          "LongMemEval-S 500 embedding-off R@5",
-          current.kpi.r_at_5,
-          0.9
-        )
-      ];
-    }
-    if (
-      embeddingEnabled &&
-      current.evaluated_count >= current.sample_size &&
-      current.sample_size >= 500
-    ) {
-      return [
-        minGate(
-          "longmemeval_s_500_embedding_on_r_at_5",
-          "LongMemEval-S 500 embedding-on R@5",
-          current.kpi.r_at_5,
-          0.55
-        )
-      ];
-    }
-  }
-
-  if (isLongMemEvalFullEmbeddingOffGateArchive(current)) {
-    const labels: Partial<Record<KpiPayload["bench_name"], [string, string]>> = {
-      "public-multiturn": [
-        "longmemeval_multiturn_500_embedding_off_r_at_5",
-        "LongMemEval-S multiturn 500 embedding-off R@5"
-      ],
-      "public-crossquestion": [
-        "longmemeval_crossquestion_500_embedding_off_r_at_5",
-        "LongMemEval-S crossquestion 500 embedding-off R@5"
-      ]
-    };
-    const label = labels[current.bench_name];
-    if (label !== undefined) {
-      return [minGate(label[0], label[1], current.kpi.r_at_5, 0.9)];
-    }
-  }
-
-  if (
-    current.bench_name === "public-locomo" &&
-    current.split === "locomo10" &&
-    current.evaluated_count >= current.sample_size &&
-    current.sample_size >= 1982
-  ) {
-    return [
-      minGate(
-        embeddingEnabled
-          ? "locomo_full_embedding_on_r_at_5"
-          : "locomo_full_embedding_off_r_at_5",
-        embeddingEnabled
-          ? "LoCoMo full embedding-on R@5"
-          : "LoCoMo full embedding-off R@5",
-        current.kpi.r_at_5,
-        embeddingEnabled ? 0.9 : 0.55
-      )
-    ];
-  }
-
-  return [];
+  return (
+    collectPublicLongMemEvalRecallGates(current) ??
+    collectLongMemEvalFullEmbeddingOffGate(current) ??
+    collectLocomoRecallGate(current) ??
+    []
+  );
 }
 
 function collectPipelineIntegrityGates(
@@ -165,60 +81,144 @@ function collectPipelineIntegrityGates(
   const embeddingEnabled = current.embedding_provider !== "none";
   const metrics = current.kpi.quality_metrics;
   const gates: BenchmarkHardGate[] = [];
-  if (embeddingEnabled) {
+  pushEmbeddingProviderReturnedGate(gates, current, embeddingEnabled);
+  pushLongMemEvalPipelineGates(gates, current, metrics);
+  pushRecallLatencyGate(gates, current, embeddingEnabled);
+  return gates;
+}
+
+function collectPublicLongMemEvalRecallGates(
+  current: KpiPayload
+): readonly BenchmarkHardGate[] | null {
+  if (current.bench_name !== "public" || current.split !== "longmemeval-s") {
+    return null;
+  }
+  const embeddingEnabled = current.embedding_provider !== "none";
+  if (current.evaluated_count === 100) {
+    return [createLongMemEvalSampleGate(current.kpi.r_at_5, embeddingEnabled, 100)];
+  }
+  if (
+    current.evaluated_count >= current.sample_size &&
+    current.sample_size >= 500
+  ) {
+    return [createLongMemEvalSampleGate(current.kpi.r_at_5, embeddingEnabled, 500)];
+  }
+  return [];
+}
+
+function createLongMemEvalSampleGate(
+  currentValue: number,
+  embeddingEnabled: boolean,
+  sampleSize: 100 | 500
+): BenchmarkHardGate {
+  return minGate(
+    `longmemeval_s_${sampleSize}_${embeddingEnabled ? "embedding_on" : "embedding_off"}_r_at_5`,
+    `LongMemEval-S ${sampleSize} ${embeddingEnabled ? "embedding-on" : "embedding-off"} R@5`,
+    currentValue,
+    embeddingEnabled ? 0.55 : sampleSize === 100 ? 0.7 : 0.9
+  );
+}
+
+function collectLongMemEvalFullEmbeddingOffGate(
+  current: KpiPayload
+): readonly BenchmarkHardGate[] | null {
+  if (!isLongMemEvalFullEmbeddingOffGateArchive(current)) {
+    return null;
+  }
+  const label = LONG_MEM_EVAL_FULL_GATE_LABELS[current.bench_name];
+  return label === undefined ? [] : [minGate(label[0], label[1], current.kpi.r_at_5, 0.9)];
+}
+
+const LONG_MEM_EVAL_FULL_GATE_LABELS: Partial<
+  Record<KpiPayload["bench_name"], readonly [string, string]>
+> = {
+  "public-multiturn": [
+    "longmemeval_multiturn_500_embedding_off_r_at_5",
+    "LongMemEval-S multiturn 500 embedding-off R@5"
+  ],
+  "public-crossquestion": [
+    "longmemeval_crossquestion_500_embedding_off_r_at_5",
+    "LongMemEval-S crossquestion 500 embedding-off R@5"
+  ]
+};
+
+function collectLocomoRecallGate(
+  current: KpiPayload
+): readonly BenchmarkHardGate[] | null {
+  if (
+    current.bench_name !== "public-locomo" ||
+    current.split !== "locomo10" ||
+    current.evaluated_count < current.sample_size ||
+    current.sample_size < 1982
+  ) {
+    return null;
+  }
+  const embeddingEnabled = current.embedding_provider !== "none";
+  return [
+    minGate(
+      embeddingEnabled
+        ? "locomo_full_embedding_on_r_at_5"
+        : "locomo_full_embedding_off_r_at_5",
+      embeddingEnabled
+        ? "LoCoMo full embedding-on R@5"
+        : "LoCoMo full embedding-off R@5",
+      current.kpi.r_at_5,
+      embeddingEnabled ? 0.9 : 0.55
+    )
+  ];
+}
+
+function pushEmbeddingProviderReturnedGate(
+  gates: BenchmarkHardGate[],
+  current: KpiPayload,
+  embeddingEnabled: boolean
+): void {
+  if (!embeddingEnabled) {
+    return;
+  }
+  gates.push(
+    minGate(
+      "embedding_provider_returned_rate",
+      "embedding provider returned",
+      current.kpi.provider_returned_rate ?? null,
+      0.95,
+      "ratio"
+    )
+  );
+}
+
+function pushLongMemEvalPipelineGates(
+  gates: BenchmarkHardGate[],
+  current: KpiPayload,
+  metrics: QualityMetrics | undefined
+): void {
+  if (current.bench_name !== "public" || current.split !== "longmemeval-s") {
+    return;
+  }
+  gates.push(
+    maxGate("longmemeval_s_non_monotonic_rate", "non_monotonic_rate", metrics?.non_monotonic_rate ?? null, 0.1, "ratio"),
+    maxGate("longmemeval_s_budget_dropped_max_entries", "budget_dropped_entries", readBudgetDroppedEntries(metrics), 8, "count"),
+    maxGate("longmemeval_s_candidate_absent", "candidate_absent", metrics?.candidate_absent_count ?? null, 6, "count"),
+    minGate("longmemeval_s_evidence_stream_gold_delivery", "evidence stream gold delivery", metrics?.evidence_stream_gold_delivery_rate ?? null, 0.15, "ratio")
+  );
+  if (current.simulate_report !== "none") {
     gates.push(
       minGate(
-        "embedding_provider_returned_rate",
-        "embedding provider returned",
-        current.kpi.provider_returned_rate ?? null,
-        0.95,
-        "ratio"
-      )
-    );
-  }
-  if (current.bench_name === "public" && current.split === "longmemeval-s") {
-    gates.push(
-      maxGate(
-        "longmemeval_s_non_monotonic_rate",
-        "non_monotonic_rate",
-        metrics?.non_monotonic_rate ?? null,
+        "longmemeval_s_path_stream_top10_contribution",
+        "path stream top-10 contribution",
+        metrics?.path_stream_top10_rate ?? null,
         0.1,
         "ratio"
-      ),
-      maxGate(
-        "longmemeval_s_budget_dropped_max_entries",
-        "budget_dropped_entries",
-        readBudgetDroppedEntries(metrics),
-        8,
-        "count"
-      ),
-      maxGate(
-        "longmemeval_s_candidate_absent",
-        "candidate_absent",
-        metrics?.candidate_absent_count ?? null,
-        6,
-        "count"
-      ),
-      minGate(
-        "longmemeval_s_evidence_stream_gold_delivery",
-        "evidence stream gold delivery",
-        metrics?.evidence_stream_gold_delivery_rate ?? null,
-        0.15,
-        "ratio"
       )
     );
-    if (current.simulate_report !== "none") {
-      gates.push(
-        minGate(
-          "longmemeval_s_path_stream_top10_contribution",
-          "path stream top-10 contribution",
-          metrics?.path_stream_top10_rate ?? null,
-          0.1,
-          "ratio"
-        )
-      );
-    }
   }
+}
+
+function pushRecallLatencyGate(
+  gates: BenchmarkHardGate[],
+  current: KpiPayload,
+  embeddingEnabled: boolean
+): void {
   gates.push(
     maxGate(
       embeddingEnabled ? "recall_p95_embedding_on" : "recall_p95_embedding_off",
@@ -228,7 +228,6 @@ function collectPipelineIntegrityGates(
       "ms"
     )
   );
-  return gates;
 }
 
 function isReleasePublicRecallArchive(current: KpiPayload): boolean {

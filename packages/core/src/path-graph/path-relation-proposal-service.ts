@@ -1,18 +1,68 @@
 import { randomUUID } from "node:crypto";
 import {
-  DYNAMICS_CONSTANTS,
   getPathAnchorBackingObjectId,
   pathRelationMatchesIdentity,
-  PathRelationSchema,
-  RuntimeGovernanceEventType,
-  parseRuntimeGovernanceEventPayload,
-  type EventLogEntry,
   type PathAnchorRef,
-  type PathGovernanceClass,
-  type PathRelation
+  type PathGovernanceClass
 } from "@do-soul/alaya-protocol";
-import { EventPublisherPropagationError, type EventPublisher, type EventPublisherInput } from "../runtime/event-publisher.js";
-import type { PathFailureHealthInboxPort } from "./path-failure-health-inbox.js";
+import { EventPublisherPropagationError, type EventPublisher } from "../runtime/event-publisher.js";
+import {
+  AUTO_BUILD_GOVERNANCE_CEILING,
+  COHERES_WITH_SEED_PROFILE,
+  CO_RECALLED_SEED_PROFILE,
+  CONTRADICTS_SEED_PROFILE,
+  DERIVES_FROM_SEED_PROFILE,
+  EXCEPTION_TO_SEED_PROFILE,
+  INCOMPATIBLE_SEED_PROFILE,
+  PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
+  PATH_RELATION_PROPOSE_THRESHOLD,
+  SHARES_ENTITY_SEED_PROFILE,
+  SIGNAL_GRAPH_REF_SEED_PROFILE,
+  SUPERSEDES_SEED_PROFILE,
+  SUPPORTS_SEED_PROFILE,
+  clampGovernanceToAutoBuildCeiling,
+  errorMessage,
+  type AnchorValidationFailure,
+  type CoUsageCounterPort,
+  type MemoryAnchorExistencePort,
+  type PathMintOutcome,
+  type PathRelationProposalEventPublisherPort,
+  type PathRelationProposalRepoPort,
+  type PathRelationProposalServiceDeps,
+  type PathSeedProfile
+} from "./path-relation-proposal-service-shared.js";
+import {
+  buildPathRelation,
+  buildPathRelationCreatedEventInput,
+  buildPathRelationRejectedEventInput,
+  type MaterializePathRelationInput,
+  type SubmitCandidateInput
+} from "./path-relation-proposal-materialization.js";
+export {
+  AUTO_BUILD_GOVERNANCE_CEILING,
+  COHERES_WITH_SEED_PROFILE,
+  CO_RECALLED_SEED_PROFILE,
+  CONTRADICTS_SEED_PROFILE,
+  DERIVES_FROM_SEED_PROFILE,
+  EXCEPTION_TO_SEED_PROFILE,
+  INCOMPATIBLE_SEED_PROFILE,
+  PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
+  PATH_RELATION_PROPOSE_THRESHOLD,
+  SHARES_ENTITY_SEED_PROFILE,
+  SIGNAL_GRAPH_REF_SEED_PROFILE,
+  SUPERSEDES_SEED_PROFILE,
+  SUPPORTS_SEED_PROFILE
+} from "./path-relation-proposal-service-shared.js";
+export type { SubmitCandidateInput } from "./path-relation-proposal-materialization.js";
+export type {
+  CoUsageCounterPort,
+  MemoryAnchorExistencePort,
+  PathMintOutcome,
+  PathRelationProposalEventPublisherPort,
+  PathRelationProposalRepoPort,
+  PathRelationProposalServiceDeps,
+  PathSeedProfile
+} from "./path-relation-proposal-service-shared.js";
 
 // invariant: PathRelationProposalService is the single producer of
 // PathRelation entities. It accepts seeding signals from many producers
@@ -57,288 +107,6 @@ import type { PathFailureHealthInboxPort } from "./path-failure-health-inbox.js"
 // see also: SqliteCoUsageCounterRepo — durable counter backing
 // see also: spine-activation-design.md §E2 — seed-profile table source
 
-export const PATH_RELATION_PROPOSE_THRESHOLD =
-  DYNAMICS_CONSTANTS.path_plasticity.co_usage_threshold;
-export const PATH_RELATION_COUNTER_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
-
-// Seed-profile catalog. Each named seeder maps to the differentiated
-// initial parameters from spine-activation-design.md §E2. submitCandidate
-// callers may pass an explicit profile, or reference one of these by
-// passing the matching fields. The recall_bias sign decides family:
-// positive = associative (supports recall), negative = lifecycle
-// (suppresses recall but never drops graph_support below baseline),
-// zero = neutral marker (exception_to) that records topology without
-// biasing recall in either direction.
-//
-// see also: spine-activation-design.md §E2 — authoritative seeding table
-// anti-patterns-lint-allow: forward intake catalog for Wave-2 edge folding;
-// exported as the stable producer contract before its callers exist.
-export interface PathSeedProfile {
-  readonly relationKind: string;
-  readonly initialStrength: number;
-  readonly governanceClass: PathGovernanceClass;
-  readonly recallBiasSign: 1 | 0 | -1;
-  readonly recallBiasMagnitude: number;
-  readonly evidenceBasis: readonly string[];
-}
-
-// Positive associative families. recall_bias positive, lifecycle active at
-// birth, so isPathRecallEligible (active AND recall_bias > 0) holds AT BIRTH —
-// a born positive associative path is recall-eligible immediately.
-// governance_class (attention_only here) gates only the negative-suppression
-// lane (isPathGovernedForSuppression), never positive recall eligibility, so
-// the auto-build ceiling clamp downstream bounds suppression authority, not
-// recall eligibility. A weak born path still manifests SILENTLY: manifestation
-// is strength-graded (low strength -> hidden tier), and plasticity/decay raise
-// or fade strength over time. see also: path-relation.ts isPathRecallEligible.
-export const CO_RECALLED_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "co_recalled",
-  initialStrength: 0.3,
-  governanceClass: "attention_only",
-  recallBiasSign: 1,
-  recallBiasMagnitude: 0.5,
-  evidenceBasis: Object.freeze(["recalls_edge_co_usage"]) as readonly string[]
-});
-
-export const SUPPORTS_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "supports",
-  initialStrength: 0.5,
-  governanceClass: "attention_only",
-  recallBiasSign: 1,
-  recallBiasMagnitude: 0.5,
-  evidenceBasis: Object.freeze(["llm_supports_inference"]) as readonly string[]
-});
-
-export const DERIVES_FROM_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "derives_from",
-  initialStrength: 0.5,
-  governanceClass: "attention_only",
-  recallBiasSign: 1,
-  recallBiasMagnitude: 0.5,
-  evidenceBasis: Object.freeze(["llm_derives_inference"]) as readonly string[]
-});
-
-export const SHARES_ENTITY_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "shares_entity",
-  initialStrength: 0.2,
-  governanceClass: "hint_only",
-  recallBiasSign: 1,
-  recallBiasMagnitude: 0.5,
-  evidenceBasis: Object.freeze(["shared_entity_overlap"]) as readonly string[]
-});
-
-export const SIGNAL_GRAPH_REF_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "signal_graph_ref",
-  initialStrength: 0.6,
-  governanceClass: "recall_allowed",
-  recallBiasSign: 1,
-  recallBiasMagnitude: 0.5,
-  evidenceBasis: Object.freeze(["signal_graph_reference"]) as readonly string[]
-});
-
-// Embedding-coherence edge, crystallized at formation from object↔object cosine
-// (design S), not earned via co-recall. Own evidence_basis keeps provenance
-// auditable; hint_only = biases recall only, never decides truth (§18). Projects
-// to the recalls tier for scoring. see also: coherence-edge-producer-service.ts.
-export const COHERES_WITH_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "coheres_with",
-  initialStrength: 0.3,
-  governanceClass: "hint_only",
-  recallBiasSign: 1,
-  recallBiasMagnitude: 0.5,
-  evidenceBasis: Object.freeze(["embedding_cosine_coherence"]) as readonly string[]
-});
-
-// Neutral marker family. recall_bias is exactly 0: exception_to records a
-// scoped-exception edge in the topology without biasing recall up or down.
-// Carries evidence_basis >= 1 and governance recall_allowed like the
-// negative families, and runs the same unified plasticity model.
-// see also: memory-graph.ts exception_to (contribution_weight 0) — the
-// edge-type whose recall-neutral semantics this profile mirrors.
-export const EXCEPTION_TO_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "exception_to",
-  initialStrength: 0.9,
-  governanceClass: "recall_allowed",
-  recallBiasSign: 0,
-  recallBiasMagnitude: 0,
-  evidenceBasis: Object.freeze(["exception_evidence"]) as readonly string[]
-});
-
-// Negative lifecycle families. Harder seed: evidence_basis >= 1, initial
-// strength 0.9, governance >= recall_allowed, recall_bias negative. These
-// still run the unified plasticity model — only the seed differs.
-export const SUPERSEDES_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "supersedes",
-  initialStrength: 0.9,
-  governanceClass: "recall_allowed",
-  recallBiasSign: -1,
-  recallBiasMagnitude: 0.5,
-  evidenceBasis: Object.freeze(["supersession_evidence"]) as readonly string[]
-});
-
-export const CONTRADICTS_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "contradicts",
-  initialStrength: 0.9,
-  governanceClass: "recall_allowed",
-  recallBiasSign: -1,
-  recallBiasMagnitude: 0.4,
-  evidenceBasis: Object.freeze(["contradiction_evidence"]) as readonly string[]
-});
-
-export const INCOMPATIBLE_SEED_PROFILE: PathSeedProfile = Object.freeze({
-  relationKind: "incompatible_with",
-  initialStrength: 0.9,
-  governanceClass: "recall_allowed",
-  recallBiasSign: -1,
-  recallBiasMagnitude: 0.3,
-  evidenceBasis: Object.freeze(["incompatibility_evidence"]) as readonly string[]
-});
-
-// invariant: discriminated mint outcome. submitCandidate (and the shared
-// materialize path) report one of four decided results so a no-drop
-// consumer can tell a DECIDED "no" apart from a TRANSIENT failure:
-//   - "applied": a fresh PathRelation row + audit event were written.
-//   - "already_present": durable dedup found the pair already linked; no
-//     write, but the owed path exists, so nothing is owed.
-//   - "rejected": a permanent refusal (object anchor missing / owned by a
-//     foreign workspace). A path.relation_rejected audit event is emitted;
-//     retrying with the same anchors can never succeed.
-//   - "failed": a transient error (repo throw, event-publisher throw). The
-//     owed path is NOT written; a retry MAY succeed, so a no-drop consumer
-//     must keep the work pending instead of marking it processed.
-// invariant: only "failed" is retry-worthy. applied / already_present are
-// successes; rejected is a decided no that retry cannot fix. A consumer
-// that retries a "rejected" candidate creates an infinite poison loop, so
-// it MUST treat rejected as terminal (no retry) — distinct from "failed".
-// see also: edge-auto-producer-service.ts / conflict-detection-service.ts —
-//   no-drop consumers; garden-runtime.ts BULK_ENRICH worker — claim release.
-export type PathMintOutcome = "applied" | "already_present" | "rejected" | "failed";
-
-// invariant: auto-build governance hard ceiling. No producer-driven seed
-// may be born at strictly_governed; that band is reserved for explicit
-// user/operator governance. submitCandidate clamps requests down to this
-// ceiling rather than rejecting, so a mis-tuned producer cannot silently
-// gain a higher band than it is entitled to.
-export const AUTO_BUILD_GOVERNANCE_CEILING: PathGovernanceClass = "recall_allowed";
-
-const GOVERNANCE_RANK: Readonly<Record<PathGovernanceClass, number>> = Object.freeze({
-  hint_only: 0,
-  attention_only: 1,
-  recall_allowed: 2,
-  strictly_governed: 3
-});
-
-function clampGovernanceToAutoBuildCeiling(
-  requested: PathGovernanceClass
-): PathGovernanceClass {
-  return GOVERNANCE_RANK[requested] > GOVERNANCE_RANK[AUTO_BUILD_GOVERNANCE_CEILING]
-    ? AUTO_BUILD_GOVERNANCE_CEILING
-    : requested;
-}
-
-export interface PathRelationProposalRepoPort {
-  create(relation: PathRelation): Readonly<PathRelation>;
-  findByAnchorMemoryId?(
-    memoryId: string,
-    workspaceId: string
-  ): Promise<readonly Readonly<PathRelation>[]>;
-}
-
-// invariant: durable counter backing. The daemon wires this to the SQLite
-// co-usage counter repo; tests may supply an in-memory fake. Memory ids are
-// already ordered low <= high by the service before reaching this port.
-// Co-usage and co-recall share this counter space: a pair that is recalled
-// together and used together is the same relation, so both signals
-// reinforce one count toward the same threshold.
-export interface CoUsageCounterPort {
-  increment(input: {
-    readonly workspaceId: string;
-    readonly lowMemoryId: string;
-    readonly highMemoryId: string;
-    readonly seenAt: string;
-  }): number | Promise<number>;
-  delete(workspaceId: string, lowMemoryId: string, highMemoryId: string): void | Promise<void>;
-  evictExpired(cutoff: string): number | Promise<number>;
-  size(): number | Promise<number>;
-}
-
-export type PathRelationProposalEventPublisherPort = Pick<
-  EventPublisher,
-  "appendManyWithMutation"
->;
-
-// invariant: object-anchor existence + ownership gate. A path object anchor
-// names a durable memory entry by object id; this port answers "does this
-// object id exist, and in which workspace" so the mint sink can refuse a
-// candidate whose source/target memory is missing or owned by another
-// workspace. This is the single referential check the durable graph plane
-// has — path_relations carries memory ids inside anchors_json with no SQL FK,
-// so without this gate an untrusted agent/Garden ref would become durable
-// governed topology pointing at a non-existent or foreign object.
-// Returns null when the object id is unknown; otherwise the owning workspace.
-// see also: SqliteMemoryEntryRepo.findById — daemon wiring of this port.
-export interface MemoryAnchorExistencePort {
-  workspaceOfObject(objectId: string): Promise<string | null>;
-}
-
-type AnchorValidationFailure = {
-  readonly anchorRole: "source" | "target";
-  readonly objectId: string;
-  readonly reason: "object_missing" | "object_foreign_workspace";
-};
-
-export interface PathRelationProposalServiceDeps {
-  readonly repo: PathRelationProposalRepoPort;
-  readonly counterStore: CoUsageCounterPort;
-  readonly eventPublisher: PathRelationProposalEventPublisherPort;
-  // invariant: when wired (the daemon always wires it), object-anchor mints are
-  // gated before EventLog append + DB insert. Left undefined only in unit
-  // tests that exercise the seed/dedup machinery in isolation; the daemon
-  // composition MUST supply it so the MCP and Garden mint paths are covered.
-  readonly memoryExistence?: MemoryAnchorExistencePort;
-  // invariant: D-EDGEAUDIT operator-triage surface. When wired, an anchor-rejected
-  // mint (emitRejection) ALSO upserts a `path_relation_failure` health_inbox group
-  // in addition to its PATH_RELATION_REJECTED EventLog row, so the failure is
-  // visible in the Inspector inbox, not only by forensic EventLog scan. Optional:
-  // when absent the EventLog audit stands alone. Best-effort — a port throw must
-  // never break the mint flow.
-  // see also: edge-proposal-service.ts (the accept-owed failure twin);
-  //   protocol HealthIssueCauseKind.PATH_RELATION_FAILURE.
-  readonly healthInboxPort?: PathFailureHealthInboxPort;
-  readonly threshold?: number;
-  readonly now?: () => string;
-  readonly nowMs?: () => number;
-  readonly counterTtlMs?: number;
-  readonly generateId?: () => string;
-  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
-}
-
-// Stable intake contract for non-counter producers (Wave-2 edge folding,
-// future entity/signal seeders). source/target anchors are PathAnchorRef so
-// object_facet / obligation / risk_concern / time_concern anchors are
-// expressible, not just plain object pairs. recallBiasSign decides family
-// (positive associative / negative lifecycle / 0 neutral marker such as
-// exception_to); governanceClass is clamped to the auto-build ceiling. why
-// is optional provenance appended to constitution.why_this_relation_exists.
-//
-// see also: spine-activation-design.md §E2 — seed-profile table
-export interface SubmitCandidateInput {
-  readonly workspaceId: string;
-  readonly sourceAnchor: PathAnchorRef;
-  readonly targetAnchor: PathAnchorRef;
-  readonly relationKind: string;
-  readonly initialStrength: number;
-  readonly governanceClass: PathGovernanceClass;
-  readonly evidenceBasis: readonly string[];
-  readonly recallBiasSign: 1 | 0 | -1;
-  readonly recallBiasMagnitude?: number;
-  readonly why?: readonly string[];
-  // Run attribution for the PATH_RELATION_CREATED audit row. Producers
-  // that hold a run id (auto-producer, signal-ref router, conflict
-  // detection) pass it so a minted path is programmatically traceable to
-  // its triggering run; counter-gated co-recall has none and leaves it null.
-  readonly runId?: string | null;
-}
 
 export class PathRelationProposalService {
   private readonly counterStore: CoUsageCounterPort;
@@ -569,19 +337,7 @@ export class PathRelationProposalService {
   // Single materialize path for every seeder. Differentiated parameters
   // arrive resolved (governance already clamped, recall_bias already
   // signed). Durable dedup + event-first transactional write live here.
-  private async materialize(params: {
-    readonly workspaceId: string;
-    readonly sourceAnchor: PathAnchorRef;
-    readonly targetAnchor: PathAnchorRef;
-    readonly relationKind: string;
-    readonly initialStrength: number;
-    readonly governanceClass: PathGovernanceClass;
-    readonly evidenceBasis: readonly string[];
-    readonly recallBias: number;
-    readonly supportEventsCount: number;
-    readonly why: readonly string[];
-    readonly runId: string | null;
-  }): Promise<PathMintOutcome> {
+  private async materialize(params: MaterializePathRelationInput): Promise<PathMintOutcome> {
     const sourceId = getPathAnchorBackingObjectId(params.sourceAnchor);
     if (this.deps.repo.findByAnchorMemoryId !== undefined) {
       const existing = await this.deps.repo.findByAnchorMemoryId(sourceId, params.workspaceId);
@@ -619,71 +375,12 @@ export class PathRelationProposalService {
     }
 
     const occurredAt = this.now();
-    const relation: PathRelation = PathRelationSchema.parse({
-      path_id: this.generateId(),
-      workspace_id: params.workspaceId,
-      anchors: {
-        source_anchor: params.sourceAnchor,
-        target_anchor: params.targetAnchor
-      },
-      constitution: {
-        relation_kind: params.relationKind,
-        why_this_relation_exists: params.why
-      },
-      effect_vector: {
-        salience: 0.5,
-        recall_bias: params.recallBias,
-        verification_bias: 0,
-        unfinishedness_bias: 0,
-        default_manifestation_preference: "lens_entry"
-      },
-      plasticity_state: {
-        strength: params.initialStrength,
-        direction_bias: "bidirectional_asymmetric",
-        stability_class: "stable",
-        support_events_count: params.supportEventsCount,
-        contradiction_events_count: 0
-      },
-      lifecycle: {
-        status: "active",
-        retirement_rule: "manual"
-      },
-      legitimacy: {
-        evidence_basis: params.evidenceBasis,
-        // see also: path-manifestation-policy.ts GOVERNANCE_PROMOTION_THRESHOLDS
-        governance_class: params.governanceClass
-      },
-      created_at: occurredAt,
-      updated_at: occurredAt
-    });
-
-    const payload = parseRuntimeGovernanceEventPayload(
-      RuntimeGovernanceEventType.PATH_RELATION_CREATED,
-      {
-        path_id: relation.path_id,
-        workspace_id: relation.workspace_id,
-        relation_kind: relation.constitution.relation_kind,
-        source_anchor_kind: relation.anchors.source_anchor.kind,
-        target_anchor_kind: relation.anchors.target_anchor.kind,
-        initial_strength: relation.plasticity_state.strength,
-        governance_class: relation.legitimacy.governance_class,
-        created_at: relation.created_at
-      }
-    );
-
-    const eventInput: EventPublisherInput = {
-      event_type: RuntimeGovernanceEventType.PATH_RELATION_CREATED,
-      entity_type: "path_relation",
-      entity_id: relation.path_id,
-      workspace_id: relation.workspace_id,
-      run_id: params.runId,
-      caused_by: "system",
-      payload_json: payload as unknown as Record<string, unknown>
-    };
+    const relation = buildPathRelation(params, this.generateId(), occurredAt);
+    const eventInput = buildPathRelationCreatedEventInput(relation, params.runId);
 
     await this.deps.eventPublisher.appendManyWithMutation(
       [eventInput],
-      (_entries: readonly EventLogEntry[]) => {
+      () => {
         this.deps.repo.create(relation);
       }
     );
@@ -734,28 +431,12 @@ export class PathRelationProposalService {
     relationKind: string,
     failure: AnchorValidationFailure
   ): Promise<void> {
-    const payload = parseRuntimeGovernanceEventPayload(
-      RuntimeGovernanceEventType.PATH_RELATION_REJECTED,
-      {
-        workspace_id: workspaceId,
-        relation_kind: relationKind,
-        anchor_role: failure.anchorRole,
-        rejected_object_id: failure.objectId,
-        rejection_reason: failure.reason,
-        rejected_at: this.now()
-      }
+    const eventInput = buildPathRelationRejectedEventInput(
+      workspaceId,
+      relationKind,
+      failure,
+      this.now()
     );
-    const eventInput: EventPublisherInput = {
-      event_type: RuntimeGovernanceEventType.PATH_RELATION_REJECTED,
-      entity_type: "path_relation",
-      // No path row exists; the rejection is scoped to the workspace whose
-      // durable topology was protected from the bad anchor.
-      entity_id: workspaceId,
-      workspace_id: workspaceId,
-      run_id: null,
-      caused_by: "system",
-      payload_json: payload as unknown as Record<string, unknown>
-    };
     // No mutation: the rejection emits an audit row only. The empty mutate
     // callback keeps the same single transactional append the mint uses.
     await this.deps.eventPublisher.appendManyWithMutation([eventInput], () => undefined);
@@ -794,11 +475,4 @@ export class PathRelationProposalService {
       this.deps.warn(message, meta);
     }
   }
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
 }

@@ -71,10 +71,37 @@ export interface InspectorAppOptions {
 export function createInspectorApp(options: InspectorAppOptions): Hono {
   const app = new Hono();
   const env = options.env ?? process.env;
-  const requestBodyLimit = bodyLimit({
+  const proxyOptions = createProxyOptions(options, env);
+  registerInspectorMiddleware(app, options.token);
+  registerInspectorApiRoutes(app, options, proxyOptions);
+  return app;
+}
+
+function registerInspectorMiddleware(app: Hono, token: string): void {
+  const requestBodyLimit = createRequestBodyLimit();
+  registerRequestIdMiddleware(app);
+  registerErrorHandler(app);
+  app.use("/api/*", createInspectorAuthMiddleware(token));
+  app.use("*", async (context, next) => {
+    if (isBodylessMethod(context.req.method)) {
+      await next();
+      return;
+    }
+    if (hasDeclaredOversizeBody(context.req.header("content-length"), MAX_INSPECTOR_REQUEST_BODY_BYTES)) {
+      return context.json({ error: "request_body_too_large" }, 413);
+    }
+    await requestBodyLimit(context, next);
+  });
+}
+
+function createRequestBodyLimit() {
+  return bodyLimit({
     maxSize: MAX_INSPECTOR_REQUEST_BODY_BYTES,
     onError: (context) => context.json({ error: "request_body_too_large" }, 413)
   });
+}
+
+function registerRequestIdMiddleware(app: Hono): void {
   app.use("*", async (context, next) => {
     const requestId = normalizeOptionalSecret(
       context.req.header(INSPECTOR_REQUEST_ID_HEADER) ??
@@ -88,6 +115,9 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
     context.header(INSPECTOR_CORRELATION_ID_HEADER, requestId);
     await next();
   });
+}
+
+function registerErrorHandler(app: Hono): void {
   app.onError((error, context) => {
     if (isRequestBodyTooLargeError(error)) {
       console.error("[inspector] sanitized route error", summarizeInspectorError(error, 413));
@@ -98,26 +128,10 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
     console.error("[inspector] sanitized route error", summarizeInspectorError(error, status));
     return context.json({ error: status === 400 ? "invalid_request" : "internal_error" }, status);
   });
-  app.use("/api/*", createInspectorAuthMiddleware(options.token));
-  app.use("*", async (context, next) => {
-    if (
-      context.req.method !== "POST" &&
-      context.req.method !== "PATCH" &&
-      context.req.method !== "PUT" &&
-      context.req.method !== "DELETE"
-    ) {
-      await next();
-      return;
-    }
+}
 
-    if (hasDeclaredOversizeBody(context.req.header("content-length"), MAX_INSPECTOR_REQUEST_BODY_BYTES)) {
-      return context.json({ error: "request_body_too_large" }, 413);
-    }
-
-    await requestBodyLimit(context, next);
-  });
-
-  const proxyOptions = {
+function createProxyOptions(options: InspectorAppOptions, env: NodeJS.ProcessEnv) {
+  return {
     daemonUrl: options.daemonUrl ?? "http://127.0.0.1:5173",
     workspaceId: normalizeOptionalSecret(options.workspaceId),
     fetchImpl: options.fetchImpl,
@@ -126,6 +140,13 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
     reviewerToken: normalizeOptionalSecret(env.ALAYA_REVIEWER_TOKEN),
     reviewerIdentity: normalizeOptionalSecret(env.ALAYA_REVIEWER_IDENTITY)
   };
+}
+
+function registerInspectorApiRoutes(
+  app: Hono,
+  options: InspectorAppOptions,
+  proxyOptions: ReturnType<typeof createProxyOptions>
+): void {
   registerInspectorConfigRoutes(app, proxyOptions);
   registerInspectorGraphRoutes(app, proxyOptions);
   registerInspectorHealthInboxRoutes(app, proxyOptions);
@@ -142,7 +163,10 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
   registerInspectorStaticRoutes(app, {
     staticRoot: options.staticRoot ?? defaultStaticRoot
   });
-  return app;
+}
+
+function isBodylessMethod(method: string): boolean {
+  return method !== "POST" && method !== "PATCH" && method !== "PUT" && method !== "DELETE";
 }
 
 function normalizeOptionalSecret(value: string | undefined): string | undefined {

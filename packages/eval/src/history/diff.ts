@@ -22,16 +22,28 @@ export function diffKpis(
   previous: KpiPayload | null,
   thresholds: ThresholdConfig = DEFAULT_THRESHOLDS
 ): KpiDiffResult {
-  if (previous === null) {
-    return {
-      deltas: [],
-      worst_verdict: "ok",
-      fixture_regressions: [],
-      rebaselined_scenarios: [],
-      new_scenarios: []
-    };
-  }
+  if (previous === null) return emptyDiffResult();
+  const downgradeFail = createFailDowngrader(current, previous, thresholds);
+  const deltas = collectKpiDeltas(current, previous, thresholds, downgradeFail);
+  const fixtureDiff = diffFixtures(current, previous);
+  return finalizeDiffResult(deltas, fixtureDiff);
+}
 
+function emptyDiffResult(): KpiDiffResult {
+  return {
+    deltas: [],
+    worst_verdict: "ok",
+    fixture_regressions: [],
+    rebaselined_scenarios: [],
+    new_scenarios: []
+  };
+}
+
+function createFailDowngrader(
+  current: KpiPayload,
+  previous: KpiPayload,
+  thresholds: ThresholdConfig
+): (verdict: Verdict) => Verdict {
   // @anchor sample-too-small: see thresholds.min_sample_for_ratio_diff.
   // Whenever either side of the diff has evaluated_count below the
   // guard, ratio-based + latency + tier-share aggregates are variance
@@ -42,39 +54,33 @@ export function diffKpis(
   const undersampled =
     Math.min(previous.evaluated_count, current.evaluated_count) <
     thresholds.min_sample_for_ratio_diff;
-  const downgradeFail = (v: Verdict): Verdict =>
-    undersampled && v === "fail" ? "warn" : v;
+  return (verdict: Verdict): Verdict =>
+    undersampled && verdict === "fail" ? "warn" : verdict;
+}
 
+function collectKpiDeltas(
+  current: KpiPayload,
+  previous: KpiPayload,
+  thresholds: ThresholdConfig,
+  downgradeFail: (verdict: Verdict) => Verdict
+): KpiDelta[] {
   const deltas: KpiDelta[] = [];
+  pushPrimaryRatioDeltas(deltas, current, previous, thresholds, downgradeFail);
+  pushTokenEconomyDelta(deltas, current, previous, thresholds, downgradeFail);
+  pushLatencyDelta(deltas, current, previous, thresholds, downgradeFail);
+  pushHotShareDelta(deltas, current, previous, thresholds, downgradeFail);
+  return deltas;
+}
 
-  // invariant: ratio-KPI regression thresholds widen to the 95% Wilson CI
-  // half-width when evaluated_count < 100. A noise-level delta no longer
-  // trips a fail/warn alarm on small-N runs, while N >= 100 keeps the raw
-  // 2pp warn / 5pp fail floor.
-  pushRatioDelta(
-    deltas,
-    "r_at_5",
-    current.kpi.r_at_5,
-    previous.kpi.r_at_5,
-    ciAwareBand(
-      thresholds.r_at_5_drop_pp,
-      Math.round(current.kpi.r_at_5 * current.evaluated_count),
-      current.evaluated_count
-    ),
-    downgradeFail
-  );
-  pushRatioDelta(
-    deltas,
-    "r_at_10",
-    current.kpi.r_at_10,
-    previous.kpi.r_at_10,
-    ciAwareBand(
-      thresholds.r_at_10_drop_pp,
-      Math.round(current.kpi.r_at_10 * current.evaluated_count),
-      current.evaluated_count
-    ),
-    downgradeFail
-  );
+function pushPrimaryRatioDeltas(
+  deltas: KpiDelta[],
+  current: KpiPayload,
+  previous: KpiPayload,
+  thresholds: ThresholdConfig,
+  downgradeFail: (verdict: Verdict) => Verdict
+): void {
+  pushCiAwareRatioDelta(deltas, "r_at_5", current.kpi.r_at_5, previous.kpi.r_at_5, current, thresholds.r_at_5_drop_pp, downgradeFail);
+  pushCiAwareRatioDelta(deltas, "r_at_10", current.kpi.r_at_10, previous.kpi.r_at_10, current, thresholds.r_at_10_drop_pp, downgradeFail);
   pushRatioDelta(
     deltas,
     "token_saved_ratio_vs_full_prompt",
@@ -83,7 +89,38 @@ export function diffKpis(
     thresholds.token_saved_drop_pp,
     downgradeFail
   );
+}
 
+function pushCiAwareRatioDelta(
+  deltas: KpiDelta[],
+  key: string,
+  currentValue: number,
+  previousValue: number,
+  current: KpiPayload,
+  band: RatioBand,
+  downgradeFail: (verdict: Verdict) => Verdict
+): void {
+  // invariant: ratio-KPI regression thresholds widen to the 95% Wilson CI
+  // half-width when evaluated_count < 100. A noise-level delta no longer
+  // trips a fail/warn alarm on small-N runs, while N >= 100 keeps the raw
+  // 2pp warn / 5pp fail floor.
+  pushRatioDelta(
+    deltas,
+    key,
+    currentValue,
+    previousValue,
+    ciAwareBand(band, Math.round(currentValue * current.evaluated_count), current.evaluated_count),
+    downgradeFail
+  );
+}
+
+function pushTokenEconomyDelta(
+  deltas: KpiDelta[],
+  current: KpiPayload,
+  previous: KpiPayload,
+  thresholds: ThresholdConfig,
+  downgradeFail: (verdict: Verdict) => Verdict
+): void {
   // @anchor token-economy-diff: secondary token-economy signal. The ratio
   // above is the headline; this surfaces a swelling per-recall payload even
   // when the ratio happens to stay flat (e.g. raw history grew in step).
@@ -92,24 +129,33 @@ export function diffKpis(
   // growth classifier — a bigger recalled-context mean is "growth_bad".
   const currentEconomy = current.kpi.token_economy;
   const previousEconomy = previous.kpi.token_economy;
-  if (currentEconomy !== undefined && previousEconomy !== undefined) {
-    const meanVerdict = classifyLatencyGrowth(
-      currentEconomy.recalled_context_tokens_mean,
-      previousEconomy.recalled_context_tokens_mean,
-      thresholds.latency_p95_growth_ratio
-    );
-    deltas.push({
-      key: "token_economy.recalled_context_tokens_mean",
-      current: currentEconomy.recalled_context_tokens_mean,
-      previous: previousEconomy.recalled_context_tokens_mean,
-      delta:
-        currentEconomy.recalled_context_tokens_mean -
-        previousEconomy.recalled_context_tokens_mean,
-      verdict: downgradeFail(meanVerdict.verdict),
-      direction: "growth_bad"
-    });
+  if (currentEconomy === undefined || previousEconomy === undefined) {
+    return;
   }
+  const meanVerdict = classifyLatencyGrowth(
+    currentEconomy.recalled_context_tokens_mean,
+    previousEconomy.recalled_context_tokens_mean,
+    thresholds.latency_p95_growth_ratio
+  );
+  deltas.push({
+    key: "token_economy.recalled_context_tokens_mean",
+    current: currentEconomy.recalled_context_tokens_mean,
+    previous: previousEconomy.recalled_context_tokens_mean,
+    delta:
+      currentEconomy.recalled_context_tokens_mean -
+      previousEconomy.recalled_context_tokens_mean,
+    verdict: downgradeFail(meanVerdict.verdict),
+    direction: "growth_bad"
+  });
+}
 
+function pushLatencyDelta(
+  deltas: KpiDelta[],
+  current: KpiPayload,
+  previous: KpiPayload,
+  thresholds: ThresholdConfig,
+  downgradeFail: (verdict: Verdict) => Verdict
+): void {
   const latencyVerdict = classifyLatencyGrowth(
     current.kpi.latency_ms_p95,
     previous.kpi.latency_ms_p95,
@@ -123,29 +169,41 @@ export function diffKpis(
     verdict: downgradeFail(latencyVerdict.verdict),
     direction: "growth_bad"
   });
+}
 
-  if (shouldDiffHotShare(current)) {
-    const hotShareVerdict = classifyHotShareDrop(
-      current.kpi.tier_distribution,
-      previous.kpi.tier_distribution,
-      thresholds.hot_share_drop_pp
-    );
-    deltas.push({
-      key: "tier_distribution.hot_share",
-      current: shareOfHot(current.kpi.tier_distribution),
-      previous: shareOfHot(previous.kpi.tier_distribution),
-      delta: -hotShareVerdict.deltaPp / 100,
-      verdict: downgradeFail(hotShareVerdict.verdict),
-      direction: "drop_bad"
-    });
+function pushHotShareDelta(
+  deltas: KpiDelta[],
+  current: KpiPayload,
+  previous: KpiPayload,
+  thresholds: ThresholdConfig,
+  downgradeFail: (verdict: Verdict) => Verdict
+): void {
+  if (!shouldDiffHotShare(current)) {
+    return;
   }
+  const hotShareVerdict = classifyHotShareDrop(
+    current.kpi.tier_distribution,
+    previous.kpi.tier_distribution,
+    thresholds.hot_share_drop_pp
+  );
+  deltas.push({
+    key: "tier_distribution.hot_share",
+    current: shareOfHot(current.kpi.tier_distribution),
+    previous: shareOfHot(previous.kpi.tier_distribution),
+    delta: -hotShareVerdict.deltaPp / 100,
+    verdict: downgradeFail(hotShareVerdict.verdict),
+    direction: "drop_bad"
+  });
+}
 
-  const fixtureDiff = diffFixtures(current, previous);
+function finalizeDiffResult(
+  deltas: readonly KpiDelta[],
+  fixtureDiff: FixtureDiff
+): KpiDiffResult {
   const worst = rollupWorstVerdict([
-    ...deltas.map((d) => d.verdict),
+    ...deltas.map((delta) => delta.verdict),
     fixtureDiff.regressions.length > 0 ? "fail" : "ok"
   ]);
-
   return {
     deltas,
     worst_verdict: worst,

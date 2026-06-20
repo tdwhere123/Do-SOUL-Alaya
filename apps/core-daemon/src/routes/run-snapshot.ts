@@ -8,21 +8,13 @@ import {
   compactRunSnapshotSurfaceState,
   SnapshotCompactionError
 } from "./run-snapshot-compaction.js";
+import {
+  queryRunEventLog,
+  type SnapshotCursorState,
+  type SnapshotEventLogRepo
+} from "./run-snapshot-event-log.js";
 
-export interface SnapshotCursorState {
-  readonly cursorExists: boolean;
-  readonly eventsUpToCursor: number;
-  readonly latestEventId: string | null;
-}
-
-type SnapshotEventLogRepo = {
-  queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
-  queryByRunAfterEventId?(runId: string, lastEventId: string): Promise<readonly EventLogEntry[]>;
-  queryByRunCursorState?(
-    runId: string,
-    lastEventId: string | null
-  ): Promise<SnapshotCursorState>;
-};
+export type { SnapshotCursorState } from "./run-snapshot-event-log.js";
 
 type RunRouteWarnLogger = (message: string, meta: Record<string, unknown>) => void;
 
@@ -48,6 +40,14 @@ interface SnapshotCacheEntry {
   /** Date.now() timestamp when this entry was stored or refreshed. */
   readonly cachedAt: number;
 }
+
+type SnapshotProbeResult = SnapshotCacheEntry | "needs-full-replay";
+type SnapshotRebuildReason =
+  | "cursor-loss"
+  | "cursor-state-unavailable"
+  | "cursor-missing"
+  | "prefix-regressed"
+  | "latest-event-drift";
 
 const SNAPSHOT_CACHE_MAX = 50;
 const SNAPSHOT_CACHE_TTL_MS = 60_000;
@@ -149,175 +149,200 @@ async function loadSnapshotCacheEntry(
   const cached = cacheGet(runId);
   const cacheHit = cached !== undefined && now - cached.cachedAt < SNAPSHOT_CACHE_TTL_MS;
 
-  if (cacheHit) {
-    // Use queryByRunAfterEventId to avoid fetching the full event history when
-    // the run has received no new events since the last snapshot.
-    if (cached.latestEventId !== null && eventLogRepo.queryByRunAfterEventId !== undefined) {
-      try {
-        const [probe, cursorState] = await Promise.all([
-          eventLogRepo.queryByRunAfterEventId(runId, cached.latestEventId),
-          eventLogRepo.queryByRunCursorState?.(runId, cached.latestEventId) ?? Promise.resolve(null)
-        ]);
-
-        if (probe.length === 0) {
-          const cachedReuseReason = getCachedReuseInvalidationReason(cached, cursorState);
-          if (cachedReuseReason !== null) {
-            return rebuildSnapshotCacheEntry(runId, eventLogRepo, cached, cursorState, cachedReuseReason, warn);
-          }
-          return cached;
-        }
-
-        const prefixDriftReason = getCursorPrefixDriftReason(cached, cursorState);
-        if (prefixDriftReason !== null) {
-          return rebuildSnapshotCacheEntry(runId, eventLogRepo, cached, cursorState, prefixDriftReason, warn);
-        }
-
-        if (isSurfaceStateEmpty(cached.surfaceState)) {
-          // With a valid cursor/prefix, an empty cached control-plane surface
-          // can safely absorb a direct probe replay without paying for a full
-          // history fetch.
-          const compacted = compactRunSnapshotSurfaceState(probe);
-          return cacheSnapshotCompactionEntry(
-            runId,
-            {
-              surfaceState: compacted.surfaceState,
-              latestControlPlaneEventId:
-                compacted.latestControlPlaneEventId ?? cached.latestControlPlaneEventId
-            },
-            lastEventId(probe) ?? cached.latestEventId,
-            deriveEventsUpToCursorFromProbe(cached, probe, cursorState)
-          );
-        }
-      } catch (probeError) {
-        // queryByRunAfterEventId is optional infrastructure; if it fails, fall
-        // through to the full-fetch path rather than surfacing an error.
-        logRunRouteWarning(warn, "[daemon] queryByRunAfterEventId probe failed, falling back to full fetch", {
-          runId,
-          error: probeError instanceof Error ? probeError.message : String(probeError)
-        });
-      }
-    }
-
-    // Incremental path: fetch all events then filter in-memory to those after
-    // the last processed event_id.
-    try {
-      const allEvents = await eventLogRepo.queryByRun(runId);
-      const deltaEvents = filterEventsAfter(allEvents, cached.latestEventId);
-
-      if (deltaEvents === null) {
-        // H1: cursor-loss detected — cached.latestEventId is no longer present in
-        // the fresh event list (event was deleted by a rollback). The cached surface
-        // state may contain phantom contributions from the deleted event. Evict the
-        // cache entry and rebuild from empty using the current event set.
-        logRunRouteWarning(warn, "[daemon] snapshot cursor-loss detected, rebuilding from empty state", {
-          runId,
-          missingCursorEventId: cached.latestEventId
-        });
-        snapshotCache.delete(runId);
-        return cacheSnapshotCompactionEntry(
-          runId,
-          compactRunSnapshotSurfaceState(allEvents),
-          lastEventId(allEvents) ?? null,
-          allEvents.length
-        );
-      }
-
-      if (eventLogRepo.queryByRunCursorState === undefined) {
-        logRunRouteWarning(warn, "[daemon] snapshot fallback missing cursor metadata, rebuilding from full replay", {
-          runId,
-          cachedLatestEventId: cached.latestEventId
-        });
-        snapshotCache.delete(runId);
-        return cacheSnapshotCompactionEntry(
-          runId,
-          compactRunSnapshotSurfaceState(allEvents),
-          lastEventId(allEvents) ?? null,
-          allEvents.length
-        );
-      }
-
-      let cursorState: SnapshotCursorState;
-      try {
-        cursorState = await eventLogRepo.queryByRunCursorState(runId, cached.latestEventId);
-      } catch (cursorStateError) {
-        logRunRouteWarning(warn, "[daemon] snapshot fallback cursor metadata failed, rebuilding from full replay", {
-          runId,
-          cachedLatestEventId: cached.latestEventId,
-          error: cursorStateError instanceof Error ? cursorStateError.message : String(cursorStateError)
-        });
-        snapshotCache.delete(runId);
-        return cacheSnapshotCompactionEntry(
-          runId,
-          compactRunSnapshotSurfaceState(allEvents),
-          lastEventId(allEvents) ?? null,
-          allEvents.length
-        );
-      }
-
-      const prefixDriftReason = getCursorPrefixDriftReason(cached, cursorState);
-      if (prefixDriftReason !== null) {
-        logRunRouteWarning(warn, "[daemon] snapshot cache metadata drift detected on fallback replay", {
-          runId,
-          reason: prefixDriftReason,
-          snapshotCursorRun: cached.snapshotCursorRun,
-          cachedLatestEventId: cached.latestEventId,
-          repoLatestEventId: cursorState.latestEventId,
-          cachedEventsUpToCursor: cached.eventsUpToCursor,
-          repoEventsUpToCursor: cursorState.eventsUpToCursor
-        });
-        snapshotCache.delete(runId);
-        return cacheSnapshotCompactionEntry(
-          runId,
-          compactRunSnapshotSurfaceState(allEvents),
-          lastEventId(allEvents) ?? null,
-          allEvents.length
-        );
-      }
-
-      if (deltaEvents.length === 0) {
-        const cachedReuseReason = getCachedReuseInvalidationReason(cached, cursorState);
-
-        if (cachedReuseReason !== null) {
-          logRunRouteWarning(warn, "[daemon] snapshot cache metadata drift detected on fallback replay", {
-            runId,
-            reason: cachedReuseReason,
-            snapshotCursorRun: cached.snapshotCursorRun,
-            cachedLatestEventId: cached.latestEventId,
-            repoLatestEventId: cursorState.latestEventId,
-            cachedEventsUpToCursor: cached.eventsUpToCursor,
-            repoEventsUpToCursor: cursorState.eventsUpToCursor
-          });
-          snapshotCache.delete(runId);
-          return cacheSnapshotCompactionEntry(
-            runId,
-            compactRunSnapshotSurfaceState(allEvents),
-            lastEventId(allEvents) ?? null,
-            allEvents.length
-          );
-        }
-        return cached;
-      }
-
-      const compacted = compactRunSnapshotSurfaceState(deltaEvents, cached.surfaceState);
-      return cacheSnapshotCompactionEntry(
-        runId,
-        {
-          surfaceState: compacted.surfaceState,
-          latestControlPlaneEventId:
-            compacted.latestControlPlaneEventId ?? cached.latestControlPlaneEventId
-        },
-        lastEventId(allEvents) ?? cached.latestEventId,
-        allEvents.length
-      );
-    } catch (error) {
-      logRunRouteWarning(warn, "[daemon] incremental snapshot compaction failed, falling back to full replay", {
-        runId,
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
+  if (!cacheHit) {
+    return cacheSnapshotFromFullReplay(runId, eventLogRepo);
   }
 
-  const events = await eventLogRepo.queryByRun(runId);
+  const probeResult = await tryResolveCachedSnapshotFromProbe(runId, eventLogRepo, cached, warn);
+  if (probeResult !== "needs-full-replay") {
+    return probeResult;
+  }
+
+  return await loadCachedSnapshotFromFullReplay(runId, eventLogRepo, cached, warn);
+}
+
+async function tryResolveCachedSnapshotFromProbe(
+  runId: string,
+  eventLogRepo: SnapshotEventLogRepo,
+  cached: Readonly<SnapshotCacheEntry>,
+  warn: RunRouteWarnLogger | undefined
+): Promise<SnapshotProbeResult> {
+  if (cached.latestEventId === null || eventLogRepo.queryByRunAfterEventId === undefined) {
+    return "needs-full-replay";
+  }
+
+  try {
+    const [probe, cursorState] = await Promise.all([
+      eventLogRepo.queryByRunAfterEventId(runId, cached.latestEventId),
+      eventLogRepo.queryByRunCursorState?.(runId, cached.latestEventId) ?? Promise.resolve(null)
+    ]);
+
+    if (probe.length === 0) {
+      return await resolveEmptyProbeSnapshot(runId, eventLogRepo, cached, cursorState, warn);
+    }
+
+    const prefixDriftReason = getCursorPrefixDriftReason(cached, cursorState);
+    if (prefixDriftReason !== null) {
+      return await rebuildSnapshotCacheEntry(runId, eventLogRepo, cached, cursorState, prefixDriftReason, warn);
+    }
+  } catch (probeError) {
+    logRunRouteWarning(warn, "[daemon] queryByRunAfterEventId probe failed, falling back to full fetch", {
+      runId,
+      error: probeError instanceof Error ? probeError.message : String(probeError)
+    });
+  }
+
+  return "needs-full-replay";
+}
+
+async function resolveEmptyProbeSnapshot(
+  runId: string,
+  eventLogRepo: SnapshotEventLogRepo,
+  cached: Readonly<SnapshotCacheEntry>,
+  cursorState: Readonly<SnapshotCursorState> | null,
+  warn: RunRouteWarnLogger | undefined
+): Promise<SnapshotCacheEntry> {
+  const cachedReuseReason = getCachedReuseInvalidationReason(cached, cursorState);
+  if (cachedReuseReason !== null) {
+    return await rebuildSnapshotCacheEntry(runId, eventLogRepo, cached, cursorState, cachedReuseReason, warn);
+  }
+  return cached;
+}
+
+async function loadCachedSnapshotFromFullReplay(
+  runId: string,
+  eventLogRepo: SnapshotEventLogRepo,
+  cached: Readonly<SnapshotCacheEntry>,
+  warn: RunRouteWarnLogger | undefined
+): Promise<SnapshotCacheEntry> {
+  try {
+    const allEvents = await queryRunEventLog(eventLogRepo, runId);
+    const deltaEvents = filterEventsAfter(allEvents, cached.latestEventId);
+
+    if (deltaEvents === null) {
+      return rebuildSnapshotCacheEntryFromEvents(runId, allEvents, "cursor-loss", warn, {
+        missingCursorEventId: cached.latestEventId
+      });
+    }
+
+    const cursorState = await readFallbackCursorState(runId, eventLogRepo, cached, warn);
+    if (cursorState === null) {
+      return rebuildSnapshotCacheEntryFromEvents(runId, allEvents, "cursor-state-unavailable", warn);
+    }
+
+    const rebuildReason = getFallbackReplayRebuildReason(cached, cursorState, deltaEvents);
+    if (rebuildReason !== null) {
+      return rebuildSnapshotCacheEntryFromEvents(runId, allEvents, rebuildReason, warn, {
+        snapshotCursorRun: cached.snapshotCursorRun,
+        cachedLatestEventId: cached.latestEventId,
+        repoLatestEventId: cursorState.latestEventId,
+        cachedEventsUpToCursor: cached.eventsUpToCursor,
+        repoEventsUpToCursor: cursorState.eventsUpToCursor
+      });
+    }
+
+    if (deltaEvents.length === 0) {
+      return cached;
+    }
+
+    return cacheSnapshotDeltaEntry(runId, cached, allEvents, deltaEvents);
+  } catch (error) {
+    logRunRouteWarning(warn, "[daemon] incremental snapshot compaction failed, falling back to full replay", {
+      runId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return await cacheSnapshotFromFullReplay(runId, eventLogRepo);
+  }
+}
+
+async function readFallbackCursorState(
+  runId: string,
+  eventLogRepo: SnapshotEventLogRepo,
+  cached: Readonly<SnapshotCacheEntry>,
+  warn: RunRouteWarnLogger | undefined
+): Promise<SnapshotCursorState | null> {
+  if (eventLogRepo.queryByRunCursorState === undefined) {
+    logRunRouteWarning(warn, "[daemon] snapshot fallback missing cursor metadata, rebuilding from full replay", {
+      runId,
+      cachedLatestEventId: cached.latestEventId
+    });
+    return null;
+  }
+
+  try {
+    return await eventLogRepo.queryByRunCursorState(runId, cached.latestEventId);
+  } catch (cursorStateError) {
+    logRunRouteWarning(warn, "[daemon] snapshot fallback cursor metadata failed, rebuilding from full replay", {
+      runId,
+      cachedLatestEventId: cached.latestEventId,
+      error: cursorStateError instanceof Error ? cursorStateError.message : String(cursorStateError)
+    });
+    return null;
+  }
+}
+
+function getFallbackReplayRebuildReason(
+  cached: Readonly<SnapshotCacheEntry>,
+  cursorState: Readonly<SnapshotCursorState>,
+  deltaEvents: readonly EventLogEntry[]
+): SnapshotRebuildReason | null {
+  const prefixDriftReason = getCursorPrefixDriftReason(cached, cursorState);
+  if (prefixDriftReason !== null) {
+    return prefixDriftReason;
+  }
+
+  if (deltaEvents.length === 0) {
+    return getCachedReuseInvalidationReason(cached, cursorState);
+  }
+
+  return null;
+}
+
+function rebuildSnapshotCacheEntryFromEvents(
+  runId: string,
+  allEvents: readonly EventLogEntry[],
+  reason: SnapshotRebuildReason,
+  warn: RunRouteWarnLogger | undefined,
+  meta: Record<string, unknown> = {}
+): SnapshotCacheEntry {
+  logRunRouteWarning(warn, "[daemon] snapshot cache metadata drift detected, rebuilding from full replay", {
+    runId,
+    reason,
+    ...meta
+  });
+  snapshotCache.delete(runId);
+  return cacheSnapshotCompactionEntry(
+    runId,
+    compactRunSnapshotSurfaceState(allEvents),
+    lastEventId(allEvents) ?? null,
+    allEvents.length
+  );
+}
+
+function cacheSnapshotDeltaEntry(
+  runId: string,
+  cached: Readonly<SnapshotCacheEntry>,
+  allEvents: readonly EventLogEntry[],
+  deltaEvents: readonly EventLogEntry[]
+): SnapshotCacheEntry {
+  const compacted = compactRunSnapshotSurfaceState(deltaEvents, cached.surfaceState);
+  return cacheSnapshotCompactionEntry(
+    runId,
+    {
+      surfaceState: compacted.surfaceState,
+      latestControlPlaneEventId:
+        compacted.latestControlPlaneEventId ?? cached.latestControlPlaneEventId
+    },
+    lastEventId(allEvents) ?? cached.latestEventId,
+    allEvents.length
+  );
+}
+
+async function cacheSnapshotFromFullReplay(
+  runId: string,
+  eventLogRepo: SnapshotEventLogRepo
+): Promise<SnapshotCacheEntry> {
+  const events = await queryRunEventLog(eventLogRepo, runId);
   return cacheSnapshotCompactionEntry(
     runId,
     compactRunSnapshotSurfaceState(events),
@@ -380,18 +405,6 @@ function cacheSnapshotCompactionEntry(
   } satisfies SnapshotCacheEntry;
   cacheSet(runId, entry);
   return entry;
-}
-
-function deriveEventsUpToCursorFromProbe(
-  cached: Readonly<SnapshotCacheEntry>,
-  probe: readonly EventLogEntry[],
-  cursorState: Readonly<SnapshotCursorState> | null
-): number {
-  if (cursorState === null) {
-    return cached.eventsUpToCursor + probe.length;
-  }
-
-  return (cursorState.cursorExists ? cursorState.eventsUpToCursor : 0) + probe.length;
 }
 
 function getCursorPrefixDriftReason(
@@ -460,13 +473,7 @@ async function rebuildSnapshotCacheEntry(
     repoEventsUpToCursor: cursorState?.eventsUpToCursor ?? null
   });
   snapshotCache.delete(runId);
-  const allEvents = await eventLogRepo.queryByRun(runId);
-  return cacheSnapshotCompactionEntry(
-    runId,
-    compactRunSnapshotSurfaceState(allEvents),
-    lastEventId(allEvents) ?? null,
-    allEvents.length
-  );
+  return await cacheSnapshotFromFullReplay(runId, eventLogRepo);
 }
 
 function logRunRouteWarning(
@@ -479,14 +486,4 @@ function logRunRouteWarning(
 
 function defaultRunRouteWarning(message: string, meta: Record<string, unknown>): void {
   console.warn(message, meta);
-}
-
-function isSurfaceStateEmpty(surfaceState: RunSnapshotSurfaceState): boolean {
-  return (
-    (surfaceState.workers?.length ?? 0) === 0 &&
-    (surfaceState.worker_integration_statuses?.length ?? 0) === 0 &&
-    (surfaceState.tools?.length ?? 0) === 0 &&
-    (surfaceState.approvals?.length ?? 0) === 0 &&
-    surfaceState.governance_fault === undefined
-  );
 }

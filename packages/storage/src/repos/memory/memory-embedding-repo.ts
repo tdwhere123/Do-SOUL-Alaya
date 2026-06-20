@@ -1,7 +1,25 @@
-import { createHash } from "node:crypto";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
+import {
+  MEMORY_EMBEDDING_METADATA_COLUMNS,
+  MEMORY_EMBEDDING_SELECT_COLUMNS,
+  chunkObjectIds,
+  hashMemoryContent,
+  parseMemoryEmbeddingMetadataRow,
+  parseMemoryEmbeddingRecord,
+  parseMemoryEmbeddingRow,
+  parseModelId,
+  parseObjectId,
+  parseProviderKind,
+  parseWorkspaceId,
+  runUpsertArgs,
+  type MemoryEmbeddingMetadataRow,
+  type MemoryEmbeddingRow
+} from "./memory-embedding-mappers.js";
+import {
+  prepareMemoryEmbeddingStatements,
+  type SqliteStatement
+} from "./memory-embedding-statements.js";
 
 export interface MemoryEmbeddingRecord {
   readonly object_id: string;
@@ -77,178 +95,79 @@ export interface MemoryEmbeddingRepo {
   ): Promise<readonly Readonly<MemoryEmbeddingRecord>[]>;
 }
 
-interface MemoryEmbeddingRow {
-  readonly object_id: string;
-  readonly workspace_id: string;
-  readonly content_hash: string;
-  readonly provider_kind: string;
-  readonly model_id: string;
-  readonly schema_version: number;
-  readonly dimensions: number;
-  readonly embedding_blob: Buffer;
-  readonly created_at: string;
-  readonly updated_at: string;
+interface MemoryEmbeddingWorkspaceQuery {
+  readonly sql: string;
+  readonly args: readonly (string | number)[];
 }
 
-type MemoryEmbeddingMetadataRow = Omit<MemoryEmbeddingRow, "embedding_blob">;
-
-const MEMORY_EMBEDDING_SELECT_COLUMNS = `
-      object_id,
-      workspace_id,
-      content_hash,
-      provider_kind,
-      model_id,
-      schema_version,
-      dimensions,
-      embedding_blob,
-      created_at,
-      updated_at
-`;
-
-const MEMORY_EMBEDDING_SELECT_COLUMNS_QUALIFIED = `
-      memory_embeddings.object_id AS object_id,
-      memory_embeddings.workspace_id AS workspace_id,
-      memory_embeddings.content_hash AS content_hash,
-      memory_embeddings.provider_kind AS provider_kind,
-      memory_embeddings.model_id AS model_id,
-      memory_embeddings.schema_version AS schema_version,
-      memory_embeddings.dimensions AS dimensions,
-      memory_embeddings.embedding_blob AS embedding_blob,
-      memory_embeddings.created_at AS created_at,
-      memory_embeddings.updated_at AS updated_at
-`;
-
-// Metadata column list: every column EXCEPT embedding_blob, so a metadata read
-// never touches the vector payload.
-const MEMORY_EMBEDDING_METADATA_COLUMNS = `
-      object_id,
-      workspace_id,
-      content_hash,
-      provider_kind,
-      model_id,
-      schema_version,
-      dimensions,
-      created_at,
-      updated_at
-`;
-const MEMORY_EMBEDDING_OBJECT_ID_CHUNK_SIZE = 900;
-
 export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
-  private readonly upsertStatement;
-  private readonly findByObjectIdStatement;
-  private readonly listByWorkspaceStatement;
-  private readonly findCurrentMemoryContentStatement;
-  private readonly clearObjectIdFilterStatement;
-  private readonly insertObjectIdFilterStatement;
-  private readonly listByObjectIdFilterStatement;
-  private readonly guardedUpsertTransaction;
-  private readonly listByObjectIdFilterTransaction;
+  private readonly upsertStatement: SqliteStatement;
+  private readonly findByObjectIdStatement: SqliteStatement;
+  private readonly listByWorkspaceStatement: SqliteStatement;
+  private readonly findCurrentMemoryContentStatement: SqliteStatement;
+  private readonly clearObjectIdFilterStatement: SqliteStatement;
+  private readonly insertObjectIdFilterStatement: SqliteStatement;
+  private readonly listByObjectIdFilterStatement: SqliteStatement;
+  private readonly guardedUpsertTransaction: (
+    parsedRecord: Readonly<MemoryEmbeddingRecord>
+  ) => Readonly<MemoryEmbeddingRecord> | null;
+  private readonly listByObjectIdFilterTransaction: (
+    parsedWorkspaceId: string,
+    parsedObjectIds: readonly string[]
+  ) => readonly MemoryEmbeddingRow[];
 
   public constructor(private readonly db: StorageDatabase) {
-    this.upsertStatement = db.connection.prepare(`
-      INSERT INTO memory_embeddings (
-        object_id,
-        workspace_id,
-        content_hash,
-        provider_kind,
-        model_id,
-        schema_version,
-        dimensions,
-        embedding_blob,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(object_id) DO UPDATE SET
-        workspace_id = excluded.workspace_id,
-        content_hash = excluded.content_hash,
-        provider_kind = excluded.provider_kind,
-        model_id = excluded.model_id,
-        schema_version = excluded.schema_version,
-        dimensions = excluded.dimensions,
-        embedding_blob = excluded.embedding_blob,
-        updated_at = excluded.updated_at
-    `);
-    this.findByObjectIdStatement = db.connection.prepare(`
-      SELECT${MEMORY_EMBEDDING_SELECT_COLUMNS}
-      FROM memory_embeddings
-      WHERE object_id = ?
-      LIMIT 1
-    `);
-    this.listByWorkspaceStatement = db.connection.prepare(`
-      SELECT${MEMORY_EMBEDDING_SELECT_COLUMNS}
-      FROM memory_embeddings
-      WHERE workspace_id = ?
-      ORDER BY object_id ASC
-    `);
-    this.findCurrentMemoryContentStatement = db.connection.prepare(`
-      SELECT content
-      FROM memory_entries
-      WHERE object_id = ?
-        AND workspace_id = ?
-      LIMIT 1
-    `);
-    db.connection.exec(`
-      CREATE TEMP TABLE IF NOT EXISTS memory_embedding_object_id_filter (
-        object_id TEXT PRIMARY KEY
-      ) WITHOUT ROWID
-    `);
-    this.clearObjectIdFilterStatement = db.connection.prepare(`
-      DELETE FROM temp.memory_embedding_object_id_filter
-    `);
-    this.insertObjectIdFilterStatement = db.connection.prepare(`
-      INSERT OR IGNORE INTO temp.memory_embedding_object_id_filter (object_id)
-      VALUES (?)
-    `);
-    this.listByObjectIdFilterStatement = db.connection.prepare(`
-      SELECT${MEMORY_EMBEDDING_SELECT_COLUMNS_QUALIFIED}
-      FROM memory_embeddings
-      INNER JOIN temp.memory_embedding_object_id_filter filter_ids
-        ON filter_ids.object_id = memory_embeddings.object_id
-      WHERE workspace_id = ?
-      ORDER BY memory_embeddings.object_id ASC
-    `);
-    this.guardedUpsertTransaction = db.connection.transaction(
-      (
-        parsedRecord: Readonly<MemoryEmbeddingRecord>
-      ): Readonly<MemoryEmbeddingRecord> | null => {
-        const currentMemory = this.findCurrentMemoryContentStatement.get(
-          parsedRecord.object_id,
-          parsedRecord.workspace_id
-        ) as { readonly content: string } | undefined;
+    const statements = prepareMemoryEmbeddingStatements(db);
+    this.upsertStatement = statements.upsertStatement;
+    this.findByObjectIdStatement = statements.findByObjectIdStatement;
+    this.listByWorkspaceStatement = statements.listByWorkspaceStatement;
+    this.findCurrentMemoryContentStatement = statements.findCurrentMemoryContentStatement;
+    this.clearObjectIdFilterStatement = statements.clearObjectIdFilterStatement;
+    this.insertObjectIdFilterStatement = statements.insertObjectIdFilterStatement;
+    this.listByObjectIdFilterStatement = statements.listByObjectIdFilterStatement;
+    this.guardedUpsertTransaction = this.createGuardedUpsertTransaction();
+    this.listByObjectIdFilterTransaction = this.createListByObjectIdFilterTransaction();
+  }
 
-        if (
-          currentMemory === undefined ||
-          hashMemoryContent(currentMemory.content) !== parsedRecord.content_hash
-        ) {
-          return null;
-        }
+  private createGuardedUpsertTransaction(): (
+    parsedRecord: Readonly<MemoryEmbeddingRecord>
+  ) => Readonly<MemoryEmbeddingRecord> | null {
+    return this.db.connection.transaction((parsedRecord: Readonly<MemoryEmbeddingRecord>) => {
+      const currentMemory = this.findCurrentMemoryContentStatement.get(
+        parsedRecord.object_id,
+        parsedRecord.workspace_id
+      ) as { readonly content: string } | undefined;
 
-        this.runUpsert(parsedRecord);
-
-        const persisted = this.findByObjectIdStatement.get(
-          parsedRecord.object_id
-        ) as MemoryEmbeddingRow | undefined;
-        if (persisted === undefined) {
-          throw new StorageError(
-            "QUERY_FAILED",
-            `Persisted memory embedding ${parsedRecord.object_id} could not be reloaded.`
-          );
-        }
-
-        return parseMemoryEmbeddingRow(persisted);
+      if (currentMemory === undefined || hashMemoryContent(currentMemory.content) !== parsedRecord.content_hash) {
+        return null;
       }
-    );
-    this.listByObjectIdFilterTransaction = db.connection.transaction(
-      (
-        parsedWorkspaceId: string,
-        parsedObjectIds: readonly string[]
-      ): readonly MemoryEmbeddingRow[] => {
-        for (const objectId of parsedObjectIds) {
-          this.insertObjectIdFilterStatement.run(objectId);
-        }
-        return this.listByObjectIdFilterStatement.all(parsedWorkspaceId) as MemoryEmbeddingRow[];
+
+      this.runUpsert(parsedRecord);
+      return this.findRequiredPersistedEmbedding(parsedRecord.object_id);
+    });
+  }
+
+  private createListByObjectIdFilterTransaction(): (
+    parsedWorkspaceId: string,
+    parsedObjectIds: readonly string[]
+  ) => readonly MemoryEmbeddingRow[] {
+    return this.db.connection.transaction((parsedWorkspaceId: string, parsedObjectIds: readonly string[]) => {
+      for (const objectId of parsedObjectIds) {
+        this.insertObjectIdFilterStatement.run(objectId);
       }
-    );
+      return this.listByObjectIdFilterStatement.all(parsedWorkspaceId) as MemoryEmbeddingRow[];
+    });
+  }
+
+  private findRequiredPersistedEmbedding(objectId: string): Readonly<MemoryEmbeddingRecord> {
+    const persisted = this.findByObjectIdStatement.get(objectId) as MemoryEmbeddingRow | undefined;
+    if (persisted === undefined) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Persisted memory embedding ${objectId} could not be reloaded.`
+      );
+    }
+    return parseMemoryEmbeddingRow(persisted);
   }
 
   public async upsert(record: MemoryEmbeddingRecord): Promise<Readonly<MemoryEmbeddingRecord>> {
@@ -360,72 +279,15 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     options?: MemoryEmbeddingListByWorkspaceOptions
   ): Promise<readonly Readonly<MemoryEmbeddingRecord>[]> {
     const parsedWorkspaceId = parseWorkspaceId(workspaceId);
-    const tierFilter = options?.tierFilter;
-    const limit = options?.limit;
-    const providerKind = options?.providerKind;
-    const modelId = options?.modelId;
-    const schemaVersion = options?.schemaVersion;
 
     try {
-      if (
-        tierFilter === undefined &&
-        (limit === undefined || limit <= 0) &&
-        providerKind === undefined &&
-        modelId === undefined &&
-        schemaVersion === undefined
-      ) {
+      if (usesDefaultWorkspaceEmbeddingQuery(options)) {
         const rows = this.listByWorkspaceStatement.all(parsedWorkspaceId) as MemoryEmbeddingRow[];
         return Object.freeze(rows.map((row) => parseMemoryEmbeddingRow(row)));
       }
 
-      const clauses: string[] = [
-        "e.workspace_id = ?",
-        "m.lifecycle_state = 'active'",
-        "COALESCE(m.retention_state, '') != 'tombstoned'"
-      ];
-      const args: (string | number)[] = [parsedWorkspaceId];
-      if (tierFilter !== undefined && tierFilter.length > 0) {
-        const placeholders = tierFilter.map(() => "?").join(", ");
-        clauses.push(`m.storage_tier IN (${placeholders})`);
-        for (const tier of tierFilter) {
-          args.push(tier);
-        }
-      }
-      if (providerKind !== undefined) {
-        clauses.push("e.provider_kind = ?");
-        args.push(parseProviderKind(providerKind));
-      }
-      if (modelId !== undefined) {
-        clauses.push("e.model_id = ?");
-        args.push(parseModelId(modelId));
-      }
-      if (schemaVersion !== undefined) {
-        clauses.push("e.schema_version = ?");
-        args.push(Math.floor(schemaVersion));
-      }
-      let sql = `
-        SELECT
-          e.object_id,
-          e.workspace_id,
-          e.content_hash,
-          e.provider_kind,
-          e.model_id,
-          e.schema_version,
-          e.dimensions,
-          e.embedding_blob,
-          e.created_at,
-          e.updated_at
-        FROM memory_embeddings e
-        INNER JOIN memory_entries m ON m.object_id = e.object_id
-        WHERE ${clauses.join(" AND ")}
-        ORDER BY e.object_id ASC
-      `;
-      if (limit !== undefined && limit > 0) {
-        sql += " LIMIT ?";
-        args.push(Math.floor(limit));
-      }
-      const statement = this.db.connection.prepare(sql);
-      const rows = statement.all(...args) as MemoryEmbeddingRow[];
+      const query = buildWorkspaceEmbeddingQuery(parsedWorkspaceId, options);
+      const rows = this.db.connection.prepare(query.sql).all(...query.args) as MemoryEmbeddingRow[];
       return Object.freeze(rows.map((row) => parseMemoryEmbeddingRow(row)));
     } catch (error) {
       if (error instanceof StorageError) {
@@ -478,156 +340,82 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
   }
 }
 
-function chunkObjectIds(objectIds: readonly string[]): readonly (readonly string[])[] {
-  const chunks: string[][] = [];
-  for (let offset = 0; offset < objectIds.length; offset += MEMORY_EMBEDDING_OBJECT_ID_CHUNK_SIZE) {
-    chunks.push(objectIds.slice(offset, offset + MEMORY_EMBEDDING_OBJECT_ID_CHUNK_SIZE));
-  }
-  return chunks;
+function usesDefaultWorkspaceEmbeddingQuery(
+  options: MemoryEmbeddingListByWorkspaceOptions | undefined
+): boolean {
+  return (
+    options?.tierFilter === undefined &&
+    (options?.limit === undefined || options.limit <= 0) &&
+    options?.providerKind === undefined &&
+    options?.modelId === undefined &&
+    options?.schemaVersion === undefined
+  );
 }
 
-function hashMemoryContent(content: string): string {
-  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
-}
-
-function runUpsertArgs(parsedRecord: Readonly<MemoryEmbeddingRecord>): [
-  string,
-  string,
-  string,
-  string,
-  string,
-  number,
-  number,
-  Buffer,
-  string,
-  string
-] {
-  return [
-    parsedRecord.object_id,
-    parsedRecord.workspace_id,
-    parsedRecord.content_hash,
-    parsedRecord.provider_kind,
-    parsedRecord.model_id,
-    parsedRecord.schema_version,
-    parsedRecord.dimensions,
-    serializeEmbedding(parsedRecord.embedding),
-    parsedRecord.created_at,
-    parsedRecord.updated_at
+function buildWorkspaceEmbeddingQuery(
+  workspaceId: string,
+  options: MemoryEmbeddingListByWorkspaceOptions | undefined
+): MemoryEmbeddingWorkspaceQuery {
+  const clauses = [
+    "e.workspace_id = ?",
+    "m.lifecycle_state = 'active'",
+    "COALESCE(m.retention_state, '') != 'tombstoned'"
   ];
-}
-
-function parseMemoryEmbeddingRecord(value: MemoryEmbeddingRecord): Readonly<MemoryEmbeddingRecord> {
-  const embedding = parseEmbedding(value.embedding, "embedding");
-  const dimensions = parseDimensions(value.dimensions);
-
-  if (embedding.length !== dimensions) {
-    throw new StorageError(
-      "VALIDATION_FAILED",
-      `Embedding length ${embedding.length} did not match declared dimensions ${dimensions}.`
-    );
+  const args: (string | number)[] = [workspaceId];
+  appendWorkspaceEmbeddingFilters(clauses, args, options);
+  let sql = `${WORKSPACE_EMBEDDING_SELECT_SQL}
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY e.object_id ASC`;
+  if (options?.limit !== undefined && options.limit > 0) {
+    sql += " LIMIT ?";
+    args.push(Math.floor(options.limit));
   }
-
-  return Object.freeze({
-    object_id: parseObjectId(value.object_id),
-    workspace_id: parseWorkspaceId(value.workspace_id),
-    content_hash: parseContentHash(value.content_hash),
-    provider_kind: parseProviderKind(value.provider_kind),
-    model_id: parseModelId(value.model_id),
-    schema_version: parseSchemaVersion(value.schema_version),
-    dimensions,
-    embedding,
-    created_at: parseTimestamp(value.created_at),
-    updated_at: parseTimestamp(value.updated_at)
-  });
+  return { sql, args };
 }
 
-function parseMemoryEmbeddingRow(row: MemoryEmbeddingRow): Readonly<MemoryEmbeddingRecord> {
-  const embedding = deserializeEmbedding(row.embedding_blob, row.dimensions);
-
-  return parseMemoryEmbeddingRecord({
-    object_id: row.object_id,
-    workspace_id: row.workspace_id,
-    content_hash: row.content_hash,
-    provider_kind: row.provider_kind,
-    model_id: row.model_id,
-    schema_version: row.schema_version,
-    dimensions: row.dimensions,
-    embedding,
-    created_at: row.created_at,
-    updated_at: row.updated_at
-  });
-}
-
-function parseMemoryEmbeddingMetadataRow(
-  row: MemoryEmbeddingMetadataRow
-): Readonly<MemoryEmbeddingMetadata> {
-  return Object.freeze({
-    object_id: parseObjectId(row.object_id),
-    workspace_id: parseWorkspaceId(row.workspace_id),
-    content_hash: parseContentHash(row.content_hash),
-    provider_kind: parseProviderKind(row.provider_kind),
-    model_id: parseModelId(row.model_id),
-    schema_version: parseSchemaVersion(row.schema_version),
-    dimensions: parseDimensions(row.dimensions),
-    created_at: parseTimestamp(row.created_at),
-    updated_at: parseTimestamp(row.updated_at)
-  });
-}
-
-function serializeEmbedding(embedding: Float32Array): Buffer {
-  const copy = new Float32Array(embedding);
-  return Buffer.from(copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength));
-}
-
-function deserializeEmbedding(blob: Buffer, dimensions: number): Float32Array {
-  const expectedByteLength = dimensions * Float32Array.BYTES_PER_ELEMENT;
-  if (blob.byteLength !== expectedByteLength) {
-    throw new StorageError(
-      "VALIDATION_FAILED",
-      `Embedding blob size ${blob.byteLength} did not match dimensions ${dimensions}.`
-    );
+function appendWorkspaceEmbeddingFilters(
+  clauses: string[],
+  args: (string | number)[],
+  options: MemoryEmbeddingListByWorkspaceOptions | undefined
+): void {
+  appendTierFilter(clauses, args, options?.tierFilter);
+  if (options?.providerKind !== undefined) {
+    clauses.push("e.provider_kind = ?");
+    args.push(parseProviderKind(options.providerKind));
   }
-
-  const copiedBytes = Uint8Array.from(blob);
-  return new Float32Array(copiedBytes.buffer);
+  if (options?.modelId !== undefined) {
+    clauses.push("e.model_id = ?");
+    args.push(parseModelId(options.modelId));
+  }
+  if (options?.schemaVersion !== undefined) {
+    clauses.push("e.schema_version = ?");
+    args.push(Math.floor(options.schemaVersion));
+  }
 }
 
-function parseEmbedding(value: Float32Array, fieldName: string): Float32Array {
-  if (!(value instanceof Float32Array)) {
-    throw new StorageError("VALIDATION_FAILED", `${fieldName} must be a Float32Array.`);
+function appendTierFilter(
+  clauses: string[],
+  args: (string | number)[],
+  tierFilter: readonly ("hot" | "warm" | "cold")[] | undefined
+): void {
+  if (tierFilter === undefined || tierFilter.length === 0) {
+    return;
   }
-
-  if (value.length === 0) {
-    throw new StorageError("VALIDATION_FAILED", `${fieldName} must not be empty.`);
-  }
-
-  for (const element of value) {
-    if (!Number.isFinite(element)) {
-      throw new StorageError("VALIDATION_FAILED", `${fieldName} must contain only finite numbers.`);
-    }
-  }
-
-  return new Float32Array(value);
+  clauses.push(`m.storage_tier IN (${tierFilter.map(() => "?").join(", ")})`);
+  args.push(...tierFilter);
 }
 
-function parseDimensions(value: number): number {
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new StorageError("VALIDATION_FAILED", "dimensions must be a positive integer.");
-  }
-
-  return value;
-}
-
-function parseSchemaVersion(value: number): number {
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new StorageError("VALIDATION_FAILED", "schema_version must be a positive integer.");
-  }
-
-  return value;
-}
-
-const parseObjectId = (value: string): string => parseNonEmptyString(value, "object_id");
-const parseWorkspaceId = (value: string): string => parseNonEmptyString(value, "workspace_id");
-const parseContentHash = (value: string): string => parseNonEmptyString(value, "content_hash");
-const parseProviderKind = (value: string): string => parseNonEmptyString(value, "provider_kind");
-const parseModelId = (value: string): string => parseNonEmptyString(value, "model_id");
+const WORKSPACE_EMBEDDING_SELECT_SQL = `
+        SELECT
+          e.object_id,
+          e.workspace_id,
+          e.content_hash,
+          e.provider_kind,
+          e.model_id,
+          e.schema_version,
+          e.dimensions,
+          e.embedding_blob,
+          e.created_at,
+          e.updated_at
+        FROM memory_embeddings e
+        INNER JOIN memory_entries m ON m.object_id = e.object_id`;

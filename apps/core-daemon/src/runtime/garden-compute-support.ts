@@ -109,79 +109,13 @@ export function canResolveOfficialGardenProvider(
 }
 
 export function createConflictDetectionLlmPort(): ConflictDetectionLlmPort | null {
-  const baseUrl = process.env.ALAYA_CONFLICT_LLM_PROVIDER_URL?.trim();
-  const apiKey = process.env.ALAYA_CONFLICT_LLM_API_KEY?.trim();
-  if (
-    baseUrl === undefined ||
-    baseUrl.length === 0 ||
-    apiKey === undefined ||
-    apiKey.length === 0
-  ) {
+  const config = readConflictDetectionLlmConfig();
+  if (config === null) {
     return null;
   }
-  const model = process.env.ALAYA_CONFLICT_LLM_MODEL?.trim() || "gpt-5.4-mini";
-  const parsedTimeout = Number.parseInt(
-    process.env.ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "",
-    10
-  );
-  const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 8000;
 
   return {
-    classifyPair: async ({ newContent, existingContent, dimension, scopeClass }) => {
-      const prompt = [
-        `You are a deterministic memory ontology classifier for Alaya.`,
-        `Two memory entries share dimension="${dimension}" and scope="${scopeClass}".`,
-        `Decide their relationship: "contradicts" | "incompatible_with" | "none".`,
-        ``,
-        `MEMORY_A (new):`,
-        newContent,
-        ``,
-        `MEMORY_B (existing):`,
-        existingContent,
-        ``,
-        `Reply with one word only: contradicts, incompatible_with, or none.`
-      ].join("\n");
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      timer.unref?.();
-      try {
-        const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: "system", content: "Reply with exactly one word." },
-              { role: "user", content: prompt }
-            ],
-            temperature: 0,
-            max_tokens: 8
-          }),
-          signal: controller.signal
-        });
-        if (!response.ok) {
-          throw new Error(`Conflict detection LLM HTTP ${response.status} ${response.statusText}`);
-        }
-        const data = (await response.json()) as {
-          readonly choices?: ReadonlyArray<{ readonly message?: { readonly content?: string } }>;
-        };
-        const text = data.choices?.[0]?.message?.content?.trim().toLowerCase() ?? "";
-        if (text.startsWith("contradicts")) return "contradicts";
-        if (text.startsWith("incompatible_with")) return "incompatible_with";
-        return "none";
-      } catch (error) {
-        if (error instanceof Error && error.message.startsWith("Conflict detection LLM HTTP ")) {
-          throw error;
-        }
-        throw new Error("Conflict detection LLM request failed", { cause: error });
-      } finally {
-        clearTimeout(timer);
-      }
-    }
+    classifyPair: async (pair) => await classifyConflictPair(config, pair)
   };
 }
 
@@ -205,4 +139,121 @@ function formatGardenSecretRefError(error: ResolveSecretError): string {
     case "keychain_entry_not_found":
       return `Garden compute secret_ref ${error.ref} keychain lookup failed: ${error.reason}`;
   }
+}
+
+type ConflictDetectionLlmConfig = Readonly<{
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  timeoutMs: number;
+}>;
+
+function readConflictDetectionLlmConfig(): ConflictDetectionLlmConfig | null {
+  const baseUrl = process.env.ALAYA_CONFLICT_LLM_PROVIDER_URL?.trim();
+  const apiKey = process.env.ALAYA_CONFLICT_LLM_API_KEY?.trim();
+  if (
+    baseUrl === undefined ||
+    baseUrl.length === 0 ||
+    apiKey === undefined ||
+    apiKey.length === 0
+  ) {
+    return null;
+  }
+  const parsedTimeout = Number.parseInt(process.env.ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "", 10);
+  return {
+    baseUrl,
+    apiKey,
+    model: process.env.ALAYA_CONFLICT_LLM_MODEL?.trim() || "gpt-5.4-mini",
+    timeoutMs: Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 8000
+  };
+}
+
+async function classifyConflictPair(
+  config: ConflictDetectionLlmConfig,
+  pair: {
+    readonly newContent: string;
+    readonly existingContent: string;
+    readonly dimension: string;
+    readonly scopeClass: string;
+  }
+): Promise<"contradicts" | "incompatible_with" | "none"> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  timer.unref?.();
+  try {
+    const content = await requestConflictDetectionClassification(config, pair, controller.signal);
+    return parseConflictDetectionClassification(content);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Conflict detection LLM HTTP ")) {
+      throw error;
+    }
+    throw new Error("Conflict detection LLM request failed", { cause: error });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function requestConflictDetectionClassification(
+  config: ConflictDetectionLlmConfig,
+  pair: {
+    readonly newContent: string;
+    readonly existingContent: string;
+    readonly dimension: string;
+    readonly scopeClass: string;
+  },
+  signal: AbortSignal
+): Promise<string> {
+  const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.apiKey}`
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages: [
+        { role: "system", content: "Reply with exactly one word." },
+        { role: "user", content: buildConflictDetectionPrompt(pair) }
+      ],
+      temperature: 0,
+      max_tokens: 8
+    }),
+    signal
+  });
+  if (!response.ok) {
+    throw new Error(`Conflict detection LLM HTTP ${response.status} ${response.statusText}`);
+  }
+  const data = (await response.json()) as {
+    readonly choices?: ReadonlyArray<{ readonly message?: { readonly content?: string } }>;
+  };
+  return data.choices?.[0]?.message?.content?.trim().toLowerCase() ?? "";
+}
+
+function buildConflictDetectionPrompt(input: {
+  readonly newContent: string;
+  readonly existingContent: string;
+  readonly dimension: string;
+  readonly scopeClass: string;
+}): string {
+  return [
+    `You are a deterministic memory ontology classifier for Alaya.`,
+    `Two memory entries share dimension="${input.dimension}" and scope="${input.scopeClass}".`,
+    `Decide their relationship: "contradicts" | "incompatible_with" | "none".`,
+    ``,
+    `MEMORY_A (new):`,
+    input.newContent,
+    ``,
+    `MEMORY_B (existing):`,
+    input.existingContent,
+    ``,
+    `Reply with one word only: contradicts, incompatible_with, or none.`
+  ].join("\n");
+}
+
+function parseConflictDetectionClassification(
+  content: string
+): "contradicts" | "incompatible_with" | "none" {
+  if (content.startsWith("contradicts")) return "contradicts";
+  if (content.startsWith("incompatible_with")) return "incompatible_with";
+  return "none";
 }

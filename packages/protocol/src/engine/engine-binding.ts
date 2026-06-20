@@ -1,9 +1,16 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedIdSchema,
+  BoundedJsonObjectSchema,
+  BoundedLabelSchema,
+  BoundedPathSchema,
+  BoundedReasonSchema,
+  IsoDatetimeStringSchema
+} from "../shared/schema-primitives.js";
 
 const engineProviderValues = ["openai", "anthropic", "custom"] as const;
-const EngineBaseUrlSchema = z.string().url();
-const EngineConfigSchema = z.record(z.string(), z.unknown());
+const EngineBaseUrlSchema = BoundedPathSchema.url();
+const EngineConfigSchema = BoundedJsonObjectSchema;
 
 export const EngineProvider = {
   OPENAI: "openai",
@@ -14,26 +21,26 @@ export const EngineProvider = {
 export const EngineProviderSchema = z.enum(engineProviderValues);
 
 const ApiKeyEngineBindingSchema = z.object({
-  binding_id: NonEmptyStringSchema,
+  binding_id: BoundedIdSchema,
   provider: EngineProviderSchema,
-  model: NonEmptyStringSchema,
+  model: BoundedLabelSchema,
   base_url: EngineBaseUrlSchema.nullable().default(null),
-  api_key: NonEmptyStringSchema,
-  api_key_ref: NonEmptyStringSchema.nullable().optional(),
+  api_key: BoundedReasonSchema,
+  api_key_ref: BoundedIdSchema.nullable().optional(),
   config: EngineConfigSchema,
   enable_tools: z.boolean().optional()
-});
+}).strict();
 
 const ApiKeyRefEngineBindingSchema = z.object({
-  binding_id: NonEmptyStringSchema,
+  binding_id: BoundedIdSchema,
   provider: EngineProviderSchema,
-  model: NonEmptyStringSchema,
+  model: BoundedLabelSchema,
   base_url: EngineBaseUrlSchema.nullable().default(null),
-  api_key: z.string().optional(),
-  api_key_ref: NonEmptyStringSchema,
+  api_key: BoundedReasonSchema.optional(),
+  api_key_ref: BoundedIdSchema,
   config: EngineConfigSchema,
   enable_tools: z.boolean().optional()
-});
+}).strict();
 
 export const EngineBindingSchema = z.union([
   ApiKeyEngineBindingSchema,
@@ -44,11 +51,12 @@ export const EngineBindingInputSchema = z
   .object({
     provider_type: EngineProviderSchema,
     base_url: EngineBaseUrlSchema.nullable(),
-    api_key: NonEmptyStringSchema,
-    model: NonEmptyStringSchema,
+    api_key: BoundedReasonSchema,
+    model: BoundedLabelSchema,
     config: EngineConfigSchema.default({}),
     enable_tools: z.boolean().optional()
   })
+  .strict()
   .superRefine((value, context) => {
     if (value.provider_type === EngineProvider.CUSTOM && value.base_url === null) {
       context.addIssue({
@@ -61,30 +69,30 @@ export const EngineBindingInputSchema = z
   .readonly();
 
 export const EngineBindingRecordSchema = z.object({
-  binding_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
+  binding_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
   provider_type: EngineProviderSchema,
   base_url: EngineBaseUrlSchema.nullable(),
-  api_key: NonEmptyStringSchema,
-  model: NonEmptyStringSchema,
+  api_key: BoundedReasonSchema,
+  model: BoundedLabelSchema,
   config: EngineConfigSchema,
   enable_tools: z.boolean().optional(),
   created_at: IsoDatetimeStringSchema,
   updated_at: IsoDatetimeStringSchema
-}).readonly();
+}).strict().readonly();
 
 export const EngineBindingSummarySchema = z.object({
   provider_type: EngineProviderSchema,
   base_url: EngineBaseUrlSchema.nullable(),
-  model: NonEmptyStringSchema
-}).readonly();
+  model: BoundedLabelSchema
+}).strict().readonly();
 
 export const EngineConnectionTestResultSchema = z.object({
   success: z.boolean(),
-  error: z.string().nullable(),
+  error: BoundedReasonSchema.nullable(),
   normalized_binding: EngineBindingSummarySchema.nullable(),
-  available_models: z.array(NonEmptyStringSchema).readonly()
-}).readonly();
+  available_models: z.array(BoundedLabelSchema).readonly()
+}).strict().readonly();
 
 export type EngineProvider = z.infer<typeof EngineProviderSchema>;
 export type EngineBinding = z.infer<typeof EngineBindingSchema>;

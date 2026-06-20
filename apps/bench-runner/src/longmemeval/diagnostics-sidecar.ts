@@ -161,6 +161,9 @@ export function renderCompactDiagnosticsSidecar(
     split: sidecar.split,
     run_at: sidecar.run_at,
     alaya_commit: sidecar.alaya_commit,
+    ...(sidecar.commit_resolution === undefined
+      ? {}
+      : { commit_resolution: sidecar.commit_resolution }),
     ...(sidecar.recall_pipeline_version === undefined
       ? {}
       : { recall_pipeline_version: sidecar.recall_pipeline_version }),
@@ -171,7 +174,13 @@ export function renderCompactDiagnosticsSidecar(
     question_count: sidecar.questions.length,
     full_diagnostics_artifact_path: fullDiagnosticsArtifactPath,
     provider_state_summary: sidecar.provider_state_summary,
+    ...(sidecar.seed_extraction_path === undefined
+      ? {}
+      : { seed_extraction_path: sidecar.seed_extraction_path }),
     ...(sidecar.report_usage === undefined ? {} : { report_usage: sidecar.report_usage }),
+    ...(sidecar.question_failures === undefined
+      ? {}
+      : { question_failures: sidecar.question_failures }),
     ...(reportSideEffects === undefined
       ? {}
       : {

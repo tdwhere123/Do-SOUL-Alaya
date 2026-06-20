@@ -9,6 +9,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString } from "../shared/validators.js";
+import { prepareWorkerRunStatements, type SqliteStatement } from "./worker-run-statements.js";
 
 export interface WorkerRunRepo {
   getById(workerRunId: string): Promise<Readonly<DelegatedWorkerRun> | null>;
@@ -28,25 +29,6 @@ export interface WorkerRunRepo {
     principalRunId: string
   ): Promise<Readonly<DelegatedWorkerRun> | null>;
 }
-
-const WORKER_RUN_SELECT_COLUMNS = `
-        worker_run_id,
-        principal_run_id,
-        workspace_id,
-        requesting_principal_run_id,
-        requesting_worker_run_id,
-        engine_class,
-        state,
-        subtask_description,
-        local_surface_ref,
-        local_evidence_pointer,
-        restricted_tool_set_json,
-        local_budget_json,
-        agreed_return_format_json,
-        principal_security_snapshot_json,
-        created_at,
-        updated_at
-`;
 
 interface WorkerRunRow {
   readonly worker_run_id: string;
@@ -91,91 +73,73 @@ interface InsertableWorkerRunRow {
 }
 
 export class SqliteWorkerRunRepo implements WorkerRunRepo {
-  private readonly insertStatement;
-  private readonly getByIdStatement;
-  private readonly deleteIfStateStatement;
-  private readonly updateStateStatement;
-  private readonly findActiveByPrincipalRunIdStatement;
-  private readonly countActiveByRequestingPrincipalStatement;
+  private readonly insertStatement: SqliteStatement;
+  private readonly getByIdStatement: SqliteStatement;
+  private readonly deleteIfStateStatement: SqliteStatement;
+  private readonly updateStateStatement: SqliteStatement;
+  private readonly findActiveByPrincipalRunIdStatement: SqliteStatement;
+  private readonly countActiveByRequestingPrincipalStatement: SqliteStatement;
+  private readonly insertIfNoActiveForPrincipalTransaction: {
+    immediate(...params: readonly unknown[]): unknown;
+  };
 
   public constructor(private readonly db: StorageDatabase) {
-    this.insertStatement = db.connection.prepare(`
-      INSERT INTO worker_runs (
-        worker_run_id,
-        principal_run_id,
-        workspace_id,
-        requesting_principal_run_id,
-        requesting_worker_run_id,
-        engine_class,
-        state,
-        subtask_description,
-        local_surface_ref,
-        local_evidence_pointer,
-        restricted_tool_set_json,
-        local_budget_json,
-        agreed_return_format_json,
-        principal_security_snapshot_json,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    const statements = prepareWorkerRunStatements(db);
+    this.insertStatement = statements.insertStatement;
+    this.getByIdStatement = statements.getByIdStatement;
+    this.deleteIfStateStatement = statements.deleteIfStateStatement;
+    this.updateStateStatement = statements.updateStateStatement;
+    this.findActiveByPrincipalRunIdStatement = statements.findActiveByPrincipalRunIdStatement;
+    this.countActiveByRequestingPrincipalStatement = statements.countActiveByRequestingPrincipalStatement;
+    this.insertIfNoActiveForPrincipalTransaction = this.createInsertIfNoActiveForPrincipalTransaction();
+  }
 
-    this.getByIdStatement = db.connection.prepare(`
-      SELECT${WORKER_RUN_SELECT_COLUMNS}
-      FROM worker_runs
-      WHERE worker_run_id = ?
-      LIMIT 1
-    `);
+  private createInsertIfNoActiveForPrincipalTransaction(): {
+    immediate(...params: readonly unknown[]): unknown;
+  } {
+    return this.db.connection.transaction((principalRunId: string, insertable: InsertableWorkerRunRow) => {
+      this.assertNoActiveWorkerForPrincipal(principalRunId);
+      this.insertWorkerRunRow(insertable);
+      return this.getByIdStatement.get(insertable.workerRunId) as WorkerRunRow | undefined;
+    });
+  }
 
-    this.deleteIfStateStatement = db.connection.prepare(`
-      DELETE FROM worker_runs
-      WHERE worker_run_id = ? AND state = ?
-    `);
+  private assertNoActiveWorkerForPrincipal(principalRunId: string): void {
+    const activeCountRow = this.countActiveByRequestingPrincipalStatement.get(principalRunId) as CountRow | undefined;
+    if ((activeCountRow?.active_count ?? 0) > 0) {
+      throw new StorageError(
+        "CONFLICT",
+        `Serial delegation: principal ${principalRunId} already has an in-flight worker`
+      );
+    }
+  }
 
-    this.updateStateStatement = db.connection.prepare(`
-      UPDATE worker_runs
-      SET state = ?, updated_at = ?
-      WHERE worker_run_id = ? AND state = ?
-    `);
-
-    this.findActiveByPrincipalRunIdStatement = db.connection.prepare(`
-      SELECT${WORKER_RUN_SELECT_COLUMNS}
-      FROM worker_runs
-      WHERE principal_run_id = ? AND state = 'active'
-      ORDER BY created_at ASC
-      LIMIT 1
-    `);
-
-    this.countActiveByRequestingPrincipalStatement = db.connection.prepare(`
-      SELECT COUNT(*) AS active_count
-      FROM worker_runs
-      WHERE requesting_principal_run_id = ?
-        AND state IN ('init', 'active', 'suspended')
-    `);
+  private insertWorkerRunRow(insertable: InsertableWorkerRunRow): void {
+    this.insertStatement.run(
+      insertable.workerRunId,
+      insertable.principalRunId,
+      insertable.workspaceId,
+      insertable.requestingPrincipalRunId,
+      insertable.requestingWorkerRunId,
+      insertable.engineClass,
+      insertable.state,
+      insertable.subtaskDescription,
+      insertable.localSurfaceRef,
+      insertable.localEvidencePointer,
+      insertable.restrictedToolSetJson,
+      insertable.localBudgetJson,
+      insertable.agreedReturnFormatJson,
+      insertable.principalSecuritySnapshotJson,
+      insertable.createdAt,
+      insertable.updatedAt
+    );
   }
 
   public async insert(run: DelegatedWorkerRun): Promise<Readonly<DelegatedWorkerRun>> {
     const insertable = this.toInsertableRow(run);
 
     try {
-      this.insertStatement.run(
-        insertable.workerRunId,
-        insertable.principalRunId,
-        insertable.workspaceId,
-        insertable.requestingPrincipalRunId,
-        insertable.requestingWorkerRunId,
-        insertable.engineClass,
-        insertable.state,
-        insertable.subtaskDescription,
-        insertable.localSurfaceRef,
-        insertable.localEvidencePointer,
-        insertable.restrictedToolSetJson,
-        insertable.localBudgetJson,
-        insertable.agreedReturnFormatJson,
-        insertable.principalSecuritySnapshotJson,
-        insertable.createdAt,
-        insertable.updatedAt
-      );
+      this.insertWorkerRunRow(insertable);
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -204,42 +168,10 @@ export class SqliteWorkerRunRepo implements WorkerRunRepo {
     const insertable = this.toInsertableRow(run);
 
     try {
-      this.db.connection.exec("BEGIN IMMEDIATE");
-
-      const activeCountRow = this.countActiveByRequestingPrincipalStatement.get(
-        parsedPrincipalRunId
-      ) as CountRow | undefined;
-      const activeCount = activeCountRow?.active_count ?? 0;
-
-      if (activeCount > 0) {
-        throw new StorageError(
-          "CONFLICT",
-          `Serial delegation: principal ${parsedPrincipalRunId} already has an in-flight worker`
-        );
-      }
-
-      this.insertStatement.run(
-        insertable.workerRunId,
-        insertable.principalRunId,
-        insertable.workspaceId,
-        insertable.requestingPrincipalRunId,
-        insertable.requestingWorkerRunId,
-        insertable.engineClass,
-        insertable.state,
-        insertable.subtaskDescription,
-        insertable.localSurfaceRef,
-        insertable.localEvidencePointer,
-        insertable.restrictedToolSetJson,
-        insertable.localBudgetJson,
-        insertable.agreedReturnFormatJson,
-        insertable.principalSecuritySnapshotJson,
-        insertable.createdAt,
-        insertable.updatedAt
-      );
-
-      const row = this.getByIdStatement.get(insertable.workerRunId) as WorkerRunRow | undefined;
-
-      this.db.connection.exec("COMMIT");
+      const row = this.insertIfNoActiveForPrincipalTransaction.immediate(
+        parsedPrincipalRunId,
+        insertable
+      ) as WorkerRunRow | undefined;
 
       if (row === undefined) {
         throw new StorageError(
@@ -250,10 +182,6 @@ export class SqliteWorkerRunRepo implements WorkerRunRepo {
 
       return this.mapRowToDomain(row);
     } catch (error) {
-      if (this.db.connection.inTransaction) {
-        this.db.connection.exec("ROLLBACK");
-      }
-
       if (error instanceof StorageError) {
         throw error;
       }

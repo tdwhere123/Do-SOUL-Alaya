@@ -55,12 +55,26 @@ export class CoherenceEdgeProducerService {
     if (input.objects.length < 2) {
       return EMPTY_RESULT;
     }
-    const objectIds = input.objects.map((o) => o.objectId);
-    const sessionById = new Map(input.objects.map((o) => [o.objectId, o.sessionId ?? null] as const));
+    const objectIds = input.objects.map((object) => object.objectId);
+    const sessionById = buildSessionMap(input.objects);
+    const coherent = await this.loadCoherentPairs(input, objectIds);
+    if (coherent.size === 0) {
+      return EMPTY_RESULT;
+    }
+    const kept = sparsifyPairs(coherent, sessionById, input.capPerNode, input.crossSessionOnly);
+    if (kept.size === 0) {
+      return Object.freeze({ coherentPairs: coherent.size, keptPairs: 0, minted: 0 });
+    }
+    const minted = await this.mintCoherentPairs(input, kept);
+    return Object.freeze({ coherentPairs: coherent.size, keptPairs: kept.size, minted });
+  }
 
-    let coherent: ReadonlySet<string>;
+  private async loadCoherentPairs(
+    input: CoherenceCrystallizeInput,
+    objectIds: readonly string[]
+  ): Promise<ReadonlySet<string>> {
     try {
-      coherent = await this.deps.pairSource.coherentPairKeys({
+      return await this.deps.pairSource.coherentPairKeys({
         workspaceId: input.workspaceId,
         runId: input.runId,
         objectIds,
@@ -72,22 +86,17 @@ export class CoherenceEdgeProducerService {
         run_id: input.runId,
         error: error instanceof Error ? error.message : String(error)
       });
-      return EMPTY_RESULT;
+      return new Set<string>();
     }
-    if (coherent.size === 0) {
-      return EMPTY_RESULT;
-    }
+  }
 
-    const kept = sparsifyPairs(coherent, sessionById, input.capPerNode, input.crossSessionOnly);
-    if (kept.size === 0) {
-      return Object.freeze({ coherentPairs: coherent.size, keptPairs: 0, minted: 0 });
-    }
-
+  private async mintCoherentPairs(
+    input: CoherenceCrystallizeInput,
+    kept: ReadonlySet<string>
+  ): Promise<number> {
     let minted = 0;
     for (const pairKey of kept) {
-      const sep = pairKey.indexOf("|");
-      const low = pairKey.slice(0, sep);
-      const high = pairKey.slice(sep + 1);
+      const [low, high] = splitCoherencePairKey(pairKey);
       const outcome = await this.deps.mintPort.submitCandidate({
         workspaceId: input.workspaceId,
         sourceAnchor: { kind: "object", object_id: low },
@@ -104,8 +113,19 @@ export class CoherenceEdgeProducerService {
         minted += 1;
       }
     }
-    return Object.freeze({ coherentPairs: coherent.size, keptPairs: kept.size, minted });
+    return minted;
   }
+}
+
+function buildSessionMap(
+  objects: readonly { readonly objectId: string; readonly sessionId?: string | null }[]
+): ReadonlyMap<string, string | null> {
+  return new Map(objects.map((object) => [object.objectId, object.sessionId ?? null] as const));
+}
+
+function splitCoherencePairKey(pairKey: string): readonly [string, string] {
+  const separator = pairKey.indexOf("|");
+  return [pairKey.slice(0, separator), pairKey.slice(separator + 1)] as const;
 }
 
 // Cap each node to its lexicographically-first `capPerNode` partners (deterministic),

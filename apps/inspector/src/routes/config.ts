@@ -14,7 +14,13 @@ export function registerInspectorConfigRoutes(
   registerConfigSection(app, options, "soul", SoulConfigSchema.unwrap().partial().strict());
   registerConfigSection(app, options, "strategy", StrategyConfigSchema.unwrap().partial().strict());
   registerConfigSection(app, options, "environment", EnvironmentConfigSchema.unwrap().partial().strict());
+  registerEmbeddingSupplementRoutes(app, options);
+  registerGardenComputeRoutes(app, options);
+  registerManifestationBudgetRoutes(app, options);
+  registerEmbeddingStatusRoute(app, options);
+}
 
+function registerEmbeddingSupplementRoutes(app: Hono, options: InspectorProxyOptions): void {
   app.get("/api/config/:workspaceId/embedding-supplement", async (context) => {
     const forbidden = assertInspectorWorkspace(context, options, context.req.param("workspaceId"));
     if (forbidden !== null) return forbidden;
@@ -31,7 +37,9 @@ export function registerInspectorConfigRoutes(
       body: await context.req.json()
     });
   });
+}
 
+function registerGardenComputeRoutes(app: Hono, options: InspectorProxyOptions): void {
   app.get("/api/config/:workspaceId/garden-compute", async (context) => {
     const forbidden = assertInspectorWorkspace(context, options, context.req.param("workspaceId"));
     if (forbidden !== null) return forbidden;
@@ -48,7 +56,9 @@ export function registerInspectorConfigRoutes(
       body: await context.req.json()
     });
   });
+}
 
+function registerManifestationBudgetRoutes(app: Hono, options: InspectorProxyOptions): void {
   app.get("/api/config/:workspaceId/manifestation-budget", async (context) => {
     const forbidden = assertInspectorWorkspace(context, options, context.req.param("workspaceId"));
     if (forbidden !== null) return forbidden;
@@ -69,7 +79,9 @@ export function registerInspectorConfigRoutes(
       body
     });
   });
+}
 
+function registerEmbeddingStatusRoute(app: Hono, options: InspectorProxyOptions): void {
   // The daemon records embedding degraded_reason via the health journal;
   // this proxy gives the Inspector config form a clean read path.
   app.get("/api/embedding-status/:workspaceId", async (context) => {

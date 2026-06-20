@@ -14,6 +14,7 @@ export const ContextLensEntrySchema = z
     scope_class: ScopeClassSchema.optional(),
     source_enforcement: EnforcementLevelSchema.optional()
   })
+  .strict()
   .readonly();
 
 export const ContextLensSchema = ControlPlaneEnvelopeSchema.unwrap()
@@ -22,6 +23,7 @@ export const ContextLensSchema = ControlPlaneEnvelopeSchema.unwrap()
     lens_entries: z.array(ContextLensEntrySchema).readonly(),
     not_a_priority_source: z.literal(true)
   })
+  .strict()
   .readonly();
 
 export const ProjectionEntrySchema = z
@@ -31,6 +33,7 @@ export const ProjectionEntrySchema = z
     content_snapshot: NonEmptyStringSchema,
     token_estimate: NonNegativeIntSchema
   })
+  .strict()
   .readonly();
 
 export const WorkingProjectionSchema = ControlPlaneEnvelopeSchema.unwrap()
@@ -40,6 +43,7 @@ export const WorkingProjectionSchema = ControlPlaneEnvelopeSchema.unwrap()
     total_token_estimate: NonNegativeIntSchema,
     recall_policy_ref: NonEmptyStringSchema.nullable()
   })
+  .strict()
   .readonly();
 
 export type ContextLensEntry = z.infer<typeof ContextLensEntrySchema>;

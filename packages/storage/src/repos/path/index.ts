@@ -16,6 +16,7 @@ export {
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_ANCHOR_KEY_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL,
+  type PathRelationPageOptions,
   type PathRelationRepo
 } from "./path-relation-repo.js";
 export {

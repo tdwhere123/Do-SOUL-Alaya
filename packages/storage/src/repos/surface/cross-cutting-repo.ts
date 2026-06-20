@@ -79,6 +79,13 @@ interface CrossCuttingPermissionRow {
   readonly workspace_id: string;
 }
 
+interface ParsedCrossCuttingStateUpdate {
+  readonly permissionId: string;
+  readonly state: CrossCuttingState;
+  readonly allowedSurfacesJson: string;
+  readonly updatedAt: string;
+}
+
 export class SqliteCrossCuttingPermissionRepo implements CrossCuttingPermissionRepo {
   private readonly createStatement;
   private readonly eventLogWriter;
@@ -282,33 +289,15 @@ export class SqliteCrossCuttingPermissionRepo implements CrossCuttingPermissionR
     allowedSurfaces: readonly string[],
     updatedAt: string
   ): Promise<Readonly<CrossCuttingPermissionRecord>> {
-    const parsedPermissionId = parseNonEmptyString(permissionId, "permission id");
-    const parsedState = parseCrossCuttingState(crossCuttingState);
-    const parsedAllowedSurfaces = parseAllowedSurfaces(allowedSurfaces);
-    const parsedUpdatedAt = parseTimestamp(updatedAt);
+    const parsed = parseCrossCuttingStateUpdate(permissionId, crossCuttingState, allowedSurfaces, updatedAt);
 
     try {
-      const result = this.updateStateStatement.run(
-        parsedState,
-        JSON.stringify(parsedAllowedSurfaces),
-        parsedUpdatedAt,
-        parsedPermissionId
-      );
-
+      const result = this.runStateUpdate(parsed);
       if (result.changes === 0) {
-        throw new StorageError("NOT_FOUND", `Cross cutting permission ${parsedPermissionId} was not found.`);
+        throw new StorageError("NOT_FOUND", `Cross cutting permission ${parsed.permissionId} was not found.`);
       }
 
-      const updated = await this.findByPermissionId(parsedPermissionId);
-
-      if (updated === null) {
-        throw new StorageError(
-          "NOT_FOUND",
-          `Cross cutting permission ${parsedPermissionId} was not found after update.`
-        );
-      }
-
-      return updated;
+      return this.findRequiredByPermissionId(parsed.permissionId);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -316,7 +305,7 @@ export class SqliteCrossCuttingPermissionRepo implements CrossCuttingPermissionR
 
       throw new StorageError(
         "QUERY_FAILED",
-        `Failed to update cross cutting permission ${parsedPermissionId}.`,
+        `Failed to update cross cutting permission ${parsed.permissionId}.`,
         error
       );
     }
@@ -329,41 +318,10 @@ export class SqliteCrossCuttingPermissionRepo implements CrossCuttingPermissionR
     updatedAt: string,
     event: EventLogDraftInput
   ): Promise<Readonly<{ record: Readonly<CrossCuttingPermissionRecord>; event: EventLogEntry }>> {
-    const parsedPermissionId = parseNonEmptyString(permissionId, "permission id");
-    const parsedState = parseCrossCuttingState(crossCuttingState);
-    const parsedAllowedSurfaces = parseAllowedSurfaces(allowedSurfaces);
-    const parsedUpdatedAt = parseTimestamp(updatedAt);
+    const parsed = parseCrossCuttingStateUpdate(permissionId, crossCuttingState, allowedSurfaces, updatedAt);
 
     try {
-      return this.db.connection.transaction(() => {
-        const storedEvent = insertEventLogEntry(this.eventLogWriter, event);
-        const result = this.updateStateStatement.run(
-          parsedState,
-          JSON.stringify(parsedAllowedSurfaces),
-          parsedUpdatedAt,
-          parsedPermissionId
-        );
-
-        if (result.changes === 0) {
-          throw new StorageError("NOT_FOUND", `Cross cutting permission ${parsedPermissionId} was not found.`);
-        }
-
-        const row = this.findByPermissionIdStatement.get(
-          parsedPermissionId
-        ) as CrossCuttingPermissionRow | undefined;
-
-        if (row === undefined) {
-          throw new StorageError(
-            "NOT_FOUND",
-            `Cross cutting permission ${parsedPermissionId} was not found after update.`
-          );
-        }
-
-        return {
-          record: parseCrossCuttingPermissionRow(row),
-          event: storedEvent
-        };
-      })();
+      return this.updateStateWithEventTransaction(parsed, event);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -371,11 +329,62 @@ export class SqliteCrossCuttingPermissionRepo implements CrossCuttingPermissionR
 
       throw new StorageError(
         "QUERY_FAILED",
-        `Failed to update cross cutting permission ${parsedPermissionId}.`,
+        `Failed to update cross cutting permission ${parsed.permissionId}.`,
         error
       );
     }
   }
+
+  private updateStateWithEventTransaction(
+    parsed: ParsedCrossCuttingStateUpdate,
+    event: EventLogDraftInput
+  ): Readonly<{ record: Readonly<CrossCuttingPermissionRecord>; event: EventLogEntry }> {
+    return this.db.connection.transaction(() => {
+      const storedEvent = insertEventLogEntry(this.eventLogWriter, event);
+      const result = this.runStateUpdate(parsed);
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Cross cutting permission ${parsed.permissionId} was not found.`);
+      }
+      return {
+        record: this.findRequiredByPermissionId(parsed.permissionId),
+        event: storedEvent
+      };
+    })();
+  }
+
+  private runStateUpdate(parsed: ParsedCrossCuttingStateUpdate): { readonly changes: number } {
+    return this.updateStateStatement.run(
+      parsed.state,
+      parsed.allowedSurfacesJson,
+      parsed.updatedAt,
+      parsed.permissionId
+    );
+  }
+
+  private findRequiredByPermissionId(permissionId: string): Readonly<CrossCuttingPermissionRecord> {
+    const row = this.findByPermissionIdStatement.get(permissionId) as CrossCuttingPermissionRow | undefined;
+    if (row === undefined) {
+      throw new StorageError(
+        "NOT_FOUND",
+        `Cross cutting permission ${permissionId} was not found after update.`
+      );
+    }
+    return parseCrossCuttingPermissionRow(row);
+  }
+}
+
+function parseCrossCuttingStateUpdate(
+  permissionId: string,
+  crossCuttingState: CrossCuttingState,
+  allowedSurfaces: readonly string[],
+  updatedAt: string
+): ParsedCrossCuttingStateUpdate {
+  return {
+    permissionId: parseNonEmptyString(permissionId, "permission id"),
+    state: parseCrossCuttingState(crossCuttingState),
+    allowedSurfacesJson: JSON.stringify(parseAllowedSurfaces(allowedSurfaces)),
+    updatedAt: parseTimestamp(updatedAt)
+  };
 }
 
 function parseCrossCuttingPermission(

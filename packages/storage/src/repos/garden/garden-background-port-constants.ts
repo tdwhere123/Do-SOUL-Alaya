@@ -1,0 +1,11 @@
+export const STALE_EVIDENCE_LIMIT = 120;
+export const POINTER_QUERY_LIMIT = 120;
+export const POINTER_RESULT_LIMIT = 240;
+export const EXPIRING_GREEN_LIMIT = 120;
+export const DRAFT_CANDIDATE_LIMIT = 120;
+export const PATTERN_LIMIT = 120;
+export const HOT_DEMOTION_LIMIT = 120;
+export const ACTIVE_VERIFICATION_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+export const BOOTSTRAP_MEMORY_THRESHOLD = 10;
+export const BOOTSTRAP_CLAIM_THRESHOLD = 5;
+export const BOUNDARY_COLD_TIER = "cold";

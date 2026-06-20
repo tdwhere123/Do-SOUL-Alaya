@@ -47,53 +47,68 @@ export function createEdgeClassifyQueueAdapter(deps: {
         input.source.object_id,
         input.neighbor.object_id
       );
-      // Dedup: an already-queued pair is a no-op (the SQLite PK guard also
-      // catches the race, but the explicit peek avoids the throw path).
       if (deps.gardenTaskRepo.findById(taskId) !== null) {
         return;
       }
-      const createdAt = now();
-      const payload = EdgeClassifyTaskPayloadSchema.parse({
-        task_id: taskId,
-        task_kind: GardenTaskKind.EDGE_CLASSIFY,
-        required_tier: GardenTier.TIER_2,
-        run_id: input.runId,
-        workspace_id: input.workspaceId,
-        priority: EDGE_CLASSIFY_PRIORITY,
-        created_at: createdAt,
-        dimension: input.dimension,
-        scope_class: input.scopeClass,
-        source_memory: {
-          object_id: input.source.object_id,
-          content: input.source.content.slice(0, EDGE_CLASSIFY_CONTENT_MAX_CHARS),
-          domain_tags: [...input.source.domainTags]
-        },
-        neighbor_memory: {
-          object_id: input.neighbor.object_id,
-          content: input.neighbor.content.slice(0, EDGE_CLASSIFY_CONTENT_MAX_CHARS),
-          domain_tags: [...input.neighbor.domainTags]
-        },
-        source_signal_id: input.sourceSignalId
-      });
-      try {
-        deps.gardenTaskRepo.enqueue({
-          id: taskId,
-          workspace_id: input.workspaceId,
-          role: GardenRole.LIBRARIAN,
-          kind: GardenTaskKind.EDGE_CLASSIFY,
-          payload,
-          created_at: createdAt
-        });
-      } catch (error) {
-        // A duplicate-pair race (lost the PK insert) is benign — the pair is
-        // already queued. Re-throw anything else so the best-effort caller can
-        // warn; it never aborts proposal production.
-        if (isDuplicateInsert(error)) {
-          return;
-        }
-        throw error;
-      }
+      await enqueueEdgeClassifyTask(deps.gardenTaskRepo, input, taskId, now());
     }
+  };
+}
+
+async function enqueueEdgeClassifyTask(
+  gardenTaskRepo: EdgeClassifyQueueRepoPort,
+  input: Parameters<EdgeClassifyQueuePort["enqueueEdgeClassify"]>[0],
+  taskId: string,
+  createdAt: string
+): Promise<void> {
+  const payload = buildEdgeClassifyTaskPayload(input, taskId, createdAt);
+  try {
+    gardenTaskRepo.enqueue({
+      id: taskId,
+      workspace_id: input.workspaceId,
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.EDGE_CLASSIFY,
+      payload,
+      created_at: createdAt
+    });
+  } catch (error) {
+    if (isDuplicateInsert(error)) {
+      return;
+    }
+    throw error;
+  }
+}
+
+function buildEdgeClassifyTaskPayload(
+  input: Parameters<EdgeClassifyQueuePort["enqueueEdgeClassify"]>[0],
+  taskId: string,
+  createdAt: string
+) {
+  return EdgeClassifyTaskPayloadSchema.parse({
+    task_id: taskId,
+    task_kind: GardenTaskKind.EDGE_CLASSIFY,
+    required_tier: GardenTier.TIER_2,
+    run_id: input.runId,
+    workspace_id: input.workspaceId,
+    priority: EDGE_CLASSIFY_PRIORITY,
+    created_at: createdAt,
+    dimension: input.dimension,
+    scope_class: input.scopeClass,
+    source_memory: buildEdgeClassifyMemoryPayload(input.source),
+    neighbor_memory: buildEdgeClassifyMemoryPayload(input.neighbor),
+    source_signal_id: input.sourceSignalId
+  });
+}
+
+function buildEdgeClassifyMemoryPayload(memory: {
+  readonly object_id: string;
+  readonly content: string;
+  readonly domainTags: readonly string[];
+}) {
+  return {
+    object_id: memory.object_id,
+    content: memory.content.slice(0, EDGE_CLASSIFY_CONTENT_MAX_CHARS),
+    domain_tags: [...memory.domainTags]
   };
 }
 

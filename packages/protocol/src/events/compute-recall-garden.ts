@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
   IsoDatetimeStringSchema,
-  NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
 import { GardenBacklogQueueDepthByTierSchema } from "../soul/garden-backlog-snapshot.js";
@@ -32,23 +34,23 @@ export const ComputeRecallGardenEventTypeSchema = z.enum(computeRecallGardenEven
 
 const WorkspaceScopedEventContextSchema = z
   .object({
-    workspace_id: NonEmptyStringSchema,
-    run_id: NonEmptyStringSchema.nullable()
+    workspace_id: BoundedIdSchema,
+    run_id: BoundedIdSchema.nullable()
   })
   .strict();
 
 const BacklogEventContextSchema = z
   .object({
-    workspace_id: NonEmptyStringSchema,
-    run_id: NonEmptyStringSchema.nullable()
+    workspace_id: BoundedIdSchema,
+    run_id: BoundedIdSchema.nullable()
   })
   .strict();
 
 const ComputeProviderCallBasePayloadSchema = WorkspaceScopedEventContextSchema.extend({
-  provider_kind: NonEmptyStringSchema,
-  model_id: NonEmptyStringSchema,
-  operation: NonEmptyStringSchema,
-  call_id: NonEmptyStringSchema
+  provider_kind: BoundedLabelSchema,
+  model_id: BoundedLabelSchema,
+  operation: BoundedLabelSchema,
+  call_id: BoundedIdSchema
 }).strict();
 
 export const ComputeProviderCallStartedPayloadSchema = ComputeProviderCallBasePayloadSchema.extend({
@@ -66,15 +68,15 @@ export const ComputeProviderCallCompletedPayloadSchema = ComputeProviderCallBase
 
 export const ComputeProviderCallFailedPayloadSchema = ComputeProviderCallBasePayloadSchema.extend({
   latency_ms: NonNegativeIntSchema,
-  error_kind: NonEmptyStringSchema,
-  error_message: z.string(),
+  error_kind: BoundedLabelSchema,
+  error_message: BoundedReasonSchema,
   failed_at: IsoDatetimeStringSchema
 })
   .strict()
   .readonly();
 
 const EmbeddingSupplementBasePayloadSchema = WorkspaceScopedEventContextSchema.extend({
-  query_id: NonEmptyStringSchema
+  query_id: BoundedIdSchema
 }).strict();
 
 export const RecallEmbeddingSupplementQueriedPayloadSchema =
@@ -99,7 +101,7 @@ export const RecallEmbeddingSupplementMergedPayloadSchema =
 
 export const RecallEmbeddingSupplementDegradedPayloadSchema =
   EmbeddingSupplementBasePayloadSchema.extend({
-    degradation_reason: NonEmptyStringSchema,
+    degradation_reason: BoundedReasonSchema,
     base_candidate_count: NonNegativeIntSchema,
     fallback_candidate_count: NonNegativeIntSchema,
     degraded_at: IsoDatetimeStringSchema

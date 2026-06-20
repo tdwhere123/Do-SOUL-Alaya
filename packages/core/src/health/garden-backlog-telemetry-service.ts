@@ -5,49 +5,31 @@ import {
   type EventLogEntry,
   type GardenBacklogSnapshot,
   type GardenBacklogThresholds,
-  type GardenBacklogWarningTransition,
-  type HealthJournalRecordPort
+  type GardenBacklogWarningTransition
 } from "@do-soul/alaya-protocol";
 import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
-import type { RuntimeNotifier } from "../runtime/event-publisher.js";
+import {
+  delay,
+  normalizeStopTimeoutMs,
+  raceWithTimeout,
+  toErrorMessage
+} from "./garden-backlog-telemetry-service-helpers.js";
+import type {
+  GardenBacklogTelemetryServiceDependencies,
+  GardenBacklogTelemetryStopResult,
+  RunnerHandle
+} from "./garden-backlog-telemetry-service-types.js";
+export type {
+  GardenBacklogTelemetryEventLogPort,
+  GardenBacklogTelemetrySchedulerPort,
+  GardenBacklogTelemetryServiceDependencies,
+  GardenBacklogTelemetryStopResult,
+  GardenBacklogTelemetryWarnPort
+} from "./garden-backlog-telemetry-service-types.js";
 
 const GARDEN_BACKLOG_ENTITY_TYPE = "garden_backlog";
 const GARDEN_BACKLOG_ENTITY_ID = "global";
-const DEFAULT_STOP_TIMEOUT_MS = 10_000;
 const STOP_RETRY_BACKOFF_MS = 1;
-
-export interface GardenBacklogTelemetrySchedulerPort {
-  getBacklogSnapshot(): GardenBacklogSnapshot;
-  peekBacklogWarningTransition(): Readonly<{
-    readonly transition_id: number;
-    readonly transition: GardenBacklogWarningTransition;
-    readonly snapshot: GardenBacklogSnapshot;
-  }> | null;
-  peekLastBacklogWarningTransitionId(): number | null;
-  acknowledgeBacklogWarningTransition(transitionId: number): boolean;
-}
-
-export interface GardenBacklogTelemetryEventLogPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
-  queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
-}
-
-export interface GardenBacklogTelemetryWarnPort {
-  (message: string, meta: Record<string, unknown>): void;
-}
-
-export interface GardenBacklogTelemetryServiceDependencies {
-  readonly scheduler: GardenBacklogTelemetrySchedulerPort;
-  readonly eventLogRepo: GardenBacklogTelemetryEventLogPort;
-  readonly runtimeNotifier?: Pick<RuntimeNotifier, "notifyEntry">;
-  readonly healthJournal?: HealthJournalRecordPort;
-  readonly thresholds: GardenBacklogThresholds;
-  readonly stopTimeoutMs?: number | null;
-  readonly defaultWorkspaceId?: string;
-  readonly warn?: GardenBacklogTelemetryWarnPort;
-}
-
-export type GardenBacklogTelemetryStopResult = "drained" | "timed_out";
 
 export class GardenBacklogTelemetryService {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -473,50 +455,4 @@ export class GardenBacklogTelemetryService {
       });
     }
   }
-}
-
-interface RunnerHandle {
-  readonly generation: number;
-  readonly promise: Promise<void>;
-}
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function normalizeStopTimeoutMs(timeoutMs: number | null | undefined): number | null {
-  if (timeoutMs === null) {
-    return null;
-  }
-
-  if (timeoutMs === undefined) {
-    return DEFAULT_STOP_TIMEOUT_MS;
-  }
-
-  return Number.isFinite(timeoutMs) && timeoutMs >= 0 ? timeoutMs : DEFAULT_STOP_TIMEOUT_MS;
-}
-
-async function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | false> {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<false>((resolve) => {
-        timeout = setTimeout(() => resolve(false), timeoutMs);
-        timeout.unref?.();
-      })
-    ]);
-  } finally {
-    if (timeout !== null) {
-      clearTimeout(timeout);
-    }
-  }
-}
-
-async function delay(timeoutMs: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(resolve, timeoutMs);
-    timeout.unref?.();
-  });
 }

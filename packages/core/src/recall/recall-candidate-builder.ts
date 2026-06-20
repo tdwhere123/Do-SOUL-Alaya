@@ -99,31 +99,44 @@ export function buildSynthesisCoarseRecallCandidate(
   input: SynthesisCoarseRecallCandidateInput
 ): Readonly<CoarseRecallCandidate> {
   const relevance = clamp01(input.normalizedRank);
+  const entry = buildSynthesisPseudoMemoryEntry(input.synthesis, relevance);
+  return Object.freeze({
+    entry,
+    objectKind: "synthesis_capsule" as const,
+    originPlane: "workspace_local" as const,
+    sourceChannel: "synthesis_fts",
+    sourceChannels: Object.freeze(["synthesis_fts"]),
+    admissionPlanes: Object.freeze(["lexical" as const]),
+    firstAdmissionPlane: "lexical" as const,
+    structuralScore: 0
+  });
+}
+
+function buildSynthesisPseudoMemoryEntry(
+  synthesis: Readonly<SynthesisCapsule>,
+  relevance: number
+): MemoryEntry {
   // invariant: a synthesis_capsule is shaped into a MemoryEntry only so it can
   // ride the shared coarse->fusion candidate pipeline. dimension/source_kind/
-  // formation_kind/scope_class are NOT true synthesis ontology — they are the
-  // schema-valid placeholders that let RecallCandidateSchema parse. Callers
-  // MUST branch on objectKind === "synthesis_capsule", never trust these
-  // fields. scoreRecallFusionStream enforces this (synthesis scores only on
-  // synthesis_fts); any new consumer of CoarseRecallCandidate.entry must do
-  // the same. see also: packages/core/src/recall/fusion-delivery.ts:scoreRecallFusionStream
-  const entry: MemoryEntry = {
-    object_id: input.synthesis.object_id,
+  // formation_kind/scope_class are schema-valid placeholders, not synthesis
+  // ontology truth. Callers MUST branch on objectKind === "synthesis_capsule".
+  return {
+    object_id: synthesis.object_id,
     object_kind: "memory_entry",
     schema_version: 1,
-    lifecycle_state: input.synthesis.lifecycle_state,
-    created_at: input.synthesis.created_at,
-    updated_at: input.synthesis.updated_at,
-    created_by: input.synthesis.created_by,
+    lifecycle_state: synthesis.lifecycle_state,
+    created_at: synthesis.created_at,
+    updated_at: synthesis.updated_at,
+    created_by: synthesis.created_by,
     dimension: "episode" as const,
     source_kind: "compiler" as const,
     formation_kind: "derived" as const,
     scope_class: "project" as const,
-    content: clipSynthesisSummary(input.synthesis.summary),
-    domain_tags: Object.freeze(["synthesis", input.synthesis.topic_key]),
-    evidence_refs: Object.freeze([...input.synthesis.evidence_refs]),
-    workspace_id: input.synthesis.workspace_id,
-    run_id: input.synthesis.run_id,
+    content: clipSynthesisSummary(synthesis.summary),
+    domain_tags: Object.freeze(["synthesis", synthesis.topic_key]),
+    evidence_refs: Object.freeze([...synthesis.evidence_refs]),
+    workspace_id: synthesis.workspace_id,
+    run_id: synthesis.run_id,
     surface_id: null,
     storage_tier: "hot" as const,
     activation_score: relevance,
@@ -138,17 +151,6 @@ export function buildSynthesisCoarseRecallCandidate(
     contradiction_count: null,
     superseded_by: null
   };
-
-  return Object.freeze({
-    entry,
-    objectKind: "synthesis_capsule" as const,
-    originPlane: "workspace_local" as const,
-    sourceChannel: "synthesis_fts",
-    sourceChannels: Object.freeze(["synthesis_fts"]),
-    admissionPlanes: Object.freeze(["lexical" as const]),
-    firstAdmissionPlane: "lexical" as const,
-    structuralScore: 0
-  });
 }
 
 export function selectCandidatesWithinBudgets(

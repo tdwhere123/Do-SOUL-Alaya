@@ -8,6 +8,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
+import { prepareSurfaceBindingStatements, type SqliteStatement } from "./surface-binding-statements.js";
 
 export interface SurfaceBindingRecord {
   readonly binding_id: string;
@@ -37,21 +38,6 @@ export interface SurfaceBindingRepo {
   ): readonly Readonly<SurfaceBindingRecord>[];
 }
 
-const SURFACE_BINDING_SELECT_COLUMNS = `
-        binding_id,
-        object_kind,
-        schema_version,
-        lifecycle_state,
-        created_at,
-        updated_at,
-        created_by,
-        object_id,
-        surface_id,
-        is_primary,
-        binding_state,
-        workspace_id
-`;
-
 interface SurfaceBindingRow {
   readonly binding_id: string;
   readonly object_kind: string;
@@ -68,95 +54,29 @@ interface SurfaceBindingRow {
 }
 
 export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
-  private readonly createStatement;
-  private readonly findByBindingIdStatement;
-  private readonly findByObjectIdStatement;
-  private readonly findPrimaryBindingStatement;
-  private readonly findBySurfaceIdStatement;
-  private readonly findByWorkspaceStatement;
-  private readonly updateStateStatement;
-  private readonly findDetachableBySurfaceIdStatement;
-  private readonly findDetachedBySurfaceIdStatement;
-  private readonly cascadeDetachStatement;
+  private readonly createStatement: SqliteStatement;
+  private readonly findByBindingIdStatement: SqliteStatement;
+  private readonly findByObjectIdStatement: SqliteStatement;
+  private readonly findPrimaryBindingStatement: SqliteStatement;
+  private readonly findBySurfaceIdStatement: SqliteStatement;
+  private readonly findByWorkspaceStatement: SqliteStatement;
+  private readonly updateStateStatement: SqliteStatement;
+  private readonly findDetachableBySurfaceIdStatement: SqliteStatement;
+  private readonly findDetachedBySurfaceIdStatement: SqliteStatement;
+  private readonly cascadeDetachStatement: SqliteStatement;
 
   public constructor(db: StorageDatabase) {
-    this.createStatement = db.connection.prepare(`
-      INSERT INTO surface_bindings (
-        binding_id,
-        object_kind,
-        schema_version,
-        lifecycle_state,
-        created_at,
-        updated_at,
-        created_by,
-        object_id,
-        surface_id,
-        is_primary,
-        binding_state,
-        workspace_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    this.findByBindingIdStatement = db.connection.prepare(`
-      SELECT${SURFACE_BINDING_SELECT_COLUMNS}
-      FROM surface_bindings
-      WHERE binding_id = ?
-      LIMIT 1
-    `);
-
-    this.findByObjectIdStatement = db.connection.prepare(`
-      SELECT${SURFACE_BINDING_SELECT_COLUMNS}
-      FROM surface_bindings
-      WHERE object_id = ? AND workspace_id = ?
-      ORDER BY created_at ASC, binding_id ASC
-    `);
-
-    this.findPrimaryBindingStatement = db.connection.prepare(`
-      SELECT${SURFACE_BINDING_SELECT_COLUMNS}
-      FROM surface_bindings
-      WHERE object_id = ? AND workspace_id = ? AND is_primary = 1 AND binding_state != 'detached'
-      LIMIT 1
-    `);
-
-    this.findBySurfaceIdStatement = db.connection.prepare(`
-      SELECT${SURFACE_BINDING_SELECT_COLUMNS}
-      FROM surface_bindings
-      WHERE surface_id = ? AND workspace_id = ?
-      ORDER BY created_at ASC, binding_id ASC
-    `);
-
-    this.findByWorkspaceStatement = db.connection.prepare(`
-      SELECT${SURFACE_BINDING_SELECT_COLUMNS}
-      FROM surface_bindings
-      WHERE workspace_id = ?
-      ORDER BY created_at ASC, binding_id ASC
-    `);
-
-    this.updateStateStatement = db.connection.prepare(`
-      UPDATE surface_bindings
-      SET binding_state = ?, updated_at = ?
-      WHERE binding_id = ?
-    `);
-
-    this.findDetachableBySurfaceIdStatement = db.connection.prepare(`
-      SELECT${SURFACE_BINDING_SELECT_COLUMNS}
-      FROM surface_bindings
-      WHERE surface_id = ? AND workspace_id = ? AND binding_state != 'detached'
-      ORDER BY created_at ASC, binding_id ASC
-    `);
-
-    this.findDetachedBySurfaceIdStatement = db.connection.prepare(`
-      SELECT${SURFACE_BINDING_SELECT_COLUMNS}
-      FROM surface_bindings
-      WHERE surface_id = ? AND workspace_id = ? AND binding_state = 'detached'
-      ORDER BY created_at ASC, binding_id ASC
-    `);
-
-    this.cascadeDetachStatement = db.connection.prepare(`
-      UPDATE surface_bindings
-      SET binding_state = 'detached', updated_at = ?
-      WHERE surface_id = ? AND workspace_id = ? AND binding_state != 'detached'
-    `);
+    const statements = prepareSurfaceBindingStatements(db);
+    this.createStatement = statements.createStatement;
+    this.findByBindingIdStatement = statements.findByBindingIdStatement;
+    this.findByObjectIdStatement = statements.findByObjectIdStatement;
+    this.findPrimaryBindingStatement = statements.findPrimaryBindingStatement;
+    this.findBySurfaceIdStatement = statements.findBySurfaceIdStatement;
+    this.findByWorkspaceStatement = statements.findByWorkspaceStatement;
+    this.updateStateStatement = statements.updateStateStatement;
+    this.findDetachableBySurfaceIdStatement = statements.findDetachableBySurfaceIdStatement;
+    this.findDetachedBySurfaceIdStatement = statements.findDetachedBySurfaceIdStatement;
+    this.cascadeDetachStatement = statements.cascadeDetachStatement;
   }
 
   public create(

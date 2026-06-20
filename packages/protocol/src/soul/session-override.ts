@@ -13,6 +13,7 @@ export const SessionOverrideSchema = ControlPlaneEnvelopeSchema.unwrap()
     correction: NonEmptyStringSchema,
     priority: NonNegativeIntSchema
   })
+  .strict()
   .readonly();
 
 export type SessionOverrideScope = z.infer<typeof SessionOverrideScopeSchema>;

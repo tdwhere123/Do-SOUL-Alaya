@@ -1,6 +1,8 @@
 import { StorageError } from "../../shared/errors.js";
 
 const SURFACE_URI_PATTERN = /^surface:\/\/[\w\-.:/]+$/;
+export const DEFAULT_REPO_LIST_PAGE_LIMIT = 500;
+export const MAX_REPO_LIST_PAGE_LIMIT = 500;
 
 export function parseNonEmptyString(value: string, field: string): string {
   if (value.trim().length === 0) {
@@ -30,4 +32,24 @@ export function parseNullableString(value: string | null, field: string): string
 
 export function parseTimestamp(value: string): string {
   return parseNonEmptyString(value, "timestamp");
+}
+
+export function parsePageLimit(
+  value: number,
+  field = "page limit",
+  max = MAX_REPO_LIST_PAGE_LIMIT
+): number {
+  if (!Number.isInteger(value) || value < 0 || value > max) {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
+  }
+
+  return value;
+}
+
+export function parsePageOffset(value: number, field = "page offset"): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
+  }
+
+  return value;
 }

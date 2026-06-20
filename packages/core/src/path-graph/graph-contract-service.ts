@@ -12,7 +12,7 @@ import { deepFreeze } from "../shared/deep-freeze.js";
 const GRAPH_CONTRACT_SNAPSHOT_HISTORY_LIMIT = 5;
 
 export interface GraphContractServicePathRelationRepoPort {
-  findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
+  findActiveAll(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
 }
 
 export interface GraphContractServiceSnapshotHistoryPort {
@@ -41,6 +41,15 @@ interface BuiltPathGraph {
   readonly topology: SoulPathGraphContract["topology"];
 }
 
+interface TarjanState {
+  index: number;
+  componentCount: number;
+  readonly stack: string[];
+  readonly onStack: Set<string>;
+  readonly indices: Map<string, number>;
+  readonly lowLinks: Map<string, number>;
+}
+
 export class GraphContractService {
   private readonly now: () => Date;
 
@@ -49,7 +58,7 @@ export class GraphContractService {
   }
 
   public async derive(workspaceId: string): Promise<Readonly<SoulPathGraphContract>> {
-    const relations = await this.dependencies.pathRelationRepo.findActive(workspaceId);
+    const relations = await this.dependencies.pathRelationRepo.findActiveAll(workspaceId);
     const built = buildPathGraph(relations);
     const generatedAt = this.now().toISOString();
     const snapshotTrend = await this.buildSnapshotTrend(workspaceId);
@@ -120,67 +129,92 @@ export class GraphContractService {
 function buildPathGraph(relations: readonly Readonly<PathRelation>[]): BuiltPathGraph {
   const nodesByKey = new Map<string, NodeAccumulator>();
   const adjacency = new Map<string, Set<string>>();
-  const edges = relations.map((relation) => {
-    const sourceId = serializePathAnchorRef(relation.anchors.source_anchor);
-    const targetId = serializePathAnchorRef(relation.anchors.target_anchor);
-    const source = getOrCreateNode(nodesByKey, sourceId, relation.anchors.source_anchor);
-    const target = getOrCreateNode(nodesByKey, targetId, relation.anchors.target_anchor);
-
-    source.out_degree += 1;
-    target.in_degree += 1;
-
-    const neighbors = adjacency.get(sourceId) ?? new Set<string>();
-    neighbors.add(targetId);
-    adjacency.set(sourceId, neighbors);
-    if (!adjacency.has(targetId)) {
-      adjacency.set(targetId, new Set<string>());
-    }
-
-    return {
-      id: relation.path_id,
-      source_id: sourceId,
-      target_id: targetId,
-      source_anchor: relation.anchors.source_anchor,
-      target_anchor: relation.anchors.target_anchor,
-      relation_kind: relation.constitution.relation_kind,
-      strength: relation.plasticity_state.strength,
-      direction_bias: relation.plasticity_state.direction_bias,
-      stability_class: relation.plasticity_state.stability_class,
-      governance_class: relation.legitimacy.governance_class,
-      effect_vector: relation.effect_vector,
+  const edges = relations.map((relation) =>
+    buildPathGraphEdge({
       relation,
-      created_at: relation.created_at,
-      updated_at: relation.updated_at
-    };
-  });
+      nodesByKey,
+      adjacency
+    })
+  );
+  const nodes = materializePathGraphNodes(nodesByKey);
 
-  const nodes = [...nodesByKey.values()].map((node) => ({
+  return {
+    nodes,
+    edges,
+    topology: buildPathGraphTopology(nodes, relations.length, [...nodesByKey.keys()], adjacency)
+  };
+}
+
+function buildPathGraphEdge(params: Readonly<{
+  readonly relation: Readonly<PathRelation>;
+  readonly nodesByKey: Map<string, NodeAccumulator>;
+  readonly adjacency: Map<string, Set<string>>;
+}>): SoulPathGraphContract["edges"][number] {
+  const sourceId = serializePathAnchorRef(params.relation.anchors.source_anchor);
+  const targetId = serializePathAnchorRef(params.relation.anchors.target_anchor);
+  const source = getOrCreateNode(params.nodesByKey, sourceId, params.relation.anchors.source_anchor);
+  const target = getOrCreateNode(params.nodesByKey, targetId, params.relation.anchors.target_anchor);
+  source.out_degree += 1;
+  target.in_degree += 1;
+  recordAdjacencyEdge(params.adjacency, sourceId, targetId);
+  return {
+    id: params.relation.path_id,
+    source_id: sourceId,
+    target_id: targetId,
+    source_anchor: params.relation.anchors.source_anchor,
+    target_anchor: params.relation.anchors.target_anchor,
+    relation_kind: params.relation.constitution.relation_kind,
+    strength: params.relation.plasticity_state.strength,
+    direction_bias: params.relation.plasticity_state.direction_bias,
+    stability_class: params.relation.plasticity_state.stability_class,
+    governance_class: params.relation.legitimacy.governance_class,
+    effect_vector: params.relation.effect_vector,
+    relation: params.relation,
+    created_at: params.relation.created_at,
+    updated_at: params.relation.updated_at
+  };
+}
+
+function recordAdjacencyEdge(
+  adjacency: Map<string, Set<string>>,
+  sourceId: string,
+  targetId: string
+): void {
+  const neighbors = adjacency.get(sourceId) ?? new Set<string>();
+  neighbors.add(targetId);
+  adjacency.set(sourceId, neighbors);
+  if (!adjacency.has(targetId)) {
+    adjacency.set(targetId, new Set<string>());
+  }
+}
+
+function materializePathGraphNodes(
+  nodesByKey: ReadonlyMap<string, Readonly<NodeAccumulator>>
+): readonly SoulPathGraphContract["nodes"][number][] {
+  return [...nodesByKey.values()].map((node) => ({
     id: node.id,
     anchor: node.anchor,
     label: node.id,
     out_degree: node.out_degree,
     in_degree: node.in_degree
   }));
-  const totalNodes = nodes.length;
-  const totalEdges = relations.length;
-  const maxOutDegree = maxValue(nodes.map((node) => node.out_degree));
-  const maxInDegree = maxValue(nodes.map((node) => node.in_degree));
-  const totalDegree = nodes.reduce((sum, node) => sum + node.out_degree + node.in_degree, 0);
+}
 
+function buildPathGraphTopology(
+  nodes: readonly SoulPathGraphContract["nodes"][number][],
+  totalEdges: number,
+  nodeKeys: readonly string[],
+  adjacency: ReadonlyMap<string, ReadonlySet<string>>
+): SoulPathGraphContract["topology"] {
+  const totalNodes = nodes.length;
+  const totalDegree = nodes.reduce((sum, node) => sum + node.out_degree + node.in_degree, 0);
   return {
-    nodes,
-    edges,
-    topology: {
-      total_nodes: totalNodes,
-      total_edges: totalEdges,
-      max_out_degree: maxOutDegree,
-      max_in_degree: maxInDegree,
-      avg_degree: totalNodes === 0 ? 0 : totalDegree / totalNodes,
-      strongly_connected_components: countStronglyConnectedComponents(
-        [...nodesByKey.keys()],
-        adjacency
-      )
-    }
+    total_nodes: totalNodes,
+    total_edges: totalEdges,
+    max_out_degree: maxValue(nodes.map((node) => node.out_degree)),
+    max_in_degree: maxValue(nodes.map((node) => node.in_degree)),
+    avg_degree: totalNodes === 0 ? 0 : totalDegree / totalNodes,
+    strongly_connected_components: countStronglyConnectedComponents(nodeKeys, adjacency)
   };
 }
 
@@ -220,66 +254,80 @@ function countStronglyConnectedComponents(
   nodeKeys: readonly string[],
   adjacency: ReadonlyMap<string, ReadonlySet<string>>
 ): number {
-  let index = 0;
-  let componentCount = 0;
-  const stack: string[] = [];
-  const onStack = new Set<string>();
-  const indices = new Map<string, number>();
-  const lowLinks = new Map<string, number>();
-
-  const strongConnect = (nodeKey: string): void => {
-    indices.set(nodeKey, index);
-    lowLinks.set(nodeKey, index);
-    index += 1;
-    stack.push(nodeKey);
-    onStack.add(nodeKey);
-
-    for (const neighbor of adjacency.get(nodeKey) ?? []) {
-      if (!indices.has(neighbor)) {
-        strongConnect(neighbor);
-        lowLinks.set(
-          nodeKey,
-          Math.min(
-            readTrackedNumber(lowLinks, nodeKey, "low-link"),
-            readTrackedNumber(lowLinks, neighbor, "low-link")
-          )
-        );
-      } else if (onStack.has(neighbor)) {
-        lowLinks.set(
-          nodeKey,
-          Math.min(
-            readTrackedNumber(lowLinks, nodeKey, "low-link"),
-            readTrackedNumber(indices, neighbor, "index")
-          )
-        );
-      }
-    }
-
-    if (
-      readTrackedNumber(lowLinks, nodeKey, "low-link") ===
-      readTrackedNumber(indices, nodeKey, "index")
-    ) {
-      componentCount += 1;
-      while (stack.length > 0) {
-        const candidate = stack.pop();
-        if (candidate === undefined) {
-          throw new Error("GraphContractService Tarjan invariant violated: stack underflow.");
-        }
-        onStack.delete(candidate);
-        if (candidate === nodeKey) {
-          break;
-        }
-      }
-    }
-  };
-
+  const state = createTarjanState();
   for (const nodeKey of nodeKeys) {
-    if (!indices.has(nodeKey)) {
-      strongConnect(nodeKey);
+    if (!state.indices.has(nodeKey)) {
+      strongConnectNode(nodeKey, adjacency, state);
     }
   }
+  return state.componentCount;
+}
 
-  return componentCount;
+function createTarjanState(): TarjanState {
+  return {
+    index: 0,
+    componentCount: 0,
+    stack: [],
+    onStack: new Set<string>(),
+    indices: new Map<string, number>(),
+    lowLinks: new Map<string, number>()
+  };
+}
+
+function strongConnectNode(
+  nodeKey: string,
+  adjacency: ReadonlyMap<string, ReadonlySet<string>>,
+  state: TarjanState
+): void {
+  trackTarjanNode(nodeKey, state);
+  for (const neighbor of adjacency.get(nodeKey) ?? []) {
+    if (!state.indices.has(neighbor)) {
+      strongConnectNode(neighbor, adjacency, state);
+      state.lowLinks.set(
+        nodeKey,
+        Math.min(
+          readTrackedNumber(state.lowLinks, nodeKey, "low-link"),
+          readTrackedNumber(state.lowLinks, neighbor, "low-link")
+        )
+      );
+    } else if (state.onStack.has(neighbor)) {
+      state.lowLinks.set(
+        nodeKey,
+        Math.min(
+          readTrackedNumber(state.lowLinks, nodeKey, "low-link"),
+          readTrackedNumber(state.indices, neighbor, "index")
+        )
+      );
+    }
+  }
+  if (
+    readTrackedNumber(state.lowLinks, nodeKey, "low-link") ===
+    readTrackedNumber(state.indices, nodeKey, "index")
+  ) {
+    settleStronglyConnectedComponent(nodeKey, state);
+  }
+}
+
+function trackTarjanNode(nodeKey: string, state: TarjanState): void {
+  state.indices.set(nodeKey, state.index);
+  state.lowLinks.set(nodeKey, state.index);
+  state.index += 1;
+  state.stack.push(nodeKey);
+  state.onStack.add(nodeKey);
+}
+
+function settleStronglyConnectedComponent(nodeKey: string, state: TarjanState): void {
+  state.componentCount += 1;
+  while (state.stack.length > 0) {
+    const candidate = state.stack.pop();
+    if (candidate === undefined) {
+      throw new Error("GraphContractService Tarjan invariant violated: stack underflow.");
+    }
+    state.onStack.delete(candidate);
+    if (candidate === nodeKey) {
+      return;
+    }
+  }
 }
 
 function readTrackedNumber(

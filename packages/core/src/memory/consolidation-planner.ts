@@ -17,10 +17,10 @@ const CONSOLIDATION_MERGE_MIN_CLUSTER_SIZE =
 /**
  * The slice of `PathRelationRepo` the planner reads. Injected so the planner is
  * constructable and unit-testable without the daemon wiring or a live DB.
- * see also: packages/storage/src/repos/path/path-relation-repo.ts findDormant.
+ * see also: packages/storage/src/repos/path/path-relation-repo.ts findDormantAll.
  */
 export interface ConsolidationPlannerPathRelationPort {
-  findDormant(
+  findDormantAll(
     workspaceId: string,
     olderThanIso: string
   ): Promise<readonly Readonly<PathRelation>[]>;
@@ -68,7 +68,7 @@ export class ConsolidationPlanner {
       Date.parse(plannedAt) - CONSOLIDATION_DORMANT_AGE_MS
     ).toISOString();
 
-    const dormantPaths = await this.dependencies.pathRelationRepo.findDormant(
+    const dormantPaths = await this.dependencies.pathRelationRepo.findDormantAll(
       workspaceId,
       olderThanIso
     );
@@ -191,7 +191,19 @@ function recallBiasSign(recallBias: number): "positive" | "negative" | "zero" {
 function pickEvidenceRichestSurvivor(
   candidates: readonly Readonly<PathRelation>[]
 ): Readonly<PathRelation> {
-  return [...candidates].sort(compareSurvivorPriority)[0]!;
+  const survivor = [...candidates].sort(compareSurvivorPriority).at(0);
+  if (survivor === undefined) {
+    throw new Error(
+      "ConsolidationPlanner survivor selection requires at least one survivor-eligible candidate"
+    );
+  }
+  return survivor;
+}
+
+export function __pickEvidenceRichestSurvivorForTests(
+  candidates: readonly Readonly<PathRelation>[]
+): Readonly<PathRelation> {
+  return pickEvidenceRichestSurvivor(candidates);
 }
 
 function compareSurvivorPriority(

@@ -24,6 +24,12 @@ export interface MemoryEntrySearchWorkflowHost {
 
 const EXACT_KEYWORD_SCAN_BATCH_SIZE = 200;
 
+interface KeywordLaneTokens {
+  readonly exact: readonly string[];
+  readonly trigram: readonly string[];
+  readonly porter: readonly string[];
+}
+
 export async function searchByKeyword(
   this: MemoryEntrySearchWorkflowHost,
   workspaceId: string,
@@ -84,40 +90,47 @@ function searchKeywordRows(
     return Object.freeze([]);
   }
 
-  const shortTokens = tokens.filter((token) => countQueryCodepoints(token) < 3);
-  const trigramTokens = tokens.filter((token) => countQueryCodepoints(token) >= 3);
-  // invariant: long Latin tokens hit both trigram substrings and porter word BM25.
-  const porterTokens = trigramTokens.filter((token) => !tokenBearsCjk(token));
+  const laneTokens = partitionKeywordLaneTokens(tokens);
   const exactRows = searchExactKeywordRows.call(
     this,
     params.workspaceId,
-    shortTokens,
+    laneTokens.exact,
     params.limit,
     params.candidateObjectIds
   );
   const trigramRows = searchTrigramKeywordRows.call(
     this,
     params.workspaceId,
-    trigramTokens,
+    laneTokens.trigram,
     params.limit,
     params.candidateObjectIds
   );
   const porterRows = searchPorterKeywordRows.call(
     this,
     params.workspaceId,
-    porterTokens,
+    laneTokens.porter,
     params.limit,
     params.candidateObjectIds
   );
-  const mergedRows = mergeKeywordSearchRows(
-    exactRows,
-    trigramRows,
-    params.limit,
-    porterRows
+  return freezeKeywordSearchResults(
+    mergeKeywordSearchRows(exactRows, trigramRows, params.limit, porterRows)
   );
+}
 
+function partitionKeywordLaneTokens(tokens: readonly string[]): KeywordLaneTokens {
+  const trigram = tokens.filter((token) => countQueryCodepoints(token) >= 3);
+  return {
+    exact: tokens.filter((token) => countQueryCodepoints(token) < 3),
+    trigram,
+    porter: trigram.filter((token) => !tokenBearsCjk(token))
+  };
+}
+
+function freezeKeywordSearchResults(
+  rows: readonly MemoryEntryKeywordSearchResult[]
+): readonly MemoryEntryKeywordSearchResult[] {
   return Object.freeze(
-    mergedRows.map((row) =>
+    rows.map((row) =>
       Object.freeze({
         object_id: row.object_id,
         normalized_rank: row.normalized_rank,
@@ -144,44 +157,18 @@ function searchExactKeywordRows(
   let lastObjectId: string | null = null;
 
   while (true) {
-    const keysetPredicate = lastObjectId === null ? "" : "AND object_id > ?";
-    const batch = this.db.connection.prepare(`
-      SELECT
-        object_id,
-        content
-      FROM memory_entries
-      WHERE workspace_id = ?
-      AND COALESCE(retention_state, '') != 'tombstoned'
-      AND COALESCE(lifecycle_state, '') != 'dormant'
-      ${objectIdFilter.sql}
-      ${keysetPredicate}
-      ORDER BY object_id ASC
-      LIMIT ?
-    `).all(
+    const batch: readonly ExactKeywordCandidateRow[] = readExactKeywordCandidateBatch.call(
+      this,
       workspaceId,
-      ...objectIdFilter.params,
-      ...(lastObjectId === null ? [] : [lastObjectId]),
-      EXACT_KEYWORD_SCAN_BATCH_SIZE
-    ) as readonly ExactKeywordCandidateRow[];
+      objectIdFilter,
+      lastObjectId
+    );
 
     if (batch.length === 0) {
       break;
     }
 
-    for (const row of batch) {
-      const matchedTokenCount = tokenMatchers.reduce(
-        (count, matcher) => count + (matcher(row.content) ? 1 : 0),
-        0
-      );
-      if (matchedTokenCount > 0) {
-        rows.push(
-          Object.freeze({
-            object_id: row.object_id,
-            matched_token_count: matchedTokenCount
-          })
-        );
-      }
-    }
+    rows.push(...matchExactKeywordRows(batch, tokenMatchers));
 
     if (batch.length < EXACT_KEYWORD_SCAN_BATCH_SIZE) {
       break;
@@ -190,15 +177,55 @@ function searchExactKeywordRows(
   }
 
   return rows
-    .sort((left, right) => {
-      const matchDelta = right.matched_token_count - left.matched_token_count;
-      if (matchDelta !== 0) {
-        return matchDelta;
-      }
-
-      return left.object_id.localeCompare(right.object_id);
-    })
+    .sort(compareExactKeywordRows)
     .slice(0, limit);
+}
+
+function readExactKeywordCandidateBatch(
+  this: MemoryEntrySearchWorkflowHost,
+  workspaceId: string,
+  objectIdFilter: Readonly<{ readonly sql: string; readonly params: readonly string[] }>,
+  lastObjectId: string | null
+): readonly ExactKeywordCandidateRow[] {
+  const keysetPredicate = lastObjectId === null ? "" : "AND object_id > ?";
+  return this.db.connection.prepare(`
+    SELECT object_id, content
+    FROM memory_entries
+    WHERE workspace_id = ?
+    AND COALESCE(retention_state, '') != 'tombstoned'
+    AND COALESCE(lifecycle_state, '') != 'dormant'
+    ${objectIdFilter.sql}
+    ${keysetPredicate}
+    ORDER BY object_id ASC
+    LIMIT ?
+  `).all(
+    workspaceId,
+    ...objectIdFilter.params,
+    ...(lastObjectId === null ? [] : [lastObjectId]),
+    EXACT_KEYWORD_SCAN_BATCH_SIZE
+  ) as readonly ExactKeywordCandidateRow[];
+}
+
+function matchExactKeywordRows(
+  batch: readonly ExactKeywordCandidateRow[],
+  tokenMatchers: readonly ((content: string) => boolean)[]
+): readonly ExactKeywordSearchRow[] {
+  return batch.flatMap((row) => {
+    const matchedTokenCount = tokenMatchers.reduce(
+      (count, matcher) => count + (matcher(row.content) ? 1 : 0),
+      0
+    );
+    return matchedTokenCount > 0
+      ? [Object.freeze({ object_id: row.object_id, matched_token_count: matchedTokenCount })]
+      : [];
+  });
+}
+
+function compareExactKeywordRows(
+  left: ExactKeywordSearchRow,
+  right: ExactKeywordSearchRow
+): number {
+  return right.matched_token_count - left.matched_token_count || left.object_id.localeCompare(right.object_id);
 }
 
 function searchTrigramKeywordRowsWithinObjectIds(

@@ -32,6 +32,7 @@ export const ConflictMatrixEdgeSchema = PersistentObjectEnvelopeSchema.unwrap()
     created_at: IsoDatetimeStringSchema,
     workspace_id: NonEmptyStringSchema
   })
+  .strict()
   .readonly();
 
 export type ConflictEdgeType = z.infer<typeof ConflictEdgeTypeSchema>;

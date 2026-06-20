@@ -1,7 +1,6 @@
 import {
   EvidenceHealthState,
   MemoryDimension,
-  PathGovernanceClass,
   ScopeClass,
   SourceKind,
   StorageTier,
@@ -19,17 +18,27 @@ import {
   type SourceKind as SourceKindValue,
   type SynthesisType
 } from "@do-soul/alaya-protocol";
-import { readSchemaGroundedContent } from "../schema-grounding.js";
 import {
   type ClaimMaterializationInput,
   type EvidenceMaterializationInput,
   type MaterializationTarget,
   type MemoryMaterializationInput,
-  type PathRelationProposalPayload,
-  type SignalRefSeedSpec,
   type SynthesisMaterializationInput
 } from "./contracts.js";
 import { SIGNAL_REF_SEED_SPECS } from "./signal-ref-seeds.js";
+import { appendSummarySuffix, buildDistilledFact, buildSignalSummary, buildTopicKey } from "./distilled-fact.js";
+import {
+  buildTimeConcernPathRelationProposal,
+  buildFailedSignalRefPathRelationProposal,
+  buildFailedSignalRefPathRelationProposalReason
+} from "./path-relation-inputs.js";
+
+export { DISTILLED_FACT_MAX_CHARS, buildDistilledFact } from "./distilled-fact.js";
+export {
+  buildTimeConcernPathRelationProposal,
+  buildFailedSignalRefPathRelationProposal,
+  buildFailedSignalRefPathRelationProposalReason
+} from "./path-relation-inputs.js";
 
 // invariant: routes a high-confidence potential_claim / potential_preference
 // signal by its `object_kind`. Claim-capable dimensions are enumerated
@@ -122,113 +131,6 @@ function normalizePayloadString(value: unknown): string | null {
   }
   const normalized = value.trim();
   return normalized.length === 0 ? null : normalized;
-}
-
-export function buildTimeConcernPathRelationProposal(
-  targetObjectId: string,
-  timeConcern: TimeConcernPayload
-): PathRelationProposalPayload {
-  return {
-    target_anchor: {
-      kind: "time_concern",
-      source_object_id: targetObjectId,
-      window_digest: timeConcern.window_digest
-    },
-    constitution: {
-      relation_kind: "time_concern",
-      why_this_relation_exists: [`matched temporal expression: ${timeConcern.matched_text}`]
-    },
-    effect_vector: {
-      salience: 0.6,
-      recall_bias: 0.7,
-      verification_bias: 0.1,
-      unfinishedness_bias: 0,
-      default_manifestation_preference: "lens_entry"
-    },
-    plasticity_state: {
-      strength: 0.4,
-      direction_bias: "source_to_target",
-      stability_class: "normal",
-      support_events_count: 1,
-      contradiction_events_count: 0
-    },
-    lifecycle: {
-      status: "active",
-      retirement_rule: "janitor_ttl_low_strength"
-    },
-    legitimacy: {
-      evidence_basis: ["garden:time_concern"],
-      governance_class: PathGovernanceClass.RECALL_ALLOWED
-    }
-  };
-}
-
-export function buildFailedSignalRefPathRelationProposal(params: {
-  readonly newObjectId: string;
-  readonly failedRef: string;
-  readonly signal: CandidateMemorySignal;
-  readonly spec: SignalRefSeedSpec;
-  readonly thrownError: string | null;
-}): PathRelationProposalPayload {
-  const recallBias = params.spec.recallBiasSign * params.spec.recallBiasMagnitude;
-  const why = [
-    `${params.spec.signalRefsKey} on candidate signal ${params.signal.signal_id}`,
-    `run=${params.signal.run_id}`,
-    `path candidate mint failed for target_anchor=${params.failedRef}`
-  ];
-  if (params.thrownError !== null) {
-    why.push(`submitCandidate threw: ${params.thrownError}`);
-  }
-
-  return {
-    target_anchor: {
-      kind: "object",
-      object_id: params.failedRef
-    },
-    constitution: {
-      relation_kind: params.spec.relationKind,
-      why_this_relation_exists: why
-    },
-    effect_vector: {
-      salience: params.spec.initialStrength,
-      recall_bias: recallBias,
-      verification_bias: 0,
-      unfinishedness_bias: 0,
-      default_manifestation_preference: "lens_entry"
-    },
-    plasticity_state: {
-      strength: params.spec.initialStrength,
-      direction_bias: "source_to_target",
-      stability_class: "volatile",
-      support_events_count: 1,
-      contradiction_events_count: 0
-    },
-    lifecycle: {
-      status: "active",
-      retirement_rule: "governance_reject_or_low_strength"
-    },
-    legitimacy: {
-      evidence_basis: params.spec.evidenceBasis,
-      governance_class: params.spec.governanceClass
-    }
-  };
-}
-
-export function buildFailedSignalRefPathRelationProposalReason(params: {
-  readonly newObjectId: string;
-  readonly failedRef: string;
-  readonly signal: CandidateMemorySignal;
-  readonly spec: SignalRefSeedSpec;
-  readonly thrownError: string | null;
-}): string {
-  const base =
-    `Persist failed ${params.spec.signalRefsKey} path_relation candidate ` +
-    `${params.spec.relationKind} from ${params.newObjectId} to ${params.failedRef}. ` +
-    `Source signal: ${params.signal.signal_id}.`;
-  if (params.thrownError === null) {
-    return base;
-  }
-  return `${base} submitCandidate error: ${params.thrownError}.`;
 }
 
 export function hasMaterializableSignalMemoryRefs(signal: CandidateMemorySignal): boolean {
@@ -532,98 +434,4 @@ function toOriginTier(source: CandidateMemorySignal["source"]): OriginTier {
 
 function toSynthesisType(): SynthesisType {
   return "cross_evidence";
-}
-
-function buildTopicKey(signal: CandidateMemorySignal): string {
-  const primaryTag = signal.domain_tags[0] ?? "signal";
-  const basis = `${primaryTag}_${signal.object_kind}`.toLowerCase();
-  const topicKey = basis.replace(/[^a-z0-9_.-]/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
-
-  return topicKey.length === 0 ? `signal_${signal.signal_id}` : topicKey;
-}
-
-function buildSignalSummary(signal: CandidateMemorySignal): string {
-  const schemaGroundedContent = readSchemaGroundedContent(signal);
-  if (schemaGroundedContent !== null) {
-    return schemaGroundedContent;
-  }
-
-  const excerpt = signal.raw_payload.excerpt;
-  if (typeof excerpt === "string" && excerpt.trim().length > 0) {
-    return excerpt.trim();
-  }
-
-  const matchedText = signal.raw_payload.matched_text;
-  if (typeof matchedText === "string" && matchedText.trim().length > 0) {
-    return matchedText.trim();
-  }
-
-  return `Signal ${signal.signal_id} (${signal.signal_kind})`;
-}
-
-// invariant: MemoryEntry.content / Claim.proposition_digest /
-// Synthesis.summary store a distilled fact, not raw turn. Raw turn lives
-// in EvidenceCapsule.gist / .excerpt. Caller (LLM / user / bench harness)
-// may supply raw_payload.distilled_fact directly; otherwise a rule-based
-// fallback takes the first two sentences capped at DISTILLED_FACT_MAX_CHARS.
-// Single source of truth for the distilled-fact length budget: the
-// official-API garden provider clamps raw_payload.distilled_fact to this
-// same constant. see also: garden/compute-provider.ts.
-// invariant: kept <= AUDIT_DROPPED_CONTENT_MAX_CHARS (500) in
-// packages/core/src/governance/reconciliation-service.ts so a dropped fact stays
-// fully reconstructable from the reconciliation audit row.
-export const DISTILLED_FACT_MAX_CHARS = 500;
-const DISTILLED_FACT_MAX_SENTENCES = 2;
-
-export function buildDistilledFact(signal: CandidateMemorySignal): string {
-  const providedDistilled = signal.raw_payload.distilled_fact;
-  if (typeof providedDistilled === "string") {
-    const trimmed = providedDistilled.trim();
-    if (trimmed.length > 0) {
-      // A caller-supplied distilled_fact is already a resolved
-      // one-assertion fact; use it verbatim when within cap. The "..."
-      // truncation belongs only to ruleDistillFromRaw (raw -> distilled).
-      // An over-cap supplied fact is not the normal path once the
-      // provider clamps to DISTILLED_FACT_MAX_CHARS — clamp defensively.
-      return trimmed.length <= DISTILLED_FACT_MAX_CHARS
-        ? trimmed
-        : trimmed.slice(0, DISTILLED_FACT_MAX_CHARS);
-    }
-  }
-  return ruleDistillFromRaw(buildSignalSummary(signal));
-}
-
-// see also: buildDistilledFact — fallback path when caller does not supply
-// raw_payload.distilled_fact. Sentence boundary scan covers Latin (.!?;)
-// and CJK (。！？；) terminators; falls back to char-count slice when no
-// terminator is found in the first 2x window.
-function ruleDistillFromRaw(raw: string): string {
-  const normalized = raw.replace(/\s+/g, " ").trim();
-  if (normalized.length === 0) {
-    return "";
-  }
-  const sentenceRegex = /[^.!?;。！？；]+[.!?;。！？；]+/gu;
-  const sentences = normalized.match(sentenceRegex) ?? [];
-  // invariant: always take at most DISTILLED_FACT_MAX_SENTENCES sentences
-  // even when the raw fits inside the char cap. Distilled fact is the
-  // *first claim* of a turn, not the entire turn.
-  if (sentences.length >= DISTILLED_FACT_MAX_SENTENCES) {
-    const head = sentences.slice(0, DISTILLED_FACT_MAX_SENTENCES).join("").trim();
-    if (head.length > 0 && head.length <= DISTILLED_FACT_MAX_CHARS) {
-      return head;
-    }
-    return `${head.slice(0, DISTILLED_FACT_MAX_CHARS - 3)}...`;
-  }
-  if (normalized.length <= DISTILLED_FACT_MAX_CHARS) {
-    return normalized;
-  }
-  return `${normalized.slice(0, DISTILLED_FACT_MAX_CHARS - 3)}...`;
-}
-
-function appendSummarySuffix(summary: string, suffix?: string): string {
-  if (suffix === undefined) {
-    return summary;
-  }
-
-  return `${summary} ${suffix}`;
 }

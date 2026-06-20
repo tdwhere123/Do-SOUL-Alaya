@@ -4,8 +4,12 @@ import { EngineFinishReasonSchema } from "../engine/engine-port.js";
 import { RunModeSchema } from "../runtime/run.js";
 import { EngineClassSchema } from "../runtime/runtime-run.js";
 import {
+  BoundedContentSchema,
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedNameSchema,
+  BoundedPathSchema,
   IsoDatetimeStringSchema,
-  NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
 import { WorkspaceKindSchema } from "../workspace/workspace.js";
@@ -13,69 +17,70 @@ import { WorkspaceKindSchema } from "../workspace/workspace.js";
 const messageRoleValues = ["user", "assistant"] as const;
 
 export const RunMessageRoleSchema = z.enum(messageRoleValues);
+const RunTitleSchema = BoundedNameSchema.max(160);
 
 export const WorkspaceCreatedPayloadSchema = z.object({
-  workspace_id: NonEmptyStringSchema,
-  name: z.string(),
+  workspace_id: BoundedIdSchema,
+  name: BoundedNameSchema,
   workspace_kind: WorkspaceKindSchema
-}).readonly();
+}).strict().readonly();
 
 export const WorkspaceDeletedPayloadSchema = z.object({
-  workspace_id: NonEmptyStringSchema
-}).readonly();
+  workspace_id: BoundedIdSchema
+}).strict().readonly();
 
 export const WorkspaceEngineBindingUpdatedPayloadSchema = z.object({
-  workspace_id: NonEmptyStringSchema,
-  binding_id: NonEmptyStringSchema,
+  workspace_id: BoundedIdSchema,
+  binding_id: BoundedIdSchema,
   provider_type: z.enum(["openai", "anthropic", "custom"]),
-  model: z.string(),
-  base_url: z.string().url().nullable()
-}).readonly();
+  model: BoundedLabelSchema,
+  base_url: BoundedPathSchema.url().nullable()
+}).strict().readonly();
 
 export const WorkspaceDefaultEngineClassUpdatedPayloadSchema = z.object({
-  workspace_id: NonEmptyStringSchema,
+  workspace_id: BoundedIdSchema,
   default_engine_class: EngineClassSchema.nullable()
-}).readonly();
+}).strict().readonly();
 
 export const RunCreatedPayloadSchema = z.object({
-  run_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
+  run_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
   run_mode: RunModeSchema,
-  title: z.string()
-}).readonly();
+  title: RunTitleSchema
+}).strict().readonly();
 
 export const RunDeletedPayloadSchema = z.object({
-  run_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema
-}).readonly();
+  run_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema
+}).strict().readonly();
 
 export const RunRenamedPayloadSchema = z.object({
-  run_id: NonEmptyStringSchema,
-  title: z.string(),
-  previous_title: z.string()
-}).readonly();
+  run_id: BoundedIdSchema,
+  title: RunTitleSchema,
+  previous_title: RunTitleSchema
+}).strict().readonly();
 
 export const RunEngineBindingUpdatedPayloadSchema = z.object({
-  run_id: NonEmptyStringSchema,
-  engine_binding_id: NonEmptyStringSchema,
-  previous_engine_binding_id: NonEmptyStringSchema.nullable()
-}).readonly();
+  run_id: BoundedIdSchema,
+  engine_binding_id: BoundedIdSchema,
+  previous_engine_binding_id: BoundedIdSchema.nullable()
+}).strict().readonly();
 
 export const RunMessageAppendedPayloadSchema = z.object({
-  run_id: NonEmptyStringSchema,
+  run_id: BoundedIdSchema,
   role: RunMessageRoleSchema,
-  content: z.string(),
-  message_id: NonEmptyStringSchema,
+  content: BoundedContentSchema,
+  message_id: BoundedIdSchema,
   /** IDs of files attached to this message. Only present for user messages with uploads. */
-  file_ids: z.array(NonEmptyStringSchema).optional()
-}).readonly();
+  file_ids: z.array(BoundedIdSchema).optional()
+}).strict().readonly();
 
 export const EngineResponseReceivedPayloadSchema = z.object({
-  run_id: NonEmptyStringSchema,
-  message_id: NonEmptyStringSchema,
-  content: z.string(),
+  run_id: BoundedIdSchema,
+  message_id: BoundedIdSchema,
+  content: BoundedContentSchema,
   finish_reason: EngineFinishReasonSchema
-}).readonly();
+}).strict().readonly();
 
 const workspaceRunPayloadSchemas = {
   [WorkspaceRunEventType.WORKSPACE_CREATED]: WorkspaceCreatedPayloadSchema,
@@ -92,15 +97,15 @@ const workspaceRunPayloadSchemas = {
 } as const;
 
 const WorkspaceRunEventBaseObjectSchema = z.object({
-  event_id: NonEmptyStringSchema,
-  entity_type: z.string(),
-  entity_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema.nullable(),
-  caused_by: z.string().nullable(),
+  event_id: BoundedIdSchema,
+  entity_type: BoundedLabelSchema,
+  entity_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema.nullable(),
+  caused_by: BoundedIdSchema.nullable(),
   revision: NonNegativeIntSchema,
   created_at: IsoDatetimeStringSchema
-});
+}).strict();
 
 export const WorkspaceRunEventBaseSchema = WorkspaceRunEventBaseObjectSchema.readonly();
 

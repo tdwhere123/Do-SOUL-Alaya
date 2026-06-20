@@ -65,6 +65,40 @@ export interface CompileSeedExtractionConfig {
   readonly apiKey: string | null;
 }
 
+export interface CompileSeedRunnerOptions {
+  readonly config?: CompileSeedExtractionConfig;
+  readonly cacheRoot?: string;
+  readonly extractorFactory?: (
+    config: CompileSeedExtractionConfig
+  ) => BenchSignalExtractor;
+  /**
+   * Opt out of the run-start coverage guard so the run may live-extract the
+   * uncovered cache gap on purpose (extraction-fill / explicit live re-run).
+   * The model + prompt guards still apply; only the coverage gate is relaxed.
+   */
+  readonly allowLiveExtraction?: boolean;
+  /**
+   * The distinct turn contents THIS run will extract. When provided, the
+   * run-start preflight switches from the manifest coverage scalar to
+   * window-containment: every one of these turns must already have a fixture on
+   * disk.
+   */
+  readonly requiredTurnContents?: readonly string[];
+  /**
+   * Skip the run-start preflight entirely. For unit tests that drive the
+   * runner with a hand-built config + temp cacheRoot and do not exercise the
+   * manifest guard. Production runner entrypoints never set this.
+   */
+  readonly skipPreflight?: boolean;
+  /**
+   * Override the directory the seed-side diagnostic dump writes failure
+   * envelopes to. Defaults to
+   * `<cwd>/data/diagnostics/seed-extraction-failures/`. Pass `null` to
+   * disable dumps entirely.
+   */
+  readonly diagnosticDir?: string | null;
+}
+
 export interface CompileSeedExtractionStats {
   /** Which seed path ran. Disclosed in the bench report for honesty. */
   path: "official_api_compile" | "no_credentials_fallback";
@@ -225,17 +259,19 @@ export interface CompileSeedRunner {
    * SeededMemoryResult so the caller maps ALL N object_ids back to the
    * source answer turn — a partial map silently undercounts recall.
    */
-  seedTurn(input: {
-    readonly daemon: CompileSeedDaemon;
-    readonly turnContent: string;
-    readonly evidenceRefBase: string;
-    readonly seedIndex: number;
-    readonly workspaceId: string;
-    readonly runId: string;
-    readonly surfaceId?: string | null;
-    // see also: apps/bench-runner/src/harness/daemon.ts BenchSignalSeedInput.sourceMemoryRefs
-    readonly sourceMemoryRefs?: readonly string[];
-  }): Promise<CompileSeedResult>;
+  seedTurn(input: CompileSeedTurnInput): Promise<CompileSeedResult>;
+}
+
+export interface CompileSeedTurnInput {
+  readonly daemon: CompileSeedDaemon;
+  readonly turnContent: string;
+  readonly evidenceRefBase: string;
+  readonly seedIndex: number;
+  readonly workspaceId: string;
+  readonly runId: string;
+  readonly surfaceId?: string | null;
+  // see also: apps/bench-runner/src/harness/daemon.ts BenchSignalSeedInput.sourceMemoryRefs
+  readonly sourceMemoryRefs?: readonly string[];
 }
 
 export interface CompileSeedResult {

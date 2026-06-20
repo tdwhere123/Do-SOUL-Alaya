@@ -1,14 +1,13 @@
 import { z } from "zod";
 import {
-  CandidateMemorySignalContentSchema,
   EmitCandidateSignalResponseSchema,
   McpEmitCandidateSignalRequestSchema
 } from "../signals/candidate-memory-signal.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_EVIDENCE_ARRAY_MAX,
+  BoundedContentSchema,
   BoundedIdSchema,
-  BoundedJsonObjectSchema,
   BoundedLabelSchema,
   BoundedQuerySchema,
   BoundedReasonSchema,
@@ -21,7 +20,6 @@ import {
   GraphNeighborSchema,
   MemoryGraphEdgeTypeSchema
 } from "./memory-graph.js";
-import { EdgeClassifyVerdictSchema } from "./garden-tier.js";
 import {
   SoulBatchReviewEdgeProposalsRequestSchema,
   SoulBatchReviewEdgeProposalsResponseSchema,
@@ -50,9 +48,54 @@ import {
 } from "./recall-candidate.js";
 import { StagedWarningArraySchema } from "./staged-warning.js";
 import { SoulResolveRequestSchema } from "./resolution.js";
+import {
+  GardenMcpWorkerRoleSchema,
+  GardenListPendingTasksRequestSchema,
+  GardenPendingTaskSnapshotSchema,
+  GardenListPendingTasksResponseSchema,
+  GardenClaimTaskRequestSchema,
+  GardenClaimTaskResponseSchema,
+  GardenTaskResultEnvelopeSchema,
+  GardenCompleteTaskRequestSchema,
+  GardenCompleteTaskResponseSchema
+} from "./mcp-garden-task-types.js";
+import {
+  SoulContextUsageStateSchema,
+  SoulContextUsageTrustModeSchema,
+  SoulContextObjectIdentitySchema,
+  SoulContextUsageAnchorRoleSchema,
+  SoulContextPerAnchorUsageSchema,
+  SoulContextDeliveredObjectUsageSchema,
+  SoulContextUsageTurnMessageSchema,
+  SoulContextUsageTurnDigestSchema,
+  SoulReportContextUsageRequestSchema,
+  SoulReportContextUsageResponseSchema
+} from "./mcp-context-usage-types.js";
+import { deriveJsonSchema } from "./mcp-json-schema.js";
 
-const GARDEN_COMPLETE_CANDIDATE_SIGNAL_MAX = 64;
-const GARDEN_COMPLETE_EXTRACTED_PROPOSAL_MAX = 32;
+export {
+  GardenMcpWorkerRoleSchema,
+  GardenListPendingTasksRequestSchema,
+  GardenPendingTaskSnapshotSchema,
+  GardenListPendingTasksResponseSchema,
+  GardenClaimTaskRequestSchema,
+  GardenClaimTaskResponseSchema,
+  GardenTaskResultEnvelopeSchema,
+  GardenCompleteTaskRequestSchema,
+  GardenCompleteTaskResponseSchema
+} from "./mcp-garden-task-types.js";
+export {
+  SoulContextUsageStateSchema,
+  SoulContextUsageTrustModeSchema,
+  SoulContextObjectIdentitySchema,
+  SoulContextUsageAnchorRoleSchema,
+  SoulContextPerAnchorUsageSchema,
+  SoulContextDeliveredObjectUsageSchema,
+  SoulContextUsageTurnMessageSchema,
+  SoulContextUsageTurnDigestSchema,
+  SoulReportContextUsageRequestSchema,
+  SoulReportContextUsageResponseSchema
+} from "./mcp-context-usage-types.js";
 
 export const SoulRecallStrategyMixSchema = z
   .object({
@@ -93,6 +136,7 @@ export const MemorySearchResultSchema = z
     // recall-candidate.ts (producer-side field).
     staged_warnings: StagedWarningArraySchema.optional()
   })
+  .strict()
   .readonly();
 
 export const SoulActiveConstraintGovernanceStateSchema = z
@@ -113,6 +157,7 @@ export const SoulActiveConstraintSchema = z
     scope_class: ScopeClassSchema,
     governance_state: SoulActiveConstraintGovernanceStateSchema
   })
+  .strict()
   .readonly();
 
 export const RecallTimeFieldSchema = z.enum(["created_at", "last_used_at"]);
@@ -151,6 +196,19 @@ export const SoulMemorySearchRequestSchema = z
     recent_turn: BoundedQuerySchema.optional(),
     active_constraints_cap: NonNegativeIntSchema.max(50).optional()
   })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.since === null || value.since === undefined || value.until === null || value.until === undefined) {
+      return;
+    }
+    if (Date.parse(value.since) > Date.parse(value.until)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["since"],
+        message: "since must be less than or equal to until."
+      });
+    }
+  })
   .readonly();
 
 export const SoulMemorySearchResponseSchema = z
@@ -167,12 +225,14 @@ export const SoulMemorySearchResponseSchema = z
     strategy_mix: SoulRecallStrategyMixSchema,
     degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional()
   })
+  .strict()
   .readonly();
 
 export const SoulOpenPointerRequestSchema = z
   .object({
     object_id: BoundedIdSchema
   })
+  .strict()
   .readonly();
 
 // Public projection: only the fields agents may read. MemoryEntry internals
@@ -185,12 +245,13 @@ export const SoulOpenPointerContentSchema = z
     object_id: NonEmptyStringSchema,
     object_kind: NonEmptyStringSchema,
     schema_version: z.number().int().min(1),
-    content: z.string().nullable(),
+    content: BoundedContentSchema.nullable(),
     domain_tags: z.array(NonEmptyStringSchema).readonly(),
     evidence_refs: z.array(NonEmptyStringSchema).readonly(),
-    gist: z.string().nullable().optional(),
-    excerpt: z.string().nullable().optional()
+    gist: BoundedContentSchema.nullable().optional(),
+    excerpt: BoundedContentSchema.nullable().optional()
   })
+  .strict()
   .readonly();
 
 export const SoulOpenPointerResponseSchema = z
@@ -199,6 +260,7 @@ export const SoulOpenPointerResponseSchema = z
     object_kind: NonEmptyStringSchema,
     content: SoulOpenPointerContentSchema
   })
+  .strict()
   .readonly();
 
 export const SoulExploreGraphRequestSchema = z
@@ -211,6 +273,7 @@ export const SoulExploreGraphRequestSchema = z
     edge_types: z.array(MemoryGraphEdgeTypeSchema).max(BOUNDED_EVIDENCE_ARRAY_MAX).readonly().optional(),
     direction: GraphExploreDirSchema.optional()
   })
+  .strict()
   .readonly();
 
 export const SoulExploreGraphResponseSchema = z
@@ -219,6 +282,7 @@ export const SoulExploreGraphResponseSchema = z
     neighbors: z.array(GraphNeighborSchema).readonly(),
     count: NonNegativeIntSchema
   })
+  .strict()
   .readonly();
 
 export const SoulProposeMemoryUpdateRequestSchema = z
@@ -236,6 +300,7 @@ export const SoulProposeMemoryUpdateResponseSchema = z
     proposal_id: NonEmptyStringSchema,
     status: z.enum(["created", "rejected"])
   })
+  .strict()
   .readonly();
 
 // reviewer_identity is required so every review record carries an explicit
@@ -259,6 +324,7 @@ export const SoulReviewMemoryProposalResponseSchema = z
     proposal_id: NonEmptyStringSchema,
     resolution_state: ProposalResolutionStateSchema
   })
+  .strict()
   .readonly();
 
 // Surfaces the existing ProposalRepo.findPending(workspaceId) query through
@@ -271,12 +337,12 @@ export const SoulPendingProposalSummarySchema = z
     proposal_id: NonEmptyStringSchema,
     target_object_id: NonEmptyStringSchema,
     target_object_kind: NonEmptyStringSchema,
-    created_at: z.string().datetime(),
-    proposed_change_summary: z.string(),
+    created_at: IsoDatetimeStringSchema,
+    proposed_change_summary: BoundedReasonSchema,
     proposed_changes: PublicMemoryEntryMutableFieldsSchema.nullable(),
-    assigned_reviewer_identity: NonEmptyStringSchema.nullable(),
-    assigned_at: z.string().datetime().nullable(),
-    deadline_at: z.string().datetime().nullable(),
+    assigned_reviewer_identity: BoundedIdSchema.nullable(),
+    assigned_at: IsoDatetimeStringSchema.nullable(),
+    deadline_at: IsoDatetimeStringSchema.nullable(),
     is_overdue: z.boolean()
   })
   .strict()
@@ -292,7 +358,7 @@ export const SoulPendingProposalSummarySchema = z
 // other write tool that elides workspace_id.
 export const SoulListPendingProposalsRequestSchema = z
   .object({
-    since: z.string().datetime().nullable().optional(),
+    since: IsoDatetimeStringSchema.nullable().optional(),
     limit: z.number().int().min(1).max(100).optional()
   })
   .strict()
@@ -302,108 +368,6 @@ export const SoulListPendingProposalsResponseSchema = z
   .object({
     proposals: z.array(SoulPendingProposalSummarySchema).readonly(),
     total_count: NonNegativeIntSchema
-  })
-  .strict()
-  .readonly();
-
-export const GardenMcpWorkerRoleSchema = z.enum([
-  "janitor",
-  "auditor",
-  "librarian",
-  "host_worker"
-]);
-
-export const GardenListPendingTasksRequestSchema = z
-  .object({
-    role: GardenMcpWorkerRoleSchema.optional(),
-    limit: z.number().int().min(1).max(50).default(10)
-  })
-  .strict()
-  .readonly();
-
-export const GardenPendingTaskSnapshotSchema = z
-  .object({
-    task_id: BoundedIdSchema,
-    role: BoundedLabelSchema,
-    kind: BoundedLabelSchema,
-    created_at: z.string(),
-    payload: z.unknown()
-  })
-  .strict()
-  .readonly();
-
-export const GardenListPendingTasksResponseSchema = z
-  .object({
-    tasks: z.array(GardenPendingTaskSnapshotSchema).readonly()
-  })
-  .strict()
-  .readonly();
-
-export const GardenClaimTaskRequestSchema = z
-  .object({
-    task_id: BoundedIdSchema
-  })
-  .strict()
-  .readonly();
-
-export const GardenClaimTaskResponseSchema = z
-  .object({
-    status: z.enum(["claimed", "already_claimed"]),
-    task_id: BoundedIdSchema,
-    role: BoundedLabelSchema,
-    kind: BoundedLabelSchema,
-    payload: z.unknown()
-  })
-  .strict()
-  .readonly();
-
-// The garden.complete_task result envelope is the discriminated result type
-// for the two host-worker task kinds:
-//   - POST_TURN_EXTRACT reports `candidate_signals` (anchor-free CONTENT-ONLY
-//     shape; the daemon binds workspace_id / run_id / surface_id / source from
-//     trusted MCP context + the claimed task row, and Garden-originated
-//     extraction has no prior recall delivery to attribute).
-//   - EDGE_CLASSIFY reports `edge_verdict` (the supports/derives_from/none
-//     pair judgement). The daemon refines the existing heuristic path with the
-//     verdict; a "none"/below-floor verdict refines nothing and the inline
-//     heuristic verdict stands.
-// invariant: exactly one result shape is meaningful per task kind. The handler
-// rejects a candidate_signals envelope on an EDGE_CLASSIFY task and an
-// edge_verdict envelope on a POST_TURN_EXTRACT task, so a host cannot smuggle
-// the wrong result type into a claimed task.
-export const GardenTaskResultEnvelopeSchema = z
-  .object({
-    candidate_signals: z
-      .array(CandidateMemorySignalContentSchema)
-      .max(GARDEN_COMPLETE_CANDIDATE_SIGNAL_MAX)
-      .readonly()
-      .optional(),
-    edge_verdict: EdgeClassifyVerdictSchema.optional(),
-    extracted_proposals: z
-      .array(BoundedJsonObjectSchema)
-      .max(GARDEN_COMPLETE_EXTRACTED_PROPOSAL_MAX)
-      .readonly()
-      .optional(),
-    notes: BoundedReasonSchema.optional()
-  })
-  .strict()
-  .readonly();
-
-export const GardenCompleteTaskRequestSchema = z
-  .object({
-    task_id: BoundedIdSchema,
-    status: z.enum(["completed", "failed"]),
-    result_envelope: GardenTaskResultEnvelopeSchema.optional(),
-    last_error_text: BoundedReasonSchema.optional()
-  })
-  .strict()
-  .readonly();
-
-export const GardenCompleteTaskResponseSchema = z
-  .object({
-    task_id: BoundedIdSchema,
-    status: z.enum(["completed", "failed"]),
-    events_appended: NonNegativeIntSchema
   })
   .strict()
   .readonly();
@@ -422,6 +386,7 @@ export const SoulApplyOverrideRequestSchema = z
     correction: BoundedReasonSchema,
     priority: NonNegativeIntSchema.max(1000).optional()
   })
+  .strict()
   .readonly();
 
 export const SoulApplyOverrideResponseSchema = z
@@ -429,87 +394,7 @@ export const SoulApplyOverrideResponseSchema = z
     override_id: NonEmptyStringSchema,
     status: z.literal("applied")
   })
-  .readonly();
-
-export const SoulContextUsageStateSchema = z.enum(["used", "skipped", "not_applicable"]);
-export const SoulContextUsageTrustModeSchema = z.enum(["manual", "automatic"]);
-
-// object_kind is an open BoundedLabel, not a closed enum, on purpose: it is
-// the same open vocabulary as SoulActiveConstraint.object_kind and must admit
-// kinds the wire does not yet model. Consumers fail closed — an unknown kind
-// simply never tuple-matches a delivered/expected (object_id, object_kind).
-export const SoulContextObjectIdentitySchema = z
-  .object({
-    object_id: BoundedIdSchema,
-    object_kind: BoundedLabelSchema
-  })
   .strict()
-  .readonly();
-
-export const SoulContextUsageAnchorRoleSchema = z.enum(["source", "target"]);
-
-export const SoulContextPerAnchorUsageSchema = z
-  .object({
-    object_id: BoundedIdSchema,
-    object_kind: BoundedLabelSchema.optional(),
-    anchor_role: SoulContextUsageAnchorRoleSchema
-  })
-  .strict()
-  .readonly();
-
-export const SoulContextDeliveredObjectUsageSchema = z
-  .object({
-    object_id: BoundedIdSchema,
-    object_kind: BoundedLabelSchema.optional(),
-    usage_status: SoulContextUsageStateSchema
-  })
-  .strict()
-  .readonly();
-
-export const SoulContextUsageTurnMessageSchema = z
-  .object({
-    role: BoundedLabelSchema,
-    content_excerpt: BoundedReasonSchema
-  })
-  .strict()
-  .readonly();
-
-export const SoulContextUsageTurnDigestSchema = z
-  .object({
-    last_messages: z.array(SoulContextUsageTurnMessageSchema).max(50).readonly().default([])
-  })
-  .strict()
-  .readonly();
-
-export const SoulReportContextUsageRequestSchema = z
-  .object({
-    delivery_id: BoundedIdSchema,
-    usage_state: SoulContextUsageStateSchema,
-    used_object_ids: z.array(BoundedIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
-    delivered_objects: z
-      .array(SoulContextDeliveredObjectUsageSchema)
-      .max(BOUNDED_DEFAULT_ARRAY_MAX)
-      .readonly()
-      .optional(),
-    turn_index: NonNegativeIntSchema.optional(),
-    turn_digest: SoulContextUsageTurnDigestSchema.optional(),
-    per_anchor_usage: z.array(SoulContextPerAnchorUsageSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
-    // invariant (agents propose, Alaya decides): trust_mode is NOT a
-    // request field. Usage trust weight is server-derived — an MCP usage
-    // report is an unverified agent self-report, always recorded as
-    // `automatic` (lower path-plasticity weight). A caller cannot
-    // self-declare `manual` to claim full reinforcement weight. The
-    // SoulContextUsageTrustModeSchema enum still types the durable
-    // UsageProofRecord, where the server sets the mode.
-    reason: BoundedReasonSchema.nullable().optional()
-  })
-  .readonly();
-
-export const SoulReportContextUsageResponseSchema = z
-  .object({
-    delivery_id: NonEmptyStringSchema,
-    status: z.literal("recorded")
-  })
   .readonly();
 
 export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>;
@@ -597,42 +482,6 @@ const soulToolRequestSchemas: Record<SoulToolName, z.ZodTypeAny> = {
   "garden.claim_task": GardenClaimTaskRequestSchema,
   "garden.complete_task": GardenCompleteTaskRequestSchema
 };
-
-function deriveJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
-  const result = z.toJSONSchema(schema, {
-    target: "openapi-3.0",
-    io: "input",
-    reused: "inline",
-    unrepresentable: "any"
-  }) as Record<string, unknown>;
-  // Strip the JSON Schema metadata fields that MCP clients do not need;
-  // they would otherwise leak the upstream draft URI and inflate every
-  // tools/list payload.
-  delete result["$schema"];
-  delete result["$defs"];
-  delete result["definitions"];
-  // zod `.readonly()` projects to `readOnly: true`; on a request *input* schema
-  // that wrongly signals MCP clients not to send the field, so drop it tree-wide.
-  stripReadOnly(result);
-  return result;
-}
-
-function stripReadOnly(node: unknown): void {
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      stripReadOnly(item);
-    }
-    return;
-  }
-  if (node === null || typeof node !== "object") {
-    return;
-  }
-  const record = node as Record<string, unknown>;
-  delete record["readOnly"];
-  for (const value of Object.values(record)) {
-    stripReadOnly(value);
-  }
-}
 
 export const soulToolJsonSchemas: Readonly<Record<SoulToolName, Readonly<Record<string, unknown>>>> =
   Object.freeze(

@@ -16,7 +16,7 @@ export interface NarrativeBudgetServiceDependencies {
   readonly repo: NarrativeBudgetRepoPort;
   readonly eventPublisher: Pick<EventPublisher, "publish">;
   readonly eventLogReader?: {
-    queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
+    hasNarrativeConsolidationTrigger(runId: string, digestCountBefore: number): Promise<boolean>;
   };
   readonly now?: () => string;
 }
@@ -105,23 +105,7 @@ export class NarrativeBudgetService {
       return false;
     }
 
-    const events = await this.deps.eventLogReader.queryByRun(runId);
-
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const event = events[index];
-      if (event?.event_type !== ObligationTrustNarrativeEventType.NARRATIVE_CONSOLIDATION_TRIGGERED) {
-        continue;
-      }
-
-      const parsedPayload = NarrativeConsolidationTriggeredPayloadSchema.safeParse(event.payload_json);
-      if (!parsedPayload.success) {
-        continue;
-      }
-
-      return parsedPayload.data.digest_count_before === digestCountBefore;
-    }
-
-    return false;
+    return await this.deps.eventLogReader.hasNarrativeConsolidationTrigger(runId, digestCountBefore);
   }
 }
 

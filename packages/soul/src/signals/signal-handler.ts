@@ -71,97 +71,107 @@ export class SoulSignalHandler {
     runtimeContext?: Readonly<ConversationRuntimeContext>
   ): Promise<ToolResultBlock> {
     try {
-      switch (toolUse.name) {
-        case "soul.emit_candidate_signal": {
-          const context = requireRuntimeContext(runtimeContext);
-          const signal = materializeCandidateSignal({
-            input: toolUse.input,
-            source: SignalSource.MODEL_TOOL,
-            generateSignalId: this.generateSignalId,
-            now: this.now,
-            // Override LLM-supplied scope with trusted server-side runtime context
-            scopeOverride: {
-              workspace_id: context.workspace_id,
-              run_id: context.run_id,
-              surface_id: context.surface_id
-            }
-          });
-          await this.dependencies.receiveSignal(signal);
-
-          return {
-            type: "tool_result",
-            tool_use_id: toolUse.id,
-            content: JSON.stringify(
-              EmitCandidateSignalResponseSchema.parse({
-                signal_id: signal.signal_id,
-                status: "emitted"
-              })
-            )
-          };
-        }
-        case "soul.apply_override": {
-          if (this.dependencies.applyOverride === undefined) {
-            return createErrorToolResult(toolUse.id, "Unsupported soul tool: soul.apply_override");
-          }
-
-          const context = requireRuntimeContext(runtimeContext);
-          const input = SoulApplyOverrideRequestSchema.parse(toolUse.input);
-          const override = await this.dependencies.applyOverride({
-            runId: context.run_id,
-            workspaceId: context.workspace_id,
-            surfaceId: context.surface_id,
-            targetObject: input.target_object,
-            correction: input.correction,
-            priority: input.priority,
-            derivedFrom: context.user_message_id
-          });
-
-          return {
-            type: "tool_result",
-            tool_use_id: toolUse.id,
-            content: JSON.stringify(
-              SoulApplyOverrideResponseSchema.parse({
-                override_id: override.runtime_id,
-                status: "applied"
-              })
-            )
-          };
-        }
-        case "soul.explore_graph": {
-          if (this.dependencies.graphExplorePort === undefined) {
-            return createErrorToolResult(toolUse.id, "Graph explore not available");
-          }
-
-          // SECURITY: workspace is bound from trusted runtime context per
-          // invariant §29, never from tool payload.
-          const context = requireRuntimeContext(runtimeContext);
-          const input = SoulExploreGraphRequestSchema.parse(toolUse.input);
-          const direction = input.direction ?? "both";
-
-          const neighbors = await this.dependencies.graphExplorePort.exploreOneHop(input.memory_id, context.workspace_id, {
-            edgeTypes: input.edge_types,
-            direction,
-            runId: context.run_id
-          });
-
-          return {
-            type: "tool_result",
-            tool_use_id: toolUse.id,
-            content: JSON.stringify(
-              SoulExploreGraphResponseSchema.parse({
-                source_memory_id: input.memory_id,
-                neighbors,
-                count: neighbors.length
-              })
-            )
-          };
-        }
-        default:
-          return createErrorToolResult(toolUse.id, `Unsupported soul tool: ${toolUse.name}`);
-      }
+      return await this.dispatchToolUse(toolUse, runtimeContext);
     } catch (error) {
       return createErrorToolResult(toolUse.id, readErrorMessage(error, "Invalid candidate signal payload."));
     }
+  }
+
+  private async dispatchToolUse(
+    toolUse: ToolUseBlock,
+    runtimeContext?: Readonly<ConversationRuntimeContext>
+  ): Promise<ToolResultBlock> {
+    switch (toolUse.name) {
+      case "soul.emit_candidate_signal":
+        return await this.handleEmitCandidateSignal(toolUse, runtimeContext);
+      case "soul.apply_override":
+        return await this.handleApplyOverride(toolUse, runtimeContext);
+      case "soul.explore_graph":
+        return await this.handleExploreGraph(toolUse, runtimeContext);
+      default:
+        return createErrorToolResult(toolUse.id, `Unsupported soul tool: ${toolUse.name}`);
+    }
+  }
+
+  private async handleEmitCandidateSignal(
+    toolUse: ToolUseBlock,
+    runtimeContext?: Readonly<ConversationRuntimeContext>
+  ): Promise<ToolResultBlock> {
+    const context = requireRuntimeContext(runtimeContext);
+    const signal = materializeCandidateSignal({
+      input: toolUse.input,
+      source: SignalSource.MODEL_TOOL,
+      generateSignalId: this.generateSignalId,
+      now: this.now,
+      scopeOverride: {
+        workspace_id: context.workspace_id,
+        run_id: context.run_id,
+        surface_id: context.surface_id
+      }
+    });
+    await this.dependencies.receiveSignal(signal);
+    return createSuccessToolResult(
+      toolUse.id,
+      EmitCandidateSignalResponseSchema.parse({
+        signal_id: signal.signal_id,
+        status: "emitted"
+      })
+    );
+  }
+
+  private async handleApplyOverride(
+    toolUse: ToolUseBlock,
+    runtimeContext?: Readonly<ConversationRuntimeContext>
+  ): Promise<ToolResultBlock> {
+    if (this.dependencies.applyOverride === undefined) {
+      return createErrorToolResult(toolUse.id, "Unsupported soul tool: soul.apply_override");
+    }
+    const context = requireRuntimeContext(runtimeContext);
+    const input = SoulApplyOverrideRequestSchema.parse(toolUse.input);
+    const override = await this.dependencies.applyOverride({
+      runId: context.run_id,
+      workspaceId: context.workspace_id,
+      surfaceId: context.surface_id,
+      targetObject: input.target_object,
+      correction: input.correction,
+      priority: input.priority,
+      derivedFrom: context.user_message_id
+    });
+    return createSuccessToolResult(
+      toolUse.id,
+      SoulApplyOverrideResponseSchema.parse({
+        override_id: override.runtime_id,
+        status: "applied"
+      })
+    );
+  }
+
+  private async handleExploreGraph(
+    toolUse: ToolUseBlock,
+    runtimeContext?: Readonly<ConversationRuntimeContext>
+  ): Promise<ToolResultBlock> {
+    if (this.dependencies.graphExplorePort === undefined) {
+      return createErrorToolResult(toolUse.id, "Graph explore not available");
+    }
+    const context = requireRuntimeContext(runtimeContext);
+    const input = SoulExploreGraphRequestSchema.parse(toolUse.input);
+    const neighbors = await this.dependencies.graphExplorePort.exploreOneHop(
+      input.memory_id,
+      context.workspace_id,
+      {
+        edgeTypes: input.edge_types,
+        direction: input.direction ?? "both",
+        runId: context.run_id
+      }
+    );
+    return createSuccessToolResult(
+      toolUse.id,
+      SoulExploreGraphResponseSchema.parse({
+        source_memory_id: input.memory_id,
+        neighbors,
+        count: neighbors.length
+      })
+    );
   }
 }
 
@@ -209,52 +219,57 @@ function normalizeSignalInput(raw: unknown): unknown {
   }
 
   const input = raw as Record<string, unknown>;
+  const result = copyKnownSignalFields(input);
+  normalizeNullableSignalFields(result);
+  normalizeSignalStringArrays(result);
+  return result;
+}
 
-  // Allowlist: only copy fields CandidateMemorySignalInputSchema expects.
-  // Extra LLM fields (e.g. "reasoning", "_meta") would cause .strict() to reject — strip them.
-  const KNOWN_FIELDS = [
-    "workspace_id",
-    "run_id",
-    "surface_id",
-    "signal_kind",
-    "object_kind",
-    "scope_hint",
-    "domain_tags",
-    "confidence",
-    "evidence_refs",
-    "source_memory_refs",
-    "supersedes_refs",
-    "exception_to_refs",
-    "contradicts_refs",
-    "incompatible_with_refs",
-    "raw_payload"
-  ] as const;
+const KNOWN_SIGNAL_FIELDS = [
+  "workspace_id",
+  "run_id",
+  "surface_id",
+  "signal_kind",
+  "object_kind",
+  "scope_hint",
+  "domain_tags",
+  "confidence",
+  "evidence_refs",
+  "source_memory_refs",
+  "supersedes_refs",
+  "exception_to_refs",
+  "contradicts_refs",
+  "incompatible_with_refs",
+  "raw_payload"
+] as const;
 
+function copyKnownSignalFields(input: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  for (const field of KNOWN_FIELDS) {
+  for (const field of KNOWN_SIGNAL_FIELDS) {
     if (field in input) {
       result[field] = input[field];
     }
   }
+  return result;
+}
 
-  // Nullable string fields: "" or undefined → null
+function normalizeNullableSignalFields(result: Record<string, unknown>): void {
   for (const field of ["surface_id", "scope_hint"] as const) {
     if (result[field] === "" || result[field] === undefined) {
       result[field] = null;
     }
   }
+}
 
-  // String array fields: filter out empty strings
+function normalizeSignalStringArrays(result: Record<string, unknown>): void {
   for (const field of ["domain_tags", "evidence_refs"] as const) {
     const value = result[field];
     if (Array.isArray(value)) {
-      result[field] = (value as unknown[]).filter(
-        (item) => typeof item === "string" && item.length > 0
+      result[field] = value.filter(
+        (item): item is string => typeof item === "string" && item.length > 0
       );
     }
   }
-
-  return result;
 }
 
 function createErrorToolResult(toolUseId: string, message: string): ToolResultBlock {
@@ -263,6 +278,14 @@ function createErrorToolResult(toolUseId: string, message: string): ToolResultBl
     tool_use_id: toolUseId,
     content: JSON.stringify({ error: message }),
     is_error: true
+  };
+}
+
+function createSuccessToolResult(toolUseId: string, payload: unknown): ToolResultBlock {
+  return {
+    type: "tool_result",
+    tool_use_id: toolUseId,
+    content: JSON.stringify(payload)
   };
 }
 

@@ -1,21 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { EventLogEntry, McpServerInfo, ToolProvider } from "@do-soul/alaya-protocol";
+import type { EventLogEntry, ToolProvider } from "@do-soul/alaya-protocol";
 import { McpToolDiscoveryService } from "../../tooling/mcp-tool-discovery-service.js";
 
-const validTimestamp = "2026-04-20T10:30:00.000Z";
-
-function createServer(overrides: Partial<McpServerInfo> = {}): McpServerInfo {
-  return {
-    server_name: "filesystem",
-    transport_type: "stdio",
-    status: "active",
-    registered_at: validTimestamp,
-    ...overrides
-  };
-}
+import { createDeferred, createServer, validTimestamp } from "./mcp-tool-discovery-service.test-support.js";
 
 describe("McpToolDiscoveryService", () => {
-  it("discovers MCP tools, registers providers, and emits extension.tool_discovered", async () => {
+it("discovers MCP tools, registers providers, and emits extension.tool_discovered", async () => {
     const server = createServer();
     const listServerTools = vi.fn(async () => [
       {
@@ -100,7 +90,7 @@ describe("McpToolDiscoveryService", () => {
     );
   });
 
-  it("normalizes blank system workspace fallback and discovered_at timestamps via shared helpers", async () => {
+it("normalizes blank system workspace fallback and discovered_at timestamps via shared helpers", async () => {
     const appendedEntries: EventLogEntry[] = [];
     const service = new McpToolDiscoveryService({
       extensionRegistry: {
@@ -143,7 +133,7 @@ describe("McpToolDiscoveryService", () => {
     });
   });
 
-  it("skips inactive servers and ignores active servers with no tools", async () => {
+it("skips inactive servers and ignores active servers with no tools", async () => {
     const listServerTools = vi.fn(async () => []);
     const registerProvider = vi.fn();
     const append = vi.fn();
@@ -170,7 +160,7 @@ describe("McpToolDiscoveryService", () => {
     expect(append).not.toHaveBeenCalled();
   });
 
-  it("emits extension.tool_discovered only for genuinely new tools across refresh passes", async () => {
+it("emits extension.tool_discovered only for genuinely new tools across refresh passes", async () => {
     const server = createServer();
     const discoveredToolPasses = [
       [
@@ -248,7 +238,7 @@ describe("McpToolDiscoveryService", () => {
     );
   });
 
-  it("suppresses duplicate extension.tool_discovered emission across overlapping discovery passes", async () => {
+it("suppresses duplicate extension.tool_discovered emission across overlapping discovery passes", async () => {
     const server = createServer();
     const storedProviders: ToolProvider[] = [];
     const listProvidersBarrierResolvers: Array<() => void> = [];
@@ -323,7 +313,7 @@ describe("McpToolDiscoveryService", () => {
     );
   });
 
-  it("suppresses duplicate extension.tool_discovered emission when a stale overlapping pass reaches emission after the first pass completed", async () => {
+it("suppresses duplicate extension.tool_discovered emission when a stale overlapping pass reaches emission after the first pass completed", async () => {
     const server = createServer();
     const storedProviders: ToolProvider[] = [];
     const listProvidersBarrierResolvers: Array<() => void> = [];
@@ -409,7 +399,7 @@ describe("McpToolDiscoveryService", () => {
     );
   });
 
-  it("makes a zero-tool shrink authoritative before later rediscovery", async () => {
+it("makes a zero-tool shrink authoritative before later rediscovery", async () => {
     const server = createServer();
     const discoveredToolPasses = [
       [
@@ -503,108 +493,4 @@ describe("McpToolDiscoveryService", () => {
       })
     ]);
   });
-
-  it("discovers active servers in parallel before awaiting any single server response", async () => {
-    const filesystemServer = createServer({ server_name: "filesystem" });
-    const githubServer = createServer({
-      server_name: "github",
-      transport_type: "http",
-      endpoint: "http://127.0.0.1:3040/mcp"
-    });
-    let resolveFilesystemTools:
-      | ((
-          tools: ReadonlyArray<{
-            readonly tool_id: string;
-            readonly name: string;
-            readonly description: string;
-          }>
-        ) => void)
-      | undefined;
-    let resolveGithubTools:
-      | ((
-          tools: ReadonlyArray<{
-            readonly tool_id: string;
-            readonly name: string;
-            readonly description: string;
-          }>
-        ) => void)
-      | undefined;
-    const listServerTools = vi.fn(
-      async (server: McpServerInfo) =>
-        await new Promise<
-          ReadonlyArray<{
-            readonly tool_id: string;
-            readonly name: string;
-            readonly description: string;
-          }>
-        >((resolve) => {
-          if (server.server_name === "filesystem") {
-            resolveFilesystemTools = resolve;
-            return;
-          }
-
-          resolveGithubTools = resolve;
-        })
-    );
-    const registerProvider = vi.fn(async (provider: ToolProvider) => provider);
-
-    const service = new McpToolDiscoveryService({
-      extensionRegistry: {
-        registerProvider,
-        listProviders: vi.fn(async () => [])
-      },
-      mcpToolCatalog: {
-        listServerTools
-      },
-      eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-          ...entry,
-          event_id: "event-1",
-          created_at: validTimestamp,
-          revision: 0
-        }))
-      },
-      now: () => validTimestamp
-    });
-
-    const discoveryPromise = service.discoverAndRegister([filesystemServer, githubServer]);
-
-    await Promise.resolve();
-
-    expect(listServerTools).toHaveBeenCalledTimes(2);
-    expect(registerProvider).not.toHaveBeenCalled();
-
-    resolveFilesystemTools?.([
-      {
-        tool_id: "mcp__filesystem__read_file",
-        name: "filesystem.read_file",
-        description: "Read file through filesystem MCP."
-      }
-    ]);
-    resolveGithubTools?.([
-      {
-        tool_id: "mcp__github__search_repos",
-        name: "github.search_repos",
-        description: "Search repositories through GitHub MCP."
-      }
-    ]);
-
-    await expect(discoveryPromise).resolves.toHaveLength(2);
-    expect(registerProvider).toHaveBeenCalledTimes(2);
-  });
 });
-
-function createDeferred<T>(): {
-  readonly promise: Promise<T>;
-  resolve: (value: T | PromiseLike<T>) => void;
-} {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-
-  return {
-    promise,
-    resolve
-  };
-}

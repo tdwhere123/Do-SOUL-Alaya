@@ -100,6 +100,9 @@ describe("SqliteEvidenceCapsuleRepo", () => {
       "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab",
       "f6c1b587-be07-4410-b2ca-8bfbc4d82db4"
     ]);
+    await expect(repo.findByRunIdPage?.("run-1", { limit: 1, offset: 1 })).resolves.toMatchObject([
+      { object_id: "f6c1b587-be07-4410-b2ca-8bfbc4d82db4" }
+    ]);
   });
 
   it("lists by workspace id", async () => {
@@ -132,6 +135,9 @@ describe("SqliteEvidenceCapsuleRepo", () => {
       "bd4db628-a17a-44a7-9000-e95f4ea61fd3",
       "fc8f9786-5ec4-4d98-a630-7350dde255f8"
     ]);
+    await expect(repo.findByWorkspaceIdPage?.("workspace-1", { limit: 1, offset: 0 })).resolves.toMatchObject([
+      { object_id: "bd4db628-a17a-44a7-9000-e95f4ea61fd3" }
+    ]);
   });
 
   it("lists by health state", async () => {
@@ -152,6 +158,9 @@ describe("SqliteEvidenceCapsuleRepo", () => {
 
     const rows = await repo.findByHealth(EvidenceHealthState.DEGRADED);
     expect(rows.map((row) => row.object_id)).toEqual(["67637f89-3086-4c6d-9e52-24545ca7cc9f"]);
+    await expect(
+      repo.findByHealthPage?.(EvidenceHealthState.DEGRADED, { limit: 1, offset: 0 })
+    ).resolves.toMatchObject([{ object_id: "67637f89-3086-4c6d-9e52-24545ca7cc9f" }]);
   });
 
   it("updates health and updated_at", async () => {

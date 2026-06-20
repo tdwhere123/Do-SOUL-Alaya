@@ -89,28 +89,35 @@ const DOMAIN_HINTS: ReadonlyArray<readonly [string, RegExp]> = [
 export function compileRecallQueryProbes(queryText: string | null): Readonly<RecallQueryProbes> {
   const normalized = normalizeQuery(queryText);
   if (normalized === null) {
-    return freezeProbes({
-      normalized_query: null,
-      subject_hints: [],
-      object_ids: [],
-      evidence_refs: [],
-      run_ids: [],
-      surface_ids: [],
-      file_paths: [],
-      command_names: [],
-      package_names: [],
-      task_refs: [],
-      dimensions: [],
-      scope_classes: [],
-      domain_tags: [],
-      lexical_terms: [],
-      expanded_terms: [],
-      phrases: [],
-      char_ngrams: [],
-      date_terms: []
-    });
+    return buildEmptyRecallQueryProbes();
   }
+  return buildRecallQueryProbes(normalized);
+}
 
+function buildEmptyRecallQueryProbes(): Readonly<RecallQueryProbes> {
+  return freezeProbes({
+    normalized_query: null,
+    subject_hints: [],
+    object_ids: [],
+    evidence_refs: [],
+    run_ids: [],
+    surface_ids: [],
+    file_paths: [],
+    command_names: [],
+    package_names: [],
+    task_refs: [],
+    dimensions: [],
+    scope_classes: [],
+    domain_tags: [],
+    lexical_terms: [],
+    expanded_terms: [],
+    phrases: [],
+    char_ngrams: [],
+    date_terms: []
+  });
+}
+
+function buildRecallQueryProbes(normalized: string): Readonly<RecallQueryProbes> {
   const lexicalTerms = extractLexicalTerms(normalized);
   return freezeProbes({
     normalized_query: normalized,
@@ -119,23 +126,50 @@ export function compileRecallQueryProbes(queryText: string | null): Readonly<Rec
     evidence_refs: collectMatches(normalized, /\b(?:evidence|ev|ref)[_-]?([a-z0-9][a-z0-9_.:-]{3,})\b/giu),
     run_ids: collectFullMatches(normalized, /\brun[-_][a-z0-9][a-z0-9_-]*\b/giu),
     surface_ids: collectFullMatches(normalized, /\bsurface[-_][a-z0-9][a-z0-9_-]*\b/giu),
-    file_paths: collectFullMatches(normalized, /(?:^|\s)(?:\.{1,2}\/|\/)?[\w.-]+(?:\/[\w .-]+)+/giu).map((value) => value.trim()),
+    file_paths: collectFilePathMatches(normalized),
     command_names: collectFullMatches(normalized, /`([^`]{2,80})`/giu),
-    package_names: collectFullMatches(normalized, /@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|(?:[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(?:\.js|\.ts|\.mjs)?/giu)
-      .filter((value) => value.includes("/") || value.startsWith("@")),
+    package_names: collectPackageNameMatches(normalized),
     task_refs: collectFullMatches(normalized, /\b(?:#|bl-|task-|v\d+\.\d+\.\d+)[a-z0-9_.-]*\b/giu),
-    dimensions: DIMENSION_HINTS.flatMap(([dimension, pattern]) => pattern.test(normalized) ? [dimension] : []),
+    dimensions: collectDimensionHints(normalized),
     scope_classes: inferScopeClasses(normalized),
-    domain_tags: DOMAIN_HINTS.flatMap(([tag, pattern]) => pattern.test(normalized) ? [tag] : []),
+    domain_tags: collectDomainHints(normalized),
     lexical_terms: lexicalTerms,
     expanded_terms: expandLexicalTerms(lexicalTerms),
     phrases: extractPhrases(normalized, lexicalTerms),
     char_ngrams: extractCharNgrams(normalized),
-    date_terms: collectFullMatches(
-      normalized,
-      /\b\d{4}-\d{2}(?:-\d{2})?\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:today|yesterday|tomorrow|tonight|last\s+(?:week|month|year)|next\s+(?:week|month|year)|this\s+(?:week|month|year))\b|(?:上次|昨天|今天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{4}年\d{1,2}月(?:\d{1,2}日)?)/giu
-    )
+    date_terms: collectDateTermMatches(normalized)
   });
+}
+
+function collectFilePathMatches(normalized: string): readonly string[] {
+  return collectFullMatches(
+    normalized,
+    /(?:^|\s)(?:\.{1,2}\/|\/)?[\w.-]+(?:\/[\w .-]+)+/giu
+  ).map((value) => value.trim());
+}
+
+function collectPackageNameMatches(normalized: string): readonly string[] {
+  return collectFullMatches(
+    normalized,
+    /@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|(?:[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(?:\.js|\.ts|\.mjs)?/giu
+  ).filter((value) => value.includes("/") || value.startsWith("@"));
+}
+
+function collectDimensionHints(normalized: string): readonly MemoryDimensionType[] {
+  return DIMENSION_HINTS.flatMap(([dimension, pattern]) =>
+    pattern.test(normalized) ? [dimension] : []
+  );
+}
+
+function collectDomainHints(normalized: string): readonly string[] {
+  return DOMAIN_HINTS.flatMap(([tag, pattern]) => pattern.test(normalized) ? [tag] : []);
+}
+
+function collectDateTermMatches(normalized: string): readonly string[] {
+  return collectFullMatches(
+    normalized,
+    /\b\d{4}-\d{2}(?:-\d{2})?\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:today|yesterday|tomorrow|tonight|last\s+(?:week|month|year)|next\s+(?:week|month|year)|this\s+(?:week|month|year))\b|(?:上次|昨天|今天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{4}年\d{1,2}月(?:\d{1,2}日)?)/giu
+  );
 }
 
 function normalizeQuery(queryText: string | null): string | null {

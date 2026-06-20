@@ -15,6 +15,7 @@
     "test:coverage": "node ./scripts/ci/run-vitest-projects.mjs --coverage.enabled --coverage.reporter=text-summary --coverage.reporter=json-summary --coverage.reporter=lcov",
     "test:parallel": "vitest run --config vitest.config.mjs",
     "ci:content-contracts": "node ./scripts/ci/check-content-contracts.mjs",
+    "ci:self-benchmark-gate": "node ./scripts/ci/self-benchmark-gate.mjs",
     "typecheck": "pnpm --workspace-concurrency=1 --filter @do-soul/alaya-protocol --filter @do-soul/alaya-core --filter @do-soul/alaya-storage --filter @do-soul/alaya-engine-gateway --filter @do-soul/alaya-eval --filter @do-soul/alaya-inspector --filter @do-soul/alaya-bench-runner --filter @do-soul/alaya-soul --filter @do-soul/alaya run typecheck",
     "hygiene:unused": "knip --config knip.json --no-progress --no-config-hints",
     "release:check-version": "node ./scripts/check-release-version.mjs",

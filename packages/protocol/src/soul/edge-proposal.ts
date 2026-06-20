@@ -88,7 +88,7 @@ const EdgeProposalFilterFieldsSchema = z.object({
   edge_type: MemoryGraphEdgeTypeSchema.optional(),
   trigger_source: EdgeProposalTriggerSourceSchema.optional(),
   min_confidence: z.number().min(0).max(1).optional(),
-  since: z.string().datetime().nullable().optional(),
+  since: IsoDatetimeStringSchema.nullable().optional(),
   limit: z.number().int().min(1).max(100).optional()
 });
 

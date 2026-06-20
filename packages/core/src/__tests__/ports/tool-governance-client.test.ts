@@ -194,4 +194,20 @@ describe("ToolGovernanceClient", () => {
 
     expect(port.querySpy).toHaveBeenCalledTimes(2);
   });
+
+  it("evicts the least recently used cache entry when maxEntries is exceeded", async () => {
+    const port = createPortMock();
+    const client = new ToolGovernanceClient({
+      port,
+      maxEntries: 2
+    });
+
+    await client.query(createQuery({ requested_by: "first" }), "node-a");
+    await client.query(createQuery({ requested_by: "second" }), "node-b");
+    await client.query(createQuery({ requested_by: "first" }), "node-a");
+    await client.query(createQuery({ requested_by: "third" }), "node-c");
+    await client.query(createQuery({ requested_by: "second" }), "node-b");
+
+    expect(port.querySpy).toHaveBeenCalledTimes(4);
+  });
 });

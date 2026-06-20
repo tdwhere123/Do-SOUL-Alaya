@@ -1,4 +1,3 @@
-import { appendFileSync } from "node:fs";
 import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind,
@@ -10,298 +9,35 @@ import type {
   BenchDaemonHandle
 } from "../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
-import { benchSessionSurfacesEnabled } from "../harness/daemon-support.js";
-import { extractRecallTokenEconomy } from "./recall-token-economy.js";
+import {
+  createPhaseTimer,
+  isBenchProfileEnabled
+} from "./runner-question-delivery.js";
+export {
+  WIDE_QA_DELIVERY_QUESTION_TYPES,
+  buildQaDeliveredCandidates,
+  dedupeQaDeliveredCandidates,
+  resolveQaDeliveryBudget,
+  shouldDedupQaDelivery
+} from "./runner-question-delivery.js";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
 import type {
   LongMemEvalQuestionDiagnostic,
   LongMemEvalReportSideEffectSnapshot
 } from "./diagnostics.js";
-import { buildQuestionDiagnostic } from "./diagnostics.js";
-import { isAbstentionQuestionId } from "./abstention.js";
-import { pairSessionIntoRounds, type LongMemEvalQuestion } from "./dataset.js";
+import type { LongMemEvalQuestion } from "./dataset.js";
+import type { CompileSeedRunner } from "./compile-seed.js";
 import {
-  buildSessionSynthesisInput,
-  computeNextTurnSeedRefs,
-  type CompileSeedRunner,
-  type SessionSeededTurn
-} from "./compile-seed.js";
-import {
-  buildLongMemEvalSidecarKey,
   deriveLongMemEvalGoldMemoryIds,
   deriveLongMemEvalMemoryObjectIds,
-  readLongMemEvalReportSideEffectSnapshot,
-  resolveLongMemEvalHitVerdict,
   runLongMemEvalRecallCycle,
-  type LongMemEvalReportSimulationStats,
-  type LongMemEvalSidecarEntry
+  type LongMemEvalReportSimulationStats
 } from "./runner-helpers.js";
-import {
-  scoreQaQuestion,
-  type QaDeliveredCandidate,
-  type QaQuestionVerdict
-} from "./qa-harness.js";
+import type { QaQuestionVerdict } from "./qa-harness.js";
 import type { LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import type { QaChatFn } from "./qa-chat.js";
-import { selectRelevantMemories } from "./qa-llm-filter.js";
-import { buildQaSupportPack } from "./qa-support-pack.js";
-
-const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
-export const WIDE_QA_DELIVERY_QUESTION_TYPES = new Set([
-  "knowledge-update",
-  "multi-session",
-  "locomo-aggregation"
-]);
-
-/** Read a positive-integer env override, else the fallback. */
-function readPositiveIntEnv(name: string, fallback: number): number {
-  const raw = Number(process.env[name]);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
-}
-
-function isEnvExplicitlyDisabled(raw: string | undefined): boolean {
-  if (raw === undefined) {
-    return false;
-  }
-  const normalized = raw.trim().toLowerCase();
-  return normalized === "0" || normalized === "off" || normalized === "false";
-}
-
-export function resolveQaDeliveryBudget(questionType: string): {
-  readonly deliverK: number;
-  readonly useWideDelivery: boolean;
-} {
-  const deliverKRaw = Number(process.env.ALAYA_BENCH_QA_DELIVER_K);
-  if (Number.isFinite(deliverKRaw) && deliverKRaw > 0) {
-    return {
-      deliverK: Math.floor(deliverKRaw),
-      useWideDelivery: true
-    };
-  }
-  const useWideDelivery =
-    process.env.ALAYA_BENCH_QA_WIDE_AGG !== undefined &&
-    WIDE_QA_DELIVERY_QUESTION_TYPES.has(questionType);
-  return {
-    deliverK: useWideDelivery ? 20 : 10,
-    useWideDelivery
-  };
-}
-
-export function shouldDedupQaDelivery(): boolean {
-  return !isEnvExplicitlyDisabled(process.env.ALAYA_BENCH_QA_DEDUP_DELIVERY);
-}
-
-function normalizeQaDeliveryContent(content: string): string {
-  return content.replace(/\s+/gu, " ").trim();
-}
-
-function qaDeliveryIdentity(candidate: QaDeliveredCandidate): string | null {
-  const normalizedContent = normalizeQaDeliveryContent(candidate.content);
-  if (normalizedContent.length === 0) {
-    return null;
-  }
-  return `${candidate.eventDate?.trim() ?? ""}\u0000${normalizedContent}`;
-}
-
-export function dedupeQaDeliveredCandidates(
-  delivered: readonly QaDeliveredCandidate[],
-  maxCandidates = Number.POSITIVE_INFINITY
-): QaDeliveredCandidate[] {
-  const seen = new Set<string>();
-  const unique: QaDeliveredCandidate[] = [];
-  for (const candidate of delivered) {
-    const key = qaDeliveryIdentity(candidate);
-    if (key === null || seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    unique.push(candidate);
-    if (unique.length >= maxCandidates) {
-      break;
-    }
-  }
-  return unique;
-}
-
-interface QaSourceRecallPointer {
-  readonly object_id: string;
-  readonly object_kind?: string;
-}
-
-interface QaSidecarContent {
-  readonly content?: string;
-  readonly sessionId?: string | null;
-  readonly eventDate?: string;
-}
-
-// sessionId stays a present string | null (not optional) so the session-spread
-// generic still narrows; the looser QaDeliveredCandidate is a supertype.
-interface QaSourceCandidate extends QaDeliveredCandidate {
-  readonly sessionId: string | null;
-}
-
-/** Build the QA delivery candidate sets, ranking against the FULL recall list
- * rather than the memory_entry-filtered subsequence so a non-memory_entry
- * pointer ranked above does not understate sourceRank (and the gold-only path
- * carries sessionId + the gold's original recall rank). Pure: callers select
- * the final delivered set from these. */
-export function buildQaDeliveredCandidates(input: {
-  readonly results: readonly QaSourceRecallPointer[];
-  readonly goldMemoryIds: readonly string[];
-  readonly lookupMemoryEntry: (objectId: string) => QaSidecarContent | undefined;
-  readonly lookupCandidate?: (
-    objectKind: "memory_entry" | "synthesis_capsule",
-    objectId: string
-  ) => QaSidecarContent | undefined;
-}): {
-  readonly deliveryCandidates: QaSourceCandidate[];
-  readonly memoryEntryCandidates: QaSourceCandidate[];
-  readonly goldOnly: QaSourceCandidate[];
-} {
-  const lookupCandidate = (
-    objectKind: "memory_entry" | "synthesis_capsule",
-    objectId: string
-  ): QaSidecarContent | undefined =>
-    input.lookupCandidate?.(objectKind, objectId) ??
-    (objectKind === "memory_entry" ? input.lookupMemoryEntry(objectId) : undefined);
-  const deliveryCandidates = input.results
-    .map((result, index) => ({ result, originalRank: index + 1 }))
-    .filter(
-      ({ result }) =>
-        (result.object_kind ?? "memory_entry") === "memory_entry" ||
-        result.object_kind === "synthesis_capsule"
-    )
-    .map(({ result, originalRank }) => {
-      const objectKind = (result.object_kind ?? "memory_entry") as
-        | "memory_entry"
-        | "synthesis_capsule";
-      const entry = lookupCandidate(objectKind, result.object_id);
-      return {
-        objectId: result.object_id,
-        objectKind,
-        content: entry?.content ?? "",
-        sessionId: entry?.sessionId ?? null,
-        sourceRank: originalRank,
-        ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
-      };
-    });
-  const memoryEntryCandidates = input.results
-    .map((result, index) => ({ result, originalRank: index + 1 }))
-    .filter(
-      ({ result }) => (result.object_kind ?? "memory_entry") === "memory_entry"
-    )
-    .map(({ result, originalRank }) => {
-      const entry = input.lookupMemoryEntry(result.object_id);
-      return {
-        objectId: result.object_id,
-        content: entry?.content ?? "",
-        sessionId: entry?.sessionId ?? null,
-        sourceRank: originalRank,
-        ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
-      };
-    });
-  const originalRankById = new Map<string, number>();
-  input.results.forEach((pointer, index) => {
-    if ((pointer.object_kind ?? "memory_entry") !== "memory_entry") {
-      return;
-    }
-    // keep the best (earliest) rank if an object_id recurs in results
-    if (!originalRankById.has(pointer.object_id)) {
-      originalRankById.set(pointer.object_id, index + 1);
-    }
-  });
-  const goldOnly = input.goldMemoryIds.map((id) => {
-    const entry = input.lookupMemoryEntry(id);
-    const goldRank = originalRankById.get(id);
-    return {
-      objectId: id,
-      content: entry?.content ?? "",
-      sessionId: entry?.sessionId ?? null,
-      // gold absent from results => no recall rank; leave sourceRank unset.
-      ...(goldRank === undefined ? {} : { sourceRank: goldRank }),
-      ...(entry?.eventDate === undefined ? {} : { eventDate: entry.eventDate })
-    };
-  });
-  return { deliveryCandidates, memoryEntryCandidates, goldOnly };
-}
-
-/** Round-robin across the source sessions of the recalled pool so one
- * high-match session can't bury other answer sessions' gold below the delivery
- * budget. Reshapes QA delivery selection only (post-recall); recall-service is
- * untouched. Pair with a wide ALAYA_BENCH_RECALL_MAXK so the deep gold is in
- * the pool to redistribute. */
-function selectSessionSpread<T extends { readonly sessionId: string | null }>(
-  pool: readonly T[]
-): T[] {
-  const bySession = new Map<string, T[]>();
-  for (const pointer of pool) {
-    const sessionId = pointer.sessionId ?? "?";
-    const bucket = bySession.get(sessionId);
-    if (bucket === undefined) bySession.set(sessionId, [pointer]);
-    else bucket.push(pointer);
-  }
-  // Map insertion order = each session's first (best) fusion rank.
-  const buckets = [...bySession.values()];
-  const picked: T[] = [];
-  for (let depth = 0; ; depth += 1) {
-    let progressed = false;
-    for (const bucket of buckets) {
-      const item = bucket[depth];
-      if (item !== undefined) {
-        picked.push(item);
-        progressed = true;
-      }
-    }
-    if (!progressed) break;
-  }
-  return picked;
-}
-
-function buildQaSupportCandidatesFromSidecar(
-  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>
-): QaSourceCandidate[] {
-  return [...sidecar.values()]
-    .filter((entry) => entry.objectKind === "memory_entry")
-    .map((entry) => ({
-      objectId: entry.objectId,
-      objectKind: "memory_entry" as const,
-      content: entry.content ?? "",
-      sessionId: entry.sessionId,
-      ...(entry.eventDate === undefined ? {} : { eventDate: entry.eventDate })
-    }));
-}
-
-function isBenchProfileEnabled(): boolean {
-  const raw = process.env[BENCH_PROFILE_ENV];
-  if (raw === undefined) return false;
-  const normalized = raw.trim().toLowerCase();
-  return (
-    normalized !== "" &&
-    normalized !== "0" &&
-    normalized !== "false" &&
-    normalized !== "off" &&
-    normalized !== "no"
-  );
-}
-
-interface PhaseTimer {
-  readonly tick: () => bigint;
-  readonly record: (name: string, started: bigint) => void;
-  readonly format: () => string;
-}
-
-function createPhaseTimer(): PhaseTimer {
-  const samples: Array<{ name: string; ms: number }> = [];
-  return {
-    tick: () => process.hrtime.bigint(),
-    record: (name: string, started: bigint) => {
-      const elapsedNs = process.hrtime.bigint() - started;
-      const ms = Number(elapsedNs) / 1_000_000;
-      samples.push({ name, ms });
-    },
-    format: () => samples.map((s) => `${s.name}=${s.ms.toFixed(1)}ms`).join(" ")
-  };
-}
+import { seedLongMemEvalQuestion } from "./runner-question-seeding.js";
+import { buildLongMemEvalQuestionResult } from "./runner-question-result.js";
 
 export interface LongMemEvalWorkerResult {
   readonly questionId: string;
@@ -326,7 +62,7 @@ export interface LongMemEvalWorkerResult {
   readonly qaVerdict?: QaQuestionVerdict;
 }
 
-export async function runLongMemEvalQuestion(input: {
+export interface LongMemEvalQuestionRunInput {
   readonly daemon: BenchDaemonHandle;
   readonly question: LongMemEvalQuestion;
   readonly turnIndex: number;
@@ -338,164 +74,62 @@ export async function runLongMemEvalQuestion(input: {
   readonly captureSnapshot: boolean;
   readonly qaChat?: QaChatFn;
   readonly qaJudgeChat?: QaChatFn;
-}): Promise<LongMemEvalWorkerResult> {
+}
+
+export async function runLongMemEvalQuestion(
+  input: LongMemEvalQuestionRunInput
+): Promise<LongMemEvalWorkerResult> {
   const profileEnabled = isBenchProfileEnabled();
   const phase = createPhaseTimer();
-  const tAttach = phase.tick();
-  const workspace: BenchWorkspaceHandle = await input.daemon.attachWorkspace({
-    workspaceId: `lme-${input.question.question_id.slice(0, 8)}`,
-    runId: `run-${input.question.question_id.slice(0, 8)}`
-  });
-  phase.record("workspace_attach", tAttach);
+  const workspace: BenchWorkspaceHandle = await runQuestionPhase(
+    phase,
+    "workspace_attach",
+    () =>
+      input.daemon.attachWorkspace({
+        workspaceId: `lme-${input.question.question_id.slice(0, 8)}`,
+        runId: `run-${input.question.question_id.slice(0, 8)}`
+      })
+  );
   try {
-    const tSeedLoop = phase.tick();
-    const sidecar = new Map<string, LongMemEvalSidecarEntry>();
-    const answerSessionSet = new Set(input.question.answer_session_ids);
-    let seedTurnsTruncated = 0;
-    let answerTurnsTruncated = 0;
-    let seedCharsClipped = 0;
-
-    let seedIndex = 0;
-    const coherenceMembers: { memoryId: string; sessionId: string }[] = [];
-    for (let si = 0; si < input.question.haystack_sessions.length; si++) {
-      const session = input.question.haystack_sessions[si];
-      const sessionId =
-        input.question.haystack_session_ids[si] ?? `session-${si}`;
-      if (session === undefined) continue;
-
-      const rounds = pairSessionIntoRounds(session);
-      const sessionTurns: SessionSeededTurn[] = [];
-      const sessionMemberMemoryIds: string[] = [];
-      let sessionHasAnswer = false;
-      let previousTurnSeedMemoryIds: readonly string[] = [];
-      for (let ri = 0; ri < rounds.length; ri++) {
-        const round = rounds[ri];
-        if (round === undefined) continue;
-
-        const evidenceRef = `${input.question.question_id}-s${si}-r${ri}`;
-        const seedResult = await input.seedRunner.seedTurn({
-          daemon: workspace,
-          turnContent: round.content,
-          evidenceRefBase: evidenceRef,
-          seedIndex,
-          workspaceId: workspace.workspaceId,
-          runId: workspace.runId,
-          ...(benchSessionSurfacesEnabled() ? { surfaceId: sessionId } : {}),
-          ...(previousTurnSeedMemoryIds.length === 0
-            ? {}
-            : { sourceMemoryRefs: previousTurnSeedMemoryIds })
-        });
-        seedIndex += 1;
-        if (seedResult.turnTruncated) {
-          seedTurnsTruncated += 1;
-          seedCharsClipped += seedResult.charsClipped;
-          if (round.hasAnswer) {
-            answerTurnsTruncated += 1;
-          }
-        }
-        if (round.hasAnswer) {
-          sessionHasAnswer = true;
-        }
-        for (const seed of seedResult.seeds) {
-          sidecar.set(buildLongMemEvalSidecarKey("memory_entry", seed.memoryId), {
-            objectId: seed.memoryId,
-            objectKind: "memory_entry",
-            sessionId,
-            hasAnswer: round.hasAnswer,
-            // Carry content (+ event date) when QA is on OR a pool dump is
-            // requested (offline rerank/coverage analysis needs candidate text +
-            // event date). Off on both => omitted.
-            ...(input.qaChat === undefined &&
-            process.env.ALAYA_BENCH_POOL_DUMP === undefined
-              ? {}
-              : {
-                  content: round.content,
-                  ...(input.question.haystack_dates[si] === undefined
-                    ? {}
-                    : { eventDate: input.question.haystack_dates[si] })
-                })
-          });
-          sessionTurns.push({
-            turnContent: round.content,
-            evidenceId: seed.evidenceId
-          });
-          sessionMemberMemoryIds.push(seed.memoryId);
-          coherenceMembers.push({ memoryId: seed.memoryId, sessionId });
-        }
-        previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
-      }
-
-      await workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
-
-      const synthesisInput = buildSessionSynthesisInput({
-        topicKey: `${input.question.question_id}-s${si}`,
-        turns: sessionTurns
-      });
-      if (synthesisInput !== null) {
-        const synthesisResult = await workspace.proposeSynthesis(synthesisInput);
-        if (synthesisResult.synthesisId !== null) {
-          sidecar.set(
-            buildLongMemEvalSidecarKey(
-              "synthesis_capsule",
-              synthesisResult.synthesisId
-            ),
-            {
-              objectId: synthesisResult.synthesisId,
-              objectKind: "synthesis_capsule",
-              sessionId,
-              hasAnswer: sessionHasAnswer,
-              content: synthesisInput.summary
-            }
-          );
-        }
-      }
-    }
-
-    phase.record("seed_loop", tSeedLoop);
-
-    const tEmbeddingWarmup = phase.tick();
-    const embeddingWarmup =
-      input.embeddingMode === "env"
-        ? await workspace.warmEmbeddingCache(
-            deriveLongMemEvalMemoryObjectIds(sidecar)
-          )
-        : null;
-    const queryEmbeddingWarmup =
-      input.embeddingMode === "env"
-        ? await workspace.warmQueryEmbeddingCache([input.question.question])
-        : null;
-    phase.record("embedding_warmup", tEmbeddingWarmup);
-
-    const tEdgePlane = phase.tick();
-    await input.daemon.runEdgePlanePassIfConfigured();
-    phase.record("edge_plane", tEdgePlane);
-
-    if (
-      input.embeddingMode === "env" &&
-      process.env.ALAYA_EXP_COHERENCE_EDGES === "1"
-    ) {
-      const coherenceSummary = await workspace.accrueCoherenceCoRecall(
-        coherenceMembers,
-        {
-          floor: Number(process.env.ALAYA_EXP_COHERENCE_FLOOR ?? "0.6"),
-          capPerNode: Number(process.env.ALAYA_EXP_COHERENCE_CAP ?? "3"),
-          crossSessionOnly: process.env.ALAYA_EXP_COHERENCE_XSESSION !== "0"
-        }
-      );
-      console.error(
-        `[coherence-edges] q=${input.question.question_id} ` +
-          `coherent=${coherenceSummary.coherentPairs} ` +
-          `kept=${coherenceSummary.keptPairs} minted=${coherenceSummary.minted}`
+    return await runLongMemEvalQuestionInWorkspace(input, workspace, phase);
+  } finally {
+    await runQuestionPhase(phase, "workspace_detach", () => workspace.detach());
+    if (profileEnabled) {
+      process.stderr.write(
+        `[bench_profile] question=${input.question.question_id} ${phase.format()}\n`
       );
     }
+  }
+}
 
-    const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(
-      sidecar,
-      answerSessionSet
-    );
-
-    const tRecall = phase.tick();
-    const recallCycle = await runLongMemEvalRecallCycle({
+async function runLongMemEvalQuestionInWorkspace(
+  input: LongMemEvalQuestionRunInput,
+  workspace: BenchWorkspaceHandle,
+  phase: ReturnType<typeof createPhaseTimer>
+): Promise<LongMemEvalWorkerResult> {
+  const seedState = await runQuestionPhase(phase, "seed_loop", () =>
+    seedLongMemEvalQuestion({
+      workspace,
+      question: input.question,
+      seedRunner: input.seedRunner,
+      qaChat: input.qaChat
+    })
+  );
+  const { embeddingWarmup, queryEmbeddingWarmup } = await runQuestionPhase(
+    phase,
+    "embedding_warmup",
+    () => warmQuestionEmbeddingCaches(input, workspace, seedState.sidecar)
+  );
+  await runQuestionPhase(phase, "edge_plane", () =>
+    input.daemon.runEdgePlanePassIfConfigured()
+  );
+  await runCoherenceEdgesIfEnabled(input, workspace, seedState.coherenceMembers);
+  const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(
+    seedState.sidecar,
+    seedState.answerSessionSet
+  );
+  const recallCycle = await runQuestionPhase(phase, "recall", () =>
+    runLongMemEvalRecallCycle({
       daemon: workspace,
       query: input.question.question,
       recallOptions: input.recallOptions,
@@ -503,337 +137,101 @@ export async function runLongMemEvalQuestion(input: {
       goldMemoryIds,
       turnIndex: input.turnIndex,
       questionText: input.question.question
-    });
-    phase.record("recall", tRecall);
-    const recallResult = recallCycle.scoredRecallResult;
-    const latencyMs = recallCycle.scoredRecallLatencyMs;
-    const results = recallResult.results;
-    const activeConstraintResults = (recallResult.active_constraints ?? []).map(
-      (constraint, index) => ({
-        object_id: constraint.object_id,
-        rank: index + 1
-      })
-    );
-    const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
-      object_id: pointer.object_id,
-      object_kind: pointer.object_kind,
-      rank: index + 1,
-      relevance_score: pointer.relevance_score,
-      score_factors: pointer.score_factors ?? null
-    }));
+    })
+  );
+  return await buildTimedQuestionResult({
+    input,
+    workspace,
+    phase,
+    seedState,
+    goldMemoryIds,
+    recallCycle,
+    embeddingWarmup,
+    queryEmbeddingWarmup
+  });
+}
 
-    // Diagnostic: where do this question's gold memories rank in the full
-    // (maxK-capped) recall list? Distinguishes "gold just past rank 10"
-    // (coverage) from "gold missing entirely" (ranking miss). Default off.
-    if (process.env.ALAYA_BENCH_GOLD_RANK_DUMP !== undefined) {
-      const rankById = new Map(results.map((p, i) => [p.object_id, i + 1]));
-      const ranks = goldMemoryIds
-        .map((id) => rankById.get(id) ?? -1)
-        .sort((a, b) => (a < 0 ? 1 : b < 0 ? -1 : a - b));
-      const inK = ranks.filter((r) => r > 0).length;
-      // Per gold session: the BEST (min) rank among its gold members. A session
-      // with no ranked member (best=-1) has NO foothold in the candidate pool.
-      const sessionBest = new Map<string, number>();
-      for (const id of goldMemoryIds) {
-        const sid =
-          sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id))?.sessionId ?? "?";
-        const r = rankById.get(id) ?? -1;
-        const cur = sessionBest.get(sid);
-        if (cur === undefined || (r > 0 && (cur < 0 || r < cur))) sessionBest.set(sid, r);
-      }
-      const footholds = [...sessionBest.values()].filter((r) => r > 0).length;
-      console.error(
-        `[gold-rank] q=${input.question.question_id} sess=${input.question.answer_session_ids.length} ` +
-          `gold=${goldMemoryIds.length} inK=${inK} ranks=[${ranks.join(",")}] ` +
-          `sessFootholds=${footholds}/${sessionBest.size} ` +
-          `sessBest=[${[...sessionBest.values()].sort((a, b) => (a < 0 ? 1 : b < 0 ? -1 : a - b)).join(",")}]`
-      );
-    }
+async function buildTimedQuestionResult(input: {
+  readonly input: LongMemEvalQuestionRunInput;
+  readonly workspace: BenchWorkspaceHandle;
+  readonly phase: ReturnType<typeof createPhaseTimer>;
+  readonly seedState: Awaited<ReturnType<typeof seedLongMemEvalQuestion>>;
+  readonly goldMemoryIds: readonly string[];
+  readonly recallCycle: Awaited<ReturnType<typeof runLongMemEvalRecallCycle>>;
+  readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
+  readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
+}): Promise<LongMemEvalWorkerResult> {
+  return await runQuestionPhase(input.phase, "kpi_query", () =>
+    buildLongMemEvalQuestionResult({
+      daemon: input.input.daemon,
+      workspace: input.workspace,
+      question: input.input.question,
+      seedState: input.seedState,
+      goldMemoryIds: input.goldMemoryIds,
+      recallCycle: input.recallCycle,
+      embeddingWarmup: input.embeddingWarmup,
+      queryEmbeddingWarmup: input.queryEmbeddingWarmup,
+      captureSnapshot: input.input.captureSnapshot,
+      qaChat: input.input.qaChat,
+      qaJudgeChat: input.input.qaJudgeChat,
+      embeddingMode: input.input.embeddingMode
+    })
+  );
+}
 
-    // Diagnostic: dump the FULL ranked candidate pool (content + gold flag +
-    // event date + fusion rank) as JSONL for offline re-ranking experiments.
-    // API-free (recall only). Default off; set ALAYA_BENCH_POOL_DUMP to a path.
-    if (process.env.ALAYA_BENCH_POOL_DUMP !== undefined) {
-      const goldSet = new Set(goldMemoryIds);
-      // Per-candidate fusion breakdown (per-stream rank) from the core recall
-      // diagnostics, for offline "which stream buries the gold" analysis.
-      const fusionByOid = new Map<string, { fusedRank?: number; perStream?: unknown }>();
-      const fb = (recallResult as { readonly diagnostics?: { readonly fusion_breakdown?: ReadonlyArray<{ readonly object_id: string; readonly fused_rank?: number; readonly per_stream_rank?: unknown }> } }).diagnostics?.fusion_breakdown;
-      if (Array.isArray(fb)) {
-        for (const b of fb) fusionByOid.set(b.object_id, { fusedRank: b.fused_rank, perStream: b.per_stream_rank });
-      }
-      const candidates = results.map((p, i) => {
-        const kind = p.object_kind ?? "memory_entry";
-        // memory_entry candidates key on "memory_entry"; synthesis_capsule (route-B
-        // navigator) candidates carry their session via the capsule sidecar — resolve
-        // it so offline route-B coverage sim can credit a capsule's whole session.
-        const entry =
-          sidecar.get(buildLongMemEvalSidecarKey("memory_entry", p.object_id)) ??
-          sidecar.get(buildLongMemEvalSidecarKey("synthesis_capsule", p.object_id));
-        const fusion = fusionByOid.get(p.object_id);
-        return {
-          rank: i + 1,
-          objectId: p.object_id,
-          objectKind: kind,
-          isGold: goldSet.has(p.object_id),
-          sessionId: entry?.sessionId ?? null,
-          eventDate: entry?.eventDate ?? null,
-          ...(fusion?.fusedRank === undefined ? {} : { fusedRank: fusion.fusedRank }),
-          ...(fusion?.perStream === undefined ? {} : { perStream: fusion.perStream }),
-          content: (entry?.content ?? "").replace(/\s+/gu, " ").slice(0, 400)
-        };
-      });
-      // Full gold set with session + recalled flag, for offline coverage analysis.
-      const recalledIds = new Set(results.map((p) => p.object_id));
-      const goldMemories = goldMemoryIds.map((id) => {
-        const entry = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", id));
-        return {
-          objectId: id,
-          sessionId: entry?.sessionId ?? null,
-          recalled: recalledIds.has(id),
-          content: (entry?.content ?? "").replace(/\s+/gu, " ").slice(0, 240)
-        };
-      });
-      appendFileSync(
-        process.env.ALAYA_BENCH_POOL_DUMP,
-        JSON.stringify({
-          questionId: input.question.question_id,
-          questionType: input.question.question_type,
-          question: input.question.question,
-          questionDate: input.question.question_date,
-          goldAnswer: input.question.answer,
-          goldCount: goldMemoryIds.length,
-          poolSize: results.length,
-          goldMemories,
-          candidates
-        }) + "\n"
-      );
-    }
+async function warmQuestionEmbeddingCaches(
+  input: LongMemEvalQuestionRunInput,
+  workspace: Awaited<ReturnType<BenchDaemonHandle["attachWorkspace"]>>,
+  sidecar: Parameters<typeof deriveLongMemEvalMemoryObjectIds>[0]
+): Promise<{
+  readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
+  readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
+}> {
+  if (input.embeddingMode !== "env") {
+    return { embeddingWarmup: null, queryEmbeddingWarmup: null };
+  }
+  return {
+    embeddingWarmup: await workspace.warmEmbeddingCache(
+      deriveLongMemEvalMemoryObjectIds(sidecar)
+    ),
+    queryEmbeddingWarmup: await workspace.warmQueryEmbeddingCache([
+      input.question.question
+    ])
+  };
+}
 
-    const isAbstention = isAbstentionQuestionId(input.question.question_id);
-    let qaVerdict: QaQuestionVerdict | undefined;
-    if (input.qaChat !== undefined) {
-      // QA delivery budget (default 10 = unchanged). ALAYA_BENCH_QA_DELIVER_K
-      // widens it so the aggregation reader sees more of a counting question's
-      // scattered gold; session-spread (default off) redistributes that budget
-      // across source sessions. Recall-service untouched.
-      // Aggregation/latest-value questions want a wide budget so scattered gold
-      // reaches the reader; precise types (temporal) are hurt by extra dated
-      // candidates, so they stay narrow. ALAYA_BENCH_QA_WIDE_AGG turns on the
-      // type-aware budget; ALAYA_BENCH_QA_DELIVER_K is a global A/B override.
-      const { deliverK } = resolveQaDeliveryBudget(input.question.question_type);
-      const { deliveryCandidates, memoryEntryCandidates, goldOnly } = buildQaDeliveredCandidates({
-        results,
-        goldMemoryIds,
-        lookupMemoryEntry: (objectId) =>
-          sidecar.get(buildLongMemEvalSidecarKey("memory_entry", objectId)),
-        lookupCandidate: (objectKind, objectId) =>
-          sidecar.get(buildLongMemEvalSidecarKey(objectKind, objectId))
-      });
-      const supportCandidates = buildQaSupportCandidatesFromSidecar(sidecar);
-      const goldOnlyRequested =
-        process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined;
-      const deliveryPool =
-        process.env.ALAYA_BENCH_QA_SESSION_SPREAD !== undefined
-          ? selectSessionSpread(deliveryCandidates)
-          : deliveryCandidates;
-      let delivered: QaDeliveredCandidate[] = goldOnlyRequested
-        ? goldOnly
-        : shouldDedupQaDelivery()
-          ? dedupeQaDeliveredCandidates(deliveryPool, deliverK)
-          : deliveryPool.slice(0, deliverK);
-      // Agent-side LLM relevance filter: retrieve WIDE (catch precise-class gold
-      // buried at rank 12-15), let an LLM pick the few relevant memories, deliver
-      // NARROW clean context. Decouples retrieve-width from deliver-width — the
-      // semantic selection fusion ranking can't do (§D wall). Default off.
-      if (
-        !goldOnlyRequested &&
-        process.env.ALAYA_BENCH_QA_LLM_FILTER !== undefined &&
-        input.qaChat !== undefined
-      ) {
-        const filterK = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_K", 30);
-        const filterM = readPositiveIntEnv("ALAYA_BENCH_QA_LLM_FILTER_M", 8);
-        const widePool: QaDeliveredCandidate[] = shouldDedupQaDelivery()
-          ? dedupeQaDeliveredCandidates(deliveryCandidates, filterK)
-          : deliveryCandidates
-              .filter((cand) => normalizeQaDeliveryContent(cand.content).length > 0)
-              .slice(0, filterK);
-        const selected = await selectRelevantMemories(
-          input.question.question,
-          widePool,
-          filterM,
-          input.qaChat
-        );
-        if (selected.length > 0) {
-          delivered = shouldDedupQaDelivery()
-            ? dedupeQaDeliveredCandidates(selected, filterM)
-            : selected.slice(0, filterM);
-        }
-      }
-      // Support pack: deterministically expand the filtered anchors with their
-      // same-session neighbours so a needed date/number/before-after value the
-      // filter skipped still reaches the reader. Default-off; agent-sim layer.
-      if (!goldOnlyRequested && process.env.ALAYA_BENCH_QA_SUPPORT_PACK !== undefined) {
-        delivered = buildQaSupportPack({
-          questionType: input.question.question_type,
-          selected: delivered,
-          widePool: deliveryCandidates,
-          supportPool: supportCandidates,
-          maxDeliver: readPositiveIntEnv("ALAYA_BENCH_QA_SUPPORT_PACK_MAX", 16)
-        });
-      }
-      // Diagnostic oracle: replace delivered recall with ONLY the materialized
-      // gold memories (no distractors), to isolate ingestion-drop from recall
-      // ranking/noise. Gold not materialized at ingestion is absent here too.
-      // It still runs through the same identity-based dedup contract so a
-      // duplicated gold turn cannot artificially shrink or inflate QA context.
-      if (goldOnlyRequested && shouldDedupQaDelivery()) {
-        delivered = dedupeQaDeliveredCandidates(delivered);
-      }
-      qaVerdict = await scoreQaQuestion(
-        {
-          questionId: input.question.question_id,
-          questionType: input.question.question_type,
-          isAbstention,
-          question: input.question.question,
-          questionDate: input.question.question_date,
-          goldAnswer: input.question.answer,
-          delivered
-        },
-        input.qaChat,
-        input.qaJudgeChat ?? input.qaChat
-      );
-      // Diagnostic: dump the delivered context + model answer + judge verdict as
-      // JSONL, so failing questions can be read by hand to split "delivered text
-      // lacks the answer" (ingestion-drop) from "delivered text has it but the
-      // reader answered wrong" (reader). Pairs with DELIVER_GOLD_ONLY to isolate
-      // the oracle ceiling. Default off; set ALAYA_BENCH_QA_DUMP to a file path.
-      if (process.env.ALAYA_BENCH_QA_DUMP !== undefined) {
-        // Failure split: locate gold in the wide pool vs the delivered set so a
-        // wrong answer is attributable to recall (gold never retrieved), the
-        // selector/support layer (retrieved but not delivered), or the reader
-        // (delivered but answered wrong). Finer judge/ingestion splits stay for
-        // manual review off the raw gold-presence fields.
-        const goldIdSet = new Set(goldMemoryIds);
-        const widePoolGoldRanks = memoryEntryCandidates
-          .filter((c) => goldIdSet.has(c.objectId) && normalizeQaDeliveryContent(c.content).length > 0)
-          .map((c) => c.sourceRank);
-        const goldInWidePool = widePoolGoldRanks.length > 0;
-        const goldInDelivered = delivered.some((d) => goldIdSet.has(d.objectId));
-        const failureClass = qaVerdict.correct
-          ? null
-          : !goldInWidePool
-            ? "recall_miss"
-            : !goldInDelivered
-              ? "support_selector_miss"
-              : "reader_miss";
-        appendFileSync(
-          process.env.ALAYA_BENCH_QA_DUMP,
-          JSON.stringify({
-            questionId: input.question.question_id,
-            questionType: input.question.question_type,
-            question: input.question.question,
-            questionDate: input.question.question_date,
-            goldAnswer: input.question.answer,
-            modelAnswer: qaVerdict.modelAnswer,
-            judgeVerdict: qaVerdict.judgeVerdict,
-            correct: qaVerdict.correct,
-            goldInWidePool,
-            goldInDelivered,
-            failureClass,
-            widePoolGoldRanks,
-            deliveredGoldOnly:
-              process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined,
-            delivered: delivered.map((d) => ({
-              objectId: d.objectId,
-              ...(d.eventDate === undefined ? {} : { eventDate: d.eventDate }),
-              ...(d.sessionId == null ? {} : { sessionId: d.sessionId }),
-              ...(d.sourceRank === undefined ? {} : { sourceRank: d.sourceRank }),
-              content: d.content.replace(/\s+/gu, " ")
-            }))
-          }) + "\n"
-        );
-      }
-    }
+async function runCoherenceEdgesIfEnabled(
+  input: LongMemEvalQuestionRunInput,
+  workspace: Awaited<ReturnType<BenchDaemonHandle["attachWorkspace"]>>,
+  members: readonly { readonly memoryId: string; readonly sessionId: string }[]
+): Promise<void> {
+  if (
+    input.embeddingMode !== "env" ||
+    process.env.ALAYA_EXP_COHERENCE_EDGES !== "1"
+  ) {
+    return;
+  }
+  const summary = await workspace.accrueCoherenceCoRecall(members, {
+    floor: Number(process.env.ALAYA_EXP_COHERENCE_FLOOR ?? "0.6"),
+    capPerNode: Number(process.env.ALAYA_EXP_COHERENCE_CAP ?? "3"),
+    crossSessionOnly: process.env.ALAYA_EXP_COHERENCE_XSESSION !== "0"
+  });
+  console.error(
+    `[coherence-edges] q=${input.question.question_id} ` +
+      `coherent=${summary.coherentPairs} kept=${summary.keptPairs} ` +
+      `minted=${summary.minted}`
+  );
+}
 
-    const scoredHits = resolveLongMemEvalHitVerdict({
-      isAbstention,
-      results,
-      sidecar,
-      answerSessionIds: answerSessionSet
-    });
-    const diagnostics = buildQuestionDiagnostic({
-      questionId: input.question.question_id,
-      goldMemoryIds,
-      answerSessionIds: input.question.answer_session_ids,
-      deliveredResults,
-      activeConstraintResults,
-      hitAt1: scoredHits.hitAt1,
-      hitAt5: scoredHits.hitAt5,
-      hitAt10: scoredHits.hitAt10,
-      isAbstention,
-      degradationReason: recallResult.degradation_reason ?? null,
-      recallResult,
-      embeddingMode: input.embeddingMode
-    });
-    const tKpiQuery = phase.tick();
-    const reportSideEffectSnapshot =
-      await readLongMemEvalReportSideEffectSnapshot(
-        input.question.question_id,
-        input.daemon,
-        workspace.workspaceId
-      );
-    const tokenMetrics = await workspace.queryTokenMetrics();
-    const recallTokenEconomy = extractRecallTokenEconomy(recallResult);
-    const edgeProposalKpiRows = await workspace.queryEdgeProposalKpiRows();
-    phase.record("kpi_query", tKpiQuery);
-
-    return {
-      questionId: input.question.question_id,
-      hitAt1: scoredHits.hitAt1,
-      hitAt5: scoredHits.hitAt5,
-      hitAt10: scoredHits.hitAt10,
-      firstTier: scoredHits.firstTier,
-      latencyMs,
-      degradationReason: recallResult.degradation_reason ?? null,
-      seedTurnsTruncated,
-      answerTurnsTruncated,
-      seedCharsClipped,
-      diagnostics,
-      embeddingWarmup,
-      queryEmbeddingWarmup,
-      reportUsageStats: recallCycle.reportUsageStats,
-      reportSideEffectSnapshot,
-      tokenMetrics,
-      recallTokenEconomy,
-      edgeProposalKpiRows,
-      ...(qaVerdict === undefined ? {} : { qaVerdict }),
-      ...(input.captureSnapshot
-        ? {
-            snapshotQuestion: {
-              questionId: input.question.question_id,
-              question: input.question.question,
-              answerSessionIds: [...input.question.answer_session_ids],
-              workspaceId: workspace.workspaceId,
-              runId: workspace.runId,
-              sidecar: [...sidecar.values()].map((entry) => ({
-                objectId: entry.objectId,
-                objectKind: entry.objectKind,
-                sessionId: entry.sessionId,
-                hasAnswer: entry.hasAnswer
-              }))
-            }
-          }
-        : {})
-    };
+async function runQuestionPhase<T>(
+  phase: ReturnType<typeof createPhaseTimer>,
+  name: string,
+  action: () => Promise<T>
+): Promise<T> {
+  const start = phase.tick();
+  try {
+    return await action();
   } finally {
-    const tDetach = phase.tick();
-    await workspace.detach();
-    phase.record("workspace_detach", tDetach);
-    if (profileEnabled) {
-      process.stderr.write(
-        `[bench_profile] question=${input.question.question_id} ${phase.format()}\n`
-      );
-    }
+    phase.record(name, start);
   }
 }

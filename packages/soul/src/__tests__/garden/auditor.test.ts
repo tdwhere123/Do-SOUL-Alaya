@@ -16,13 +16,13 @@ import {
 } from "@do-soul/alaya-protocol";
 import { AUDITOR_CONSTANTS, Auditor } from "../../garden/auditor.js";
 
-describe("Auditor", () => {
-  it("exposes the auditor role and tier", () => {
+describe("Auditor", () => {  it("exposes the auditor role and tier", () => {
     const auditor = createAuditor().auditor;
 
     expect(auditor.role).toBe("auditor");
     expect(auditor.tier).toBe("tier_1");
   });
+
 
   it("runs evidence staleness checks, revokes Green, records health diagnostics, and reports completion", async () => {
     const { auditor, evidenceCheckPort, greenMaintenancePort, healthJournal, scheduler } = createAuditor({
@@ -72,6 +72,7 @@ describe("Auditor", () => {
   // The mock eventLogRepo captures the (events, mutate) pair so we can
   // assert the canonical event type lands and the storage mutation runs
   // inside the transaction body.
+
   it("emits SOUL_GREEN_REVOKED alongside revoke during evidence staleness check", async () => {
     const appendManyWithMutation = vi.fn(async (entries: readonly unknown[], mutate: (rows: readonly unknown[]) => unknown) => {
       const persisted = entries.map((entry, idx) => ({ ...(entry as object), event_id: `evt-${idx}`, created_at: "2026-03-27T00:00:00.000Z", revision: idx }));
@@ -115,6 +116,7 @@ describe("Auditor", () => {
     );
   });
 
+
   it("emits SOUL_GREEN_RENEWED for passive-stable expiring statuses and SOUL_GREEN_GRACE_REQUESTED for verification-required ones", async () => {
     const appendManyWithMutation = vi.fn(async (entries: readonly unknown[], mutate: (rows: readonly unknown[]) => unknown) => {
       const persisted = entries.map((entry, idx) => ({ ...(entry as object), event_id: `evt-${idx}`, created_at: "2026-03-27T00:00:00.000Z", revision: idx }));
@@ -143,6 +145,7 @@ describe("Auditor", () => {
     expect(greenMaintenancePort.requestActiveVerification).toHaveBeenCalledWith("g2", "task-1");
   });
 
+
   it("does not revoke Green or record health diagnostics when evidence staleness finds nothing", async () => {
     const { auditor, greenMaintenancePort, healthJournal, scheduler } = createAuditor();
 
@@ -156,6 +159,7 @@ describe("Auditor", () => {
     ]);
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
+
 
   it("limits evidence staleness processing to the first batch", async () => {
     const staleEntries: StaleMemoryEntry[] = Array.from(
@@ -172,6 +176,7 @@ describe("Auditor", () => {
     expect(greenMaintenancePort.revokeGreen).toHaveBeenCalledTimes(AUDITOR_CONSTANTS.BATCH_SIZE);
     expect(result.objects_affected).toHaveLength(AUDITOR_CONSTANTS.BATCH_SIZE);
   });
+
 
   it("runs pointer health checks and records broken pointer diagnostics", async () => {
     const { auditor, pointerHealthPort, healthJournal, scheduler } = createAuditor({
@@ -204,6 +209,7 @@ describe("Auditor", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
+
   it("does not call any repair method during pointer health checks", async () => {
     const { auditor, pointerHealthPort } = createAuditor({
       brokenPointers: [
@@ -220,6 +226,7 @@ describe("Auditor", () => {
 
     expect(pointerHealthPort.repair).not.toHaveBeenCalled();
   });
+
 
   it("renews preference and episode Green statuses with passive stable verification", async () => {
     const { auditor, greenMaintenancePort, scheduler } = createAuditor({
@@ -241,6 +248,7 @@ describe("Auditor", () => {
     expect(result.objects_affected).toEqual(["green-1", "green-2"]);
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
+
 
   it("requests active verification for fact, constraint, and procedure Green statuses", async () => {
     const { auditor, greenMaintenancePort } = createAuditor({
@@ -272,6 +280,7 @@ describe("Auditor", () => {
     expect(result.objects_affected).toEqual(["green-fact", "green-constraint", "green-procedure"]);
   });
 
+
   it("skips hazard Green statuses during maintenance", async () => {
     const { auditor, greenMaintenancePort, scheduler } = createAuditor({
       expiringStatuses: [createExpiringGreenStatus("green-hazard", MemoryDimension.HAZARD)]
@@ -286,223 +295,6 @@ describe("Auditor", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
-  it("assesses cold start and generates draft candidates when bootstrapping is needed", async () => {
-    const { auditor, bootstrappingPort, scheduler } = createAuditor({
-      coldStartAssessment: {
-        is_cold_start: true,
-        memory_count: 2,
-        claim_count: 1
-      },
-      draftCandidates: [
-        {
-          candidate_id: "candidate-1",
-          object_kind: "memory_entry",
-          lifecycle_state: "candidate",
-          requires_review: true,
-          workspace_id: "workspace-1"
-        },
-        {
-          candidate_id: "candidate-2",
-          object_kind: "claim_form",
-          lifecycle_state: "candidate",
-          requires_review: true,
-          workspace_id: "workspace-1"
-        }
-      ]
-    });
-
-    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.BOOTSTRAPPING_SCAN }));
-
-    expect(bootstrappingPort.assessColdStart).toHaveBeenCalledWith("workspace-1");
-    expect(bootstrappingPort.generateDraftCandidates).toHaveBeenCalledWith("workspace-1");
-    expect(result).toMatchObject({
-      success: true,
-      objects_affected: ["candidate-1", "candidate-2"]
-    });
-    expect(result.audit_entries).toEqual([
-      "bootstrapping_scan: cold start detected (2 memories, 1 claims); 2 draft candidates generated"
-    ]);
-    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
-  });
-
-  it("does not generate draft candidates when bootstrapping is not needed", async () => {
-    const { auditor, bootstrappingPort, scheduler } = createAuditor({
-      coldStartAssessment: {
-        is_cold_start: false,
-        memory_count: 20,
-        claim_count: 8
-      }
-    });
-
-    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.BOOTSTRAPPING_SCAN }));
-
-    expect(bootstrappingPort.assessColdStart).toHaveBeenCalledWith("workspace-1");
-    expect(bootstrappingPort.generateDraftCandidates).not.toHaveBeenCalled();
-    expect(result.objects_affected).toEqual([]);
-    expect(result.audit_entries).toEqual([
-      "bootstrapping_scan: not cold start (20 memories, 8 claims)"
-    ]);
-    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
-  });
-
-  it("uses the configured crystallization threshold when scanning high-frequency patterns", async () => {
-    const { auditor, bootstrappingPort, scheduler } = createAuditor({
-      patterns: [{ pattern_key: "pattern-a", frequency: AUDITOR_CONSTANTS.CRYSTALLIZATION_THRESHOLD }]
-    });
-
-    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.CRYSTALLIZATION_SCAN }));
-
-    expect(bootstrappingPort.findHighFrequencyPatterns).toHaveBeenCalledWith(
-      "workspace-1",
-      AUDITOR_CONSTANTS.CRYSTALLIZATION_THRESHOLD
-    );
-    expect(result.success).toBe(true);
-    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
-  });
-
-  it("skips crystallization patterns that already have a pending synthesis candidate", async () => {
-    const { auditor, bootstrappingPort } = createAuditor({
-      patterns: [
-        { pattern_key: "pattern-a", frequency: 4 },
-        { pattern_key: "pattern-b", frequency: 5 }
-      ],
-      pendingPatternKeys: ["pattern-a"]
-    });
-
-    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.CRYSTALLIZATION_SCAN }));
-
-    expect(bootstrappingPort.hasPendingSynthesisCandidate).toHaveBeenNthCalledWith(
-      1,
-      "workspace-1",
-      "pattern-a"
-    );
-    expect(bootstrappingPort.createSynthesisCandidate).toHaveBeenCalledTimes(1);
-    expect(bootstrappingPort.createSynthesisCandidate).toHaveBeenCalledWith("workspace-1", "pattern-b");
-    expect(result.objects_affected).toEqual(["candidate:pattern-b"]);
-  });
-
-  it("creates synthesis candidates for crystallization patterns without pending proposals", async () => {
-    const { auditor, bootstrappingPort, scheduler } = createAuditor({
-      patterns: [
-        { pattern_key: "pattern-a", frequency: 4 },
-        { pattern_key: "pattern-b", frequency: 6 }
-      ]
-    });
-
-    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.CRYSTALLIZATION_SCAN }));
-
-    expect(bootstrappingPort.createSynthesisCandidate).toHaveBeenNthCalledWith(
-      1,
-      "workspace-1",
-      "pattern-a"
-    );
-    expect(bootstrappingPort.createSynthesisCandidate).toHaveBeenNthCalledWith(
-      2,
-      "workspace-1",
-      "pattern-b"
-    );
-    expect(result).toMatchObject({
-      success: true,
-      objects_affected: ["candidate:pattern-a", "candidate:pattern-b"]
-    });
-    expect(result.audit_entries).toEqual([
-      "crystallization_scan: 2 synthesis candidates created from 2 high-frequency patterns"
-    ]);
-    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
-  });
-
-  it("reports completion with success = true across all supported task kinds", async () => {
-    const { auditor, scheduler } = createAuditor({
-      coldStartAssessment: {
-        is_cold_start: false,
-        memory_count: 0,
-        claim_count: 0
-      }
-    });
-
-    const taskKinds = [
-      GardenTaskKind.EVIDENCE_STALENESS_CHECK,
-      GardenTaskKind.POINTER_HEALTH_CHECK,
-      GardenTaskKind.GREEN_MAINTENANCE,
-      GardenTaskKind.BOOTSTRAPPING_SCAN,
-      GardenTaskKind.CRYSTALLIZATION_SCAN
-    ] as const;
-
-    for (const taskKind of taskKinds) {
-      const result = await auditor.run(createTask({ task_kind: taskKind }));
-      expect(result.success).toBe(true);
-    }
-
-    expect(scheduler.reportCompletion).toHaveBeenCalledTimes(taskKinds.length);
-    for (const call of scheduler.reportCompletion.mock.calls) {
-      expect(call[0]).toMatchObject({ success: true, role: GardenRole.AUDITOR, tier: GardenTier.TIER_1 });
-    }
-  });
-
-  it("reports failure when a port throws", async () => {
-    const { auditor, scheduler } = createAuditor({
-      findBrokenPointers: vi.fn(async () => {
-        throw new Error("pointer index unavailable");
-      })
-    });
-
-    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.POINTER_HEALTH_CHECK }));
-
-    expect(result).toMatchObject({
-      success: false,
-      error_message: "pointer index unavailable",
-      objects_affected: [],
-      audit_entries: []
-    });
-    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
-  });
-
-  it("reports failure for unsupported task kinds", async () => {
-    const { auditor, scheduler } = createAuditor();
-
-    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.TTL_CLEANUP }));
-
-    expect(result).toMatchObject({
-      task_kind: GardenTaskKind.TTL_CLEANUP,
-      success: false,
-      error_message: "Auditor does not handle task kind: ttl_cleanup"
-    });
-    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
-  });
-
-  it("does not handle path_plasticity_update after the Gate-5F owner move", async () => {
-    const { auditor, scheduler } = createAuditor();
-
-    const result = await auditor.run(
-      createTask({
-        task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
-        required_tier: GardenTier.TIER_2
-      })
-    );
-
-    expect(result).toMatchObject({
-      task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
-      success: false,
-      error_message: "Auditor does not handle task kind: path_plasticity_update"
-    });
-    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
-  });
-
-  it("limits crystallization processing to the first batch of patterns", async () => {
-    const patterns: HighFrequencyPattern[] = Array.from(
-      { length: AUDITOR_CONSTANTS.BATCH_SIZE + 3 },
-      (_, index) => ({
-        pattern_key: `pattern-${index + 1}`,
-        frequency: AUDITOR_CONSTANTS.CRYSTALLIZATION_THRESHOLD
-      })
-    );
-    const { auditor, bootstrappingPort } = createAuditor({ patterns });
-
-    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.CRYSTALLIZATION_SCAN }));
-
-    expect(bootstrappingPort.createSynthesisCandidate).toHaveBeenCalledTimes(AUDITOR_CONSTANTS.BATCH_SIZE);
-    expect(result.objects_affected).toHaveLength(AUDITOR_CONSTANTS.BATCH_SIZE);
-  });
 });
 
 function createAuditor(options: {

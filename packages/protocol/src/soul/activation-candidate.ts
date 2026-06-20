@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
+  BoundedIdSchema,
+  BoundedReasonSchema,
   IsoDatetimeStringSchema,
-  NonEmptyStringSchema
+  RatioSchema
 } from "../shared/schema-primitives.js";
 import {
   PathAnchorRefSchema,
@@ -11,16 +13,16 @@ import {
 
 export const ActivationCandidateSchema = z
   .object({
-    candidate_id: NonEmptyStringSchema,
-    workspace_id: NonEmptyStringSchema,
-    run_id: NonEmptyStringSchema,
-    source_path_id: NonEmptyStringSchema,
+    candidate_id: BoundedIdSchema,
+    workspace_id: BoundedIdSchema,
+    run_id: BoundedIdSchema,
+    source_path_id: BoundedIdSchema,
     source_anchor: PathAnchorRefSchema,
     target_anchor: PathAnchorRefSchema,
-    why_now: NonEmptyStringSchema,
+    why_now: BoundedReasonSchema,
     effect_vector_snapshot: PathEffectVectorSchema,
-    pressure: z.number(),
-    confidence: z.number(),
+    pressure: RatioSchema,
+    confidence: RatioSchema,
     governance_ceiling: PathGovernanceClassSchema,
     created_at: IsoDatetimeStringSchema
   })

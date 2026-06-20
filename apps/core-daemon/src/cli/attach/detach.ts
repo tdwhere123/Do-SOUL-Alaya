@@ -15,7 +15,8 @@ import {
   type ProfileMutationApplyOptions,
   type ProfileMutationAuditWriter,
   type ProfileMutationConfirmIo,
-  type ProfileMutationFs
+  type ProfileMutationFs,
+  type ProfileTarget
 } from "../../attach/index.js";
 
 export interface DetachCommandDeps {
@@ -57,28 +58,22 @@ async function executeDetach(
 ): Promise<AlayaCliResult> {
   const parseResult = parseDetachArgs(args);
   if (!parseResult.ok) {
-    ctx.stderr.write(`${parseResult.message}\n`);
-    return {
-      exitCode: ALAYA_SYSEXITS.USAGE,
-      json: {
-        ok: false,
-        supported_targets: SUPPORTED_PROFILE_TARGETS
-      }
-    };
+    return reportDetachUsage(ctx.stderr, parseResult.message);
   }
-
   const target = parseProfileTarget(parseResult.target);
   if (target === undefined) {
-    ctx.stderr.write(`unsupported detach target: ${parseResult.target}\n`);
-    return {
-      exitCode: ALAYA_SYSEXITS.USAGE,
-      json: {
-        ok: false,
-        supported_targets: SUPPORTED_PROFILE_TARGETS
-      }
-    };
+    return reportDetachUsage(ctx.stderr, `unsupported detach target: ${parseResult.target}`);
   }
 
+  return await executeDetachPlan(ctx, deps, parseResult, target);
+}
+
+async function executeDetachPlan(
+  ctx: AlayaCliContext,
+  deps: DetachCommandDeps,
+  args: Readonly<{ ok: true; target: string; yes: boolean; dryRun: boolean }>,
+  target: ProfileTarget
+): Promise<AlayaCliResult> {
   const applyOptions: ProfileMutationApplyOptions = {
     fs: deps.fs,
     auditWriter: deps.auditWriter,
@@ -92,82 +87,138 @@ async function executeDetach(
     const searchedPaths = [...plan.paths.slashPathCandidates];
     const conflictOperations = plan.operations.filter((operation) => operation.conflict !== undefined);
     if (conflictOperations.length > 0) {
-      const message = conflictOperations
-        .map((operation) => operation.conflict!.message)
-        .join("; ");
-      ctx.stderr.write(`${message}\n`);
-      return {
-        exitCode: ALAYA_SYSEXITS.NOPERM,
-        json: {
-          ok: false,
-          target,
-          changed: false,
-          searched: searchedPaths,
-          conflicts: conflictOperations.map((operation) => ({
-            path: operation.path,
-            message: operation.conflict!.message,
-            existing_command: operation.conflict!.existingCommand
-          }))
-        }
-      };
+      return reportDetachConflicts(ctx.stderr, target, searchedPaths, conflictOperations);
     }
     const hasChanges = plan.operations.some((operation) => operation.changed);
     if (!hasChanges) {
-      if (ctx.jsonRequested !== true) {
-        ctx.stdout.write("nothing to detach\n");
-        ctx.stdout.write(`searched paths: ${searchedPaths.join(", ")}\n`);
-      }
-      return {
-        exitCode: ALAYA_SYSEXITS.OK,
-        json: { ok: true, target, changed: false, searched: searchedPaths }
-      };
+      return reportNoDetachChanges(ctx, target, searchedPaths);
     }
 
     if (ctx.jsonRequested !== true) {
       ctx.stdout.write(renderProfileMutationPreview(plan));
     }
-    if (parseResult.dryRun) {
-      return {
-        exitCode: ALAYA_SYSEXITS.OK,
-        json: {
-          ok: true,
-          target,
-          changed: false,
-          dry_run: true,
-          searched: searchedPaths,
-          changed_paths: plan.operations.filter((operation) => operation.changed).map((operation) => operation.path)
-        }
-      };
+    if (args.dryRun) {
+      return reportDetachDryRun(target, searchedPaths, plan.operations);
     }
 
-    if (!parseResult.yes && !(await confirm(ctx))) {
-      if (ctx.jsonRequested !== true) {
-        ctx.stdout.write("canceled\n");
-      }
-      return {
-        exitCode: ALAYA_SYSEXITS.OK,
-        json: { ok: true, target, changed: false, canceled: true, searched: searchedPaths }
-      };
+    if (!args.yes && !(await confirm(ctx))) {
+      return reportDetachCanceled(ctx, target, searchedPaths);
     }
 
     const result = await applyProfileMutationPlan(plan, applyOptions);
-    if (ctx.jsonRequested !== true) {
-      ctx.stdout.write(`detached ${target}\n`);
-    }
-    return {
-      exitCode: ALAYA_SYSEXITS.OK,
-      json: {
-        ok: true,
-        target,
-        changed: result.changed,
-        searched: searchedPaths,
-        changed_paths: result.auditRow?.changed_paths ?? [],
-        records: result.auditRow?.records ?? []
-      }
-    };
+    return reportDetachApplied(ctx, target, searchedPaths, result);
   } catch (error) {
     return reportDetachError(ctx.stderr, error);
   }
+}
+
+function reportDetachUsage(stderr: NodeJS.WritableStream, message: string): AlayaCliResult {
+  stderr.write(`${message}\n`);
+  return {
+    exitCode: ALAYA_SYSEXITS.USAGE,
+    json: {
+      ok: false,
+      supported_targets: SUPPORTED_PROFILE_TARGETS
+    }
+  };
+}
+
+function reportDetachConflicts(
+  stderr: NodeJS.WritableStream,
+  target: ProfileTarget,
+  searchedPaths: readonly string[],
+  conflictOperations: readonly Readonly<{
+    readonly path: string;
+    readonly conflict?: Readonly<{ readonly message: string; readonly existingCommand: string | null }>;
+  }>[]
+): AlayaCliResult {
+  const message = conflictOperations
+    .map((operation) => operation.conflict!.message)
+    .join("; ");
+  stderr.write(`${message}\n`);
+  return {
+    exitCode: ALAYA_SYSEXITS.NOPERM,
+    json: {
+      ok: false,
+      target,
+      changed: false,
+      searched: searchedPaths,
+      conflicts: conflictOperations.map((operation) => ({
+        path: operation.path,
+        message: operation.conflict!.message,
+        existing_command: operation.conflict!.existingCommand
+      }))
+    }
+  };
+}
+
+function reportNoDetachChanges(
+  ctx: AlayaCliContext,
+  target: ProfileTarget,
+  searchedPaths: readonly string[]
+): AlayaCliResult {
+  if (ctx.jsonRequested !== true) {
+    ctx.stdout.write("nothing to detach\n");
+    ctx.stdout.write(`searched paths: ${searchedPaths.join(", ")}\n`);
+  }
+  return {
+    exitCode: ALAYA_SYSEXITS.OK,
+    json: { ok: true, target, changed: false, searched: searchedPaths }
+  };
+}
+
+function reportDetachDryRun(
+  target: ProfileTarget,
+  searchedPaths: readonly string[],
+  operations: readonly { readonly changed: boolean; readonly path: string }[]
+): AlayaCliResult {
+  return {
+    exitCode: ALAYA_SYSEXITS.OK,
+    json: {
+      ok: true,
+      target,
+      changed: false,
+      dry_run: true,
+      searched: searchedPaths,
+      changed_paths: operations.filter((operation) => operation.changed).map((operation) => operation.path)
+    }
+  };
+}
+
+function reportDetachCanceled(
+  ctx: AlayaCliContext,
+  target: ProfileTarget,
+  searchedPaths: readonly string[]
+): AlayaCliResult {
+  if (ctx.jsonRequested !== true) {
+    ctx.stdout.write("canceled\n");
+  }
+  return {
+    exitCode: ALAYA_SYSEXITS.OK,
+    json: { ok: true, target, changed: false, canceled: true, searched: searchedPaths }
+  };
+}
+
+function reportDetachApplied(
+  ctx: AlayaCliContext,
+  target: ProfileTarget,
+  searchedPaths: readonly string[],
+  result: Awaited<ReturnType<typeof applyProfileMutationPlan>>
+): AlayaCliResult {
+  if (ctx.jsonRequested !== true) {
+    ctx.stdout.write(`detached ${target}\n`);
+  }
+  return {
+    exitCode: ALAYA_SYSEXITS.OK,
+    json: {
+      ok: true,
+      target,
+      changed: result.changed,
+      searched: searchedPaths,
+      changed_paths: result.auditRow?.changed_paths ?? [],
+      records: result.auditRow?.records ?? []
+    }
+  };
 }
 
 function parseDetachArgs(args: readonly string[]):

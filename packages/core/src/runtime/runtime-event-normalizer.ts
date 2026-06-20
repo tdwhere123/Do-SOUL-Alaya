@@ -23,6 +23,8 @@ export interface NormalizerRuntimeNotifierPort {
 export interface RuntimeEventNormalizerDependencies {
   readonly eventLogRepo: NormalizerEventLogRepoPort;
   readonly runtimeNotifier: NormalizerRuntimeNotifierPort;
+  readonly maxPendingNotifications?: number;
+  readonly warn?: (message: string, meta: Readonly<Record<string, unknown>>) => void;
 }
 
 export interface NormalizerContext {
@@ -52,9 +54,14 @@ export class RuntimeEventNormalizerPropagationError extends Error {
 export class RuntimeEventNormalizer {
   private readonly state: RuntimeEventNormalizerState;
   private readonly pendingNotifications = new Map<string, PendingNormalizedNotification>();
+  private readonly maxPendingNotifications: number;
 
   public constructor(private readonly dependencies: RuntimeEventNormalizerDependencies) {
     this.state = new RuntimeEventNormalizerState();
+    this.maxPendingNotifications = Math.max(
+      1,
+      Math.floor(dependencies.maxPendingNotifications ?? DEFAULT_MAX_PENDING_NOTIFICATIONS)
+    );
   }
 
   public async normalize(
@@ -68,47 +75,12 @@ export class RuntimeEventNormalizer {
       return await this.notifyPendingEntry(pendingKey, pending, event);
     }
 
-    if (event.type === "message_delta" && !this.state.reserveMessageDelta(event.session_id, event.sequence)) {
+    if (!this.reserveEvent(event)) {
       return null;
     }
 
-    if (event.type === "session_finished" && !this.state.reserveSessionFinished(event.session_id)) {
-      return null;
-    }
-
-    let entry: EventLogEntry;
-    try {
-      entry = await this.dependencies.eventLogRepo.append(this.buildEntry(event, context));
-    } catch (error) {
-      if (event.type === "message_delta") {
-        this.state.releaseMessageDelta(event.session_id, event.sequence);
-      }
-
-      if (event.type === "session_finished") {
-        this.state.clearSessionState(event.session_id);
-      }
-
-      throw error;
-    }
-
-    if (event.type === "session_finished") {
-      this.state.markSessionFinishedAppended(event.session_id);
-    }
-
-    try {
-      await this.dependencies.runtimeNotifier.notifyEntry(entry);
-    } catch (error) {
-      this.pendingNotifications.set(pendingKey, {
-        entry,
-        sessionId: event.session_id
-      });
-      throw new RuntimeEventNormalizerPropagationError(entry, error);
-    }
-
-    if (event.type === "session_finished") {
-      this.state.clearSessionState(event.session_id);
-    }
-
+    const entry = await this.appendNormalizedEntry(event, context);
+    await this.notifyNormalizedEntry(pendingKey, event, entry);
     return entry;
   }
 
@@ -197,98 +169,233 @@ export class RuntimeEventNormalizer {
   ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
     switch (event.type) {
       case "session_started":
-        return this.createEntry(
-          context,
-          WorkerRuntimeEventType.WORKER_SESSION_STARTED,
-          WorkerSessionStartedPayloadSchema.parse({
-            sessionId: event.session_id,
-            emittedAt: event.emitted_at
-          })
-        );
+        return this.buildSessionStartedEntry(event, context);
       case "session_finished":
-        return this.createEntry(
-          context,
-          WorkerRuntimeEventType.WORKER_SESSION_FINISHED,
-          WorkerSessionFinishedPayloadSchema.parse({
-            sessionId: event.session_id,
-            emittedAt: event.emitted_at,
-            status: event.status,
-            resultSummary: event.result_summary
-          })
-        );
+        return this.buildSessionFinishedEntry(event, context);
       case "message_delta":
-        return this.createEntry(
-          context,
-          WorkerRuntimeEventType.WORKER_MESSAGE_DELTA,
-          WorkerMessageDeltaPayloadSchema.parse({
-            sessionId: event.session_id,
-            workerRunId: context.workerRunId,
-            emittedAt: event.emitted_at,
-            delta: event.delta,
-            sequence: event.sequence
-          })
-        );
+        return this.buildMessageDeltaEntry(event, context);
       case "tool_call_started":
-        return this.createEntry(
-          context,
-          WorkerRuntimeEventType.WORKER_TOOL_CALL_STARTED,
-          WorkerToolCallStartedPayloadSchema.parse({
-            sessionId: event.session_id,
-            emittedAt: event.emitted_at,
-            callId: event.call_id,
-            toolId: event.tool_id
-          })
-        );
+        return this.buildToolCallStartedEntry(event, context);
       case "tool_call_finished":
-        return this.createEntry(
-          context,
-          WorkerRuntimeEventType.WORKER_TOOL_CALL_FINISHED,
-          WorkerToolCallFinishedPayloadSchema.parse({
-            sessionId: event.session_id,
-            emittedAt: event.emitted_at,
-            callId: event.call_id,
-            toolId: event.tool_id,
-            outcome: event.outcome,
-            resultSummary: event.result_summary
-          })
-        );
+        return this.buildToolCallFinishedEntry(event, context);
       case "permission_requested":
-        return this.createEntry(
-          context,
-          WorkerRuntimeEventType.WORKER_PERMISSION_REQUESTED,
-          WorkerPermissionRequestedPayloadSchema.parse({
-            sessionId: event.session_id,
-            emittedAt: event.emitted_at,
-            requestId: event.request_id,
-            toolId: event.tool_id,
-            reason: event.reason
-          })
-        );
+        return this.buildPermissionRequestedEntry(event, context);
       case "patch_emitted":
-        return this.createEntry(
-          context,
-          WorkerRuntimeEventType.WORKER_PATCH_EMITTED,
-          WorkerPatchEmittedPayloadSchema.parse({
-            sessionId: event.session_id,
-            emittedAt: event.emitted_at,
-            patchId: event.patch_id,
-            pathHints: event.path_hints
-          })
-        );
+        return this.buildPatchEmittedEntry(event, context);
       case "runtime_error":
-        return this.createEntry(
-          context,
-          WorkerRuntimeEventType.WORKER_RUNTIME_ERROR,
-          WorkerRuntimeErrorPayloadSchema.parse({
-            sessionId: event.session_id,
-            emittedAt: event.emitted_at,
-            errorCode: event.error_code,
-            message: event.message
-          })
-        );
+        return this.buildRuntimeErrorEntry(event, context);
       default:
         return assertNever(event);
     }
+  }
+
+  private reserveEvent(event: RuntimeEvent): boolean {
+    if (event.type === "message_delta") {
+      return this.state.reserveMessageDelta(event.session_id, event.sequence);
+    }
+
+    if (event.type === "session_finished") {
+      return this.state.reserveSessionFinished(event.session_id);
+    }
+
+    return true;
+  }
+
+  private async appendNormalizedEntry(
+    event: RuntimeEvent,
+    context: NormalizerContext
+  ): Promise<EventLogEntry> {
+    try {
+      const entry = await this.dependencies.eventLogRepo.append(this.buildEntry(event, context));
+      if (event.type === "session_finished") {
+        this.state.markSessionFinishedAppended(event.session_id);
+      }
+      return entry;
+    } catch (error) {
+      this.releaseReservedEvent(event);
+      throw error;
+    }
+  }
+
+  private releaseReservedEvent(event: RuntimeEvent): void {
+    if (event.type === "message_delta") {
+      this.state.releaseMessageDelta(event.session_id, event.sequence);
+      return;
+    }
+
+    if (event.type === "session_finished") {
+      this.state.clearSessionState(event.session_id);
+    }
+  }
+
+  private async notifyNormalizedEntry(
+    pendingKey: string,
+    event: RuntimeEvent,
+    entry: EventLogEntry
+  ): Promise<void> {
+    try {
+      await this.dependencies.runtimeNotifier.notifyEntry(entry);
+    } catch (error) {
+      this.retainPendingNotification(pendingKey, event, entry);
+      throw new RuntimeEventNormalizerPropagationError(entry, error);
+    }
+
+    if (event.type === "session_finished") {
+      this.state.clearSessionState(event.session_id);
+    }
+  }
+
+  private retainPendingNotification(
+    pendingKey: string,
+    event: RuntimeEvent,
+    entry: EventLogEntry
+  ): void {
+    if (this.pendingNotifications.size < this.maxPendingNotifications) {
+      this.pendingNotifications.set(pendingKey, {
+        entry,
+        sessionId: event.session_id
+      });
+      return;
+    }
+
+    this.warn(
+      "Runtime event normalizer pending-notification cap reached; new pending notification will not be retained for retry.",
+      {
+        max_pending_notifications: this.maxPendingNotifications,
+        pending_key: pendingKey,
+        event_type: entry.event_type
+      }
+    );
+  }
+
+  private buildSessionStartedEntry(
+    event: Extract<RuntimeEvent, { readonly type: "session_started" }>,
+    context: NormalizerContext
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+    return this.createEntry(
+      context,
+      WorkerRuntimeEventType.WORKER_SESSION_STARTED,
+      WorkerSessionStartedPayloadSchema.parse({
+        sessionId: event.session_id,
+        emittedAt: event.emitted_at
+      })
+    );
+  }
+
+  private buildSessionFinishedEntry(
+    event: Extract<RuntimeEvent, { readonly type: "session_finished" }>,
+    context: NormalizerContext
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+    return this.createEntry(
+      context,
+      WorkerRuntimeEventType.WORKER_SESSION_FINISHED,
+      WorkerSessionFinishedPayloadSchema.parse({
+        sessionId: event.session_id,
+        emittedAt: event.emitted_at,
+        status: event.status,
+        resultSummary: event.result_summary
+      })
+    );
+  }
+
+  private buildMessageDeltaEntry(
+    event: Extract<RuntimeEvent, { readonly type: "message_delta" }>,
+    context: NormalizerContext
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+    return this.createEntry(
+      context,
+      WorkerRuntimeEventType.WORKER_MESSAGE_DELTA,
+      WorkerMessageDeltaPayloadSchema.parse({
+        sessionId: event.session_id,
+        workerRunId: context.workerRunId,
+        emittedAt: event.emitted_at,
+        delta: event.delta,
+        sequence: event.sequence
+      })
+    );
+  }
+
+  private buildToolCallStartedEntry(
+    event: Extract<RuntimeEvent, { readonly type: "tool_call_started" }>,
+    context: NormalizerContext
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+    return this.createEntry(
+      context,
+      WorkerRuntimeEventType.WORKER_TOOL_CALL_STARTED,
+      WorkerToolCallStartedPayloadSchema.parse({
+        sessionId: event.session_id,
+        emittedAt: event.emitted_at,
+        callId: event.call_id,
+        toolId: event.tool_id
+      })
+    );
+  }
+
+  private buildToolCallFinishedEntry(
+    event: Extract<RuntimeEvent, { readonly type: "tool_call_finished" }>,
+    context: NormalizerContext
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+    return this.createEntry(
+      context,
+      WorkerRuntimeEventType.WORKER_TOOL_CALL_FINISHED,
+      WorkerToolCallFinishedPayloadSchema.parse({
+        sessionId: event.session_id,
+        emittedAt: event.emitted_at,
+        callId: event.call_id,
+        toolId: event.tool_id,
+        outcome: event.outcome,
+        resultSummary: event.result_summary
+      })
+    );
+  }
+
+  private buildPermissionRequestedEntry(
+    event: Extract<RuntimeEvent, { readonly type: "permission_requested" }>,
+    context: NormalizerContext
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+    return this.createEntry(
+      context,
+      WorkerRuntimeEventType.WORKER_PERMISSION_REQUESTED,
+      WorkerPermissionRequestedPayloadSchema.parse({
+        sessionId: event.session_id,
+        emittedAt: event.emitted_at,
+        requestId: event.request_id,
+        toolId: event.tool_id,
+        reason: event.reason
+      })
+    );
+  }
+
+  private buildPatchEmittedEntry(
+    event: Extract<RuntimeEvent, { readonly type: "patch_emitted" }>,
+    context: NormalizerContext
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+    return this.createEntry(
+      context,
+      WorkerRuntimeEventType.WORKER_PATCH_EMITTED,
+      WorkerPatchEmittedPayloadSchema.parse({
+        sessionId: event.session_id,
+        emittedAt: event.emitted_at,
+        patchId: event.patch_id,
+        pathHints: event.path_hints
+      })
+    );
+  }
+
+  private buildRuntimeErrorEntry(
+    event: Extract<RuntimeEvent, { readonly type: "runtime_error" }>,
+    context: NormalizerContext
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+    return this.createEntry(
+      context,
+      WorkerRuntimeEventType.WORKER_RUNTIME_ERROR,
+      WorkerRuntimeErrorPayloadSchema.parse({
+        sessionId: event.session_id,
+        emittedAt: event.emitted_at,
+        errorCode: event.error_code,
+        message: event.message
+      })
+    );
   }
 
   private createEntry(
@@ -306,8 +413,14 @@ export class RuntimeEventNormalizer {
       payload_json: payload
     };
   }
+
+  private warn(message: string, meta: Readonly<Record<string, unknown>>): void {
+    this.dependencies.warn?.(message, meta);
+  }
 }
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled runtime event: ${JSON.stringify(value)}`);
 }
+
+const DEFAULT_MAX_PENDING_NOTIFICATIONS = 1_000;

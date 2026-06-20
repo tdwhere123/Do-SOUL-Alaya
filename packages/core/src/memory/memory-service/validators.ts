@@ -13,6 +13,8 @@ import {
 import { CoreError } from "../../shared/errors.js";
 import type { MemoryEntryUpdateFields } from "./types.js";
 
+export { isPromiseLike } from "../../shared/promise-utils.js";
+
 export function parseMemoryEntry(value: MemoryEntry): MemoryEntry {
   try {
     return MemoryEntrySchema.parse(value);
@@ -176,8 +178,4 @@ export function ensureAllowedLifecycleTransition(
   if (!isValidLifecycleTransition(from, to)) {
     throw new CoreError("VALIDATION", `Invalid memory lifecycle transition: ${from} -> ${to}`);
   }
-}
-
-export function isPromiseLike(value: unknown): value is Promise<unknown> {
-  return value instanceof Promise || typeof (value as { readonly then?: unknown })?.then === "function";
 }

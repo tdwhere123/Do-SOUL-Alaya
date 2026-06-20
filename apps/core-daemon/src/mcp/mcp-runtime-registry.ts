@@ -77,7 +77,7 @@ export function createDaemonMcpRuntimeClientInfo(): DaemonMcpRuntimeClientInfo {
   });
 }
 
-export function createDaemonMcpRuntimeRegistry(input: {
+type DaemonMcpRuntimeRegistryInput = {
   readonly serverConfigs: Readonly<Record<string, DaemonMcpServerRuntimeConfig>>;
   readonly createClient?: (clientInfo: DaemonMcpRuntimeClientInfo) => DaemonMcpRuntimeClient;
   readonly createStdioTransport?: (
@@ -89,236 +89,261 @@ export function createDaemonMcpRuntimeRegistry(input: {
   ) => StreamableHTTPClientTransport;
   readonly now?: () => string;
   readonly warn: WarnPort;
-}): DaemonMcpRuntimeRegistry {
-  const warn = resolveWarn(input.warn);
-  const clientInfo = createDaemonMcpRuntimeClientInfo();
-  const clientHandles = new Map<string, Promise<DaemonMcpRuntimeClientHandle>>();
-  const toolCache = new Map<string, readonly DaemonMcpListedTool[]>();
-  const liveServerNames = new Set<string>();
-  let closePromise: Promise<void> | null = null;
-  let closed = false;
+};
+
+type DaemonMcpRuntimeRegistryState = {
+  readonly input: DaemonMcpRuntimeRegistryInput;
+  readonly warn: (message: string, meta: Record<string, unknown>) => void;
+  readonly clientInfo: DaemonMcpRuntimeClientInfo;
+  readonly clientHandles: Map<string, Promise<DaemonMcpRuntimeClientHandle>>;
+  readonly toolCache: Map<string, readonly DaemonMcpListedTool[]>;
+  readonly liveServerNames: Set<string>;
+  closePromise: Promise<void> | null;
+  closed: boolean;
+  readonly serverInfos: readonly Readonly<McpServerInfo>[];
+  readonly serverInfoByName: Map<string, Readonly<McpServerInfo>>;
+};
+
+export function createDaemonMcpRuntimeRegistry(input: DaemonMcpRuntimeRegistryInput): DaemonMcpRuntimeRegistry {
+  const state = createDaemonMcpRuntimeRegistryState(input);
+  return {
+    close: () => closeRegistry(state),
+    listServerInfos: () => listServerInfos(state),
+    refresh: (refreshInput) => refreshRegistry(state, refreshInput),
+    getServerTools: (serverName) => readServerTools(state, serverName),
+    listServerTools: (serverName) => listServerTools(state, serverName),
+    callTool: (callInput) => callRuntimeTool(state, callInput)
+  };
+}
+
+function createDaemonMcpRuntimeRegistryState(input: DaemonMcpRuntimeRegistryInput): DaemonMcpRuntimeRegistryState {
   const serverInfos = Object.freeze(
     Object.entries(input.serverConfigs).map(([serverName, config]) =>
       createServerInfo(serverName, config, input.now)
     )
   );
-  const serverInfoByName = new Map(
-    serverInfos.map((server) => [server.server_name, server] as const)
-  );
-
   return {
-    async close() {
-      if (closePromise !== null) {
-        await closePromise;
-        return;
-      }
-
-      closed = true;
-      const pendingHandles = [...clientHandles.values()];
-      closePromise = (async () => {
-        const settledHandles = await Promise.allSettled(pendingHandles);
-        await Promise.all(
-          settledHandles.map(async (result) => {
-            if (result.status !== "fulfilled") {
-              return;
-            }
-
-            await closeHandle(result.value, warn);
-          })
-        );
-        clientHandles.clear();
-        toolCache.clear();
-        liveServerNames.clear();
-      })();
-      await closePromise;
-    },
-    listServerInfos() {
-      return Object.freeze(
-        serverInfos.map((server) =>
-          Object.freeze({
-            ...server,
-            status: liveServerNames.has(server.server_name) ? "active" : "inactive"
-          })
-        )
-      );
-    },
-    async refresh(refreshInput) {
-      if (closed) {
-        return;
-      }
-
-      const targetServers = (refreshInput?.serverNames ?? serverInfos.map((server) => server.server_name))
-        .map((serverName) => serverInfoByName.get(serverName))
-        .filter((server): server is Readonly<McpServerInfo> => server !== undefined);
-
-      await Promise.all(targetServers.map(async (server) => {
-        try {
-          await refreshServerTools(server.server_name);
-        } catch (error) {
-          warn("failed to refresh MCP server tool catalog", {
-            serverName: server.server_name,
-            error
-          });
-        }
-      }));
-    },
-    getServerTools(serverName) {
-      return readServerTools(serverName);
-    },
-    async listServerTools(serverName) {
-      assertOpen();
-      await refreshServerTools(serverName);
-      return readServerTools(serverName);
-    },
-    async callTool({ serverName, toolName, input: rawInput }) {
-      assertOpen();
-      try {
-        const handle = await getHandle(serverName);
-        const result = await handle.client.callTool(
-          {
-            name: toolName,
-            ...(isRecord(rawInput) ? { arguments: rawInput } : {})
-          },
-          CallToolResultSchema
-        );
-        liveServerNames.add(serverName);
-        const content = readMcpToolResultContent(result);
-        const structuredContent = readMcpToolStructuredContent(result);
-
-        if (readMcpToolIsError(result)) {
-          return {
-            ok: false,
-            code: "MCP_TOOL_ERROR",
-            message: readMcpToolErrorMessage(content),
-            content,
-            ...(structuredContent === undefined ? {} : { structuredContent })
-          };
-        }
-
-        return {
-          content,
-          ...(structuredContent === undefined ? {} : { structuredContent })
-        };
-      } catch (error) {
-        await deactivateServer(serverName);
-        throw error;
-      }
-    }
+    input,
+    warn: resolveWarn(input.warn),
+    clientInfo: createDaemonMcpRuntimeClientInfo(),
+    clientHandles: new Map(),
+    toolCache: new Map(),
+    liveServerNames: new Set(),
+    closePromise: null,
+    closed: false,
+    serverInfos,
+    serverInfoByName: new Map(serverInfos.map((server) => [server.server_name, server] as const))
   };
+}
 
-  function assertOpen(): void {
-    if (closed) {
-      throw new Error("Daemon MCP runtime registry is closed.");
-    }
+async function closeRegistry(state: DaemonMcpRuntimeRegistryState): Promise<void> {
+  if (state.closePromise !== null) {
+    await state.closePromise;
+    return;
   }
+  state.closed = true;
+  const pendingHandles = [...state.clientHandles.values()];
+  state.closePromise = closePendingHandles(state, pendingHandles);
+  await state.closePromise;
+}
 
-  async function getHandle(serverName: string): Promise<DaemonMcpRuntimeClientHandle> {
-    assertOpen();
-    const existing = clientHandles.get(serverName);
-    if (existing !== undefined) {
-      return await existing;
-    }
+async function closePendingHandles(
+  state: DaemonMcpRuntimeRegistryState,
+  pendingHandles: readonly Promise<DaemonMcpRuntimeClientHandle>[]
+): Promise<void> {
+  const settledHandles = await Promise.allSettled(pendingHandles);
+  await Promise.all(settledHandles.map(async (result) => {
+    if (result.status === "fulfilled") await closeHandle(result.value, state.warn);
+  }));
+  state.clientHandles.clear();
+  state.toolCache.clear();
+  state.liveServerNames.clear();
+}
 
-    const config = input.serverConfigs[serverName];
-    if (config === undefined) {
-      throw new Error(`MCP server ${serverName} is not configured for daemon execution.`);
-    }
+function listServerInfos(state: DaemonMcpRuntimeRegistryState): readonly Readonly<McpServerInfo>[] {
+  return Object.freeze(
+    state.serverInfos.map((server) =>
+      Object.freeze({
+        ...server,
+        status: state.liveServerNames.has(server.server_name) ? "active" : "inactive"
+      })
+    )
+  );
+}
 
-    const pending = connectServer(config).catch((error) => {
-      clientHandles.delete(serverName);
-      throw error;
-    });
-    clientHandles.set(serverName, pending);
-    return await pending;
-  }
-
-  async function connectServer(
-    config: DaemonMcpServerRuntimeConfig
-  ): Promise<DaemonMcpRuntimeClientHandle> {
-    const client =
-      input.createClient?.(clientInfo) ??
-      new Client(clientInfo, { capabilities: {} });
-    const transport: DaemonMcpRuntimeTransport =
-      config.transportType === "stdio"
-        ? (input.createStdioTransport ?? ((params) => new StdioClientTransport(params)))({
-            command: config.command,
-            ...(config.args === undefined ? {} : { args: [...config.args] }),
-            ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
-            ...(config.env === undefined ? {} : { env: { ...config.env } }),
-            stderr: "inherit"
-          })
-        : (input.createStreamableHttpTransport ??
-            ((url, options) => new StreamableHTTPClientTransport(url, options)))(
-            new URL(config.endpoint),
-            config.headers === undefined
-              ? undefined
-              : { requestInit: { headers: { ...config.headers } } }
-          );
-
+async function refreshRegistry(
+  state: DaemonMcpRuntimeRegistryState,
+  refreshInput?: { readonly serverNames?: readonly string[] }
+): Promise<void> {
+  if (state.closed) return;
+  await Promise.all(resolveRefreshTargets(state, refreshInput).map(async (server) => {
     try {
-      await client.connect(transport);
-      return {
-        client,
-        transport
-      };
+      await refreshServerTools(state, server.server_name);
     } catch (error) {
-      await closeHandle(
-        {
-          client,
-          transport
-        },
-        warn
-      );
-      throw error;
+      state.warn("failed to refresh MCP server tool catalog", { serverName: server.server_name, error });
     }
+  }));
+}
+
+function resolveRefreshTargets(
+  state: DaemonMcpRuntimeRegistryState,
+  refreshInput?: { readonly serverNames?: readonly string[] }
+): readonly Readonly<McpServerInfo>[] {
+  return (refreshInput?.serverNames ?? state.serverInfos.map((server) => server.server_name))
+    .map((serverName) => state.serverInfoByName.get(serverName))
+    .filter((server): server is Readonly<McpServerInfo> => server !== undefined);
+}
+
+async function listServerTools(
+  state: DaemonMcpRuntimeRegistryState,
+  serverName: string
+): Promise<readonly DaemonMcpListedTool[]> {
+  assertOpen(state);
+  await refreshServerTools(state, serverName);
+  return readServerTools(state, serverName);
+}
+
+async function callRuntimeTool(
+  state: DaemonMcpRuntimeRegistryState,
+  input: { readonly serverName: string; readonly toolName: string; readonly input: unknown }
+): Promise<unknown> {
+  assertOpen(state);
+  try {
+    const handle = await getHandle(state, input.serverName);
+    const result = await handle.client.callTool(
+      { name: input.toolName, ...(isRecord(input.input) ? { arguments: input.input } : {}) },
+      CallToolResultSchema
+    );
+    state.liveServerNames.add(input.serverName);
+    return formatMcpToolResult(result);
+  } catch (error) {
+    await deactivateServer(state, input.serverName);
+    throw error;
   }
+}
 
-  async function refreshServerTools(serverName: string): Promise<void> {
-    assertOpen();
-    try {
-      const handle = await getHandle(serverName);
-      const listedTools = await handle.client.listTools();
-      toolCache.set(
-        serverName,
-        Object.freeze(
-          listedTools.tools.map((tool) => ({
-            name: tool.name,
-            description: tool.description ?? `MCP tool ${tool.name}`
-          }))
-        )
-      );
-      liveServerNames.add(serverName);
-    } catch (error) {
-      await deactivateServer(serverName);
-      throw error;
-    }
+function assertOpen(state: DaemonMcpRuntimeRegistryState): void {
+  if (state.closed) throw new Error("Daemon MCP runtime registry is closed.");
+}
+
+async function getHandle(
+  state: DaemonMcpRuntimeRegistryState,
+  serverName: string
+): Promise<DaemonMcpRuntimeClientHandle> {
+  assertOpen(state);
+  const existing = state.clientHandles.get(serverName);
+  if (existing !== undefined) return await existing;
+  const config = state.input.serverConfigs[serverName];
+  if (config === undefined) throw new Error(`MCP server ${serverName} is not configured for daemon execution.`);
+  const pending = connectServer(state, config).catch((error) => {
+    state.clientHandles.delete(serverName);
+    throw error;
+  });
+  state.clientHandles.set(serverName, pending);
+  return await pending;
+}
+
+async function connectServer(
+  state: DaemonMcpRuntimeRegistryState,
+  config: DaemonMcpServerRuntimeConfig
+): Promise<DaemonMcpRuntimeClientHandle> {
+  const client = state.input.createClient?.(state.clientInfo) ?? new Client(state.clientInfo, { capabilities: {} });
+  const transport = createRuntimeTransport(state, config);
+  try {
+    await client.connect(transport);
+    return { client, transport };
+  } catch (error) {
+    await closeHandle({ client, transport }, state.warn);
+    throw error;
   }
+}
 
-  function readServerTools(serverName: string): readonly DaemonMcpListedTool[] {
-    if (!liveServerNames.has(serverName)) {
-      return [];
-    }
+function createRuntimeTransport(
+  state: DaemonMcpRuntimeRegistryState,
+  config: DaemonMcpServerRuntimeConfig
+): DaemonMcpRuntimeTransport {
+  return config.transportType === "stdio"
+    ? createStdioRuntimeTransport(state, config)
+    : createHttpRuntimeTransport(state, config);
+}
 
-    return toolCache.get(serverName) ?? [];
+function createStdioRuntimeTransport(
+  state: DaemonMcpRuntimeRegistryState,
+  config: Extract<DaemonMcpServerRuntimeConfig, { readonly transportType: "stdio" }>
+): StdioClientTransport {
+  return (state.input.createStdioTransport ?? ((params) => new StdioClientTransport(params)))({
+    command: config.command,
+    ...(config.args === undefined ? {} : { args: [...config.args] }),
+    ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
+    ...(config.env === undefined ? {} : { env: { ...config.env } }),
+    stderr: "inherit"
+  });
+}
+
+function createHttpRuntimeTransport(
+  state: DaemonMcpRuntimeRegistryState,
+  config: Extract<DaemonMcpServerRuntimeConfig, { readonly transportType: "http" }>
+): StreamableHTTPClientTransport {
+  const options = config.headers === undefined
+    ? undefined
+    : { requestInit: { headers: { ...config.headers } } };
+  return (state.input.createStreamableHttpTransport ??
+    ((url, transportOptions) => new StreamableHTTPClientTransport(url, transportOptions)))(
+    new URL(config.endpoint),
+    options
+  );
+}
+
+async function refreshServerTools(state: DaemonMcpRuntimeRegistryState, serverName: string): Promise<void> {
+  assertOpen(state);
+  try {
+    const handle = await getHandle(state, serverName);
+    const listedTools = await handle.client.listTools();
+    state.toolCache.set(serverName, Object.freeze(listedTools.tools.map(toListedTool)));
+    state.liveServerNames.add(serverName);
+  } catch (error) {
+    await deactivateServer(state, serverName);
+    throw error;
   }
+}
 
-  async function deactivateServer(serverName: string): Promise<void> {
-    liveServerNames.delete(serverName);
-    toolCache.delete(serverName);
-    const pendingHandle = clientHandles.get(serverName);
+function toListedTool(tool: { readonly name: string; readonly description?: string }): DaemonMcpListedTool {
+  return {
+    name: tool.name,
+    description: tool.description ?? `MCP tool ${tool.name}`
+  };
+}
 
-    if (pendingHandle === undefined) {
-      return;
-    }
+function readServerTools(
+  state: DaemonMcpRuntimeRegistryState,
+  serverName: string
+): readonly DaemonMcpListedTool[] {
+  return state.liveServerNames.has(serverName) ? state.toolCache.get(serverName) ?? [] : [];
+}
 
-    clientHandles.delete(serverName);
-    const [result] = await Promise.allSettled([pendingHandle]);
-    if (result?.status !== "fulfilled") {
-      return;
-    }
+async function deactivateServer(state: DaemonMcpRuntimeRegistryState, serverName: string): Promise<void> {
+  state.liveServerNames.delete(serverName);
+  state.toolCache.delete(serverName);
+  const pendingHandle = state.clientHandles.get(serverName);
+  if (pendingHandle === undefined) return;
+  state.clientHandles.delete(serverName);
+  const [result] = await Promise.allSettled([pendingHandle]);
+  if (result?.status === "fulfilled") await closeHandle(result.value, state.warn);
+}
 
-    await closeHandle(result.value, warn);
+function formatMcpToolResult(result: DaemonMcpRuntimeCallResult): unknown {
+  const content = readMcpToolResultContent(result);
+  const structuredContent = readMcpToolStructuredContent(result);
+  if (readMcpToolIsError(result)) {
+    return {
+      ok: false,
+      code: "MCP_TOOL_ERROR",
+      message: readMcpToolErrorMessage(content),
+      content,
+      ...(structuredContent === undefined ? {} : { structuredContent })
+    };
   }
+  return { content, ...(structuredContent === undefined ? {} : { structuredContent }) };
 }
 
 function resolveWarn(warn: WarnPort | undefined): (message: string, meta: Record<string, unknown>) => void {

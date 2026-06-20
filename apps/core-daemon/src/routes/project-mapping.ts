@@ -18,6 +18,16 @@ export interface ProjectMappingRouteServices {
 }
 
 export function registerProjectMappingRoutes(app: Hono, services: ProjectMappingRouteServices): void {
+  registerProjectMappingListRoute(app, services);
+  registerProjectMappingSuggestRoute(app, services);
+  registerProjectMappingTransitionRoute(app, services);
+  registerProjectMappingBatchAcceptRoute(app, services);
+}
+
+function registerProjectMappingListRoute(
+  app: Hono,
+  services: ProjectMappingRouteServices
+): void {
   app.get("/soul/project-mapping-anchors", async (context) => {
     const workspaceId = parseRequiredString(context.req.query("workspace_id"), "workspace_id is required");
     await services.workspaceService.getById(workspaceId);
@@ -36,7 +46,12 @@ export function registerProjectMappingRoutes(app: Hono, services: ProjectMapping
       200
     );
   });
+}
 
+function registerProjectMappingSuggestRoute(
+  app: Hono,
+  services: ProjectMappingRouteServices
+): void {
   app.post("/soul/project-mapping-anchors", async (context) => {
     const body = await parseCreateRequest(context.req.json.bind(context.req));
     await services.workspaceService.getById(body.workspace_id);
@@ -57,7 +72,12 @@ export function registerProjectMappingRoutes(app: Hono, services: ProjectMapping
       201
     );
   });
+}
 
+function registerProjectMappingTransitionRoute(
+  app: Hono,
+  services: ProjectMappingRouteServices
+): void {
   app.patch("/soul/project-mapping-anchors/:id/transition", async (context) => {
     const mappingId = parseRequiredString(context.req.param("id"), "id is required");
     const body = await parseTransitionRequest(context.req.json.bind(context.req));
@@ -73,7 +93,12 @@ export function registerProjectMappingRoutes(app: Hono, services: ProjectMapping
       200
     );
   });
+}
 
+function registerProjectMappingBatchAcceptRoute(
+  app: Hono,
+  services: ProjectMappingRouteServices
+): void {
   app.post("/soul/project-mapping-anchors/batch-accept", async (context) => {
     const body = await parseBatchAcceptRequest(context.req.json.bind(context.req));
     await services.workspaceService.getById(body.workspace_id);

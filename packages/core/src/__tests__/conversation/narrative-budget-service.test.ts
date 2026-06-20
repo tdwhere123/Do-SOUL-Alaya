@@ -142,9 +142,7 @@ describe("NarrativeBudgetService", () => {
   });
 
   it("emits narrative.consolidation_triggered with digest_count_before", async () => {
-    const events: Array<Record<string, unknown>> = [];
     const publish = vi.fn(async (entry) => ({
-      ...(events.push(entry), entry),
       ...entry,
       event_id: "event-consolidation",
       created_at: FIXED_NOW
@@ -155,7 +153,7 @@ describe("NarrativeBudgetService", () => {
         totalDigestBytesByRun: vi.fn(async () => 1300)
       },
       eventLogReader: {
-        queryByRun: vi.fn(async () => events as never)
+        hasNarrativeConsolidationTrigger: vi.fn(async () => false)
       },
       eventPublisher: { publish },
       now: () => FIXED_NOW
@@ -194,7 +192,14 @@ describe("NarrativeBudgetService", () => {
         totalDigestBytesByRun: vi.fn(async () => 1300)
       },
       eventLogReader: {
-        queryByRun: vi.fn(async () => publishedEvents as never)
+        hasNarrativeConsolidationTrigger: vi.fn(async (_runId, digestCountBefore) =>
+          publishedEvents.some(
+            (event) =>
+              event.event_type === ObligationTrustNarrativeEventType.NARRATIVE_CONSOLIDATION_TRIGGERED &&
+              (event.payload_json as { readonly digest_count_before?: number }).digest_count_before ===
+                digestCountBefore
+          )
+        )
       },
       eventPublisher: { publish },
       now: () => FIXED_NOW
@@ -221,7 +226,14 @@ describe("NarrativeBudgetService", () => {
         totalDigestBytesByRun: vi.fn(async () => 1300)
       },
       eventLogReader: {
-        queryByRun: vi.fn(async () => publishedEvents as never)
+        hasNarrativeConsolidationTrigger: vi.fn(async (_runId, digestCountBefore) =>
+          publishedEvents.some(
+            (event) =>
+              event.event_type === ObligationTrustNarrativeEventType.NARRATIVE_CONSOLIDATION_TRIGGERED &&
+              (event.payload_json as { readonly digest_count_before?: number }).digest_count_before ===
+                digestCountBefore
+          )
+        )
       },
       eventPublisher: { publish },
       now: () => FIXED_NOW

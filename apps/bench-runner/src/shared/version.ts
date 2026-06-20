@@ -14,6 +14,12 @@ let cachedVersion: string | null = null;
 
 export const RECALL_PIPELINE_VERSION = "fusion-rrf-synthesis-v2";
 
+export interface BenchCommitResolution {
+  readonly sha7: string;
+  readonly source: "env" | "git" | "fallback";
+  readonly unavailable: boolean;
+}
+
 export function resolveBenchRunnerVersion(): string {
   if (cachedVersion !== null) {
     return cachedVersion;
@@ -35,18 +41,41 @@ export function resolveBenchRunnerVersion(): string {
 export function resolveBenchCommitSha7(
   env: Readonly<Record<string, string | undefined>> = process.env
 ): string {
+  return resolveBenchCommitInfo(env).sha7;
+}
+
+export function resolveBenchCommitInfo(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  resolveFromGit: () => string = defaultResolveBenchCommitFromGit
+): BenchCommitResolution {
   const fromEnv = env.BENCH_COMMIT_SHA7?.trim();
   if (fromEnv !== undefined && /^[0-9a-f]{7,40}$/iu.test(fromEnv)) {
-    return fromEnv.slice(0, 7);
+    return {
+      sha7: fromEnv.slice(0, 7),
+      source: "env",
+      unavailable: false
+    };
   }
   try {
-    // git --short is adaptive (>= 7 chars when a 7-char prefix is ambiguous);
-    // slice to the 7-char contract this function name and the env path above
-    // both guarantee, so the result is always exactly 7 hex chars.
-    return execSync("git rev-parse --short=7 HEAD", { encoding: "utf8" })
-      .trim()
-      .slice(0, 7);
+    return {
+      sha7: resolveFromGit(),
+      source: "git",
+      unavailable: false
+    };
   } catch {
-    return "0000000";
+    return {
+      sha7: "0000000",
+      source: "fallback",
+      unavailable: true
+    };
   }
+}
+
+function defaultResolveBenchCommitFromGit(): string {
+  // git --short is adaptive (>= 7 chars when a 7-char prefix is ambiguous);
+  // slice to the 7-char contract this function name and the env path above
+  // both guarantee, so the result is always exactly 7 hex chars.
+  return execSync("git rev-parse --short=7 HEAD", { encoding: "utf8" })
+    .trim()
+    .slice(0, 7);
 }

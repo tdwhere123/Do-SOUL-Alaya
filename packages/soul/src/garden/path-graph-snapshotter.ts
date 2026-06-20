@@ -8,7 +8,7 @@ import { deepFreeze } from "../shared/deep-freeze.js";
 
 export interface PathGraphSnapshotterDependencies {
   readonly pathRelationRepo: {
-    findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
+    findActiveAll(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
   };
   readonly now?: () => Date;
 }
@@ -37,7 +37,7 @@ export class PathGraphSnapshotter {
     workspaceId: string,
     previousSnapshot: Readonly<PathGraphSnapshot> | null = null
   ): Promise<Readonly<PathGraphSnapshot>> {
-    const relations = await this.deps.pathRelationRepo.findActive(workspaceId);
+    const relations = await this.deps.pathRelationRepo.findActiveAll(workspaceId);
     const snapshotAt = this.now().toISOString();
     const metrics = summarizePathRelations(relations, previousSnapshot);
 
@@ -103,93 +103,156 @@ function summarizePathRelations(
   | "paths_weakened_since_last"
   | "paths_created_since_last"
 > {
-  const previousSnapshotAt = previousSnapshot?.snapshot_at ?? null;
-  const strength_distribution = {
-    very_weak: 0,
-    weak: 0,
-    moderate: 0,
-    strong: 0,
-    very_strong: 0
-  };
-  const stability_distribution = {
-    volatile: 0,
-    normal: 0,
-    stable: 0,
-    pinned: 0
-  };
-  const governance_distribution = {
-    hint_only: 0,
-    attention_only: 0,
-    recall_allowed: 0,
-    strictly_governed: 0
-  };
-  const sourceCounts = new Map<string, number>();
-  const targetCounts = new Map<string, number>();
-  const anchorPathSets = new Map<string, Set<string>>();
-  let paths_reinforced_since_last = 0;
-  let paths_weakened_since_last = 0;
-  let paths_created_since_last = 0;
-
+  const state = createPathSummaryState(previousSnapshot);
   for (const relation of relations) {
-    const strength = relation.plasticity_state.strength;
-    if (strength < 0.2) {
-      strength_distribution.very_weak += 1;
-    } else if (strength < 0.4) {
-      strength_distribution.weak += 1;
-    } else if (strength < 0.6) {
-      strength_distribution.moderate += 1;
-    } else if (strength < 0.8) {
-      strength_distribution.strong += 1;
-    } else {
-      strength_distribution.very_strong += 1;
-    }
-
-    stability_distribution[relation.plasticity_state.stability_class] += 1;
-    governance_distribution[relation.legitimacy.governance_class] += 1;
-
-    const sourceKey = serializePathAnchorRef(relation.anchors.source_anchor);
-    const targetKey = serializePathAnchorRef(relation.anchors.target_anchor);
-
-    sourceCounts.set(sourceKey, (sourceCounts.get(sourceKey) ?? 0) + 1);
-    targetCounts.set(targetKey, (targetCounts.get(targetKey) ?? 0) + 1);
-
-    addAnchorPath(anchorPathSets, sourceKey, relation.path_id);
-    addAnchorPath(anchorPathSets, targetKey, relation.path_id);
-
-    if (previousSnapshotAt === null) {
-      paths_reinforced_since_last += 1;
-      paths_weakened_since_last += 1;
-      paths_created_since_last += 1;
-      continue;
-    }
-
-    if (timestampIsAfter(relation.plasticity_state.last_reinforced_at, previousSnapshotAt)) {
-      paths_reinforced_since_last += 1;
-    }
-    if (timestampIsAfter(relation.plasticity_state.last_weakened_at, previousSnapshotAt)) {
-      paths_weakened_since_last += 1;
-    }
-    if (timestampIsAfter(relation.created_at, previousSnapshotAt)) {
-      paths_created_since_last += 1;
-    }
+    recordPathStrength(state, relation);
+    recordPathDistributions(state, relation);
+    recordPathConnectivity(state, relation);
+    recordPathChangeCounts(state, relation);
   }
-
   return {
     total_active_paths: relations.length,
-    strength_distribution,
-    stability_distribution,
-    governance_distribution,
+    strength_distribution: state.strength_distribution,
+    stability_distribution: state.stability_distribution,
+    governance_distribution: state.governance_distribution,
     connectivity: {
-      unique_source_anchors: sourceCounts.size,
-      unique_target_anchors: targetCounts.size,
-      max_out_degree: maxMapValue(sourceCounts),
-      max_in_degree: maxMapValue(targetCounts),
-      isolated_anchors: countIsolatedAnchors(anchorPathSets)
+      unique_source_anchors: state.sourceCounts.size,
+      unique_target_anchors: state.targetCounts.size,
+      max_out_degree: maxMapValue(state.sourceCounts),
+      max_in_degree: maxMapValue(state.targetCounts),
+      isolated_anchors: countIsolatedAnchors(state.anchorPathSets)
     },
-    paths_reinforced_since_last,
-    paths_weakened_since_last,
-    paths_created_since_last
+    paths_reinforced_since_last: state.paths_reinforced_since_last,
+    paths_weakened_since_last: state.paths_weakened_since_last,
+    paths_created_since_last: state.paths_created_since_last
   };
+}
+
+interface PathSummaryState {
+  readonly previousSnapshotAt: string | null;
+  readonly strength_distribution: MutableStrengthDistribution;
+  readonly stability_distribution: MutableStabilityDistribution;
+  readonly governance_distribution: MutableGovernanceDistribution;
+  readonly sourceCounts: Map<string, number>;
+  readonly targetCounts: Map<string, number>;
+  readonly anchorPathSets: Map<string, Set<string>>;
+  paths_reinforced_since_last: number;
+  paths_weakened_since_last: number;
+  paths_created_since_last: number;
+}
+
+interface MutableStrengthDistribution {
+  very_weak: number;
+  weak: number;
+  moderate: number;
+  strong: number;
+  very_strong: number;
+}
+
+interface MutableStabilityDistribution {
+  volatile: number;
+  normal: number;
+  stable: number;
+  pinned: number;
+}
+
+interface MutableGovernanceDistribution {
+  hint_only: number;
+  attention_only: number;
+  recall_allowed: number;
+  strictly_governed: number;
+}
+
+function createPathSummaryState(
+  previousSnapshot: Readonly<PathGraphSnapshot> | null
+): PathSummaryState {
+  return {
+    previousSnapshotAt: previousSnapshot?.snapshot_at ?? null,
+    strength_distribution: {
+      very_weak: 0,
+      weak: 0,
+      moderate: 0,
+      strong: 0,
+      very_strong: 0
+    },
+    stability_distribution: {
+      volatile: 0,
+      normal: 0,
+      stable: 0,
+      pinned: 0
+    },
+    governance_distribution: {
+      hint_only: 0,
+      attention_only: 0,
+      recall_allowed: 0,
+      strictly_governed: 0
+    },
+    sourceCounts: new Map<string, number>(),
+    targetCounts: new Map<string, number>(),
+    anchorPathSets: new Map<string, Set<string>>(),
+    paths_reinforced_since_last: 0,
+    paths_weakened_since_last: 0,
+    paths_created_since_last: 0
+  };
+}
+
+function recordPathStrength(
+  state: PathSummaryState,
+  relation: Readonly<PathRelation>
+): void {
+  const strength = relation.plasticity_state.strength;
+  if (strength < 0.2) {
+    state.strength_distribution.very_weak += 1;
+  } else if (strength < 0.4) {
+    state.strength_distribution.weak += 1;
+  } else if (strength < 0.6) {
+    state.strength_distribution.moderate += 1;
+  } else if (strength < 0.8) {
+    state.strength_distribution.strong += 1;
+  } else {
+    state.strength_distribution.very_strong += 1;
+  }
+}
+
+function recordPathDistributions(
+  state: PathSummaryState,
+  relation: Readonly<PathRelation>
+): void {
+  state.stability_distribution[relation.plasticity_state.stability_class] += 1;
+  state.governance_distribution[relation.legitimacy.governance_class] += 1;
+}
+
+function recordPathConnectivity(
+  state: PathSummaryState,
+  relation: Readonly<PathRelation>
+): void {
+  const sourceKey = serializePathAnchorRef(relation.anchors.source_anchor);
+  const targetKey = serializePathAnchorRef(relation.anchors.target_anchor);
+  state.sourceCounts.set(sourceKey, (state.sourceCounts.get(sourceKey) ?? 0) + 1);
+  state.targetCounts.set(targetKey, (state.targetCounts.get(targetKey) ?? 0) + 1);
+  addAnchorPath(state.anchorPathSets, sourceKey, relation.path_id);
+  addAnchorPath(state.anchorPathSets, targetKey, relation.path_id);
+}
+
+function recordPathChangeCounts(
+  state: PathSummaryState,
+  relation: Readonly<PathRelation>
+): void {
+  if (state.previousSnapshotAt === null) {
+    state.paths_reinforced_since_last += 1;
+    state.paths_weakened_since_last += 1;
+    state.paths_created_since_last += 1;
+    return;
+  }
+  if (timestampIsAfter(relation.plasticity_state.last_reinforced_at, state.previousSnapshotAt)) {
+    state.paths_reinforced_since_last += 1;
+  }
+  if (timestampIsAfter(relation.plasticity_state.last_weakened_at, state.previousSnapshotAt)) {
+    state.paths_weakened_since_last += 1;
+  }
+  if (timestampIsAfter(relation.created_at, state.previousSnapshotAt)) {
+    state.paths_created_since_last += 1;
+  }
 }
 
 function timestampIsAfter(timestamp: string | undefined, previousSnapshotAt: string): boolean {

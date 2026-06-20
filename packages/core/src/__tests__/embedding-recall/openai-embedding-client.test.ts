@@ -31,6 +31,33 @@ describe("OpenAIEmbeddingClient", () => {
     ).rejects.not.toThrow("sk-test-secret");
   });
 
+  it("uses the official OpenAI URL by default but still allows an override", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          data: [{ index: 0, embedding: [0.1, 0.9] }]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    ) as unknown as typeof fetch;
+
+    const defaultClient = new OpenAIEmbeddingClient({
+      apiKey: "sk-test-secret",
+      fetchImpl
+    });
+    await defaultClient.embedTexts(["default"], { timeoutMs: 1000 });
+
+    const overrideClient = new OpenAIEmbeddingClient({
+      apiKey: "sk-test-secret",
+      baseUrl: "https://embedding.example.test/v1",
+      fetchImpl
+    });
+    await overrideClient.embedTexts(["override"], { timeoutMs: 1000 });
+
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.openai.com/v1/embeddings");
+    expect(fetchImpl.mock.calls[1]?.[0]).toBe("https://embedding.example.test/v1/embeddings");
+  });
+
   it("retries transient transport failures before returning embeddings", async () => {
     const transportError = new TypeError("fetch failed") as TypeError & {
       cause: { code: string };

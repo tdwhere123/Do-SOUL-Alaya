@@ -8,8 +8,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
-
-const ORPHAN_RADAR_LIST_LIMIT = 200;
+import { prepareOrphanRadarStatements, type SqliteStatement } from "./orphan-radar-statements.js";
 
 export interface OrphanRadarRepo {
   create(record: Readonly<OrphanRadar>): Readonly<OrphanRadar>;
@@ -38,37 +37,38 @@ interface OrphanRadarRow {
 }
 
 export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
-  public constructor(private readonly db: StorageDatabase) {}
+  private readonly createStatement: SqliteStatement;
+  private readonly createEventLogOrphanStatement: SqliteStatement;
+  private readonly findByIdStatement: SqliteStatement;
+  private readonly findActiveByWorkspaceIdStatement: SqliteStatement;
+  private readonly findByTargetMemoryStatement: SqliteStatement;
+  private readonly deleteExpiredStatement: SqliteStatement;
+
+  public constructor(private readonly db: StorageDatabase) {
+    const statements = prepareOrphanRadarStatements(db);
+    this.createStatement = statements.createStatement;
+    this.createEventLogOrphanStatement = statements.createEventLogOrphanStatement;
+    this.findByIdStatement = statements.findByIdStatement;
+    this.findActiveByWorkspaceIdStatement = statements.findActiveByWorkspaceIdStatement;
+    this.findByTargetMemoryStatement = statements.findByTargetMemoryStatement;
+    this.deleteExpiredStatement = statements.deleteExpiredStatement;
+  }
 
   public create(record: Readonly<OrphanRadar>): Readonly<OrphanRadar> {
     const parsed = parseRecord(record);
 
     try {
-      this.db.connection
-        .prepare(
-          `INSERT INTO orphan_radar (
-            radar_id,
-            target_memory_id,
-            workspace_id,
-            suspected_surface_gaps_json,
-            suggested_action,
-            confidence,
-            detected_at,
-            expires_at,
-            requires_review
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          parsed.radar_id,
-          parsed.target_memory_id,
-          parsed.workspace_id,
-          JSON.stringify(parsed.suspected_surface_gaps),
-          parsed.suggested_action,
-          parsed.confidence,
-          parsed.detected_at,
-          parsed.expires_at,
-          parsed.requires_review ? 1 : 0
-        );
+      this.createStatement.run(
+        parsed.radar_id,
+        parsed.target_memory_id,
+        parsed.workspace_id,
+        JSON.stringify(parsed.suspected_surface_gaps),
+        parsed.suggested_action,
+        parsed.confidence,
+        parsed.detected_at,
+        parsed.expires_at,
+        parsed.requires_review ? 1 : 0
+      );
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to create orphan radar ${parsed.radar_id}.`, error);
     }
@@ -82,36 +82,19 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
     const parsed = parseEventLogOrphanRecord(record);
 
     try {
-      const result = this.db.connection
-        .prepare(
-          `INSERT OR IGNORE INTO orphan_radar (
-            radar_id,
-            target_memory_id,
-            target_event_id,
-            target_event_type,
-            expected_table,
-            workspace_id,
-            suspected_surface_gaps_json,
-            suggested_action,
-            confidence,
-            detected_at,
-            expires_at,
-            requires_review
-          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          parsed.radar_id,
-          parsed.audit_event_id,
-          parsed.event_type,
-          parsed.expected_table,
-          parsed.workspace_id,
-          JSON.stringify([`event_log:${parsed.expected_table}:missing_audit_event_id`]),
-          "re_anchor_candidate",
-          1,
-          parsed.detected_at,
-          parsed.expires_at,
-          parsed.requires_review ? 1 : 0
-        );
+      const result = this.createEventLogOrphanStatement.run(
+        parsed.radar_id,
+        parsed.audit_event_id,
+        parsed.event_type,
+        parsed.expected_table,
+        parsed.workspace_id,
+        JSON.stringify([`event_log:${parsed.expected_table}:missing_audit_event_id`]),
+        "re_anchor_candidate",
+        1,
+        parsed.detected_at,
+        parsed.expires_at,
+        parsed.requires_review ? 1 : 0
+      );
       if (result.changes !== 1) {
         throw new StorageError(
           "CONFLICT",
@@ -136,23 +119,7 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
     const parsedRadarId = parseNonEmptyString(radarId, "radar id");
 
     try {
-      const row = this.db.connection
-        .prepare(
-          `SELECT
-             radar_id,
-             target_memory_id,
-             workspace_id,
-             suspected_surface_gaps_json,
-             suggested_action,
-             confidence,
-             detected_at,
-             expires_at,
-             requires_review
-           FROM orphan_radar
-           WHERE radar_id = ? AND target_event_id IS NULL
-           LIMIT 1`
-        )
-        .get(parsedRadarId) as OrphanRadarRow | undefined;
+      const row = this.findByIdStatement.get(parsedRadarId) as OrphanRadarRow | undefined;
 
       return row === undefined ? null : parseRow(row);
     } catch (error) {
@@ -168,24 +135,7 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
     const parsedNow = parseTimestamp(now);
 
     try {
-      const rows = this.db.connection
-        .prepare(
-          `SELECT
-             radar_id,
-             target_memory_id,
-             workspace_id,
-             suspected_surface_gaps_json,
-             suggested_action,
-             confidence,
-             detected_at,
-             expires_at,
-             requires_review
-           FROM orphan_radar
-           WHERE workspace_id = ? AND expires_at > ? AND target_event_id IS NULL
-           ORDER BY detected_at DESC, radar_id ASC
-           LIMIT ${ORPHAN_RADAR_LIST_LIMIT}`
-        )
-        .all(parsedWorkspaceId, parsedNow) as OrphanRadarRow[];
+      const rows = this.findActiveByWorkspaceIdStatement.all(parsedWorkspaceId, parsedNow) as OrphanRadarRow[];
 
       return Object.freeze(rows.map((row) => parseRow(row)));
     } catch (error) {
@@ -202,24 +152,7 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.db.connection
-        .prepare(
-          `SELECT
-             radar_id,
-             target_memory_id,
-             workspace_id,
-             suspected_surface_gaps_json,
-             suggested_action,
-             confidence,
-             detected_at,
-             expires_at,
-             requires_review
-           FROM orphan_radar
-           WHERE target_memory_id = ? AND workspace_id = ?
-           ORDER BY detected_at DESC, radar_id ASC
-           LIMIT ${ORPHAN_RADAR_LIST_LIMIT}`
-        )
-        .all(parsedMemoryId, parsedWorkspaceId) as OrphanRadarRow[];
+      const rows = this.findByTargetMemoryStatement.all(parsedMemoryId, parsedWorkspaceId) as OrphanRadarRow[];
 
       return Object.freeze(rows.map((row) => parseRow(row)));
     } catch (error) {
@@ -235,9 +168,7 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
     const parsedNow = parseTimestamp(now);
 
     try {
-      const result = this.db.connection
-        .prepare("DELETE FROM orphan_radar WHERE expires_at <= ?")
-        .run(parsedNow);
+      const result = this.deleteExpiredStatement.run(parsedNow);
 
       return result.changes;
     } catch (error) {

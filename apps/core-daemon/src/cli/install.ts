@@ -13,7 +13,6 @@ import {
 } from "./config-files.js";
 import {
   ALAYA_SYSEXITS,
-  type AlayaCliArgsSchema,
   type AlayaCliContext,
   type AlayaCliResult,
   type AlayaSubcommandSpec
@@ -39,6 +38,7 @@ import {
   type InstallCommandDependencies,
   type PartialStateEntry
 } from "./install/support.js";
+import { installArgsSchema } from "./install/args.js";
 
 export type { InstallAnswers, InstallCommandDependencies } from "./install/support.js";
 
@@ -60,124 +60,11 @@ async function executeInstall(
   if (args.keychain) {
     return await executeKeychainInstall(ctx, args, deps);
   }
-
   if (!args.nonInteractive || args.answers === null) {
-    // invariant: `alaya install` is configuration-as-data — the supported form
-    // is `--non-interactive <answers-json>` (or `--keychain` for the guided
-    // secret prompt). There is no free-text TTY wizard; surface the JSON form
-    // with a runnable example rather than a "not implemented" dead-end.
-    // cross-file: README.md §Quickstart, apps/core-daemon/src/cli/install/support.ts InstallAnswers
-    ctx.stderr.write(
-      "alaya install takes its answers as JSON.\n" +
-        "Run:  alaya install --non-interactive '<answers-json>'\n" +
-        "      alaya install --keychain                 # guided secret prompt\n" +
-        "Example answers JSON:\n" +
-        '  {"db_path":"~/.local/share/alaya/alaya.db","model_id":"gpt-4.1-mini",' +
-        '"api_key_source":"file","key_file_path":"~/.config/alaya/secrets/openai",' +
-        '"default_workspace":"default","garden_provider_kind":"official_api"}\n' +
-        "Fields are documented in README.md §Quickstart.\n"
-    );
-    return { exitCode: ALAYA_SYSEXITS.USAGE };
+    return reportStructuredInstallUsage(ctx);
   }
 
-  const clock = deps.clock ?? (() => new Date().toISOString());
-  const configDir = deps.configDirResolver?.(ctx) ?? resolveAlayaConfigDir({ env: ctx.env });
-  const paths = resolveAlayaConfigPaths(configDir);
-  const startedAt = clock();
-  const auditPath = buildInstallAuditPath(paths, startedAt);
-  const partialState: PartialStateEntry[] = [];
-  let auditInitialized = false;
-
-  try {
-    await ensurePrivateDirectory(paths.configDir);
-    await ensurePrivateDirectory(paths.auditDir);
-
-    if (!args.force) {
-      const blocking = await detectBlockingPriorAudit(paths);
-      if (blocking !== null) {
-        ctx.stderr.write(
-          `previous install audit ${blocking.fileName} reports status="${blocking.status}"; ` +
-            `partial_state may be unrecovered. Re-run with --force to override.\n`
-        );
-        return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
-      }
-    }
-
-    await writeInstallAudit(auditPath, {
-      status: "started",
-      started_at: startedAt,
-      finished_at: null,
-      config_dir: paths.configDir,
-      partial_state: [],
-      error: null
-    });
-    auditInitialized = true;
-
-    const existing = await readExistingInstallConfig(paths);
-    const resolved = resolveInstallAnswers(args.answers, existing, paths);
-
-    if (resolved.pasted_secret !== null) {
-      await ensurePrivateDirectory(paths.secretsDir);
-      const secretBefore = await readOptional(resolved.pasted_secret.path);
-      await writePrivateTextAtomic(resolved.pasted_secret.path, `${resolved.pasted_secret.value.trimEnd()}\n`, 0o600);
-      partialState.push({ path: resolved.pasted_secret.path, beforeContent: secretBefore ?? undefined });
-    }
-
-    const nextToml = renderAlayaToml(resolved);
-    const nextEnv = renderEnvFile(resolved);
-    const tomlBefore = await readOptional(paths.tomlPath);
-    if (normalizeFile(tomlBefore) !== normalizeFile(nextToml)) {
-      await writePrivateTextAtomic(paths.tomlPath, nextToml, 0o600);
-      partialState.push({ path: paths.tomlPath, beforeContent: tomlBefore ?? undefined });
-    }
-    const envBefore = await readOptional(paths.envPath);
-    if (normalizeFile(envBefore) !== normalizeFile(nextEnv)) {
-      await writePrivateTextAtomic(paths.envPath, nextEnv, 0o600);
-      partialState.push({ path: paths.envPath, beforeContent: envBefore ?? undefined });
-    }
-
-    // Open the configured SQLite DB and run migrations now, so install
-    // reports readiness honestly. If migration fails the catch branch
-    // unwinds the toml/env writes.
-    await ensureSchemaReady(resolved.db_path);
-
-    await writeInstallAudit(auditPath, {
-      status: "succeeded",
-      started_at: startedAt,
-      finished_at: clock(),
-      config_dir: paths.configDir,
-      partial_state: partialState.map((entry) => entry.path),
-      error: null
-    });
-    if (ctx.jsonRequested !== true) {
-      ctx.stdout.write(`installed Alaya config at ${paths.configDir}\n`);
-    }
-    return {
-      exitCode: ALAYA_SYSEXITS.OK,
-      json: {
-        ok: true,
-        config_dir: paths.configDir,
-        toml_path: paths.tomlPath,
-        env_path: paths.envPath,
-        audit_path: auditPath
-      }
-    };
-  } catch (error) {
-    const rollbackErrors = await rollbackPartialState(partialState);
-    if (auditInitialized) {
-      await writeInstallAudit(auditPath, {
-        status: "failed",
-        started_at: startedAt,
-        finished_at: clock(),
-        config_dir: paths.configDir,
-        partial_state: partialState.map((entry) => entry.path),
-        error: sanitizeInstallError(error),
-        rollback_errors: rollbackErrors.length > 0 ? rollbackErrors : undefined
-      }).catch(() => undefined);
-    }
-    ctx.stderr.write(`${sanitizeInstallError(error)}\n`);
-    return { exitCode: ALAYA_SYSEXITS.CANTCREAT };
-  }
+  return await runNonInteractiveInstall(ctx, args, deps);
 }
 
 /**
@@ -199,85 +86,6 @@ async function ensureSchemaReady(dbPath: string): Promise<void> {
     await mkdir(dir, { recursive: true });
   }
   initDatabase({ filename: dbPath });
-}
-
-function installArgsSchema(): AlayaCliArgsSchema<InstallArgs> {
-  return {
-    safeParse(input) {
-      if (!Array.isArray(input) || input.some((token) => typeof token !== "string")) {
-        return {
-          success: false,
-          error: { issues: [{ path: [], message: "Expected a string argument list." }] }
-        };
-      }
-
-      if (input.length === 0) {
-        return { success: true, data: { nonInteractive: false, answers: null, force: false, keychain: false } };
-      }
-
-      const tokens = [...input];
-      const keychainIndex = tokens.indexOf("--keychain");
-      const keychain = keychainIndex >= 0;
-      if (keychain) {
-        tokens.splice(keychainIndex, 1);
-      }
-      const forceIndex = tokens.indexOf("--force");
-      const force = forceIndex >= 0;
-      if (force) {
-        tokens.splice(forceIndex, 1);
-      }
-      const nonInteractiveIndex = tokens.indexOf("--non-interactive");
-      if (nonInteractiveIndex < 0) {
-        if (keychain && tokens.length === 0) {
-          return { success: true, data: { nonInteractive: false, answers: null, force, keychain: true } };
-        }
-        return {
-          success: false,
-          error: { issues: [{ path: [], message: "Usage: install [--keychain] | install --non-interactive [--json] [--force] <answers-json>" }] }
-        };
-      }
-      tokens.splice(nonInteractiveIndex, 1);
-      const jsonIndex = tokens.indexOf("--json");
-      if (jsonIndex >= 0) {
-        tokens.splice(jsonIndex, 1);
-      }
-      if (keychain) {
-        if (tokens.length === 0) {
-          return { success: true, data: { nonInteractive: true, answers: null, force, keychain: true } };
-        }
-        return {
-          success: false,
-          error: {
-            issues: [
-              {
-                path: [],
-                message: "install --keychain --non-interactive does not accept an answer JSON or secret argument."
-              }
-            ]
-          }
-        };
-      }
-      if (tokens.length !== 1) {
-        return {
-          success: false,
-          error: { issues: [{ path: [], message: "install --non-interactive requires one JSON answer object." }] }
-        };
-      }
-
-      try {
-        const parsed = JSON.parse(tokens[0]!) as unknown;
-        if (!isRecord(parsed)) {
-          throw new Error("answers must be an object");
-        }
-        return { success: true, data: { nonInteractive: true, answers: parsed as InstallAnswers, force, keychain } };
-      } catch (error) {
-        return {
-          success: false,
-          error: { issues: [{ path: [], message: sanitizeInstallError(error) }] }
-        };
-      }
-    }
-  };
 }
 
 // Default on-device model id, mirrored from packages/core LocalOnnxEmbeddingClient.
@@ -475,6 +283,192 @@ function requireNonEmpty(value: string | undefined, label: string): string {
   return trimmed;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function reportStructuredInstallUsage(ctx: AlayaCliContext): AlayaCliResult {
+  // invariant: `alaya install` is configuration-as-data — the supported form
+  // is `--non-interactive <answers-json>` (or `--keychain` for the guided
+  // secret prompt). There is no free-text TTY wizard; surface the JSON form
+  // with a runnable example rather than a "not implemented" dead-end.
+  // cross-file: README.md §Quickstart, apps/core-daemon/src/cli/install/support.ts InstallAnswers
+  ctx.stderr.write(
+    "alaya install takes its answers as JSON.\n" +
+      "Run:  alaya install --non-interactive '<answers-json>'\n" +
+      "      alaya install --keychain                 # guided secret prompt\n" +
+      "Example answers JSON:\n" +
+      '  {"db_path":"~/.local/share/alaya/alaya.db","model_id":"gpt-4.1-mini",' +
+      '"api_key_source":"file","key_file_path":"~/.config/alaya/secrets/openai",' +
+      '"default_workspace":"default","garden_provider_kind":"official_api"}\n' +
+      "Fields are documented in README.md §Quickstart.\n"
+  );
+  return { exitCode: ALAYA_SYSEXITS.USAGE };
+}
+
+async function runNonInteractiveInstall(
+  ctx: AlayaCliContext,
+  args: InstallArgs,
+  deps: InstallCommandDependencies
+): Promise<AlayaCliResult> {
+  const session = createInstallSession(ctx, deps);
+  const partialState: PartialStateEntry[] = [];
+  let auditInitialized = false;
+
+  try {
+    const blockingMessage = await prepareInstallSession(session, args.force);
+    if (blockingMessage !== null) {
+      ctx.stderr.write(`${blockingMessage}\n`);
+      return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
+    }
+    await writeInstallAudit(session.auditPath, {
+      status: "started",
+      started_at: session.startedAt,
+      finished_at: null,
+      config_dir: session.paths.configDir,
+      partial_state: [],
+      error: null
+    });
+    auditInitialized = true;
+    await applyInstallConfig(args.answers!, session.paths, partialState);
+    await finalizeInstallSuccess(ctx, session, partialState);
+    return buildInstallSuccessResult(session.paths, session.auditPath);
+  } catch (error) {
+    return await finalizeInstallFailure(ctx, session, partialState, auditInitialized, error);
+  }
+}
+
+function createInstallSession(
+  ctx: AlayaCliContext,
+  deps: InstallCommandDependencies
+) {
+  const clock = deps.clock ?? (() => new Date().toISOString());
+  const configDir = deps.configDirResolver?.(ctx) ?? resolveAlayaConfigDir({ env: ctx.env });
+  const paths = resolveAlayaConfigPaths(configDir);
+  const startedAt = clock();
+  return {
+    clock,
+    paths,
+    startedAt,
+    auditPath: buildInstallAuditPath(paths, startedAt)
+  };
+}
+
+async function prepareInstallSession(
+  session: ReturnType<typeof createInstallSession>,
+  force: boolean
+): Promise<string | null> {
+  await ensurePrivateDirectory(session.paths.configDir);
+  await ensurePrivateDirectory(session.paths.auditDir);
+  if (force) {
+    return null;
+  }
+  const blocking = await detectBlockingPriorAudit(session.paths);
+  if (blocking === null) {
+    return null;
+  }
+  return (
+    `previous install audit ${blocking.fileName} reports status="${blocking.status}"; ` +
+    "partial_state may be unrecovered. Re-run with --force to override."
+  );
+}
+
+async function applyInstallConfig(
+  answers: InstallAnswers,
+  paths: AlayaConfigPaths,
+  partialState: PartialStateEntry[]
+): Promise<void> {
+  const existing = await readExistingInstallConfig(paths);
+  const resolved = resolveInstallAnswers(answers, existing, paths);
+  await persistPastedSecret(paths, resolved.pasted_secret, partialState);
+  await persistInstallTextFiles(paths, resolved, partialState);
+  await ensureSchemaReady(resolved.db_path);
+}
+
+async function persistPastedSecret(
+  paths: AlayaConfigPaths,
+  pastedSecret: ResolvedInstallConfig["pasted_secret"],
+  partialState: PartialStateEntry[]
+): Promise<void> {
+  if (pastedSecret === null) {
+    return;
+  }
+  await ensurePrivateDirectory(paths.secretsDir);
+  const secretBefore = await readOptional(pastedSecret.path);
+  await writePrivateTextAtomic(pastedSecret.path, `${pastedSecret.value.trimEnd()}\n`, 0o600);
+  partialState.push({ path: pastedSecret.path, beforeContent: secretBefore ?? undefined });
+}
+
+async function persistInstallTextFiles(
+  paths: AlayaConfigPaths,
+  resolved: ResolvedInstallConfig,
+  partialState: PartialStateEntry[]
+): Promise<void> {
+  const nextToml = renderAlayaToml(resolved);
+  const nextEnv = renderEnvFile(resolved);
+  await persistInstallFile(paths.tomlPath, nextToml, partialState);
+  await persistInstallFile(paths.envPath, nextEnv, partialState);
+}
+
+async function persistInstallFile(
+  filePath: string,
+  nextContent: string,
+  partialState: PartialStateEntry[]
+): Promise<void> {
+  const before = await readOptional(filePath);
+  if (normalizeFile(before) === normalizeFile(nextContent)) {
+    return;
+  }
+  await writePrivateTextAtomic(filePath, nextContent, 0o600);
+  partialState.push({ path: filePath, beforeContent: before ?? undefined });
+}
+
+async function finalizeInstallSuccess(
+  ctx: AlayaCliContext,
+  session: ReturnType<typeof createInstallSession>,
+  partialState: readonly PartialStateEntry[]
+): Promise<void> {
+  await writeInstallAudit(session.auditPath, {
+    status: "succeeded",
+    started_at: session.startedAt,
+    finished_at: session.clock(),
+    config_dir: session.paths.configDir,
+    partial_state: partialState.map((entry) => entry.path),
+    error: null
+  });
+  if (ctx.jsonRequested !== true) {
+    ctx.stdout.write(`installed Alaya config at ${session.paths.configDir}\n`);
+  }
+}
+
+function buildInstallSuccessResult(paths: AlayaConfigPaths, auditPath: string): AlayaCliResult {
+  return {
+    exitCode: ALAYA_SYSEXITS.OK,
+    json: {
+      ok: true,
+      config_dir: paths.configDir,
+      toml_path: paths.tomlPath,
+      env_path: paths.envPath,
+      audit_path: auditPath
+    }
+  };
+}
+
+async function finalizeInstallFailure(
+  ctx: AlayaCliContext,
+  session: ReturnType<typeof createInstallSession>,
+  partialState: readonly PartialStateEntry[],
+  auditInitialized: boolean,
+  error: unknown
+): Promise<AlayaCliResult> {
+  const rollbackErrors = await rollbackPartialState(partialState);
+  if (auditInitialized) {
+    await writeInstallAudit(session.auditPath, {
+      status: "failed",
+      started_at: session.startedAt,
+      finished_at: session.clock(),
+      config_dir: session.paths.configDir,
+      partial_state: partialState.map((entry) => entry.path),
+      error: sanitizeInstallError(error),
+      rollback_errors: rollbackErrors.length > 0 ? rollbackErrors : undefined
+    }).catch(() => undefined);
+  }
+  ctx.stderr.write(`${sanitizeInstallError(error)}\n`);
+  return { exitCode: ALAYA_SYSEXITS.CANTCREAT };
 }

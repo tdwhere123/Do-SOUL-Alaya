@@ -1,19 +1,26 @@
 import {
-  EvidenceCapsuleSchema,
-  EvidenceHealthStateSchema,
   type EvidenceCapsule,
   type EvidenceHealthState
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
 import {
   mergeFtsLanes,
   queryFtsLane,
   splitFtsLanes,
   tokenizeFtsQuery
 } from "../shared/fts-lane-routing.js";
-import { parseTimestamp } from "../shared/validators.js";
+import {
+  DEFAULT_EVIDENCE_PAGE,
+  EVIDENCE_CAPSULE_SELECT_COLUMNS,
+  parseEvidenceCapsule,
+  parseEvidenceCapsulePage,
+  parseEvidenceCapsuleRow,
+  parseEvidenceHealthState,
+  parseUpdatedAt,
+  type EvidenceCapsuleRow
+} from "./evidence-capsule-mappers.js";
+import { prepareEvidenceCapsuleStatements, type SqliteStatement } from "./evidence-capsule-statements.js";
 
 export interface EvidenceCapsuleKeywordHit {
   readonly object_id: string;
@@ -24,9 +31,24 @@ export interface EvidenceCapsuleRepo {
   create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
   findByIds(objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByRunIdPage?(
+    runId: string,
+    page: EvidenceCapsuleListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByRunId(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByRunIdAll?(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByWorkspaceIdPage?(
+    workspaceId: string,
+    page: EvidenceCapsuleListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByWorkspaceIdAll?(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByHealthPage?(
+    health: EvidenceHealthState,
+    page: EvidenceCapsuleListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByHealth(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByHealthAll?(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]>;
   updateHealth(
     objectId: string,
     health: EvidenceHealthState,
@@ -40,192 +62,41 @@ export interface EvidenceCapsuleRepo {
   ): Promise<readonly EvidenceCapsuleKeywordHit[]>;
 }
 
-interface EvidenceCapsuleRow {
-  readonly object_id: string;
-  readonly object_kind: string;
-  readonly schema_version: number;
-  readonly lifecycle_state: string;
-  readonly created_at: string;
-  readonly updated_at: string;
-  readonly created_by: string;
-  readonly evidence_kind: string;
-  readonly semantic_anchor: string;
-  readonly event_anchor: string | null;
-  readonly physical_anchor: string | null;
-  readonly evidence_health_state: string;
-  readonly gist: string;
-  readonly excerpt: string | null;
-  readonly source_hash: string | null;
-  readonly run_id: string;
-  readonly workspace_id: string;
-  readonly surface_id: string | null;
+export interface EvidenceCapsuleListPageOptions {
+  readonly limit: number;
+  readonly offset: number;
 }
 
-// see also: ./shared/fts-lane-routing.ts — the porter/trigram dual-lane
-// query split and ordinal-rank merge shared with synthesis-capsule-repo.ts.
+// see also: packages/protocol/src/soul/fts-search-policy.ts — porter/trigram
+// split and ordinal-rank merge shared with synthesis-capsule-repo.ts.
 export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
-  private readonly createStatement;
-  private readonly findByIdStatement;
-  private readonly findByRunIdStatement;
-  private readonly findByWorkspaceIdStatement;
-  private readonly findByHealthStatement;
-  private readonly updateHealthStatement;
+  private readonly createStatement: SqliteStatement;
+  private readonly findByIdStatement: SqliteStatement;
+  private readonly findByRunIdStatement: SqliteStatement;
+  private readonly findByRunIdPagedStatement: SqliteStatement;
+  private readonly findByWorkspaceIdStatement: SqliteStatement;
+  private readonly findByWorkspaceIdPagedStatement: SqliteStatement;
+  private readonly findByHealthStatement: SqliteStatement;
+  private readonly findByHealthPagedStatement: SqliteStatement;
+  private readonly updateHealthStatement: SqliteStatement;
   // see also: 078-evidence-capsule-fts-dual.sql — porter unicode61 word lane.
-  private readonly searchByKeywordStatement;
+  private readonly searchByKeywordStatement: SqliteStatement;
   // see also: 078-evidence-capsule-fts-dual.sql — trigram CJK/substring lane.
-  private readonly searchByKeywordTrigramStatement;
+  private readonly searchByKeywordTrigramStatement: SqliteStatement;
 
   public constructor(private readonly db: StorageDatabase) {
-    this.createStatement = db.connection.prepare(`
-      INSERT INTO evidence_capsules (
-        object_id,
-        object_kind,
-        schema_version,
-        lifecycle_state,
-        created_at,
-        updated_at,
-        created_by,
-        evidence_kind,
-        semantic_anchor,
-        event_anchor,
-        physical_anchor,
-        evidence_health_state,
-        gist,
-        excerpt,
-        source_hash,
-        run_id,
-        workspace_id,
-        surface_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    this.findByIdStatement = db.connection.prepare(`
-      SELECT
-        object_id,
-        object_kind,
-        schema_version,
-        lifecycle_state,
-        created_at,
-        updated_at,
-        created_by,
-        evidence_kind,
-        semantic_anchor,
-        event_anchor,
-        physical_anchor,
-        evidence_health_state,
-        gist,
-        excerpt,
-        source_hash,
-        run_id,
-        workspace_id,
-        surface_id
-      FROM evidence_capsules
-      WHERE object_id = ?
-      LIMIT 1
-    `);
-    this.findByRunIdStatement = db.connection.prepare(`
-      SELECT
-        object_id,
-        object_kind,
-        schema_version,
-        lifecycle_state,
-        created_at,
-        updated_at,
-        created_by,
-        evidence_kind,
-        semantic_anchor,
-        event_anchor,
-        physical_anchor,
-        evidence_health_state,
-        gist,
-        excerpt,
-        source_hash,
-        run_id,
-        workspace_id,
-        surface_id
-      FROM evidence_capsules
-      WHERE run_id = ?
-      ORDER BY created_at ASC, object_id ASC
-    `);
-    this.findByWorkspaceIdStatement = db.connection.prepare(`
-      SELECT
-        object_id,
-        object_kind,
-        schema_version,
-        lifecycle_state,
-        created_at,
-        updated_at,
-        created_by,
-        evidence_kind,
-        semantic_anchor,
-        event_anchor,
-        physical_anchor,
-        evidence_health_state,
-        gist,
-        excerpt,
-        source_hash,
-        run_id,
-        workspace_id,
-        surface_id
-      FROM evidence_capsules
-      WHERE workspace_id = ?
-      ORDER BY created_at ASC, object_id ASC
-    `);
-    this.findByHealthStatement = db.connection.prepare(`
-      SELECT
-        object_id,
-        object_kind,
-        schema_version,
-        lifecycle_state,
-        created_at,
-        updated_at,
-        created_by,
-        evidence_kind,
-        semantic_anchor,
-        event_anchor,
-        physical_anchor,
-        evidence_health_state,
-        gist,
-        excerpt,
-        source_hash,
-        run_id,
-        workspace_id,
-        surface_id
-      FROM evidence_capsules
-      WHERE evidence_health_state = ?
-      ORDER BY created_at ASC, object_id ASC
-    `);
-    this.updateHealthStatement = db.connection.prepare(`
-      UPDATE evidence_capsules
-      SET evidence_health_state = ?, updated_at = ?
-      WHERE object_id = ?
-    `);
-    this.searchByKeywordStatement = db.connection.prepare(`
-      SELECT
-        evidence_capsule_fts.object_id,
-        bm25(evidence_capsule_fts) AS raw_rank
-      FROM evidence_capsule_fts
-      JOIN evidence_capsules ON evidence_capsules.object_id = evidence_capsule_fts.object_id
-      WHERE
-        evidence_capsule_fts.workspace_id = ?
-        AND evidence_capsule_fts MATCH ?
-        AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
-      ORDER BY raw_rank ASC, evidence_capsule_fts.object_id ASC
-      LIMIT ?
-    `);
-    this.searchByKeywordTrigramStatement = db.connection.prepare(`
-      SELECT
-        evidence_capsule_fts_trigram.object_id,
-        bm25(evidence_capsule_fts_trigram) AS raw_rank
-      FROM evidence_capsule_fts_trigram
-      JOIN evidence_capsules
-        ON evidence_capsules.object_id = evidence_capsule_fts_trigram.object_id
-      WHERE
-        evidence_capsule_fts_trigram.workspace_id = ?
-        AND evidence_capsule_fts_trigram MATCH ?
-        AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
-      ORDER BY raw_rank ASC, evidence_capsule_fts_trigram.object_id ASC
-      LIMIT ?
-    `);
+    const statements = prepareEvidenceCapsuleStatements(db);
+    this.createStatement = statements.createStatement;
+    this.findByIdStatement = statements.findByIdStatement;
+    this.findByRunIdStatement = statements.findByRunIdStatement;
+    this.findByRunIdPagedStatement = statements.findByRunIdPagedStatement;
+    this.findByWorkspaceIdStatement = statements.findByWorkspaceIdStatement;
+    this.findByWorkspaceIdPagedStatement = statements.findByWorkspaceIdPagedStatement;
+    this.findByHealthStatement = statements.findByHealthStatement;
+    this.findByHealthPagedStatement = statements.findByHealthPagedStatement;
+    this.updateHealthStatement = statements.updateHealthStatement;
+    this.searchByKeywordStatement = statements.searchByKeywordStatement;
+    this.searchByKeywordTrigramStatement = statements.searchByKeywordTrigramStatement;
   }
 
   public async searchByKeyword(
@@ -325,25 +196,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
         const chunk = uniqueIds.slice(offset, offset + 500);
         const placeholders = chunk.map(() => "?").join(", ");
         const statement = this.db.connection.prepare(`
-          SELECT
-            object_id,
-            object_kind,
-            schema_version,
-            lifecycle_state,
-            created_at,
-            updated_at,
-            created_by,
-            evidence_kind,
-            semantic_anchor,
-            event_anchor,
-            physical_anchor,
-            evidence_health_state,
-            gist,
-            excerpt,
-            source_hash,
-            run_id,
-            workspace_id,
-            surface_id
+          SELECT${EVIDENCE_CAPSULE_SELECT_COLUMNS}
           FROM evidence_capsules
           WHERE object_id IN (${placeholders})
           ORDER BY created_at ASC, object_id ASC
@@ -357,28 +210,76 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   }
 
   public async findByRunId(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    return await this.findByRunIdPage(runId, DEFAULT_EVIDENCE_PAGE);
+  }
+
+  public async findByRunIdAll(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
     try {
       const rows = this.findByRunIdStatement.all(runId) as EvidenceCapsuleRow[];
       return rows.map((row) => parseEvidenceCapsuleRow(row));
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to list evidence capsules for run ${runId}.`, error);
+      throw new StorageError("QUERY_FAILED", `Failed to list all evidence capsules for run ${runId}.`, error);
+    }
+  }
+
+  public async findByRunIdPage(
+    runId: string,
+    page: EvidenceCapsuleListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    const parsedPage = parseEvidenceCapsulePage(page);
+
+    try {
+      const rows = this.findByRunIdPagedStatement.all(runId, parsedPage.limit, parsedPage.offset) as EvidenceCapsuleRow[];
+      return rows.map((row) => parseEvidenceCapsuleRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to list paged evidence capsules for run ${runId}.`, error);
     }
   }
 
   public async findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    return await this.findByWorkspaceIdPage(workspaceId, DEFAULT_EVIDENCE_PAGE);
+  }
+
+  public async findByWorkspaceIdAll(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
     try {
       const rows = this.findByWorkspaceIdStatement.all(workspaceId) as EvidenceCapsuleRow[];
       return rows.map((row) => parseEvidenceCapsuleRow(row));
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
-        `Failed to list evidence capsules for workspace ${workspaceId}.`,
+        `Failed to list all evidence capsules for workspace ${workspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async findByWorkspaceIdPage(
+    workspaceId: string,
+    page: EvidenceCapsuleListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    const parsedPage = parseEvidenceCapsulePage(page);
+
+    try {
+      const rows = this.findByWorkspaceIdPagedStatement.all(
+        workspaceId,
+        parsedPage.limit,
+        parsedPage.offset
+      ) as EvidenceCapsuleRow[];
+      return rows.map((row) => parseEvidenceCapsuleRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list paged evidence capsules for workspace ${workspaceId}.`,
         error
       );
     }
   }
 
   public async findByHealth(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    return await this.findByHealthPage(health, DEFAULT_EVIDENCE_PAGE);
+  }
+
+  public async findByHealthAll(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]> {
     const parsedHealth = parseEvidenceHealthState(health);
 
     try {
@@ -387,7 +288,30 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
-        `Failed to list evidence capsules by health state ${parsedHealth}.`,
+        `Failed to list all evidence capsules by health state ${parsedHealth}.`,
+        error
+      );
+    }
+  }
+
+  public async findByHealthPage(
+    health: EvidenceHealthState,
+    page: EvidenceCapsuleListPageOptions
+  ): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    const parsedHealth = parseEvidenceHealthState(health);
+    const parsedPage = parseEvidenceCapsulePage(page);
+
+    try {
+      const rows = this.findByHealthPagedStatement.all(
+        parsedHealth,
+        parsedPage.limit,
+        parsedPage.offset
+      ) as EvidenceCapsuleRow[];
+      return rows.map((row) => parseEvidenceCapsuleRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list paged evidence capsules by health state ${parsedHealth}.`,
         error
       );
     }
@@ -424,50 +348,3 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     }
   }
 }
-
-function parseEvidenceCapsule(value: EvidenceCapsule): Readonly<EvidenceCapsule> {
-  try {
-    return deepFreeze(EvidenceCapsuleSchema.parse(value));
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate evidence capsule.", error);
-  }
-}
-
-function parseEvidenceCapsuleRow(row: EvidenceCapsuleRow): Readonly<EvidenceCapsule> {
-  try {
-    return deepFreeze(
-      EvidenceCapsuleSchema.parse({
-        object_id: row.object_id,
-        object_kind: row.object_kind,
-        schema_version: row.schema_version,
-        lifecycle_state: row.lifecycle_state,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        created_by: row.created_by,
-        evidence_kind: row.evidence_kind,
-        semantic_anchor: JSON.parse(row.semantic_anchor),
-        event_anchor: row.event_anchor === null ? null : JSON.parse(row.event_anchor),
-        physical_anchor: row.physical_anchor === null ? null : JSON.parse(row.physical_anchor),
-        evidence_health_state: row.evidence_health_state,
-        gist: row.gist,
-        excerpt: row.excerpt,
-        source_hash: row.source_hash,
-        run_id: row.run_id,
-        workspace_id: row.workspace_id,
-        surface_id: row.surface_id
-      })
-    );
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate evidence capsule row.", error);
-  }
-}
-
-function parseEvidenceHealthState(health: EvidenceHealthState): EvidenceHealthState {
-  try {
-    return EvidenceHealthStateSchema.parse(health);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate evidence health state.", error);
-  }
-}
-
-const parseUpdatedAt = parseTimestamp;

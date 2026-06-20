@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import {
   access,
   mkdir,
@@ -22,6 +21,24 @@ import {
 } from "../schema/kpi-schema.js";
 import { releaseHardGateAllowsLatestPassing } from "../gates/release-gates.js";
 import { evaluateSeedExtractionReleaseBlocker } from "../gates/seed-extraction-blocker.js";
+import {
+  FINDINGS_FILENAME,
+  KPI_FILENAME,
+  LATEST_BASELINE_FILENAME,
+  LATEST_PASSING_FILENAME,
+  LATEST_RUN_FILENAME,
+  LIVE_GATES_FILENAME,
+  REPORT_FILENAME,
+  latestPointerFilename,
+  latestProviderPointerFilename,
+  validateSidecarFilename,
+  writeLegacyBaselinePointer,
+  writePointer,
+  type HistoryPointerKind
+} from "./history-files.js";
+import { liveGatesSidecarAllowsLatestPassing } from "./history-live-gates.js";
+
+export type { HistoryPointerKind } from "./history-files.js";
 
 export interface HistoryLayout {
   readonly historyRoot: string;
@@ -43,21 +60,6 @@ export interface HistorySidecar {
 export interface WriteEntryOptions {
   readonly sidecars?: readonly HistorySidecar[];
 }
-
-export type HistoryPointerKind = "run" | "passing";
-
-const KPI_FILENAME = "kpi.json";
-const REPORT_FILENAME = "report.md";
-const FINDINGS_FILENAME = "findings.md";
-const LATEST_BASELINE_FILENAME = "latest-baseline.json";
-const LATEST_BASELINE_EMBEDDING_ON_FILENAME = "latest-baseline-embedding-on.json";
-const LATEST_RUN_FILENAME = "latest-run.json";
-const LATEST_PASSING_FILENAME = "latest-passing.json";
-const LATEST_RUN_EMBEDDING_OFF_FILENAME = "latest-run-embedding-off.json";
-const LATEST_RUN_EMBEDDING_ON_FILENAME = "latest-run-embedding-on.json";
-const LATEST_PASSING_EMBEDDING_OFF_FILENAME = "latest-passing-embedding-off.json";
-const LATEST_PASSING_EMBEDDING_ON_FILENAME = "latest-passing-embedding-on.json";
-const LIVE_GATES_FILENAME = "live-gates.json";
 
 export function entrySlug(
   runAt: Date,
@@ -445,91 +447,12 @@ async function entryAllowsLatestPassing(
     return false;
   }
   if (payload.bench_name === "live" && payload.split === "strict-real") {
-    return await liveGatesSidecarAllowsLatestPassing(layout, benchName, slug);
+    return await liveGatesSidecarAllowsLatestPassing(
+      path.join(layout.historyRoot, benchName, slug, LIVE_GATES_FILENAME),
+      isNotFound
+    );
   }
   return releaseHardGateAllowsLatestPassing(payload);
-}
-
-async function liveGatesSidecarAllowsLatestPassing(
-  layout: HistoryLayout,
-  benchName: BenchName,
-  slug: string
-): Promise<boolean> {
-  const sidecarPath = path.join(layout.historyRoot, benchName, slug, LIVE_GATES_FILENAME);
-  try {
-    const raw = await readFile(sidecarPath, "utf8");
-    return liveGatesJsonAllowsLatestPassing(JSON.parse(raw) as unknown);
-  } catch (error) {
-    if (isNotFound(error) || error instanceof SyntaxError) return false;
-    throw error;
-  }
-}
-
-function liveGatesJsonAllowsLatestPassing(sidecar: unknown): boolean {
-  if (!isRecord(sidecar)) return false;
-  if (sidecar.status !== "pass") return false;
-  if (typeof sidecar.latest_run_id !== "string" || sidecar.latest_run_id.length === 0) {
-    return false;
-  }
-  if (!Array.isArray(sidecar.gates) || sidecar.gates.length === 0) return false;
-  return sidecar.gates.some(
-    (gate) =>
-      isRecord(gate) &&
-      typeof gate.id === "string" &&
-      gate.id.length > 0 &&
-      gate.pass === true
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-async function writePointer(
-  benchRoot: string,
-  filename: string,
-  slug: string,
-  kpiPath: string
-): Promise<void> {
-  const pointerPath = path.join(benchRoot, filename);
-  // Pointer tmp suffix combines pid + 4-byte random (8 hex chars,
-  // ~4.3e9 namespace) so two same-PID concurrent writeEntry calls
-  // (worker_threads) cannot collide on the tmp filename even though
-  // Node's main thread is single-runtime.
-  const pointerTmp = `${pointerPath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-  await writeFile(
-    pointerTmp,
-    JSON.stringify({ slug, kpi_path: path.relative(benchRoot, kpiPath) }, null, 2) + "\n",
-    "utf8"
-  );
-  await rename(pointerTmp, pointerPath);
-}
-
-async function writeLegacyBaselinePointer(
-  benchRoot: string,
-  embeddingProvider: string,
-  slug: string,
-  kpiPath: string
-): Promise<void> {
-  await writePointer(benchRoot, LATEST_BASELINE_FILENAME, slug, kpiPath);
-  if (embeddingProvider !== "none") {
-    await writePointer(benchRoot, LATEST_BASELINE_EMBEDDING_ON_FILENAME, slug, kpiPath);
-  }
-}
-
-function latestPointerFilename(kind: HistoryPointerKind): string {
-  return kind === "run" ? LATEST_RUN_FILENAME : LATEST_PASSING_FILENAME;
-}
-
-function latestProviderPointerFilename(
-  kind: HistoryPointerKind,
-  embeddingProvider: string
-): string {
-  const embeddingOn = embeddingProvider !== "none";
-  if (kind === "run") {
-    return embeddingOn ? LATEST_RUN_EMBEDDING_ON_FILENAME : LATEST_RUN_EMBEDDING_OFF_FILENAME;
-  }
-  return embeddingOn ? LATEST_PASSING_EMBEDDING_ON_FILENAME : LATEST_PASSING_EMBEDDING_OFF_FILENAME;
 }
 
 export async function readPrevious(
@@ -552,30 +475,4 @@ function isNotFound(error: unknown): boolean {
     "code" in error &&
     (error as { code: string }).code === "ENOENT"
   );
-}
-
-function validateSidecarFilename(filename: string): void {
-  const reserved = new Set([
-    KPI_FILENAME,
-    REPORT_FILENAME,
-    FINDINGS_FILENAME,
-    LATEST_BASELINE_FILENAME,
-    LATEST_BASELINE_EMBEDDING_ON_FILENAME,
-    LATEST_RUN_FILENAME,
-    LATEST_PASSING_FILENAME,
-    LATEST_RUN_EMBEDDING_OFF_FILENAME,
-    LATEST_RUN_EMBEDDING_ON_FILENAME,
-    LATEST_PASSING_EMBEDDING_OFF_FILENAME,
-    LATEST_PASSING_EMBEDDING_ON_FILENAME
-  ]);
-  if (
-    filename.length === 0 ||
-    filename.includes("/") ||
-    filename.includes("\\") ||
-    filename.includes("..") ||
-    filename !== path.basename(filename) ||
-    reserved.has(filename)
-  ) {
-    throw new Error(`invalid sidecar filename: '${filename}'`);
-  }
 }

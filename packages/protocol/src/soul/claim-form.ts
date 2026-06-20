@@ -116,6 +116,7 @@ export const ClaimFormSchema = PersistentObjectEnvelopeSchema.unwrap()
     workspace_id: NonEmptyStringSchema,
     claim_status: ClaimLifecycleStateSchema
   })
+  .strict()
   .readonly();
 
 export type ClaimKind = z.infer<typeof ClaimKindSchema>;

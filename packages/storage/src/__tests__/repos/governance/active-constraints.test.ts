@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  ClaimLifecycleState,
   FormationKind,
   MemoryDimension,
   PathGovernanceClass,
@@ -11,8 +10,6 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
-  canonicalGovernanceSubject,
-  type ClaimForm,
   type MemoryEntry,
   type PathRelation
 } from "@do-soul/alaya-protocol";
@@ -34,160 +31,58 @@ afterEach(() => {
 });
 
 describe("findActiveConstraints", () => {
-  it("returns governance-backed constraints and excludes draft dimension-only memories", async () => {
+  it("reads full active path history before applying the output cap", async () => {
     const { memoryRepo, claimFormRepo, pathRelationRepo } = await createRepos();
-    const dimensionOnlyConstraints = Array.from({ length: 2 }, (_, index) =>
-      createMemoryEntry({
-        object_id: constraintId(index + 1),
-        dimension: MemoryDimension.CONSTRAINT,
-        content: `Draft-only hard rule ${index + 1}`,
-        created_at: `2026-05-18T00:0${index}:00.000Z`,
-        updated_at: `2026-05-18T00:0${index}:00.000Z`
-      })
-    );
-    for (const memory of dimensionOnlyConstraints) {
-      await memoryRepo.create(memory);
+    const strictMemoryId = "10000000-0000-4000-8000-000000009999";
+
+    for (let index = 0; index < 500; index += 1) {
+      const timestamp = new Date(Date.UTC(2026, 4, 18, 1, 0, index)).toISOString();
+      await pathRelationRepo.create(createPathRelation({
+        path_id: `hint-path-${index}`,
+        anchors: {
+          source_anchor: { kind: "object", object_id: `missing-hint-${index}` },
+          target_anchor: { kind: "object", object_id: `missing-target-${index}` }
+        },
+        created_at: timestamp,
+        updated_at: timestamp
+      }));
     }
-    await claimFormRepo.create(createClaimForm({
-      object_id: "20000000-0000-4000-8000-000000000010",
-      source_object_refs: [constraintId(1)],
-      claim_status: ClaimLifecycleState.DRAFT
-    }));
 
     await memoryRepo.create(createMemoryEntry({
-      object_id: CLAIM_BACKED_MEMORY_ID,
-      dimension: MemoryDimension.PROCEDURE,
-      content: "Procedure backed by active claim.",
-      created_at: "2026-05-18T00:10:00.000Z",
-      updated_at: "2026-05-18T00:10:00.000Z"
-    }));
-    await claimFormRepo.create(createClaimForm({
-      object_id: "20000000-0000-4000-8000-000000000001",
-      source_object_refs: [CLAIM_BACKED_MEMORY_ID],
-      claim_status: ClaimLifecycleState.ACTIVE
-    }));
-    await memoryRepo.create(createMemoryEntry({
-      object_id: CLAIM_BACKED_CONSTRAINT_ID,
-      dimension: MemoryDimension.CONSTRAINT,
-      content: "Constraint backed by a winning claim.",
-      created_at: "2026-05-18T00:09:00.000Z",
-      updated_at: "2026-05-18T00:09:00.000Z"
-    }));
-    await claimFormRepo.create(createClaimForm({
-      object_id: "20000000-0000-4000-8000-000000000003",
-      source_object_refs: [CLAIM_BACKED_CONSTRAINT_ID],
-      claim_status: ClaimLifecycleState.WINNER
-    }));
-
-    await memoryRepo.create(createMemoryEntry({
-      object_id: PATH_BACKED_MEMORY_ID,
+      object_id: strictMemoryId,
       dimension: MemoryDimension.FACT,
-      content: "Fact backed by a strictly governed path.",
-      created_at: "2026-05-18T00:11:00.000Z",
-      updated_at: "2026-05-18T00:11:00.000Z"
+      content: "Strict path candidate beyond the default active page.",
+      created_at: "2026-05-18T01:10:00.000Z",
+      updated_at: "2026-05-18T01:10:00.000Z"
     }));
     await pathRelationRepo.create(createPathRelation({
-      path_id: "strict-path-1",
+      path_id: "strict-path-after-default-cap",
       anchors: {
-        source_anchor: { kind: "object", object_id: PATH_BACKED_MEMORY_ID },
-        target_anchor: { kind: "object", object_id: "missing-memory" }
+        source_anchor: { kind: "object", object_id: strictMemoryId },
+        target_anchor: { kind: "object", object_id: "missing-strict-target" }
       },
       legitimacy: {
         evidence_basis: ["evidence-1"],
         governance_class: PathGovernanceClass.STRICTLY_GOVERNED
-      }
-    }));
-
-    await memoryRepo.create(createMemoryEntry({
-      object_id: ARCHIVED_CLAIM_BACKED_MEMORY_ID,
-      dimension: MemoryDimension.PROCEDURE,
-      content: "Archived procedure backed by active claim.",
-      lifecycle_state: "archived",
-      created_at: "2026-05-18T00:12:00.000Z",
-      updated_at: "2026-05-18T00:12:00.000Z"
-    }));
-    await claimFormRepo.create(createClaimForm({
-      object_id: "20000000-0000-4000-8000-000000000002",
-      source_object_refs: [ARCHIVED_CLAIM_BACKED_MEMORY_ID],
-      claim_status: ClaimLifecycleState.ACTIVE
-    }));
-    await memoryRepo.create(createMemoryEntry({
-      object_id: TOMBSTONED_PATH_BACKED_MEMORY_ID,
-      dimension: MemoryDimension.FACT,
-      content: "Tombstoned fact backed by a strictly governed path.",
-      retention_state: "tombstoned",
-      created_at: "2026-05-18T00:13:00.000Z",
-      updated_at: "2026-05-18T00:13:00.000Z"
-    }));
-    await pathRelationRepo.create(createPathRelation({
-      path_id: "strict-path-2",
-      anchors: {
-        source_anchor: { kind: "object", object_id: TOMBSTONED_PATH_BACKED_MEMORY_ID },
-        target_anchor: { kind: "object", object_id: "missing-memory-2" }
       },
-      legitimacy: {
-        evidence_basis: ["evidence-1"],
-        governance_class: PathGovernanceClass.STRICTLY_GOVERNED
-      }
-    }));
-    await memoryRepo.create(createMemoryEntry({
-      object_id: ARCHIVED_DIMENSION_MEMORY_ID,
-      dimension: MemoryDimension.HAZARD,
-      content: "Archived hazard should not surface as active.",
-      lifecycle_state: "archived",
-      created_at: "2026-05-18T00:14:00.000Z",
-      updated_at: "2026-05-18T00:14:00.000Z"
+      created_at: "2026-05-18T01:10:00.000Z",
+      updated_at: "2026-05-18T01:10:00.000Z"
     }));
 
     const result = await findActiveConstraints({
       workspaceId: "workspace-1",
       memoryRepo,
       claimFormRepo,
-      pathRelationRepo
-    });
-
-    expect(result.total_count).toBe(3);
-    expect(result.constraints.map((record) => record.memory.object_id)).toEqual([
-      CLAIM_BACKED_CONSTRAINT_ID,
-      CLAIM_BACKED_MEMORY_ID,
-      PATH_BACKED_MEMORY_ID
-    ]);
-    expect(result.constraints.map((record) => record.source_channels)).toEqual([
-      ["claim_status"],
-      ["claim_status"],
-      ["path_relation"]
-    ]);
-    expect(result.constraints.find((record) => record.memory.object_id === CLAIM_BACKED_MEMORY_ID)?.claim_status)
-      .toBe(ClaimLifecycleState.ACTIVE);
-    expect(result.constraints.find((record) => record.memory.object_id === CLAIM_BACKED_CONSTRAINT_ID)?.claim_status)
-      .toBe(ClaimLifecycleState.WINNER);
-    expect(result.constraints.find((record) => record.memory.object_id === PATH_BACKED_MEMORY_ID)?.governance_class)
-      .toBe(PathGovernanceClass.STRICTLY_GOVERNED);
-    expect(result.constraints.map((record) => record.memory.object_id)).not.toContain(constraintId(1));
-    expect(result.constraints.map((record) => record.memory.object_id)).not.toContain(constraintId(2));
-
-    const capped = await findActiveConstraints({
-      workspaceId: "workspace-1",
-      memoryRepo,
-      claimFormRepo,
       pathRelationRepo,
       cap: 1
     });
-    expect(capped.total_count).toBe(3);
-    expect(capped.constraints).toHaveLength(1);
+
+    expect(result.total_count).toBe(1);
+    expect(result.constraints).toHaveLength(1);
+    expect(result.constraints[0]?.memory.object_id).toBe(strictMemoryId);
+    expect(result.constraints[0]?.source_channels).toEqual(["path_relation"]);
   });
 });
-
-const CLAIM_BACKED_MEMORY_ID = "10000000-0000-4000-8000-000000000010";
-const CLAIM_BACKED_CONSTRAINT_ID = "10000000-0000-4000-8000-000000000015";
-const PATH_BACKED_MEMORY_ID = "10000000-0000-4000-8000-000000000011";
-const ARCHIVED_CLAIM_BACKED_MEMORY_ID = "10000000-0000-4000-8000-000000000012";
-const TOMBSTONED_PATH_BACKED_MEMORY_ID = "10000000-0000-4000-8000-000000000013";
-const ARCHIVED_DIMENSION_MEMORY_ID = "10000000-0000-4000-8000-000000000014";
-
-function constraintId(index: number): string {
-  return `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
-}
 
 async function createRepos(): Promise<{
   readonly memoryRepo: SqliteMemoryEntryRepo;
@@ -253,30 +148,6 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     reinforcement_count: null,
     contradiction_count: null,
     superseded_by: null,
-    ...overrides
-  };
-}
-
-function createClaimForm(overrides: Partial<ClaimForm> = {}): ClaimForm {
-  return {
-    object_id: "20000000-0000-4000-8000-000000000000",
-    object_kind: "claim_form",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-05-18T00:00:00.000Z",
-    updated_at: "2026-05-18T00:00:00.000Z",
-    created_by: "user",
-    governance_subject: canonicalGovernanceSubject("workflow", { area: "repo" }),
-    claim_kind: "constraint",
-    scope_class: "project",
-    enforcement_level: "strict",
-    origin_tier: "user_explicit",
-    precedence_basis: "authority",
-    proposition_digest: "Procedure is active.",
-    evidence_refs: ["evidence-1"],
-    source_object_refs: ["10000000-0000-4000-8000-000000000001"],
-    workspace_id: "workspace-1",
-    claim_status: ClaimLifecycleState.ACTIVE,
     ...overrides
   };
 }

@@ -22,25 +22,7 @@ interface CandidateProposalInput {
   readonly unresolvedAfterApply?: readonly string[];
 }
 
-export function createPendingCandidateProposal(context: GardenDataPortFactoryContext, input: CandidateProposalInput): string {
-  const proposalId = context.generateId();
-  const runtimeId = context.generateId();
-  const optionId = context.generateId();
-  const nowIso = context.now();
-  const proposalOptions = JSON.stringify([
-    {
-      option_id: optionId,
-      option_kind: ProposalOptionKind.REQUEST_CONFIRMATION,
-      preserves_protected_constraints: true,
-      dropped_candidates: [...(input.droppedCandidates ?? [])],
-      unresolved_after_apply: [...(input.unresolvedAfterApply ?? [])],
-      requires_confirmation: true
-    }
-  ]);
-
-  context.database.connection
-    .prepare(
-      `INSERT INTO proposals (
+const INSERT_PENDING_CANDIDATE_PROPOSAL_SQL = `INSERT INTO proposals (
         runtime_id,
         object_kind,
         proposal_id,
@@ -55,8 +37,17 @@ export function createPendingCandidateProposal(context: GardenDataPortFactoryCon
         last_updated_at,
         workspace_id,
         run_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+export function createPendingCandidateProposal(context: GardenDataPortFactoryContext, input: CandidateProposalInput): string {
+  const proposalId = context.generateId();
+  const runtimeId = context.generateId();
+  const optionId = context.generateId();
+  const nowIso = context.now();
+  const proposalOptions = buildCandidateProposalOptions(optionId, input);
+
+  context.database.connection
+    .prepare(INSERT_PENDING_CANDIDATE_PROPOSAL_SQL)
     .run(
       runtimeId,
       ControlPlaneObjectKind.PROPOSAL,
@@ -75,6 +66,19 @@ export function createPendingCandidateProposal(context: GardenDataPortFactoryCon
     );
 
   return proposalId;
+}
+
+function buildCandidateProposalOptions(optionId: string, input: CandidateProposalInput): string {
+  return JSON.stringify([
+    {
+      option_id: optionId,
+      option_kind: ProposalOptionKind.REQUEST_CONFIRMATION,
+      preserves_protected_constraints: true,
+      dropped_candidates: [...(input.droppedCandidates ?? [])],
+      unresolved_after_apply: [...(input.unresolvedAfterApply ?? [])],
+      requires_confirmation: true
+    }
+  ]);
 }
 
 export function addMilliseconds(isoTimestamp: string, deltaMs: number): string {

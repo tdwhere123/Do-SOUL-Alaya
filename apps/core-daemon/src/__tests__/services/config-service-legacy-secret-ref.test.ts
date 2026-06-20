@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { EventPublisher } from "@do-soul/alaya-core";
+import { RuntimeGardenComputeConfigSchema } from "@do-soul/alaya-protocol";
 import { initDatabase, SqliteConfigRepo, SqliteEventLogRepo } from "@do-soul/alaya-storage";
 import { createConfigService } from "../../services/config-service.js";
 import { resolveAlayaConfigPaths } from "../../cli/config-files.js";
@@ -10,13 +11,13 @@ import { resolveAlayaConfigPaths } from "../../cli/config-files.js";
 describe("config-service legacy secret_ref compatibility", () => {
   it("keeps a persisted legacy keychain ref schema-compatible for the resolver boundary", async () => {
     const harness = await createHarness();
-    harness.configRepo.set("runtime:garden-compute", {
+    harness.configRepo.setParsed("runtime:garden-compute", {
       provider_kind: "official_api",
       provider_url: null,
       secret_ref: "keychain:alaya: openai",
       model_id: "gpt-4.1-mini",
       enabled: true
-    });
+    }, RuntimeGardenComputeConfigSchema);
 
     const config = await harness.configService.getRuntimeGardenComputeConfig();
 
@@ -28,13 +29,13 @@ describe("config-service legacy secret_ref compatibility", () => {
 
   it("does not warn when the persisted ref is valid", async () => {
     const harness = await createHarness();
-    harness.configRepo.set("runtime:garden-compute", {
+    harness.configRepo.setParsed("runtime:garden-compute", {
       provider_kind: "official_api",
       provider_url: null,
       secret_ref: "keychain:alaya:openai",
       model_id: "gpt-4.1-mini",
       enabled: true
-    });
+    }, RuntimeGardenComputeConfigSchema);
 
     const config = await harness.configService.getRuntimeGardenComputeConfig();
 

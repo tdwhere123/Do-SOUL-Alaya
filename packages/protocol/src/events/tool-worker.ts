@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 import { WorkerRunStateSchema } from "../runtime/runtime-run.js";
 import { GovernanceSubjectSchema } from "../soul/governance-subject.js";
 import { ToolAffectedPathsSchema } from "../tools/tool-affected-path.js";
@@ -37,11 +42,11 @@ export const WorkerStateChangedSuspendReasonSchema = z.enum([
 
 export const ToolIntentCreatedPayloadSchema = z
   .object({
-    executionId: NonEmptyStringSchema,
-    toolId: NonEmptyStringSchema,
+    executionId: BoundedIdSchema,
+    toolId: BoundedLabelSchema,
     requestedBy: ToolIntentRequestedBySchema,
-    requestingRunId: NonEmptyStringSchema,
-    nodeId: NonEmptyStringSchema.optional(),
+    requestingRunId: BoundedIdSchema,
+    nodeId: BoundedIdSchema.optional(),
     governanceSubject: GovernanceSubjectSchema
   })
   .strict()
@@ -49,10 +54,10 @@ export const ToolIntentCreatedPayloadSchema = z
 
 export const ToolIntentApprovedPayloadSchema = z
   .object({
-    executionId: NonEmptyStringSchema,
-    governanceDecisionRef: NonEmptyStringSchema,
-    matchedClaimRefs: z.array(NonEmptyStringSchema).readonly(),
-    matchedSlotRefs: z.array(NonEmptyStringSchema).readonly(),
+    executionId: BoundedIdSchema,
+    governanceDecisionRef: BoundedIdSchema,
+    matchedClaimRefs: z.array(BoundedIdSchema).readonly(),
+    matchedSlotRefs: z.array(BoundedIdSchema).readonly(),
     requiresRedCard: z.boolean()
   })
   .strict()
@@ -60,9 +65,9 @@ export const ToolIntentApprovedPayloadSchema = z
 
 export const ToolIntentDeniedPayloadSchema = z
   .object({
-    executionId: NonEmptyStringSchema,
-    governanceDecisionRef: NonEmptyStringSchema,
-    explanationSummary: NonEmptyStringSchema,
+    executionId: BoundedIdSchema,
+    governanceDecisionRef: BoundedIdSchema,
+    explanationSummary: BoundedReasonSchema,
     hardConstraintsPresent: z.boolean()
   })
   .strict()
@@ -70,19 +75,19 @@ export const ToolIntentDeniedPayloadSchema = z
 
 export const ToolCallStartedPayloadSchema = z
   .object({
-    toolCallId: NonEmptyStringSchema,
-    workerId: NonEmptyStringSchema.optional(),
-    toolId: NonEmptyStringSchema,
-    inputSummary: NonEmptyStringSchema
+    toolCallId: BoundedIdSchema,
+    workerId: BoundedIdSchema.optional(),
+    toolId: BoundedLabelSchema,
+    inputSummary: BoundedReasonSchema
   })
   .strict()
   .readonly();
 
 export const ToolCallCompletedPayloadSchema = z
   .object({
-    toolCallId: NonEmptyStringSchema,
+    toolCallId: BoundedIdSchema,
     statusKind: ToolCallCompletedStatusKindSchema,
-    outputSummary: z.string().optional(),
+    outputSummary: BoundedReasonSchema.optional(),
     durationMs: NonNegativeIntSchema,
     affected_paths: ToolAffectedPathsSchema.nullable().optional()
   })
@@ -91,15 +96,15 @@ export const ToolCallCompletedPayloadSchema = z
 
 export const WorkerStateChangedPayloadSchema = z
   .object({
-    workerId: NonEmptyStringSchema,
+    workerId: BoundedIdSchema,
     state: WorkerStateChangedStateSchema,
     previousState: WorkerRunStateSchema,
     suspendReason: WorkerStateChangedSuspendReasonSchema.optional(),
-    returnedObjectRefs: z.array(NonEmptyStringSchema).readonly().optional(),
-    abortReason: NonEmptyStringSchema.optional(),
+    returnedObjectRefs: z.array(BoundedIdSchema).readonly().optional(),
+    abortReason: BoundedReasonSchema.optional(),
     rollbackAttempted: z.boolean().optional(),
-    panicSource: NonEmptyStringSchema.optional(),
-    panicSummary: NonEmptyStringSchema.optional()
+    panicSource: BoundedLabelSchema.optional(),
+    panicSummary: BoundedReasonSchema.optional()
   })
   .strict()
   .readonly()
@@ -115,9 +120,9 @@ export const WorkerStateChangedPayloadSchema = z
 
 export const GovernanceSpamFaultPayloadSchema = z
   .object({
-    runId: NonEmptyStringSchema,
-    nodeId: NonEmptyStringSchema,
-    faultSummary: NonEmptyStringSchema
+    runId: BoundedIdSchema,
+    nodeId: BoundedIdSchema,
+    faultSummary: BoundedReasonSchema
   })
   .strict()
   .readonly();

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import { BoundedLabelSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
 
 const canonicalAliasDomainPrefix = "governance_subject.qualifier." as const;
 
@@ -21,7 +21,7 @@ export const CanonicalAliasEntrySchema = z
   .readonly();
 
 export const CanonicalAliasMapSchema = z
-  .record(z.string(), z.array(CanonicalAliasEntrySchema).readonly())
+  .record(BoundedLabelSchema, z.array(CanonicalAliasEntrySchema).readonly())
   .readonly();
 
 export type CanonicalAliasEntry = z.infer<typeof CanonicalAliasEntrySchema>;

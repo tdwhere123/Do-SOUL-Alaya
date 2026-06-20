@@ -2,7 +2,16 @@ import type { EngineBinding, EngineBindingSummary } from "./engine-binding.js";
 import { z } from "zod";
 import { EngineBindingSchema } from "./engine-binding.js";
 import type { MessageDeltaEvent } from "../events/message-delta.js";
-import { NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import {
+  BOUNDED_DEFAULT_ARRAY_MAX,
+  BoundedContentSchema,
+  BoundedIdSchema,
+  BoundedJsonObjectSchema,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
+  BoundedString,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 import { ContextLensSchema } from "../soul/context-lens.js";
 
 const enginePortMessageRoleValues = ["user", "assistant", "system"] as const;
@@ -20,81 +29,88 @@ export const EngineErrorKind = {
 } as const;
 
 export const EngineErrorKindSchema = z.enum(engineErrorKindValues);
+const EngineAttachmentDataSchema = BoundedString(30 * 1024 * 1024);
 
 /**
  * File attachment resolved for a message before it is sent to the engine.
  * Providers convert these to their own multipart content block format.
  */
 export const MessageAttachmentSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("image"),
-    mime_type: z.string(),
-    data: z.string() // base64-encoded bytes
-  }),
-  z.object({
-    type: z.literal("text_file"),
-    filename: z.string(),
-    content: z.string()
-  }),
-  z.object({
-    type: z.literal("unsupported"),
-    filename: z.string(),
-    mime_type: z.string()
-  })
+  z
+    .object({
+      type: z.literal("image"),
+      mime_type: BoundedLabelSchema,
+      data: EngineAttachmentDataSchema
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("text_file"),
+      filename: BoundedLabelSchema,
+      content: EngineAttachmentDataSchema
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("unsupported"),
+      filename: BoundedLabelSchema,
+      mime_type: BoundedLabelSchema
+    })
+    .strict()
 ]).readonly();
 
 export const EnginePortMessageSchema = z.object({
   role: EnginePortMessageRoleSchema,
-  content: z.string(),
-  attachments: z.array(MessageAttachmentSchema).optional()
-}).readonly();
+  content: BoundedContentSchema,
+  attachments: z.array(MessageAttachmentSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).optional()
+}).strict().readonly();
 
 export const ConversationRuntimeContextSchema = z.object({
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema,
-  surface_id: NonEmptyStringSchema.nullable(),
-  user_message_id: NonEmptyStringSchema,
-  assistant_message_id: NonEmptyStringSchema.optional()
-}).readonly();
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema,
+  surface_id: BoundedIdSchema.nullable(),
+  user_message_id: BoundedIdSchema,
+  assistant_message_id: BoundedIdSchema.optional()
+}).strict().readonly();
 
 export const ConversationRequestSchema = z.object({
-  messages: z.array(EnginePortMessageSchema).readonly(),
-  systemPrompt: z.string(),
+  messages: z.array(EnginePortMessageSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+  systemPrompt: BoundedContentSchema,
   contextLens: ContextLensSchema.nullable(),
   binding: EngineBindingSchema,
   runtime_context: ConversationRuntimeContextSchema.optional()
-}).readonly();
+}).strict().readonly();
 
 export const EngineMessageSchema = z.object({
   role: z.literal("assistant"),
-  content: z.string(),
-  message_id: NonEmptyStringSchema
-}).readonly();
+  content: BoundedContentSchema,
+  message_id: BoundedIdSchema
+}).strict().readonly();
 
 export const EngineUsageSchema = z.object({
   prompt_tokens: NonNegativeIntSchema,
   completion_tokens: NonNegativeIntSchema
-}).readonly();
+}).strict().readonly();
 
 export const ToolUseBlockSchema = z.object({
   type: z.literal("tool_use"),
-  id: NonEmptyStringSchema,
-  name: NonEmptyStringSchema,
-  input: z.record(z.string(), z.unknown()).readonly()
-}).readonly();
+  id: BoundedIdSchema,
+  name: BoundedLabelSchema,
+  input: BoundedJsonObjectSchema
+}).strict().readonly();
 
 export const EngineResultSchema = z.object({
   message: EngineMessageSchema,
   finish_reason: EngineFinishReasonSchema,
   tool_uses: z.array(ToolUseBlockSchema).readonly().optional(),
   usage: EngineUsageSchema.optional()
-}).readonly();
+}).strict().readonly();
 
 /** Serializable DTO for engine failures crossing package or process boundaries. */
 export const EngineErrorSchema = z.object({
-  message: z.string(),
+  message: BoundedReasonSchema,
   kind: EngineErrorKindSchema
-}).readonly();
+}).strict().readonly();
 
 export type EngineErrorKind = z.infer<typeof EngineErrorKindSchema>;
 export type EngineFinishReason = z.infer<typeof EngineFinishReasonSchema>;

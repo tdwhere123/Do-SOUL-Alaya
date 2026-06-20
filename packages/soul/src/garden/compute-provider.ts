@@ -2,7 +2,6 @@ import {
   CandidateMemorySignalSchema,
   GardenProviderKind as GardenProviderKinds,
   type GardenProviderKind as GardenProviderKindValue,
-  SignalKind,
   SignalSource,
   readErrorMessage,
   type CandidateMemorySignal,
@@ -17,11 +16,30 @@ import {
   type SignalExtractor
 } from "./pi-mono-extractor.js";
 import { buildSchemaGroundedRawPayload } from "./schema-grounding.js";
-import { DISTILLED_FACT_MAX_CHARS } from "./materialization-router.js";
 import {
   WallClockTimeoutError,
   withWallClockTimeout
 } from "./wall-clock-timeout.js";
+import {
+  buildTurnExcerpt,
+  clampConfidence,
+  clampFullTurnContent,
+  normalizeOptionalString,
+  normalizePositiveTimeoutMs,
+  parseOfficialApiSignals,
+  type OfficialApiSignalDraft
+} from "./official-api-signal-parser.js";
+import {
+  extractHeadersFromCauseChain,
+  extractRecoveryKindFromInputs,
+  extractRetryClassificationFromInputs,
+  extractRetryCountFromInputs,
+  extractSignalErrorDiagnostic,
+  extractStatusFromCauseChain
+} from "./compute-provider-diagnostics.js";
+
+export { parseOfficialApiSignals, salvageRawSignalElements } from "./official-api-signal-parser.js";
+export type { OfficialApiSignalDraft } from "./official-api-signal-parser.js";
 
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;
@@ -68,19 +86,6 @@ const DEFAULT_DIAGNOSTIC_DIR_REL = "data/diagnostics/seed-extraction-failures";
 const DIAGNOSTIC_BODY_PREFIX_MAX_CHARS = 4_096;
 const DIAGNOSTIC_PROMPT_PREFIX_MAX_CHARS = 512;
 
-// One parsed signal from the official-API extractor JSON. distilled_fact is
-// absent when the model omits it (or supplies a non-string / empty value);
-// in that case materialization-router/inputs.ts buildDistilledFact falls through to
-// the rule distiller rather than receiving a faked span.
-export interface OfficialApiSignalDraft {
-  readonly signal_kind: CandidateMemorySignal["signal_kind"];
-  readonly object_kind: string;
-  readonly confidence: number;
-  readonly matched_text: string;
-  readonly distilled_fact?: string;
-  readonly reason?: string;
-}
-
 export class GardenProviderError extends Error {
   public constructor(
     message: string,
@@ -91,7 +96,6 @@ export class GardenProviderError extends Error {
     this.name = "GardenProviderError";
   }
 }
-
 const DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS = 10_000;
 // invariant: outer wall-clock budget = read timeout + grace. Read timeout
 // drives the inner SDK abort; wall-clock catches stale sockets the monotonic
@@ -437,437 +441,4 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       });
     }
   }
-}
-
-const MAX_OFFICIAL_API_SIGNALS = 64;
-const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
-const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
-const MAX_OFFICIAL_API_REASON_CHARS = 400;
-
-// Exported so the LongMemEval bench seed path can drive its ingestion
-// through this exact production parse instead of a divergent bench-only
-// copy.
-// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
-export function parseOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content) as unknown;
-  } catch {
-    // The whole envelope did not parse. One corrupt `signals[]` entry (a bad
-    // `\'` escape, a stray `,""}` empty key, an unescaped inner quote, a
-    // malformed key missing `":"`, or a max_tokens-truncated final element)
-    // otherwise nukes every clean sibling signal. Degrade element-wise: walk
-    // the `signals` array, JSON.parse each `{...}` independently, keep the
-    // valid entries, drop the corrupt one(s), and tolerate a truncated final
-    // element. This is the array-level analogue of the per-entry drop policy
-    // applied below after a successful parse — a sibling's corruption is not
-    // allowed to abort the turn's good signals.
-    return salvageOfficialApiSignals(content);
-  }
-  // invariant: a malformed *envelope* (response is not an object, or has no
-  // signals array) is a genuine total failure of the extraction call, so it
-  // still throws hard. A malformed single *entry* is one bad fact among
-  // many — it is dropped, never allowed to abort the turn's good signals.
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("signals" in parsed) ||
-    !Array.isArray((parsed as { readonly signals?: unknown }).signals)
-  ) {
-    throw new Error("signals array missing");
-  }
-
-  const drafts: OfficialApiSignalDraft[] = [];
-  for (const candidate of (parsed as { readonly signals: readonly unknown[] }).signals.slice(
-    0,
-    MAX_OFFICIAL_API_SIGNALS
-  )) {
-    const draft = parseOfficialApiSignalEntry(candidate);
-    if (draft !== null) {
-      drafts.push(draft);
-    }
-  }
-  return Object.freeze(drafts);
-}
-
-// Element-wise salvage for a `{"signals":[...]}` envelope whose strict
-// JSON.parse threw. Reuses parseOfficialApiSignalEntry so every salvaged
-// element passes the SAME per-entry validation/drop as the strict path — the
-// downstream draft shape is byte-identical. THROWS when zero valid elements
-// are recoverable (a degenerate envelope: no `signals` region, or only a
-// truncated first/only element) so the caller's existing failure attribution
-// (offline_fallbacks + recordExtractionFailureSource) still fires — a corrupt
-// degenerate body must NOT masquerade as an empty `{"signals":[]}` extraction.
-// see also: salvageRawSignalElements (string-aware balanced-brace walk).
-function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
-  const drafts: OfficialApiSignalDraft[] = [];
-  for (const element of salvageRawSignalElements(content)) {
-    if (drafts.length >= MAX_OFFICIAL_API_SIGNALS) {
-      break;
-    }
-    let candidate: unknown;
-    try {
-      candidate = JSON.parse(element) as unknown;
-    } catch {
-      // A single corrupt element (bad escape / unescaped quote / malformed
-      // key) — skip it, keep walking the clean siblings.
-      continue;
-    }
-    const draft = parseOfficialApiSignalEntry(candidate);
-    if (draft !== null) {
-      drafts.push(draft);
-    }
-  }
-  if (drafts.length === 0) {
-    throw new Error("signals envelope unparseable and no element recoverable");
-  }
-  return Object.freeze(drafts);
-}
-
-// Walk the `signals` array region of an envelope and return each top-level
-// `{...}` element as an independent substring. String-aware (braces inside a
-// JSON string literal do not change depth; `\` escapes the next char) so a
-// `}` inside `matched_text` never miscounts. A truncated/incomplete FINAL
-// element (the array ends before its closing `}`) is dropped — only complete
-// balanced elements are returned. Returns [] when no `signals` array region
-// is found, so the caller degrades to zero signals (existing fallback).
-//
-// Exported so the LongMemEval bench seed path can count the RAW salvageable
-// element population (lastTurnRawSignalCount) when the strict envelope parse
-// fails — otherwise the dropped corrupt entries would vanish from the
-// parse-drop attribution instead of landing in parseDropped.
-// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
-//   countRawEnvelopeSignals
-export function salvageRawSignalElements(content: string): readonly string[] {
-  const signalsKeyIndex = findSignalsArrayStart(content);
-  if (signalsKeyIndex < 0) {
-    return [];
-  }
-  const elements: string[] = [];
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  let elementStart = -1;
-  for (let i = signalsKeyIndex; i < content.length; i += 1) {
-    const ch = content[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (ch === "\\" && inString) {
-      escape = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-    if (ch === "{") {
-      if (depth === 0) {
-        elementStart = i;
-      }
-      depth += 1;
-    } else if (ch === "}") {
-      if (depth > 0) {
-        depth -= 1;
-        if (depth === 0 && elementStart >= 0) {
-          elements.push(content.slice(elementStart, i + 1));
-          elementStart = -1;
-        }
-      }
-    } else if (ch === "]" && depth === 0) {
-      // Closing the signals array at top level — no in-flight element.
-      break;
-    }
-  }
-  // An element still open (depth > 0 / elementStart set) at end-of-buffer is
-  // the truncated final element — intentionally NOT pushed.
-  return elements;
-}
-
-// Find the index of the `[` that opens the `signals` array, scanning past the
-// `"signals"` key. String-aware so a `"signals"` substring inside an earlier
-// string value is not mistaken for the key. Returns -1 when not found.
-function findSignalsArrayStart(content: string): number {
-  const keyMatch = /"signals"\s*:\s*\[/u.exec(content);
-  if (keyMatch === null) {
-    return -1;
-  }
-  // Position the walk at the `[` so the first `{` after it starts element 0.
-  return keyMatch.index + keyMatch[0].length - 1;
-}
-
-// Parse one entry of the official-API {"signals":[...]} envelope. Returns
-// null — instead of throwing — when the entry is malformed (hallucinated
-// signal_kind, missing object_kind / matched_text / confidence, or a
-// non-object element), so one bad fact is dropped while the rest survive.
-function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft | null {
-  if (typeof candidate !== "object" || candidate === null) {
-    return null;
-  }
-
-  const signalKind = normalizeOptionalString((candidate as { readonly signal_kind?: unknown }).signal_kind);
-  const objectKind = normalizeOptionalString((candidate as { readonly object_kind?: unknown }).object_kind);
-  const matchedText = normalizeOptionalString((candidate as { readonly matched_text?: unknown }).matched_text);
-  const distilledFact = normalizeOptionalString((candidate as { readonly distilled_fact?: unknown }).distilled_fact);
-  const confidence = (candidate as { readonly confidence?: unknown }).confidence;
-  const reason = normalizeOptionalString((candidate as { readonly reason?: unknown }).reason);
-
-  if (signalKind === null || !isSignalKind(signalKind)) {
-    return null;
-  }
-
-  if (objectKind === null || matchedText === null || typeof confidence !== "number") {
-    return null;
-  }
-
-  const clampedMatchedText = matchedText.slice(0, MAX_OFFICIAL_API_MATCHED_TEXT_CHARS);
-  // distilled_fact is the resolved one-assertion fact materialization
-  // stores as memory_entry content. A model that omits it (or sends a
-  // non-string / empty value) leaves the field ABSENT so
-  // materialization-router/inputs.ts buildDistilledFact degrades honestly to
-  // its rule distiller — never fake one from matched_text. The clamp
-  // shares DISTILLED_FACT_MAX_CHARS so the provider and materialization
-  // agree on one budget.
-  const clampedDistilledFact =
-    distilledFact === null ? null : distilledFact.slice(0, DISTILLED_FACT_MAX_CHARS);
-  const clampedReason = reason === null ? null : reason.slice(0, MAX_OFFICIAL_API_REASON_CHARS);
-  return Object.freeze({
-    signal_kind: signalKind,
-    object_kind: objectKind.slice(0, MAX_OFFICIAL_API_OBJECT_KIND_CHARS),
-    confidence,
-    matched_text: clampedMatchedText,
-    ...(clampedDistilledFact === null ? {} : { distilled_fact: clampedDistilledFact }),
-    ...(clampedReason === null ? {} : { reason: clampedReason })
-  });
-}
-
-function normalizeOptionalString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? null : trimmed;
-}
-
-function normalizePositiveTimeoutMs(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return null;
-  }
-
-  return value;
-}
-
-function clampConfidence(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
-
-function isSignalKind(value: string): value is CandidateMemorySignal["signal_kind"] {
-  return (
-    value === SignalKind.POTENTIAL_CLAIM ||
-    value === SignalKind.POTENTIAL_SYNTHESIS ||
-    value === SignalKind.POTENTIAL_HANDOFF ||
-    value === SignalKind.POTENTIAL_EVIDENCE_ANCHOR ||
-    value === SignalKind.POTENTIAL_CONFLICT ||
-    value === SignalKind.POTENTIAL_PREFERENCE
-  );
-}
-
-function buildTurnExcerpt(turnContent: string, matchedText: string): string {
-  const index = turnContent.indexOf(matchedText);
-  if (index < 0) {
-    return turnContent.slice(0, 160);
-  }
-
-  const start = Math.max(0, index - 40);
-  const end = Math.min(turnContent.length, index + matchedText.length + 40);
-  return turnContent.slice(start, end).trim();
-}
-
-const MAX_FULL_TURN_CONTENT_CHARS = 2_048;
-
-function clampFullTurnContent(turnContent: string): string {
-  return turnContent.slice(0, MAX_FULL_TURN_CONTENT_CHARS);
-}
-
-interface SignalErrorDiagnostic {
-  readonly is_signal_extractor_error: boolean;
-  readonly kind: string | null;
-  readonly name: string;
-  readonly message: string;
-  readonly cause_message: string | null;
-}
-
-type ExtractorMetaSnapshot = {
-  readonly recoveryKind: string;
-  readonly retryCount: number;
-  readonly retryClassification?: string;
-};
-
-function extractRecoveryKindFromInputs(
-  meta: ExtractorMetaSnapshot | null,
-  _error: unknown
-): string {
-  if (meta !== null) {
-    return meta.recoveryKind;
-  }
-  // No meta available — the extract() call threw before returning. The
-  // recovery branch is unknowable in that case; emit "none" so the dump
-  // shape stays stable for diagnostic readers.
-  return "none";
-}
-
-function extractRetryCountFromInputs(
-  meta: ExtractorMetaSnapshot | null,
-  error: unknown
-): number {
-  if (meta !== null) {
-    return meta.retryCount;
-  }
-  if (error instanceof SignalExtractorError) {
-    return error.retryCount;
-  }
-  return 0;
-}
-
-// invariant: the dump envelope's retry_classification field is "unknown"
-// only when neither extractorMeta nor a typed SignalExtractorError carries
-// the label — happens when a transport error fires before the extractor
-// loop even started. The closed enum branches stay in sync with
-// RetryClassification in pi-mono-extractor.ts.
-function extractRetryClassificationFromInputs(
-  meta: ExtractorMetaSnapshot | null,
-  error: unknown
-): string {
-  if (meta?.retryClassification !== undefined) {
-    return meta.retryClassification;
-  }
-  if (error instanceof SignalExtractorError) {
-    return error.retryClassification;
-  }
-  return "unknown";
-}
-
-function extractSignalErrorDiagnostic(error: unknown): SignalErrorDiagnostic {
-  if (error instanceof SignalExtractorError) {
-    const cause = (error as { readonly cause?: unknown }).cause;
-    return {
-      is_signal_extractor_error: true,
-      kind: error.kind,
-      name: error.name,
-      message: error.message,
-      cause_message: cause instanceof Error ? cause.message : null
-    };
-  }
-  if (error instanceof Error) {
-    const cause = (error as { readonly cause?: unknown }).cause;
-    return {
-      is_signal_extractor_error: false,
-      kind: null,
-      name: error.name,
-      message: error.message,
-      cause_message: cause instanceof Error ? cause.message : null
-    };
-  }
-  return {
-    is_signal_extractor_error: false,
-    kind: null,
-    name: "UnknownError",
-    message: String(error),
-    cause_message: null
-  };
-}
-
-// Walk the .cause chain and surface any numeric HTTP status the transport
-// happened to attach. The pi-mono extractor currently does not, but
-// createGardenHttpExtractor (bench-runner) throws an Error whose .message
-// embeds the status — we read both shapes so the dump captures whichever
-// transport raised the failure.
-function extractStatusFromCauseChain(error: unknown): number | null {
-  let current: unknown = error;
-  for (let depth = 0; depth < 4; depth += 1) {
-    if (current === null || current === undefined) {
-      return null;
-    }
-    if (typeof current === "object") {
-      const candidate = (current as { readonly status?: unknown }).status;
-      if (typeof candidate === "number" && Number.isFinite(candidate)) {
-        return candidate;
-      }
-      const messageStatus = readStatusFromMessage(current);
-      if (messageStatus !== null) {
-        return messageStatus;
-      }
-      current = (current as { readonly cause?: unknown }).cause;
-      continue;
-    }
-    return null;
-  }
-  return null;
-}
-
-function readStatusFromMessage(value: object): number | null {
-  if (!(value instanceof Error)) {
-    return null;
-  }
-  const match = /\bHTTP\s+(\d{3})\b/u.exec(value.message);
-  if (match === null) {
-    return null;
-  }
-  const parsed = Number.parseInt(match[1]!, 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function extractHeadersFromCauseChain(error: unknown): Record<string, string> | null {
-  let current: unknown = error;
-  for (let depth = 0; depth < 4; depth += 1) {
-    if (current === null || current === undefined) {
-      return null;
-    }
-    if (typeof current === "object") {
-      const candidate = (current as { readonly headers?: unknown }).headers;
-      const normalized = normalizeHeadersValue(candidate);
-      if (normalized !== null) {
-        return normalized;
-      }
-      current = (current as { readonly cause?: unknown }).cause;
-      continue;
-    }
-    return null;
-  }
-  return null;
-}
-
-function normalizeHeadersValue(value: unknown): Record<string, string> | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  // Web Headers / Node Headers expose .entries(); plain Records expose keys.
-  if (typeof value === "object" && typeof (value as { entries?: unknown }).entries === "function") {
-    const out: Record<string, string> = {};
-    try {
-      for (const [key, val] of (value as Iterable<[string, string]>)) {
-        if (typeof key === "string" && typeof val === "string") {
-          out[key.toLowerCase()] = val;
-        }
-      }
-      return out;
-    } catch {
-      return null;
-    }
-  }
-  if (typeof value === "object") {
-    const out: Record<string, string> = {};
-    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      if (typeof val === "string") {
-        out[key.toLowerCase()] = val;
-      }
-    }
-    return Object.keys(out).length > 0 ? out : null;
-  }
-  return null;
 }

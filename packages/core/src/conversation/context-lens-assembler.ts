@@ -35,6 +35,9 @@ import type { RecallCandidate, RecallResult } from "../recall/recall-service.js"
 import { makeTokenEstimator, type TokenEstimator } from "../recall/recall-service-types.js";
 import type { NodeStrategy } from "./task-surface-builder.js";
 
+import { contextLensAssemblerAssemble, contextLensAssemblerGetLastLens, contextLensAssemblerClearLens, contextLensAssemblerPrepareAssemblyState, contextLensAssemblerApplyDegradation, contextLensAssemblerLoadStrictWinners } from "./context-lens-assembler-methods-1.js";
+import { contextLensAssemblerLoadRecalledMemories, contextLensAssemblerBuildLensEntries, contextLensAssemblerBuildOverrideEntries, contextLensAssemblerBuildWorkingProjection, contextLensAssemblerResolveContentSnapshot, contextLensAssemblerPruneLensStore, contextLensAssemblerTrimLensStore, contextLensAssemblerResolveMissingOverrideService } from "./context-lens-assembler-methods-2.js";
+
 const MAX_LENS_STORE_SIZE = 200;
 
 export interface LensAssemblerRecallPort {
@@ -86,7 +89,6 @@ export interface LensAssemblerOverridePort {
 export interface LensAssemblerWarnPort {
   (message: string, meta: Record<string, unknown>): void;
 }
-
 
 export interface LensAssemblerBankruptcyPort {
   declare(params: {
@@ -163,13 +165,17 @@ interface PreparedAssemblyState {
 }
 
 export class ContextLensAssembler {
-  private readonly lensStore = new Map<string, Readonly<ContextLens>>();
-  private readonly generateRuntimeId: () => string;
-  private readonly now: () => string;
-  private readonly warn: LensAssemblerWarnPort;
-  private hasWarnedMissingOverrideService = false;
+public readonly lensStore = new Map<string, Readonly<ContextLens>>();
 
-  public constructor(private readonly dependencies: LensAssemblerDependencies) {
+public readonly generateRuntimeId: () => string;
+
+public readonly now: () => string;
+
+public readonly warn: LensAssemblerWarnPort;
+
+public hasWarnedMissingOverrideService = false;
+
+public constructor(public readonly dependencies: LensAssemblerDependencies) {
     this.generateRuntimeId = dependencies.generateRuntimeId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? ((message, meta) => console.warn(message, meta));
@@ -181,82 +187,15 @@ export class ContextLensAssembler {
     readonly displayName?: string;
     readonly runtimeMode?: RuntimeModeValue;
   }): Promise<AssembleResult> {
-    const occurredAt = this.now();
-    this.pruneLensStore(occurredAt);
-
-    const prepared = await this.prepareAssemblyState(params);
-    const {
-      taskSurface,
-      recallPolicy,
-      recallResult,
-      strictWinners,
-      recalledMemories,
-      activeOverrides
-    } = prepared;
-    let { contextLens, workingProjection } = prepared;
-
-    const policyBudget = recallPolicy?.fine_assessment.budgets.max_total_tokens ?? null;
-
-    const degradationPipeline = this.dependencies.degradationPipeline;
-    if (
-      degradationPipeline !== undefined &&
-      policyBudget !== null &&
-      workingProjection.total_token_estimate > policyBudget
-    ) {
-      const degradationApplication = await this.applyDegradation({
-        taskSurface,
-        contextLens,
-        workingProjection,
-        recallResult,
-        strictWinners,
-        recalledMemories,
-        recallPolicyRuntimeId: recallPolicy?.runtime_id ?? null,
-        activeOverrides,
-        policyBudget,
-        run: params.run,
-        runtimeMode: params.runtimeMode ?? RuntimeMode.FULL,
-        occurredAt,
-        degradationPipeline
-      });
-      contextLens = degradationApplication.contextLens;
-      workingProjection = degradationApplication.workingProjection;
-    }
-    await this.dependencies.eventLogRepo.append({
-      event_type: RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED,
-      entity_type: "context_lens",
-      entity_id: contextLens.runtime_id,
-      workspace_id: params.run.workspace_id,
-      run_id: params.run.run_id,
-      caused_by: "system",
-      payload_json: SoulContextLensAssembledPayloadSchema.parse({
-        runtime_id: contextLens.runtime_id,
-        task_surface_ref: taskSurface.runtime_id,
-        lens_entry_count: contextLens.lens_entries.length,
-        total_token_estimate: workingProjection.total_token_estimate,
-        run_id: params.run.run_id,
-        workspace_id: params.run.workspace_id,
-        occurred_at: occurredAt
-      })
-    });
-
-    this.lensStore.delete(params.run.run_id);
-    this.lensStore.set(params.run.run_id, contextLens);
-    this.trimLensStore();
-
-    return {
-      contextLens,
-      taskSurface,
-      workingProjection
-    };
+    return contextLensAssemblerAssemble(this, params);
   }
 
   public getLastLens(runId: string): Readonly<ContextLens> | null {
-    this.pruneLensStore(this.now());
-    return this.lensStore.get(runId) ?? null;
+    return contextLensAssemblerGetLastLens(this, runId);
   }
 
   public clearLens(runId: string): void {
-    this.lensStore.delete(runId);
+    return contextLensAssemblerClearLens(this, runId);
   }
 
   private async prepareAssemblyState(params: {
@@ -264,459 +203,46 @@ export class ContextLensAssembler {
     readonly surfaceId: string | null;
     readonly displayName?: string;
   }): Promise<PreparedAssemblyState> {
-    const taskSurface = await this.dependencies.taskSurfaceBuilder.build({
-      run: params.run,
-      surfaceId: params.surfaceId,
-      displayName: params.displayName
-    });
-    const strategy = this.dependencies.taskSurfaceBuilder.resolveStrategy(taskSurface.surface_kind);
-    const recallPolicy =
-      this.dependencies.recallService.buildDefaultPolicy?.(strategy, taskSurface.runtime_id) ?? null;
-    const recallResult = await this.dependencies.recallService.recall({
-      taskSurface,
-      workspaceId: params.run.workspace_id,
-      strategy,
-      runId: params.run.run_id,
-      policyOverride: recallPolicy ?? undefined
-    });
-    const strictWinners = await this.loadStrictWinners(params.run.workspace_id);
-    const recalledMemories = await this.loadRecalledMemories(recallResult.candidates);
-    const activeOverrides = this.dependencies.overrideService !== undefined
-      ? await this.dependencies.overrideService.getActiveFor(params.run.run_id)
-      : this.resolveMissingOverrideService(params.run.run_id, params.run.workspace_id);
-    const lensEntries = this.buildLensEntries(taskSurface, recallResult, strictWinners, recalledMemories, activeOverrides);
-    const contextLens = ContextLensSchema.parse({
-      runtime_id: this.generateRuntimeId(),
-      object_kind: ControlPlaneObjectKind.CONTEXT_LENS,
-      task_surface_ref: taskSurface.runtime_id,
-      expires_at: taskSurface.expires_at,
-      derived_from: taskSurface.runtime_id,
-      retention_policy: RetentionPolicy.SESSION_ONLY,
-      lens_entries: lensEntries,
-      not_a_priority_source: true
-    });
-    const workingProjection = this.buildWorkingProjection(
-      taskSurface,
-      contextLens,
-      recallResult,
-      strictWinners,
-      recalledMemories,
-      recallPolicy?.runtime_id ?? null,
-      activeOverrides
-    );
-
-    return {
-      taskSurface,
-      recallPolicy,
-      recallResult,
-      strictWinners,
-      recalledMemories,
-      activeOverrides,
-      contextLens,
-      workingProjection
-    };
+    return contextLensAssemblerPrepareAssemblyState(this, params);
   }
 
   private async applyDegradation(params: DegradationApplicationParams): Promise<DegradationApplicationResult> {
-    const tokensBeforeDegradation = params.workingProjection.total_token_estimate;
-    const degradationResult = params.degradationPipeline.assess({
-      contextLens: params.contextLens,
-      workingProjection: params.workingProjection,
-      budgetLimit: params.policyBudget,
-      runId: params.run.run_id,
-      workspaceId: params.run.workspace_id
-    });
-
-    let contextLens = params.contextLens;
-    let workingProjection = params.workingProjection;
-    let tokensAfterDegradation = degradationResult.tokensAfter;
-
-    if (degradationResult.degraded) {
-      contextLens = degradationResult.finalLens;
-      workingProjection = this.buildWorkingProjection(
-        params.taskSurface,
-        contextLens,
-        params.recallResult,
-        params.strictWinners,
-        params.recalledMemories,
-        params.recallPolicyRuntimeId,
-        params.activeOverrides
-      );
-      tokensAfterDegradation = workingProjection.total_token_estimate;
-      await this.dependencies.eventLogRepo.append({
-        event_type: BudgetEventType.SOUL_BUDGET_DEGRADED,
-        entity_type: "context_lens",
-        entity_id: contextLens.runtime_id,
-        workspace_id: params.run.workspace_id,
-        run_id: params.run.run_id,
-        caused_by: "system",
-        payload_json: SoulBudgetDegradedPayloadSchema.parse({
-          run_id: params.run.run_id,
-          workspace_id: params.run.workspace_id,
-          lens_runtime_id: contextLens.runtime_id,
-          steps_applied: degradationResult.stepsApplied.map((step) => step.kind),
-          tokens_before: tokensBeforeDegradation,
-          tokens_after: tokensAfterDegradation,
-          budget_limit: params.policyBudget,
-          still_over_budget: tokensAfterDegradation > params.policyBudget,
-          occurred_at: params.occurredAt
-        })
-      });
-    }
-
-    const stillOverBudgetAfterDegradation = tokensAfterDegradation > params.policyBudget;
-    if (stillOverBudgetAfterDegradation) {
-      this.warn("[ContextLensAssembler] budget remains over limit after degradation.", {
-        runId: params.run.run_id,
-        workspaceId: params.run.workspace_id,
-        lensRuntimeId: contextLens.runtime_id,
-        budgetLimit: params.policyBudget,
-        tokensAfter: tokensAfterDegradation,
-        degraded: degradationResult.degraded
-      });
-      if (this.dependencies.bankruptcyService !== undefined) {
-        await this.dependencies.bankruptcyService.declare({
-          runId: params.run.run_id,
-          workspaceId: params.run.workspace_id,
-          triggerKind: BankruptcyTriggerKind.TOKEN_OVERFLOW,
-          triggerSummary: `Token estimate ${tokensAfterDegradation} exceeds budget ${params.policyBudget}`,
-          taskSurfaceRef: params.taskSurface.runtime_id,
-          taskSurfaceExpiresAt: params.taskSurface.expires_at,
-          currentMode: params.runtimeMode,
-          protectedConstraints: degradationResult.protectedObjectIds,
-          droppedCandidates: degradationResult.droppedObjectIds,
-          unresolvedConflicts: [],
-          requiredActions: [BankruptcyAction.COMPRESS, BankruptcyAction.DEFER],
-          tokensUsed: tokensAfterDegradation,
-          maxTotalTokens: params.policyBudget
-        });
-      }
-    }
-
-    return {
-      contextLens,
-      workingProjection,
-      degradationResult,
-      tokensAfterDegradation,
-      stillOverBudgetAfterDegradation
-    };
+    return contextLensAssemblerApplyDegradation(this, params);
   }
 
   private async loadStrictWinners(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]> {
-    const slots = await this.dependencies.slotRepo.findByWorkspace(workspaceId);
-    const winnerClaimIds = [...new Set(slots.flatMap((slot) => (slot.winner_claim_id === null ? [] : [slot.winner_claim_id])))];
-
-    if (winnerClaimIds.length === 0) {
-      return Object.freeze([]);
-    }
-
-    const claims = await this.dependencies.claimRepo.findByIds(winnerClaimIds);
-    const claimById = new Map(claims.map((claim) => [claim.object_id, claim] as const));
-
-    return Object.freeze(
-      winnerClaimIds.flatMap((claimId) => {
-        const claim = claimById.get(claimId);
-        return claim !== undefined && claim.enforcement_level === EnforcementLevel.STRICT ? [claim] : [];
-      })
-    );
+    return contextLensAssemblerLoadStrictWinners(this, workspaceId);
   }
 
-  private async loadRecalledMemories(
-    candidates: readonly Readonly<RecallCandidate>[]
-  ): Promise<ReadonlyMap<string, Readonly<MemoryEntry>>> {
-    const objectIds = [...new Set(candidates.map((candidate) => candidate.object_id))];
-    if (objectIds.length === 0) {
-      return new Map();
-    }
-
-    if (this.dependencies.memoryRepo.findByIds !== undefined) {
-      const memories = await this.dependencies.memoryRepo.findByIds(objectIds);
-      const memoryById = new Map(memories.map((memory) => [memory.object_id, memory] as const));
-      return new Map(
-        objectIds.flatMap((objectId) => {
-          const memory = memoryById.get(objectId);
-          return memory === undefined ? [] : [[objectId, memory] as const];
-        })
-      );
-    }
-
-    const entries = await Promise.all(
-      objectIds.map(async (objectId) => {
-        const memory = await this.dependencies.memoryRepo.findById(objectId);
-        return memory === null ? null : ([objectId, memory] as const);
-      })
-    );
-
-    return new Map(entries.filter((entry): entry is readonly [string, Readonly<MemoryEntry>] => entry !== null));
+  private async loadRecalledMemories(candidates: readonly Readonly<RecallCandidate>[]): Promise<ReadonlyMap<string, Readonly<MemoryEntry>>> {
+    return contextLensAssemblerLoadRecalledMemories(this, candidates);
   }
 
-  private buildLensEntries(
-    taskSurface: Readonly<TaskObjectSurface>,
-    recallResult: RecallResult,
-    strictWinners: readonly Readonly<ClaimForm>[],
-    recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>,
-    activeOverrides: readonly Readonly<SessionOverride>[]
-  ): readonly Readonly<ContextLensEntry>[] {
-    const overrideEntries = this.buildOverrideEntries(activeOverrides);
-    const taskSurfaceEntries = [
-      createLensEntry(taskSurface.runtime_id, ControlPlaneObjectKind.TASK_OBJECT_SURFACE, 1, "full_eligible"),
-      createLensEntry(taskSurface.runtime_id, ControlPlaneObjectKind.TASK_OBJECT_SURFACE, 0.9, "full_eligible")
-    ];
-    const strictWinnerEntries = strictWinners.map((claim) =>
-      createLensEntry(claim.object_id, ObjectKind.CLAIM_FORM, 1, "full_eligible", {
-        scopeClass: claim.scope_class,
-        sourceEnforcement: claim.enforcement_level
-      })
-    );
-    const projectCandidates = recallResult.candidates
-      .filter((candidate) => candidate.scope_class === ScopeClass.PROJECT)
-      .sort(compareRecallCandidates);
-    const projectEntries = projectCandidates.map((candidate) =>
-      createLensEntry(candidate.object_id, ObjectKind.MEMORY_ENTRY, candidate.relevance_score, candidate.manifestation, {
-        scopeClass: candidate.scope_class
-      })
-    );
-    const globalCandidates = recallResult.candidates
-      .filter(
-        (candidate) =>
-          candidate.scope_class === ScopeClass.GLOBAL_DOMAIN || candidate.scope_class === ScopeClass.GLOBAL_CORE
-      )
-      .sort(compareRecallCandidates);
-    const globalEntries = globalCandidates.map((candidate) =>
-      createLensEntry(candidate.object_id, ObjectKind.MEMORY_ENTRY, candidate.relevance_score, candidate.manifestation, {
-        scopeClass: candidate.scope_class
-      })
-    );
-    const evidenceEntries = [...new Set([...projectCandidates, ...globalCandidates].flatMap((candidate) => {
-      const memory = recalledMemories.get(candidate.object_id);
-      return memory?.evidence_refs ?? [];
-    }))].map((evidenceRef) => createLensEntry(evidenceRef, ObjectKind.EVIDENCE_CAPSULE, 0.25, "hint"));
-
-    return Object.freeze([
-      ...overrideEntries,
-      ...taskSurfaceEntries,
-      ...strictWinnerEntries,
-      ...projectEntries,
-      ...globalEntries,
-      ...evidenceEntries
-    ]);
+  private buildLensEntries(taskSurface: Readonly<TaskObjectSurface>, recallResult: RecallResult, strictWinners: readonly Readonly<ClaimForm>[], recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>, activeOverrides: readonly Readonly<SessionOverride>[]): readonly Readonly<ContextLensEntry>[] {
+    return contextLensAssemblerBuildLensEntries(this, taskSurface, recallResult, strictWinners, recalledMemories, activeOverrides);
   }
 
-  private buildOverrideEntries(
-    activeOverrides: readonly Readonly<SessionOverride>[]
-  ): readonly Readonly<ContextLensEntry>[] {
-    return Object.freeze(
-      activeOverrides.map((override) =>
-        createLensEntry(
-          override.runtime_id,
-          ControlPlaneObjectKind.SESSION_OVERRIDE,
-          1,
-          "full_eligible"
-        )
-      )
-    );
+  private buildOverrideEntries(activeOverrides: readonly Readonly<SessionOverride>[]): readonly Readonly<ContextLensEntry>[] {
+    return contextLensAssemblerBuildOverrideEntries(this, activeOverrides);
   }
 
-  private buildWorkingProjection(
-    taskSurface: Readonly<TaskObjectSurface>,
-    contextLens: Readonly<ContextLens>,
-    recallResult: RecallResult,
-    strictWinners: readonly Readonly<ClaimForm>[],
-    recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>,
-    recallPolicyRef: string | null,
-    activeOverrides: readonly Readonly<SessionOverride>[],
-    tokenEstimator: TokenEstimator = makeTokenEstimator()
-  ): Readonly<WorkingProjection> {
-    let taskSurfaceEntryIndex = 0;
-    const strictWinnerMap = new Map(strictWinners.map((claim) => [claim.object_id, claim] as const));
-    const recallCandidateMap = new Map(recallResult.candidates.map((candidate) => [candidate.object_id, candidate] as const));
-    const overrideMap = new Map(activeOverrides.map((override) => [override.runtime_id, override] as const));
-
-    const entries = contextLens.lens_entries.map((entry) => {
-      const contentSnapshot = this.resolveContentSnapshot(
-        entry,
-        taskSurface,
-        taskSurfaceEntryIndex,
-        strictWinnerMap,
-        recallCandidateMap,
-        recalledMemories,
-        overrideMap
-      );
-
-      if (entry.object_kind === ControlPlaneObjectKind.TASK_OBJECT_SURFACE) {
-        taskSurfaceEntryIndex += 1;
-      }
-
-      return {
-        object_id: entry.object_id,
-        object_kind: entry.object_kind,
-        content_snapshot: contentSnapshot,
-        token_estimate: tokenEstimator.estimate(contentSnapshot)
-      };
-    });
-    const totalTokenEstimate = entries.reduce((sum, entry) => sum + entry.token_estimate, 0);
-
-    return WorkingProjectionSchema.parse({
-      runtime_id: this.generateRuntimeId(),
-      object_kind: ControlPlaneObjectKind.WORKING_PROJECTION,
-      task_surface_ref: taskSurface.runtime_id,
-      expires_at: taskSurface.expires_at,
-      derived_from: contextLens.runtime_id,
-      retention_policy: RetentionPolicy.SESSION_ONLY,
-      entries,
-      total_token_estimate: totalTokenEstimate,
-      recall_policy_ref: recallPolicyRef
-    });
+  private buildWorkingProjection(taskSurface: Readonly<TaskObjectSurface>, contextLens: Readonly<ContextLens>, recallResult: RecallResult, strictWinners: readonly Readonly<ClaimForm>[], recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>, recallPolicyRef: string | null, activeOverrides: readonly Readonly<SessionOverride>[], tokenEstimator: TokenEstimator = makeTokenEstimator()): Readonly<WorkingProjection> {
+    return contextLensAssemblerBuildWorkingProjection(this, taskSurface, contextLens, recallResult, strictWinners, recalledMemories, recallPolicyRef, activeOverrides, tokenEstimator);
   }
 
-  private resolveContentSnapshot(
-    entry: Readonly<ContextLensEntry>,
-    taskSurface: Readonly<TaskObjectSurface>,
-    taskSurfaceEntryIndex: number,
-    strictWinnerMap: ReadonlyMap<string, Readonly<ClaimForm>>,
-    recallCandidateMap: ReadonlyMap<string, Readonly<RecallCandidate>>,
-    recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>,
-    overrideMap: ReadonlyMap<string, Readonly<SessionOverride>>
-  ): string {
-    if (entry.object_kind === ControlPlaneObjectKind.SESSION_OVERRIDE) {
-      const override = overrideMap.get(entry.object_id);
-      return override === undefined
-        ? `[session_override: ${entry.object_id}]`
-        : `Override ${override.target_object}: ${override.correction}`;
-    }
-
-    if (entry.object_kind === ControlPlaneObjectKind.TASK_OBJECT_SURFACE) {
-      if (entry.manifestation === "hint") {
-        return `[task surface ref: ${taskSurface.runtime_id}]`;
-      }
-
-      if (entry.manifestation === "excerpt") {
-        return taskSurfaceEntryIndex === 0
-          ? `Goal ref: ${taskSurface.display_name}`
-          : `Surface ref: ${taskSurface.runtime_id}`;
-      }
-
-      return taskSurfaceEntryIndex === 0
-        ? `Goal: ${taskSurface.display_name}`
-        : `Surface ${taskSurface.surface_kind}: ${taskSurface.display_name}`;
-    }
-
-    if (entry.object_kind === ObjectKind.CLAIM_FORM) {
-      if (entry.manifestation === "hint") {
-        return `[claim ref: ${entry.object_id}]`;
-      }
-
-      const proposition = strictWinnerMap.get(entry.object_id)?.proposition_digest ?? `[claim ref: ${entry.object_id}]`;
-      return entry.manifestation === "excerpt" ? createExcerptContent(proposition) : proposition;
-    }
-
-    if (entry.object_kind === ObjectKind.MEMORY_ENTRY) {
-      if (entry.manifestation === "hint") {
-        return `[memory ref: ${entry.object_id}]`;
-      }
-
-      const memory = recalledMemories.get(entry.object_id);
-      if (entry.manifestation === "excerpt") {
-        return recallCandidateMap.get(entry.object_id)?.content_preview ?? createExcerptContent(memory?.content ?? `[memory ref: ${entry.object_id}]`);
-      }
-
-      if (memory !== undefined) {
-        return memory.content;
-      }
-
-      return recallCandidateMap.get(entry.object_id)?.content_preview ?? `[memory ref: ${entry.object_id}]`;
-    }
-
-    if (entry.object_kind === ObjectKind.EVIDENCE_CAPSULE) {
-      return `[evidence ref: ${entry.object_id}]`;
-    }
-
-    if (entry.manifestation === "hint") {
-      return `[${entry.object_kind} ref: ${entry.object_id}]`;
-    }
-
-    return `[${entry.object_kind}: ${entry.object_id}]`;
+  private resolveContentSnapshot(entry: Readonly<ContextLensEntry>, taskSurface: Readonly<TaskObjectSurface>, taskSurfaceEntryIndex: number, strictWinnerMap: ReadonlyMap<string, Readonly<ClaimForm>>, recallCandidateMap: ReadonlyMap<string, Readonly<RecallCandidate>>, recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>, overrideMap: ReadonlyMap<string, Readonly<SessionOverride>>): string {
+    return contextLensAssemblerResolveContentSnapshot(this, entry, taskSurface, taskSurfaceEntryIndex, strictWinnerMap, recallCandidateMap, recalledMemories, overrideMap);
   }
 
   private pruneLensStore(referenceTime: string): void {
-    const referenceMs = Date.parse(referenceTime);
-
-    if (!Number.isFinite(referenceMs)) {
-      return;
-    }
-
-    for (const [runId, lens] of this.lensStore) {
-      const expiresAtMs = lens.expires_at === null ? Number.NaN : Date.parse(lens.expires_at);
-
-      if (!Number.isFinite(expiresAtMs) || expiresAtMs <= referenceMs) {
-        this.lensStore.delete(runId);
-      }
-    }
+    return contextLensAssemblerPruneLensStore(this, referenceTime);
   }
 
   private trimLensStore(): void {
-    while (this.lensStore.size > MAX_LENS_STORE_SIZE) {
-      const oldestRunId = this.lensStore.keys().next().value;
-
-      if (oldestRunId === undefined) {
-        return;
-      }
-
-      this.lensStore.delete(oldestRunId);
-    }
+    return contextLensAssemblerTrimLensStore(this);
   }
 
   private resolveMissingOverrideService(runId: string, workspaceId: string): readonly Readonly<SessionOverride>[] {
-    if (!this.hasWarnedMissingOverrideService) {
-      this.hasWarnedMissingOverrideService = true;
-      this.warn("[ContextLensAssembler] overrideService missing; session overrides will not be projected.", {
-        runId,
-        workspaceId
-      });
-    }
-
-    return Object.freeze([]);
+    return contextLensAssemblerResolveMissingOverrideService(this, runId, workspaceId);
   }
-}
-
-function createLensEntry(
-  objectId: string,
-  objectKind: string,
-  relevanceScore: number,
-  manifestation: ContextLensEntry["manifestation"],
-  options?: {
-    readonly scopeClass?: ContextLensEntry["scope_class"];
-    readonly sourceEnforcement?: ContextLensEntry["source_enforcement"];
-  }
-): ContextLensEntry {
-  return {
-    object_id: objectId,
-    object_kind: objectKind,
-    relevance_score: relevanceScore,
-    manifestation,
-    scope_class: options?.scopeClass,
-    source_enforcement: options?.sourceEnforcement
-  };
-}
-
-function compareRecallCandidates(left: Readonly<RecallCandidate>, right: Readonly<RecallCandidate>): number {
-  const activationDelta = right.activation_score - left.activation_score;
-  if (activationDelta !== 0) {
-    return activationDelta;
-  }
-
-  return left.object_id.localeCompare(right.object_id);
-}
-
-const EXCERPT_CONTENT_RATIO = 0.35;
-
-function createExcerptContent(content: string): string {
-  const targetLength = Math.max(1, Math.ceil(content.length * EXCERPT_CONTENT_RATIO));
-
-  if (content.length <= targetLength) {
-    return content;
-  }
-
-  const sliceLength = Math.max(1, targetLength - 3);
-  return `${content.slice(0, sliceLength).trimEnd()}...`;
 }

@@ -57,7 +57,7 @@ describe("path graph routes", () => {
       makePathRelation({ pathId: "path-2", sourceObjectId: "mem-2", targetObjectId: "mem-3" })
     ];
     const pathRelationRepo: GraphContractServicePathRelationRepoPort = {
-      findActive: vi.fn(async (workspaceId: string) =>
+      findActiveAll: vi.fn(async (workspaceId: string) =>
         workspaceId === "ws-1" ? relations : []
       )
     };
@@ -74,7 +74,7 @@ describe("path graph routes", () => {
     const body = (await response.json()) as { success: boolean; data: SoulPathGraphContract };
     expect(body.success).toBe(true);
     expect(workspaceService.getById).toHaveBeenCalledWith("ws-1");
-    expect(pathRelationRepo.findActive).toHaveBeenCalledWith("ws-1");
+    expect(pathRelationRepo.findActiveAll).toHaveBeenCalledWith("ws-1");
 
     const graph = body.data;
     expect(graph.contract_version).toBe(1);
@@ -96,7 +96,7 @@ describe("path graph routes", () => {
   it("is workspace-scoped: an empty workspace yields an empty graph", async () => {
     const app = new Hono();
     const pathRelationRepo: GraphContractServicePathRelationRepoPort = {
-      findActive: vi.fn(async () => [])
+      findActiveAll: vi.fn(async () => [])
     };
     const graphContractService = new GraphContractService({ pathRelationRepo });
     const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-2" })) };
@@ -107,7 +107,7 @@ describe("path graph routes", () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as { success: boolean; data: SoulPathGraphContract };
-    expect(pathRelationRepo.findActive).toHaveBeenCalledWith("ws-2");
+    expect(pathRelationRepo.findActiveAll).toHaveBeenCalledWith("ws-2");
     expect(body.data.nodes).toHaveLength(0);
     expect(body.data.edges).toHaveLength(0);
     expect(body.data.topology.total_nodes).toBe(0);

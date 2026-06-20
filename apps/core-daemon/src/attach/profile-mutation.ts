@@ -1,190 +1,84 @@
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import path, { dirname, join } from "node:path";
-import { soulToolDefs } from "@do-soul/alaya-engine-gateway";
+import { join } from "node:path";
+import {
+  ALAYA_OPERATOR_INSTRUCTIONS,
+  ALAYA_SLASH_ALIAS,
+  PROFILE_MUTATION_CONFIRM_PROMPT,
+  SUPPORTED_PROFILE_TARGETS
+} from "./profile-mutation-constants.js";
+import { createNodeProfileMutationFs } from "./profile-mutation-fs.js";
+import { resolveAlayaSlashCommand } from "./profile-mutation-launcher.js";
+import {
+  detectActivePath,
+  readSingleLine,
+  removeMcpEntry,
+  removeSlashAlias,
+  requireHome,
+  restoreOperationBefore,
+  uniqueNonEmptyPaths,
+  upsertMcpEntry,
+  upsertSlashAlias
+} from "./profile-mutation-operations.js";
+import {
+  ProfileMutationError,
+  type ProfileMutationApplyOptions,
+  type ProfileMutationApplyResult,
+  type ProfileMutationAuditRow,
+  type ProfileMutationBuildOptions,
+  type ProfileMutationConfirmIo,
+  type ProfileMutationOperation,
+  type ProfileMutationPlan,
+  type ProfilePaths,
+  type ProfileTarget,
+  type ResolveProfilePathsOptions
+} from "./profile-mutation-types.js";
+import { extractTomlBlock, indentBlock, isRecord, normalizeFileText, parseJsonObject } from "./profile-mutation-text.js";
 
-export type ProfileTarget = "codex" | "claude-code";
-export type ProfileMutationDirection = "add" | "remove";
+export type {
+  ProfileMutationApplyOptions,
+  ProfileMutationApplyResult,
+  ProfileMutationAuditRecord,
+  ProfileMutationAuditRow,
+  ProfileMutationAuditWriter,
+  ProfileMutationBuildOptions,
+  ProfileMutationConfirmIo,
+  ProfileMutationConflict,
+  ProfileMutationDirection,
+  ProfileMutationFs,
+  ProfileMutationOperation,
+  ProfileMutationPlan,
+  ProfilePaths,
+  ProfileTarget,
+  ResolveProfilePathsOptions
+} from "./profile-mutation-types.js";
+export { ProfileMutationError } from "./profile-mutation-types.js";
+export {
+  ALAYA_LEGACY_SLASH_COMMAND,
+  ALAYA_MCP_ARGS,
+  ALAYA_MCP_COMMAND,
+  ALAYA_OPERATOR_INSTRUCTIONS,
+  ALAYA_SLASH_ALIAS,
+  ALAYA_SLASH_ARGS,
+  PROFILE_MUTATION_CONFIRM_PROMPT,
+  PUBLIC_SOUL_TOOL_NAMES,
+  SUPPORTED_PROFILE_TARGETS
+} from "./profile-mutation-constants.js";
+export { createNodeProfileMutationFs } from "./profile-mutation-fs.js";
+export { resolveAlayaMcpLauncher, resolveAlayaSlashCommand } from "./profile-mutation-launcher.js";
 
-export interface ProfilePaths {
-  readonly mcpConfigPath: string;
-  readonly slashCommandsPath: string;
-  readonly slashPathCandidates: readonly string[];
-}
-
-export interface ProfileMutationConflict {
-  readonly message: string;
-  readonly existingCommand: string;
-}
-
-export interface ProfileMutationOperation {
-  readonly recordKind: "mcp_server_entry" | "slash_alias";
-  readonly label: string;
-  readonly path: string;
-  readonly before: string | undefined;
-  readonly after: string | undefined;
-  readonly changed: boolean;
-  readonly alreadyAbsent: boolean;
-  readonly conflict?: ProfileMutationConflict;
-}
-
-export interface ProfileMutationPlan {
-  readonly target: ProfileTarget;
-  readonly direction: ProfileMutationDirection;
-  readonly paths: ProfilePaths;
-  readonly operations: readonly ProfileMutationOperation[];
-  readonly auditEventKind: "profile_mutation_attach" | "profile_mutation_detach";
-}
-
-export interface ProfileMutationAuditRecord {
-  readonly record_kind: ProfileMutationOperation["recordKind"];
-  readonly path: string;
-}
-
-export interface ProfileMutationAuditRow {
-  readonly event_kind: "profile_mutation_attach" | "profile_mutation_detach";
-  readonly target: ProfileTarget;
-  readonly direction: ProfileMutationDirection;
-  readonly changed_paths: readonly string[];
-  readonly records: readonly ProfileMutationAuditRecord[];
-  readonly created_at: string;
-}
-
-export interface ProfileMutationAuditWriter {
-  append(row: ProfileMutationAuditRow): Promise<void>;
-  rollback?(row: ProfileMutationAuditRow): Promise<void>;
-}
-
-export interface ProfileMutationFs {
-  readText(filePath: string): Promise<string | undefined>;
-  writeTextAtomic(filePath: string, content: string, mode?: number): Promise<void>;
-  removeText(filePath: string): Promise<void>;
-}
-
-export interface ResolveProfilePathsOptions {
-  readonly env?: NodeJS.ProcessEnv;
-  readonly fs?: ProfileMutationFs;
-}
-
-export interface ProfileMutationBuildOptions extends ResolveProfilePathsOptions {}
-
-export interface ProfileMutationApplyOptions {
-  readonly fs?: ProfileMutationFs;
-  readonly auditWriter?: ProfileMutationAuditWriter;
-  readonly allowConflicts?: boolean;
-  readonly nowIso?: () => string;
-}
-
-export interface ProfileMutationConfirmIo {
-  readonly stdin: NodeJS.ReadableStream;
-  readonly stdout: NodeJS.WritableStream;
-}
-
-export interface ProfileMutationApplyResult {
-  readonly changed: boolean;
-  readonly auditRow: ProfileMutationAuditRow | undefined;
-}
-
-export class ProfileMutationError extends Error {
-  public constructor(
-    message: string,
-    public readonly exitCode: number
-  ) {
-    super(message);
-    this.name = "ProfileMutationError";
-  }
-}
-
-export const SUPPORTED_PROFILE_TARGETS = Object.freeze(["codex", "claude-code"] as const);
-export const ALAYA_SLASH_ALIAS = "/alaya-inspect";
-export const ALAYA_LEGACY_SLASH_COMMAND = "alaya inspect --open";
-export const ALAYA_MCP_COMMAND = "alaya";
-export const ALAYA_MCP_ARGS = Object.freeze(["mcp", "stdio"] as const);
-export const ALAYA_SLASH_ARGS = Object.freeze(["inspect", "--open"] as const);
 export const ALAYA_SLASH_COMMAND = resolveAlayaSlashCommand();
 
-type AlayaLauncherRootInput =
-  | string
-  | {
-      readonly importMetaDirname?: string;
-      readonly packageRoot?: string;
-    };
-
-/**
- * Resolve the launcher pair (command, args) that attach writes into user
- * Codex / Claude profiles for spawning Alaya as an MCP stdio server.
- *
- * Default: node <repo-abs>/bin/alaya.mjs mcp stdio (always
- * spawnable; does not require `alaya` on PATH). The user can override
- * by exporting ALAYA_MCP_LAUNCHER=<command-or-path> before running
- * `alaya attach <target>` — useful after `pnpm link --global`.
- *
- * Attach writes a node launcher instead of bare `alaya` because pnpm does
- * not auto-expose private root bins on PATH.
- */
-export function resolveAlayaMcpLauncher(
-  env: NodeJS.ProcessEnv = process.env,
-  rootInput?: AlayaLauncherRootInput
-): { readonly command: string; readonly args: readonly string[] } {
-  const override = env.ALAYA_MCP_LAUNCHER?.trim();
-  if (override !== undefined && override.length > 0) {
-    const tokens = override.split(/\s+/u);
-    const cmd = tokens[0] ?? ALAYA_MCP_COMMAND;
-    const extraArgs = tokens.slice(1);
-    return { command: cmd, args: [...extraArgs, ...ALAYA_MCP_ARGS] };
-  }
-  const binPath = resolveAlayaBinPath(rootInput);
-  return { command: "node", args: [binPath, ...ALAYA_MCP_ARGS] };
-}
-
-export function resolveAlayaSlashCommand(
-  env: NodeJS.ProcessEnv = process.env,
-  rootInput?: AlayaLauncherRootInput
-): string {
-  const override = env.ALAYA_SLASH_LAUNCHER?.trim();
-  if (override !== undefined && override.length > 0) {
-    return [override, ...ALAYA_SLASH_ARGS].join(" ");
-  }
-
-  const binPath = resolveAlayaBinPath(rootInput);
-  return ["node", alwaysSingleQuote(binPath), ...ALAYA_SLASH_ARGS].join(" ");
-}
-
-function alwaysSingleQuote(value: string): string {
-  return `'${value.replace(/'/gu, "'\\''")}'`;
-}
-export const PROFILE_MUTATION_CONFIRM_PROMPT = "Apply profile mutation changes? [y/N] ";
-export const PUBLIC_SOUL_TOOL_NAMES = Object.freeze(soulToolDefs.map((toolDef) => toolDef.name));
-
-export const ALAYA_OPERATOR_INSTRUCTIONS = [
-  "This server is tools-only for soul.* memory operations; do not expect MCP prompts/resources.",
-  `Use only these public SOUL memory tools: ${PUBLIC_SOUL_TOOL_NAMES.join(", ")}.`,
-  "START every memory-sensitive turn by calling soul.recall BEFORE answering.",
-  "You SHOULD call soul.recall when the user message touches: personal preferences, working style, or past corrections; prior decisions, architecture choices, or project context; or any \"do you remember / last time / we agreed\" reference.",
-  "Workflow: soul.recall -> soul.open_pointer (only if the preview is insufficient) -> answer -> soul.report_context_usage.",
-  "When you detect possible durable memory, call soul.emit_candidate_signal first; signal emission is candidate-only and not durable by itself.",
-  "For durable edits, call soul.propose_memory_update, then soul.list_pending_proposals and soul.review_memory_proposal with explicit reviewer approval.",
-  "When the operator has set Garden compute provider_kind=host_worker and you have spare capacity, optionally call garden.list_pending_tasks, then garden.claim_task, then garden.complete_task. If provider_kind is not host_worker, do not claim Garden work.",
-  "Accepted proposals trigger durable-memory apply; rejected proposals keep durable memory unchanged."
-].join(" ");
-
 export type ProfileInstructionsDriftStatus =
-  | "absent"            // host profile file or alaya entry not present
-  | "in_sync"           // attached entry's instructions match current source
-  | "drifted";          // attached entry exists but instructions differ from source
+  | "absent"
+  | "in_sync"
+  | "drifted";
 
 export interface ProfileInstructionsDriftReport {
   readonly target: ProfileTarget;
   readonly profile_path: string;
   readonly status: ProfileInstructionsDriftStatus;
-  /** Truncated current value from the host profile (≤120 chars) for diagnosis. */
   readonly attached_preview: string | null;
 }
 
-/**
- * Extract the operator_instructions value Alaya wrote to a host profile, if
- * any. Returns undefined when the profile file is missing, has no Alaya
- * entry, or the entry has no instructions field.
- */
 export function extractAttachedOperatorInstructions(
   target: ProfileTarget,
   content: string | undefined
@@ -197,8 +91,6 @@ export function extractAttachedOperatorInstructions(
     if (block === undefined) {
       return undefined;
     }
-    // operator_instructions = "..." — value is JSON-encoded so it can span
-    // a single double-quoted string with escapes (matches renderCodexMcpBlock).
     const match = /^\s*operator_instructions\s*=\s*(".*")\s*$/mu.exec(block);
     if (match === null) {
       return undefined;
@@ -210,7 +102,6 @@ export function extractAttachedOperatorInstructions(
     }
   }
 
-  // claude-code: parse JSON, walk mcpServers.alaya.operatorInstructions.
   let parsed: Record<string, unknown>;
   try {
     parsed = parseJsonObject(content, ".claude.json");
@@ -229,12 +120,6 @@ export function extractAttachedOperatorInstructions(
   return typeof value === "string" ? value : undefined;
 }
 
-/**
- * Extract the ALAYA_AGENT_TARGET env stamp from a host profile's MCP entry, if
- * present. Returns undefined when the entry is absent or carries no stamp so the
- * caller can flag it as drifted — without the stamp, recall/usage telemetry
- * attributes to the generic `mcp` bucket instead of this host's trust surface.
- */
 export function extractAttachedAgentTarget(
   target: ProfileTarget,
   content: string | undefined
@@ -262,16 +147,6 @@ export function extractAttachedAgentTarget(
   return typeof value === "string" ? value : undefined;
 }
 
-/**
- * Read the active host profile and report whether the attached
- * operator_instructions are in sync with the current source value.
- *
- * The attached entry is in sync only when both the operator_instructions value
- * and the ALAYA_AGENT_TARGET stamp match current source. `alaya attach`
- * overwrites the entry on re-run, but operators don't always re-attach after
- * `alaya update`; doctor surfaces drift — stale instructions or a missing/wrong
- * stamp — so the operator sees a clear hint to refresh.
- */
 export async function detectAttachedProfileInstructionsDrift(
   target: ProfileTarget,
   options: ProfileMutationBuildOptions = {}
@@ -297,8 +172,6 @@ export async function detectAttachedProfileInstructionsDrift(
       attached_preview: attached.length > 120 ? `${attached.slice(0, 119)}…` : attached
     };
   }
-  // ProfileTarget values ("codex" / "claude-code") are exactly the expected
-  // ALAYA_AGENT_TARGET stamp; an entry without the stamp counts as drifted.
   const attachedAgentTarget = extractAttachedAgentTarget(target, content);
   if (attachedAgentTarget !== target) {
     return {
@@ -478,61 +351,25 @@ export async function applyProfileMutationPlan(
   options: ProfileMutationApplyOptions = {}
 ): Promise<ProfileMutationApplyResult> {
   const fs = options.fs ?? createNodeProfileMutationFs();
-  const allowConflicts = options.allowConflicts ?? false;
-  const conflicts = plan.operations.filter((operation) => operation.conflict !== undefined);
-  if (!allowConflicts && conflicts.length > 0) {
-    throw new ProfileMutationError(conflicts.map((operation) => operation.conflict!.message).join("; "), 77);
-  }
-
+  assertProfileMutationConflictsAllowed(plan, options.allowConflicts ?? false);
   const changedOperations = plan.operations.filter((operation) => operation.changed);
   if (changedOperations.length === 0) {
     return { changed: false, auditRow: undefined };
   }
 
-  const nowIso = options.nowIso ?? (() => new Date().toISOString());
-  const auditRow: ProfileMutationAuditRow = {
-    event_kind: plan.auditEventKind,
-    target: plan.target,
-    direction: plan.direction,
-    changed_paths: changedOperations.map((operation) => operation.path),
-    records: changedOperations.map((operation) => ({
-      record_kind: operation.recordKind,
-      path: operation.path
-    })),
-    created_at: nowIso()
-  };
-
-  const applied: ProfileMutationOperation[] = [];
+  const auditRow = buildProfileMutationAuditRow(plan, changedOperations, options.nowIso);
   const auditWriter = options.auditWriter;
   const auditBeforeWrite = auditWriter !== undefined && typeof auditWriter.rollback === "function";
-  let auditWritten = false;
-
-  if (auditBeforeWrite) {
-    await auditWriter.append(auditRow);
-    auditWritten = true;
-  }
-
+  let auditWritten = await writeProfileMutationAuditBeforeApply(auditWriter, auditBeforeWrite, auditRow);
+  const applied: ProfileMutationOperation[] = [];
   try {
-    for (const operation of changedOperations) {
-      if (operation.after === undefined) {
-        await fs.removeText(operation.path);
-      } else {
-        await fs.writeTextAtomic(operation.path, operation.after, 0o600);
-      }
-      applied.push(operation);
-    }
-
+    await applyChangedProfileMutationOperations(fs, changedOperations, applied);
     if (!auditWritten && auditWriter !== undefined) {
       await auditWriter.append(auditRow);
       auditWritten = true;
     }
   } catch (error) {
-    for (const operation of applied.reverse()) {
-      await restoreOperationBefore(fs, operation);
-    }
-    if (auditWritten && auditWriter !== undefined && typeof auditWriter.rollback === "function") {
-      await auditWriter.rollback(auditRow);
-    }
+    await rollbackAppliedProfileMutation(fs, applied, auditWritten, auditWriter, auditRow);
     throw error;
   }
 
@@ -543,430 +380,70 @@ export function parseProfileTarget(value: string): ProfileTarget | undefined {
   return SUPPORTED_PROFILE_TARGETS.find((target) => target === value);
 }
 
-export function createNodeProfileMutationFs(): ProfileMutationFs {
+function buildProfileMutationAuditRow(
+  plan: ProfileMutationPlan,
+  changedOperations: readonly ProfileMutationOperation[],
+  nowIsoInput: (() => string) | undefined
+): ProfileMutationAuditRow {
+  const nowIso = nowIsoInput ?? (() => new Date().toISOString());
   return {
-    async readText(filePath) {
-      try {
-        return await readFile(filePath, "utf8");
-      } catch (error) {
-        if (isNodeError(error) && error.code === "ENOENT") {
-          return undefined;
-        }
-        throw error;
-      }
-    },
-    async writeTextAtomic(filePath, content, mode = 0o600) {
-      await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
-      const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-      await writeFile(tempPath, content, { mode });
-      await rename(tempPath, filePath);
-    },
-    async removeText(filePath) {
-      try {
-        await unlink(filePath);
-      } catch (error) {
-        if (!isNodeError(error) || error.code !== "ENOENT") {
-          throw error;
-        }
-      }
-    }
+    event_kind: plan.auditEventKind,
+    target: plan.target,
+    direction: plan.direction,
+    changed_paths: changedOperations.map((operation) => operation.path),
+    records: changedOperations.map((operation) => ({
+      record_kind: operation.recordKind,
+      path: operation.path
+    })),
+    created_at: nowIso()
   };
 }
 
-async function restoreOperationBefore(fs: ProfileMutationFs, operation: ProfileMutationOperation): Promise<void> {
-  if (operation.before === undefined) {
-    await fs.removeText(operation.path);
-    return;
+function assertProfileMutationConflictsAllowed(plan: ProfileMutationPlan, allowConflicts: boolean): void {
+  const conflicts = plan.operations.filter((operation) => operation.conflict !== undefined);
+  if (!allowConflicts && conflicts.length > 0) {
+    throw new ProfileMutationError(conflicts.map((operation) => operation.conflict!.message).join("; "), 77);
   }
-  await fs.writeTextAtomic(operation.path, operation.before, 0o600);
 }
 
-function upsertMcpEntry(target: ProfileTarget, before: string | undefined, env: NodeJS.ProcessEnv): string {
-  if (target === "codex") {
-    const withoutExisting = removeTomlBlock(before ?? "", "[mcp_servers.alaya]");
-    return appendTomlBlock(withoutExisting, renderCodexMcpBlock(env));
+async function writeProfileMutationAuditBeforeApply(
+  auditWriter: ProfileMutationApplyOptions["auditWriter"],
+  auditBeforeWrite: boolean,
+  auditRow: ProfileMutationAuditRow
+): Promise<boolean> {
+  if (auditBeforeWrite && auditWriter !== undefined) {
+    await auditWriter.append(auditRow);
+    return true;
   }
+  return false;
+}
 
-  const parsed = parseJsonObject(before, ".claude.json");
-  const currentMcpServers = isRecord(parsed.mcpServers) ? parsed.mcpServers : {};
-  const launcher = resolveAlayaMcpLauncher(env);
-  parsed.mcpServers = {
-    ...currentMcpServers,
-    alaya: {
-      command: launcher.command,
-      args: [...launcher.args],
-      // Stamps the launched `alaya mcp stdio` child with its host identity so
-      // recall / usage telemetry attributes to the claude-code trust surface
-      // instead of the generic `mcp` session bucket (see resolveMcpAgentTarget).
-      env: { ALAYA_AGENT_TARGET: "claude-code" },
-      operatorInstructions: ALAYA_OPERATOR_INSTRUCTIONS
+async function applyChangedProfileMutationOperations(
+  fs: ReturnType<typeof createNodeProfileMutationFs>,
+  changedOperations: readonly ProfileMutationOperation[],
+  applied: ProfileMutationOperation[]
+): Promise<void> {
+  for (const operation of changedOperations) {
+    if (operation.after === undefined) {
+      await fs.removeText(operation.path);
+    } else {
+      await fs.writeTextAtomic(operation.path, operation.after, 0o600);
     }
-  };
-  return `${JSON.stringify(parsed, null, 2)}\n`;
-}
-
-function removeMcpEntry(
-  target: ProfileTarget,
-  before: string | undefined
-): { readonly content: string | undefined; readonly changed: boolean } {
-  if (before === undefined || before.trim().length === 0) {
-    return { content: before, changed: false };
-  }
-
-  if (target === "codex") {
-    const after = removeTomlBlock(before, "[mcp_servers.alaya]");
-    return {
-      content: after,
-      changed: normalizeFileText(after) !== normalizeFileText(before)
-    };
-  }
-
-  const parsed = parseJsonObject(before, ".claude.json");
-  if (!isRecord(parsed.mcpServers) || !("alaya" in parsed.mcpServers)) {
-    return { content: before, changed: false };
-  }
-
-  const nextMcpServers = { ...parsed.mcpServers };
-  delete nextMcpServers.alaya;
-  parsed.mcpServers = nextMcpServers;
-  return {
-    content: `${JSON.stringify(parsed, null, 2)}\n`,
-    changed: true
-  };
-}
-
-function upsertSlashAlias(
-  target: ProfileTarget,
-  before: string | undefined,
-  env: NodeJS.ProcessEnv
-): { readonly content: string; readonly conflict?: ProfileMutationConflict } {
-  const slashCommand = resolveAlayaSlashCommand(env);
-  if (target === "codex") {
-    const existingCommand = extractCodexSlashCommand(before ?? "");
-    return {
-      content: appendTomlBlock(
-        removeTomlBlock(before ?? "", "[slash_commands.alaya-inspect]"),
-        renderCodexSlashBlock(slashCommand)
-      ),
-      conflict: buildAttachConflict(existingCommand, slashCommand)
-    };
-  }
-
-  const parsed = parseJsonObject(before, "Claude slash command registry");
-  const currentCommands = isRecord(parsed.commands) ? parsed.commands : {};
-  const existingEntry = currentCommands[ALAYA_SLASH_ALIAS];
-  const existingCommand =
-    isRecord(existingEntry) && typeof existingEntry.command === "string" ? existingEntry.command : undefined;
-  parsed.commands = {
-    ...currentCommands,
-    [ALAYA_SLASH_ALIAS]: {
-      command: slashCommand,
-      description: "Open the Alaya Memory Inspector."
-    }
-  };
-
-  return {
-    content: `${JSON.stringify(parsed, null, 2)}\n`,
-    conflict: buildAttachConflict(existingCommand, slashCommand)
-  };
-}
-
-function removeSlashAlias(
-  target: ProfileTarget,
-  before: string | undefined,
-  env: NodeJS.ProcessEnv
-): { readonly content: string | undefined; readonly changed: boolean; readonly conflict?: ProfileMutationConflict } {
-  const slashCommand = resolveAlayaSlashCommand(env);
-  if (before === undefined || before.trim().length === 0) {
-    return { content: before, changed: false };
-  }
-
-  if (target === "codex") {
-    const existingCommand = extractCodexSlashCommand(before);
-    const after = removeTomlBlock(before, "[slash_commands.alaya-inspect]");
-    return {
-      content: after,
-      changed: normalizeFileText(after) !== normalizeFileText(before),
-      conflict: buildDetachConflict(existingCommand, slashCommand)
-    };
-  }
-
-  const parsed = parseJsonObject(before, "Claude slash command registry");
-  if (!isRecord(parsed.commands) || !(ALAYA_SLASH_ALIAS in parsed.commands)) {
-    return { content: before, changed: false };
-  }
-
-  const existingEntry = parsed.commands[ALAYA_SLASH_ALIAS];
-  const existingCommand =
-    isRecord(existingEntry) && typeof existingEntry.command === "string" ? existingEntry.command : undefined;
-  const nextCommands = { ...parsed.commands };
-  delete nextCommands[ALAYA_SLASH_ALIAS];
-  parsed.commands = nextCommands;
-  return {
-    content: `${JSON.stringify(parsed, null, 2)}\n`,
-    changed: true,
-    conflict: buildDetachConflict(existingCommand, slashCommand)
-  };
-}
-
-function buildAttachConflict(
-  existingCommand: string | undefined,
-  currentCommand: string
-): ProfileMutationConflict | undefined {
-  if (existingCommand === undefined || isManagedSlashCommand(existingCommand, currentCommand)) {
-    return undefined;
-  }
-  return {
-    message: `${ALAYA_SLASH_ALIAS} is currently bound to "${existingCommand}"; confirming will overwrite it.`,
-    existingCommand
-  };
-}
-
-function buildDetachConflict(
-  existingCommand: string | undefined,
-  currentCommand: string
-): ProfileMutationConflict | undefined {
-  if (existingCommand === undefined || isManagedSlashCommand(existingCommand, currentCommand)) {
-    return undefined;
-  }
-  return {
-    message: `${ALAYA_SLASH_ALIAS} is currently bound to "${existingCommand}"; confirming will remove this custom binding.`,
-    existingCommand
-  };
-}
-
-function isManagedSlashCommand(existingCommand: string, currentCommand: string): boolean {
-  return existingCommand === currentCommand || existingCommand === ALAYA_LEGACY_SLASH_COMMAND;
-}
-
-function renderCodexMcpBlock(env: NodeJS.ProcessEnv): string {
-  const launcher = resolveAlayaMcpLauncher(env);
-  return [
-    "[mcp_servers.alaya]",
-    `command = ${JSON.stringify(launcher.command)}`,
-    `args = ${JSON.stringify([...launcher.args])}`,
-    // Stamps the launched `alaya mcp stdio` child with its host identity so
-    // recall / usage telemetry attributes to the codex trust surface instead
-    // of the generic `mcp` session bucket (see resolveMcpAgentTarget).
-    `env = { ALAYA_AGENT_TARGET = "codex" }`,
-    `operator_instructions = ${JSON.stringify(ALAYA_OPERATOR_INSTRUCTIONS)}`
-  ].join("\n");
-}
-
-function renderCodexSlashBlock(slashCommand: string): string {
-  return [
-    "[slash_commands.alaya-inspect]",
-    `command = ${JSON.stringify(slashCommand)}`,
-    `description = ${JSON.stringify("Open the Alaya Memory Inspector.")}`
-  ].join("\n");
-}
-
-async function detectActivePath(fs: ProfileMutationFs, candidates: readonly string[]): Promise<string> {
-  if (candidates.length === 0) {
-    throw new ProfileMutationError("No profile path candidates resolved.", 66);
-  }
-  for (const candidate of candidates) {
-    if ((await fs.readText(candidate)) !== undefined) {
-      return candidate;
-    }
-  }
-  return candidates[0]!;
-}
-
-function uniqueNonEmptyPaths(paths: readonly (string | undefined)[]): readonly string[] {
-  const seen = new Set<string>();
-  const values: string[] = [];
-  for (const candidate of paths) {
-    if (candidate === undefined) {
-      continue;
-    }
-    const trimmed = candidate.trim();
-    if (trimmed.length === 0 || seen.has(trimmed)) {
-      continue;
-    }
-    seen.add(trimmed);
-    values.push(trimmed);
-  }
-  return values;
-}
-
-function parseJsonObject(content: string | undefined, label: string): Record<string, unknown> {
-  if (content === undefined || content.trim().length === 0) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(content) as unknown;
-    if (!isRecord(parsed)) {
-      throw new Error("must contain a JSON object");
-    }
-    return { ...parsed };
-  } catch (error) {
-    throw new ProfileMutationError(
-      `${label} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-      65
-    );
+    applied.push(operation);
   }
 }
 
-function appendTomlBlock(content: string, block: string): string {
-  const trimmed = content.trimEnd();
-  return `${trimmed.length === 0 ? "" : `${trimmed}\n\n`}${block}\n`;
-}
-
-function removeTomlBlock(content: string, header: string): string {
-  const lines = content.split(/\r?\n/gu);
-  const nextLines: string[] = [];
-  let skipping = false;
-  let removedAny = false;
-
-  for (const line of lines) {
-    if (line.trim() === header) {
-      skipping = true;
-      removedAny = true;
-      continue;
-    }
-
-    if (skipping && /^\s*\[[^\]]+\]\s*$/u.test(line)) {
-      skipping = false;
-    }
-
-    if (!skipping) {
-      nextLines.push(line);
-    }
+async function rollbackAppliedProfileMutation(
+  fs: ReturnType<typeof createNodeProfileMutationFs>,
+  applied: ProfileMutationOperation[],
+  auditWritten: boolean,
+  auditWriter: ProfileMutationApplyOptions["auditWriter"],
+  auditRow: ProfileMutationAuditRow
+): Promise<void> {
+  for (const operation of applied.reverse()) {
+    await restoreOperationBefore(fs, operation);
   }
-
-  if (!removedAny) {
-    return content;
+  if (auditWritten && auditWriter !== undefined && typeof auditWriter.rollback === "function") {
+    await auditWriter.rollback(auditRow);
   }
-
-  return `${nextLines.join("\n").trimEnd()}\n`;
-}
-
-function extractTomlBlock(content: string, header: string): string | undefined {
-  const lines = content.split(/\r?\n/gu);
-  const block: string[] = [];
-  let collecting = false;
-  for (const line of lines) {
-    if (line.trim() === header) {
-      collecting = true;
-    } else if (collecting && /^\s*\[[^\]]+\]\s*$/u.test(line)) {
-      break;
-    }
-    if (collecting) {
-      block.push(line);
-    }
-  }
-  return block.length === 0 ? undefined : block.join("\n");
-}
-
-function extractCodexSlashCommand(content: string): string | undefined {
-  const block = extractTomlBlock(content, "[slash_commands.alaya-inspect]");
-  if (block === undefined) {
-    return undefined;
-  }
-  const match = /^\s*command\s*=\s*"([^"]*)"\s*$/mu.exec(block);
-  return match?.[1];
-}
-
-function requireHome(env: NodeJS.ProcessEnv): string {
-  const home = env.HOME ?? env.USERPROFILE;
-  if (home === undefined || home.trim().length === 0) {
-    throw new ProfileMutationError("HOME is required to resolve profile paths.", 66);
-  }
-  return home;
-}
-
-function readSingleLine(stream: NodeJS.ReadableStream): Promise<string> {
-  return new Promise((resolve) => {
-    let buffer = "";
-
-    const onData = (chunk: Buffer | string) => {
-      buffer += chunk.toString();
-      const lineBreakIndex = buffer.indexOf("\n");
-      if (lineBreakIndex >= 0) {
-        const line = buffer.slice(0, lineBreakIndex);
-        cleanup();
-        resolve(line.replace(/\r$/u, ""));
-      }
-    };
-
-    const onEnd = () => {
-      cleanup();
-      resolve(buffer.trim());
-    };
-
-    const cleanup = () => {
-      stream.removeListener("data", onData);
-      stream.removeListener("end", onEnd);
-      stream.removeListener("error", onEnd);
-    };
-
-    stream.on("data", onData);
-    stream.on("end", onEnd);
-    stream.on("error", onEnd);
-  });
-}
-
-function normalizeFileText(content: string | undefined): string {
-  return (content ?? "").replace(/\r\n/gu, "\n").trimEnd();
-}
-
-function indentBlock(content: string): string {
-  return content
-    .split(/\r?\n/gu)
-    .map((line) => `  ${line}`)
-    .join("\n");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
-}
-
-function resolveAlayaBinPath(rootInput: AlayaLauncherRootInput | undefined): string {
-  return path.resolve(resolveAlayaPackageRoot(rootInput), "bin", "alaya.mjs");
-}
-
-function resolveAlayaPackageRoot(rootInput: AlayaLauncherRootInput | undefined): string {
-  if (typeof rootInput === "string") {
-    return path.resolve(rootInput);
-  }
-
-  if (rootInput?.packageRoot !== undefined) {
-    return path.resolve(rootInput.packageRoot);
-  }
-
-  const moduleDir = path.resolve(rootInput?.importMetaDirname ?? import.meta.dirname);
-
-  // This module compiles into a subdirectory (dist/attach), so climb to the
-  // src/dist build root before deriving the checkout or package root.
-  let buildRoot = moduleDir;
-  while (
-    path.basename(buildRoot) !== "dist" &&
-    path.basename(buildRoot) !== "src" &&
-    dirname(buildRoot) !== buildRoot
-  ) {
-    buildRoot = dirname(buildRoot);
-  }
-
-  const buildParent = dirname(buildRoot);
-  const buildGrandparent = dirname(buildParent);
-  const isRepoCoreDaemonModule =
-    (path.basename(buildRoot) === "src" || path.basename(buildRoot) === "dist") &&
-    path.basename(buildParent) === "core-daemon" &&
-    path.basename(buildGrandparent) === "apps";
-
-  if (isRepoCoreDaemonModule) {
-    return path.resolve(buildRoot, "..", "..", "..");
-  }
-
-  if (path.basename(buildRoot) === "dist") {
-    return buildParent;
-  }
-
-  return path.resolve(moduleDir, "..", "..", "..");
 }

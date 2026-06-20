@@ -63,6 +63,7 @@ export function buildToolRuntimeWiringCoreMocks(params: {
     }),
     PathRelationProposalService: makeClass({
       onCoUsage: vi.fn(async () => undefined),
+      onCoRecall: vi.fn(async () => undefined),
       evictExpired: vi.fn(async () => 0),
       counterSize: vi.fn(async () => 0)
     }),
@@ -97,6 +98,9 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       subscribeToInvalidations: vi.fn(() => ({ dispose: vi.fn() }))
     })),
     rebuildCountersFromEventLog: hoisted.rebuildCountersFromEventLog,
+    scheduleAuditedAsyncSideEffect: vi.fn((work: Promise<unknown> | null | undefined) => {
+      void work?.catch(() => undefined);
+    }),
     // anchor: jieba warm-up call site lives in apps/core-daemon/src/index.ts
     // createAlayaDaemonRuntime. The mock must expose a no-op so the
     // fire-and-forget call does not blow up the runtime-wiring test surface.

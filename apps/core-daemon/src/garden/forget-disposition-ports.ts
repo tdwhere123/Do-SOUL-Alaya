@@ -143,66 +143,86 @@ export function createTombstoneDispositionSweepPort(input: {
   readonly causedBy?: TransitionCausedBy;
 }): JanitorDispositionSweepPort {
   const causedBy: TransitionCausedBy = input.causedBy ?? "deterministic_rule";
-
   return {
     findDormantDispositionCandidates: async (
       workspaceId: string
-    ): Promise<readonly DormantDispositionCandidate[]> => {
-      const [dormant, memberIndex] = await Promise.all([
-        input.memoryLookup.findDormantMemories(workspaceId),
-        buildLiveCapsuleMemberIndex(workspaceId, input.capsuleLookup)
-      ]);
-      return dormant.map((memory) => {
-        const verdict = computeForgetDisposition(memory, memberIndex);
-        return {
-          memory_id: memory.object_id,
-          disposition: verdict.disposition,
-          disposition_ref: verdict.ref
-        };
-      });
-    },
+    ): Promise<readonly DormantDispositionCandidate[]> =>
+      await findDormantDispositionCandidates(input, workspaceId),
     autonomousTombstone: async (
       candidate: DormantDispositionCandidate,
       _taskId: string
-    ): Promise<DispositionSweepOutcome> => {
-      // The Janitor only calls this for non-null dispositions; re-assert here so a
-      // mis-wired caller can never tombstone an undisposed memory.
-      if (candidate.disposition === null) {
-        return { status: "skipped", reason: "null disposition (kept)" };
-      }
-      try {
-        await input.tombstoneAuthority.autonomousTombstone(
-          candidate.memory_id,
-          candidate.disposition,
-          candidate.disposition_ref,
-          "autonomous_forget_sweep",
-          causedBy
-        );
-        return { status: "tombstoned" };
-      } catch (error) {
-        // invariant: the candidate snapshot can go stale between disposition
-        // selection and this turn (concurrent revival / overlapping sweep /
-        // Inspector pin). The authority then refuses with a VALIDATION CoreError —
-        // either "no longer dormant" or the explicitly-protected backstop.
-        // Discriminate by CODE (not message strings) AND a structural row-state
-        // re-check: only a confirmed benign
-        // concurrent-mutation race resolves "skipped" so one racy candidate cannot
-        // abort the batch. EVERYTHING ELSE (shape-precondition VALIDATION on a
-        // still-eligible row, NOT_FOUND, CONFLICT, storage faults, non-CoreError)
-        // rethrows loud to the Janitor run() failure path.
-        // see also: packages/core/src/memory/memory-service/service.ts:MemoryService.autonomousTombstone,
-        // packages/core/src/memory/memory-service/service.ts:MemoryService.demoteActiveToDormantIfActive.
-        if (!(error instanceof CoreError) || error.code !== "VALIDATION") {
-          throw error;
-        }
-        const benignReason = await classifyTombstoneRefusal(input.memoryLookup, candidate.memory_id);
-        if (benignReason === null) {
-          throw error;
-        }
-        return { status: "skipped", reason: benignReason };
-      }
-    }
+    ): Promise<DispositionSweepOutcome> =>
+      await autonomousTombstoneDispositionCandidate(
+        input,
+        causedBy,
+        candidate
+      )
   };
+}
+
+async function findDormantDispositionCandidates(
+  input: Readonly<{
+    readonly memoryLookup: ForgetDispositionMemoryLookupPort;
+    readonly capsuleLookup: ForgetDispositionCapsuleLookupPort;
+  }>,
+  workspaceId: string
+): Promise<readonly DormantDispositionCandidate[]> {
+  const [dormant, memberIndex] = await Promise.all([
+    input.memoryLookup.findDormantMemories(workspaceId),
+    buildLiveCapsuleMemberIndex(workspaceId, input.capsuleLookup)
+  ]);
+  return dormant.map((memory) => {
+    const verdict = computeForgetDisposition(memory, memberIndex);
+    return {
+      memory_id: memory.object_id,
+      disposition: verdict.disposition,
+      disposition_ref: verdict.ref
+    };
+  });
+}
+
+async function autonomousTombstoneDispositionCandidate(
+  input: Readonly<{
+    readonly memoryLookup: ForgetDispositionMemoryLookupPort;
+    readonly tombstoneAuthority: ForgetDispositionTombstoneAuthorityPort;
+  }>,
+  causedBy: TransitionCausedBy,
+  candidate: DormantDispositionCandidate
+): Promise<DispositionSweepOutcome> {
+  if (candidate.disposition === null) {
+    return { status: "skipped", reason: "null disposition (kept)" };
+  }
+  try {
+    await input.tombstoneAuthority.autonomousTombstone(
+      candidate.memory_id,
+      candidate.disposition,
+      candidate.disposition_ref,
+      "autonomous_forget_sweep",
+      causedBy
+    );
+    return { status: "tombstoned" };
+  } catch (error) {
+    const benignReason = await classifyBenignTombstoneRefusal(
+      input.memoryLookup,
+      candidate.memory_id,
+      error
+    );
+    if (benignReason === null) {
+      throw error;
+    }
+    return { status: "skipped", reason: benignReason };
+  }
+}
+
+async function classifyBenignTombstoneRefusal(
+  memoryLookup: ForgetDispositionMemoryLookupPort,
+  objectId: string,
+  error: unknown
+): Promise<string | null> {
+  if (!(error instanceof CoreError) || error.code !== "VALIDATION") {
+    return null;
+  }
+  return await classifyTombstoneRefusal(memoryLookup, objectId);
 }
 
 // invariant: re-loads the refused row to confirm whether the refusal is a benign

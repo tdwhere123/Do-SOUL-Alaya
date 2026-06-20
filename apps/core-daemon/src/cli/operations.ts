@@ -125,6 +125,24 @@ function parseOperationArgs(
   command: "backup" | "export" | "import",
   input: readonly string[]
 ): Readonly<{ ok: true; args: OperationArgs }> | Readonly<{ ok: false; message: string }> {
+  const parsedFlags = parseOperationFlags(input);
+  if (!parsedFlags.ok) {
+    return parsedFlags;
+  }
+  return command === "import"
+    ? parseImportOperationArgs(parsedFlags)
+    : parseArtifactOperationArgs(command, parsedFlags);
+}
+
+function parseOperationFlags(
+  input: readonly string[]
+): Readonly<{
+  ok: true;
+  outputPath: string | null;
+  preview: boolean;
+  yes: boolean;
+  positionals: readonly string[];
+}> | Readonly<{ ok: false; message: string }> {
   let outputPath: string | null = null;
   let preview = false;
   let yes = false;
@@ -155,23 +173,46 @@ function parseOperationArgs(
     positionals.push(token);
   }
 
-  if (command === "import") {
-    const bundlePath = positionals[0];
-    // Guard instead of `positionals[0]!`: a null/undefined here means no bundle path.
-    if (positionals.length !== 1 || bundlePath === undefined) {
-      return { ok: false, message: "import requires exactly one bundle path." };
-    }
-    return {
-      ok: true,
-      args: { outputPath: null, bundlePath, preview, yes }
-    };
-  }
+  return { ok: true, outputPath, preview, yes, positionals };
+}
 
-  if (positionals.length > 0 || preview || yes) {
+function parseImportOperationArgs(
+  parsedFlags: Readonly<{
+    outputPath: string | null;
+    preview: boolean;
+    yes: boolean;
+    positionals: readonly string[];
+  }>
+): Readonly<{ ok: true; args: OperationArgs }> | Readonly<{ ok: false; message: string }> {
+  const bundlePath = parsedFlags.positionals[0];
+  if (parsedFlags.positionals.length !== 1 || bundlePath === undefined) {
+    return { ok: false, message: "import requires exactly one bundle path." };
+  }
+  return {
+    ok: true,
+    args: {
+      outputPath: parsedFlags.outputPath,
+      bundlePath,
+      preview: parsedFlags.preview,
+      yes: parsedFlags.yes
+    }
+  };
+}
+
+function parseArtifactOperationArgs(
+  command: "backup" | "export",
+  parsedFlags: Readonly<{
+    outputPath: string | null;
+    preview: boolean;
+    yes: boolean;
+    positionals: readonly string[];
+  }>
+): Readonly<{ ok: true; args: OperationArgs }> | Readonly<{ ok: false; message: string }> {
+  if (parsedFlags.positionals.length > 0 || parsedFlags.preview || parsedFlags.yes) {
     return { ok: false, message: `${command} accepts only --output <path>.` };
   }
   return {
     ok: true,
-    args: { outputPath, bundlePath: null, preview: false, yes: false }
+    args: { outputPath: parsedFlags.outputPath, bundlePath: null, preview: false, yes: false }
   };
 }

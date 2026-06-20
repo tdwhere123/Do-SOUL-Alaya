@@ -1,3 +1,5 @@
+import { readErrorMessage } from "@do-soul/alaya-protocol";
+
 /**
  * CJK-aware lazy word segmenter backed by @node-rs/jieba.
  *
@@ -9,8 +11,9 @@
  *
  * Fail-soft contract: if the @node-rs/jieba native binding cannot load on
  * this host (missing platform binary, jieba ESM import error, dict read
- * error, …) the segmenter returns the input as a single-element array.
- * Recall paths therefore never throw on a missing jieba.
+ * error, …) the segmenter emits a structured process warning and returns the
+ * input as a single-element array. Recall paths therefore never throw on a
+ * missing jieba.
  *
  * Lifecycle: the jieba instance + dict are loaded exactly once on the
  * first successful `segmentCjkRun` call, then cached for the process. A
@@ -18,11 +21,19 @@
  * trivial split without re-paying the import cost.
  */
 
+type CjkSegmenter = { cut(input: string): readonly string[] };
+type CjkSegmenterLoader = () => Promise<CjkSegmenter | null>;
+
+const CJK_SEGMENTATION_FALLBACK_WARNING_CODE = "ALAYA_CORE_CJK_SEGMENTATION_FALLBACK";
+const CJK_SEGMENTATION_FALLBACK_WARNING_MESSAGE =
+  "[CjkSegmentation] @node-rs/jieba unavailable; using surface-token fallback";
+
 let jiebaState:
   | { readonly kind: "uninitialized" }
-  | { readonly kind: "loading"; readonly promise: Promise<{ cut(input: string): readonly string[] } | null> }
+  | { readonly kind: "loading"; readonly promise: Promise<CjkSegmenter | null> }
   | { readonly kind: "ready"; readonly cut: (input: string) => readonly string[] }
   | { readonly kind: "unavailable" } = { kind: "uninitialized" };
+let loadJiebaOverrideForTests: CjkSegmenterLoader | null = null;
 
 // Han + Hiragana + Katakana are the scripts jieba actually segments at
 // word level; Hangul / Arabic / other scripts fall back to per-codepoint
@@ -35,8 +46,11 @@ export function isCjkSegmentationCandidate(token: string): boolean {
   return CJK_WORD_SEGMENTER_SCRIPTS.test(token);
 }
 
-async function loadJieba(): Promise<{ cut(input: string): readonly string[] } | null> {
+async function loadJieba(): Promise<CjkSegmenter | null> {
   try {
+    if (loadJiebaOverrideForTests !== null) {
+      return await loadJiebaOverrideForTests();
+    }
     // Dynamic import keeps the native binding off the import graph for
     // hosts that never see CJK input. The dict subpath uses a CommonJS
     // wrapper that synchronously reads dict.txt; if either resolution
@@ -48,12 +62,23 @@ async function loadJieba(): Promise<{ cut(input: string): readonly string[] } | 
     return {
       cut: (input: string) => instance.cut(input)
     };
-  } catch {
+  } catch (error) {
+    emitCjkSegmentationFallbackWarning(error);
     return null;
   }
 }
 
-async function ensureSegmenter(): Promise<{ cut(input: string): readonly string[] } | null> {
+function emitCjkSegmentationFallbackWarning(error: unknown): void {
+  process.emitWarning(CJK_SEGMENTATION_FALLBACK_WARNING_MESSAGE, {
+    code: CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
+    detail: JSON.stringify({
+      layer: "core",
+      error: readErrorMessage(error, "Unknown jieba load failure")
+    })
+  });
+}
+
+async function ensureSegmenter(): Promise<CjkSegmenter | null> {
   if (jiebaState.kind === "ready") {
     return { cut: jiebaState.cut };
   }
@@ -120,5 +145,11 @@ export function segmentCjkRun(text: string): readonly string[] {
  * one process. Not exported from the package barrel — internal-only.
  */
 export function __resetCjkSegmentationStateForTests(): void {
+  jiebaState = { kind: "uninitialized" };
+  loadJiebaOverrideForTests = null;
+}
+
+export function __setCjkSegmentationLoaderForTests(loader: CjkSegmenterLoader): void {
+  loadJiebaOverrideForTests = loader;
   jiebaState = { kind: "uninitialized" };
 }

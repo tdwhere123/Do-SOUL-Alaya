@@ -4,7 +4,14 @@ import {
   SignalKindSchema,
   SignalSourceSchema
 } from "../signals/candidate-memory-signal.js";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedIdSchema,
+  BoundedJsonObjectSchema,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
+  IsoDatetimeStringSchema,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 
 const signalEventTypeValues = [
   "soul.signal.emitted",
@@ -15,7 +22,7 @@ const signalEventTypeValues = [
 ] as const;
 
 const triageResultValues = ["accepted", "dropped", "deferred"] as const;
-const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).max(32).readonly();
+const SourceDeliveryIdsSchema = z.array(BoundedIdSchema).min(1).max(32).readonly();
 
 export const SignalEventType = {
   SOUL_SIGNAL_EMITTED: "soul.signal.emitted",
@@ -28,9 +35,9 @@ export const SignalEventType = {
 export const SignalEventTypeSchema = z.enum(signalEventTypeValues);
 
 export const SoulSignalEmittedPayloadSchema = z.object({
-  signal_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema,
+  signal_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema,
   source: SignalSourceSchema,
   signal_kind: SignalKindSchema,
   source_delivery_ids: SourceDeliveryIdsSchema.optional(),
@@ -39,41 +46,41 @@ export const SoulSignalEmittedPayloadSchema = z.object({
   exception_to_refs: CandidateMemorySignalMemoryRefsSchema,
   contradicts_refs: CandidateMemorySignalMemoryRefsSchema,
   incompatible_with_refs: CandidateMemorySignalMemoryRefsSchema,
-  raw_payload: z.record(z.string(), z.unknown()).readonly()
-}).readonly();
+  raw_payload: BoundedJsonObjectSchema
+}).strict().readonly();
 
 export const SoulSignalNormalizedPayloadSchema = z.object({
-  signal_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema,
-  normalized_fields: z.record(z.string(), z.unknown()).readonly()
-}).readonly();
+  signal_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema,
+  normalized_fields: BoundedJsonObjectSchema
+}).strict().readonly();
 
 export const SoulSignalTriagedPayloadSchema = z.object({
-  signal_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema,
+  signal_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema,
   triage_result: z.enum(triageResultValues)
-}).readonly();
+}).strict().readonly();
 
 export const SoulSignalMaterializedPayloadSchema = z
   .object({
-    signal_id: NonEmptyStringSchema,
-    workspace_id: NonEmptyStringSchema,
-    run_id: NonEmptyStringSchema,
+    signal_id: BoundedIdSchema,
+    workspace_id: BoundedIdSchema,
+    run_id: BoundedIdSchema,
     created_objects: z
       .array(
         z
           .object({
-            object_kind: NonEmptyStringSchema,
-            object_id: NonEmptyStringSchema
+            object_kind: BoundedLabelSchema,
+            object_id: BoundedIdSchema
           })
           .strict()
           .readonly()
       )
       .readonly(),
     success: z.boolean(),
-    error: z.string().optional()
+    error: BoundedReasonSchema.optional()
   })
   .strict()
   .readonly();
@@ -87,15 +94,15 @@ const signalPayloadSchemas = {
 } as const;
 
 const SignalEventBaseObjectSchema = z.object({
-  event_id: NonEmptyStringSchema,
-  entity_type: z.string(),
-  entity_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema.nullable(),
-  caused_by: z.string().nullable(),
+  event_id: BoundedIdSchema,
+  entity_type: BoundedLabelSchema,
+  entity_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema.nullable(),
+  caused_by: BoundedIdSchema.nullable(),
   revision: NonNegativeIntSchema,
   created_at: IsoDatetimeStringSchema
-});
+}).strict();
 
 export const SignalEventBaseSchema = SignalEventBaseObjectSchema.readonly();
 

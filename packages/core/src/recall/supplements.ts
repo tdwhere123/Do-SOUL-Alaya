@@ -1,11 +1,9 @@
-import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
+import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import type {
-  EmbeddingWorkspaceNeighborResult,
   EmbeddingRecallSupplementResult,
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingSupplement
 } from "../embedding-recall/embedding-recall-service.js";
-import { hashMemoryContent } from "../embedding-recall/helpers.js";
 import { buildSynthesisCoarseRecallCandidate } from "./recall-candidate-builder.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import {
@@ -16,19 +14,15 @@ import {
 } from "./recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
-  RecallEmbeddingProviderStatus,
-  RecallEmbeddingWorkspaceScanDiagnostics,
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "./recall-service-types.js";
 import { buildEvidenceSearchQueries } from "./coarse-candidates.js";
 import { normalizeEmbeddingProviderDegradationReason } from "./diagnostics.js";
+export { collectEmbeddingCoarseInjection } from "./embedding-coarse-injection.js";
 
-const EMBEDDING_INJECTION_SIMILARITY_FLOOR = 0.5;
-// Default pure-semantic injection cap (policy.semantic_supplement.injection_cap
-// overrides). Sized to the delivery window so a vocab-disjoint gold can surface,
-// not just 1-2 neighbors.
-const EMBEDDING_MAX_INJECTED_DELIVERY = 10;
+type SynthesisSearchPort = NonNullable<RecallServiceDependencies["synthesisSearchPort"]>;
+type SynthesisSearchRow = Awaited<ReturnType<SynthesisSearchPort["findByIds"]>>[number];
 
 export function emptyEmbeddingSupplementResult(): EmbeddingRecallSupplementResult {
   return Object.freeze({
@@ -44,231 +38,6 @@ export function emptySynthesisCoarseFilter(): Readonly<{
   return Object.freeze({
     candidates: Object.freeze([]),
     synthesisFtsRanks: Object.freeze({})
-  });
-}
-
-/**
- * Embedding-on coarse-injection path. Lexical coarse filtering admits only
- * memories that match deterministic / FTS / precomputed-rank predicates, so
- * a semantically relevant memory with zero lexical overlap never enters the
- * candidate pool. When the embedding_enabled gate is true this fetches the
- * top-K workspace cosine neighbors, resolves them into MemoryEntry coarse
- * candidates tagged with the semantic_supplement source channel, and returns
- * their similarity scores for the embedding_similarity fusion stream.
- *
- * invariant: returns an empty injection whenever the gate is false, so the
- * embedding-off recall path is unchanged at the bit level.
- */
-export async function collectEmbeddingCoarseInjection(params: {
-  readonly dependencies: Pick<RecallServiceDependencies, "embeddingRecallService" | "memoryRepo">;
-  readonly warn: RecallServiceWarnPort;
-  readonly policy: Readonly<RecallPolicy>;
-  readonly workspaceId: string;
-  readonly runId: string | null;
-  readonly queryText: string | null;
-  readonly poolCandidates: readonly Readonly<CoarseRecallCandidate>[];
-}): Promise<Readonly<{
-  readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
-  readonly similarityScores: Readonly<Record<string, number>>;
-  readonly embeddingInferenceCalls: number;
-  readonly embeddingProviderStatus: RecallEmbeddingProviderStatus | null;
-  readonly providerDegradationReason: string | null;
-  readonly workspaceScan: Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null;
-}>> {
-  const empty = Object.freeze({
-    candidates: Object.freeze([]) as readonly Readonly<CoarseRecallCandidate>[],
-    similarityScores: Object.freeze({}),
-    embeddingInferenceCalls: 0,
-    embeddingProviderStatus: null,
-    providerDegradationReason: null,
-    workspaceScan: null
-  });
-  const embeddingRecallService = params.dependencies.embeddingRecallService;
-  const maxSupplement = params.policy.coarse_filter.semantic_supplement.max_supplement;
-  if (
-    params.policy.coarse_filter.semantic_supplement.embedding_enabled !== true ||
-    maxSupplement <= 0 ||
-    params.queryText === null ||
-    embeddingRecallService === undefined ||
-    (typeof embeddingRecallService.collectWorkspaceNeighbors !== "function" &&
-      typeof embeddingRecallService.collectWorkspaceNeighborsWithMetadata !== "function") ||
-    typeof params.dependencies.memoryRepo.findByIds !== "function"
-  ) {
-    return empty;
-  }
-
-  // The fetch must surface enough neighbors to fill the delivery cap, which can
-  // exceed max_supplement; the floor stage then trims to the hard slice below.
-  const injectionCap =
-    params.policy.coarse_filter.semantic_supplement.injection_cap ??
-    EMBEDDING_MAX_INJECTED_DELIVERY;
-  if (injectionCap <= 0) {
-    return empty;
-  }
-  const fetchNeighbors = Math.max(maxSupplement, injectionCap);
-  const poolObjectIds = params.poolCandidates.map((candidate) => candidate.entry.object_id);
-  const neighborResult =
-    typeof embeddingRecallService.collectWorkspaceNeighborsWithMetadata === "function"
-      ? await embeddingRecallService.collectWorkspaceNeighborsWithMetadata({
-          workspaceId: params.workspaceId,
-          runId: params.runId,
-          queryText: params.queryText,
-          excludeObjectIds: poolObjectIds,
-          maxNeighbors: fetchNeighbors
-        })
-      : {
-          hits: await embeddingRecallService.collectWorkspaceNeighbors!({
-            workspaceId: params.workspaceId,
-            runId: params.runId,
-            queryText: params.queryText,
-            excludeObjectIds: poolObjectIds,
-            maxNeighbors: fetchNeighbors
-          }),
-          embedding_inference_calls: 0,
-          query_embedding_cache_hit: true,
-          query_embedding_status: "provider_not_requested" as const,
-          query_embedding_degradation_reason: null
-        };
-  const workspaceScan = readWorkspaceScanDiagnostics(neighborResult);
-  const embeddingProviderStatus = neighborResult.query_embedding_status ?? null;
-  const providerDegradationReason = neighborResult.query_embedding_degradation_reason ?? null;
-  const neighbors = neighborResult.hits;
-  if (neighbors.length === 0) {
-    return Object.freeze({
-      ...empty,
-      embeddingInferenceCalls: neighborResult.embedding_inference_calls,
-      embeddingProviderStatus,
-      providerDegradationReason,
-      workspaceScan
-    });
-  }
-
-  const similarityByObjectId = new Map(
-    neighbors.map((neighbor) => [neighbor.object_id, neighbor.normalized_similarity] as const)
-  );
-  const contentHashByObjectId = new Map(
-    neighbors
-      .filter((neighbor) => neighbor.content_hash !== undefined)
-      .map((neighbor) => [neighbor.object_id, neighbor.content_hash as string] as const)
-  );
-  let neighborEntries: readonly Readonly<MemoryEntry>[];
-  try {
-    neighborEntries = await params.dependencies.memoryRepo.findByIds([...similarityByObjectId.keys()]);
-  } catch (error) {
-    params.warn("embedding coarse injection lookup failed", {
-      workspace_id: params.workspaceId,
-      run_id: params.runId,
-      error: toErrorMessage(error)
-    });
-    return Object.freeze({
-      ...empty,
-      embeddingInferenceCalls: neighborResult.embedding_inference_calls,
-      embeddingProviderStatus,
-      providerDegradationReason,
-      workspaceScan
-    });
-  }
-
-  const poolObjectIdSet = new Set(poolObjectIds);
-  const semantic = params.policy.coarse_filter.semantic_supplement;
-  const injectionFloor =
-    semantic.injection_similarity_floor ?? EMBEDDING_INJECTION_SIMILARITY_FLOOR;
-  const maxInjected = injectionCap;
-  // Gate the injected neighbors on the query cosine floor and hard-cap the
-  // count: the semantic facet contributes at most maxInjected pool-external
-  // objects, each clearing the cosine floor. The cosine floor IS the relevance
-  // gate — these are pure-semantic objects with zero lexical overlap, so no
-  // lexical/deterministic filter applies.
-  let staleVectorDrops = 0;
-  const candidates = neighborEntries
-    .filter((entry) => {
-      const knownHash = contentHashByObjectId.get(entry.object_id);
-      if (knownHash !== undefined && knownHash !== hashMemoryContent(entry.content)) {
-        staleVectorDrops += 1;
-        return false;
-      }
-      return (
-        entry.workspace_id === params.workspaceId &&
-        !poolObjectIdSet.has(entry.object_id) &&
-        (similarityByObjectId.get(entry.object_id) ?? 0) >= injectionFloor
-      );
-    })
-    .sort(
-      (left, right) =>
-        (similarityByObjectId.get(right.object_id) ?? 0) -
-        (similarityByObjectId.get(left.object_id) ?? 0)
-    )
-    .slice(0, maxInjected)
-    .map((entry) =>
-      Object.freeze({
-        entry,
-        originPlane: "workspace_local" as const,
-        sourceChannel: "semantic_supplement",
-        sourceChannels: Object.freeze(["semantic_supplement"]),
-        admissionPlanes: Object.freeze(["semantic_supplement" as const]),
-        firstAdmissionPlane: "semantic_supplement" as const,
-        structuralScore: 0
-      })
-  ) as readonly Readonly<CoarseRecallCandidate>[];
-  if (staleVectorDrops > 0) {
-    params.warn("embedding coarse injection dropped stale vectors", {
-      workspace_id: params.workspaceId,
-      run_id: params.runId,
-      stale_vector_drops: staleVectorDrops
-    });
-  }
-  if (candidates.length === 0) {
-    return Object.freeze({
-      ...empty,
-      embeddingInferenceCalls: neighborResult.embedding_inference_calls,
-      embeddingProviderStatus,
-      providerDegradationReason,
-      workspaceScan
-    });
-  }
-
-  const similarityScores = Object.fromEntries(
-    candidates.map((candidate) => [
-      candidate.entry.object_id,
-      similarityByObjectId.get(candidate.entry.object_id) ?? 0
-    ] as const)
-  );
-  return Object.freeze({
-    candidates: Object.freeze([...candidates]),
-    similarityScores: Object.freeze(similarityScores),
-    embeddingInferenceCalls: neighborResult.embedding_inference_calls,
-    embeddingProviderStatus,
-    providerDegradationReason,
-    workspaceScan
-  });
-}
-
-function readWorkspaceScanDiagnostics(
-  result: Readonly<EmbeddingWorkspaceNeighborResult>
-): Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null {
-  if (
-    result.workspace_scan_truncated === undefined &&
-    result.workspace_scan_cap === undefined &&
-    result.workspace_scanned_count === undefined &&
-    result.provider_kind === undefined &&
-    result.model_id === undefined &&
-    result.schema_version === undefined
-  ) {
-    return null;
-  }
-  return Object.freeze({
-    ...(result.workspace_scan_truncated === undefined
-      ? {}
-      : { workspace_scan_truncated: result.workspace_scan_truncated }),
-    ...(result.workspace_scan_cap === undefined
-      ? {}
-      : { workspace_scan_cap: result.workspace_scan_cap }),
-    ...(result.workspace_scanned_count === undefined
-      ? {}
-      : { workspace_scanned_count: result.workspace_scanned_count }),
-    ...(result.provider_kind === undefined ? {} : { provider_kind: result.provider_kind }),
-    ...(result.model_id === undefined ? {} : { model_id: result.model_id }),
-    ...(result.schema_version === undefined ? {} : { schema_version: result.schema_version })
   });
 }
 
@@ -336,51 +105,15 @@ export async function collectSynthesisCoarseCandidates(params: {
     return emptySynthesisCoarseFilter();
   }
   try {
-    const rankById = new Map<string, number>();
-    for (const synthesisQuery of buildEvidenceSearchQueries(
-      params.queryText,
-      params.queryProbes
-    )) {
-      const matches = await synthesisSearchPort.searchByKeyword(
-        params.workspaceId,
-        synthesisQuery,
-        limit
-      );
-      for (const match of matches) {
-        rankById.set(
-          match.object_id,
-          Math.max(rankById.get(match.object_id) ?? 0, clamp01(match.normalized_rank))
-        );
-      }
-    }
+    const rankById = await collectSynthesisRankById(params, synthesisSearchPort, limit);
     if (rankById.size === 0) {
       return emptySynthesisCoarseFilter();
     }
     const synthesisRows = await synthesisSearchPort.findByIds([...rankById.keys()]);
-    const candidates = synthesisRows
-      .filter((synthesis) => synthesis.workspace_id === params.workspaceId)
-      .map((synthesis) =>
-        buildSynthesisCoarseRecallCandidate({
-          synthesis,
-          normalizedRank: rankById.get(synthesis.object_id) ?? 0
-        })
-      )
-      .sort((left, right) => {
-        const leftRank = rankById.get(left.entry.object_id) ?? 0;
-        const rightRank = rankById.get(right.entry.object_id) ?? 0;
-        const delta = rightRank - leftRank;
-        return delta !== 0 ? delta : compareMemoryEntries(left.entry, right.entry);
-      });
+    const candidates = buildSynthesisCandidates(params.workspaceId, synthesisRows, rankById);
     return Object.freeze({
       candidates: Object.freeze(candidates),
-      synthesisFtsRanks: Object.freeze(
-        Object.fromEntries(
-          candidates.map((candidate) => [
-            candidate.entry.object_id,
-            rankById.get(candidate.entry.object_id) ?? 0
-          ] as const)
-        )
-      )
+      synthesisFtsRanks: buildSynthesisFtsRanks(candidates, rankById)
     });
   } catch (error) {
     params.warn("synthesis FTS lookup failed", {
@@ -405,25 +138,18 @@ export async function prepareEmbeddingSupplementQuery(params: {
   readonly degradedReason: string | null;
 }>> {
   const embeddingRecallService = params.dependencies.embeddingRecallService;
-  const hasSupplementPreparation =
-    typeof embeddingRecallService?.prepareQuerySupplement === "function" ||
-    typeof embeddingRecallService?.prepareQueryEmbedding === "function";
-  if (
-    embeddingRecallService === undefined ||
-    !hasSupplementPreparation ||
-    params.queryText === null ||
-    params.config.coarse_filter.semantic_supplement.embedding_enabled !== true ||
-    params.config.coarse_filter.semantic_supplement.max_supplement <= 0 ||
-    params.localEligibleCandidates.length === 0
-  ) {
+  if (!canPrepareEmbeddingSupplementQuery(params, embeddingRecallService)) {
     return Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
   }
-
+  if (embeddingRecallService === undefined || params.queryText === null) {
+    return Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
+  }
+  const queryText = params.queryText;
   if (typeof embeddingRecallService.prepareQuerySupplement === "function") {
     const prepared = await embeddingRecallService.prepareQuerySupplement({
       workspaceId: params.workspaceId,
       runId: params.runId,
-      queryText: params.queryText,
+      queryText,
       eligibleMemories: params.localEligibleCandidates.map((candidate) => candidate.entry),
       baseCandidateCount: params.lexicalFallbackCount
     });
@@ -436,52 +162,149 @@ export async function prepareEmbeddingSupplementQuery(params: {
           : normalizeEmbeddingProviderDegradationReason(prepared.degradedReason)
     });
   }
+  return prepareLegacyEmbeddingSupplementQuery(params, embeddingRecallService);
+}
 
+async function collectSynthesisRankById(
+  params: Pick<Parameters<typeof collectSynthesisCoarseCandidates>[0], "queryText" | "queryProbes" | "workspaceId">,
+  synthesisSearchPort: NonNullable<RecallServiceDependencies["synthesisSearchPort"]>,
+  limit: number
+): Promise<ReadonlyMap<string, number>> {
+  const rankById = new Map<string, number>();
+  if (params.queryText === null) {
+    return rankById;
+  }
+  for (const synthesisQuery of buildEvidenceSearchQueries(params.queryText, params.queryProbes)) {
+    const matches = await synthesisSearchPort.searchByKeyword(
+      params.workspaceId,
+      synthesisQuery,
+      limit
+    );
+    for (const match of matches) {
+      rankById.set(
+        match.object_id,
+        Math.max(rankById.get(match.object_id) ?? 0, clamp01(match.normalized_rank))
+      );
+    }
+  }
+  return rankById;
+}
+
+function buildSynthesisCandidates(
+  workspaceId: string,
+  synthesisRows: readonly Readonly<SynthesisSearchRow>[],
+  rankById: ReadonlyMap<string, number>
+): readonly Readonly<CoarseRecallCandidate>[] {
+  return synthesisRows
+    .filter((synthesis) => synthesis.workspace_id === workspaceId)
+    .map((synthesis) =>
+      buildSynthesisCoarseRecallCandidate({
+        synthesis,
+        normalizedRank: rankById.get(synthesis.object_id) ?? 0
+      })
+    )
+    .sort((left, right) => {
+      const leftRank = rankById.get(left.entry.object_id) ?? 0;
+      const rightRank = rankById.get(right.entry.object_id) ?? 0;
+      const delta = rightRank - leftRank;
+      return delta !== 0 ? delta : compareMemoryEntries(left.entry, right.entry);
+    });
+}
+
+function buildSynthesisFtsRanks(
+  candidates: readonly Readonly<CoarseRecallCandidate>[],
+  rankById: ReadonlyMap<string, number>
+): Readonly<Record<string, number>> {
+  return Object.freeze(
+    Object.fromEntries(
+      candidates.map((candidate) => [
+        candidate.entry.object_id,
+        rankById.get(candidate.entry.object_id) ?? 0
+      ] as const)
+    )
+  );
+}
+
+function canPrepareEmbeddingSupplementQuery(
+  params: Parameters<typeof prepareEmbeddingSupplementQuery>[0],
+  embeddingRecallService: RecallServiceDependencies["embeddingRecallService"]
+): boolean {
+  const hasSupplementPreparation =
+    typeof embeddingRecallService?.prepareQuerySupplement === "function" ||
+    typeof embeddingRecallService?.prepareQueryEmbedding === "function";
+  return !(
+    embeddingRecallService === undefined ||
+    !hasSupplementPreparation ||
+    params.queryText === null ||
+    params.config.coarse_filter.semantic_supplement.embedding_enabled !== true ||
+    params.config.coarse_filter.semantic_supplement.max_supplement <= 0 ||
+    params.localEligibleCandidates.length === 0
+  );
+}
+
+async function prepareLegacyEmbeddingSupplementQuery(
+  params: Parameters<typeof prepareEmbeddingSupplementQuery>[0],
+  embeddingRecallService: NonNullable<RecallServiceDependencies["embeddingRecallService"]>
+): Promise<Readonly<{
+  readonly handle: PreparedEmbeddingQueryHandle | null;
+  readonly storedVectors: PreparedEmbeddingSupplement["storedVectors"] | null;
+  readonly degradedReason: string | null;
+}>> {
   const prepareQueryEmbedding = embeddingRecallService.prepareQueryEmbedding;
   if (typeof prepareQueryEmbedding !== "function") {
     return Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
   }
-
-  if (typeof embeddingRecallService.hasStoredVectors === "function") {
-    let hasStoredVectors: boolean;
-    try {
-      hasStoredVectors = await embeddingRecallService.hasStoredVectors({
-        workspaceId: params.workspaceId,
-        eligibleMemories: params.localEligibleCandidates.map((candidate) => candidate.entry)
-      });
-    } catch (error) {
-      const reason = parseEmbeddingPrecheckReason(error);
-
-      if (reason === null) {
-        throw error;
-      }
-
-      await embeddingRecallService.recordPrecheckDegraded?.({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        reason,
-        baseCandidateCount: params.lexicalFallbackCount,
-        fallbackCandidateCount: params.lexicalFallbackCount
-      });
-      return Object.freeze({
-        handle: null,
-        storedVectors: null,
-        degradedReason: normalizeEmbeddingProviderDegradationReason(reason)
-      });
-    }
-
-    if (!hasStoredVectors) {
-      return Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
-    }
+  const precheck = await precheckStoredVectorsForEmbeddingSupplement(params, embeddingRecallService);
+  if (precheck !== null) {
+    return precheck;
   }
-
   return Object.freeze({
     handle: prepareQueryEmbedding({
       workspaceId: params.workspaceId,
       runId: params.runId,
-      queryText: params.queryText
+      queryText: params.queryText!
     }),
     storedVectors: null,
     degradedReason: null
   });
+}
+
+async function precheckStoredVectorsForEmbeddingSupplement(
+  params: Parameters<typeof prepareEmbeddingSupplementQuery>[0],
+  embeddingRecallService: NonNullable<RecallServiceDependencies["embeddingRecallService"]>
+): Promise<Readonly<{
+  readonly handle: PreparedEmbeddingQueryHandle | null;
+  readonly storedVectors: PreparedEmbeddingSupplement["storedVectors"] | null;
+  readonly degradedReason: string | null;
+}> | null> {
+  if (typeof embeddingRecallService.hasStoredVectors !== "function") {
+    return null;
+  }
+  let hasStoredVectors: boolean;
+  try {
+    hasStoredVectors = await embeddingRecallService.hasStoredVectors({
+      workspaceId: params.workspaceId,
+      eligibleMemories: params.localEligibleCandidates.map((candidate) => candidate.entry)
+    });
+  } catch (error) {
+    const reason = parseEmbeddingPrecheckReason(error);
+    if (reason === null) {
+      throw error;
+    }
+    await embeddingRecallService.recordPrecheckDegraded?.({
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      reason,
+      baseCandidateCount: params.lexicalFallbackCount,
+      fallbackCandidateCount: params.lexicalFallbackCount
+    });
+    return Object.freeze({
+      handle: null,
+      storedVectors: null,
+      degradedReason: normalizeEmbeddingProviderDegradationReason(reason)
+    });
+  }
+  return hasStoredVectors
+    ? null
+    : Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
 }

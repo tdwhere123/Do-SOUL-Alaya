@@ -67,74 +67,48 @@ export class GraphExploreService {
     workspaceId: string,
     options: GraphExploreOptions = {}
   ): Promise<readonly GraphNeighbor[]> {
-    const parsedMemoryId = parseObjectId(memoryId);
-    const parsedWorkspaceId = parseObjectId(workspaceId);
-    const parsedDirection = options.direction ?? "both";
-    const parsedEdgeTypes = options.edgeTypes?.map(parseMemoryGraphEdgeType);
-    const edgeTypeFilter = parsedEdgeTypes === undefined ? null : new Set(parsedEdgeTypes);
-
-    const relations = await this.dependencies.pathRepo.findByAnchors(parsedWorkspaceId, [
-      { kind: "object", object_id: parsedMemoryId }
+    const parsed = parseGraphExploreInput(memoryId, workspaceId, options);
+    const relations = await this.dependencies.pathRepo.findByAnchors(parsed.workspaceId, [
+      { kind: "object", object_id: parsed.memoryId }
     ]);
-
-    const neighbors = relations.flatMap((relation): GraphNeighbor[] => {
-      if (!isPathActiveForRecall(relation.lifecycle.status)) {
-        return [];
-      }
-      const sourceId = anchorObjectId(relation.anchors.source_anchor);
-      const targetId = anchorObjectId(relation.anchors.target_anchor);
-      if (sourceId === undefined || targetId === undefined || sourceId === targetId) {
-        return [];
-      }
-      const edgeType = mapRelationKindToGraphEdgeType(relation.constitution.relation_kind);
-      if (edgeTypeFilter !== null && !edgeTypeFilter.has(edgeType)) {
-        return [];
-      }
-      if (sourceId === parsedMemoryId && (parsedDirection === "outbound" || parsedDirection === "both")) {
-        return [
-          GraphNeighborSchema.parse({
-            memory_id: targetId,
-            edge_type: edgeType,
-            direction: "outbound",
-            edge_id: relation.path_id
-          })
-        ];
-      }
-      if (targetId === parsedMemoryId && (parsedDirection === "inbound" || parsedDirection === "both")) {
-        return [
-          GraphNeighborSchema.parse({
-            memory_id: sourceId,
-            edge_type: edgeType,
-            direction: "inbound",
-            edge_id: relation.path_id
-          })
-        ];
-      }
-      return [];
-    });
-
+    const neighbors = buildGraphNeighbors(
+      relations,
+      parsed.memoryId,
+      parsed.direction,
+      parsed.edgeTypeFilter
+    );
     if (neighbors.length === 0) {
       return Object.freeze(neighbors);
     }
+    await this.appendGraphExploreEvent(parsed, neighbors.length, options.runId ?? null);
+    return Object.freeze(neighbors);
+  }
 
+  private async appendGraphExploreEvent(
+    parsed: Readonly<{
+      readonly memoryId: string;
+      readonly workspaceId: string;
+      readonly direction: GraphExploreDir;
+    }>,
+    neighborCount: number,
+    runId: string | null
+  ): Promise<void> {
     await this.dependencies.eventLogRepo.append({
       event_type: GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
       entity_type: "memory_entry",
-      entity_id: parsedMemoryId,
-      workspace_id: parsedWorkspaceId,
-      run_id: options.runId ?? null,
+      entity_id: parsed.memoryId,
+      workspace_id: parsed.workspaceId,
+      run_id: runId,
       caused_by: "system",
       payload_json: SoulGraphExploreCompletedPayloadSchema.parse({
         exploration_kind: "memory_neighbors",
-        source_memory_id: parsedMemoryId,
-        workspace_id: parsedWorkspaceId,
-        direction: parsedDirection,
-        neighbor_count: neighbors.length,
+        source_memory_id: parsed.memoryId,
+        workspace_id: parsed.workspaceId,
+        direction: parsed.direction,
+        neighbor_count: neighborCount,
         occurred_at: this.now()
       })
     });
-
-    return Object.freeze(neighbors);
   }
 
   /** @deprecated use `countInboundEdgesWeighted` for recall scoring;
@@ -201,6 +175,78 @@ export class GraphExploreService {
     });
     return paths.filter((path) => isPathRecallEligible(path));
   }
+}
+
+function parseGraphExploreInput(
+  memoryId: string,
+  workspaceId: string,
+  options: GraphExploreOptions
+): Readonly<{
+  readonly memoryId: string;
+  readonly workspaceId: string;
+  readonly direction: GraphExploreDir;
+  readonly edgeTypeFilter: ReadonlySet<MemoryGraphEdgeTypeValue> | null;
+}> {
+  const direction = options.direction ?? "both";
+  const parsedEdgeTypes = options.edgeTypes?.map(parseMemoryGraphEdgeType);
+  return Object.freeze({
+    memoryId: parseObjectId(memoryId),
+    workspaceId: parseObjectId(workspaceId),
+    direction,
+    edgeTypeFilter: parsedEdgeTypes === undefined ? null : new Set(parsedEdgeTypes)
+  });
+}
+
+function buildGraphNeighbors(
+  relations: readonly Readonly<PathRelation>[],
+  memoryId: string,
+  direction: GraphExploreDir,
+  edgeTypeFilter: ReadonlySet<MemoryGraphEdgeTypeValue> | null
+): readonly GraphNeighbor[] {
+  return relations.flatMap((relation) =>
+    buildGraphNeighborsForRelation(relation, memoryId, direction, edgeTypeFilter)
+  );
+}
+
+function buildGraphNeighborsForRelation(
+  relation: Readonly<PathRelation>,
+  memoryId: string,
+  direction: GraphExploreDir,
+  edgeTypeFilter: ReadonlySet<MemoryGraphEdgeTypeValue> | null
+): readonly GraphNeighbor[] {
+  if (!isPathActiveForRecall(relation.lifecycle.status)) {
+    return [];
+  }
+  const sourceId = anchorObjectId(relation.anchors.source_anchor);
+  const targetId = anchorObjectId(relation.anchors.target_anchor);
+  if (sourceId === undefined || targetId === undefined || sourceId === targetId) {
+    return [];
+  }
+  const edgeType = mapRelationKindToGraphEdgeType(relation.constitution.relation_kind);
+  if (edgeTypeFilter !== null && !edgeTypeFilter.has(edgeType)) {
+    return [];
+  }
+  if (sourceId === memoryId && (direction === "outbound" || direction === "both")) {
+    return [createGraphNeighbor(targetId, edgeType, "outbound", relation.path_id)];
+  }
+  if (targetId === memoryId && (direction === "inbound" || direction === "both")) {
+    return [createGraphNeighbor(sourceId, edgeType, "inbound", relation.path_id)];
+  }
+  return [];
+}
+
+function createGraphNeighbor(
+  memoryId: string,
+  edgeType: MemoryGraphEdgeTypeValue,
+  direction: "inbound" | "outbound",
+  edgeId: string
+): GraphNeighbor {
+  return GraphNeighborSchema.parse({
+    memory_id: memoryId,
+    edge_type: edgeType,
+    direction,
+    edge_id: edgeId
+  });
 }
 
 function parseMemoryGraphEdgeType(value: MemoryGraphEdgeTypeValue): MemoryGraphEdgeTypeValue {

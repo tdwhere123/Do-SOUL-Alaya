@@ -8,6 +8,7 @@ import {
   parseSecretRefKeychainTarget,
   RuntimeEmbeddingConfigPatchSchema,
   RuntimeEmbeddingConfigSchema,
+  RuntimeGardenComputeConfigPatchSchema,
   RuntimeGardenComputeConfigSchema,
   secretRefScheme,
   SoulConfigSchema,
@@ -224,5 +225,37 @@ describe("app config schemas", () => {
       daemon: { ready: true },
       mcp: { enrolled_tools: 2 }
     });
+  });
+
+  it("rejects unknown keys on full versioned config schemas", () => {
+    expect(SoulConfigSchema.safeParse({ ...DEFAULT_SOUL_CONFIG, unknown: true }).success).toBe(false);
+    expect(StrategyConfigSchema.safeParse({ ...DEFAULT_STRATEGY_CONFIG, unknown: true }).success).toBe(false);
+    expect(EnvironmentConfigSchema.safeParse({ ...DEFAULT_ENVIRONMENT_CONFIG, unknown: true }).success).toBe(false);
+    expect(
+      RuntimeEmbeddingConfigSchema.safeParse({
+        config_version: 1,
+        provider_url: null,
+        secret_ref: "env:OPENAI_API_KEY",
+        model_id: "text-embedding-3-small",
+        embedding_enabled: true,
+        unknown: true
+      }).success
+    ).toBe(false);
+    expect(
+      RuntimeGardenComputeConfigSchema.safeParse({
+        config_version: 1,
+        provider_kind: "official_api",
+        provider_url: null,
+        secret_ref: "keychain:alaya-garden:openai",
+        model_id: "gpt-4.1-mini",
+        enabled: true,
+        unknown: true
+      }).success
+    ).toBe(false);
+  });
+
+  it("keeps runtime config patch schemas strict on unknown keys", () => {
+    expect(RuntimeEmbeddingConfigPatchSchema.safeParse({ unknown: true }).success).toBe(false);
+    expect(RuntimeGardenComputeConfigPatchSchema.safeParse({ unknown: true }).success).toBe(false);
   });
 });

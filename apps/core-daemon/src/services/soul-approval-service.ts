@@ -20,7 +20,7 @@ export interface SoulApprovalResolution {
 }
 
 interface SoulApprovalServiceDependencies {
-  readonly eventLogRepo: Pick<EventLogRepo, "append" | "queryByRun">;
+  readonly eventLogRepo: Pick<EventLogRepo, "append" | "queryByRunAll">;
   readonly runLookup: (runId: string) => Promise<{
     readonly run_id: string;
     readonly workspace_id: string;
@@ -49,7 +49,7 @@ async function resolveSoulApproval(
   result: "approved" | "rejected"
 ): Promise<SoulApprovalResolution> {
   const run = await dependencies.runLookup(input.runId);
-  const runEvents = await dependencies.eventLogRepo.queryByRun(run.run_id);
+  const runEvents = await dependencies.eventLogRepo.queryByRunAll(run.run_id);
   const approvalState = getApprovalState(runEvents, input.approvalId);
   const resolvedAt = now();
   const entry = await dependencies.eventLogRepo.append({

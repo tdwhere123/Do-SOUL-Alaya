@@ -6,9 +6,9 @@ import {
 } from "../../garden/path-graph-snapshotter.js";
 
 describe("PathGraphSnapshotter", () => {
-  it("uses findActive and builds a zeroed snapshot for an empty workspace", async () => {
+  it("uses findActiveAll and builds a zeroed snapshot for an empty workspace", async () => {
     const pathRelationRepo = {
-      findActive: vi.fn(async () => [] as const),
+      findActiveAll: vi.fn(async () => [] as const),
       findByWorkspace: vi.fn(async () => {
         throw new Error("findByWorkspace should not be used for active snapshot reads");
       })
@@ -53,7 +53,7 @@ describe("PathGraphSnapshotter", () => {
       paths_created_since_last: 0,
       snapshot_at: "2026-04-17T01:00:00.000Z"
     });
-    expect(pathRelationRepo.findActive).toHaveBeenCalledWith("workspace-1");
+    expect(pathRelationRepo.findActiveAll).toHaveBeenCalledWith("workspace-1");
     expect(pathRelationRepo.findByWorkspace).not.toHaveBeenCalled();
   });
 
@@ -119,7 +119,7 @@ describe("PathGraphSnapshotter", () => {
     ] as const;
     const snapshotter = new PathGraphSnapshotter({
       pathRelationRepo: {
-        findActive: vi.fn(async () => relations)
+        findActiveAll: vi.fn(async () => relations)
       },
       now: () => new Date("2026-04-17T01:00:00.000Z")
     });
@@ -223,7 +223,7 @@ describe("PathGraphSnapshotter", () => {
     ] as const;
     const snapshotter = new PathGraphSnapshotter({
       pathRelationRepo: {
-        findActive: vi.fn(async () => relations)
+        findActiveAll: vi.fn(async () => relations)
       },
       now: () => new Date("2026-04-17T01:00:00.000Z")
     });

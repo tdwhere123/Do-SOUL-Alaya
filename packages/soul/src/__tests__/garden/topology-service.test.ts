@@ -6,7 +6,7 @@ describe("TopologyService", () => {
   it("returns an empty derived view without snapshot history", async () => {
     const service = new TopologyService({
       pathRelationRepo: {
-        findActive: vi.fn(async () => [] as const)
+        findActiveAll: vi.fn(async () => [] as const)
       },
       now: () => new Date("2026-04-21T08:00:00.000Z")
     });
@@ -27,7 +27,7 @@ describe("TopologyService", () => {
   it("derives degrees, SCCs, and trend overlay from active relations and snapshot history", async () => {
     const service = new TopologyService({
       pathRelationRepo: {
-        findActive: vi.fn(async () => [
+        findActiveAll: vi.fn(async () => [
           createPathRelationFixture({
             path_id: "path-a",
             anchors: {
@@ -149,7 +149,7 @@ describe("TopologyService", () => {
 
     const service = new TopologyService({
       pathRelationRepo: {
-        findActive: vi.fn(async () => relations)
+        findActiveAll: vi.fn(async () => relations)
       },
       now: () => new Date("2026-04-21T08:00:00.000Z")
     });
@@ -193,7 +193,7 @@ describe("TopologyService", () => {
   it("drops the optional trend overlay when snapshot history is unavailable", async () => {
     const service = new TopologyService({
       pathRelationRepo: {
-        findActive: vi.fn(async () => [
+        findActiveAll: vi.fn(async () => [
           createPathRelationFixture({
             path_id: "path-a",
             anchors: {

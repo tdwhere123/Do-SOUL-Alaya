@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  IsoDatetimeStringSchema,
+  NonEmptyStringSchema,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 import { StorageTierSchema } from "../soul/memory-entry.js";
 
 const memoryGovernanceEventTypeValues = [
@@ -178,15 +184,15 @@ const memoryGovernancePayloadSchemas = {
 } as const;
 
 const MemoryGovernanceEventBaseObjectSchema = z.object({
-  event_id: NonEmptyStringSchema,
-  entity_type: z.string(),
-  entity_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema.nullable(),
-  caused_by: z.string().nullable(),
+  event_id: BoundedIdSchema,
+  entity_type: BoundedLabelSchema,
+  entity_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema.nullable(),
+  caused_by: BoundedIdSchema.nullable(),
   revision: NonNegativeIntSchema,
   created_at: IsoDatetimeStringSchema
-});
+}).strict();
 
 export const MemoryGovernanceEventBaseSchema = MemoryGovernanceEventBaseObjectSchema.readonly();
 

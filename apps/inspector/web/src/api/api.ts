@@ -56,20 +56,31 @@ export async function apiFetchWithHeaders<T>(
   options: ApiRequestOptions = {}
 ): Promise<ApiFetchResult<T>> {
   const { params, headers, body, method = "GET", ...rest } = options;
+  const url = buildApiUrl(path, params);
+  const init = buildRequestInit(rest, method, headers, body);
+  return await fetchWithRetry<T>(url, init, method);
+}
 
+function buildApiUrl(path: string, params: Record<string, string> | undefined): string {
   let resolvedPath = path;
   if (currentWorkspaceId) {
     resolvedPath = path.replace(":workspaceId", currentWorkspaceId);
   }
-
   let url = resolvedPath.startsWith("http") ? resolvedPath : `/api${resolvedPath}`;
-
   if (params) {
     const searchParams = new URLSearchParams(params);
     url += (url.includes("?") ? "&" : "?") + searchParams.toString();
   }
+  return url;
+}
 
-  const init: RequestInit = {
+function buildRequestInit(
+  rest: Omit<RequestInit, "body" | "method" | "headers">,
+  method: string,
+  headers: HeadersInit | undefined,
+  body: unknown
+): RequestInit {
+  return {
     ...rest,
     method,
     headers: {
@@ -79,58 +90,81 @@ export async function apiFetchWithHeaders<T>(
     },
     body: body === undefined ? undefined : JSON.stringify(body)
   };
+}
 
+async function fetchWithRetry<T>(
+  url: string,
+  init: RequestInit,
+  method: string
+): Promise<ApiFetchResult<T>> {
   const canRetry = RETRYABLE_METHODS.has(method.toUpperCase());
   const maxAttempts = canRetry ? 2 : 1;
-
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    let response: Response;
-    try {
-      response = await fetch(url, init);
-    } catch (err) {
-      lastError = err;
-      if (attempt < maxAttempts) {
-        await sleep(200 * Math.pow(5, attempt - 1));
-        continue;
-      }
-      throw err;
+    const attemptResult = await fetchAttempt(url, init, attempt, maxAttempts);
+    if (attemptResult.kind === "network_error") {
+      lastError = attemptResult.error;
+      continue;
     }
-
-    if (response.status === 401) {
-      onUnauthorized?.();
-      const error = new Error(
-        "Unauthorized: Please re-run `alaya inspect` to get a fresh token."
-      ) as ApiError;
-      error.status = 401;
-      throw error;
-    }
-
-    if (response.status >= 500 && response.status < 600 && attempt < maxAttempts) {
+    if (shouldRetryResponse(attemptResult.response, attempt, maxAttempts)) {
       await sleep(200 * Math.pow(5, attempt - 1));
       continue;
     }
-
-    if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as {
-        readonly message?: unknown;
-        readonly error?: unknown;
-      };
-      const error = new Error(
-        extractApiErrorMessage(errorData) ??
-          `API Error: ${response.status} ${response.statusText}`
-      ) as ApiError;
-      error.status = response.status;
-      throw error;
-    }
-
-    return {
-      payload: await response.json() as T,
-      headers: response.headers
-    };
+    return await responsePayload<T>(attemptResult.response);
   }
 
   throw lastError instanceof Error ? lastError : new Error("apiFetch exhausted retries");
+}
+
+async function fetchAttempt(
+  url: string,
+  init: RequestInit,
+  attempt: number,
+  maxAttempts: number
+): Promise<{ readonly kind: "response"; readonly response: Response } | { readonly kind: "network_error"; readonly error: unknown }> {
+  try {
+    return { kind: "response", response: await fetch(url, init) };
+  } catch (err) {
+    if (attempt < maxAttempts) {
+      await sleep(200 * Math.pow(5, attempt - 1));
+      return { kind: "network_error", error: err };
+    }
+    throw err;
+  }
+}
+
+function shouldRetryResponse(response: Response, attempt: number, maxAttempts: number): boolean {
+  return response.status >= 500 && response.status < 600 && attempt < maxAttempts;
+}
+
+async function responsePayload<T>(response: Response): Promise<ApiFetchResult<T>> {
+  if (response.status === 401) throw unauthorizedError();
+  if (!response.ok) throw await apiResponseError(response);
+  return {
+    payload: await response.json() as T,
+    headers: response.headers
+  };
+}
+
+function unauthorizedError(): ApiError {
+  onUnauthorized?.();
+  const error = new Error(
+    "Unauthorized: Please re-run `alaya inspect` to get a fresh token."
+  ) as ApiError;
+  error.status = 401;
+  return error;
+}
+
+async function apiResponseError(response: Response): Promise<ApiError> {
+  const errorData = (await response.json().catch(() => ({}))) as {
+    readonly message?: unknown;
+    readonly error?: unknown;
+  };
+  const error = new Error(
+    extractApiErrorMessage(errorData) ?? `API Error: ${response.status} ${response.statusText}`
+  ) as ApiError;
+  error.status = response.status;
+  return error;
 }
 
 function extractApiErrorMessage(errorData: {

@@ -85,6 +85,31 @@ export interface WallClockTimeoutOptions {
   readonly operatorAbortSignal?: AbortSignal;
 }
 
+interface ResolvedWallClockTimeoutDeps {
+  readonly now: () => number;
+  readonly setTimeout: (
+    handler: () => void,
+    ms: number
+  ) => ReturnType<typeof setTimeout>;
+  readonly clearTimeout: (handle: ReturnType<typeof setTimeout>) => void;
+  readonly setInterval: (
+    handler: () => void,
+    ms: number
+  ) => ReturnType<typeof setInterval>;
+  readonly clearInterval: (handle: ReturnType<typeof setInterval>) => void;
+}
+
+interface WallClockTimeoutState {
+  readonly controller: AbortController;
+  readonly startedAt: number;
+  readonly timeoutSettlement: Promise<never>;
+  rejectSettlement: (error: WallClockTimeoutError | OperatorAbortError) => void;
+  monotonicHandle: ReturnType<typeof setTimeout> | null;
+  wallClockHandle: ReturnType<typeof setInterval> | null;
+  trigger: "monotonic" | "wall_clock" | null;
+  elapsedAtTrigger: number;
+}
+
 /**
  * Race `fn(signal)` against a wall-clock outer budget.
  *
@@ -104,95 +129,21 @@ export async function withWallClockTimeout<T>(
   options: WallClockTimeoutOptions,
   deps?: WallClockTimeoutDeps
 ): Promise<T> {
-  const nowFn = deps?.now ?? Date.now;
-  const setTimeoutFn = deps?.setTimeoutImpl ?? setTimeout;
-  const clearTimeoutFn = deps?.clearTimeoutImpl ?? clearTimeout;
-  const setIntervalFn = deps?.setIntervalImpl ?? setInterval;
-  const clearIntervalFn = deps?.clearIntervalImpl ?? clearInterval;
-
-  const controller = new AbortController();
-  const startedAt = nowFn();
-  let monotonicHandle: ReturnType<typeof setTimeout> | null = null;
-  let wallClockHandle: ReturnType<typeof setInterval> | null = null;
-  let trigger: "monotonic" | "wall_clock" | null = null;
-  let elapsedAtTrigger = 0;
-
-  // invariant: the settlement promise NEVER resolves; it only rejects when a
-  // timeout fires (`fire()`) OR the operator aborts (`settleOperatorAbort()`).
-  // Racing it against `fn(signal)` is what guarantees the outer promise settles
-  // even if the inner fetch ignores the abort (the Node 24 stalled-undici
-  // case). A timeout rejection is a WallClockTimeoutError so it flows through
-  // the SAME catch-rewrap below; the timeout fields are read from `trigger` /
-  // `elapsedAtTrigger` set by `fire()` (so a wall-clock trigger still surfaces
-  // its real elapsed, not the rejection-site value).
-  // invariant: every path that calls controller.abort() MUST also settle this
-  // promise — otherwise a stalled fn that ignores its signal leaves the race
-  // unsettled and the outer await hangs forever. The operator-abort paths
-  // settle via OperatorAbortError so the catch below surfaces it as the abort
-  // (NOT a WallClockTimeoutError); when the inner fn honors the abort it
-  // rejects first and wins the race, surfacing its own original error instead.
-  let rejectSettlement:
-    | ((error: WallClockTimeoutError | OperatorAbortError) => void)
-    | null = null;
-  const timeoutSettlement = new Promise<never>((_resolve, reject) => {
-    rejectSettlement = reject;
-  });
-
-  const settleOperatorAbort = (): void => {
-    controller.abort();
-    rejectSettlement?.(new OperatorAbortError());
-  };
-
-  const operatorAbortListener = (): void => {
-    // Operator abort: forward to inner AND settle the race. The outer promise
-    // surfaces the inner's original abort error if the inner honors the abort
-    // (it rejects first), otherwise the OperatorAbortError above — NEVER a
-    // WallClockTimeoutError.
-    settleOperatorAbort();
-  };
+  const resolvedDeps = resolveWallClockTimeoutDeps(deps);
+  const state = createWallClockTimeoutState(resolvedDeps);
   const operator = options.operatorAbortSignal;
-  if (operator !== undefined) {
-    if (operator.aborted) {
-      settleOperatorAbort();
-    } else {
-      operator.addEventListener("abort", operatorAbortListener);
-    }
-  }
-
-  const fire = (cause: "monotonic" | "wall_clock"): void => {
-    if (controller.signal.aborted) {
-      return;
-    }
-    trigger = cause;
-    elapsedAtTrigger = nowFn() - startedAt;
-    controller.abort();
-    rejectSettlement?.(
-      new WallClockTimeoutError(options.budgetMs, elapsedAtTrigger, cause)
-    );
-  };
-
-  // invariant: .unref?.() so a live backstop timer does not pin the event loop
-  // and block process exit mid-extract. finally-clear + awaiting callers make
-  // this redundant on the happy path; it is the safety margin for an abrupt
-  // exit. see also: packages/core/src/embedding-recall/openai-client.ts:OpenAIEmbeddingClient.fetchEmbeddingWithRetry
-  monotonicHandle = setTimeoutFn(() => fire("monotonic"), options.budgetMs);
-  monotonicHandle.unref?.();
-  wallClockHandle = setIntervalFn(() => {
-    if (nowFn() - startedAt >= options.budgetMs) {
-      fire("wall_clock");
-    }
-  }, WALL_CLOCK_TICK_MS);
-  wallClockHandle.unref?.();
+  const operatorAbortListener = registerOperatorAbortListener(operator, state);
+  startWallClockGuards(state, options, resolvedDeps);
 
   let raceSettled = false;
   try {
-    const inner = fn(controller.signal);
+    const inner = fn(state.controller.signal);
     // invariant: once the outer race already settled, a late rejection from an
     // abandoned inner promise must not surface as an unhandledRejection.
     // Timeout/operator-abort paths intentionally abandon the inner; any other
     // post-settlement rejection is unexpected and should stay visible.
     void inner.catch((error: unknown) => {
-      if (!raceSettled || controller.signal.aborted) {
+      if (!raceSettled || state.controller.signal.aborted) {
         return;
       }
       console.warn(
@@ -200,36 +151,135 @@ export async function withWallClockTimeout<T>(
         { error }
       );
     });
-    const result = await Promise.race([inner, timeoutSettlement]);
+    const result = await Promise.race([inner, state.timeoutSettlement]);
     raceSettled = true;
     return result;
   } catch (error) {
     raceSettled = true;
-    // Distinguish OUR timeout from any other rejection. If `trigger` is set,
-    // our controller aborted the inner; rewrap as WallClockTimeoutError so
-    // callers can classify it cleanly. If the operator aborted, surface the
-    // original error (it carries the operator's abort reason).
-    if (
-      trigger !== null &&
-      controller.signal.aborted &&
-      (operator === undefined || !operator.aborted)
-    ) {
-      throw new WallClockTimeoutError(
-        options.budgetMs,
-        elapsedAtTrigger,
-        trigger
-      );
-    }
-    throw error;
+    throw remapWallClockTimeoutError(error, state, options, operator);
   } finally {
-    if (monotonicHandle !== null) {
-      clearTimeoutFn(monotonicHandle);
+    cleanupWallClockGuards(state, resolvedDeps);
+    operator?.removeEventListener("abort", operatorAbortListener);
+  }
+}
+
+function resolveWallClockTimeoutDeps(
+  deps?: WallClockTimeoutDeps
+): ResolvedWallClockTimeoutDeps {
+  return {
+    now: deps?.now ?? Date.now,
+    setTimeout: deps?.setTimeoutImpl ?? setTimeout,
+    clearTimeout: deps?.clearTimeoutImpl ?? clearTimeout,
+    setInterval: deps?.setIntervalImpl ?? setInterval,
+    clearInterval: deps?.clearIntervalImpl ?? clearInterval
+  };
+}
+
+function createWallClockTimeoutState(
+  deps: ResolvedWallClockTimeoutDeps
+): WallClockTimeoutState {
+  let rejectSettlement:
+    | ((error: WallClockTimeoutError | OperatorAbortError) => void)
+    | null = null;
+  const timeoutSettlement = new Promise<never>((_resolve, reject) => {
+    rejectSettlement = reject;
+  });
+  return {
+    controller: new AbortController(),
+    startedAt: deps.now(),
+    timeoutSettlement,
+    rejectSettlement: rejectSettlement ?? (() => undefined),
+    monotonicHandle: null,
+    wallClockHandle: null,
+    trigger: null,
+    elapsedAtTrigger: 0
+  };
+}
+
+function registerOperatorAbortListener(
+  operator: AbortSignal | undefined,
+  state: WallClockTimeoutState
+): () => void {
+  const listener = (): void => settleOperatorAbort(state);
+  if (operator === undefined) {
+    return listener;
+  }
+  if (operator.aborted) {
+    listener();
+    return listener;
+  }
+  operator.addEventListener("abort", listener);
+  return listener;
+}
+
+function settleOperatorAbort(state: WallClockTimeoutState): void {
+  state.controller.abort();
+  state.rejectSettlement(new OperatorAbortError());
+}
+
+function startWallClockGuards(
+  state: WallClockTimeoutState,
+  options: WallClockTimeoutOptions,
+  deps: ResolvedWallClockTimeoutDeps
+): void {
+  state.monotonicHandle = deps.setTimeout(
+    () => fireWallClockTimeout(state, options.budgetMs, "monotonic", deps.now),
+    options.budgetMs
+  );
+  state.monotonicHandle.unref?.();
+  state.wallClockHandle = deps.setInterval(() => {
+    if (deps.now() - state.startedAt >= options.budgetMs) {
+      fireWallClockTimeout(state, options.budgetMs, "wall_clock", deps.now);
     }
-    if (wallClockHandle !== null) {
-      clearIntervalFn(wallClockHandle);
-    }
-    if (operator !== undefined) {
-      operator.removeEventListener("abort", operatorAbortListener);
-    }
+  }, WALL_CLOCK_TICK_MS);
+  state.wallClockHandle.unref?.();
+}
+
+function fireWallClockTimeout(
+  state: WallClockTimeoutState,
+  budgetMs: number,
+  cause: "monotonic" | "wall_clock",
+  now: () => number
+): void {
+  if (state.controller.signal.aborted) {
+    return;
+  }
+  state.trigger = cause;
+  state.elapsedAtTrigger = now() - state.startedAt;
+  state.controller.abort();
+  state.rejectSettlement(
+    new WallClockTimeoutError(budgetMs, state.elapsedAtTrigger, cause)
+  );
+}
+
+function remapWallClockTimeoutError(
+  error: unknown,
+  state: WallClockTimeoutState,
+  options: WallClockTimeoutOptions,
+  operator: AbortSignal | undefined
+): unknown {
+  if (
+    state.trigger !== null &&
+    state.controller.signal.aborted &&
+    (operator === undefined || !operator.aborted)
+  ) {
+    return new WallClockTimeoutError(
+      options.budgetMs,
+      state.elapsedAtTrigger,
+      state.trigger
+    );
+  }
+  return error;
+}
+
+function cleanupWallClockGuards(
+  state: WallClockTimeoutState,
+  deps: ResolvedWallClockTimeoutDeps
+): void {
+  if (state.monotonicHandle !== null) {
+    deps.clearTimeout(state.monotonicHandle);
+  }
+  if (state.wallClockHandle !== null) {
+    deps.clearInterval(state.wallClockHandle);
   }
 }

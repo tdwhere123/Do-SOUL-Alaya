@@ -92,75 +92,23 @@ export interface RecallUtilizationEventLogPort {
   ): Promise<readonly EventLogEntry[]>;
 }
 
+type RecallDeliveredPayload = ReturnType<typeof parseSoulRecallDeliveredPayload>;
+type RecallUsagePayload = ReturnType<typeof parseSoulContextUsagePayload>;
+type EmbeddingSupplementPayload = ReturnType<typeof parseEmbeddingSupplementPayload>;
+
 export function createRecallUtilizationService(deps: {
   readonly eventLogRepo: RecallUtilizationEventLogPort;
 }): RecallUtilizationService {
   return {
     async getStats({ workspaceId, since, until, excludeAgentTargets }) {
-      const sinceArg = since ?? undefined;
-      const untilArg = until ?? undefined;
       const exclusion = new Set(excludeAgentTargets ?? Array.from(NON_AGENT_TARGETS));
-      const [deliveredRows, usageRows, embeddingRows] = await Promise.all([
-        deps.eventLogRepo.queryByWorkspaceAndType(
-          workspaceId,
-          RecallContextEventType.SOUL_RECALL_DELIVERED,
-          sinceArg,
-          untilArg
-        ),
-        deps.eventLogRepo.queryByWorkspaceAndType(
-          workspaceId,
-          RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
-          sinceArg,
-          untilArg
-        ),
-        deps.eventLogRepo.queryByWorkspaceAndType(
-          workspaceId,
-          ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
-          sinceArg,
-          untilArg
-        )
-      ]);
-
-      const deliveredPayloads = deliveredRows
-        .map((row) =>
-          parseRecallContextEventPayload(
-            RecallContextEventType.SOUL_RECALL_DELIVERED,
-            row.payload_json as Record<string, unknown>
-          )
-        )
-        .filter((payload) => !exclusion.has(payload.agent_target));
-      const usagePayloads = usageRows
-        .map((row) =>
-          parseRecallContextEventPayload(
-            RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
-            row.payload_json as Record<string, unknown>
-          )
-        )
-        .filter((payload) => !exclusion.has(payload.agent_target));
-      const embeddingPayloads = embeddingRows.map((row) =>
-        parseComputeRecallGardenEventPayload(
-          ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
-          row.payload_json as Record<string, unknown>
-        )
+      const payloads = await loadRecallUtilizationPayloads(
+        deps.eventLogRepo,
+        workspaceId,
+        since,
+        until,
+        exclusion
       );
-
-      const total = deliveredPayloads.length;
-      const runIds = deliveredPayloads.map((payload) => payload.run_id);
-      const uniqueSessions = new Set(deliveredPayloads.map((payload) => payload.session_id)).size;
-      const uniqueRuns = new Set(runIds.filter((id): id is string => id !== null)).size;
-      const nullRun = runIds.filter((id) => id === null).length;
-      const pointerCounts = deliveredPayloads.map((payload) => payload.pointer_count);
-      const latencies = deliveredPayloads.map((payload) => payload.latency_ms);
-      const missCount = pointerCounts.filter((count) => count === 0).length;
-
-      const totalUsage = usagePayloads.length;
-      const used = usagePayloads.filter((payload) => payload.usage_state === "used").length;
-      const skipped = usagePayloads.filter((payload) => payload.usage_state === "skipped").length;
-      const notApplicable = usagePayloads.filter(
-        (payload) => payload.usage_state === "not_applicable"
-      ).length;
-      const embeddingLatencies = embeddingPayloads.map((payload) => payload.latency_ms);
-
       return {
         window: {
           workspace_id: workspaceId,
@@ -168,38 +116,146 @@ export function createRecallUtilizationService(deps: {
           until: until ?? null,
           excluded_agent_targets: Array.from(exclusion).sort()
         },
-        recall: {
-          total,
-          unique_sessions: uniqueSessions,
-          unique_runs: uniqueRuns,
-          null_run: nullRun,
-          miss_count: missCount,
-          miss_ratio: total === 0 ? 0 : missCount / total,
-          p50_pointer_count: percentile50(pointerCounts),
-          p50_latency_ms: percentile50(latencies)
-        },
-        embedding: {
-          total_queries: embeddingPayloads.length,
-          returned_candidate_count: embeddingPayloads.reduce(
-            (sum, payload) => sum + payload.returned_candidate_count,
-            0
-          ),
-          p50_latency_ms: percentile50(embeddingLatencies),
-          p95_latency_ms: percentileNearestRank(embeddingLatencies, 95),
-          p99_latency_ms: percentileNearestRank(embeddingLatencies, 99),
-          latency_buckets: bucketEmbeddingLatencies(embeddingLatencies)
-        },
-        usage: {
-          total: totalUsage,
-          used,
-          skipped,
-          not_applicable: notApplicable,
-          used_ratio: used + skipped === 0 ? 0 : used / (used + skipped),
-          follow_through_ratio: total === 0 ? 0 : totalUsage / total
-        }
+        recall: buildRecallStats(payloads.delivered),
+        embedding: buildEmbeddingStats(payloads.embedding),
+        usage: buildUsageStats(payloads.delivered.length, payloads.usage)
       };
     }
   };
+}
+
+async function loadRecallUtilizationPayloads(
+  eventLogRepo: RecallUtilizationEventLogPort,
+  workspaceId: string,
+  since: string | null | undefined,
+  until: string | null | undefined,
+  exclusion: ReadonlySet<string>
+) {
+  const sinceArg = since ?? undefined;
+  const untilArg = until ?? undefined;
+  const [deliveredRows, usageRows, embeddingRows] = await Promise.all([
+    eventLogRepo.queryByWorkspaceAndType(
+      workspaceId,
+      RecallContextEventType.SOUL_RECALL_DELIVERED,
+      sinceArg,
+      untilArg
+    ),
+    eventLogRepo.queryByWorkspaceAndType(
+      workspaceId,
+      RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+      sinceArg,
+      untilArg
+    ),
+    eventLogRepo.queryByWorkspaceAndType(
+      workspaceId,
+      ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+      sinceArg,
+      untilArg
+    )
+  ]);
+
+  return {
+    delivered: parseRecallDeliveredRows(deliveredRows, exclusion),
+    usage: parseRecallUsageRows(usageRows, exclusion),
+    embedding: embeddingRows.map((row) =>
+      parseEmbeddingSupplementPayload(row.payload_json as Record<string, unknown>)
+    )
+  };
+}
+
+function parseRecallDeliveredRows(
+  rows: readonly EventLogEntry[],
+  exclusion: ReadonlySet<string>
+): readonly RecallDeliveredPayload[] {
+  return rows
+    .map((row) => parseSoulRecallDeliveredPayload(row.payload_json as Record<string, unknown>))
+    .filter((payload) => !exclusion.has(payload.agent_target));
+}
+
+function parseRecallUsageRows(
+  rows: readonly EventLogEntry[],
+  exclusion: ReadonlySet<string>
+): readonly RecallUsagePayload[] {
+  return rows
+    .map((row) => parseSoulContextUsagePayload(row.payload_json as Record<string, unknown>))
+    .filter((payload) => !exclusion.has(payload.agent_target));
+}
+
+function buildRecallStats(
+  deliveredPayloads: readonly RecallDeliveredPayload[]
+): RecallUtilizationStats["recall"] {
+  const total = deliveredPayloads.length;
+  const runIds = deliveredPayloads.map((payload) => payload.run_id);
+  const pointerCounts = deliveredPayloads.map((payload) => payload.pointer_count);
+  const latencies = deliveredPayloads.map((payload) => payload.latency_ms);
+  const missCount = pointerCounts.filter((count) => count === 0).length;
+  return {
+    total,
+    unique_sessions: new Set(deliveredPayloads.map((payload) => payload.session_id)).size,
+    unique_runs: new Set(runIds.filter((id): id is string => id !== null)).size,
+    null_run: runIds.filter((id) => id === null).length,
+    miss_count: missCount,
+    miss_ratio: total === 0 ? 0 : missCount / total,
+    p50_pointer_count: percentile50(pointerCounts),
+    p50_latency_ms: percentile50(latencies)
+  };
+}
+
+function buildEmbeddingStats(
+  embeddingPayloads: readonly EmbeddingSupplementPayload[]
+): RecallUtilizationStats["embedding"] {
+  const embeddingLatencies = embeddingPayloads.map((payload) => payload.latency_ms);
+  return {
+    total_queries: embeddingPayloads.length,
+    returned_candidate_count: embeddingPayloads.reduce(
+      (sum, payload) => sum + payload.returned_candidate_count,
+      0
+    ),
+    p50_latency_ms: percentile50(embeddingLatencies),
+    p95_latency_ms: percentileNearestRank(embeddingLatencies, 95),
+    p99_latency_ms: percentileNearestRank(embeddingLatencies, 99),
+    latency_buckets: bucketEmbeddingLatencies(embeddingLatencies)
+  };
+}
+
+function buildUsageStats(
+  totalDeliveries: number,
+  usagePayloads: readonly RecallUsagePayload[]
+): RecallUtilizationStats["usage"] {
+  const used = usagePayloads.filter((payload) => payload.usage_state === "used").length;
+  const skipped = usagePayloads.filter((payload) => payload.usage_state === "skipped").length;
+  const notApplicable = usagePayloads.filter(
+    (payload) => payload.usage_state === "not_applicable"
+  ).length;
+  return {
+    total: usagePayloads.length,
+    used,
+    skipped,
+    not_applicable: notApplicable,
+    used_ratio: used + skipped === 0 ? 0 : used / (used + skipped),
+    follow_through_ratio: totalDeliveries === 0 ? 0 : usagePayloads.length / totalDeliveries
+  };
+}
+
+function parseSoulRecallDeliveredPayload(payload: Record<string, unknown>) {
+  return parseRecallContextEventPayload(
+    RecallContextEventType.SOUL_RECALL_DELIVERED,
+    payload
+  );
+}
+
+function parseSoulContextUsagePayload(payload: Record<string, unknown>) {
+  return parseRecallContextEventPayload(
+    RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+    payload
+  );
+}
+
+function parseEmbeddingSupplementPayload(payload: Record<string, unknown>) {
+  return parseComputeRecallGardenEventPayload(
+    ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+    payload
+  );
 }
 
 function percentile50(values: readonly number[]): number {

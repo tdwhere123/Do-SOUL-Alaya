@@ -10,6 +10,15 @@ export interface MemoryRouteServices {
 }
 
 type MemoryListRow = Awaited<ReturnType<MemoryService["findByWorkspaceId"]>>[number];
+type WorkspaceMemoryListInput = {
+  readonly workspaceId: string;
+  readonly dimension?: ReturnType<typeof parseDimension>;
+  readonly scopeClass?: ScopeClass;
+  readonly hasConflict?: boolean;
+  readonly pagination: { readonly limit: number; readonly offset: number };
+};
+
+const MEMORY_SCAN_PAGE_LIMIT = 500;
 
 // HTTP route surface intentionally omits GET /memories/:id.
 // Per-memory reads must stay workspace-scoped per invariants §21 and §29:
@@ -82,13 +91,7 @@ function parseOptionalBoolean(value: string | undefined, name: string): boolean 
 
 async function listWorkspaceMemories(
   memoryService: MemoryService,
-  input: {
-    readonly workspaceId: string;
-    readonly dimension?: ReturnType<typeof parseDimension>;
-    readonly scopeClass?: ScopeClass;
-    readonly hasConflict?: boolean;
-    readonly pagination: { readonly limit: number; readonly offset: number };
-  }
+  input: WorkspaceMemoryListInput
 ): Promise<{ readonly memories: readonly MemoryListRow[]; readonly totalCount: number }> {
   const needsAuthoritativeFiltering =
     input.scopeClass !== undefined || input.hasConflict === true;
@@ -105,26 +108,65 @@ async function listWorkspaceMemories(
     return { memories, totalCount };
   }
 
-  const baseRows =
-    input.scopeClass !== undefined
-      ? await memoryService.findByScopeClass(input.workspaceId, input.scopeClass)
-      : input.dimension !== undefined
-        ? await memoryService.findByDimension(input.workspaceId, input.dimension)
-        : await memoryService.findByWorkspaceId(input.workspaceId);
-  const filtered = baseRows.filter((memory) => {
-    if (input.dimension !== undefined && memory.dimension !== input.dimension) {
-      return false;
+  const memories: MemoryListRow[] = [];
+  let totalCount = 0;
+  let scanOffset = 0;
+
+  for (;;) {
+    const page = await loadWorkspaceMemoryScanPage(memoryService, input, {
+      limit: MEMORY_SCAN_PAGE_LIMIT,
+      offset: scanOffset
+    });
+
+    if (page.length === 0) {
+      break;
     }
-    if (input.scopeClass !== undefined && memory.scope_class !== input.scopeClass) {
-      return false;
+
+    for (const memory of page) {
+      if (!matchesWorkspaceMemoryListFilters(memory, input)) {
+        continue;
+      }
+
+      if (totalCount >= input.pagination.offset && memories.length < input.pagination.limit) {
+        memories.push(memory);
+      }
+      totalCount += 1;
     }
-    if (input.hasConflict === true && (memory.contradiction_count ?? 0) === 0) {
-      return false;
+
+    if (page.length < MEMORY_SCAN_PAGE_LIMIT) {
+      break;
     }
-    return true;
-  });
+    scanOffset += MEMORY_SCAN_PAGE_LIMIT;
+  }
+
   return {
-    memories: filtered.slice(input.pagination.offset, input.pagination.offset + input.pagination.limit),
-    totalCount: filtered.length
+    memories,
+    totalCount
   };
+}
+
+async function loadWorkspaceMemoryScanPage(
+  memoryService: MemoryService,
+  input: WorkspaceMemoryListInput,
+  page: { readonly limit: number; readonly offset: number }
+): Promise<readonly MemoryListRow[]> {
+  return input.dimension === undefined
+    ? await memoryService.findByWorkspaceId(input.workspaceId, page)
+    : await memoryService.findByDimension(input.workspaceId, input.dimension, page);
+}
+
+function matchesWorkspaceMemoryListFilters(
+  memory: MemoryListRow,
+  input: WorkspaceMemoryListInput
+): boolean {
+  if (input.dimension !== undefined && memory.dimension !== input.dimension) {
+    return false;
+  }
+  if (input.scopeClass !== undefined && memory.scope_class !== input.scopeClass) {
+    return false;
+  }
+  if (input.hasConflict === true && (memory.contradiction_count ?? 0) === 0) {
+    return false;
+  }
+  return true;
 }
