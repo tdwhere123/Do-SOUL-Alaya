@@ -1,20 +1,25 @@
-import type {
-  ConversationGardenComputeProviderPort,
-  ConversationListPageOptions,
-  ConversationServiceDependencies,
-  ConversationMessage,
-  ExecutionStanceModelRef,
-  GardenProviderCallTelemetry,
-  GardenProviderKind,
-  MemoryContextAssemblyInput,
-  MemoryContextAssemblyResult,
-  MemoryTurnOrchestrationInput,
-  MemoryTurnOrchestrationResult,
-  Run,
-  RunInterruptResult,
-  RuntimeModeValue,
-  Workspace
-} from "./conversation-service-internal.js";
+import { CoreError } from "../shared/errors.js";
+
+import { GardenComputeCoordinator } from "./garden-compute-coordinator.js";
+import { rebuildConversationMessages } from "./message-history.js";
+import {
+  RuntimeMode,
+  applyMessagePage,
+  buildRecalledContextSection,
+  queryConversationMessageEvents,
+  queryRunEventLog,
+  type ConversationListPageOptions,
+  type ConversationMessage,
+  type ConversationServiceDependencies,
+  type MemoryContextAssemblyInput,
+  type MemoryContextAssemblyResult,
+  type MemoryTurnOrchestrationInput,
+  type MemoryTurnOrchestrationResult,
+  type Run,
+  type RunInterruptResult,
+  type RuntimeModeValue,
+  type Workspace
+} from "./conversation-service-ports.js";
 
 export type {
   ConversationBudgetBankruptcyPort,
@@ -34,43 +39,118 @@ export type {
   MemoryContextAssemblyResult,
   MemoryTurnOrchestrationInput,
   MemoryTurnOrchestrationResult
-} from "./conversation-service-internal.js";
-
-import { conversationServiceListMessages, conversationServiceCountMessages, conversationServiceSendMessage, conversationServiceSendMessageStreaming, conversationServiceInterruptRun, conversationServiceAssembleMemoryContext, conversationServiceOrchestrateMemoryTurn } from "./conversation-service-methods-1.js";
-import { conversationServiceAssembleContextForTurn, conversationServiceTriggerGardenCompile } from "./conversation-service-methods-2.js";
-import { conversationServiceRecordGardenProviderCallStarted, conversationServiceRecordGardenProviderCallCompleted } from "./conversation-service-methods-3.js";
-import { conversationServiceRecordGardenProviderCallFailed, conversationServiceRecordGardenProviderCallJournal, conversationServiceResolveGardenComputeProvider, conversationServiceReleaseGovernanceLeaseSafely, conversationServiceRequireRun } from "./conversation-service-methods-4.js";
-import { conversationServiceRequireWorkspace } from "./conversation-service-methods-5.js";
+} from "./conversation-service-ports.js";
 
 export class ConversationService {
-public constructor(public readonly dependencies: ConversationServiceDependencies) {}
+  private readonly gardenComputeCoordinator: GardenComputeCoordinator;
+
+  public constructor(public readonly dependencies: ConversationServiceDependencies) {
+    this.gardenComputeCoordinator = new GardenComputeCoordinator({
+      eventLogRepo: dependencies.eventLogRepo,
+      gardenComputeProvider: dependencies.gardenComputeProvider,
+      resolveGardenComputeProvider: dependencies.resolveGardenComputeProvider,
+      signalReceiver: dependencies.signalReceiver,
+      sessionOverridePromotion: dependencies.sessionOverridePromotion,
+      healthJournalRecorder: dependencies.healthJournalRecorder,
+      warn: dependencies.warn,
+      releaseGovernanceLeaseSafely: (runId, workspaceId, phase) =>
+        this.releaseGovernanceLeaseSafely(runId, workspaceId, phase)
+    });
+  }
 
   public async listMessages(runId: string, page?: ConversationListPageOptions): Promise<readonly ConversationMessage[]> {
-    return conversationServiceListMessages(this, runId, page);
+    const run = await this.requireRun(runId);
+    const pagedReader = this.dependencies.eventLogRepo.queryConversationMessageEventsByRun;
+    if (pagedReader === undefined) {
+      const messages = rebuildConversationMessages(await queryRunEventLog(this.dependencies.eventLogRepo, run.run_id));
+      return applyMessagePage(messages, page);
+    }
+    const events = await queryConversationMessageEvents(this.dependencies.eventLogRepo, run.run_id, page);
+    return rebuildConversationMessages(events);
   }
 
   public async countMessages(runId: string): Promise<number> {
-    return conversationServiceCountMessages(this, runId);
+    const run = await this.requireRun(runId);
+    const counter = this.dependencies.eventLogRepo.countConversationMessageEventsByRun;
+    if (counter !== undefined) {
+      return await counter.call(this.dependencies.eventLogRepo, run.run_id);
+    }
+    return rebuildConversationMessages(await queryRunEventLog(this.dependencies.eventLogRepo, run.run_id)).length;
   }
 
   public async sendMessage(_runId: string, _input: unknown): Promise<never> {
-    return conversationServiceSendMessage(this, _runId, _input);
+    throw new CoreError(
+      "CONFLICT",
+      "Alaya ConversationService does not execute chat turns; use MCP memory tools."
+    );
   }
 
   public async sendMessageStreaming(_runId: string, _input: unknown): Promise<never> {
-    return conversationServiceSendMessageStreaming(this, _runId, _input);
+    throw new CoreError(
+      "CONFLICT",
+      "Alaya ConversationService does not expose chat streaming; use MCP request/response tools."
+    );
   }
 
   public async interruptRun(runId: string): Promise<RunInterruptResult> {
-    return conversationServiceInterruptRun(this, runId);
+    await this.requireRun(runId);
+    return {
+      run_id: runId,
+      status: "unsupported",
+      message: "Alaya does not own an interrupt-capable chat runtime session."
+    };
   }
 
-  public async assembleMemoryContext(runId: string, input: MemoryContextAssemblyInput = {}): Promise<MemoryContextAssemblyResult> {
-    return conversationServiceAssembleMemoryContext(this, runId, input);
+  public async assembleMemoryContext(
+    runId: string,
+    input: MemoryContextAssemblyInput = {}
+  ): Promise<MemoryContextAssemblyResult> {
+    const run = await this.requireRun(runId);
+    const workspace = await this.requireWorkspace(run.workspace_id);
+    return this.assembleContextForTurn({
+      run,
+      workspace,
+      displayName: input.displayName,
+      runtimeMode: input.runtimeMode
+    });
   }
 
   public async orchestrateMemoryTurn(input: MemoryTurnOrchestrationInput): Promise<MemoryTurnOrchestrationResult> {
-    return conversationServiceOrchestrateMemoryTurn(this, input);
+    const run = await this.requireRun(input.runId);
+    const workspace = await this.requireWorkspace(run.workspace_id);
+
+    await this.dependencies.governanceLeaseService?.acquire({
+      runId: run.run_id,
+      workspaceId: workspace.workspace_id
+    });
+
+    let gardenTakesLease = false;
+    try {
+      const memoryContext = await this.assembleContextForTurn({
+        run,
+        workspace,
+        displayName: input.displayName ?? input.userMessage.content.slice(0, 80)
+      });
+
+      gardenTakesLease = true;
+      this.gardenComputeCoordinator.triggerCompile({
+        run,
+        workspace,
+        modelRef: input.modelRef ?? null,
+        userMessage: input.userMessage,
+        assistantMessage: input.assistantMessage
+      });
+
+      return {
+        run,
+        workspace,
+        ...memoryContext
+      };
+    } finally {
+      if (!gardenTakesLease) {
+        await this.releaseGovernanceLeaseSafely(run.run_id, workspace.workspace_id, "memory turn processing");
+      }
+    }
   }
 
   private async assembleContextForTurn(input: {
@@ -79,67 +159,101 @@ public constructor(public readonly dependencies: ConversationServiceDependencies
     readonly displayName?: string;
     readonly runtimeMode?: RuntimeModeValue;
   }): Promise<MemoryContextAssemblyResult> {
-    return conversationServiceAssembleContextForTurn(this, input);
+    if (this.dependencies.contextLensAssembler === undefined) {
+      return {
+        contextLens: null,
+        workingProjection: null,
+        recalledContextSection: ""
+      };
+    }
+
+    const runtimeMode = await this.resolveRuntimeMode(input);
+
+    try {
+      const assembled = await this.dependencies.contextLensAssembler.assemble({
+        run: input.run,
+        surfaceId: input.run.current_surface_id ?? null,
+        displayName: input.displayName,
+        runtimeMode
+      });
+
+      return {
+        contextLens: assembled.contextLens,
+        workingProjection: assembled.workingProjection,
+        recalledContextSection: buildRecalledContextSection(assembled.workingProjection)
+      };
+    } catch (error) {
+      this.dependencies.warn("[ConversationService] ContextLens assembly failed, proceeding without lens", {
+        run_id: input.run.run_id,
+        workspace_id: input.workspace.workspace_id,
+        error
+      });
+
+      return {
+        contextLens: null,
+        workingProjection: null,
+        recalledContextSection: ""
+      };
+    }
   }
 
-  private triggerGardenCompile(input: {
+  private async resolveRuntimeMode(input: {
     readonly run: Run;
     readonly workspace: Workspace;
-    readonly modelRef: ExecutionStanceModelRef | null;
-    readonly userMessage: ConversationMessage;
-    readonly assistantMessage: ConversationMessage;
-  }): void {
-    return conversationServiceTriggerGardenCompile(this, input);
-  }
+    readonly runtimeMode?: RuntimeModeValue;
+  }): Promise<RuntimeModeValue> {
+    if (input.runtimeMode !== undefined || this.dependencies.budgetBankruptcyService === undefined) {
+      return input.runtimeMode ?? RuntimeMode.FULL;
+    }
 
-  private async recordGardenProviderCallStarted(input: {
-      readonly run: Run;
-      readonly workspace: Workspace;
-      readonly modelRef: ExecutionStanceModelRef | null;
-    }, gardenComputeProvider: ConversationGardenComputeProviderPort): Promise<GardenProviderCallTelemetry | null> {
-    return conversationServiceRecordGardenProviderCallStarted(this, input, gardenComputeProvider);
-  }
-
-  private async recordGardenProviderCallCompleted(input: {
-      readonly run: Run;
-      readonly workspace: Workspace;
-    }, providerCall: GardenProviderCallTelemetry | null, gardenComputeProvider: ConversationGardenComputeProviderPort): Promise<void> {
-    return conversationServiceRecordGardenProviderCallCompleted(this, input, providerCall, gardenComputeProvider);
-  }
-
-  private async recordGardenProviderCallFailed(input: {
-      readonly run: Run;
-      readonly workspace: Workspace;
-    }, providerCall: GardenProviderCallTelemetry | null, gardenComputeProvider: ConversationGardenComputeProviderPort, error: unknown): Promise<void> {
-    return conversationServiceRecordGardenProviderCallFailed(this, input, providerCall, gardenComputeProvider, error);
-  }
-
-  private async recordGardenProviderCallJournal(input: {
-    readonly workspaceId: string;
-    readonly runId: string;
-    readonly providerCall: GardenProviderCallTelemetry;
-    readonly providerKind: GardenProviderKind;
-    readonly status: "completed" | "failed";
-    readonly latencyMs: number;
-    readonly errorKind?: string;
-    readonly errorMessage?: string;
-  }): Promise<void> {
-    return conversationServiceRecordGardenProviderCallJournal(this, input);
-  }
-
-  private async resolveGardenComputeProvider(modelRef: Readonly<ExecutionStanceModelRef> | null): Promise<ConversationGardenComputeProviderPort> {
-    return conversationServiceResolveGardenComputeProvider(this, modelRef);
+    try {
+      const snapshot = await this.dependencies.budgetBankruptcyService.getSnapshot(
+        input.run.run_id,
+        new Date().toISOString()
+      );
+      return snapshot.current_mode;
+    } catch (error) {
+      this.dependencies.warn(
+        "[ConversationService] Budget bankruptcy snapshot lookup failed; using minimal runtime mode",
+        {
+          run_id: input.run.run_id,
+          workspace_id: input.workspace.workspace_id,
+          error
+        }
+      );
+      return RuntimeMode.MINIMAL;
+    }
   }
 
   private async releaseGovernanceLeaseSafely(runId: string, workspaceId: string, phase: string): Promise<void> {
-    return conversationServiceReleaseGovernanceLeaseSafely(this, runId, workspaceId, phase);
+    try {
+      await this.dependencies.governanceLeaseService?.release(runId);
+    } catch (error) {
+      this.dependencies.warn(`Failed to release governance lease after ${phase}`, {
+        run_id: runId,
+        workspace_id: workspaceId,
+        error
+      });
+    }
   }
 
   private async requireRun(runId: string): Promise<Run> {
-    return conversationServiceRequireRun(this, runId);
+    const run = await this.dependencies.runRepo.getById(runId);
+
+    if (run === null) {
+      throw new CoreError("NOT_FOUND", "Run not found");
+    }
+
+    return run;
   }
 
   private async requireWorkspace(workspaceId: string): Promise<Workspace> {
-    return conversationServiceRequireWorkspace(this, workspaceId);
+    const workspace = await this.dependencies.workspaceRepo.getById(workspaceId);
+
+    if (workspace === null) {
+      throw new CoreError("NOT_FOUND", "Workspace not found");
+    }
+
+    return workspace;
   }
 }

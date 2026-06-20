@@ -1,5 +1,4 @@
 import {
-  HealthEventKind,
   RuntimeMode,
   type CandidateMemorySignal,
   type ContextLens,
@@ -16,7 +15,6 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import type { SignalServiceReceiveResult } from "../memory/signal-service.js";
-import { CoreError } from "../shared/errors.js";
 
 export { RuntimeMode };
 export type {
@@ -171,10 +169,6 @@ export interface GardenProviderCallTelemetry {
   readonly modelId: string;
 }
 
-export interface ConversationServiceMethodOwner {
-  readonly dependencies: ConversationServiceDependencies;
-}
-
 export const MAX_RECALLED_CONTEXT_CHARS = 4_000;
 
 export const CONVERSATION_EVENT_SCAN_PAGE_LIMIT = 500;
@@ -312,106 +306,6 @@ export function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
-}
-
-export async function requireRun(owner: ConversationServiceMethodOwner, runId: string): Promise<Run> {
-  const run = await owner.dependencies.runRepo.getById(runId);
-
-  if (run === null) {
-    throw new CoreError("NOT_FOUND", "Run not found");
-  }
-
-  return run;
-}
-
-export async function requireWorkspace(owner: ConversationServiceMethodOwner, workspaceId: string): Promise<Workspace> {
-  const workspace = await owner.dependencies.workspaceRepo.getById(workspaceId);
-
-  if (workspace === null) {
-    throw new CoreError("NOT_FOUND", "Workspace not found");
-  }
-
-  return workspace;
-}
-
-export async function resolveGardenComputeProvider(
-  owner: ConversationServiceMethodOwner,
-  modelRef: Readonly<ExecutionStanceModelRef> | null
-): Promise<ConversationGardenComputeProviderPort> {
-  const resolvedProvider = (await owner.dependencies.resolveGardenComputeProvider?.resolve(modelRef)) ?? null;
-  if (resolvedProvider !== null) {
-    return resolvedProvider;
-  }
-
-  const currentDefaultProvider =
-    (await owner.dependencies.resolveGardenComputeProvider?.resolve(null)) ?? null;
-  return currentDefaultProvider ?? owner.dependencies.gardenComputeProvider;
-}
-
-export async function releaseGovernanceLeaseSafely(
-  owner: ConversationServiceMethodOwner,
-  runId: string,
-  workspaceId: string,
-  phase: string
-): Promise<void> {
-  try {
-    await owner.dependencies.governanceLeaseService?.release(runId);
-  } catch (error) {
-    owner.dependencies.warn(`Failed to release governance lease after ${phase}`, {
-      run_id: runId,
-      workspace_id: workspaceId,
-      error
-    });
-  }
-}
-
-export async function recordGardenProviderCallJournal(
-  owner: ConversationServiceMethodOwner,
-  input: {
-    readonly workspaceId: string;
-    readonly runId: string;
-    readonly providerCall: GardenProviderCallTelemetry;
-    readonly providerKind: GardenProviderKind;
-    readonly status: "completed" | "failed";
-    readonly latencyMs: number;
-    readonly errorKind?: string;
-    readonly errorMessage?: string;
-  }
-): Promise<void> {
-  if (owner.dependencies.healthJournalRecorder === undefined) {
-    return;
-  }
-
-  try {
-    await owner.dependencies.healthJournalRecorder.record({
-      event_kind: HealthEventKind.PROVIDER_CALL,
-      workspace_id: input.workspaceId,
-      run_id: input.runId,
-      summary:
-        input.status === "completed"
-          ? "Garden provider call completed."
-          : "Garden provider call failed.",
-      detail_json: {
-        status: input.status,
-        call_id: input.providerCall.callId,
-        provider_kind: input.providerKind,
-        model_id: input.providerCall.modelId,
-        operation: "garden.compile",
-        started_at: input.providerCall.startedAt,
-        latency_ms: input.latencyMs,
-        ...(input.errorKind === undefined ? {} : { error_kind: input.errorKind }),
-        ...(input.errorMessage === undefined ? {} : { error_message: input.errorMessage })
-      }
-    });
-  } catch (error) {
-    owner.dependencies.warn("Garden provider call journal record failed.", {
-      workspace_id: input.workspaceId,
-      run_id: input.runId,
-      provider_kind: input.providerKind,
-      call_id: input.providerCall.callId,
-      error
-    });
-  }
 }
 
 function isSignalServiceReceiveResult(value: unknown): value is SignalServiceReceiveResult {
