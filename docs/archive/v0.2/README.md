@@ -58,7 +58,7 @@ the minor and follow without reading code.
 The originally-planned `v0.2.1` (OS keychain adapter, `#BL-009`) and
 `v0.2.2` (host autonomy recording + Codex `/alaya-inspect`
 recognition, `#BL-038` / `#BL-037`) buckets were folded into
-**v0.3.0** — see `docs/v0.3/`. The renumber to a minor is because
+**v0.3.0** — see `docs/archive/v0.3-historical/`. The renumber to a minor is because
 adding `keychain:` to the `secret_ref` accepted shapes
 (`packages/protocol/src/app-config.ts`) and `keychain` to the
 `secret_ref_kind` EventLog enum (`packages/protocol/src/events/garden.ts`)
@@ -129,7 +129,7 @@ docs/v0.2/
 ```
 
 (The former `v0.2.1/` and `v0.2.2/` plan folders were removed when
-that work was folded into `docs/v0.3/v0.3.0/`.)
+that work was folded into `docs/archive/v0.3-historical/v0.3.0/`.)
 
 `v0.2.0/plan.md` is the operational plan; the ten task cards under
 `v0.2.0/task-cards/` are the work units.
@@ -138,7 +138,7 @@ that work was folded into `docs/v0.3/v0.3.0/`.)
 
 - `docs/handbook/invariants.md` — §21 (no agent UI), §25 (SemVer, new)
 - `docs/handbook/backlog.md` — #BL-008 (closes in v0.2.0); #BL-009 /
-  #BL-037 / #BL-038 moved to v0.3.0 (see `docs/v0.3/`)
+  #BL-037 / #BL-038 moved to v0.3.0 (see `docs/archive/v0.3-historical/`)
 - `docs/handbook/runtime-status.md` — Subsystem readiness; updated as
   each slice lands
 - `docs/handbook/workflow/agent-workflow.md` — per-card pipeline

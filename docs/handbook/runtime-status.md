@@ -13,7 +13,7 @@ used for new rows.
 | Level | Meaning | Promotion evidence required |
 |---|---|---|
 | `schema_only` | Zod / type / migration exists; no production code reads or writes it. | Promote to `implementation_wired` by landing the production producer **and** at least one production consumer in the daemon's startup graph. |
-| `implementation_wired` | Producer and consumer code both exist in the daemon wiring; service is constructed at startup; targeted unit / integration tests prove the call path under fixture conditions. No live durable evidence has been observed outside the test harness. | Promote to `live_event_proven` when at least one of: (a) a non-test EventLog row produced by this subsystem appears under a real attached MCP session (Codex / Claude Code or another adapter), recorded in `docs/v0.3/v0.3.x/host-autonomy-fixtures/` or equivalent witness path; OR (b) a live SQLite portrait (post-fix snapshot under `.do-it/findings/v0.3.x-live-data-portrait*.md` or similar) confirms the producer is firing against a real workspace; OR (c) `bench-runner` end-to-end output exercises the surface under a non-mock run. |
+| `implementation_wired` | Producer and consumer code both exist in the daemon wiring; service is constructed at startup; targeted unit / integration tests prove the call path under fixture conditions. No live durable evidence has been observed outside the test harness. | Promote to `live_event_proven` when at least one of: (a) a non-test EventLog row produced by this subsystem appears under a real attached MCP session (Codex / Claude Code or another adapter), recorded in `docs/archive/v0.3-historical/v0.3.x/host-autonomy-fixtures/` or equivalent witness path; OR (b) a live SQLite portrait (post-fix snapshot under `.do-it/findings/v0.3.x-live-data-portrait*.md` or similar) confirms the producer is firing against a real workspace; OR (c) `bench-runner` end-to-end output exercises the surface under a non-mock run. |
 | `live_event_proven` | The subsystem has been observed producing durable artefacts in a real workspace — via attached MCP session, live SQLite portrait, or `bench-runner` end-to-end — not only in test fixtures. The agent did not necessarily decide autonomously to use it; the trigger may have been the host operator, another subsystem, or the bench harness. | Promote to `agent_used` when an attached host agent (Codex or Claude Code) is observed autonomously invoking the surface during a normal conversation, with EventLog evidence chained across the recall / open / respond / report cycle. |
 | `agent_used` | A real host agent autonomously chose the surface during a normal conversation; the EventLog chain is committed durable. Strongest claim on this scale. | — (terminal level) |
 
@@ -52,7 +52,7 @@ overloaded promotion evidence with surface-shape claims):
 ## v0.3.11 Subsystem Readiness (current truth, 4-level)
 
 v0.3.11 is **implementation complete with the big-machine 500q KPI gate
-PENDING** (see `docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`).
+PENDING** (see `docs/archive/v0.3-historical/v0.3.11/reports/v0.3.11-closeout-report.md`).
 The rows below cover the subsystems v0.3.11 changed. None is promoted past
 `implementation_wired`: the live witnesses for these surfaces require the R5
 500q bench run on a larger host (the local 7.6 GB WSL2 box OOMs at 500q), or
@@ -87,7 +87,7 @@ the legacy table further down.
 
 | Subsystem | Level | Evidence |
 |---|---|---|
-| MCP tool surface — legacy 12 tools (9 pre-`soul.resolve` `soul.*` + 3 `garden.*`) | `live_event_proven` for the legacy catalog. `agent_used` for `soul.recall` + `soul.report_context_usage` only (the v0.3.0 host-autonomy witness). The live catalog remains 13 tools after `soul.resolve`. | `apps/core-daemon/src/mcp-memory/tool-catalog.ts:3-17`. `agent_used` evidence: `docs/v0.3/v0.3.0/host-autonomy-fixtures/`. |
+| MCP tool surface — legacy 12 tools (9 pre-`soul.resolve` `soul.*` + 3 `garden.*`) | `live_event_proven` for the legacy catalog. `agent_used` for `soul.recall` + `soul.report_context_usage` only (the v0.3.0 host-autonomy witness). The live catalog remains 13 tools after `soul.resolve`. | `apps/core-daemon/src/mcp-memory/tool-catalog.ts:3-17`. `agent_used` evidence: `docs/archive/v0.3-historical/v0.3.0/host-autonomy-fixtures/`. |
 | `soul.resolve` verb (new in v0.3.9) | `implementation_wired`. Production handler is mounted; end-to-end tests cover all 6 resolutions; optimistic concurrency guard live. No real host has been observed autonomously calling it yet. | Handler: `apps/core-daemon/src/mcp-memory/resolve-handler.ts`. Dispatcher: `packages/core/src/governance/resolution-service.ts`. E2E: `apps/core-daemon/src/__tests__/soul-resolve-e2e.test.ts`. |
 | `staged_warnings[]` on recall payload (additive) | `implementation_wired`. Recall handler attaches warnings when policies fire; protocol schema field is optional and now carries typed `target_object_id` so `soul.resolve` scope checks do not infer the target from array position. Production producers exist; an attached host has not yet been observed reacting to a warning autonomously. | `apps/core-daemon/src/mcp-memory/tool-handler.ts`; `packages/protocol/src/soul/staged-warning.ts`; descriptor: catalog `soul.recall` description. |
 | `active_constraints[]` recall root channel | `implementation_wired`. Governance-backed hard constraints / hazards / active governance facts are returned outside `results[]`, deduped from ordinary recall results, and capped by workspace config. Draft claims and dimension-only agent outputs do not enter this hard channel. This is an additive root field; `results[]` remains the existing recall result list. | `packages/protocol/src/soul/mcp-types.ts`; `packages/storage/src/repos/active-constraints.ts`; `packages/core/src/recall/recall-service.ts`; `apps/core-daemon/src/mcp-memory/recall-result.ts`; tests: `active-constraints.test.ts`, `harness.test.ts`, `recall-service-tier-cascade.test.ts`, `mcp-memory-tool-handler.test.ts`. |
@@ -112,8 +112,8 @@ the legacy table further down.
 | `SynthesisCapsule.promotion` | **Retired in v0.3.9.** Schema columns dropped via migration `072`; `SOUL_SYNTHESIS_PROMOTED` event registration kept as deprecated per invariant §25 (no producer). | Migration `072-drop-synthesis-promotion.sql`. |
 | `NodeInstance` | **Retired in v0.3.9.** Single-instance runtime engine; no consumer needed. Schema dropped via migration `069`. | Migration `069-drop-node-instances.sql`. |
 | `DeferredObligation` | `implementation_wired`. Service instantiated in the daemon; `soul.resolve.defer` is the only producer; tests cover the obligation create path. Live witness chains on `soul.resolve` host-autonomy. | `packages/core/src/governance/deferred-obligation-service.ts`. |
-| `UpgradeAssessmentAxis` (5 fields on `GapRecord` / `HandoffRecord`) | `schema_only` — deferred decision. Producer and consumer pending; see `docs/v0.3/v0.3.9/closeout-deferred-conditions.md` for the closure condition. | Carry-forward item. |
-| Bench harness data correctness (LoCoMo denominator, cohort guard, sample-size label, baseline pointer hygiene, shared version helper, producer-chain seed rotation) | `live_event_proven`. The denominator fix is observable in `public-locomo/2026-05-17T064415Z-75d418c/kpi.json` (`sample_size = 1982`, `evaluated_count = 1982`, `label = full`). The label cascade renders `staged` on `public/2026-05-17T065105Z-75d418c` (100 evaluated, disabled) and on `public/2026-05-17T104037Z-294070f` (100 evaluated, embedding-on). Shared version helper writes `alaya_version: 0.3.9` to all three archives. The embedding-on baseline pointer hygiene fix is observable in `public/latest-baseline-embedding-on.json` (no longer `{ "slug": null }`). Seed rotation persists mixed-dimension memories across all three archives. See `docs/v0.3/v0.3.9/reports/v0.3.9-bench-diff.md` for the full diff. | `apps/bench-runner/src/locomo/runner.ts`; `apps/bench-runner/src/shared/version.ts`; `apps/bench-runner/src/harness/seed-rotation.ts`; `packages/eval/src/metrics/wilson-ci.ts`; `packages/eval/src/metrics/cohort-attribution.ts`. |
+| `UpgradeAssessmentAxis` (5 fields on `GapRecord` / `HandoffRecord`) | `schema_only` — deferred decision. Producer and consumer pending; see `docs/archive/v0.3-historical/v0.3.9/closeout-deferred-conditions.md` for the closure condition. | Carry-forward item. |
+| Bench harness data correctness (LoCoMo denominator, cohort guard, sample-size label, baseline pointer hygiene, shared version helper, producer-chain seed rotation) | `live_event_proven`. The denominator fix is observable in `public-locomo/2026-05-17T064415Z-75d418c/kpi.json` (`sample_size = 1982`, `evaluated_count = 1982`, `label = full`). The label cascade renders `staged` on `public/2026-05-17T065105Z-75d418c` (100 evaluated, disabled) and on `public/2026-05-17T104037Z-294070f` (100 evaluated, embedding-on). Shared version helper writes `alaya_version: 0.3.9` to all three archives. The embedding-on baseline pointer hygiene fix is observable in `public/latest-baseline-embedding-on.json` (no longer `{ "slug": null }`). Seed rotation persists mixed-dimension memories across all three archives. See `docs/archive/v0.3-historical/v0.3.9/reports/v0.3.9-bench-diff.md` for the full diff. | `apps/bench-runner/src/locomo/runner.ts`; `apps/bench-runner/src/shared/version.ts`; `apps/bench-runner/src/harness/seed-rotation.ts`; `packages/eval/src/metrics/wilson-ci.ts`; `packages/eval/src/metrics/cohort-attribution.ts`. |
 
 **Deliberately not promoted past `implementation_wired` for most
 v0.3.9-new subsystems.** The release shipped production code +
@@ -208,7 +208,7 @@ reflect the state at the time of the row's last update.
 | Memory Inspector | `live-event-ready`; server/frontend exist, token-gated routes pass, and Provider/Config writes proxy daemon runtime config | `live-event-ready` for the inspector surface | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend + #BL-019 repair |
 | Current-directory workspace startup | `cli-consumable`; absent `--workspace` or `ALAYA_WORKSPACE_ID`, attached MCP stdio and CLI fallback calls derive and register a stable local workspace from process cwd before invoking memory tools or Garden startup | `cli-consumable` | P6-cwd-workspace-startup |
 | Garden startup / cleanup loop | `live-event-ready`; HTTP daemon and attached MCP stdio start Garden services, trigger one startup background pass, then leave Janitor/Auditor/Librarian/Scheduler on intervals until shutdown drains them | `live-event-ready` | P2-garden-batch-* + P4-mcp-server + P6-garden-startup-cleanup-loop |
-| MCP Agent-Use Protocol | `agent-used` for `soul.recall` + `soul.report_context_usage`: real Claude Code MCP stdio sessions have been observed autonomously calling `soul.recall` and then `soul.report_context_usage` with `usage_state == "used"` during normal conversations; #BL-038 closed in v0.3.0 with a live-usage EventLog witness (`docs/v0.3/v0.3.0/host-autonomy-fixtures/claude-code-live/`) + an offline regression (`host-autonomy-witness.test.ts`). SDK-driven proof still covers the full tool surface (discovery, ordered calls, CLI fallback, pointer open, proposal review, durable update, post-apply recall). Durable *capture* does not depend on host autonomy — the daemon auto-extracts server-side from the recall turn text (see POST_TURN_EXTRACT routing). By design, autonomous use of `soul.emit_candidate_signal` / `soul.propose_memory_update` is narrower: daemon-side POST_TURN_EXTRACT (`apps/core-daemon/src/mcp-memory/tool-handler.ts:1019-1069`) auto-captures from `recent_turn` / `turn_digest`, so the explicit emit / propose MCP channels are reserved for high-confidence host-asserted writes, not required for routine memory capture. | `agent-used` for recall + usage-report; explicit `emit_candidate_signal` / `propose_memory_update` channels remain available for host-driven assertions but routine capture is covered server-side | P6-agent-use-protocol + P6-live-agent-proof + v0.3.0-slice-4 (#BL-038) |
+| MCP Agent-Use Protocol | `agent-used` for `soul.recall` + `soul.report_context_usage`: real Claude Code MCP stdio sessions have been observed autonomously calling `soul.recall` and then `soul.report_context_usage` with `usage_state == "used"` during normal conversations; #BL-038 closed in v0.3.0 with a live-usage EventLog witness (`docs/archive/v0.3-historical/v0.3.0/host-autonomy-fixtures/claude-code-live/`) + an offline regression (`host-autonomy-witness.test.ts`). SDK-driven proof still covers the full tool surface (discovery, ordered calls, CLI fallback, pointer open, proposal review, durable update, post-apply recall). Durable *capture* does not depend on host autonomy — the daemon auto-extracts server-side from the recall turn text (see POST_TURN_EXTRACT routing). By design, autonomous use of `soul.emit_candidate_signal` / `soul.propose_memory_update` is narrower: daemon-side POST_TURN_EXTRACT (`apps/core-daemon/src/mcp-memory/tool-handler.ts:1019-1069`) auto-captures from `recent_turn` / `turn_digest`, so the explicit emit / propose MCP channels are reserved for high-confidence host-asserted writes, not required for routine memory capture. | `agent-used` for recall + usage-report; explicit `emit_candidate_signal` / `propose_memory_update` channels remain available for host-driven assertions but routine capture is covered server-side | P6-agent-use-protocol + P6-live-agent-proof + v0.3.0-slice-4 (#BL-038) |
 | Garden compute provider config | `live-event-ready` for deterministic config routing; provider_kind / model_id / provider_url / secret_ref split from embedding config; doctor surfaces credential_source (env / file / embedding-fallback / none) and routing_decision; v0.2.0 hot-applies runtime config patches by refreshing compute routing candidates and lazily rebuilding pi-mono-backed official providers after config/secret changes | `live-event-ready` | P6.1-C1 + P6.1-C2 + v0.2.0-slice-4 |
 | Garden host-worker surface | `host-worker-ready`; SQLite-backed task queue with atomic claimAtomic CAS (`packages/storage/src/repos/garden-task-repo.ts`); three MCP tools (`garden.list_pending_tasks`, `garden.claim_task`, `garden.complete_task`) let host CLI agents claim and complete Garden tasks; result candidate_signals flow into the same review queue as `soul.emit_candidate_signal`; `garden.complete_task` persists a completion envelope before candidate-signal persistence so partial-failure retries must use the same signal set and cannot under-report already-persisted side effects. `provider_kind=host_worker` is the v0.3.11 PRODUCT DEFAULT (`defaultRuntimeGardenComputeConfig` resolves host_worker when no Garden secret is configured; a secret present is read as an explicit `official_api` opt-in). `ALAYA_GARDEN_PROVIDER_KIND` in the config `.env` or `garden_provider_kind` in `alaya install --non-interactive` set the env-derived mode explicitly; the Inspector Garden Compute form writes the authoritative `runtime:garden-compute` SQLite row (which, once present, overrides the env default). Under the host_worker default, extract work left unclaimed past a bounded window falls back to the zero-cloud `local_heuristics` extractor in-process so capture never stalls; `alaya doctor` prints the live mode and warns when extract work is sitting unclaimed (attach a CLI agent for LLM-quality extraction) | `host-worker-ready` | P6.1-H1 + P6.1-H2 + P6.1-H3 + v0.2.x completion-envelope / migration 067 + v0.3.0 host-worker config entry + v0.3.11 host_worker default |
 | POST_TURN_EXTRACT routing | `live-event-ready`; v0.2.x makes capture self-bootstrapping — attached MCP stdio sessions without `ALAYA_RUN_ID` first create a canonical session run whose `run_id` equals the process-stable MCP `session_id`; `soul.recall` then enqueues a `POST_TURN_EXTRACT` task from `recent_turn` (or `query`), deduped on `(workspace_id, run_id, turn-text hash)`, and `report_context_usage` enqueues one whenever a `turn_digest` is present (no longer gated on a used object), deduped on `(linked_delivery.workspace_id, linked_delivery.run_id, turn_index)` unless the same normalized user turn already has a recall-origin extract task. Either way the daemon, not the host, drives capture; report-side extraction and recall-hit promotion attribute side effects to the linked delivery rather than the reporter's later MCP context; tasks route to OfficialApiGardenProvider, host_worker (pending for MCP claim, then a bounded zero-cloud LocalHeuristics in-process fallback if no agent claims — v0.3.11 host_worker default), or LocalHeuristics per the live Garden compute config, and a failed extract no longer aborts the background pass | `live-event-ready` | P6.1-H3 + v0.2.x-auto-extract + v0.3.11 host_worker fallback |
@@ -471,7 +471,7 @@ Bench feedback loop:
   `smoke` ≤ 50 / `staged` 51–200 / `shard_merged` 201–499 /
   `full` ≥ 500; cohort-attribution cross-question metric bounded ≤
   50%; `latest-baseline.json` no longer points at a FAIL archive.
-  See `docs/v0.3/v0.3.9/reports/v0.3.9-bench-diff.md` for pre/post
+  See `docs/archive/v0.3-historical/v0.3.9/reports/v0.3.9-bench-diff.md` for pre/post
   numbers per category.
 
 Backlog status: `#BL-044` is closed in v0.3.9 (recall utilization
@@ -489,9 +489,9 @@ also carries optional `trust_mode`, path plasticity applies repeated-use
 decay plus automatic-mode half weight, and recall diagnostics record
 path expansion source seed/path/target triples. The long-lived
 `UpgradeAssessmentAxis` cutover stays tracked by
-`docs/v0.3/v0.3.9/closeout-deferred-conditions.md`.
+`docs/archive/v0.3-historical/v0.3.9/closeout-deferred-conditions.md`.
 
-Workspace packages bumped `0.3.8` → `0.3.9`. See `docs/v0.3/v0.3.9/`.
+Workspace packages bumped `0.3.8` → `0.3.9`. See `docs/archive/v0.3-historical/v0.3.9/`.
 
 ## v0.3.8 Release (2026-05-16)
 
@@ -568,13 +568,13 @@ New / changed runtime-visible surfaces:
   + `OPENAI_EMBEDDING_MODEL` + `ALAYA_OPENAI_SECRET_REF` continue to
   drive `OpenAIEmbeddingClient`; documented recipe for yunwu.ai
   `/v1/embeddings` (`text-embedding-3-small`, 1536-d) lives in
-  `docs/v0.3/v0.3.8/README.md`.
+  `docs/archive/v0.3-historical/v0.3.8/README.md`.
 
 Closed backlog: #BL-039 / #BL-040 / #BL-041 / #BL-042 / #BL-045 /
 #BL-046 (see `docs/handbook/backlog.md`). #BL-044 deferred to v0.3.9
 by user directive.
 
-Workspace packages bumped `0.3.7` -> `0.3.8`. See `docs/v0.3/v0.3.8/`.
+Workspace packages bumped `0.3.7` -> `0.3.8`. See `docs/archive/v0.3-historical/v0.3.8/`.
 
 ## v0.3.7 Release (2026-05-15)
 
@@ -588,7 +588,7 @@ The earlier R@5 = 70.0% disabled-100 number came from a build that
 included LongMemEval-question-shape heuristics in `packages/core`;
 those heuristics have been removed and the post-removal disabled-100
 archive is the new honest baseline (see
-`docs/v0.3/v0.3.7/reports/v0.3.7-closeout.md`). Disabled-500,
+`docs/archive/v0.3-historical/v0.3.7/reports/v0.3.7-closeout.md`). Disabled-500,
 env-embedding staged floor evidence, and the first `public-multiturn`
 and `live` archives are explicitly out of scope for this checkpoint
 and are tracked in the follow-up plan.
@@ -632,7 +632,7 @@ New / changed runtime-visible surfaces:
   `apps/bench-runner`, preventing stale eval/bench declarations during
   `rtk pnpm build`.
 
-Workspace packages bumped `0.3.6` -> `0.3.7`. See `docs/v0.3/v0.3.7/`.
+Workspace packages bumped `0.3.6` -> `0.3.7`. See `docs/archive/v0.3-historical/v0.3.7/`.
 
 ## v0.3.6 Release (2026-05-14)
 
@@ -664,7 +664,7 @@ New runtime-visible surfaces:
   the `readLatest(layout, bench, { split })` API which scans entries
   and ignores the pointer when a split filter is provided.
 
-Workspace packages bumped `0.3.5` -> `0.3.6`. See `docs/v0.3/v0.3.6/`.
+Workspace packages bumped `0.3.5` -> `0.3.6`. See `docs/archive/v0.3-historical/v0.3.6/`.
 
 ## v0.3.2 Release (2026-05-13)
 
@@ -680,7 +680,7 @@ normalizes Garden candidate signals with internal schema-grounded
 integration fixtures for exact fact, current state, negative query,
 relation query, thematic recall, and Chinese preference / constraint
 recall. Workspace packages bumped `0.3.1` -> `0.3.2`. See
-`docs/v0.3/v0.3.2/`.
+`docs/archive/v0.3-historical/v0.3.2/`.
 
 ## v0.3.1 Release (2026-05-13)
 
@@ -693,7 +693,7 @@ shaping out of `mcp-memory/tool-handler.ts`, registers the host-autonomy
 witness export script as an explicit hygiene-visible package script, and
 bumps workspace packages `0.3.0` -> `0.3.1`. The later v0.3.2
 read/write integrated memory-quality work is recorded above. See
-`docs/v0.3/v0.3.1/`.
+`docs/archive/v0.3-historical/v0.3.1/`.
 
 ## v0.3.0 Release (2026-05-13)
 
@@ -715,7 +715,7 @@ telemetry attributes to the `claude-code` / `codex` trust surface (re-run
 `alaya attach` after upgrading to pick it up; `alaya doctor` flags a stale
 attach as drifted). Workspace packages bumped `0.2.0` → `0.3.0` (the new
 `secret_ref_kind: "keychain"` EventLog value is a public-surface change per
-invariant §25). See `docs/v0.3/v0.3.0/`.
+invariant §25). See `docs/archive/v0.3-historical/v0.3.0/`.
 
 ## v0.1.0 Release (2026-05-05)
 

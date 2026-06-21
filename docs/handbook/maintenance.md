@@ -94,7 +94,7 @@ bounded by
 `keychain_tooling_unavailable`. The runtime-verified secret path on the dev
 box is `env:` / `file:` refs. When a host with a working keychain service is
 available, capture `<platform>/transcript.txt` under
-`docs/v0.3/v0.3.0/keychain-transcripts/` and update this note +
+`docs/archive/v0.3-historical/v0.3.0/keychain-transcripts/` and update this note +
 `runtime-status.md`.
 
 ## Deprecated public symbols

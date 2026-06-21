@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to Do-SOUL Alaya are recorded here. Per-release detail
-lives under `docs/v0.3/<version>/`; this file is the chronological index.
+lives under `docs/archive/v0.3-historical/<version>/`; this file is the chronological index.
 
 ## v0.3.11 — 2026-06-04 (implementation complete; 500q KPI gate pending)
 
@@ -10,7 +10,7 @@ lives under `docs/v0.3/<version>/`; this file is the chronological index.
 tagged only after that gate passes. **R@5 -> 90% is not claimed as achieved** —
 the recall fan-in is implemented and code-reviewed, but the R@5 number is
 unmeasured locally and deferred to the R5 gate. See
-`docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`.
+`docs/archive/v0.3-historical/v0.3.11/reports/v0.3.11-closeout-report.md`.
 
 ### Garden compute — zero-cloud by default
 
@@ -101,7 +101,7 @@ lease-pierce governance-cache hot-path hook; `#BL-055` Inspector label/filter fo
 
 ## Earlier releases
 
-Earlier release detail is recorded under `docs/v0.3/`, `docs/archive/v0.2/`, and
+Earlier release detail is recorded under `docs/archive/v0.3-historical/`, `docs/archive/v0.2/`, and
 `docs/handbook/runtime-status.md` (per-release sections). Highlights:
 
 - **v0.3.9** (2026-05-17) — three-layer trust-loop closure: Garden's only legal

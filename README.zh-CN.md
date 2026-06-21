@@ -613,7 +613,7 @@ release-closed，"R@5 → 90%" 这个目标也没被宣称达成。** v0.3.4 是
 这条线第一次正式对外发布。
 从 v0.3.0 起累积下来：真实的 Codex 和 Claude Code MCP 会话已经
 被观察到在正常对话里自主调 `soul.recall` → `soul.report_context_usage`，
-真实 live-usage EventLog witness 落档在 `docs/v0.3/v0.3.0/`
+真实 live-usage EventLog witness 落档在 `docs/archive/v0.3-historical/v0.3.0/`
 （v0.3.4 wave 把 fixture 刷到 18 条链，含两个 host）；
 `POST_TURN_EXTRACT` 在 host 已经转发的 `recent_turn` 文本上自动
 抓取，空库从第一句对话就开始学，host 不必显式调
@@ -648,7 +648,7 @@ v0.3.11 **实现已完成，但大机器 500q gate 仍未跑。** 只有该 gate
 主机上跑过、LongMemEval / LoCoMo 全量 bench 归档通过后，才能把它描述成
 full release-ready。**R@5 → 90% 没被宣称达成** —— 召回 fan-in 已实现并过
 code-review，但 R@5 这个数字在本地未测量，已 defer 到那个 gate。见
-`docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`。
+`docs/archive/v0.3-historical/v0.3.11/reports/v0.3.11-closeout-report.md`。
 
 ### 下一步要走的方向
 

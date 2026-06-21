@@ -55,7 +55,7 @@ it("rule-path contradicts seeds a WEAK attention_only path (agent-controllable v
   // NOT call submitCandidate at propose time — locked in
   // edge-proposal-service.test.ts ("creates a pending proposal ...").
   // see also: packages/core/src/path-graph/edge-proposal-service.ts AUTO_ACCEPT_FLOOR_BY_TRIGGER;
-  //   docs/v0.3/v0.3.11/kpi-targets.md K4.1.
+  //   docs/archive/v0.3-historical/v0.3.11/kpi-targets.md K4.1.
   it("B-4 direct-materializes a governed weak path (rule attention_only / llm recall_allowed), never edge_proposals, never strictly_governed", async () => {
     const ruleExisting = createMemoryEntry({ object_id: "mem-A", content: "I prefer dark roast coffee." });
     const ruleMemoryRepo = {

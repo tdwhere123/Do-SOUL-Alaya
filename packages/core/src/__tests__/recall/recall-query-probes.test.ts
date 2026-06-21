@@ -11,12 +11,12 @@ import {
 describe("compileRecallQueryProbes", () => {
   it("extracts multilingual structural probes without a provider", () => {
     const probes = compileRecallQueryProbes(
-      "昨天我们确认 v0.3.7 无 embedding 召回方案，相关 docs/v0.3/v0.3.7/no-embedding-dynamic-recall.md 和 @do-soul/alaya-core 怎么改？"
+      "昨天我们确认 v0.3.7 无 embedding 召回方案，相关 docs/archive/v0.3-historical/v0.3.7/no-embedding-dynamic-recall.md 和 @do-soul/alaya-core 怎么改？"
     );
 
     expect(probes.date_terms).toContain("昨天");
     expect(probes.task_refs).toContain("v0.3.7");
-    expect(probes.file_paths).toContain("docs/v0.3/v0.3.7/no-embedding-dynamic-recall.md");
+    expect(probes.file_paths).toContain("docs/archive/v0.3-historical/v0.3.7/no-embedding-dynamic-recall.md");
     expect(probes.package_names).toContain("@do-soul/alaya-core");
     expect(probes.domain_tags).toEqual(expect.arrayContaining(["embedding", "recall", "docs"]));
     expect(probes.lexical_terms).toEqual(expect.arrayContaining(["embedding", "召回方案"]));

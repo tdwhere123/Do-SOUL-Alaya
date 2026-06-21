@@ -716,7 +716,7 @@ publicly released v0.3.x line. Cumulative since
 v0.3.0: real Codex and Claude
 Code MCP sessions autonomously run `soul.recall` →
 `soul.report_context_usage` during normal conversations, with a
-live-usage EventLog witness committed under `docs/v0.3/v0.3.0/`
+live-usage EventLog witness committed under `docs/archive/v0.3-historical/v0.3.0/`
 (18 chains across both hosts after the v0.3.4 refresh).
 `POST_TURN_EXTRACT` auto-captures from the `recent_turn` text the
 host already forwards, so an empty store learns from the first
@@ -763,7 +763,7 @@ pending.** It is not full release-ready until that gate runs on a larger host
 and the LongMemEval / LoCoMo full-bench archives pass. **R@5 → 90% is not
 claimed as achieved** — the recall fan-in is implemented and code-reviewed,
 but the R@5 number is unmeasured locally and deferred to that gate. See
-`docs/v0.3/v0.3.11/reports/v0.3.11-closeout-report.md`.
+`docs/archive/v0.3-historical/v0.3.11/reports/v0.3.11-closeout-report.md`.
 
 `keychain:` secret refs are code-reviewed across Linux / macOS /
 Windows adapters (runtime cross-platform write→read still deferred —

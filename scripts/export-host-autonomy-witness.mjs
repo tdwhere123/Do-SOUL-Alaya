@@ -3,14 +3,14 @@
 // repo fixture. The witness is intentionally drawn from real attached-host
 // usage (a normal Codex / Claude Code conversation that called soul.recall and
 // then soul.report_context_usage), not a synthetic capture session — see
-// docs/v0.3/v0.3.0/host-autonomy-fixtures/README.md.
+// docs/archive/v0.3-historical/v0.3.0/host-autonomy-fixtures/README.md.
 //
 // Usage:
 //   node scripts/export-host-autonomy-witness.mjs [db-path] [host-label]
 //
 // Defaults: db-path = $ALAYA_CONFIG_DIR/alaya.db or ~/.config/alaya/alaya.db;
 //           host-label = claude-code. Output lands in
-//           docs/v0.3/v0.3.0/host-autonomy-fixtures/<host-label>-live/.
+//           docs/archive/v0.3-historical/v0.3.0/host-autonomy-fixtures/<host-label>-live/.
 //
 // Re-running refreshes the fixture from current EventLog state. Only the
 // structured soul.recall.delivered + soul.context_usage.reported rows are
@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const fixturesRoot = path.join(repoRoot, "docs/v0.3/v0.3.0/host-autonomy-fixtures");
+const fixturesRoot = path.join(repoRoot, "docs/archive/v0.3-historical/v0.3.0/host-autonomy-fixtures");
 
 function fail(message) {
   console.error(message);
