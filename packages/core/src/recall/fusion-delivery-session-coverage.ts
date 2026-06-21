@@ -3,7 +3,9 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type {
   CoarseRecallCandidate,
-  RecallFusionBreakdown} from "./recall-service-types.js";
+  RecallFusionBreakdown,
+  RecallSupplementaryData} from "./recall-service-types.js";
+import { coverageReorderGateOpen } from "./evidence-set-optimizer.js";
 
 type RecallFusionCandidateInput = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -40,13 +42,17 @@ function sessionCoverageKey(
 // set is unchanged — only its order, which moves the @K-scored slots. A
 // candidate whose session is already represented yields to the next
 // not-yet-represented session candidate whose fused_score is within `band` of
-// it; strong head hits (far outside the band) are never demoted. No-op when the
-// window is single-session (e.g. one run_id, null surfaces) so default recall
-// stays byte-identical.
+// it; strong head hits (far outside the band) are never demoted. Gated by the
+// same multi-fact condition as the evidence-set optimizer so single-fact queries
+// stay byte-identical; also a no-op when the window is single-session.
 export function applySessionCoverageRerank<T extends FusedRecallCandidateInput>(
   ordered: readonly T[],
+  supplementaryData: RecallSupplementaryData,
   maxEntries: number
 ): readonly T[] {
+  if (!coverageReorderGateOpen(ordered, supplementaryData, maxEntries)) {
+    return ordered;
+  }
   const band = resolveSessionCoverageBand();
   if (band <= 0 || maxEntries <= 1 || ordered.length <= 1) {
     return ordered;

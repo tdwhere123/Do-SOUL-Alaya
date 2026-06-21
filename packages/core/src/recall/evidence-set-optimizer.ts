@@ -198,37 +198,57 @@ function analyzePoolBreadth<T extends DeliveryCandidate>(
   return { crossSessionStrong: strongSessions.size >= 2, crossSessionNovelTerm };
 }
 
+// Whether delivery-layer coverage reordering should run at all: off-switch
+// honored, basic no-op guards, then force OR (the pool genuinely offers
+// cross-session evidence AND the query is plausibly multi-fact). Shared so the
+// optimizer and applySessionCoverageRerank stay byte-identical for single-fact
+// queries under the same conditions.
+export function coverageReorderGateOpen<T extends DeliveryCandidate>(
+  ordered: readonly T[],
+  supplementaryData: RecallSupplementaryData,
+  maxEntries: number
+): boolean {
+  const mode = resolveSelectorMode();
+  if (mode === "off" || maxEntries <= 1 || ordered.length <= 1) {
+    return false;
+  }
+  const targetK = resolveCoverageTargetK(maxEntries);
+  if (targetK <= 1) {
+    return false;
+  }
+  const pool = ordered.slice(0, resolveCoveragePoolK(ordered.length, targetK));
+  const head = pool[0];
+  if (head === undefined) {
+    return false;
+  }
+  if (mode === "force") {
+    return true;
+  }
+  const minScoreRatio = readRatioEnv(COVERAGE_MIN_SCORE_RATIO_ENV, DEFAULT_MIN_SCORE_RATIO);
+  const probes = supplementaryData.queryProbes;
+  const breadth = analyzePoolBreadth(pool, head, probes, head.fusion.fused_score, minScoreRatio);
+  return (
+    breadth.crossSessionStrong &&
+    (hasTextualMultiFactIntent(probes, entityProbeTokens(probes)) || breadth.crossSessionNovelTerm)
+  );
+}
+
 export function applyEvidenceSetDelivery<T extends DeliveryCandidate>(
   ordered: readonly T[],
   supplementaryData: RecallSupplementaryData,
   maxEntries: number
 ): readonly T[] {
-  const mode = resolveSelectorMode();
-  if (mode === "off" || maxEntries <= 1 || ordered.length <= 1) {
+  if (!coverageReorderGateOpen(ordered, supplementaryData, maxEntries)) {
     return ordered;
   }
   const targetK = resolveCoverageTargetK(maxEntries);
-  if (targetK <= 1) {
-    return ordered;
-  }
   const poolK = resolveCoveragePoolK(ordered.length, targetK);
   const pool = ordered.slice(0, poolK);
-  const head = pool[0];
-  if (head === undefined) {
-    return ordered;
-  }
+  const head = pool[0]!;
   const headScore = head.fusion.fused_score;
   const minScoreRatio = readRatioEnv(COVERAGE_MIN_SCORE_RATIO_ENV, DEFAULT_MIN_SCORE_RATIO);
   const probes = supplementaryData.queryProbes;
   const entityTokens = entityProbeTokens(probes);
-
-  if (mode !== "force") {
-    const breadth = analyzePoolBreadth(pool, head, probes, headScore, minScoreRatio);
-    const wantsMultiFact = hasTextualMultiFactIntent(probes, entityTokens) || breadth.crossSessionNovelTerm;
-    if (!breadth.crossSessionStrong || !wantsMultiFact) {
-      return ordered;
-    }
-  }
 
   const ctx: FacetContext = {
     supplementaryData,

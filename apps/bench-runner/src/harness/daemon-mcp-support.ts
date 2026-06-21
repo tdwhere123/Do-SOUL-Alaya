@@ -112,11 +112,15 @@ export function withEmbeddingFusionWeightInjected(
   });
 }
 
-// When enabled, the LongMemEval / LoCoMo seeders stamp a per-session surface_id
-// so delivery-time session coverage has a grouping axis (off => surface_id null
-// => coverage rerank is a no-op, default-identical recall).
+// The LongMemEval / LoCoMo seeders stamp a per-session surface_id so delivery-
+// time session coverage has the grouping axis production already has (durable
+// memories carry context.surface_id). Default on for fidelity; explicit
+// off/0/false/no strips surfaces for an A/B against single-session corpora.
 export function benchSessionSurfacesEnabled(): boolean {
   const raw = process.env.ALAYA_BENCH_SESSION_SURFACES?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+  if (raw === undefined || raw === "") {
+    return true;
+  }
+  return !(raw === "0" || raw === "false" || raw === "off" || raw === "no");
 }
 

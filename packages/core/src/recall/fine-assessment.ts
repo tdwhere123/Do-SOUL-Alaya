@@ -140,7 +140,11 @@ function orderFusedFineAssessmentCandidates(
     supplementaryData,
     maxEntries
   );
-  const coverageOrderedCandidates = applySessionCoverageRerank(coverageSelectedCandidates, maxEntries);
+  const coverageOrderedCandidates = applySessionCoverageRerank(
+    coverageSelectedCandidates,
+    supplementaryData,
+    maxEntries
+  );
   const synthesisReservedCandidates = reserveSynthesisDeliverySlots(
     coverageOrderedCandidates,
     supplementaryData,

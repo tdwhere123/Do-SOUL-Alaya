@@ -72,6 +72,12 @@ The standing QA + seeding config for baseline runs, so it is not re-litigated:
 - **Embedding** local ONNX `paraphrase-multilingual-MiniLM-L12-v2`
   (`--embedding env --embedding-provider local_onnx`,
   `ALAYA_LOCAL_EMBEDDING_CACHE_DIR`); the off arm uses `--embedding disabled`.
+- **Session surfaces default ON** (`ALAYA_BENCH_SESSION_SURFACES`): seeders
+  stamp a per-session `surface_id`, faithful to production where durable
+  memories carry `context.surface_id`, so delivery-time session coverage has its
+  grouping axis. Baselines archived before this flip ran surfaces OFF and are
+  not directly comparable on the session-coverage axis; set
+  `ALAYA_BENCH_SESSION_SURFACES=off` for a session-collapsed A/B.
 
 ## Why this exists
 
