@@ -26,6 +26,31 @@ export function scoreQueryEvidenceMatch(
   return clamp01(termCoverage * 0.48 + phraseScore * 0.12 + densityScore * 0.08 + conciseScore);
 }
 
+// The set of query lexical terms that hit a candidate, used by the evidence-set
+// optimizer to tell complementary multi-fact golds apart by which sub-clause
+// each answers. Shares normalization + word-boundary matching with the scorer.
+export function collectQueryTermHits(
+  entry: Readonly<MemoryEntry>,
+  queryProbes: Readonly<RecallQueryProbes>
+): ReadonlySet<string> {
+  const hits = new Set<string>();
+  if (queryProbes.normalized_query === null || queryProbes.lexical_terms.length === 0) {
+    return hits;
+  }
+  const content = normalizeEvidenceText(entry.content);
+  const metadata = normalizeEvidenceText([...entry.domain_tags, ...entry.evidence_refs].join(" "));
+  for (const term of queryProbes.lexical_terms.slice(0, 32)) {
+    const needle = normalizeEvidenceText(term);
+    if (needle.length === 0) {
+      continue;
+    }
+    if (containsEvidenceNeedle(content, needle) || containsEvidenceNeedle(metadata, needle)) {
+      hits.add(needle);
+    }
+  }
+  return hits;
+}
+
 function collectEvidenceTermHitStats(
   terms: readonly string[],
   content: string,

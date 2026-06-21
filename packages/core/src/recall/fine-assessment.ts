@@ -23,7 +23,7 @@ import {
   reserveSynthesisDeliverySlots,
   synthesisReserveCount
 } from "./fusion-delivery.js";
-import { applyCoverageDeliverySelection } from "./coverage-delivery.js";
+import { applyEvidenceSetDelivery } from "./evidence-set-optimizer.js";
 import { computeEffectiveScoreDetails } from "./scoring.js";
 import {
   selectFineAssessmentCandidates,
@@ -135,7 +135,7 @@ function orderFusedFineAssessmentCandidates(
     supplementaryData,
     maxEntries
   );
-  const coverageSelectedCandidates = applyCoverageDeliverySelection(
+  const coverageSelectedCandidates = applyEvidenceSetDelivery(
     prioritizedCandidates,
     supplementaryData,
     maxEntries
