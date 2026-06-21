@@ -40,6 +40,32 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   entity_seed: 1, path_expansion: 3, temporal_recency: 0, workspace_activation: 0
 });
 
+// Correlated full-text streams that all fire on the same lexical surface match;
+// damping their combined RRF mass stops a lexical distractor from out-voting a
+// strong single-stream (e.g. embedding-only) gold. See resolveFtsFamilyDamp.
+const FTS_FAMILY_FUSION_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
+  "lexical_fts",
+  "trigram_fts",
+  "synthesis_fts",
+  "evidence_fts"
+]);
+
+const FTS_FAMILY_DAMP_ENV = "ALAYA_RECALL_FTS_FAMILY_DAMP";
+const DEFAULT_FTS_FAMILY_DAMP = 0.5;
+
+// Damp factor in [0,1] for the FTS family tail beyond its strongest stream.
+// 1 = off, 0 = count only the single best FTS stream; default 0.5 de-correlates.
+function resolveFtsFamilyDamp(): number {
+  const raw = process.env[FTS_FAMILY_DAMP_ENV];
+  if (raw === undefined || raw.trim() === "") {
+    return DEFAULT_FTS_FAMILY_DAMP;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1
+    ? parsed
+    : DEFAULT_FTS_FAMILY_DAMP;
+}
+
 type RecallFusionCandidateInput = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
   readonly effectiveFactors: RecallScoreFactors;
@@ -51,6 +77,7 @@ type FusedRecallCandidateInput = Readonly<RecallFusionCandidateInput & {
 type ResolvedRecallFusionWeights = Readonly<{
   readonly k: number;
   readonly weights: Readonly<Record<RecallFusionStream, number>>;
+  readonly ftsFamilyDamp: number;
 }>;
 
 type PreliminaryFusionCandidate = Readonly<{
@@ -223,7 +250,10 @@ function accumulateFusionContributions(
   perStreamRank: Record<RecallFusionStream, number | null>,
   contributions: Record<RecallFusionStream, number>
 ): number {
+  const ftsFamilyDamp = resolved.ftsFamilyDamp;
   let fusedScore = 0;
+  let ftsFamilyRaw = 0;
+  let ftsFamilyMax = 0;
   for (const stream of RECALL_FUSION_STREAMS) {
     const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
     perStreamRank[stream] = rank;
@@ -238,7 +268,19 @@ function accumulateFusionContributions(
       rank
     );
     contributions[stream] = contribution;
-    fusedScore += contribution;
+    if (ftsFamilyDamp !== 1 && FTS_FAMILY_FUSION_STREAMS.has(stream)) {
+      ftsFamilyRaw += contribution;
+      if (contribution > ftsFamilyMax) {
+        ftsFamilyMax = contribution;
+      }
+    } else {
+      fusedScore += contribution;
+    }
+  }
+  // De-correlate the FTS family: keep the strongest FTS stream in full and damp
+  // the rest so one lexical surface match cannot out-vote a strong single stream.
+  if (ftsFamilyDamp !== 1) {
+    fusedScore += ftsFamilyMax + ftsFamilyDamp * (ftsFamilyRaw - ftsFamilyMax);
   }
   return fusedScore;
 }
@@ -472,7 +514,8 @@ function resolveRrfFusionWeights(
   ) as Record<RecallFusionStream, number>;
   return Object.freeze({
     k: Math.max(1, k),
-    weights: Object.freeze(weights)
+    weights: Object.freeze(weights),
+    ftsFamilyDamp: resolveFtsFamilyDamp()
   });
 }
 
