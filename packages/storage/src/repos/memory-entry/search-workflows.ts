@@ -1,6 +1,9 @@
 import { StorageError } from "../../shared/errors.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
-import { buildWorkspaceScopedFtsMatch } from "../shared/fts-lane-routing.js";
+import {
+  buildAnchorScopedFtsMatch,
+  buildWorkspaceScopedFtsMatch
+} from "../shared/fts-lane-routing.js";
 import {
   buildObjectIdFilterSql,
   countQueryCodepoints,
@@ -74,6 +77,77 @@ export async function searchByKeywordWithinObjectIds(
       error
     );
   }
+}
+
+const MEMORY_FTS_TRIGRAM = "memory_content_fts";
+const MEMORY_FTS_PORTER = "memory_content_fts_porter";
+
+// Runs the anchor MATCH against both the porter and trigram tables and merges;
+// [] when there is no anchor so the caller keeps only the relaxed lane.
+export async function searchByAnchorWithinObjectIds(
+  this: MemoryEntrySearchWorkflowHost,
+  workspaceId: string,
+  anchorTokens: readonly string[],
+  optionalTokens: readonly string[],
+  limit: number,
+  objectIds: readonly string[]
+): Promise<readonly MemoryEntryKeywordSearchResult[]> {
+  const candidateObjectIds = normalizeKeywordSearchObjectIds(objectIds);
+  if (candidateObjectIds.length === 0 || !Number.isInteger(limit) || limit <= 0) {
+    return Object.freeze([]);
+  }
+  const matchExpression = buildAnchorScopedFtsMatch(workspaceId, anchorTokens, optionalTokens);
+  if (matchExpression === null) {
+    return Object.freeze([]);
+  }
+  try {
+    const trigramRows = searchAnchorFtsLane.call(
+      this, MEMORY_FTS_TRIGRAM, workspaceId, matchExpression, limit, candidateObjectIds
+    );
+    const porterRows = searchAnchorFtsLane.call(
+      this, MEMORY_FTS_PORTER, workspaceId, matchExpression, limit, candidateObjectIds
+    );
+    return freezeKeywordSearchResults(
+      mergeKeywordSearchRows([], trigramRows, limit, porterRows)
+    );
+  } catch (error) {
+    throw new StorageError(
+      "QUERY_FAILED",
+      `Failed anchor search for workspace ${workspaceId}.`,
+      error
+    );
+  }
+}
+
+function searchAnchorFtsLane(
+  this: MemoryEntrySearchWorkflowHost,
+  table: typeof MEMORY_FTS_TRIGRAM | typeof MEMORY_FTS_PORTER,
+  workspaceId: string,
+  matchExpression: string,
+  limit: number,
+  candidateObjectIds: readonly string[]
+): readonly FtsKeywordSearchRow[] {
+  const objectIdFilter = buildObjectIdFilterSql(candidateObjectIds, `${table}.object_id`);
+  return this.db.connection.prepare(`
+    SELECT
+      ${table}.object_id,
+      bm25(${table}) AS raw_rank
+    FROM ${table}
+    JOIN memory_entries ON memory_entries.object_id = ${table}.object_id
+    WHERE
+      ${table}.workspace_id = ?
+      AND ${table} MATCH ?
+      AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
+      AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
+    ${objectIdFilter.sql}
+    ORDER BY raw_rank ASC, ${table}.object_id ASC
+    LIMIT ?
+  `).all(
+    workspaceId,
+    matchExpression,
+    ...objectIdFilter.params,
+    limit
+  ) as readonly FtsKeywordSearchRow[];
 }
 
 function searchKeywordRows(

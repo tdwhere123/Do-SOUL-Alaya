@@ -2,6 +2,11 @@ import { type MemoryEntry, type RecallPolicy } from "@do-soul/alaya-protocol";
 import { clamp01, errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import {
+  intentSplitsByAnchor,
+  type RecallQueryAnchors,
+  type RecallQueryIntent
+} from "./recall-query-plan.js";
+import {
   EXPANDED_QUERY_RANK_DISCOUNT,
   buildEvidenceSearchQueries,
   buildExpandedKeywordQuery
@@ -15,6 +20,8 @@ export interface SemanticSupplementParams {
   readonly config: Readonly<RecallPolicy>["coarse_filter"];
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly anchors: RecallQueryAnchors;
+  readonly intent: RecallQueryIntent;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly addCandidate: AddCoarseCandidate;
   readonly ftsRanks: Map<string, number>;
@@ -64,8 +71,93 @@ export async function addSemanticSupplementCandidates(params: SemanticSupplement
     }
   }
 
+  await addAnchorLaneCandidates(params, objectIds);
   await addExpandedKeywordCandidates(params, searchWithinObjectIds, searchByKeywordFn, objectIds);
   await addEvidenceFtsCandidates(params);
+}
+
+const MAX_SUBQUERY_ANCHORS = 4;
+const MIN_SUBQUERY_ANCHOR_QUOTA = 8;
+
+// A/B kill switches; both default on for production-equivalent recall.
+function envEnabled(name: string): boolean {
+  const raw = process.env[name];
+  return raw !== "off" && raw !== "0" && raw !== "false";
+}
+
+type AnchorSearchFn = (
+  workspaceId: string,
+  anchorTokens: readonly string[],
+  optionalTokens: readonly string[],
+  limit: number,
+  objectIds: readonly string[]
+) => Promise<readonly { readonly object_id: string; readonly normalized_rank: number; readonly trigram_rank?: number }[]>;
+
+// Additive; no-op (relaxed lane stands) when there is no anchor or no repo support.
+async function addAnchorLaneCandidates(
+  params: SemanticSupplementParams,
+  objectIds: readonly string[]
+): Promise<void> {
+  if (params.anchors.required.length === 0 || !envEnabled("ALAYA_RECALL_ANCHOR_LANE")) {
+    return;
+  }
+  const memoryRepo = params.context.dependencies.memoryRepo;
+  const searchByAnchor = memoryRepo.searchByAnchorWithinObjectIds?.bind(memoryRepo);
+  if (searchByAnchor === undefined) {
+    return;
+  }
+  const quota = params.config.semantic_supplement.max_supplement;
+  if (shouldSplitAnchors(params)) {
+    const perAnchorQuota = Math.max(
+      MIN_SUBQUERY_ANCHOR_QUOTA,
+      Math.ceil(quota / params.anchors.required.length)
+    );
+    for (const anchor of params.anchors.required.slice(0, MAX_SUBQUERY_ANCHORS)) {
+      await admitAnchorMatches(params, searchByAnchor, [anchor], perAnchorQuota, objectIds);
+    }
+    return;
+  }
+  await admitAnchorMatches(params, searchByAnchor, params.anchors.required, quota, objectIds);
+}
+
+// Split a multi-fact query into one anchor lane per anchor so the first anchor
+// cannot crowd the others out of the pool. Reserved-quota recall, not delivery.
+function shouldSplitAnchors(params: SemanticSupplementParams): boolean {
+  return (
+    params.anchors.required.length >= 2 &&
+    intentSplitsByAnchor(params.intent) &&
+    envEnabled("ALAYA_RECALL_SUBQUERY")
+  );
+}
+
+async function admitAnchorMatches(
+  params: SemanticSupplementParams,
+  searchByAnchor: AnchorSearchFn,
+  requiredAnchors: readonly string[],
+  limit: number,
+  objectIds: readonly string[]
+): Promise<void> {
+  const matches = await searchByAnchor(
+    params.workspaceId,
+    requiredAnchors,
+    params.anchors.optional,
+    limit,
+    objectIds
+  );
+  for (const match of matches) {
+    const ranked = clamp01(match.normalized_rank);
+    params.ftsRanks.set(match.object_id, Math.max(params.ftsRanks.get(match.object_id) ?? 0, ranked));
+    if (match.trigram_rank !== undefined && match.trigram_rank > 0) {
+      params.trigramFtsRanks.set(
+        match.object_id,
+        Math.max(params.trigramFtsRanks.get(match.object_id) ?? 0, clamp01(match.trigram_rank))
+      );
+    }
+    const entry = params.byId.get(match.object_id);
+    if (entry !== undefined) {
+      params.addCandidate(entry, "lexical_anchor", ranked, "lexical_anchor");
+    }
+  }
 }
 
 async function addExpandedKeywordCandidates(

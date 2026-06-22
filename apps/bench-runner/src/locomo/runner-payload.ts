@@ -15,6 +15,7 @@ import {
 import type { CompileSeedExtractionStats } from "../longmemeval/compile-seed.js";
 import { toSeedExtractionPathKpi } from "../longmemeval/compile-seed.js";
 import {
+  buildLongMemEvalFullGoldCoverage,
   buildLongMemEvalQualityMetrics,
   rAt5WithProviderReturned,
   summarizeLongMemEvalRecallEvidence,
@@ -229,6 +230,7 @@ function buildLocomoKpi(
       answer_turns_truncated: 0,
       seed_chars_clipped: 0
     },
+    full_gold_coverage: buildLongMemEvalFullGoldCoverage(input.aggregate.questionDiagnostics),
     quality_metrics: buildLongMemEvalQualityMetrics(input.aggregate.questionDiagnostics),
     per_scenario: input.aggregate.perScenario
   };

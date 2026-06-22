@@ -109,6 +109,8 @@ export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> 
           ? ""
           : `  full-gold@5=${pct(kpi.full_gold_coverage.full_gold_at_5)} ` +
             `cov@5=${pct(kpi.full_gold_coverage.gold_coverage_at_5)} ` +
+            `pool@50=${pct(kpi.full_gold_coverage.pool_recall_at_50)} ` +
+            `pool@100=${pct(kpi.full_gold_coverage.pool_recall_at_100)} ` +
             `(official R@5 counts ANY gold; this needs ALL ${kpi.full_gold_coverage.gold_bearing_questions}q)\n`) +
         (kpi.qa_metrics === undefined
           ? ""
@@ -435,6 +437,12 @@ export async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
     process.stdout.write(
       `Done. Slug: ${result.slug}\n` +
         `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
+        (kpi.full_gold_coverage === undefined
+          ? ""
+          : `  full-gold@5=${pct(kpi.full_gold_coverage.full_gold_at_5)} ` +
+            `cov@5=${pct(kpi.full_gold_coverage.gold_coverage_at_5)} ` +
+            `pool@50=${pct(kpi.full_gold_coverage.pool_recall_at_50)} ` +
+            `pool@100=${pct(kpi.full_gold_coverage.pool_recall_at_100)}\n`) +
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
     );

@@ -200,9 +200,15 @@ const FullGoldCoverageSchema = z
     full_gold_at_5: RatioSchema,
     full_gold_at_10: RatioSchema,
     gold_coverage_at_5: RatioSchema,
-    gold_coverage_at_10: RatioSchema
+    gold_coverage_at_10: RatioSchema,
+    // Pool reach (pre-budget pool rank), distinct from the delivery-rank
+    // coverage above: how many golds sit in the candidate pool within rank
+    // 50/100 at all — separates retrieval/fusion reach from delivery budget.
+    pool_recall_at_50: RatioSchema,
+    pool_recall_at_100: RatioSchema
   })
   .strict();
+export type FullGoldCoverage = z.infer<typeof FullGoldCoverageSchema>;
 
 export type { QualityMetrics } from "./kpi-quality-schema.js";
 

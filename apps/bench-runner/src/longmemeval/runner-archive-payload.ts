@@ -13,6 +13,7 @@ import { aggregateBenchTokenMetrics, assertBenchTokenEconomyContract } from "../
 import type { BenchRecallWeightOverrides } from "../harness/recall-weight-overrides.js";
 import { aggregateRecallTokenEconomy } from "./recall-token-economy.js";
 import {
+  buildLongMemEvalFullGoldCoverage,
   buildLongMemEvalQualityMetrics,
   rAt5WithProviderReturned,
   summarizeProviderStates
@@ -195,6 +196,7 @@ function buildKpi(
       seed_chars_clipped: input.aggregate.truncCharsTotal
     },
     seed_extraction_path: toSeedExtractionPathKpi(input.extractionStats),
+    full_gold_coverage: buildLongMemEvalFullGoldCoverage(input.aggregate.questionDiagnostics),
     quality_metrics: buildLongMemEvalQualityMetrics(input.aggregate.questionDiagnostics),
     ...(edgeProposalRate === undefined ? {} : { edge_proposal_rate: edgeProposalRate }),
     ...(edgeProposalAutoAccept === undefined ? {} : { edge_proposal_auto_accept: edgeProposalAutoAccept }),

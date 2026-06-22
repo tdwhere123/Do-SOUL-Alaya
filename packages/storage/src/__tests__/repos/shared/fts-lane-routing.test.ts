@@ -1,6 +1,7 @@
 import type BetterSqlite3 from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildAnchorScopedFtsMatch,
   buildFtsMatchExpression,
   buildWorkspaceScopedFtsMatch,
   queryFtsLane
@@ -20,6 +21,31 @@ describe("buildWorkspaceScopedFtsMatch", () => {
     );
     expect(buildWorkspaceScopedFtsMatch('workspace-"quoted"', ["alpha"])).toBe(
       'workspace_id:"workspace-""quoted""" AND content:("alpha")'
+    );
+  });
+});
+
+describe("buildAnchorScopedFtsMatch", () => {
+  it("requires the anchor and keeps all terms for BM25 ranking", () => {
+    expect(buildAnchorScopedFtsMatch("ws", ["alpha"], ["beta"])).toBe(
+      'workspace_id:"ws" AND content:(("alpha") AND ("alpha" OR "beta"))'
+    );
+  });
+
+  it("collapses to just the anchor clause when there is no optional term", () => {
+    expect(buildAnchorScopedFtsMatch("ws", ["alpha"], [])).toBe(
+      'workspace_id:"ws" AND content:(("alpha"))'
+    );
+  });
+
+  it("returns null when there is no anchor (caller falls back to relaxed)", () => {
+    expect(buildAnchorScopedFtsMatch("ws", [], ["beta"])).toBeNull();
+    expect(buildAnchorScopedFtsMatch("ws", ["  "], ["beta"])).toBeNull();
+  });
+
+  it("dedupes an optional term that repeats an anchor", () => {
+    expect(buildAnchorScopedFtsMatch("ws", ["alpha"], ["alpha"])).toBe(
+      'workspace_id:"ws" AND content:(("alpha"))'
     );
   });
 });

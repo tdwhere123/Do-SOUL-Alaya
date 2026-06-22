@@ -111,6 +111,13 @@ export interface MemoryEntryRepo {
     limit: number,
     objectIds: readonly string[]
   ): Promise<readonly MemoryEntryKeywordSearchResult[]>;
+  searchByAnchorWithinObjectIds?(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    objectIds: readonly string[]
+  ): Promise<readonly MemoryEntryKeywordSearchResult[]>;
   // see also: packages/storage/src/migrations/005-evidence-capsules.sql
   // see also: packages/storage/src/migrations/068-evidence-capsule-fts.sql
   findByEvidenceRefs?(

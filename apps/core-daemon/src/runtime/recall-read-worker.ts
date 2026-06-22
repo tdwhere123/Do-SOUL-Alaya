@@ -65,6 +65,7 @@ async function runOperation(request: RecallReadWorkerRequest): Promise<unknown> 
     case "memory.findByScopeClass":
     case "memory.searchByKeyword":
     case "memory.searchByKeywordWithinObjectIds":
+    case "memory.searchByAnchorWithinObjectIds":
     case "memory.findByEvidenceRefs":
     case "memory.findByIds":
       return await runMemoryOperation(request.operation, payload);
@@ -116,6 +117,14 @@ async function runMemoryOperation(
       return await memoryEntryRepo.searchByKeywordWithinObjectIds(
         readString(payload.workspaceId, "workspaceId"),
         readString(payload.queryText, "queryText"),
+        readNumber(payload.limit, "limit"),
+        readStringArray(payload.objectIds, "objectIds")
+      );
+    case "memory.searchByAnchorWithinObjectIds":
+      return await memoryEntryRepo.searchByAnchorWithinObjectIds(
+        readString(payload.workspaceId, "workspaceId"),
+        readStringArray(payload.anchorTokens, "anchorTokens"),
+        readStringArray(payload.optionalTokens, "optionalTokens"),
         readNumber(payload.limit, "limit"),
         readStringArray(payload.objectIds, "objectIds")
       );

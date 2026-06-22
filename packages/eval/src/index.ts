@@ -11,6 +11,7 @@ export {
   type DiffVsPrevious,
   type EdgeProposalAutoAccept,
   type EdgeProposalRate,
+  type FullGoldCoverage,
   type KpiCore,
   type KpiPayload,
   type QualityMetrics,

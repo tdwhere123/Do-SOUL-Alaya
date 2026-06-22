@@ -22,6 +22,7 @@ export type RecallReadWorkerOperation =
   | "memory.findByScopeClass"
   | "memory.searchByKeyword"
   | "memory.searchByKeywordWithinObjectIds"
+  | "memory.searchByAnchorWithinObjectIds"
   | "memory.findByEvidenceRefs"
   | "memory.findByIds"
   | "evidence.searchByKeyword"
@@ -124,6 +125,20 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       await this.request("memory.searchByKeywordWithinObjectIds", {
         workspaceId,
         queryText,
+        limit,
+        objectIds
+      }),
+    searchByAnchorWithinObjectIds: async (
+      workspaceId: string,
+      anchorTokens: readonly string[],
+      optionalTokens: readonly string[],
+      limit: number,
+      objectIds: readonly string[]
+    ) =>
+      await this.request("memory.searchByAnchorWithinObjectIds", {
+        workspaceId,
+        anchorTokens,
+        optionalTokens,
         limit,
         objectIds
       }),
