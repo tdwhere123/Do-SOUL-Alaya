@@ -9,13 +9,14 @@ import RecallPage from "../pages/Recall";
 import SystemPage from "../pages/System";
 import Layout from "../components/Layout";
 import NoWorkspaceAlert from "../components/NoWorkspaceAlert";
+import ErrorBoundary from "./ErrorBoundary";
 
 const GraphPage = lazy(() => import("../pages/Graph"));
 
 export function InspectorRoutes() {
   return (
     <Routes>
-      <Route element={<Layout />}>
+      <Route element={<ErrorBoundary><Layout /></ErrorBoundary>}>
         <Route path="/overview" element={<OverviewPage />} />
         <Route path="/governance" element={<GovernancePage />} />
         <Route path="/memory-browser" element={<MemoryBrowserPage />} />
