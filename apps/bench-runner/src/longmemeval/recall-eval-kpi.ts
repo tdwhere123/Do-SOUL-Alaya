@@ -16,7 +16,11 @@ import type { BenchTokenMetrics } from "../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
 import { type BenchRecallWeightOverrides } from "../harness/recall-weight-overrides.js";
 import { aggregateRecallTokenEconomy } from "./recall-token-economy.js";
-import { buildLongMemEvalQualityMetrics, type LongMemEvalQuestionDiagnostic } from "./diagnostics.js";
+import {
+  buildLongMemEvalFullGoldCoverage,
+  buildLongMemEvalQualityMetrics,
+  type LongMemEvalQuestionDiagnostic
+} from "./diagnostics.js";
 import { RECALL_EVAL_ARCHIVE_MARKER } from "./recall-eval-archive.js";
 import type { LongMemEvalSnapshotManifest } from "./snapshot.js";
 import type { LongMemEvalVariant } from "./dataset.js";
@@ -202,6 +206,7 @@ export function assembleRecallEvalKpi(input: {
       r_at_1: agg.rAt1,
       r_at_5: agg.rAt5,
       r_at_10: agg.rAt10,
+      full_gold_coverage: buildLongMemEvalFullGoldCoverage(acc.questionDiagnostics),
       latency_ms_p50: agg.latencyP50,
       latency_ms_p95: agg.latencyP95,
       latency_source: "exact",

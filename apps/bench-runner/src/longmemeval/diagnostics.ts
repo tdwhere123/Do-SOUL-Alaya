@@ -28,6 +28,7 @@ export {
   buildLongMemEvalQualityMetrics,
   buildPerPlaneRecallCoverage
 } from "./diagnostics-quality.js";
+export { buildLongMemEvalFullGoldCoverage } from "./diagnostics-full-gold-coverage.js";
 export {
   renderCompactDiagnosticsSidecar,
   renderDiagnosticsSidecar,
