@@ -471,7 +471,11 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   )) {
     return 3;
   }
-  if (draft.admissionPlanes.includes("lexical") || draft.admissionPlanes.includes("entity_seed")) {
+  if (
+    draft.admissionPlanes.includes("lexical") ||
+    draft.admissionPlanes.includes("lexical_anchor") ||
+    draft.admissionPlanes.includes("entity_seed")
+  ) {
     return 3;
   }
   // Semantic-supplement injections lack lexical / structural anchors; rank

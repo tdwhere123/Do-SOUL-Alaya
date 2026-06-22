@@ -17,6 +17,7 @@ import {
   type MemoryEntryLifecycleWorkflowHost
 } from "./lifecycle-workflows.js";
 import {
+  searchByAnchorWithinObjectIds,
   searchByKeyword,
   searchByKeywordWithinObjectIds,
   type MemoryEntrySearchWorkflowHost
@@ -292,6 +293,23 @@ export class SqliteMemoryEntryRepo
       this,
       workspaceId,
       queryText,
+      limit,
+      objectIds
+    );
+  }
+
+  public async searchByAnchorWithinObjectIds(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    objectIds: readonly string[]
+  ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
+    return searchByAnchorWithinObjectIds.call(
+      this,
+      workspaceId,
+      anchorTokens,
+      optionalTokens,
       limit,
       objectIds
     );

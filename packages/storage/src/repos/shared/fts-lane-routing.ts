@@ -29,6 +29,30 @@ export function buildWorkspaceScopedFtsMatch(
   return `workspace_id:"${workspaceId.replace(/"/g, '""')}" AND content:(${buildFtsMatchExpression(tokens)})`;
 }
 
+// Require ≥1 anchor token, but keep all terms in the MATCH so BM25 still ranks
+// by them; null when no anchor so the caller falls back to the relaxed OR lane.
+export function buildAnchorScopedFtsMatch(
+  workspaceId: string,
+  anchorTokens: readonly string[],
+  optionalTokens: readonly string[]
+): string | null {
+  const anchors = dedupeNonEmpty(anchorTokens);
+  if (anchors.length === 0) {
+    return null;
+  }
+  const allTerms = dedupeNonEmpty([...anchorTokens, ...optionalTokens]);
+  const required = `(${buildFtsMatchExpression(anchors)})`;
+  const body =
+    allTerms.length === anchors.length
+      ? required
+      : `${required} AND (${buildFtsMatchExpression(allTerms)})`;
+  return `workspace_id:"${workspaceId.replace(/"/g, '""')}" AND content:(${body})`;
+}
+
+function dedupeNonEmpty(tokens: readonly string[]): readonly string[] {
+  return [...new Set(tokens.map((token) => token.trim()).filter((token) => token.length > 0))];
+}
+
 export function queryFtsLane(
   statement: BetterSqlite3.Statement,
   workspaceId: string,

@@ -59,6 +59,13 @@ export interface RecallServiceMemoryRepoPort {
     limit: number,
     objectIds: readonly string[]
   ): Promise<readonly KeywordSearchResult[]>;
+  searchByAnchorWithinObjectIds?(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    objectIds: readonly string[]
+  ): Promise<readonly KeywordSearchResult[]>;
   // see also: 068-evidence-capsule-fts.sql. Used by lexical plane to admit
   // memories whose distilled content lost keywords but whose underlying
   // EvidenceCapsule.gist still matches the query.

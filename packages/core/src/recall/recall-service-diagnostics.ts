@@ -14,6 +14,9 @@ export type RecallAdmissionPlane =
   | "graph_expansion"
   | "path_expansion"
   | "lexical"
+  // High-precision anchor FTS lane: admitted only when the row contains a
+  // required anchor token. see also: recall-query-plan.ts, coarse-filter-semantic.ts.
+  | "lexical_anchor"
   // Coarse-injection candidates surfaced by the embedding workspace neighbor
   // scan. They have no lexical / structural anchor, so a separate plane name
   // keeps source-proximity / graph-expansion seed selection honest.

@@ -344,6 +344,36 @@ describe("SqliteMemoryEntryRepo keyword search", () => {
     ]);
   });
 
+  it("anchor search admits only rows containing a required anchor", async () => {
+    const { repo } = await createRepo();
+    const withAnchor = "eeeeeeee-1111-4111-8111-111111111111";
+    const optionalOnly = "ffffffff-2222-4222-8222-222222222222";
+    await repo.create(
+      createMemoryEntry({ object_id: withAnchor, content: "Melanie hosted the dinner downtown." })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: optionalOnly,
+        run_id: "run-2",
+        content: "The dinner downtown was catered for everyone."
+      })
+    );
+
+    await expect(
+      repo.searchByAnchorWithinObjectIds!(
+        "workspace-1",
+        ["melanie"],
+        ["dinner"],
+        5,
+        [withAnchor, optionalOnly]
+      )
+    ).resolves.toEqual([expect.objectContaining({ object_id: withAnchor })]);
+
+    await expect(
+      repo.searchByAnchorWithinObjectIds!("workspace-1", [], ["dinner"], 5, [withAnchor, optionalOnly])
+    ).resolves.toEqual([]);
+  });
+
   it("caps keyword query tokens before building an FTS MATCH expression", async () => {
     const { repo } = await createRepo();
     const boundedTokens = Array.from({ length: 32 }, (_, index) => `absent${index + 1}`);

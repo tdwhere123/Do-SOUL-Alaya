@@ -75,6 +75,7 @@ function shouldAdmitCoarseCandidate(
   return (
     plane === "protected_winner" ||
     plane === "lexical" ||
+    plane === "lexical_anchor" ||
     plane === "semantic_supplement" ||
     params.winnerMemoryIds.has(entry.object_id) ||
     matchesDeterministicFilter(entry, params.config)
