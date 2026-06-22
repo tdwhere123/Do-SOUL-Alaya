@@ -369,6 +369,65 @@ describe("McpBridge", () => {
     expect(result.tool_use_id).toBe("toolu_recall");
   });
 
+  it("returns a handler_timeout error result when a soul handler hangs past the bound", async () => {
+    const previous = process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
+    process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"] = "25";
+    try {
+      const bridge = new McpBridge({
+        soulHandler: () => new Promise<never>(() => {})
+      });
+
+      const result = await bridge.executeToolUse(toolUse, runtimeContext);
+
+      expect(result).toEqual({
+        type: "tool_result",
+        tool_use_id: toolUse.id,
+        content: JSON.stringify({
+          error: {
+            error_code: "handler_timeout",
+            message: "MCP tool execution timed out.",
+            error_type: "TimeoutError"
+          }
+        }),
+        is_error: true
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
+      } else {
+        process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"] = previous;
+      }
+    }
+  });
+
+  it("returns the real result for a fast handler within the timeout bound", async () => {
+    const previous = process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
+    process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"] = "1000";
+    try {
+      const soulHandler = vi.fn().mockResolvedValue({
+        type: "tool_result",
+        tool_use_id: toolUse.id,
+        content: JSON.stringify({ signal_id: "signal-fast", status: "emitted" })
+      });
+      const bridge = new McpBridge({ soulHandler });
+
+      const result = await bridge.executeToolUse(toolUse, runtimeContext);
+
+      expect(soulHandler).toHaveBeenCalledWith(toolUse, runtimeContext);
+      expect(result).toEqual({
+        type: "tool_result",
+        tool_use_id: toolUse.id,
+        content: JSON.stringify({ signal_id: "signal-fast", status: "emitted" })
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
+      } else {
+        process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"] = previous;
+      }
+    }
+  });
+
   it("no longer exports openAIMcpTools, anthropicMcpTools, or SOUL_TOOL_DEFS from the MCP bridge module", () => {
     expect("openAIMcpTools" in mcpBridgeModule).toBe(false);
     expect("anthropicMcpTools" in mcpBridgeModule).toBe(false);

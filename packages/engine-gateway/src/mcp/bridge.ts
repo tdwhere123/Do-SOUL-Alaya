@@ -1,5 +1,8 @@
 import { type ConversationRuntimeContext, type ToolUseBlock } from "@do-soul/alaya-protocol";
 import { soulToolDefs } from "../provider/soul-tool-specs.js";
+import { withTimeout } from "./with-timeout.js";
+
+const DEFAULT_TOOL_TIMEOUT_MS = 30000;
 
 export interface McpToolResultBlock {
   readonly type: "tool_result";
@@ -51,11 +54,17 @@ export class McpBridge {
         if (!Object.hasOwn(allowedSoulToolNames, toolUse.name)) {
           return createErrorResult(toolUse.id, "unsupported tool");
         }
-        return await this.dependencies.soulHandler(toolUse, runtimeContext);
+        return await withTimeout(
+          () => this.dependencies.soulHandler(toolUse, runtimeContext),
+          resolveTimeoutMs()
+        );
       }
 
       if (this.hasConversationToolName(toolUse.name)) {
-        return await this.toolsHandler(toolUse, runtimeContext);
+        return await withTimeout(
+          () => this.toolsHandler(toolUse, runtimeContext),
+          resolveTimeoutMs()
+        );
       }
 
       if (toolUse.name.startsWith("tools.")) {
@@ -79,6 +88,16 @@ export class McpBridge {
 }
 
 const allowedSoulToolNames = createStringLookup(soulToolDefs.map((toolDef) => toolDef.name));
+
+function resolveTimeoutMs(): number {
+  const raw = process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
+  if (raw === undefined) {
+    return DEFAULT_TOOL_TIMEOUT_MS;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TOOL_TIMEOUT_MS;
+}
 
 function createErrorResult(
   toolUseId: string,
