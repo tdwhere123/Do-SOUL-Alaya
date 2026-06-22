@@ -13,7 +13,8 @@ import type {
   SessionOverrideService,
   SynthesisService,
   TaskSurfaceBuilder,
-  PathFailureHealthInboxPort
+  PathFailureHealthInboxPort,
+  RecallFailureHealthInboxPort
 } from "@do-soul/alaya-core";
 import type {
   GlobalMemoryRecallCacheRepo,
@@ -86,5 +87,6 @@ export type CreateRecallMaterializationWiringInput = {
   readonly sqliteHandoffGapRepo: SqliteHandoffGapRepo;
   readonly signalRepo: SqliteSignalRepo;
   readonly pathFailureHealthInboxPort: PathFailureHealthInboxPort;
+  readonly recallFailureHealthInboxPort: RecallFailureHealthInboxPort;
   readonly evidenceService: EvidenceService;
 };

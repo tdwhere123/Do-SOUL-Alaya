@@ -185,6 +185,7 @@ async function createRecallAndCoreWiring(
     sqliteHandoffGapRepo: repositories.sqliteHandoffGapRepo,
     signalRepo: repositories.signalRepo,
     pathFailureHealthInboxPort: foundation.pathFailureHealthInboxPort,
+    recallFailureHealthInboxPort: foundation.recallFailureHealthInboxPort,
     evidenceService: foundation.evidenceService
   });
   foundation.pathRelationProposalServiceRef.current = recallWiring.pathRelationProposalService;

@@ -1,4 +1,5 @@
 import { getWorkspaceId } from "../api";
+import ErrorBoundary from "../app/ErrorBoundary";
 import NoWorkspaceAlert from "../components/NoWorkspaceAlert";
 import GraphWorkspace from "./graph-page/GraphWorkspace";
 
@@ -11,5 +12,9 @@ export default function GraphPage() {
   if (workspaceId === null) {
     return <NoWorkspaceAlert testId="graph-no-workspace" />;
   }
-  return <GraphWorkspace workspaceId={workspaceId} />;
+  return (
+    <ErrorBoundary>
+      <GraphWorkspace workspaceId={workspaceId} />
+    </ErrorBoundary>
+  );
 }

@@ -52,4 +52,16 @@ describe("alaya-eval CLI", () => {
       "expected self | public | public-multiturn | public-crossquestion | public-locomo | live"
     );
   });
+
+  it("throws a usage error when --history-root is the final argument", async () => {
+    await expect(runCli(["diff", "self", "--history-root"])).rejects.toThrow(
+      "--history-root requires a path value"
+    );
+  });
+
+  it("throws a usage error when --history-root is followed by another flag", async () => {
+    await expect(runCli(["list", "self", "--history-root", "--help"])).rejects.toThrow(
+      "--history-root requires a path value"
+    );
+  });
 });

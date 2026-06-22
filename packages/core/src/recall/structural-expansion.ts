@@ -15,7 +15,7 @@ import {
   type GraphExpansionCandidateSourceDiagnostic,
   type GraphExpansionCandidatesResult
 } from "./graph-expansion.js";
-import { clamp01, toErrorMessage } from "./recall-service-helpers.js";
+import { clamp01, errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
 import type {
   RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
@@ -304,6 +304,8 @@ async function extractSeedEntities(params: Readonly<{
   } catch (error) {
     params.warn("entity extraction failed", {
       workspace_id: params.workspaceId,
+      operation: "entity_extraction",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
     return [];
@@ -347,6 +349,8 @@ async function searchEntitySeedHits(
     params.warn("entity seed lookup failed", {
       workspace_id: params.workspaceId,
       entity_surface: surface,
+      operation: "entity_seed_lookup",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
     return [];

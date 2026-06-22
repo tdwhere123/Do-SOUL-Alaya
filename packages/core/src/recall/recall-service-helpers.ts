@@ -354,6 +354,12 @@ export function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Error class name (or `typeof` for non-Error throws). Feeds the recall warn
+// meta so the fault-aware warn can flag unexpected (programming-bug) failures.
+export function errorNameOf(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
+
 /**
  * Optional time-window pre-filter applied during recall coarse-filter, before
  * ranking. Lets agents answer queries like "what did I say on May 20" without

@@ -158,6 +158,53 @@ describe("aggregateEdgeProposalRate", () => {
     expect(result?.per_workspace_per_day_median).toBe(3);
   });
 
+  it("skips records whose created_at is not a real YYYY-MM-DD day", () => {
+    // created_at is read directly off the row (not the payload), so garbage
+    // here must not synthesize a bogus per-day bucket. Two valid rows on the
+    // same real day form the only legitimate bucket -> min == max == median.
+    const garbageDay = createdRow({
+      proposalId: "garbage",
+      triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+      confidence: 0.9,
+      workspaceId: WORKSPACE_A,
+      createdAt: "2026-05-24T12:00:00.000Z"
+    });
+    const impossibleDay = createdRow({
+      proposalId: "impossible",
+      triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+      confidence: 0.9,
+      workspaceId: WORKSPACE_A,
+      createdAt: "2026-05-24T13:00:00.000Z"
+    });
+    const rows: EdgeProposalKpiEventRow[] = [
+      { ...garbageDay, created_at: "abcdefghij" },
+      { ...impossibleDay, created_at: "2026-13-99T00:00:00.000Z" },
+      createdRow({
+        proposalId: "valid-1",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+        confidence: 0.9,
+        workspaceId: WORKSPACE_A,
+        createdAt: "2026-05-24T12:00:00.000Z"
+      }),
+      createdRow({
+        proposalId: "valid-2",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+        confidence: 0.9,
+        workspaceId: WORKSPACE_A,
+        createdAt: "2026-05-24T14:00:00.000Z"
+      })
+    ];
+    const result = aggregateEdgeProposalRate(rows);
+    expect(result).toBeDefined();
+    // Garbage rows still count toward total_proposals (the payload is valid);
+    // they are excluded only from the day-bucket aggregation.
+    expect(result?.total_proposals).toBe(4);
+    // Only one valid day bucket with 2 proposals -> min == max == median == 2.
+    expect(result?.per_workspace_per_day_min).toBe(2);
+    expect(result?.per_workspace_per_day_max).toBe(2);
+    expect(result?.per_workspace_per_day_median).toBe(2);
+  });
+
   it("ignores reviewed events when computing the rate", () => {
     const rows: readonly EdgeProposalKpiEventRow[] = [
       createdRow({

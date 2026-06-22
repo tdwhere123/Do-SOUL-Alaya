@@ -32,6 +32,7 @@ import {
   MIN_RECALL_RESULTS,
   WARM_CASCADE_DECAY,
   clamp01,
+  errorNameOf,
   toErrorMessage
 } from "./recall-service-helpers.js";
 import type {
@@ -149,6 +150,8 @@ export async function recordGlobalRecallClassificationsSafely(params: Readonly<{
     params.warn("global recall cache record failed", {
       workspace_id: params.classifications[0]?.workspaceId ?? null,
       classification_count: params.classifications.length,
+      operation: "global_recall_cache_record",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
   }
@@ -288,6 +291,8 @@ export async function appendWeightTransferTelemetry(params: Readonly<{
     params.warn("recall weight transfer telemetry append failed", {
       workspace_id: params.workspaceId,
       run_id: params.runId,
+      operation: "recall_weight_transfer_telemetry_append",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
   }

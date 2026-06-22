@@ -215,6 +215,7 @@ function createRecallService(input: {
       ? {}
       : { defaultPolicyDecorator: input.embeddingRuntime.defaultPolicyDecorator }),
     entityExtractionPort: new RuleBasedEntityExtractor(),
+    recallFailureHealthInbox: input.input.recallFailureHealthInboxPort,
     warn: input.input.warn
   });
 }

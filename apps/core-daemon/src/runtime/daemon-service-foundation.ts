@@ -49,7 +49,10 @@ import {
   createManifestationBudgetConfigProvider,
 } from "./daemon-runtime-helpers.js";
 import { createSoulGraphService } from "./soul-graph-runtime-support.js";
-import { createPathFailureHealthInbox } from "./daemon-service-wiring.js";
+import {
+  createPathFailureHealthInbox,
+  createRecallFailureHealthInbox
+} from "./daemon-service-wiring.js";
 import {
   defaultBootstrappingTemplates,
   defaultCanonicalAliasMap
@@ -181,6 +184,7 @@ function createKnowledgeFoundation(
     pathRelationProposalServiceRef: interactionRuntime.pathRelationProposalServiceRef,
     healthIssueGroupRepo: interactionRuntime.healthIssueGroupRepo,
     pathFailureHealthInboxPort: interactionRuntime.pathFailureHealthInboxPort,
+    recallFailureHealthInboxPort: interactionRuntime.recallFailureHealthInboxPort,
     edgeProposalService: interactionRuntime.edgeProposalService,
     topologyService: graphRuntime.topologyService,
     soulGraphService: graphRuntime.soulGraphService,
@@ -479,6 +483,7 @@ function createKnowledgeInteractionRuntime(
   } = { current: null };
   const healthIssueGroupRepo = new SqliteHealthIssueGroupRepo(input.database);
   const pathFailureHealthInboxPort = createPathFailureHealthInbox({ healthIssueGroupRepo });
+  const recallFailureHealthInboxPort = createRecallFailureHealthInbox({ healthIssueGroupRepo });
   return {
     graphExploreService: new GraphExploreService({
       pathRepo: input.pathRelationRepo,
@@ -487,6 +492,7 @@ function createKnowledgeInteractionRuntime(
     pathRelationProposalServiceRef,
     healthIssueGroupRepo,
     pathFailureHealthInboxPort,
+    recallFailureHealthInboxPort,
     edgeProposalService: createEdgeProposalService(
       input,
       eventPublisher,

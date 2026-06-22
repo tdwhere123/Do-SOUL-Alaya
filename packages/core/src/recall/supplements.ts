@@ -9,6 +9,7 @@ import type { RecallQueryProbes } from "./recall-query-probes.js";
 import {
   clamp01,
   compareMemoryEntries,
+  errorNameOf,
   parseEmbeddingPrecheckReason,
   toErrorMessage
 } from "./recall-service-helpers.js";
@@ -118,6 +119,8 @@ export async function collectSynthesisCoarseCandidates(params: {
   } catch (error) {
     params.warn("synthesis FTS lookup failed", {
       workspace_id: params.workspaceId,
+      operation: "synthesis_fts_lookup",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
     return emptySynthesisCoarseFilter();

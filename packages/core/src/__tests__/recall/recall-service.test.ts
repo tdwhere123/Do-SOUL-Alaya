@@ -450,6 +450,8 @@ it("does not fail recall when optional global recall cache recording throws and 
     expect(warnSpy).toHaveBeenCalledWith("global recall cache record failed", {
       workspace_id: "workspace-1",
       classification_count: 1,
+      operation: "global_recall_cache_record",
+      errorName: "Error",
       error: "cache write failed"
     });
   });

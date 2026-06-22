@@ -25,7 +25,7 @@ import {
   uniqueStrings
 } from "./path-relations.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
-import { toErrorMessage } from "./recall-service-helpers.js";
+import { errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
 import type {
   RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
@@ -164,6 +164,8 @@ async function loadSeededPathExpansionPaths(
     warn(warningMessage, {
       workspace_id: workspaceId,
       seed_count: seeds.length,
+      operation: "path_expansion_seed_lookup",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
     return [];
@@ -256,6 +258,8 @@ async function loadTimeConcernPathExpansionPaths(
     params.warn("time concern path expansion lookup failed", {
       workspace_id: params.workspaceId,
       window_digest_count: windowDigests.length,
+      operation: "time_concern_path_expansion_lookup",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
     return [];

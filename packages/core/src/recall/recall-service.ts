@@ -12,6 +12,7 @@ import type {
 } from "./recall-service-types.js";
 import { buildDefaultPolicy } from "./orchestration.js";
 import { executeRecall, type RecallExecutionParams } from "./recall-service-runner.js";
+import { wrapRecallFaultWarn } from "./recall-failure-health-inbox.js";
 
 export { classifyGlobalCandidate } from "./recall-service-helpers.js";
 export type {
@@ -56,7 +57,12 @@ export class RecallService {
   public async recall(params: RecallExecutionParams): Promise<RecallResult> {
     return executeRecall({
       dependencies: this.dependencies,
-      warn: this.warn,
+      warn: wrapRecallFaultWarn(
+        this.warn,
+        this.dependencies.recallFailureHealthInbox,
+        params.workspaceId,
+        this.now
+      ),
       now: this.now,
       buildDefaultPolicy: (strategy, taskSurfaceRef) => this.buildDefaultPolicy(strategy, taskSurfaceRef)
     }, params);

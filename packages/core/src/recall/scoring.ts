@@ -17,6 +17,7 @@ import {
   normalizeActivationScore,
   normalizeGraphSupport,
   resolveActivationWeights,
+  errorNameOf,
   toErrorMessage
 } from "./recall-service-helpers.js";
 import type {
@@ -298,6 +299,8 @@ export function resolveEffectiveActivationWeights(
     warn("ERROR: recall domain weight override invalid; falling back to base activation weights", {
       policy_id: policy.runtime_id,
       domain_tag: matchedDomainTag,
+      operation: "recall_domain_weight_override_validation",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
     return resolveActivationWeights();

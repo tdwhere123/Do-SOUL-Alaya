@@ -281,6 +281,7 @@ async function retryAfterBackoff(
   if (state.attempt >= MAX_EXTRACTOR_RETRIES) {
     throw withClassification(error, "failure_max_retries");
   }
+  // 0-indexed backoff: jitter off the current attempt, then advance the counter.
   const jitterMs = computeJitterMs(state.attempt, runtime.random);
   state.attempt += 1;
   await runtime.sleep(jitterMs);
