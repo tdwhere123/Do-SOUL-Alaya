@@ -33,4 +33,14 @@ describe("deepFreeze", () => {
     expect(deepFreeze(null)).toBeNull();
     expect(deepFreeze(undefined)).toBeUndefined();
   });
+
+  it("freezes cyclic object graphs without overflowing the stack", () => {
+    const value: { self?: unknown } = {};
+    value.self = value;
+
+    const frozen = deepFreeze(value);
+
+    expect(Object.isFrozen(frozen)).toBe(true);
+    expect(frozen.self).toBe(frozen);
+  });
 });

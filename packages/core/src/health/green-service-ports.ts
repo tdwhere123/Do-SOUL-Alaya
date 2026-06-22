@@ -96,6 +96,7 @@ export interface GreenServiceDependencies {
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
   readonly warn?: GreenWarnPort;
+  readonly consecutiveNoGoMaxEntries?: number;
 }
 
 export function basisAllowedForDimension(

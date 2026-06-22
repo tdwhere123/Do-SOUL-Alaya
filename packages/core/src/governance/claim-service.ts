@@ -3,7 +3,6 @@ import {
   ClaimLifecycleState,
   MemoryGovernanceEventType,
   SoulClaimContestedPayloadSchema,
-  SoulClaimLifecycleChangedPayloadSchema,
   TransitionCausedBy,
   type ClaimForm,
   type ClaimLifecycleState as ClaimLifecycleStateType,
@@ -14,13 +13,17 @@ import { CoreError } from "../shared/errors.js";
 import type { EventPublisherInput } from "../runtime/event-publisher.js";
 import { parseObjectId } from "../shared/validators.js";
 import {
+  assertNoAdditionalEventInputs,
+  collectAdditionalEvents,
   createClaimCreatedEventInput,
+  createLifecycleChangedEventInput,
   ensureAllowedLifecycleTransition,
   parseClaimForm,
   parseClaimLifecycleState,
   parseGovernanceSubject,
   parseReason,
-  parseTransitionCausedBy
+  parseTransitionCausedBy,
+  shouldRunSlotElection
 } from "./claim-service-helpers.js";
 import type {
   ClaimFormInput,
@@ -99,12 +102,12 @@ export class ClaimService {
     const existing = await this.requireExistingClaim(transition.objectId);
     ensureAllowedLifecycleTransition(existing.claim_status, transition.newState);
 
-    const shouldRunSlotElection = this.shouldRunSlotElection(
+    const slotElectionRequired = shouldRunSlotElection(
       existing,
       transition.newState,
       options.skipSlotElection === true
     );
-    this.requireSlotServiceForActivation(shouldRunSlotElection);
+    this.requireSlotServiceForActivation(slotElectionRequired);
 
     const updated = await this.applyLifecycleTransition(
       existing,
@@ -118,7 +121,7 @@ export class ClaimService {
       }
     );
 
-    return shouldRunSlotElection
+    return slotElectionRequired
       ? await this.resolveActivatedClaimElection(updated, options.deferredNotificationEvents)
       : updated;
   }
@@ -144,7 +147,7 @@ export class ClaimService {
     auditComposition: LifecycleAuditComposition = {}
   ): Promise<Readonly<ClaimForm>> {
     const occurredAt = this.now();
-    const eventInput = this.createLifecycleChangedEventInput(
+    const eventInput = createLifecycleChangedEventInput(
       existing,
       newState,
       reason,
@@ -166,7 +169,7 @@ export class ClaimService {
       );
     }
 
-    this.assertNoAdditionalEventInputs(additionalEventInputs);
+    assertNoAdditionalEventInputs(additionalEventInputs);
     return await this.applyNonAtomicLifecycleTransition(
       existing,
       newState,
@@ -329,18 +332,6 @@ export class ClaimService {
     return existing;
   }
 
-  private shouldRunSlotElection(
-    existing: Readonly<ClaimForm>,
-    newState: ClaimLifecycleStateType,
-    skipSlotElection: boolean
-  ): boolean {
-    return (
-      !skipSlotElection &&
-      newState === ClaimLifecycleState.ACTIVE &&
-      existing.claim_status === ClaimLifecycleState.DRAFT
-    );
-  }
-
   private requireSlotServiceForActivation(shouldRunSlotElection: boolean): void {
     if (shouldRunSlotElection && this.dependencies.slotService === undefined) {
       throw new CoreError("CONFLICT", "Slot service is required for claim activation");
@@ -370,35 +361,6 @@ export class ClaimService {
     return contested;
   }
 
-  private createLifecycleChangedEventInput(
-    existing: Readonly<ClaimForm>,
-    newState: ClaimLifecycleStateType,
-    reason: string,
-    causedBy: TransitionCausedByType,
-    occurredAt: string
-  ): EventPublisherInput {
-    return {
-      event_type: MemoryGovernanceEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
-      entity_type: "claim_form",
-      entity_id: existing.object_id,
-      workspace_id: existing.workspace_id,
-      run_id: null,
-      caused_by: causedBy,
-      payload_json: SoulClaimLifecycleChangedPayloadSchema.parse({
-        object_id: existing.object_id,
-        object_kind: existing.object_kind,
-        workspace_id: existing.workspace_id,
-        run_id: null,
-        from_state: existing.claim_status,
-        to_state: newState,
-        reason_code: reason,
-        caused_by: causedBy,
-        evidence_refs: null,
-        occurred_at: occurredAt
-      })
-    };
-  }
-
   private canApplyAtomicLifecycleTransition(
     syncStatusUpdate: ClaimServiceDependencies["claimFormRepo"]["updateStatusSync"],
     deferredNotificationEvents?: EventLogEntry[]
@@ -422,7 +384,7 @@ export class ClaimService {
     return await this.dependencies.eventPublisher!.appendManyWithMutation(
       [eventInput, ...additionalEventInputs],
       (persistedEntries) => {
-        this.collectAdditionalEvents(persistedEntries, additionalEventInputs.length, additionalEventsSink);
+        collectAdditionalEvents(persistedEntries, additionalEventInputs.length, additionalEventsSink);
         return syncStatusUpdate.call(
           this.dependencies.claimFormRepo,
           existing.object_id,
@@ -432,34 +394,6 @@ export class ClaimService {
         );
       }
     );
-  }
-
-  private collectAdditionalEvents(
-    persistedEntries: readonly EventLogEntry[],
-    additionalEventCount: number,
-    additionalEventsSink: EventLogEntry[] | undefined
-  ): void {
-    if (additionalEventsSink === undefined) {
-      return;
-    }
-
-    for (let index = 0; index < additionalEventCount; index += 1) {
-      const persisted = persistedEntries[index + 1];
-      if (persisted !== undefined) {
-        additionalEventsSink.push(persisted);
-      }
-    }
-  }
-
-  private assertNoAdditionalEventInputs(
-    additionalEventInputs: readonly EventPublisherInput[]
-  ): void {
-    if (additionalEventInputs.length > 0) {
-      throw new CoreError(
-        "CONFLICT",
-        "Atomic claim transition with additional audit events is not available"
-      );
-    }
   }
 
   private async applyNonAtomicLifecycleTransition(

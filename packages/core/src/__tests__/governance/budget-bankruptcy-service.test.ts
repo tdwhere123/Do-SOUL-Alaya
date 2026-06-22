@@ -118,6 +118,43 @@ describe("BudgetBankruptcyService", () => {
     expect(secondResult.proposal.proposal_id).toBe("proposal-race");
   });
 
+  it("bounds process-local stateStore entries by least-recently-used run", async () => {
+    const dependencies = createDependencies();
+    const service = new BudgetBankruptcyService({
+      ...dependencies,
+      stateStoreMaxEntries: 2
+    });
+
+    await service.declare(createDeclareParams({ runId: "run-1" }));
+    await service.declare(createDeclareParams({ runId: "run-2" }));
+    await service.getSnapshot("run-1", "2026-03-26T00:00:00.000Z");
+    await service.declare(createDeclareParams({ runId: "run-3" }));
+
+    const stateStore = (service as unknown as { readonly stateStore: Map<string, unknown> }).stateStore;
+    expect([...stateStore.keys()]).toEqual(["run-1", "run-3"]);
+  });
+
+  it("expires stale process-local stateStore entries instead of retaining every run forever", async () => {
+    let now = "2026-03-26T00:00:00.000Z";
+    const dependencies = createDependencies();
+    const service = new BudgetBankruptcyService({
+      ...dependencies,
+      now: () => now,
+      stateStoreTtlMs: 1
+    });
+    await service.declare(createDeclareParams({ runId: "run-stale" }));
+
+    now = "2026-03-26T00:00:00.002Z";
+    const snapshot = await service.getSnapshot("run-stale", now);
+
+    expect(snapshot.bankruptcy_kind).toBe(BankruptcyKind.NONE);
+    expect(
+      (service as unknown as { readonly stateStore: Map<string, unknown> }).stateStore.has(
+        "run-stale"
+      )
+    ).toBe(false);
+  });
+
   it("resolves a pending bankruptcy with an accepted option and keeps the chosen mode sticky in snapshots", async () => {
     const dependencies = createDependencies();
     const service = new BudgetBankruptcyService(dependencies);

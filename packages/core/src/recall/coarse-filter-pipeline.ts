@@ -6,10 +6,8 @@ import type { CoarseFilterRunResult } from "./coarse-filter-result.js";
 import { buildCoarseFilterResult } from "./coarse-filter-result.js";
 import type { AddCoarseCandidate } from "./coarse-filter-admission.js";
 import { createCoarseCandidateAdder } from "./coarse-filter-admission.js";
-import {
-  addContentDerivedExpansionCandidates,
-  addSourceProximityCandidates
-} from "./content-expansion.js";
+import { addContentDerivedExpansionCandidates } from "./content-expansion.js";
+import { addSourceProximityCandidates } from "./source-proximity-expansion.js";
 import {
   addGraphExpansionCandidates,
   collectEntityDerivedSeeds

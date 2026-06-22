@@ -9,7 +9,7 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { governanceAuthorisesLevel } from "../path-graph/path-manifestation-policy.js";
-import { normalizeUnit } from "../shared/normalize-unit.js";
+import { clamp01 } from "../shared/clamp.js";
 import type {
   BudgetAllocationResult,
   BudgetState,
@@ -27,8 +27,8 @@ export function determineDesiredLevel(
   lens: LensEligibility;
 } {
   const nudgeEligible =
-    normalizeUnit(candidate.pressure) >= config.escalation_policy.nudge_min_pressure &&
-    normalizeUnit(candidate.confidence) >= config.escalation_policy.nudge_min_confidence;
+    clamp01(candidate.pressure) >= config.escalation_policy.nudge_min_pressure &&
+    clamp01(candidate.confidence) >= config.escalation_policy.nudge_min_confidence;
   const lens = evaluateLensEligibility(candidate, config, taskSurfaceRef);
 
   if (lens.eligible) {
@@ -145,12 +145,12 @@ export function compareCandidatesForDeterministicEvaluation(
     return scoreDelta;
   }
 
-  const pressureDelta = normalizeUnit(right.pressure) - normalizeUnit(left.pressure);
+  const pressureDelta = clamp01(right.pressure) - clamp01(left.pressure);
   if (pressureDelta !== 0) {
     return pressureDelta;
   }
 
-  const confidenceDelta = normalizeUnit(right.confidence) - normalizeUnit(left.confidence);
+  const confidenceDelta = clamp01(right.confidence) - clamp01(left.confidence);
   if (confidenceDelta !== 0) {
     return confidenceDelta;
   }
@@ -203,8 +203,8 @@ function evaluateLensEligibility(
   taskSurfaceRef: Readonly<TaskObjectSurface> | null
 ): LensEligibility {
   const meetsLensStrength =
-    normalizeUnit(candidate.pressure) >= config.escalation_policy.lens_min_pressure &&
-    normalizeUnit(candidate.confidence) >= config.escalation_policy.lens_min_confidence;
+    clamp01(candidate.pressure) >= config.escalation_policy.lens_min_pressure &&
+    clamp01(candidate.confidence) >= config.escalation_policy.lens_min_confidence;
 
   if (!meetsLensStrength) {
     return { eligible: false, blockedReason: null };
@@ -273,7 +273,7 @@ function getAllocationOrder(
 }
 
 function scoreCandidate(candidate: Readonly<ActivationCandidate>): number {
-  return normalizeUnit(candidate.pressure) * normalizeUnit(candidate.confidence);
+  return clamp01(candidate.pressure) * clamp01(candidate.confidence);
 }
 
 function unreachableManifestationLevel(value: never): never {

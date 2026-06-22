@@ -92,6 +92,11 @@ export function createBuiltinConversationToolProvider(
   });
 }
 
+type ProviderToolLookup = Readonly<{
+  readonly providerId: string;
+  readonly providerTool: Readonly<ToolProviderToolSpec>;
+}>;
+
 export async function syncConversationToolCatalog(input: {
   readonly catalog: ConversationToolCatalog;
   readonly extensionRegistry: Pick<ExtensionRegistryService, "listProviders">;
@@ -99,31 +104,31 @@ export async function syncConversationToolCatalog(input: {
   readonly allowedExternalToolIds?: ReadonlySet<string>;
   readonly warn?: WarnLogger;
 }): Promise<void> {
-  const warn = input.warn ?? defaultWarn;
-  const nextSpecs: ToolSpec[] = [];
-  const knownToolIds = new Set<string>();
   const providers = await input.extensionRegistry.listProviders();
-  const pendingLookups = new Map<
-    string,
-    Readonly<{
-      readonly providerId: string;
-      readonly providerTool: Readonly<ToolProviderToolSpec>;
-    }>
-  >();
+  const pendingLookups = collectProviderToolLookups(providers, input.allowedExternalToolIds);
+  const nextSpecs = await resolveUniqueToolSpecs(
+    pendingLookups,
+    input.toolSpecService,
+    input.warn ?? defaultWarn
+  );
+  input.catalog.replaceSpecs(nextSpecs);
+}
 
+function collectProviderToolLookups(
+  providers: readonly ToolProvider[],
+  allowedExternalToolIds: ReadonlySet<string> | undefined
+): ReadonlyMap<string, ProviderToolLookup> {
+  const pendingLookups = new Map<string, ProviderToolLookup>();
   for (const provider of providers) {
     for (const providerTool of provider.tool_specs) {
       if (
         provider.source === "mcp_external" &&
-        input.allowedExternalToolIds !== undefined &&
-        !input.allowedExternalToolIds.has(providerTool.tool_id)
+        allowedExternalToolIds !== undefined &&
+        !allowedExternalToolIds.has(providerTool.tool_id)
       ) {
         continue;
       }
 
-      if (knownToolIds.has(providerTool.tool_id)) {
-        continue;
-      }
       const existingLookup = pendingLookups.get(providerTool.tool_id);
       if (existingLookup !== undefined) {
         throw new CoreError(
@@ -134,18 +139,22 @@ export async function syncConversationToolCatalog(input: {
 
       pendingLookups.set(
         providerTool.tool_id,
-        Object.freeze({
-          providerId: provider.provider_id,
-          providerTool
-        })
+        Object.freeze({ providerId: provider.provider_id, providerTool })
       );
     }
   }
+  return pendingLookups;
+}
 
+async function resolveUniqueToolSpecs(
+  pendingLookups: ReadonlyMap<string, ProviderToolLookup>,
+  toolSpecService: Pick<ToolSpecService, "findById">,
+  warn: WarnLogger
+): Promise<ToolSpec[]> {
   const resolvedSpecs = await Promise.all(
     [...pendingLookups.values()].map(async (lookup) => {
       try {
-        return await input.toolSpecService.findById(lookup.providerTool.tool_id);
+        return await toolSpecService.findById(lookup.providerTool.tool_id);
       } catch (error) {
         warn("failed to sync extension tool into daemon conversation catalog", {
           providerId: lookup.providerId,
@@ -157,16 +166,16 @@ export async function syncConversationToolCatalog(input: {
     })
   );
 
+  const nextSpecs: ToolSpec[] = [];
+  const knownToolIds = new Set<string>();
   for (const spec of resolvedSpecs) {
     if (spec === null || knownToolIds.has(spec.tool_id)) {
       continue;
     }
-
     knownToolIds.add(spec.tool_id);
     nextSpecs.push(spec);
   }
-
-  input.catalog.replaceSpecs(nextSpecs);
+  return nextSpecs;
 }
 
 export function createDaemonMcpCatalogFromEnv(input: {

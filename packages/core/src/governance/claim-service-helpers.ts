@@ -1,9 +1,11 @@
 import {
   ClaimFormSchema,
+  ClaimLifecycleState,
   ClaimLifecycleStateSchema,
   MemoryGovernanceEventType,
   PrecedenceBasis,
   SoulClaimCreatedPayloadSchema,
+  SoulClaimLifecycleChangedPayloadSchema,
   TransitionCausedBySchema,
   canonicalGovernanceSubject,
   isValidClaimTransition,
@@ -14,6 +16,7 @@ import {
   type TransitionCausedBy as TransitionCausedByType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
+import type { EventPublisherInput } from "../runtime/event-publisher.js";
 import type { PrecedenceBasisDecisionInput } from "./claim-service-types.js";
 
 export function derivePrecedenceBasis(
@@ -103,5 +106,74 @@ export function ensureAllowedLifecycleTransition(
 ): void {
   if (!isValidClaimTransition(from, to)) {
     throw new CoreError("VALIDATION", `Invalid claim lifecycle transition: ${from} -> ${to}`);
+  }
+}
+
+export function shouldRunSlotElection(
+  existing: Readonly<ClaimForm>,
+  newState: ClaimLifecycleStateType,
+  skipSlotElection: boolean
+): boolean {
+  return (
+    !skipSlotElection &&
+    newState === ClaimLifecycleState.ACTIVE &&
+    existing.claim_status === ClaimLifecycleState.DRAFT
+  );
+}
+
+export function createLifecycleChangedEventInput(
+  existing: Readonly<ClaimForm>,
+  newState: ClaimLifecycleStateType,
+  reason: string,
+  causedBy: TransitionCausedByType,
+  occurredAt: string
+): EventPublisherInput {
+  return {
+    event_type: MemoryGovernanceEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
+    entity_type: "claim_form",
+    entity_id: existing.object_id,
+    workspace_id: existing.workspace_id,
+    run_id: null,
+    caused_by: causedBy,
+    payload_json: SoulClaimLifecycleChangedPayloadSchema.parse({
+      object_id: existing.object_id,
+      object_kind: existing.object_kind,
+      workspace_id: existing.workspace_id,
+      run_id: null,
+      from_state: existing.claim_status,
+      to_state: newState,
+      reason_code: reason,
+      caused_by: causedBy,
+      evidence_refs: null,
+      occurred_at: occurredAt
+    })
+  };
+}
+
+export function collectAdditionalEvents(
+  persistedEntries: readonly EventLogEntry[],
+  additionalEventCount: number,
+  additionalEventsSink: EventLogEntry[] | undefined
+): void {
+  if (additionalEventsSink === undefined) {
+    return;
+  }
+
+  for (let index = 0; index < additionalEventCount; index += 1) {
+    const persisted = persistedEntries[index + 1];
+    if (persisted !== undefined) {
+      additionalEventsSink.push(persisted);
+    }
+  }
+}
+
+export function assertNoAdditionalEventInputs(
+  additionalEventInputs: readonly EventPublisherInput[]
+): void {
+  if (additionalEventInputs.length > 0) {
+    throw new CoreError(
+      "CONFLICT",
+      "Atomic claim transition with additional audit events is not available"
+    );
   }
 }

@@ -178,8 +178,14 @@ const RELATION_KIND_TO_GRAPH_EDGE_TYPE: Readonly<Record<string, MemoryGraphEdgeT
   coheres_with: "recalls"
 });
 
+// Open vocabulary: relation_kind is a free-form label and producers mint kinds
+// outside the projection (e.g. co_usage, time_concern), so this stays total —
+// unknown kinds fold to the associative `recalls` tier rather than throwing on
+// arbitrary stored data. Display projection only; never feeds recall scoring.
+const ASSOCIATIVE_DEFAULT_EDGE_TYPE: MemoryGraphEdgeTypeValue = "recalls";
+
 export function mapRelationKindToGraphEdgeType(relationKind: string): MemoryGraphEdgeTypeValue {
-  return RELATION_KIND_TO_GRAPH_EDGE_TYPE[relationKind] ?? "recalls";
+  return RELATION_KIND_TO_GRAPH_EDGE_TYPE[relationKind] ?? ASSOCIATIVE_DEFAULT_EDGE_TYPE;
 }
 
 export type MemoryGraphEdgeTypeValue = z.infer<typeof MemoryGraphEdgeTypeSchema>;

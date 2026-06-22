@@ -40,4 +40,14 @@ describe("deepFreeze", () => {
       (value.outer as { inner: number }).inner = 1;
     }).toThrow();
   });
+
+  it("freezes cyclic object graphs without overflowing the stack", () => {
+    const value: { self?: unknown } = {};
+    value.self = value;
+
+    const frozen = deepFreeze(value);
+
+    expect(Object.isFrozen(frozen)).toBe(true);
+    expect(frozen.self).toBe(frozen);
+  });
 });

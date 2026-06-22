@@ -1,6 +1,8 @@
 import { StorageError } from "../../shared/errors.js";
 
-const SURFACE_URI_PATTERN = /^surface:\/\/[\w\-.:/]+$/;
+// surface://segment(/segment)* — mirrors core/shared/surface-uri.ts; rejects
+// empty paths, bare/duplicated slashes, colons, and control chars.
+const SURFACE_URI_PATTERN = /^surface:\/\/[\w.-]+(?:\/[\w.-]+)*$/;
 export const DEFAULT_REPO_LIST_PAGE_LIMIT = 500;
 export const MAX_REPO_LIST_PAGE_LIMIT = 500;
 

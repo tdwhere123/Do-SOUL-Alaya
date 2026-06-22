@@ -185,7 +185,8 @@ describe("splitLexicalTokens CJK segmentation fail-soft", () => {
   });
 
   it("falls back to the surface token when jieba has not been loaded yet", () => {
-    __resetCjkSegmentationStateForTests();
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    __setCjkSegmentationLoaderForTests(() => new Promise(() => undefined));
     // First sync call kicks off the async load but cannot await it; the
     // fail-soft contract is that the surface token alone is returned so
     // recall paths never throw on a cold cache.
@@ -194,6 +195,15 @@ describe("splitLexicalTokens CJK segmentation fail-soft", () => {
     // No jieba pieces yet — the load is still in-flight.
     expect(tokens).not.toContain("喜欢");
     expect(tokens).not.toContain("咖啡");
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[CjkSegmentation] @node-rs/jieba not ready; using surface-token fallback for this call",
+      expect.objectContaining({
+        code: "ALAYA_CORE_CJK_SEGMENTATION_COLD_FALLBACK"
+      })
+    );
+
+    splitLexicalTokens("我喜欢咖啡");
+    expect(emitWarning).toHaveBeenCalledTimes(1);
   });
 
   it("emits a structured warning once when jieba native loading fails", async () => {

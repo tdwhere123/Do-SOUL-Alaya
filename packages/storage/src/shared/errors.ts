@@ -6,6 +6,9 @@ export type StorageErrorCode =
   | "VALIDATION_FAILED"
   | "CONFLICT"
   | "NOT_FOUND"
+  // Persisted schema version is ahead of this binary's known max; refuse to
+  // operate rather than risk corrupting a newer database.
+  | "STORAGE_VERSION_AHEAD"
   // Surfaces a UNIQUE-constraint collision so callers can branch on a
   // structured code rather than string-matching sqlite driver messages.
   | "DUPLICATE_KEY";

@@ -10,6 +10,11 @@ coverage/
 .claude/
 .vscode/
 
+# Secrets / local env (.env.example stays tracked)
+.env
+.env.local
+.env.*.local
+
 # Local runtime data
 var/
 data/

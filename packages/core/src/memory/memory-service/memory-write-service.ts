@@ -21,7 +21,8 @@ import type {
   MemoryServiceEventLogRepoPort,
   MemoryServiceEvidenceServicePort,
   MemoryServiceGreenPort,
-  MemoryServiceMemoryEntryRepoPort
+  MemoryEntryReadPort,
+  MemoryEntryWritePort
 } from "./types.js";
 import {
   isPromiseLike,
@@ -34,7 +35,7 @@ import {
 } from "./validators.js";
 
 export interface MemoryWriteServiceDependencies {
-  readonly memoryEntryRepo: MemoryServiceMemoryEntryRepoPort;
+  readonly memoryEntryRepo: MemoryEntryReadPort & MemoryEntryWritePort;
   readonly evidenceService: MemoryServiceEvidenceServicePort;
   readonly eventLogRepo: MemoryServiceEventLogRepoPort;
   readonly runtimeNotifier: MemoryRuntimeNotifier;
@@ -166,7 +167,9 @@ export class MemoryWriteService {
   }> {
     const createWithinTransaction = this.dependencies.memoryEntryRepo.createWithinTransaction;
     if (createWithinTransaction === undefined) {
-      throw new CoreError("CONFLICT", "Memory create transaction port is not available");
+      throw new CoreError("CONFLICT", "Memory create transaction port is not available", {
+        subCode: "PORT_UNAVAILABLE"
+      });
     }
 
     const enrichPendingWriter = this.dependencies.enrichPendingWriter;

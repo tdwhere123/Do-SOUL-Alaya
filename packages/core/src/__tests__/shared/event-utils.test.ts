@@ -9,6 +9,24 @@ describe("isUniqueConstraintError", () => {
     expect(isUniqueConstraintError(error)).toBe(true);
   });
 
+  it("returns true when the driver exposes the extended unique constraint code", () => {
+    const error = new Error("wrapped", {
+      cause: Object.assign(new Error("driver text changed"), {
+        code: "SQLITE_CONSTRAINT_UNIQUE"
+      })
+    });
+    expect(isUniqueConstraintError(error)).toBe(true);
+  });
+
+  it("returns true when the driver exposes SQLite constraint errno", () => {
+    const error = new Error("wrapped", {
+      cause: Object.assign(new Error("driver text changed"), {
+        errno: 19
+      })
+    });
+    expect(isUniqueConstraintError(error)).toBe(true);
+  });
+
   it("returns false for an unrelated cause message", () => {
     const error = new Error("wrapped", { cause: new Error("disk full") });
     expect(isUniqueConstraintError(error)).toBe(false);

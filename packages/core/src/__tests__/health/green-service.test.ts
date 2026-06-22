@@ -413,7 +413,43 @@ it("runVerification() stops retrying after three consecutive no-go verdicts", as
     expect(events.filter((event) => event.event_type === GreenGovernanceEventType.SOUL_GREEN_PIERCED)).toHaveLength(3);
   });
 
-it("setGrace() audits and notifies an eligible-to-grace transition with dedicated grace event", async () => {
+  it("bounds consecutive no-go counts and evicts the least recently used target with a warning", async () => {
+    const firstTargetObjectId = "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
+    const secondTargetObjectId = "80a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
+    const { service, warn } = createHarness({
+      consecutiveNoGoMaxEntries: 1,
+      memories: [
+        createMemoryEntry({ object_id: firstTargetObjectId }),
+        createMemoryEntry({ object_id: secondTargetObjectId })
+      ]
+    });
+
+    await service.runVerification({
+      targetObjectId: firstTargetObjectId,
+      workspaceId: "workspace-1",
+      verdict: VerificationVerdict.NO_GO,
+      microCorrectionHint: "retry",
+      necessaryPatch: null
+    });
+    await service.runVerification({
+      targetObjectId: secondTargetObjectId,
+      workspaceId: "workspace-1",
+      verdict: VerificationVerdict.NO_GO,
+      microCorrectionHint: "retry",
+      necessaryPatch: null
+    });
+
+    expect([...service.consecutiveNoGo.keys()]).toEqual([secondTargetObjectId]);
+    expect(warn).toHaveBeenCalledWith(
+      "[GreenService] consecutive No-Go cache entry evicted.",
+      {
+        targetObjectId: firstTargetObjectId,
+        maxEntries: 1
+      }
+    );
+  });
+
+  it("setGrace() audits and notifies an eligible-to-grace transition with dedicated grace event", async () => {
     const { service, statuses, events, notifyEntry, appendEvent, upsertStatus } = createHarness({
       existingStatus: createGreenStatus()
     });

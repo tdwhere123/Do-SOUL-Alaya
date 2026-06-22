@@ -286,6 +286,19 @@ describe("extension descriptor schemas", () => {
       endpoint: "http://[::1]:3040/mcp"
     });
 
+    expect(
+      IntegrationDescriptorSchema.parse({
+        integration_id: "integration.loopback-ipv6-expanded",
+        name: "Loopback IPv6 Expanded MCP",
+        integration_type: "mcp_server",
+        endpoint: "http://[0:0:0:0:0:0:0:1]:3040/mcp",
+        status: "active",
+        registered_at: validTimestamp
+      })
+    ).toMatchObject({
+      endpoint: "http://[0:0:0:0:0:0:0:1]:3040/mcp"
+    });
+
     expect(() =>
       IntegrationDescriptorSchema.parse({
         integration_id: "integration.remote-http",

@@ -111,10 +111,20 @@ describe("tokenizeFtsQuery CJK segmentation fail-soft", () => {
   });
 
   it("emits the surface CJK token when jieba is not yet warm so FTS5 still gets a match expression", () => {
-    __resetCjkSegmentationStateForTests();
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    __setCjkSegmentationLoaderForTests(() => new Promise(() => undefined));
     const tokens = tokenizeFtsQuery("我喜欢咖啡");
     expect(tokens).toContain("我喜欢咖啡");
     expect(tokens).not.toContain("喜欢");
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[CjkSegmentation] @node-rs/jieba not ready; using surface-token fallback for this call",
+      expect.objectContaining({
+        code: "ALAYA_STORAGE_CJK_SEGMENTATION_COLD_FALLBACK"
+      })
+    );
+
+    tokenizeFtsQuery("我喜欢咖啡");
+    expect(emitWarning).toHaveBeenCalledTimes(1);
   });
 
   it("emits a structured warning once when jieba native loading fails", async () => {

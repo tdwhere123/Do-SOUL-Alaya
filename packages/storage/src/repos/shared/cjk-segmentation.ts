@@ -21,6 +21,9 @@ type CjkSegmenterLoader = () => Promise<CjkSegmenter | null>;
 const CJK_SEGMENTATION_FALLBACK_WARNING_CODE = "ALAYA_STORAGE_CJK_SEGMENTATION_FALLBACK";
 const CJK_SEGMENTATION_FALLBACK_WARNING_MESSAGE =
   "[CjkSegmentation] @node-rs/jieba unavailable; using surface-token fallback";
+const CJK_SEGMENTATION_COLD_FALLBACK_WARNING_CODE = "ALAYA_STORAGE_CJK_SEGMENTATION_COLD_FALLBACK";
+const CJK_SEGMENTATION_COLD_FALLBACK_WARNING_MESSAGE =
+  "[CjkSegmentation] @node-rs/jieba not ready; using surface-token fallback for this call";
 
 let jiebaState:
   | { readonly kind: "uninitialized" }
@@ -28,6 +31,7 @@ let jiebaState:
   | { readonly kind: "ready"; readonly cut: (input: string) => readonly string[] }
   | { readonly kind: "unavailable" } = { kind: "uninitialized" };
 let loadJiebaOverrideForTests: CjkSegmenterLoader | null = null;
+let emittedColdFallbackWarning = false;
 
 // invariant: only Han/Hiragana/Katakana flow through jieba. Hangul /
 // Arabic / Latin degenerate to per-codepoint splits under jieba, so
@@ -62,6 +66,20 @@ function emitCjkSegmentationFallbackWarning(error: unknown): void {
     detail: JSON.stringify({
       layer: "storage",
       error: readErrorMessage(error, "Unknown jieba load failure")
+    })
+  });
+}
+
+function emitCjkSegmentationColdFallbackWarning(): void {
+  if (emittedColdFallbackWarning) {
+    return;
+  }
+  emittedColdFallbackWarning = true;
+  process.emitWarning(CJK_SEGMENTATION_COLD_FALLBACK_WARNING_MESSAGE, {
+    code: CJK_SEGMENTATION_COLD_FALLBACK_WARNING_CODE,
+    detail: JSON.stringify({
+      layer: "storage",
+      state: jiebaState.kind
     })
   });
 }
@@ -113,6 +131,9 @@ export function segmentCjkRun(text: string): readonly string[] {
   if (jiebaState.kind === "uninitialized") {
     void ensureSegmenter();
   }
+  if (jiebaState.kind !== "unavailable") {
+    emitCjkSegmentationColdFallbackWarning();
+  }
   return [text];
 }
 
@@ -120,9 +141,11 @@ export function segmentCjkRun(text: string): readonly string[] {
 export function __resetCjkSegmentationStateForTests(): void {
   jiebaState = { kind: "uninitialized" };
   loadJiebaOverrideForTests = null;
+  emittedColdFallbackWarning = false;
 }
 
 export function __setCjkSegmentationLoaderForTests(loader: CjkSegmenterLoader): void {
   loadJiebaOverrideForTests = loader;
   jiebaState = { kind: "uninitialized" };
+  emittedColdFallbackWarning = false;
 }

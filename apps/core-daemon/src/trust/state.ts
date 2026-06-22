@@ -178,21 +178,10 @@ export class TrustStateRecorder {
   ): Promise<UsageProofRecord> {
     this.assertReady();
 
-    const linkedDelivery = await this.repo.findDeliveryById(input.delivery_id);
-    if (linkedDelivery === null) {
-      throw new TrustStateUnknownDeliveryError(input.delivery_id);
-    }
-
-    // invariant: workspace-bound usage reports cannot write usage proof rows
-    // for deliveries from another workspace. The public error mirrors an
-    // unknown delivery so probes leak no boundary information.
-    if (
-      options?.expectedWorkspaceId !== undefined &&
-      linkedDelivery.workspace_id !== options.expectedWorkspaceId
-    ) {
-      throw new TrustStateUnknownDeliveryError(input.delivery_id);
-    }
-
+    const linkedDelivery = await this.resolveLinkedDelivery(
+      input.delivery_id,
+      options?.expectedWorkspaceId
+    );
     const draftRecord = UsageProofRecordSchema.parse({
       ...input,
       audit_event_id: PLACEHOLDER_AUDIT_EVENT_ID
@@ -238,6 +227,20 @@ export class TrustStateRecorder {
         return this.repo.createUsage(finalRecord);
       }
     );
+  }
+
+  // Resolve the delivery this usage report attaches to and enforce the
+  // workspace boundary. A cross-workspace mismatch mirrors an unknown delivery
+  // so probes leak no boundary information.
+  private async resolveLinkedDelivery(deliveryId: string, expectedWorkspaceId: string | undefined) {
+    const linkedDelivery = await this.repo.findDeliveryById(deliveryId);
+    if (linkedDelivery === null) {
+      throw new TrustStateUnknownDeliveryError(deliveryId);
+    }
+    if (expectedWorkspaceId !== undefined && linkedDelivery.workspace_id !== expectedWorkspaceId) {
+      throw new TrustStateUnknownDeliveryError(deliveryId);
+    }
+    return linkedDelivery;
   }
 
   public async recordInstalled(agent_target: string): Promise<void> {

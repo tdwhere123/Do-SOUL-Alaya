@@ -59,17 +59,10 @@ export interface MemoryServiceEventLogRepoPort {
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
-export interface MemoryServiceMemoryEntryRepoPort {
-  create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>>;
-  // invariant: callbacks commit atomically with the row insert.
-  // see also: packages/storage/src/repos/memory-entry/sqlite-memory-entry-repo.ts:createWithinTransaction.
-  createWithinTransaction?(
-    entry: MemoryEntry,
-    callbacks: {
-      readonly beforeCreate?: () => void;
-      readonly afterCreate?: () => void;
-    }
-  ): Readonly<MemoryEntry>;
+// ISP: the memory-entry repo port is segregated into read / write / lifecycle
+// facets so a narrow consumer (e.g. a query path) can depend on the read facet
+// alone. A full repo satisfies the composed MemoryServiceMemoryEntryRepoPort.
+export interface MemoryEntryReadPort {
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
   findByIds?(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
   findByWorkspaceId(
@@ -107,12 +100,28 @@ export interface MemoryServiceMemoryEntryRepoPort {
     workspaceId: string,
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+}
+
+export interface MemoryEntryWritePort {
+  create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>>;
+  // invariant: callbacks commit atomically with the row insert.
+  // see also: packages/storage/src/repos/memory-entry/sqlite-memory-entry-repo.ts:createWithinTransaction.
+  createWithinTransaction?(
+    entry: MemoryEntry,
+    callbacks: {
+      readonly beforeCreate?: () => void;
+      readonly afterCreate?: () => void;
+    }
+  ): Readonly<MemoryEntry>;
   update(objectId: string, fields: MemoryEntryRepoUpdateFields): Promise<Readonly<MemoryEntry>>;
   updateScoped?(
     objectId: string,
     workspaceId: string,
     fields: MemoryEntryRepoUpdateFields
   ): Promise<Readonly<MemoryEntry>>;
+}
+
+export interface MemoryEntryLifecyclePort {
   transitionLifecycle?(
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
@@ -148,6 +157,11 @@ export interface MemoryServiceMemoryEntryRepoPort {
     }
   ): Promise<boolean>;
 }
+
+export interface MemoryServiceMemoryEntryRepoPort
+  extends MemoryEntryReadPort,
+    MemoryEntryWritePort,
+    MemoryEntryLifecyclePort {}
 
 export interface MemoryServiceEvidenceServicePort {
   findById(objectId: string): Promise<unknown | null>;

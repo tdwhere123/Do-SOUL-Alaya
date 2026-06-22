@@ -68,6 +68,8 @@ export function createHarness(options: {
   readonly governanceRole?: "standalone" | "claimed" | "contested" | "winner" | null;
   readonly leaseHeld?: boolean;
   readonly initialEvents?: readonly EventLogEntry[];
+  readonly memories?: readonly MemoryEntry[];
+  readonly consecutiveNoGoMaxEntries?: number;
 } = {}): {
   readonly service: GreenService;
   readonly statuses: Map<string, GreenStatus>;
@@ -78,6 +80,9 @@ export function createHarness(options: {
   readonly upsertStatus: Mock;
 } {
   const memory = options.memory ?? createMemoryEntry();
+  const memories = new Map(
+    (options.memories ?? [memory]).map((entry) => [entry.object_id, entry])
+  );
   const statuses = new Map<string, GreenStatus>();
   if (options.existingStatus !== undefined && options.existingStatus !== null) {
     statuses.set(options.existingStatus.target_object_id, { ...options.existingStatus });
@@ -132,7 +137,7 @@ export function createHarness(options: {
     },
     memoryRepo: {
       findById: vi.fn(async (objectId: string) =>
-        objectId === memory.object_id ? Object.freeze({ ...memory }) : null
+        memories.has(objectId) ? Object.freeze({ ...memories.get(objectId)! }) : null
       )
     },
     eventLogRepo: {
@@ -162,7 +167,8 @@ export function createHarness(options: {
         ? undefined
         : {
             isHeld: vi.fn(async () => options.leaseHeld ?? false)
-          }
+          },
+    consecutiveNoGoMaxEntries: options.consecutiveNoGoMaxEntries
   };
 
   return {

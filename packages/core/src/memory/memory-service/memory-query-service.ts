@@ -1,5 +1,5 @@
 import type { MemoryEntry, ScopeClass } from "@do-soul/alaya-protocol";
-import type { MemoryListPageOptions, MemoryServiceMemoryEntryRepoPort } from "./types.js";
+import type { MemoryEntryReadPort, MemoryListPageOptions } from "./types.js";
 
 const MEMORY_SERVICE_SCAN_PAGE_LIMIT = 500;
 
@@ -21,13 +21,13 @@ async function collectMemoryPages(
 }
 
 export interface MemoryQueryServiceDependencies {
-  readonly memoryEntryRepo: MemoryServiceMemoryEntryRepoPort;
+  readonly memoryEntryRepo: MemoryEntryReadPort;
 }
 
 // invariant: read-side queries never decide durable truth; scoped lookups hide
 // cross-workspace rows so callers cannot distinguish them from missing objects.
 export class MemoryQueryService {
-  private readonly memoryEntryRepo: MemoryServiceMemoryEntryRepoPort;
+  private readonly memoryEntryRepo: MemoryEntryReadPort;
 
   public constructor(dependencies: MemoryQueryServiceDependencies) {
     this.memoryEntryRepo = dependencies.memoryEntryRepo;

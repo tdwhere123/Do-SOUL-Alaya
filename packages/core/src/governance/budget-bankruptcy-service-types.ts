@@ -84,4 +84,6 @@ export interface BudgetBankruptcyServiceDependencies {
   readonly runtimeNotifier: BudgetBankruptcyRuntimeNotifierPort;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
+  readonly stateStoreMaxEntries?: number;
+  readonly stateStoreTtlMs?: number;
 }

@@ -68,15 +68,28 @@ interface DeclarationArtifacts {
   readonly recommendedOptionId: string | null;
 }
 
+const DEFAULT_STATE_STORE_MAX_ENTRIES = 1024;
+const DEFAULT_STATE_STORE_TTL_MS = 24 * 60 * 60 * 1000;
+
 export class BudgetBankruptcyService {
   private readonly stateStore = new Map<string, BankruptcyStoreEntry>();
   private readonly inFlightDeclarations = new Map<string, Promise<BudgetBankruptcyDeclareResult>>();
   private readonly generateRuntimeId: () => string;
   private readonly now: () => string;
+  private readonly stateStoreMaxEntries: number;
+  private readonly stateStoreTtlMs: number;
 
   public constructor(private readonly dependencies: BudgetBankruptcyServiceDependencies) {
     this.generateRuntimeId = dependencies.generateRuntimeId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.stateStoreMaxEntries = normalizePositiveInteger(
+      dependencies.stateStoreMaxEntries,
+      DEFAULT_STATE_STORE_MAX_ENTRIES
+    );
+    this.stateStoreTtlMs = normalizePositiveInteger(
+      dependencies.stateStoreTtlMs,
+      DEFAULT_STATE_STORE_TTL_MS
+    );
   }
 
   public async declare(params: BudgetBankruptcyDeclareParams): Promise<BudgetBankruptcyDeclareResult> {
@@ -128,7 +141,7 @@ export class BudgetBankruptcyService {
       resolution_state: resolutionState,
       last_updated_at: occurredAt
     });
-    this.stateStore.set(
+    this.setStateStoreEntry(
       runId,
       createStoreEntry(
         buildResolvedState(entry.state, option.option_kind, action === "accept", occurredAt),
@@ -176,6 +189,49 @@ export class BudgetBankruptcyService {
     this.inFlightDeclarations.delete(parsedRunId);
   }
 
+  private getStateStoreEntry(runId: string): BankruptcyStoreEntry | undefined {
+    this.pruneExpiredStateStoreEntries();
+    const existing = this.stateStore.get(runId);
+    if (existing === undefined) {
+      return undefined;
+    }
+    this.stateStore.delete(runId);
+    this.stateStore.set(runId, existing);
+    return existing;
+  }
+
+  private setStateStoreEntry(runId: string, entry: BankruptcyStoreEntry): void {
+    this.pruneExpiredStateStoreEntries();
+    if (this.stateStore.has(runId)) {
+      this.stateStore.delete(runId);
+    }
+    this.stateStore.set(runId, entry);
+    this.pruneStateStoreToMax();
+  }
+
+  private pruneExpiredStateStoreEntries(): void {
+    const nowMs = Date.parse(this.now());
+    if (!Number.isFinite(nowMs)) {
+      return;
+    }
+    for (const [runId, entry] of this.stateStore.entries()) {
+      const updatedMs = Date.parse(entry.state.updated_at);
+      if (Number.isFinite(updatedMs) && nowMs - updatedMs > this.stateStoreTtlMs) {
+        this.stateStore.delete(runId);
+      }
+    }
+  }
+
+  private pruneStateStoreToMax(): void {
+    while (this.stateStore.size > this.stateStoreMaxEntries) {
+      const oldestRunId = this.stateStore.keys().next().value;
+      if (typeof oldestRunId !== "string") {
+        return;
+      }
+      this.stateStore.delete(oldestRunId);
+    }
+  }
+
   private async declareInternal(
     params: BudgetBankruptcyDeclareParams,
     runId: string,
@@ -204,18 +260,18 @@ export class BudgetBankruptcyService {
       return await this.autoResolveSoftDeclaration(entry, proposal, runId, workspaceId, declaredEvent);
     }
 
-    this.stateStore.set(runId, entry);
+    this.setStateStoreEntry(runId, entry);
     await this.dependencies.runtimeNotifier.notifyEntry(declaredEvent);
     return { state: entry.state, dossier: entry.dossier, proposal };
   }
 
   private getStickyCurrentMode(runId: string, fallback: RuntimeModeValue): RuntimeModeValue {
-    const existing = this.stateStore.get(runId);
+    const existing = this.getStateStoreEntry(runId);
     return existing?.state.current_mode ?? fallback;
   }
 
   private async getActivePendingProposal(runId: string): Promise<Readonly<Proposal> | null> {
-    const existing = this.stateStore.get(runId);
+    const existing = this.getStateStoreEntry(runId);
     if (existing !== undefined) {
       const proposal = await this.dependencies.proposalService.findById(existing.proposalId);
       if (proposal !== null && proposal.resolution_state === ProposalResolutionState.PENDING) {
@@ -282,14 +338,14 @@ export class BudgetBankruptcyService {
       updatedProposal.proposal_id,
       entry.pressureRatio
     );
-    this.stateStore.set(runId, updatedEntry);
+    this.setStateStoreEntry(runId, updatedEntry);
     await this.dependencies.runtimeNotifier.notifyEntry(declaredEvent);
     await this.dependencies.runtimeNotifier.notifyEntry(resolvedEvent);
     return { state: updatedEntry.state, dossier: updatedEntry.dossier, proposal: updatedProposal };
   }
 
   private async resolveSnapshotEntry(runId: string): Promise<BankruptcyStoreEntry | null> {
-    const existing = this.stateStore.get(runId) ?? null;
+    const existing = this.getStateStoreEntry(runId) ?? null;
     if (existing !== null) {
       return existing;
     }
@@ -305,7 +361,7 @@ export class BudgetBankruptcyService {
   }
 
   private async getOrRecoverEntry(runId: string): Promise<BankruptcyStoreEntry> {
-    const existing = this.stateStore.get(runId);
+    const existing = this.getStateStoreEntry(runId);
     if (existing !== undefined) {
       return existing;
     }
@@ -322,7 +378,7 @@ export class BudgetBankruptcyService {
 
     const declaredEvent = await requireDeclaredEvent(this.dependencies, dossierRef);
     const recovered = buildRecoveredEntry(dossierRef, pendingProposal.proposal_id, declaredEvent);
-    this.stateStore.set(runId, recovered);
+    this.setStateStoreEntry(runId, recovered);
     return recovered;
   }
 
@@ -398,4 +454,11 @@ export class BudgetBankruptcyService {
       })
     });
   }
+}
+
+function normalizePositiveInteger(value: number | undefined, fallback: number): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  return Number.isInteger(value) && value > 0 ? value : fallback;
 }

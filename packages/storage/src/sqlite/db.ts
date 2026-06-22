@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
-import { StorageError, type StorageErrorCode } from "../shared/errors.js";
+import { StorageError } from "../shared/errors.js";
 
 export type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 
@@ -152,7 +152,7 @@ function assertSchemaVersionNotAhead(database: SqliteConnection, knownMaxVersion
   const persistedMaxVersion = readPersistedMaxVersion(database);
   if (persistedMaxVersion !== null && persistedMaxVersion > knownMaxVersion) {
     throw new StorageError(
-      "STORAGE_VERSION_AHEAD" as StorageErrorCode,
+      "STORAGE_VERSION_AHEAD",
       `Database schema version ${persistedMaxVersion} is ahead of this binary's known max ${knownMaxVersion}. ` +
         "Upgrade Alaya or restore a database matching this version."
     );

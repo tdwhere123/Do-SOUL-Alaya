@@ -9,9 +9,10 @@ import {
 import { CoreError } from "../../shared/errors.js";
 import { parseObjectId } from "../../shared/validators.js";
 import type {
+  MemoryEntryLifecyclePort,
+  MemoryEntryReadPort,
   MemoryRuntimeNotifier,
-  MemoryServiceEventLogRepoPort,
-  MemoryServiceMemoryEntryRepoPort
+  MemoryServiceEventLogRepoPort
 } from "./types.js";
 import {
   ensureAllowedLifecycleTransition,
@@ -22,7 +23,7 @@ import {
 import { appendAuditEventSynchronously } from "./memory-audit-append.js";
 
 export interface MemoryLifecycleManagerDependencies {
-  readonly memoryEntryRepo: MemoryServiceMemoryEntryRepoPort;
+  readonly memoryEntryRepo: MemoryEntryReadPort & MemoryEntryLifecyclePort;
   readonly eventLogRepo: MemoryServiceEventLogRepoPort;
   readonly runtimeNotifier: MemoryRuntimeNotifier;
   readonly now: () => string;
@@ -31,7 +32,7 @@ export interface MemoryLifecycleManagerDependencies {
 // invariant: lifecycle transitions append audit inside the guarded repo
 // transaction so storage never commits without atomic audit.
 export class MemoryLifecycleManager {
-  private readonly memoryEntryRepo: MemoryServiceMemoryEntryRepoPort;
+  private readonly memoryEntryRepo: MemoryEntryReadPort & MemoryEntryLifecyclePort;
   private readonly eventLogRepo: MemoryServiceEventLogRepoPort;
   private readonly runtimeNotifier: MemoryRuntimeNotifier;
   private readonly now: () => string;
@@ -133,7 +134,9 @@ export class MemoryLifecycleManager {
 
     const transitionLifecycle = this.memoryEntryRepo.transitionLifecycle;
     if (transitionLifecycle === undefined) {
-      throw new CoreError("CONFLICT", "Memory lifecycle transition port is not available");
+      throw new CoreError("CONFLICT", "Memory lifecycle transition port is not available", {
+        subCode: "PORT_UNAVAILABLE"
+      });
     }
 
     const occurredAt = this.now();
@@ -184,7 +187,9 @@ export class MemoryLifecycleManager {
 
     const transitionToDormantIfActive = this.memoryEntryRepo.transitionToDormantIfActive;
     if (transitionToDormantIfActive === undefined) {
-      throw new CoreError("CONFLICT", "Guarded active->dormant demotion port is not available");
+      throw new CoreError("CONFLICT", "Guarded active->dormant demotion port is not available", {
+        subCode: "PORT_UNAVAILABLE"
+      });
     }
 
     const existing = await this.memoryEntryRepo.findById(parsedObjectId);
@@ -253,7 +258,9 @@ export class MemoryLifecycleManager {
 
     const hardDeleteTombstoned = this.memoryEntryRepo.hardDeleteTombstoned;
     if (hardDeleteTombstoned === undefined) {
-      throw new CoreError("CONFLICT", "Memory tombstone delete port is not available");
+      throw new CoreError("CONFLICT", "Memory tombstone delete port is not available", {
+        subCode: "PORT_UNAVAILABLE"
+      });
     }
 
     const occurredAt = this.now();

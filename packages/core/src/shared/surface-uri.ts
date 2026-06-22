@@ -1,7 +1,9 @@
 import { CoreError } from "./errors.js";
 import { parseNonEmptyString } from "./validators.js";
 
-export const SURFACE_URI_PATTERN = /^surface:\/\/[\w\-.:/]+$/;
+// surface://segment(/segment)* — each segment is non-empty [\w.-]; rejects
+// empty paths, bare/duplicated slashes, colons, and control chars.
+export const SURFACE_URI_PATTERN = /^surface:\/\/[\w.-]+(?:\/[\w.-]+)*$/;
 
 export function parseSurfaceUri(value: string, field: string): string {
   const parsed = parseNonEmptyString(value, field);

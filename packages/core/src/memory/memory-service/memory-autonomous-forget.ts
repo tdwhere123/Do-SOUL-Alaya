@@ -9,16 +9,17 @@ import { CoreError } from "../../shared/errors.js";
 import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "../../manifestation/importance-gate.js";
 import { parseObjectId } from "../../shared/validators.js";
 import type {
+  MemoryEntryLifecyclePort,
+  MemoryEntryReadPort,
   MemoryRuntimeNotifier,
   MemoryServiceEventLogRepoPort,
-  MemoryServiceMemoryEntryRepoPort,
   MemoryServiceSynthesisCapsuleLookupPort
 } from "./types.js";
 import { isRepoGuardRefusal, parseReason, parseTransitionCausedBy } from "./validators.js";
 import { appendAuditEventSynchronously } from "./memory-audit-append.js";
 
 export interface MemoryAutonomousForgetDependencies {
-  readonly memoryEntryRepo: MemoryServiceMemoryEntryRepoPort;
+  readonly memoryEntryRepo: MemoryEntryReadPort & MemoryEntryLifecyclePort;
   readonly eventLogRepo: MemoryServiceEventLogRepoPort;
   readonly runtimeNotifier: MemoryRuntimeNotifier;
   readonly synthesisCapsuleLookup?: MemoryServiceSynthesisCapsuleLookupPort;
@@ -28,7 +29,7 @@ export interface MemoryAutonomousForgetDependencies {
 // invariant: autonomous forget terminalizes only dormant/tombstoned rows under a
 // verified disposition; every refusal leaves the row recoverable (fail-closed).
 export class MemoryAutonomousForget {
-  private readonly memoryEntryRepo: MemoryServiceMemoryEntryRepoPort;
+  private readonly memoryEntryRepo: MemoryEntryReadPort & MemoryEntryLifecyclePort;
   private readonly eventLogRepo: MemoryServiceEventLogRepoPort;
   private readonly runtimeNotifier: MemoryRuntimeNotifier;
   private readonly synthesisCapsuleLookup?: MemoryServiceSynthesisCapsuleLookupPort;
@@ -82,7 +83,9 @@ export class MemoryAutonomousForget {
 
     const autonomousTombstone = this.memoryEntryRepo.autonomousTombstone;
     if (autonomousTombstone === undefined) {
-      throw new CoreError("CONFLICT", "Autonomous tombstone port is not available");
+      throw new CoreError("CONFLICT", "Autonomous tombstone port is not available", {
+        subCode: "PORT_UNAVAILABLE"
+      });
     }
 
     const occurredAt = this.now();
@@ -203,7 +206,9 @@ export class MemoryAutonomousForget {
 
     const hardDeleteWithDisposition = this.memoryEntryRepo.hardDeleteTombstonedWithDisposition;
     if (hardDeleteWithDisposition === undefined) {
-      throw new CoreError("CONFLICT", "Disposition-gated tombstone delete port is not available");
+      throw new CoreError("CONFLICT", "Disposition-gated tombstone delete port is not available", {
+        subCode: "PORT_UNAVAILABLE"
+      });
     }
 
     // invariant: compressed DELETE runs before the deleted audit and returns

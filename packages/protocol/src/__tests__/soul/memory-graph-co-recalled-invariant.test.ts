@@ -20,4 +20,9 @@ describe("co_recalled enum invariant (recall earned-fan-in exemption guard)", ()
   it("projects the co_recalled relation_kind to the display edge_type recalls", () => {
     expect(mapRelationKindToGraphEdgeType("co_recalled")).toBe("recalls");
   });
+
+  it("folds unknown open-vocabulary relation kinds to the associative recalls tier", () => {
+    expect(mapRelationKindToGraphEdgeType("required_by")).toBe("recalls");
+    expect(mapRelationKindToGraphEdgeType("co_usage")).toBe("recalls");
+  });
 });

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFixture,
   seedClaimForm,
@@ -12,6 +12,7 @@ import {
 const databases = trackedDatabases;
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const database of databases) {
     database.close();
   }
@@ -288,6 +289,46 @@ describe("garden background data ports", () => {
       .prepare("SELECT green_state, revoke_reason FROM green_statuses WHERE object_id = ? LIMIT 1")
       .get("green-reanchored") as { readonly green_state: string; readonly revoke_reason: string } | undefined;
     expect(revokedRow).toEqual({ green_state: "revoked", revoke_reason: "mapping_revoked" });
+  });
+
+  it("revokeGreenOnEvidenceRewrite revokes when stored evidence_refs JSON is corrupt", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const { database, ports } = await createFixture();
+    seedMemoryEntry(database, {
+      objectId: "memory-corrupt-refs",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      evidenceRefs: ["evidence-original"]
+    });
+    seedGreenStatus(database, {
+      objectId: "green-corrupt-refs",
+      workspaceId: "workspace-1",
+      targetObjectId: "memory-corrupt-refs",
+      verificationBasis: "active_verification",
+      greenState: "eligible",
+      validUntil: "2026-05-15T00:00:00.000Z"
+    });
+    database.connection
+      .prepare("UPDATE memory_entries SET evidence_refs = ? WHERE object_id = ?")
+      .run("{bad-json", "memory-corrupt-refs");
+
+    const result = ports.greenMaintenancePort.revokeGreenOnEvidenceRewrite({
+      memoryEntryId: "memory-corrupt-refs",
+      workspaceId: "workspace-1",
+      newEvidenceRefs: ["evidence-original"]
+    });
+
+    expect(result).toEqual({ affected: 1 });
+    const revokedRow = database.connection
+      .prepare("SELECT green_state, revoke_reason FROM green_statuses WHERE object_id = ? LIMIT 1")
+      .get("green-corrupt-refs") as { readonly green_state: string; readonly revoke_reason: string } | undefined;
+    expect(revokedRow).toEqual({ green_state: "revoked", revoke_reason: "mapping_revoked" });
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[GardenAuditor] failed to parse memory evidence_refs JSON; revoking Green mapping",
+      expect.objectContaining({
+        code: "ALAYA_STORAGE_EVIDENCE_REFS_PARSE_FAILURE"
+      })
+    );
   });
 
   it("revokeGreenOnEvidenceRewrite is a no-op when the memory entry does not exist", async () => {

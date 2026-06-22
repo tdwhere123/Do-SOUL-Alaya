@@ -15,6 +15,7 @@ import {
   VerificationResultSchema,
   VerificationVerdict,
   type GreenStatus,
+  type MemoryEntry,
   type RevokeReason as RevokeReasonType,
   type ScopeClass,
   type VerificationBasis as VerificationBasisType,
@@ -53,6 +54,17 @@ export type {
   GreenWarnPort
 } from "./green-service-ports.js";
 
+interface ReevaluationContext {
+  readonly targetObjectId: string;
+  readonly workspaceId: string;
+  readonly memory: Readonly<MemoryEntry>;
+  readonly existing: Readonly<GreenStatus> | null;
+  readonly nowIso: string;
+  readonly runId?: string;
+}
+
+const DEFAULT_CONSECUTIVE_NO_GO_MAX_ENTRIES = 10_000;
+
 export class GreenService {
   public static readonly VERIFICATION_MAX_CONSECUTIVE_NO_GO = 3;
 
@@ -65,11 +77,16 @@ export class GreenService {
   public readonly consecutiveNoGo = new Map<string, number>();
 
   private readonly guard: GreenGrantGuard;
+  private readonly consecutiveNoGoMaxEntries: number;
 
   public constructor(public readonly dependencies: GreenServiceDependencies) {
     this.generateObjectId = dependencies.generateObjectId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? ((message, meta) => console.warn(message, meta));
+    this.consecutiveNoGoMaxEntries = normalizePositiveInteger(
+      dependencies.consecutiveNoGoMaxEntries,
+      DEFAULT_CONSECUTIVE_NO_GO_MAX_ENTRIES
+    );
     this.guard = new GreenGrantGuard({
       memoryRepo: dependencies.memoryRepo,
       eventLogRepo: dependencies.eventLogRepo,
@@ -257,75 +274,111 @@ export class GreenService {
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
     const memory = await this.guard.getMemoryOrThrow(targetObjectId);
     const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
-    const nowIso = this.now();
+    const ctx: ReevaluationContext = {
+      targetObjectId,
+      workspaceId,
+      memory,
+      existing,
+      nowIso: this.now(),
+      runId: params.runId
+    };
 
-    if (existing?.green_state === GreenState.GRACE && isExpired(existing.valid_until, nowIso)) {
-      const pierced = await this.pierce({
-        targetObjectId,
-        workspaceId,
-        reason: RevokeReason.REVIEW_OVERDUE,
-        runId: params.runId
-      });
-      return pierced === null || pierced.green_state === existing.green_state ? "unchanged" : "pierced";
+    if (existing?.green_state === GreenState.GRACE && isExpired(existing.valid_until, ctx.nowIso)) {
+      return this.reevaluateExpiredGrace(ctx, existing);
     }
 
-    if (existing?.green_state === GreenState.ELIGIBLE && isExpired(existing.valid_until, nowIso)) {
-      const graceUntil = calculateGraceUntil(memory.dimension, nowIso);
-
-      if (graceUntil === null) {
-        return "unchanged";
-      }
-
-      const grace = await this.setGrace({
-        targetObjectId,
-        workspaceId,
-        until: graceUntil,
-        runId: params.runId ?? memory.run_id,
-        reason: "valid_until_expired"
-      });
-      return grace === null ? "unchanged" : "grace";
+    if (existing?.green_state === GreenState.ELIGIBLE && isExpired(existing.valid_until, ctx.nowIso)) {
+      return this.reevaluateExpiredEligible(ctx);
     }
 
-    const piercingReason =
-      existing === null
-        ? null
-        : await this.guard.evaluatePiercingReason({
-            existing,
-            memory,
-            workspaceId
-          });
-
-    if (piercingReason !== null) {
-      const pierced = await this.pierce({
-        targetObjectId,
-        workspaceId,
-        reason: piercingReason,
-        runId: params.runId
-      });
-      return pierced === null ? "unchanged" : "pierced";
+    const piercingOutcome = await this.reevaluatePiercing(ctx);
+    if (piercingOutcome !== null) {
+      return piercingOutcome;
     }
 
     if (existing?.green_state === GreenState.ELIGIBLE) {
       return "unchanged";
     }
 
-    if (memory.lifecycle_state !== ACTIVE_LIFECYCLE || memory.evidence_refs.length === 0) {
+    return this.reevaluateGrant(ctx);
+  }
+
+  private async reevaluateExpiredGrace(
+    ctx: ReevaluationContext,
+    existing: Readonly<GreenStatus>
+  ): Promise<GreenServiceReevaluationOutcome> {
+    const pierced = await this.pierce({
+      targetObjectId: ctx.targetObjectId,
+      workspaceId: ctx.workspaceId,
+      reason: RevokeReason.REVIEW_OVERDUE,
+      runId: ctx.runId
+    });
+    return pierced === null || pierced.green_state === existing.green_state ? "unchanged" : "pierced";
+  }
+
+  private async reevaluateExpiredEligible(
+    ctx: ReevaluationContext
+  ): Promise<GreenServiceReevaluationOutcome> {
+    const graceUntil = calculateGraceUntil(ctx.memory.dimension, ctx.nowIso);
+    if (graceUntil === null) {
       return "unchanged";
     }
 
-    const basis = determineReevaluationBasis(memory, existing);
+    const grace = await this.setGrace({
+      targetObjectId: ctx.targetObjectId,
+      workspaceId: ctx.workspaceId,
+      until: graceUntil,
+      runId: ctx.runId ?? ctx.memory.run_id,
+      reason: "valid_until_expired"
+    });
+    return grace === null ? "unchanged" : "grace";
+  }
+
+  private async reevaluatePiercing(
+    ctx: ReevaluationContext
+  ): Promise<GreenServiceReevaluationOutcome | null> {
+    const piercingReason =
+      ctx.existing === null
+        ? null
+        : await this.guard.evaluatePiercingReason({
+            existing: ctx.existing,
+            memory: ctx.memory,
+            workspaceId: ctx.workspaceId
+          });
+
+    if (piercingReason === null) {
+      return null;
+    }
+
+    const pierced = await this.pierce({
+      targetObjectId: ctx.targetObjectId,
+      workspaceId: ctx.workspaceId,
+      reason: piercingReason,
+      runId: ctx.runId
+    });
+    return pierced === null ? "unchanged" : "pierced";
+  }
+
+  private async reevaluateGrant(
+    ctx: ReevaluationContext
+  ): Promise<GreenServiceReevaluationOutcome> {
+    if (ctx.memory.lifecycle_state !== ACTIVE_LIFECYCLE || ctx.memory.evidence_refs.length === 0) {
+      return "unchanged";
+    }
+
+    const basis = determineReevaluationBasis(ctx.memory, ctx.existing);
     if (basis === null) {
       return "unchanged";
     }
 
     await this.grant({
-      targetObjectId,
-      workspaceId,
+      targetObjectId: ctx.targetObjectId,
+      workspaceId: ctx.workspaceId,
       basis,
-      validUntil: calculateValidUntil(memory.dimension, nowIso),
+      validUntil: calculateValidUntil(ctx.memory.dimension, ctx.nowIso),
       verifiedBy: determineVerifiedByForBasis(basis),
-      boundSurfaces: memory.surface_id === null ? null : [memory.surface_id],
-      boundScopeClass: memory.scope_class
+      boundSurfaces: ctx.memory.surface_id === null ? null : [ctx.memory.surface_id],
+      boundScopeClass: ctx.memory.scope_class
     });
 
     return "granted";
@@ -341,7 +394,7 @@ export class GreenService {
     const targetObjectId = parseObjectId(params.targetObjectId);
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
     const memory = await this.guard.getMemoryOrThrow(targetObjectId);
-    const currentCount = this.consecutiveNoGo.get(targetObjectId) ?? 0;
+    const currentCount = this.readConsecutiveNoGo(targetObjectId);
     const timestamp = this.now();
 
     let count = currentCount;
@@ -354,7 +407,7 @@ export class GreenService {
         hint = "max retries reached";
       } else {
         count = currentCount + 1;
-        this.consecutiveNoGo.set(targetObjectId, count);
+        this.writeConsecutiveNoGo(targetObjectId, count);
         await this.pierce({
           targetObjectId,
           workspaceId,
@@ -412,6 +465,34 @@ export class GreenService {
     return verificationResult;
   }
 
+  private readConsecutiveNoGo(targetObjectId: string): number {
+    const count = this.consecutiveNoGo.get(targetObjectId);
+    if (count === undefined) {
+      return 0;
+    }
+    this.consecutiveNoGo.delete(targetObjectId);
+    this.consecutiveNoGo.set(targetObjectId, count);
+    return count;
+  }
+
+  private writeConsecutiveNoGo(targetObjectId: string, count: number): void {
+    if (this.consecutiveNoGo.has(targetObjectId)) {
+      this.consecutiveNoGo.delete(targetObjectId);
+    }
+    while (this.consecutiveNoGo.size >= this.consecutiveNoGoMaxEntries) {
+      const oldestTargetObjectId = this.consecutiveNoGo.keys().next().value;
+      if (typeof oldestTargetObjectId !== "string") {
+        break;
+      }
+      this.consecutiveNoGo.delete(oldestTargetObjectId);
+      this.warn("[GreenService] consecutive No-Go cache entry evicted.", {
+        targetObjectId: oldestTargetObjectId,
+        maxEntries: this.consecutiveNoGoMaxEntries
+      });
+    }
+    this.consecutiveNoGo.set(targetObjectId, count);
+  }
+
   public async getStatus(targetObjectId: string): Promise<Readonly<GreenStatus> | null> {
     return await this.dependencies.greenStatusRepo.findByTargetObjectId(parseObjectId(targetObjectId));
   }
@@ -427,4 +508,11 @@ export class GreenService {
   public async findAll(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]> {
     return await this.dependencies.greenStatusRepo.findByWorkspaceId(parseNonEmptyString(workspaceId, "workspaceId"));
   }
+}
+
+function normalizePositiveInteger(value: number | undefined, fallback: number): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  return Number.isInteger(value) && value > 0 ? value : fallback;
 }

@@ -179,6 +179,7 @@ function isTrustedLocalHostname(hostname: string): boolean {
   return (
     normalizedHostname === "localhost" ||
     normalizedHostname === "127.0.0.1" ||
-    normalizedHostname === "::1"
+    normalizedHostname === "::1" ||
+    normalizedHostname === "0:0:0:0:0:0:0:1"
   );
 }

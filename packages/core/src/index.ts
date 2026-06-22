@@ -84,7 +84,6 @@ export * from "./shared/event-utils.js";
 export * from "./shared/extension-descriptor-parsers.js";
 export * from "./shared/keyed-mutex.js";
 export * from "./shared/load-or-default-with-workspace-guard.js";
-export * from "./shared/normalize-unit.js";
 export * from "./shared/recall-policy.js";
 export * from "./shared/stable-stringify.js";
 export * from "./shared/surface-uri.js";

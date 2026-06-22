@@ -205,6 +205,9 @@ function shouldRevokeGreenForEvidenceRewrite(
     return false;
   }
   const previousRefs = parseEvidenceRefs(row.evidence_refs);
+  if (previousRefs === null) {
+    return true;
+  }
   if (previousRefs.length === 0) {
     return false;
   }
@@ -291,11 +294,29 @@ function readCount(row: unknown): number {
   return (row as { readonly count: number } | undefined)?.count ?? 0;
 }
 
-function parseEvidenceRefs(value: string): readonly string[] {
+function parseEvidenceRefs(value: string): readonly string[] | null {
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? (parsed as readonly string[]) : [];
-  } catch {
-    return [];
+    if (Array.isArray(parsed) && parsed.every((ref) => typeof ref === "string")) {
+      return parsed;
+    }
+    emitEvidenceRefsParseWarning("memory evidence_refs is not a string array");
+    return null;
+  } catch (error) {
+    emitEvidenceRefsParseWarning(error instanceof Error ? error.message : String(error));
+    return null;
   }
+}
+
+function emitEvidenceRefsParseWarning(error: string): void {
+  process.emitWarning(
+    "[GardenAuditor] failed to parse memory evidence_refs JSON; revoking Green mapping",
+    {
+      code: "ALAYA_STORAGE_EVIDENCE_REFS_PARSE_FAILURE",
+      detail: JSON.stringify({
+        layer: "storage",
+        error
+      })
+    }
+  );
 }
