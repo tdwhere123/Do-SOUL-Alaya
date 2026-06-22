@@ -1,17 +1,27 @@
 # Recall lever A/B — FTS-family fusion damp (2026-06-22)
 
-Decision report for the recall change landed on `main` as the FTS-family fusion
-damp (lever C). Records the full LongMemEval-S 500 A/B matrix that selected it,
-the per-type evidence, and what was deliberately **not** landed.
+> **STATUS: LANDED THEN REVERTED.** Landed as `202f2b77`, reverted after the
+> post-land confirmation bench (below) showed the lever does **not** reproduce
+> on the current `main`: it is net-neutral on real questions (+1) and **−1.0pp**
+> on the official R@5 KPI. The pre-refactor matrix that motivated it is kept
+> below as historical evidence; the confirmation + reversal rationale are in
+> **§Confirmation on current main → reverted**.
+
+Decision report for the recall change once landed on `main` as the FTS-family
+fusion damp (lever C). Records the full LongMemEval-S 500 A/B matrix that
+originally selected it, the per-type evidence, the confirmation that retired it,
+and what was deliberately **not** landed.
 
 ## TL;DR
 
-- **Landed:** FTS-family fusion damp, default-on (`ALAYA_RECALL_FTS_FAMILY_DAMP=0.5`),
-  one file (`packages/core/src/recall/fusion-delivery-scoring.ts`). De-correlates
-  the four full-text streams (`lexical_fts`, `trigram_fts`, `synthesis_fts`,
+- **Landed then reverted:** FTS-family fusion damp, default-on
+  (`ALAYA_RECALL_FTS_FAMILY_DAMP=0.5`), one file
+  (`packages/core/src/recall/fusion-delivery-scoring.ts`). De-correlates the four
+  full-text streams (`lexical_fts`, `trigram_fts`, `synthesis_fts`,
   `evidence_fts`) in the RRF sum: the strongest FTS stream counts in full, the
   rest are damped by 0.5, so one lexical surface match can no longer out-vote a
-  strong single-stream (e.g. embedding-only) gold.
+  strong single-stream (e.g. embedding-only) gold. **Reverted** because the
+  confirmation bench measured it net-neutral/negative on current `main`.
 - **Why it is the lever:** in the matrix it is the *sole* source of the +1.2pp
   R@5 gain — the gating + event_time base it was measured on contributed nothing
   measurable; lever C carried every per-type win.
@@ -92,14 +102,60 @@ gain is expected to transfer to a non-gating base.
   typecheck (9 packages) + knip clean.
 - The change is byte-identical when `ALAYA_RECALL_FTS_FAMILY_DAMP=1`.
 
-## Pending
+## Confirmation on current main → reverted
 
-- **Post-land confirmation bench** on the landed `main` (full LME-S 500) to
-  measure lever C's R@5 on the current recall code (which carries the
-  post-matrix `facet-coverage` + `session-rerank` commits the matrix base did
-  not). The matrix above is the full-dataset evidence on the pre-refactor base;
-  the confirmation number will be appended here when the run completes. Host is
-  currently throttled, so the run is slow.
+The post-land confirmation bench finished on base `7a55d06` (the landed `main`,
+which carries the post-matrix `facet-coverage` + `session-rerank` commits the
+pre-refactor matrix base did not). Two arms, full LME-S 500, recall-only,
+embedding-on, **deterministic seeding** (`llm_calls=0`, cache-replayed) so the
+arms differ only by the env var:
+
+- **L0** — `ALAYA_RECALL_FTS_FAMILY_DAMP=1` (lever off, byte-identical baseline)
+- **L1** — `ALAYA_RECALL_FTS_FAMILY_DAMP=0.5` (the landed lever)
+
+| metric | L0 (off) | L1 (lever) |    Δ |
+| ------ | -------: | ---------: | ---: |
+| R@1    |     59.0 |       57.6 | −1.4 |
+| R@5    |     85.8 |       84.8 | **−1.0** |
+| R@10   |     87.6 |       87.0 | −0.6 |
+
+Per-question flip breakdown at R@5 (500 paired questions, 30 `_abs`
+abstention questions in the set):
+
+- rescued (L0 miss → L1 hit): **7**, all real questions.
+- buried (L0 hit → L1 miss): **12** — but **6 of those are `_abs`** abstention
+  questions (the prior `_abs`-noise caveat). Real buried = **6**.
+- **Net on real questions = +1** (7 rescued − 6 buried) ≈ noise; **net on the
+  official all-questions KPI = −5 (−1.0pp)**, driven by the 6 abstention flips.
+
+Per-type R@5 (L0 → L1): ss-user 95.7→94.3, ss-asst 80.4→80.4, ss-pref
+63.3→60.0, multi 89.5→86.5, temporal 78.2→78.2, knowledge-update 96.2→97.4.
+
+**Reading.** The +1.2pp the lever showed on the pre-refactor GATED base does
+**not** reproduce here: on the current recall code its real-question effect is a
+noise-level +1, while the official R@5 KPI drops 1.0pp. The most likely cause is
+that the `facet-coverage` + `session-rerank` commits that landed after the
+matrix already capture most of the FTS-family burial the lever targeted, leaving
+it nothing to fix and a small net-negative footprint.
+
+**Decision: reverted** (`git revert 202f2b77`). A default that no longer earns
+its keep — neutral on real recall and negative on the headline KPI — should not
+ship default-on (it would only depress the tracked R@5). The mechanism is fully
+preserved in git history (`202f2b77`) and in this report if a future base ever
+benefits; resurrect with a single cherry-pick. Reverted on base `5d03630c`
+(PR #7 `remediation/codex-audit` had merged on top in the interim; it does not
+touch `fusion-delivery-scoring.ts`, so the revert applies cleanly). Full gate
+green after revert: `pnpm build` + full `pnpm test` (0 failures, ELIFECYCLE 0,
+core-daemon 872 passed | 1 skipped) + typecheck (9 pkgs) + knip; migrations
+dist/src in parity (090–093).
+
+### Scoring provenance
+
+- Arms: `.do-it/bench-runs/confirm-lever-out/.bench-artifacts/public/`
+  `2026-06-21T163651Z-7a55d06-policy-stress` (L0) and
+  `2026-06-21T202538Z-7a55d06-policy-stress` (L1) — full per-question diagnostics.
+- Scorer: `.do-it/bench-runs/score-confirm.mjs` (the prior `score-lever-matrix.mjs`
+  was removed with the bench worktree; this is its minimal A/B re-implementation).
 
 ## Provenance
 
