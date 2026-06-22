@@ -70,12 +70,22 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   for (let i = 0; i < args.length; i++) {
     const token = args[i] ?? "";
     if (token === "--history-root") {
-      historyRoot = args[++i];
+      historyRoot = readFlagValue(args, ++i, "--history-root");
     } else {
       positional.push(token);
     }
   }
   return { historyRoot, positional };
+}
+
+// Read a flag's value argument, rejecting a missing, empty, or flag-shaped
+// value so a trailing `--history-root` cannot silently pass undefined.
+function readFlagValue(args: ReadonlyArray<string>, index: number, flag: string): string {
+  const value = args[index];
+  if (value === undefined || value.length === 0 || value.startsWith("--")) {
+    throw new Error(`${flag} requires a path value`);
+  }
+  return value;
 }
 
 async function runDiffCommand(

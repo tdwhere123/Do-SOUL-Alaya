@@ -252,15 +252,18 @@ function computeBuckets(input: {
   readonly deliveries: readonly NormalizedDelivery[];
   readonly reports: readonly NormalizedReport[];
 }): RecallUtilizationCohortRow["buckets"] {
-  const deliveryIds = new Set(input.deliveries.map((delivery) => delivery.delivery_id));
-  const reportStateById = new Map<string, "used" | "skipped" | "not_applicable">();
+  const deliveryKeys = new Set(
+    input.deliveries.map((delivery) => deliveryKey(delivery.workspace_id, delivery.delivery_id))
+  );
+  const reportStateByKey = new Map<string, "used" | "skipped" | "not_applicable">();
   for (const report of input.reports) {
-    const existing = reportStateById.get(report.delivery_id);
+    const key = deliveryKey(report.workspace_id, report.delivery_id);
+    const existing = reportStateByKey.get(key);
     if (existing === undefined) {
-      reportStateById.set(report.delivery_id, report.usage_state);
+      reportStateByKey.set(key, report.usage_state);
       continue;
     }
-    reportStateById.set(report.delivery_id, mergeUsageState(existing, report.usage_state));
+    reportStateByKey.set(key, mergeUsageState(existing, report.usage_state));
   }
 
   let emptyRecall = 0;
@@ -269,7 +272,7 @@ function computeBuckets(input: {
   let reportedUsed = 0;
 
   for (const delivery of input.deliveries) {
-    const reportState = reportStateById.get(delivery.delivery_id);
+    const reportState = reportStateByKey.get(deliveryKey(delivery.workspace_id, delivery.delivery_id));
     if (reportState === undefined) {
       deliveredNotReported += 1;
       if (delivery.pointer_count === 0) {
@@ -291,7 +294,7 @@ function computeBuckets(input: {
   // proxy for "agent attached but did not call recall in those sessions".
   const orphanSessions = new Set<string>();
   for (const report of input.reports) {
-    if (deliveryIds.has(report.delivery_id)) continue;
+    if (deliveryKeys.has(deliveryKey(report.workspace_id, report.delivery_id))) continue;
     orphanSessions.add(report.session_id);
   }
 
@@ -375,6 +378,12 @@ async function emitSingleUsedAnchorTelemetry(input: {
       // invariant: telemetry emission never breaks the route response.
     }
   }
+}
+
+// (workspace_id, delivery_id) composite so the same delivery_id across
+// workspaces does not cross-match. Lockstep with the eval helper's deliveryKey.
+function deliveryKey(workspaceId: string, deliveryId: string): string {
+  return JSON.stringify([workspaceId, deliveryId]);
 }
 
 function mergeUsageState(

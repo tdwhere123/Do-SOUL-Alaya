@@ -14,7 +14,10 @@ export const UtilizationBucketDeliverySchema = z
     session_id: z.string().min(1),
     run_id: z.string().min(1).nullable(),
     agent_target: z.string().min(1),
-    pointer_count: z.number().int().nonnegative()
+    pointer_count: z.number().int().nonnegative(),
+    // Optional: present on cohort-rollup inputs; scopes the delivery_id so the
+    // same id across workspaces does not cross-match.
+    workspace_id: z.string().min(1).optional()
   })
   .readonly();
 
@@ -25,7 +28,9 @@ export const UtilizationBucketReportSchema = z
     run_id: z.string().min(1).nullable(),
     agent_target: z.string().min(1),
     usage_state: z.enum(["used", "skipped", "not_applicable"]),
-    turn_index: z.number().int().nonnegative().optional()
+    turn_index: z.number().int().nonnegative().optional(),
+    // Optional: see UtilizationBucketDeliverySchema.workspace_id.
+    workspace_id: z.string().min(1).optional()
   })
   .readonly();
 
@@ -63,24 +68,22 @@ export function computeUtilizationBuckets(input: {
   readonly deliveries: readonly UtilizationBucketDelivery[];
   readonly reports: readonly UtilizationBucketReport[];
 }): UtilizationBucketCounts {
-  const deliveryById = new Map<string, UtilizationBucketDelivery>();
+  const deliveryByKey = new Map<string, UtilizationBucketDelivery>();
   for (const delivery of input.deliveries) {
-    deliveryById.set(delivery.delivery_id, delivery);
+    deliveryByKey.set(deliveryKey(delivery.workspace_id, delivery.delivery_id), delivery);
   }
 
-  // Reports may arrive multiple times per delivery_id (retries); collapse to
-  // the latest semantic per delivery_id: prefer `used` over skipped/na so a
-  // single "used" anywhere in the window counts the delivery as used. This
-  // matches the daemon route's read of EventLog (latest-by-row-order semantic
-  // is undefined, so we use deterministic max-state precedence).
-  const reportStateById = new Map<string, "used" | "skipped" | "not_applicable">();
+  // Collapse retries per (workspace_id, delivery_id) by max-state precedence so
+  // one "used" anywhere in the window counts the delivery as used.
+  const reportStateByKey = new Map<string, "used" | "skipped" | "not_applicable">();
   for (const report of input.reports) {
-    const existing = reportStateById.get(report.delivery_id);
+    const key = deliveryKey(report.workspace_id, report.delivery_id);
+    const existing = reportStateByKey.get(key);
     if (existing === undefined) {
-      reportStateById.set(report.delivery_id, report.usage_state);
+      reportStateByKey.set(key, report.usage_state);
       continue;
     }
-    reportStateById.set(report.delivery_id, mergeUsageState(existing, report.usage_state));
+    reportStateByKey.set(key, mergeUsageState(existing, report.usage_state));
   }
 
   let emptyRecall = 0;
@@ -89,7 +92,7 @@ export function computeUtilizationBuckets(input: {
   let reportedUsed = 0;
 
   for (const delivery of input.deliveries) {
-    const reportState = reportStateById.get(delivery.delivery_id);
+    const reportState = reportStateByKey.get(deliveryKey(delivery.workspace_id, delivery.delivery_id));
     if (reportState === undefined) {
       deliveredNotReported += 1;
       if (delivery.pointer_count === 0) {
@@ -106,7 +109,7 @@ export function computeUtilizationBuckets(input: {
 
   const orphanSessions = new Set<string>();
   for (const report of input.reports) {
-    if (deliveryById.has(report.delivery_id)) continue;
+    if (deliveryByKey.has(deliveryKey(report.workspace_id, report.delivery_id))) continue;
     orphanSessions.add(report.session_id);
   }
 
@@ -198,6 +201,13 @@ export function listSingleUsedAnchorDeliveries(input: {
       (delivery) => delivery.pointer_count === 1 && usedReportIds.has(delivery.delivery_id)
     )
   );
+}
+
+// (workspace_id, delivery_id) composite so the same delivery_id across
+// workspaces does not cross-match. Mirrors rollUpUtilizationBucketsByCohort's
+// cohortKey. A missing workspace_id collapses to single-scope (pre-fix) behavior.
+function deliveryKey(workspaceId: string | undefined, deliveryId: string): string {
+  return JSON.stringify([workspaceId ?? "", deliveryId]);
 }
 
 function mergeUsageState(

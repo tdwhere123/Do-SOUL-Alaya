@@ -127,6 +127,41 @@ describe("computeUtilizationBuckets", () => {
     const reports = [report({ delivery_id: "orphan_no_turn", usage_state: "not_applicable" })];
     expect(computeUtilizationBuckets({ deliveries: [], reports }).no_recall).toBe(1);
   });
+
+  it("scopes delivery_id by workspace_id so a shared id is not mis-flagged as orphan", () => {
+    // Two workspaces reuse the same delivery_id; each has its own delivery and a
+    // matching used report. Without the (workspace_id, delivery_id) composite key
+    // the cross-workspace report would be treated as an orphan (no_recall).
+    const deliveries = [
+      { ...delivery({ delivery_id: "shared", pointer_count: 3 }), workspace_id: "ws-1" },
+      { ...delivery({ delivery_id: "shared", pointer_count: 3 }), workspace_id: "ws-2" }
+    ];
+    const reports = [
+      { ...report({ delivery_id: "shared", usage_state: "used" }), workspace_id: "ws-1" },
+      { ...report({ delivery_id: "shared", usage_state: "used" }), workspace_id: "ws-2" }
+    ];
+    const buckets = computeUtilizationBuckets({ deliveries, reports });
+    expect(buckets.no_recall).toBe(0);
+    expect(buckets.reported_used).toBe(2);
+    expect(buckets.delivered_not_reported).toBe(0);
+  });
+
+  it("does not cross-match report state across workspaces sharing a delivery_id", () => {
+    // ws-1 used, ws-2 skipped on the same delivery_id; the composite key must
+    // keep the two states distinct rather than collapsing under max-precedence.
+    const deliveries = [
+      { ...delivery({ delivery_id: "shared", pointer_count: 2 }), workspace_id: "ws-1" },
+      { ...delivery({ delivery_id: "shared", pointer_count: 2 }), workspace_id: "ws-2" }
+    ];
+    const reports = [
+      { ...report({ delivery_id: "shared", usage_state: "used" }), workspace_id: "ws-1" },
+      { ...report({ delivery_id: "shared", usage_state: "skipped" }), workspace_id: "ws-2" }
+    ];
+    const buckets = computeUtilizationBuckets({ deliveries, reports });
+    expect(buckets.reported_used).toBe(1);
+    expect(buckets.reported_skipped_or_na).toBe(1);
+    expect(buckets.no_recall).toBe(0);
+  });
 });
 
 describe("rollUpUtilizationBucketsByCohort", () => {

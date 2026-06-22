@@ -180,8 +180,8 @@ export function aggregateEdgeProposalRate(
   const dayCounts = new Map<string, number>();
   for (const record of created) {
     const day = record.createdAt.slice(0, 10);
-    if (day.length !== 10) {
-      // ISO datetime parse fell short; skip rather than synthesize a key.
+    if (!isValidIsoDay(day)) {
+      // Malformed created_at; skip rather than synthesize a bogus day bucket.
       continue;
     }
     const key = `${record.workspaceId}::${day}`;
@@ -319,6 +319,13 @@ function collectCreatedRecords(
     });
   }
   return records;
+}
+
+const ISO_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+// A real YYYY-MM-DD: shape AND a parseable calendar date (rejects 2026-13-99).
+function isValidIsoDay(day: string): boolean {
+  return ISO_DAY_PATTERN.test(day) && !Number.isNaN(Date.parse(day));
 }
 
 function computeMedian(values: readonly number[]): number {

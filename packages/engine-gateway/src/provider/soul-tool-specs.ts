@@ -18,8 +18,8 @@ import {
   SoulReviewMemoryProposalRequestSchema
 } from "@do-soul/alaya-protocol";
 
-export interface ProviderNeutralSchema {
-  parse(input: unknown): unknown;
+export interface ProviderNeutralSchema<T = unknown> {
+  parse(input: unknown): T;
 }
 
 export interface SoulToolSpec {
