@@ -28,6 +28,7 @@ import type {
   GlobalMemoryRecallCachePort,
   GlobalMemoryRecallPort
 } from "./global-memory-recall-port.js";
+import type { RecallFailureHealthInboxPort } from "./recall-failure-health-inbox.js";
 
 export interface KeywordSearchResult {
   readonly object_id: string;
@@ -323,6 +324,8 @@ export interface RecallServiceDependencies {
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly warn?: RecallServiceWarnPort;
+  // Unexpected recall auxiliary failures (not graceful degradations) land here.
+  readonly recallFailureHealthInbox?: RecallFailureHealthInboxPort;
 }
 
 export interface RecallServiceWarnPort {

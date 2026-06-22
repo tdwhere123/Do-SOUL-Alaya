@@ -11,12 +11,11 @@ import {
   ConversationServiceDependencies,
   type ConversationContextLensAssemblerPort,
   EngineBindingService,
-  GardenBacklogTelemetryService,
   RunService,
   type EventPublisher,
   type GovernanceLeaseService,
   type PathFailureHealthInboxPort,
-  type PathRelationProposalService,
+  type RecallFailureHealthInboxPort,
   type SignalService,
   type BudgetBankruptcyService,
   type HealthJournalService
@@ -72,6 +71,37 @@ export function createPathFailureHealthInbox(input: {
         last_seen_at: entry.observedAt,
         count: (existing?.count ?? 0) + 1,
         suggested_actions: [HealthIssueSuggestedAction.INSPECT_PATH_FAILURE],
+        resolution_state: HealthIssueResolutionState.PENDING,
+        resolved_at: null,
+        resolved_by: null
+      };
+      input.healthIssueGroupRepo.upsert(next);
+    }
+  };
+}
+
+export function createRecallFailureHealthInbox(input: {
+  readonly healthIssueGroupRepo: SqliteHealthIssueGroupRepo;
+}): RecallFailureHealthInboxPort {
+  return {
+    recordRecallFailure: (entry) => {
+      const existing = input.healthIssueGroupRepo.findByCompositeKey(
+        entry.workspaceId,
+        entry.operation,
+        HealthIssueCauseKind.RECALL_AUXILIARY_FAILURE
+      );
+      const next: HealthIssueGroup = {
+        group_id: existing?.group_id ?? randomUUID(),
+        workspace_id: entry.workspaceId,
+        target_object_id: entry.operation,
+        target_object_kind: "recall_operation",
+        cause_kind: HealthIssueCauseKind.RECALL_AUXILIARY_FAILURE,
+        severity: HealthIssueSeverity.WARN,
+        confidence: 1,
+        first_seen_at: existing?.first_seen_at ?? entry.observedAt,
+        last_seen_at: entry.observedAt,
+        count: (existing?.count ?? 0) + 1,
+        suggested_actions: [],
         resolution_state: HealthIssueResolutionState.PENDING,
         resolved_at: null,
         resolved_by: null

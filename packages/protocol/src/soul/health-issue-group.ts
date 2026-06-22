@@ -22,7 +22,12 @@ const healthIssueCauseKindValues = [
   // or an accept-owed mint failure (edge-proposal-service.handleMintFailure) is
   // EventLog-audited but was otherwise invisible to the inbox. target_object_id
   // is the source memory/workspace whose durable topology failed to form.
-  "path_relation_failure"
+  "path_relation_failure",
+  // invariant: a recall auxiliary lookup (path/graph/embedding expansion) threw
+  // an UNEXPECTED error (not a known graceful degradation). The warn log alone
+  // hid silently-degraded recall from the operator; target_object_id is the
+  // recall operation label, deduped per workspace.
+  "recall_auxiliary_failure"
 ] as const;
 
 const healthIssueResolutionStateValues = [
@@ -53,7 +58,8 @@ export const HealthIssueCauseKind = {
   ORPHAN_RADAR: "orphan_radar",
   GREEN_REVOKED: "green_revoked",
   EVIDENCE_FAILURE: "evidence_failure",
-  PATH_RELATION_FAILURE: "path_relation_failure"
+  PATH_RELATION_FAILURE: "path_relation_failure",
+  RECALL_AUXILIARY_FAILURE: "recall_auxiliary_failure"
 } as const;
 
 export const HealthIssueResolutionState = {

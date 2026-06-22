@@ -15,7 +15,7 @@ import {
   type GraphExpansionCandidateSourceDiagnostic
 } from "./graph-expansion.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
-import { buildRecallCandidateDedupeKey, toErrorMessage, type RecallTimeFilter } from "./recall-service-helpers.js";
+import { buildRecallCandidateDedupeKey, errorNameOf, toErrorMessage, type RecallTimeFilter } from "./recall-service-helpers.js";
 import { collectSupplementaryData } from "./supplementary-data.js";
 import type {
   CoarseRecallCandidate,
@@ -148,6 +148,8 @@ export async function loadManifestationBiasSidecar(
     params.warn("manifestation bias sidecar build failed", {
       workspace_id: params.workspaceId,
       run_id: params.runId,
+      operation: "manifestation_bias_sidecar_build",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
     return null;

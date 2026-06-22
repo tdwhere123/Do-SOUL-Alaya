@@ -11,7 +11,7 @@ import {
   type GraphExpansionFrontierNode
 } from "./graph-expansion.js";
 import { collectPathGraphNeighbors } from "./path-relations.js";
-import { clamp01, toErrorMessage } from "./recall-service-helpers.js";
+import { clamp01, errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
 import type {
   RecallServiceDependencies,
   RecallServiceWarnPort
@@ -93,6 +93,8 @@ async function loadEligibleGraphExpansionPaths(
     params.warn("graph expansion path lookup failed", {
       workspace_id: params.workspaceId,
       seed_count: frontierIds.length,
+      operation: "graph_expansion_path_lookup",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
     return null;

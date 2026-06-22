@@ -1,7 +1,7 @@
 import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
 import type { EmbeddingWorkspaceNeighborResult } from "../embedding-recall/embedding-recall-service.js";
 import { hashMemoryContent } from "../embedding-recall/helpers.js";
-import { toErrorMessage } from "./recall-service-helpers.js";
+import { errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
   RecallEmbeddingProviderStatus,
@@ -120,6 +120,8 @@ async function loadEmbeddingNeighborEntries(
     params.warn("embedding coarse injection lookup failed", {
       workspace_id: params.workspaceId,
       run_id: params.runId,
+      operation: "embedding_coarse_injection_lookup",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
     return fallback.candidates.length === 0 ? null : [];

@@ -9,6 +9,7 @@ import {
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import {
   clamp01,
+  errorNameOf,
   mapBudgetPenalty,
   normalizeGraphSupport,
   toErrorMessage
@@ -132,7 +133,7 @@ async function collectGraphSupportCounts(
         const count = await params.dependencies.graphSupportPort.countInboundEdgesWeighted(candidate.object_id, params.workspaceId);
         return [candidate.object_id, count] as const;
       } catch (error) {
-        params.warn("graph support lookup failed", { workspace_id: params.workspaceId, memory_id: candidate.object_id, error: toErrorMessage(error) });
+        params.warn("graph support lookup failed", { workspace_id: params.workspaceId, memory_id: candidate.object_id, operation: "graph_support_lookup", errorName: errorNameOf(error), error: toErrorMessage(error) });
         return [candidate.object_id, 0] as const;
       }
     })
@@ -151,7 +152,7 @@ async function collectRecallEdgeCounts(
         const count = await params.dependencies.graphSupportPort.countInboundRecalls(candidate.object_id, params.workspaceId);
         return [candidate.object_id, count] as const;
       } catch (error) {
-        params.warn("recall edge count lookup failed", { workspace_id: params.workspaceId, memory_id: candidate.object_id, error: toErrorMessage(error) });
+        params.warn("recall edge count lookup failed", { workspace_id: params.workspaceId, memory_id: candidate.object_id, operation: "recall_edge_count_lookup", errorName: errorNameOf(error), error: toErrorMessage(error) });
         return [candidate.object_id, 0] as const;
       }
     })
@@ -178,7 +179,7 @@ async function collectPlasticityFactors(
     );
     return Object.freeze(Object.fromEntries([...strengthMap.entries()].map(([memoryId, strength]) => [memoryId, clamp01(strength)])));
   } catch (error) {
-    params.warn("path plasticity port lookup failed", { workspace_id: params.workspaceId, candidate_count: params.candidates.length, error: toErrorMessage(error) });
+    params.warn("path plasticity port lookup failed", { workspace_id: params.workspaceId, candidate_count: params.candidates.length, operation: "path_plasticity_port_lookup", errorName: errorNameOf(error), error: toErrorMessage(error) });
     return Object.freeze({});
   }
 }
@@ -241,6 +242,8 @@ async function collectEvidenceGistsByMemoryId(params: {
   } catch (error) {
     params.warn("evidence gist lookup for rerank failed", {
       workspace_id: params.workspaceId,
+      operation: "evidence_gist_lookup_for_rerank",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
     return Object.freeze({});
@@ -407,6 +410,8 @@ async function collectGovernanceCeilings(params: {
     params.warn("governance ceiling path lookup failed", {
       workspace_id: params.workspaceId,
       candidate_count: params.candidates.length,
+      operation: "governance_ceiling_path_lookup",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
     return buildGovernanceFailsafeCeilings(candidateIds);

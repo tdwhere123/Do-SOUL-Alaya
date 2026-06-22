@@ -17,6 +17,7 @@ import { uniqueStrings } from "./path-relations.js";
 import {
   clamp01,
   compareMemoryEntries,
+  errorNameOf,
   toErrorMessage
 } from "./recall-service-helpers.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
@@ -441,6 +442,8 @@ async function loadEvidenceSourceRefsByMemoryId(params: Readonly<{
   } catch (error) {
     params.warn("evidence source-anchor lookup failed", {
       workspace_id: params.workspaceId,
+      operation: "evidence_source_anchor_lookup",
+      errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
   }

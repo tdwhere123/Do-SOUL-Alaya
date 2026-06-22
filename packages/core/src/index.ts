@@ -17,6 +17,7 @@ export * from "./governance/deferred-obligation-service.js";
 export * from "./path-graph/path-relation-proposal-service.js";
 export * from "./path-graph/path-candidate-sink.js";
 export * from "./path-graph/path-failure-health-inbox.js";
+export * from "./recall/recall-failure-health-inbox.js";
 export * from "./runtime/dirty-state-panic-service.js";
 export * from "./dynamics/dynamics-constants-runtime.js";
 export * from "./dynamics/dynamics-service.js";
