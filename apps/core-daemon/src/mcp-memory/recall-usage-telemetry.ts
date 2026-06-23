@@ -6,10 +6,56 @@ import {
   type ContextDeliveryRecord,
   type SoulReportContextUsageRequest
 } from "@do-soul/alaya-protocol";
+import { reportAsyncSideEffectFailure } from "@do-soul/alaya-core";
 import type {
   RecallUsageHandlerDependencies,
   RecallUsageToolCallContext
 } from "./recall-usage-handlers.js";
+
+// INVARIANT: telemetry append never throws to the MCP caller. The failure
+// is made observable (audited event when the audit port is wired, else a
+// process warning) but is always swallowed.
+async function reportTelemetryAppendFailure(
+  deps: RecallUsageHandlerDependencies,
+  input: Readonly<{
+    readonly operation: string;
+    readonly deliveryId: string;
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly now?: () => string;
+  }>,
+  error: unknown
+): Promise<void> {
+  const audit = deps.asyncSideEffectAudit;
+  if (audit === undefined) {
+    process.emitWarning("[RecallUsage] telemetry append failed", {
+      code: "ALAYA_RECALL_TELEMETRY_APPEND_FAILED",
+      detail: JSON.stringify({
+        operation: input.operation,
+        delivery_id: input.deliveryId,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    });
+    return;
+  }
+  await reportAsyncSideEffectFailure(
+    {
+      source: "mcp-memory.recall-usage-telemetry",
+      operation: input.operation,
+      subjectType: "context_delivery",
+      subjectId: input.deliveryId,
+      workspaceId: input.workspaceId,
+      runId: input.runId,
+      severity: "warning",
+      warningCode: "ALAYA_RECALL_TELEMETRY_APPEND_FAILED",
+      warningMessage: "[RecallUsage] telemetry append failed",
+      eventLogRepo: audit.eventLogRepo,
+      runtimeNotifier: audit.runtimeNotifier,
+      ...(input.now === undefined ? {} : { now: input.now })
+    },
+    error
+  );
+}
 
 export async function emitRecallDeliveredTelemetry(
   params: Readonly<{ readonly deps: RecallUsageHandlerDependencies; readonly now: () => string }>,
@@ -47,8 +93,19 @@ export async function emitRecallDeliveredTelemetry(
   } as const;
   try {
     await params.deps.eventPublisher.appendManyWithMutation([event], () => undefined);
-  } catch {
+  } catch (error) {
     // INVARIANT: telemetry append never throws to the MCP caller.
+    await reportTelemetryAppendFailure(
+      params.deps,
+      {
+        operation: "recall_delivered_telemetry",
+        deliveryId: input.deliveryId,
+        workspaceId: input.context.workspaceId,
+        runId: input.context.runId,
+        now: params.now
+      },
+      error
+    );
   }
 }
 
@@ -87,7 +144,17 @@ export async function emitContextUsageReportedTelemetry(
   } as const;
   try {
     await params.deps.eventPublisher.appendManyWithMutation([event], () => undefined);
-  } catch {
+  } catch (error) {
     // INVARIANT: telemetry append never throws to the MCP caller.
+    await reportTelemetryAppendFailure(
+      params.deps,
+      {
+        operation: "context_usage_reported_telemetry",
+        deliveryId: input.deliveryId,
+        workspaceId: attributedWorkspaceId,
+        runId: attributedRunId
+      },
+      error
+    );
   }
 }

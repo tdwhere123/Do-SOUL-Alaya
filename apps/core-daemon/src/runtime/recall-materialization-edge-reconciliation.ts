@@ -67,7 +67,15 @@ function createEdgeAutoProducerLlmPortFromConfig(
   let apiKey: string;
   try {
     apiKey = resolveGardenSecretRefValue(secretRef);
-  } catch {
+  } catch (error) {
+    // resolution failure (≠ missing-config above): credentials configured but unreadable
+    process.emitWarning("[EdgeAutoProducer] garden secret-ref resolution failed; running without LLM port", {
+      code: "ALAYA_GARDEN_LLM_SECRET_RESOLVE_FAILED",
+      detail: JSON.stringify({
+        secret_ref: secretRef,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    });
     return null;
   }
   const providerUrl = gardenComputeConfig.provider_url;
@@ -154,7 +162,15 @@ function createReconciliationLlmPortFromConfig(
   let apiKey: string;
   try {
     apiKey = resolveGardenSecretRefValue(secretRef);
-  } catch {
+  } catch (error) {
+    // resolution failure (≠ missing-config above): credentials configured but unreadable
+    process.emitWarning("[Reconciliation] garden secret-ref resolution failed; running rule-only", {
+      code: "ALAYA_GARDEN_LLM_SECRET_RESOLVE_FAILED",
+      detail: JSON.stringify({
+        secret_ref: secretRef,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    });
     return null;
   }
   const providerUrl = gardenComputeConfig.provider_url;
@@ -169,6 +185,11 @@ function createReconciliationLlmPortFromConfig(
     }
   });
 }
+
+export const edgeReconciliationTestInternals = {
+  createEdgeAutoProducerLlmPortFromConfig,
+  createReconciliationLlmPortFromConfig
+};
 
 function readEnabledEnv(name: string, defaultValue: boolean): boolean {
   const raw = process.env[name]?.trim().toLowerCase();

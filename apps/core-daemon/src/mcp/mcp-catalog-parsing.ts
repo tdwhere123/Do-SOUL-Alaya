@@ -192,7 +192,16 @@ function parseMcpToolSpec(rawTool: unknown): Readonly<ToolProviderToolSpec> | nu
         description: candidate["description"]
       })
     );
-  } catch {
+  } catch (error) {
+    // dropping an invalid tool spec is correct, but make the drop observable
+    process.emitWarning("[McpCatalog] dropping invalid MCP tool spec", {
+      code: "ALAYA_MCP_TOOL_SPEC_INVALID",
+      detail: JSON.stringify({
+        tool_id: typeof candidate["tool_id"] === "string" ? candidate["tool_id"] : null,
+        name: typeof candidate["name"] === "string" ? candidate["name"] : null,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    });
     return null;
   }
 }
