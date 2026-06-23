@@ -400,6 +400,47 @@ describe("McpBridge", () => {
     }
   });
 
+  it("does not crash the process when a soul handler rejects after the timeout fires", async () => {
+    const previous = process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
+    process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"] = "25";
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      let rejectLate: (reason: unknown) => void = () => {};
+      const bridge = new McpBridge({
+        soulHandler: () =>
+          new Promise<never>((_resolve, reject) => {
+            rejectLate = reject;
+          })
+      });
+
+      const result = await bridge.executeToolUse(toolUse, runtimeContext);
+
+      expect(result).toMatchObject({
+        is_error: true,
+        content: JSON.stringify({
+          error: {
+            error_code: "handler_timeout",
+            message: "MCP tool execution timed out.",
+            error_type: "TimeoutError"
+          }
+        })
+      });
+
+      // The abandoned handler still rejects; it must not become an unhandledRejection.
+      rejectLate(new Error("late handler failure"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+      if (previous === undefined) {
+        delete process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
+      } else {
+        process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"] = previous;
+      }
+    }
+  });
+
   it("returns the real result for a fast handler within the timeout bound", async () => {
     const previous = process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
     process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"] = "1000";
