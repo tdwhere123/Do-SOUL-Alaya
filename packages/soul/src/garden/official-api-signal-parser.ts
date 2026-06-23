@@ -35,6 +35,8 @@ export interface OfficialApiSignalDraft {
   readonly object_kind: string;
   readonly confidence: number;
   readonly matched_text: string;
+  readonly evidence_refs: readonly string[];
+  readonly source_memory_refs: readonly string[];
   readonly distilled_fact?: string;
   readonly reason?: string;
   readonly temporal_projection?: OfficialApiTemporalProjectionDraft;
@@ -210,6 +212,10 @@ function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft
   const objectKind = normalizeOptionalString((candidate as { readonly object_kind?: unknown }).object_kind);
   const matchedText = normalizeOptionalString((candidate as { readonly matched_text?: unknown }).matched_text);
   const distilledFact = normalizeOptionalString((candidate as { readonly distilled_fact?: unknown }).distilled_fact);
+  const evidenceRefs = normalizeStringArray((candidate as { readonly evidence_refs?: unknown }).evidence_refs);
+  const sourceMemoryRefs = normalizeStringArray(
+    (candidate as { readonly source_memory_refs?: unknown }).source_memory_refs
+  );
   const confidence = (candidate as { readonly confidence?: unknown }).confidence;
   const reason = normalizeOptionalString((candidate as { readonly reason?: unknown }).reason);
   const temporalProjection = normalizeTemporalProjection(
@@ -243,11 +249,30 @@ function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft
     object_kind: objectKind.slice(0, MAX_OFFICIAL_API_OBJECT_KIND_CHARS),
     confidence,
     matched_text: clampedMatchedText,
+    evidence_refs: evidenceRefs,
+    source_memory_refs: sourceMemoryRefs,
     ...(clampedDistilledFact === null ? {} : { distilled_fact: clampedDistilledFact }),
     ...(clampedReason === null ? {} : { reason: clampedReason }),
     ...(temporalProjection === null ? {} : { temporal_projection: temporalProjection }),
     ...(preferenceProfile === null ? {} : { preference_profile: preferenceProfile })
   });
+}
+
+function normalizeStringArray(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const entry of value) {
+    const normalized = normalizeOptionalString(entry);
+    if (normalized === null || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    output.push(normalized);
+  }
+  return Object.freeze(output);
 }
 
 function normalizeTemporalProjection(value: unknown): OfficialApiTemporalProjectionDraft | null {

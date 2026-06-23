@@ -54,9 +54,45 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("distilled_fact");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("one assertion");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("split compound statements into separate signals");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("evidence_refs");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("source_memory_refs");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("temporal_projection");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("preference_profile");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("projection_schema_version");
+  });
+
+  it("carries official synthesis evidence and source refs into first-class signal fields", async () => {
+    const extractor = createExtractor(JSON.stringify({
+      signals: [
+        {
+          signal_kind: "potential_synthesis",
+          object_kind: "synthesis",
+          confidence: 0.74,
+          matched_text: "The rollout summary connects the launch owner evidence.",
+          distilled_fact: "The launch owner evidence resolves to Mira.",
+          evidence_refs: ["evidence-1", " evidence-2 ", "evidence-1", ""],
+          source_memory_refs: ["memory-source-1", " memory-source-2 ", "memory-source-1", ""]
+        }
+      ]
+    }));
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor,
+      generateSignalId: () => "signal-synthesis"
+    });
+
+    const signals = await provider.compile(
+      "The rollout summary connects the launch owner evidence.",
+      createContext()
+    );
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({
+      signal_kind: "potential_synthesis",
+      object_kind: "synthesis",
+      evidence_refs: ["evidence-1", "evidence-2"],
+      source_memory_refs: ["memory-source-1", "memory-source-2"]
+    });
   });
 
 

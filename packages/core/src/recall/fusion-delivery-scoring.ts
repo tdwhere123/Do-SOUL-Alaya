@@ -349,7 +349,9 @@ function scoreWorkspaceLocalFusionStream(
     case "trigram_fts":
       return clamp01(supplementaryData.trigramFtsRanks[objectId] ?? 0);
     case "synthesis_fts":
-      return 0;
+      return candidate.sourceChannels?.includes("synthesis_child") === true
+        ? clamp01(supplementaryData.synthesisFtsRanks[objectId] ?? 0)
+        : 0;
     case "evidence_fts":
       return clamp01(supplementaryData.evidenceFtsRanks[objectId] ?? 0);
     case "evidence_structural_agreement":

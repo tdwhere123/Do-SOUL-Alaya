@@ -255,7 +255,7 @@ it("is a no-op when the structural candidate already sits inside the delivery wi
       expect(goldDiagnostic?.pre_budget_rank ?? 99).toBeLessThanOrEqual(5);
     });
 
-it("composes synthesis and structural reserves within maxEntries leaving a pure-fusion head slot", async () => {
+it("keeps structural reserve within maxEntries when source-less synthesis rows match", async () => {
       const fixture = buildStructuralFixture({ decoyCount: 6, goldPathStrength: 0.05 });
       const synthesisRows = ["synthesis-1", "synthesis-2", "synthesis-3"].map(buildCompositionSynthesis);
       const service = buildStructuralService({ ...fixture, synthesisRows });
@@ -266,9 +266,6 @@ it("composes synthesis and structural reserves within maxEntries leaving a pure-
       const diagnosticsById = new Map(
         (result.diagnostics?.candidates ?? []).map((candidate) => [candidate.object_id, candidate])
       );
-      // Both reserves run at maxEntries=5: the synthesis reserve evicts the
-      // weakest in-window rows, then the structural reserve re-rescues the
-      // strongest structural rows. Neither permanently evicts the other.
       const synthesisDelivered = delivered.filter(
         (candidate) => candidate.object_kind === "synthesis_capsule"
       );
@@ -282,26 +279,23 @@ it("composes synthesis and structural reserves within maxEntries leaving a pure-
 
       // No overflow: delivery never exceeds the entry-count budget.
       expect(delivered.length).toBeLessThanOrEqual(5);
-      // Both reserved planes coexist in the same delivery window.
-      expect(synthesisDelivered.length).toBeGreaterThan(0);
+      // Source-less synthesis capsules are router-only and are not direct
+      // delivery candidates.
+      expect(synthesisDelivered.length).toBe(0);
       expect(structuralDelivered.length).toBeGreaterThan(0);
-      // The combined reserve leaves >= 1 pure-fusion head slot: the head row is
-      // a natural in-window lexical winner, neither a reserved synthesis nor a
-      // tail-placed structural row.
+      // The structural reserve leaves >= 1 pure-fusion head slot: the head row
+      // is a natural in-window lexical winner, not a tail-placed structural row.
       const head = delivered[0];
       expect(head?.object_kind).toBe("memory_entry");
       const headDiagnostic = head ? diagnosticsById.get(head.object_id) : undefined;
       expect(headDiagnostic?.admission_planes).toContain("lexical");
       expect(headDiagnostic?.pre_budget_rank).toBe(1);
-      // Synthesis stays at the very tail; structural rows sit ahead of it, never
-      // pushed out of the window by the structural reserve.
-      expect(kinds[kinds.length - 1]).toBe("synthesis_capsule");
+      expect(kinds.every((kind) => kind === "memory_entry")).toBe(true);
     });
 
-it("leaves synthesis-only reserve behavior unchanged when no structural candidate is buried", async () => {
-      // Mirror of the synthesis reserve test: with the structural reserve wired
-      // but no structural plane present, delivery must equal the synthesis-only
-      // outcome (two top synthesis rows tail-placed below three memory_entry).
+it("does not deliver source-less synthesis rows when no structural candidate is buried", async () => {
+      // Source-less synthesis capsules match synthesis FTS, but synthesis
+      // routes through source child memories instead of direct capsule delivery.
       const memories = Array.from({ length: 8 }, (_unused, index) =>
         createMemoryEntry({
           object_id: `memory-${index + 1}`,
@@ -356,14 +350,8 @@ it("leaves synthesis-only reserve behavior unchanged when no structural candidat
         delivered
           .filter((candidate) => candidate.object_kind === "synthesis_capsule")
           .map((candidate) => candidate.object_id)
-      ).toEqual(["synthesis-1", "synthesis-2"]);
-      expect(delivered.slice(-2).map((candidate) => candidate.object_kind)).toEqual([
-        "synthesis_capsule",
-        "synthesis_capsule"
-      ]);
-      expect(delivered.slice(0, 3).every((candidate) => candidate.object_kind === "memory_entry")).toBe(
-        true
-      );
+      ).toEqual([]);
+      expect(delivered.every((candidate) => candidate.object_kind === "memory_entry")).toBe(true);
     });
 });
 });

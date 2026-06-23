@@ -121,6 +121,7 @@ export const OFFICIAL_API_SYSTEM_PROMPT = [
   'Use only supported signal kinds such as "potential_preference" and "potential_claim".',
   '"matched_text" is the verbatim span of the turn that triggered the signal.',
   '"distilled_fact" must be a self-contained declarative sentence carrying exactly one assertion.',
+  'When a synthesis signal cites existing evidence or memories by ID, include "evidence_refs" and "source_memory_refs" arrays.',
   'When a signal has an event or valid-time fact, include optional "temporal_projection" with "projection_schema_version":1, ISO "event_time_start"/"event_time_end", ISO "valid_from"/"valid_to", "time_precision", and "time_source".',
   'When a signal is a durable preference, include optional "preference_profile" with "projection_schema_version":1, "subject", "predicate", "object", "category", and "polarity".',
   "Resolve every pronoun, relative date, and reference in distilled_fact to its absolute form using the turn text.",
@@ -247,7 +248,8 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         scope_hint: null,
         domain_tags: [],
         confidence,
-        evidence_refs: [],
+        evidence_refs: draft.evidence_refs,
+        source_memory_refs: draft.source_memory_refs,
         raw_payload: buildSchemaGroundedRawPayload({
           signalKind: draft.signal_kind,
           objectKind: draft.object_kind,

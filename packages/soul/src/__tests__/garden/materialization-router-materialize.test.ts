@@ -85,7 +85,8 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
     const result = await router.materializeSignal(
       createSignal({
         signal_kind: "potential_synthesis",
-        evidence_refs: ["msg-1", "msg-2", "msg-3"]
+        evidence_refs: ["msg-1", "msg-2", "msg-3"],
+        source_memory_refs: ["memory-source-1", "memory-source-2"]
       })
     );
 
@@ -102,6 +103,9 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
     ]);
     expect(deps.evidenceService.create).toHaveBeenCalledTimes(3);
     expect(deps.synthesisService.create).toHaveBeenCalledTimes(1);
+    expect(deps.synthesisService.create.mock.calls[0][0]).toMatchObject({
+      source_memory_refs: ["memory-source-1", "memory-source-2"]
+    });
 
     const evidenceInputs = deps.evidenceService.create.mock.calls.map((call) =>
       call[0] as {

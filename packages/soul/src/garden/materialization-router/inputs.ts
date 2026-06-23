@@ -327,10 +327,28 @@ export function buildSynthesisInput(
     synthesis_type: toSynthesisType(),
     summary: buildDistilledFact(signal),
     evidence_refs: evidenceRefs,
-    source_memory_refs: [],
+    source_memory_refs: collectSynthesisSourceMemoryRefs(signal),
     workspace_id: signal.workspace_id,
     run_id: signal.run_id
   };
+}
+
+function collectSynthesisSourceMemoryRefs(signal: CandidateMemorySignal): readonly string[] {
+  return uniqueNonEmptyStrings(signal.source_memory_refs);
+}
+
+function uniqueNonEmptyStrings(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim();
+    if (normalized.length === 0 || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    output.push(normalized);
+  }
+  return output;
 }
 
 function toScopeClass(scopeHint: string | null): ScopeClassValue {
