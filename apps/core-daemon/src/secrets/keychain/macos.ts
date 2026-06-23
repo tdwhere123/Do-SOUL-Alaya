@@ -44,6 +44,9 @@ export function writeMacosKeychainSecret(
   value: string,
   runner: KeychainSubprocessRunner
 ): KeychainWriteResult {
+  // `security -i` parses stdin line-by-line; a newline in any field splits the
+  // interactive command, so reject CR/LF rather than smuggle a second command.
+  rejectInteractiveNewlines({ service, account, value });
   const result = runner("security", ["-i"], {
     // Secrets stay off argv, but any host-level shell transcript or terminal
     // recording that captures interactive stdin can still observe this input.
@@ -99,4 +102,12 @@ function macosToolingUnavailable(
 
 function quoteSecurityInteractiveArg(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function rejectInteractiveNewlines(fields: Record<string, string>): void {
+  for (const [name, value] of Object.entries(fields)) {
+    if (/[\r\n]/u.test(value)) {
+      throw new Error(`macOS Keychain ${name} must not contain newline characters.`);
+    }
+  }
 }
