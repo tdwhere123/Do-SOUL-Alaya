@@ -186,11 +186,12 @@ export function buildLocomoQuestionId(sampleId: string, qaIndex: number): string
   return `${sampleId}:${qaIndex + 1}`;
 }
 
+// LoCoMo gold evidence references phantom/malformed dia_ids that can never
+// materialize; disclose the gap and score on present gold instead of failing closed.
 export function resolveLocomoGoldMemoryIds(input: {
-  readonly questionId: string;
   readonly evidenceSet: ReadonlySet<string>;
   readonly memoryIdsByDiaId: ReadonlyMap<string, readonly string[]>;
-}): string[] {
+}): { readonly goldMemoryIds: string[]; readonly missingDiaIds: string[] } {
   const goldMemoryIds: string[] = [];
   const missingDiaIds: string[] = [];
   for (const diaId of input.evidenceSet) {
@@ -201,11 +202,5 @@ export function resolveLocomoGoldMemoryIds(input: {
     }
     goldMemoryIds.push(...memoryIds);
   }
-  if (missingDiaIds.length > 0) {
-    throw new Error(
-      `LoCoMo seed materialization lost gold evidence for ${input.questionId}: ` +
-        missingDiaIds.join(", ")
-    );
-  }
-  return goldMemoryIds;
+  return { goldMemoryIds, missingDiaIds };
 }

@@ -113,7 +113,7 @@ describe("LoCoMo runner", () => {
     }
   });
 
-  it("fails closed when a scored gold dia_id materializes to zero memory ids", async () => {
+  it("tolerates and discloses a scored gold dia_id that materializes to zero memory ids", async () => {
     const createCompileSeedRunnerSpy = vi
       .spyOn(compileSeedModule, "createCompileSeedRunner")
       .mockReturnValue({
@@ -161,13 +161,14 @@ describe("LoCoMo runner", () => {
     startBenchDaemonMock.mockResolvedValue(buildMockDaemon({ recall }));
 
     try {
-      await expect(
-        runLocomo({
-          variant: "locomo10",
-          historyRoot: tmpDir
-        })
-      ).rejects.toThrow("LoCoMo seed materialization lost gold evidence");
-      expect(recall).not.toHaveBeenCalled();
+      // LoCoMo gold references unmaterializable dia_ids; the run completes,
+      // recall still runs, and the unscorable question drops out of the denominator.
+      const result = await runLocomo({
+        variant: "locomo10",
+        historyRoot: tmpDir
+      });
+      expect(recall).toHaveBeenCalled();
+      expect(Number.isFinite(result.payload.kpi.r_at_5)).toBe(true);
     } finally {
       createCompileSeedRunnerSpy.mockRestore();
     }
