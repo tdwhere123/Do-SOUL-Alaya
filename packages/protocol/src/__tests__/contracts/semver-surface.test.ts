@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import sidecar from "./semver-surface.sidecar.json" with { type: "json" };
 import * as AppConfig from "../../config/app-config.js";
 import * as CandidateMemorySignal from "../../signals/candidate-memory-signal.js";
 import * as SchemaPrimitives from "../../shared/schema-primitives.js";
@@ -100,13 +103,7 @@ const wrapperTypeNames = new Set([
 
 describe("semver-surface", () => {
   it("snapshots the v0.2 public MCP, EventLog, and runtime config surface", () => {
-    const schemaRegistry = createSchemaRegistry([...mcpSchemaModules, ...eventSchemaModules, {
-      module: "packages/protocol/src/config/app-config.ts",
-      exports: AppConfig
-    }]);
-    const mcpSurface = collectMcpSurface(schemaRegistry);
-    const eventPayloadKeys = collectPayloadSchemaKeys(eventSchemaModules);
-    const runtimeConfigKeys = collectRuntimeConfigKeys();
+    const mcpSurface = computeMcpSurface();
 
     expect(mcpSurface.reachableModules).toEqual(
       expect.arrayContaining([
@@ -122,13 +119,49 @@ describe("semver-surface", () => {
       ])
     );
 
-    expect(formatSnapshotLines({
-      mcp: mcpSurface,
-      eventPayloadKeys,
-      runtimeConfigKeys
-    }).join("\n")).toMatchSnapshot();
+    expect(computeSurfaceSource()).toMatchSnapshot();
+  });
+
+  // A surface change with no package.json version bump must FAIL. The sidecar
+  // pins {version, surfaceHash}; regenerating the snapshot alone no longer
+  // smuggles a breaking surface change through CI.
+  it("requires a version bump when the public protocol surface changes", () => {
+    const currentHash = sha256(computeSurfaceSource());
+    const currentVersion = readPackageVersion();
+    if (currentHash === sidecar.surfaceHash) {
+      expect(currentVersion).toBe(sidecar.version);
+      return;
+    }
+    expect(
+      currentVersion,
+      `The public protocol surface changed (hash ${sidecar.surfaceHash} -> ${currentHash}). ` +
+        `Bump packages/protocol/package.json "version" and update ` +
+        `semver-surface.sidecar.json to { "version": "${currentVersion}", "surfaceHash": "${currentHash}" }.`
+    ).not.toBe(sidecar.version);
   });
 });
+
+function computeMcpSurface(): ReturnType<typeof collectMcpSurface> {
+  const schemaRegistry = createSchemaRegistry([...mcpSchemaModules, ...eventSchemaModules, {
+    module: "packages/protocol/src/config/app-config.ts",
+    exports: AppConfig
+  }]);
+  return collectMcpSurface(schemaRegistry);
+}
+
+function computeSurfaceSource(): string {
+  return formatSnapshotLines({
+    mcp: computeMcpSurface(),
+    eventPayloadKeys: collectPayloadSchemaKeys(eventSchemaModules),
+    runtimeConfigKeys: collectRuntimeConfigKeys()
+  }).join("\n");
+}
+
+function readPackageVersion(): string {
+  const pkgUrl = new URL("../../../package.json", import.meta.url);
+  const pkg = JSON.parse(readFileSync(fileURLToPath(pkgUrl), "utf8")) as { readonly version: string };
+  return pkg.version;
+}
 
 function collectMcpSurface(
   schemaRegistry: ReadonlyMap<z.ZodTypeAny, readonly NamedSchema[]>

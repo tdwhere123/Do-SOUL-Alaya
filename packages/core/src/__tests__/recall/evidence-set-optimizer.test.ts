@@ -6,18 +6,14 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { applyEvidenceSetDelivery } from "../../recall/evidence-set-optimizer.js";
-import {
-  RECALL_FUSION_STREAMS,
-  recallDeliveryReserveTestInternals
-} from "../../recall/recall-service.js";
+import { RECALL_FUSION_STREAMS } from "../../recall/recall-service.js";
+import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
 import type {
   RecallFusionBreakdown,
   RecallFusionStream,
   RecallSupplementaryData
 } from "../../recall/recall-service-types.js";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-
-const { buildEmptyRecallFusionBreakdown } = recallDeliveryReserveTestInternals;
 
 function emptyStreamRanks(): Record<RecallFusionStream, number | null> {
   return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, null])) as Record<

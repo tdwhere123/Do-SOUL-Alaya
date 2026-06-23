@@ -40,7 +40,7 @@ export type {
 } from "./recall-service-types.js";
 export { makeTokenEstimator } from "./recall-service-types.js";
 export { computeRecallTokenEconomy } from "./diagnostics.js";
-export { RECALL_FUSION_STREAMS, recallDeliveryReserveTestInternals } from "./fusion-delivery.js";
+export { RECALL_FUSION_STREAMS } from "./fusion-delivery.js";
 
 export class RecallService {
   private readonly generateRuntimeId: () => string;

@@ -3,7 +3,91 @@ import { describe, expect, it, vi } from "vitest";
 import { createToolsCommand } from "../../cli/tools.js";
 import type { AlayaCliContext } from "../../cli/bridge.js";
 import { ALAYA_SYSEXITS } from "../../cli/bridge.js";
+import { createMcpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
 import type { McpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
+import { callAlayaMcpMemoryTool } from "../../mcp/mcp-server.js";
+import {
+  context as realHandlerContext,
+  createDeps
+} from "../mcp-memory/mcp-memory-tool-handler-fixture.js";
+
+// Parity runs through one real handler (createMcpMemoryToolHandler over the
+// in-memory fixture) so CLI arg-marshalling drift vs the MCP request shape fails
+// here, not just wiring.
+describe("alaya tools real-handler CLI/MCP parity", () => {
+  async function callViaMcp(toolName: string, args: unknown): Promise<unknown> {
+    const mcpResult = await callAlayaMcpMemoryTool(
+      {
+        memoryToolHandler: createMcpMemoryToolHandler(createDeps()),
+        contextProvider: () => realHandlerContext
+      },
+      toolName,
+      args
+    );
+    return (mcpResult.structuredContent as { readonly output: unknown }).output;
+  }
+
+  async function callViaCli(toolName: string, args: unknown): Promise<unknown> {
+    const command = createToolsCommand({
+      handler: createMcpMemoryToolHandler(createDeps()),
+      defaultWorkspaceId: realHandlerContext.workspaceId,
+      defaultRunId: realHandlerContext.runId,
+      defaultAgentTarget: realHandlerContext.agentTarget,
+      runService: createRunLookup({ run1: realHandlerContext.workspaceId })
+    });
+    const parsed = command.argsSchema.safeParse(["call", toolName, JSON.stringify(args)]);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) throw new Error("CLI args parse failed in test setup");
+    const result = await command.handler(createContext(), parsed.data);
+    expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
+    return result.json;
+  }
+
+  it("returns the same soul.recall output through MCP and CLI", async () => {
+    const args = {
+      query: "deployment rules",
+      scope_class: null,
+      dimension: null,
+      domain_tags: null,
+      max_results: 3
+    };
+    const [mcpOutput, cliOutput] = await Promise.all([
+      callViaMcp("soul.recall", args),
+      callViaCli("soul.recall", args)
+    ]);
+    expect(cliOutput).toEqual(mcpOutput);
+  });
+
+  it("returns the same soul.open_pointer output through MCP and CLI", async () => {
+    // createDeps().memoryService.findByIdScoped seeds an in-memory entry for
+    // mem1, so the pointer dereferences instead of NOT_FOUND.
+    const args = { object_id: "mem1" };
+    const [mcpOutput, cliOutput] = await Promise.all([
+      callViaMcp("soul.open_pointer", args),
+      callViaCli("soul.open_pointer", args)
+    ]);
+    expect(mcpOutput).toMatchObject({ object_id: "mem1", object_kind: "memory_entry" });
+    expect(cliOutput).toEqual(mcpOutput);
+  });
+
+  it("returns the same soul.emit_candidate_signal output through MCP and CLI", async () => {
+    const args = {
+      signal_kind: "potential_preference",
+      object_kind: "preference",
+      scope_hint: null,
+      domain_tags: [],
+      confidence: 0.9,
+      evidence_refs: [],
+      raw_payload: { content: "prefers dark mode" }
+    };
+    const [mcpOutput, cliOutput] = await Promise.all([
+      callViaMcp("soul.emit_candidate_signal", args),
+      callViaCli("soul.emit_candidate_signal", args)
+    ]);
+    expect(mcpOutput).toMatchObject({ status: "emitted" });
+    expect(cliOutput).toEqual(mcpOutput);
+  });
+});
 
 describe("alaya tools", () => {
   it("lists the same first-party catalog used by MCP", async () => {
