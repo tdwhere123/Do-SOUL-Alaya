@@ -160,11 +160,12 @@ export class SlotService {
     return await this.dependencies.slotRepo.findByWorkspace(workspaceId);
   }
 
-  public async findById(objectId: string): Promise<Readonly<Slot>> {
+  public async findById(objectId: string, workspaceId: string): Promise<Readonly<Slot>> {
     const parsedObjectId = parseObjectId(objectId);
     const slot = await this.dependencies.slotRepo.findById(parsedObjectId);
 
-    if (slot === null) {
+    // Cross-workspace slots are indistinguishable from missing ones.
+    if (slot === null || slot.workspace_id !== workspaceId) {
       throw new CoreError("NOT_FOUND", "Slot not found");
     }
 

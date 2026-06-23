@@ -256,9 +256,10 @@ export class ProjectMappingService {
 
   public async accept(
     mappingId: string,
-    acceptedBy: AcceptedByType
+    acceptedBy: AcceptedByType,
+    workspaceId?: string
   ): Promise<Readonly<ProjectMappingAnchor>> {
-    const anchor = await this.getAnchorById(mappingId);
+    const anchor = await this.getAnchorById(mappingId, workspaceId);
 
     return await this.transitionExistingAnchor(anchor, {
       targetState: ProjectMappingState.ACCEPTED,
@@ -273,8 +274,8 @@ export class ProjectMappingService {
     });
   }
 
-  public async reject(mappingId: string): Promise<Readonly<ProjectMappingAnchor>> {
-    const anchor = await this.getAnchorById(mappingId);
+  public async reject(mappingId: string, workspaceId?: string): Promise<Readonly<ProjectMappingAnchor>> {
+    const anchor = await this.getAnchorById(mappingId, workspaceId);
 
     return await this.transitionExistingAnchor(anchor, {
       targetState: ProjectMappingState.REJECTED,
@@ -283,8 +284,8 @@ export class ProjectMappingService {
     });
   }
 
-  public async adapt(mappingId: string): Promise<Readonly<ProjectMappingAnchor>> {
-    const anchor = await this.getAnchorById(mappingId);
+  public async adapt(mappingId: string, workspaceId?: string): Promise<Readonly<ProjectMappingAnchor>> {
+    const anchor = await this.getAnchorById(mappingId, workspaceId);
 
     return await this.transitionExistingAnchor(anchor, {
       targetState: ProjectMappingState.ADAPTED,
@@ -295,8 +296,8 @@ export class ProjectMappingService {
     });
   }
 
-  public async setNotApplicable(mappingId: string): Promise<Readonly<ProjectMappingAnchor>> {
-    const anchor = await this.getAnchorById(mappingId);
+  public async setNotApplicable(mappingId: string, workspaceId?: string): Promise<Readonly<ProjectMappingAnchor>> {
+    const anchor = await this.getAnchorById(mappingId, workspaceId);
 
     return await this.transitionExistingAnchor(anchor, {
       targetState: ProjectMappingState.NOT_APPLICABLE,
@@ -305,8 +306,8 @@ export class ProjectMappingService {
     });
   }
 
-  public async setProbationary(mappingId: string): Promise<Readonly<ProjectMappingAnchor>> {
-    const anchor = await this.getAnchorById(mappingId);
+  public async setProbationary(mappingId: string, workspaceId?: string): Promise<Readonly<ProjectMappingAnchor>> {
+    const anchor = await this.getAnchorById(mappingId, workspaceId);
 
     return await this.transitionExistingAnchor(anchor, {
       targetState: ProjectMappingState.PROBATIONARY,
@@ -402,10 +403,15 @@ export class ProjectMappingService {
     );
   }
 
-  private async getAnchorById(mappingId: string): Promise<Readonly<ProjectMappingAnchor>> {
+  private async getAnchorById(
+    mappingId: string,
+    workspaceId?: string
+  ): Promise<Readonly<ProjectMappingAnchor>> {
     const anchor = await this.dependencies.projectMappingRepo.findById(mappingId);
 
-    if (anchor === null) {
+    // When a workspace is bound, cross-workspace anchors are indistinguishable
+    // from missing ones.
+    if (anchor === null || (workspaceId !== undefined && anchor.workspace_id !== workspaceId)) {
       throw new CoreError("NOT_FOUND", `Project mapping anchor ${mappingId} was not found.`);
     }
 

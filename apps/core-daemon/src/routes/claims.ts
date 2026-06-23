@@ -15,8 +15,11 @@ export function registerClaimRoutes(app: Hono, services: ClaimRouteServices): vo
     return context.json({ success: true, data: claims }, 200);
   });
 
-  app.get("/claims/:id", async (context) => {
-    const claim = await services.claimService.findById(context.req.param("id"));
+  app.get("/workspaces/:wsId/claims/:id", async (context) => {
+    const workspaceId = context.req.param("wsId");
+    await services.workspaceService.getById(workspaceId);
+
+    const claim = await services.claimService.findByIdScoped(context.req.param("id"), workspaceId);
 
     if (claim === null) {
       throw new CoreError("NOT_FOUND", "Claim form not found");

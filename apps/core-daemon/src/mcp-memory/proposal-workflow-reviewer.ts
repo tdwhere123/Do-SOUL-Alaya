@@ -1,10 +1,10 @@
-import { timingSafeEqual } from "node:crypto";
 import {
   NonEmptyStringSchema,
   type SoulReviewMemoryProposalRequest
 } from "@do-soul/alaya-protocol";
 import type { McpMemoryToolCallContext } from "./tool-handler.js";
-import { HUMAN_REVIEWER_AGENT_TARGETS } from "./reviewer-surfaces.js";
+import { HUMAN_REVIEWER_AGENT_TARGETS, INSPECTOR_REVIEWER_AGENT_TARGET } from "./reviewer-surfaces.js";
+import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
 
 export interface ReviewerIdentityBinding {
   readonly token: string;
@@ -15,7 +15,17 @@ export function assertReviewCallerIsAllowed(
   context: McpMemoryToolCallContext,
   binding: ReviewerIdentityBinding | undefined
 ): void {
-  if (binding !== undefined || HUMAN_REVIEWER_AGENT_TARGETS.has(context.agentTarget)) {
+  if (binding !== undefined) {
+    return;
+  }
+
+  // The Inspector HTTP loopback asserts reviewer_identity over the network with
+  // no token; without a configured binding it would forge the audit trail.
+  if (context.agentTarget === INSPECTOR_REVIEWER_AGENT_TARGET) {
+    throw createWorkflowError("VALIDATION", "reviewer binding not configured");
+  }
+
+  if (HUMAN_REVIEWER_AGENT_TARGETS.has(context.agentTarget)) {
     return;
   }
 
@@ -57,9 +67,7 @@ function matchesReviewerToken(providedToken: string | undefined, expectedToken: 
   if (providedToken === undefined || providedToken.length === 0) {
     return false;
   }
-  const provided = Buffer.from(providedToken);
-  const expected = Buffer.from(expectedToken);
-  return provided.length === expected.length && timingSafeEqual(provided, expected);
+  return constantTimeTokenEqual(providedToken, expectedToken);
 }
 
 export function assertProposalContext(

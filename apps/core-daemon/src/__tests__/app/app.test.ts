@@ -41,6 +41,21 @@ describe("createApp", () => {
       success: false,
       error: "Invalid X-Request-Token"
     });
+
+    // A wrong-length token is rejected via the length-independent constant-time
+    // compare rather than an early length-based return.
+    const wrongLength = await app.request("/unknown", {
+      method: "POST",
+      headers: {
+        origin: "http://localhost:5173",
+        "x-request-token": "secret-token-with-extra-length"
+      }
+    });
+    expect(wrongLength.status).toBe(403);
+    await expect(wrongLength.json()).resolves.toEqual({
+      success: false,
+      error: "Invalid X-Request-Token"
+    });
   });
 
   it("requires a request token for non-health GET routes", async () => {
@@ -284,7 +299,7 @@ describe("createApp", () => {
 
     const response = await app.request(
       createChunkedJsonRequest(
-        "http://localhost/conflict-matrix-edges/edge-1",
+        "http://localhost/workspaces/ws-1/conflict-matrix-edges/edge-1",
         "DELETE",
         JSON.stringify({ payload: "x".repeat(MAX_REQUEST_BODY_BYTES) })
       )
@@ -316,7 +331,7 @@ describe("createApp", () => {
 
     const response = await app.request(
       createChunkedJsonRequest(
-        "http://localhost/conflict-matrix-edges/edge-1",
+        "http://localhost/workspaces/ws-1/conflict-matrix-edges/edge-1",
         "DELETE",
         JSON.stringify({ payload: "x" })
       )
@@ -349,7 +364,7 @@ describe("createApp", () => {
     const response = await withResponseTimeout(
       app.request(
         createNeverEndingChunkedJsonRequest(
-          "http://localhost/conflict-matrix-edges/edge-1",
+          "http://localhost/workspaces/ws-1/conflict-matrix-edges/edge-1",
           "DELETE",
           JSON.stringify({ payload: "x" })
         )
@@ -381,12 +396,12 @@ describe("createApp", () => {
     });
 
     const response = await app.request(
-      createEmptyChunkedJsonRequest("http://localhost/conflict-matrix-edges/edge-1", "DELETE")
+      createEmptyChunkedJsonRequest("http://localhost/workspaces/ws-1/conflict-matrix-edges/edge-1", "DELETE")
     );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ success: true, data: null });
-    expect(deleteEdge).toHaveBeenCalledWith("edge-1");
+    expect(deleteEdge).toHaveBeenCalledWith("edge-1", "ws-1");
   });
 });
 

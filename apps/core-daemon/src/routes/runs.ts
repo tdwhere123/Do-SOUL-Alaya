@@ -1,5 +1,11 @@
 import type { Context, Hono } from "hono";
-import { CoreError, type ConversationService, type RunHotStateService, type RunService } from "@do-soul/alaya-core";
+import {
+  CoreError,
+  type ConversationService,
+  type RunHotStateService,
+  type RunService,
+  type WorkspaceService
+} from "@do-soul/alaya-core";
 import {
   parseJsonBody,
   parseListPagination,
@@ -22,6 +28,7 @@ export { resetSnapshotCacheForTesting } from "./run-snapshot.js";
 
 export interface RunRouteServices {
   readonly runService: RunService;
+  readonly workspaceService: WorkspaceService;
   readonly conversationService: ConversationService;
   readonly runHotStateService: RunHotStateService;
   readonly eventLogRepo?: {
@@ -98,6 +105,7 @@ function registerRunCollectionRoutes(app: Hono, services: RunRouteServices): voi
 function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
   app.get("/runs/:id/messages", async (context) => {
     const runId = context.req.param("id");
+    await assertRunWorkspace(services, runId);
     const pagination = parseListPagination(context);
     const messages = await services.conversationService.listMessages(runId, pagination);
     const totalCount = await services.conversationService.countMessages(runId);
@@ -106,8 +114,10 @@ function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
   });
 
   app.post("/runs/:id/messages", async (context) => {
+    const runId = context.req.param("id");
+    await assertRunWorkspace(services, runId);
     const response = await services.conversationService.sendMessage(
-      context.req.param("id"),
+      runId,
       await parseJsonBody(context.req.json.bind(context.req))
     );
 
@@ -152,7 +162,7 @@ function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void
 
 async function getRunSnapshot(context: Context, services: RunRouteServices): Promise<Response> {
   const runId = context.req.param("id")!;
-  await services.runService.getById(runId);
+  await assertRunWorkspace(services, runId);
   const snapshot = await services.runHotStateService.getSnapshot(runId);
   if (snapshot === null) throw new CoreError("NOT_FOUND", "Run not found");
   try {
@@ -183,10 +193,18 @@ async function deleteRun(context: Context, services: RunRouteServices): Promise<
   const unexpectedBody = await rejectUnexpectedRequestBody(context);
   if (unexpectedBody !== null) return unexpectedBody;
   const runId = context.req.param("id")!;
+  await assertRunWorkspace(services, runId);
   const run = await services.runService.delete(runId);
   clearRunLocalState(services, runId);
   await services.governanceLeaseService?.release(runId).catch(() => undefined);
   return context.json({ success: true, data: run }, 200);
+}
+
+// Resolve the run then confirm its workspace exists (mirror recall.ts) so an
+// unscoped /runs/:id route cannot reach a run in a missing/foreign workspace.
+async function assertRunWorkspace(services: RunRouteServices, runId: string): Promise<void> {
+  const run = await services.runService.getById(runId);
+  await services.workspaceService.getById(run.workspace_id);
 }
 
 function clearRunLocalState(services: RunRouteServices, runId: string): void {

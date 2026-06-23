@@ -40,6 +40,8 @@ type CreateCoreDaemonAppInput = Readonly<{
   listServerHardConstraints: (workspaceId: string) => Promise<readonly unknown[]>;
   workspaceService: RouteField<"workspaces", "workspaceService"> &
     RouteField<"workspaceFiles", "workspaceService"> &
+    RouteField<"runs", "workspaceService"> &
+    RouteField<"e2eEventTriggers", "workspaceService"> &
     RouteField<"securityStatus", "workspaceService"> &
     RouteField<"embeddingStatus", "workspaceService"> &
     RouteField<"memories", "workspaceService"> &
@@ -200,6 +202,7 @@ function createRunLifecycleRoutes(input: CreateCoreDaemonAppInput) {
   return {
     runs: {
       runService: input.runService,
+      workspaceService: input.workspaceService,
       conversationService: input.conversationService,
       runHotStateService: input.runHotStateService,
       eventLogRepo: input.eventLogRepo,
@@ -371,6 +374,7 @@ function createOptionalRouteServices(input: CreateCoreDaemonAppInput) {
       ? {
           e2eEventTriggers: {
             runService: input.runService,
+            workspaceService: input.workspaceService,
             eventLogRepo: createE2eEventLogRepo(input.eventLogRepo),
             runtimeNotifier: input.runtimeNotifier
           }

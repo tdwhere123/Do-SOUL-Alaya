@@ -183,12 +183,19 @@ describe("mcp memory proposal workflow — event_log audit replay", () => {
     const proposalRepo = new SqliteProposalRepo(database);
     const eventLogRepo = new SqliteEventLogRepo(database);
 
+    // Mix of CJK + Latin extended + an internal quote. better-sqlite3
+    // binds parameters, so the quote is not an injection vector — it's
+    // a UTF-8 / quoting-discipline guard, mirroring the kind of names
+    // that appear in shared agent fleets ("Mei \"the proxy\" Lin",
+    // 中文运维, etc.).
+    const reviewerIdentity = "审核者:Mei \"the proxy\" Lin";
     const workflow = createMcpMemoryProposalWorkflow({
       now: () => "2026-04-30T00:00:00.000Z",
       generateObjectId: () => "44444444-5555-4555-8555-666666666666",
       eventLogRepo,
       proposalRepo,
       runtimeNotifier: { notifyEntry: async () => {} },
+      reviewerIdentityBinding: { token: "reviewer-token", identity: reviewerIdentity },
       memoryService: createMemoryApplyPort()
     });
 
@@ -201,18 +208,13 @@ describe("mcp memory proposal workflow — event_log audit replay", () => {
       { workspaceId: "ws-utf8", runId: "run-utf8", agentTarget: "codex", sessionId: "session-1" }
     );
 
-    // Mix of CJK + Latin extended + an internal quote. better-sqlite3
-    // binds parameters, so the quote is not an injection vector — it's
-    // a UTF-8 / quoting-discipline guard, mirroring the kind of names
-    // that appear in shared agent fleets ("Mei \"the proxy\" Lin",
-    // 中文运维, etc.).
-    const reviewerIdentity = "审核者:Mei \"the proxy\" Lin";
     await workflow.reviewMemoryProposal(
       {
         proposal_id: created.proposal_id,
         verdict: "reject",
         reason: "utf-8 reviewer",
-        reviewer_identity: reviewerIdentity
+        reviewer_identity: reviewerIdentity,
+        reviewer_token: "reviewer-token"
       },
       // Human-reviewer surface (runId: null) — exercises the loosened
       // context check on a real repo (Inspector / `alaya review`).

@@ -282,4 +282,25 @@ describe("SlotService", () => {
     expect(events.map((event) => event.event_type)).toEqual(["soul.slot.created"]);
     expect(notifySpy).toHaveBeenCalledTimes(1);
   });
+
+  it("findById returns the slot when the workspace matches", async () => {
+    const claim = createActiveClaim();
+    const slot = createSlot(claim, { workspace_id: "workspace-1" });
+    const { dependencies } = createDependencies([slot]);
+    const service = new SlotService(dependencies);
+
+    await expect(service.findById(slot.object_id, "workspace-1")).resolves.toEqual(slot);
+  });
+
+  it("findById returns NOT_FOUND for a slot bound to a different workspace", async () => {
+    const claim = createActiveClaim();
+    const slot = createSlot(claim, { workspace_id: "workspace-1" });
+    const { dependencies } = createDependencies([slot]);
+    const service = new SlotService(dependencies);
+
+    await expect(service.findById(slot.object_id, "workspace-b")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "Slot not found"
+    });
+  });
 });

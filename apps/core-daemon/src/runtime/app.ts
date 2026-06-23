@@ -1,5 +1,6 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
+import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { readBuildInfo } from "./build-info.js";
@@ -440,6 +441,9 @@ function isLocalOperatorRequest(header: string | undefined): boolean {
   return header?.trim() === "1";
 }
 
+// The origin gate only defends against browser CSRF; the X-Request-Token is the
+// sole real authentication. allowDesktopOriginlessRequests admits origin-less
+// desktop calls and should be disabled when ALAYA_ALLOW_REMOTE_DAEMON=1.
 function isAllowedProtectedRequest(
   origin: string | undefined,
   allowedOrigin: string,
@@ -458,12 +462,5 @@ function isAllowedProtectedRequest(
 }
 
 function matchesRequestToken(provided: string, expected: string): boolean {
-  const providedBuffer = Buffer.from(provided);
-  const expectedBuffer = Buffer.from(expected);
-
-  if (providedBuffer.length !== expectedBuffer.length) {
-    return false;
-  }
-
-  return timingSafeEqual(providedBuffer, expectedBuffer);
+  return constantTimeTokenEqual(provided, expected);
 }

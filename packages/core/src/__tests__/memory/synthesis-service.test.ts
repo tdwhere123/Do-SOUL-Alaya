@@ -280,4 +280,38 @@ describe("SynthesisService", () => {
       code: "VALIDATION"
     });
   });
+
+  it("findByIdScoped returns the capsule when the workspace matches", async () => {
+    const capsule = createSynthesisCapsule({ workspace_id: "workspace-1" });
+    const { dependencies } = createDependencies({
+      synthesisCapsuleRepo: {
+        create: vi.fn(async (value) => value),
+        findById: vi.fn(async () => capsule),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByTopicKey: vi.fn(async () => []),
+        updateStatus: vi.fn(async () => capsule)
+      }
+    });
+
+    const service = new SynthesisService(dependencies);
+
+    await expect(service.findByIdScoped(capsule.object_id, "workspace-1")).resolves.toEqual(capsule);
+  });
+
+  it("findByIdScoped hides a capsule that belongs to a different workspace", async () => {
+    const capsule = createSynthesisCapsule({ workspace_id: "workspace-1" });
+    const { dependencies } = createDependencies({
+      synthesisCapsuleRepo: {
+        create: vi.fn(async (value) => value),
+        findById: vi.fn(async () => capsule),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByTopicKey: vi.fn(async () => []),
+        updateStatus: vi.fn(async () => capsule)
+      }
+    });
+
+    const service = new SynthesisService(dependencies);
+
+    await expect(service.findByIdScoped(capsule.object_id, "workspace-b")).resolves.toBeNull();
+  });
 });

@@ -439,4 +439,40 @@ describe("ClaimService", () => {
       code: "VALIDATION"
     });
   });
+
+  it("findByIdScoped returns the claim when the workspace matches", async () => {
+    const claim = createClaimForm({ workspace_id: "workspace-1" });
+    const { dependencies } = createDependencies({
+      claimFormRepo: {
+        create: vi.fn((value) => value),
+        findById: vi.fn(async () => claim),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByStatus: vi.fn(async () => []),
+        findByCanonicalKey: vi.fn(async () => []),
+        updateStatus: vi.fn(async () => claim)
+      }
+    });
+
+    const service = new ClaimService(dependencies);
+
+    await expect(service.findByIdScoped(claim.object_id, "workspace-1")).resolves.toEqual(claim);
+  });
+
+  it("findByIdScoped hides a claim that belongs to a different workspace", async () => {
+    const claim = createClaimForm({ workspace_id: "workspace-1" });
+    const { dependencies } = createDependencies({
+      claimFormRepo: {
+        create: vi.fn((value) => value),
+        findById: vi.fn(async () => claim),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByStatus: vi.fn(async () => []),
+        findByCanonicalKey: vi.fn(async () => []),
+        updateStatus: vi.fn(async () => claim)
+      }
+    });
+
+    const service = new ClaimService(dependencies);
+
+    await expect(service.findByIdScoped(claim.object_id, "workspace-b")).resolves.toBeNull();
+  });
 });

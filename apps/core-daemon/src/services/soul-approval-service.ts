@@ -10,6 +10,7 @@ import type { EventLogRepo } from "@do-soul/alaya-storage";
 export interface SoulApprovalActionInput {
   readonly approvalId: string;
   readonly runId: string;
+  readonly workspaceId: string;
   readonly causedBy: string;
 }
 
@@ -49,6 +50,11 @@ async function resolveSoulApproval(
   result: "approved" | "rejected"
 ): Promise<SoulApprovalResolution> {
   const run = await dependencies.runLookup(input.runId);
+  // Cross-workspace runs are indistinguishable from missing ones so an
+  // approval cannot be resolved through a foreign workspace binding.
+  if (run.workspace_id !== input.workspaceId) {
+    throw new CoreError("NOT_FOUND", "Pending approval not found for run");
+  }
   const runEvents = await dependencies.eventLogRepo.queryByRunAll(run.run_id);
   const approvalState = getApprovalState(runEvents, input.approvalId);
   const resolvedAt = now();

@@ -66,7 +66,13 @@ describe("route list pagination", () => {
   it("paginates GET /runs/:id/messages", async () => {
     const app = new Hono();
     registerRunRoutes(app, {
-      runService: { create: vi.fn(), listByWorkspace: vi.fn(), countByWorkspace: vi.fn(), getById: vi.fn() },
+      runService: {
+        create: vi.fn(),
+        listByWorkspace: vi.fn(),
+        countByWorkspace: vi.fn(),
+        getById: vi.fn(async () => ({ run_id: "run-1", workspace_id: "ws-1" }))
+      },
+      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
       conversationService: {
         listMessages: vi.fn(async (_runId, page) => {
           expect(page).toEqual({ limit: 1, offset: 1 });
