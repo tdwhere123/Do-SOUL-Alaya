@@ -121,6 +121,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
     texts: readonly string[],
     options: {
       readonly timeoutMs: number;
+      readonly signal?: AbortSignal;
     }
   ): Promise<readonly Float32Array[]> {
     if (texts.length === 0) {
@@ -129,7 +130,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
 
     const extractor = await this.loadExtractor();
     const run = extractor([...texts], { pooling: "mean", normalize: true });
-    const output = await withTimeout(run, options.timeoutMs);
+    const output = await withTimeout(run, options.timeoutMs, options.signal);
     const rows = output.tolist();
     if (rows.length !== texts.length) {
       throw new Error(
@@ -241,22 +242,52 @@ async function defaultLocalOnnxPipelineLoader(
   return transformers.pipeline("feature-extraction", modelId, { dtype: "q8" });
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    return promise;
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<T> {
+  // The ONNX feature-extraction run is not cancellable, so on timeout/abort we
+  // discard the stale result and suppress its late rejection rather than letting
+  // it surface as an unhandledRejection.
+  promise.catch(() => undefined);
+
+  const controller = new AbortController();
+  if (signal !== undefined) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+    } else {
+      signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+    }
   }
+
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_resolve, reject) => {
+    return await new Promise<T>((resolve, reject) => {
+      const onAbort = (): void => {
+        reject(
+          controller.signal.reason instanceof Error
+            ? controller.signal.reason
+            : new Error(`Local ONNX embedding timed out after ${timeoutMs} ms.`)
+        );
+      };
+      if (controller.signal.aborted) {
+        onAbort();
+        return;
+      }
+      controller.signal.addEventListener("abort", onAbort, { once: true });
+      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
         timeoutHandle = setTimeout(
-          () => reject(new Error(`Local ONNX embedding timed out after ${timeoutMs} ms.`)),
+          () =>
+            controller.abort(
+              new Error(`Local ONNX embedding timed out after ${timeoutMs} ms.`)
+            ),
           timeoutMs
         );
         timeoutHandle.unref?.();
-      })
-    ]);
+      }
+      promise.then(resolve, reject);
+    });
   } finally {
     if (timeoutHandle !== null) {
       clearTimeout(timeoutHandle);

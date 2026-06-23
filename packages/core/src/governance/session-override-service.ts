@@ -13,6 +13,8 @@ import {
 import { CoreError } from "../shared/errors.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 
+const OVERRIDE_REHYDRATE_FAILED_WARNING_CODE = "ALAYA_SESSION_OVERRIDE_REHYDRATE_FAILED";
+
 export interface SessionOverrideServiceEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
@@ -242,8 +244,19 @@ export class SessionOverrideService {
     let events: readonly EventLogEntry[];
     try {
       events = await queryRunEventLog(this.dependencies.eventLogRepo, runId);
-    } catch {
-      return Object.freeze([]);
+    } catch (error) {
+      // Fail-closed: a read failure must not silently drop an operator hard-stop override.
+      process.emitWarning("[SessionOverrideService] Failed to rehydrate overrides from EventLog", {
+        code: OVERRIDE_REHYDRATE_FAILED_WARNING_CODE,
+        detail: JSON.stringify({
+          run_id: runId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      });
+      throw new CoreError("CONFLICT", `Failed to rehydrate session overrides for run ${runId}.`, {
+        subCode: "CONCURRENT_MODIFICATION",
+        cause: error instanceof Error ? error : undefined
+      });
     }
     const overrides = events
       .filter((event) => event.event_type === GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED)

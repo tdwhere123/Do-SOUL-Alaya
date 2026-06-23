@@ -22,6 +22,8 @@ import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../shared/
 
 const LEASE_DURATION_MS = 5 * 60 * 1000;
 
+const LEASE_REHYDRATE_FAILED_WARNING_CODE = "ALAYA_GOVERNANCE_LEASE_REHYDRATE_FAILED";
+
 const HIGH_SIGNAL_PIERCING_CONDITIONS: readonly Readonly<PiercingCondition>[] = Object.freeze([
   Object.freeze({
     condition_kind: GovernanceLeasePiercingConditionKindValue.UNSUBMITTED_CHANGES,
@@ -232,8 +234,19 @@ export class GovernanceLeaseService {
     let events: readonly EventLogEntry[];
     try {
       events = await queryRunEventLog(this.dependencies.eventLogRepo, runId);
-    } catch {
-      return null;
+    } catch (error) {
+      // Fail-closed: a read failure must not report "not held" and let a second worker race (§31).
+      process.emitWarning("[GovernanceLeaseService] Failed to rehydrate lease from EventLog", {
+        code: LEASE_REHYDRATE_FAILED_WARNING_CODE,
+        detail: JSON.stringify({
+          run_id: runId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      });
+      throw new CoreError("CONFLICT", `Failed to rehydrate governance lease for run ${runId}.`, {
+        subCode: "CONCURRENT_MODIFICATION",
+        cause: error instanceof Error ? error : undefined
+      });
     }
     let active: StoredLease | null = null;
     for (const event of events) {

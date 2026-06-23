@@ -252,6 +252,45 @@ describe("Janitor", () => {
     });
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
+
+  it("warns but still returns the original failure when reportCompletion rejects", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    try {
+      const taskFailure = new Error("storage unavailable");
+      const reportFailure = new Error("scheduler offline");
+      const { janitor } = createJanitor({
+        findExpiredObjects: vi.fn(async () => {
+          throw taskFailure;
+        }),
+        reportCompletion: vi.fn(async () => {
+          throw reportFailure;
+        })
+      });
+
+      const result = await janitor.run(createTask({ task_kind: GardenTaskKind.TTL_CLEANUP }));
+
+      expect(result).toMatchObject({
+        success: false,
+        error_message: "storage unavailable",
+        objects_affected: [],
+        audit_entries: []
+      });
+
+      const warnCall = emitWarning.mock.calls.find(
+        ([, options]) =>
+          typeof options === "object" &&
+          options !== null &&
+          "code" in options &&
+          options.code === "ALAYA_GARDEN_REPORT_COMPLETION_FAILED"
+      );
+      expect(warnCall).toBeDefined();
+      const detail = JSON.parse((warnCall?.[1] as { detail: string }).detail) as Record<string, unknown>;
+      expect(detail.task_error).toBe("storage unavailable");
+      expect(detail.report_error).toBe("scheduler offline");
+    } finally {
+      emitWarning.mockRestore();
+    }
+  });
 });
 
 function createJanitor(options: {
@@ -261,6 +300,7 @@ function createJanitor(options: {
     workspaceId: string,
     nowIso: string
   ) => Promise<readonly ExpiredControlPlaneObject[]>;
+  readonly reportCompletion?: () => Promise<void>;
 } = {}) {
   const cleanupPort = {
     findExpiredObjects:
@@ -273,7 +313,7 @@ function createJanitor(options: {
     demoteToWarm: vi.fn(async () => undefined)
   };
   const scheduler = {
-    reportCompletion: vi.fn(async () => undefined)
+    reportCompletion: options.reportCompletion ?? vi.fn(async () => undefined)
   };
 
   return {

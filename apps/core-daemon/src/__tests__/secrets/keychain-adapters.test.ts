@@ -121,6 +121,20 @@ describe("keychain adapters", () => {
     expect(runner.mock.calls[0]![1].join(" ")).not.toContain(secret);
   });
 
+  it.each([
+    { label: "value", service: "svc", account: "acct", secret: "sk\nadd-generic-password -s evil -a evil -w pwn -U", field: "value" },
+    { label: "CR value", service: "svc", account: "acct", secret: "sk\radd-generic-password", field: "value" },
+    { label: "service", service: "svc\nevil", account: "acct", secret: "sk", field: "service" },
+    { label: "account", service: "svc", account: "acct\nevil", secret: "sk", field: "account" }
+  ])("rejects macOS security -i $label newlines without invoking the runner", ({ service, account, secret, field }) => {
+    const runner = stubRunner({ code: 0, stdout: "", stderr: "" });
+
+    expect(() => writeMacosKeychainSecret(service, account, secret, runner)).toThrow(
+      `macOS Keychain ${field} must not contain newline characters.`
+    );
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   it("maps write tooling and command failures", () => {
     expect(writeLinuxKeychainSecret("svc", "acct", "secret", stubRunner({ code: null, stdout: "", stderr: "", error: enoent() }))).toMatchObject({
       kind: "keychain_tooling_unavailable"

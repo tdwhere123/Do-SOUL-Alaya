@@ -170,6 +170,52 @@ describe("LocalOnnxEmbeddingClient", () => {
     await expect(client.embedTexts(["x"], { timeoutMs: 5_000 })).rejects.toThrow(/dimensions/);
   });
 
+  it("times out a hung extractor run and discards the late result without an unhandledRejection", async () => {
+    let resolveLate: (rows: { dims: readonly number[]; tolist: () => readonly (readonly number[])[] }) => void =
+      () => {};
+    const extractor: LocalOnnxFeatureExtractor = () =>
+      new Promise((resolve) => {
+        resolveLate = resolve;
+      });
+    const client = new LocalOnnxEmbeddingClient({ pipelineLoader: async () => extractor });
+
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      await expect(client.embedTexts(["x"], { timeoutMs: 10 })).rejects.toThrow(/timed out/);
+      // The uncancellable run resolves after the timeout; the stale result is discarded.
+      resolveLate({ dims: [1, LOCAL_ONNX_EMBEDDING_DIMENSIONS], tolist: () => [dimRow(9)] });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  });
+
+  it("aborts via an external signal and suppresses the abandoned run's late rejection", async () => {
+    let rejectLate: (reason: unknown) => void = () => {};
+    const extractor: LocalOnnxFeatureExtractor = () =>
+      new Promise((_resolve, reject) => {
+        rejectLate = reject;
+      });
+    const client = new LocalOnnxEmbeddingClient({ pipelineLoader: async () => extractor });
+
+    const controller = new AbortController();
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      const pending = client.embedTexts(["x"], { timeoutMs: 5_000, signal: controller.signal });
+      controller.abort(new Error("caller cancelled"));
+      await expect(pending).rejects.toThrow(/caller cancelled/);
+      // The abandoned extractor rejects afterwards; it must not surface.
+      rejectLate(new Error("late extractor failure"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  });
+
   it("retries the pipeline load after a transient failure rather than caching it", async () => {
     let attempt = 0;
     const loader = vi.fn(async () => {

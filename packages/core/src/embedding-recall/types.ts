@@ -26,6 +26,9 @@ export interface EmbeddingProviderPort {
     texts: readonly string[],
     options: {
       readonly timeoutMs: number;
+      // Optional cooperative-cancellation signal. On timeout the provider may
+      // abort in-flight work; uncancellable backends discard the stale result.
+      readonly signal?: AbortSignal;
     }
   ): Promise<readonly Float32Array[]>;
 }

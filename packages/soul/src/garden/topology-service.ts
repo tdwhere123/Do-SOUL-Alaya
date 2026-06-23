@@ -94,10 +94,17 @@ export class TopologyService {
   ): Promise<readonly Readonly<PathGraphSnapshot>[] | undefined> {
     try {
       return await this.deps.snapshotHistory?.getHistory(workspaceId, TOPOLOGY_HISTORY_LIMIT);
-    } catch {
+    } catch (error) {
       // C-5 snapshots are only an optional historical overlay for the C-10
-      // derived view. If the overlay read fails, keep the topology projection
-      // available from active PathRelation state and omit the trend block.
+      // derived view, so the projection still returns; warn so a chronic
+      // snapshot-read failure stays visible.
+      process.emitWarning("[TopologyService] snapshot history read failed", {
+        code: "ALAYA_TOPOLOGY_HISTORY_READ_FAILED",
+        detail: JSON.stringify({
+          workspace_id: workspaceId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      });
       return undefined;
     }
   }

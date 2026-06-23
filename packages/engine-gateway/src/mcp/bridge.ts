@@ -54,15 +54,17 @@ export class McpBridge {
         if (!Object.hasOwn(allowedSoulToolNames, toolUse.name)) {
           return createErrorResult(toolUse.id, "unsupported tool");
         }
+        // Signal passed for future abort-aware handlers; withTimeout already
+        // suppresses a late reject so a timed-out handler cannot crash the daemon.
         return await withTimeout(
-          () => this.dependencies.soulHandler(toolUse, runtimeContext),
+          (_signal) => this.dependencies.soulHandler(toolUse, runtimeContext),
           resolveTimeoutMs()
         );
       }
 
       if (this.hasConversationToolName(toolUse.name)) {
         return await withTimeout(
-          () => this.toolsHandler(toolUse, runtimeContext),
+          (_signal) => this.toolsHandler(toolUse, runtimeContext),
           resolveTimeoutMs()
         );
       }
