@@ -51,11 +51,16 @@ interface Harness {
   readonly repoCreate: ReturnType<typeof vi.fn>;
   readonly events: EventLogEntry[];
   readonly recordPathRelationFailure: ReturnType<typeof vi.fn>;
+  readonly warn: ReturnType<typeof vi.fn>;
 }
 
-function buildHarness(owners: Record<string, string>): Harness {
+function buildHarness(
+  owners: Record<string, string>,
+  options: { readonly recordPathRelationFailure?: ReturnType<typeof vi.fn> } = {}
+): Harness {
   const events: EventLogEntry[] = [];
-  const recordPathRelationFailure = vi.fn();
+  const recordPathRelationFailure = options.recordPathRelationFailure ?? vi.fn();
+  const warn = vi.fn();
   const repoCreate = vi.fn((relation: any) => relation);
   const appendManyWithMutation = vi.fn(
     async <T,>(
@@ -85,10 +90,13 @@ function buildHarness(owners: Record<string, string>): Harness {
     eventPublisher: {
       appendManyWithMutation
     } as unknown as PathRelationProposalEventPublisherPort,
-    healthInboxPort: { recordPathRelationFailure },
+    healthInboxPort: { recordPathRelationFailure } as ConstructorParameters<
+      typeof PathRelationProposalService
+    >[0]["healthInboxPort"],
+    warn,
     generateId: () => "path-should-not-mint"
   });
-  return { service, repoCreate, events, recordPathRelationFailure };
+  return { service, repoCreate, events, recordPathRelationFailure, warn };
 }
 
 function candidate(overrides: Partial<SubmitCandidateInput> = {}): SubmitCandidateInput {
@@ -191,6 +199,26 @@ describe("PathRelationProposalService — object-anchor existence + ownership ga
     const clean = buildHarness({ "mem-source": "workspace-A", "mem-target": "workspace-A" });
     await clean.service.submitCandidate(candidate());
     expect(clean.recordPathRelationFailure).not.toHaveBeenCalled();
+  });
+
+  it("warns but still rejects gracefully when the health_inbox write throws on an anchor reject", async () => {
+    const recordPathRelationFailure = vi.fn(async () => {
+      throw new Error("inbox offline");
+    });
+    const harness = buildHarness({ "mem-source": "workspace-A" }, { recordPathRelationFailure });
+
+    const result = await harness.service.submitCandidate(candidate());
+
+    expect(result).toBe("rejected");
+    expect(recordPathRelationFailure).toHaveBeenCalledTimes(1);
+    expect(harness.warn).toHaveBeenCalledWith(
+      "PathRelation health-inbox write failed",
+      expect.objectContaining({
+        workspace_id: "workspace-A",
+        target_object_id: "mem-target",
+        error: "inbox offline"
+      })
+    );
   });
 
   it("does not mutate durable memory on the co-recall counter path when the pair object id is missing", async () => {

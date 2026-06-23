@@ -120,7 +120,15 @@ export class GraphContractService {
         workspaceId,
         GRAPH_CONTRACT_SNAPSHOT_HISTORY_LIMIT
       );
-    } catch {
+    } catch (error) {
+      // Optional history: the projection still returns without it; surface the swallow.
+      process.emitWarning("[GraphContractService] optional snapshot-history read failed", {
+        code: "ALAYA_GRAPH_CONTRACT_HISTORY_READ_FAILED",
+        detail: JSON.stringify({
+          workspace_id: workspaceId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      });
       return undefined;
     }
   }

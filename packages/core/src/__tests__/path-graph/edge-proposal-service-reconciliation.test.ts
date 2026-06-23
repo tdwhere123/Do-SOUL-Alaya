@@ -278,4 +278,45 @@ describe("EdgeProposalService", () => {
       expect.objectContaining({ workspaceId: "workspace-1", targetObjectId: "memory-a" })
     );
   });
+
+  it("surfaces a warning but still degrades the accept when the health_inbox write throws", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    try {
+      const repo = createProposalRepo();
+      const recordPathRelationFailure = vi.fn(async () => {
+        throw new Error("inbox offline");
+      });
+      const service = new EdgeProposalService({
+        memoryRepo: createMemoryRepo(),
+        proposalRepo: repo,
+        pathCandidatePort: { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "rejected") },
+        eventPublisher: createEventPublisher(),
+        healthInboxPort: { recordPathRelationFailure },
+        generateId: createIdGenerator(),
+        now: () => "2026-05-24T00:00:00.000Z"
+      });
+      const proposal = await service.proposeEdge({
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "recalls",
+        workspaceId: "workspace-1"
+      });
+      await expect(
+        service.batchReview({
+          workspaceId: "workspace-1",
+          verdict: "accept",
+          filter: { proposal_ids: [proposal.proposal_id] },
+          reason: null,
+          reviewerIdentity: "operator-1"
+        })
+      ).rejects.toMatchObject({ name: "CoreError", code: "OBLIGATION_VIOLATION" });
+      expect(recordPathRelationFailure).toHaveBeenCalledTimes(1);
+      expect(emitWarning).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ code: "ALAYA_PATH_FAILURE_INBOX_WRITE_FAILED" })
+      );
+    } finally {
+      emitWarning.mockRestore();
+    }
+  });
 });
