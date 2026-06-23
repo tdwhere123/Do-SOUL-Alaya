@@ -59,7 +59,15 @@ async function recordRecallFailureBestEffort(
 ): Promise<void> {
   try {
     await healthInbox.recordRecallFailure(entry);
-  } catch {
-    // best-effort projection; a health-inbox write must never break recall.
+  } catch (error) {
+    // best-effort projection; never break recall, but surface the swallow.
+    process.emitWarning("[RecallFailureHealthInbox] recall-failure health-inbox write failed", {
+      code: "ALAYA_RECALL_FAILURE_INBOX_WRITE_FAILED",
+      detail: JSON.stringify({
+        workspace_id: entry.workspaceId,
+        operation: entry.operation,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    });
   }
 }

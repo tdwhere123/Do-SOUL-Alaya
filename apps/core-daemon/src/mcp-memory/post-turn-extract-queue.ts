@@ -81,6 +81,9 @@ export function enqueueRecallExtractTask(
     if (isDuplicatePostTurnExtractTask(error)) {
       return;
     }
+    // recall enqueue is best-effort passive ingestion (§17): warn, never throw —
+    // throwing would regress the recall MCP response. (Contrast the report path
+    // below, which is caller-driven and rethrows.)
     params.warn("recall-driven extract task enqueue failed; skipping.", {
       workspace_id: workspaceId,
       run_id: runId,
@@ -138,6 +141,9 @@ export function enqueuePostTurnExtractTask(
     if (isDuplicatePostTurnExtractTask(error)) {
       return;
     }
+    // report path is caller-driven (report_context_usage), so a real enqueue
+    // failure rethrows to the caller — deliberately asymmetric with the
+    // best-effort recall path above.
     throw error;
   }
 }

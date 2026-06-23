@@ -153,8 +153,15 @@ export class WorkspaceNeighborScanner {
         ? await preparedQuery.waitForSnapshot(this.deps.queryTimeoutMs)
         : initialSnapshot;
       return resolveWorkspaceNeighborQuerySnapshot(snapshot, queryEmbeddingCacheHit);
-    } catch {
-      return failedWorkspaceNeighborQuery(queryEmbeddingCacheHit);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.deps.warn("embedding workspace neighbor scan failed", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        reason: "query_embedding_failed",
+        error: message
+      });
+      return failedWorkspaceNeighborQuery(queryEmbeddingCacheHit, "provider_failed", "query_embedding_failed", message);
     }
   }
 

@@ -237,6 +237,41 @@ describe("SurfaceDriftService", () => {
     );
   });
 
+  it("surfaces a warning with the lease id but still resolves when the witness publish itself fails", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    try {
+      const repo = createLeaseRepo({
+        findActiveById: vi.fn(async () => createLease()),
+        delete: vi.fn(() => {
+          throw new Error("delete failed");
+        })
+      });
+      const service = new SurfaceDriftService({
+        now: () => "2026-04-20T08:01:00.000Z",
+        leaseRepo: repo,
+        eventPublisher: createEventPublisher({
+          publish: vi.fn(async () => {
+            throw new Error("witness publish failed");
+          }),
+          appendManyWithMutation: vi.fn(async (inputs: any, mutate: any) => {
+            const entries = inputs.map((input: any) => createEventLogEntry(input));
+            return mutate(entries);
+          })
+        })
+      });
+
+      await expect(service.releaseLease("lease-1", "workspace-1", "user")).resolves.toBeUndefined();
+      expect(emitWarning).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ code: "ALAYA_SURFACE_DRIFT_RELEASE_WITNESS_FAILED" })
+      );
+      const detail = JSON.parse((emitWarning.mock.calls[0]![1] as { detail: string }).detail);
+      expect(detail).toMatchObject({ subject_id: "lease-1", workspace_id: "workspace-1" });
+    } finally {
+      emitWarning.mockRestore();
+    }
+  });
+
   it("preserves propagation failures without emitting a false lease release failure witness", async () => {
     const publishSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
       createEventLogEntry(event)

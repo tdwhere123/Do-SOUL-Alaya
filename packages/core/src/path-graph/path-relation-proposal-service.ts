@@ -449,8 +449,13 @@ export class PathRelationProposalService {
         targetObjectId,
         observedAt: this.now()
       });
-    } catch {
-      // best-effort projection: never break the mint flow on an inbox write.
+    } catch (error) {
+      // best-effort projection: never break the mint flow, but surface the swallow.
+      this.warn("PathRelation health-inbox write failed", {
+        workspace_id: workspaceId,
+        target_object_id: targetObjectId,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 

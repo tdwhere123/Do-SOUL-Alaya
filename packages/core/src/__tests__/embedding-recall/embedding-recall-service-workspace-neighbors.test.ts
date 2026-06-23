@@ -5,6 +5,8 @@ import {
   EmbeddingRecallService,
   type EmbeddingVectorRecord
 } from "../../embedding-recall/embedding-recall-service.js";
+import { WorkspaceNeighborScanner } from "../../embedding-recall/workspace-neighbor-scanner.js";
+import type { QueryEmbeddingEngine } from "../../embedding-recall/query-embedding-engine.js";
 import {
   createEmbeddingRecord,
   createProvider
@@ -323,5 +325,42 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     });
     expect(neighbors).toHaveLength(0);
     expect(listByWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("warns with the real error and degrades to empty hits when query-embedding preparation throws", async () => {
+    const warn = vi.fn();
+    const scanner = new WorkspaceNeighborScanner({
+      provider: createProvider({}),
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => []),
+        listByWorkspace: vi.fn(async () => [
+          createEmbeddingRecord({ object_id: "near", embedding: new Float32Array([0.05, 0.99]) })
+        ])
+      },
+      queryEngine: {
+        prepareQueryEmbedding: vi.fn(() => {
+          throw new Error("query engine exploded");
+        })
+      } as unknown as QueryEmbeddingEngine,
+      queryTimeoutMs: 1000,
+      warn
+    });
+
+    const result = await scanner.collectWorkspaceNeighborsWithMetadata({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "query",
+      excludeObjectIds: [],
+      maxNeighbors: 5
+    });
+
+    expect(result.hits).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(
+      "embedding workspace neighbor scan failed",
+      expect.objectContaining({
+        reason: "query_embedding_failed",
+        error: "query engine exploded"
+      })
+    );
   });
 });

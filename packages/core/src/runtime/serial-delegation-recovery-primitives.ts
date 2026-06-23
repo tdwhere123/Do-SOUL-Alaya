@@ -134,8 +134,17 @@ export class RecoveryPrimitives implements RecoveryPrimitivesPort {
   public async safeReportAsyncFailure(error: unknown, metadata: RecoveryMetadata): Promise<void> {
     try {
       await this.deps.reportAsyncFailure?.(error, metadata);
-    } catch {
-      // Reporter failures must never block fail-closed recovery.
+    } catch (reportError) {
+      // Reporter throw must not block fail-closed recovery; this warn is the only
+      // operator channel that the worker may remain in-flight.
+      process.emitWarning("[SerialDelegationRecovery] async-failure report failed; worker may remain in-flight", {
+        code: "ALAYA_WORKER_RECOVERY_REPORT_FAILED",
+        detail: JSON.stringify({
+          session_id: metadata.sessionId,
+          recovery_error: error instanceof Error ? error.message : String(error),
+          report_error: reportError instanceof Error ? reportError.message : String(reportError)
+        })
+      });
     }
   }
 

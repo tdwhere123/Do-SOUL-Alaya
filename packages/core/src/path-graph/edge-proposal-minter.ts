@@ -122,8 +122,16 @@ export class EdgeProposalMinter {
         targetObjectId,
         observedAt: this.deps.now()
       });
-    } catch {
-      // best-effort projection: never break the accept flow on an inbox write.
+    } catch (error) {
+      // best-effort projection: never break the accept flow, but surface the swallow.
+      process.emitWarning("[EdgeProposalMinter] path-failure health-inbox write failed", {
+        code: "ALAYA_PATH_FAILURE_INBOX_WRITE_FAILED",
+        detail: JSON.stringify({
+          workspace_id: workspaceId,
+          target_object_id: targetObjectId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      });
     }
   }
 }

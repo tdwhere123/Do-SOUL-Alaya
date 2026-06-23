@@ -63,32 +63,41 @@ describe("GraphContractService", () => {
     expect(graph.edges[0]!.relation.legitimacy.evidence_basis).toEqual(["evidence-1", "evidence-2"]);
   });
 
-  it("omits optional snapshot trend when history reads fail", async () => {
-    const service = new GraphContractService({
-      pathRelationRepo: {
-        findActiveAll: vi.fn(async () => [])
-      },
-      snapshotHistory: {
-        findHistory: vi.fn(async () => {
-          throw new Error("history unavailable");
-        })
-      },
-      now: () => new Date("2026-05-02T00:00:00.000Z")
-    });
+  it("omits optional snapshot trend and warns when history reads fail", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    try {
+      const service = new GraphContractService({
+        pathRelationRepo: {
+          findActiveAll: vi.fn(async () => [])
+        },
+        snapshotHistory: {
+          findHistory: vi.fn(async () => {
+            throw new Error("history unavailable");
+          })
+        },
+        now: () => new Date("2026-05-02T00:00:00.000Z")
+      });
 
-    const graph = await service.derive("workspace-1");
+      const graph = await service.derive("workspace-1");
 
-    expect(graph.nodes).toEqual([]);
-    expect(graph.edges).toEqual([]);
-    expect(graph.topology).toEqual({
-      total_nodes: 0,
-      total_edges: 0,
-      max_out_degree: 0,
-      max_in_degree: 0,
-      avg_degree: 0,
-      strongly_connected_components: 0
-    });
-    expect(graph.snapshot_trend).toBeUndefined();
+      expect(graph.nodes).toEqual([]);
+      expect(graph.edges).toEqual([]);
+      expect(graph.topology).toEqual({
+        total_nodes: 0,
+        total_edges: 0,
+        max_out_degree: 0,
+        max_in_degree: 0,
+        avg_degree: 0,
+        strongly_connected_components: 0
+      });
+      expect(graph.snapshot_trend).toBeUndefined();
+      expect(emitWarning).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ code: "ALAYA_GRAPH_CONTRACT_HISTORY_READ_FAILED" })
+      );
+    } finally {
+      emitWarning.mockRestore();
+    }
   });
 
   it("rereads the active PathRelation set for every derivation", async () => {

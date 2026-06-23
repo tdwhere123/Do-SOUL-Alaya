@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -223,4 +224,41 @@ describe("createReconciliationLlmDecisionPort", () => {
     expect(second.targetObjectId).toBeUndefined();
     expect(llmComplete).toHaveBeenCalledTimes(1);
   });
+
+  it("warns ALAYA_RECONCILIATION_CACHE_READ_FAILED and re-requests when the cache file is corrupt", async () => {
+    const llmComplete = vi.fn(async () =>
+      JSON.stringify({ kind: "add", reason: "distinct" })
+    );
+    const port = createReconciliationLlmDecisionPort({ config: baseConfig, cacheRoot, llmComplete });
+    const candidates = [{ objectId: "memory-a", content: "The user lives in Berlin" }];
+
+    // Populate the cache, then corrupt the exact file the port wrote.
+    await port!.decide({ incomingContent: "works in Munich", candidates });
+    const cacheFiles = await findCacheFiles(cacheRoot);
+    expect(cacheFiles).toHaveLength(1);
+    writeFileSync(cacheFiles[0]!, "{ corrupt", "utf8");
+
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    await port!.decide({ incomingContent: "works in Munich", candidates });
+
+    expect(emitWarning).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ code: "ALAYA_RECONCILIATION_CACHE_READ_FAILED" })
+    );
+    // corrupt read → cache miss → the LLM was called a second time
+    expect(llmComplete).toHaveBeenCalledTimes(2);
+  });
 });
+
+async function findCacheFiles(root: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const shard of await readdir(root)) {
+    const shardPath = join(root, shard);
+    for (const file of await readdir(shardPath)) {
+      if (file.endsWith(".json")) {
+        found.push(join(shardPath, file));
+      }
+    }
+  }
+  return found;
+}

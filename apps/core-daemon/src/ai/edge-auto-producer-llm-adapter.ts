@@ -192,7 +192,15 @@ async function requestAndCachePairVerdict(
   let raw: string;
   try {
     raw = await llmComplete(buildPrompt(pair), config);
-  } catch {
+  } catch (error) {
+    // LLM transport failed → fall back to local heuristic for this pair
+    process.emitWarning("[EdgeAutoProducer] pair classifier LLM call failed; falling back to heuristic", {
+      code: "ALAYA_EDGE_AUTO_PRODUCER_LLM_FAILED",
+      detail: JSON.stringify({
+        request_key: requestKey,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    });
     return null;
   }
   const parsed = parseVerdict(raw);
@@ -262,7 +270,15 @@ function readCachedVerdict(cacheRoot: string, requestKey: string): CachedVerdict
       rationale: typeof parsed.rationale === "string" ? parsed.rationale : "",
       decided_at: typeof parsed.decided_at === "string" ? parsed.decided_at : ""
     };
-  } catch {
+  } catch (error) {
+    // corrupt cache file → treated as a miss, which silently doubles LLM cost
+    process.emitWarning("[EdgeAutoProducer] verdict cache read failed; treating as miss", {
+      code: "ALAYA_EDGE_AUTO_PRODUCER_CACHE_READ_FAILED",
+      detail: JSON.stringify({
+        path: filePath,
+        code: (error as NodeJS.ErrnoException)?.code ?? (error instanceof Error ? error.name : "unknown")
+      })
+    });
     return undefined;
   }
 }
@@ -284,9 +300,11 @@ function parseVerdict(rawJson: string): {
   try {
     parsed = JSON.parse(rawJson);
   } catch {
+    emitMalformedVerdictWarning("non-json", rawJson);
     return { edgeType: "none", confidence: 0, rationale: "non-json response" };
   }
   if (typeof parsed !== "object" || parsed === null) {
+    emitMalformedVerdictWarning("non-object", rawJson);
     return { edgeType: "none", confidence: 0, rationale: "non-object response" };
   }
   const record = parsed as {
@@ -304,6 +322,13 @@ function parseVerdict(rawJson: string): {
       : 0;
   const rationale = typeof record.rationale === "string" ? record.rationale : "";
   return { edgeType, confidence, rationale };
+}
+
+function emitMalformedVerdictWarning(reason: "non-json" | "non-object", rawJson: string): void {
+  process.emitWarning("[EdgeAutoProducer] pair verdict was malformed; degrading to none", {
+    code: "ALAYA_EDGE_AUTO_PRODUCER_VERDICT_MALFORMED",
+    detail: JSON.stringify({ reason, raw_excerpt: rawJson.slice(0, 200) })
+  });
 }
 
 async function requestVerdictFromGarden(

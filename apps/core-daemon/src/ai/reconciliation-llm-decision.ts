@@ -275,7 +275,15 @@ function readCachedDecision(
       reason: typeof parsed.reason === "string" ? parsed.reason : "",
       decided_at: typeof parsed.decided_at === "string" ? parsed.decided_at : ""
     };
-  } catch {
+  } catch (error) {
+    // corrupt cache file → treated as a miss, which silently doubles LLM cost
+    process.emitWarning("[Reconciliation] decision cache read failed; treating as miss", {
+      code: "ALAYA_RECONCILIATION_CACHE_READ_FAILED",
+      detail: JSON.stringify({
+        path: filePath,
+        code: (error as NodeJS.ErrnoException)?.code ?? (error instanceof Error ? error.name : "unknown")
+      })
+    });
     return undefined;
   }
 }

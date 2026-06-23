@@ -50,15 +50,26 @@ export async function writeFile(
 
   try {
     const realParentDirectory = await realpath(parentDirectory);
-    const realWritableRoots = await Promise.all(
-      writableRoots.map(async (root) => {
-        try {
-          return await realpath(root);
-        } catch {
-          return path.resolve(root);
-        }
-      })
-    );
+    const realWritableRoots = (
+      await Promise.all(
+        writableRoots.map(async (root) => {
+          try {
+            return await realpath(root);
+          } catch (error) {
+            // unresolvable root: DROP it, never resolve() back — a non-canonical
+            // root would weaken the symlink boundary. Mirrors workspace-git-binding.
+            process.emitWarning("[ToolRuntime] dropping unresolvable writable root", {
+              code: "ALAYA_WRITABLE_ROOT_UNRESOLVABLE",
+              detail: JSON.stringify({
+                root,
+                code: (error as NodeJS.ErrnoException)?.code ?? "unknown"
+              })
+            });
+            return null;
+          }
+        })
+      )
+    ).filter((root): root is string => root !== null);
 
     if (!realWritableRoots.some((root) => isPathWithinRoot(realParentDirectory, root))) {
       return createAccessDenied("Path is outside the workspace boundary.");

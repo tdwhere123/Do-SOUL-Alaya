@@ -76,7 +76,16 @@ async function defaultCountActiveWorktrees(): Promise<number> {
       .split("\n")
       .filter((line) => line.startsWith("worktree "))
       .length;
-  } catch {
+  } catch (error) {
+    // git failed: 0 here means "could not determine", not "zero worktrees" —
+    // the schema's active_worktrees is a NonNegativeInt with no unknown variant,
+    // so surface the degradation via a warning rather than silently reporting 0.
+    process.emitWarning("[EnvironmentStatus] active worktree count unavailable; reporting 0", {
+      code: "ALAYA_WORKTREE_COUNT_UNAVAILABLE",
+      detail: JSON.stringify({
+        error: error instanceof Error ? error.message : String(error)
+      })
+    });
     return 0;
   }
 }

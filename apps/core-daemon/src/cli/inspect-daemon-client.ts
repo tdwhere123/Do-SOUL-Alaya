@@ -107,7 +107,13 @@ export async function defaultGetWorkspaceById(
   if (!response.ok) {
     return { status: "error", detail: `HTTP ${response.status}` };
   }
-  const payload = (await response.json().catch(() => ({}))) as { readonly data?: unknown };
+  // a 200 with unparseable JSON is a broken daemon, not an empty-ok workspace
+  let payload: { readonly data?: unknown };
+  try {
+    payload = (await response.json()) as { readonly data?: unknown };
+  } catch {
+    return { status: "error", detail: "non-JSON response" };
+  }
   return { status: "ok", workspace: coerceWorkspaceSummary(payload?.data) };
 }
 

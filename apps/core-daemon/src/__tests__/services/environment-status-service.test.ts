@@ -95,8 +95,9 @@ describe("environment status service", () => {
     );
   });
 
-  it("falls back to false and zero when probes and worktree counting fail", async () => {
+  it("falls back to false and zero and warns ALAYA_WORKTREE_COUNT_UNAVAILABLE when git fails", async () => {
     childProcessMock.gitWorktreeState = { kind: "failure", error: new Error("boom") };
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
 
     const service = createEnvironmentStatusService({
       toolNames: ["git", "node"],
@@ -114,6 +115,12 @@ describe("environment status service", () => {
       db_path: "/tmp/alaya.db",
       files_dir: "/tmp/alaya-files"
     });
+    // 0 here means "unknown" (git failed), and that degradation is surfaced.
+    expect(emitWarning).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ code: "ALAYA_WORKTREE_COUNT_UNAVAILABLE" })
+    );
+    emitWarning.mockRestore();
   });
 
   it("starts tool probes and worktree counting concurrently", async () => {

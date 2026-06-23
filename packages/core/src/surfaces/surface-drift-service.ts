@@ -21,6 +21,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import { EventPublisherPropagationError } from "../runtime/event-publisher.js";
+import { reportAsyncSideEffectFailure } from "../runtime/async-side-effect-auditor.js";
 import { SYSTEM_ACTOR } from "../shared/actors.js";
 import { addDuration, readNow } from "../shared/time.js";
 import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../shared/validators.js";
@@ -317,8 +318,24 @@ export class SurfaceDriftService {
           failed_at: failedAt
         })
       });
-    } catch {
-      // Keep release non-fatal for already-applied durable mutations even if the witness publish fails.
+    } catch (error) {
+      // Keep release non-fatal even if the witness publish fails; surface the swallow.
+      // Routed warn-only (no eventLogRepo): the failing path IS the EventLog publish.
+      await reportAsyncSideEffectFailure(
+        {
+          source: "SurfaceDriftService",
+          operation: "lease_release_failure_witness_publish",
+          subjectType: "surface_drift_lease",
+          subjectId: lease.lease_id,
+          workspaceId: lease.workspace_id,
+          runId: null,
+          causedBy: releasedBy,
+          warningCode: "ALAYA_SURFACE_DRIFT_RELEASE_WITNESS_FAILED",
+          warningMessage: "[SurfaceDriftService] lease-release failure witness publish failed",
+          now: this.dependencies.now
+        },
+        error
+      );
     }
   }
 }
