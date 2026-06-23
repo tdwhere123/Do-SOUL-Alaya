@@ -24,10 +24,11 @@ import {
 
 import {
   BENCH_DAEMON_MANAGED_ENV_KEYS,
-  startBenchDaemon,
   type BenchDaemonHandle,
   type BenchSignalSeedInput
 } from "../../harness/daemon.js";
+
+import { withBenchDaemon } from "./bench-daemon.test-support.js";
 
 import {
   closeBenchDaemonResources,
@@ -261,100 +262,101 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       };
 
       // ---- POSITIVE: edge minted -> sibling delivered via the path plane ----
-      const positiveDaemon = await startBenchDaemon({
-        workspaceId: "harness-co-recall-fanin-ws",
-        runId: "harness-co-recall-fanin-run"
-      });
-      handles.push(positiveDaemon);
-      const positive = await seedFaninWorld(positiveDaemon);
+      await withBenchDaemon(
+        {
+          workspaceId: "harness-co-recall-fanin-ws",
+          runId: "harness-co-recall-fanin-run"
+        },
+        async (positiveDaemon) => {
+          const positive = await seedFaninWorld(positiveDaemon);
 
-      // Earn the co_recalled edge between anchor and sibling through the
-      // production gate (decoys are NOT in the pair, so they grow no edges).
-      const summary = await positiveDaemon.accrueSessionCoRecall([
-        positive.anchorId,
-        positive.siblingId
-      ]);
-      expect(summary.minted).toBe(1);
+          // Earn the co_recalled edge between anchor and sibling through the
+          // production gate (decoys are NOT in the pair, so they grow no edges).
+          const summary = await positiveDaemon.accrueSessionCoRecall([
+            positive.anchorId,
+            positive.siblingId
+          ]);
+          expect(summary.minted).toBe(1);
 
-      // BUDGET below the decoy count (DECOY_COUNT=15 + anchor = 16 content
-      // candidates): the budget can hold all the query-relevant content hits
-      // but cannot also fit the content-irrelevant sibling on fused rank alone.
-      const positiveRecall = await positiveDaemon.recall(QUERY, {
-        maxResults: FANIN_MAX_RESULTS
-      });
-      const positiveIds = new Set(
-        positiveRecall.results.map((r) => r.object_id)
+          // BUDGET below the decoy count (DECOY_COUNT=15 + anchor = 16 content
+          // candidates): the budget can hold all the query-relevant content hits
+          // but cannot also fit the content-irrelevant sibling on fused rank alone.
+          const positiveRecall = await positiveDaemon.recall(QUERY, {
+            maxResults: FANIN_MAX_RESULTS
+          });
+          const positiveIds = new Set(
+            positiveRecall.results.map((r) => r.object_id)
+          );
+
+          // The anchor is the direct content hit.
+          expect(positiveIds).toContain(positive.anchorId);
+          // The sibling is DELIVERED (within budget) only because the earned
+          // co_recalled edge fans it in across the unified path plane.
+          expect(positiveIds).toContain(positive.siblingId);
+          const positiveSiblingDiag = findCandidateDiagnostic(
+            positiveRecall.diagnostics,
+            positive.siblingId
+          );
+          expect(positiveSiblingDiag).toBeDefined();
+          expect(positiveSiblingDiag!.within_budget).toBe(true);
+          expect(positiveSiblingDiag!.final_rank).not.toBeNull();
+          // The edge's load-bearing signal: the sibling carries the path-plane
+          // admission (path_expansion is the direct 1-hop pass of the same unified
+          // path plane graph_expansion's multi-hop traversal belongs to). This
+          // plane and its non-null RRF stream rank CANNOT exist without the edge.
+          // see also: packages/core/src/recall/recall-service.ts (path_expansion /
+          //   graph_expansion share the unified path plane; the double-count guard
+          //   credits path_expansion when the 1-hop pass already admitted a target)
+          expect(positiveSiblingDiag!.admission_planes).toContain("path_expansion");
+          expect(positiveSiblingDiag!.per_stream_rank.path_expansion).not.toBeNull();
+        }
       );
-
-      // The anchor is the direct content hit.
-      expect(positiveIds).toContain(positive.anchorId);
-      // The sibling is DELIVERED (within budget) only because the earned
-      // co_recalled edge fans it in across the unified path plane.
-      expect(positiveIds).toContain(positive.siblingId);
-      const positiveSiblingDiag = findCandidateDiagnostic(
-        positiveRecall.diagnostics,
-        positive.siblingId
-      );
-      expect(positiveSiblingDiag).toBeDefined();
-      expect(positiveSiblingDiag!.within_budget).toBe(true);
-      expect(positiveSiblingDiag!.final_rank).not.toBeNull();
-      // The edge's load-bearing signal: the sibling carries the path-plane
-      // admission (path_expansion is the direct 1-hop pass of the same unified
-      // path plane graph_expansion's multi-hop traversal belongs to). This
-      // plane and its non-null RRF stream rank CANNOT exist without the edge.
-      // see also: packages/core/src/recall/recall-service.ts (path_expansion /
-      //   graph_expansion share the unified path plane; the double-count guard
-      //   credits path_expansion when the 1-hop pass already admitted a target)
-      expect(positiveSiblingDiag!.admission_planes).toContain("path_expansion");
-      expect(positiveSiblingDiag!.per_stream_rank.path_expansion).not.toBeNull();
-
-      // The harness allows only one active daemon per process, so shut the
-      // positive daemon down before the negative-control daemon starts.
-      await positiveDaemon.shutdown();
-      handles.splice(handles.indexOf(positiveDaemon), 1);
 
       // ---- NEGATIVE CONTROL: NO edge -> sibling ABSENT from recall ----
-      const negativeDaemon = await startBenchDaemon({
-        workspaceId: "harness-co-recall-fanin-negctl-ws",
-        runId: "harness-co-recall-fanin-negctl-run"
-      });
-      handles.push(negativeDaemon);
-      const negative = await seedFaninWorld(negativeDaemon);
-      // Deliberately DO NOT call accrueSessionCoRecall: no co_recalled edge.
+      await withBenchDaemon(
+        {
+          workspaceId: "harness-co-recall-fanin-negctl-ws",
+          runId: "harness-co-recall-fanin-negctl-run"
+        },
+        async (negativeDaemon) => {
+          const negative = await seedFaninWorld(negativeDaemon);
+          // Deliberately DO NOT call accrueSessionCoRecall: no co_recalled edge.
 
-      const negativeRecall = await negativeDaemon.recall(QUERY, {
-        maxResults: FANIN_MAX_RESULTS
-      });
-      const negativeIds = new Set(
-        negativeRecall.results.map((r) => r.object_id)
-      );
+          const negativeRecall = await negativeDaemon.recall(QUERY, {
+            maxResults: FANIN_MAX_RESULTS
+          });
+          const negativeIds = new Set(
+            negativeRecall.results.map((r) => r.object_id)
+          );
 
-      // The anchor still delivers (direct content hit) — the world is otherwise
-      // byte-identical, isolating the edge as the only difference.
-      expect(negativeIds).toContain(negative.anchorId);
-      // Without the edge the sibling is ABSENT from the delivered top-N. The
-      // query-relevant decoys outrank it on fused rank and the budget excludes
-      // it: with no path edge there is no path-plane admission to win it a
-      // delivery slot above the content hits.
-      expect(negativeIds).not.toContain(negative.siblingId);
-      const negativeSiblingDiag = findCandidateDiagnostic(
-        negativeRecall.diagnostics,
-        negative.siblingId
+          // The anchor still delivers (direct content hit) — the world is otherwise
+          // byte-identical, isolating the edge as the only difference.
+          expect(negativeIds).toContain(negative.anchorId);
+          // Without the edge the sibling is ABSENT from the delivered top-N. The
+          // query-relevant decoys outrank it on fused rank and the budget excludes
+          // it: with no path edge there is no path-plane admission to win it a
+          // delivery slot above the content hits.
+          expect(negativeIds).not.toContain(negative.siblingId);
+          const negativeSiblingDiag = findCandidateDiagnostic(
+            negativeRecall.diagnostics,
+            negative.siblingId
+          );
+          // The shared bench-seed domain_tag_cluster still admits the sibling to the
+          // candidate POOL (so a diagnostic row may exist), but with NO path edge it
+          // carries no path_expansion admission and is budget-dropped — proving the
+          // positive delivery was the edge's path-plane lift, not a content/floor
+          // freebie. (If the pool ejected it entirely there is no row, which is an
+          // even stronger absence — both outcomes satisfy the negative control.)
+          if (negativeSiblingDiag !== undefined) {
+            expect(negativeSiblingDiag.within_budget).toBe(false);
+            expect(negativeSiblingDiag.final_rank).toBeNull();
+            expect(negativeSiblingDiag.admission_planes).not.toContain(
+              "path_expansion"
+            );
+            expect(negativeSiblingDiag.per_stream_rank.path_expansion).toBeNull();
+          }
+        }
       );
-      // The shared bench-seed domain_tag_cluster still admits the sibling to the
-      // candidate POOL (so a diagnostic row may exist), but with NO path edge it
-      // carries no path_expansion admission and is budget-dropped — proving the
-      // positive delivery was the edge's path-plane lift, not a content/floor
-      // freebie. (If the pool ejected it entirely there is no row, which is an
-      // even stronger absence — both outcomes satisfy the negative control.)
-      if (negativeSiblingDiag !== undefined) {
-        expect(negativeSiblingDiag.within_budget).toBe(false);
-        expect(negativeSiblingDiag.final_rank).toBeNull();
-        expect(negativeSiblingDiag.admission_planes).not.toContain(
-          "path_expansion"
-        );
-        expect(negativeSiblingDiag.per_stream_rank.path_expansion).toBeNull();
-      }
     },
     120_000
   );

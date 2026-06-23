@@ -47,6 +47,8 @@ import {
   type CompileSeedExtractionConfig
 } from "../../longmemeval/compile-seed.js";
 
+import { withBenchDaemon } from "./bench-daemon.test-support.js";
+
 const handles: BenchDaemonHandle[] = [];
 
 const tmpRoots: string[] = [];
@@ -352,31 +354,31 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
     "uses configured reviewer credentials and restores managed env on shutdown",
     async () => {
       const savedEnv = snapshotManagedEnv();
-      const daemon = await startBenchDaemon({
-        workspaceId: "harness-reviewer-config-ws",
-        runId: "harness-reviewer-config-run",
-        reviewerIdentity: "user:bench-configured-reviewer",
-        reviewerToken: "configured-bench-review-token"
-      });
-      handles.push(daemon);
-
-      expect(process.env.ALAYA_REVIEWER_IDENTITY).toBe("user:bench-configured-reviewer");
-      expect(process.env.ALAYA_REVIEWER_TOKEN).toBe("configured-bench-review-token");
-      const seed = await daemon.proposeMemory(
-        "Reviewer credentials should come from bench configuration.",
-        "harness-reviewer-config-evidence"
+      await withBenchDaemon(
+        {
+          workspaceId: "harness-reviewer-config-ws",
+          runId: "harness-reviewer-config-run",
+          reviewerIdentity: "user:bench-configured-reviewer",
+          reviewerToken: "configured-bench-review-token"
+        },
+        async (daemon) => {
+          expect(process.env.ALAYA_REVIEWER_IDENTITY).toBe("user:bench-configured-reviewer");
+          expect(process.env.ALAYA_REVIEWER_TOKEN).toBe("configured-bench-review-token");
+          const seed = await daemon.proposeMemory(
+            "Reviewer credentials should come from bench configuration.",
+            "harness-reviewer-config-evidence"
+          );
+          const row = initDatabase({ filename: join(daemon.dataDir, "alaya.db") })
+            .connection.prepare(
+              `SELECT reviewer_identity AS reviewerIdentity
+                 FROM proposals
+                WHERE proposal_id = ?`
+            )
+            .get(seed.proposalId) as { readonly reviewerIdentity: string };
+          expect(row.reviewerIdentity).toBe("user:bench-configured-reviewer");
+        }
       );
-      const row = initDatabase({ filename: join(daemon.dataDir, "alaya.db") })
-        .connection.prepare(
-          `SELECT reviewer_identity AS reviewerIdentity
-             FROM proposals
-            WHERE proposal_id = ?`
-        )
-        .get(seed.proposalId) as { readonly reviewerIdentity: string };
-      expect(row.reviewerIdentity).toBe("user:bench-configured-reviewer");
-
-      await daemon.shutdown();
-      handles.splice(handles.indexOf(daemon), 1);
+      // shutdown (inside withBenchDaemon) restores the managed env.
       expect(snapshotManagedEnv()).toEqual(savedEnv);
     },
     60_000
