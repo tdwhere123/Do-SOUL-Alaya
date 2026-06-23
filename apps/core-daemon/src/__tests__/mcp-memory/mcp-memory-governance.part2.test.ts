@@ -65,6 +65,7 @@ describe("mcp memory governance", () => {
     const workflow = createMcpMemoryProposalWorkflow({
       now: () => "2026-04-30T00:00:00.000Z",
       generateObjectId: () => proposal.proposal_id,
+      reviewerIdentityBinding: { token: "reviewer-token", identity: "user:alice" },
       eventLogRepo: {
         append: async () => {
           throw new Error("append must not be called from review path");
@@ -132,7 +133,8 @@ describe("mcp memory governance", () => {
         proposal_id: proposal.proposal_id,
         verdict: "accept",
         reason: "human reviewer in Inspector",
-        reviewer_identity: "user:alice"
+        reviewer_identity: "user:alice",
+        reviewer_token: "reviewer-token"
       },
       // Human-reviewer surface: runId === null. Workspace matches.
       { workspaceId: "ws1", runId: null, agentTarget: "inspector", sessionId: "session-1" }

@@ -20,12 +20,45 @@ describe("SoulApprovalService", () => {
       service.approve({
         approvalId: "approval-1",
         runId: "run-1",
+        workspaceId: "ws-1",
         causedBy: "user_action"
       })
     ).rejects.toMatchObject({
       code: "NOT_FOUND",
       message: "Pending approval not found for run"
     });
+    expect(eventLogRepo.append).not.toHaveBeenCalled();
+    expect(runtimeNotifier.notifyEntry).not.toHaveBeenCalled();
+  });
+
+  it("throws NOT_FOUND when the run belongs to a different workspace and resolves nothing", async () => {
+    const eventLogRepo = createEventLogRepo([
+      createApprovalRequestedEvent({ approvalId: "approval-1", runId: "run-1" })
+    ]);
+    const runtimeNotifier = { notifyEntry: vi.fn() };
+    const queryByRunAll = eventLogRepo.queryByRunAll as ReturnType<typeof vi.fn>;
+    const service = createSoulApprovalService({
+      eventLogRepo,
+      runLookup: vi.fn(async () => ({
+        run_id: "run-1",
+        workspace_id: "ws-a"
+      })),
+      runtimeNotifier,
+      now: () => "2026-04-01T00:00:00.000Z"
+    });
+
+    await expect(
+      service.approve({
+        approvalId: "approval-1",
+        runId: "run-1",
+        workspaceId: "ws-b",
+        causedBy: "user_action"
+      })
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "Pending approval not found for run"
+    });
+    expect(queryByRunAll).not.toHaveBeenCalled();
     expect(eventLogRepo.append).not.toHaveBeenCalled();
     expect(runtimeNotifier.notifyEntry).not.toHaveBeenCalled();
   });
@@ -57,6 +90,7 @@ describe("SoulApprovalService", () => {
       service.reject({
         approvalId: "approval-1",
         runId: "run-1",
+        workspaceId: "ws-1",
         causedBy: "user_action"
       })
     ).rejects.toMatchObject({
@@ -105,6 +139,7 @@ describe("SoulApprovalService", () => {
       service.reject({
         approvalId: "approval-1",
         runId: "run-1",
+        workspaceId: "ws-1",
         causedBy: "user_action"
       })
     ).rejects.toMatchObject({
@@ -141,6 +176,7 @@ describe("SoulApprovalService", () => {
       service.approve({
         approvalId: "approval-1",
         runId: "run-1",
+        workspaceId: "ws-1",
         causedBy: "user_action"
       })
     ).resolves.toEqual({
@@ -206,6 +242,7 @@ describe("SoulApprovalService", () => {
       service.approve({
         approvalId: "approval-1",
         runId: "run-1",
+        workspaceId: "ws-1",
         causedBy: "user_action"
       })
     ).resolves.toEqual({
@@ -251,6 +288,7 @@ describe("SoulApprovalService", () => {
       service.approve({
         approvalId: "approval-1",
         runId: "run-1",
+        workspaceId: "ws-1",
         causedBy: "user_action"
       })
     ).resolves.toEqual({
@@ -303,6 +341,7 @@ describe("SoulApprovalService", () => {
       service.reject({
         approvalId: "approval-1",
         runId: "run-1",
+        workspaceId: "ws-1",
         causedBy: "user_action"
       })
     ).rejects.toMatchObject({

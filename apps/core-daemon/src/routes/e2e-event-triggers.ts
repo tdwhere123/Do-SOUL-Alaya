@@ -18,6 +18,9 @@ export interface E2eEventTriggerRouteServices {
       readonly workspace_id: string;
     }>;
   };
+  readonly workspaceService: {
+    getById(workspaceId: string): Promise<unknown>;
+  };
   readonly eventLogRepo: {
     append(
       event: Omit<EventLogEntry, "event_id" | "created_at" | "revision"> & {
@@ -35,6 +38,12 @@ export function registerE2eEventTriggerRoutes(
   app: Hono,
   services: E2eEventTriggerRouteServices
 ): void {
+  // Loud at startup: these unauthenticated event-injection routes append real
+  // EventLog entries and must never reach production (double-gated in wiring).
+  process.emitWarning(
+    "E2E event-trigger routes (/__e2e/events/*) are ENABLED — inject arbitrary EventLog entries. Never enable in production.",
+    { type: "AlayaSecurityWarning", code: "ALAYA_E2E_EVENT_TRIGGERS_ENABLED" }
+  );
   registerSoulApprovalRequestedRoute(app, services);
   registerDirtyStatePanicRoute(app, services);
 }
@@ -104,7 +113,9 @@ async function loadTriggeredRun(
   body: Readonly<Record<string, unknown>>
 ) {
   const runId = readRequiredString(body, "run_id");
-  return await services.runService.getById(runId);
+  const run = await services.runService.getById(runId);
+  await services.workspaceService.getById(run.workspace_id);
+  return run;
 }
 
 function createSoulApprovalRequestedEvent(

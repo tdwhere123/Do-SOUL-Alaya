@@ -24,24 +24,33 @@ export function registerConflictMatrixRoutes(app: Hono, services: ConflictMatrix
     return context.json({ success: true, data: edges }, 200);
   });
 
-  app.post("/conflict-matrix-edges", async (context) => {
+  app.post("/workspaces/:wsId/conflict-matrix-edges", async (context) => {
+    const workspaceId = context.req.param("wsId");
+    await services.workspaceService.getById(workspaceId);
+
     const body = (await parseJsonBody(context.req.json.bind(context.req))) as CreateEdgePayload;
     const payload = parseCreateEdgePayload(body);
 
-    const created = await services.arbitrationService.createEdge({
-      source_claim_id: payload.source_claim_id,
-      target_claim_id: payload.target_claim_id,
-      edge_type: payload.edge_type,
-      created_by: payload.created_by ?? "user_action"
-    });
+    const created = await services.arbitrationService.createEdge(
+      {
+        source_claim_id: payload.source_claim_id,
+        target_claim_id: payload.target_claim_id,
+        edge_type: payload.edge_type,
+        created_by: payload.created_by ?? "user_action"
+      },
+      workspaceId
+    );
 
     return context.json({ success: true, data: created }, 201);
   });
 
-  app.delete("/conflict-matrix-edges/:id", async (context) => {
+  app.delete("/workspaces/:wsId/conflict-matrix-edges/:id", async (context) => {
     const unexpectedBody = await rejectUnexpectedRequestBody(context);
     if (unexpectedBody !== null) return unexpectedBody;
-    await services.arbitrationService.deleteEdge(context.req.param("id"));
+    const workspaceId = context.req.param("wsId");
+    await services.workspaceService.getById(workspaceId);
+
+    await services.arbitrationService.deleteEdge(context.req.param("id"), workspaceId);
     return context.json({ success: true, data: null }, 200);
   });
 

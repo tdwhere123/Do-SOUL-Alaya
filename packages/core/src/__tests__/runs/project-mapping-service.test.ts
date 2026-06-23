@@ -453,4 +453,27 @@ it("derives strict policy from the underlying memory dimension and defaults tomb
       ConfirmationPolicy.PER_ITEM
     );
   });
+
+  it("reject returns NOT_FOUND for an anchor bound to a different workspace and does not transition", async () => {
+    const anchor = Object.freeze(createAnchor({ object_id: "mapping-foreign", workspace_id: "workspace-1" }));
+    const updateState = vi.fn(async () => {});
+    const { dependencies, appendSpy } = createDependencies({
+      projectMappingRepo: {
+        create: vi.fn(async () => {}),
+        findById: vi.fn(async (objectId: string) => (objectId === anchor.object_id ? anchor : null)),
+        findByIds: vi.fn(async () => []),
+        findByWorkspace: vi.fn(async () => []),
+        findByGlobalObjectId: vi.fn(async () => anchor),
+        updateState,
+        listPending: vi.fn(async () => [])
+      }
+    });
+    const service = new ProjectMappingService(dependencies);
+
+    await expect(service.reject(anchor.object_id, "workspace-b")).rejects.toMatchObject({
+      code: "NOT_FOUND"
+    });
+    expect(updateState).not.toHaveBeenCalled();
+    expect(appendSpy).not.toHaveBeenCalled();
+  });
 });

@@ -252,6 +252,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       eventLogRepo,
       proposalRepo,
       runtimeNotifier: { notifyEntry: vi.fn() },
+      reviewerIdentityBinding: { token: "reviewer-token", identity: "user:inspector" },
       memoryService: {
         findByIdScoped: async (objectId, workspaceId) => {
           const memory = await memoryEntryRepo.findById(objectId);
@@ -270,7 +271,8 @@ describe("proposal routes (HTTP surface narrowed)", () => {
           proposal_id: proposalId,
           verdict: "accept",
           reason: "approved associative link",
-          reviewer_identity: "user:inspector"
+          reviewer_identity: "user:inspector",
+          reviewer_token: "reviewer-token"
         },
         {
           workspaceId: "ws-1",

@@ -19,6 +19,7 @@ export interface SoulApprovalResolution {
 export interface SoulApprovalActionInput {
   readonly approvalId: string;
   readonly runId: string;
+  readonly workspaceId: string;
   readonly causedBy: string;
 }
 
@@ -72,16 +73,13 @@ export function registerSoulRoutes(app: Hono, services: SoulRouteServices): void
   const graphExploreService = services.graphExploreService;
 
   if (graphExploreService !== undefined) {
-    app.get("/soul/memories/:objectId/graph-neighbors", async (context) => {
+    app.get("/workspaces/:workspaceId/soul/memories/:objectId/graph-neighbors", async (context) => {
       const memoryId = context.req.param("objectId").trim();
-      const workspaceId = (context.req.query("workspace_id") ?? "").trim();
+      const workspaceId = parseRequiredString(context.req.param("workspaceId"), "workspaceId is required");
+      await services.workspaceService.getById(workspaceId);
 
       if (memoryId.length === 0) {
         throw new CoreError("VALIDATION", "objectId is required");
-      }
-
-      if (workspaceId.length === 0) {
-        throw new CoreError("VALIDATION", "workspace_id is required");
       }
 
       const direction = parseGraphExploreDirection(context.req.query("direction"));
@@ -98,26 +96,32 @@ export function registerSoulRoutes(app: Hono, services: SoulRouteServices): void
   const approvalService = services.approvalService;
 
   if (approvalService !== undefined) {
-    app.post("/soul/approval/:approvalId/approve", async (context) => {
+    app.post("/workspaces/:workspaceId/soul/approval/:approvalId/approve", async (context) => {
+      const workspaceId = parseRequiredString(context.req.param("workspaceId"), "workspaceId is required");
+      await services.workspaceService.getById(workspaceId);
       const approvalId = parseRequiredString(context.req.param("approvalId"), "approvalId is required");
       const body = await parseJsonBody(context.req.json.bind(context.req));
       const runId = parseRunIdFromBody(body);
       const resolution = await approvalService.approve({
         approvalId,
         runId,
+        workspaceId,
         causedBy: "user_action"
       });
 
       return context.json({ success: true, data: resolution }, 200);
     });
 
-    app.post("/soul/approval/:approvalId/reject", async (context) => {
+    app.post("/workspaces/:workspaceId/soul/approval/:approvalId/reject", async (context) => {
+      const workspaceId = parseRequiredString(context.req.param("workspaceId"), "workspaceId is required");
+      await services.workspaceService.getById(workspaceId);
       const approvalId = parseRequiredString(context.req.param("approvalId"), "approvalId is required");
       const body = await parseJsonBody(context.req.json.bind(context.req));
       const runId = parseRunIdFromBody(body);
       const resolution = await approvalService.reject({
         approvalId,
         runId,
+        workspaceId,
         causedBy: "user_action"
       });
 

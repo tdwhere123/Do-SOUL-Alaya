@@ -167,6 +167,19 @@ export class SynthesisService {
     return this.dependencies.synthesisCapsuleRepo.findById(objectId);
   }
 
+  // invariant: scoped lookup hides cross-workspace capsules so handlers cannot
+  // distinguish them from missing objects (mirrors memoryService.findByIdScoped).
+  public async findByIdScoped(
+    objectId: string,
+    workspaceId: string
+  ): Promise<Readonly<SynthesisCapsule> | null> {
+    const capsule = await this.dependencies.synthesisCapsuleRepo.findById(objectId);
+    if (capsule === null || capsule.workspace_id !== workspaceId) {
+      return null;
+    }
+    return capsule;
+  }
+
   public findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<SynthesisCapsule>[]> {
     return this.dependencies.synthesisCapsuleRepo.findByWorkspaceId(workspaceId);
   }

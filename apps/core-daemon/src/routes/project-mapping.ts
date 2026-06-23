@@ -78,10 +78,17 @@ function registerProjectMappingTransitionRoute(
   app: Hono,
   services: ProjectMappingRouteServices
 ): void {
-  app.patch("/soul/project-mapping-anchors/:id/transition", async (context) => {
+  app.patch("/workspaces/:wsId/soul/project-mapping-anchors/:id/transition", async (context) => {
+    const workspaceId = parseRequiredString(context.req.param("wsId"), "wsId is required");
+    await services.workspaceService.getById(workspaceId);
     const mappingId = parseRequiredString(context.req.param("id"), "id is required");
     const body = await parseTransitionRequest(context.req.json.bind(context.req));
-    const anchor = await transitionProjectMappingAnchor(services.projectMappingService, mappingId, body);
+    const anchor = await transitionProjectMappingAnchor(
+      services.projectMappingService,
+      mappingId,
+      workspaceId,
+      body
+    );
 
     return context.json(
       {
@@ -135,6 +142,7 @@ function registerProjectMappingBatchAcceptRoute(
 async function transitionProjectMappingAnchor(
   service: ProjectMappingService,
   mappingId: string,
+  workspaceId: string,
   body: {
     readonly action: ProjectMappingTransitionAction;
     readonly accepted_by?: AcceptedBy;
@@ -142,15 +150,15 @@ async function transitionProjectMappingAnchor(
 ): Promise<ProjectMappingAnchor> {
   switch (body.action) {
     case "accept":
-      return await service.accept(mappingId, body.accepted_by ?? AcceptedBy.USER);
+      return await service.accept(mappingId, body.accepted_by ?? AcceptedBy.USER, workspaceId);
     case "reject":
-      return await service.reject(mappingId);
+      return await service.reject(mappingId, workspaceId);
     case "adapt":
-      return await service.adapt(mappingId);
+      return await service.adapt(mappingId, workspaceId);
     case "not_applicable":
-      return await service.setNotApplicable(mappingId);
+      return await service.setNotApplicable(mappingId, workspaceId);
     case "probationary":
-      return await service.setProbationary(mappingId);
+      return await service.setProbationary(mappingId, workspaceId);
   }
 }
 

@@ -79,10 +79,10 @@ export async function addSemanticSupplementCandidates(params: SemanticSupplement
 const MAX_SUBQUERY_ANCHORS = 4;
 const MIN_SUBQUERY_ANCHOR_QUOTA = 8;
 
-// A/B kill switches; both default on for production-equivalent recall.
-function envEnabled(name: string): boolean {
+// Opt-in flags, default OFF: the anchor lane is recall-neutral and slower.
+function envOptIn(name: string): boolean {
   const raw = process.env[name];
-  return raw !== "off" && raw !== "0" && raw !== "false";
+  return raw === "on" || raw === "1" || raw === "true";
 }
 
 type AnchorSearchFn = (
@@ -98,7 +98,7 @@ async function addAnchorLaneCandidates(
   params: SemanticSupplementParams,
   objectIds: readonly string[]
 ): Promise<void> {
-  if (params.anchors.required.length === 0 || !envEnabled("ALAYA_RECALL_ANCHOR_LANE")) {
+  if (params.anchors.required.length === 0 || !envOptIn("ALAYA_RECALL_ANCHOR_LANE")) {
     return;
   }
   const memoryRepo = params.context.dependencies.memoryRepo;
@@ -126,7 +126,7 @@ function shouldSplitAnchors(params: SemanticSupplementParams): boolean {
   return (
     params.anchors.required.length >= 2 &&
     intentSplitsByAnchor(params.intent) &&
-    envEnabled("ALAYA_RECALL_SUBQUERY")
+    envOptIn("ALAYA_RECALL_SUBQUERY")
   );
 }
 

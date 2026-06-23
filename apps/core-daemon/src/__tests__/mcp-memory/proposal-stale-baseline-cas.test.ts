@@ -108,6 +108,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
       eventLogRepo,
       proposalRepo,
       runtimeNotifier: { notifyEntry: async () => {} },
+      reviewerIdentityBinding: { token: "reviewer-token", identity: "user:reviewer" },
       memoryService
     });
 
@@ -134,7 +135,8 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
           proposal_id: first.proposal_id,
           verdict: "accept",
           reason: "accept first",
-          reviewer_identity: "user:reviewer"
+          reviewer_identity: "user:reviewer",
+          reviewer_token: "reviewer-token"
         },
         { workspaceId: "ws-cas-create", runId: null, agentTarget: "inspector", sessionId: "session-1" }
       )
@@ -146,7 +148,8 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
           proposal_id: second.proposal_id,
           verdict: "accept",
           reason: "accept second after target changed",
-          reviewer_identity: "user:reviewer"
+          reviewer_identity: "user:reviewer",
+          reviewer_token: "reviewer-token"
         },
         { workspaceId: "ws-cas-create", runId: null, agentTarget: "inspector", sessionId: "session-1" }
       )
@@ -190,6 +193,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
       eventLogRepo,
       proposalRepo,
       runtimeNotifier: { notifyEntry: async () => {} },
+      reviewerIdentityBinding: { token: "reviewer-token", identity: "user:reviewer" },
       memoryService: staleBaselineMemoryService
     });
 
@@ -208,7 +212,8 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
           proposal_id: created.proposal_id,
           verdict: "accept",
           reason: "approved despite stale baseline",
-          reviewer_identity: "user:reviewer"
+          reviewer_identity: "user:reviewer",
+          reviewer_token: "reviewer-token"
         },
         { workspaceId: "ws-cas-1", runId: null, agentTarget: "inspector", sessionId: "session-1" }
       )
@@ -262,6 +267,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
       eventLogRepo,
       proposalRepo,
       runtimeNotifier: { notifyEntry: async () => {} },
+      reviewerIdentityBinding: { token: "reviewer-token", identity: "user:reviewer" },
       memoryService: matchingBaselineMemoryService
     });
 
@@ -279,7 +285,8 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
         proposal_id: created.proposal_id,
         verdict: "accept",
         reason: "approved against matching baseline",
-        reviewer_identity: "user:reviewer"
+        reviewer_identity: "user:reviewer",
+        reviewer_token: "reviewer-token"
       },
       { workspaceId: "ws-cas-2", runId: null, agentTarget: "inspector", sessionId: "session-1" }
     );

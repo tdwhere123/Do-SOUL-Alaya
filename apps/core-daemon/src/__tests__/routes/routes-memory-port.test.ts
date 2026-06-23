@@ -6,6 +6,7 @@ import { registerRecallRoutes } from "../../routes/recall.js";
 import { registerEvidenceRoutes } from "../../routes/evidence.js";
 import { registerClaimRoutes } from "../../routes/claims.js";
 import { registerSynthesisRoutes } from "../../routes/syntheses.js";
+import { registerErrorHandler } from "../../middleware/error-handler.js";
 import { registerProposalRoutes } from "../../routes/proposals.js";
 import { registerGlobalMemoryRoutes } from "../../routes/global-memory.js";
 import { registerSignalRoutes } from "../../routes/signals.js";
@@ -123,38 +124,79 @@ describe("routes-memory port batch", () => {
     expect(services.evidenceService.findById).not.toHaveBeenCalled();
   });
 
-  it("registerClaimRoutes resolves claims by id", async () => {
+  it("registerClaimRoutes resolves claims by workspace-scoped id", async () => {
     const app = new Hono();
     const services = {
       workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
-      claimService: { findByWorkspaceId: vi.fn(), findById: vi.fn(async () => ({ object_id: "c1" })) }
+      claimService: {
+        findByWorkspaceId: vi.fn(),
+        findByIdScoped: vi.fn(async () => ({ object_id: "c1", workspace_id: "ws-1" }))
+      }
     };
     registerClaimRoutes(app, services as any);
 
-    const response = await app.request("/claims/c1");
+    const response = await app.request("/workspaces/ws-1/claims/c1");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       success: true,
-      data: { object_id: "c1" }
+      data: { object_id: "c1", workspace_id: "ws-1" }
     });
-    expect(services.claimService.findById).toHaveBeenCalledWith("c1");
+    expect(services.workspaceService.getById).toHaveBeenCalledWith("ws-1");
+    expect(services.claimService.findByIdScoped).toHaveBeenCalledWith("c1", "ws-1");
   });
 
-  it("registerSynthesisRoutes resolves syntheses by id", async () => {
+  it("registerClaimRoutes returns 404 for a claim bound to a foreign workspace", async () => {
+    const app = new Hono();
+    registerErrorHandler(app, { error: vi.fn() });
+    const services = {
+      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-b" })) },
+      claimService: {
+        findByWorkspaceId: vi.fn(),
+        findByIdScoped: vi.fn(async () => null)
+      }
+    };
+    registerClaimRoutes(app, services as any);
+
+    const response = await app.request("/workspaces/ws-b/claims/c1");
+    expect(response.status).toBe(404);
+    expect(services.claimService.findByIdScoped).toHaveBeenCalledWith("c1", "ws-b");
+  });
+
+  it("registerSynthesisRoutes resolves syntheses by workspace-scoped id", async () => {
     const app = new Hono();
     const services = {
       workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
-      synthesisService: { findByWorkspaceId: vi.fn(), findById: vi.fn(async () => ({ object_id: "s1" })) }
+      synthesisService: {
+        findByWorkspaceId: vi.fn(),
+        findByIdScoped: vi.fn(async () => ({ object_id: "s1", workspace_id: "ws-1" }))
+      }
     };
     registerSynthesisRoutes(app, services as any);
 
-    const response = await app.request("/syntheses/s1");
+    const response = await app.request("/workspaces/ws-1/syntheses/s1");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       success: true,
-      data: { object_id: "s1" }
+      data: { object_id: "s1", workspace_id: "ws-1" }
     });
-    expect(services.synthesisService.findById).toHaveBeenCalledWith("s1");
+    expect(services.synthesisService.findByIdScoped).toHaveBeenCalledWith("s1", "ws-1");
+  });
+
+  it("registerSynthesisRoutes returns 404 for a capsule bound to a foreign workspace", async () => {
+    const app = new Hono();
+    registerErrorHandler(app, { error: vi.fn() });
+    const services = {
+      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-b" })) },
+      synthesisService: {
+        findByWorkspaceId: vi.fn(),
+        findByIdScoped: vi.fn(async () => null)
+      }
+    };
+    registerSynthesisRoutes(app, services as any);
+
+    const response = await app.request("/workspaces/ws-b/syntheses/s1");
+    expect(response.status).toBe(404);
+    expect(services.synthesisService.findByIdScoped).toHaveBeenCalledWith("s1", "ws-b");
   });
 
   it("registerProposalRoutes does not expose POST /proposals/:id/review", async () => {

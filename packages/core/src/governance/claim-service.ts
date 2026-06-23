@@ -130,6 +130,19 @@ export class ClaimService {
     return this.dependencies.claimFormRepo.findById(objectId);
   }
 
+  // invariant: scoped lookup hides cross-workspace claims so handlers cannot
+  // distinguish them from missing objects (mirrors memoryService.findByIdScoped).
+  public async findByIdScoped(
+    objectId: string,
+    workspaceId: string
+  ): Promise<Readonly<ClaimForm> | null> {
+    const claim = await this.dependencies.claimFormRepo.findById(objectId);
+    if (claim === null || claim.workspace_id !== workspaceId) {
+      return null;
+    }
+    return claim;
+  }
+
   public findByCanonicalKey(workspaceId: string, canonicalKey: string): Promise<readonly Readonly<ClaimForm>[]> {
     return this.dependencies.claimFormRepo.findByCanonicalKey(workspaceId, canonicalKey);
   }

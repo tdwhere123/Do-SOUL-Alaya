@@ -58,9 +58,13 @@ export class ArbitrationService {
     return await this.dependencies.conflictMatrixRepo.findByWorkspace(parsedWorkspaceId);
   }
 
-  public async createEdge(input: ConflictMatrixEdgeInput): Promise<Readonly<ConflictMatrixEdge>> {
+  public async createEdge(
+    input: ConflictMatrixEdgeInput,
+    workspaceId: string
+  ): Promise<Readonly<ConflictMatrixEdge>> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
     const parsedInput = parseEdgeInput(input);
-    const { sourceClaim } = await this.requireClaimsForEdge(parsedInput);
+    const { sourceClaim } = await this.requireClaimsForEdge(parsedInput, parsedWorkspaceId);
     const timestamp = this.now();
     const edge = buildConflictMatrixEdge(this.generateObjectId, parsedInput, sourceClaim.workspace_id, timestamp);
     const event = await this.dependencies.eventLogRepo.append(buildConflictMatrixEdgeCreatedEntry(edge));
@@ -69,11 +73,13 @@ export class ArbitrationService {
     return created;
   }
 
-  public async deleteEdge(edgeId: string): Promise<void> {
+  public async deleteEdge(edgeId: string, workspaceId: string): Promise<void> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
     const parsedEdgeId = parseObjectId(edgeId, "edge_id");
     const existing = await this.dependencies.conflictMatrixRepo.findById(parsedEdgeId);
 
-    if (existing === null) {
+    // Cross-workspace edges are indistinguishable from missing ones.
+    if (existing === null || existing.workspace_id !== parsedWorkspaceId) {
       throw new CoreError("NOT_FOUND", "Conflict matrix edge not found");
     }
 
@@ -136,13 +142,19 @@ export class ArbitrationService {
     };
   }
 
-  public async resolveSlotConflict(slotId: string, winnerClaimId: string): Promise<Readonly<Slot>> {
+  public async resolveSlotConflict(
+    slotId: string,
+    winnerClaimId: string,
+    workspaceId: string
+  ): Promise<Readonly<Slot>> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
     const parsedSlotId = parseObjectId(slotId, "slot_id");
     const parsedWinnerClaimId = parseObjectId(winnerClaimId, "winner_claim_id");
 
     const slot = await this.dependencies.slotRepo.findById(parsedSlotId);
 
-    if (slot === null) {
+    // Cross-workspace slots are indistinguishable from missing ones.
+    if (slot === null || slot.workspace_id !== parsedWorkspaceId) {
       throw new CoreError("NOT_FOUND", "Slot not found");
     }
 
@@ -281,16 +293,18 @@ export class ArbitrationService {
     return [...edgesById.values()];
   }
 
-  private async requireClaimsForEdge(input: ConflictMatrixEdgeInput): Promise<{
+  private async requireClaimsForEdge(input: ConflictMatrixEdgeInput, workspaceId: string): Promise<{
     readonly sourceClaim: Readonly<ClaimForm>;
     readonly targetClaim: Readonly<ClaimForm>;
   }> {
     const sourceClaim = await this.dependencies.claimRepo.findById(input.source_claim_id);
     const targetClaim = await this.dependencies.claimRepo.findById(input.target_claim_id);
-    if (sourceClaim === null) {
+    // Cross-workspace claims are indistinguishable from missing ones so the
+    // edge cannot bridge or leak across the bound workspace.
+    if (sourceClaim === null || sourceClaim.workspace_id !== workspaceId) {
       throw new CoreError("NOT_FOUND", "Source claim not found");
     }
-    if (targetClaim === null) {
+    if (targetClaim === null || targetClaim.workspace_id !== workspaceId) {
       throw new CoreError("NOT_FOUND", "Target claim not found");
     }
     if (sourceClaim.workspace_id !== targetClaim.workspace_id) {

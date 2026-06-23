@@ -15,8 +15,11 @@ export function registerSynthesisRoutes(app: Hono, services: SynthesisRouteServi
     return context.json({ success: true, data: syntheses }, 200);
   });
 
-  app.get("/syntheses/:id", async (context) => {
-    const synthesis = await services.synthesisService.findById(context.req.param("id"));
+  app.get("/workspaces/:wsId/syntheses/:id", async (context) => {
+    const workspaceId = context.req.param("wsId");
+    await services.workspaceService.getById(workspaceId);
+
+    const synthesis = await services.synthesisService.findByIdScoped(context.req.param("id"), workspaceId);
 
     if (synthesis === null) {
       throw new CoreError("NOT_FOUND", "Synthesis capsule not found");

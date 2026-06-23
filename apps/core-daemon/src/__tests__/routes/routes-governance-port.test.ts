@@ -158,7 +158,43 @@ describe("routes-governance port batch", () => {
     expect(services.securityStatusService.getStatus).toHaveBeenCalledWith("ws-1");
   });
 
-  it("registerConflictMatrixRoutes creates conflict edges through arbitration service", async () => {
+  it("registerConflictMatrixRoutes creates conflict edges through workspace-bound arbitration service", async () => {
+    const app = new Hono();
+    const services = {
+      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
+      arbitrationService: {
+        listEdgesByWorkspace: vi.fn(),
+        createEdge: vi.fn(async () => ({ object_id: "edge-1" })),
+        deleteEdge: vi.fn(),
+        rebuildConflictMatrix: vi.fn()
+      }
+    };
+    registerConflictMatrixRoutes(app, services as any);
+
+    const response = await app.request("/workspaces/ws-1/conflict-matrix-edges", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        source_claim_id: "claim-a",
+        target_claim_id: "claim-b",
+        edge_type: "supports"
+      })
+    });
+
+    expect(response.status).toBe(201);
+    expect(services.workspaceService.getById).toHaveBeenCalledWith("ws-1");
+    expect(services.arbitrationService.createEdge).toHaveBeenCalledWith(
+      {
+        source_claim_id: "claim-a",
+        target_claim_id: "claim-b",
+        edge_type: "supports",
+        created_by: "user_action"
+      },
+      "ws-1"
+    );
+  });
+
+  it("registerConflictMatrixRoutes does not expose the unscoped POST /conflict-matrix-edges route", async () => {
     const app = new Hono();
     const services = {
       workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
@@ -181,13 +217,8 @@ describe("routes-governance port batch", () => {
       })
     });
 
-    expect(response.status).toBe(201);
-    expect(services.arbitrationService.createEdge).toHaveBeenCalledWith({
-      source_claim_id: "claim-a",
-      target_claim_id: "claim-b",
-      edge_type: "supports",
-      created_by: "user_action"
-    });
+    expect(response.status).toBe(404);
+    expect(services.arbitrationService.createEdge).not.toHaveBeenCalled();
   });
 
   it("registerBudgetRoutes snapshots and resolves bankruptcy proposals", async () => {

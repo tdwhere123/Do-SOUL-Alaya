@@ -161,4 +161,64 @@ describe("proposal review inspector cli parity", () => {
       }
     ]);
   });
+
+  it("rejects an Inspector review with 400 when no reviewer binding is configured and writes no review event", async () => {
+    const proposal = createProposal();
+    const appendSpy = vi.fn(async () => {
+      throw new Error("append must not be called when the reviewer binding is missing");
+    });
+    const notifySpy = vi.fn(async () => {});
+    const updateSpy = vi.fn(async () => {
+      throw new Error("resolution must not be written without a reviewer binding");
+    });
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => "prop-1",
+      // No reviewerIdentityBinding: the Inspector surface asserts identity over
+      // the network and must be rejected rather than forging the audit trail.
+      eventLogRepo: { append: appendSpy, queryByEntity: async () => [] },
+      proposalRepo: {
+        create: async () => proposal,
+        createProposalWithEvents: async () => ({ proposal, events: [] }),
+        findById: async () => proposal,
+        findScopedById: async () => ({
+          proposal,
+          workspace_id: "ws1",
+          run_id: null,
+          reviewer_assignment: null,
+          proposed_changes: { content: "approved locally" }
+        }),
+        findPendingSummaries: async () => [],
+        acceptPendingMemoryUpdateWithEvents: updateSpy,
+        updatePendingResolutionWithEvents: updateSpy
+      },
+      runtimeNotifier: { notifyEntry: notifySpy },
+      memoryService: {
+        findByIdScoped: async (objectId: string) => ({ object_id: objectId }),
+        validateUpdate: async () => {},
+        update: async (objectId: string, fields) => createParityMemoryEntry({ object_id: objectId, ...fields })
+      }
+    });
+
+    await expect(
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: "prop-1",
+          verdict: "accept",
+          reason: "approved locally",
+          reviewer_identity: "user:payload-override"
+        },
+        {
+          workspaceId: "ws1",
+          runId: null,
+          agentTarget: "inspector",
+          sessionId: "inspector-no-binding-review"
+        }
+      )
+    ).rejects.toMatchObject({ code: "VALIDATION", message: "reviewer binding not configured" });
+
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(notifySpy).not.toHaveBeenCalled();
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
 });

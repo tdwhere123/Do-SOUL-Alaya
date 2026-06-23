@@ -412,5 +412,5 @@ async function adoptGlobalMemoryEntry(
     return anchor;
   }
 
-  return await projectMappingService.accept(anchor.object_id, acceptedBy);
+  return await projectMappingService.accept(anchor.object_id, acceptedBy, input.workspace_id);
 }

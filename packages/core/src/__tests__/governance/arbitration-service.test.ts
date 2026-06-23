@@ -205,18 +205,66 @@ describe("ArbitrationService", () => {
       target_claim_id: CLAIM_ID_B,
       edge_type: "incompatible_with",
       created_by: "reviewer"
-    });
+    }, WORKSPACE_ID);
 
     expect(edge.edge_type).toBe("incompatible_with");
     expect(order).toEqual(["event_log", "repo_create"]);
     expect(broadcastSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("createEdge rejects when a claim belongs to a different workspace and does not persist", async () => {
+    const claimA = createClaim({ object_id: CLAIM_ID_A, workspace_id: "workspace-other" });
+    const claimB = createClaim({ object_id: CLAIM_ID_B, workspace_id: "workspace-other" });
+    const { dependencies, broadcastSpy } = createDependencies({ claims: [claimA, claimB] });
+    const createSpy = dependencies.conflictMatrixRepo.create as ReturnType<typeof vi.fn>;
+    const service = new ArbitrationService(dependencies);
+
+    await expect(
+      service.createEdge(
+        {
+          source_claim_id: CLAIM_ID_A,
+          target_claim_id: CLAIM_ID_B,
+          edge_type: "incompatible_with",
+          created_by: "reviewer"
+        },
+        WORKSPACE_ID
+      )
+    ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Source claim not found" });
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(broadcastSpy).not.toHaveBeenCalled();
+  });
+
+  it("deleteEdge returns NOT_FOUND for an edge bound to a different workspace and does not delete", async () => {
+    const edge = createEdge({ workspace_id: "workspace-other" });
+    const { dependencies } = createDependencies({ edges: [edge] });
+    const deleteSpy = dependencies.conflictMatrixRepo.delete as ReturnType<typeof vi.fn>;
+    const service = new ArbitrationService(dependencies);
+
+    await expect(service.deleteEdge(edge.object_id, WORKSPACE_ID)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "Conflict matrix edge not found"
+    });
+    expect(deleteSpy).not.toHaveBeenCalled();
+  });
+
+  it("resolveSlotConflict returns NOT_FOUND for a slot bound to a different workspace", async () => {
+    const slot = createSlot({ winner_claim_id: CLAIM_ID_A, workspace_id: "workspace-other" });
+    const claimA = createClaim({ object_id: CLAIM_ID_A, workspace_id: "workspace-other" });
+    const { dependencies, updateWinnerSpy } = createDependencies({ slot, claims: [claimA], edges: [] });
+    const service = new ArbitrationService(dependencies);
+
+    await expect(service.resolveSlotConflict(slot.object_id, CLAIM_ID_A, WORKSPACE_ID)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "Slot not found"
+    });
+    expect(updateWinnerSpy).not.toHaveBeenCalled();
+  });
+
   it("returns NOT_FOUND when deleting a non-existent conflict edge", async () => {
     const { dependencies } = createDependencies();
     const service = new ArbitrationService(dependencies);
 
-    await expect(service.deleteEdge(EDGE_ID)).rejects.toMatchObject({
+    await expect(service.deleteEdge(EDGE_ID, WORKSPACE_ID)).rejects.toMatchObject({
       code: "NOT_FOUND",
       message: "Conflict matrix edge not found"
     });
@@ -307,7 +355,7 @@ describe("ArbitrationService", () => {
     });
     const service = new ArbitrationService(dependencies);
 
-    const updated = await service.resolveSlotConflict(slot.object_id, CLAIM_ID_B);
+    const updated = await service.resolveSlotConflict(slot.object_id, CLAIM_ID_B, WORKSPACE_ID);
 
     expect(updated.winner_claim_id).toBe(CLAIM_ID_B);
     expect(updateWinnerSpy).toHaveBeenCalledTimes(1);
@@ -343,7 +391,7 @@ describe("ArbitrationService", () => {
     });
     const service = new ArbitrationService(dependencies);
 
-    await expect(service.resolveSlotConflict(slot.object_id, CLAIM_ID_B)).rejects.toMatchObject({
+    await expect(service.resolveSlotConflict(slot.object_id, CLAIM_ID_B, WORKSPACE_ID)).rejects.toMatchObject({
       code: "VALIDATION",
       message: "winner_claim_id must match a candidate claim in slot"
     });
