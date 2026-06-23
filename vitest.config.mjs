@@ -51,7 +51,20 @@ export default defineConfig({
         "**/*.{test,spec}.ts",
         "**/dist/**",
         "bin/**"
-      ]
+      ],
+      // Ratchet floor: thresholds run PER-PROJECT (run-vitest-projects.mjs runs
+      // each project separately with --coverage.enabled), so a single global
+      // floor must hold for EVERY project. Set below the weakest measured
+      // project (bench-runner lines/statements ~42%, engine-gateway branches
+      // 14% / functions 30%); raise as projects improve. perFile off so it
+      // gates the project aggregate.
+      thresholds: {
+        perFile: false,
+        statements: 40,
+        lines: 40,
+        functions: 25,
+        branches: 10
+      }
     }
   },
 });

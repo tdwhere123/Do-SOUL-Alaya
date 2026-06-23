@@ -4,14 +4,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { initDatabase, SqliteMemoryEntryRepo } from "@do-soul/alaya-storage";
 import { createRecallReadWorkerClient } from "../../runtime/recall-read-worker-client.js";
 
 const builtWorkerUrl = new URL("../../../dist/runtime/recall-read-worker.js", import.meta.url);
-const describeIfBuilt = existsSync(fileURLToPath(builtWorkerUrl)) ? describe : describe.skip;
 
-describeIfBuilt("RecallReadWorkerClient", () => {
+describe("RecallReadWorkerClient", () => {
+  // Loud failure (not skip): the wave gate builds before testing, so a missing
+  // dist is a real regression, never an excuse to silently pass.
+  beforeAll(() => {
+    if (!existsSync(fileURLToPath(builtWorkerUrl))) {
+      throw new Error("Built recall-read-worker dist missing. Run `rtk pnpm build` before this test.");
+    }
+  });
+
   it("keeps the daemon event loop available during a file-backed SQLite recall read", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-test-"));
     const database = initDatabase({ filename: join(directory, "alaya.db") });

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   initDatabase,
   SqliteGardenTaskRepo,
+  SqliteMemoryEntryRepo,
   SqliteSignalRepo,
   type GardenTaskEventPublisherPort
 } from "@do-soul/alaya-storage";
@@ -295,14 +296,40 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   it(
     "rejects seeds when signal does not materialize a memory_entry",
     async () => {
-      // A low-confidence emission should route to "deferred" (no memory created).
-      // We can't easily inject a low-confidence path through the public
-      // proposeMemory helper, so this test documents the failure mode:
-      // proposeMemory throws if the materializer did not produce a memory.
-      // The wiring is tested indirectly by the happy-path test above and
-      // the materialization-router unit tests in packages/soul.
-      expect(true).toBe(true);
-    }
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-deferred-ws",
+        runId: "harness-deferred-run"
+      });
+      handles.push(daemon);
+
+      // confidence 0.1 (< router floor 0.5 and < 0.3) routes the signal to
+      // "deferred" — no memory_entry. Driven through the same in-process
+      // signalService.receiveSignal seam the production POST_TURN_EXTRACT path uses.
+      const { seeds, dropped } = await daemon.proposeMemoriesFromCompileSignals([
+        {
+          signalKind: "potential_preference",
+          objectKind: "preference",
+          confidence: 0.1,
+          distilledFact: "Bob might prefer tea, unconfirmed.",
+          turnContent: "Maybe I sometimes drink tea, not sure.",
+          matchedText: "drink tea",
+          evidenceRef: "harness-deferred-q0-f0",
+          turnSeedIndex: 0,
+          extractionProvider: "official_api_compile"
+        }
+      ]);
+
+      expect(seeds).toHaveLength(0);
+      expect(dropped).toHaveLength(1);
+      expect(dropped[0]?.reason).toBe("candidate_absent");
+
+      // The materialization-router deferred the signal: no memory_entry exists.
+      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+      const memoryRepo = new SqliteMemoryEntryRepo(db);
+      const memories = await memoryRepo.findByWorkspaceIdAll(daemon.workspaceId);
+      expect(memories).toHaveLength(0);
+    },
+    60_000
   );
 
   it(

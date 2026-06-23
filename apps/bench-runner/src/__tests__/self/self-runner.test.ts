@@ -6,6 +6,11 @@ import { KpiPayloadSchema } from "@do-soul/alaya-eval";
 import { runSelfBench } from "../../self/runner.js";
 import { SYNTHETIC_SCENARIOS } from "../../self/scenarios.js";
 
+// Mirrors the release gate's R@5 floor (scripts/ci/self-benchmark-gate.mjs,
+// ALAYA_CI_SELF_BENCH_MIN_R_AT_5 default 0.95). Overridable so a local box can
+// relax it; CI leaves it at the gate constant.
+const MIN_R_AT_5 = Number(process.env.ALAYA_SELF_BENCH_MIN_R5 ?? "0.95");
+
 let tmpDir: string;
 
 beforeEach(async () => {
@@ -44,6 +49,9 @@ describe("Self bench runner", () => {
       expect(kpi.r_at_1).toBeLessThanOrEqual(1);
       expect(kpi.r_at_5).toBeGreaterThanOrEqual(0);
       expect(kpi.r_at_5).toBeLessThanOrEqual(1);
+      // The release gate fails the build below this floor; the test must too, so
+      // a recall regression that surfaces only distractors fails here, not in CI.
+      expect(kpi.r_at_5).toBeGreaterThanOrEqual(MIN_R_AT_5);
       expect(kpi.r_at_10).toBeGreaterThanOrEqual(0);
       expect(kpi.r_at_10).toBeLessThanOrEqual(1);
 
@@ -62,13 +70,11 @@ describe("Self bench runner", () => {
       expect(actualIds).toEqual(expectedIds);
 
       // Distractor-pressure check: with 3-5 unrelated memories seeded
-      // alongside each scenario's 1-2 setup utterances, the scoring is
-      // no longer a tautology. The exact R@K depends on the daemon's
-      // recall ranking against the FTS-derived scores; the values are
-      // bounded in [0, 1] (already asserted above). R@K of 0 means the
-      // recall did not surface the seeded setup above distractors;
-      // that is real recall behavior on a 5–7-memory workspace, not a
-      // harness bug. Surface the values so reviewers can see them.
+      // alongside each scenario's 1-2 setup utterances, the scoring is no
+      // longer a tautology. R@5 must clear MIN_R_AT_5 (asserted above) — the
+      // recall MUST surface the seeded setup above distractors; an R@5 that
+      // drops below the floor is a regression, not acceptable behavior.
+      // Surface the values so reviewers can see them.
       // eslint-disable-next-line no-console
       console.log(
         `[self-bench distractor pressure] r_at_1=${kpi.r_at_1} r_at_5=${kpi.r_at_5} r_at_10=${kpi.r_at_10} tier_hot=${kpi.tier_distribution.hot} tier_warm=${kpi.tier_distribution.warm} tier_cold=${kpi.tier_distribution.cold} degrade_none=${kpi.degradation_reasons.none} degrade_warm=${kpi.degradation_reasons.warm_cascade_engaged} degrade_cold=${kpi.degradation_reasons.cold_cascade_engaged}`
