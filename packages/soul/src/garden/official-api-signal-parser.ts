@@ -1,10 +1,30 @@
 import { SignalKind, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { DISTILLED_FACT_MAX_CHARS } from "./materialization-router.js";
+import { normalizeTemporalIsoString } from "./temporal-date.js";
 
 const MAX_OFFICIAL_API_SIGNALS = 64;
 const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
+
+export interface OfficialApiTemporalProjectionDraft {
+  readonly event_time_start?: string;
+  readonly event_time_end?: string;
+  readonly valid_from?: string;
+  readonly valid_to?: string;
+  readonly time_precision?: "day" | "month" | "year" | "range" | "relative" | "unknown";
+  readonly time_source?: "explicit" | "session_timestamp" | "relative_resolved";
+  readonly projection_schema_version?: 1;
+}
+
+export interface OfficialApiPreferenceProfileDraft {
+  readonly preference_subject?: string;
+  readonly preference_predicate?: string;
+  readonly preference_object?: string;
+  readonly preference_category?: string;
+  readonly preference_polarity?: "positive" | "negative" | "neutral";
+  readonly projection_schema_version?: 1;
+}
 
 // One parsed signal from the official-API extractor JSON. distilled_fact is
 // absent when the model omits it (or supplies a non-string / empty value);
@@ -17,6 +37,8 @@ export interface OfficialApiSignalDraft {
   readonly matched_text: string;
   readonly distilled_fact?: string;
   readonly reason?: string;
+  readonly temporal_projection?: OfficialApiTemporalProjectionDraft;
+  readonly preference_profile?: OfficialApiPreferenceProfileDraft;
 }
 
 // Exported so the LongMemEval bench seed path can drive its ingestion
@@ -190,6 +212,12 @@ function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft
   const distilledFact = normalizeOptionalString((candidate as { readonly distilled_fact?: unknown }).distilled_fact);
   const confidence = (candidate as { readonly confidence?: unknown }).confidence;
   const reason = normalizeOptionalString((candidate as { readonly reason?: unknown }).reason);
+  const temporalProjection = normalizeTemporalProjection(
+    (candidate as { readonly temporal_projection?: unknown }).temporal_projection
+  );
+  const preferenceProfile = normalizePreferenceProfile(
+    (candidate as { readonly preference_profile?: unknown }).preference_profile
+  );
 
   if (signalKind === null || !isSignalKind(signalKind)) {
     return null;
@@ -216,8 +244,101 @@ function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft
     confidence,
     matched_text: clampedMatchedText,
     ...(clampedDistilledFact === null ? {} : { distilled_fact: clampedDistilledFact }),
-    ...(clampedReason === null ? {} : { reason: clampedReason })
+    ...(clampedReason === null ? {} : { reason: clampedReason }),
+    ...(temporalProjection === null ? {} : { temporal_projection: temporalProjection }),
+    ...(preferenceProfile === null ? {} : { preference_profile: preferenceProfile })
   });
+}
+
+function normalizeTemporalProjection(value: unknown): OfficialApiTemporalProjectionDraft | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const projection: OfficialApiTemporalProjectionDraft = {
+    ...readProjectionSchemaVersion(record.projection_schema_version ?? record.version),
+    ...readOptionalIsoField(record, "event_time_start"),
+    ...readOptionalIsoField(record, "event_time_end"),
+    ...readOptionalIsoField(record, "valid_from"),
+    ...readOptionalIsoField(record, "valid_to"),
+    ...readOptionalTimePrecision(record.time_precision),
+    ...readOptionalTimeSource(record.time_source)
+  };
+
+  return Object.keys(projection).length === 0 ? null : Object.freeze(projection);
+}
+
+function readOptionalIsoField(
+  record: Record<string, unknown>,
+  key: "event_time_start" | "event_time_end" | "valid_from" | "valid_to"
+): Partial<OfficialApiTemporalProjectionDraft> {
+  const value = normalizeOptionalString(record[key]);
+  if (value === null) {
+    return {};
+  }
+  const normalized = normalizeTemporalIsoString(value);
+  return normalized === null ? {} : { [key]: normalized };
+}
+
+function readOptionalTimePrecision(
+  value: unknown
+): Pick<OfficialApiTemporalProjectionDraft, "time_precision"> | Record<string, never> {
+  return value === "day" ||
+    value === "month" ||
+    value === "year" ||
+    value === "range" ||
+    value === "relative" ||
+    value === "unknown"
+    ? { time_precision: value }
+    : {};
+}
+
+function readOptionalTimeSource(
+  value: unknown
+): Pick<OfficialApiTemporalProjectionDraft, "time_source"> | Record<string, never> {
+  return value === "explicit" || value === "session_timestamp" || value === "relative_resolved"
+    ? { time_source: value }
+    : {};
+}
+
+function normalizePreferenceProfile(value: unknown): OfficialApiPreferenceProfileDraft | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const profile: OfficialApiPreferenceProfileDraft = {
+    ...readProjectionSchemaVersion(record.projection_schema_version ?? record.version),
+    ...readOptionalProfileField(record, "preference_subject", "subject"),
+    ...readOptionalProfileField(record, "preference_predicate", "predicate"),
+    ...readOptionalProfileField(record, "preference_object", "object"),
+    ...readOptionalProfileField(record, "preference_category", "category"),
+    ...readOptionalProfilePolarity(record.preference_polarity ?? record.polarity)
+  };
+  return Object.keys(profile).length === 0 ? null : Object.freeze(profile);
+}
+
+function readProjectionSchemaVersion(
+  value: unknown
+): Pick<OfficialApiTemporalProjectionDraft, "projection_schema_version"> | Record<string, never> {
+  return value === 1 ? { projection_schema_version: 1 } : {};
+}
+
+function readOptionalProfileField(
+  record: Record<string, unknown>,
+  outputKey: "preference_subject" | "preference_predicate" | "preference_object" | "preference_category",
+  inputKey: "subject" | "predicate" | "object" | "category"
+): Partial<OfficialApiPreferenceProfileDraft> {
+  const value = normalizeOptionalString(record[outputKey] ?? record[inputKey]);
+  return value === null ? {} : { [outputKey]: value.slice(0, 1024) };
+}
+
+function readOptionalProfilePolarity(
+  value: unknown
+): Pick<OfficialApiPreferenceProfileDraft, "preference_polarity"> | Record<string, never> {
+  return value === "positive" || value === "negative" || value === "neutral"
+    ? { preference_polarity: value }
+    : {};
 }
 
 export function normalizeOptionalString(value: unknown): string | null {

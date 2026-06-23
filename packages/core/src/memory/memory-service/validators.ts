@@ -1,6 +1,7 @@
 import {
   FactualPolicyConditionSchema,
   IsoDatetimeStringSchema,
+  MemoryEntryMutableFieldsSchema,
   MemoryEntrySchema,
   ObjectLifecycleStateSchema,
   StorageTierSchema,
@@ -14,6 +15,27 @@ import { CoreError } from "../../shared/errors.js";
 import type { MemoryEntryUpdateFields } from "./types.js";
 
 export { isPromiseLike } from "../../shared/promise-utils.js";
+
+const MEMORY_UPDATE_FIELD_NAMES = [
+  "content",
+  "domain_tags",
+  "evidence_refs",
+  "storage_tier",
+  "last_used_at",
+  "last_hit_at",
+  "projection_schema_version",
+  "event_time_start",
+  "event_time_end",
+  "valid_from",
+  "valid_to",
+  "time_precision",
+  "time_source",
+  "preference_subject",
+  "preference_predicate",
+  "preference_object",
+  "preference_category",
+  "preference_polarity"
+] as const satisfies readonly (keyof MemoryEntryUpdateFields)[];
 
 export function parseMemoryEntry(value: MemoryEntry): MemoryEntry {
   try {
@@ -72,25 +94,8 @@ export function parseTransitionCausedBy(value: TransitionCausedBy): TransitionCa
 }
 
 export function parseUpdateFields(fields: MemoryEntryUpdateFields): MemoryEntryUpdateFields {
-  const parsed: MemoryEntryUpdateFields = {
-    content: fields.content,
-    domain_tags: fields.domain_tags,
-    evidence_refs: fields.evidence_refs,
-    storage_tier: fields.storage_tier,
-    last_used_at: fields.last_used_at,
-    last_hit_at: fields.last_hit_at
-  };
-
-  if (
-    parsed.content === undefined &&
-    parsed.domain_tags === undefined &&
-    parsed.evidence_refs === undefined &&
-    parsed.storage_tier === undefined &&
-    parsed.last_used_at === undefined &&
-    parsed.last_hit_at === undefined
-  ) {
-    throw new CoreError("VALIDATION", "At least one field is required for update");
-  }
+  const parsed = parseMutableUpdateFields(fields);
+  assertHasUpdateField(parsed);
 
   if (parsed.content !== undefined && parsed.content.trim().length === 0) {
     throw new CoreError("VALIDATION", "Memory content cannot be empty");
@@ -117,6 +122,24 @@ export function parseUpdateFields(fields: MemoryEntryUpdateFields): MemoryEntryU
     last_used_at: parsedLastUsedAt,
     last_hit_at: parsedLastHitAt
   };
+}
+
+function parseMutableUpdateFields(fields: MemoryEntryUpdateFields): MemoryEntryUpdateFields {
+  try {
+    const { last_used_at, last_hit_at, ...mutableFields } = fields;
+    const parsedMutable = MemoryEntryMutableFieldsSchema.parse(mutableFields);
+    return { ...parsedMutable, last_used_at, last_hit_at };
+  } catch (error) {
+    throw new CoreError("VALIDATION", "Invalid memory update fields", { cause: error });
+  }
+}
+
+function assertHasUpdateField(fields: MemoryEntryUpdateFields): void {
+  if (MEMORY_UPDATE_FIELD_NAMES.some((fieldName) => fields[fieldName] !== undefined)) {
+    return;
+  }
+
+  throw new CoreError("VALIDATION", "At least one field is required for update");
 }
 
 export function shouldRevokeGreenForEvidenceRewrite(
@@ -147,28 +170,7 @@ export function assertStringArray(value: readonly string[], field: "domain_tags"
 }
 
 export function toUpdatedFieldNames(fields: MemoryEntryUpdateFields): string[] {
-  const updatedFields: string[] = [];
-
-  if (fields.content !== undefined) {
-    updatedFields.push("content");
-  }
-  if (fields.domain_tags !== undefined) {
-    updatedFields.push("domain_tags");
-  }
-  if (fields.evidence_refs !== undefined) {
-    updatedFields.push("evidence_refs");
-  }
-  if (fields.storage_tier !== undefined) {
-    updatedFields.push("storage_tier");
-  }
-  if (fields.last_used_at !== undefined) {
-    updatedFields.push("last_used_at");
-  }
-  if (fields.last_hit_at !== undefined) {
-    updatedFields.push("last_hit_at");
-  }
-
-  return updatedFields;
+  return MEMORY_UPDATE_FIELD_NAMES.filter((fieldName) => fields[fieldName] !== undefined);
 }
 
 export function ensureAllowedLifecycleTransition(

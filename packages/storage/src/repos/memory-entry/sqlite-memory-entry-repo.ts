@@ -24,6 +24,7 @@ import {
 } from "./search-workflows.js";
 import {
   parseMemoryEntry} from "./row-mapper.js";
+import { buildMemoryEntryCreateParams } from "./create-params.js";
 import { MemoryEntryReadQueries } from "./memory-entry-read-queries.js";
 import { prepareMemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
 import type {
@@ -144,39 +145,7 @@ export class SqliteMemoryEntryRepo
 
   private runCreateStatement(parsedEntry: Readonly<MemoryEntry>): void {
     try {
-      this.createStatement.run(
-        parsedEntry.object_id,
-        parsedEntry.object_kind,
-        parsedEntry.schema_version,
-        parsedEntry.lifecycle_state,
-        parsedEntry.created_at,
-        parsedEntry.updated_at,
-        parsedEntry.created_by,
-        parsedEntry.dimension,
-        parsedEntry.source_kind,
-        parsedEntry.formation_kind,
-        parsedEntry.scope_class,
-        parsedEntry.content,
-        JSON.stringify(parsedEntry.domain_tags),
-        JSON.stringify(parsedEntry.evidence_refs),
-        parsedEntry.workspace_id,
-        parsedEntry.run_id,
-        parsedEntry.surface_id,
-        parsedEntry.storage_tier,
-        parsedEntry.activation_score,
-        parsedEntry.retention_score,
-        parsedEntry.manifestation_state,
-        parsedEntry.retention_state,
-        parsedEntry.decay_profile,
-        parsedEntry.confidence,
-        parsedEntry.last_used_at,
-        parsedEntry.last_hit_at,
-        parsedEntry.reinforcement_count,
-        parsedEntry.contradiction_count,
-        parsedEntry.superseded_by,
-        parsedEntry.forget_disposition ?? null,
-        parsedEntry.forget_disposition_ref ?? null
-      );
+      this.createStatement.run(...buildMemoryEntryCreateParams(parsedEntry));
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",

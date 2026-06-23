@@ -1,6 +1,7 @@
 import {
   ForgetDispositionSchema,
   MemoryDimensionSchema,
+  MemoryEntryRepoUpdateFieldsSchema,
   MemoryEntrySchema,
   ObjectLifecycleStateSchema,
   ScopeClassSchema,
@@ -46,6 +47,18 @@ export const MEMORY_ENTRY_SELECT_COLUMNS = `
         reinforcement_count,
         contradiction_count,
         superseded_by,
+        projection_schema_version,
+        event_time_start,
+        event_time_end,
+        valid_from,
+        valid_to,
+        time_precision,
+        time_source,
+        preference_subject,
+        preference_predicate,
+        preference_object,
+        preference_category,
+        preference_polarity,
         forget_disposition,
         forget_disposition_ref
 `;
@@ -79,6 +92,18 @@ export interface MemoryEntryRow {
   readonly reinforcement_count: number | null;
   readonly contradiction_count: number | null;
   readonly superseded_by: string | null;
+  readonly projection_schema_version: number | null;
+  readonly event_time_start: string | null;
+  readonly event_time_end: string | null;
+  readonly valid_from: string | null;
+  readonly valid_to: string | null;
+  readonly time_precision: string | null;
+  readonly time_source: string | null;
+  readonly preference_subject: string | null;
+  readonly preference_predicate: string | null;
+  readonly preference_object: string | null;
+  readonly preference_category: string | null;
+  readonly preference_polarity: string | null;
   readonly forget_disposition: string | null;
   readonly forget_disposition_ref: string | null;
 }
@@ -124,6 +149,9 @@ export function parseMemoryEntryRow(row: MemoryEntryRow): Readonly<MemoryEntry> 
         reinforcement_count: row.reinforcement_count,
         contradiction_count: row.contradiction_count,
         superseded_by: row.superseded_by,
+        ...buildProjectionVersionFromRow(row),
+        ...buildTemporalProjectionFromRow(row),
+        ...buildPreferenceProjectionFromRow(row),
         forget_disposition: row.forget_disposition,
         forget_disposition_ref: row.forget_disposition_ref
       })
@@ -131,6 +159,52 @@ export function parseMemoryEntryRow(row: MemoryEntryRow): Readonly<MemoryEntry> 
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate memory entry row.", error);
   }
+}
+
+function buildProjectionVersionFromRow(row: MemoryEntryRow): Partial<MemoryEntry> {
+  return row.projection_schema_version === null
+    ? {}
+    : { projection_schema_version: row.projection_schema_version as MemoryEntry["projection_schema_version"] };
+}
+
+function buildTemporalProjectionFromRow(row: MemoryEntryRow): Partial<MemoryEntry> {
+  if (
+    row.event_time_start === null &&
+    row.event_time_end === null &&
+    row.valid_from === null &&
+    row.valid_to === null &&
+    row.time_precision === null &&
+    row.time_source === null
+  ) {
+    return {};
+  }
+  return {
+    event_time_start: row.event_time_start,
+    event_time_end: row.event_time_end,
+    valid_from: row.valid_from,
+    valid_to: row.valid_to,
+    time_precision: row.time_precision as MemoryEntry["time_precision"],
+    time_source: row.time_source as MemoryEntry["time_source"]
+  };
+}
+
+function buildPreferenceProjectionFromRow(row: MemoryEntryRow): Partial<MemoryEntry> {
+  if (
+    row.preference_subject === null &&
+    row.preference_predicate === null &&
+    row.preference_object === null &&
+    row.preference_category === null &&
+    row.preference_polarity === null
+  ) {
+    return {};
+  }
+  return {
+    preference_subject: row.preference_subject,
+    preference_predicate: row.preference_predicate,
+    preference_object: row.preference_object,
+    preference_category: row.preference_category,
+    preference_polarity: row.preference_polarity as MemoryEntry["preference_polarity"]
+  };
 }
 
 export function parseMemoryDimension(value: MemoryDimension): MemoryDimension {
@@ -158,43 +232,57 @@ export function parseStorageTier(value: StorageTier): StorageTier {
 }
 
 export function parseUpdateFields(fields: MemoryEntryRepoUpdateFields): MemoryEntryRepoUpdateFields {
-  const updatedAt = parseUpdatedAt(fields.updated_at);
+  const { last_used_at, last_hit_at, ...repoFields } = fields;
+  const parsedRepoFields = parseRepoUpdateFields(repoFields);
+  const updatedAt = parseUpdatedAt(parsedRepoFields.updated_at);
 
-  if (fields.content !== undefined && fields.content.trim().length === 0) {
+  if (parsedRepoFields.content !== undefined && parsedRepoFields.content.trim().length === 0) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate memory content.");
   }
 
-  if (fields.domain_tags !== undefined) {
-    parseStringArray(fields.domain_tags, "domain_tags");
+  if (parsedRepoFields.domain_tags !== undefined) {
+    parseStringArray(parsedRepoFields.domain_tags, "domain_tags");
   }
 
-  if (fields.evidence_refs !== undefined) {
-    parseStringArray(fields.evidence_refs, "evidence_refs");
+  if (parsedRepoFields.evidence_refs !== undefined) {
+    parseStringArray(parsedRepoFields.evidence_refs, "evidence_refs");
   }
 
   const parsedStorageTier =
-    fields.storage_tier === undefined ? undefined : parseStorageTier(fields.storage_tier);
+    parsedRepoFields.storage_tier === undefined ? undefined : parseStorageTier(parsedRepoFields.storage_tier);
   if (
-    fields.confidence !== undefined &&
-    (!Number.isFinite(fields.confidence) || fields.confidence < 0 || fields.confidence > 1)
+    parsedRepoFields.confidence !== undefined &&
+    (!Number.isFinite(parsedRepoFields.confidence) ||
+      parsedRepoFields.confidence < 0 ||
+      parsedRepoFields.confidence > 1)
   ) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate confidence.");
   }
-  if (fields.retention_state !== undefined && fields.retention_state !== null) {
-    parseRetentionState(fields.retention_state);
+  if (parsedRepoFields.retention_state !== undefined && parsedRepoFields.retention_state !== null) {
+    parseRetentionState(parsedRepoFields.retention_state);
   }
   const parsedLastUsedAt =
-    fields.last_used_at === undefined ? undefined : parseTimestamp(fields.last_used_at);
+    last_used_at === undefined ? undefined : parseTimestamp(last_used_at);
   const parsedLastHitAt =
-    fields.last_hit_at === undefined ? undefined : parseTimestamp(fields.last_hit_at);
+    last_hit_at === undefined ? undefined : parseTimestamp(last_hit_at);
 
   return {
-    ...fields,
+    ...parsedRepoFields,
     updated_at: updatedAt,
     storage_tier: parsedStorageTier,
     last_used_at: parsedLastUsedAt,
     last_hit_at: parsedLastHitAt
   };
+}
+
+function parseRepoUpdateFields(
+  fields: Omit<MemoryEntryRepoUpdateFields, "last_used_at" | "last_hit_at">
+): Omit<MemoryEntryRepoUpdateFields, "last_used_at" | "last_hit_at"> {
+  try {
+    return MemoryEntryRepoUpdateFieldsSchema.parse(fields);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate memory update fields.", error);
+  }
 }
 
 export function parseDynamicsUpdateFields(

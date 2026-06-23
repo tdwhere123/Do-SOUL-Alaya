@@ -331,12 +331,29 @@ export interface ReconciliationPort {
       readonly signalId: string;
       readonly incomingContent: string;
       readonly incomingDomainTags: readonly string[];
+      readonly incomingProjectionFields?: ReconciliationProjectionFields;
     },
     applyVerdict: (
       verdict: ReconciliationDecisionView
     ) => Promise<{ readonly incomingEvidenceRef?: string }>
   ): Promise<ReconciliationDecisionView>;
 }
+
+export type ReconciliationProjectionFields = Pick<
+  MemoryMaterializationInput,
+  | "projection_schema_version"
+  | "event_time_start"
+  | "event_time_end"
+  | "valid_from"
+  | "valid_to"
+  | "time_precision"
+  | "time_source"
+  | "preference_subject"
+  | "preference_predicate"
+  | "preference_object"
+  | "preference_category"
+  | "preference_polarity"
+>;
 
 export interface MaterializationRouterDeps {
   readonly evidenceService: EvidenceMaterializationPort;

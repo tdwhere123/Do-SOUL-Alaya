@@ -18,6 +18,10 @@ describe("classifyRecallIntent", () => {
     expect(intentFor("where is the warehouse located")).toBe("single_fact");
   });
 
+  it("does not treat month-name path-source text as temporal intent", () => {
+    expect(intentFor("november path source")).toBe("single_fact");
+  });
+
   it("only splits fact-spread intents by anchor", () => {
     expect(intentSplitsByAnchor("multi_fact")).toBe(true);
     expect(intentSplitsByAnchor("temporal")).toBe(true);

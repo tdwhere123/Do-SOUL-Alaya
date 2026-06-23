@@ -103,6 +103,48 @@ it("updates memory through the workspace-scoped repo path", async () => {
     expect(updated.last_hit_at).toBe("2026-03-21T03:30:00.000Z");
   });
 
+it("persists projection-only updates through the production service boundary", async () => {
+    const { appendSpy, dependencies, evidenceFindByIdSpy, repoUpdateSpy } = createDependencies();
+    const service = new MemoryService(dependencies);
+
+    const updated = await service.update(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      {
+        projection_schema_version: 1,
+        event_time_start: "2026-03-19T00:00:00.000Z",
+        time_precision: "day",
+        time_source: "explicit"
+      },
+      "reconciliation_projection_merge"
+    );
+
+    expect(evidenceFindByIdSpy).not.toHaveBeenCalled();
+    expect(repoUpdateSpy).toHaveBeenCalledWith(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      expect.objectContaining({
+        projection_schema_version: 1,
+        event_time_start: "2026-03-19T00:00:00.000Z",
+        time_precision: "day",
+        time_source: "explicit",
+        updated_at: "2026-03-21T01:00:00.000Z"
+      })
+    );
+    expect(updated.event_time_start).toBe("2026-03-19T00:00:00.000Z");
+    expect(appendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: "soul.memory.updated",
+        payload_json: expect.objectContaining({
+          updated_fields: [
+            "projection_schema_version",
+            "event_time_start",
+            "time_precision",
+            "time_source"
+          ]
+        })
+      })
+    );
+  });
+
 it("revokes green mapping when an evidence rewrite removes every prior anchor", async () => {
     const pierceSpy = vi.fn(async () => undefined);
     const { dependencies } = createDependencies({

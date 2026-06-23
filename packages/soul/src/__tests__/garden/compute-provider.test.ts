@@ -54,6 +54,9 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("distilled_fact");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("one assertion");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("split compound statements into separate signals");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("temporal_projection");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("preference_profile");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("projection_schema_version");
   });
 
 
@@ -77,6 +80,135 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
     const signals = await provider.compile("We decided to ship on Friday.", createContext());
     expect(signals).toHaveLength(1);
     expect("distilled_fact" in signals[0]!.raw_payload).toBe(false);
+  });
+
+  it("preserves official temporal projection metadata on the raw payload", async () => {
+    const extractor = createExtractor(JSON.stringify({
+      signals: [
+        {
+          signal_kind: "potential_claim",
+          object_kind: "fact",
+          confidence: 0.7,
+          matched_text: "The deployment happened yesterday.",
+          distilled_fact: "The deployment happened on 2026-03-19.",
+          temporal_projection: {
+            projection_schema_version: 1,
+            event_time_start: "2026-03-19",
+            event_time_end: "2026-03-20",
+            valid_from: "2026-03-19",
+            time_precision: "day",
+            time_source: "relative_resolved",
+            ignored_field: "drop me"
+          }
+        }
+      ]
+    }));
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor,
+      generateSignalId: () => "signal-temporal"
+    });
+
+    const signals = await provider.compile("The deployment happened yesterday.", createContext());
+
+    expect(signals[0]!.raw_payload).toMatchObject({
+      temporal_projection: {
+        projection_schema_version: 1,
+        event_time_start: "2026-03-19T00:00:00.000Z",
+        event_time_end: "2026-03-20T00:00:00.000Z",
+        valid_from: "2026-03-19T00:00:00.000Z",
+        time_precision: "day",
+        time_source: "relative_resolved"
+      }
+    });
+    expect(
+      "ignored_field" in
+        (signals[0]!.raw_payload.temporal_projection as Record<string, unknown>)
+    ).toBe(false);
+  });
+
+  it("drops invalid official temporal date fields instead of normalizing rollover dates", async () => {
+    const extractor = createExtractor(JSON.stringify({
+      signals: [
+        {
+          signal_kind: "potential_claim",
+          object_kind: "fact",
+          confidence: 0.7,
+          matched_text: "The impossible date was 2026-02-31.",
+          distilled_fact: "The impossible date was 2026-02-31.",
+          temporal_projection: {
+            projection_schema_version: 1,
+            event_time_start: "2026-02-31",
+            event_time_end: "2026-03-01",
+            time_precision: "day",
+            time_source: "explicit"
+          }
+        }
+      ]
+    }));
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor,
+      generateSignalId: () => "signal-invalid-date"
+    });
+
+    const signals = await provider.compile("The impossible date was 2026-02-31.", createContext());
+
+    expect(signals[0]!.raw_payload).toMatchObject({
+      temporal_projection: {
+        projection_schema_version: 1,
+        event_time_end: "2026-03-01T00:00:00.000Z"
+      }
+    });
+    expect(
+      "event_time_start" in
+        (signals[0]!.raw_payload.temporal_projection as Record<string, unknown>)
+    ).toBe(false);
+  });
+
+  it("preserves official preference profile metadata on the raw payload", async () => {
+    const extractor = createExtractor(JSON.stringify({
+      signals: [
+        {
+          signal_kind: "potential_preference",
+          object_kind: "preference",
+          confidence: 0.8,
+          matched_text: "I prefer dark mode.",
+          distilled_fact: "The operator prefers dark mode.",
+          preference_profile: {
+            projection_schema_version: 1,
+            subject: "operator",
+            predicate: "prefer",
+            object: "dark mode",
+            category: "theme",
+            polarity: "positive",
+            ignored_field: "drop me"
+          }
+        }
+      ]
+    }));
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor,
+      generateSignalId: () => "signal-profile"
+    });
+
+    const signals = await provider.compile("I prefer dark mode.", createContext());
+
+    expect(signals[0]!.raw_payload).toMatchObject({
+      preference_profile: {
+        projection_schema_version: 1,
+        preference_subject: "operator",
+        preference_predicate: "prefer",
+        preference_object: "dark mode",
+        preference_category: "theme",
+        preference_polarity: "positive"
+      }
+    });
+    expect(
+      "ignored_field" in
+        (signals[0]!.raw_payload.preference_profile as Record<string, unknown>)
+    ).toBe(false);
   });
 
 

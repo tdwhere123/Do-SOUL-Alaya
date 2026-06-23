@@ -107,7 +107,11 @@ export // invariant: drives runWithDecision with an applyVerdict callback that
 // be asserted.
 function drive(
   service: ReconciliationService,
-  input: { incomingContent: string; incomingDomainTags: readonly string[] },
+  input: {
+    incomingContent: string;
+    incomingDomainTags: readonly string[];
+    incomingProjectionFields?: Parameters<ReconciliationService["runWithDecision"]>[0]["incomingProjectionFields"];
+  },
   options: { evidenceRefForVerdict?: (kind: string) => string } = {}
 ): {
   readonly decision: Promise<ReconciliationDecision>;
