@@ -107,8 +107,15 @@ async function runLocomoQuestion(
 ): Promise<void> {
   const context = buildQuestionContext(input, qa, qaIndex);
   if (!context.shouldRunRecall) return;
+  if (context.missingDiaIds.length > 0) {
+    process.stderr.write(
+      `[locomo] ${context.questionId}: ${context.missingDiaIds.length} unmaterialized gold dia_id(s); ` +
+        `scoring on present gold (${context.missingDiaIds.join(", ")})\n`
+    );
+  }
   const result = await runQuestion(input.workspace, qa);
-  if (context.retrievalScorable) {
+  // exclude from the retrieval denominator only when ZERO gold materialized
+  if (context.retrievalScorable && context.goldMemoryIds.length > 0) {
     recordRetrievalOutcome(input, state, context, result);
   }
   if (input.opts.qa !== undefined) {
@@ -124,13 +131,12 @@ function buildQuestionContext(
   const questionId = buildLocomoQuestionId(input.conversation.sample_id, qaIndex);
   const evidenceSet = new Set(qa.evidence);
   const retrievalScorable = hasLocomoRetrievalEvidence(qa);
-  const goldMemoryIds = retrievalScorable
+  const { goldMemoryIds, missingDiaIds } = retrievalScorable
     ? resolveLocomoGoldMemoryIds({
-        questionId,
         evidenceSet,
         memoryIdsByDiaId: input.seeded.memoryIdsByDiaId
       })
-    : [];
+    : { goldMemoryIds: [], missingDiaIds: [] };
   return {
     qa,
     questionId,
@@ -138,7 +144,8 @@ function buildQuestionContext(
     isAbstention: isLocomoAbstentionQa(qa),
     retrievalScorable,
     shouldRunRecall: shouldRunLocomoRecall(qa, input.opts),
-    goldMemoryIds
+    goldMemoryIds,
+    missingDiaIds
   };
 }
 

@@ -304,6 +304,47 @@ describe("SecurityStatusService", () => {
     ]);
   });
 
+  it("records a degraded epoch timestamp, not a fresh now, when the status probe read fails", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
+    const service = new SecurityStatusService({
+      zeroDayLayer: {
+        getSecurityStatus: vi.fn(async () => {
+          throw new Error("zero-day status store offline");
+        }),
+        initializeWorkspaceSecurity: vi.fn(async () => false),
+        subscribeStatusEvaluations: vi.fn(() => vi.fn())
+      },
+      eventPublisher: {
+        publish: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+          publishedEvents.push(entry);
+          return { ...entry, event_id: "event-1", created_at: FIXED_NOW, revision: 0 };
+        })
+      }
+    });
+
+    await (
+      service as {
+        recordInitializationFailure(
+          workspaceId: string,
+          operation: "create" | "list" | "get_by_id",
+          reason?: string | null,
+          errorCode?: string | null
+        ): Promise<void>;
+      }
+    ).recordInitializationFailure("workspace-1", "create", "init failed", "Error");
+
+    expect(publishedEvents).toHaveLength(1);
+    expect(publishedEvents[0]!.payload_json).toMatchObject({
+      failed_at: new Date(0).toISOString()
+    });
+    expect(emitWarning).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ code: "ALAYA_SECURITY_STATUS_READ_FAILED" })
+    );
+    emitWarning.mockRestore();
+  });
+
   it("unsubscribes from zero-day evaluations when closed", () => {
     const unsubscribe = vi.fn();
     const subscribeStatusEvaluations = vi.fn(() => unsubscribe);

@@ -7,11 +7,14 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { EventPublisher } from "../runtime/event-publisher.js";
 import { SYSTEM_ACTOR } from "../shared/actors.js";
-import { readNow } from "../shared/time.js";
 import type {
   ZeroDaySecurityLayer,
   ZeroDaySecurityStatusEvaluationObserver
 } from "./zero-day-security-layer.js";
+
+const STATUS_READ_FAILED_WARNING_CODE = "ALAYA_SECURITY_STATUS_READ_FAILED";
+// Epoch sentinel: a failed probe read must not masquerade as a fresh assessment in the freshness gate.
+const DEGRADED_ASSESSMENT_AT = new Date(0).toISOString();
 
 export interface SecurityStatusServiceDependencies {
   readonly zeroDayLayer: Pick<
@@ -19,7 +22,6 @@ export interface SecurityStatusServiceDependencies {
     "getSecurityStatus" | "initializeWorkspaceSecurity" | "subscribeStatusEvaluations"
   >;
   readonly eventPublisher: Pick<EventPublisher, "publish">;
-  readonly now?: () => string;
   readonly observedStatusCacheLimit?: number;
 }
 
@@ -140,8 +142,15 @@ export class SecurityStatusService {
   private async readFailureTimestamp(workspaceId: string): Promise<string> {
     try {
       return (await this.deps.zeroDayLayer.getSecurityStatus(workspaceId)).last_assessment_at;
-    } catch {
-      return readNow(this.deps.now);
+    } catch (error) {
+      process.emitWarning("[SecurityStatusService] Failed to read security status for failure timestamp", {
+        code: STATUS_READ_FAILED_WARNING_CODE,
+        detail: JSON.stringify({
+          workspace_id: workspaceId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      });
+      return DEGRADED_ASSESSMENT_AT;
     }
   }
 }

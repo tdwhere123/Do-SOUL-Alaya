@@ -270,7 +270,8 @@ describe("GovernanceLeaseService", () => {
     expect(appendSpy).not.toHaveBeenCalled();
   });
 
-  it("degrades to no active lease when EventLog rehydrate read fails", async () => {
+  it("fails closed instead of reporting not-held when EventLog rehydrate read fails", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
     const queryByRunAll = vi.fn(async () => {
       throw new Error("event log read failed");
     });
@@ -280,9 +281,17 @@ describe("GovernanceLeaseService", () => {
       eventLogRepo: createEventLogRepo({ queryByRunAll })
     });
 
-    await expect(service.getActive("run-1")).resolves.toBeNull();
-    await expect(service.isHeld("run-1")).resolves.toBe(false);
+    await expect(service.getActive("run-1")).rejects.toMatchObject({
+      code: "CONFLICT",
+      subCode: "CONCURRENT_MODIFICATION"
+    });
+    await expect(service.isHeld("run-1")).rejects.toMatchObject({ code: "CONFLICT" });
     expect(queryByRunAll).toHaveBeenCalledWith("run-1");
+    expect(emitWarning).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ code: "ALAYA_GOVERNANCE_LEASE_REHYDRATE_FAILED" })
+    );
+    emitWarning.mockRestore();
   });
 
   it("fails replay when a persisted governance lease event payload is malformed", async () => {

@@ -272,7 +272,8 @@ describe("SessionOverrideService", () => {
     ]);
   });
 
-  it("degrades to no active overrides when EventLog rehydrate read fails", async () => {
+  it("fails closed instead of dropping overrides when EventLog rehydrate read fails", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
     const queryByRunAll = vi.fn(async () => {
       throw new Error("event log read failed");
     });
@@ -282,8 +283,16 @@ describe("SessionOverrideService", () => {
       eventLogRepo: createEventLogRepo({ queryByRunAll })
     });
 
-    await expect(service.getActiveFor("run-1")).resolves.toEqual([]);
+    await expect(service.getActiveFor("run-1")).rejects.toMatchObject({
+      code: "CONFLICT",
+      subCode: "CONCURRENT_MODIFICATION"
+    });
     expect(queryByRunAll).toHaveBeenCalledWith("run-1");
+    expect(emitWarning).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ code: "ALAYA_SESSION_OVERRIDE_REHYDRATE_FAILED" })
+    );
+    emitWarning.mockRestore();
   });
 
   it("does not let a stale rehydration overwrite a newly applied override", async () => {
