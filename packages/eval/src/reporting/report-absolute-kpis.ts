@@ -222,22 +222,61 @@ function pushDroppedSignalsWarning(
   if (extractionPath.signals_dropped <= 0) {
     return;
   }
-  // signals_dropped also absorbs whole-turn batches lost when seed
-  // materialization throws, which parse_dropped / compile_overflow_dropped
-  // do not attribute — surface that residual so the breakdown still sums.
-  const seedMaterializationDropped = Math.max(
+  const drops = attributeSeedDrops(extractionPath);
+  if (drops.declined > 0) {
+    lines.push(
+      `  - ${drops.declined} extracted signal(s) declined by governance routing ` +
+        `(routed to evidence_only/deferred, not durable memory) — expected for conversational turns, not a failure.`
+    );
+  }
+  if (drops.trulyLost > 0) {
+    lines.push(
+      `  - ⚠ ${drops.trulyLost} extracted signal(s) were lost before seeding ` +
+        `(${drops.parseDropped} dropped by the parser as malformed / over the 64-signal cap, ` +
+        `${drops.compileOverflowDropped} dropped by compile() as oversized, ` +
+        `${drops.materializationError} failed materialization, ` +
+        `${drops.batchResidual} dropped when a seed-materialization batch failed); ` +
+        `a dropped answer-bearing signal inflates the miss rate.`
+    );
+  }
+}
+
+export interface SeedDropAttribution {
+  readonly declined: number;
+  readonly parseDropped: number;
+  readonly compileOverflowDropped: number;
+  readonly materializationError: number;
+  readonly batchResidual: number;
+  readonly trulyLost: number;
+}
+
+// candidate_absent is governance declining a signal as durable truth, not a loss;
+// only parser/compile/materialization/unattributed-batch drops truly lose a signal.
+export function attributeSeedDrops(
+  extractionPath: NonNullable<KpiPayload["kpi"]["seed_extraction_path"]>
+): SeedDropAttribution {
+  const declined = extractionPath.signals_dropped_by_reason.candidate_absent;
+  const materializationError = extractionPath.signals_dropped_by_reason.materialization_error;
+  const batchResidual = Math.max(
     0,
     extractionPath.signals_dropped -
       extractionPath.parse_dropped -
-      extractionPath.compile_overflow_dropped
+      extractionPath.compile_overflow_dropped -
+      declined -
+      materializationError
   );
-  lines.push(
-    `  - ⚠ ${extractionPath.signals_dropped} extracted signal(s) were lost before seeding ` +
-      `(${extractionPath.parse_dropped} dropped by the parser as malformed / over the 64-signal cap, ` +
-      `${extractionPath.compile_overflow_dropped} dropped by compile() as oversized, ` +
-      `${seedMaterializationDropped} dropped when a seed-materialization batch failed); ` +
-      `a dropped answer-bearing signal inflates the miss rate.`
-  );
+  return {
+    declined,
+    parseDropped: extractionPath.parse_dropped,
+    compileOverflowDropped: extractionPath.compile_overflow_dropped,
+    materializationError,
+    batchResidual,
+    trulyLost:
+      extractionPath.parse_dropped +
+      extractionPath.compile_overflow_dropped +
+      materializationError +
+      batchResidual
+  };
 }
 
 function formatRatio(value: number): string {
