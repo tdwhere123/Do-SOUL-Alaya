@@ -219,6 +219,52 @@ describe("TopologyService", () => {
       trend: undefined
     });
   });
+
+  it("warns but still returns the projection when snapshot history read rejects", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    try {
+      const service = new TopologyService({
+        pathRelationRepo: {
+          findActiveAll: vi.fn(async () => [
+            createPathRelationFixture({
+              path_id: "path-a",
+              anchors: {
+                source_anchor: { kind: "object", object_id: "anchor-a" },
+                target_anchor: { kind: "object", object_id: "anchor-b" }
+              }
+            })
+          ] as const)
+        },
+        snapshotHistory: {
+          getHistory: vi.fn(async () => {
+            throw new Error("snapshot repo unavailable");
+          })
+        },
+        now: () => new Date("2026-04-21T08:00:00.000Z")
+      });
+
+      await expect(service.explore("workspace-1")).resolves.toMatchObject({
+        workspace_id: "workspace-1",
+        total_nodes: 2,
+        total_edges: 1,
+        trend: undefined
+      });
+
+      const warnCall = emitWarning.mock.calls.find(
+        ([, options]) =>
+          typeof options === "object" &&
+          options !== null &&
+          "code" in options &&
+          options.code === "ALAYA_TOPOLOGY_HISTORY_READ_FAILED"
+      );
+      expect(warnCall).toBeDefined();
+      const detail = JSON.parse((warnCall?.[1] as { detail: string }).detail) as Record<string, unknown>;
+      expect(detail.workspace_id).toBe("workspace-1");
+      expect(detail.error).toBe("snapshot repo unavailable");
+    } finally {
+      emitWarning.mockRestore();
+    }
+  });
 });
 
 function createPathRelationFixture(overrides: Partial<PathRelation> = {}): PathRelation {

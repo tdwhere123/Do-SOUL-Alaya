@@ -162,7 +162,21 @@ export class Librarian {
       }
     } catch (error) {
       const result = this.createFailureResult(task, completedAt, error);
-      await this.scheduler.reportCompletion(result);
+      // A reportCompletion failure must not mask the original task error.
+      try {
+        await this.scheduler.reportCompletion(result);
+      } catch (reportError) {
+        process.emitWarning("[Librarian] reportCompletion failed for failed task", {
+          code: "ALAYA_GARDEN_REPORT_COMPLETION_FAILED",
+          detail: JSON.stringify({
+            task_id: task.task_id,
+            task_kind: task.task_kind,
+            workspace_id: task.workspace_id,
+            task_error: error instanceof Error ? error.message : String(error),
+            report_error: reportError instanceof Error ? reportError.message : String(reportError)
+          })
+        });
+      }
       return result;
     }
   }
