@@ -276,7 +276,7 @@ it("falls back to no plasticity boost when the path plasticity port throws — r
     );
   });
 
-it("lets an L2 synthesis_capsule compete with memory entries before the delivery budget cut", async () => {
+it("lets an L2 synthesis hit route through its child memory before the delivery budget cut", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-1",
@@ -310,6 +310,12 @@ it("lets an L2 synthesis_capsule compete with memory entries before the delivery
     const synthesisFindByIds = vi.fn(async () => [synthesis]);
     const service = new RecallService({
       ...dependencies,
+      memoryRepo: {
+        ...dependencies.memoryRepo,
+        findByIds: vi.fn(async (ids: readonly string[]) =>
+          memories.filter((memory) => ids.includes(memory.object_id))
+        )
+      },
       synthesisSearchPort: {
         searchByKeyword: synthesisSearchByKeyword,
         findByIds: synthesisFindByIds
@@ -337,21 +343,366 @@ it("lets an L2 synthesis_capsule compete with memory entries before the delivery
     });
 
     expect(synthesisSearchByKeyword).toHaveBeenCalled();
-    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["synthesis-1"]);
-    expect(result.candidates[0]?.object_kind).toBe("synthesis_capsule");
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-1"]);
+    expect(result.candidates[0]?.object_kind).toBe("memory_entry");
     const synthesisDiagnostic = result.diagnostics?.candidates.find(
-      (candidate) => candidate.object_id === "synthesis-1"
-    );
-    const memoryDiagnostic = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-1"
     );
     expect(synthesisDiagnostic?.per_stream_rank.synthesis_fts).toBe(1);
-    expect(synthesisDiagnostic?.object_kind).toBe("synthesis_capsule");
+    expect(synthesisDiagnostic?.object_kind).toBe("memory_entry");
+    expect(synthesisDiagnostic?.admission_planes).toContain("synthesis_child");
     expect(synthesisDiagnostic?.final_rank).toBe(1);
-    expect(memoryDiagnostic?.dropped_reason).toBe("max_entries");
   });
 
-it("keeps a strong memory_entry ahead of a weaker synthesis_capsule", async () => {
+  it("routes synthesis FTS hits through source child memories instead of delivering the capsule", async () => {
+    const child = createMemoryEntry({
+      object_id: "memory-child",
+      scope_class: ScopeClass.PROJECT,
+      dimension: MemoryDimension.FACT,
+      content: "The answer-bearing child memory says the launch owner was Mira.",
+      domain_tags: ["launch"],
+      activation_score: 0.1
+    });
+    const decoys = Array.from({ length: 4 }, (_unused, index) =>
+      createMemoryEntry({
+        object_id: `memory-decoy-${index + 1}`,
+        scope_class: ScopeClass.PROJECT,
+        dimension: MemoryDimension.PROCEDURE,
+        content: "Generic recall implementation memory.",
+        activation_score: 0.9 - index * 0.01
+      })
+    );
+    const { dependencies } = createDependencies([child, ...decoys]);
+    const findByIds = vi.fn(async (ids: readonly string[]) =>
+      [child, ...decoys].filter((memory) => ids.includes(memory.object_id))
+    );
+    const synthesis: SynthesisCapsule = {
+      object_id: "synthesis-router",
+      object_kind: "synthesis_capsule",
+      schema_version: 1,
+      lifecycle_state: "active",
+      created_at: "2026-03-23T00:00:00.000Z",
+      updated_at: "2026-03-23T00:00:00.000Z",
+      created_by: "system",
+      topic_key: "launch/router",
+      synthesis_type: "cross_evidence",
+      summary: "Launch-owner synthesis mentions Mira.",
+      evidence_refs: ["evidence-1", "evidence-2"],
+      source_memory_refs: ["memory-child"],
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      synthesis_status: SynthesisStatus.WORKING
+    };
+    const service = new RecallService({
+      ...dependencies,
+      memoryRepo: {
+        ...dependencies.memoryRepo,
+        findByIds,
+        searchByKeyword: vi.fn(async () =>
+          decoys.map((memory, index) => ({
+            object_id: memory.object_id,
+            normalized_rank: 1 - index * 0.05
+          }))
+        )
+      },
+      synthesisSearchPort: {
+        searchByKeyword: vi.fn(async () => [
+          { object_id: "synthesis-router", normalized_rank: 1 }
+        ]),
+        findByIds: vi.fn(async () => [synthesis])
+      }
+    });
+    const policy = overridePolicy(service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id), {
+      fine_assessment: {
+        budgets: {
+          max_entries: 5,
+          max_total_tokens: 1000,
+          per_dimension_limits: null
+        },
+        conflict_awareness: false
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: {
+        ...createTaskSurface(),
+        display_name: "Who was the launch owner Mira?"
+      },
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(findByIds).toHaveBeenCalledWith(["memory-child"]);
+    expect(result.candidates.map((candidate) => candidate.object_kind)).not.toContain("synthesis_capsule");
+    expect(result.candidates.map((candidate) => candidate.object_id)).toContain("memory-child");
+    const childDiagnostic = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "memory-child"
+    );
+    expect(childDiagnostic?.admission_planes).toContain("synthesis_child");
+    expect(childDiagnostic?.per_stream_rank.synthesis_fts).toBe(1);
+    expect(childDiagnostic?.source_channels).toContain("synthesis_child");
+  });
+
+  it("filters synthesis source children to active memories in the recall workspace", async () => {
+    const validChild = createMemoryEntry({
+      object_id: "memory-valid-child",
+      scope_class: ScopeClass.PROJECT,
+      dimension: MemoryDimension.FACT,
+      content: "The answer-bearing child memory says the launch owner was Mira.",
+      domain_tags: ["launch"],
+      workspace_id: "workspace-1",
+      lifecycle_state: "active",
+      activation_score: 0.1
+    });
+    const crossWorkspaceChild = createMemoryEntry({
+      object_id: "memory-cross-workspace-child",
+      content: "Cross-workspace launch owner memory must not route through this recall.",
+      workspace_id: "workspace-2",
+      lifecycle_state: "active"
+    });
+    const dormantChild = createMemoryEntry({
+      object_id: "memory-dormant-child",
+      content: "Dormant launch owner memory must not route through synthesis recall.",
+      workspace_id: "workspace-1",
+      lifecycle_state: "dormant"
+    });
+    const { dependencies } = createDependencies([validChild]);
+    const childRefs = [
+      "memory-valid-child",
+      "memory-cross-workspace-child",
+      "memory-dormant-child"
+    ];
+    const findByIds = vi.fn(async (ids: readonly string[]) =>
+      [validChild, crossWorkspaceChild, dormantChild].filter((memory) =>
+        ids.includes(memory.object_id)
+      )
+    );
+    const synthesis: SynthesisCapsule = {
+      object_id: "synthesis-router",
+      object_kind: "synthesis_capsule",
+      schema_version: 1,
+      lifecycle_state: "active",
+      created_at: "2026-03-23T00:00:00.000Z",
+      updated_at: "2026-03-23T00:00:00.000Z",
+      created_by: "system",
+      topic_key: "launch/router",
+      synthesis_type: "cross_evidence",
+      summary: "Launch-owner synthesis mentions Mira.",
+      evidence_refs: ["evidence-1", "evidence-2"],
+      source_memory_refs: childRefs,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      synthesis_status: SynthesisStatus.WORKING
+    };
+    const service = new RecallService({
+      ...dependencies,
+      memoryRepo: {
+        ...dependencies.memoryRepo,
+        findByIds,
+        searchByKeyword: vi.fn(async () => [])
+      },
+      synthesisSearchPort: {
+        searchByKeyword: vi.fn(async () => [
+          { object_id: "synthesis-router", normalized_rank: 1 }
+        ]),
+        findByIds: vi.fn(async () => [synthesis])
+      }
+    });
+    const policy = overridePolicy(service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id), {
+      fine_assessment: {
+        budgets: {
+          max_entries: 5,
+          max_total_tokens: 1000,
+          per_dimension_limits: null
+        },
+        conflict_awareness: false
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: {
+        ...createTaskSurface(),
+        display_name: "Who was the launch owner Mira?"
+      },
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(findByIds).toHaveBeenCalledTimes(1);
+    expect(findByIds.mock.calls[0]?.[0]).toHaveLength(childRefs.length);
+    expect(findByIds.mock.calls[0]?.[0]).toEqual(expect.arrayContaining(childRefs));
+    const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
+    expect(deliveredIds).toContain("memory-valid-child");
+    expect(deliveredIds).not.toContain("memory-cross-workspace-child");
+    expect(deliveredIds).not.toContain("memory-dormant-child");
+    const diagnosticIds = result.diagnostics?.candidates.map((candidate) => candidate.object_id) ?? [];
+    expect(diagnosticIds).toContain("memory-valid-child");
+    expect(diagnosticIds).not.toContain("memory-cross-workspace-child");
+    expect(diagnosticIds).not.toContain("memory-dormant-child");
+  });
+
+  it("injects every bounded active synthesis child before fusion even without child-local specificity", async () => {
+    const children = Array.from({ length: 3 }, (_unused, index) =>
+      createMemoryEntry({
+        object_id: `memory-zero-specificity-child-${index + 1}`,
+        scope_class: ScopeClass.PROJECT,
+        dimension: MemoryDimension.FACT,
+        content: `Unrelated archive note ${index + 1}.`,
+        domain_tags: ["archive"],
+        workspace_id: "workspace-1",
+        lifecycle_state: "active",
+        activation_score: 0.1
+      })
+    );
+    const { dependencies } = createDependencies([]);
+    const childRefs = children.map((child) => child.object_id);
+    const synthesis: SynthesisCapsule = {
+      object_id: "synthesis-router",
+      object_kind: "synthesis_capsule",
+      schema_version: 1,
+      lifecycle_state: "active",
+      created_at: "2026-03-23T00:00:00.000Z",
+      updated_at: "2026-03-23T00:00:00.000Z",
+      created_by: "system",
+      topic_key: "launch/router",
+      synthesis_type: "cross_evidence",
+      summary: "Launch-owner synthesis mentions Mira.",
+      evidence_refs: ["evidence-1", "evidence-2"],
+      source_memory_refs: childRefs,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      synthesis_status: SynthesisStatus.WORKING
+    };
+    const service = new RecallService({
+      ...dependencies,
+      memoryRepo: {
+        ...dependencies.memoryRepo,
+        findByIds: vi.fn(async (ids: readonly string[]) =>
+          children.filter((child) => ids.includes(child.object_id))
+        ),
+        searchByKeyword: vi.fn(async () => [])
+      },
+      synthesisSearchPort: {
+        searchByKeyword: vi.fn(async () => [
+          { object_id: "synthesis-router", normalized_rank: 1 }
+        ]),
+        findByIds: vi.fn(async () => [synthesis])
+      }
+    });
+    const policy = overridePolicy(service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id), {
+      fine_assessment: {
+        budgets: {
+          max_entries: 5,
+          max_total_tokens: 1000,
+          per_dimension_limits: null
+        },
+        conflict_awareness: false
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: {
+        ...createTaskSurface(),
+        display_name: "Who was the launch owner Mira?"
+      },
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
+    expect(deliveredIds).toEqual(expect.arrayContaining(childRefs));
+    expect(result.candidates.map((candidate) => candidate.object_kind)).not.toContain("synthesis_capsule");
+    const diagnosticIds = result.diagnostics?.candidates.map((candidate) => candidate.object_id) ?? [];
+    expect(diagnosticIds).toEqual(expect.arrayContaining(childRefs));
+  });
+
+  it("applies synthesis child caps after filtering unusable source refs", async () => {
+    const invalidChildren = Array.from({ length: 20 }, (_unused, index) =>
+      createMemoryEntry({
+        object_id: `memory-invalid-child-${index + 1}`,
+        content: `Cross-workspace child ${index + 1}.`,
+        workspace_id: "workspace-2",
+        lifecycle_state: "active"
+      })
+    );
+    const validChildren = Array.from({ length: 3 }, (_unused, index) =>
+      createMemoryEntry({
+        object_id: `memory-valid-capped-child-${index + 1}`,
+        content: `Valid child behind unusable refs ${index + 1}.`,
+        workspace_id: "workspace-1",
+        lifecycle_state: "active",
+        activation_score: 0.1
+      })
+    );
+    const { dependencies } = createDependencies([]);
+    const sourceRefs = [...invalidChildren, ...validChildren].map((child) => child.object_id);
+    const synthesis: SynthesisCapsule = {
+      object_id: "synthesis-router",
+      object_kind: "synthesis_capsule",
+      schema_version: 1,
+      lifecycle_state: "active",
+      created_at: "2026-03-23T00:00:00.000Z",
+      updated_at: "2026-03-23T00:00:00.000Z",
+      created_by: "system",
+      topic_key: "launch/router",
+      synthesis_type: "cross_evidence",
+      summary: "Launch-owner synthesis mentions Mira.",
+      evidence_refs: ["evidence-1", "evidence-2"],
+      source_memory_refs: sourceRefs,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      synthesis_status: SynthesisStatus.WORKING
+    };
+    const service = new RecallService({
+      ...dependencies,
+      memoryRepo: {
+        ...dependencies.memoryRepo,
+        findByIds: vi.fn(async (ids: readonly string[]) =>
+          [...invalidChildren, ...validChildren].filter((child) => ids.includes(child.object_id))
+        ),
+        searchByKeyword: vi.fn(async () => [])
+      },
+      synthesisSearchPort: {
+        searchByKeyword: vi.fn(async () => [
+          { object_id: "synthesis-router", normalized_rank: 1 }
+        ]),
+        findByIds: vi.fn(async () => [synthesis])
+      }
+    });
+    const policy = overridePolicy(service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id), {
+      fine_assessment: {
+        budgets: {
+          max_entries: 5,
+          max_total_tokens: 1000,
+          per_dimension_limits: null
+        },
+        conflict_awareness: false
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: {
+        ...createTaskSurface(),
+        display_name: "Who was the launch owner Mira?"
+      },
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
+    expect(deliveredIds).toEqual(
+      expect.arrayContaining(validChildren.map((child) => child.object_id))
+    );
+    for (const invalidChild of invalidChildren) {
+      expect(deliveredIds).not.toContain(invalidChild.object_id);
+    }
+  });
+
+  it("keeps a strong memory_entry ahead of a weaker synthesis_capsule", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-1",

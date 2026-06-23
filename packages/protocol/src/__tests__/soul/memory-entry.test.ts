@@ -78,6 +78,85 @@ describe("MemoryEntrySchema", () => {
     expect(MemoryEntrySchema.parse(value)).toEqual(value);
   });
 
+  it("round-trips optional event-time and valid-time projection fields", () => {
+    const value = {
+      ...memoryEntryBase,
+      projection_schema_version: 1,
+      event_time_start: "2026-03-19T00:00:00.000Z",
+      event_time_end: "2026-03-19T23:59:59.999Z",
+      valid_from: "2026-03-19T00:00:00.000Z",
+      valid_to: null,
+      time_precision: "day",
+      time_source: "relative_resolved"
+    } as const;
+
+    const parsed = MemoryEntrySchema.parse(value);
+
+    expect(parsed.projection_schema_version).toBe(1);
+    expect(parsed.event_time_start).toBe("2026-03-19T00:00:00.000Z");
+    expect(parsed.event_time_end).toBe("2026-03-19T23:59:59.999Z");
+    expect(parsed.valid_from).toBe("2026-03-19T00:00:00.000Z");
+    expect(parsed.valid_to).toBeNull();
+    expect(parsed.time_precision).toBe("day");
+    expect(parsed.time_source).toBe("relative_resolved");
+  });
+
+  it("rejects invalid event-time precision and source values", () => {
+    expect(
+      MemoryEntrySchema.safeParse({
+        ...memoryEntryBase,
+        time_precision: "hour",
+        time_source: "relative_resolved"
+      }).success
+    ).toBe(false);
+    expect(
+      MemoryEntrySchema.safeParse({
+        ...memoryEntryBase,
+        time_precision: "day",
+        time_source: "regex_guess"
+      }).success
+    ).toBe(false);
+  });
+
+  it("round-trips optional preference profile projection fields", () => {
+    const value = {
+      ...memoryEntryBase,
+      projection_schema_version: 1,
+      preference_subject: "operator",
+      preference_predicate: "prefer",
+      preference_object: "dark mode in the editor",
+      preference_category: "editor-theme",
+      preference_polarity: "positive"
+    } as const;
+
+    const parsed = MemoryEntrySchema.parse(value);
+
+    expect(parsed.projection_schema_version).toBe(1);
+    expect(parsed.preference_subject).toBe("operator");
+    expect(parsed.preference_predicate).toBe("prefer");
+    expect(parsed.preference_object).toBe("dark mode in the editor");
+    expect(parsed.preference_category).toBe("editor-theme");
+    expect(parsed.preference_polarity).toBe("positive");
+  });
+
+  it("rejects invalid preference polarity values", () => {
+    expect(
+      MemoryEntrySchema.safeParse({
+        ...memoryEntryBase,
+        preference_polarity: "love"
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects unsupported projection schema versions", () => {
+    expect(
+      MemoryEntrySchema.safeParse({
+        ...memoryEntryBase,
+        projection_schema_version: 2
+      }).success
+    ).toBe(false);
+  });
+
   it("treats an omitted forget_disposition as no disposition (undefined, not present)", () => {
     const parsed = MemoryEntrySchema.parse(memoryEntryBase);
     expect(parsed.forget_disposition).toBeUndefined();

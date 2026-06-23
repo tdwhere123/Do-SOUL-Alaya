@@ -19,9 +19,7 @@ import {
   buildRecallFusionDetails,
   compareFusedRecallCandidates,
   prioritizeStrongLexicalDeliveryWindowCandidates,
-  reserveStructuralDeliverySlots,
-  reserveSynthesisDeliverySlots,
-  synthesisReserveCount
+  reserveStructuralDeliverySlots
 } from "./fusion-delivery.js";
 import { applyEvidenceSetDelivery } from "./evidence-set-optimizer.js";
 import { computeEffectiveScoreDetails } from "./scoring.js";
@@ -145,16 +143,12 @@ function orderFusedFineAssessmentCandidates(
     supplementaryData,
     maxEntries
   );
-  const synthesisReservedCandidates = reserveSynthesisDeliverySlots(
-    coverageOrderedCandidates,
-    supplementaryData,
-    maxEntries
-  );
+  const synthesisReservedCandidates = coverageOrderedCandidates;
   const deliveryOrderedCandidates = reserveStructuralDeliverySlots(
     synthesisReservedCandidates,
     supplementaryData,
     maxEntries,
-    synthesisReserveCount(coverageOrderedCandidates, maxEntries)
+    0
   );
   return Object.freeze({
     rankedCandidates,

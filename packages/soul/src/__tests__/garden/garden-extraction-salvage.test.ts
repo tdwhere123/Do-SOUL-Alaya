@@ -146,6 +146,8 @@ describe("parseOfficialApiSignals element-wise salvage", () => {
       object_kind: "user_preference",
       confidence: 0.9,
       matched_text: "Call me Ash",
+      evidence_refs: [],
+      source_memory_refs: [],
       distilled_fact: "The operator stated: Call me Ash",
       reason: "stated_preference"
     });

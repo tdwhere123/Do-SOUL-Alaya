@@ -95,8 +95,9 @@ export interface RecallServiceEvidenceSearchPort {
 
 // Synthesis FTS port consumed by the recall service. The implementing repo
 // is SqliteSynthesisCapsuleRepo (migration 079). Recall queries it on the
-// FTS-backed keyword path and joins each hit as a synthesis_capsule candidate
-// before fusion, rerank, and delivery-budget selection.
+// FTS-backed keyword path, uses synthesis rows as routing capsules, and expands
+// active same-workspace source_memory_refs into memory_entry candidates before
+// fusion and delivery-budget selection. Synthesis capsules are not delivered.
 // see also: packages/storage/src/repos/capsules/synthesis-capsule-repo.ts
 export interface RecallServiceSynthesisSearchPort {
   searchByKeyword(

@@ -311,6 +311,103 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
     expect(memoryInput.enqueueEnrichment).toEqual({ runId: "run-1", sourceSignalId: "signal-1" });
   });
 
+  it("passes temporal projection metadata into memory create input", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    await router.materializeSignal(createSignal({
+      raw_payload: {
+        excerpt: "The deployment happened yesterday.",
+        temporal_projection: {
+          projection_schema_version: 1,
+          event_time_start: "2026-03-19T00:00:00.000Z",
+          event_time_end: "2026-03-20T00:00:00.000Z",
+          valid_from: "2026-03-19T00:00:00.000Z",
+          time_precision: "day",
+          time_source: "relative_resolved"
+        }
+      }
+    }));
+
+    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+      readonly event_time_start?: string;
+      readonly event_time_end?: string;
+      readonly valid_from?: string;
+      readonly time_precision?: string;
+      readonly time_source?: string;
+      readonly projection_schema_version?: number;
+    };
+    expect(memoryInput).toMatchObject({
+      projection_schema_version: 1,
+      event_time_start: "2026-03-19T00:00:00.000Z",
+      event_time_end: "2026-03-20T00:00:00.000Z",
+      valid_from: "2026-03-19T00:00:00.000Z",
+      time_precision: "day",
+      time_source: "relative_resolved"
+    });
+  });
+
+  it("drops invalid temporal projection dates before memory create", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    await router.materializeSignal(createSignal({
+      raw_payload: {
+        excerpt: "The impossible date was 2026-02-31.",
+        temporal_projection: {
+          projection_schema_version: 1,
+          event_time_start: "2026-02-31",
+          event_time_end: "2026-03-01",
+          time_precision: "day",
+          time_source: "explicit"
+        }
+      }
+    }));
+
+    const memoryInput = deps.memoryService.create.mock.calls[0][0] as Record<string, unknown>;
+    expect(memoryInput.projection_schema_version).toBe(1);
+    expect(memoryInput.event_time_start).toBeUndefined();
+    expect(memoryInput.event_time_end).toBe("2026-03-01T00:00:00.000Z");
+  });
+
+  it("passes preference profile metadata into memory create input", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    await router.materializeSignal(createSignal({
+      signal_kind: "potential_preference",
+      object_kind: "preference",
+      raw_payload: {
+        excerpt: "I prefer dark mode.",
+        preference_profile: {
+          projection_schema_version: 1,
+          subject: "operator",
+          predicate: "prefer",
+          object: "dark mode",
+          category: "theme",
+          polarity: "positive"
+        }
+      }
+    }));
+
+    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+      readonly preference_subject?: string;
+      readonly preference_predicate?: string;
+      readonly preference_object?: string;
+      readonly preference_category?: string;
+      readonly preference_polarity?: string;
+      readonly projection_schema_version?: number;
+    };
+    expect(memoryInput).toMatchObject({
+      projection_schema_version: 1,
+      preference_subject: "operator",
+      preference_predicate: "prefer",
+      preference_object: "dark mode",
+      preference_category: "theme",
+      preference_polarity: "positive"
+    });
+  });
+
 
   it("skips the loud fallback enqueue when the create reported it enqueued atomically", async () => {
     const deps = createDeps();

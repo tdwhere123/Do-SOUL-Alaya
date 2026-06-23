@@ -41,6 +41,9 @@ const manifestationStateValues = ["hidden", "hint", "excerpt", "full_eligible"] 
 const retentionStateValues = ["working", "consolidated", "canon", "archived", "tombstoned"] as const;
 
 const storageTierValues = ["hot", "warm", "cold"] as const;
+const timePrecisionValues = ["day", "month", "year", "range", "relative", "unknown"] as const;
+const timeSourceValues = ["explicit", "session_timestamp", "relative_resolved"] as const;
+const preferencePolarityValues = ["positive", "negative", "neutral"] as const;
 
 // invariant: durable forgetting-disposition marker. A memory is eligible for
 // AUTONOMOUS terminal removal ONLY when this is non-null; null is never
@@ -111,6 +114,27 @@ export const StorageTier = {
   COLD: "cold"
 } as const;
 
+export const TimePrecision = {
+  DAY: "day",
+  MONTH: "month",
+  YEAR: "year",
+  RANGE: "range",
+  RELATIVE: "relative",
+  UNKNOWN: "unknown"
+} as const;
+
+export const TimeSource = {
+  EXPLICIT: "explicit",
+  SESSION_TIMESTAMP: "session_timestamp",
+  RELATIVE_RESOLVED: "relative_resolved"
+} as const;
+
+export const PreferencePolarity = {
+  POSITIVE: "positive",
+  NEGATIVE: "negative",
+  NEUTRAL: "neutral"
+} as const;
+
 export const ForgetDisposition = {
   COMPRESSED: "compressed",
   JUDGED_USELESS: "judged_useless"
@@ -123,6 +147,9 @@ export const DecayProfileSchema = z.enum(decayProfileValues);
 export const ManifestationStateSchema = z.enum(manifestationStateValues);
 export const RetentionStateSchema = z.enum(retentionStateValues);
 export const StorageTierSchema = z.enum(storageTierValues);
+const TimePrecisionSchema = z.enum(timePrecisionValues);
+const TimeSourceSchema = z.enum(timeSourceValues);
+const PreferencePolaritySchema = z.enum(preferencePolarityValues);
 export const ForgetDispositionSchema = z.enum(forgetDispositionValues);
 const MemoryEntryMutableFieldsBaseSchema = z.object({
   // Bound `content` plus each `domain_tags` / `evidence_refs` element so
@@ -145,7 +172,24 @@ const MemoryEntryMutableFieldsBaseSchema = z.object({
   retention_state: RetentionStateSchema.optional()
 }).strict();
 
-export const MemoryEntryMutableFieldsSchema = MemoryEntryMutableFieldsBaseSchema.readonly();
+const MemoryEntryProjectionMutableFieldsSchema = z.object({
+  projection_schema_version: z.number().int().min(1).max(1).nullable().optional(),
+  event_time_start: IsoDatetimeStringSchema.nullable().optional(),
+  event_time_end: IsoDatetimeStringSchema.nullable().optional(),
+  valid_from: IsoDatetimeStringSchema.nullable().optional(),
+  valid_to: IsoDatetimeStringSchema.nullable().optional(),
+  time_precision: TimePrecisionSchema.nullable().optional(),
+  time_source: TimeSourceSchema.nullable().optional(),
+  preference_subject: BoundedLabelSchema.nullable().optional(),
+  preference_predicate: BoundedLabelSchema.nullable().optional(),
+  preference_object: BoundedLabelSchema.nullable().optional(),
+  preference_category: BoundedLabelSchema.nullable().optional(),
+  preference_polarity: PreferencePolaritySchema.nullable().optional()
+}).strict();
+
+export const MemoryEntryMutableFieldsSchema = MemoryEntryMutableFieldsBaseSchema
+  .extend(MemoryEntryProjectionMutableFieldsSchema.shape)
+  .readonly();
 
 /**
  * Strict variant for the public MCP `soul.propose_memory_update`
@@ -157,6 +201,7 @@ export const PublicMemoryEntryMutableFieldsSchema =
 
 
 export const MemoryEntryRepoUpdateFieldsSchema = MemoryEntryMutableFieldsBaseSchema.extend({
+  ...MemoryEntryProjectionMutableFieldsSchema.shape,
   updated_at: IsoDatetimeStringSchema
 }).strict().readonly();
 export const MemoryEntrySchema = PersistentObjectEnvelopeSchema.unwrap()
@@ -184,6 +229,18 @@ export const MemoryEntrySchema = PersistentObjectEnvelopeSchema.unwrap()
     reinforcement_count: NonNegativeIntSchema.nullable(),
     contradiction_count: NonNegativeIntSchema.nullable(),
     superseded_by: BoundedIdSchema.nullable(),
+    projection_schema_version: z.number().int().min(1).max(1).nullable().optional(),
+    event_time_start: IsoDatetimeStringSchema.nullable().optional(),
+    event_time_end: IsoDatetimeStringSchema.nullable().optional(),
+    valid_from: IsoDatetimeStringSchema.nullable().optional(),
+    valid_to: IsoDatetimeStringSchema.nullable().optional(),
+    time_precision: TimePrecisionSchema.nullable().optional(),
+    time_source: TimeSourceSchema.nullable().optional(),
+    preference_subject: BoundedLabelSchema.nullable().optional(),
+    preference_predicate: BoundedLabelSchema.nullable().optional(),
+    preference_object: BoundedLabelSchema.nullable().optional(),
+    preference_category: BoundedLabelSchema.nullable().optional(),
+    preference_polarity: PreferencePolaritySchema.nullable().optional(),
     // invariant: optional on the wire (legacy rows + most constructors omit it),
     // but the storage layer always materializes it as null|value. Safety treats
     // undefined and null identically as "no disposition" — non-null/defined is
@@ -226,6 +283,9 @@ export type DecayProfile = z.infer<typeof DecayProfileSchema>;
 export type ManifestationState = z.infer<typeof ManifestationStateSchema>;
 export type RetentionState = z.infer<typeof RetentionStateSchema>;
 export type StorageTier = z.infer<typeof StorageTierSchema>;
+export type TimePrecision = z.infer<typeof TimePrecisionSchema>;
+export type TimeSource = z.infer<typeof TimeSourceSchema>;
+export type PreferencePolarity = z.infer<typeof PreferencePolaritySchema>;
 export type ForgetDisposition = z.infer<typeof ForgetDispositionSchema>;
 export type MemoryEntryMutableFields = z.infer<typeof MemoryEntryMutableFieldsSchema>;
 export type MemoryEntryRepoUpdateFields = z.infer<typeof MemoryEntryRepoUpdateFieldsSchema>;

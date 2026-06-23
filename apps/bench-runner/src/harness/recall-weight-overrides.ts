@@ -21,7 +21,7 @@ const ADDITIVE_WEIGHT_KEYS = [
   "PATH_PLASTICITY_WEIGHT"
 ] as const;
 
-// see also: packages/core/src/recall/fusion-delivery.ts:resolveRrfFusionWeights and
+// see also: packages/core/src/recall/fusion-delivery-adaptive-scoring.ts:resolveRrfFusionWeights and
 // packages/core/src/recall/scoring.ts:resolveFusionScoringWeights (read these non-stream knobs
 // alongside per-stream weights)
 const FUSION_NON_STREAM_KEYS = [
@@ -31,11 +31,16 @@ const FUSION_NON_STREAM_KEYS = [
   "QUERY_EVIDENCE_BASE_WEIGHT_FLOOR"
 ] as const;
 
+const FUSION_STREAM_RRF_K_KEYS = RECALL_FUSION_STREAMS.map(
+  (stream) => `${stream}_rrf_k`
+) as readonly string[];
+
 // invariant: per-stream keys derive from RECALL_FUSION_STREAMS, so every
-// allowed key maps to a real weight slot in resolveRrfFusionWeights and a
-// new stream is sweepable without editing this list.
+// allowed key maps to a real weight or per-lane k slot in resolveRrfFusionWeights
+// and a new stream is sweepable without editing this list.
 const FUSION_WEIGHT_KEYS = [
   ...RECALL_FUSION_STREAMS,
+  ...FUSION_STREAM_RRF_K_KEYS,
   ...FUSION_NON_STREAM_KEYS
 ] as const;
 

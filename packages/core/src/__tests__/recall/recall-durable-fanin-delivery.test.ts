@@ -22,7 +22,7 @@ import {
   overridePolicy
 } from "./recall-service-test-fixtures.js";
 
-// Synthesis-backstop delivery via the public RecallService.recall() surface
+// Synthesis-router delivery via the public RecallService.recall() surface
 // (result.candidates + result.diagnostics); session-coverage rerank via its real
 // exported helper.
 
@@ -102,17 +102,17 @@ function runSynthesisRecall(service: RecallService, maxEntries: number) {
     }
   );
   return service.recall({
-    taskSurface: { ...createTaskSurface(), display_name: "recall synthesis backstop" },
+    taskSurface: { ...createTaskSurface(), display_name: "recall synthesis router" },
     workspaceId: WS,
     strategy: "analyze",
     policyOverride: policy
   });
 }
 
-describe("synthesis backstop — fires only for uncovered capsules, not a tail-pin", () => {
-  it("does NOT reserve a tail slot when a delivered memory already covers the capsule's evidence set", async () => {
-    // mem-0 shares the capsule's only evidence ref and fills the window → capsule
-    // COVERED, synthesis reserve must not fire.
+describe("synthesis router disables direct capsule delivery", () => {
+  it("does not deliver a source-less capsule when a delivered memory already covers the capsule's evidence set", async () => {
+    // mem-0 shares the capsule's only evidence ref and fills the window. The
+    // synthesis row remains router-only and is not delivered directly.
     const memories = Array.from({ length: 6 }, (_unused, index) =>
       createMemoryEntry({
         object_id: `mem-${index}`,
@@ -138,9 +138,10 @@ describe("synthesis backstop — fires only for uncovered capsules, not a tail-p
     expect(reservedSynthesis).toHaveLength(0);
   });
 
-  it("reserves a tail slot for a capsule whose evidence set reached no in-window member", async () => {
-    // Six memories saturate the window, none carries the capsule's evidence ref →
-    // UNCOVERED and buried, only the synthesis reserve can deliver it.
+  it("does not deliver a source-less capsule whose evidence set reached no in-window member", async () => {
+    // Six memories saturate the window and none carries the capsule's evidence
+    // ref, but source-less capsules are not delivered directly; synthesis routes
+    // through child source memories instead.
     const memories = Array.from({ length: 6 }, (_unused, index) =>
       createMemoryEntry({
         object_id: `mem-${index}`,
@@ -159,18 +160,18 @@ describe("synthesis backstop — fires only for uncovered capsules, not a tail-p
 
     const result = await runSynthesisRecall(service, 5);
     const deliveredIds = result.candidates.slice(0, 5).map((candidate) => candidate.object_id);
-    expect(deliveredIds).toContain("syn-uncov");
+    expect(deliveredIds).not.toContain("syn-uncov");
     const capsuleDiagnostic = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "syn-uncov"
     );
-    expect(capsuleDiagnostic?.pre_budget_rank ?? 0).toBeGreaterThan(5);
-    expect(capsuleDiagnostic?.reserved_by).toBe("synthesis");
+    expect(capsuleDiagnostic).toBeUndefined();
     expect(result.candidates.length).toBeLessThanOrEqual(5);
   });
 
-  it("prefers the uncovered capsule with the stronger synthesis FTS rank in the bounded tail", async () => {
-    // Two uncovered capsules compete for the bounded reserve, ranked by synthesis
-    // FTS rank: stronger delivered first, both behind the pure-fusion head.
+  it("does not tail-pin uncovered source-less capsules by synthesis FTS rank", async () => {
+    // Two uncovered source-less capsules match synthesis FTS, but direct
+    // capsule delivery is intentionally disabled by the synthesis-as-router
+    // contract.
     const memories = Array.from({ length: 5 }, (_unused, index) =>
       createMemoryEntry({
         object_id: `mem-${index}`,
@@ -190,12 +191,8 @@ describe("synthesis backstop — fires only for uncovered capsules, not a tail-p
 
     const result = await runSynthesisRecall(service, 6);
     const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
-    const strongPos = deliveredIds.indexOf("syn-strong");
-    const weakPos = deliveredIds.indexOf("syn-weak");
-    expect(strongPos).toBeGreaterThanOrEqual(0);
-    if (weakPos !== -1) {
-      expect(strongPos).toBeLessThan(weakPos);
-    }
+    expect(deliveredIds).not.toContain("syn-strong");
+    expect(deliveredIds).not.toContain("syn-weak");
     expect(result.candidates[0]?.object_kind).toBe("memory_entry");
   });
 });

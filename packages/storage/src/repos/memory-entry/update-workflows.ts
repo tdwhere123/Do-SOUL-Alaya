@@ -42,6 +42,21 @@ interface DynamicUpdateParts {
   readonly params: readonly (string | number | null)[];
 }
 
+const PROJECTION_UPDATE_FIELDS = [
+  "projection_schema_version",
+  "event_time_start",
+  "event_time_end",
+  "valid_from",
+  "valid_to",
+  "time_precision",
+  "time_source",
+  "preference_subject",
+  "preference_predicate",
+  "preference_object",
+  "preference_category",
+  "preference_polarity"
+] as const satisfies readonly (keyof MemoryEntryRepoUpdateFields)[];
+
 export async function updateMemoryEntry(
   this: MemoryEntryUpdateWorkflowHost,
   objectId: string,
@@ -59,6 +74,7 @@ export async function updateMemoryEntry(
       parsedFields.retention_state ?? null,
       parsedFields.last_used_at ?? null,
       parsedFields.last_hit_at ?? null,
+      ...buildProjectionUpdateParams(parsedFields),
       parsedFields.updated_at,
       objectId
     );
@@ -102,6 +118,7 @@ export async function updateScopedMemoryEntry(
       parsedFields.retention_state ?? null,
       parsedFields.last_used_at ?? null,
       parsedFields.last_hit_at ?? null,
+      ...buildProjectionUpdateParams(parsedFields),
       parsedFields.updated_at,
       objectId,
       parsedWorkspaceId
@@ -125,6 +142,17 @@ export async function updateScopedMemoryEntry(
 
     throw new StorageError("QUERY_FAILED", `Failed to update memory entry ${objectId}.`, error);
   }
+}
+
+function buildProjectionUpdateParams(fields: MemoryEntryRepoUpdateFields): readonly unknown[] {
+  return PROJECTION_UPDATE_FIELDS.flatMap((fieldName) => [
+    hasOwn(fields, fieldName) ? 1 : 0,
+    fields[fieldName] ?? null
+  ]);
+}
+
+function hasOwn<T extends object>(value: T, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 export function updateMemoryEntryTier(

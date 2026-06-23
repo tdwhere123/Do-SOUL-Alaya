@@ -119,7 +119,19 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
         evidence_refs: fields.evidence_refs ?? ["evidence-1", "evidence-2"],
         storage_tier: fields.storage_tier ?? StorageTier.HOT,
         last_used_at: fields.last_used_at ?? null,
-        last_hit_at: fields.last_hit_at ?? null
+        last_hit_at: fields.last_hit_at ?? null,
+        projection_schema_version: fields.projection_schema_version ?? null,
+        event_time_start: fields.event_time_start ?? null,
+        event_time_end: fields.event_time_end ?? null,
+        valid_from: fields.valid_from ?? null,
+        valid_to: fields.valid_to ?? null,
+        time_precision: fields.time_precision ?? null,
+        time_source: fields.time_source ?? null,
+        preference_subject: fields.preference_subject ?? null,
+        preference_predicate: fields.preference_predicate ?? null,
+        preference_object: fields.preference_object ?? null,
+        preference_category: fields.preference_category ?? null,
+        preference_polarity: fields.preference_polarity ?? null
       })
     )
   );
@@ -133,7 +145,19 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
         evidence_refs: fields.evidence_refs ?? ["evidence-1", "evidence-2"],
         storage_tier: fields.storage_tier ?? StorageTier.HOT,
         last_used_at: fields.last_used_at ?? null,
-        last_hit_at: fields.last_hit_at ?? null
+        last_hit_at: fields.last_hit_at ?? null,
+        projection_schema_version: fields.projection_schema_version ?? null,
+        event_time_start: fields.event_time_start ?? null,
+        event_time_end: fields.event_time_end ?? null,
+        valid_from: fields.valid_from ?? null,
+        valid_to: fields.valid_to ?? null,
+        time_precision: fields.time_precision ?? null,
+        time_source: fields.time_source ?? null,
+        preference_subject: fields.preference_subject ?? null,
+        preference_predicate: fields.preference_predicate ?? null,
+        preference_object: fields.preference_object ?? null,
+        preference_category: fields.preference_category ?? null,
+        preference_polarity: fields.preference_polarity ?? null
       })
     )
   );

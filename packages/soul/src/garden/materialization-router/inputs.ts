@@ -27,6 +27,8 @@ import {
 } from "./contracts.js";
 import { SIGNAL_REF_SEED_SPECS } from "./signal-ref-seeds.js";
 import { appendSummarySuffix, buildDistilledFact, buildSignalSummary, buildTopicKey } from "./distilled-fact.js";
+import { readMemoryTemporalProjectionPayload } from "./temporal-projection.js";
+import { readMemoryPreferenceProfilePayload } from "./preference-projection.js";
 
 export { DISTILLED_FACT_MAX_CHARS, buildDistilledFact } from "./distilled-fact.js";
 export {
@@ -222,6 +224,8 @@ export function buildMemoryInput(
   evidenceRefs: readonly string[],
   enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"]
 ): MemoryMaterializationInput {
+  const temporalProjection = readMemoryTemporalProjectionPayload(signal.raw_payload);
+  const preferenceProfile = readMemoryPreferenceProfilePayload(signal.raw_payload);
   return {
     created_by: signal.source,
     dimension: toMemoryDimension(signal.object_kind),
@@ -239,6 +243,8 @@ export function buildMemoryInput(
     run_id: signal.run_id,
     surface_id: signal.surface_id,
     storage_tier: StorageTier.HOT,
+    ...temporalProjection,
+    ...preferenceProfile,
     ...(enqueueEnrichment === undefined ? {} : { enqueueEnrichment })
   };
 }
@@ -321,10 +327,28 @@ export function buildSynthesisInput(
     synthesis_type: toSynthesisType(),
     summary: buildDistilledFact(signal),
     evidence_refs: evidenceRefs,
-    source_memory_refs: [],
+    source_memory_refs: collectSynthesisSourceMemoryRefs(signal),
     workspace_id: signal.workspace_id,
     run_id: signal.run_id
   };
+}
+
+function collectSynthesisSourceMemoryRefs(signal: CandidateMemorySignal): readonly string[] {
+  return uniqueNonEmptyStrings(signal.source_memory_refs);
+}
+
+function uniqueNonEmptyStrings(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim();
+    if (normalized.length === 0 || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    output.push(normalized);
+  }
+  return output;
 }
 
 function toScopeClass(scopeHint: string | null): ScopeClassValue {

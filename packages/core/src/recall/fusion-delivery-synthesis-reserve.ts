@@ -15,8 +15,6 @@ import {
   scoreQueryEvidenceMatch
 } from "./query-evidence-scoring.js";
 
-const SYNTHESIS_ANCHOR_BONUS = 0.15;
-
 type RecallFusionCandidateInput = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
   readonly effectiveFactors: RecallScoreFactors;
@@ -25,7 +23,6 @@ type FusedRecallCandidateInput = Readonly<RecallFusionCandidateInput & {
   readonly fusion: RecallFusionBreakdown;
 }>;
 
-const SYNTHESIS_DELIVERY_RESERVE = 2;
 // invariant: covered capsules share evidence_refs with a memory_entry already in the natural top-K delivery window.
 const SYNTHESIS_COVERAGE_WINDOW = 5;
 
@@ -61,14 +58,9 @@ export function synthesisReserveCount(
   deliveryOrdered: readonly FusedRecallCandidateInput[],
   maxEntries: number
 ): number {
-  if (maxEntries <= 1) {
-    return 0;
-  }
-  const uncoveredCount = selectUncoveredSynthesisCapsules(deliveryOrdered, maxEntries).length;
-  if (uncoveredCount === 0) {
-    return 0;
-  }
-  return Math.max(0, Math.min(SYNTHESIS_DELIVERY_RESERVE, uncoveredCount, maxEntries - 1));
+  void deliveryOrdered;
+  void maxEntries;
+  return 0;
 }
 
 export function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
@@ -76,24 +68,9 @@ export function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInpu
   supplementaryData: RecallSupplementaryData,
   maxEntries: number
 ): readonly T[] {
-  if (maxEntries <= 1) {
-    return deliveryOrdered;
-  }
-  const uncoveredCapsules = selectUncoveredSynthesisCapsules(deliveryOrdered, maxEntries);
-  if (uncoveredCapsules.length === 0) {
-    return deliveryOrdered;
-  }
-  const reserveCount = synthesisReserveCount(deliveryOrdered, maxEntries);
-  if (reserveCount <= 0) {
-    return deliveryOrdered;
-  }
-  const pathReachedEvidenceRefs = collectPathReachedEvidenceRefs(deliveryOrdered);
-  const reservedSynthesis = rankReservedSynthesisCandidates(
-    uncoveredCapsules,
-    supplementaryData,
-    pathReachedEvidenceRefs
-  ).slice(0, reserveCount);
-  return spliceReservedDeliveryTail(deliveryOrdered, reservedSynthesis, maxEntries, reserveCount);
+  void supplementaryData;
+  void maxEntries;
+  return deliveryOrdered;
 }
 
 // invariant: structural streams are only graph/path topology reach; generic structuralScore and entity/evidence terms are excluded.
@@ -233,63 +210,6 @@ export function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInp
     reservedTailCount,
     reserveCount
   );
-}
-
-function collectPathReachedEvidenceRefs(
-  deliveryOrdered: readonly FusedRecallCandidateInput[]
-): ReadonlySet<string> {
-  const pathReachedEvidenceRefs = new Set<string>();
-  for (const candidate of deliveryOrdered) {
-    if (
-      candidate.objectKind !== "synthesis_capsule" &&
-      structuralFusionContribution(candidate) > 0
-    ) {
-      for (const ref of candidate.entry.evidence_refs) {
-        pathReachedEvidenceRefs.add(ref);
-      }
-    }
-  }
-  return pathReachedEvidenceRefs;
-}
-
-function rankReservedSynthesisCandidates<T extends FusedRecallCandidateInput>(
-  uncoveredCapsules: readonly T[],
-  supplementaryData: RecallSupplementaryData,
-  pathReachedEvidenceRefs: ReadonlySet<string>
-): readonly T[] {
-  const synthesisAnchorBonus = (capsule: T): number =>
-    capsule.entry.evidence_refs.some((ref) => pathReachedEvidenceRefs.has(ref))
-      ? SYNTHESIS_ANCHOR_BONUS
-      : 0;
-  return [...uncoveredCapsules].sort((left, right) => {
-    const leftRank =
-      (supplementaryData.synthesisFtsRanks[left.entry.object_id] ?? 0) + synthesisAnchorBonus(left);
-    const rightRank =
-      (supplementaryData.synthesisFtsRanks[right.entry.object_id] ?? 0) + synthesisAnchorBonus(right);
-    return rightRank - leftRank !== 0
-      ? rightRank - leftRank
-      : compareMemoryEntries(left.entry, right.entry);
-  });
-}
-
-function spliceReservedDeliveryTail<T extends FusedRecallCandidateInput>(
-  deliveryOrdered: readonly T[],
-  reservedCandidates: readonly T[],
-  maxEntries: number,
-  reserveCount: number
-): readonly T[] {
-  const reservedKeys = new Set(
-    reservedCandidates.map((candidate) => buildRecallCandidateDedupeKey(candidate))
-  );
-  const rest = deliveryOrdered.filter(
-    (candidate) => !reservedKeys.has(buildRecallCandidateDedupeKey(candidate))
-  );
-  const headCount = Math.max(0, maxEntries - reserveCount);
-  return Object.freeze([
-    ...rest.slice(0, headCount),
-    ...reservedCandidates,
-    ...rest.slice(headCount)
-  ]);
 }
 
 function collectBuriedStructuralCandidates<T extends FusedRecallCandidateInput>(

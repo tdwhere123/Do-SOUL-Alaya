@@ -14,12 +14,15 @@ import {
 import { type RecallQueryProbes } from "./recall-query-probes.js";
 import {
   classifyGlobalCandidate,
+  buildRecallCandidateDedupeKey,
   entryMatchesTimeFilter,
   getGlobalRecallLimit,
   matchesConfiguredCoarseFilter,
   type RecallTimeFilter
 } from "./recall-service-helpers.js";
 import type { CoarseRecallCandidate } from "./recall-service-types.js";
+import { uniqueStrings } from "./path-relations.js";
+import { uniquePlanes } from "./coarse-candidates.js";
 import type {
   PreparedRecallRequest,
   RecallExecutionContext,
@@ -208,7 +211,43 @@ function mergeLexicalCoarseCandidates(
   globalCandidates: readonly Readonly<CoarseRecallCandidate>[],
   synthesisCoarseFilter: SynthesisCoarseResult
 ): readonly Readonly<CoarseRecallCandidate>[] {
-  return Object.freeze([...coarseFilter.candidates, ...globalCandidates, ...synthesisCoarseFilter.candidates]);
+  return mergeCoarseCandidateMetadata([
+    ...coarseFilter.candidates,
+    ...globalCandidates,
+    ...synthesisCoarseFilter.candidates
+  ]);
+}
+
+function mergeCoarseCandidateMetadata(
+  candidates: readonly Readonly<CoarseRecallCandidate>[]
+): readonly Readonly<CoarseRecallCandidate>[] {
+  const byKey = new Map<string, Readonly<CoarseRecallCandidate>>();
+  for (const candidate of candidates) {
+    const key = buildRecallCandidateDedupeKey(candidate);
+    byKey.set(key, mergeCoarseCandidatePair(byKey.get(key), candidate));
+  }
+  return Object.freeze([...byKey.values()]);
+}
+
+function mergeCoarseCandidatePair(
+  current: Readonly<CoarseRecallCandidate> | undefined,
+  next: Readonly<CoarseRecallCandidate>
+): Readonly<CoarseRecallCandidate> {
+  if (current === undefined) {
+    return next;
+  }
+  return Object.freeze({
+    ...current,
+    sourceChannels: uniqueStrings([...(current.sourceChannels ?? []), ...(next.sourceChannels ?? [])]),
+    admissionPlanes: uniquePlanes([...(current.admissionPlanes ?? []), ...(next.admissionPlanes ?? [])]),
+    structuralScore: Math.max(current.structuralScore ?? 0, next.structuralScore ?? 0),
+    pathExpansionSources: Object.freeze([
+      ...(current.pathExpansionSources ?? []),
+      ...(next.pathExpansionSources ?? [])
+    ]),
+    ...(current.sourceChannel === undefined ? { sourceChannel: next.sourceChannel } : {}),
+    ...(current.firstAdmissionPlane === undefined ? { firstAdmissionPlane: next.firstAdmissionPlane } : {})
+  });
 }
 
 function combineEmbeddingInjection(

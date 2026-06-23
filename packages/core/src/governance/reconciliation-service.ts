@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { SignalEventType, SoulSignalTriagedPayloadSchema } from "@do-soul/alaya-protocol";
+import {
+  SignalEventType,
+  SoulSignalTriagedPayloadSchema,
+  type MemoryEntry
+} from "@do-soul/alaya-protocol";
 
 import { KeyedMutex } from "../shared/keyed-mutex.js";
 import { ReconciliationDecider } from "./reconciliation-decider.js";
@@ -18,6 +22,7 @@ import {
   type ReconciliationInput,
   type ReconciliationLeasePort,
   type ReconciliationMemoryRepoPort,
+  type ReconciliationMemoryProjectionFields,
   type ReconciliationMemoryUpdatePort,
   type ReconciliationServiceDependencies,
   type ReconciliationVerdictApplier
@@ -38,11 +43,104 @@ export type {
   ReconciliationLeasePort,
   ReconciliationLlmDecisionPort,
   ReconciliationMemoryRepoPort,
+  ReconciliationMemoryProjectionFields,
   ReconciliationMemoryUpdatePort,
   ReconciliationServiceDependencies,
   ReconciliationServiceThresholds,
   ReconciliationVerdictApplier
 } from "./reconciliation-service-internal.js";
+
+function buildProjectionMergeFields(
+  existing: Readonly<MemoryEntry>,
+  incoming: ReconciliationMemoryProjectionFields | undefined
+): MutableProjectionMergeFields {
+  if (incoming === undefined) {
+    return {};
+  }
+  const fields: MutableProjectionMergeFields = {};
+  for (const key of PROJECTION_FIELD_KEYS) {
+    if (existing[key] === undefined || existing[key] === null) {
+      const value = incoming[key];
+      if (value !== undefined && value !== null) {
+        fields[key] = value as never;
+      }
+    }
+  }
+  return fields;
+}
+
+function buildProjectionReplacementFields(
+  incoming: ReconciliationMemoryProjectionFields | undefined
+): MutableProjectionMergeFields {
+  if (incoming === undefined) {
+    return {};
+  }
+  const fields: MutableProjectionMergeFields = {};
+  for (const key of PROJECTION_FIELD_KEYS) {
+    const value = incoming[key];
+    if (value !== undefined) {
+      fields[key] = value as never;
+    }
+  }
+  return fields;
+}
+
+function updateFieldsMatch(
+  row: Readonly<MemoryEntry>,
+  fields: {
+    readonly content: string;
+    readonly domain_tags: readonly string[];
+    readonly evidence_refs?: readonly string[];
+  } & Partial<ReconciliationMemoryProjectionFields>
+): boolean {
+  if (row.content !== fields.content || !sameStringSet(row.domain_tags, fields.domain_tags)) {
+    return false;
+  }
+  if (fields.evidence_refs !== undefined && !sameStringSet(row.evidence_refs, fields.evidence_refs)) {
+    return false;
+  }
+  return PROJECTION_FIELD_KEYS.every(
+    (key) => fields[key] === undefined || projectionValuesMatch(row[key], fields[key])
+  );
+}
+
+function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((item, index) => item === sortedRight[index]);
+}
+
+function projectionValuesMatch(
+  actual: MemoryEntry[(typeof PROJECTION_FIELD_KEYS)[number]] | undefined,
+  expected: MemoryEntry[(typeof PROJECTION_FIELD_KEYS)[number]] | undefined
+): boolean {
+  if (expected === null) {
+    return actual === null || actual === undefined;
+  }
+  return actual === expected;
+}
+
+type MutableProjectionMergeFields = {
+  -readonly [K in keyof ReconciliationMemoryProjectionFields]?: ReconciliationMemoryProjectionFields[K];
+};
+
+const PROJECTION_FIELD_KEYS = [
+  "projection_schema_version",
+  "event_time_start",
+  "event_time_end",
+  "valid_from",
+  "valid_to",
+  "time_precision",
+  "time_source",
+  "preference_subject",
+  "preference_predicate",
+  "preference_object",
+  "preference_category",
+  "preference_polarity"
+] as const;
 
 export class ReconciliationService {
   private readonly mutex: KeyedMutex;
@@ -135,7 +233,8 @@ export class ReconciliationService {
         decision.survivingObjectId,
         input.incomingContent.trim(),
         input.incomingDomainTags,
-        incomingEvidenceRef
+        incomingEvidenceRef,
+        input.incomingProjectionFields
       );
       if (applied) {
         return decision;
@@ -152,6 +251,7 @@ export class ReconciliationService {
     if (decision.kind === "noop" && decision.survivingObjectId !== undefined) {
       // NOOP creates nothing, but the verdict still feeds the bench sidecar remap.
       await applyVerdict(decision);
+      await this.applyNoopProjectionMerge(decision.survivingObjectId, input.incomingProjectionFields);
       await this.auditDrop(input, decision.survivingObjectId, decision.bestSimilarity);
       return decision;
     }
@@ -161,31 +261,26 @@ export class ReconciliationService {
     return decision;
   }
 
-  private async applyUpdate(targetObjectId: string, incomingContent: string, incomingDomainTags: readonly string[], incomingEvidenceRef: string | undefined): Promise<boolean> {
+  private async applyUpdate(
+    targetObjectId: string,
+    incomingContent: string,
+    incomingDomainTags: readonly string[],
+    incomingEvidenceRef: string | undefined,
+    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
+  ): Promise<boolean> {
+    const existing = await this.findUpdateTarget(targetObjectId);
+    if (existing === null) {
+      return false;
+    }
+    const fields = this.buildUpdateFields(
+      existing,
+      incomingContent,
+      incomingDomainTags,
+      incomingEvidenceRef,
+      incomingProjectionFields
+    );
+
     try {
-      const existing = await this.memoryRepo.findByIds([targetObjectId]);
-      const row = existing[0];
-      if (row === undefined || row.lifecycle_state === "archived") {
-        this.warn("reconciliation update target missing or archived", {
-          object_id: targetObjectId
-        });
-        return false;
-      }
-      const fields: {
-        content: string;
-        domain_tags: readonly string[];
-        evidence_refs?: readonly string[];
-      } = {
-        content: incomingContent,
-        // mirror buildMemoryInput so the refined row's tags track its content.
-        // see also: packages/soul/src/garden/materialization-router/inputs.ts
-        domain_tags: incomingDomainTags
-      };
-      if (incomingEvidenceRef !== undefined && incomingEvidenceRef.trim().length > 0) {
-        fields.evidence_refs = row.evidence_refs.includes(incomingEvidenceRef)
-          ? row.evidence_refs
-          : [...row.evidence_refs, incomingEvidenceRef];
-      }
       await this.memoryUpdate.update(
         targetObjectId,
         fields,
@@ -197,7 +292,90 @@ export class ReconciliationService {
         object_id: targetObjectId,
         error: errorMessage(error)
       });
-      return false;
+      return await this.updateAppearsApplied(targetObjectId, fields);
+    }
+  }
+
+  private buildUpdateFields(
+    existing: Readonly<MemoryEntry>,
+    incomingContent: string,
+    incomingDomainTags: readonly string[],
+    incomingEvidenceRef: string | undefined,
+    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
+  ): {
+    readonly content: string;
+    readonly domain_tags: readonly string[];
+    readonly evidence_refs?: readonly string[];
+  } & Partial<ReconciliationMemoryProjectionFields> {
+    const fields = {
+      content: incomingContent,
+      domain_tags: incomingDomainTags
+    } as {
+      content: string;
+      domain_tags: readonly string[];
+      evidence_refs?: readonly string[];
+    } & Partial<ReconciliationMemoryProjectionFields>;
+    if (incomingEvidenceRef !== undefined && incomingEvidenceRef.trim().length > 0) {
+      fields.evidence_refs = existing.evidence_refs.includes(incomingEvidenceRef)
+        ? existing.evidence_refs
+        : [...existing.evidence_refs, incomingEvidenceRef];
+    }
+    Object.assign(fields, buildProjectionReplacementFields(incomingProjectionFields));
+    return fields;
+  }
+
+  private async updateAppearsApplied(
+    targetObjectId: string,
+    fields: {
+      readonly content: string;
+      readonly domain_tags: readonly string[];
+      readonly evidence_refs?: readonly string[];
+    } & Partial<ReconciliationMemoryProjectionFields>
+  ): Promise<boolean> {
+    const row = await this.findUpdateTarget(targetObjectId);
+    return row !== null && updateFieldsMatch(row, fields);
+  }
+
+  private async findUpdateTarget(targetObjectId: string): Promise<Readonly<MemoryEntry> | null> {
+    try {
+      const existing = await this.memoryRepo.findByIds([targetObjectId]);
+      const row = existing[0];
+      if (row === undefined || row.lifecycle_state === "archived") {
+        this.warn("reconciliation update target missing or archived", {
+          object_id: targetObjectId
+        });
+        return null;
+      }
+      return row;
+    } catch (error) {
+      this.warn("reconciliation update target lookup failed", {
+        object_id: targetObjectId,
+        error: errorMessage(error)
+      });
+      return null;
+    }
+  }
+
+  private async applyNoopProjectionMerge(
+    targetObjectId: string,
+    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
+  ): Promise<void> {
+    try {
+      const existing = await this.memoryRepo.findByIds([targetObjectId]);
+      const row = existing[0];
+      if (row === undefined || row.lifecycle_state === "archived") {
+        return;
+      }
+      const fields = buildProjectionMergeFields(row, incomingProjectionFields);
+      if (Object.keys(fields).length === 0) {
+        return;
+      }
+      await this.memoryUpdate.update(targetObjectId, fields, "reconciliation_projection_merge");
+    } catch (error) {
+      this.warn("reconciliation NOOP projection merge failed", {
+        object_id: targetObjectId,
+        error: errorMessage(error)
+      });
     }
   }
 

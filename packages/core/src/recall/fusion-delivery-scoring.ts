@@ -11,6 +11,11 @@ import {
   normalizeActivationScore,
   normalizeGraphSupport
 } from "./recall-service-helpers.js";
+import {
+  resolveFusionContribution as resolveAdaptiveFusionContribution,
+  resolveRrfFusionWeights,
+  type ResolvedRecallFusionWeights
+} from "./fusion-delivery-adaptive-scoring.js";
 import type {
   CoarseRecallCandidate,
   RecallFusionBreakdown,
@@ -21,10 +26,10 @@ import type {
 } from "./recall-service-types.js";
 import {
   normalizeEvidenceText} from "./query-evidence-scoring.js";
+import { scorePreferenceProfileAlignment } from "./preference-fusion-scoring.js";
+import { scoreTemporalEventTime } from "./temporal-fusion-scoring.js";
 
 const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;
-const EMBEDDING_PATH_MODULATION_GAIN = 0.25;
-const RECALL_RRF_DEFAULT_K = 60;
 
 export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "lexical_fts", "trigram_fts", "synthesis_fts", "evidence_fts",
@@ -48,11 +53,6 @@ type FusedRecallCandidateInput = Readonly<RecallFusionCandidateInput & {
   readonly fusion: RecallFusionBreakdown;
 }>;
 
-type ResolvedRecallFusionWeights = Readonly<{
-  readonly k: number;
-  readonly weights: Readonly<Record<RecallFusionStream, number>>;
-}>;
-
 type PreliminaryFusionCandidate = Readonly<{
   readonly candidateKey: string;
   readonly objectId: string;
@@ -71,7 +71,12 @@ export function buildRecallFusionDetails(params: Readonly<{
   readonly supplementaryData: RecallSupplementaryData;
   readonly nowIso: string;
 }>): ReadonlyMap<string, RecallFusionBreakdown> {
-  const resolved = resolveRrfFusionWeights(params.policy);
+  const resolved = resolveRrfFusionWeights({
+    policy: params.policy,
+    queryProbes: params.supplementaryData.queryProbes,
+    streams: RECALL_FUSION_STREAMS,
+    baseWeights: RECALL_FUSION_DEFAULT_WEIGHTS
+  });
   const ranksByStream = buildFusionRanksByStream(params.candidates, params.supplementaryData, params.nowIso);
   const prelim = buildPreliminaryFusionCandidates(params, resolved, ranksByStream);
   const fusedRankByCandidateKey = buildFusedRankByCandidateKey(prelim);
@@ -250,13 +255,13 @@ function resolveFusionContribution(
   stream: RecallFusionStream,
   rank: number
 ): number {
-  let contribution = resolved.weights[stream] / (resolved.k + rank);
-  if (stream === "path_expansion" || stream === "graph_expansion") {
-    const cos = clamp01(supplementaryData.embeddingSimilarityScores?.[candidate.entry.object_id] ?? 0.5);
-    const modulation = 1 + EMBEDDING_PATH_MODULATION_GAIN * Math.max(0, 2 * cos - 1);
-    contribution *= modulation;
-  }
-  return contribution;
+  return resolveAdaptiveFusionContribution({
+    candidate,
+    supplementaryData,
+    resolved,
+    stream,
+    rank
+  });
 }
 
 function buildFusedRankByCandidateKey(
@@ -323,7 +328,7 @@ function scoreGlobalFusionStream(
     case "embedding_similarity":
       return clamp01(candidate.effectiveFactors.embedding_similarity ?? 0);
     case "temporal_recency":
-      return scoreTemporalRecency(candidate.entry, nowIso);
+      return scoreTemporalEventTime(candidate.entry, nowIso);
     case "workspace_activation":
       return normalizeActivationScore(candidate.entry.activation_score);
     default:
@@ -344,7 +349,9 @@ function scoreWorkspaceLocalFusionStream(
     case "trigram_fts":
       return clamp01(supplementaryData.trigramFtsRanks[objectId] ?? 0);
     case "synthesis_fts":
-      return 0;
+      return candidate.sourceChannels?.includes("synthesis_child") === true
+        ? clamp01(supplementaryData.synthesisFtsRanks[objectId] ?? 0)
+        : 0;
     case "evidence_fts":
       return clamp01(supplementaryData.evidenceFtsRanks[objectId] ?? 0);
     case "evidence_structural_agreement":
@@ -371,7 +378,7 @@ function scoreWorkspaceLocalFusionStream(
     case "path_expansion":
       return clamp01(supplementaryData.pathExpansionScores[objectId] ?? 0);
     case "temporal_recency":
-      return scoreTemporalRecency(candidate.entry, nowIso);
+      return scoreTemporalEventTime(candidate.entry, nowIso);
     case "workspace_activation":
       return normalizeActivationScore(candidate.entry.activation_score);
   }
@@ -407,16 +414,17 @@ function scoreSubjectAlignment(
   entry: Readonly<MemoryEntry>,
   queryProbes: Readonly<RecallQueryProbes>
 ): number {
-  if (!queryProbes.subject_hints.includes("self_reference")) return 0;
+  const preferenceScore = scorePreferenceProfileAlignment(entry, queryProbes);
+  if (!queryProbes.subject_hints.includes("self_reference")) return preferenceScore;
   const content = normalizeEvidenceText(entry.content);
-  if (content.length === 0) return 0;
+  if (content.length === 0) return preferenceScore;
   const explicitSelf = /\b(?:i|i'm|i've|i'd|i'll|me|my|mine|we|we're|we've|our|ours)\b|(?:我|我的|我们|咱们|咱)/iu.test(content);
   const userFramed = /\b(?:the user|user|operator|principal)\b/iu.test(content);
-  if (!explicitSelf && !userFramed) return 0;
+  if (!explicitSelf && !userFramed) return preferenceScore;
   const genericAssistant =
     /\b(?:as an ai|i (?:do not|don't) have|i can help|here are|you can|you could|you should|there are many|some suggestions|popular (?:ones|options))\b/iu.test(content);
   const baseScore = explicitSelf ? 1 : 0.55;
-  return clamp01(genericAssistant ? baseScore * 0.25 : baseScore);
+  return Math.max(preferenceScore, clamp01(genericAssistant ? baseScore * 0.25 : baseScore));
 }
 
 export function compareFusedRecallCandidates(
@@ -453,35 +461,4 @@ function buildEmptyFusionStreamRanks(): Record<RecallFusionStream, number | null
 
 function buildEmptyFusionStreamContributions(): Record<RecallFusionStream, number> {
   return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, 0])) as Record<RecallFusionStream, number>;
-}
-
-function resolveRrfFusionWeights(
-  policy: Readonly<RecallPolicy>
-): ResolvedRecallFusionWeights {
-  const base = RECALL_FUSION_DEFAULT_WEIGHTS;
-  const overrides = policy.scoring_weight_overrides?.fusion_weights;
-  const kOverride = overrides?.RRF_K ?? overrides?.rrf_k;
-  const k = typeof kOverride === "number" && Number.isFinite(kOverride) && kOverride > 0
-    ? Math.trunc(kOverride)
-    : RECALL_RRF_DEFAULT_K;
-  const weights = Object.fromEntries(
-    RECALL_FUSION_STREAMS.map((stream) => {
-      const baseWeight = base[stream];
-      return [stream, Math.max(0, overrides?.[stream] ?? baseWeight)];
-    })
-  ) as Record<RecallFusionStream, number>;
-  return Object.freeze({
-    k: Math.max(1, k),
-    weights: Object.freeze(weights)
-  });
-}
-
-function scoreTemporalRecency(entry: Readonly<MemoryEntry>, nowIso: string): number {
-  const createdAtMs = Date.parse(entry.created_at);
-  const nowMs = Date.parse(nowIso);
-  if (!Number.isFinite(createdAtMs) || !Number.isFinite(nowMs)) {
-    return 0;
-  }
-  const ageDays = Math.max(0, (nowMs - createdAtMs) / 86_400_000);
-  return clamp01(1 - ageDays / 30);
 }

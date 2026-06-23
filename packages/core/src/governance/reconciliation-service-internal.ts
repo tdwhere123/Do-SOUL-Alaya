@@ -89,7 +89,24 @@ export interface ReconciliationInput {
   readonly signalId: string;
   readonly incomingContent: string;
   readonly incomingDomainTags: readonly string[];
+  readonly incomingProjectionFields?: ReconciliationMemoryProjectionFields;
 }
+
+export type ReconciliationMemoryProjectionFields = Pick<
+  MemoryEntry,
+  | "projection_schema_version"
+  | "event_time_start"
+  | "event_time_end"
+  | "valid_from"
+  | "valid_to"
+  | "time_precision"
+  | "time_source"
+  | "preference_subject"
+  | "preference_predicate"
+  | "preference_object"
+  | "preference_category"
+  | "preference_polarity"
+>;
 
 // invariant: the per-verdict object-creation callback the router supplies
 // to runWithDecision. It runs INSIDE the per-workspace lock, after the
@@ -134,7 +151,7 @@ export interface ReconciliationMemoryUpdatePort {
       readonly content?: string;
       readonly domain_tags?: readonly string[];
       readonly evidence_refs?: readonly string[];
-    },
+    } & Partial<ReconciliationMemoryProjectionFields>,
     reason: string
   ): Promise<Readonly<MemoryEntry>>;
 }

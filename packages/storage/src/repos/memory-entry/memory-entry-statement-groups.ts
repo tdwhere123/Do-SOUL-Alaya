@@ -105,9 +105,21 @@ const MEMORY_ENTRY_CREATE_SQL: SqlDefinitionMap<MemoryEntryCreateStatements> = {
         reinforcement_count,
         contradiction_count,
         superseded_by,
+        projection_schema_version,
+        event_time_start,
+        event_time_end,
+        valid_from,
+        valid_to,
+        time_precision,
+        time_source,
+        preference_subject,
+        preference_predicate,
+        preference_object,
+        preference_category,
+        preference_polarity,
         forget_disposition,
         forget_disposition_ref
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
 };
 
@@ -217,6 +229,18 @@ const MEMORY_ENTRY_UPDATE_SQL: SqlDefinitionMap<MemoryEntryUpdateStatements> = {
         retention_state = COALESCE(?, retention_state),
         last_used_at = COALESCE(?, last_used_at),
         last_hit_at = COALESCE(?, last_hit_at),
+        projection_schema_version = CASE WHEN ? THEN ? ELSE projection_schema_version END,
+        event_time_start = CASE WHEN ? THEN ? ELSE event_time_start END,
+        event_time_end = CASE WHEN ? THEN ? ELSE event_time_end END,
+        valid_from = CASE WHEN ? THEN ? ELSE valid_from END,
+        valid_to = CASE WHEN ? THEN ? ELSE valid_to END,
+        time_precision = CASE WHEN ? THEN ? ELSE time_precision END,
+        time_source = CASE WHEN ? THEN ? ELSE time_source END,
+        preference_subject = CASE WHEN ? THEN ? ELSE preference_subject END,
+        preference_predicate = CASE WHEN ? THEN ? ELSE preference_predicate END,
+        preference_object = CASE WHEN ? THEN ? ELSE preference_object END,
+        preference_category = CASE WHEN ? THEN ? ELSE preference_category END,
+        preference_polarity = CASE WHEN ? THEN ? ELSE preference_polarity END,
         updated_at = ?
       WHERE object_id = ?
     `,
@@ -231,6 +255,18 @@ const MEMORY_ENTRY_UPDATE_SQL: SqlDefinitionMap<MemoryEntryUpdateStatements> = {
         retention_state = COALESCE(?, retention_state),
         last_used_at = COALESCE(?, last_used_at),
         last_hit_at = COALESCE(?, last_hit_at),
+        projection_schema_version = CASE WHEN ? THEN ? ELSE projection_schema_version END,
+        event_time_start = CASE WHEN ? THEN ? ELSE event_time_start END,
+        event_time_end = CASE WHEN ? THEN ? ELSE event_time_end END,
+        valid_from = CASE WHEN ? THEN ? ELSE valid_from END,
+        valid_to = CASE WHEN ? THEN ? ELSE valid_to END,
+        time_precision = CASE WHEN ? THEN ? ELSE time_precision END,
+        time_source = CASE WHEN ? THEN ? ELSE time_source END,
+        preference_subject = CASE WHEN ? THEN ? ELSE preference_subject END,
+        preference_predicate = CASE WHEN ? THEN ? ELSE preference_predicate END,
+        preference_object = CASE WHEN ? THEN ? ELSE preference_object END,
+        preference_category = CASE WHEN ? THEN ? ELSE preference_category END,
+        preference_polarity = CASE WHEN ? THEN ? ELSE preference_polarity END,
         updated_at = ?
       WHERE object_id = ? AND workspace_id = ?
     `

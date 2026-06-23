@@ -121,11 +121,31 @@ export const OFFICIAL_API_SYSTEM_PROMPT = [
   'Use only supported signal kinds such as "potential_preference" and "potential_claim".',
   '"matched_text" is the verbatim span of the turn that triggered the signal.',
   '"distilled_fact" must be a self-contained declarative sentence carrying exactly one assertion.',
+  'When a synthesis signal cites existing evidence or memories by ID, include "evidence_refs" and "source_memory_refs" arrays.',
+  'When a signal has an event or valid-time fact, include optional "temporal_projection" with "projection_schema_version":1, ISO "event_time_start"/"event_time_end", ISO "valid_from"/"valid_to", "time_precision", and "time_source".',
+  'When a signal is a durable preference, include optional "preference_profile" with "projection_schema_version":1, "subject", "predicate", "object", "category", and "polarity".',
   "Resolve every pronoun, relative date, and reference in distilled_fact to its absolute form using the turn text.",
   "Preserve every concrete detail (names, numbers, dates, places) that appears in the turn.",
   "Do not invent facts and do not summarize away detail; split compound statements into separate signals.",
   'Return {"signals":[]} when the turn does not contain durable memory candidates.'
 ].join(" ");
+
+function buildOfficialApiRawPayload(
+  draft: OfficialApiSignalDraft,
+  providerKind: GardenProviderKind,
+  normalizedTurnContent: string
+): Record<string, unknown> {
+  return {
+    matched_text: draft.matched_text,
+    ...(draft.distilled_fact === undefined ? {} : { distilled_fact: draft.distilled_fact }),
+    ...(draft.temporal_projection === undefined ? {} : { temporal_projection: draft.temporal_projection }),
+    ...(draft.preference_profile === undefined ? {} : { preference_profile: draft.preference_profile }),
+    provider_kind: providerKind,
+    extraction_reason: draft.reason ?? "official_api",
+    turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, draft.matched_text),
+    full_turn_content: clampFullTurnContent(normalizedTurnContent)
+  };
+}
 
 export class OfficialApiGardenProvider implements GardenComputeProvider {
   public readonly provider_kind = GardenProviderKind.OFFICIAL_API;
@@ -189,67 +209,12 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     const signals: CandidateMemorySignal[] = [];
     let distilledFactOmittedCount = 0;
     for (const draft of drafts) {
-      const confidence = clampConfidence(draft.confidence);
-      // Observability: a draft with no distilled_fact makes
-      // materialization-router/inputs.ts buildDistilledFact degrade to its rule
-      // distiller (raw-payload truncation) instead of storing a resolved
-      // one-assertion fact. Count per turn so the production omission rate
-      // — how often ingestion silently loses §18-faithfulness — is visible.
       if (draft.distilled_fact === undefined) {
         distilledFactOmittedCount += 1;
       }
-      try {
-        signals.push(
-          CandidateMemorySignalSchema.parse({
-            signal_id: this.generateSignalId(),
-            workspace_id: context.workspace_id,
-            run_id: context.run_id,
-            surface_id: context.surface_id,
-            source: SignalSource.GARDEN_COMPILE,
-            signal_kind: draft.signal_kind,
-            object_kind: draft.object_kind,
-            scope_hint: null,
-            domain_tags: [],
-            confidence,
-            evidence_refs: [],
-            raw_payload: buildSchemaGroundedRawPayload({
-              signalKind: draft.signal_kind,
-              objectKind: draft.object_kind,
-              confidence,
-              rawPayload: {
-                matched_text: draft.matched_text,
-                // materialization-router/inputs.ts buildDistilledFact reads this
-                // key when present; an absent value (model omitted it)
-                // falls through to that file's rule distiller. Never write
-                // a faked span here.
-                ...(draft.distilled_fact === undefined
-                  ? {}
-                  : { distilled_fact: draft.distilled_fact }),
-                provider_kind: this.provider_kind,
-                extraction_reason: draft.reason ?? "official_api",
-                turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, draft.matched_text),
-                // reader keys on full_turn_content (inputs.ts buildEvidenceInput
-                // widening); clamp keeps raw_payload under the 16 KB cap.
-                full_turn_content: clampFullTurnContent(normalizedTurnContent)
-              }
-            }),
-            created_at: createdAt
-          })
-        );
-      } catch (error) {
-        // invariant: one over-budget signal (raw_payload past the protocol
-        // 16 KB BoundedJsonObject cap — a long matched_text triples under
-        // schema-grounding and overflows even after clamping — or an
-        // empty/oversized matched_text) must not abort the turn's other
-        // signals. Drop the bad signal and keep the rest; emit an observable
-        // line so chronic overflow is a visible recall hole, not a silent one.
-        console.warn("garden/compute-provider: dropped one official-API signal", {
-          runId: context.run_id,
-          signalKind: draft.signal_kind,
-          matchedTextChars: draft.matched_text.length,
-          distilledFactChars: draft.distilled_fact?.length ?? 0,
-          error: readErrorMessage(error, "unknown error")
-        });
+      const signal = this.buildSignalFromDraft(draft, context, normalizedTurnContent, createdAt);
+      if (signal !== null) {
+        signals.push(signal);
       }
     }
 
@@ -262,6 +227,47 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     }
 
     return Object.freeze(signals);
+  }
+
+  private buildSignalFromDraft(
+    draft: OfficialApiSignalDraft,
+    context: GardenCompileContext,
+    normalizedTurnContent: string,
+    createdAt: string
+  ): CandidateMemorySignal | null {
+    const confidence = clampConfidence(draft.confidence);
+    try {
+      return CandidateMemorySignalSchema.parse({
+        signal_id: this.generateSignalId(),
+        workspace_id: context.workspace_id,
+        run_id: context.run_id,
+        surface_id: context.surface_id,
+        source: SignalSource.GARDEN_COMPILE,
+        signal_kind: draft.signal_kind,
+        object_kind: draft.object_kind,
+        scope_hint: null,
+        domain_tags: [],
+        confidence,
+        evidence_refs: draft.evidence_refs,
+        source_memory_refs: draft.source_memory_refs,
+        raw_payload: buildSchemaGroundedRawPayload({
+          signalKind: draft.signal_kind,
+          objectKind: draft.object_kind,
+          confidence,
+          rawPayload: buildOfficialApiRawPayload(draft, this.provider_kind, normalizedTurnContent)
+        }),
+        created_at: createdAt
+      });
+    } catch (error) {
+      console.warn("garden/compute-provider: dropped one official-API signal", {
+        runId: context.run_id,
+        signalKind: draft.signal_kind,
+        matchedTextChars: draft.matched_text.length,
+        distilledFactChars: draft.distilled_fact?.length ?? 0,
+        error: readErrorMessage(error, "unknown error")
+      });
+      return null;
+    }
   }
 
   private async requestSignals(

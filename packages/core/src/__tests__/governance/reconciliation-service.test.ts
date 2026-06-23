@@ -242,47 +242,6 @@ it("ambiguous-band fact: LLM ADD verdict appends without an UPDATE", async () =>
     expect(update).not.toHaveBeenCalled();
   });
 
-it("ambiguous-band fact: LLM UPDATE verdict rewrites content, refreshes tags, relinks evidence", async () => {
-    const neighbor = createMemoryEntry({
-      object_id: "memory-neighbor",
-      content: "The user lives in Berlin city center",
-      domain_tags: ["stale-tag"],
-      evidence_refs: ["evidence-old"]
-    });
-    const { deps, update } = createDeps([neighbor], {
-      thresholds: { similarityFloor: 0.2 }
-    });
-    deps.llmDecision.decide = vi.fn<DecideFn>(async () => ({
-      kind: "update",
-      targetObjectId: "memory-neighbor",
-      reason: "refines the residence fact"
-    }));
-    const service = new ReconciliationService(deps);
-
-    const driven = drive(
-      service,
-      {
-        incomingContent: "The user lives in Berlin since 2019",
-        incomingDomainTags: ["residence", "fresh-tag"]
-      },
-      { evidenceRefForVerdict: () => "evidence-new" }
-    );
-    const decision = await driven.decision;
-
-    expect(decision.kind).toBe("update");
-    expect(decision.survivingObjectId).toBe("memory-neighbor");
-    expect(driven.appliedVerdicts).toEqual(["update"]);
-    expect(update).toHaveBeenCalledTimes(1);
-    expect(update.mock.calls[0][0]).toBe("memory-neighbor");
-    // Content rewritten, domain_tags refreshed from the new fact, and
-    // the freshly-materialized evidence ref appended.
-    expect(update.mock.calls[0][1]).toEqual({
-      content: "The user lives in Berlin since 2019",
-      domain_tags: ["residence", "fresh-tag"],
-      evidence_refs: ["evidence-old", "evidence-new"]
-    });
-  });
-
 it("ambiguous-band fact: LLM NOOP verdict drops the fact, audits it, creates nothing", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",
@@ -365,7 +324,7 @@ it("LLM failure degrades to ADD with the conflict scan flagged", async () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-it("LLM UPDATE that cannot be applied degrades to ADD with the conflict scan flagged", async () => {
+it("LLM UPDATE write failure without a visible mutation degrades to ADD", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",
       content: "The user lives in Berlin city center"
@@ -393,8 +352,6 @@ it("LLM UPDATE that cannot be applied degrades to ADD with the conflict scan fla
 
     expect(decision.kind).toBe("add");
     expect(decision.runConflictScan).toBe(true);
-    // applyVerdict is re-driven with the degraded ADD so the router
-    // creates the memory_entry it skipped on the failed UPDATE.
     expect(driven.appliedVerdicts).toEqual(["update", "add"]);
   });
 

@@ -4,7 +4,7 @@ import { RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createMemoryEntry, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
-it("keeps memory_entry and synthesis_capsule streams namespaced when object ids collide", async () => {
+it("merges synthesis-child metadata into a memory_entry when object ids collide", async () => {
     const sharedObjectId = "shared-object-1";
     const memories = [
       createMemoryEntry({
@@ -37,6 +37,9 @@ it("keeps memory_entry and synthesis_capsule streams namespaced when object ids 
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
+        findByIds: vi.fn(async (ids: readonly string[]) =>
+          memories.filter((memory) => ids.includes(memory.object_id))
+        ),
         searchByKeyword: vi.fn(async () => [
           { object_id: sharedObjectId, normalized_rank: 1 }
         ])
@@ -70,24 +73,15 @@ it("keeps memory_entry and synthesis_capsule streams namespaced when object ids 
     });
 
     expect(result.candidates.map((candidate) => `${candidate.object_kind}:${candidate.object_id}`))
-      .toEqual(expect.arrayContaining([
-        `memory_entry:${sharedObjectId}`,
-        `synthesis_capsule:${sharedObjectId}`
-      ]));
+      .toEqual([`memory_entry:${sharedObjectId}`]);
     const memoryDiagnostic = result.diagnostics?.candidates.find(
       (candidate) => candidate.candidate_key === `workspace_local:memory_entry:${sharedObjectId}`
-    );
-    const synthesisDiagnostic = result.diagnostics?.candidates.find(
-      (candidate) => candidate.candidate_key === `workspace_local:synthesis_capsule:${sharedObjectId}`
     );
 
     expect(memoryDiagnostic?.per_stream_rank.lexical_fts).toBe(1);
     expect(memoryDiagnostic?.object_kind).toBe("memory_entry");
-    expect(memoryDiagnostic?.per_stream_rank.synthesis_fts).toBeNull();
-    expect(synthesisDiagnostic?.per_stream_rank.synthesis_fts).toBe(1);
-    expect(synthesisDiagnostic?.object_kind).toBe("synthesis_capsule");
-    expect(synthesisDiagnostic?.per_stream_rank.lexical_fts).toBeNull();
-    expect(synthesisDiagnostic?.per_stream_rank.existing_score).toBeNull();
+    expect(memoryDiagnostic?.per_stream_rank.synthesis_fts).toBe(1);
+    expect(memoryDiagnostic?.admission_planes).toContain("synthesis_child");
   });
 
 it("degrades cleanly to memory_entry-only when no synthesis port is wired", async () => {
@@ -113,7 +107,7 @@ it("degrades cleanly to memory_entry-only when no synthesis port is wired", asyn
     ).toBe(true);
   });
 
-it("reserves tail delivery slots for top synthesis below the fused-rank cut", async () => {
+it("does not reserve tail delivery slots for source-less synthesis capsules", async () => {
     // Eight memory_entry rows with strong lexical hits win fused rank
     // outright (multi-stream RRF). A synthesis fires on synthesis_fts only,
     // so without the reserve no synthesis reaches the delivery budget.
@@ -184,18 +178,11 @@ it("reserves tail delivery slots for top synthesis below the fused-rank cut", as
 
     const delivered = result.candidates;
     expect(delivered.length).toBe(5);
-    // Exactly the reserve count, the top synthesis by FTS rank, tail-placed.
     expect(
       delivered
         .filter((candidate) => candidate.object_kind === "synthesis_capsule")
         .map((candidate) => candidate.object_id)
-    ).toEqual(["synthesis-1", "synthesis-2"]);
-    expect(delivered.slice(-2).map((candidate) => candidate.object_kind)).toEqual([
-      "synthesis_capsule",
-      "synthesis_capsule"
-    ]);
-    expect(delivered.slice(0, 3).every((candidate) => candidate.object_kind === "memory_entry")).toBe(
-      true
-    );
+    ).toEqual([]);
+    expect(delivered.every((candidate) => candidate.object_kind === "memory_entry")).toBe(true);
   });
 });

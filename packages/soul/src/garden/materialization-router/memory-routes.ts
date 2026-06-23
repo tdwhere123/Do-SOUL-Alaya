@@ -214,7 +214,10 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
         runId: signal.run_id,
         signalId: signal.signal_id,
         incomingContent: buildDistilledFact(signal),
-        incomingDomainTags: signal.domain_tags
+        incomingDomainTags: signal.domain_tags,
+        incomingProjectionFields: readReconciliationProjectionFields(
+          buildMemoryInput(signal, [], this.enrichmentIntent(signal))
+        )
       },
       async (verdict) => await this.applyReconciledVerdict(signal, verdict, state)
     );
@@ -389,4 +392,23 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     return memory.enrichmentEnqueued === true || this.dependencies.enrichPendingPort !== undefined;
   }
 
+}
+
+function readReconciliationProjectionFields(
+  input: MemoryMaterializationInput
+): NonNullable<Parameters<ReconciliationPort["runWithDecision"]>[0]["incomingProjectionFields"]> {
+  return {
+    projection_schema_version: input.projection_schema_version,
+    event_time_start: input.event_time_start,
+    event_time_end: input.event_time_end,
+    valid_from: input.valid_from,
+    valid_to: input.valid_to,
+    time_precision: input.time_precision,
+    time_source: input.time_source,
+    preference_subject: input.preference_subject,
+    preference_predicate: input.preference_predicate,
+    preference_object: input.preference_object,
+    preference_category: input.preference_category,
+    preference_polarity: input.preference_polarity
+  };
 }

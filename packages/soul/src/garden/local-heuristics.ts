@@ -6,7 +6,9 @@ import {
   type SignalKind
 } from "@do-soul/alaya-protocol";
 import { GardenProviderKind, type GardenCompileContext, type GardenComputeProvider } from "./compute-provider.js";
+import { buildHeuristicPreferenceProfile } from "./local-preference-profile.js";
 import { buildSchemaGroundedRawPayload } from "./schema-grounding.js";
+import { parseStrictCalendarDateToUtcDay } from "./temporal-date.js";
 
 interface PatternDefinition {
   readonly pattern: RegExp;
@@ -20,6 +22,15 @@ interface TimeConcernMatch {
   readonly matched_text: string;
   readonly window_digest: string;
   readonly excerpt: string;
+  readonly temporal_projection: TemporalProjection | null;
+}
+
+interface TemporalProjection {
+  readonly event_time_start: string;
+  readonly event_time_end: string;
+  readonly time_precision: "day" | "month" | "year" | "range" | "relative" | "unknown";
+  readonly time_source: "explicit" | "session_timestamp" | "relative_resolved";
+  readonly projection_schema_version: 1;
 }
 
 const PATTERNS: readonly PatternDefinition[] = [
@@ -207,7 +218,7 @@ function appendPatternSignals(state: CompileSignalState): void {
 }
 
 function appendTimeConcernSignals(state: CompileSignalState): void {
-  for (const timeConcern of extractTimeConcerns(state.normalizedTurnContent)) {
+  for (const timeConcern of extractTimeConcerns(state.normalizedTurnContent, state.createdAt)) {
     const dedupeKey =
       `potential_claim:time_concern:${timeConcern.window_digest}:` +
       `${timeConcern.excerpt.toLowerCase()}`;
@@ -231,6 +242,7 @@ function appendPatternSignal(
   definition: PatternDefinition,
   matchedText: string
 ): void {
+  const preferenceProfile = buildHeuristicPreferenceProfile(matchedText, definition.pattern_category);
   appendCandidateSignal(state, {
     signalKind: definition.signal_kind,
     objectKind: definition.object_kind,
@@ -239,6 +251,7 @@ function appendPatternSignal(
     rawPayload: {
       matched_text: matchedText,
       pattern_category: definition.pattern_category,
+      ...(preferenceProfile === null ? {} : { preference_profile: preferenceProfile }),
       turn_content_excerpt: buildTurnExcerpt(state.normalizedTurnContent, matchedText),
       full_turn_content: clampFullTurnContent(state.normalizedTurnContent)
     }
@@ -263,8 +276,12 @@ function appendTimeConcernSignal(
       },
       time_concern: {
         window_digest: timeConcern.window_digest,
-        matched_text: timeConcern.matched_text
+        matched_text: timeConcern.matched_text,
+        ...formatTemporalProjection(timeConcern.temporal_projection)
       },
+      ...(timeConcern.temporal_projection === null
+        ? {}
+        : { temporal_projection: formatTemporalProjection(timeConcern.temporal_projection) }),
       distilled_fact: timeConcern.excerpt,
       field_candidates: [
         {
@@ -337,7 +354,7 @@ function clampFullTurnContent(turnContent: string): string {
   return turnContent.slice(0, MAX_FULL_TURN_CONTENT_CHARS);
 }
 
-function extractTimeConcerns(turnContent: string): readonly TimeConcernMatch[] {
+function extractTimeConcerns(turnContent: string, anchorIso: string): readonly TimeConcernMatch[] {
   const matches: TimeConcernMatch[] = [];
   for (const sentence of splitSentences(turnContent)) {
     if (isQuestion(sentence)) {
@@ -353,11 +370,67 @@ function extractTimeConcerns(turnContent: string): readonly TimeConcernMatch[] {
       matches.push({
         matched_text: matchedText,
         window_digest: normalizeWindowDigest(matchedText),
-        excerpt: sentence
+        excerpt: sentence,
+        temporal_projection: resolveTemporalProjection(matchedText, anchorIso)
       });
     }
   }
   return matches;
+}
+
+function resolveTemporalProjection(matchedText: string, anchorIso: string): TemporalProjection | null {
+  const anchor = new Date(anchorIso);
+  if (Number.isNaN(anchor.getTime())) {
+    return null;
+  }
+  const normalized = normalizeWindowDigest(matchedText);
+  if (normalized === "yesterday" || normalized === "昨天") {
+    return buildDayProjection(addUtcDays(anchor, -1), "relative_resolved");
+  }
+  if (normalized === "today" || normalized === "今天") {
+    return buildDayProjection(anchor, "relative_resolved");
+  }
+  if (normalized === "tomorrow" || normalized === "明天") {
+    return buildDayProjection(addUtcDays(anchor, 1), "relative_resolved");
+  }
+  const explicitIso = resolveExplicitIsoDate(normalized);
+  return explicitIso === null ? null : buildDayProjection(explicitIso, "explicit");
+}
+
+function buildDayProjection(
+  date: Date,
+  timeSource: TemporalProjection["time_source"]
+): TemporalProjection {
+  const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
+  return {
+    event_time_start: start.toISOString(),
+    event_time_end: end.toISOString(),
+    time_precision: "day",
+    time_source: timeSource,
+    projection_schema_version: 1
+  };
+}
+
+function addUtcDays(anchor: Date, deltaDays: number): Date {
+  return new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate() + deltaDays));
+}
+
+function resolveExplicitIsoDate(normalized: string): Date | null {
+  return parseStrictCalendarDateToUtcDay(normalized);
+}
+
+function formatTemporalProjection(projection: TemporalProjection | null): Record<string, string> {
+  if (projection === null) {
+    return {};
+  }
+  return {
+    event_time_start: projection.event_time_start,
+    event_time_end: projection.event_time_end,
+    time_precision: projection.time_precision,
+    time_source: projection.time_source,
+    projection_schema_version: String(projection.projection_schema_version)
+  };
 }
 
 function splitSentences(turnContent: string): readonly string[] {
