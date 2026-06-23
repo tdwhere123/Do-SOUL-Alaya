@@ -36,19 +36,29 @@ describe("KeyedMutex", () => {
     const mutex = new KeyedMutex();
     let active = 0;
     let maxActive = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
 
+    // Each task parks on a shared gate so all three are observed active
+    // before any releases, independent of scheduler timing.
     const task = async () => {
       active += 1;
       maxActive = Math.max(maxActive, active);
-      await new Promise((resolve) => setTimeout(resolve, 3));
+      await gate;
       active -= 1;
     };
 
-    await Promise.all([
+    const all = Promise.all([
       mutex.runExclusive("a", task),
       mutex.runExclusive("b", task),
       mutex.runExclusive("c", task)
     ]);
+
+    await Promise.resolve();
+    release();
+    await all;
 
     expect(maxActive).toBe(3);
   });

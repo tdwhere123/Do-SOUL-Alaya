@@ -160,6 +160,8 @@ export interface ControlledReplayArchive {
 export interface ControlledReplayRunOptions {
   readonly historyRoot: string;
   readonly runAt?: Date;
+  // Override the resolved git SHA so deterministic slugs are testable off-git.
+  readonly commitSha?: string;
 }
 
 export interface ControlledReplayRunResult {

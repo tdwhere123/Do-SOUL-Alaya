@@ -47,7 +47,7 @@ export async function runControlledReplay(
   opts: ControlledReplayRunOptions
 ): Promise<ControlledReplayRunResult> {
   const runAt = opts.runAt ?? new Date();
-  const commitSha = resolveCommitSha7();
+  const commitSha = opts.commitSha ?? resolveCommitSha7();
   const slug = entrySlug(runAt, commitSha);
   await assertArchiveSlotFree(opts.historyRoot, slug);
   const aggregateSeeds: SeedSidecar[] = [];

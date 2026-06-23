@@ -383,14 +383,17 @@ function createResolverDependencies(input: {
     budgetConfigProvider: {
       getConfig: vi.fn(async () => input.config)
     },
-    eventLogWriter: {
-      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-        event_id: `event-${Math.random()}`,
-        created_at: NOW,
-        revision: 0,
-        ...entry
-      }))
-    }
+    eventLogWriter: (() => {
+      const nextEventId = stableIdGenerator("event");
+      return {
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+          event_id: nextEventId(),
+          created_at: NOW,
+          revision: 0,
+          ...entry
+        }))
+      };
+    })()
   };
 }
 

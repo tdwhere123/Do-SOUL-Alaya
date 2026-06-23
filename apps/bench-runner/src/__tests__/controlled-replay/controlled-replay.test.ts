@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process";
 import { access, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -189,13 +188,14 @@ describe("controlled replay runner", () => {
     async () => {
       const historyRoot = await mkdtemp(join(tmpdir(), "alaya-controlled-replay-collision-"));
       const runAt = new Date("2026-05-18T01:02:03.456Z");
-      const slug = entrySlug(runAt, resolveCommitSha7ForTest());
+      const commitSha = "abc1234";
+      const slug = entrySlug(runAt, commitSha);
       const entryDir = join(historyRoot, "controlled-replay", slug);
       const archivePath = join(entryDir, "controlled-replay.json");
       await mkdir(entryDir, { recursive: true });
       await writeFile(archivePath, "sentinel\n", "utf8");
 
-      await expect(runControlledReplay({ historyRoot, runAt })).rejects.toThrow(
+      await expect(runControlledReplay({ historyRoot, runAt, commitSha })).rejects.toThrow(
         /refusing to overwrite/
       );
       await expect(readFile(archivePath, "utf8")).resolves.toBe("sentinel\n");
@@ -203,14 +203,6 @@ describe("controlled replay runner", () => {
     180_000
   );
 });
-
-function resolveCommitSha7ForTest(): string {
-  try {
-    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
-  } catch {
-    return "0000000";
-  }
-}
 
 function buildDiagnostic(
   objectId: string,

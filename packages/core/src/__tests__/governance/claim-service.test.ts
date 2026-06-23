@@ -260,8 +260,9 @@ describe("ClaimService", () => {
 
   it("marks claim as contested when slot election requires review", async () => {
     const existing = createClaimForm({ claim_status: ClaimLifecycleState.DRAFT });
+    let appendSeq = 0;
     const contestedAppendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-      event_id: `event-${event.event_type}-${Math.random()}`,
+      event_id: `event-${event.event_type}-${(appendSeq += 1)}`,
       created_at: "2026-03-21T00:00:00.000Z",
       revision: 0,
       ...event
