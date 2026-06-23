@@ -1,329 +1,398 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ControlPlaneObjectKind,
+  FormationKind,
   MemoryDimension,
+  RetentionPolicy,
+  RunMode,
+  RunState,
   ScopeClass,
-  type MemoryEntry
+  SourceKind,
+  StorageTier,
+  WorkspaceKind,
+  WorkspaceState,
+  type EventLogEntry,
+  type MemoryEntry,
+  type PathRelation,
+  type RecallPolicy,
+  type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import {
-  RECALL_FUSION_STREAMS,
-  recallDeliveryReserveTestInternals
-} from "../../recall/recall-service.js";
-import type {
-  RecallFusionBreakdown,
-  RecallFusionStream,
-  RecallSupplementaryData
-} from "../../recall/recall-service-types.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-const {
-  reserveStructuralDeliverySlots,
-  buildEmptyRecallFusionBreakdown,
-  isStructuralRescueCandidate} = recallDeliveryReserveTestInternals;
-function memory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
+  initDatabase,
+  SqliteMemoryEntryRepo,
+  SqlitePathRelationRepo,
+  SqliteRunRepo,
+  SqliteWorkspaceRepo,
+  type StorageDatabase
+} from "@do-soul/alaya-storage";
+import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+
+// Structural delivery reserve: the gold-blind relevance guard and the sign-aware
+// suppression floor, driven through the public RecallService.recall() surface
+// against real memory_entries + PathRelations.
+
+const databases = new Set<StorageDatabase>();
+
+afterEach(() => {
+  for (const database of databases) {
+    database.close();
+  }
+  databases.clear();
+});
+
+const WS = "workspace-1";
+const RUN = "run-1";
+const QUERY_TERM = "zylphqorbex";
+const SEED_ID = "00000000-0000-4000-8000-000000000001";
+const SIBLING_ID = "00000000-0000-4000-8000-000000000009";
+const FILLER_COUNT = 8;
+const DECOY_COUNT = 5;
+const MAX_ENTRIES = 6;
+
+function fillerId(index: number): string {
+  return `00000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`;
+}
+
+// recall() where one sibling is reached from the lexical seed via a structural
+// path. siblingCarriesQueryTerm adds a lexical co-admit (relevance signal);
+// negativeSiblingPath adds a high-strength supersedes (suppression delta).
+// Returns whether the sibling survived into the truncated top-N.
+async function deliverSibling(params: {
+  readonly relationKind: string;
+  readonly siblingCarriesQueryTerm?: boolean;
+  readonly negativeSiblingPath?: boolean;
+}): Promise<boolean> {
+  const { database, memoryEntryRepo, pathRelationRepo } = await createRealStorage();
+
+  await memoryEntryRepo.create(
+    createMemoryEntry({
+      object_id: SEED_ID,
+      content: `${QUERY_TERM} primary anchor memory`,
+      activation_score: 0.9
+    })
+  );
+  await memoryEntryRepo.create(
+    createMemoryEntry({
+      object_id: SIBLING_ID,
+      content: params.siblingCarriesQueryTerm
+        ? `${QUERY_TERM} sibling with a faint relevance term`
+        : "wholly unrelated procedure about kettle descaling intervals",
+      domain_tags: [],
+      activation_score: 0.01
+    })
+  );
+  for (let index = 0; index < FILLER_COUNT; index += 1) {
+    await memoryEntryRepo.create(
+      createMemoryEntry({
+        object_id: fillerId(index),
+        content: `${QUERY_TERM} filler note number ${index}`,
+        activation_score: 0.9 - index * 0.01
+      })
+    );
+  }
+
+  pathRelationRepo.create(
+    buildPath({
+      path_id: "11111111-1111-4111-8111-aaaaaaaaaaaa",
+      sourceId: SEED_ID,
+      targetId: SIBLING_ID,
+      relationKind: params.relationKind,
+      strength: 0.5,
+      recallBias: 0.5
+    })
+  );
+  for (let index = 0; index < DECOY_COUNT; index += 1) {
+    pathRelationRepo.create(
+      buildPath({
+        path_id: `3333333${index}-3333-4333-8333-aaaaaaaaaaaa`,
+        sourceId: SEED_ID,
+        targetId: fillerId(index),
+        relationKind: "co_recalled",
+        strength: 0.95,
+        recallBias: 0.5
+      })
+    );
+  }
+  if (params.negativeSiblingPath === true) {
+    // Suppression floors the sibling's structural score, so the reserve must
+    // refuse it even though it is earned fan-in.
+    pathRelationRepo.create(
+      buildPath({
+        path_id: "22222222-2222-4222-8222-bbbbbbbbbbbb",
+        sourceId: SEED_ID,
+        targetId: SIBLING_ID,
+        relationKind: "supersedes",
+        strength: 0.95,
+        recallBias: -0.5,
+        governanceClass: "recall_allowed"
+      })
+    );
+  }
+
+  const recallService = buildRecallService({ memoryEntryRepo, pathRelationRepo });
+  const result = await recallService.recall({
+    taskSurface: createTaskSurface(`${QUERY_TERM} recall`),
+    workspaceId: WS,
+    runId: RUN,
+    strategy: "build",
+    policyOverride: buildWideOpenPolicy(recallService)
+  });
+  const delivered = result.candidates.some((row) => row.object_id === SIBLING_ID);
+  database.close();
+  databases.delete(database);
+  return delivered;
+}
+
+describe("query/evidence-relevance guard on generic structural fan-in rescue", () => {
+  it("refuses an irrelevant GENERIC structural sibling (supports edge, zero relevance, not earned co_recalled)", async () => {
+    // No relevance term and no earned-fan-in provenance, so the relevance guard
+    // refuses the reserve slot.
+    const delivered = await deliverSibling({ relationKind: "supports" });
+    expect(delivered).toBe(false);
+  });
+
+  it("admits the SAME GENERIC structural sibling once it carries a query-relevance term (guard is the discriminator)", async () => {
+    // Same topology plus a faint lexical term: the relevance guard now admits it
+    // and the reserve rescues it (gates on relevance, not a blanket refusal).
+    const delivered = await deliverSibling({
+      relationKind: "supports",
+      siblingCarriesQueryTerm: true
+    });
+    expect(delivered).toBe(true);
+  });
+});
+
+describe("structural reserve honors active sign-aware suppression", () => {
+  it("does not rescue an EARNED co_recalled-reached sibling that a high-strength supersedes negative suppresses", async () => {
+    // Earned-fan-in sibling, but a supersedes negative floors it upstream of the
+    // reserve, so the contradicted sibling must NOT be resurfaced.
+    const delivered = await deliverSibling({
+      relationKind: "co_recalled",
+      negativeSiblingPath: true
+    });
+    expect(delivered).toBe(false);
+  });
+
+  it("rescues the SAME earned co_recalled sibling when no suppression path is present (suppression is the discriminator)", async () => {
+    // Same sibling+pool without the negative path: the exemption admits it and the
+    // reserve rescues it (the refusal above is the suppression delta).
+    const delivered = await deliverSibling({ relationKind: "co_recalled" });
+    expect(delivered).toBe(true);
+  });
+});
+
+async function createRealStorage(): Promise<{
+  readonly database: StorageDatabase;
+  readonly memoryEntryRepo: SqliteMemoryEntryRepo;
+  readonly pathRelationRepo: SqlitePathRelationRepo;
+}> {
+  const database = initDatabase({ filename: ":memory:" });
+  databases.add(database);
+  const workspaceRepo = new SqliteWorkspaceRepo(database);
+  const runRepo = new SqliteRunRepo(database);
+  const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
+  const pathRelationRepo = new SqlitePathRelationRepo(database);
+
+  await workspaceRepo.create({
+    workspace_id: WS,
+    name: "workspace one",
+    root_path: "/tmp/ws1",
+    workspace_kind: WorkspaceKind.LOCAL_REPO,
+    default_engine_binding: null,
+    workspace_state: WorkspaceState.ACTIVE
+  });
+  await runRepo.create({
+    run_id: RUN,
+    workspace_id: WS,
+    title: "run one",
+    goal: null,
+    run_mode: RunMode.CHAT,
+    engine_binding_id: null,
+    engine_class: null,
+    run_state: RunState.IDLE,
+    current_surface_id: null
+  });
+
+  return { database, memoryEntryRepo, pathRelationRepo };
+}
+
+function buildRecallService(params: {
+  readonly memoryEntryRepo: SqliteMemoryEntryRepo;
+  readonly pathRelationRepo: SqlitePathRelationRepo;
+}): RecallService {
+  const memoriesPromise = params.memoryEntryRepo.findByWorkspaceId(WS, StorageTier.HOT);
+  const append = vi.fn(
+    async (
+      entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+    ): Promise<EventLogEntry> => ({
+      event_id: `event-${entry.event_type}`,
+      created_at: "2026-05-16T00:00:00.000Z",
+      revision: 0,
+      ...entry
+    })
+  );
+
+  const deps: RecallServiceDependencies = {
+    now: () => "2026-05-16T00:00:00.000Z",
+    generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+    memoryRepo: {
+      findByWorkspaceId: vi.fn(async () => await memoriesPromise),
+      findByDimension: vi.fn(async () => await memoriesPromise),
+      findByScopeClass: vi.fn(async () => await memoriesPromise),
+      // Lexical hit only when content carries the query term verbatim.
+      searchByKeyword: vi.fn(async (_workspaceId, queryText) => {
+        const memories = await memoriesPromise;
+        const needle = QUERY_TERM.toLowerCase();
+        return memories
+          .filter(
+            (memory) =>
+              queryText.toLowerCase().includes(needle) &&
+              memory.content.toLowerCase().includes(needle)
+          )
+          .map((memory, rankIndex) => ({
+            object_id: memory.object_id,
+            // Faint rank: clears the relevance guard (lexical > 0) yet stays
+            // structural-dominated and buried, so only the reserve can deliver it.
+            normalized_rank: memory.object_id === SIBLING_ID ? 0.0001 : 1 / (rankIndex + 1)
+          }));
+      })
+    } as RecallServiceDependencies["memoryRepo"],
+    slotRepo: {
+      findByWorkspace: vi.fn(async () => [])
+    },
+    eventLogRepo: {
+      append,
+      queryByEntity: vi.fn(async () => [])
+    },
+    pathExpansionPort: {
+      findByAnchors: params.pathRelationRepo.findByAnchors.bind(params.pathRelationRepo)
+    }
+  };
+
+  return new RecallService(deps);
+}
+
+function buildWideOpenPolicy(recallService: RecallService): RecallPolicy {
+  const base = recallService.buildDefaultPolicy("build", "task-surface-ref");
   return {
-    object_id: "00000000-0000-4000-8000-000000000000",
+    ...base,
+    coarse_filter: {
+      ...base.coarse_filter,
+      deterministic_match: {
+        scope_filter: null,
+        dimension_filter: null,
+        domain_tag_filter: null
+      },
+      precomputed_rank: {
+        ...base.coarse_filter.precomputed_rank,
+        max_candidates: 50,
+        min_activation_score: 0
+      }
+    },
+    fine_assessment: {
+      ...base.fine_assessment,
+      budgets: {
+        ...base.fine_assessment.budgets,
+        max_entries: MAX_ENTRIES,
+        max_total_tokens: 100000
+      }
+    }
+  };
+}
+
+function buildPath(params: {
+  readonly path_id: string;
+  readonly sourceId: string;
+  readonly targetId: string;
+  readonly relationKind: string;
+  readonly strength: number;
+  readonly recallBias: number;
+  readonly governanceClass?: "attention_only" | "recall_allowed" | "strictly_governed" | "hint_only";
+}): PathRelation {
+  return {
+    path_id: params.path_id,
+    workspace_id: WS,
+    anchors: {
+      source_anchor: { kind: "object", object_id: params.sourceId },
+      target_anchor: { kind: "object", object_id: params.targetId }
+    },
+    constitution: {
+      relation_kind: params.relationKind,
+      why_this_relation_exists: ["co-usage threshold reached"]
+    },
+    effect_vector: {
+      salience: 1,
+      recall_bias: params.recallBias,
+      verification_bias: 0,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "lens_entry"
+    },
+    plasticity_state: {
+      strength: params.strength,
+      direction_bias: "bidirectional_asymmetric",
+      stability_class: "stable",
+      support_events_count: 3,
+      contradiction_events_count: 0,
+      last_reinforced_at: "2026-05-16T00:00:00.000Z"
+    },
+    lifecycle: {
+      status: "active",
+      retirement_rule: "janitor_ttl_low_strength"
+    },
+    legitimacy: {
+      evidence_basis: ["recalls_edge_co_usage"],
+      governance_class: params.governanceClass ?? "attention_only"
+    },
+    created_at: "2026-05-16T00:00:00.000Z",
+    updated_at: "2026-05-16T00:00:00.000Z"
+  };
+}
+
+function createTaskSurface(displayName: string): TaskObjectSurface {
+  return {
+    runtime_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+    object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
+    task_surface_ref: null,
+    expires_at: "2026-05-13T00:30:00.000Z",
+    derived_from: null,
+    retention_policy: RetentionPolicy.SESSION_ONLY,
+    surface_kind: "build",
+    display_name: displayName,
+    context_refs: []
+  };
+}
+
+function createMemoryEntry(overrides: Partial<MemoryEntry>): MemoryEntry {
+  return {
+    object_id: "memory-default",
     object_kind: "memory_entry",
     schema_version: 1,
     lifecycle_state: "active",
-    created_at: "2026-03-20T00:00:00.000Z",
-    updated_at: "2026-03-20T00:00:00.000Z",
-    created_by: "system",
+    created_at: "2026-05-13T00:00:00.000Z",
+    updated_at: "2026-05-13T00:00:00.000Z",
+    created_by: "recall-durable-fanin-delivery-part2-test",
     dimension: MemoryDimension.PROCEDURE,
-    source_kind: "user",
-    formation_kind: "explicit",
+    source_kind: SourceKind.USER,
+    formation_kind: FormationKind.EXPLICIT,
     scope_class: ScopeClass.PROJECT,
-    content: "memory content",
-    domain_tags: [],
+    content: "default content",
+    domain_tags: ["repo"],
     evidence_refs: [],
-    workspace_id: "workspace-1",
-    run_id: "run-1",
+    workspace_id: WS,
+    run_id: RUN,
     surface_id: null,
-    storage_tier: "hot",
-    activation_score: 0.5,
-    retention_score: null,
-    manifestation_state: null,
-    retention_state: null,
-    decay_profile: null,
-    confidence: null,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: null,
-    contradiction_count: null,
+    storage_tier: StorageTier.HOT,
+    activation_score: 0.7,
+    retention_score: 0.8,
+    manifestation_state: "full_eligible",
+    retention_state: "consolidated",
+    decay_profile: "stable",
+    confidence: 0.9,
+    last_used_at: "2026-05-12T00:00:00.000Z",
+    last_hit_at: "2026-05-12T00:00:00.000Z",
+    reinforcement_count: 0,
+    contradiction_count: 0,
     superseded_by: null,
     ...overrides
   };
 }
-function emptyStreamContributions(): Record<RecallFusionStream, number> {
-  return Object.fromEntries(
-    RECALL_FUSION_STREAMS.map((stream) => [stream, 0])
-  ) as Record<RecallFusionStream, number>;
-}
-function emptyStreamRanks(): Record<RecallFusionStream, number | null> {
-  return Object.fromEntries(
-    RECALL_FUSION_STREAMS.map((stream) => [stream, null])
-  ) as Record<RecallFusionStream, number | null>;
-}
-type FusedCandidate = Readonly<{
-  readonly entry: Readonly<MemoryEntry>;
-  readonly originPlane: "workspace_local";
-  readonly objectKind: "memory_entry" | "synthesis_capsule";
-  readonly effectiveScore: number;
-  // RecallScoreFactors requires relevance + activation; the delivery-reserve
-  // helpers never read score_factors, so the minimal valid shape suffices.
-  readonly effectiveFactors: { readonly relevance: number; readonly activation: number };
-  readonly structuralScore?: number;
-  // Internal-only discriminator: true when the candidate was admitted on the
-  // path_expansion plane via an EARNED co_recalled fan-in carrier (R1, the
-  // sparse durable multi-session fan-in route). isStructuralRescueCandidate
-  // reads it as the bounded exemption from the relevance gate. see also:
-  // packages/core/src/recall/fusion-delivery.ts:isStructuralRescueCandidate.
-  readonly reachedViaEarnedCoRecalledFanin?: boolean;
-  readonly fusion: Readonly<RecallFusionBreakdown>;
-}>;
-function fusedCandidate(input: {
-  readonly objectId: string;
-  readonly objectKind?: "memory_entry" | "synthesis_capsule";
-  readonly evidenceRefs?: readonly string[];
-  readonly contributions?: Partial<Record<RecallFusionStream, number>>;
-  readonly reachedViaEarnedCoRecalledFanin?: boolean;
-}): FusedCandidate {
-  const objectKind = input.objectKind ?? "memory_entry";
-  const entry = memory({
-    object_id: input.objectId,
-    evidence_refs: input.evidenceRefs ?? []
-  });
-  const breakdown = buildEmptyRecallFusionBreakdown(input.objectId);
-  const contributions = {
-    ...emptyStreamContributions(),
-    ...(input.contributions ?? {})
-  };
-  return Object.freeze({
-    entry,
-    originPlane: "workspace_local" as const,
-    objectKind,
-    effectiveScore: 0,
-    effectiveFactors: { relevance: 0, activation: 0 },
-    ...(input.reachedViaEarnedCoRecalledFanin
-      ? { reachedViaEarnedCoRecalledFanin: true }
-      : {}),
-    fusion: Object.freeze({
-      ...breakdown,
-      object_kind: objectKind,
-      per_stream_rank: Object.freeze(emptyStreamRanks()) as RecallFusionBreakdown["per_stream_rank"],
-      fused_rank: 1,
-      fused_score: 0,
-      fused_rank_contribution_per_stream:
-        Object.freeze(contributions) as RecallFusionBreakdown["fused_rank_contribution_per_stream"]
-    })
-  });
-}
-function supplementary(
-  overrides: Partial<RecallSupplementaryData> = {}
-): RecallSupplementaryData {
-  return Object.freeze({
-    queryProbes: compileRecallQueryProbes(null),
-    ftsRanks: Object.freeze({}),
-    trigramFtsRanks: Object.freeze({}),
-    synthesisFtsRanks: Object.freeze({}),
-    evidenceFtsRanks: Object.freeze({}),
-    sourceProximityScores: Object.freeze({}),
-    sourceCohortKeys: Object.freeze({}),
-    structuralScores: Object.freeze({}),
-    graphExpansionScores: Object.freeze({}),
-    entitySeedScores: Object.freeze({}),
-    pathExpansionScores: Object.freeze({}),
-    pathSuppressionScores: Object.freeze({}),
-    embeddingSimilarityScores: Object.freeze({}),
-    graphSupportCounts: Object.freeze({}),
-    budgetPenaltyFactor: 0,
-    plasticityFactors: Object.freeze({}),
-    graphAndPathColdScore: 0,
-    recallsEdgeCount: 0,
-    weightTransferAmount: 0,
-    evidenceGistsByMemoryId: Object.freeze({}),
-    governanceCeilingByMemoryId: Object.freeze({}),
-    ...overrides
-  });
-}
-
-describe("I-1 — query/evidence-relevance guard on GENERIC path/graph fan-in rescue (gold-blind)", () => {
-  it("refuses an irrelevant GENERIC membership-reached sibling (path_expansion, zero relevance, NOT earned co_recalled)", () => {
-    // A non-gold sibling reached via a GENERIC structural path / membership hop
-    // (NOT the earned co_recalled fan-in carrier) fires path_expansion but
-    // carries NO lexical/evidence relevance term and NO earned-fan-in
-    // provenance. It must NOT be a rescue candidate: a generic membership hop
-    // cannot consume a reserve slot. (reachedViaEarnedCoRecalledFanin defaults
-    // to undefined here — this is the displacement-protection I-1 guards.)
-    const membershipSibling = fusedCandidate({
-      objectId: "membership-sibling",
-      contributions: { path_expansion: 0.3 }
-    });
-    expect(isStructuralRescueCandidate(membershipSibling, supplementary())).toBe(false);
-  });
-
-  it("rescues a zero-relevance sibling reached via an EARNED co_recalled fan-in edge (Route 乙)", () => {
-    // The earned co_recalled fan-in carrier (R1, threshold-3 sparse) is the
-    // INTENDED multi-session fan-in mechanism, not a distractor. A
-    // content-disjoint, ZERO-query-relevance sibling reached via that earned
-    // edge MUST be rescue-eligible — the bounded exemption that makes Route 乙
-    // load-bearing. Identical topology to the GENERIC case above; the ONLY delta
-    // is the earned-fan-in provenance, proving the discriminator (not relevance)
-    // is what flips eligibility.
-    const earnedFaninSibling = fusedCandidate({
-      objectId: "earned-fanin-sibling",
-      contributions: { path_expansion: 0.3 },
-      reachedViaEarnedCoRecalledFanin: true
-    });
-    expect(isStructuralRescueCandidate(earnedFaninSibling, supplementary())).toBe(true);
-  });
-
-  it("admits the SAME fan-in target once it carries a relevance signal (guard is the discriminator)", () => {
-    // Identical topology contribution; the only delta is a nonzero lexical-lane
-    // relevance term. Proves the guard refuses on ZERO relevance, not on the
-    // path_expansion plane itself — so genuine relevant fan-in stays eligible.
-    const relevantSibling = fusedCandidate({
-      objectId: "relevant-sibling",
-      contributions: { path_expansion: 0.3, lexical_fts: 0.02 }
-    });
-    expect(isStructuralRescueCandidate(relevantSibling, supplementary())).toBe(true);
-  });
-
-  it("does not let an irrelevant GENERIC structural sibling displace a rank-4/5 lexical gold", () => {
-    // Window of 5. Ranks 1-5 are genuine lexical golds (descending lexical_fts);
-    // the rank-4 and rank-5 golds are the displacement targets. An irrelevant
-    // GENERIC structural sibling (path_expansion, NOT earned co_recalled) sits
-    // buried below the cut with a STRONG path_expansion contribution and zero
-    // relevance. Without the guard it would out-rank the buried-set and steal a
-    // reserve slot, displacing a lexical gold. This is the displacement
-    // protection I-1 exists to enforce, and it is UNCHANGED by the earned
-    // co_recalled exemption (this sibling carries no earned-fan-in provenance).
-    const lexicalGolds = Array.from({ length: 5 }, (_unused, index) =>
-      fusedCandidate({
-        objectId: `lexical-gold-${index + 1}`,
-        contributions: { lexical_fts: 0.5 - index * 0.05 }
-      })
-    );
-    const irrelevantSibling = fusedCandidate({
-      objectId: "generic-structural-sibling",
-      contributions: { path_expansion: 0.9 }
-    });
-    const delivered = [...lexicalGolds, irrelevantSibling];
-    const maxEntries = 5;
-    const result = reserveStructuralDeliverySlots(delivered, supplementary(), maxEntries, 0);
-    const windowIds = result.slice(0, maxEntries).map((candidate) => candidate.entry.object_id);
-    // The guard refuses the sibling: it is NOT rescued into the window.
-    expect(windowIds).not.toContain("generic-structural-sibling");
-    // The rank-4 and rank-5 lexical golds are not displaced.
-    expect(windowIds).toContain("lexical-gold-4");
-    expect(windowIds).toContain("lexical-gold-5");
-    // The reserve is a strict no-op here (no eligible buried structural row).
-    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(
-      delivered.map((candidate) => candidate.entry.object_id)
-    );
-  });
-
-  it("DOES rescue a zero-relevance EARNED co_recalled fan-in sibling into the window (Route 乙 delivery)", () => {
-    // Same shape as the GENERIC-distractor case above, but the buried sibling
-    // was admitted via the EARNED co_recalled fan-in carrier and carries ZERO
-    // query relevance. The earned-fan-in exemption admits it and the reserve
-    // rescues it past the weakest in-window lexical row — proving the
-    // multi-session fan-in mechanism delivers the content-disjoint sibling,
-    // while the generic distractor above is still refused. The ONLY delta vs the
-    // refused case is the earned-fan-in provenance (gold-blind discriminator).
-    const lexicalGolds = Array.from({ length: 5 }, (_unused, index) =>
-      fusedCandidate({
-        objectId: `lexical-gold-${index + 1}`,
-        contributions: { lexical_fts: 0.5 - index * 0.05 }
-      })
-    );
-    const earnedFaninSibling = fusedCandidate({
-      objectId: "earned-fanin-sibling",
-      contributions: { path_expansion: 0.9 },
-      reachedViaEarnedCoRecalledFanin: true
-    });
-    const delivered = [...lexicalGolds, earnedFaninSibling];
-    const maxEntries = 5;
-    const result = reserveStructuralDeliverySlots(delivered, supplementary(), maxEntries, 0);
-    const windowIds = result.slice(0, maxEntries).map((candidate) => candidate.entry.object_id);
-    expect(windowIds).toContain("earned-fanin-sibling");
-  });
-
-  it("DOES rescue a relevant buried fan-in target, displacing the weakest in-window lexical row", () => {
-    // Same shape as above, but the buried fan-in target ALSO carries a lexical
-    // relevance term. The guard now admits it and the reserve rescues it past the
-    // weakest in-window lexical row — confirming the guard gates on relevance,
-    // not on a blanket refusal of the path plane.
-    const lexicalGolds = Array.from({ length: 5 }, (_unused, index) =>
-      fusedCandidate({
-        objectId: `lexical-gold-${index + 1}`,
-        contributions: { lexical_fts: 0.5 - index * 0.05 }
-      })
-    );
-    const relevantFanin = fusedCandidate({
-      objectId: "relevant-fanin",
-      contributions: { path_expansion: 0.9, lexical_fts: 0.02 }
-    });
-    const delivered = [...lexicalGolds, relevantFanin];
-    const maxEntries = 5;
-    const result = reserveStructuralDeliverySlots(delivered, supplementary(), maxEntries, 0);
-    const windowIds = result.slice(0, maxEntries).map((candidate) => candidate.entry.object_id);
-    expect(windowIds).toContain("relevant-fanin");
-  });
-});
-
-describe("I-2 — structural reserve honors active sign-aware suppression", () => {
-  it("does not rescue an EARNED co_recalled-reached candidate that carries a positive suppression delta", () => {
-    // The candidate is path_expansion-dominated, carries a relevance term, AND
-    // was admitted via the EARNED co_recalled fan-in carrier — so it clears BOTH
-    // the relevance gate AND the earned-fan-in exemption. But the sign-aware
-    // suppression collector floored it (contradicts/supersedes-reinforced
-    // negative): its pathSuppressionScores delta exceeds its structural
-    // contribution. The suppression floor is UPSTREAM of both eligibility
-    // branches, so the reserve must still honor that demotion and refuse to
-    // resurface the stale/contradicted target — proving the earned exemption
-    // does NOT override active suppression (I-2 holds even for earned fan-in).
-    const suppressedTarget = fusedCandidate({
-      objectId: "suppressed-fanin",
-      contributions: { path_expansion: 0.3, lexical_fts: 0.02 },
-      reachedViaEarnedCoRecalledFanin: true
-    });
-    const suppressed = supplementary({
-      pathSuppressionScores: Object.freeze({ "suppressed-fanin": 0.5 })
-    });
-    expect(isStructuralRescueCandidate(suppressedTarget, suppressed)).toBe(false);
-
-    const lexicalRows = Array.from({ length: 5 }, (_unused, index) =>
-      fusedCandidate({
-        objectId: `lexical-row-${index + 1}`,
-        contributions: { lexical_fts: 0.5 - index * 0.05 }
-      })
-    );
-    const delivered = [...lexicalRows, suppressedTarget];
-    const result = reserveStructuralDeliverySlots(delivered, suppressed, 5, 0);
-    const windowIds = result.slice(0, 5).map((candidate) => candidate.entry.object_id);
-    expect(windowIds).not.toContain("suppressed-fanin");
-  });
-
-  it("rescues the SAME candidate when no suppression delta is present (suppression is the discriminator)", () => {
-    // Identical candidate (earned co_recalled fan-in) and pool, but
-    // pathSuppressionScores is empty. The reserve rescues it — proving the
-    // refusal above is driven by the suppression delta, not by the candidate
-    // failing some other gate.
-    const target = fusedCandidate({
-      objectId: "suppressed-fanin",
-      contributions: { path_expansion: 0.3, lexical_fts: 0.02 },
-      reachedViaEarnedCoRecalledFanin: true
-    });
-    expect(isStructuralRescueCandidate(target, supplementary())).toBe(true);
-
-    const lexicalRows = Array.from({ length: 5 }, (_unused, index) =>
-      fusedCandidate({
-        objectId: `lexical-row-${index + 1}`,
-        contributions: { lexical_fts: 0.5 - index * 0.05 }
-      })
-    );
-    const delivered = [...lexicalRows, target];
-    const result = reserveStructuralDeliverySlots(delivered, supplementary(), 5, 0);
-    const windowIds = result.slice(0, 5).map((candidate) => candidate.entry.object_id);
-    expect(windowIds).toContain("suppressed-fanin");
-  });
-});

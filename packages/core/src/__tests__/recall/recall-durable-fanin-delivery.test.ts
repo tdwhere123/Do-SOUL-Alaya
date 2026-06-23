@@ -2,30 +2,232 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
   ScopeClass,
-  type MemoryEntry
+  SynthesisStatus,
+  type MemoryEntry,
+  type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
-import {
-  RECALL_FUSION_STREAMS,
-  recallDeliveryReserveTestInternals
-} from "../../recall/recall-service.js";
+import { RECALL_FUSION_STREAMS, RecallService } from "../../recall/recall-service.js";
+import { applySessionCoverageRerank } from "../../recall/fusion-delivery-session-coverage.js";
+import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
 import type {
   RecallFusionBreakdown,
   RecallFusionStream,
   RecallSupplementaryData
 } from "../../recall/recall-service-types.js";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-const {
-  selectUncoveredSynthesisCapsules,
-  reserveSynthesisDeliverySlots,
-  reserveStructuralDeliverySlots,
-  synthesisReserveCount,
-  buildEmptyRecallFusionBreakdown,
-  isStructuralRescueCandidate,
-  applySessionCoverageRerank
-} = recallDeliveryReserveTestInternals;
-function memory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
+import {
+  createDependencies,
+  createMemoryEntry,
+  createTaskSurface,
+  overridePolicy
+} from "./recall-service-test-fixtures.js";
+
+// Synthesis-backstop delivery via the public RecallService.recall() surface
+// (result.candidates + result.diagnostics); session-coverage rerank via its real
+// exported helper.
+
+const WS = "workspace-1";
+
+describe("durable-edge fan-in stream registration", () => {
+  it("does NOT register the retired session_cohort_fanin heuristic stream", () => {
+    expect(RECALL_FUSION_STREAMS).not.toContain("session_cohort_fanin");
+  });
+
+  it("registers the durable-edge fan-in carriers path_expansion + graph_expansion", () => {
+    expect(RECALL_FUSION_STREAMS).toContain("path_expansion");
+    expect(RECALL_FUSION_STREAMS).toContain("graph_expansion");
+  });
+});
+
+function synthesisCapsule(overrides: {
+  readonly objectId: string;
+  readonly evidenceRefs: readonly string[];
+}): SynthesisCapsule {
   return {
-    object_id: "00000000-0000-4000-8000-000000000000",
+    object_id: overrides.objectId,
+    object_kind: "synthesis_capsule",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: "2026-03-23T00:00:00.000Z",
+    updated_at: "2026-03-23T00:00:00.000Z",
+    created_by: "system",
+    topic_key: `recall/${overrides.objectId}`,
+    synthesis_type: "cross_evidence",
+    summary: `Cross-evidence synthesis ${overrides.objectId}.`,
+    evidence_refs: [...overrides.evidenceRefs],
+    source_memory_refs: [],
+    workspace_id: WS,
+    run_id: "run-1",
+    synthesis_status: SynthesisStatus.WORKING
+  };
+}
+
+function buildSynthesisService(params: {
+  readonly memories: readonly MemoryEntry[];
+  readonly synthesisRows: readonly SynthesisCapsule[];
+  readonly synthesisRanks: Readonly<Record<string, number>>;
+}): RecallService {
+  const { dependencies } = createDependencies(params.memories);
+  return new RecallService({
+    ...dependencies,
+    memoryRepo: {
+      ...dependencies.memoryRepo,
+      searchByKeyword: vi.fn(async () =>
+        params.memories.map((memory, index) => ({
+          object_id: memory.object_id,
+          normalized_rank: 1 - index * 0.02
+        }))
+      )
+    },
+    synthesisSearchPort: {
+      searchByKeyword: vi.fn(async () =>
+        params.synthesisRows.map((row) => ({
+          object_id: row.object_id,
+          normalized_rank: params.synthesisRanks[row.object_id] ?? 0.5
+        }))
+      ),
+      findByIds: vi.fn(async () => [...params.synthesisRows])
+    }
+  });
+}
+
+function runSynthesisRecall(service: RecallService, maxEntries: number) {
+  const policy = overridePolicy(
+    service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id),
+    {
+      fine_assessment: {
+        budgets: { max_entries: maxEntries, max_total_tokens: 40000, per_dimension_limits: null },
+        conflict_awareness: false
+      }
+    }
+  );
+  return service.recall({
+    taskSurface: { ...createTaskSurface(), display_name: "recall synthesis backstop" },
+    workspaceId: WS,
+    strategy: "analyze",
+    policyOverride: policy
+  });
+}
+
+describe("synthesis backstop — fires only for uncovered capsules, not a tail-pin", () => {
+  it("does NOT reserve a tail slot when a delivered memory already covers the capsule's evidence set", async () => {
+    // mem-0 shares the capsule's only evidence ref and fills the window → capsule
+    // COVERED, synthesis reserve must not fire.
+    const memories = Array.from({ length: 6 }, (_unused, index) =>
+      createMemoryEntry({
+        object_id: `mem-${index}`,
+        content: "recall implementation memory",
+        evidence_refs: index === 0 ? ["ev-1"] : [`other-${index}`],
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.9 - index * 0.01
+      })
+    );
+    const capsule = synthesisCapsule({ objectId: "syn-cov", evidenceRefs: ["ev-1"] });
+    const service = buildSynthesisService({
+      memories,
+      synthesisRows: [capsule],
+      synthesisRanks: { "syn-cov": 0.1 }
+    });
+
+    const result = await runSynthesisRecall(service, 5);
+    const deliveredIds = result.candidates.slice(0, 5).map((candidate) => candidate.object_id);
+    expect(deliveredIds).not.toContain("syn-cov");
+    const reservedSynthesis = (result.diagnostics?.candidates ?? []).filter(
+      (candidate) => candidate.reserved_by === "synthesis"
+    );
+    expect(reservedSynthesis).toHaveLength(0);
+  });
+
+  it("reserves a tail slot for a capsule whose evidence set reached no in-window member", async () => {
+    // Six memories saturate the window, none carries the capsule's evidence ref →
+    // UNCOVERED and buried, only the synthesis reserve can deliver it.
+    const memories = Array.from({ length: 6 }, (_unused, index) =>
+      createMemoryEntry({
+        object_id: `mem-${index}`,
+        content: "recall implementation memory",
+        evidence_refs: [`other-${index}`],
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.9 - index * 0.01
+      })
+    );
+    const capsule = synthesisCapsule({ objectId: "syn-uncov", evidenceRefs: ["ev-uncovered"] });
+    const service = buildSynthesisService({
+      memories,
+      synthesisRows: [capsule],
+      synthesisRanks: { "syn-uncov": 0.1 }
+    });
+
+    const result = await runSynthesisRecall(service, 5);
+    const deliveredIds = result.candidates.slice(0, 5).map((candidate) => candidate.object_id);
+    expect(deliveredIds).toContain("syn-uncov");
+    const capsuleDiagnostic = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "syn-uncov"
+    );
+    expect(capsuleDiagnostic?.pre_budget_rank ?? 0).toBeGreaterThan(5);
+    expect(capsuleDiagnostic?.reserved_by).toBe("synthesis");
+    expect(result.candidates.length).toBeLessThanOrEqual(5);
+  });
+
+  it("prefers the uncovered capsule with the stronger synthesis FTS rank in the bounded tail", async () => {
+    // Two uncovered capsules compete for the bounded reserve, ranked by synthesis
+    // FTS rank: stronger delivered first, both behind the pure-fusion head.
+    const memories = Array.from({ length: 5 }, (_unused, index) =>
+      createMemoryEntry({
+        object_id: `mem-${index}`,
+        content: "recall implementation memory",
+        evidence_refs: [`other-${index}`],
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.9 - index * 0.01
+      })
+    );
+    const strong = synthesisCapsule({ objectId: "syn-strong", evidenceRefs: ["ev-a"] });
+    const weak = synthesisCapsule({ objectId: "syn-weak", evidenceRefs: ["ev-b"] });
+    const service = buildSynthesisService({
+      memories,
+      synthesisRows: [weak, strong],
+      synthesisRanks: { "syn-strong": 0.9, "syn-weak": 0.1 }
+    });
+
+    const result = await runSynthesisRecall(service, 6);
+    const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
+    const strongPos = deliveredIds.indexOf("syn-strong");
+    const weakPos = deliveredIds.indexOf("syn-weak");
+    expect(strongPos).toBeGreaterThanOrEqual(0);
+    if (weakPos !== -1) {
+      expect(strongPos).toBeLessThan(weakPos);
+    }
+    expect(result.candidates[0]?.object_kind).toBe("memory_entry");
+  });
+});
+
+// Band mechanics can't be isolated through recall() (the evidence-set selector
+// front-runs the same multi-fact gate), so drive the real exported helper.
+function streamRanks(): Record<RecallFusionStream, number | null> {
+  return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, null])) as Record<
+    RecallFusionStream,
+    number | null
+  >;
+}
+
+function streamContributions(): Record<RecallFusionStream, number> {
+  return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, 0])) as Record<
+    RecallFusionStream,
+    number
+  >;
+}
+
+type CoverageCandidate = Readonly<{
+  readonly entry: Readonly<MemoryEntry>;
+  readonly originPlane: "workspace_local";
+  readonly objectKind: "memory_entry";
+  readonly effectiveScore: number;
+  readonly effectiveFactors: { readonly relevance: number; readonly activation: number };
+  readonly fusion: Readonly<RecallFusionBreakdown>;
+}>;
+
+function coverageMemory(objectId: string, surfaceId: string | null): MemoryEntry {
+  return {
+    object_id: objectId,
     object_kind: "memory_entry",
     schema_version: 1,
     lifecycle_state: "active",
@@ -39,9 +241,9 @@ function memory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     content: "memory content",
     domain_tags: [],
     evidence_refs: [],
-    workspace_id: "workspace-1",
+    workspace_id: WS,
     run_id: "run-1",
-    surface_id: null,
+    surface_id: surfaceId,
     storage_tier: "hot",
     activation_score: 0.5,
     retention_score: null,
@@ -53,126 +255,47 @@ function memory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     last_hit_at: null,
     reinforcement_count: null,
     contradiction_count: null,
-    superseded_by: null,
-    ...overrides
+    superseded_by: null
   };
 }
-function emptyStreamContributions(): Record<RecallFusionStream, number> {
-  return Object.fromEntries(
-    RECALL_FUSION_STREAMS.map((stream) => [stream, 0])
-  ) as Record<RecallFusionStream, number>;
-}
-function emptyStreamRanks(): Record<RecallFusionStream, number | null> {
-  return Object.fromEntries(
-    RECALL_FUSION_STREAMS.map((stream) => [stream, null])
-  ) as Record<RecallFusionStream, number | null>;
-}
-type FusedCandidate = Readonly<{
-  readonly entry: Readonly<MemoryEntry>;
-  readonly originPlane: "workspace_local";
-  readonly objectKind: "memory_entry" | "synthesis_capsule";
-  readonly effectiveScore: number;
-  // RecallScoreFactors requires relevance + activation; the delivery-reserve
-  // helpers never read score_factors, so the minimal valid shape suffices.
-  readonly effectiveFactors: { readonly relevance: number; readonly activation: number };
-  readonly structuralScore?: number;
-  // Internal-only discriminator: true when the candidate was admitted on the
-  // path_expansion plane via an EARNED co_recalled fan-in carrier (R1, the
-  // sparse durable multi-session fan-in route). isStructuralRescueCandidate
-  // reads it as the bounded exemption from the relevance gate. see also:
-  // packages/core/src/recall/fusion-delivery.ts:isStructuralRescueCandidate.
-  readonly reachedViaEarnedCoRecalledFanin?: boolean;
-  readonly fusion: Readonly<RecallFusionBreakdown>;
-}>;
-function fusedCandidate(input: {
-  readonly objectId: string;
-  readonly objectKind?: "memory_entry" | "synthesis_capsule";
-  readonly evidenceRefs?: readonly string[];
-  readonly contributions?: Partial<Record<RecallFusionStream, number>>;
-  readonly reachedViaEarnedCoRecalledFanin?: boolean;
-}): FusedCandidate {
-  const objectKind = input.objectKind ?? "memory_entry";
-  const entry = memory({
-    object_id: input.objectId,
-    evidence_refs: input.evidenceRefs ?? []
-  });
-  const breakdown = buildEmptyRecallFusionBreakdown(input.objectId);
-  const contributions = {
-    ...emptyStreamContributions(),
-    ...(input.contributions ?? {})
-  };
-  return Object.freeze({
-    entry,
-    originPlane: "workspace_local" as const,
-    objectKind,
-    effectiveScore: 0,
-    effectiveFactors: { relevance: 0, activation: 0 },
-    ...(input.reachedViaEarnedCoRecalledFanin
-      ? { reachedViaEarnedCoRecalledFanin: true }
-      : {}),
-    fusion: Object.freeze({
-      ...breakdown,
-      object_kind: objectKind,
-      per_stream_rank: Object.freeze(emptyStreamRanks()) as RecallFusionBreakdown["per_stream_rank"],
-      fused_rank: 1,
-      fused_score: 0,
-      fused_rank_contribution_per_stream:
-        Object.freeze(contributions) as RecallFusionBreakdown["fused_rank_contribution_per_stream"]
-    })
-  });
-}
-function supplementary(
-  overrides: Partial<RecallSupplementaryData> = {}
-): RecallSupplementaryData {
-  return Object.freeze({
-    queryProbes: compileRecallQueryProbes(null),
-    ftsRanks: Object.freeze({}),
-    trigramFtsRanks: Object.freeze({}),
-    synthesisFtsRanks: Object.freeze({}),
-    evidenceFtsRanks: Object.freeze({}),
-    sourceProximityScores: Object.freeze({}),
-    sourceCohortKeys: Object.freeze({}),
-    structuralScores: Object.freeze({}),
-    graphExpansionScores: Object.freeze({}),
-    entitySeedScores: Object.freeze({}),
-    pathExpansionScores: Object.freeze({}),
-    pathSuppressionScores: Object.freeze({}),
-    embeddingSimilarityScores: Object.freeze({}),
-    graphSupportCounts: Object.freeze({}),
-    budgetPenaltyFactor: 0,
-    plasticityFactors: Object.freeze({}),
-    graphAndPathColdScore: 0,
-    recallsEdgeCount: 0,
-    weightTransferAmount: 0,
-    evidenceGistsByMemoryId: Object.freeze({}),
-    governanceCeilingByMemoryId: Object.freeze({}),
-    ...overrides
-  });
-}
+
 function coverageCandidate(input: {
   readonly objectId: string;
   readonly surfaceId: string | null;
   readonly fusedScore: number;
-}): FusedCandidate {
-  const base = fusedCandidate({ objectId: input.objectId });
+}): CoverageCandidate {
+  const breakdown = buildEmptyRecallFusionBreakdown(input.objectId);
   return Object.freeze({
-    ...base,
-    entry: memory({ object_id: input.objectId, surface_id: input.surfaceId }),
-    fusion: Object.freeze({ ...base.fusion, fused_score: input.fusedScore })
+    entry: coverageMemory(input.objectId, input.surfaceId),
+    originPlane: "workspace_local" as const,
+    objectKind: "memory_entry" as const,
+    effectiveScore: 0,
+    effectiveFactors: { relevance: 0, activation: 0 },
+    fusion: Object.freeze({
+      ...breakdown,
+      object_kind: "memory_entry",
+      per_stream_rank: Object.freeze(streamRanks()) as RecallFusionBreakdown["per_stream_rank"],
+      fused_rank: 1,
+      fused_score: input.fusedScore,
+      fused_rank_contribution_per_stream: Object.freeze(
+        streamContributions()
+      ) as RecallFusionBreakdown["fused_rank_contribution_per_stream"]
+    })
   });
 }
 
+function coverageSupplementary(): RecallSupplementaryData {
+  return { queryProbes: compileRecallQueryProbes(null) } as unknown as RecallSupplementaryData;
+}
+
 describe("session-coverage delivery rerank", () => {
-  // force opens the shared coverage gate so the band mechanics are exercised
-  // directly without crafting multi-fact probes.
   beforeEach(() => {
+    // force opens the shared coverage gate so the band mechanics run directly.
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
   });
   afterEach(() => {
     vi.unstubAllEnvs();
   });
-  const coverageSupplementary = (): RecallSupplementaryData =>
-    ({ queryProbes: compileRecallQueryProbes(null) }) as unknown as RecallSupplementaryData;
 
   it("promotes a bottom-of-window distinct-session candidate within the band", () => {
     const ordered = [
@@ -183,13 +306,7 @@ describe("session-coverage delivery rerank", () => {
       coverageCandidate({ objectId: "e", surfaceId: "s2", fusedScore: 0.93 })
     ];
     const result = applySessionCoverageRerank(ordered, coverageSupplementary(), 5);
-    expect(result.map((candidate) => candidate.entry.object_id)).toEqual([
-      "a",
-      "e",
-      "b",
-      "c",
-      "d"
-    ]);
+    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(["a", "e", "b", "c", "d"]);
   });
 
   it("does not demote a represented session for a much-weaker distinct session outside the band", () => {
@@ -199,11 +316,7 @@ describe("session-coverage delivery rerank", () => {
       coverageCandidate({ objectId: "c", surfaceId: "s2", fusedScore: 0.5 })
     ];
     const result = applySessionCoverageRerank(ordered, coverageSupplementary(), 3);
-    expect(result.map((candidate) => candidate.entry.object_id)).toEqual([
-      "a",
-      "b",
-      "c"
-    ]);
+    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(["a", "b", "c"]);
   });
 
   it("is a no-op when the whole window is one session", () => {
@@ -213,11 +326,7 @@ describe("session-coverage delivery rerank", () => {
       coverageCandidate({ objectId: "c", surfaceId: "s1", fusedScore: 0.8 })
     ];
     const result = applySessionCoverageRerank(ordered, coverageSupplementary(), 3);
-    expect(result.map((candidate) => candidate.entry.object_id)).toEqual([
-      "a",
-      "b",
-      "c"
-    ]);
+    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(["a", "b", "c"]);
   });
 
   it("never pulls a candidate from outside the top-K window into it", () => {
@@ -227,11 +336,7 @@ describe("session-coverage delivery rerank", () => {
       coverageCandidate({ objectId: "c", surfaceId: "s2", fusedScore: 0.99 })
     ];
     const result = applySessionCoverageRerank(ordered, coverageSupplementary(), 2);
-    expect(result.map((candidate) => candidate.entry.object_id)).toEqual([
-      "a",
-      "b",
-      "c"
-    ]);
+    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(["a", "b", "c"]);
   });
 
   it("disables when the band env is 0", () => {
@@ -242,151 +347,6 @@ describe("session-coverage delivery rerank", () => {
       coverageCandidate({ objectId: "e", surfaceId: "s2", fusedScore: 0.93 })
     ];
     const result = applySessionCoverageRerank(ordered, coverageSupplementary(), 3);
-    expect(result.map((candidate) => candidate.entry.object_id)).toEqual([
-      "a",
-      "b",
-      "e"
-    ]);
-    vi.unstubAllEnvs();
-  });
-});
-
-describe("durable-edge fan-in stream registration", () => {
-  it("does NOT register the retired session_cohort_fanin heuristic stream", () => {
-    expect(RECALL_FUSION_STREAMS).not.toContain("session_cohort_fanin");
-  });
-
-  it("registers the durable-edge fan-in carriers path_expansion + graph_expansion", () => {
-    expect(RECALL_FUSION_STREAMS).toContain("path_expansion");
-    expect(RECALL_FUSION_STREAMS).toContain("graph_expansion");
-  });
-});
-
-describe("synthesis backstop — fires only for uncovered capsules, not a tail-pin", () => {
-  it("drops a capsule from reserve eligibility when a member of its evidence set is already in top-5", () => {
-    const delivered = [
-      fusedCandidate({ objectId: "mem-cov", evidenceRefs: ["ev-1"] }),
-      fusedCandidate({
-        objectId: "syn-cov",
-        objectKind: "synthesis_capsule",
-        evidenceRefs: ["ev-1"]
-      })
-    ];
-    const uncovered = selectUncoveredSynthesisCapsules(delivered, 10);
-    expect(uncovered).toHaveLength(0);
-    expect(synthesisReserveCount(delivered, 10)).toBe(0);
-    // No reserve fires: the delivery order is returned unchanged.
-    expect(reserveSynthesisDeliverySlots(delivered, supplementary(), 10)).toEqual(delivered);
-  });
-
-  it("reserves a tail slot for a capsule whose evidence set reached no top-5 member", () => {
-    const fillers = Array.from({ length: 6 }, (_unused, index) =>
-      fusedCandidate({ objectId: `filler-${index}`, evidenceRefs: [`other-${index}`] })
-    );
-    const capsule = fusedCandidate({
-      objectId: "syn-uncov",
-      objectKind: "synthesis_capsule",
-      evidenceRefs: ["ev-uncovered"]
-    });
-    const delivered = [...fillers, capsule];
-    const uncovered = selectUncoveredSynthesisCapsules(delivered, 5);
-    expect(uncovered.map((candidate) => candidate.entry.object_id)).toEqual(["syn-uncov"]);
-    const reserved = reserveSynthesisDeliverySlots(delivered, supplementary(), 5);
-    // The capsule is pulled into the 5-entry window (it was at index 6, outside it).
-    const windowIds = reserved.slice(0, 5).map((candidate) => candidate.entry.object_id);
-    expect(windowIds).toContain("syn-uncov");
-  });
-
-  it("prefers an uncovered capsule whose evidence overlaps a path-reached member (durable-edge anchor bonus)", () => {
-    // The coverage window is min(maxEntries, 5)=5 here. Fillers 0-4 fill that
-    // window WITHOUT carrying ev-shared, so the anchored capsule stays uncovered.
-    // A path-reached member (path_expansion stream contribution) sits OUTSIDE the
-    // coverage window carrying ev-shared. Two uncovered capsules tie on synthesis
-    // FTS rank (0); the anchor bonus must break the tie toward the capsule whose
-    // evidence corroborates the path-reached member.
-    const fillers = Array.from({ length: 5 }, (_unused, index) =>
-      fusedCandidate({ objectId: `filler-${index}`, evidenceRefs: [`other-${index}`] })
-    );
-    const pathReachedMember = fusedCandidate({
-      objectId: "mem-path-reached",
-      evidenceRefs: ["ev-shared"],
-      contributions: { path_expansion: 0.3 }
-    });
-    const anchoredCapsule = fusedCandidate({
-      objectId: "syn-anchored",
-      objectKind: "synthesis_capsule",
-      evidenceRefs: ["ev-shared"]
-    });
-    const unanchoredCapsule = fusedCandidate({
-      objectId: "syn-unanchored",
-      objectKind: "synthesis_capsule",
-      evidenceRefs: ["ev-orphan"]
-    });
-    // maxEntries 6 reserves up to SYNTHESIS_DELIVERY_RESERVE (2) tail slots; with
-    // two uncovered capsules tied on FTS rank, the anchor bonus orders the
-    // anchored one ahead of the orphan in the reserved tail.
-    const delivered = [...fillers, pathReachedMember, unanchoredCapsule, anchoredCapsule];
-    const reserved = reserveSynthesisDeliverySlots(delivered, supplementary(), 6);
-    const anchoredPos = reserved.findIndex((c) => c.entry.object_id === "syn-anchored");
-    const unanchoredPos = reserved.findIndex((c) => c.entry.object_id === "syn-unanchored");
-    expect(anchoredPos).toBeGreaterThanOrEqual(0);
-    expect(unanchoredPos).toBeGreaterThanOrEqual(0);
-    expect(anchoredPos).toBeLessThan(unanchoredPos);
-  });
-});
-
-describe("structural reserve — durable-edge path/graph fan-in eligible + bounded", () => {
-  it("treats a path_expansion-dominated candidate that carries a relevance signal as a structural rescue candidate", () => {
-    const candidate = fusedCandidate({
-      objectId: "path-fanin",
-      contributions: { path_expansion: 0.3, lexical_fts: 0.05 }
-    });
-    expect(isStructuralRescueCandidate(candidate, supplementary())).toBe(true);
-  });
-
-  it("treats a graph_expansion-dominated candidate that carries a relevance signal as a structural rescue candidate", () => {
-    const candidate = fusedCandidate({
-      objectId: "graph-fanin",
-      contributions: { graph_expansion: 0.3, lexical_fts: 0.05 }
-    });
-    expect(isStructuralRescueCandidate(candidate, supplementary())).toBe(true);
-  });
-
-  it("does not rescue a lexical-dominated row that merely carries a small path term", () => {
-    const candidate = fusedCandidate({
-      objectId: "lexical-filler",
-      contributions: { path_expansion: 0.05, lexical_fts: 0.4 }
-    });
-    expect(isStructuralRescueCandidate(candidate, supplementary())).toBe(false);
-  });
-
-  it("keeps at least one pure-fusion head slot (bounded reserve)", () => {
-    // Head rows: pure lexical winners. Buried rows: path-fan-in-dominated, out of window.
-    const head = Array.from({ length: 10 }, (_unused, index) =>
-      fusedCandidate({
-        objectId: `head-${index}`,
-        contributions: { lexical_fts: 0.5 - index * 0.01 }
-      })
-    );
-    // Each buried row is path-fan-in-DOMINATED but also carries a small lexical
-    // relevance term, so it passes the gold-blind relevance guard while staying
-    // structural-dominated (path_expansion >> lexical_fts).
-    const buried = Array.from({ length: 3 }, (_unused, index) =>
-      fusedCandidate({
-        objectId: `buried-${index}`,
-        contributions: { path_expansion: 0.4 - index * 0.01, lexical_fts: 0.02 }
-      })
-    );
-    const delivered = [...head, ...buried];
-    const maxEntries = 10;
-    const result = reserveStructuralDeliverySlots(delivered, supplementary(), maxEntries, 0);
-    // Reserve is capped at STRUCTURAL_DELIVERY_RESERVE (2) and at maxEntries-1,
-    // so at least one of the original head rows survives in the window head.
-    const windowHead = result.slice(0, maxEntries).map((candidate) => candidate.entry.object_id);
-    const headSurvivors = windowHead.filter((id) => id.startsWith("head-"));
-    expect(headSurvivors.length).toBeGreaterThanOrEqual(1);
-    // No more than 2 buried path-fan-in reps are pulled into the window.
-    const rescued = windowHead.filter((id) => id.startsWith("buried-"));
-    expect(rescued.length).toBeLessThanOrEqual(2);
+    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(["a", "b", "e"]);
   });
 });
