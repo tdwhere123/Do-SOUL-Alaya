@@ -111,6 +111,28 @@ describe("bench recall weight overrides", () => {
     });
   });
 
+  it("accepts derived per-lane RRF k keys for fusion tuning", () => {
+    const overrides = resolveBenchRecallWeightOverrides({
+      cliJson: JSON.stringify({
+        fusion_weights: {
+          lexical_fts_rrf_k: 72,
+          evidence_structural_agreement_rrf_k: 75
+        }
+      })
+    });
+
+    expect(overrides?.summary.fusion_weights).toEqual({
+      lexical_fts_rrf_k: 72,
+      evidence_structural_agreement_rrf_k: 75
+    });
+
+    const policy = applyBenchRecallWeightOverrides(basePolicy(), overrides);
+    expect(policy.scoring_weight_overrides?.fusion_weights).toEqual({
+      lexical_fts_rrf_k: 72,
+      evidence_structural_agreement_rrf_k: 75
+    });
+  });
+
   it("rejects partial activation overrides that do not resolve to sum 1", () => {
     expect(() =>
       resolveBenchRecallWeightOverrides({

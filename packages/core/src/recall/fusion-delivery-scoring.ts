@@ -11,6 +11,11 @@ import {
   normalizeActivationScore,
   normalizeGraphSupport
 } from "./recall-service-helpers.js";
+import {
+  resolveFusionContribution as resolveAdaptiveFusionContribution,
+  resolveRrfFusionWeights,
+  type ResolvedRecallFusionWeights
+} from "./fusion-delivery-adaptive-scoring.js";
 import type {
   CoarseRecallCandidate,
   RecallFusionBreakdown,
@@ -22,14 +27,9 @@ import type {
 import {
   normalizeEvidenceText} from "./query-evidence-scoring.js";
 import { scorePreferenceProfileAlignment } from "./preference-fusion-scoring.js";
-import {
-  resolveDefaultFusionWeightForIntent,
-  scoreTemporalEventTime
-} from "./temporal-fusion-scoring.js";
+import { scoreTemporalEventTime } from "./temporal-fusion-scoring.js";
 
 const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;
-const EMBEDDING_PATH_MODULATION_GAIN = 0.25;
-const RECALL_RRF_DEFAULT_K = 60;
 
 export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "lexical_fts", "trigram_fts", "synthesis_fts", "evidence_fts",
@@ -53,11 +53,6 @@ type FusedRecallCandidateInput = Readonly<RecallFusionCandidateInput & {
   readonly fusion: RecallFusionBreakdown;
 }>;
 
-type ResolvedRecallFusionWeights = Readonly<{
-  readonly k: number;
-  readonly weights: Readonly<Record<RecallFusionStream, number>>;
-}>;
-
 type PreliminaryFusionCandidate = Readonly<{
   readonly candidateKey: string;
   readonly objectId: string;
@@ -76,7 +71,12 @@ export function buildRecallFusionDetails(params: Readonly<{
   readonly supplementaryData: RecallSupplementaryData;
   readonly nowIso: string;
 }>): ReadonlyMap<string, RecallFusionBreakdown> {
-  const resolved = resolveRrfFusionWeights(params.policy, params.supplementaryData.queryProbes);
+  const resolved = resolveRrfFusionWeights({
+    policy: params.policy,
+    queryProbes: params.supplementaryData.queryProbes,
+    streams: RECALL_FUSION_STREAMS,
+    baseWeights: RECALL_FUSION_DEFAULT_WEIGHTS
+  });
   const ranksByStream = buildFusionRanksByStream(params.candidates, params.supplementaryData, params.nowIso);
   const prelim = buildPreliminaryFusionCandidates(params, resolved, ranksByStream);
   const fusedRankByCandidateKey = buildFusedRankByCandidateKey(prelim);
@@ -255,13 +255,13 @@ function resolveFusionContribution(
   stream: RecallFusionStream,
   rank: number
 ): number {
-  let contribution = resolved.weights[stream] / (resolved.k + rank);
-  if (stream === "path_expansion" || stream === "graph_expansion") {
-    const cos = clamp01(supplementaryData.embeddingSimilarityScores?.[candidate.entry.object_id] ?? 0.5);
-    const modulation = 1 + EMBEDDING_PATH_MODULATION_GAIN * Math.max(0, 2 * cos - 1);
-    contribution *= modulation;
-  }
-  return contribution;
+  return resolveAdaptiveFusionContribution({
+    candidate,
+    supplementaryData,
+    resolved,
+    stream,
+    rank
+  });
 }
 
 function buildFusedRankByCandidateKey(
@@ -459,26 +459,4 @@ function buildEmptyFusionStreamRanks(): Record<RecallFusionStream, number | null
 
 function buildEmptyFusionStreamContributions(): Record<RecallFusionStream, number> {
   return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, 0])) as Record<RecallFusionStream, number>;
-}
-
-function resolveRrfFusionWeights(
-  policy: Readonly<RecallPolicy>,
-  queryProbes: Readonly<RecallQueryProbes>
-): ResolvedRecallFusionWeights {
-  const base = RECALL_FUSION_DEFAULT_WEIGHTS;
-  const overrides = policy.scoring_weight_overrides?.fusion_weights;
-  const kOverride = overrides?.RRF_K ?? overrides?.rrf_k;
-  const k = typeof kOverride === "number" && Number.isFinite(kOverride) && kOverride > 0
-    ? Math.trunc(kOverride)
-    : RECALL_RRF_DEFAULT_K;
-  const weights = Object.fromEntries(
-    RECALL_FUSION_STREAMS.map((stream) => {
-      const baseWeight = resolveDefaultFusionWeightForIntent(stream, base[stream], queryProbes);
-      return [stream, Math.max(0, overrides?.[stream] ?? baseWeight)];
-    })
-  ) as Record<RecallFusionStream, number>;
-  return Object.freeze({
-    k: Math.max(1, k),
-    weights: Object.freeze(weights)
-  });
 }

@@ -85,6 +85,38 @@ describe("buildRecallFusionDetails temporal lane", () => {
     expect(createdOnlyContribution).toBe(0);
   });
 
+  it("uses temporal intent k instead of the global RRF constant", () => {
+    const policy = {} as RecallPolicy;
+    const eventMemory = createMemoryEntry({
+      object_id: "66666666-6666-4666-8666-666666666666",
+      content: "The release blocker was reviewed yesterday.",
+      event_time_start: "2026-03-19T00:00:00.000Z",
+      time_precision: "day",
+      time_source: "relative_resolved"
+    });
+
+    const fusion = buildRecallFusionDetails({
+      candidates: [
+        {
+          entry: eventMemory,
+          effectiveScore: 0,
+          effectiveFactors: {
+            activation: 0,
+            relevance: 0
+          }
+        }
+      ],
+      policy,
+      supplementaryData: emptySupplementaryData("what happened yesterday before the release?"),
+      nowIso: "2026-03-20T10:20:30.000Z"
+    });
+
+    expect(
+      fusion.get("workspace_local:memory_entry:66666666-6666-4666-8666-666666666666")
+        ?.fused_rank_contribution_per_stream.temporal_recency ?? 0
+    ).toBeCloseTo(4 / 41, 6);
+  });
+
   it("does not apply temporal-recency scoring to month-name path-source text", () => {
     const policy = {} as RecallPolicy;
     const eventMemory = createMemoryEntry({
@@ -115,6 +147,83 @@ describe("buildRecallFusionDetails temporal lane", () => {
       fusion.get("workspace_local:memory_entry:55555555-5555-4555-8555-555555555555")
         ?.fused_rank_contribution_per_stream.temporal_recency ?? 0
     ).toBe(0);
+  });
+});
+
+describe("buildRecallFusionDetails query-adaptive fusion", () => {
+  it("de-correlates repeated lexical-family hits without global hard damp", () => {
+    const policy = {} as RecallPolicy;
+    const memory = createMemoryEntry({
+      object_id: "77777777-7777-4777-8777-777777777777",
+      content: "MaterializationRouter memory creation topic neighbor."
+    });
+    const fusion = buildRecallFusionDetails({
+      candidates: [
+        {
+          entry: memory,
+          effectiveScore: 0,
+          effectiveFactors: {
+            activation: 0,
+            relevance: 0
+          },
+          structuralScore: 1
+        }
+      ],
+      policy,
+      supplementaryData: {
+        ...emptySupplementaryData("how does MaterializationRouter create memory?"),
+        ftsRanks: { [memory.object_id]: 1 },
+        trigramFtsRanks: { [memory.object_id]: 1 },
+        evidenceFtsRanks: { [memory.object_id]: 1 },
+        structuralScores: { [memory.object_id]: 1 }
+      },
+      nowIso: "2026-03-20T10:20:30.000Z"
+    });
+
+    const contributions =
+      fusion.get("workspace_local:memory_entry:77777777-7777-4777-8777-777777777777")
+        ?.fused_rank_contribution_per_stream;
+
+    expect(contributions?.lexical_fts ?? 0).toBeLessThan(3 / 61);
+    expect(contributions?.lexical_fts ?? 0).toBeGreaterThan((3 / 61) * 0.5);
+    expect(contributions?.evidence_structural_agreement ?? 0).toBeLessThan(6 / 61);
+    expect(contributions?.evidence_structural_agreement ?? 0).toBeGreaterThan((6 / 61) * 0.5);
+  });
+
+  it("honors per-lane RRF k overrides", () => {
+    const memory = createMemoryEntry({
+      object_id: "88888888-8888-4888-8888-888888888888",
+      content: "MaterializationRouter memory creation."
+    });
+    const fusion = buildRecallFusionDetails({
+      candidates: [
+        {
+          entry: memory,
+          effectiveScore: 0,
+          effectiveFactors: {
+            activation: 0,
+            relevance: 0
+          }
+        }
+      ],
+      policy: {
+        scoring_weight_overrides: {
+          fusion_weights: {
+            lexical_fts_rrf_k: 10
+          }
+        }
+      } as unknown as RecallPolicy,
+      supplementaryData: {
+        ...emptySupplementaryData("how does MaterializationRouter create memory?"),
+        ftsRanks: { [memory.object_id]: 1 }
+      },
+      nowIso: "2026-03-20T10:20:30.000Z"
+    });
+
+    expect(
+      fusion.get("workspace_local:memory_entry:88888888-8888-4888-8888-888888888888")
+        ?.fused_rank_contribution_per_stream.lexical_fts ?? 0
+    ).toBeCloseTo(3 / 11, 6);
   });
 });
 
