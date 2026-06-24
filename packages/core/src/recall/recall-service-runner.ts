@@ -31,6 +31,7 @@ import {
 } from "./recall-service-helpers.js";
 import type {
   RecallCandidateDiagnostic,
+  RecallDegradationReason,
   RecallEmbeddingProviderStatus,
   RecallResult,
   RecallServiceDependencies,
@@ -67,6 +68,7 @@ export interface RecallExecutionContext {
   readonly warn: RecallServiceWarnPort;
   readonly now: () => string;
   readonly buildDefaultPolicy: (strategy: NodeStrategy, taskSurfaceRef: string) => Readonly<RecallPolicy>;
+  readonly degradationReasons?: Set<RecallDegradationReason>;
 }
 
 type ActiveConstraintsResult = Awaited<ReturnType<typeof loadActiveConstraints>>;
@@ -104,12 +106,14 @@ export async function executeRecall(
   context: RecallExecutionContext,
   params: RecallExecutionParams
 ): Promise<RecallResult> {
-  const prepared = await prepareRecallRequest(context, params);
-  const coarse = await collectCoarseStage(context, params, prepared);
-  const assessment = await assessCandidateStage(context, params, prepared, coarse);
-  const manifested = await manifestCandidateStage(context, params, assessment.finalAssessment);
-  await recordRecallSideEffects(context, params, prepared, coarse, assessment, manifested);
-  return buildRecallResult(prepared, coarse, assessment, manifested);
+  const degradationReasons = new Set<RecallDegradationReason>();
+  const executionContext = Object.freeze({ ...context, degradationReasons });
+  const prepared = await prepareRecallRequest(executionContext, params);
+  const coarse = await collectCoarseStage(executionContext, params, prepared);
+  const assessment = await assessCandidateStage(executionContext, params, prepared, coarse);
+  const manifested = await manifestCandidateStage(executionContext, params, assessment.finalAssessment);
+  await recordRecallSideEffects(executionContext, params, prepared, coarse, assessment, manifested);
+  return buildRecallResult(prepared, coarse, assessment, manifested, degradationReasons);
 }
 
 async function prepareRecallRequest(
@@ -139,19 +143,20 @@ async function prepareRecallRequest(
     queryText,
     queryProbes,
     activeConstraints,
-    winnerMemoryIds: await resolveWinnerMemoryIds(context, slots)
+    winnerMemoryIds: await resolveWinnerMemoryIds(context, params.workspaceId, slots)
   });
 }
 
 async function resolveWinnerMemoryIds(
   context: RecallExecutionContext,
+  workspaceId: string,
   slots: Awaited<ReturnType<RecallServiceDependencies["slotRepo"]["findByWorkspace"]>>
 ): Promise<ReadonlySet<string>> {
   const winnerClaimIds = new Set(slots.flatMap((slot) => (slot.winner_claim_id === null ? [] : [slot.winner_claim_id])));
   if (winnerClaimIds.size === 0 || context.dependencies.claimResolverPort === undefined) {
     return new Set();
   }
-  const claims = await context.dependencies.claimResolverPort.findByIds([...winnerClaimIds]);
+  const claims = await context.dependencies.claimResolverPort.findByIds(workspaceId, [...winnerClaimIds]);
   return new Set(claims.flatMap((claim) => claim.source_object_refs).filter((ref): ref is string => ref !== undefined));
 }
 
@@ -366,7 +371,8 @@ function buildRecallResult(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
   assessment: AssessmentStageResult,
-  manifested: ManifestedRecallResult
+  manifested: ManifestedRecallResult,
+  degradationReasons: ReadonlySet<RecallDegradationReason>
 ): RecallResult {
   const phaseLatencyMs = buildPhaseLatencyMs(coarse, assessment, manifested);
   const tokenEconomy = buildTokenEconomy(assessment, coarse.combinedCoarseCandidates.length, manifested);
@@ -387,6 +393,7 @@ function buildRecallResult(
       deliveredCount: manifested.candidates.length,
       embeddingProviderStatus: assessment.embeddingProviderStatus,
       providerDegradationReason: assessment.providerDegradationReason,
+      degradationReasons: [...degradationReasons],
       graphExpansionDiagnostics: coarse.coarseFilter.graphExpansionDiagnostics,
       candidates: manifested.candidateDiagnostics,
       tokenEconomy,

@@ -23,6 +23,6 @@ it("uses bounded local search only and has no external provider dependency", asy
     });
 
     expect(searchByKeyword).toHaveBeenCalledWith("workspace-1", newMemory.content, 12);
-    expect(findByIds.mock.calls[0][0]).toHaveLength(12);
+    expect(findByIds.mock.calls[0][1]).toHaveLength(12);
   });
 });

@@ -16,6 +16,7 @@ import {
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 import {
   prepareSynthesisCapsuleStatements,
+  SYNTHESIS_SELECT_COLUMNS,
   type SqliteStatement
 } from "./synthesis-capsule-statements.js";
 
@@ -27,6 +28,10 @@ export interface SynthesisCapsuleKeywordHit {
 export interface SynthesisCapsuleRepo {
   create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>>;
   findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null>;
+  findByIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<SynthesisCapsule>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<SynthesisCapsule>[]>;
   findByTopicKey(workspaceId: string, topicKey: string): Promise<readonly Readonly<SynthesisCapsule>[]>;
   clearEvidenceRef(objectId: string, evidenceRef: string, updatedAt: string): Promise<Readonly<SynthesisCapsule>>;
@@ -82,7 +87,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   // see also: 079-synthesis-capsule-fts-dual.sql — trigram CJK/substring lane.
   private readonly searchByKeywordTrigramStatement: SqliteStatement;
 
-  public constructor(db: StorageDatabase) {
+  public constructor(private readonly db: StorageDatabase) {
     const statements = prepareSynthesisCapsuleStatements(db);
     this.createStatement = statements.createStatement;
     this.findByIdStatement = statements.findByIdStatement;
@@ -175,6 +180,33 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
       return row === undefined ? null : parseSynthesisCapsuleRow(row);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load synthesis capsule ${objectId}.`, error);
+    }
+  }
+
+  public async findByIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<SynthesisCapsule>[]> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+    const parsedObjectIds = Array.from(
+      new Set(objectIds.map((objectId) => parseNonEmptyString(objectId, "object id")))
+    );
+    if (parsedObjectIds.length === 0) {
+      return Object.freeze([]);
+    }
+    const placeholders = parsedObjectIds.map(() => "?").join(", ");
+    const statement = this.db.connection.prepare(`
+      SELECT${SYNTHESIS_SELECT_COLUMNS}
+      FROM synthesis_capsules
+      WHERE workspace_id = ?
+        AND object_id IN (${placeholders})
+      ORDER BY created_at ASC, object_id ASC
+    `);
+    try {
+      const rows = statement.all(parsedWorkspaceId, ...parsedObjectIds) as SynthesisCapsuleRow[];
+      return rows.map((row) => parseSynthesisCapsuleRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to load synthesis capsules by ids.", error);
     }
   }
 

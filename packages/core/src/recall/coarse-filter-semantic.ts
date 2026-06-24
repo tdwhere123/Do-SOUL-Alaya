@@ -1,5 +1,6 @@
 import { type MemoryEntry, type RecallPolicy } from "@do-soul/alaya-protocol";
 import { clamp01, errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
+import { recordRecallDegradation } from "./diagnostics.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import {
   intentSplitsByAnchor,
@@ -228,6 +229,7 @@ async function addEvidenceFtsCandidates(params: SemanticSupplementParams): Promi
     }
     await admitEvidenceMatches(params, evidenceMatchById);
   } catch (error) {
+    recordRecallDegradation(params.context, "evidence_fts_failed");
     params.context.warn("evidence FTS lookup failed", {
       workspace_id: params.workspaceId,
       operation: "evidence_fts_lookup",

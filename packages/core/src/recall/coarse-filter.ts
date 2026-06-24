@@ -15,6 +15,7 @@ import {
 } from "./recall-service-helpers.js";
 import type {
   RecallMemoryListPageOptions,
+  RecallDegradationReason,
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "./recall-service-types.js";
@@ -35,10 +36,12 @@ import {
 
 const RECALL_TIER_MEMORY_PAGE_SIZE = 512;
 const STORAGE_RECALL_TIER_MEMORY_PAGE_SIZE = 500;
+const MAX_RECALL_TIER_MEMORY_PAGES = 200;
 
 export interface RunCoarseFilterContext {
   readonly dependencies: RecallServiceDependencies;
   readonly warn: RecallServiceWarnPort;
+  readonly degradationReasons?: Set<RecallDegradationReason>;
 }
 
 export interface RunCoarseFilterOptions {
@@ -84,6 +87,7 @@ async function loadTierMemoriesForRecall(
   let offset = 0;
   let pageLimit = RECALL_TIER_MEMORY_PAGE_SIZE;
   let previousPageSignature: string | null = null;
+  let pagesLoaded = 0;
 
   for (;;) {
     const { pageMemories, effectiveLimit } = await loadTierMemoryPage(context, workspaceId, tier, {
@@ -91,6 +95,7 @@ async function loadTierMemoriesForRecall(
       offset
     });
     pageLimit = effectiveLimit;
+    pagesLoaded += 1;
     if (hasOversizedRecallMemoryPage(pageMemories, pageLimit)) {
       warnOversizedRecallMemoryPage(context, workspaceId, tier, pageLimit, pageMemories.length);
       memories.push(...pageMemories);
@@ -105,6 +110,10 @@ async function loadTierMemoriesForRecall(
 
     memories.push(...pageMemories);
     if (pageMemories.length < pageLimit) {
+      break;
+    }
+    if (pagesLoaded >= MAX_RECALL_TIER_MEMORY_PAGES) {
+      warnMaxRecallMemoryPagesReached(context, workspaceId, tier, pageLimit, pagesLoaded, memories.length);
       break;
     }
     offset += pageMemories.length;
@@ -156,6 +165,23 @@ function warnDuplicateRecallMemoryPage(
     tier,
     limit: pageLimit,
     offset
+  });
+}
+
+function warnMaxRecallMemoryPagesReached(
+  context: RunCoarseFilterContext,
+  workspaceId: string,
+  tier: StorageTier,
+  pageLimit: number,
+  pagesLoaded: number,
+  returnedCount: number
+): void {
+  context.warn("recall memory repo page scan reached the maximum page count", {
+    workspace_id: workspaceId,
+    tier,
+    limit: pageLimit,
+    pages_loaded: pagesLoaded,
+    returned_count: returnedCount
   });
 }
 

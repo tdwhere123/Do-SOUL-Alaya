@@ -27,10 +27,10 @@ export function readMemoryTemporalProjectionPayload(
 }
 
 function readTemporalProjectionRecord(value: unknown): TemporalProjectionPayload | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+  const candidate = toUnknownRecord(value);
+  if (candidate === null) {
     return null;
   }
-  const candidate = value as Record<string, unknown>;
   const projection: TemporalProjectionPayload = {
     ...readProjectionSchemaVersion(candidate.projection_schema_version ?? candidate.version),
     ...readOptionalTemporalDate(candidate, "event_time_start"),
@@ -75,6 +75,13 @@ function normalizePayloadString(value: unknown): string | null {
   }
   const normalized = value.trim();
   return normalized.length === 0 ? null : normalized;
+}
+
+function toUnknownRecord(value: unknown): Readonly<Record<string, unknown>> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return value as Readonly<Record<string, unknown>>;
 }
 
 function readProjectionSchemaVersion(value: unknown): Pick<TemporalProjectionPayload, "projection_schema_version"> | Record<string, never> {

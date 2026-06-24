@@ -24,10 +24,10 @@ export function readMemoryPreferenceProfilePayload(
 }
 
 function readPreferenceProfileRecord(value: unknown): PreferenceProfilePayload | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+  const candidate = toUnknownRecord(value);
+  if (candidate === null) {
     return null;
   }
-  const candidate = value as Record<string, unknown>;
   const profile: PreferenceProfilePayload = {
     ...readProjectionSchemaVersion(candidate.projection_schema_version ?? candidate.version),
     ...readOptionalProfileString(candidate, "preference_subject", "subject"),
@@ -65,4 +65,11 @@ function normalizeProfileString(value: unknown): string | null {
   }
   const normalized = value.trim();
   return normalized.length === 0 ? null : normalized.slice(0, 1024);
+}
+
+function toUnknownRecord(value: unknown): Readonly<Record<string, unknown>> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return value as Readonly<Record<string, unknown>>;
 }

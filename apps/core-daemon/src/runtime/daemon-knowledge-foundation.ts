@@ -32,7 +32,10 @@ export function createKnowledgeFoundation(
 ) {
   const dynamicsServiceRef = createDynamicsServiceRef();
   const evidenceService = createEvidenceService(input, dynamicsServiceRef);
-  const governanceLeaseService = new GovernanceLeaseService({ eventLogRepo: input.eventLogRepo });
+  const governanceLeaseService = new GovernanceLeaseService({
+    eventLogRepo: input.eventLogRepo,
+    runLookup: input.runRepo
+  });
   const healthJournalService = createHealthJournalService(input);
   const greenService = createGreenService(input, governanceLeaseService);
   const dynamicsService = createDynamicsService(input, greenService);

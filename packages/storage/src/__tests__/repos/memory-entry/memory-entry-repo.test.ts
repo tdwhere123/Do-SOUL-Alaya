@@ -119,7 +119,7 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(enrichRepo.countPending(entry.workspace_id)).toBe(0);
   });
 
-  it("finds memory entries by ids without duplicates and skips missing ids", async () => {
+  it("finds memory entries by workspace and ids without duplicates or cross-workspace leakage", async () => {
     const { repo } = await createRepo();
     const first = createMemoryEntry({
       object_id: "7ab81ca8-9425-4e18-ad4a-81ab6406db55",
@@ -131,11 +131,25 @@ describe("SqliteMemoryEntryRepo", () => {
       created_at: "2026-03-21T00:00:01.000Z",
       updated_at: "2026-03-21T00:00:01.000Z"
     });
+    const otherWorkspace = createMemoryEntry({
+      object_id: "568f0269-4cb4-4c3d-8a17-33b57977c133",
+      workspace_id: "workspace-2",
+      run_id: "run-3",
+      created_at: "2026-03-21T00:00:02.000Z",
+      updated_at: "2026-03-21T00:00:02.000Z"
+    });
 
     await repo.create(first);
     await repo.create(second);
+    await repo.create(otherWorkspace);
 
-    const rows = await repo.findByIds([second.object_id, "missing-memory", first.object_id, second.object_id]);
+    const rows = await repo.findByIds("workspace-1", [
+      second.object_id,
+      "missing-memory",
+      otherWorkspace.object_id,
+      first.object_id,
+      second.object_id
+    ]);
 
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.object_id).sort()).toEqual([first.object_id, second.object_id].sort());

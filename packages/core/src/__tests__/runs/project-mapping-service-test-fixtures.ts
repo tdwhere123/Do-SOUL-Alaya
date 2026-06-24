@@ -161,7 +161,7 @@ export function createDependencies(overrides: Partial<ProjectMappingServiceDepen
     },
     memoryRepo: {
       findById: vi.fn(async (objectId: string) => memoryEntries.get(objectId) ?? null),
-      findByIds: vi.fn(async (objectIds: readonly string[]) =>
+      findByIds: vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
         [...new Set(objectIds)].flatMap((objectId) => {
           const entry = memoryEntries.get(objectId);
           return entry === undefined ? [] : [entry];

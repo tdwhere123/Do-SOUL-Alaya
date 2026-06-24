@@ -169,7 +169,7 @@ function pickEvidenceKind(signal: CandidateMemorySignal): EvidenceKindValue {
 export function buildEvidenceInput(
   signal: CandidateMemorySignal,
   summarySuffix?: string,
-  opts?: { readonly fullTurnExcerpt?: boolean }
+  opts?: { readonly fullTurnExcerpt?: boolean; readonly artifactRef?: string | null }
 ): EvidenceMaterializationInput {
   // fullTurnExcerpt widens the searchable excerpt/gist to the signal's full
   // source turn so evidence FTS keeps the query terms distillation drops;
@@ -194,7 +194,7 @@ export function buildEvidenceInput(
       event_id: null,
       occurred_at: signal.created_at
     },
-    physical_anchor: buildSignalPhysicalAnchor(signal),
+    physical_anchor: buildSignalPhysicalAnchor(signal, opts?.artifactRef),
     evidence_health_state: computeEvidenceHealthState(signal),
     gist: appendSummarySuffix(excerpt, summarySuffix),
     excerpt,
@@ -205,8 +205,14 @@ export function buildEvidenceInput(
   };
 }
 
-function buildSignalPhysicalAnchor(signal: CandidateMemorySignal): EvidenceCapsule["physical_anchor"] {
-  const artifactRef = signal.evidence_refs.find((ref) => ref.trim().length > 0)?.trim() ?? null;
+function buildSignalPhysicalAnchor(
+  signal: CandidateMemorySignal,
+  artifactRefOverride?: string | null
+): EvidenceCapsule["physical_anchor"] {
+  const override = artifactRefOverride?.trim() ?? "";
+  const artifactRef = override.length > 0
+    ? override
+    : signal.evidence_refs.find((ref) => ref.trim().length > 0)?.trim() ?? null;
   if (artifactRef === null) {
     return null;
   }

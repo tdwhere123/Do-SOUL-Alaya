@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 
 const PROJECTS = [
   "@do-soul/alaya-protocol",
+  "@do-soul/alaya-graph-algorithms",
   "@do-soul/alaya-storage",
   "@do-soul/alaya-core",
   "@do-soul/alaya-soul",

@@ -66,6 +66,47 @@ describe("SqliteSynthesisCapsuleRepo", () => {
     ]);
   });
 
+  it("loads synthesis capsules by workspace and ids without cross-workspace leakage", async () => {
+    const { repo } = await createRepo();
+
+    await repo.create(
+      createSynthesisCapsule({
+        object_id: "6f2c53a4-0c4a-41aa-a2b0-c26fd862aa75",
+        created_at: "2026-03-21T00:00:01.000Z",
+        updated_at: "2026-03-21T00:00:01.000Z"
+      })
+    );
+    await repo.create(
+      createSynthesisCapsule({
+        object_id: "420b0a6f-c74e-459b-947f-61353f82e0a3",
+        created_at: "2026-03-21T00:00:02.000Z",
+        updated_at: "2026-03-21T00:00:02.000Z"
+      })
+    );
+    await repo.create(
+      createSynthesisCapsule({
+        object_id: "6b0b311b-d1c9-4460-a447-bb179ab3cc1e",
+        workspace_id: "workspace-2",
+        run_id: "run-3",
+        created_at: "2026-03-21T00:00:03.000Z",
+        updated_at: "2026-03-21T00:00:03.000Z"
+      })
+    );
+
+    const rows = await repo.findByIds("workspace-1", [
+      "420b0a6f-c74e-459b-947f-61353f82e0a3",
+      "missing-synthesis",
+      "6b0b311b-d1c9-4460-a447-bb179ab3cc1e",
+      "6f2c53a4-0c4a-41aa-a2b0-c26fd862aa75",
+      "420b0a6f-c74e-459b-947f-61353f82e0a3"
+    ]);
+
+    expect(rows.map((row) => row.object_id)).toEqual([
+      "6f2c53a4-0c4a-41aa-a2b0-c26fd862aa75",
+      "420b0a6f-c74e-459b-947f-61353f82e0a3"
+    ]);
+  });
+
   it("updates synthesis status", async () => {
     const { repo } = await createRepo();
     const capsule = createSynthesisCapsule();
@@ -286,6 +327,14 @@ async function createRepo(): Promise<{
     default_engine_binding: null,
     workspace_state: WorkspaceState.ACTIVE
   });
+  await workspaceRepo.create({
+    workspace_id: "workspace-2",
+    name: "workspace two",
+    root_path: "/tmp/ws2",
+    workspace_kind: WorkspaceKind.LOCAL_REPO,
+    default_engine_binding: null,
+    workspace_state: WorkspaceState.ACTIVE
+  });
 
   await runRepo.create({
     run_id: "run-1",
@@ -302,6 +351,17 @@ async function createRepo(): Promise<{
     run_id: "run-2",
     workspace_id: "workspace-1",
     title: "run two",
+    goal: null,
+    run_mode: RunMode.CHAT,
+    engine_binding_id: null,
+    engine_class: null,
+    run_state: RunState.IDLE,
+    current_surface_id: null
+  });
+  await runRepo.create({
+    run_id: "run-3",
+    workspace_id: "workspace-2",
+    title: "run three",
     goal: null,
     run_mode: RunMode.CHAT,
     engine_binding_id: null,

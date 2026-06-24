@@ -53,7 +53,7 @@ describe("SqliteClaimFormRepo", () => {
     await expect(repo.findById(claim.object_id)).resolves.toEqual(claim);
   });
 
-  it("loads multiple claim forms by id in deterministic order", async () => {
+  it("loads multiple claim forms by workspace and id in deterministic order", async () => {
     const { repo } = await createRepo();
 
     await repo.create(
@@ -70,11 +70,20 @@ describe("SqliteClaimFormRepo", () => {
         updated_at: "2026-03-21T00:00:02.000Z"
       })
     );
+    await repo.create(
+      createClaimForm({
+        object_id: "4ec19418-5d72-4f62-adce-b9df80a2d64b",
+        workspace_id: "workspace-2",
+        created_at: "2026-03-21T00:00:03.000Z",
+        updated_at: "2026-03-21T00:00:03.000Z"
+      })
+    );
 
-    const rows = await repo.findByIds([
+    const rows = await repo.findByIds("workspace-1", [
       "4de58de9-8ec7-45f4-a593-fde6ec67865c",
       "8af6288f-f460-423f-babc-c9f7c90d733f",
       "4de58de9-8ec7-45f4-a593-fde6ec67865c",
+      "4ec19418-5d72-4f62-adce-b9df80a2d64b",
       "missing-claim"
     ]);
 
@@ -220,6 +229,14 @@ async function createRepo(): Promise<{
     workspace_id: "workspace-1",
     name: "workspace one",
     root_path: "/tmp/ws1",
+    workspace_kind: WorkspaceKind.LOCAL_REPO,
+    default_engine_binding: null,
+    workspace_state: WorkspaceState.ACTIVE
+  });
+  await workspaceRepo.create({
+    workspace_id: "workspace-2",
+    name: "workspace two",
+    root_path: "/tmp/ws2",
     workspace_kind: WorkspaceKind.LOCAL_REPO,
     default_engine_binding: null,
     workspace_state: WorkspaceState.ACTIVE

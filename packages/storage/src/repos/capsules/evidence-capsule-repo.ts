@@ -29,8 +29,9 @@ export interface EvidenceCapsuleKeywordHit {
 
 export interface EvidenceCapsuleRepo {
   create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>>;
+  deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
-  findByIds(objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByIds(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByRunIdPage?(
     runId: string,
     page: EvidenceCapsuleListPageOptions
@@ -175,6 +176,14 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     return parsedCapsule;
   }
 
+  public async deleteById(objectId: string): Promise<void> {
+    try {
+      this.db.connection.prepare("DELETE FROM evidence_capsules WHERE object_id = ?").run(objectId);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to delete evidence capsule ${objectId}.`, error);
+    }
+  }
+
   public async findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null> {
     try {
       const row = this.findByIdStatement.get(objectId) as EvidenceCapsuleRow | undefined;
@@ -184,7 +193,10 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     }
   }
 
-  public async findByIds(objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]> {
+  public async findByIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<EvidenceCapsule>[]> {
     const uniqueIds = [...new Set(objectIds.map((objectId) => objectId.trim()).filter((objectId) => objectId.length > 0))];
     if (uniqueIds.length === 0) {
       return [];
@@ -198,10 +210,10 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
         const statement = this.db.connection.prepare(`
           SELECT${EVIDENCE_CAPSULE_SELECT_COLUMNS}
           FROM evidence_capsules
-          WHERE object_id IN (${placeholders})
+          WHERE workspace_id = ? AND object_id IN (${placeholders})
           ORDER BY created_at ASC, object_id ASC
         `);
-        rows.push(...statement.all(...chunk) as EvidenceCapsuleRow[]);
+        rows.push(...statement.all(workspaceId, ...chunk) as EvidenceCapsuleRow[]);
       }
       return rows.map((row) => parseEvidenceCapsuleRow(row));
     } catch (error) {

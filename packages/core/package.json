@@ -25,6 +25,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
+    "@do-soul/alaya-graph-algorithms": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
     "@node-rs/jieba": "2.0.1"
   },

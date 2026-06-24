@@ -7,6 +7,7 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 const sharedAlias = {
   "@do-soul/alaya-protocol": path.resolve(rootDir, "packages/protocol/src/index.ts"),
+  "@do-soul/alaya-graph-algorithms": path.resolve(rootDir, "packages/graph-algorithms/src/index.ts"),
   "@do-soul/alaya-storage": path.resolve(rootDir, "packages/storage/src/index.ts"),
   "@do-soul/alaya-core": path.resolve(rootDir, "packages/core/src/index.ts"),
   "@do-soul/alaya-soul": path.resolve(rootDir, "packages/soul/src/index.ts"),
@@ -67,6 +68,7 @@ function appProject(name, appDir) {
 
 export default [
   packageProject("@do-soul/alaya-protocol", "packages/protocol"),
+  packageProject("@do-soul/alaya-graph-algorithms", "packages/graph-algorithms"),
   packageProject("@do-soul/alaya-storage", "packages/storage"),
   packageProject("@do-soul/alaya-core", "packages/core"),
   packageProject("@do-soul/alaya-soul", "packages/soul"),

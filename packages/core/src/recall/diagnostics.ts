@@ -3,6 +3,7 @@ import type { PreparedEmbeddingQueryHandle } from "../embedding-recall/embedding
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import type {
   RecallCandidateDiagnostic,
+  RecallDegradationReason,
   RecallDiagnostics,
   RecallEmbeddingProviderStatus,
   RecallEmbeddingWorkspaceScanDiagnostics,
@@ -19,6 +20,7 @@ export function buildRecallDiagnostics(params: Readonly<{
   readonly deliveredCount: number;
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly providerDegradationReason: string | null;
+  readonly degradationReasons?: readonly RecallDegradationReason[];
   readonly graphExpansionDiagnostics: Readonly<RecallGraphExpansionDiagnostics>;
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly tokenEconomy: Readonly<RecallTokenEconomy>;
@@ -34,6 +36,9 @@ export function buildRecallDiagnostics(params: Readonly<{
     delivered_count: params.deliveredCount,
     embedding_provider_status: params.embeddingProviderStatus,
     provider_degradation_reason: params.providerDegradationReason,
+    ...(params.degradationReasons === undefined || params.degradationReasons.length === 0
+      ? {}
+      : { degradation_reasons: Object.freeze([...new Set(params.degradationReasons)]) }),
     ...buildEmbeddingWorkspaceScanDiagnostics(embeddingWorkspaceScan),
     graph_expansion_plane_count_per_hop:
       params.graphExpansionDiagnostics.graph_expansion_plane_count_per_hop,
@@ -49,6 +54,13 @@ export function buildRecallDiagnostics(params: Readonly<{
       ? {}
       : { phase_latency_ms: Object.freeze({ ...params.phaseLatencyMs }) })
   });
+}
+
+export function recordRecallDegradation(
+  target: Readonly<{ readonly degradationReasons?: Set<RecallDegradationReason> }>,
+  reason: RecallDegradationReason
+): void {
+  target.degradationReasons?.add(reason);
 }
 
 function freezeRecallQueryProbes(

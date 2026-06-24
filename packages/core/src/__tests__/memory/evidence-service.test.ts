@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   EvidenceHealthState,
+  MemoryGovernanceEventType,
   TransitionCausedBy,
   type EvidenceCapsule,
   type EventLogEntry
@@ -65,6 +66,9 @@ describe("EvidenceService", () => {
           store.set(capsule.object_id, Object.freeze({ ...capsule }));
           return store.get(capsule.object_id)!;
         }),
+        deleteById: vi.fn(async () => {
+          throw new Error("not used");
+        }),
         findById: vi.fn(async (objectId) => store.get(objectId) ?? null),
         findByRunId: vi.fn(async () => []),
         findByWorkspaceId: vi.fn(async () => []),
@@ -96,6 +100,76 @@ describe("EvidenceService", () => {
         workspace_id: "workspace-1",
         run_id: "run-1"
       }
+    });
+  });
+
+  it("writes soul.evidence.deleted before deleting created evidence and notifying", async () => {
+    const order: string[] = [];
+    const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
+    const existing: EvidenceCapsule = Object.freeze({
+      object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+      object_kind: "evidence_capsule",
+      schema_version: 1,
+      lifecycle_state: "active",
+      created_at: "2026-03-20T01:00:00.000Z",
+      updated_at: "2026-03-20T01:00:00.000Z",
+      ...createEvidenceInput()
+    });
+
+    const service = new EvidenceService({
+      now: () => "2026-03-20T01:05:00.000Z",
+      eventLogRepo: {
+        append: vi.fn(async (event) => {
+          order.push("event_log");
+          appendedEvents.push(event);
+          return {
+            event_id: "event-compensated-delete",
+            created_at: "2026-03-20T01:05:00.000Z",
+            revision: 0,
+            ...event
+          };
+        })
+      },
+      evidenceCapsuleRepo: {
+        create: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        deleteById: vi.fn(async () => {
+          order.push("repo_delete");
+        }),
+        findById: vi.fn(async () => existing),
+        findByRunId: vi.fn(async () => []),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByHealth: vi.fn(async () => []),
+        updateHealth: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      },
+      runtimeNotifier: {
+        notifyEntry: vi.fn(async () => {
+          order.push("notify");
+        })
+      }
+    });
+
+    await service.deleteCreatedEvidence(existing.object_id);
+
+    expect(order).toEqual(["event_log", "repo_delete", "notify"]);
+    expect(appendedEvents[0]).toMatchObject({
+      event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_DELETED,
+      entity_type: "evidence_capsule",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      payload_json: expect.objectContaining({
+        object_id: existing.object_id,
+        object_kind: "evidence_capsule",
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        from_state: "active",
+        to_state: "deleted",
+        reason_code: "memory_materialization_failed_after_evidence_creation"
+      })
     });
   });
 
@@ -144,6 +218,9 @@ describe("EvidenceService", () => {
       },
       evidenceCapsuleRepo: {
         create: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        deleteById: vi.fn(async () => {
           throw new Error("not used");
         }),
         findById: vi.fn(async () => existing),
@@ -217,6 +294,9 @@ describe("EvidenceService", () => {
           store.set(capsule.object_id, frozen);
           return frozen;
         }),
+        deleteById: vi.fn(async () => {
+          throw new Error("not used");
+        }),
         findById: vi.fn(async (objectId) => store.get(objectId) ?? null),
         findByRunId: vi.fn(async () => []),
         findByWorkspaceId: vi.fn(async () => []),
@@ -271,6 +351,9 @@ describe("EvidenceService", () => {
       },
       evidenceCapsuleRepo: {
         create: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        deleteById: vi.fn(async () => {
           throw new Error("not used");
         }),
         findById: vi.fn(async () => existing),

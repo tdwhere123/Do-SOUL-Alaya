@@ -312,7 +312,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
-        findByIds: vi.fn(async (ids: readonly string[]) =>
+        findByIds: vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
           memories.filter((memory) => ids.includes(memory.object_id))
         )
       },
@@ -373,7 +373,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       })
     );
     const { dependencies } = createDependencies([child, ...decoys]);
-    const findByIds = vi.fn(async (ids: readonly string[]) =>
+    const findByIds = vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
       [child, ...decoys].filter((memory) => ids.includes(memory.object_id))
     );
     const synthesis: SynthesisCapsule = {
@@ -433,7 +433,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       policyOverride: policy
     });
 
-    expect(findByIds).toHaveBeenCalledWith(["memory-child"]);
+    expect(findByIds).toHaveBeenCalledWith("workspace-1", ["memory-child"]);
     expect(result.candidates.map((candidate) => candidate.object_kind)).not.toContain("synthesis_capsule");
     expect(result.candidates.map((candidate) => candidate.object_id)).toContain("memory-child");
     const childDiagnostic = result.diagnostics?.candidates.find(
@@ -473,7 +473,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       "memory-cross-workspace-child",
       "memory-dormant-child"
     ];
-    const findByIds = vi.fn(async (ids: readonly string[]) =>
+    const findByIds = vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
       [validChild, crossWorkspaceChild, dormantChild].filter((memory) =>
         ids.includes(memory.object_id)
       )
@@ -531,8 +531,9 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
     });
 
     expect(findByIds).toHaveBeenCalledTimes(1);
-    expect(findByIds.mock.calls[0]?.[0]).toHaveLength(childRefs.length);
-    expect(findByIds.mock.calls[0]?.[0]).toEqual(expect.arrayContaining(childRefs));
+    expect(findByIds.mock.calls[0]?.[0]).toBe("workspace-1");
+    expect(findByIds.mock.calls[0]?.[1]).toHaveLength(childRefs.length);
+    expect(findByIds.mock.calls[0]?.[1]).toEqual(expect.arrayContaining(childRefs));
     const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
     expect(deliveredIds).toContain("memory-valid-child");
     expect(deliveredIds).not.toContain("memory-cross-workspace-child");
@@ -579,7 +580,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
-        findByIds: vi.fn(async (ids: readonly string[]) =>
+        findByIds: vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
           children.filter((child) => ids.includes(child.object_id))
         ),
         searchByKeyword: vi.fn(async () => [])
@@ -660,7 +661,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
-        findByIds: vi.fn(async (ids: readonly string[]) =>
+        findByIds: vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
           [...invalidChildren, ...validChildren].filter((child) => ids.includes(child.object_id))
         ),
         searchByKeyword: vi.fn(async () => [])

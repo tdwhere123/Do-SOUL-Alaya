@@ -75,7 +75,7 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     await repo.create(createEvidenceCapsule({ object_id: "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab" }));
     await repo.create(createEvidenceCapsule({ object_id: "256a7ff5-6150-4a82-9a53-99dbfd08cb77" }));
 
-    const rows = await repo.findByIds([
+    const rows = await repo.findByIds("workspace-1", [
       "256a7ff5-6150-4a82-9a53-99dbfd08cb77",
       "missing-id",
       "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab",
@@ -86,6 +86,17 @@ describe("SqliteEvidenceCapsuleRepo", () => {
       "256a7ff5-6150-4a82-9a53-99dbfd08cb77",
       "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab"
     ]);
+  });
+
+  it("loads evidence capsules by ids only inside the requested workspace", async () => {
+    const { repo } = await createRepo();
+
+    const sharedId = "f6c1b587-be07-4410-b2ca-8bfbc4d82db4";
+    await repo.create(createEvidenceCapsule({ object_id: sharedId, run_id: "run-3", workspace_id: "workspace-2" }));
+
+    const rows = await repo.findByIds("workspace-1", [sharedId]);
+
+    expect(rows).toEqual([]);
   });
 
   it("lists by run id", async () => {

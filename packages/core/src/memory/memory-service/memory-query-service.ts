@@ -65,7 +65,7 @@ export class MemoryQueryService {
       return entries.filter((entry): entry is Readonly<MemoryEntry> => entry !== null);
     }
 
-    const entries = await findByIds.call(this.memoryEntryRepo, objectIds);
+    const entries = await findByIds.call(this.memoryEntryRepo, workspaceId, objectIds);
     return entries.filter((entry) => entry.workspace_id === workspaceId);
   }
 

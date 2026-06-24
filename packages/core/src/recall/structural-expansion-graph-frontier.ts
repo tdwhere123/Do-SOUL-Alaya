@@ -11,6 +11,7 @@ import {
   type GraphExpansionFrontierNode
 } from "./graph-expansion.js";
 import { collectPathGraphNeighbors } from "./path-relations.js";
+import { recordRecallDegradation } from "./diagnostics.js";
 import { clamp01, errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
 import type {
   RecallServiceDependencies,
@@ -25,6 +26,7 @@ type ExpandGraphFrontierParams = Readonly<{
   readonly maxGraphHops: number;
   readonly dynamicRecallEdgeFanout: number;
   readonly warn: RecallServiceWarnPort;
+  readonly degradationReasons?: Set<import("./recall-service-types.js").RecallDegradationReason>;
   readonly onCandidate: (candidate: Readonly<GraphExpansionCandidateDraft>) => void;
 }>;
 
@@ -79,6 +81,7 @@ async function loadEligibleGraphExpansionPaths(
     readonly workspaceId: string;
     readonly pathExpansionPort: NonNullable<RecallServiceDependencies["pathExpansionPort"]>;
     readonly warn: RecallServiceWarnPort;
+    readonly degradationReasons?: Set<import("./recall-service-types.js").RecallDegradationReason>;
   }>,
   frontierIds: readonly string[]
 ): Promise<readonly Readonly<PathRelation>[] | null> {
@@ -90,6 +93,7 @@ async function loadEligibleGraphExpansionPaths(
     const paths = await params.pathExpansionPort.findByAnchors(params.workspaceId, anchorRefs);
     return paths.filter((path) => isPathRecallEligible(path));
   } catch (error) {
+    recordRecallDegradation(params, "graph_expansion_failed");
     params.warn("graph expansion path lookup failed", {
       workspace_id: params.workspaceId,
       seed_count: frontierIds.length,

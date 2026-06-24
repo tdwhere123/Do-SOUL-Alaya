@@ -81,7 +81,7 @@ export function createDeps(memories: readonly MemoryEntry[]) {
         normalized_rank: 1 - index * 0.1
       }))
   );
-  const findByIds = vi.fn(async (objectIds: readonly string[]) =>
+  const findByIds = vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
     objectIds.flatMap((objectId) => {
       const memory = byId.get(objectId);
       return memory === undefined ? [] : [memory];

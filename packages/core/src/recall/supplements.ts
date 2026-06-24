@@ -19,6 +19,7 @@ import type {
 } from "./recall-service-types.js";
 import { buildEvidenceSearchQueries } from "./coarse-candidates.js";
 import { normalizeEmbeddingProviderDegradationReason } from "./diagnostics.js";
+import { recordRecallDegradation } from "./diagnostics.js";
 import { scoreEvidenceAnchorMatch, scoreQueryEvidenceMatch } from "./query-evidence-scoring.js";
 export { collectEmbeddingCoarseInjection } from "./embedding-coarse-injection.js";
 
@@ -105,6 +106,7 @@ export async function collectSynthesisCoarseCandidates(params: {
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly policy: Readonly<RecallPolicy>;
+  readonly degradationReasons?: Set<import("./recall-service-types.js").RecallDegradationReason>;
 }): Promise<Readonly<{
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly synthesisFtsRanks: Readonly<Record<string, number>>;
@@ -122,13 +124,14 @@ export async function collectSynthesisCoarseCandidates(params: {
     if (rankById.size === 0) {
       return emptySynthesisCoarseFilter();
     }
-    const synthesisRows = await synthesisSearchPort.findByIds([...rankById.keys()]);
+    const synthesisRows = await synthesisSearchPort.findByIds(params.workspaceId, [...rankById.keys()]);
     const candidates = await buildSynthesisChildCandidates(params, synthesisRows, rankById);
     return Object.freeze({
       candidates: Object.freeze(candidates.map((candidate) => candidate.candidate)),
       synthesisFtsRanks: buildSynthesisChildFtsRanks(candidates)
     });
   } catch (error) {
+    recordRecallDegradation(params, "synthesis_fts_failed");
     params.warn("synthesis FTS lookup failed", {
       workspace_id: params.workspaceId,
       operation: "synthesis_fts_lookup",
@@ -218,6 +221,7 @@ async function buildSynthesisChildCandidates(
     return Object.freeze([]);
   }
   const childRows = await params.dependencies.memoryRepo.findByIds(
+    params.workspaceId,
     uniqueMemoryIds(childRefs)
   );
   return buildResolvedSynthesisChildren(params, childRefs, childRows);

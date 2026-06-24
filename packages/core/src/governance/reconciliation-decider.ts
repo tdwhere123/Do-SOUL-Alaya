@@ -92,12 +92,10 @@ export class ReconciliationDecider {
     }
     try {
       const entries = await this.deps.memoryRepo.findByIds(
+        workspaceId,
         hits.map((hit) => hit.object_id)
       );
-      return entries.filter(
-        (entry) =>
-          entry.workspace_id === workspaceId && entry.lifecycle_state !== "archived"
-      );
+      return entries.filter((entry) => entry.lifecycle_state !== "archived");
     } catch (error) {
       this.deps.warn("reconciliation neighbor fetch failed", {
         workspace_id: workspaceId,

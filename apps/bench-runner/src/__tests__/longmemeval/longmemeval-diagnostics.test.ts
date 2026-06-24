@@ -45,6 +45,7 @@ describe("LongMemEval recall diagnostics", () => {
       delivered_count: 0,
       embedding_provider_status: "provider_not_requested",
       provider_degradation_reason: null,
+      degradation_reasons: ["evidence_fts_failed", "path_expansion_failed"],
       embedding_workspace_scan_cap: 10000,
       embedding_workspace_scanned_count: 10001,
       embedding_workspace_truncated: true,
@@ -82,6 +83,7 @@ describe("LongMemEval recall diagnostics", () => {
       coarse_filter: 1.25,
       fusion: 2.5
     });
+    expect(parsed.degradation_reasons).toEqual(["evidence_fts_failed", "path_expansion_failed"]);
     expect(parsed.embedding_workspace_truncated).toBe(true);
     expect(parsed.embedding_workspace_scanned_count).toBe(10001);
   });

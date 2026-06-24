@@ -64,7 +64,10 @@ export interface MemoryServiceEventLogRepoPort {
 // alone. A full repo satisfies the composed MemoryServiceMemoryEntryRepoPort.
 export interface MemoryEntryReadPort {
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
-  findByIds?(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByIds?(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   findByWorkspaceId(
     workspaceId: string,
     tier?: MemoryEntry["storage_tier"],
@@ -164,8 +167,8 @@ export interface MemoryServiceMemoryEntryRepoPort
     MemoryEntryLifecyclePort {}
 
 export interface MemoryServiceEvidenceServicePort {
-  findById(objectId: string): Promise<unknown | null>;
-  findByIds?(objectIds: readonly string[]): Promise<readonly { readonly object_id: string }[]>;
+  findById(objectId: string): Promise<Readonly<{ readonly object_id?: string; readonly workspace_id?: string }> | null>;
+  findByIds?(workspaceId: string, objectIds: readonly string[]): Promise<readonly { readonly object_id: string }[]>;
 }
 
 // invariant: compressed physical delete re-verifies live capsule preservation

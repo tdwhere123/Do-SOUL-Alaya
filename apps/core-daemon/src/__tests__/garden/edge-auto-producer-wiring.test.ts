@@ -284,16 +284,21 @@ describe("edge auto producer daemon wiring", () => {
             await memoryRepo.searchByKeyword(workspaceId, queryText, limit)
         },
         memoryRepo: {
-          findByIds: async (objectIds) => await memoryRepo.findByIds(objectIds)
+          findByIds: async (workspaceId, objectIds) =>
+            await memoryRepo.findByIds(workspaceId, objectIds)
         },
         memoryUpdate: {
           update: async (objectId, fields, reason) =>
             await memoryService.update(objectId, fields, reason)
         },
-        eventLog: {
-          append: (event) => eventLogRepo.append(event)
-        },
-        llmDecision: createRuleOnlyReconciliationDecisionPort(),
+	        eventLog: {
+	          append: (event) => eventLogRepo.append(event)
+	        },
+	        runLookup: {
+	          getById: async (runId) =>
+	            runId === "run-1" ? { workspace_id: "workspace-1" } : null
+	        },
+	        llmDecision: createRuleOnlyReconciliationDecisionPort(),
         lease: reconciliationLeaseRepo,
         now: () => new Date("2026-05-25T00:00:02.000Z")
       });

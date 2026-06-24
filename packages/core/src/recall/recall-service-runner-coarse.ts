@@ -185,7 +185,8 @@ async function collectSynthesisStage(
     workspaceId: params.workspaceId,
     queryText: prepared.queryText,
     queryProbes: prepared.queryProbes,
-    policy: prepared.policy
+    policy: prepared.policy,
+    degradationReasons: context.degradationReasons
   });
 }
 
@@ -202,7 +203,8 @@ async function collectEmbeddingInjection(
     workspaceId: params.workspaceId,
     runId: params.runId ?? null,
     queryText: prepared.queryText,
-    poolCandidates: lexicalCoarseCandidates
+    poolCandidates: lexicalCoarseCandidates,
+    degradationReasons: context.degradationReasons
   });
 }
 

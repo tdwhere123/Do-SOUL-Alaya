@@ -12,9 +12,21 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
     const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
 
     try {
-      const evidenceCount = Math.max(2, signal.evidence_refs.length);
-      const evidenceInputs = Array.from({ length: evidenceCount }, (_, index) =>
-        buildEvidenceInput(signal, `signal_ref_${index + 1}`, {
+      const evidenceRefs = normalizeSynthesisEvidenceRefs(signal.evidence_refs);
+      if (evidenceRefs.length < 2) {
+        return {
+          signal_id: signal.signal_id,
+          target_kind: target.kind,
+          route_target: target.route_target,
+          routing_reason: target.routing_reason,
+          created_objects: [],
+          success: false,
+          error: "Synthesis materialization requires at least two evidence_refs"
+        };
+      }
+      const evidenceInputs = evidenceRefs.map((evidenceRef) =>
+        buildEvidenceInput(signal, evidenceRef, {
+          artifactRef: evidenceRef,
           fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt
         })
       );
@@ -213,4 +225,18 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
     }
   }
 
+}
+
+function normalizeSynthesisEvidenceRefs(evidenceRefs: readonly string[]): readonly string[] {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const evidenceRef of evidenceRefs) {
+    const trimmed = evidenceRef.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+  return Object.freeze(normalized);
 }

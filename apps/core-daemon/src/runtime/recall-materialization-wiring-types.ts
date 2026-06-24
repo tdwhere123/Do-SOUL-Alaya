@@ -72,9 +72,12 @@ export type CreateRecallMaterializationWiringInput = {
   };
   readonly edgeProposalService: EdgeProposalService;
   readonly dynamicsService: DynamicsService;
-  readonly memoryService: MemoryService;
-  readonly proposalRepo: SqliteProposalRepo;
-  readonly reconciliationLeaseRepo: SqliteReconciliationLeaseRepo;
+	  readonly memoryService: MemoryService;
+	  readonly proposalRepo: SqliteProposalRepo;
+	  readonly runLookup: {
+	    getById(runId: string): Promise<{ readonly workspace_id: string } | null>;
+	  };
+	  readonly reconciliationLeaseRepo: SqliteReconciliationLeaseRepo;
   readonly deferredObligationRepo: SqliteDeferredObligationRepo;
   readonly claimService: ClaimService;
   readonly synthesisService: SynthesisService;

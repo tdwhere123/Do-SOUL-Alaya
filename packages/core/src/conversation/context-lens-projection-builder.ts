@@ -52,7 +52,7 @@ export class ContextLensProjectionBuilder {
       })
     );
     const projectCandidates = recallResult.candidates
-      .filter((candidate) => candidate.scope_class === ScopeClass.PROJECT)
+      .filter((candidate) => candidate.scope_class === ScopeClass.PROJECT && recalledMemories.has(candidate.object_id))
       .sort(compareRecallCandidates);
     const projectEntries = projectCandidates.map((candidate) =>
       createLensEntry(candidate.object_id, ObjectKind.MEMORY_ENTRY, candidate.relevance_score, candidate.manifestation, {

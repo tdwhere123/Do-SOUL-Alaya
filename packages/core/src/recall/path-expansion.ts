@@ -26,6 +26,7 @@ import {
 } from "./path-relations.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
+import { recordRecallDegradation } from "./diagnostics.js";
 import type {
   RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
@@ -52,6 +53,7 @@ export async function addPathExpansionCandidates(params: Readonly<{
   readonly dynamicRecallPlaneCap: number;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
   readonly warn: RecallServiceWarnPort;
+  readonly degradationReasons?: Set<import("./recall-service-types.js").RecallDegradationReason>;
 }>): Promise<void> {
   const pathExpansionPort = params.pathExpansionPort;
   if (pathExpansionPort === undefined) {
@@ -64,7 +66,8 @@ export async function addPathExpansionCandidates(params: Readonly<{
     addCandidate: params.addCandidate,
     dynamicRecallPlaneCap: params.dynamicRecallPlaneCap,
     pathExpansionPort,
-    warn: params.warn
+    warn: params.warn,
+    degradationReasons: params.degradationReasons
   });
   if (added >= params.dynamicRecallPlaneCap || params.drafts.size === 0) {
     return;
@@ -80,7 +83,8 @@ export async function addPathExpansionCandidates(params: Readonly<{
     seeds,
     pathExpansionPort,
     params.warn,
-    "path expansion lookup failed"
+    "path expansion lookup failed",
+    params.degradationReasons
   );
   added = admitSeededPathExpansionCandidates(params, paths, seedIds, added);
 }
@@ -93,6 +97,7 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
   readonly dynamicRecallPlaneCap: number;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
   readonly warn: RecallServiceWarnPort;
+  readonly degradationReasons?: Set<import("./recall-service-types.js").RecallDegradationReason>;
 }>): Promise<number> {
   const pathExpansionPort = params.pathExpansionPort;
   const findByTimeConcernWindowDigests = pathExpansionPort?.findByTimeConcernWindowDigests;
@@ -125,6 +130,7 @@ export async function collectNegativePathSuppressions(params: Readonly<{
   readonly suppressionScores: Map<string, number>;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
   readonly warn: RecallServiceWarnPort;
+  readonly degradationReasons?: Set<import("./recall-service-types.js").RecallDegradationReason>;
 }>): Promise<void> {
   const pathExpansionPort = params.pathExpansionPort;
   if (pathExpansionPort === undefined || params.drafts.size === 0) {
@@ -140,7 +146,8 @@ export async function collectNegativePathSuppressions(params: Readonly<{
     seeds,
     pathExpansionPort,
     params.warn,
-    "path suppression lookup failed"
+    "path suppression lookup failed",
+    params.degradationReasons
   );
   applyNegativePathSuppressions(params, paths, seedIds);
 }
@@ -156,11 +163,13 @@ async function loadSeededPathExpansionPaths(
   seeds: readonly Readonly<{ readonly entry: Readonly<MemoryEntry> }>[],
   pathExpansionPort: NonNullable<RecallServiceDependencies["pathExpansionPort"]>,
   warn: RecallServiceWarnPort,
-  warningMessage: string
+  warningMessage: string,
+  degradationReasons?: Set<import("./recall-service-types.js").RecallDegradationReason>
 ): Promise<readonly Readonly<PathRelation>[]> {
   try {
     return await pathExpansionPort.findByAnchors(workspaceId, buildSeedPathAnchors(seeds));
   } catch (error) {
+    recordRecallDegradation({ degradationReasons }, "path_expansion_failed");
     warn(warningMessage, {
       workspace_id: workspaceId,
       seed_count: seeds.length,
@@ -262,6 +271,7 @@ async function loadTimeConcernPathExpansionPaths(
       errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
+    recordRecallDegradation(params, "path_expansion_failed");
     return [];
   }
 }

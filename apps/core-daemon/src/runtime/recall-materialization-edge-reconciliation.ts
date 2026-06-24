@@ -134,7 +134,8 @@ async function createReconciliationRuntime(
         await input.memoryEntryRepo.searchByKeyword(workspaceId, queryText, limit)
     },
     memoryRepo: {
-      findByIds: async (objectIds) => await input.memoryEntryRepo.findByIds(objectIds)
+      findByIds: async (workspaceId, objectIds) =>
+        await input.memoryEntryRepo.findByIds(workspaceId, objectIds)
     },
     memoryUpdate: {
       update: async (objectId, fields, reason) =>
@@ -143,6 +144,7 @@ async function createReconciliationRuntime(
     eventLog: {
       append: (event) => input.eventLogRepo.append(event)
     },
+    runLookup: input.runLookup,
     llmDecision: llmDecisionPort ?? createRuleOnlyReconciliationDecisionPort(),
     lease: input.reconciliationLeaseRepo,
     warn: input.warn

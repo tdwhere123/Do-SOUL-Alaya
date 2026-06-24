@@ -1,3 +1,4 @@
+import { countStronglyConnectedComponents } from "@do-soul/alaya-graph-algorithms";
 import {
   TopologyExplorationResultSchema,
   TopologyTrendSchema,
@@ -146,7 +147,8 @@ function buildTopology(relations: readonly Readonly<PathRelation>[]): BuiltTopol
     avgDegree: totalNodes === 0 ? 0 : totalDegree / totalNodes,
     stronglyConnectedComponents: countStronglyConnectedComponents(
       [...nodesByKey.keys()],
-      adjacency
+      adjacency,
+      "TopologyService"
     )
   };
 }
@@ -178,87 +180,6 @@ function maxValue(values: readonly number[]): number {
   }
 
   return max;
-}
-
-function countStronglyConnectedComponents(
-  nodeKeys: readonly string[],
-  adjacency: ReadonlyMap<string, ReadonlySet<string>>
-): number {
-  let index = 0;
-  let componentCount = 0;
-  const stack: string[] = [];
-  const onStack = new Set<string>();
-  const indices = new Map<string, number>();
-  const lowLinks = new Map<string, number>();
-
-  const strongConnect = (nodeKey: string): void => {
-    indices.set(nodeKey, index);
-    lowLinks.set(nodeKey, index);
-    index += 1;
-    stack.push(nodeKey);
-    onStack.add(nodeKey);
-
-    for (const neighbor of adjacency.get(nodeKey) ?? []) {
-      if (!indices.has(neighbor)) {
-        strongConnect(neighbor);
-        lowLinks.set(
-          nodeKey,
-          Math.min(
-            readTrackedNumber(lowLinks, nodeKey, "low-link"),
-            readTrackedNumber(lowLinks, neighbor, "low-link")
-          )
-        );
-      } else if (onStack.has(neighbor)) {
-        lowLinks.set(
-          nodeKey,
-          Math.min(
-            readTrackedNumber(lowLinks, nodeKey, "low-link"),
-            readTrackedNumber(indices, neighbor, "index")
-          )
-        );
-      }
-    }
-
-    if (
-      readTrackedNumber(lowLinks, nodeKey, "low-link") ===
-      readTrackedNumber(indices, nodeKey, "index")
-    ) {
-      componentCount += 1;
-      while (stack.length > 0) {
-        const candidate = stack.pop();
-        if (candidate === undefined) {
-          throw new Error("TopologyService Tarjan invariant violated: stack underflow.");
-        }
-        onStack.delete(candidate);
-        if (candidate === nodeKey) {
-          break;
-        }
-      }
-    }
-  };
-
-  for (const nodeKey of nodeKeys) {
-    if (!indices.has(nodeKey)) {
-      strongConnect(nodeKey);
-    }
-  }
-
-  return componentCount;
-}
-
-function readTrackedNumber(
-  trackedValues: ReadonlyMap<string, number>,
-  nodeKey: string,
-  label: string
-): number {
-  const value = trackedValues.get(nodeKey);
-  if (value === undefined) {
-    throw new Error(
-      `TopologyService Tarjan invariant violated: missing ${label} for ${nodeKey}.`
-    );
-  }
-
-  return value;
 }
 
 function classifyEdgeTrend(latest: number, baseline: number): TopologyTrendDirection {

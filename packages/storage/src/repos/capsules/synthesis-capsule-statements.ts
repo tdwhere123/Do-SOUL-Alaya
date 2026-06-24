@@ -53,7 +53,7 @@ function updateRefsSql(columnName: "evidence_refs" | "source_memory_refs"): stri
     `;
 }
 
-const SYNTHESIS_SELECT_COLUMNS = `
+export const SYNTHESIS_SELECT_COLUMNS = `
         object_id,
         object_kind,
         schema_version,

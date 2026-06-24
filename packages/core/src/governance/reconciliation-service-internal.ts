@@ -6,6 +6,7 @@ import {
 export type { EventLogEntry, MemoryEntry };
 
 import { KeyedMutex } from "../shared/keyed-mutex.js";
+import type { GovernanceRunWorkspaceLookup } from "./run-workspace-guard.js";
 
 // invariant: ingest-time reconciliation. Decides ADD / UPDATE / NOOP for
 // an incoming distilled fact against the top-k lexically-similar existing
@@ -135,6 +136,7 @@ export interface ReconciliationKeywordSearchPort {
 
 export interface ReconciliationMemoryRepoPort {
   findByIds(
+    workspaceId: string,
     objectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
@@ -247,6 +249,7 @@ export interface ReconciliationServiceDependencies {
   readonly memoryRepo: ReconciliationMemoryRepoPort;
   readonly memoryUpdate: ReconciliationMemoryUpdatePort;
   readonly eventLog: ReconciliationEventLogPort;
+  readonly runLookup: GovernanceRunWorkspaceLookup;
   readonly llmDecision: ReconciliationLlmDecisionPort;
   readonly thresholds?: ReconciliationServiceThresholds;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;

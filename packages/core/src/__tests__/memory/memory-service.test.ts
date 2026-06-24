@@ -93,7 +93,7 @@ it("filters cross-workspace rows from scoped batch lookups", async () => {
       expect.objectContaining({ object_id: "mem-1", workspace_id: "workspace-1" }),
       expect.objectContaining({ object_id: "mem-3", workspace_id: "workspace-1" })
     ]);
-    expect(findByIds).toHaveBeenCalledWith(["mem-1", "mem-2", "mem-3"]);
+    expect(findByIds).toHaveBeenCalledWith("workspace-1", ["mem-1", "mem-2", "mem-3"]);
   });
 
 it("commits the enrich_pending marker atomically with the row when the create input carries the intent", async () => {
@@ -341,7 +341,7 @@ it("rejects create when evidence_refs contains a missing reference", async () =>
       evidenceService: {
         findById: vi
           .fn()
-          .mockResolvedValueOnce({ object_id: "evidence-1" })
+          .mockResolvedValueOnce({ object_id: "evidence-1", workspace_id: "workspace-1" })
           .mockResolvedValueOnce(null)
       }
     });
@@ -357,8 +357,8 @@ it("rejects create when evidence_refs contains a missing reference", async () =>
   });
 
 it("validates evidence refs through the batch lookup port when available", async () => {
-    const findById = vi.fn(async () => ({ object_id: "should-not-be-called" }));
-    const findByIds = vi.fn(async (objectIds: readonly string[]) =>
+    const findById = vi.fn(async () => ({ object_id: "should-not-be-called", workspace_id: "workspace-1" }));
+    const findByIds = vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
       objectIds.map((objectId) => ({ object_id: objectId }))
     );
     const { dependencies } = createDependencies({
@@ -373,14 +373,14 @@ it("validates evidence refs through the batch lookup port when available", async
       service.create(createMemoryInput({ evidence_refs: ["evidence-1", "evidence-2", "evidence-1"] }))
     ).resolves.toMatchObject({ object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9" });
 
-    expect(findByIds).toHaveBeenCalledWith(["evidence-1", "evidence-2"]);
+    expect(findByIds).toHaveBeenCalledWith("workspace-1", ["evidence-1", "evidence-2"]);
     expect(findById).not.toHaveBeenCalled();
   });
 
 it("uses dynamics service defaults when provided", async () => {
     const { dependencies } = createDependencies({
       evidenceService: {
-        findById: vi.fn(async () => ({ object_id: "evidence" }))
+        findById: vi.fn(async () => ({ object_id: "evidence", workspace_id: "workspace-1" }))
       },
       dynamicsService: {
         assignInitialDynamics: vi.fn(() => ({
@@ -412,7 +412,7 @@ it("uses dynamics service defaults when provided", async () => {
 it("forces all dynamics fields to null on create", async () => {
     const { dependencies } = createDependencies({
       evidenceService: {
-        findById: vi.fn(async () => ({ object_id: "evidence" }))
+        findById: vi.fn(async () => ({ object_id: "evidence", workspace_id: "workspace-1" }))
       }
     });
 

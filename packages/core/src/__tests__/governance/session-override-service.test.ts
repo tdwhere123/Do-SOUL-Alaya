@@ -23,7 +23,8 @@ describe("SessionOverrideService", () => {
     service = new SessionOverrideService({
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo({ append: appendSpy })
+      eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runLookup: createRunLookup()
     });
 
     const override = await service.apply({
@@ -63,11 +64,38 @@ describe("SessionOverrideService", () => {
     );
   });
 
+  it("rejects an override when workspaceId does not match the run workspace", async () => {
+    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
+      createEventLogEntry(event)
+    );
+    const service = new SessionOverrideService({
+      now: () => "2026-03-24T00:00:00.000Z",
+      generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
+      eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runLookup: {
+        getById: vi.fn(async () => ({ workspace_id: "workspace-2" }))
+      }
+    });
+
+    await expect(
+      service.apply({
+        runId: "run-1",
+        workspaceId: "workspace-1",
+        targetObject: "memory:build-style",
+        correction: "Use pnpm instead of npm.",
+        priority: 2
+      })
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+    await expect(service.getActiveFor("run-1")).resolves.toEqual([]);
+    expect(appendSpy).not.toHaveBeenCalled();
+  });
+
   it("returns active overrides sorted by priority descending and empty for unknown runs", async () => {
     const service = new SessionOverrideService({
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
-      eventLogRepo: createEventLogRepo()
+      eventLogRepo: createEventLogRepo(),
+      runLookup: createRunLookup()
     });
 
     await service.apply({
@@ -101,7 +129,8 @@ describe("SessionOverrideService", () => {
     const service = new SessionOverrideService({
       now: () => now,
       generateRuntimeId: createRuntimeIdGenerator(),
-      eventLogRepo: createEventLogRepo()
+      eventLogRepo: createEventLogRepo(),
+      runLookup: createRunLookup()
     });
 
     await service.apply({
@@ -129,7 +158,8 @@ describe("SessionOverrideService", () => {
     const service = new SessionOverrideService({
       now: () => now,
       generateRuntimeId: createRuntimeIdGenerator(),
-      eventLogRepo: createEventLogRepo()
+      eventLogRepo: createEventLogRepo(),
+      runLookup: createRunLookup()
     });
 
     await service.apply({
@@ -177,7 +207,8 @@ describe("SessionOverrideService", () => {
     const service = new SessionOverrideService({
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
-      eventLogRepo
+      eventLogRepo,
+      runLookup: createRunLookup()
     });
 
     await service.apply({
@@ -208,7 +239,8 @@ describe("SessionOverrideService", () => {
     const firstService = new SessionOverrideService({
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
-      eventLogRepo
+      eventLogRepo,
+      runLookup: createRunLookup()
     });
 
     await firstService.apply({
@@ -222,7 +254,8 @@ describe("SessionOverrideService", () => {
     const restartedService = new SessionOverrideService({
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
-      eventLogRepo
+      eventLogRepo,
+      runLookup: createRunLookup()
     });
 
     await expect(restartedService.getActiveFor("run-1")).resolves.toEqual([
@@ -260,7 +293,8 @@ describe("SessionOverrideService", () => {
     const service = new SessionOverrideService({
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
-      eventLogRepo
+      eventLogRepo,
+      runLookup: createRunLookup()
     });
 
     await expect(service.getActiveFor("run-1")).resolves.toEqual([
@@ -280,7 +314,8 @@ describe("SessionOverrideService", () => {
     const service = new SessionOverrideService({
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
-      eventLogRepo: createEventLogRepo({ queryByRunAll })
+      eventLogRepo: createEventLogRepo({ queryByRunAll }),
+      runLookup: createRunLookup()
     });
 
     await expect(service.getActiveFor("run-1")).rejects.toMatchObject({
@@ -302,7 +337,8 @@ describe("SessionOverrideService", () => {
       generateRuntimeId: createRuntimeIdGenerator(),
       eventLogRepo: createEventLogRepo({
         queryByRunAll: vi.fn(async () => await queryDeferred.promise)
-      })
+      }),
+      runLookup: createRunLookup()
     });
 
     const pendingLookup = service.getActiveFor("run-1");
@@ -329,7 +365,8 @@ describe("SessionOverrideService", () => {
     const service = new SessionOverrideService({
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo()
+      eventLogRepo: createEventLogRepo(),
+      runLookup: createRunLookup()
     });
 
     const override = await service.apply({
@@ -364,7 +401,8 @@ describe("SessionOverrideService", () => {
             }
           })
         ])
-      })
+      }),
+      runLookup: createRunLookup()
     });
 
     const override = await service.apply({
@@ -381,7 +419,8 @@ describe("SessionOverrideService", () => {
     const service = new SessionOverrideService({
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo()
+      eventLogRepo: createEventLogRepo(),
+      runLookup: createRunLookup()
     });
 
     const override = await service.apply({
@@ -427,6 +466,12 @@ function createRuntimeIdGenerator(): () => string {
     const value = `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
     index += 1;
     return value;
+  };
+}
+
+function createRunLookup(workspaceId = "workspace-1") {
+  return {
+    getById: vi.fn(async () => ({ workspace_id: workspaceId }))
   };
 }
 

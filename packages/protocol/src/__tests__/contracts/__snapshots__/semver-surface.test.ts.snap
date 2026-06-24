@@ -154,6 +154,7 @@ evt:memory-governance.ts#SoulClaimLifecycleChangedPayloadSchema(caused_by,eviden
 evt:memory-governance.ts#SoulClaimSupersededPayloadSchema(caused_by,evidence_refs,from_state,object_id,object_kind,occurred_at,reason_code,run_id,to_state,workspace_id)#781281d
 evt:memory-governance.ts#SoulClaimWonPayloadSchema(caused_by,evidence_refs,from_state,object_id,object_kind,occurred_at,reason_code,run_id,to_state,workspace_id)#781281d
 evt:memory-governance.ts#SoulEvidenceCreatedPayloadSchema(object_id,object_kind,run_id,workspace_id)#8ed3077
+evt:memory-governance.ts#SoulEvidenceDeletedPayloadSchema(caused_by,evidence_refs,from_state,object_id,object_kind,occurred_at,reason_code,run_id,to_state,workspace_id)#781281d
 evt:memory-governance.ts#SoulEvidenceHealthChangedPayloadSchema(caused_by,evidence_refs,from_state,object_id,object_kind,occurred_at,reason_code,run_id,to_state,workspace_id)#781281d
 evt:memory-governance.ts#SoulMemoryArchivedPayloadSchema(caused_by,evidence_refs,from_state,object_id,object_kind,occurred_at,reason_code,run_id,to_state,workspace_id)#781281d
 evt:memory-governance.ts#SoulMemoryCreatedPayloadSchema(object_id,object_kind,run_id,workspace_id)#8ed3077

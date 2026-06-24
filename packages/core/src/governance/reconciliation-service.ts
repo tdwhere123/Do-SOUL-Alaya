@@ -7,6 +7,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import { KeyedMutex } from "../shared/keyed-mutex.js";
+import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "./run-workspace-guard.js";
 import { ReconciliationDecider } from "./reconciliation-decider.js";
 import {
   addDecision,
@@ -151,6 +152,7 @@ export class ReconciliationService {
   private readonly memoryRepo: ReconciliationMemoryRepoPort;
   private readonly memoryUpdate: ReconciliationMemoryUpdatePort;
   private readonly eventLog: ReconciliationEventLogPort;
+  private readonly runLookup: GovernanceRunWorkspaceLookup;
   private readonly warnFn?: (message: string, meta: Record<string, unknown>) => void;
 
   public constructor(deps: ReconciliationServiceDependencies) {
@@ -167,6 +169,7 @@ export class ReconciliationService {
     this.memoryRepo = deps.memoryRepo;
     this.memoryUpdate = deps.memoryUpdate;
     this.eventLog = deps.eventLog;
+    this.runLookup = deps.runLookup;
     this.warnFn = deps.warn;
     this.decider = new ReconciliationDecider({
       keywordSearch: deps.keywordSearch,
@@ -182,6 +185,7 @@ export class ReconciliationService {
 
   public async runWithDecision(input: ReconciliationInput, applyVerdict: ReconciliationVerdictApplier): Promise<ReconciliationDecision> {
     return await this.mutex.runExclusive(input.workspaceId, async () => {
+      await assertGovernanceRunWorkspace(this.runLookup, input.runId, input.workspaceId);
       if (this.lease === undefined) {
         return await this.runDecisionSection(input, applyVerdict);
       }
@@ -230,6 +234,7 @@ export class ReconciliationService {
       // router creates the evidence_capsule, then the in-place rewrite runs under the lock.
       const { incomingEvidenceRef } = await applyVerdict(decision);
       const applied = await this.applyUpdate(
+        input.workspaceId,
         decision.survivingObjectId,
         input.incomingContent.trim(),
         input.incomingDomainTags,
@@ -251,7 +256,11 @@ export class ReconciliationService {
     if (decision.kind === "noop" && decision.survivingObjectId !== undefined) {
       // NOOP creates nothing, but the verdict still feeds the bench sidecar remap.
       await applyVerdict(decision);
-      await this.applyNoopProjectionMerge(decision.survivingObjectId, input.incomingProjectionFields);
+      await this.applyNoopProjectionMerge(
+        input.workspaceId,
+        decision.survivingObjectId,
+        input.incomingProjectionFields
+      );
       await this.auditDrop(input, decision.survivingObjectId, decision.bestSimilarity);
       return decision;
     }
@@ -262,13 +271,14 @@ export class ReconciliationService {
   }
 
   private async applyUpdate(
+    workspaceId: string,
     targetObjectId: string,
     incomingContent: string,
     incomingDomainTags: readonly string[],
     incomingEvidenceRef: string | undefined,
     incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
   ): Promise<boolean> {
-    const existing = await this.findUpdateTarget(targetObjectId);
+    const existing = await this.findUpdateTarget(workspaceId, targetObjectId);
     if (existing === null) {
       return false;
     }
@@ -292,7 +302,7 @@ export class ReconciliationService {
         object_id: targetObjectId,
         error: errorMessage(error)
       });
-      return await this.updateAppearsApplied(targetObjectId, fields);
+      return await this.updateAppearsApplied(workspaceId, targetObjectId, fields);
     }
   }
 
@@ -325,6 +335,7 @@ export class ReconciliationService {
   }
 
   private async updateAppearsApplied(
+    workspaceId: string,
     targetObjectId: string,
     fields: {
       readonly content: string;
@@ -332,13 +343,16 @@ export class ReconciliationService {
       readonly evidence_refs?: readonly string[];
     } & Partial<ReconciliationMemoryProjectionFields>
   ): Promise<boolean> {
-    const row = await this.findUpdateTarget(targetObjectId);
+    const row = await this.findUpdateTarget(workspaceId, targetObjectId);
     return row !== null && updateFieldsMatch(row, fields);
   }
 
-  private async findUpdateTarget(targetObjectId: string): Promise<Readonly<MemoryEntry> | null> {
+  private async findUpdateTarget(
+    workspaceId: string,
+    targetObjectId: string
+  ): Promise<Readonly<MemoryEntry> | null> {
     try {
-      const existing = await this.memoryRepo.findByIds([targetObjectId]);
+      const existing = await this.memoryRepo.findByIds(workspaceId, [targetObjectId]);
       const row = existing[0];
       if (row === undefined || row.lifecycle_state === "archived") {
         this.warn("reconciliation update target missing or archived", {
@@ -357,11 +371,12 @@ export class ReconciliationService {
   }
 
   private async applyNoopProjectionMerge(
+    workspaceId: string,
     targetObjectId: string,
     incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
   ): Promise<void> {
     try {
-      const existing = await this.memoryRepo.findByIds([targetObjectId]);
+      const existing = await this.memoryRepo.findByIds(workspaceId, [targetObjectId]);
       const row = existing[0];
       if (row === undefined || row.lifecycle_state === "archived") {
         return;

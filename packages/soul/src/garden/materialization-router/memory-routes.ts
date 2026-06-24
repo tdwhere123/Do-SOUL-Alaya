@@ -28,6 +28,17 @@ interface ReconciledMaterializationState {
   appendedMemory?: MemoryMaterializationCreatedObject;
 }
 
+class MaterializationPartialFailureError extends Error {
+  public constructor(
+    message: string,
+    public readonly createdObjects: readonly MaterializationCreatedObject[],
+    options?: { readonly cause?: unknown }
+  ) {
+    super(message, options);
+    this.name = "MaterializationPartialFailureError";
+  }
+}
+
 export class MaterializationRouterMemoryRoutes extends MaterializationRouterPathSideEffects {
   // invariant: ingest reconciliation covers the materializeMemoryEntryOnly
   // path only (the bench `fact` object_kind). materialize_and_claim is
@@ -60,6 +71,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
         success: true
       };
     } catch (error) {
+      createdObjects.push(...readPartialFailureCreatedObjects(error));
       return {
         signal_id: signal.signal_id,
         target_kind: target.kind,
@@ -124,6 +136,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
         success: true
       };
     } catch (error) {
+      createdObjects.push(...readPartialFailureCreatedObjects(error));
       return {
         signal_id: signal.signal_id,
         target_kind: "evidence_only",
@@ -149,9 +162,27 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     );
     createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
-    const memory = await this.dependencies.memoryService.create(
-      buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal))
-    );
+    let memory: MemoryMaterializationCreatedObject;
+    try {
+      memory = await this.dependencies.memoryService.create(
+        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal))
+      );
+    } catch (error) {
+      try {
+        await this.dependencies.evidenceService.deleteCreatedEvidence(evidence.object_id);
+      } catch (compensationError) {
+        throw new MaterializationPartialFailureError(
+          readErrorMessage(compensationError, "Evidence compensation failed after memory materialization failed"),
+          createdObjects,
+          { cause: compensationError }
+        );
+      }
+      throw new MaterializationPartialFailureError(
+        readErrorMessage(error, "Memory materialization failed after evidence creation"),
+        [],
+        { cause: error }
+      );
+    }
     createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
 
     this.enqueueEnrichmentAfterCreate(memory, signal);
@@ -392,6 +423,10 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     return memory.enrichmentEnqueued === true || this.dependencies.enrichPendingPort !== undefined;
   }
 
+}
+
+function readPartialFailureCreatedObjects(error: unknown): readonly MaterializationCreatedObject[] {
+  return error instanceof MaterializationPartialFailureError ? error.createdObjects : [];
 }
 
 function readReconciliationProjectionFields(

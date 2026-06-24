@@ -87,6 +87,7 @@ export async function addGraphExpansionCandidates(params: Readonly<{
   readonly dynamicRecallEdgeFanout: number;
   readonly multiSeedGraphFanOutCap: number;
   readonly warn: RecallServiceWarnPort;
+  readonly degradationReasons?: Set<import("./recall-service-types.js").RecallDegradationReason>;
 }>): Promise<Readonly<GraphExpansionCandidatesResult>> {
   const diagnostics = createMutableGraphExpansionDiagnostics();
   const candidateSources = new Map<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>();
@@ -167,6 +168,7 @@ async function collectDraftGraphExpansionCandidates(
       maxGraphHops: params.maxGraphHops,
       dynamicRecallEdgeFanout: params.dynamicRecallEdgeFanout,
       warn: params.warn,
+      degradationReasons: params.degradationReasons,
       onCandidate: (candidate) => {
         const current = bestCandidates.get(candidate.entry.object_id);
         if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
@@ -210,6 +212,7 @@ async function collectSingleEntitySeedGraphCandidates(
     maxGraphHops: params.maxGraphHops,
     dynamicRecallEdgeFanout: params.dynamicRecallEdgeFanout,
     warn: params.warn,
+    degradationReasons: params.degradationReasons,
     onCandidate: (candidate) => {
       const current = seedMap.get(candidate.entry.object_id);
       if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {

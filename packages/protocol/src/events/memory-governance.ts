@@ -11,6 +11,7 @@ import { StorageTierSchema } from "../soul/memory-entry.js";
 const memoryGovernanceEventTypeValues = [
   "soul.evidence.created",
   "soul.evidence.health_changed",
+  "soul.evidence.deleted",
   "soul.memory.created",
   "soul.memory.updated",
   "soul.memory.archived",
@@ -44,6 +45,7 @@ const memoryTierPromotionReasonValues = ["recall_hit", "other"] as const;
 export const MemoryGovernanceEventType = {
   SOUL_EVIDENCE_CREATED: "soul.evidence.created",
   SOUL_EVIDENCE_HEALTH_CHANGED: "soul.evidence.health_changed",
+  SOUL_EVIDENCE_DELETED: "soul.evidence.deleted",
   SOUL_MEMORY_CREATED: "soul.memory.created",
   SOUL_MEMORY_UPDATED: "soul.memory.updated",
   SOUL_MEMORY_ARCHIVED: "soul.memory.archived",
@@ -101,6 +103,7 @@ const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).max(32).rea
 
 export const SoulEvidenceCreatedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.readonly();
 export const SoulEvidenceHealthChangedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
+export const SoulEvidenceDeletedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
 
 export const SoulMemoryCreatedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.readonly();
 export const SoulMemoryUpdatedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.extend({
@@ -161,6 +164,7 @@ export const SoulReviewCompletedPayloadSchema = TransitionEventPayloadObjectSche
 const memoryGovernancePayloadSchemas = {
   [MemoryGovernanceEventType.SOUL_EVIDENCE_CREATED]: SoulEvidenceCreatedPayloadSchema,
   [MemoryGovernanceEventType.SOUL_EVIDENCE_HEALTH_CHANGED]: SoulEvidenceHealthChangedPayloadSchema,
+  [MemoryGovernanceEventType.SOUL_EVIDENCE_DELETED]: SoulEvidenceDeletedPayloadSchema,
   [MemoryGovernanceEventType.SOUL_MEMORY_CREATED]: SoulMemoryCreatedPayloadSchema,
   [MemoryGovernanceEventType.SOUL_MEMORY_UPDATED]: SoulMemoryUpdatedPayloadSchema,
   [MemoryGovernanceEventType.SOUL_MEMORY_ARCHIVED]: SoulMemoryArchivedPayloadSchema,
@@ -213,6 +217,10 @@ const SoulEvidenceCreatedEventObjectSchema = createMemoryGovernanceEventObjectSc
 const SoulEvidenceHealthChangedEventObjectSchema = createMemoryGovernanceEventObjectSchema(
   MemoryGovernanceEventType.SOUL_EVIDENCE_HEALTH_CHANGED,
   SoulEvidenceHealthChangedPayloadSchema
+);
+const SoulEvidenceDeletedEventObjectSchema = createMemoryGovernanceEventObjectSchema(
+  MemoryGovernanceEventType.SOUL_EVIDENCE_DELETED,
+  SoulEvidenceDeletedPayloadSchema
 );
 const SoulMemoryCreatedEventObjectSchema = createMemoryGovernanceEventObjectSchema(
   MemoryGovernanceEventType.SOUL_MEMORY_CREATED,
@@ -297,6 +305,7 @@ const SoulReviewCompletedEventObjectSchema = createMemoryGovernanceEventObjectSc
 
 export const SoulEvidenceCreatedEventSchema = SoulEvidenceCreatedEventObjectSchema.readonly();
 export const SoulEvidenceHealthChangedEventSchema = SoulEvidenceHealthChangedEventObjectSchema.readonly();
+export const SoulEvidenceDeletedEventSchema = SoulEvidenceDeletedEventObjectSchema.readonly();
 export const SoulMemoryCreatedEventSchema = SoulMemoryCreatedEventObjectSchema.readonly();
 export const SoulMemoryUpdatedEventSchema = SoulMemoryUpdatedEventObjectSchema.readonly();
 export const SoulMemoryArchivedEventSchema = SoulMemoryArchivedEventObjectSchema.readonly();
@@ -321,6 +330,7 @@ export const SoulReviewCompletedEventSchema = SoulReviewCompletedEventObjectSche
 const MemoryGovernanceEventUnionSchema = z.discriminatedUnion("event_type", [
   SoulEvidenceCreatedEventObjectSchema,
   SoulEvidenceHealthChangedEventObjectSchema,
+  SoulEvidenceDeletedEventObjectSchema,
   SoulMemoryCreatedEventObjectSchema,
   SoulMemoryUpdatedEventObjectSchema,
   SoulMemoryArchivedEventObjectSchema,

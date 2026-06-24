@@ -44,6 +44,7 @@ describe("EventType and TransitionRecord", () => {
       WorkspaceRunEventType.RUN_CREATED,
       SignalEventType.SOUL_SIGNAL_EMITTED,
       MemoryGovernanceEventType.SOUL_EVIDENCE_CREATED,
+      MemoryGovernanceEventType.SOUL_EVIDENCE_DELETED,
       MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED
     ] as const;
@@ -69,6 +70,7 @@ describe("EventType and TransitionRecord", () => {
   it("requires TransitionRecord fields for transition events", () => {
     const transitionEventTypes = [
       MemoryGovernanceEventType.SOUL_EVIDENCE_HEALTH_CHANGED,
+      MemoryGovernanceEventType.SOUL_EVIDENCE_DELETED,
       MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       MemoryGovernanceEventType.SOUL_MEMORY_RETENTION_UPDATED,
       MemoryGovernanceEventType.SOUL_MEMORY_MANIFESTATION_CHANGED,
@@ -128,6 +130,7 @@ describe("EventType and TransitionRecord", () => {
     const expectedValues = [
       "soul.evidence.created",
       "soul.evidence.health_changed",
+      "soul.evidence.deleted",
       "soul.memory.created",
       "soul.memory.updated",
       "soul.memory.archived",
@@ -157,4 +160,3 @@ describe("EventType and TransitionRecord", () => {
     expect(EventTypeSchema.parse(WorkspaceRunEventType.WORKSPACE_CREATED)).toBe(WorkspaceRunEventType.WORKSPACE_CREATED);
   });
 });
-

@@ -65,8 +65,8 @@ export function createDeps(
   readonly append: ReturnType<typeof vi.fn<AppendFn>>;
   readonly decide: ReturnType<typeof vi.fn<DecideFn>>;
 } {
-  const findByIds = async (ids: readonly string[]) =>
-    neighbors.filter((entry) => ids.includes(entry.object_id));
+  const findByIds = async (workspaceId: string, ids: readonly string[]) =>
+    neighbors.filter((entry) => entry.workspace_id === workspaceId && ids.includes(entry.object_id));
   const update = vi.fn<UpdateFn>(async (objectId, fields) =>
     createMemoryEntry({
       object_id: objectId,
@@ -82,14 +82,18 @@ export function createDeps(
     async (event) => ({ ...event, event_id: "event-1", created_at: "2026-05-16T00:00:00.000Z", revision: 0 }) as EventLogEntry
   );
   const decide = vi.fn<DecideFn>(async () => ({ kind: "add" as const, reason: "distinct" }));
-  const deps: ReconciliationServiceDependencies = {
-    keywordSearch: { searchByKeyword },
-    memoryRepo: { findByIds },
-    memoryUpdate: { update },
-    eventLog: { append },
-    llmDecision: { decide },
-    ...overrides
-  };
+	  const deps: ReconciliationServiceDependencies = {
+	    keywordSearch: { searchByKeyword },
+	    memoryRepo: { findByIds },
+	    memoryUpdate: { update },
+	    eventLog: { append },
+	    runLookup: {
+	      getById: async (runId) =>
+	        runId === "run-1" ? { workspace_id: "workspace-1" } : null
+	    },
+	    llmDecision: { decide },
+	    ...overrides
+	  };
   return { deps, update, searchByKeyword, append, decide };
 }
 

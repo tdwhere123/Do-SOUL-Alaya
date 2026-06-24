@@ -46,7 +46,11 @@ export class MemoryEntryReadQueries {
     }
   }
 
-  public async findByIds(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]> {
+  public async findByIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
     const parsedObjectIds = Array.from(new Set(objectIds.map((objectId) => parseNonEmptyString(objectId, "object_id"))));
 
     if (parsedObjectIds.length === 0) {
@@ -57,12 +61,13 @@ export class MemoryEntryReadQueries {
     const statement = this.db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
-      WHERE object_id IN (${placeholders})
+      WHERE workspace_id = ?
+        AND object_id IN (${placeholders})
       ORDER BY created_at ASC, object_id ASC
     `);
 
     try {
-      const rows = statement.all(...parsedObjectIds) as MemoryEntryRow[];
+      const rows = statement.all(parsedWorkspaceId, ...parsedObjectIds) as MemoryEntryRow[];
       return rows.map((row) => parseMemoryEntryRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to load memory entries by ids.", error);

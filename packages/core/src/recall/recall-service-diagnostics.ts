@@ -38,6 +38,13 @@ export type RecallEmbeddingProviderStatus =
   | "provider_failed"
   | "provider_not_requested";
 
+export type RecallDegradationReason =
+  | "evidence_fts_failed"
+  | "synthesis_fts_failed"
+  | "embedding_coarse_injection_failed"
+  | "graph_expansion_failed"
+  | "path_expansion_failed";
+
 export interface RecallEmbeddingWorkspaceScanDiagnostics {
   readonly workspace_scan_truncated?: boolean;
   readonly workspace_scan_cap?: number;
@@ -244,6 +251,7 @@ export interface RecallDiagnostics {
   readonly delivered_count: number;
   readonly embedding_provider_status: RecallEmbeddingProviderStatus;
   readonly provider_degradation_reason: string | null;
+  readonly degradation_reasons?: readonly RecallDegradationReason[];
   readonly embedding_workspace_scan_cap?: number;
   readonly embedding_workspace_scanned_count?: number;
   readonly embedding_workspace_truncated?: boolean;

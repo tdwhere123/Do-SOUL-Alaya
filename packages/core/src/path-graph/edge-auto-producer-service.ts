@@ -254,7 +254,7 @@ export class EdgeAutoProducerService {
     newMemory: Readonly<MemoryEntry>
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     const neighborIds = await this.collectNeighborIds(workspaceId, newMemory);
-    const neighbors = await this.deps.memoryRepo.findByIds(neighborIds);
+    const neighbors = await this.deps.memoryRepo.findByIds(workspaceId, neighborIds);
     const rankById = new Map(neighborIds.map((objectId, index) => [objectId, index]));
     return [...neighbors].sort(
       (left, right) =>

@@ -33,6 +33,11 @@ describe("controlled replay runner", () => {
               readonly denominator: number;
               readonly rate: number;
             };
+            readonly non_monotonic: { readonly count: number };
+            readonly active_constraints: { readonly count: number };
+            readonly budget_drop: { readonly max_entries: number };
+            readonly high_lexical_demoted: { readonly count: number };
+            readonly conflict_penalty: { readonly count: number };
           };
           readonly pre_report_metrics?: {
             readonly expected_rank_by_question: Record<string, number | null>;
@@ -108,11 +113,21 @@ describe("controlled replay runner", () => {
         .toBeGreaterThan(0);
       expect(archive.metrics.hit_at_5.count).toBeGreaterThan(0);
       expect(archive.metrics.hit_at_5.rate).toBeGreaterThan(0);
-      expect(archive.metrics.non_monotonic.count).toBeGreaterThanOrEqual(0);
-      expect(archive.metrics.active_constraints.count).toBeGreaterThanOrEqual(0);
-      expect(archive.metrics.budget_drop.max_entries).toBeGreaterThanOrEqual(0);
-      expect(archive.metrics.high_lexical_demoted.count).toBeGreaterThanOrEqual(0);
-      expect(archive.metrics.conflict_penalty.count).toBeGreaterThanOrEqual(0);
+      expect(archive.metrics.non_monotonic.count).toBe(
+        sumScenarioMetric(archive.scenarios, (scenario) => scenario.metrics.non_monotonic.count)
+      );
+      expect(archive.metrics.active_constraints.count).toBe(
+        sumScenarioMetric(archive.scenarios, (scenario) => scenario.metrics.active_constraints.count)
+      );
+      expect(archive.metrics.budget_drop.max_entries).toBe(
+        sumScenarioMetric(archive.scenarios, (scenario) => scenario.metrics.budget_drop.max_entries)
+      );
+      expect(archive.metrics.high_lexical_demoted.count).toBe(
+        sumScenarioMetric(archive.scenarios, (scenario) => scenario.metrics.high_lexical_demoted.count)
+      );
+      expect(archive.metrics.conflict_penalty.count).toBe(
+        sumScenarioMetric(archive.scenarios, (scenario) => scenario.metrics.conflict_penalty.count)
+      );
       expect(archive.metrics.evidence_stream_gold_delivery.denominator)
         .toBeGreaterThan(0);
       expect(archive.metrics.evidence_stream_gold_delivery.rate)
@@ -203,6 +218,13 @@ describe("controlled replay runner", () => {
     180_000
   );
 });
+
+function sumScenarioMetric<T>(
+  scenarios: readonly T[],
+  readValue: (scenario: T) => number
+): number {
+  return scenarios.reduce((sum, scenario) => sum + readValue(scenario), 0);
+}
 
 function buildDiagnostic(
   objectId: string,

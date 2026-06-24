@@ -2,6 +2,7 @@ import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
 import type { EmbeddingWorkspaceNeighborResult } from "../embedding-recall/embedding-recall-service.js";
 import { hashMemoryContent } from "../embedding-recall/helpers.js";
 import { errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
+import { recordRecallDegradation } from "./diagnostics.js";
 import type {
   CoarseRecallCandidate,
   RecallEmbeddingProviderStatus,
@@ -30,6 +31,7 @@ type EmbeddingCoarseInjectionParams = {
   readonly runId: string | null;
   readonly queryText: string | null;
   readonly poolCandidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly degradationReasons?: Set<import("./recall-service-types.js").RecallDegradationReason>;
 };
 
 export async function collectEmbeddingCoarseInjection(
@@ -115,8 +117,12 @@ async function loadEmbeddingNeighborEntries(
 ): Promise<readonly Readonly<MemoryEntry>[] | null> {
   try {
     const similarityByObjectId = new Map(neighborResult.hits.map((hit) => [hit.object_id, hit.normalized_similarity] as const));
-    return await params.dependencies.memoryRepo.findByIds!([...similarityByObjectId.keys()]);
+    return await params.dependencies.memoryRepo.findByIds!(
+      params.workspaceId,
+      [...similarityByObjectId.keys()]
+    );
   } catch (error) {
+    recordRecallDegradation(params, "embedding_coarse_injection_failed");
     params.warn("embedding coarse injection lookup failed", {
       workspace_id: params.workspaceId,
       run_id: params.runId,

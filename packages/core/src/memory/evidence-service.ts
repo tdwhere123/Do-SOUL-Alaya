@@ -4,6 +4,7 @@ import {
   EvidenceHealthStateSchema,
   MemoryGovernanceEventType,
   SoulEvidenceCreatedPayloadSchema,
+  SoulEvidenceDeletedPayloadSchema,
   SoulEvidenceHealthChangedPayloadSchema,
   TransitionCausedBySchema,
   type EvidenceCapsule,
@@ -37,8 +38,9 @@ export interface EvidenceListPageOptions {
 
 export interface EvidenceServiceEvidenceCapsuleRepoPort {
   create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>>;
+  deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
-  findByIds?(objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByIds?(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByRunIdPage?(
     runId: string,
     page: EvidenceListPageOptions
@@ -138,6 +140,38 @@ export class EvidenceService {
     const created = await this.dependencies.evidenceCapsuleRepo.create(evidence);
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return created;
+  }
+
+  public async deleteCreatedEvidence(objectId: string): Promise<void> {
+    const parsedObjectId = parseObjectId(objectId);
+    const existing = await this.dependencies.evidenceCapsuleRepo.findById(parsedObjectId);
+    if (existing === null) {
+      return;
+    }
+
+    const occurredAt = this.now();
+    const event = await this.dependencies.eventLogRepo.append({
+      event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_DELETED,
+      entity_type: "evidence_capsule",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: "system",
+      payload_json: SoulEvidenceDeletedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        from_state: existing.lifecycle_state,
+        to_state: "deleted",
+        reason_code: "memory_materialization_failed_after_evidence_creation",
+        caused_by: "system",
+        evidence_refs: null,
+        occurred_at: occurredAt
+      })
+    });
+    await this.dependencies.evidenceCapsuleRepo.deleteById(parsedObjectId);
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
   }
 
   public async transitionHealth(
@@ -246,15 +280,21 @@ export class EvidenceService {
     return this.dependencies.evidenceCapsuleRepo.findById(objectId);
   }
 
-  public async findByIds(objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]> {
+  public async findByIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<EvidenceCapsule>[]> {
     const findByIds = this.dependencies.evidenceCapsuleRepo.findByIds;
     if (findByIds === undefined) {
       const rows = await Promise.all(
-        [...new Set(objectIds)].map(async (objectId) => await this.dependencies.evidenceCapsuleRepo.findById(objectId))
+        [...new Set(objectIds)].map(async (objectId) => {
+          const row = await this.dependencies.evidenceCapsuleRepo.findById(objectId);
+          return row === null || row.workspace_id !== workspaceId ? null : row;
+        })
       );
       return rows.filter((row): row is Readonly<EvidenceCapsule> => row !== null);
     }
-    return await findByIds.call(this.dependencies.evidenceCapsuleRepo, objectIds);
+    return await findByIds.call(this.dependencies.evidenceCapsuleRepo, workspaceId, objectIds);
   }
 
   // SECURITY: scoped lookup blocks cross-workspace pointer resolution at

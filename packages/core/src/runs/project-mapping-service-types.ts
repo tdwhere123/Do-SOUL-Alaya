@@ -34,7 +34,10 @@ export interface ProjectMappingServiceProjectMappingRepoPort {
 
 export interface ProjectMappingServiceMemoryRepoPort {
   findById(id: string): Promise<Readonly<MemoryEntry> | null>;
-  findByIds(ids: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByIds(
+    workspaceId: string,
+    ids: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
 export interface ProjectMappingServiceRuntimeNotifierPort {

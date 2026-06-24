@@ -6,8 +6,10 @@ import { registerGreenStatusRoutes } from "../../routes/green-status.js";
 import { registerOverrideRoutes } from "../../routes/overrides.js";
 import { registerSecurityStatusRoutes } from "../../routes/security-status.js";
 import { registerConflictMatrixRoutes } from "../../routes/conflict-matrix.js";
+import { registerSlotRoutes } from "../../routes/slots.js";
 import { registerBudgetRoutes } from "../../routes/budget.js";
 import { registerHealthJournalRoutes } from "../../routes/health-journal.js";
+import { registerErrorHandler } from "../../middleware/error-handler.js";
 
 describe("routes-governance port batch", () => {
   it("registerGovernanceRoutes aggregates services into governance snapshot", async () => {
@@ -219,6 +221,55 @@ describe("routes-governance port batch", () => {
 
     expect(response.status).toBe(404);
     expect(services.arbitrationService.createEdge).not.toHaveBeenCalled();
+  });
+
+  it("registerConflictMatrixRoutes rejects scalar create-edge bodies before arbitration", async () => {
+    const app = new Hono();
+    const services = {
+      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
+      arbitrationService: {
+        listEdgesByWorkspace: vi.fn(),
+        createEdge: vi.fn(),
+        deleteEdge: vi.fn(),
+        rebuildConflictMatrix: vi.fn()
+      }
+    };
+    registerErrorHandler(app, { error: vi.fn() });
+    registerConflictMatrixRoutes(app, services as any);
+
+    const response = await app.request("/workspaces/ws-1/conflict-matrix-edges", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "null"
+    });
+
+    expect(response.status).toBe(400);
+    expect(services.arbitrationService.createEdge).not.toHaveBeenCalled();
+  });
+
+  it("registerSlotRoutes rejects scalar resolve bodies before arbitration", async () => {
+    const app = new Hono();
+    const services = {
+      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
+      slotService: {
+        findByWorkspace: vi.fn(),
+        findById: vi.fn()
+      },
+      arbitrationService: {
+        resolveSlotConflict: vi.fn()
+      }
+    };
+    registerErrorHandler(app, { error: vi.fn() });
+    registerSlotRoutes(app, services as any);
+
+    const response = await app.request("/workspaces/ws-1/slots/slot-1/resolve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "null"
+    });
+
+    expect(response.status).toBe(400);
+    expect(services.arbitrationService.resolveSlotConflict).not.toHaveBeenCalled();
   });
 
   it("registerBudgetRoutes snapshots and resolves bankruptcy proposals", async () => {

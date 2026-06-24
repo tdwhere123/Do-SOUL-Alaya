@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/protocol" },
+    { "path": "./packages/graph-algorithms" },
     { "path": "./packages/storage" },
     { "path": "./packages/core" },
     { "path": "./packages/soul" },

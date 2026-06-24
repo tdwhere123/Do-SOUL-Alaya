@@ -122,6 +122,7 @@ export type ClaimMaterializationInput = Omit<
 
 export interface EvidenceMaterializationPort {
   create(input: EvidenceMaterializationInput): Promise<MaterializationCreatedObject>;
+  deleteCreatedEvidence(objectId: string): Promise<void>;
 }
 
 // invariant: the memory-create port reports whether the enrich_pending no-drop

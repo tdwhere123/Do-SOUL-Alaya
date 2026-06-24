@@ -51,12 +51,18 @@ export interface LensAssemblerSlotRepoPort {
 }
 
 export interface LensAssemblerClaimRepoPort {
-  findByIds(objectIds: readonly string[]): Promise<readonly Readonly<ClaimForm>[]>;
+  findByIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<ClaimForm>[]>;
 }
 
 export interface LensAssemblerMemoryRepoPort {
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
-  findByIds?(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByIds?(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
 export interface LensAssemblerEventLogRepoPort {
