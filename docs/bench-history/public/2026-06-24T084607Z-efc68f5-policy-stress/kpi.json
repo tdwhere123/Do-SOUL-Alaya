@@ -1,0 +1,3798 @@
+{
+  "bench_name": "public",
+  "split": "longmemeval-s",
+  "run_at": "2026-06-24T08:46:07.863Z",
+  "alaya_commit": "efc68f5",
+  "alaya_version": "0.3.11",
+  "recall_pipeline_version": "fusion-rrf-synthesis-v2",
+  "embedding_provider": "local_onnx:Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+  "chat_provider": "none",
+  "policy_shape": "stress",
+  "simulate_report": "none",
+  "seed_policy": {
+    "mode": "label_independent_all_fact",
+    "label_independent": true,
+    "object_kind": "fact",
+    "description": "LongMemEval public recall evaluation seeds every haystack turn as a factual memory; has_answer labels are used only for scoring sidecars."
+  },
+  "dataset": {
+    "name": "longmemeval_s",
+    "size": 500,
+    "source": "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
+    "checksum_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+    "checksum_source": "/home/tdwhere/vibe/Do-SOUL-Alaya/docs/bench-history/datasets/longmemeval_s.meta.json"
+  },
+  "sample_size": 500,
+  "evaluated_count": 500,
+  "harness_mode": "mcp_propose_review",
+  "kpi": {
+    "r_at_1": 0.592,
+    "r_at_5": 0.852,
+    "r_at_10": 0.898,
+    "r_at_5_overall": 0.852,
+    "r_at_5_with_embedding_returned": 0.852,
+    "provider_returned_rate": 1,
+    "provider_pending_rate": 0,
+    "provider_failed_rate": 0,
+    "provider_not_requested_rate": 0,
+    "embedding_vector_cache_ready_rate": 1,
+    "query_embedding_cache_ready_rate": 1,
+    "latency_ms_p50": 364.897687,
+    "latency_ms_p95": 542.94619,
+    "latency_source": "exact",
+    "token_saved_ratio_vs_full_prompt": 0.9999922959053641,
+    "token_economy": {
+      "schema_version": "bench-token-economy.v1",
+      "raw_history_tokens": 52186271,
+      "stored_memory_tokens": 18473836,
+      "recalled_context_tokens_total": 217910,
+      "recall_event_count": 542,
+      "recalled_context_tokens_mean": 402.0479704797048,
+      "seed_event_count": 249807
+    },
+    "recall_token_economy": {
+      "schema_version": "bench-recall-token-economy.v1",
+      "sample_count": 500,
+      "delivered_context_tokens_estimate": {
+        "mean": 405.438,
+        "p50": 364.5,
+        "p95": 736,
+        "max": 1007
+      },
+      "coarse_pool_size": {
+        "mean": 380.558,
+        "p50": 364,
+        "p95": 564.1499999999999,
+        "max": 727
+      },
+      "fine_evaluated": {
+        "mean": 380.558,
+        "p50": 364,
+        "p95": 564.1499999999999,
+        "max": 727
+      },
+      "fusion_streams_with_hits": {
+        "mean": 13.56,
+        "p50": 13,
+        "p95": 15,
+        "max": 15
+      },
+      "embedding_inference_calls": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      }
+    },
+    "tier_distribution": {
+      "hot": 500,
+      "warm": 0,
+      "cold": 0
+    },
+    "degradation_reasons": {
+      "none": 500,
+      "warm_cascade_engaged": 0,
+      "cold_cascade_engaged": 0,
+      "recall_explainability_partial": 0
+    },
+    "seed_truncation": {
+      "seed_turns_truncated": 0,
+      "answer_turns_truncated": 0,
+      "seed_chars_clipped": 0
+    },
+    "seed_extraction_path": {
+      "path": "official_api_compile",
+      "cache_hits": 124366,
+      "llm_calls": 0,
+      "offline_fallbacks": 0,
+      "live_extraction_failures": 0,
+      "cached_extraction_failures": 0,
+      "facts_produced": 296279,
+      "signals_dropped": 36450,
+      "parse_dropped": 418,
+      "compile_overflow_dropped": 0,
+      "signals_dropped_by_reason": {
+        "candidate_absent": 34888,
+        "materialization_error": 1144
+      }
+    },
+    "full_gold_coverage": {
+      "gold_bearing_questions": 463,
+      "full_gold_at_5": 0.20734341252699784,
+      "full_gold_at_10": 0.3174946004319654,
+      "gold_coverage_at_5": 0.3836363636363636,
+      "gold_coverage_at_10": 0.5181818181818182,
+      "pool_recall_at_50": 0.8904545454545455,
+      "pool_recall_at_100": 0.9490909090909091
+    },
+    "quality_metrics": {
+      "schema_version": "bench-quality-metrics.v1",
+      "non_monotonic_rate": 0,
+      "non_monotonic_count": 0,
+      "non_monotonic_denominator": 500,
+      "budget_drop_distribution": {
+        "max_entries": {
+          "count": 140,
+          "share": 0.06289308176100629,
+          "denominator": 2226
+        }
+      },
+      "high_lexical_demoted_rate": 0.21203438395415472,
+      "high_lexical_demoted_count": 222,
+      "high_lexical_demoted_denominator": 1047,
+      "candidate_absent_count": 1,
+      "candidate_absent_denominator": 500,
+      "no_gold_count": 7,
+      "no_gold_denominator": 500,
+      "evidence_stream_gold_delivery_rate": 1,
+      "evidence_stream_gold_delivery_count": 859,
+      "evidence_stream_gold_delivery_denominator": 859,
+      "path_stream_top10_rate": 0.9314,
+      "path_stream_top10_count": 4657,
+      "path_stream_top10_denominator": 5000,
+      "per_plane_recall_coverage": {
+        "activation": {
+          "gold_count": 450,
+          "hit_at_5_count": 188,
+          "hit_at_5_rate": 0.4177777777777778
+        },
+        "evidence_anchor": {
+          "gold_count": 1806,
+          "hit_at_5_count": 848,
+          "hit_at_5_rate": 0.4695459579180509
+        },
+        "graph_expansion": {
+          "gold_count": 86,
+          "hit_at_5_count": 4,
+          "hit_at_5_rate": 0.046511627906976744
+        },
+        "lexical": {
+          "gold_count": 2146,
+          "hit_at_5_count": 859,
+          "hit_at_5_rate": 0.40027958993476237
+        },
+        "object_probe": {
+          "gold_count": 12,
+          "hit_at_5_count": 6,
+          "hit_at_5_rate": 0.5
+        },
+        "path_expansion": {
+          "gold_count": 1900,
+          "hit_at_5_count": 816,
+          "hit_at_5_rate": 0.42947368421052634
+        },
+        "session_surface_cohort": {
+          "gold_count": 596,
+          "hit_at_5_count": 215,
+          "hit_at_5_rate": 0.36073825503355705
+        },
+        "source_proximity": {
+          "gold_count": 1414,
+          "hit_at_5_count": 656,
+          "hit_at_5_rate": 0.4639321074964639
+        }
+      },
+      "cohort_attribution": {
+        "delivered_plane_count": 102,
+        "gold_source_plane_count": 596,
+        "gold_first_admitted_count": 6,
+        "gold_winning_admission_count": 5,
+        "hit_at_5_count": 215,
+        "hit_at_5_rate": 0.36073825503355705
+      },
+      "path_vs_graph_fanin": {
+        "path_gold_source_count": 1900,
+        "path_gold_hit_at_5_count": 816,
+        "path_gold_hit_at_5_rate": 0.42947368421052634,
+        "graph_gold_source_count": 86,
+        "graph_gold_hit_at_5_count": 4,
+        "graph_gold_hit_at_5_rate": 0.046511627906976744,
+        "path_primary_hit_at_5_count": 816,
+        "graph_only_hit_at_5_count": 4
+      },
+      "abstention": {
+        "schema_version": "bench-abstention.v1",
+        "total": 30,
+        "false_confident_threshold": 0.91,
+        "correct_at_1": 27,
+        "correct_at_5": 26,
+        "correct_at_10": 26,
+        "false_confident_at_1": 3,
+        "false_confident_at_5": 4,
+        "false_confident_at_10": 4
+      },
+      "gold_rank_buckets": {
+        "delivered_top5": 400,
+        "pre_budget_6_10": 26,
+        "pre_budget_11_25": 17,
+        "pre_budget_26_50": 6,
+        "pre_budget_51_100": 9,
+        "pre_budget_gt_100": 4,
+        "candidate_absent": 1
+      },
+      "top_distractor_breakdown": {
+        "existing_score_dominant": 0,
+        "synthesis_reserved": 0,
+        "source_proximity_local_only": 0,
+        "path_or_graph_dominant": 0,
+        "lexical_topic_neighbor": 315,
+        "unknown": 0
+      },
+      "object_kind_delivery": {
+        "memory_entry": 5000,
+        "synthesis_capsule": 0,
+        "total_delivered": 5000
+      },
+      "gold_facet_separation": {
+        "separable": 1,
+        "overlapping": 61,
+        "indeterminate": 1,
+        "gold_dimension_counts": {
+          "fact": 60,
+          "decision": 2,
+          "constraint": 3
+        }
+      },
+      "per_gold_rank_buckets": {
+        "gold_ordinal_0": {
+          "delivered_top5": 395,
+          "pre_budget_6_10": 31,
+          "pre_budget_11_25": 17,
+          "pre_budget_26_50": 6,
+          "pre_budget_51_100": 9,
+          "pre_budget_gt_100": 4,
+          "candidate_absent": 1
+        },
+        "gold_ordinal_1plus": {
+          "delivered_top5": 449,
+          "pre_budget_6_10": 379,
+          "pre_budget_11_25": 459,
+          "pre_budget_26_50": 223,
+          "pre_budget_51_100": 120,
+          "pre_budget_gt_100": 85,
+          "candidate_absent": 22
+        }
+      },
+      "per_gold_displaced_by": {
+        "existing_score_dominant": 0,
+        "synthesis_reserved": 0,
+        "source_proximity_local_only": 0,
+        "path_or_graph_dominant": 0,
+        "lexical_topic_neighbor": 6440,
+        "unknown": 0
+      },
+      "miss_distribution": {
+        "hit_at_5": 400,
+        "under_ranked": 52,
+        "budget_dropped": 10,
+        "abstained_correctly": 26,
+        "abstain_false_confident": 4,
+        "candidate_absent": 1,
+        "no_gold": 7
+      }
+    },
+    "per_scenario": [
+      {
+        "id": "e47becba",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 355.370395
+      },
+      {
+        "id": "118b2229",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 275.813967
+      },
+      {
+        "id": "51a45a95",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 273.462642
+      },
+      {
+        "id": "58bf7951",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 403.713149
+      },
+      {
+        "id": "1e043500",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 275.849852
+      },
+      {
+        "id": "c5e8278d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 223.395896
+      },
+      {
+        "id": "6ade9755",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 280.637831
+      },
+      {
+        "id": "6f9b354f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 240.962546
+      },
+      {
+        "id": "58ef2f1c",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 293.537256
+      },
+      {
+        "id": "f8c5f88b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 239.157112
+      },
+      {
+        "id": "5d3d2817",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 221.16605
+      },
+      {
+        "id": "7527f7e2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 264.091651
+      },
+      {
+        "id": "c960da58",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 267.222856
+      },
+      {
+        "id": "3b6f954b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 290.129678
+      },
+      {
+        "id": "726462e0",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 308.140145
+      },
+      {
+        "id": "94f70d80",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 261.960118
+      },
+      {
+        "id": "66f24dbb",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 296.343463
+      },
+      {
+        "id": "ad7109d1",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 266.26401
+      },
+      {
+        "id": "af8d2e46",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 277.300448
+      },
+      {
+        "id": "dccbc061",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 221.436812
+      },
+      {
+        "id": "c8c3f81d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 198.644799
+      },
+      {
+        "id": "8ebdbe50",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 214.216757
+      },
+      {
+        "id": "6b168ec8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 225.344368
+      },
+      {
+        "id": "75499fd8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 184.571817
+      },
+      {
+        "id": "21436231",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 244.222413
+      },
+      {
+        "id": "95bcc1c8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 306.225171
+      },
+      {
+        "id": "0862e8bf",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 234.055246
+      },
+      {
+        "id": "853b0a1d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 252.250259
+      },
+      {
+        "id": "a06e4cfe",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 278.114528
+      },
+      {
+        "id": "37d43f65",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 229.653532
+      },
+      {
+        "id": "b86304ba",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 268.642652
+      },
+      {
+        "id": "d52b4f67",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 243.390164
+      },
+      {
+        "id": "25e5aa4f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 260.485317
+      },
+      {
+        "id": "caf9ead2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 244.990744
+      },
+      {
+        "id": "8550ddae",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 303.682698
+      },
+      {
+        "id": "60d45044",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 231.136716
+      },
+      {
+        "id": "3f1e9474",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 310.389241
+      },
+      {
+        "id": "86b68151",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 258.361095
+      },
+      {
+        "id": "577d4d32",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 311.076723
+      },
+      {
+        "id": "ec81a493",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 286.419658
+      },
+      {
+        "id": "15745da0",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 270.339666
+      },
+      {
+        "id": "e01b8e2f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 305.64925
+      },
+      {
+        "id": "bc8a6e93",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 236.720123
+      },
+      {
+        "id": "ccb36322",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 313.460001
+      },
+      {
+        "id": "001be529",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 287.233994
+      },
+      {
+        "id": "b320f3f8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 280.396169
+      },
+      {
+        "id": "19b5f2b3",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 242.3345
+      },
+      {
+        "id": "4fd1909e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 276.831089
+      },
+      {
+        "id": "545bd2b5",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 302.637032
+      },
+      {
+        "id": "8a137a7f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 229.386236
+      },
+      {
+        "id": "76d63226",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 208.677533
+      },
+      {
+        "id": "86f00804",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 245.819704
+      },
+      {
+        "id": "8e9d538c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 283.901902
+      },
+      {
+        "id": "311778f1",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 344.380462
+      },
+      {
+        "id": "c19f7a0b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 286.522567
+      },
+      {
+        "id": "4100d0a0",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 206.841737
+      },
+      {
+        "id": "29f2956b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 283.259876
+      },
+      {
+        "id": "1faac195",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 247.247175
+      },
+      {
+        "id": "faba32e5",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 298.931504
+      },
+      {
+        "id": "f4f1d8a4",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 292.170146
+      },
+      {
+        "id": "c14c00dd",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 262.207305
+      },
+      {
+        "id": "36580ce8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 283.646786
+      },
+      {
+        "id": "3d86fd0a",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 233.919353
+      },
+      {
+        "id": "a82c026e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 268.318636
+      },
+      {
+        "id": "0862e8bf_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 417.140788
+      },
+      {
+        "id": "15745da0_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 418.7464
+      },
+      {
+        "id": "bc8a6e93_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 359.440098
+      },
+      {
+        "id": "19b5f2b3_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 362.935378
+      },
+      {
+        "id": "29f2956b_abs",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 448.217853
+      },
+      {
+        "id": "f4f1d8a4_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 404.816754
+      },
+      {
+        "id": "0a995998",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 275.048821
+      },
+      {
+        "id": "6d550036",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 294.79494
+      },
+      {
+        "id": "gpt4_59c863d7",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 277.199523
+      },
+      {
+        "id": "b5ef892d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 348.980402
+      },
+      {
+        "id": "e831120c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 337.500815
+      },
+      {
+        "id": "3a704032",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 345.93249
+      },
+      {
+        "id": "gpt4_d84a3211",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 361.534472
+      },
+      {
+        "id": "aae3761f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 367.651045
+      },
+      {
+        "id": "gpt4_f2262a51",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 243.705431
+      },
+      {
+        "id": "dd2973ad",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 354.674511
+      },
+      {
+        "id": "c4a1ceb8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 302.673128
+      },
+      {
+        "id": "gpt4_a56e767c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 297.308903
+      },
+      {
+        "id": "6cb6f249",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 292.653549
+      },
+      {
+        "id": "46a3abf7",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 351.849324
+      },
+      {
+        "id": "36b9f61e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 313.646534
+      },
+      {
+        "id": "28dc39ac",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 318.599126
+      },
+      {
+        "id": "gpt4_2f8be40d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 363.676548
+      },
+      {
+        "id": "2e6d26dc",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 314.111033
+      },
+      {
+        "id": "gpt4_15e38248",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 315.827324
+      },
+      {
+        "id": "88432d0a",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 326.737601
+      },
+      {
+        "id": "80ec1f4f",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 307.714113
+      },
+      {
+        "id": "d23cf73b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 326.388401
+      },
+      {
+        "id": "gpt4_7fce9456",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 337.205968
+      },
+      {
+        "id": "d682f1a2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 303.781331
+      },
+      {
+        "id": "7024f17c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 311.184969
+      },
+      {
+        "id": "gpt4_5501fe77",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 365.100605
+      },
+      {
+        "id": "gpt4_2ba83207",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 344.833365
+      },
+      {
+        "id": "2318644b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 314.967418
+      },
+      {
+        "id": "2ce6a0f2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 335.783034
+      },
+      {
+        "id": "gpt4_d12ceb0e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 287.773778
+      },
+      {
+        "id": "00ca467f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 268.236158
+      },
+      {
+        "id": "b3c15d39",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 334.934238
+      },
+      {
+        "id": "gpt4_31ff4165",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 316.308786
+      },
+      {
+        "id": "eeda8a6d",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 300.64389
+      },
+      {
+        "id": "2788b940",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 319.754675
+      },
+      {
+        "id": "60bf93ed",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 312.493172
+      },
+      {
+        "id": "9d25d4e0",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 303.870153
+      },
+      {
+        "id": "129d1232",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 319.476227
+      },
+      {
+        "id": "60472f9c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 323.644175
+      },
+      {
+        "id": "gpt4_194be4b3",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 294.989594
+      },
+      {
+        "id": "a9f6b44c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 304.510016
+      },
+      {
+        "id": "d851d5ba",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 278.872567
+      },
+      {
+        "id": "5a7937c8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 286.284996
+      },
+      {
+        "id": "gpt4_ab202e7f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 309.959671
+      },
+      {
+        "id": "gpt4_e05b82a6",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 346.209533
+      },
+      {
+        "id": "gpt4_731e37d7",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 361.300447
+      },
+      {
+        "id": "edced276",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 327.377898
+      },
+      {
+        "id": "10d9b85a",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 364.089025
+      },
+      {
+        "id": "e3038f8c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 278.004887
+      },
+      {
+        "id": "2b8f3739",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 346.973097
+      },
+      {
+        "id": "1a8a66a6",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 338.486071
+      },
+      {
+        "id": "c2ac3c61",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 344.52411
+      },
+      {
+        "id": "bf659f65",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 312.06525
+      },
+      {
+        "id": "gpt4_372c3eed",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 365.299619
+      },
+      {
+        "id": "gpt4_2f91af09",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 402.484522
+      },
+      {
+        "id": "81507db6",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 378.979319
+      },
+      {
+        "id": "88432d0a_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 471.408342
+      },
+      {
+        "id": "80ec1f4f_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 412.438642
+      },
+      {
+        "id": "eeda8a6d_abs",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 390.943731
+      },
+      {
+        "id": "60bf93ed_abs",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 477.132181
+      },
+      {
+        "id": "edced276_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 415.442157
+      },
+      {
+        "id": "gpt4_372c3eed_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 471.265955
+      },
+      {
+        "id": "8a2466db",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 373.009575
+      },
+      {
+        "id": "06878be2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 339.942425
+      },
+      {
+        "id": "75832dbd",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 379.038779
+      },
+      {
+        "id": "0edc2aef",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 341.401465
+      },
+      {
+        "id": "35a27287",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 369.290048
+      },
+      {
+        "id": "32260d93",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 322.973181
+      },
+      {
+        "id": "195a1a1b",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 355.947097
+      },
+      {
+        "id": "afdc33df",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 321.933937
+      },
+      {
+        "id": "caf03d32",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 331.956545
+      },
+      {
+        "id": "54026fce",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 336.606679
+      },
+      {
+        "id": "06f04340",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 308.961567
+      },
+      {
+        "id": "6b7dfb22",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 398.290238
+      },
+      {
+        "id": "1a1907b4",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 478.10524
+      },
+      {
+        "id": "09d032c9",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 349.168964
+      },
+      {
+        "id": "38146c39",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 357.20923
+      },
+      {
+        "id": "d24813b1",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 358.662474
+      },
+      {
+        "id": "57f827a0",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 378.130727
+      },
+      {
+        "id": "95228167",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 373.096254
+      },
+      {
+        "id": "505af2f5",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 344.160076
+      },
+      {
+        "id": "75f70248",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 368.515493
+      },
+      {
+        "id": "d6233ab6",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 391.775208
+      },
+      {
+        "id": "1da05512",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 319.625268
+      },
+      {
+        "id": "fca70973",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 326.978176
+      },
+      {
+        "id": "b6025781",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 339.962818
+      },
+      {
+        "id": "a89d7624",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 355.193342
+      },
+      {
+        "id": "b0479f84",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 356.123579
+      },
+      {
+        "id": "1d4e3b97",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 352.728209
+      },
+      {
+        "id": "07b6f563",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 400.727585
+      },
+      {
+        "id": "1c0ddc50",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 391.113379
+      },
+      {
+        "id": "0a34ad58",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 406.832287
+      },
+      {
+        "id": "d3ab962e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 282.23281
+      },
+      {
+        "id": "2311e44b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 362.144412
+      },
+      {
+        "id": "cc06de0d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 358.664609
+      },
+      {
+        "id": "a11281a2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 316.924912
+      },
+      {
+        "id": "4f54b7c9",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 308.615821
+      },
+      {
+        "id": "85fa3a3f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 359.983303
+      },
+      {
+        "id": "9aaed6a3",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 299.582745
+      },
+      {
+        "id": "1f2b8d4f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 412.627032
+      },
+      {
+        "id": "e6041065",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 318.79083
+      },
+      {
+        "id": "51c32626",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 283.643036
+      },
+      {
+        "id": "d905b33f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 345.354484
+      },
+      {
+        "id": "7405e8b1",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 332.588388
+      },
+      {
+        "id": "f35224e0",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 424.785967
+      },
+      {
+        "id": "6456829e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 312.155366
+      },
+      {
+        "id": "a4996e51",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 375.951426
+      },
+      {
+        "id": "3c1045c8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 281.729405
+      },
+      {
+        "id": "60036106",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 346.689721
+      },
+      {
+        "id": "681a1674",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 261.564669
+      },
+      {
+        "id": "e25c3b8d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 311.82321
+      },
+      {
+        "id": "4adc0475",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 378.11301
+      },
+      {
+        "id": "4bc144e2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 286.851531
+      },
+      {
+        "id": "ef66a6e5",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 315.074294
+      },
+      {
+        "id": "5025383b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 370.33206
+      },
+      {
+        "id": "a1cc6108",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 278.142023
+      },
+      {
+        "id": "9ee3ecd6",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 325.702569
+      },
+      {
+        "id": "3fdac837",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 296.481286
+      },
+      {
+        "id": "91b15a6e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 318.46624
+      },
+      {
+        "id": "27016adc",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 374.208947
+      },
+      {
+        "id": "720133ac",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 288.476911
+      },
+      {
+        "id": "77eafa52",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 345.835214
+      },
+      {
+        "id": "8979f9ec",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 359.069853
+      },
+      {
+        "id": "0100672e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 326.369202
+      },
+      {
+        "id": "a96c20ee",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 282.762773
+      },
+      {
+        "id": "92a0aa75",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 354.487648
+      },
+      {
+        "id": "3fe836c9",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 334.433671
+      },
+      {
+        "id": "1c549ce4",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 335.749092
+      },
+      {
+        "id": "6c49646a",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 275.980859
+      },
+      {
+        "id": "1192316e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 350.762455
+      },
+      {
+        "id": "0ea62687",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 360.291104
+      },
+      {
+        "id": "67e0d0f2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 332.976634
+      },
+      {
+        "id": "bb7c3b45",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 305.254148
+      },
+      {
+        "id": "ba358f49",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 341.177229
+      },
+      {
+        "id": "61f8c8f8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 314.975135
+      },
+      {
+        "id": "60159905",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 348.72247
+      },
+      {
+        "id": "ef9cf60a",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 319.71558
+      },
+      {
+        "id": "73d42213",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 283.955235
+      },
+      {
+        "id": "bc149d6b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 356.840323
+      },
+      {
+        "id": "099778bb",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 311.926705
+      },
+      {
+        "id": "09ba9854",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 401.21009
+      },
+      {
+        "id": "d6062bb9",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 412.409501
+      },
+      {
+        "id": "157a136e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 298.161654
+      },
+      {
+        "id": "c18a7dc8",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 330.086118
+      },
+      {
+        "id": "a3332713",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 357.968954
+      },
+      {
+        "id": "55241a1f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 397.016226
+      },
+      {
+        "id": "a08a253f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 339.472316
+      },
+      {
+        "id": "f0e564bc",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 366.307517
+      },
+      {
+        "id": "078150f1",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 381.914194
+      },
+      {
+        "id": "8cf4d046",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 313.18027
+      },
+      {
+        "id": "a346bb18",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 350.537905
+      },
+      {
+        "id": "37f165cf",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 339.366911
+      },
+      {
+        "id": "8e91e7d9",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 311.350181
+      },
+      {
+        "id": "87f22b4a",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 340.883632
+      },
+      {
+        "id": "e56a43b9",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 335.291866
+      },
+      {
+        "id": "efc3f7c2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 345.905897
+      },
+      {
+        "id": "21d02d0d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 326.75049
+      },
+      {
+        "id": "2311e44b_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 539.653748
+      },
+      {
+        "id": "6456829e_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 455.889736
+      },
+      {
+        "id": "e5ba910e_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 326.721503
+      },
+      {
+        "id": "a96c20ee_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 402.849146
+      },
+      {
+        "id": "ba358f49_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 401.631935
+      },
+      {
+        "id": "09ba9854_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 488.202915
+      },
+      {
+        "id": "gpt4_59149c77",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 431.05934
+      },
+      {
+        "id": "gpt4_f49edff3",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 419.502772
+      },
+      {
+        "id": "71017276",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 386.59832
+      },
+      {
+        "id": "b46e15ed",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 391.104773
+      },
+      {
+        "id": "gpt4_fa19884c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 446.448867
+      },
+      {
+        "id": "0bc8ad92",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 364.897687
+      },
+      {
+        "id": "af082822",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 365.427581
+      },
+      {
+        "id": "gpt4_4929293a",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 357.831374
+      },
+      {
+        "id": "gpt4_b5700ca9",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 368.419177
+      },
+      {
+        "id": "9a707b81",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 391.898118
+      },
+      {
+        "id": "gpt4_1d4ab0c9",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 406.603984
+      },
+      {
+        "id": "gpt4_e072b769",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 363.995256
+      },
+      {
+        "id": "0db4c65d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 535.622628
+      },
+      {
+        "id": "gpt4_1d80365e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 374.477653
+      },
+      {
+        "id": "gpt4_7f6b06db",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 389.135952
+      },
+      {
+        "id": "gpt4_6dc9b45b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 327.231132
+      },
+      {
+        "id": "gpt4_8279ba02",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 268.775408
+      },
+      {
+        "id": "gpt4_18c2b244",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 601.136065
+      },
+      {
+        "id": "gpt4_a1b77f9c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 562.228983
+      },
+      {
+        "id": "gpt4_1916e0ea",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 431.746839
+      },
+      {
+        "id": "gpt4_7a0daae1",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 393.403669
+      },
+      {
+        "id": "gpt4_468eb063",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 289.894716
+      },
+      {
+        "id": "gpt4_7abb270c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 331.303823
+      },
+      {
+        "id": "gpt4_1e4a8aeb",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 393.0556
+      },
+      {
+        "id": "gpt4_4fc4f797",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 414.360555
+      },
+      {
+        "id": "4dfccbf7",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 430.370931
+      },
+      {
+        "id": "gpt4_61e13b3c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 414.288081
+      },
+      {
+        "id": "gpt4_45189cb4",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 300.439069
+      },
+      {
+        "id": "2ebe6c90",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 423.291668
+      },
+      {
+        "id": "gpt4_e061b84f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 431.055611
+      },
+      {
+        "id": "370a8ff4",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 379.71388
+      },
+      {
+        "id": "gpt4_d6585ce8",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 452.151847
+      },
+      {
+        "id": "gpt4_4ef30696",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 502.747906
+      },
+      {
+        "id": "gpt4_ec93e27f",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 355.690635
+      },
+      {
+        "id": "6e984301",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 389.956785
+      },
+      {
+        "id": "8077ef71",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 355.448309
+      },
+      {
+        "id": "gpt4_f420262c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 371.32351
+      },
+      {
+        "id": "gpt4_8e165409",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 398.620752
+      },
+      {
+        "id": "gpt4_74aed68e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 402.70995
+      },
+      {
+        "id": "bcbe585f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 367.230708
+      },
+      {
+        "id": "gpt4_21adecb5",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 397.585923
+      },
+      {
+        "id": "5e1b23de",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 349.653634
+      },
+      {
+        "id": "gpt4_98f46fc6",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 371.286096
+      },
+      {
+        "id": "gpt4_af6db32f",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 274.823878
+      },
+      {
+        "id": "eac54adc",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 389.30871
+      },
+      {
+        "id": "gpt4_7ddcf75f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 392.729114
+      },
+      {
+        "id": "gpt4_a2d1d1f6",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 393.321933
+      },
+      {
+        "id": "gpt4_85da3956",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 362.324083
+      },
+      {
+        "id": "gpt4_b0863698",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 333.717234
+      },
+      {
+        "id": "gpt4_68e94287",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 400.059001
+      },
+      {
+        "id": "gpt4_e414231e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 411.257573
+      },
+      {
+        "id": "gpt4_7ca326fa",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 361.396213
+      },
+      {
+        "id": "gpt4_7bc6cf22",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 432.010049
+      },
+      {
+        "id": "2ebe6c92",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 311.328551
+      },
+      {
+        "id": "gpt4_e061b84g",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 531.342356
+      },
+      {
+        "id": "71017277",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 289.252695
+      },
+      {
+        "id": "b46e15ee",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 281.904842
+      },
+      {
+        "id": "gpt4_d6585ce9",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 429.898232
+      },
+      {
+        "id": "gpt4_1e4a8aec",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 442.090847
+      },
+      {
+        "id": "gpt4_f420262d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 461.257082
+      },
+      {
+        "id": "gpt4_59149c78",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 600.5677
+      },
+      {
+        "id": "gpt4_e414231f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 446.992662
+      },
+      {
+        "id": "gpt4_4929293b",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 598.965914
+      },
+      {
+        "id": "gpt4_468eb064",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 441.690725
+      },
+      {
+        "id": "gpt4_fa19884d",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 618.82108
+      },
+      {
+        "id": "9a707b82",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 374.831578
+      },
+      {
+        "id": "eac54add",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 350.458486
+      },
+      {
+        "id": "4dfccbf8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 329.204193
+      },
+      {
+        "id": "0bc8ad93",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 375.214163
+      },
+      {
+        "id": "6e984302",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 318.571686
+      },
+      {
+        "id": "gpt4_8279ba03",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 451.552289
+      },
+      {
+        "id": "gpt4_b5700ca0",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 521.52696
+      },
+      {
+        "id": "gpt4_68e94288",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 496.020019
+      },
+      {
+        "id": "gpt4_2655b836",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 353.145632
+      },
+      {
+        "id": "gpt4_2487a7cb",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 480.994927
+      },
+      {
+        "id": "gpt4_76048e76",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 369.518345
+      },
+      {
+        "id": "gpt4_2312f94c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 359.263059
+      },
+      {
+        "id": "0bb5a684",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 468.443325
+      },
+      {
+        "id": "08f4fc43",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 430.380906
+      },
+      {
+        "id": "2c63a862",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 478.710881
+      },
+      {
+        "id": "gpt4_385a5000",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 389.459356
+      },
+      {
+        "id": "2a1811e2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 410.145316
+      },
+      {
+        "id": "bbf86515",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 454.22253
+      },
+      {
+        "id": "gpt4_5dcc0aab",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 337.114271
+      },
+      {
+        "id": "gpt4_0b2f1d21",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 381.921527
+      },
+      {
+        "id": "f0853d11",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 451.288794
+      },
+      {
+        "id": "gpt4_6ed717ea",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 413.141002
+      },
+      {
+        "id": "gpt4_70e84552",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 334.52045
+      },
+      {
+        "id": "a3838d2b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 488.552754
+      },
+      {
+        "id": "gpt4_93159ced",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 434.999518
+      },
+      {
+        "id": "gpt4_2d58bcd6",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 478.540667
+      },
+      {
+        "id": "gpt4_65aabe59",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 398.18868
+      },
+      {
+        "id": "982b5123",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 432.738435
+      },
+      {
+        "id": "b9cfe692",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 560.235003
+      },
+      {
+        "id": "gpt4_4edbafa2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 383.383218
+      },
+      {
+        "id": "c8090214",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 401.634766
+      },
+      {
+        "id": "gpt4_483dd43c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 523.360933
+      },
+      {
+        "id": "e4e14d04",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 434.461937
+      },
+      {
+        "id": "c9f37c46",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 445.289773
+      },
+      {
+        "id": "gpt4_2c50253f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 364.622728
+      },
+      {
+        "id": "dcfa8644",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 440.410354
+      },
+      {
+        "id": "gpt4_b4a80587",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 446.469734
+      },
+      {
+        "id": "gpt4_9a159967",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 376.705266
+      },
+      {
+        "id": "cc6d1ec1",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 385.607769
+      },
+      {
+        "id": "gpt4_8c8961ae",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 438.565965
+      },
+      {
+        "id": "gpt4_d9af6064",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 400.379879
+      },
+      {
+        "id": "gpt4_7de946e7",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 461.904986
+      },
+      {
+        "id": "d01c6aa8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 295.424942
+      },
+      {
+        "id": "993da5e2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 423.325594
+      },
+      {
+        "id": "a3045048",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 415.235196
+      },
+      {
+        "id": "gpt4_d31cdae3",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 463.837335
+      },
+      {
+        "id": "gpt4_cd90e484",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 473.660321
+      },
+      {
+        "id": "gpt4_88806d6e",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 327.249615
+      },
+      {
+        "id": "gpt4_4cd9eba1",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 478.910631
+      },
+      {
+        "id": "gpt4_93f6379c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 391.409927
+      },
+      {
+        "id": "b29f3365",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 409.452677
+      },
+      {
+        "id": "gpt4_2f56ae70",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 388.666167
+      },
+      {
+        "id": "6613b389",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 335.977903
+      },
+      {
+        "id": "gpt4_78cf46a3",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 449.194608
+      },
+      {
+        "id": "gpt4_0a05b494",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 398.326196
+      },
+      {
+        "id": "gpt4_1a1dc16d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 415.607962
+      },
+      {
+        "id": "gpt4_2f584639",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 520.452451
+      },
+      {
+        "id": "gpt4_213fd887",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 471.232481
+      },
+      {
+        "id": "gpt4_5438fa52",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 418.427872
+      },
+      {
+        "id": "gpt4_c27434e8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 408.731636
+      },
+      {
+        "id": "gpt4_fe651585",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 318.272659
+      },
+      {
+        "id": "8c18457d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 416.175714
+      },
+      {
+        "id": "gpt4_70e84552_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 503.385022
+      },
+      {
+        "id": "gpt4_93159ced_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 552.368345
+      },
+      {
+        "id": "982b5123_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 482.074445
+      },
+      {
+        "id": "c8090214_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 505.507167
+      },
+      {
+        "id": "gpt4_c27434e8_abs",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 455.002311
+      },
+      {
+        "id": "gpt4_fe651585_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 384.230462
+      },
+      {
+        "id": "6a1eabeb",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 358.191223
+      },
+      {
+        "id": "6aeb4375",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 363.384303
+      },
+      {
+        "id": "830ce83f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 354.865573
+      },
+      {
+        "id": "852ce960",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 301.482778
+      },
+      {
+        "id": "945e3d21",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 389.516089
+      },
+      {
+        "id": "d7c942c3",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 379.710825
+      },
+      {
+        "id": "71315a70",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 343.611226
+      },
+      {
+        "id": "89941a93",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 315.01539
+      },
+      {
+        "id": "ce6d2d27",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 358.290432
+      },
+      {
+        "id": "9ea5eabc",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 344.574915
+      },
+      {
+        "id": "07741c44",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 298.981897
+      },
+      {
+        "id": "a1eacc2a",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 444.84683
+      },
+      {
+        "id": "184da446",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 441.603128
+      },
+      {
+        "id": "031748ae",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 373.521192
+      },
+      {
+        "id": "4d6b87c8",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 343.214725
+      },
+      {
+        "id": "0f05491a",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 354.350402
+      },
+      {
+        "id": "08e075c7",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 362.669954
+      },
+      {
+        "id": "f9e8c073",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 354.167
+      },
+      {
+        "id": "41698283",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 290.78863
+      },
+      {
+        "id": "2698e78f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 286.559896
+      },
+      {
+        "id": "b6019101",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 357.858483
+      },
+      {
+        "id": "45dc21b6",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 366.997512
+      },
+      {
+        "id": "5a4f22c0",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 376.965915
+      },
+      {
+        "id": "6071bd76",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 497.200112
+      },
+      {
+        "id": "e493bb7c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 392.998954
+      },
+      {
+        "id": "618f13b2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 425.792583
+      },
+      {
+        "id": "72e3ee87",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 420.821502
+      },
+      {
+        "id": "c4ea545c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 372.225228
+      },
+      {
+        "id": "01493427",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 445.961145
+      },
+      {
+        "id": "6a27ffc2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 396.085076
+      },
+      {
+        "id": "2133c1b5",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 372.318546
+      },
+      {
+        "id": "18bc8abd",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 269.636176
+      },
+      {
+        "id": "db467c8c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 384.790397
+      },
+      {
+        "id": "7a87bd0c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 394.55781
+      },
+      {
+        "id": "e61a7584",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 329.937411
+      },
+      {
+        "id": "1cea1afa",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 352.878635
+      },
+      {
+        "id": "ed4ddc30",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 369.275637
+      },
+      {
+        "id": "8fb83627",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 396.938962
+      },
+      {
+        "id": "b01defab",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 379.590626
+      },
+      {
+        "id": "22d2cb42",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 307.047429
+      },
+      {
+        "id": "0e4e4c46",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 307.79651
+      },
+      {
+        "id": "4b24c848",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 327.156741
+      },
+      {
+        "id": "7e974930",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 378.644737
+      },
+      {
+        "id": "603deb26",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 406.739271
+      },
+      {
+        "id": "59524333",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 337.741746
+      },
+      {
+        "id": "5831f84d",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 397.582584
+      },
+      {
+        "id": "eace081b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 346.598598
+      },
+      {
+        "id": "affe2881",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 404.803955
+      },
+      {
+        "id": "50635ada",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 411.978803
+      },
+      {
+        "id": "e66b632c",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 458.660836
+      },
+      {
+        "id": "0ddfec37",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 443.796259
+      },
+      {
+        "id": "f685340e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 367.936777
+      },
+      {
+        "id": "cc5ded98",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 387.547899
+      },
+      {
+        "id": "dfde3500",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 391.963755
+      },
+      {
+        "id": "69fee5aa",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 365.956418
+      },
+      {
+        "id": "7401057b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 444.331257
+      },
+      {
+        "id": "cf22b7bf",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 459.415419
+      },
+      {
+        "id": "a2f3aa27",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 439.081433
+      },
+      {
+        "id": "c7dc5443",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 337.027713
+      },
+      {
+        "id": "06db6396",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 413.752432
+      },
+      {
+        "id": "3ba21379",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 324.895677
+      },
+      {
+        "id": "9bbe84a2",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 361.382297
+      },
+      {
+        "id": "10e09553",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 400.52571
+      },
+      {
+        "id": "dad224aa",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 322.036111
+      },
+      {
+        "id": "ba61f0b9",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 352.382492
+      },
+      {
+        "id": "42ec0761",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 313.88935
+      },
+      {
+        "id": "5c40ec5b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 367.909984
+      },
+      {
+        "id": "c6853660",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 520.240111
+      },
+      {
+        "id": "26bdc477",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 387.364518
+      },
+      {
+        "id": "0977f2af",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 394.215453
+      },
+      {
+        "id": "6aeb4375_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 526.604553
+      },
+      {
+        "id": "031748ae_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 631.17985
+      },
+      {
+        "id": "2698e78f_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 398.226691
+      },
+      {
+        "id": "2133c1b5_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 515.622984
+      },
+      {
+        "id": "0ddfec37_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 579.317158
+      },
+      {
+        "id": "f685340e_abs",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 479.751213
+      },
+      {
+        "id": "89941a94",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 494.176252
+      },
+      {
+        "id": "07741c45",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 305.734261
+      },
+      {
+        "id": "7161e7e2",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 497.559355
+      },
+      {
+        "id": "c4f10528",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 528.65983
+      },
+      {
+        "id": "89527b6b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 554.35973
+      },
+      {
+        "id": "e9327a54",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 493.693587
+      },
+      {
+        "id": "4c36ccef",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 455.907988
+      },
+      {
+        "id": "6ae235be",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 471.998419
+      },
+      {
+        "id": "7e00a6cb",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 522.85697
+      },
+      {
+        "id": "1903aded",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 479.645323
+      },
+      {
+        "id": "ceb54acb",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 490.652065
+      },
+      {
+        "id": "f523d9fe",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 548.899801
+      },
+      {
+        "id": "0e5e2d1a",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 536.569516
+      },
+      {
+        "id": "fea54f57",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 513.27437
+      },
+      {
+        "id": "cc539528",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 548.95727
+      },
+      {
+        "id": "dc439ea3",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 456.143033
+      },
+      {
+        "id": "18dcd5a5",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 465.206283
+      },
+      {
+        "id": "488d3006",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 493.33501
+      },
+      {
+        "id": "58470ed2",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 509.217524
+      },
+      {
+        "id": "8cf51dda",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 500.208256
+      },
+      {
+        "id": "1d4da289",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 590.933008
+      },
+      {
+        "id": "8464fc84",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 502.835177
+      },
+      {
+        "id": "8aef76bc",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 550.547409
+      },
+      {
+        "id": "71a3fd6b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 557.969675
+      },
+      {
+        "id": "2bf43736",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 550.802504
+      },
+      {
+        "id": "70b3e69b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 531.057357
+      },
+      {
+        "id": "8752c811",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 540.300905
+      },
+      {
+        "id": "3249768e",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 496.456478
+      },
+      {
+        "id": "1b9b7252",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 638.353435
+      },
+      {
+        "id": "1568498a",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 423.876287
+      },
+      {
+        "id": "6222b6eb",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 522.917342
+      },
+      {
+        "id": "e8a79c70",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 486.458068
+      },
+      {
+        "id": "d596882b",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 524.551822
+      },
+      {
+        "id": "e3fc4d6e",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 542.94619
+      },
+      {
+        "id": "51b23612",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 477.864433
+      },
+      {
+        "id": "3e321797",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 559.124762
+      },
+      {
+        "id": "e982271f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 513.738155
+      },
+      {
+        "id": "352ab8bd",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 586.886055
+      },
+      {
+        "id": "fca762bc",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 542.52797
+      },
+      {
+        "id": "7a8d0b71",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 498.662029
+      },
+      {
+        "id": "a40e080f",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 518.124535
+      },
+      {
+        "id": "8b9d4367",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 557.958423
+      },
+      {
+        "id": "5809eb10",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 517.084126
+      },
+      {
+        "id": "41275add",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 517.309516
+      },
+      {
+        "id": "4388e9dd",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 441.403608
+      },
+      {
+        "id": "4baee567",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 505.902711
+      },
+      {
+        "id": "561fabcd",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 496.296394
+      },
+      {
+        "id": "b759caee",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 533.897504
+      },
+      {
+        "id": "ac031881",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 498.010063
+      },
+      {
+        "id": "28bcfaac",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 561.22427
+      },
+      {
+        "id": "16c90bf4",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 563.594921
+      },
+      {
+        "id": "c8f1aeed",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 578.975215
+      },
+      {
+        "id": "eaca4986",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 501.563833
+      },
+      {
+        "id": "c7cf7dfd",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 567.094472
+      },
+      {
+        "id": "e48988bc",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 546.403325
+      },
+      {
+        "id": "1de5cff2",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot",
+        "latency_ms": 539.694627
+      },
+      {
+        "id": "65240037",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 456.515304
+      },
+      {
+        "id": "778164c6",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot",
+        "latency_ms": 529.692517
+      }
+    ]
+  },
+  "diff_vs_previous": null
+}
