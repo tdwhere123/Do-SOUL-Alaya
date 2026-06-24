@@ -78,6 +78,7 @@ export async function collectSupplementaryData(
     trigramFtsRanks: params.coarseTrigramFtsRanks,
     synthesisFtsRanks: params.coarseSynthesisFtsRanks,
     evidenceFtsRanks: params.coarseEvidenceFtsRanks,
+    evidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef,
     sourceProximityScores: params.coarseSourceProximityScores,
     sourceCohortKeys: params.coarseSourceCohortKeys,
     structuralScores: params.coarseStructuralScores,
