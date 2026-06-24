@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { SignalKind, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { DISTILLED_FACT_MAX_CHARS } from "./materialization-router.js";
 import { normalizeTemporalIsoString } from "./temporal-date.js";
@@ -6,6 +7,145 @@ const MAX_OFFICIAL_API_SIGNALS = 64;
 const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
+const UnknownRecordSchema = z.record(z.string(), z.unknown()).readonly();
+const OfficialApiSignalsEnvelopeSchema = z.object({
+  signals: z.array(z.unknown()).readonly()
+}).passthrough().readonly();
+
+const RequiredTrimmedStringSchema = z.preprocess(normalizeStringValue, z.string().min(1));
+const OptionalTrimmedStringSchema = z
+  .preprocess(normalizeStringValue, z.string().min(1).nullable())
+  .transform((value) => value ?? null);
+const OfficialApiSignalKindSchema = z.preprocess(
+  normalizeStringValue,
+  z.union([
+    z.literal(SignalKind.POTENTIAL_CLAIM),
+    z.literal(SignalKind.POTENTIAL_SYNTHESIS),
+    z.literal(SignalKind.POTENTIAL_HANDOFF),
+    z.literal(SignalKind.POTENTIAL_EVIDENCE_ANCHOR),
+    z.literal(SignalKind.POTENTIAL_CONFLICT),
+    z.literal(SignalKind.POTENTIAL_PREFERENCE)
+  ])
+);
+const StringArraySchema = z
+  .preprocess((value) => (Array.isArray(value) ? value : []), z.array(OptionalTrimmedStringSchema))
+  .transform((values) => {
+    const seen = new Set<string>();
+    const output: string[] = [];
+    for (const value of values) {
+      if (value === null || seen.has(value)) {
+        continue;
+      }
+      seen.add(value);
+      output.push(value);
+    }
+    return Object.freeze(output);
+  });
+const OptionalProjectionSchemaVersionSchema = z.preprocess(
+  (value) => (value === 1 ? value : undefined),
+  z.literal(1).optional()
+);
+const OptionalIsoStringSchema = z.preprocess((value) => {
+  const normalized = normalizeStringValue(value);
+  return normalized === null ? undefined : normalizeTemporalIsoString(normalized) ?? undefined;
+}, z.string().optional());
+const TimePrecisionValueSchema = z.union([
+  z.literal("day"),
+  z.literal("month"),
+  z.literal("year"),
+  z.literal("range"),
+  z.literal("relative"),
+  z.literal("unknown")
+]);
+const OptionalTimePrecisionSchema = z.preprocess((value) => {
+  const parsed = TimePrecisionValueSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}, TimePrecisionValueSchema.optional());
+const TimeSourceValueSchema = z.union([
+  z.literal("explicit"),
+  z.literal("session_timestamp"),
+  z.literal("relative_resolved")
+]);
+const OptionalTimeSourceSchema = z.preprocess((value) => {
+  const parsed = TimeSourceValueSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}, TimeSourceValueSchema.optional());
+const OfficialApiTemporalProjectionSchema = z
+  .preprocess(normalizeTemporalProjectionInput, z.object({
+    projection_schema_version: OptionalProjectionSchemaVersionSchema,
+    event_time_start: OptionalIsoStringSchema,
+    event_time_end: OptionalIsoStringSchema,
+    valid_from: OptionalIsoStringSchema,
+    valid_to: OptionalIsoStringSchema,
+    time_precision: OptionalTimePrecisionSchema,
+    time_source: OptionalTimeSourceSchema
+  }).nullable())
+  .transform((projection): OfficialApiTemporalProjectionDraft | null => {
+    if (projection === null) {
+      return null;
+    }
+    const draft: OfficialApiTemporalProjectionDraft = {
+      ...(projection.projection_schema_version === undefined
+        ? {}
+        : { projection_schema_version: projection.projection_schema_version }),
+      ...(projection.event_time_start === undefined ? {} : { event_time_start: projection.event_time_start }),
+      ...(projection.event_time_end === undefined ? {} : { event_time_end: projection.event_time_end }),
+      ...(projection.valid_from === undefined ? {} : { valid_from: projection.valid_from }),
+      ...(projection.valid_to === undefined ? {} : { valid_to: projection.valid_to }),
+      ...(projection.time_precision === undefined ? {} : { time_precision: projection.time_precision }),
+      ...(projection.time_source === undefined ? {} : { time_source: projection.time_source })
+    };
+    return Object.keys(draft).length === 0 ? null : Object.freeze(draft);
+  });
+const PreferencePolarityValueSchema = z.union([
+  z.literal("positive"),
+  z.literal("negative"),
+  z.literal("neutral")
+]);
+const OptionalPreferencePolaritySchema = z.preprocess((value) => {
+  const parsed = PreferencePolarityValueSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}, PreferencePolarityValueSchema.optional());
+const OptionalProfileFieldSchema = z
+  .preprocess((value) => normalizeStringValue(value) ?? undefined, z.string().min(1).optional())
+  .transform((value) => (value === undefined ? undefined : value.slice(0, 1024)));
+const OfficialApiPreferenceProfileSchema = z
+  .preprocess(normalizePreferenceProfileInput, z.object({
+    projection_schema_version: OptionalProjectionSchemaVersionSchema,
+    preference_subject: OptionalProfileFieldSchema,
+    preference_predicate: OptionalProfileFieldSchema,
+    preference_object: OptionalProfileFieldSchema,
+    preference_category: OptionalProfileFieldSchema,
+    preference_polarity: OptionalPreferencePolaritySchema
+  }).nullable())
+  .transform((profile): OfficialApiPreferenceProfileDraft | null => {
+    if (profile === null) {
+      return null;
+    }
+    const draft: OfficialApiPreferenceProfileDraft = {
+      ...(profile.projection_schema_version === undefined
+        ? {}
+        : { projection_schema_version: profile.projection_schema_version }),
+      ...(profile.preference_subject === undefined ? {} : { preference_subject: profile.preference_subject }),
+      ...(profile.preference_predicate === undefined ? {} : { preference_predicate: profile.preference_predicate }),
+      ...(profile.preference_object === undefined ? {} : { preference_object: profile.preference_object }),
+      ...(profile.preference_category === undefined ? {} : { preference_category: profile.preference_category }),
+      ...(profile.preference_polarity === undefined ? {} : { preference_polarity: profile.preference_polarity })
+    };
+    return Object.keys(draft).length === 0 ? null : Object.freeze(draft);
+  });
+const OfficialApiSignalEntrySchema = z.object({
+  signal_kind: OfficialApiSignalKindSchema,
+  object_kind: RequiredTrimmedStringSchema,
+  confidence: z.number(),
+  matched_text: RequiredTrimmedStringSchema,
+  evidence_refs: StringArraySchema,
+  source_memory_refs: StringArraySchema,
+  distilled_fact: OptionalTrimmedStringSchema,
+  reason: OptionalTrimmedStringSchema,
+  temporal_projection: OfficialApiTemporalProjectionSchema,
+  preference_profile: OfficialApiPreferenceProfileSchema
+}).passthrough().readonly();
 
 export interface OfficialApiTemporalProjectionDraft {
   readonly event_time_start?: string;
@@ -50,7 +190,7 @@ export interface OfficialApiSignalDraft {
 export function parseOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(content) as unknown;
+    parsed = JSON.parse(content);
   } catch {
     // The whole envelope did not parse. One corrupt `signals[]` entry (a bad
     // `\'` escape, a stray `,""}` empty key, an unescaped inner quote, a
@@ -67,20 +207,13 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
   // signals array) is a genuine total failure of the extraction call, so it
   // still throws hard. A malformed single *entry* is one bad fact among
   // many — it is dropped, never allowed to abort the turn's good signals.
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("signals" in parsed) ||
-    !Array.isArray((parsed as { readonly signals?: unknown }).signals)
-  ) {
+  const envelope = OfficialApiSignalsEnvelopeSchema.safeParse(parsed);
+  if (!envelope.success) {
     throw new Error("signals array missing");
   }
 
   const drafts: OfficialApiSignalDraft[] = [];
-  for (const candidate of (parsed as { readonly signals: readonly unknown[] }).signals.slice(
-    0,
-    MAX_OFFICIAL_API_SIGNALS
-  )) {
+  for (const candidate of envelope.data.signals.slice(0, MAX_OFFICIAL_API_SIGNALS)) {
     const draft = parseOfficialApiSignalEntry(candidate);
     if (draft !== null) {
       drafts.push(draft);
@@ -106,7 +239,7 @@ function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalD
     }
     let candidate: unknown;
     try {
-      candidate = JSON.parse(element) as unknown;
+      candidate = JSON.parse(element);
     } catch {
       // A single corrupt element (bad escape / unescaped quote / malformed
       // key) — skip it, keep walking the clean siblings.
@@ -204,36 +337,13 @@ function findSignalsArrayStart(content: string): number {
 // signal_kind, missing object_kind / matched_text / confidence, or a
 // non-object element), so one bad fact is dropped while the rest survive.
 function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft | null {
-  if (typeof candidate !== "object" || candidate === null) {
+  const parsed = OfficialApiSignalEntrySchema.safeParse(candidate);
+  if (!parsed.success) {
     return null;
   }
+  const record = parsed.data;
 
-  const signalKind = normalizeOptionalString((candidate as { readonly signal_kind?: unknown }).signal_kind);
-  const objectKind = normalizeOptionalString((candidate as { readonly object_kind?: unknown }).object_kind);
-  const matchedText = normalizeOptionalString((candidate as { readonly matched_text?: unknown }).matched_text);
-  const distilledFact = normalizeOptionalString((candidate as { readonly distilled_fact?: unknown }).distilled_fact);
-  const evidenceRefs = normalizeStringArray((candidate as { readonly evidence_refs?: unknown }).evidence_refs);
-  const sourceMemoryRefs = normalizeStringArray(
-    (candidate as { readonly source_memory_refs?: unknown }).source_memory_refs
-  );
-  const confidence = (candidate as { readonly confidence?: unknown }).confidence;
-  const reason = normalizeOptionalString((candidate as { readonly reason?: unknown }).reason);
-  const temporalProjection = normalizeTemporalProjection(
-    (candidate as { readonly temporal_projection?: unknown }).temporal_projection
-  );
-  const preferenceProfile = normalizePreferenceProfile(
-    (candidate as { readonly preference_profile?: unknown }).preference_profile
-  );
-
-  if (signalKind === null || !isSignalKind(signalKind)) {
-    return null;
-  }
-
-  if (objectKind === null || matchedText === null || typeof confidence !== "number") {
-    return null;
-  }
-
-  const clampedMatchedText = matchedText.slice(0, MAX_OFFICIAL_API_MATCHED_TEXT_CHARS);
+  const clampedMatchedText = record.matched_text.slice(0, MAX_OFFICIAL_API_MATCHED_TEXT_CHARS);
   // distilled_fact is the resolved one-assertion fact materialization
   // stores as memory_entry content. A model that omits it (or sends a
   // non-string / empty value) leaves the field ABSENT so
@@ -242,131 +352,60 @@ function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft
   // shares DISTILLED_FACT_MAX_CHARS so the provider and materialization
   // agree on one budget.
   const clampedDistilledFact =
-    distilledFact === null ? null : distilledFact.slice(0, DISTILLED_FACT_MAX_CHARS);
-  const clampedReason = reason === null ? null : reason.slice(0, MAX_OFFICIAL_API_REASON_CHARS);
+    record.distilled_fact === null ? null : record.distilled_fact.slice(0, DISTILLED_FACT_MAX_CHARS);
+  const clampedReason = record.reason === null ? null : record.reason.slice(0, MAX_OFFICIAL_API_REASON_CHARS);
   return Object.freeze({
-    signal_kind: signalKind,
-    object_kind: objectKind.slice(0, MAX_OFFICIAL_API_OBJECT_KIND_CHARS),
-    confidence,
+    signal_kind: record.signal_kind,
+    object_kind: record.object_kind.slice(0, MAX_OFFICIAL_API_OBJECT_KIND_CHARS),
+    confidence: record.confidence,
     matched_text: clampedMatchedText,
-    evidence_refs: evidenceRefs,
-    source_memory_refs: sourceMemoryRefs,
+    evidence_refs: record.evidence_refs,
+    source_memory_refs: record.source_memory_refs,
     ...(clampedDistilledFact === null ? {} : { distilled_fact: clampedDistilledFact }),
     ...(clampedReason === null ? {} : { reason: clampedReason }),
-    ...(temporalProjection === null ? {} : { temporal_projection: temporalProjection }),
-    ...(preferenceProfile === null ? {} : { preference_profile: preferenceProfile })
+    ...(record.temporal_projection === null ? {} : { temporal_projection: record.temporal_projection }),
+    ...(record.preference_profile === null ? {} : { preference_profile: record.preference_profile })
   });
 }
 
-function normalizeStringArray(value: unknown): readonly string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const seen = new Set<string>();
-  const output: string[] = [];
-  for (const entry of value) {
-    const normalized = normalizeOptionalString(entry);
-    if (normalized === null || seen.has(normalized)) {
-      continue;
-    }
-    seen.add(normalized);
-    output.push(normalized);
-  }
-  return Object.freeze(output);
-}
-
-function normalizeTemporalProjection(value: unknown): OfficialApiTemporalProjectionDraft | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+function normalizeTemporalProjectionInput(value: unknown): unknown {
+  const parsed = UnknownRecordSchema.safeParse(value);
+  if (!parsed.success) {
     return null;
   }
-
-  const record = value as Record<string, unknown>;
-  const projection: OfficialApiTemporalProjectionDraft = {
-    ...readProjectionSchemaVersion(record.projection_schema_version ?? record.version),
-    ...readOptionalIsoField(record, "event_time_start"),
-    ...readOptionalIsoField(record, "event_time_end"),
-    ...readOptionalIsoField(record, "valid_from"),
-    ...readOptionalIsoField(record, "valid_to"),
-    ...readOptionalTimePrecision(record.time_precision),
-    ...readOptionalTimeSource(record.time_source)
+  const record = parsed.data;
+  return {
+    projection_schema_version: record.projection_schema_version ?? record.version,
+    event_time_start: record.event_time_start,
+    event_time_end: record.event_time_end,
+    valid_from: record.valid_from,
+    valid_to: record.valid_to,
+    time_precision: record.time_precision,
+    time_source: record.time_source
   };
-
-  return Object.keys(projection).length === 0 ? null : Object.freeze(projection);
 }
 
-function readOptionalIsoField(
-  record: Record<string, unknown>,
-  key: "event_time_start" | "event_time_end" | "valid_from" | "valid_to"
-): Partial<OfficialApiTemporalProjectionDraft> {
-  const value = normalizeOptionalString(record[key]);
-  if (value === null) {
-    return {};
-  }
-  const normalized = normalizeTemporalIsoString(value);
-  return normalized === null ? {} : { [key]: normalized };
-}
-
-function readOptionalTimePrecision(
-  value: unknown
-): Pick<OfficialApiTemporalProjectionDraft, "time_precision"> | Record<string, never> {
-  return value === "day" ||
-    value === "month" ||
-    value === "year" ||
-    value === "range" ||
-    value === "relative" ||
-    value === "unknown"
-    ? { time_precision: value }
-    : {};
-}
-
-function readOptionalTimeSource(
-  value: unknown
-): Pick<OfficialApiTemporalProjectionDraft, "time_source"> | Record<string, never> {
-  return value === "explicit" || value === "session_timestamp" || value === "relative_resolved"
-    ? { time_source: value }
-    : {};
-}
-
-function normalizePreferenceProfile(value: unknown): OfficialApiPreferenceProfileDraft | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+function normalizePreferenceProfileInput(value: unknown): unknown {
+  const parsed = UnknownRecordSchema.safeParse(value);
+  if (!parsed.success) {
     return null;
   }
-  const record = value as Record<string, unknown>;
-  const profile: OfficialApiPreferenceProfileDraft = {
-    ...readProjectionSchemaVersion(record.projection_schema_version ?? record.version),
-    ...readOptionalProfileField(record, "preference_subject", "subject"),
-    ...readOptionalProfileField(record, "preference_predicate", "predicate"),
-    ...readOptionalProfileField(record, "preference_object", "object"),
-    ...readOptionalProfileField(record, "preference_category", "category"),
-    ...readOptionalProfilePolarity(record.preference_polarity ?? record.polarity)
+  const record = parsed.data;
+  return {
+    projection_schema_version: record.projection_schema_version ?? record.version,
+    preference_subject: record.preference_subject ?? record.subject,
+    preference_predicate: record.preference_predicate ?? record.predicate,
+    preference_object: record.preference_object ?? record.object,
+    preference_category: record.preference_category ?? record.category,
+    preference_polarity: record.preference_polarity ?? record.polarity
   };
-  return Object.keys(profile).length === 0 ? null : Object.freeze(profile);
-}
-
-function readProjectionSchemaVersion(
-  value: unknown
-): Pick<OfficialApiTemporalProjectionDraft, "projection_schema_version"> | Record<string, never> {
-  return value === 1 ? { projection_schema_version: 1 } : {};
-}
-
-function readOptionalProfileField(
-  record: Record<string, unknown>,
-  outputKey: "preference_subject" | "preference_predicate" | "preference_object" | "preference_category",
-  inputKey: "subject" | "predicate" | "object" | "category"
-): Partial<OfficialApiPreferenceProfileDraft> {
-  const value = normalizeOptionalString(record[outputKey] ?? record[inputKey]);
-  return value === null ? {} : { [outputKey]: value.slice(0, 1024) };
-}
-
-function readOptionalProfilePolarity(
-  value: unknown
-): Pick<OfficialApiPreferenceProfileDraft, "preference_polarity"> | Record<string, never> {
-  return value === "positive" || value === "negative" || value === "neutral"
-    ? { preference_polarity: value }
-    : {};
 }
 
 export function normalizeOptionalString(value: unknown): string | null {
+  return normalizeStringValue(value);
+}
+
+function normalizeStringValue(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -385,17 +424,6 @@ export function normalizePositiveTimeoutMs(value: unknown): number | null {
 
 export function clampConfidence(value: number): number {
   return Math.max(0, Math.min(1, value));
-}
-
-function isSignalKind(value: string): value is CandidateMemorySignal["signal_kind"] {
-  return (
-    value === SignalKind.POTENTIAL_CLAIM ||
-    value === SignalKind.POTENTIAL_SYNTHESIS ||
-    value === SignalKind.POTENTIAL_HANDOFF ||
-    value === SignalKind.POTENTIAL_EVIDENCE_ANCHOR ||
-    value === SignalKind.POTENTIAL_CONFLICT ||
-    value === SignalKind.POTENTIAL_PREFERENCE
-  );
 }
 
 export function buildTurnExcerpt(turnContent: string, matchedText: string): string {

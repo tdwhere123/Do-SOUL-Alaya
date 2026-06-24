@@ -37,7 +37,7 @@ it("merges synthesis-child metadata into a memory_entry when object ids collide"
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
-        findByIds: vi.fn(async (ids: readonly string[]) =>
+        findByIds: vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
           memories.filter((memory) => ids.includes(memory.object_id))
         ),
         searchByKeyword: vi.fn(async () => [

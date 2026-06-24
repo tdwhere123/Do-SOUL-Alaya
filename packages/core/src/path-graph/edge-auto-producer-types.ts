@@ -21,7 +21,10 @@ export interface EdgeAutoProducerMemoryRepoPort {
     queryText: string,
     limit: number
   ): Promise<readonly EdgeAutoProducerMemorySearchHit[]>;
-  findByIds(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
 // invariant: the host-worker defer port. When present, the LLM-quality pair

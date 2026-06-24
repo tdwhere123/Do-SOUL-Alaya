@@ -12,7 +12,7 @@ import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 export interface ClaimFormRepo {
   create(claim: ClaimForm): Readonly<ClaimForm>;
   findById(objectId: string): Promise<Readonly<ClaimForm> | null>;
-  findByIds(objectIds: readonly string[]): Promise<readonly Readonly<ClaimForm>[]>;
+  findByIds(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<ClaimForm>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]>;
   findByStatus(workspaceId: string, status: ClaimLifecycleState): Promise<readonly Readonly<ClaimForm>[]>;
   findByCanonicalKey(workspaceId: string, canonicalKey: string): Promise<readonly Readonly<ClaimForm>[]>;
@@ -210,7 +210,11 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     }
   }
 
-  public async findByIds(objectIds: readonly string[]): Promise<readonly Readonly<ClaimForm>[]> {
+  public async findByIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<ClaimForm>[]> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
     const parsedObjectIds = Array.from(
       new Set(objectIds.map((objectId) => parseNonEmptyString(objectId, "object id")))
     );
@@ -223,12 +227,13 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     const statement = this.db.connection.prepare(`
       SELECT${CLAIM_FORM_SELECT_COLUMNS}
       FROM claim_forms
-      WHERE object_id IN (${placeholders})
+      WHERE workspace_id = ?
+        AND object_id IN (${placeholders})
       ORDER BY created_at ASC, object_id ASC
     `);
 
     try {
-      const rows = statement.all(...parsedObjectIds) as ClaimFormRow[];
+      const rows = statement.all(parsedWorkspaceId, ...parsedObjectIds) as ClaimFormRow[];
       return rows.map((row) => parseClaimFormRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to load claim forms by ids.", error);

@@ -1,4 +1,5 @@
 import process from "node:process";
+import { z } from "zod";
 import {
   releaseHardGateVerdict,
   type KpiPayload
@@ -24,6 +25,14 @@ import { runLocomo } from "../locomo/runner.js";
 import { runControlledReplay } from "../controlled-replay/runner.js";
 import { exitCodeForVerdicts, pct } from "./result-format.js";
 import type { ParsedFlags } from "./cli-options.js";
+
+const QaByTypeSchema = z.record(
+  z.string(),
+  z.object({
+    correct: z.number().finite(),
+    total: z.number().finite()
+  })
+);
 
 export async function runFetchLongMemEval(opts: ParsedFlags): Promise<number> {
   try {
@@ -117,9 +126,7 @@ export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> 
           : `  QA accuracy=${pct(kpi.qa_metrics.qa_accuracy)} ` +
             `(${kpi.qa_metrics.qa_correct}/${kpi.qa_metrics.qa_total})` +
             ` | abstention ${kpi.qa_metrics.qa_abstention_correct}/${kpi.qa_metrics.qa_abstention_total}\n` +
-            Object.entries(
-              kpi.qa_metrics.qa_by_type as Record<string, { correct: number; total: number }>
-            )
+            Object.entries(parseQaByType(kpi.qa_metrics.qa_by_type))
               .map(
                 ([type, t]) => `    ${type}: ${t.correct}/${t.total}\n`
               )
@@ -134,6 +141,11 @@ export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> 
     );
     return 2;
   }
+}
+
+function parseQaByType(value: unknown): Readonly<Record<string, { readonly correct: number; readonly total: number }>> {
+  const parsed = QaByTypeSchema.safeParse(value);
+  return parsed.success ? parsed.data : {};
 }
 
 // --edge-plane sets the BULK_ENRICH drain gate the bench daemon reads

@@ -323,13 +323,20 @@ export class ProjectMappingService {
     acceptedBy: AcceptedByType
   ): Promise<readonly Readonly<ProjectMappingAnchor>[]> {
     const anchors = await this.getAnchorsByIds(mappingIds);
-    const memoryById = new Map(
-      (
-        await this.dependencies.memoryRepo.findByIds(
-          anchors.map((anchor) => anchor.global_object_id)
+    const memoryIdsByWorkspace = new Map<string, Set<string>>();
+    for (const anchor of anchors) {
+      const ids = memoryIdsByWorkspace.get(anchor.workspace_id) ?? new Set<string>();
+      ids.add(anchor.global_object_id);
+      memoryIdsByWorkspace.set(anchor.workspace_id, ids);
+    }
+    const memories = (
+      await Promise.all(
+        [...memoryIdsByWorkspace.entries()].map(async ([workspaceId, ids]) =>
+          await this.dependencies.memoryRepo.findByIds(workspaceId, [...ids])
         )
-      ).map((memory) => [memory.object_id, memory] as const)
-    );
+      )
+    ).flat();
+    const memoryById = new Map(memories.map((memory) => [memory.object_id, memory] as const));
     const strictMappingIds: string[] = [];
 
     for (const anchor of anchors) {

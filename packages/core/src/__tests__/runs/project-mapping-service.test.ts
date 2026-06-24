@@ -227,7 +227,7 @@ it("blocks batch acceptance when any anchor requires strict confirmation", async
 
           return null;
         }),
-        findByIds: vi.fn(async (objectIds: readonly string[]) =>
+        findByIds: vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
           objectIds.flatMap((objectId) => {
             if (objectId === safeAnchor.global_object_id) {
               return [createMemoryEntry({ object_id: objectId, dimension: MemoryDimension.PREFERENCE })];
@@ -319,7 +319,7 @@ it("treats missing and tombstoned memories as per-item safe defaults for batch a
 
           return null;
         }),
-        findByIds: vi.fn(async (objectIds: readonly string[]) =>
+        findByIds: vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
           objectIds.flatMap((objectId) => {
             if (objectId === missingAnchor.global_object_id) {
               return [];
@@ -423,7 +423,7 @@ it("derives strict policy from the underlying memory dimension and defaults tomb
 
           return null;
         }),
-        findByIds: vi.fn(async (objectIds: readonly string[]) =>
+        findByIds: vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
           objectIds.flatMap((objectId) => {
             if (objectId === strictAnchor.global_object_id) {
               return [createMemoryEntry({ object_id: objectId, dimension: MemoryDimension.HAZARD })];

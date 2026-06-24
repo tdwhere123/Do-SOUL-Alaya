@@ -1,3 +1,4 @@
+import { countStronglyConnectedComponents } from "@do-soul/alaya-graph-algorithms";
 import {
   SoulPathGraphContractSchema,
   serializePathAnchorRef,
@@ -39,15 +40,6 @@ interface BuiltPathGraph {
   readonly nodes: readonly SoulPathGraphContract["nodes"][number][];
   readonly edges: readonly SoulPathGraphContract["edges"][number][];
   readonly topology: SoulPathGraphContract["topology"];
-}
-
-interface TarjanState {
-  index: number;
-  componentCount: number;
-  readonly stack: string[];
-  readonly onStack: Set<string>;
-  readonly indices: Map<string, number>;
-  readonly lowLinks: Map<string, number>;
 }
 
 export class GraphContractService {
@@ -222,7 +214,11 @@ function buildPathGraphTopology(
     max_out_degree: maxValue(nodes.map((node) => node.out_degree)),
     max_in_degree: maxValue(nodes.map((node) => node.in_degree)),
     avg_degree: totalNodes === 0 ? 0 : totalDegree / totalNodes,
-    strongly_connected_components: countStronglyConnectedComponents(nodeKeys, adjacency)
+    strongly_connected_components: countStronglyConnectedComponents(
+      nodeKeys,
+      adjacency,
+      "GraphContractService"
+    )
   };
 }
 
@@ -256,101 +252,6 @@ function maxValue(values: readonly number[]): number {
   }
 
   return max;
-}
-
-function countStronglyConnectedComponents(
-  nodeKeys: readonly string[],
-  adjacency: ReadonlyMap<string, ReadonlySet<string>>
-): number {
-  const state = createTarjanState();
-  for (const nodeKey of nodeKeys) {
-    if (!state.indices.has(nodeKey)) {
-      strongConnectNode(nodeKey, adjacency, state);
-    }
-  }
-  return state.componentCount;
-}
-
-function createTarjanState(): TarjanState {
-  return {
-    index: 0,
-    componentCount: 0,
-    stack: [],
-    onStack: new Set<string>(),
-    indices: new Map<string, number>(),
-    lowLinks: new Map<string, number>()
-  };
-}
-
-function strongConnectNode(
-  nodeKey: string,
-  adjacency: ReadonlyMap<string, ReadonlySet<string>>,
-  state: TarjanState
-): void {
-  trackTarjanNode(nodeKey, state);
-  for (const neighbor of adjacency.get(nodeKey) ?? []) {
-    if (!state.indices.has(neighbor)) {
-      strongConnectNode(neighbor, adjacency, state);
-      state.lowLinks.set(
-        nodeKey,
-        Math.min(
-          readTrackedNumber(state.lowLinks, nodeKey, "low-link"),
-          readTrackedNumber(state.lowLinks, neighbor, "low-link")
-        )
-      );
-    } else if (state.onStack.has(neighbor)) {
-      state.lowLinks.set(
-        nodeKey,
-        Math.min(
-          readTrackedNumber(state.lowLinks, nodeKey, "low-link"),
-          readTrackedNumber(state.indices, neighbor, "index")
-        )
-      );
-    }
-  }
-  if (
-    readTrackedNumber(state.lowLinks, nodeKey, "low-link") ===
-    readTrackedNumber(state.indices, nodeKey, "index")
-  ) {
-    settleStronglyConnectedComponent(nodeKey, state);
-  }
-}
-
-function trackTarjanNode(nodeKey: string, state: TarjanState): void {
-  state.indices.set(nodeKey, state.index);
-  state.lowLinks.set(nodeKey, state.index);
-  state.index += 1;
-  state.stack.push(nodeKey);
-  state.onStack.add(nodeKey);
-}
-
-function settleStronglyConnectedComponent(nodeKey: string, state: TarjanState): void {
-  state.componentCount += 1;
-  while (state.stack.length > 0) {
-    const candidate = state.stack.pop();
-    if (candidate === undefined) {
-      throw new Error("GraphContractService Tarjan invariant violated: stack underflow.");
-    }
-    state.onStack.delete(candidate);
-    if (candidate === nodeKey) {
-      return;
-    }
-  }
-}
-
-function readTrackedNumber(
-  trackedValues: ReadonlyMap<string, number>,
-  nodeKey: string,
-  label: string
-): number {
-  const value = trackedValues.get(nodeKey);
-  if (value === undefined) {
-    throw new Error(
-      `GraphContractService Tarjan invariant violated: missing ${label} for ${nodeKey}.`
-    );
-  }
-
-  return value;
 }
 
 function classifyEdgeTrend(latest: number, baseline: number): SoulPathGraphTrendDirection {

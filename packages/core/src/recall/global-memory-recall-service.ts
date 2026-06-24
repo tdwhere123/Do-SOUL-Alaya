@@ -3,12 +3,12 @@ import {
   FormationKind,
   type GlobalMemoryEntry,
   ObjectLifecycleState,
+  ScopeClassSchema,
   SourceKind,
   StorageTier,
   type MemoryEntry,
   type ProjectMappingAnchor,
-  type ProjectMappingState,
-  type ScopeClass
+  type ProjectMappingState
 } from "@do-soul/alaya-protocol";
 import type {
   GlobalMemoryRecallEntry,
@@ -461,6 +461,7 @@ function createPseudoMemoryEntry(
   workspaceId: string
 ): Readonly<MemoryEntry> {
   const pseudoRunId = `global:${entry.global_object_id}`;
+  const scopeClass = ScopeClassSchema.safeParse(entry.scope_class);
 
   return Object.freeze({
     object_id: entry.global_object_id,
@@ -473,7 +474,7 @@ function createPseudoMemoryEntry(
     dimension: entry.dimension,
     source_kind: SourceKind.IMPORT,
     formation_kind: FormationKind.IMPORTED,
-    scope_class: entry.scope_class as ScopeClass,
+    scope_class: scopeClass.success ? scopeClass.data : "project",
     content: entry.content,
     domain_tags: Object.freeze([...(entry.domain_tags ?? [])]),
     evidence_refs: Object.freeze([...(entry.evidence_refs ?? [])]),

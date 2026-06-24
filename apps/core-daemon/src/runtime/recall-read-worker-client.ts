@@ -16,6 +16,9 @@ import type {
   RecallServiceSynthesisSearchPort
 } from "@do-soul/alaya-core";
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_ENV = "ALAYA_RECALL_READ_WORKER_REQUEST_TIMEOUT_MS";
+
 export type RecallReadWorkerOperation =
   | "memory.findByWorkspaceId"
   | "memory.findByDimension"
@@ -64,6 +67,7 @@ export interface RecallReadWorkerClient {
 export function createRecallReadWorkerClient(input: {
   readonly databaseFilename: string;
   readonly workerUrl?: URL;
+  readonly requestTimeoutMs?: number;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }): RecallReadWorkerClient | null {
   if (input.databaseFilename === ":memory:") {
@@ -87,12 +91,14 @@ export function createRecallReadWorkerClient(input: {
 
 class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   private readonly worker: Worker;
+  private readonly requestTimeoutMs: number;
   private nextRequestId = 1;
   private readonly pending = new Map<
     number,
     {
       readonly resolve: (value: unknown) => void;
       readonly reject: (error: unknown) => void;
+      readonly timeout: ReturnType<typeof setTimeout>;
     }
   >();
   private requestTail: Promise<unknown> = Promise.resolve();
@@ -144,8 +150,8 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       }),
     findByEvidenceRefs: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
       await this.request("memory.findByEvidenceRefs", { workspaceId, evidenceObjectIds }),
-    findByIds: async (objectIds: readonly string[]) =>
-      await this.request("memory.findByIds", { objectIds })
+    findByIds: async (workspaceId: string, objectIds: readonly string[]) =>
+      await this.request("memory.findByIds", { workspaceId, objectIds })
   };
 
   public readonly evidenceSearchPort: RecallServiceEvidenceSearchPort = {
@@ -158,8 +164,8 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   public readonly synthesisSearchPort: RecallServiceSynthesisSearchPort = {
     searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
       await this.request("synthesis.searchByKeyword", { workspaceId, queryText, limit }),
-    findByIds: async (objectIds: readonly string[]) =>
-      await this.request("synthesis.findByIds", { objectIds })
+    findByIds: async (workspaceId: string, objectIds: readonly string[]) =>
+      await this.request("synthesis.findByIds", { workspaceId, objectIds })
   };
 
   public readonly pathExpansionPort: RecallServicePathExpansionPort = {
@@ -188,8 +194,10 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   public constructor(input: {
     readonly databaseFilename: string;
     readonly workerUrl: URL;
+    readonly requestTimeoutMs?: number;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   }) {
+    this.requestTimeoutMs = normalizeRequestTimeoutMs(input.requestTimeoutMs);
     this.worker = new Worker(input.workerUrl, {
       execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
       workerData: {
@@ -222,7 +230,11 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     this.closeStarted = true;
     try {
       if (!this.closed) {
-        await this.request("close", {});
+        try {
+          await this.request("close", {});
+        } catch {
+          // close is best-effort; terminate below is the bounded cleanup path.
+        }
       }
     } finally {
       this.closed = true;
@@ -255,15 +267,41 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     const id = this.nextRequestId;
     this.nextRequestId += 1;
     return await new Promise<T>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        const pending = this.pending.get(id);
+        if (pending === undefined) {
+          return;
+        }
+        this.pending.delete(id);
+        const error = new Error(
+          `recall read worker ${operation} timed out after ${this.requestTimeoutMs}ms`
+        );
+        this.closed = true;
+        pending.reject(error);
+        this.rejectPending(error);
+        void this.worker.terminate().catch(() => undefined);
+      }, this.requestTimeoutMs);
       this.pending.set(id, {
-        resolve: (value) => resolve(value as T),
-        reject
+        resolve: (value) => {
+          clearTimeout(timeout);
+          resolve(value as T);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+        timeout
       });
       try {
         this.worker.postMessage({ id, operation, payload } satisfies RecallReadWorkerRequest);
       } catch (error) {
+        const pending = this.pending.get(id);
         this.pending.delete(id);
-        reject(error);
+        if (pending === undefined) {
+          reject(error);
+        } else {
+          pending.reject(error);
+        }
       }
     });
   }
@@ -291,10 +329,19 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
 
   private rejectPending(error: unknown): void {
     for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeout);
       pending.reject(error);
     }
     this.pending.clear();
   }
+}
+
+function normalizeRequestTimeoutMs(value: number | undefined): number {
+  const fromEnv = value ?? Number(process.env[REQUEST_TIMEOUT_ENV]);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return Math.trunc(fromEnv);
+  }
+  return DEFAULT_REQUEST_TIMEOUT_MS;
 }
 
 function resolveDefaultWorkerUrl(): URL | null {

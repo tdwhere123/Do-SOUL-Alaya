@@ -26,7 +26,8 @@ describe("GovernanceLeaseService", () => {
     service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo({ append: appendSpy })
+      eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runLookup: createRunLookup()
     });
 
     const lease = await service.acquire({
@@ -60,12 +61,36 @@ describe("GovernanceLeaseService", () => {
     );
   });
 
+  it("rejects a lease acquire when workspaceId does not match the run workspace", async () => {
+    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
+      createEventLogEntry(event)
+    );
+    const service = new GovernanceLeaseService({
+      now: () => "2026-03-25T00:00:00.000Z",
+      generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
+      eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runLookup: {
+        getById: vi.fn(async () => ({ workspace_id: "workspace-2" }))
+      }
+    });
+
+    await expect(
+      service.acquire({
+        runId: "run-1",
+        workspaceId: "workspace-1"
+      })
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+    await expect(service.isHeld("run-1")).resolves.toBe(false);
+    expect(appendSpy).not.toHaveBeenCalled();
+  });
+
   it("releases a held lease by appending a release event", async () => {
     const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(event));
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo({ append: appendSpy })
+      eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runLookup: createRunLookup()
     });
 
     await service.acquire({
@@ -96,7 +121,8 @@ describe("GovernanceLeaseService", () => {
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo({ append: appendSpy })
+      eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runLookup: createRunLookup()
     });
 
     await service.acquire({
@@ -123,7 +149,8 @@ describe("GovernanceLeaseService", () => {
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo({ append: appendSpy })
+      eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runLookup: createRunLookup()
     });
 
     await service.acquire({
@@ -160,7 +187,8 @@ describe("GovernanceLeaseService", () => {
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo({ append: appendSpy })
+      eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runLookup: createRunLookup()
     });
 
     await service.acquire({
@@ -186,7 +214,8 @@ describe("GovernanceLeaseService", () => {
     const service = new GovernanceLeaseService({
       now: () => now,
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo()
+      eventLogRepo: createEventLogRepo(),
+      runLookup: createRunLookup()
     });
 
     await service.acquire({
@@ -215,7 +244,8 @@ describe("GovernanceLeaseService", () => {
     const firstService = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo
+      eventLogRepo,
+      runLookup: createRunLookup()
     });
 
     await firstService.acquire({
@@ -226,7 +256,8 @@ describe("GovernanceLeaseService", () => {
     const restartedBeforeRelease = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "22222222-2222-4222-8222-222222222222",
-      eventLogRepo
+      eventLogRepo,
+      runLookup: createRunLookup()
     });
     await expect(restartedBeforeRelease.getActive("run-1")).resolves.toMatchObject({
       lease_id: "11111111-1111-4111-8111-111111111111",
@@ -238,7 +269,8 @@ describe("GovernanceLeaseService", () => {
     const restartedAfterRelease = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "33333333-3333-4333-8333-333333333333",
-      eventLogRepo
+      eventLogRepo,
+      runLookup: createRunLookup()
     });
     await expect(restartedAfterRelease.getActive("run-1")).resolves.toBeNull();
   });
@@ -249,7 +281,8 @@ describe("GovernanceLeaseService", () => {
     const firstService = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo
+      eventLogRepo,
+      runLookup: createRunLookup()
     });
 
     await firstService.acquire({
@@ -262,7 +295,8 @@ describe("GovernanceLeaseService", () => {
     const restartedService = new GovernanceLeaseService({
       now: () => "2026-03-25T00:02:00.000Z",
       generateRuntimeId: () => "22222222-2222-4222-8222-222222222222",
-      eventLogRepo
+      eventLogRepo,
+      runLookup: createRunLookup()
     });
 
     await expect(restartedService.getActive("run-1")).resolves.toBeNull();
@@ -278,7 +312,8 @@ describe("GovernanceLeaseService", () => {
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo({ queryByRunAll })
+      eventLogRepo: createEventLogRepo({ queryByRunAll }),
+      runLookup: createRunLookup()
     });
 
     await expect(service.getActive("run-1")).rejects.toMatchObject({
@@ -316,7 +351,8 @@ describe("GovernanceLeaseService", () => {
             }
           })
         ])
-      })
+      }),
+      runLookup: createRunLookup()
     });
 
     await expect(service.getActive("run-1")).rejects.toMatchObject({
@@ -348,7 +384,8 @@ describe("GovernanceLeaseService", () => {
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({
         queryByRunAll: vi.fn(async () => await queryDeferred.promise)
-      })
+      }),
+      runLookup: createRunLookup()
     });
 
     const pendingLookup = service.getActive("run-1");
@@ -391,6 +428,12 @@ function createEventLogRepo(overrides: Partial<{
       ),
     queryByRun: overrides.queryByRun ?? queryByRunAll,
     queryByRunAll
+  };
+}
+
+function createRunLookup(workspaceId = "workspace-1") {
+  return {
+    getById: vi.fn(async () => ({ workspace_id: workspaceId }))
   };
 }
 

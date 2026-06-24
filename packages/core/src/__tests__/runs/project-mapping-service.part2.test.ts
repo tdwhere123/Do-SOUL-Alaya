@@ -52,7 +52,7 @@ it("loads anchors and memories in batches during batchAccept", async () => {
     const findMemoryById = vi.fn(async () => {
       throw new Error("batchAccept should not call memoryRepo.findById");
     });
-    const findMemoryByIds = vi.fn(async (objectIds: readonly string[]) =>
+    const findMemoryByIds = vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
       objectIds.flatMap((objectId) => {
         if (objectId === firstAnchor.global_object_id) {
           return [createMemoryEntry({ object_id: objectId, dimension: MemoryDimension.PREFERENCE })];
@@ -85,7 +85,7 @@ it("loads anchors and memories in batches during batchAccept", async () => {
     );
 
     expect(findByIds).toHaveBeenCalledWith([secondAnchor.object_id, firstAnchor.object_id]);
-    expect(findMemoryByIds).toHaveBeenCalledWith([secondAnchor.global_object_id, firstAnchor.global_object_id]);
+    expect(findMemoryByIds).toHaveBeenCalledWith("workspace-1", [secondAnchor.global_object_id, firstAnchor.global_object_id]);
     expect(findById).not.toHaveBeenCalled();
     expect(findMemoryById).not.toHaveBeenCalled();
     expect(anchors.map((anchor) => anchor.object_id)).toEqual([secondAnchor.object_id, firstAnchor.object_id]);

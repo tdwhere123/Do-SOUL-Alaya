@@ -112,7 +112,7 @@ function buildRecallService(params: {
       searchByKeyword: params.evidenceCapsuleRepo.searchByKeyword.bind(params.evidenceCapsuleRepo),
       // Port passes (workspaceId, ids); the repo's findByIds is keyed by ids only.
       findByIds: (_workspaceId: string, evidenceObjectIds: readonly string[]) =>
-        params.evidenceCapsuleRepo.findByIds(evidenceObjectIds)
+        params.evidenceCapsuleRepo.findByIds(params.workspaceId, evidenceObjectIds)
     }
   };
 

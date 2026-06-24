@@ -8,6 +8,7 @@ migrations, or runtime wiring change.
 | Workspace path | npm name | tsconfig path alias |
 |---|---|---|
 | `packages/protocol/` | `@do-soul/alaya-protocol` | `@do-soul/alaya-protocol` |
+| `packages/graph-algorithms/` | `@do-soul/alaya-graph-algorithms` | `@do-soul/alaya-graph-algorithms` |
 | `packages/storage/` | `@do-soul/alaya-storage` | `@do-soul/alaya-storage` |
 | `packages/core/` | `@do-soul/alaya-core` | `@do-soul/alaya-core` |
 | `packages/soul/` | `@do-soul/alaya-soul` | `@do-soul/alaya-soul` |
@@ -25,6 +26,7 @@ namespaced upstream.
 ```text
 packages/
   protocol/       @do-soul/alaya-protocol — zod-only domain types
+  graph-algorithms/ @do-soul/alaya-graph-algorithms — dependency-free pure graph algorithms
   storage/        @do-soul/alaya-storage  — SQLite migrations and repos
   core/           @do-soul/alaya-core     — services, runtime, EventLog
   soul/           @do-soul/alaya-soul     — SOUL kernel, Garden, scheduler

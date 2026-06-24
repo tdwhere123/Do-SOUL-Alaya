@@ -74,7 +74,7 @@ describe("B-2 edge classification (K4.5 no-network, default config)", () => {
       memoryRepo: {
         findById: async (objectId: string) => byId.get(objectId) ?? null,
         searchByKeyword: async () => [{ object_id: "memory-existing", normalized_rank: 0.9 }],
-        findByIds: async (objectIds: readonly string[]) =>
+        findByIds: async (_workspaceId: string, objectIds: readonly string[]) =>
           objectIds.flatMap((objectId) => {
             const memory = byId.get(objectId);
             return memory === undefined ? [] : [memory];

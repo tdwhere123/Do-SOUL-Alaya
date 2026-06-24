@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Hono } from "hono";
 import {
   EngineStatus,
+  RuntimeGovernanceEventType,
   RunState,
   WorkerRuntimeEventType,
   WorkspaceRunEventType,
   type EventLogEntry,
   type RunHotState
 } from "@do-soul/alaya-protocol";
+import { registerRunRoutes } from "../../routes/runs.js";
 import {
   enrichRunSnapshot,
   resetSnapshotCacheForTesting,
@@ -19,6 +22,58 @@ afterEach(() => {
 });
 
 describe("run snapshot route compaction", () => {
+  it("returns a structured error code when snapshot compaction fails", async () => {
+    const app = new Hono();
+    const warn = vi.fn();
+    vi.spyOn(process, "emitWarning").mockImplementation(() => true);
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      ...entry,
+      event_id: "evt-audit",
+      created_at: "2026-06-24T00:00:00.000Z",
+      revision: 1
+    }));
+    registerRunRoutes(app, {
+      runService: {
+        getById: vi.fn(async () => ({ run_id: "run-a", workspace_id: "workspace-a" }))
+      },
+      workspaceService: {
+        getById: vi.fn(async () => ({ workspace_id: "workspace-a" }))
+      },
+      conversationService: {},
+      runHotStateService: {
+        getSnapshot: vi.fn(async () => createHotState())
+      },
+      eventLogRepo: {
+        append,
+        queryByRun: vi.fn(async () => []),
+        queryByRunAll: vi.fn(async () => [])
+      },
+      warn
+    } as any);
+
+    const response = await app.request("/runs/run-a/snapshot");
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Failed to compact run snapshot",
+      code: "SNAPSHOT_COMPACTION_FAILED"
+    });
+    expect(warn).toHaveBeenCalledWith(
+      "[daemon] snapshot compaction failed",
+      expect.objectContaining({ runId: "run-a" })
+    );
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED,
+        entity_type: "run",
+        entity_id: "run-a",
+        workspace_id: "workspace-a",
+        run_id: "run-a"
+      })
+    );
+  });
+
   it("fully replays empty-cache deltas when the after-cursor probe is capped", async () => {
     const seedEvent = createEvent("evt-seed", WorkspaceRunEventType.RUN_MESSAGE_APPENDED, {
       run_id: "run-a",

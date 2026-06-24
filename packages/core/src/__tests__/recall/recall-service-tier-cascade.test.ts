@@ -96,26 +96,31 @@ function createDependencies(params: {
   readonly slots?: readonly Slot[];
   readonly projectMappings?: readonly ProjectMappingAnchor[];
   readonly graphSupportPort?: RecallServiceDependencies["graphSupportPort"];
+  readonly findByWorkspaceId?: RecallServiceDependencies["memoryRepo"]["findByWorkspaceId"];
+  readonly warn?: RecallServiceDependencies["warn"];
 } = {}): {
   readonly dependencies: RecallServiceDependencies;
   readonly findByWorkspaceIdSpy: ReturnType<typeof vi.fn>;
+  readonly warnSpy: ReturnType<typeof vi.fn>;
 } {
   const byTier = new Map<StorageTier, readonly MemoryEntry[]>([
     [StorageTier.HOT, params.hot ?? []],
     [StorageTier.WARM, params.warm ?? []],
     [StorageTier.COLD, params.cold ?? []]
   ]);
-  const findByWorkspaceIdSpy = vi.fn(async (
-    _workspaceId: string,
-    tier?: StorageTier,
-    page?: { readonly limit: number; readonly offset: number }
-  ) => {
-    const entries = byTier.get(tier ?? StorageTier.HOT) ?? [];
-    if (page === undefined) {
-      return entries;
-    }
-    return entries.slice(page.offset, page.offset + page.limit);
-  });
+  const defaultFindByWorkspaceId = async (
+      _workspaceId: string,
+      tier?: StorageTier,
+      page?: { readonly limit: number; readonly offset: number }
+    ) => {
+      const entries = byTier.get(tier ?? StorageTier.HOT) ?? [];
+      if (page === undefined) {
+        return entries;
+      }
+      return entries.slice(page.offset, page.offset + page.limit);
+    };
+  const findByWorkspaceIdSpy = vi.fn(params.findByWorkspaceId ?? defaultFindByWorkspaceId);
+  const warnSpy = vi.fn(params.warn ?? (() => undefined));
 
   return {
     dependencies: {
@@ -126,6 +131,7 @@ function createDependencies(params: {
         findByDimension: vi.fn(async () => []),
         findByScopeClass: vi.fn(async () => [])
       },
+      warn: warnSpy,
       slotRepo: {
         findByWorkspace: vi.fn(async () => params.slots ?? [])
       },
@@ -143,7 +149,8 @@ function createDependencies(params: {
         findByWorkspace: vi.fn(async () => params.projectMappings ?? [])
       }
     },
-    findByWorkspaceIdSpy
+    findByWorkspaceIdSpy,
+    warnSpy
   };
 }
 
@@ -179,7 +186,7 @@ function buildPolicy(service: RecallService, maxEntries = 10): RecallPolicy {
 }
 
 async function recallWith(params: Parameters<typeof createDependencies>[0], maxEntries = 10) {
-  const { dependencies, findByWorkspaceIdSpy } = createDependencies(params);
+  const { dependencies, findByWorkspaceIdSpy, warnSpy } = createDependencies(params);
   const service = new RecallService(dependencies);
   const result = await service.recall({
     taskSurface: createTaskSurface(),
@@ -187,7 +194,7 @@ async function recallWith(params: Parameters<typeof createDependencies>[0], maxE
     strategy: "chat",
     policyOverride: buildPolicy(service, maxEntries)
   });
-  return { result, findByWorkspaceIdSpy };
+  return { result, findByWorkspaceIdSpy, warnSpy };
 }
 
 describe("RecallService tier cascade", () => {
@@ -252,6 +259,40 @@ describe("RecallService tier cascade", () => {
     expect(hotCalls).toHaveLength(2);
     expect(hotCalls[0]?.[2]).toEqual({ limit: 512, offset: 0 });
     expect(hotCalls[1]?.[2]).toEqual({ limit: 512, offset: 512 });
+  });
+
+  it("stops a HOT tier scan when the page source keeps returning full unique pages", async () => {
+    const findByWorkspaceId = vi.fn(async (
+      _workspaceId: string,
+      tier?: StorageTier,
+      page?: { readonly limit: number; readonly offset: number }
+    ) => {
+      if ((tier ?? StorageTier.HOT) !== StorageTier.HOT || page === undefined) {
+        return [];
+      }
+      return Array.from({ length: page.limit }, (_, index) =>
+        createMemoryEntry({
+          object_id: `hot-${page.offset + index}`,
+          activation_score: 0.9,
+          storage_tier: StorageTier.HOT
+        })
+      );
+    });
+
+    const { findByWorkspaceIdSpy, warnSpy } = await recallWith({ findByWorkspaceId }, 1);
+    const hotCalls = findByWorkspaceIdSpy.mock.calls.filter(
+      (call) => call[1] === StorageTier.HOT
+    );
+
+    expect(hotCalls).toHaveLength(200);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "recall memory repo page scan reached the maximum page count",
+      expect.objectContaining({
+        workspace_id: "workspace-1",
+        tier: StorageTier.HOT,
+        pages_loaded: 200
+      })
+    );
   });
 
   it("uses WARM once when HOT is empty and decays delivered relevance", async () => {

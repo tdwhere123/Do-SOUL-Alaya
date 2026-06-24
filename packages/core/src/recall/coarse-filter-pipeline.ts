@@ -129,7 +129,8 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
     drafts: params.state.drafts,
     suppressionScores: params.state.pathSuppressionScores,
     pathExpansionPort: params.context.dependencies.pathExpansionPort,
-    warn: params.context.warn
+    warn: params.context.warn,
+    degradationReasons: params.context.degradationReasons
   });
   return Object.freeze({
     sourceCohortKeys,
@@ -272,7 +273,8 @@ async function admitPathAndGraphExpansionCandidates(
     addCandidate: params.state.addCandidate,
     dynamicRecallPlaneCap: DYNAMIC_RECALL_PLANE_CAP,
     pathExpansionPort: params.context.dependencies.pathExpansionPort,
-    warn: params.context.warn
+    warn: params.context.warn,
+    degradationReasons: params.context.degradationReasons
   });
   if (params.context.dependencies.pathExpansionPort === undefined) {
     return Object.freeze({
@@ -291,6 +293,7 @@ async function admitPathAndGraphExpansionCandidates(
     maxGraphHops: MAX_GRAPH_HOPS,
     dynamicRecallEdgeFanout: DYNAMIC_RECALL_EDGE_FANOUT,
     multiSeedGraphFanOutCap: MULTI_SEED_GRAPH_FAN_OUT_CAP,
-    warn: params.context.warn
+    warn: params.context.warn,
+    degradationReasons: params.context.degradationReasons
   });
 }

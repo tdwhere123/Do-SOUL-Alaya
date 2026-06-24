@@ -75,7 +75,10 @@ export interface RecallServiceMemoryRepoPort {
   ): Promise<readonly Readonly<MemoryEntry>[]>;
   // Optional id-batch lookup. Used by the embedding-on coarse-injection path
   // to resolve workspace cosine neighbors into MemoryEntry candidates.
-  findByIds?(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByIds?(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
 // Evidence FTS port consumed by the recall service. The implementing repo
@@ -106,6 +109,7 @@ export interface RecallServiceSynthesisSearchPort {
     limit: number
   ): Promise<readonly KeywordSearchResult[]>;
   findByIds(
+    workspaceId: string,
     objectIds: readonly string[]
   ): Promise<readonly Readonly<SynthesisCapsule>[]>;
 }
@@ -148,7 +152,7 @@ export interface RecallServiceProjectMappingPort {
 }
 
 export interface RecallServiceClaimResolverPort {
-  findByIds(objectIds: readonly string[]): Promise<readonly Readonly<{
+  findByIds(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<{
     readonly object_id: string;
     readonly source_object_refs: readonly string[];
   }>[]>;

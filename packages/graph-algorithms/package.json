@@ -1,0 +1,19 @@
+{
+  "name": "@do-soul/alaya-graph-algorithms",
+  "version": "0.3.11",
+  "private": true,
+  "description": "Dependency-free graph algorithms shared by Alaya implementation packages.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "pnpm exec vitest run --project @do-soul/alaya-graph-algorithms",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
+  },
+  "files": ["dist/"]
+}

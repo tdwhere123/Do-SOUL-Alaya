@@ -6,6 +6,9 @@ These rules always win over lower-level docs and task-card convenience.
 
 1. `packages/protocol` is the domain leaf package and depends only on
    `zod`.
+1a. `packages/graph-algorithms` is a dependency-free pure algorithm helper
+   package. It may not define domain types, EventLog payloads, runtime
+   transitions, or storage contracts.
 2. All domain types come from `@do-soul/alaya-protocol`; do not redefine
    business types in app or package-local code.
 3. `apps/core-daemon` is the wiring layer. Packages must not import

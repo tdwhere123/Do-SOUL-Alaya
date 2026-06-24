@@ -7,6 +7,7 @@ const REQUEST_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
 const REQUEST_BODY_PRESENCE_PROBE_TIMEOUT_MS = 0;
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 500;
+const MAX_LIST_OFFSET = 1_000_000;
 
 export interface ListPagination {
   readonly limit: number;
@@ -64,7 +65,7 @@ export function parseListPagination(context: Context): ListPagination {
       "offset",
       0,
       0,
-      Number.MAX_SAFE_INTEGER
+      MAX_LIST_OFFSET
     )
   };
 }

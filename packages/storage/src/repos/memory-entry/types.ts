@@ -59,7 +59,10 @@ export interface MemoryEntryRepo {
     }
   ): Readonly<MemoryEntry>;
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
-  findByIds(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   findByWorkspaceId(
     workspaceId: string,
     tier?: StorageTier,

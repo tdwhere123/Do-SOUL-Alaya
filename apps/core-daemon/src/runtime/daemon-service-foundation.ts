@@ -240,7 +240,8 @@ function createSurfaceService(
 
 function createGovernanceServices(input: DaemonServiceFoundationInput) {
   const sessionOverrideService = new SessionOverrideService({
-    eventLogRepo: input.eventLogRepo
+    eventLogRepo: input.eventLogRepo,
+    runLookup: input.runRepo
   });
   const proposalService = new ProposalService({
     proposalRepo: input.proposalRepo,

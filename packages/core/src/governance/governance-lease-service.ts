@@ -19,6 +19,7 @@ import { CoreError } from "../shared/errors.js";
 import { SYSTEM_ACTOR } from "../shared/actors.js";
 import { addDuration, readNow } from "../shared/time.js";
 import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../shared/validators.js";
+import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "./run-workspace-guard.js";
 
 const LEASE_DURATION_MS = 5 * 60 * 1000;
 
@@ -48,6 +49,7 @@ export interface GovernanceLeaseServiceEventLogPort {
 
 export interface GovernanceLeaseServiceDependencies {
   readonly eventLogRepo: GovernanceLeaseServiceEventLogPort;
+  readonly runLookup: GovernanceRunWorkspaceLookup;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
 }
@@ -76,6 +78,7 @@ export class GovernanceLeaseService {
     const occurredAt = readNow(this.dependencies.now);
     const runId = parseNonEmptyString(params.runId, "runId");
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
+    await assertGovernanceRunWorkspace(this.dependencies.runLookup, runId, workspaceId);
     const runtimeId = this.generateRuntimeId();
     const expiresAt = normalizeExpiresAt(params.expiresAt ?? addDuration(occurredAt, LEASE_DURATION_MS));
     const turnId = normalizeOptionalNonEmptyString(params.turnId);

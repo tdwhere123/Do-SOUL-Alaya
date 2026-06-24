@@ -32,6 +32,7 @@ const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
 const synthesisCapsuleRepo = new SqliteSynthesisCapsuleRepo(database);
 const pathRelationRepo = new SqlitePathRelationRepo(database);
 const MEMORY_ENTRY_PAGE_LIMIT = 500;
+const MAX_WORKER_PAGE_LIMIT = 5000;
 let closed = false;
 
 parentPort.on("message", (message: unknown) => {
@@ -134,7 +135,10 @@ async function runMemoryOperation(
         readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
       );
     case "memory.findByIds":
-      return await memoryEntryRepo.findByIds(readStringArray(payload.objectIds, "objectIds"));
+      return await memoryEntryRepo.findByIds(
+        readString(payload.workspaceId, "workspaceId"),
+        readStringArray(payload.objectIds, "objectIds")
+      );
   }
 }
 
@@ -151,10 +155,10 @@ async function runEvidenceOperation(
   }
 
   const workspaceId = readString(payload.workspaceId, "workspaceId");
-  const results = await evidenceCapsuleRepo.findByIds(
+  return await evidenceCapsuleRepo.findByIds(
+    workspaceId,
     readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
   );
-  return results.filter((evidence) => evidence.workspace_id === workspaceId);
 }
 
 async function runSynthesisOperation(
@@ -169,14 +173,10 @@ async function runSynthesisOperation(
     );
   }
 
-  const scoped = [];
-  for (const objectId of readStringArray(payload.objectIds, "objectIds")) {
-    const synthesis = await synthesisCapsuleRepo.findById(objectId);
-    if (synthesis !== null) {
-      scoped.push(synthesis);
-    }
-  }
-  return scoped;
+  return await synthesisCapsuleRepo.findByIds(
+    readString(payload.workspaceId, "workspaceId"),
+    readStringArray(payload.objectIds, "objectIds")
+  );
 }
 
 async function runPathOperation(
@@ -366,9 +366,17 @@ function readStringArray(value: unknown, name: string): readonly string[] {
 
 function readPage(value: unknown): { readonly limit: number; readonly offset: number } {
   const payload = asPayload(value);
+  const limit = readNumber(payload.limit, "page.limit");
+  if (!Number.isInteger(limit) || limit < 0 || limit > MAX_WORKER_PAGE_LIMIT) {
+    throw new Error(`worker payload page.limit must be an integer between 0 and ${MAX_WORKER_PAGE_LIMIT}`);
+  }
+  const offset = readNumber(payload.offset, "page.offset");
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error("worker payload page.offset must be a non-negative integer");
+  }
   return {
-    limit: readNumber(payload.limit, "page.limit"),
-    offset: readNumber(payload.offset, "page.offset")
+    limit,
+    offset
   };
 }
 

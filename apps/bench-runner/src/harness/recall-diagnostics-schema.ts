@@ -131,6 +131,14 @@ const RecallGraphExpansionPlaneCountPerEdgeTypeSchema = z
   .strict()
   .readonly();
 
+const RecallDegradationReasonSchema = z.enum([
+  "evidence_fts_failed",
+  "synthesis_fts_failed",
+  "embedding_coarse_injection_failed",
+  "graph_expansion_failed",
+  "path_expansion_failed"
+]);
+
 // see also: packages/core/src/recall/recall-service-types.ts
 //   RecallMultiSeedGraphFanInDiagnostics
 const RecallMultiSeedGraphFanInDiagnosticsSchema = z
@@ -178,6 +186,7 @@ export const BenchRecallDiagnosticsSchema = z
       "provider_not_requested"
     ]),
     provider_degradation_reason: z.string().nullable(),
+    degradation_reasons: z.array(RecallDegradationReasonSchema).readonly().optional(),
     embedding_workspace_scan_cap: z.number().int().nonnegative().optional(),
     embedding_workspace_scanned_count: z.number().int().nonnegative().optional(),
     embedding_workspace_truncated: z.boolean().optional(),

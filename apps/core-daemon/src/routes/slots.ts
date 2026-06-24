@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { z } from "zod";
 import { CoreError, type ArbitrationService, type SlotService, type WorkspaceService } from "@do-soul/alaya-core";
 import { parseJsonBody } from "./shared.js";
 
@@ -8,9 +9,9 @@ export interface SlotRouteServices {
   readonly arbitrationService?: ArbitrationService;
 }
 
-interface ResolveSlotPayload {
-  readonly winner_claim_id: string;
-}
+const ResolveSlotBodySchema = z.object({
+  winner_claim_id: z.string().trim().min(1)
+}).strict().readonly();
 
 export function registerSlotRoutes(app: Hono, services: SlotRouteServices): void {
   app.get("/workspaces/:wsId/slots", async (context) => {
@@ -37,16 +38,14 @@ export function registerSlotRoutes(app: Hono, services: SlotRouteServices): void
     const workspaceId = context.req.param("wsId");
     await services.workspaceService.getById(workspaceId);
 
-    const body = (await parseJsonBody(context.req.json.bind(context.req))) as ResolveSlotPayload;
-    const winnerClaimId = body.winner_claim_id?.trim() ?? "";
-
-    if (winnerClaimId.length === 0) {
-      throw new CoreError("VALIDATION", "winner_claim_id is required");
+    const body = ResolveSlotBodySchema.safeParse(await parseJsonBody(context.req.json.bind(context.req)));
+    if (!body.success) {
+      throw new CoreError("VALIDATION", "Invalid request body");
     }
 
     const updated = await services.arbitrationService.resolveSlotConflict(
       context.req.param("id"),
-      winnerClaimId,
+      body.data.winner_claim_id,
       workspaceId
     );
     return context.json({ success: true, data: updated }, 200);

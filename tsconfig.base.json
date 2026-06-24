@@ -18,6 +18,7 @@
     "moduleDetection": "force",
     "paths": {
       "@do-soul/alaya-protocol": ["./packages/protocol/src/index.ts"],
+      "@do-soul/alaya-graph-algorithms": ["./packages/graph-algorithms/src/index.ts"],
       "@do-soul/alaya-core": ["./packages/core/src/index.ts"],
       "@do-soul/alaya-soul": ["./packages/soul/src/index.ts"],
       "@do-soul/alaya-engine-gateway": ["./packages/engine-gateway/src/index.ts"],

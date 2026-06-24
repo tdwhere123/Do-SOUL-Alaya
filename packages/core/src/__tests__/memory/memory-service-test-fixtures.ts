@@ -108,7 +108,7 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
     ...event
   }));
   const queryByEntitySpy = vi.fn(async () => [] as readonly EventLogEntry[]);
-  const evidenceFindByIdSpy = vi.fn(async () => ({ object_id: "evidence" }));
+  const evidenceFindByIdSpy = vi.fn(async () => ({ object_id: "evidence", workspace_id: "workspace-1" }));
   const notifySpy = vi.fn(async () => {});
   const repoUpdateSpy = vi.fn(async (_objectId: string, fields: MemoryEntryRepoUpdateFields) =>
     Object.freeze(
@@ -191,7 +191,7 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
       create: vi.fn(async (entry) => Object.freeze({ ...entry })),
       createWithinTransaction: repoCreateWithinTransactionSpy,
       findById: vi.fn(async () => createMemoryEntry()),
-      findByIds: vi.fn(async (objectIds: readonly string[]) =>
+      findByIds: vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
         objectIds.map((objectId) => createMemoryEntry({ object_id: objectId }))
       ),
       findByWorkspaceId: vi.fn(async () => []),

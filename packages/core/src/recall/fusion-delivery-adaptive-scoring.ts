@@ -33,18 +33,18 @@ export function resolveRrfFusionWeights(params: Readonly<{
   readonly streams: readonly RecallFusionStream[];
   readonly baseWeights: Readonly<Record<RecallFusionStream, number>>;
 }>): ResolvedRecallFusionWeights {
-  const overrides = params.policy.scoring_weight_overrides?.fusion_weights;
-  const fallbackK = readPositiveInteger(overrides?.RRF_K ?? overrides?.rrf_k, RECALL_RRF_DEFAULT_K);
+  const overrides = parseFusionWeightOverrides(params.policy.scoring_weight_overrides?.fusion_weights);
+  const fallbackK = readPositiveInteger(overrides.RRF_K ?? overrides.rrf_k, RECALL_RRF_DEFAULT_K);
   const weights = Object.fromEntries(
     params.streams.map((stream) => {
       const baseWeight = resolveDefaultFusionWeightForIntent(stream, params.baseWeights[stream], params.queryProbes);
-      return [stream, Math.max(0, overrides?.[stream] ?? baseWeight)];
+      return [stream, overrides[stream] ?? baseWeight];
     })
   ) as Record<RecallFusionStream, number>;
   const kByStream = Object.fromEntries(
     params.streams.map((stream) => [
       stream,
-      readPositiveInteger(overrides?.[`${stream}_rrf_k`], resolveDefaultRrfK(stream, fallbackK, params.queryProbes))
+      readPositiveInteger(overrides[`${stream}_rrf_k`], resolveDefaultRrfK(stream, fallbackK, params.queryProbes))
     ])
   ) as Record<RecallFusionStream, number>;
   return Object.freeze({
@@ -62,6 +62,27 @@ export function resolveFusionContribution(params: FusionContributionParams): num
     contribution *= 1 + EMBEDDING_PATH_MODULATION_GAIN * Math.max(0, 2 * cos - 1);
   }
   return contribution;
+}
+
+function parseFusionWeightOverrides(value: unknown): Readonly<Record<string, number>> {
+  const record = toUnknownRecord(value);
+  if (record === null) {
+    return Object.freeze({});
+  }
+  const entries: Array<readonly [string, number]> = [];
+  for (const [key, candidate] of Object.entries(record)) {
+    if (typeof candidate === "number" && Number.isFinite(candidate) && candidate >= 0) {
+      entries.push([key, candidate]);
+    }
+  }
+  return Object.freeze(Object.fromEntries(entries));
+}
+
+function toUnknownRecord(value: unknown): Readonly<Record<string, unknown>> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return value as Readonly<Record<string, unknown>>;
 }
 
 function resolveDefaultRrfK(

@@ -87,8 +87,7 @@ function createRecallEvidenceSearchPort(
         ? []
         : await input.evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
     findByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) => {
-      const results = await input.evidenceCapsuleRepo.findByIds(evidenceObjectIds);
-      return results.filter((evidence) => evidence.workspace_id === workspaceId);
+      return await input.evidenceCapsuleRepo.findByIds(workspaceId, evidenceObjectIds);
     }
   };
 }
@@ -102,16 +101,8 @@ function createRecallSynthesisSearchPort(
       input.synthesisCapsuleRepo.searchByKeyword === undefined
         ? []
         : await input.synthesisCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
-    findByIds: async (objectIds: readonly string[]) => {
-      const scoped = [];
-      for (const objectId of objectIds) {
-        const synthesis = await input.synthesisCapsuleRepo.findById(objectId);
-        if (synthesis !== null) {
-          scoped.push(synthesis);
-        }
-      }
-      return scoped;
-    }
+    findByIds: async (workspaceId: string, objectIds: readonly string[]) =>
+      await input.synthesisCapsuleRepo.findByIds(workspaceId, objectIds)
   };
 }
 

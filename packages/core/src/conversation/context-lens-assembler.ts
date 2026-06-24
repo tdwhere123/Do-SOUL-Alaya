@@ -173,7 +173,10 @@ export class ContextLensAssembler {
       policyOverride: recallPolicy ?? undefined
     });
     const strictWinners = await this.loadStrictWinners(params.run.workspace_id);
-    const recalledMemories = await this.loadRecalledMemories(recallResult.candidates);
+    const recalledMemories = await this.loadRecalledMemories(
+      params.run.workspace_id,
+      recallResult.candidates
+    );
     const activeOverrides = this.dependencies.overrideService !== undefined
       ? await this.dependencies.overrideService.getActiveFor(params.run.run_id)
       : this.resolveMissingOverrideService(params.run.run_id, params.run.workspace_id);
@@ -303,7 +306,7 @@ export class ContextLensAssembler {
       return Object.freeze([]);
     }
 
-    const claims = await this.dependencies.claimRepo.findByIds(winnerClaimIds);
+    const claims = await this.dependencies.claimRepo.findByIds(workspaceId, winnerClaimIds);
     const claimById = new Map(claims.map((claim) => [claim.object_id, claim] as const));
 
     return Object.freeze(
@@ -314,14 +317,17 @@ export class ContextLensAssembler {
     );
   }
 
-  private async loadRecalledMemories(candidates: readonly Readonly<RecallCandidate>[]): Promise<ReadonlyMap<string, Readonly<MemoryEntry>>> {
+  private async loadRecalledMemories(
+    workspaceId: string,
+    candidates: readonly Readonly<RecallCandidate>[]
+  ): Promise<ReadonlyMap<string, Readonly<MemoryEntry>>> {
     const objectIds = [...new Set(candidates.map((candidate) => candidate.object_id))];
     if (objectIds.length === 0) {
       return new Map();
     }
 
     if (this.dependencies.memoryRepo.findByIds !== undefined) {
-      const memories = await this.dependencies.memoryRepo.findByIds(objectIds);
+      const memories = await this.dependencies.memoryRepo.findByIds(workspaceId, objectIds);
       const memoryById = new Map(memories.map((memory) => [memory.object_id, memory] as const));
       return new Map(
         objectIds.flatMap((objectId) => {
@@ -334,7 +340,7 @@ export class ContextLensAssembler {
     const entries = await Promise.all(
       objectIds.map(async (objectId) => {
         const memory = await this.dependencies.memoryRepo.findById(objectId);
-        return memory === null ? null : ([objectId, memory] as const);
+        return memory === null || memory.workspace_id !== workspaceId ? null : ([objectId, memory] as const);
       })
     );
 

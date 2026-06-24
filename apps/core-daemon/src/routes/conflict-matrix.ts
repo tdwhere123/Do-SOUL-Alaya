@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { z } from "zod";
 import { CoreError, type ArbitrationService, type WorkspaceService } from "@do-soul/alaya-core";
 import { parseJsonBody, rejectUnexpectedRequestBody } from "./shared.js";
 import { ConflictEdgeTypeSchema } from "@do-soul/alaya-protocol";
@@ -8,12 +9,12 @@ export interface ConflictMatrixRouteServices {
   readonly arbitrationService: ArbitrationService;
 }
 
-interface CreateEdgePayload {
-  readonly source_claim_id: string;
-  readonly target_claim_id: string;
-  readonly edge_type: string;
-  readonly created_by?: string;
-}
+const CreateConflictEdgeBodySchema = z.object({
+  source_claim_id: z.string().trim().min(1),
+  target_claim_id: z.string().trim().min(1),
+  edge_type: ConflictEdgeTypeSchema,
+  created_by: z.string().trim().min(1).optional()
+}).strict().readonly();
 
 export function registerConflictMatrixRoutes(app: Hono, services: ConflictMatrixRouteServices): void {
   app.get("/workspaces/:wsId/conflict-matrix-edges", async (context) => {
@@ -28,7 +29,7 @@ export function registerConflictMatrixRoutes(app: Hono, services: ConflictMatrix
     const workspaceId = context.req.param("wsId");
     await services.workspaceService.getById(workspaceId);
 
-    const body = (await parseJsonBody(context.req.json.bind(context.req))) as CreateEdgePayload;
+    const body = await parseJsonBody(context.req.json.bind(context.req));
     const payload = parseCreateEdgePayload(body);
 
     const created = await services.arbitrationService.createEdge(
@@ -65,35 +66,21 @@ export function registerConflictMatrixRoutes(app: Hono, services: ConflictMatrix
   });
 }
 
-function parseCreateEdgePayload(value: CreateEdgePayload): {
+function parseCreateEdgePayload(value: unknown): {
   readonly source_claim_id: string;
   readonly target_claim_id: string;
   readonly edge_type: ReturnType<typeof ConflictEdgeTypeSchema.parse>;
   readonly created_by?: string;
 } {
-  const sourceClaimId = value.source_claim_id?.trim() ?? "";
-  const targetClaimId = value.target_claim_id?.trim() ?? "";
-
-  if (sourceClaimId.length === 0) {
-    throw new CoreError("VALIDATION", "source_claim_id is required");
+  const parsed = CreateConflictEdgeBodySchema.safeParse(value);
+  if (!parsed.success) {
+    throw new CoreError("VALIDATION", "Invalid request body");
   }
+  const payload = parsed.data;
 
-  if (targetClaimId.length === 0) {
-    throw new CoreError("VALIDATION", "target_claim_id is required");
-  }
-
-  if (sourceClaimId === targetClaimId) {
+  if (payload.source_claim_id === payload.target_claim_id) {
     throw new CoreError("VALIDATION", "source_claim_id and target_claim_id must be different");
   }
 
-  try {
-    return {
-      source_claim_id: sourceClaimId,
-      target_claim_id: targetClaimId,
-      edge_type: ConflictEdgeTypeSchema.parse(value.edge_type),
-      created_by: value.created_by
-    };
-  } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid edge_type", { cause: error });
-  }
+  return payload;
 }

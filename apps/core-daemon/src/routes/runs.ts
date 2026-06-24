@@ -2,6 +2,7 @@ import type { Context, Hono } from "hono";
 import {
   CoreError,
   type ConversationService,
+  reportAsyncSideEffectFailure,
   type RunHotStateService,
   type RunService,
   type WorkspaceService
@@ -32,6 +33,7 @@ export interface RunRouteServices {
   readonly conversationService: ConversationService;
   readonly runHotStateService: RunHotStateService;
   readonly eventLogRepo?: {
+    append?(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
     queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
     queryByRunAll(runId: string): Promise<readonly EventLogEntry[]>;
     /**
@@ -97,7 +99,9 @@ function registerRunCollectionRoutes(app: Hono, services: RunRouteServices): voi
   });
 
   app.get("/runs/:id", async (context) => {
-    const run = await services.runService.getById(context.req.param("id"));
+    const runId = context.req.param("id");
+    await assertRunWorkspace(services, runId);
+    const run = await services.runService.getById(runId);
     return context.json({ success: true, data: run }, 200);
   });
 }
@@ -125,8 +129,10 @@ function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
   });
 
   app.post("/runs/:id/messages/stream", async (context) => {
+    const runId = context.req.param("id");
+    await assertRunWorkspace(services, runId);
     const response = await services.conversationService.sendMessageStreaming(
-      context.req.param("id"),
+      runId,
       await parseJsonBody(context.req.json.bind(context.req))
     );
 
@@ -151,6 +157,7 @@ function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void
   app.patch("/runs/:id", async (context) => {
     const runId = context.req.param("id");
     const body = parseRunRenameInput(runId, await parseJsonBody(context.req.json.bind(context.req)));
+    await assertRunWorkspace(services, runId);
     const run = await services.runService.rename(body);
     return context.json({ success: true, data: run }, 200);
   });
@@ -162,7 +169,7 @@ function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void
 
 async function getRunSnapshot(context: Context, services: RunRouteServices): Promise<Response> {
   const runId = context.req.param("id")!;
-  await assertRunWorkspace(services, runId);
+  const workspaceId = await assertRunWorkspace(services, runId);
   const snapshot = await services.runHotStateService.getSnapshot(runId);
   if (snapshot === null) throw new CoreError("NOT_FOUND", "Run not found");
   try {
@@ -171,22 +178,47 @@ async function getRunSnapshot(context: Context, services: RunRouteServices): Pro
       200
     );
   } catch (error) {
-    if (error instanceof SnapshotCompactionError) return snapshotCompactionFailure(context, services, runId, error);
+    if (error instanceof SnapshotCompactionError) {
+      return await snapshotCompactionFailure(context, services, runId, workspaceId, error);
+    }
     throw error;
   }
 }
 
-function snapshotCompactionFailure(
+async function snapshotCompactionFailure(
   context: Context,
   services: RunRouteServices,
   runId: string,
+  workspaceId: string,
   error: SnapshotCompactionError
-): Response {
+): Promise<Response> {
   logRunRouteWarning(services.warn, "[daemon] snapshot compaction failed", {
     runId,
     message: error.message
   });
-  return context.json({ success: false, error: "Failed to compact run snapshot" }, 500);
+  await reportAsyncSideEffectFailure(
+    {
+      source: "daemon.runs.snapshot",
+      operation: "snapshot_compaction",
+      subjectType: "run",
+      subjectId: runId,
+      workspaceId,
+      runId,
+      severity: "error",
+      warningCode: "ALAYA_RUN_SNAPSHOT_COMPACTION_FAILED",
+      warningMessage: "[RunSnapshot] snapshot compaction failed",
+      eventLogRepo:
+        services.eventLogRepo?.append === undefined
+          ? undefined
+          : { append: (entry) => services.eventLogRepo!.append!(entry) }
+    },
+    error
+  );
+  return context.json({
+    success: false,
+    error: "Failed to compact run snapshot",
+    code: "SNAPSHOT_COMPACTION_FAILED"
+  }, 500);
 }
 
 async function deleteRun(context: Context, services: RunRouteServices): Promise<Response> {
@@ -202,9 +234,10 @@ async function deleteRun(context: Context, services: RunRouteServices): Promise<
 
 // Resolve the run then confirm its workspace exists (mirror recall.ts) so an
 // unscoped /runs/:id route cannot reach a run in a missing/foreign workspace.
-async function assertRunWorkspace(services: RunRouteServices, runId: string): Promise<void> {
+async function assertRunWorkspace(services: RunRouteServices, runId: string): Promise<string> {
   const run = await services.runService.getById(runId);
   await services.workspaceService.getById(run.workspace_id);
+  return run.workspace_id;
 }
 
 function clearRunLocalState(services: RunRouteServices, runId: string): void {

@@ -92,7 +92,7 @@ export function createDependencies(
       findByWorkspace: vi.fn(async () => [createSlot()])
     },
     claimRepo: {
-      findByIds: vi.fn(async (objectIds: readonly string[]) =>
+      findByIds: vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
         objectIds.flatMap((objectId) => {
           const loaded = claimById.get(objectId);
           return loaded === undefined ? [] : [loaded];
@@ -100,7 +100,7 @@ export function createDependencies(
       )
     },
     memoryRepo: {
-      findByIds: vi.fn(async (objectIds: readonly string[]) =>
+      findByIds: vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
         objectIds.flatMap((objectId) => {
           const loaded = memories.get(objectId);
           return loaded === undefined ? [] : [loaded];

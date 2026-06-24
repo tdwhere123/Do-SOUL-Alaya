@@ -180,7 +180,7 @@ export function createDependencies(
           }
         }),
     claimResolverPort: {
-      findByIds: vi.fn(async (ids: readonly string[]) =>
+      findByIds: vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
         ids
           .filter((id) => claimSourceRefs[id] !== undefined)
           .map((id) => ({ object_id: id, source_object_refs: claimSourceRefs[id] ?? [] }))

@@ -50,6 +50,11 @@ interface FineAssessmentSelectionContext {
   readonly ranks: FineAssessmentRankDiagnostics;
 }
 
+interface FineAssessmentAdmission {
+  readonly droppedReason: RecallCandidateDropReason | null;
+  readonly tokenEstimate: number | null;
+}
+
 export function selectFineAssessmentCandidates(params: {
   readonly deliveryOrderedCandidates: readonly FineAssessmentCandidate[];
   readonly config: Readonly<RecallPolicy>["fine_assessment"];
@@ -93,12 +98,12 @@ function appendFineAssessmentCandidate(
   context: FineAssessmentSelectionContext
 ): FineAssessmentAccumulator {
   const candidateKey = buildRecallCandidateDedupeKey(candidate);
-  const droppedReason = resolveDropReason(accumulator, candidate, candidateKey, context);
-  if (droppedReason !== null) {
-    accumulator.diagnostics.push(createFineAssessmentDiagnostic(candidate, candidateKey, selectionOrder, null, droppedReason, context));
+  const admission = resolveAdmission(accumulator, candidate, candidateKey, context);
+  if (admission.droppedReason !== null) {
+    accumulator.diagnostics.push(createFineAssessmentDiagnostic(candidate, candidateKey, selectionOrder, null, admission.droppedReason, context));
     return accumulator;
   }
-  const tokenEstimate = context.tokenEstimator.estimate(candidate.entry.content);
+  const tokenEstimate = admission.tokenEstimate ?? context.tokenEstimator.estimate(candidate.entry.content);
   const nextCandidate = buildRecallCandidate({
     candidate,
     relevanceScore: candidate.effectiveScore,
@@ -118,27 +123,28 @@ function appendFineAssessmentCandidate(
   return accumulator;
 }
 
-function resolveDropReason(
+function resolveAdmission(
   accumulator: FineAssessmentAccumulator,
   candidate: FineAssessmentCandidate,
   candidateKey: string,
   context: FineAssessmentSelectionContext
-): RecallCandidateDropReason | null {
+): FineAssessmentAdmission {
   if (accumulator.seen.has(candidateKey)) {
-    return "duplicate";
+    return { droppedReason: "duplicate", tokenEstimate: null };
   }
   const dimensionCount = accumulator.perDimensionCounts.get(candidate.entry.dimension) ?? 0;
   const dimensionLimit = context.config.budgets.per_dimension_limits?.[candidate.entry.dimension] ?? null;
   if (dimensionLimit !== null && dimensionCount >= dimensionLimit) {
-    return "dimension_limit";
+    return { droppedReason: "dimension_limit", tokenEstimate: null };
   }
   if (accumulator.selected.length + 1 > context.config.budgets.max_entries) {
-    return "max_entries";
+    return { droppedReason: "max_entries", tokenEstimate: null };
   }
-  if (accumulator.totalTokens + context.tokenEstimator.estimate(candidate.entry.content) > context.config.budgets.max_total_tokens) {
-    return "max_total_tokens";
+  const tokenEstimate = context.tokenEstimator.estimate(candidate.entry.content);
+  if (accumulator.totalTokens + tokenEstimate > context.config.budgets.max_total_tokens) {
+    return { droppedReason: "max_total_tokens", tokenEstimate };
   }
-  return null;
+  return { droppedReason: null, tokenEstimate };
 }
 
 function createFineAssessmentDiagnostic(

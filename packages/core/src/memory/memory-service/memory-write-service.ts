@@ -100,7 +100,7 @@ export class MemoryWriteService {
       superseded_by: null
     });
 
-    await this.validateEvidenceRefs(memoryEntry.evidence_refs);
+    await this.validateEvidenceRefs(memoryEntry.workspace_id, memoryEntry.evidence_refs);
     const eventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_CREATED,
       entity_type: "memory_entry",
@@ -238,13 +238,13 @@ export class MemoryWriteService {
     const parsedObjectId = parseObjectId(objectId);
     const parsedFields = parseUpdateFields(fields);
 
-    if (parsedFields.evidence_refs !== undefined) {
-      await this.validateEvidenceRefs(parsedFields.evidence_refs);
-    }
-
     const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
     if (existing === null) {
       throw new CoreError("NOT_FOUND", "Memory entry not found");
+    }
+
+    if (parsedFields.evidence_refs !== undefined) {
+      await this.validateEvidenceRefs(existing.workspace_id, parsedFields.evidence_refs);
     }
 
     if (existing.lifecycle_state === "archived") {
@@ -264,14 +264,14 @@ export class MemoryWriteService {
     const parsedReason = parseReason(input.reason);
     const parsedFields = parseUpdateFields(input.fields);
 
-    if (parsedFields.evidence_refs !== undefined) {
-      await this.validateEvidenceRefs(parsedFields.evidence_refs);
-    }
-
     const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
 
     if (existing === null || (parsedWorkspaceId !== undefined && existing.workspace_id !== parsedWorkspaceId)) {
       throw new CoreError("NOT_FOUND", "Memory entry not found");
+    }
+
+    if (parsedFields.evidence_refs !== undefined) {
+      await this.validateEvidenceRefs(existing.workspace_id, parsedFields.evidence_refs);
     }
 
     if (existing.lifecycle_state === "archived") {
@@ -334,7 +334,7 @@ export class MemoryWriteService {
     return await this.dependencies.memoryEntryRepo.updateScoped(objectId, workspaceId, fields);
   }
 
-  private async validateEvidenceRefs(evidenceRefs: readonly string[]): Promise<void> {
+  private async validateEvidenceRefs(workspaceId: string, evidenceRefs: readonly string[]): Promise<void> {
     if (evidenceRefs.length === 0) {
       return;
     }
@@ -342,7 +342,7 @@ export class MemoryWriteService {
     const distinctEvidenceRefs = [...new Set(evidenceRefs)];
     const findByIds = this.dependencies.evidenceService.findByIds;
     if (findByIds !== undefined) {
-      const evidence = await findByIds.call(this.dependencies.evidenceService, distinctEvidenceRefs);
+      const evidence = await findByIds.call(this.dependencies.evidenceService, workspaceId, distinctEvidenceRefs);
       const foundEvidenceRefs = new Set(evidence.map((entry) => entry.object_id));
       const firstMissing = distinctEvidenceRefs.find((evidenceRef) => !foundEvidenceRefs.has(evidenceRef));
       if (firstMissing !== undefined) {
@@ -358,7 +358,9 @@ export class MemoryWriteService {
       }))
     );
 
-    const firstMissing = results.find((result) => result.evidence === null);
+    const firstMissing = results.find(
+      (result) => result.evidence === null || result.evidence.workspace_id !== workspaceId
+    );
 
     if (firstMissing !== undefined) {
       throw new CoreError("VALIDATION", `Evidence reference not found: ${firstMissing.evidenceRef}`);

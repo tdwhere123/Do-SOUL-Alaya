@@ -281,6 +281,48 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
   });
 
 
+  it("deletes already-created evidence when memory creation fails after evidence creation", async () => {
+    const deps = createDeps();
+    deps.memoryService.create.mockRejectedValueOnce(new Error("memory create failed"));
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(createSignal());
+
+    expect(result).toMatchObject({
+      signal_id: "signal-1",
+      target_kind: "memory_and_claim",
+      success: false,
+      error: "memory create failed"
+    });
+    expect(result.created_objects).toEqual([]);
+    expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
+    expect(deps.evidenceService.deleteCreatedEvidence).toHaveBeenCalledWith("evidence-1");
+    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
+    expect(deps.claimService.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps evidence visible in created_objects when compensation delete fails", async () => {
+    const deps = createDeps();
+    deps.memoryService.create.mockRejectedValueOnce(new Error("memory create failed"));
+    deps.evidenceService.deleteCreatedEvidence.mockRejectedValueOnce(new Error("delete failed"));
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(createSignal());
+
+    expect(result).toMatchObject({
+      signal_id: "signal-1",
+      target_kind: "memory_and_claim",
+      success: false,
+      error: "delete failed"
+    });
+    expect(result.created_objects).toEqual([
+      { object_kind: "evidence_capsule", object_id: "evidence-1" }
+    ]);
+    expect(deps.evidenceService.deleteCreatedEvidence).toHaveBeenCalledWith("evidence-1");
+    expect(deps.claimService.create).not.toHaveBeenCalled();
+  });
+
+
   it("enqueues enrichment after memory_and_claim creates a memory entry (no inline enrichment)", async () => {
     const deps = createDeps();
     const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };

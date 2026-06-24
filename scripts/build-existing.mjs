@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 
 const projectDirs = [
   "packages/protocol",
+  "packages/graph-algorithms",
   "packages/eval",
   "packages/core",
   "packages/soul",

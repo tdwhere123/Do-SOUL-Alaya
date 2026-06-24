@@ -159,8 +159,11 @@ export class SqliteMemoryEntryRepo
     return await this.readQueries.findById(objectId);
   }
 
-  public async findByIds(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]> {
-    return await this.readQueries.findByIds(objectIds);
+  public async findByIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return await this.readQueries.findByIds(workspaceId, objectIds);
   }
 
   public async findByWorkspaceId(

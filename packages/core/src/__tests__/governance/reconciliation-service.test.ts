@@ -55,7 +55,7 @@ it("ADD: a neighbor below the similarity floor never reaches the LLM", async () 
     expect(decide).not.toHaveBeenCalled();
   });
 
-it("NOOP: a normalized-string-identical duplicate collapses with zero LLM call and creates nothing", async () => {
+	it("NOOP: a normalized-string-identical duplicate collapses with zero LLM call and creates nothing", async () => {
     const neighbor = createMemoryEntry({
       content: "The user lives in Berlin.",
       evidence_refs: ["evidence-old"]
@@ -90,9 +90,41 @@ it("NOOP: a normalized-string-identical duplicate collapses with zero LLM call a
     expect(append.mock.calls[0][0].caused_by).toContain(
       `dropped_content=${encodeURIComponent("The user lives in   Berlin.")}`
     );
-  });
+	  });
 
-it("a genuine ADD followed by a byte-identical re-seed collapses to NOOP and does not grow evidence_refs", async () => {
+	it("rejects a runId from another workspace before NOOP audit append", async () => {
+	    const neighbor = createMemoryEntry({
+	      content: "The user lives in Berlin.",
+	      evidence_refs: ["evidence-old"]
+	    });
+	    const { deps, append } = createDeps([neighbor], {
+	      runLookup: {
+	        getById: async (runId) =>
+	          runId === "run-foreign" ? { workspace_id: "workspace-other" } : { workspace_id: "workspace-1" }
+	      }
+	    });
+	    const service = new ReconciliationService(deps);
+
+	    const applyVerdict = vi.fn(async () => ({}));
+
+	    await expect(
+	      service.runWithDecision(
+	        {
+	          workspaceId: "workspace-1",
+	          runId: "run-foreign",
+	          signalId: "signal-1",
+	          incomingContent: "The user lives in Berlin.",
+	          incomingDomainTags: ["bench-seed"]
+	        },
+	        applyVerdict
+	      )
+	    ).rejects.toThrow("workspaceId does not match run workspace.");
+
+	    expect(applyVerdict).not.toHaveBeenCalled();
+	    expect(append).not.toHaveBeenCalled();
+	  });
+
+	it("a genuine ADD followed by a byte-identical re-seed collapses to NOOP and does not grow evidence_refs", async () => {
     // The store starts EMPTY. The first ingest is a genuine ADD that
     // mints exactly one evidence capsule and creates a row; that row is
     // then fed back into the neighbor pool. The second ingest of the

@@ -208,7 +208,7 @@ describe("RecallService embedding coarse-injection cap and floor", () => {
         })
       )
     );
-    const findByIds = vi.fn(async (ids: readonly string[]) =>
+    const findByIds = vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
       memories.filter((memory) => ids.includes(memory.object_id))
     );
     const embeddingRecallService = {

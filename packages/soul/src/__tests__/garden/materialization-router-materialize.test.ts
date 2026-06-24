@@ -110,17 +110,49 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
     const evidenceInputs = deps.evidenceService.create.mock.calls.map((call) =>
       call[0] as {
         readonly gist: string;
+        readonly physical_anchor: { readonly artifact_ref: string } | null;
         readonly semantic_anchor: { readonly summary: string };
       }
     );
 
-    expect(evidenceInputs[0].gist).toBe("Never print secrets. signal_ref_1");
-    expect(evidenceInputs[1].gist).toBe("Never print secrets. signal_ref_2");
-    expect(evidenceInputs[2].gist).toBe("Never print secrets. signal_ref_3");
+    expect(evidenceInputs[0].gist).toBe("Never print secrets. msg-1");
+    expect(evidenceInputs[0].physical_anchor?.artifact_ref).toBe("msg-1");
+    expect(evidenceInputs[1].gist).toBe("Never print secrets. msg-2");
+    expect(evidenceInputs[1].physical_anchor?.artifact_ref).toBe("msg-2");
+    expect(evidenceInputs[2].gist).toBe("Never print secrets. msg-3");
+    expect(evidenceInputs[2].physical_anchor?.artifact_ref).toBe("msg-3");
     for (const evidenceInput of evidenceInputs) {
       expect(evidenceInput.gist).not.toContain("[routing:");
       expect(evidenceInput.semantic_anchor.summary).not.toContain("[routing:");
     }
+  });
+
+  it("does not fabricate evidence when synthesis materialization lacks two real evidence refs", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materialize(
+      createSignal({
+        signal_kind: "potential_synthesis",
+        evidence_refs: ["msg-1"],
+        source_memory_refs: ["memory-source-1", "memory-source-2"]
+      }),
+      {
+        kind: "synthesis",
+        route_target: "synthesis",
+        routing_reason: "forced synthesis test target"
+      }
+    );
+
+    expect(result).toMatchObject({
+      signal_id: "signal-1",
+      target_kind: "synthesis",
+      success: false,
+      error: "Synthesis materialization requires at least two evidence_refs"
+    });
+    expect(result.created_objects).toEqual([]);
+    expect(deps.evidenceService.create).not.toHaveBeenCalled();
+    expect(deps.synthesisService.create).not.toHaveBeenCalled();
   });
 
 

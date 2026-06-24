@@ -12,6 +12,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import { parseNonEmptyString } from "../shared/validators.js";
+import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "./run-workspace-guard.js";
 
 const OVERRIDE_REHYDRATE_FAILED_WARNING_CODE = "ALAYA_SESSION_OVERRIDE_REHYDRATE_FAILED";
 
@@ -24,6 +25,7 @@ export interface SessionOverrideServiceEventLogPort {
 
 export interface SessionOverrideServiceDependencies {
   readonly eventLogRepo: SessionOverrideServiceEventLogPort;
+  readonly runLookup: GovernanceRunWorkspaceLookup;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
 }
@@ -57,6 +59,7 @@ export class SessionOverrideService {
     const occurredAt = this.now();
     const runId = parseNonEmptyString(params.runId, "runId");
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
+    await assertGovernanceRunWorkspace(this.dependencies.runLookup, runId, workspaceId);
     const derivedFrom = await this.resolveDerivedFrom(runId, params.derivedFrom);
     const existing = await this.resolveStoredOverrides(runId);
     const override = this.buildSessionOverride(params, derivedFrom, occurredAt);

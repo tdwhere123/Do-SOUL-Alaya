@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ControlPlaneObjectKind, MemoryDimension, ObjectKind, RecallContextEventType, RetentionPolicy, ScopeClass, type SessionOverride } from "@do-soul/alaya-protocol";
 import type { RecallCandidate } from "../../recall/recall-service.js";
-import { ContextLensAssembler } from "../../conversation/context-lens-assembler.js";
+import { ContextLensAssembler, type LensAssemblerDependencies } from "../../conversation/context-lens-assembler.js";
 import { NOW, EXPIRY, CLAIM_ID, GLOBAL_MEMORY_ID, PROJECT_MEMORY_ID, RECALL_POLICY_ID, TASK_SURFACE_ID, createDependencies, createGlobalCandidate, createMemoryEntry, createProjectCandidate, createRecallPolicy, createRecallResult, createTaskSurface } from "./context-lens-assembler-test-fixtures.js";
 
 describe("context lens assembler", () => {
@@ -78,8 +78,8 @@ it("assembles task-surface entries, strict winners, recalled memories, evidence 
     expect(result.workingProjection.recall_policy_ref).toBe(RECALL_POLICY_ID);
     expect(assembler.getLastLens("run-1")).toEqual(result.contextLens);
     expect(assembler.getLastLens("missing-run")).toBeNull();
-    expect(dependencies.claimRepo.findByIds).toHaveBeenCalledWith([CLAIM_ID]);
-    expect(dependencies.memoryRepo.findByIds).toHaveBeenCalledWith([PROJECT_MEMORY_ID, GLOBAL_MEMORY_ID]);
+    expect(dependencies.claimRepo.findByIds).toHaveBeenCalledWith("workspace-1", [CLAIM_ID]);
+    expect(dependencies.memoryRepo.findByIds).toHaveBeenCalledWith("workspace-1", [PROJECT_MEMORY_ID, GLOBAL_MEMORY_ID]);
     expect(dependencies.memoryRepo.findById).not.toHaveBeenCalled();
     expect(dependencies.recallService.buildDefaultPolicy).toHaveBeenCalledWith("analyze", TASK_SURFACE_ID);
 
@@ -157,6 +157,50 @@ it("prepends session overrides and exposes correction content in the working pro
         })
       })
     );
+  });
+
+it("filters cross-workspace memories when using the single-id fallback loader", async () => {
+    const crossWorkspaceMemoryId = "9d599a9a-4940-4f23-a88e-0149f82ab099";
+    const crossWorkspaceMemory = createMemoryEntry({
+      object_id: crossWorkspaceMemoryId,
+      workspace_id: "workspace-2",
+      content: "Foreign workspace memory."
+    });
+    const dependencies = createDependencies({
+      recallService: {
+        recall: vi.fn(async () => createRecallResult([
+          {
+            ...createProjectCandidate(),
+            object_id: crossWorkspaceMemoryId
+          } satisfies RecallCandidate
+        ])),
+        buildDefaultPolicy: vi.fn(() => createRecallPolicy(TASK_SURFACE_ID, "analyze"))
+      },
+      slotRepo: {
+        findByWorkspace: vi.fn(async () => [])
+      },
+      memoryRepo: {
+        findById: vi.fn(async () => crossWorkspaceMemory),
+        findByIds: undefined
+      } as unknown as LensAssemblerDependencies["memoryRepo"]
+    });
+    const assembler = new ContextLensAssembler(dependencies);
+
+    const result = await assembler.assemble({
+      run: {
+        run_id: "run-1",
+        workspace_id: "workspace-1",
+        run_mode: "chat",
+        title: "Main Run"
+      },
+      surfaceId: "surface://chat/main",
+      displayName: "Implement ContextLens"
+    });
+
+    expect(result.workingProjection.entries).not.toContainEqual(
+      expect.objectContaining({ object_id: crossWorkspaceMemoryId })
+    );
+    expect(dependencies.memoryRepo.findById).toHaveBeenCalledWith(crossWorkspaceMemoryId);
   });
 
 it("falls back to full global candidate content when no local memory row exists", async () => {
