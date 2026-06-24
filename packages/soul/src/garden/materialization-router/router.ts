@@ -6,7 +6,11 @@ import type {
   MaterializationRouterDeps,
   MaterializationTarget
 } from "./contracts.js";
-import { hasMaterializableSignalMemoryRefs, routeByObjectKind } from "./inputs.js";
+import {
+  hasMaterializableSignalMemoryRefs,
+  routeByObjectKind,
+  signalCarriesProjectionPayload
+} from "./inputs.js";
 import { MaterializationRouterRouteHandlers } from "./route-handlers.js";
 
 type SignalRouteStrategy = {
@@ -103,7 +107,7 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
     ) {
       const objectKindRoute = routeByObjectKind(signal.object_kind);
       if (objectKindRoute !== null) {
-        return objectKindRoute;
+        return this.liftSignalOnlyForProjection(signal, objectKindRoute);
       }
       // invariant: unknown object_kind never enters governance review as
       // a draft claim — that would re-introduce the producer-side claim
@@ -143,6 +147,27 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
       // invariant: unroutable signals are archived as questionable evidence only;
       // they do not produce verified long-term objects (invariant #16).
       routing_reason: "unroutable signal -> evidence archive (questionable evidence only)"
+    };
+  }
+
+  // A signal_only object_kind carrying a memory projection is lifted to
+  // memory_entry_only so buildMemoryInput's projection fields reach a recallable
+  // memory_entry. Gated by projectionRoutingEnabled (default-off → unchanged).
+  private liftSignalOnlyForProjection(
+    signal: CandidateMemorySignal,
+    route: MaterializationTarget
+  ): MaterializationTarget {
+    if (
+      this.dependencies.projectionRoutingEnabled !== true ||
+      route.route_target !== "signal_only" ||
+      !signalCarriesProjectionPayload(signal)
+    ) {
+      return route;
+    }
+    return {
+      kind: "evidence_only",
+      route_target: "memory_entry_only",
+      routing_reason: `${route.routing_reason} -> memory_entry_only (projection payload present)`
     };
   }
 

@@ -42,6 +42,7 @@ export function createSignalMaterializationRuntime(input: {
     handoffGapHandler: input.handoffGapHandler,
     retainUnroutedHighConfidenceFacts: routerOptions.retainUnroutedHighConfidenceFacts,
     fullTurnEvidenceExcerpt: routerOptions.fullTurnEvidenceExcerpt,
+    projectionRoutingEnabled: routerOptions.projectionRoutingEnabled,
     ...(routerOptions.materializationConfidenceFloor === undefined
       ? {}
       : { materializationConfidenceFloor: routerOptions.materializationConfidenceFloor })
@@ -83,8 +84,16 @@ function readMaterializationRouterOptions() {
     fullTurnEvidenceExcerpt:
       process.env.ALAYA_EVIDENCE_FULL_TURN !== "0" &&
       process.env.ALAYA_EVIDENCE_FULL_TURN !== "false",
+    // Routing lift defaults OFF (a merge must not flip durable write behavior
+    // pre-bench); the bench proj-on arm sets ALAYA_RECALL_PROJECTIONS=on to
+    // activate write-routing alongside read-side recallProjectionScoringEnabled.
+    projectionRoutingEnabled: readProjectionRoutingEnabled(),
     materializationConfidenceFloor: readMaterializationConfidenceFloor()
   };
+}
+
+function readProjectionRoutingEnabled(): boolean {
+  return /^(?:1|true|on|yes)$/iu.test(process.env.ALAYA_RECALL_PROJECTIONS ?? "");
 }
 
 function readMaterializationConfidenceFloor(): number | undefined {

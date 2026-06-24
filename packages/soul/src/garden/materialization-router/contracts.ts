@@ -394,4 +394,10 @@ export interface MaterializationRouterDeps {
   // source turn (full_turn_content) instead of the matched_text span, so evidence
   // FTS can recall a memory whose distilled content dropped the query terms.
   readonly fullTurnEvidenceExcerpt?: boolean;
+  // When true, a signal whose object_kind routes to signal_only but whose
+  // raw_payload carries a memory projection (preference_profile /
+  // temporal_projection) is lifted to memory_entry_only so the projection lands
+  // on a recallable memory_entry instead of dying on the signal row. Default-off
+  // keeps the curated signal_only deferral byte-identical.
+  readonly projectionRoutingEnabled?: boolean;
 }
