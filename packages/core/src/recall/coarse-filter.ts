@@ -27,6 +27,11 @@ import {
   buildCoarseFilterRunResult,
   createCoarseFilterState
 } from "./coarse-filter-pipeline.js";
+import {
+  resolveRoutedSurfaceIds,
+  sessionRouteEnabled,
+  withRoutedSurfaceIds
+} from "./session-route.js";
 
 const RECALL_TIER_MEMORY_PAGE_SIZE = 512;
 const STORAGE_RECALL_TIER_MEMORY_PAGE_SIZE = 500;
@@ -208,12 +213,13 @@ export async function runCoarseFilter(
   options: Readonly<RunCoarseFilterOptions> = {}
 ): Promise<CoarseFilterRunResult> {
   const input = await loadCoarseFilterInput(context, workspaceId, config, queryText, options);
+  const queryProbes = routeQueryToSession(input.tierMemories, input.queryProbes);
   const state = createCoarseFilterState({ config, winnerMemoryIds: input.winnerMemoryIds });
   admitInitialCoarseCandidates({
     tierMemories: input.tierMemories,
     protectedCandidates: input.protectedCandidates,
     rankedMatches: input.rankedMatches,
-    queryProbes: input.queryProbes,
+    queryProbes,
     state
   });
   const dynamic = await admitDynamicCoarseCandidates({
@@ -221,7 +227,7 @@ export async function runCoarseFilter(
     workspaceId,
     config,
     queryText,
-    queryProbes: input.queryProbes,
+    queryProbes,
     tierMemories: input.tierMemories,
     byId: input.byId,
     deliveryMaxEntries: options.deliveryMaxEntries,
@@ -236,6 +242,16 @@ export async function runCoarseFilter(
     state,
     dynamic
   });
+}
+
+function routeQueryToSession(
+  tierMemories: readonly Readonly<MemoryEntry>[],
+  queryProbes: Readonly<RecallQueryProbes>
+): Readonly<RecallQueryProbes> {
+  if (!sessionRouteEnabled()) {
+    return queryProbes;
+  }
+  return withRoutedSurfaceIds(queryProbes, resolveRoutedSurfaceIds(tierMemories, queryProbes));
 }
 
 async function loadCoarseFilterInput(

@@ -8,6 +8,7 @@ import type {
   RecallSupplementaryData
 } from "./recall-service-types.js";
 import { uniqueStrings } from "./path-relations.js";
+import { sessionRouteEnabled } from "./session-route.js";
 
 export const DYNAMIC_RECALL_SEED_CAP = 50;
 // anchor: entity-derived graph_expansion seeding floor. Only entities whose
@@ -460,6 +461,11 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   }
   if (draft.admissionPlanes.includes("object_probe")) {
     return 4;
+  }
+  // Routing certainty, not a redundant lexical vote → lift just above lexical
+  // (selective, gated; inert below the candidate cap, so a no-op on small pools).
+  if (sessionRouteEnabled() && draft.admissionPlanes.includes("session_surface_cohort")) {
+    return 3.5;
   }
   if (draft.admissionPlanes.some((plane) =>
     plane === "evidence_anchor" ||
