@@ -163,6 +163,7 @@ it("filters cross-workspace memories when using the single-id fallback loader", 
     const crossWorkspaceMemoryId = "9d599a9a-4940-4f23-a88e-0149f82ab099";
     const crossWorkspaceMemory = createMemoryEntry({
       object_id: crossWorkspaceMemoryId,
+      scope_class: ScopeClass.PROJECT,
       workspace_id: "workspace-2",
       content: "Foreign workspace memory."
     });

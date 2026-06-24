@@ -187,6 +187,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
       const evidenceService = new EvidenceService({
         evidenceCapsuleRepo: {
           create: vi.fn(),
+          deleteById: vi.fn(),
           findById: vi.fn(async () => Object.freeze({ ...evidenceCapsule })),
           findByRunId: vi.fn(),
           findByWorkspaceId: vi.fn(),
@@ -259,6 +260,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
       const evidenceService = new EvidenceService({
         evidenceCapsuleRepo: {
           create: vi.fn(),
+          deleteById: vi.fn(),
           findById: vi.fn(async () => Object.freeze({ ...baseCapsule })),
           findByRunId: vi.fn(),
           findByWorkspaceId: vi.fn(),

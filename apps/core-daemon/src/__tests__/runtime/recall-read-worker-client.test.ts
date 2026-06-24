@@ -116,7 +116,7 @@ describe("RecallReadWorkerClient", () => {
 
       try {
         await expect(
-          client.memoryRepo.findByIds("workspace-1", [
+          client.memoryRepo.findByIds!("workspace-1", [
             workspaceMemoryId,
             otherWorkspaceMemoryId
           ])

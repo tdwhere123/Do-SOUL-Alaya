@@ -106,8 +106,8 @@ function buildRecallService(params: {
     },
     evidenceSearchPort: {
       searchByKeyword: params.evidenceCapsuleRepo.searchByKeyword.bind(params.evidenceCapsuleRepo),
-      findByIds: (_workspaceId: string, evidenceObjectIds: readonly string[]) =>
-        params.evidenceCapsuleRepo.findByIds(evidenceObjectIds)
+      findByIds: (workspaceId: string, evidenceObjectIds: readonly string[]) =>
+        params.evidenceCapsuleRepo.findByIds(workspaceId, evidenceObjectIds)
     }
   };
 
