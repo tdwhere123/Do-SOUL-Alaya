@@ -106,10 +106,9 @@ Benchmark output has two homes — putting a run in the wrong one is how the tre
 - Do NOT create hand-named dated dirs in `docs/bench-history/` (e.g. the retired `v0311-lever-ab-2026-06-17/`). Retention: tracked = current pointer targets + ≤7 days; gitignored scratch = ≤7 days, keeping `scripts/`.
 
 <!-- gitnexus:start -->
-
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Do-SOUL-Alaya** (25860 symbols, 43868 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Do-SOUL-Alaya** (29241 symbols, 50817 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -130,22 +129,22 @@ This project is indexed by GitNexus as **Do-SOUL-Alaya** (25860 symbols, 43868 r
 
 ## Resources
 
-| Resource                                       | Use for                                  |
-| ---------------------------------------------- | ---------------------------------------- |
-| `gitnexus://repo/Do-SOUL-Alaya/context`        | Codebase overview, check index freshness |
-| `gitnexus://repo/Do-SOUL-Alaya/clusters`       | All functional areas                     |
-| `gitnexus://repo/Do-SOUL-Alaya/processes`      | All execution flows                      |
-| `gitnexus://repo/Do-SOUL-Alaya/process/{name}` | Step-by-step execution trace             |
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/Do-SOUL-Alaya/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/Do-SOUL-Alaya/clusters` | All functional areas |
+| `gitnexus://repo/Do-SOUL-Alaya/processes` | All execution flows |
+| `gitnexus://repo/Do-SOUL-Alaya/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
-| Task                                         | Read this skill file                                        |
-| -------------------------------------------- | ----------------------------------------------------------- |
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md`       |
-| Blast radius / "What breaks if I change X?"  | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?"             | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md`       |
-| Rename / extract / split / refactor          | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md`     |
-| Tools, resources, schema reference           | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md`           |
-| Index, status, clean, wiki CLI commands      | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md`             |
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
