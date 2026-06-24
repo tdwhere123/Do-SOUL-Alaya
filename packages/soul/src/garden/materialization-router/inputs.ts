@@ -130,10 +130,7 @@ function normalizePayloadString(value: unknown): string | null {
   return normalized.length === 0 ? null : normalized;
 }
 
-// True when raw_payload carries a non-empty memory-projection
-// (preference_profile or temporal_projection) that buildMemoryInput would
-// stamp onto a memory_entry. Gates the projection-routing override that lifts
-// a projection-bearing signal_only kind to memory_entry_only.
+// True when raw_payload carries a non-empty preference_profile / temporal_projection; gates the projection-routing lift.
 export function signalCarriesProjectionPayload(signal: CandidateMemorySignal): boolean {
   return (
     Object.keys(readMemoryPreferenceProfilePayload(signal.raw_payload)).length > 0 ||

@@ -24,11 +24,7 @@ import {
 const MEMORY_ID = "44444444-4444-4444-8444-444444444444";
 const EVIDENCE_ID = "55555555-5555-4555-8555-555555555555";
 
-// invariant: PR-4 projection-routing activation. A workflow_preference signal
-// routes to signal_only by default, but when projectionRoutingEnabled is set
-// and raw_payload carries a preference_profile, the router lifts it to
-// memory_entry_only so the projection lands on a recallable memory_entry. With
-// the flag off (proj-off) the route stays signal_only and no memory is written.
+// With projectionRoutingEnabled on, a preference_profile workflow_preference lifts to memory_entry_only; off stays signal_only.
 describe("projection routing daemon wiring", () => {
   it("lifts a workflow_preference projection signal to a memory_entry when projections are on", async () => {
     const database = initDatabase({ filename: ":memory:" });
@@ -141,9 +137,6 @@ async function createHarness(
   return { router, memoryRepo, evidenceRepo };
 }
 
-// seed boilerplate mirrors the established per-file pattern in this dir
-// (edge-auto-producer-wiring / trustworthy-loop-trace); no shared helper exists.
-// anti-patterns-lint-allow
 async function seedWorkspaceRun(
   workspaceRepo: SqliteWorkspaceRepo,
   runRepo: SqliteRunRepo

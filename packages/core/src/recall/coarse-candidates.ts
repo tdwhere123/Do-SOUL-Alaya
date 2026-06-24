@@ -462,8 +462,7 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   if (draft.admissionPlanes.includes("object_probe")) {
     return 4;
   }
-  // Routing certainty, not a redundant lexical vote → lift just above lexical
-  // (selective, gated; inert below the candidate cap, so a no-op on small pools).
+  // Routing certainty, not a redundant lexical vote → rank just above lexical.
   if (sessionRouteEnabled() && draft.admissionPlanes.includes("session_surface_cohort")) {
     return 3.5;
   }

@@ -36,7 +36,6 @@ afterEach(() => {
   delete process.env.ALAYA_RECALL_SESSION_ROUTE;
 });
 
-// anti-patterns-lint-allow: real-DB stand-up mirrors the recall real-storage integration precedents.
 async function createRealStorage(): Promise<{
   readonly database: StorageDatabase;
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
@@ -114,7 +113,6 @@ function buildRecallService(params: {
   return new RecallService(deps);
 }
 
-// anti-patterns-lint-allow: query-carrying surface fixture mirrors recall precedents.
 function createTaskSurface(displayName: string): TaskObjectSurface {
   return {
     runtime_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
@@ -129,11 +127,7 @@ function createTaskSurface(displayName: string): TaskObjectSurface {
   };
 }
 
-// Seeds one gold memory in the anchor session at low activation, several
-// anchor-session footholds that share the query terms (so the router resolves
-// the anchor session as the dominant foothold cohort), and a few high-activation
-// co-topical distractors in another session that carry every query term — so
-// without routing the gold sinks below them on activation/recency alone.
+// Low-activation gold + anchor-session footholds vs high-activation distractors in another session, so unrouted gold sinks.
 async function seedSessionRoutedCorpus(memoryEntryRepo: SqliteMemoryEntryRepo): Promise<string> {
   const goldId = "00000000-0000-4000-8000-000000000001";
   await memoryEntryRepo.create(createMemoryEntry({
@@ -204,8 +198,7 @@ describe("recall session route (real SQLite + FTS5)", () => {
     process.env.ALAYA_RECALL_SESSION_ROUTE = "1";
     const onRows = await recallRows(on.memoryEntryRepo, on.evidenceCapsuleRepo);
 
-    // The router resolves the query to the anchor session and the selective
-    // cohort pre-weight raises the routed gold's fusion relevance.
+    // Routing + cohort pre-weight raise the routed gold's fusion relevance.
     expect(relevanceOf(onRows, goldId)).toBeGreaterThan(relevanceOf(offRows, goldId));
     expect(onRows.slice(0, 5).map((row) => row.objectId)).toContain(goldId);
 
@@ -217,8 +210,7 @@ describe("recall session route (real SQLite + FTS5)", () => {
 
   it("is byte-identical (same order and scores) on or off when no session dominates the footholds", async () => {
     const { database, memoryEntryRepo, evidenceCapsuleRepo } = await createRealStorage();
-    // Co-topical footholds are split evenly across two sessions, so no session
-    // clears the dominance threshold: routing resolves nothing and ON must equal OFF.
+    // Footholds split evenly across two sessions, so no session clears dominance: ON must equal OFF.
     for (let index = 0; index < 4; index += 1) {
       await memoryEntryRepo.create(createMemoryEntry({
         object_id: `00000000-0000-4000-8000-0000000000${String(index + 10).padStart(2, "0")}`,

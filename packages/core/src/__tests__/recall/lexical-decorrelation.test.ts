@@ -37,7 +37,6 @@ afterEach(() => {
   delete process.env.ALAYA_RECALL_LEXICAL_DECORR;
 });
 
-// anti-patterns-lint-allow: real-DB stand-up mirrors the recall real-storage integration precedents.
 function createRealStorage(): { readonly database: StorageDatabase; readonly memoryEntryRepo: SqliteMemoryEntryRepo } {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
@@ -66,11 +65,7 @@ function createRealStorage(): { readonly database: StorageDatabase; readonly mem
   return { database, memoryEntryRepo };
 }
 
-// Two candidates whose RAW lexical-lane counts are identical (porter + trigram
-// + evidence + evidence^structural all hit = 4 lanes each) but whose orthogonal
-// field spread differs: the redundant one's lexical hits all collapse onto a
-// SINGLE evidence_ref; the distinct one's evidence hits land on TWO different
-// refs (independent corroboration of separate sub-questions).
+// Equal 4-lane counts but different field spread: redundant collapses onto one ref, distinct lands on two refs.
 async function seedCandidates(memoryEntryRepo: SqliteMemoryEntryRepo): Promise<void> {
   await memoryEntryRepo.create(createMemoryEntry({
     object_id: REDUNDANT_ID,
@@ -88,7 +83,6 @@ async function seedCandidates(memoryEntryRepo: SqliteMemoryEntryRepo): Promise<v
   }));
 }
 
-// anti-patterns-lint-allow: supplementary-data fixture shape mirrors the recall scoring-test precedent; only the rank maps differ.
 function buildSupplementaryData(): RecallSupplementaryData {
   return {
     queryProbes: compileRecallQueryProbes(QUERY),
@@ -96,8 +90,7 @@ function buildSupplementaryData(): RecallSupplementaryData {
     trigramFtsRanks: { [REDUNDANT_ID]: 1, [DISTINCT_ID]: 1 },
     synthesisFtsRanks: {},
     evidenceFtsRanks: { [REDUNDANT_ID]: 1, [DISTINCT_ID]: 1 },
-    // Redundant candidate: all evidence weight on ONE ref. Distinct candidate:
-    // two separate refs each hit → two independent fields.
+    // Redundant: all weight on one ref. Distinct: two refs → two independent fields.
     evidenceFtsRanksPerRef: {
       [REDUNDANT_REF]: 1,
       [DISTINCT_REF_A]: 1,
@@ -150,13 +143,10 @@ describe("selective lexical de-correlation (real SQLite)", () => {
     process.env.ALAYA_RECALL_LEXICAL_DECORR = "1";
     const on = await fusedScoresFromRealStorage();
 
-    // The distinct-ref candidate's 4 lexical lanes map to 4 orthogonal fields
-    // (content + 2 refs + evidence^structural), so ON lifts its discount and its
-    // fused score rises. The redundant candidate's lanes collapse onto 3 fields
-    // (single ref), so it stays discounted — byte-identical to OFF.
+    // Distinct's 4 lanes map to 4 fields so ON lifts its discount; redundant's collapse to 3 fields so it stays damped.
     expect(on.distinct).toBeGreaterThan(off.distinct);
     expect(on.redundant).toBeCloseTo(off.redundant, 9);
-    // Relative rank lift: distinct now clears redundant by a wider margin than OFF.
+    // Distinct clears redundant by a wider margin than OFF.
     expect(on.distinct - on.redundant).toBeGreaterThan(off.distinct - off.redundant);
   });
 
@@ -166,9 +156,7 @@ describe("selective lexical de-correlation (real SQLite)", () => {
     const second = await fusedScoresFromRealStorage();
     expect(first).toEqual(second);
 
-    // Captured HEAD baseline: the lane-count path damps both candidates equally
-    // (identical 4-lane family); ON must reproduce these exact values for the
-    // redundant candidate, proving OFF is the unchanged default.
+    // ON must reproduce the redundant candidate's OFF value exactly, proving OFF is the unchanged default.
     process.env.ALAYA_RECALL_LEXICAL_DECORR = "1";
     const on = await fusedScoresFromRealStorage();
     expect(on.redundant).toBeCloseTo(first.redundant, 9);

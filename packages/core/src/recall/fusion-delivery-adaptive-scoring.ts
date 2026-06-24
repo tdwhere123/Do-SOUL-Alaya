@@ -128,10 +128,7 @@ type LexicalFamilyContext = Readonly<{
   readonly hasIndependentSupport: boolean;
 }>;
 
-// Genuine corroboration redundancy: the lexical family fired across >=3 lanes
-// AND those lanes pile onto fewer orthogonal fields than lanes (same content /
-// same ref). When the flag is off this collapses to the raw lane-count gate, so
-// behavior is unchanged.
+// Redundant when >=3 lexical lanes pile onto fewer orthogonal fields; flag off collapses to the raw lane-count gate.
 function isRedundantLexicalFamily(context: LexicalFamilyContext): boolean {
   if (context.lexicalFamilyHitCount < 3 || context.hasIndependentSupport) {
     return false;

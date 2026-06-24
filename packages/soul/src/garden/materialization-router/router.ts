@@ -150,9 +150,7 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
     };
   }
 
-  // A signal_only object_kind carrying a memory projection is lifted to
-  // memory_entry_only so buildMemoryInput's projection fields reach a recallable
-  // memory_entry. Gated by projectionRoutingEnabled (default-off → unchanged).
+  // Lift a projection-bearing signal_only kind to memory_entry_only so its projection reaches a recallable memory_entry.
   private liftSignalOnlyForProjection(
     signal: CandidateMemorySignal,
     route: MaterializationTarget

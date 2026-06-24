@@ -29,9 +29,7 @@ export interface RecallSupplementaryData {
   readonly trigramFtsRanks: Readonly<Record<string, number>>;
   readonly synthesisFtsRanks: Readonly<Record<string, number>>;
   readonly evidenceFtsRanks: Readonly<Record<string, number>>;
-  // Per-evidence-ref FTS rank keyed by evidence_ref id (evidenceFtsRanks
-  // aggregates to memory id); lets fusion separate same-ref redundancy from
-  // independent-ref corroboration. Optional: absent → lane-count fallback.
+  // Per-ref grain (evidenceFtsRanks aggregates to memory id); absent → lane-count fallback.
   readonly evidenceFtsRanksPerRef?: Readonly<Record<string, number>>;
   readonly sourceProximityScores: Readonly<Record<string, number>>;
   readonly sourceCohortKeys: Readonly<Record<string, string>>;

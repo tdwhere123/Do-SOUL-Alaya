@@ -3,23 +3,17 @@ import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { compareMemoryEntries } from "./recall-service-helpers.js";
 import { uniqueStrings } from "./path-relations.js";
 
-// Opt-in: a natural-language query carries no `surface-` token, so the
-// exact-cohort path in content-expansion stays dead for real queries. With
-// this flag the router resolves the query to its dominant foothold session
-// and injects that surface_id into queryProbes so exact-cohort activates.
+// Opt-in: NL queries carry no `surface-` token, so inject the dominant foothold session's surface_id to wake exact-cohort.
 export function sessionRouteEnabled(): boolean {
   return /^(?:1|true|on|yes)$/iu.test(process.env.ALAYA_RECALL_SESSION_ROUTE ?? "");
 }
 
 const SESSION_ROUTE_FOOTHOLD_TOP_K = 12;
-// A session must own strictly more than this share of the lexical footholds to
-// count as the routed anchor; an even split across sessions routes nothing.
+// Min foothold share to count as the routed anchor; an even split routes nothing.
 const SESSION_ROUTE_DOMINANCE_RATIO = 0.5;
 const SESSION_ROUTE_MIN_FOOTHOLDS = 3;
 
-// Resolves the query to its anchor session(s) by reading the dominant
-// surface_id among the strongest lexical footholds in the tier page. Returns
-// surface_ids to merge into queryProbes; empty when no session dominates.
+// Reads the dominant surface_id among the strongest footholds; empty when no session dominates.
 export function resolveRoutedSurfaceIds(
   tierMemories: readonly Readonly<MemoryEntry>[],
   queryProbes: Readonly<RecallQueryProbes>
@@ -32,9 +26,7 @@ export function resolveRoutedSurfaceIds(
   return dominant === null ? [] : [dominant];
 }
 
-// Merge routed surface_ids into the probes so both exact-cohort admission and
-// object-probe scoring treat the routed session as a structural match. Returns
-// the same probes object unchanged when there is nothing to add.
+// Merge routed surface_ids so exact-cohort admission and object-probe scoring treat the session as a structural match.
 export function withRoutedSurfaceIds(
   queryProbes: Readonly<RecallQueryProbes>,
   routedSurfaceIds: readonly string[]
@@ -65,8 +57,7 @@ function selectLexicalFootholds(
     .map((scored) => scored.entry);
 }
 
-// Deterministic lexical-overlap proxy over the tier page (no extra FTS I/O):
-// counts query lexical_terms / expanded_terms found in the memory content.
+// Deterministic lexical-overlap proxy over the tier page (no extra FTS I/O).
 function scoreLexicalFoothold(
   entry: Readonly<MemoryEntry>,
   queryProbes: Readonly<RecallQueryProbes>

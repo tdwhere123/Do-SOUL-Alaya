@@ -1,21 +1,13 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { RecallSupplementaryData } from "./recall-service-types.js";
 
-// Opt-in: the lane-count corroboration discount cannot tell a porter+trigram
-// pair firing on the SAME content string (redundant) from a content hit plus a
-// DISTINCT evidence_ref hit (independent corroboration). With this flag the
-// discount is gated on orthogonal-field count, not raw lane count, so only
-// genuinely-redundant same-field multi-lane hits are damped.
+// Opt-in: gate the lane-count discount on orthogonal-field count so distinct-ref corroboration is not damped as redundant.
 export function lexicalDecorrEnabled(): boolean {
   const raw = process.env.ALAYA_RECALL_LEXICAL_DECORR;
   return raw === "on" || raw === "1" || raw === "true";
 }
 
-// Counts how many ORTHOGONAL lexical fields actually hit this candidate.
-// porter + trigram collapse to one `content` field (a trigram is a redundant
-// view of the same content string); each distinct evidence_ref that hit is its
-// own independent field; the evidence^structural co-agreement is one marker.
-// A discount is redundancy only when raw lane count exceeds this field count.
+// porter+trigram collapse to one content field; each distinct evidence_ref is its own field; evidence^structural is one marker.
 export function countOrthogonalLexicalFields(
   candidate: Readonly<{ readonly entry: Readonly<MemoryEntry>; readonly structuralScore?: number | null }>,
   supplementaryData: RecallSupplementaryData
@@ -45,9 +37,7 @@ function countDistinctEvidenceRefHits(
       count += 1;
     }
   }
-  // perRef absent (older producers only emit the aggregate) → fall back to the
-  // aggregate evidence hit as a single field so the field count never collapses
-  // below the lane signal it represents.
+  // perRef absent (older producers) → count the aggregate hit as one field.
   if (count === 0 && (supplementaryData.evidenceFtsRanks[entry.object_id] ?? 0) > 0) {
     return 1;
   }
