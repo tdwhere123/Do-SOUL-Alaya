@@ -1,4 +1,5 @@
 import type { MemoryEntry, RecallPolicy, RecallScoreFactors } from "@do-soul/alaya-protocol";
+import { countOrthogonalLexicalFields, lexicalDecorrEnabled } from "./lexical-decorrelation.js";
 import { classifyRecallIntent } from "./recall-query-plan.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { clamp01 } from "./recall-service-helpers.js";
@@ -121,12 +122,29 @@ function scoreLaneReliability(params: FusionContributionParams): number {
   return scoreBroadLexicalReliability(params.supplementaryData.queryProbes, context, 0.9);
 }
 
+type LexicalFamilyContext = Readonly<{
+  readonly lexicalFamilyHitCount: number;
+  readonly orthogonalFieldCount: number;
+  readonly hasIndependentSupport: boolean;
+}>;
+
+// Genuine corroboration redundancy: the lexical family fired across >=3 lanes
+// AND those lanes pile onto fewer orthogonal fields than lanes (same content /
+// same ref). When the flag is off this collapses to the raw lane-count gate, so
+// behavior is unchanged.
+function isRedundantLexicalFamily(context: LexicalFamilyContext): boolean {
+  if (context.lexicalFamilyHitCount < 3 || context.hasIndependentSupport) {
+    return false;
+  }
+  return !lexicalDecorrEnabled() || context.lexicalFamilyHitCount > context.orthogonalFieldCount;
+}
+
 function scoreBroadLexicalReliability(
   queryProbes: Readonly<RecallQueryProbes>,
-  context: Readonly<{ readonly lexicalFamilyHitCount: number; readonly hasIndependentSupport: boolean }>,
+  context: LexicalFamilyContext,
   floor: number
 ): number {
-  if (context.lexicalFamilyHitCount < 3 || context.hasIndependentSupport) {
+  if (!isRedundantLexicalFamily(context)) {
     return 1;
   }
   const intent = classifyRecallIntent(queryProbes);
@@ -135,11 +153,11 @@ function scoreBroadLexicalReliability(
 
 function scoreTrigramReliability(
   queryProbes: Readonly<RecallQueryProbes>,
-  context: Readonly<{ readonly lexicalFamilyHitCount: number; readonly hasIndependentSupport: boolean }>
+  context: LexicalFamilyContext
 ): number {
   const scriptSpecific = queryProbes.char_ngrams.length > 0 || queryProbes.lexical_terms.some((term) => term.length >= 12);
   const base = scriptSpecific ? 0.85 : 0.7;
-  if (context.lexicalFamilyHitCount >= 3 && !context.hasIndependentSupport) {
+  if (isRedundantLexicalFamily(context)) {
     return Math.max(0.55, base - 0.15);
   }
   return base;
@@ -148,7 +166,7 @@ function scoreTrigramReliability(
 function buildLexicalFamilyContext(
   candidate: FusionContributionCandidate,
   supplementaryData: RecallSupplementaryData
-): Readonly<{ readonly lexicalFamilyHitCount: number; readonly hasIndependentSupport: boolean }> {
+): LexicalFamilyContext {
   const objectId = candidate.entry.object_id;
   const evidenceHit = (supplementaryData.evidenceFtsRanks[objectId] ?? 0) > 0;
   const structuralHit = (candidate.structuralScore ?? supplementaryData.structuralScores[objectId] ?? 0) > 0;
@@ -160,6 +178,7 @@ function buildLexicalFamilyContext(
   ].filter((score) => (score ?? 0) > 0).length;
   return Object.freeze({
     lexicalFamilyHitCount,
+    orthogonalFieldCount: countOrthogonalLexicalFields(candidate, supplementaryData),
     hasIndependentSupport:
       (candidate.effectiveFactors.embedding_similarity ?? 0) > 0 ||
       (supplementaryData.sourceProximityScores[objectId] ?? 0) > 0 ||
