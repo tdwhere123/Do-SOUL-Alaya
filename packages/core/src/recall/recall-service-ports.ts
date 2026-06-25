@@ -33,9 +33,7 @@ import type { RecallFailureHealthInboxPort } from "./recall-failure-health-inbox
 export interface KeywordSearchResult {
   readonly object_id: string;
   readonly normalized_rank: number;
-  // Trigram-lane ordinal score, present only when the keyword search routed a
-  // hit through the substring/CJK trigram lane. Feeds the trigram_fts fusion
-  // stream. Absent for exact/porter-only hits.
+  // Trigram-lane ordinal score, present only for substring/CJK trigram hits; feeds trigram_fts. Absent for exact/porter-only hits.
   readonly trigram_rank?: number;
 }
 
@@ -66,24 +64,19 @@ export interface RecallServiceMemoryRepoPort {
     limit: number,
     objectIds: readonly string[]
   ): Promise<readonly KeywordSearchResult[]>;
-  // see also: 068-evidence-capsule-fts.sql. Used by lexical plane to admit
-  // memories whose distilled content lost keywords but whose underlying
-  // EvidenceCapsule.gist still matches the query.
+  // Admits memories whose distilled content lost keywords but whose EvidenceCapsule.gist still matches. see also: 068-evidence-capsule-fts.sql.
   findByEvidenceRefs?(
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]>;
-  // Optional id-batch lookup. Used by the embedding-on coarse-injection path
-  // to resolve workspace cosine neighbors into MemoryEntry candidates.
+  // Optional id-batch lookup; the embedding coarse-injection path resolves cosine neighbors into MemoryEntry candidates.
   findByIds?(
     workspaceId: string,
     objectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
-// Evidence FTS port consumed by the recall service. The implementing repo
-// is SqliteEvidenceCapsuleRepo (migration 068). Recall uses this only to
-// widen lexical candidate generation when distillation drops keywords.
+// Evidence FTS port (impl SqliteEvidenceCapsuleRepo, migration 068); widens lexical candidate generation when distillation drops keywords.
 export interface RecallServiceEvidenceSearchPort {
   searchByKeyword(
     workspaceId: string,
@@ -96,12 +89,7 @@ export interface RecallServiceEvidenceSearchPort {
   ): Promise<readonly Readonly<EvidenceCapsule>[]>;
 }
 
-// Synthesis FTS port consumed by the recall service. The implementing repo
-// is SqliteSynthesisCapsuleRepo (migration 079). Recall queries it on the
-// FTS-backed keyword path, uses synthesis rows as routing capsules, and expands
-// active same-workspace source_memory_refs into memory_entry candidates before
-// fusion and delivery-budget selection. Synthesis capsules are not delivered.
-// see also: packages/storage/src/repos/capsules/synthesis-capsule-repo.ts
+// Synthesis FTS port (impl SqliteSynthesisCapsuleRepo, migration 079); synthesis rows route as capsules and expand source_memory_refs into candidates, but are not themselves delivered. see also: storage/repos/capsules/synthesis-capsule-repo.ts.
 export interface RecallServiceSynthesisSearchPort {
   searchByKeyword(
     workspaceId: string,
@@ -127,14 +115,9 @@ export interface RecallServiceGraphSupportPort {
   /** @deprecated recall reads `countInboundEdgesWeighted` instead.
    * Kept on the port for non-recall callers (raw supports-only count). */
   countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
-  // Aggregates inbound graph edges by edge_type weight into one signed
-  // support score. The recall service consumes this so that derives_from /
-  // recalls signals also lift graph_support, and supersedes pulls it down
-  // (floor-clamped to zero baseline; see MEMORY_GRAPH_EDGE_RECALL_WEIGHTS invariant).
+  // Inbound graph edges aggregated by edge_type weight into one signed support score (floor-clamped to 0). see also: MEMORY_GRAPH_EDGE_RECALL_WEIGHTS invariant.
   countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
-  // Counts inbound RECALLS edges only. Cold-mode transfer uses this as explicit
-  // evidence that recall graph activity exists, independent of other
-  // graph-support edge types.
+  // Inbound RECALLS edges only; cold-mode transfer uses this as explicit evidence of recall graph activity.
   countInboundRecalls?(memoryId: string, workspaceId: string): Promise<number>;
 }
 
@@ -158,16 +141,7 @@ export interface RecallServiceClaimResolverPort {
   }>[]>;
 }
 
-/**
- * Optional port that returns the strongest direction-eligible
- * PathPlasticityState.strength across all path relations anchored on each
- * memory entry. Implementations are expected to read precomputed
- * PathRelation rows and apply direction_bias filtering; the recall service
- * does not compute paths itself.
- *
- * The map's value range is [0, 1]. Memories without an entry are treated as
- * having no plasticity boost.
- */
+/** Optional port: strongest direction-eligible PathPlasticityState.strength per memory (value in [0,1]); missing entry = no plasticity boost. Reads precomputed PathRelation rows; recall does not compute paths itself. */
 export interface RecallServicePathPlasticityPort {
   getStrengthByMemoryId(
     workspaceId: string,
@@ -196,12 +170,7 @@ export interface RecallServiceActiveConstraintsPort {
   }>>;
 }
 
-// invariant: ManifestationSidecarApplierPort produces the bias sidecar
-// the recall service forwards into RecallCandidate.pending_incomplete
-// and RecallCandidate.unfinishedness_bias. Implementations are expected
-// to call PathActivationCandidateProducer and ManifestationResolver in
-// sequence. The port is optional. When absent the recall service skips
-// the sidecar step and emits candidates unchanged.
+// invariant: produces the bias sidecar forwarded into RecallCandidate.pending_incomplete / unfinishedness_bias. Optional — when absent the sidecar step is skipped and candidates emit unchanged.
 export interface RecallServiceManifestationSidecarPort {
   buildBiasSidecar(params: Readonly<{
     readonly workspaceId: string;
@@ -230,8 +199,7 @@ export function makeTokenEstimator(opts: {
 function resolveCharsPerToken(hint: SoulRecallTokenizerHint | null): number {
   switch (hint) {
     case "cl100k":
-      // OpenAI tokenizer docs cite ~4 chars/token for common English text;
-      // the hint is a conservative heuristic, not a native tokenizer.
+      // Conservative chars/token heuristic, not a native tokenizer.
       return 3.6;
     case "o200k":
       return 3.2;
@@ -318,20 +286,13 @@ export interface RecallServiceDependencies {
   readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
   readonly synthesisSearchPort?: RecallServiceSynthesisSearchPort;
   readonly manifestationSidecarPort?: RecallServiceManifestationSidecarPort;
-  // Optional decorator applied to every policy buildDefaultPolicy emits.
-  // The daemon uses it to inject scoring_weight_overrides driven by runtime
-  // state (e.g. raise the embedding_similarity fusion weight when the
-  // embedding provider is wired). Decorators must return a structurally
-  // valid RecallPolicy; an identity function is the safe default.
+  // Optional decorator over every buildDefaultPolicy output; the daemon injects runtime-driven scoring_weight_overrides. Must return a valid RecallPolicy; identity is the safe default.
   readonly defaultPolicyDecorator?: (
     policy: Readonly<import("@do-soul/alaya-protocol").RecallPolicy>
   ) => Readonly<import("@do-soul/alaya-protocol").RecallPolicy>;
-  // see also: packages/core/src/shared/entity-extraction-port.ts
-  // see also: packages/core/src/shared/entity-extraction-rules.ts RuleBasedEntityExtractor
+  // see also: shared/entity-extraction-port.ts, shared/entity-extraction-rules.ts RuleBasedEntityExtractor.
   readonly entityExtractionPort?: import("../shared/entity-extraction-port.js").EntityExtractionPort;
-  // Opt-in (ALAYA_RECALL_SOURCE_REF_ROBUST): also parse round-labeled / per-fact
-  // evidence source refs (`s3-r2`, `s3-r2-f1`) so source proximity engages on
-  // conversational corpora. Default off keeps t/turn/chunk parsing unchanged.
+  // Opt-in (ALAYA_RECALL_SOURCE_REF_ROBUST): also parse round-labeled / per-fact source refs (`s3-r2`, `s3-r2-f1`) so source proximity engages on conversational corpora. Default off.
   readonly robustSourceRefParsing?: boolean;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;

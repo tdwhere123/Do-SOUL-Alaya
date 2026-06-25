@@ -6,20 +6,14 @@ import type {
   RecallMultiSeedGraphFanInDiagnostics
 } from "./recall-service-types.js";
 
-// invariant: membership equals EDGE_TYPE_RECALL_MODEL transitive rows
-// (membership asserted in edge-hop-decay-derivation.test.ts; order asserted
-// in recall-service.test.ts). order is load-bearing — indexOf here drives the
-// edge_type tie-break, so the array stays explicit rather than derived from
-// declaration order.
-// see also: packages/core/src/recall/graph-expansion.ts:shouldReplaceGraphExpansionCandidate,
-// packages/core/src/recall/graph-expansion.ts:compareGraphExpansionCandidateDrafts
+// invariant: membership equals EDGE_TYPE_RECALL_MODEL transitive rows; order is load-bearing (indexOf drives the edge_type tie-break), so the array stays explicit.
+// see also: graph-expansion.ts shouldReplaceGraphExpansionCandidate, compareGraphExpansionCandidateDrafts.
 export const GRAPH_EXPANSION_TRACKED_EDGE_TYPES: readonly RecallGraphExpansionTrackedEdgeType[] = [
   "derives_from",
   "recalls",
   "supports"
 ];
-// Derived view of EDGE_TYPE_RECALL_MODEL.hop_decay restricted to the
-// transitive rows; only read at hop >= 2 in expandGraph.
+// Derived view of EDGE_TYPE_RECALL_MODEL.hop_decay over the transitive rows; only read at hop >= 2.
 export const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdgeType, number>> = Object.freeze(
   Object.fromEntries(
     GRAPH_EXPANSION_TRACKED_EDGE_TYPES.map((edgeType) => {
@@ -31,34 +25,12 @@ export const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdg
     })
   ) as Record<RecallGraphExpansionTrackedEdgeType, number>
 );
-// invariant: path-graph traversal reads PathRelation rows (the single
-// associative plane) instead of memory_graph_edges. A path's
-// constitution.relation_kind is a free string, so traversal scoring maps it
-// back onto the EDGE_TYPE_RECALL_MODEL contribution_weight / hop_decay basis
-// when the kind names a transitive edge type (supports / derives_from /
-// recalls). Path-only associative kinds (co_recalled / shares_entity /
-// signal_graph_ref) have no edge-type row; they are treated as recalls-tier
-// associations (contribution 0.3, hop_decay 0.3) — the weakest positive
-// associative band — so they propagate at most one extra hop without
-// over-amplifying. Negative / neutral kinds never reach this map because the
-// traversal only follows isPathRecallEligible (recall_bias > 0) paths.
-// see also: packages/protocol/src/soul/memory-graph.ts:EDGE_TYPE_RECALL_MODEL
-// see also: packages/core/src/path-graph/path-relation-proposal-service.ts seed catalog
+// invariant: traversal maps a path's free-string relation_kind onto EDGE_TYPE_RECALL_MODEL when it names a transitive edge type; path-only kinds (co_recalled/shares_entity/signal_graph_ref) fold onto the weakest recalls tier so they propagate at most one extra hop. Negative/neutral kinds never reach here (traversal follows only recall-eligible paths).
+// see also: protocol/soul/memory-graph.ts EDGE_TYPE_RECALL_MODEL, path-graph/path-relation-proposal-service.ts seed catalog.
 const PATH_ASSOCIATIVE_RELATION_KIND_FALLBACK: RecallGraphExpansionTrackedEdgeType = "recalls";
-// invariant: the earned multi-session fan-in carrier relation_kind. Mirrors
-// path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE.relationKind — the
-// R1 path the co-usage counter mints ONLY after the threshold-3 gate (sparse,
-// bounded). A path_expansion admission traversing this kind is the durable
-// fan-in route Route 乙 depends on, so the structural delivery reserve grants it
-// a gold-blind, earned exemption from the relevance gate (a zero-relevance
-// earned sibling is the intended fan-in target, not a distractor). Any OTHER
-// relation_kind (generic structural / session membership) stays relevance-gated.
+// invariant: earned multi-session fan-in carrier relation_kind (mirrors path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE.relationKind); minted only past the threshold-3 gate, so the structural reserve grants it a gold-blind exemption from the relevance gate. Other relation_kinds stay relevance-gated.
 export const EARNED_CO_RECALLED_FANIN_RELATION_KIND = "co_recalled";
-// Maps a path's free-string relation_kind onto the tracked transitive
-// edge-type set used for graph-traversal scoring and the per-edge-type
-// diagnostic. Unmapped associative kinds fold onto the recalls tier so the
-// {derives_from, recalls, supports} diagnostic key set (consumed by the
-// bench-runner zod schema) is preserved without inventing a new key.
+// Folds a path's free-string relation_kind onto the tracked edge-type set; unmapped kinds become recalls so the {derives_from, recalls, supports} diagnostic key set is preserved.
 export function pathRelationKindToTrackedEdgeType(
   relationKind: string
 ): RecallGraphExpansionTrackedEdgeType {
@@ -70,25 +42,18 @@ export function pathRelationKindToTrackedEdgeType(
 export interface MutableGraphExpansionDiagnostics {
   readonly graph_expansion_plane_count_per_hop: [number, number];
   readonly graph_expansion_plane_count_per_edge_type: Record<RecallGraphExpansionTrackedEdgeType, number>;
-  // invariant: 0 = pooled-seed only; 1+ = entity_seed fan-in ran.
-  // see also: packages/core/src/recall/recall-service.ts:addGraphExpansionCandidates multi-seed branch
+  // invariant: 0 = pooled-seed only; 1+ = entity_seed fan-in ran. see also: recall-service.ts addGraphExpansionCandidates multi-seed branch.
   multi_seed_fan_in_distinct_seeds: number;
-  // anchor: dedup_collisions counts every collision (not unique colliders);
-  // max-score reduction keeps one candidate.
+  // anchor: dedup_collisions counts every collision (not unique colliders); max-score reduction keeps one candidate.
   multi_seed_fan_in_dedup_collisions: number;
-  // anchor: per-seed candidate counts (post-dedup, pre-cap) consumed by
-  // freezeGraphExpansionDiagnostics to derive p50 / p95.
+  // anchor: per-seed candidate counts (post-dedup, pre-cap); freezeGraphExpansionDiagnostics derives p50/p95.
   readonly multi_seed_fan_in_candidates_per_seed: number[];
 }
 
 export interface GraphExpansionFrontierNode {
   readonly memoryId: string;
   readonly pathScore: number;
-  // The raw relation_kind traversed to REACH this node (null for seed roots).
-  // hop >= 2 admission drops a neighbor reached by this same relation_kind to gate
-  // single-relation lineage walks that would otherwise flood the candidate pool.
-  // Keyed on the raw relation_kind, not the folded tracked edge_type, so
-  // heterogeneous associative reach (e.g. co_recalled -> shares_entity) survives.
+  // Raw relation_kind traversed to reach this node (null for seed roots); hop>=2 drops a neighbor reached by the same kind to gate single-relation lineage floods. Keyed on raw kind so heterogeneous reach survives.
   readonly arrivalRelationKind: string | null;
 }
 
@@ -109,27 +74,9 @@ export interface GraphExpansionCandidatesResult {
   readonly candidateSources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
 }
 
-// Graph-traversal admission score MAGNITUDE for a PathRelation hop. The
-// contribution basis is EDGE_TYPE_RECALL_MODEL[trackedEdgeType].contribution_weight
-// (supports 1.0 / derives_from 0.5 / recalls 0.3); path-only relation kinds
-// fold onto the recalls tier via pathRelationKindToTrackedEdgeType. Floored at
-// 0 because only recall-eligible (recall_bias > 0) paths reach traversal.
-// Strength deliberately does NOT scale the basis here: the caller routes hop-1
-// (direct) associations through scorePathRelationExpansion (which already folds
-// strength), and this traversal score carries only the static contribution
-// magnitude.
-// note: the score MAGNITUDE matches the static edge-era contribution_weight,
-// but the traversal is NOT edge-equivalent in TOPOLOGY — collectPathGraphNeighbors
-// follows path direction_bias (a source_to_target path is followed forward
-// only), whereas retired memory_graph_edges propagated undirected. This is
-// intentional and aligned with the hop-1 path_expansion direction filter
-// (directionEligiblePathExpansionTargets), so the two planes agree on which way
-// a path may be followed; it is not a zero-drift reproduction of the undirected
-// edge plane. Producer-seeded paths are minted bidirectional_asymmetric (see
-// path-relation-proposal-service.ts submitCandidate), so hop-2 reach narrows
-// only after plasticity redirects a path to an asymmetric direction.
-// see also: packages/core/src/recall/path-relations.ts:collectPathGraphNeighbors,
-// packages/core/src/recall/path-relations.ts:directionEligiblePathExpansionTargets.
+// Traversal admission score magnitude for a PathRelation hop = EDGE_TYPE_RECALL_MODEL[edge].contribution_weight, floored at 0. Strength does NOT scale here — the caller folds strength into hop-1 via scorePathRelationExpansion.
+// note: magnitude matches the static edge-era weight but topology is directed (collectPathGraphNeighbors follows direction_bias), not the retired undirected edge plane; aligned with the hop-1 direction filter on purpose.
+// see also: path-relations.ts collectPathGraphNeighbors, directionEligiblePathExpansionTargets.
 export function graphTraversalScoreFromPath(
   trackedEdgeType: RecallGraphExpansionTrackedEdgeType
 ): number {
@@ -155,9 +102,7 @@ export function createEmptyGraphExpansionDiagnostics(): Readonly<RecallGraphExpa
   return freezeGraphExpansionDiagnostics(createMutableGraphExpansionDiagnostics());
 }
 
-// anchor: percentile-of-sample helper used only by multi_seed_graph_fan_in
-// diagnostics. Linear interpolation between adjacent ranks, matches
-// numpy.percentile(..., method='linear') for stable cross-language reads.
+// anchor: percentile-of-sample helper for multi_seed_graph_fan_in diagnostics; linear interpolation matching numpy.percentile(method='linear') for cross-language reads.
 function percentileOfSorted(samples: readonly number[], percentile: number): number {
   if (samples.length === 0) {
     return 0;
@@ -256,13 +201,7 @@ function summarizeGraphExpansionCandidateSources(
   return freezeGraphExpansionDiagnostics(diagnostics);
 }
 
-// anchor: cascade merge for graph_expansion diagnostics. Re-derives hop /
-// edge_type counts from candidate sources so the merged surface stays
-// consistent with the kept candidates. multi_seed_graph_fan_in is not
-// re-derivable from sources (per-seed BFS history is local to each
-// addGraphExpansionCandidates call) so the merger prefers the cascade tier
-// with more distinct_seeds; when only one tier carries fan-in stats, that
-// tier wins. see also: packages/core/src/recall/recall-service.ts:mergeCoarseFilters
+// anchor: cascade merge for graph_expansion diagnostics; re-derives hop/edge_type counts from sources. multi_seed_graph_fan_in is not re-derivable, so the tier with more distinct_seeds wins. see also: recall-service.ts mergeCoarseFilters.
 export function mergeGraphExpansionDiagnosticsAcrossCascade(params: Readonly<{
   readonly sources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
   readonly currentFanIn?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;

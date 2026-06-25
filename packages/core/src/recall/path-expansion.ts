@@ -112,17 +112,8 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
   return admitTimeConcernPathExpansionCandidates(params, paths, windowDigests);
 }
 
-// anchor: active sign-aware suppression collector. Reuses the same expansion
-// seeds and pathExpansionPort.findByAnchors lookup as path_expansion, but
-// selects the negative (recall_bias < 0) active paths that the positive
-// lanes deliberately exclude. Each such path demotes its direction-eligible
-// target by a strength-gated delta (scorePathRelationSuppression). Deltas
-// accumulate per target so multiple converging negatives compound. The
-// collected map is applied to the fused score before sort. Fail-soft: a
-// missing port or lookup failure leaves suppression empty and recall
-// degrades to the no-suppression behavior.
-// see also: packages/core/src/recall/fusion-delivery.ts:applyPathSuppressionToFusionScores,
-// packages/core/src/recall/path-relations.ts:scorePathRelationSuppression.
+// anchor: active sign-aware suppression collector. Reuses path_expansion's seeds and findByAnchors but selects the negative (recall_bias < 0) paths the positive lanes exclude; each demotes its direction-eligible target by a strength-gated delta, accumulated per target. Fail-soft: missing port / lookup failure leaves suppression empty.
+// see also: fusion-delivery.ts applyPathSuppressionToFusionScores, path-relations.ts scorePathRelationSuppression.
 export async function collectNegativePathSuppressions(params: Readonly<{
   readonly workspaceId: string;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;

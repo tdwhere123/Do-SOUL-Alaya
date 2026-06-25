@@ -28,8 +28,7 @@ export function classifyRecallIntent(probes: Readonly<RecallQueryProbes>): Recal
   if (UPDATE_CUE.test(text)) return "knowledge_update";
   if (probes.date_terms.length >= 2 || TEMPORAL_CUE.test(text)) return "temporal";
   if (LIST_CUE.test(text)) return "list";
-  // Preference wins over coordination: a coordinated preference query is a
-  // word-gap problem, not a multi-fact one to split.
+  // Preference wins over coordination: a coordinated preference query is a word-gap problem, not a multi-fact split.
   if (probes.dimensions.includes(MemoryDimension.PREFERENCE) || PREFERENCE_CUE.test(text)) {
     return "preference";
   }
@@ -37,8 +36,7 @@ export function classifyRecallIntent(probes: Readonly<RecallQueryProbes>): Recal
   return "single_fact";
 }
 
-// Intents whose golds are spread across independent facts; per-anchor reserved
-// quota stops the first anchor from crowding the rest out of the pool.
+// Intents whose golds spread across independent facts; per-anchor reserved quota stops the first anchor from crowding the rest out.
 export function intentSplitsByAnchor(intent: RecallQueryIntent): boolean {
   return (
     intent === "multi_fact" ||

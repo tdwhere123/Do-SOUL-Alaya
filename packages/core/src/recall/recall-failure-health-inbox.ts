@@ -1,6 +1,4 @@
-// invariant: surfaces only UNEXPECTED recall auxiliary failures to the operator
-// health inbox (sibling of path-failure-health-inbox.ts). Known graceful
-// degradations stay warn-only. Best-effort: the wrapper swallows its throw.
+// invariant: surfaces only UNEXPECTED recall auxiliary failures to the operator health inbox; known graceful degradations stay warn-only. Best-effort: the wrapper swallows its throw. see also: path-failure-health-inbox.ts.
 export interface RecallFailureHealthInboxEntry {
   readonly workspaceId: string;
   // failed recall operation; deduped per workspace as target_object_id.
@@ -12,8 +10,7 @@ export interface RecallFailureHealthInboxPort {
   recordRecallFailure(entry: RecallFailureHealthInboxEntry): Promise<void> | void;
 }
 
-// JS programming-error classes; everything else (CoreError, AbortError, provider
-// errors) is treated as expected degradation and stays warn-only.
+// JS programming-error classes; everything else (CoreError, AbortError, provider errors) is expected degradation and stays warn-only.
 const UNEXPECTED_RECALL_ERROR_NAMES: ReadonlySet<string> = new Set([
   "TypeError",
   "RangeError",
@@ -26,9 +23,7 @@ function isUnexpectedRecallErrorName(errorName: string | undefined): boolean {
   return errorName !== undefined && UNEXPECTED_RECALL_ERROR_NAMES.has(errorName);
 }
 
-// Wraps the base recall warn so any warn carrying an unexpected `errorName` also
-// lands an aggregated health-inbox entry. Sites opt in by adding `operation` +
-// `errorName` to their warn meta; warns without them only log.
+// Wraps the base recall warn so an unexpected `errorName` also lands a health-inbox entry; sites opt in via `operation` + `errorName` meta, others only log.
 export function wrapRecallFaultWarn(
   baseWarn: (message: string, meta: Record<string, unknown>) => void,
   healthInbox: RecallFailureHealthInboxPort | undefined,

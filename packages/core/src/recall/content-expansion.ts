@@ -139,10 +139,7 @@ function addDomainTagClusterCandidates(
   }
 }
 
-// invariant: cohort dominance guard runs per-branch. Each branch's would-be
-// admissions are compared against tier pool size; exact query-attested cohorts
-// and seed-proximity cohorts are each skipped only when their own match set
-// covers more than 50% of tierMemories.
+// invariant: cohort dominance guard runs per-branch; exact and seed-proximity cohorts are each skipped only when their own match set covers >50% of tierMemories.
 function addSessionSurfaceCohortCandidates(
   params: Readonly<{
     readonly tierMemories: readonly Readonly<MemoryEntry>[];

@@ -10,47 +10,12 @@ import type {
 } from "./recall-service-types.js";
 import { pathRelationKindToTrackedEdgeType } from "./graph-expansion.js";
 
-// Active sign-aware suppression scale. A negative path (recall_bias < 0)
-// demotes its target's fused recall score by
-//   delta = |recall_bias| * f(strength) * PATH_SUPPRESSION_SCALE
-// where f(strength) is the path's plasticity strength in [0, 1] (an
-// attention_only co-occurrence sits near 0.5; a plasticity-reinforced
-// contradiction climbs toward 0.9-1.0). PATH_SUPPRESSION_SCALE is the only
-// magnitude tuned by intent here, and it is set so the gate is strength-aware
-// rather than benchmark-fitted (no-benchmark-specific-patch):
-//   - fused_score contributions are RRF terms ~weight/(k+rank), so a single
-//     mid-table stream contributes on the order of 0.01-0.05 and a strong
-//     multi-stream memory totals ~0.1-0.3.
-//   - a weak attention_only negative (|bias|~0.4, strength~0.5) yields
-//     delta ~ 0.4 * 0.5 * 0.5 = 0.10 ... too aggressive, so the strength gate
-//     below floors weak/forming paths out of suppression entirely and only
-//     stable/pinned high-strength negatives apply the full delta.
-// The strength gate (PATH_SUPPRESSION_STRENGTH_FLOOR) makes "weak attention_only
-// barely suppresses" literal: below the floor delta collapses to 0; at/above it
-// scales linearly so a reinforced contradiction (strength ~0.9) lands
-// delta ~ 0.4 * 0.9 * 0.6 = 0.216, enough to push a target out of a tight
-// top-K, while a freshly-seeded weak negative does not move rankings.
+// Active sign-aware suppression scale: a negative path demotes its target by delta = |recall_bias| * strength * SCALE. Strength-aware, not benchmark-fitted — the strength floor zeros weak/forming negatives, so only reinforced high-strength negatives apply the full delta.
 const PATH_SUPPRESSION_SCALE = 0.6;
-// invariant: strength below this floor contributes no suppression. Matches the
-// attention_only seed band (initial strength 0.3-0.5 for co-occurrence-class
-// paths) so a barely-formed negative association cannot demote a memory until
-// plasticity has reinforced it past the floor. see also:
-// packages/core/src/path-graph/path-relation-proposal-service.ts seed catalog (initialStrength per family).
+// invariant: strength below this floor contributes no suppression — above the attention_only seed band, so a barely-formed negative cannot demote until reinforced. see also: path-graph/path-relation-proposal-service.ts seed catalog (initialStrength per family).
 const PATH_SUPPRESSION_STRENGTH_FLOOR = 0.6;
-// invariant: hard ceiling on the total suppression delta any single target may
-// accumulate, across all converging negative paths. Sized to one supersedes-class
-// negative at full reinforcement: |recall_bias 0.5| * strength 0.9 *
-// PATH_SUPPRESSION_SCALE 0.6 = 0.27, so a lone reinforced supersession can
-// demote a target out of a tight top-K but stacked negatives can never exceed
-// the worst single legitimate suppression. This bounds the accumulated delta
-// (rank loss). The per-target cap limits the DELTA, not the residual score: a
-// single full-strength negative whose target had a low base fused_score
-// (< 0.27) could still drive that target's fused_score to 0 via one subtraction
-// and drop it out of the candidate set. PATH_SUPPRESSION_RESIDUAL_FLOOR (below)
-// is the residual-side guard that demotes, never erases.
-// see also: packages/core/src/recall/recall-service.ts:collectNegativePathSuppressions,
-// packages/core/src/recall/path-relations.ts:scorePathRelationSuppression,
-// packages/core/src/recall/fusion-delivery.ts:PATH_SUPPRESSION_RESIDUAL_FLOOR.
+// invariant: ceiling on total suppression delta one target may accumulate across converging negatives; sized to one full-strength supersession (0.5*0.9*0.6=0.27) so stacked negatives never exceed the worst single legitimate one. Caps the delta, not the residual — a low-base target can still hit 0; the residual-floor guard handles that.
+// see also: recall-service.ts collectNegativePathSuppressions, path-relations.ts scorePathRelationSuppression, fusion-delivery.ts PATH_SUPPRESSION_RESIDUAL_FLOOR.
 export const PATH_SUPPRESSION_MAX_PER_TARGET = 0.27;
 
 export function scorePathRelationExpansion(path: Readonly<PathRelation>): number {
@@ -72,15 +37,7 @@ export function scorePathRelationExpansion(path: Readonly<PathRelation>): number
   );
 }
 
-// Strength-gated active suppression delta for one negative path. recall_bias
-// is negative for the suppressing families (contradicts / supersedes /
-// incompatible_with), so |recall_bias| is the suppression magnitude. The
-// plasticity strength gate keeps weak / forming negatives inert: below
-// PATH_SUPPRESSION_STRENGTH_FLOOR the delta is exactly 0, so an attention_only
-// co-occurrence cannot demote a memory. At or above the floor the strength
-// scales the delta linearly, so a plasticity-reinforced contradiction applies
-// real demotion. Returns 0 for non-negative paths defensively (callers pass
-// only recall_bias < 0 paths). see also: packages/core/src/recall/path-relations.ts:PATH_SUPPRESSION_SCALE rationale.
+// Strength-gated suppression delta for one negative path (|recall_bias| is the magnitude). Below PATH_SUPPRESSION_STRENGTH_FLOOR the delta is 0; at/above it scales linearly. Returns 0 for non-negative paths defensively. see also: path-relations.ts PATH_SUPPRESSION_SCALE.
 export function scorePathRelationSuppression(path: Readonly<PathRelation>): number {
   const recallBias = path.effect_vector.recall_bias;
   if (recallBias >= 0) {
@@ -129,18 +86,12 @@ export interface DirectionEligiblePathExpansionTarget {
 export interface PathGraphNeighbor {
   readonly neighborId: string;
   readonly edgeType: RecallGraphExpansionTrackedEdgeType;
-  // The raw path relation_kind (pre-fold), kept alongside the tracked edgeType so
-  // the hop>=2 chain gate can key on the true relation rather than the folded type.
+  // Raw pre-fold relation_kind kept alongside edgeType so the hop>=2 chain gate keys on the true relation, not the folded type.
   readonly relationKind: string;
 }
 
 // anchor: path-graph traversal neighbor extraction shared by expandGraphFrontier.
-// Given a frontier node id, returns the direction-eligible object neighbors
-// reachable through the supplied recall-eligible paths, each tagged with the
-// tracked edge type its relation_kind maps onto. Reuses the same
-// direction_bias semantics as directionEligiblePathExpansionTargets so the
-// graph-traversal plane and the direct path_expansion plane agree on which
-// way a path may be followed. Self-loops and non-object anchors yield nothing.
+// Direction-eligible object neighbors of a frontier node, tagged with the tracked edge type; reuses directionEligiblePathExpansionTargets's direction_bias so both planes agree. Self-loops and non-object anchors yield nothing.
 export function collectPathGraphNeighbors(
   paths: readonly Readonly<PathRelation>[],
   nodeId: string
@@ -188,9 +139,7 @@ export function pathRelationMemoryIds(path: Readonly<PathRelation>): readonly st
   ].filter((value): value is string => value !== undefined));
 }
 
-// Provenance helper: the facet_key the path is anchored on, if either endpoint
-// is an object_facet anchor (source preferred — it is the matched side). null
-// for plain object/obligation/risk/time anchors.
+// Provenance helper: the object_facet anchor's facet_key (source preferred as the matched side); null for non-facet anchors.
 export function pathAnchorFacetKey(path: Readonly<PathRelation>): string | null {
   const { source_anchor, target_anchor } = path.anchors;
   if (source_anchor.kind === "object_facet") return source_anchor.facet_key;
@@ -245,28 +194,8 @@ export function anchorMemoryId(anchor: PathAnchorRef): string | undefined {
   }
 }
 
-// invariant: recall path_expansion only consumes recall-eligible paths —
-// active lifecycle AND recall_bias > 0 (the shared isPathRecallEligible
-// predicate). This is the negation of recall-eligible, so it excludes in
-// one gate:
-//   - lifecycle: retired (terminal) and dormant (reversible cold storage)
-//     never leak back into recall scoring;
-//   - negative families (contradicts / supersedes / incompatible_with,
-//     recall_bias < 0): suppression, not association — adding the target as
-//     a positive path_expansion candidate would AMPLIFY the suppressed
-//     memory instead of demoting it;
-//   - the recall-neutral exception_to marker (recall_bias == 0): a topology
-//     marker that must not enter positive expansion either.
-// Using the shared predicate keeps the < 0 / <= 0 family boundary aligned
-// with PathPlasticityService (which retires the negative + neutral family)
-// rather than re-deriving the sign test here.
-// Active sign-aware suppression is handled by collectNegativePathSuppressions;
-// this guard only stops positive path_expansion from amplifying suppressing
-// relations before that demotion pass runs.
-// see also: packages/core/src/path-graph/path-relation-proposal-service.ts — recall_bias is
-// recallBiasSign * recallBiasMagnitude, so a negative family is < 0 and the
-// exception_to marker is exactly 0.
-// see also: packages/protocol/src/soul/path-relation.ts:isPathRecallEligible.
+// invariant: positive path_expansion consumes only recall-eligible paths (active lifecycle AND recall_bias > 0). This negation excludes in one gate: retired/dormant lifecycle, negative families (would amplify the suppressed memory), and the neutral exception_to marker. Uses the shared predicate to keep the family boundary aligned with PathPlasticityService; active suppression is handled separately by collectNegativePathSuppressions.
+// see also: path-graph/path-relation-proposal-service.ts (recall_bias = sign*magnitude), protocol/soul/path-relation.ts isPathRecallEligible.
 export function isPathExcludedFromRecall(path: Readonly<PathRelation>): boolean {
   return !isPathRecallEligible(path);
 }

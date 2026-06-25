@@ -255,10 +255,7 @@ function collectRelevantEvidenceCandidates(
   candidates: readonly Readonly<MemoryEntry>[],
   coarseEvidenceFtsRanks: Readonly<Record<string, number>>
 ): readonly Readonly<MemoryEntry>[] {
-  // Restrict to candidates that already landed in the pool through an
-  // evidence FTS hit — their gists are the ones whose paraphrase carries
-  // recall-relevant semantics. Avoids an unbounded findByIds over every
-  // memory's full evidence_refs set.
+  // Only candidates that landed via an evidence FTS hit; bounds findByIds instead of scanning every memory's full evidence_refs.
   return candidates.filter(
     (entry) =>
       entry.evidence_refs.length > 0 &&
@@ -270,8 +267,7 @@ function collectRelevantEvidenceIds(
   candidates: readonly Readonly<MemoryEntry>[],
   coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
 ): readonly string[] {
-  // invariant: findByIds payload bounded by evidence-FTS hit set, not the
-  // candidate's full evidence_refs cardinality. see also: P2-R2-E.
+  // invariant: findByIds payload bounded by the evidence-FTS hit set, not the candidate's full evidence_refs cardinality.
   return uniqueStrings(
     candidates.flatMap((entry) =>
       selectRelevantEvidenceRefs(entry, coarseEvidenceFtsRanksPerRef)
@@ -283,9 +279,7 @@ function selectRelevantEvidenceRefs(
   entry: Readonly<MemoryEntry>,
   coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
 ): readonly string[] {
-  // invariant: per-memory evidence_refs cardinality is capped before the
-  // findByIds payload is built so a pathological memory cannot dominate the
-  // rerank loop's tokenizer / Set fan-out.
+  // invariant: per-memory evidence_refs capped before findByIds so a pathological memory cannot dominate the rerank loop's tokenizer/Set fan-out.
   const hitRefs = entry.evidence_refs.filter(
     (ref) => (coarseEvidenceFtsRanksPerRef[ref] ?? 0) > 0
   );
@@ -340,8 +334,7 @@ function pickRankedEvidenceGist(
   coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>,
   gistById: ReadonlyMap<string, string>
 ): string | undefined {
-  // invariant: pick gist from the highest-ranked ref in evidence_refs
-  // (per coarseEvidenceFtsRanksPerRef); stable by evidence_refs order on ties.
+  // invariant: gist from the highest-ranked ref (per coarseEvidenceFtsRanksPerRef); stable by evidence_refs order on ties.
   const orderedRefs = [...entry.evidence_refs].sort(
     (left, right) =>
       (coarseEvidenceFtsRanksPerRef[right] ?? 0) -
@@ -356,9 +349,7 @@ function pickFallbackEvidenceGist(
   entry: Readonly<MemoryEntry>,
   gistById: ReadonlyMap<string, string>
 ): string | undefined {
-  // fallback: aggregated rank > 0 but no per-ref rank populated; mirrors the
-  // legacy first-non-empty-gist rule for future producers that only emit the
-  // aggregate rank.
+  // fallback: aggregate rank > 0 but no per-ref rank; first-non-empty-gist rule for producers that emit only the aggregate.
   return entry.evidence_refs
     .map((ref) => gistById.get(ref))
     .find((gist) => gist !== undefined && gist.length > 0);
@@ -389,9 +380,7 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-// invariant: governance_class is a HARD CEILING on recall manifestation.
-// Absent path expansion is fail-open; path read failure is fail-closed to the
-// safe hint band for every candidate.
+// invariant: governance_class is a hard ceiling on recall manifestation; absent path expansion is fail-open, path read failure is fail-closed to the safe hint band.
 async function collectGovernanceCeilings(params: {
   readonly dependencies: Pick<RecallServiceDependencies, "pathExpansionPort">;
   readonly warn: RecallServiceWarnPort;
@@ -430,8 +419,7 @@ function buildGovernanceCandidateAnchors(
 function buildGovernanceFailsafeCeilings(
   candidateIds: ReadonlySet<string>
 ): Readonly<Record<string, ManifestationState>> {
-  // fail-CLOSED: cap every candidate to the safe band so a transient read
-  // error cannot lift a governed memory to its full strength tier.
+  // fail-closed: cap every candidate to the safe band so a transient read error cannot lift a governed memory to full strength.
   const failsafeCeilings: Record<string, ManifestationState> = {};
   for (const object_id of candidateIds) {
     failsafeCeilings[object_id] = GOVERNANCE_CEILING_FAILSAFE_BAND;
@@ -470,9 +458,7 @@ function resolveGovernedTargetMemoryId(
   if (!isPathRecallEligible(path)) {
     return undefined;
   }
-  // invariant: the ceiling is INBOUND — keyed on the path's target memory.
-  // findByAnchors also returns paths where the candidate is the SOURCE anchor;
-  // those govern the path's target, not the source.
+  // invariant: the ceiling is inbound — keyed on the path's target memory; source-anchor paths govern their target, not the candidate.
   const targetMemoryId = anchorMemoryId(path.anchors.target_anchor);
   if (targetMemoryId === undefined || !candidateIds.has(targetMemoryId)) {
     return undefined;

@@ -121,8 +121,7 @@ async function addAnchorLaneCandidates(
   await admitAnchorMatches(params, searchByAnchor, params.anchors.required, quota, objectIds);
 }
 
-// Split a multi-fact query into one anchor lane per anchor so the first anchor
-// cannot crowd the others out of the pool. Reserved-quota recall, not delivery.
+// Split a multi-fact query into one anchor lane per anchor so the first cannot crowd the others out. Reserved-quota recall, not delivery.
 function shouldSplitAnchors(params: SemanticSupplementParams): boolean {
   return (
     params.anchors.required.length >= 2 &&

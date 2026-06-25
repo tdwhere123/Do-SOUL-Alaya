@@ -16,15 +16,7 @@ import {
   sessionKeyOf
 } from "./coverage-delivery-signals.js";
 
-// Default-on delivery selection. The natural ranking buries complementary golds
-// (Any-gold@5 high, Full-gold@5 low): a multi-fact answer needs N golds across
-// sessions / entities / sub-clauses but only the strongest survives the flat
-// top-K cut. This rewrites the interior of the top-K (never rank-1, never the
-// reserve tail) so a candidate's own relevance stays primary and facet coverage
-// is an additive bonus — a strong same-session answer is never demoted for a
-// weak new-session one. It runs only when the query is plausibly multi-fact AND
-// the pool actually offers cross-session evidence to diversify into. Facets and
-// the gate derive only from delivery-time signals; there is no QueryPlan.
+// Default-on delivery selection: natural ranking buries complementary golds (Any-gold@5 high, Full-gold@5 low). Rewrites the top-K interior (never rank-1, never the reserve tail) with facet coverage as an additive bonus, so a strong same-session answer is never demoted for a weak new-session one. Runs only when the query is plausibly multi-fact AND the pool offers cross-session evidence; all signals are delivery-time, no QueryPlan.
 
 // Facet tokens are prefixed by axis; the prefix maps to its coverage bonus.
 const FACET_PREFIX_WEIGHT: Readonly<Record<string, number>> = {
@@ -37,9 +29,7 @@ const FACET_PREFIX_WEIGHT: Readonly<Record<string, number>> = {
   "M:": 0.02
 };
 
-// Coverage is a near-tie nudge, not an override: the total facet bonus can never
-// exceed one strong facet's worth, so a candidate cannot leapfrog another whose
-// base relevance is clearly higher — it only reorders candidates close in score.
+// Near-tie nudge, not an override: total facet bonus never exceeds one strong facet, so it only reorders candidates close in score.
 const MAX_COVERAGE_BONUS = 0.12;
 
 const MULTI_FACT_LIST_CUE = /\b(all|both|each|list|every|multiple|several|compare|across)\b/iu;
@@ -136,9 +126,7 @@ function facetSignature(entry: Readonly<MemoryEntry>, ctx: FacetContext): Readon
   return signature;
 }
 
-// Relevance stays primary: the candidate's own score ratio plus an additive
-// bonus for each facet it newly covers. A strong same-session candidate keeps
-// its full score and is not displaced by a weak new-session one.
+// Relevance stays primary: score ratio plus an additive bonus per newly-covered facet.
 function coverageUtility(base: number, signature: ReadonlySet<string>, covered: ReadonlySet<string>): number {
   let bonus = 0;
   for (const facet of signature) {
@@ -164,12 +152,7 @@ interface PoolBreadth {
   readonly crossSessionNovelTerm: boolean;
 }
 
-// What the realized pool actually offers, relative to the head. crossSessionStrong
-// (>=2 above-ratio sessions) is the mandatory data condition — without genuine
-// cross-session evidence there is nothing to diversify into. crossSessionNovelTerm
-// is true when a strong candidate in another session matches a query term the head
-// does NOT: a distractor that only repeats the head's terms is no signal, but a
-// second fact answering a different sub-clause is — even with no list cue.
+// What the realized pool offers vs the head. crossSessionStrong (>=2 above-ratio sessions) is the mandatory data condition; crossSessionNovelTerm is true when a strong other-session candidate matches a query term the head does not (a second sub-clause fact, not a term-repeating distractor).
 function analyzePoolBreadth<T extends DeliveryCandidate>(
   pool: readonly T[],
   head: T,
@@ -198,11 +181,7 @@ function analyzePoolBreadth<T extends DeliveryCandidate>(
   return { crossSessionStrong: strongSessions.size >= 2, crossSessionNovelTerm };
 }
 
-// Whether delivery-layer coverage reordering should run at all: off-switch
-// honored, basic no-op guards, then force OR (the pool genuinely offers
-// cross-session evidence AND the query is plausibly multi-fact). Shared so the
-// optimizer and applySessionCoverageRerank stay byte-identical for single-fact
-// queries under the same conditions.
+// Whether coverage reordering runs: off-switch + no-op guards, then force OR (cross-session evidence AND plausibly multi-fact). Shared so the optimizer and applySessionCoverageRerank agree for single-fact queries.
 export function coverageReorderGateOpen<T extends DeliveryCandidate>(
   ordered: readonly T[],
   supplementaryData: RecallSupplementaryData,

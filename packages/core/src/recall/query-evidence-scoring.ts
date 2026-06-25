@@ -26,9 +26,7 @@ export function scoreQueryEvidenceMatch(
   return clamp01(termCoverage * 0.48 + phraseScore * 0.12 + densityScore * 0.08 + conciseScore);
 }
 
-// The set of query lexical terms that hit a candidate, used by the evidence-set
-// optimizer to tell complementary multi-fact golds apart by which sub-clause
-// each answers. Shares normalization + word-boundary matching with the scorer.
+// Query lexical terms that hit a candidate; the evidence-set optimizer uses them to tell complementary multi-fact golds apart by sub-clause. Shares normalization + word-boundary matching with the scorer.
 export function collectQueryTermHits(
   entry: Readonly<MemoryEntry>,
   queryProbes: Readonly<RecallQueryProbes>

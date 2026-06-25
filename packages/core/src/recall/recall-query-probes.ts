@@ -18,11 +18,7 @@ export interface RecallQueryProbes {
   readonly scope_classes: readonly ScopeClassType[];
   readonly domain_tags: readonly string[];
   readonly lexical_terms: readonly string[];
-  // Deterministic lexical-term expansions (morphology folding, abbreviation
-  // pairs, static domain synonyms) kept distinct from lexical_terms so phrase
-  // adjacency and feature-rerank tokenization stay computed off the original
-  // surface terms only. Recall feeds these into the lexical/evidence FTS
-  // retrievers to widen candidate coverage. see also: expandLexicalTerms.
+  // Deterministic expansions (morphology, abbreviations, domain synonyms) kept distinct from lexical_terms so phrase adjacency / rerank tokenize off surface terms only; fed to FTS to widen coverage. see also: expandLexicalTerms.
   readonly expanded_terms: readonly string[];
   readonly phrases: readonly string[];
   readonly char_ngrams: readonly string[];
@@ -178,16 +174,8 @@ function normalizeQuery(queryText: string | null): string | null {
 }
 
 /**
- * Split text into deterministic lowercased terms: shared split regex,
- * lowercase+trim, drop empties, and a length>2-or-CJK-script keep rule.
- * Does NOT drop stop words. The feature-rerank tokenizer reuses this so
- * query terms and candidate terms tokenize under one identical rule.
- *
- * invariant: when a surface token bears Han/Hiragana/Katakana, the
- * original surface chunk is yielded first AND jieba word-level pieces are
- * appended (deduped). This preserves trigram-lane substring coverage on
- * the long form while also exposing word boundaries for BM25/phrase
- * adjacency on the short form. see also: packages/core/src/shared/cjk-segmentation.ts.
+ * Deterministic lowercased terms (shared split regex, length>2-or-CJK keep rule); keeps stop words. Reused by the feature-rerank tokenizer so query and candidate tokenize identically.
+ * invariant: a CJK-bearing surface token yields its surface chunk first then deduped jieba word-pieces — keeps trigram substring coverage while exposing word boundaries. see also: shared/cjk-segmentation.ts.
  */
 export function splitLexicalTokens(value: string): readonly string[] {
   const surfaceTokens = value
@@ -195,12 +183,7 @@ export function splitLexicalTokens(value: string): readonly string[] {
     .map((term) => term.trim().toLocaleLowerCase())
     .filter((term) => term.length > 0)
     .filter((term) => term.length > 2 || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(term));
-  // invariant: surface tokens preserve their duplicates so downstream
-  // distinct-token / occurrence-count features (feature-rerank diversity
-  // damp, concentration damp, …) keep the same numerator behaviour as
-  // pre-jieba. Only jieba word-level pieces are deduped (against tokens
-  // already in the output) so repeated CJK runs do not fan out N copies
-  // of the same piece set.
+  // invariant: surface tokens keep their duplicates so downstream occurrence-count features keep pre-jieba numerator behaviour; only jieba pieces are deduped against the output.
   const output: string[] = [];
   const seenJiebaPieces = new Set<string>();
   for (const token of surfaceTokens) {
@@ -214,16 +197,7 @@ export function splitLexicalTokens(value: string): readonly string[] {
       if (normalized.length === 0 || seenJiebaPieces.has(normalized)) {
         continue;
       }
-      // invariant: ONLY CJK-bearing jieba pieces are pushed into
-      // lexical_terms. The surface split lane (with `_/@/#/./-` kept as
-      // word-chars) already produces the canonical ASCII tokenization;
-      // re-emitting jieba's ASCII pieces would break compound tokens
-      // like `admin_passwords` apart whenever an attacker appends an
-      // unrelated CJK run (`admin_passwords你好`), bypassing surface
-      // boundary integrity and letting auto-decomposed sub-terms match
-      // memories the surface form alone would not. ASCII jieba pieces
-      // are therefore discarded; only Han/Hiragana/Katakana/Hangul
-      // pieces enter lexical_terms.
+      // invariant: only CJK-bearing jieba pieces enter lexical_terms; emitting jieba's ASCII pieces would split compound tokens (`admin_passwords你好`) and bypass surface-boundary integrity, so ASCII pieces are discarded.
       if (
         /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(normalized)
       ) {
@@ -240,11 +214,7 @@ function extractLexicalTerms(value: string): readonly string[] {
   return unique(terms).slice(0, 48);
 }
 
-// Conservative, domain-restricted synonym/abbreviation table. Each entry is a
-// bidirectional cluster: any member present in the query expands to the other
-// members. Kept narrow on purpose — an over-broad table dilutes the candidate
-// pool with noise and depresses RRF-fused R@5. Entries are lowercased; lookup
-// reuses the lexical-term lowercasing rule so matching is deterministic.
+// Conservative bidirectional synonym/abbreviation clusters; kept narrow because an over-broad table dilutes the pool and depresses RRF R@5. Lowercased, deterministic lookup.
 const DOMAIN_SYNONYM_CLUSTERS: ReadonlyArray<readonly string[]> = [
   ["alaya", "do-soul"],
   ["recall", "retrieval", "retrieve"],
@@ -267,9 +237,7 @@ const DOMAIN_SYNONYM_CLUSTERS: ReadonlyArray<readonly string[]> = [
 const SYNONYM_CLUSTER_MAX_MEMBERS = 8;
 const SYNONYM_CLUSTER_MAX_TOTAL = 256;
 
-// Optional operator-supplied clusters (JSON array of string arrays) merged with
-// the built-in table via ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS. Fail-loud on
-// malformed JSON so a typo cannot silently disable expansion.
+// Optional operator clusters (ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS, JSON array of string arrays); fail-loud on malformed JSON so a typo cannot silently disable expansion.
 function readExtraSynonymClusters(): ReadonlyArray<readonly string[]> {
   const raw = process.env.ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS;
   if (raw === undefined || raw.trim() === "") {
@@ -302,9 +270,7 @@ function readExtraSynonymClusters(): ReadonlyArray<readonly string[]> {
   );
 }
 
-// term -> sorted unique cluster partners. The caps are enforced at build time so
-// an over-broad table (which dilutes the candidate pool and depresses RRF R@5)
-// fails loud at boot rather than degrading recall silently.
+// term -> sorted unique cluster partners; caps enforced at build time so an over-broad table fails loud at boot rather than degrading recall silently.
 export function buildSynonymExpansionTable(): ReadonlyMap<string, readonly string[]> {
   const clusters = [...DOMAIN_SYNONYM_CLUSTERS, ...readExtraSynonymClusters()];
   if (clusters.length > SYNONYM_CLUSTER_MAX_TOTAL) {
@@ -334,13 +300,7 @@ export function buildSynonymExpansionTable(): ReadonlyMap<string, readonly strin
 
 const SYNONYM_EXPANSION_BY_TERM = buildSynonymExpansionTable();
 
-/**
- * Deterministic lexical-term expansion. For each surface term it yields
- * morphology-folded variants (regular English plural/verb-suffix rules) and
- * static domain synonyms/abbreviations. Pure function: identical input always
- * yields identical output, no ML, no network, no clock. The result excludes
- * the original lexical terms and stop words so it is purely additive coverage.
- */
+/** Deterministic expansion of each term into morphology-folded variants + domain synonyms; pure (no ML/network/clock). Excludes the originals and stop words, so it is purely additive coverage. */
 export function expandLexicalTerms(lexicalTerms: readonly string[]): readonly string[] {
   const surface = new Set(lexicalTerms);
   const expansions: string[] = [];
@@ -359,9 +319,7 @@ export function expandLexicalTerms(lexicalTerms: readonly string[]): readonly st
   ).slice(0, 64);
 }
 
-// Regular English suffix folding. Returns the deterministic set of inflected
-// forms reachable from `term` under common plural / verb-tense rules. CJK and
-// non-alphabetic terms are left unfolded (no Latin morphology applies).
+// English suffix folding: inflected forms reachable under common plural/verb-tense rules; CJK and non-alphabetic terms are left unfolded.
 function foldMorphology(term: string): readonly string[] {
   if (!/^[a-z][a-z'-]*$/u.test(term)) {
     return [];
@@ -400,9 +358,7 @@ function foldMorphology(term: string): readonly string[] {
   return [...variants];
 }
 
-// Collapse a doubled final consonant (the orthographic doubling that English
-// applies before -ing / -ed, e.g. "running" -> stem "runn" -> "run"). Only
-// folds a true double of the same non-vowel letter.
+// Collapse the orthographic consonant doubling before -ing/-ed ("runn" -> "run"); folds only a true double of the same non-vowel.
 function undoubleFinalConsonant(stem: string): string {
   const last = stem.slice(-1);
   return stem.length > 3 && stem.slice(-2, -1) === last && !/[aeiou]/u.test(last)

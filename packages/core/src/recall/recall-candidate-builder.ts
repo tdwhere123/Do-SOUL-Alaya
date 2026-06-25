@@ -29,10 +29,7 @@ export interface BuildRecallCandidateInput {
   readonly index: number;
   readonly usedTokensBeforeCandidate: number;
   readonly extraSourceChannel?: string;
-  // invariant: governance ceiling on manifestation derived from the memory's
-  // inbound recall-eligible PathRelations. Absent => unrestricted
-  // (full_eligible). The ceiling only LOWERS the strength tier, never elevates.
-  // see also: path-manifestation-policy.ts memoryGovernanceCeiling.
+  // invariant: governance ceiling on manifestation from inbound recall-eligible PathRelations; clamp only lowers the tier, never elevates; absent = full_eligible. see also: path-manifestation-policy.ts memoryGovernanceCeiling.
   readonly governanceCeiling?: ManifestationState;
 }
 
@@ -48,8 +45,7 @@ export function buildRecallCandidate(input: BuildRecallCandidateInput): Readonly
 
   return RecallCandidateSchema.parse({
     object_id: entry.object_id,
-    // A synthesis-derived candidate carries object_kind synthesis_capsule;
-    // its CoarseRecallCandidate.entry is a synthesis-shaped pseudo memory.
+    // A synthesis-derived candidate carries object_kind synthesis_capsule over a synthesis-shaped pseudo memory.
     object_kind: input.candidate.objectKind ?? ("memory_entry" as const),
     activation_score: activationScore,
     relevance_score: input.relevanceScore,
@@ -78,14 +74,7 @@ export interface SynthesisCoarseRecallCandidateInput {
   readonly normalizedRank: number;
 }
 
-/**
- * Delivered-content cap for a synthesis_capsule recall candidate. A
- * synthesis summary is an L2 aggregate that can run long; recall delivers a
- * bounded preview, not the whole digest, so a reserved synthesis slot costs
- * a memory-entry-comparable share of the delivery token budget. FTS still
- * indexes the full summary (migration 079) — only the delivered excerpt is
- * clipped.
- */
+/** Delivered-content cap for a synthesis_capsule candidate: bounds the long L2 summary to a memory-entry-comparable budget share. FTS still indexes the full summary (migration 079); only the delivered excerpt is clipped. */
 const SYNTHESIS_RECALL_PREVIEW_CHARS = 600;
 
 function clipSynthesisSummary(summary: string): string {
@@ -116,10 +105,7 @@ function buildSynthesisPseudoMemoryEntry(
   synthesis: Readonly<SynthesisCapsule>,
   relevance: number
 ): MemoryEntry {
-  // invariant: a synthesis_capsule is shaped into a MemoryEntry only so it can
-  // ride the shared coarse->fusion candidate pipeline. dimension/source_kind/
-  // formation_kind/scope_class are schema-valid placeholders, not synthesis
-  // ontology truth. Callers MUST branch on objectKind === "synthesis_capsule".
+  // invariant: a synthesis_capsule is shaped into a MemoryEntry only to ride the shared coarse->fusion pipeline; dimension/source_kind/formation_kind/scope_class are schema-valid placeholders, not ontology truth. Callers MUST branch on objectKind === "synthesis_capsule".
   return {
     object_id: synthesis.object_id,
     object_kind: "memory_entry",

@@ -130,20 +130,9 @@ function freezeFusionBreakdown(
 }
 
 /**
- * Pure derivation of per-recall token economy from already-computed recall
- * state. Synchronous, allocation-light, and never widens the diagnostics
- * surface beyond integer counters and the existing token_estimate sum.
- *
- * @anchor compute-recall-token-economy: every figure must be derivable
- * from data already produced for the recall result. Adding a field that
- * needs new traversal of the corpus would push instrumentation past the
- * "no measurable latency budget impact" red line of phase 7.
- *
- * Exported only so the recall-service test suite can pin the latency
- * contract (O-1 regression: nested per-stream/per-candidate scan stays
- * sub-50µs even at the worst-case bench cardinality). Production callers
- * still go through RecallService.recall — there is no separate runtime
- * entry point.
+ * Pure derivation of per-recall token economy from already-computed state; synchronous, allocation-light, integer counters + the existing token_estimate sum only.
+ * @anchor compute-recall-token-economy: every figure must be derivable from data already produced; a field needing fresh corpus traversal would breach the no-latency-impact contract.
+ * Exported only so the test suite can pin the latency contract; production callers go through RecallService.recall.
  */
 export function computeRecallTokenEconomy(params: Readonly<{
   readonly deliveredCandidates: readonly Readonly<RecallCandidate>[];
@@ -156,10 +145,7 @@ export function computeRecallTokenEconomy(params: Readonly<{
   for (const candidate of params.deliveredCandidates) {
     deliveredContextTokensEstimate += candidate.token_estimate;
   }
-  // Count distinct fusion streams that produced at least one non-null
-  // rank across the pre-budget candidate set. Iterates over the typed
-  // RECALL_FUSION_STREAMS list so the count tracks the protocol's
-  // fusion-stream surface, not an ad-hoc subset.
+  // Distinct fusion streams with a non-null rank across pre-budget candidates; iterates RECALL_FUSION_STREAMS so the count tracks the protocol surface, not an ad-hoc subset.
   let fusionStreamsWithHits = 0;
   for (const stream of RECALL_FUSION_STREAMS) {
     const hit = params.preBudgetCandidates.some(

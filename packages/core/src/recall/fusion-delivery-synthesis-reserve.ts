@@ -73,8 +73,7 @@ export function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInpu
   return deliveryOrdered;
 }
 
-// invariant: structural streams are only graph/path topology reach; generic structuralScore and entity/evidence terms are excluded.
-// see also: packages/core/src/recall/fusion-delivery.ts:reserveStructuralDeliverySlots.
+// invariant: structural streams are only graph/path topology reach; generic structuralScore and entity/evidence terms are excluded. see also: fusion-delivery.ts reserveStructuralDeliverySlots.
 const STRUCTURAL_FUSION_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
   "graph_expansion",
   "path_expansion"
@@ -130,9 +129,7 @@ function lexicalLaneFusionContribution(candidate: FusedRecallCandidateInput): nu
 const STRUCTURAL_DELIVERY_RESERVE = 2;
 
 // invariant: structural rescue relevance is gold-blind; generic structural candidates need lexical/evidence relevance unless earned co_recalled fan-in applies.
-// see also: packages/core/src/recall/query-evidence-scoring.ts:scoreQueryEvidenceMatch,
-// packages/core/src/recall/query-evidence-scoring.ts:scoreEvidenceAnchorMatch,
-// packages/core/src/recall/fusion-delivery.ts:isStructuralRescueCandidate.
+// see also: query-evidence-scoring.ts scoreQueryEvidenceMatch / scoreEvidenceAnchorMatch, fusion-delivery.ts isStructuralRescueCandidate.
 function structuralRescueRelevanceSignal(
   candidate: FusedRecallCandidateInput,
   supplementaryData: RecallSupplementaryData

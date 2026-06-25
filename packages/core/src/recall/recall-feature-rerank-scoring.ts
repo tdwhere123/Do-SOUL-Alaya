@@ -25,12 +25,7 @@ function poolTermIdf(pool: RerankPoolIdf, term: string): number {
   return Math.log((pool.poolSize + 1) / (df + 1));
 }
 
-/**
- * Exact-phrase feature: 1 when any salient query span appears verbatim.
- * The bare full-query fallback only fires when the query carries at least
- * one content term; a stop-word-only query (e.g. "the") has no content
- * signal and must not award spurious exact-phrase credit.
- */
+/** Exact-phrase feature: 1 when a salient query span appears verbatim. Full-query fallback fires only with >=1 content term, so a stop-word-only query earns no credit. */
 function scoreExactPhrase(
   normalizedQuery: string | null,
   phrases: readonly string[],
@@ -73,28 +68,7 @@ function scoreTermCoverage(
   return hits / queryTerms.length;
 }
 
-/**
- * Rare-term-coverage feature: like term-coverage, but each matched query
- * term contributes its pool-local IDF weight instead of a flat 1. The
- * result is the matched IDF mass over the total query IDF mass, so it
- * stays in [0, 1]. A candidate that matches the rare, answer-bearing
- * terms scores high; one that matches only common topic terms scores low,
- * even when its plain term-coverage is identical.
- *
- * Yields 0 when the query is too thin (mirrors term-coverage), when no
- * pool IDF is supplied, or when the total query IDF mass is 0 (every
- * matched-or-unmatched term is maximally common — no rarity signal).
- *
- * Two consequences worth stating: (1) on a fully topic-saturated pool —
- * every query term in every candidate — this feature contributes 0 even
- * to a full-coverage candidate, and `term_coverage` carries that case
- * alone; the discriminating gain therefore comes from *partially*
- * saturated pools, which is the LongMemEval distractor-cluster shape this
- * targets. (2) A query term absent from the whole pool earns the maximum
- * IDF and so inflates `totalIdf` (the denominator) without ever adding to
- * `matchedIdf` — it legitimately dampens every candidate's score, since
- * "no candidate matches a rare query term" means none is a strong hit.
- */
+/** Rare-term-coverage: matched IDF mass over total query IDF mass (in [0,1]); rewards matching rare answer-bearing terms over common topic terms at equal plain coverage. Yields 0 on a thin query, no pool IDF, or zero total IDF mass (fully topic-saturated pool — term_coverage carries that case). */
 function scoreRareTermCoverage(
   queryTerms: readonly string[],
   haystackTerms: ReadonlySet<string>,
@@ -118,11 +92,7 @@ function scoreRareTermCoverage(
   return matchedIdf / totalIdf;
 }
 
-/**
- * Proximity feature: query terms appearing in a tight window score higher
- * than scattered ones. Computes the smallest token-span window that
- * contains every matched query term, then maps span → [0, 1].
- */
+/** Proximity feature: smallest token-span window containing every matched query term, mapped span → [0,1]; tight windows score higher than scattered. */
 function scoreProximity(
   queryTerms: readonly string[],
   haystackTokens: readonly string[]
@@ -196,16 +166,7 @@ function findTightestMatchedSpan(
   return bestSpan === Number.MAX_SAFE_INTEGER ? null : bestSpan;
 }
 
-/**
- * Compute the deterministic lexical rerank feature breakdown for one
- * candidate. The `score` is in [0, 1]. Exported for unit testing the
- * scorer in isolation.
- *
- * `poolIdf` carries pool-local term rarity over the rerank candidate set;
- * when omitted (or `null`) the `rare_term_coverage` feature contributes 0,
- * so the scorer stays well-defined for an empty pool or a single-candidate
- * call.
- */
+/** Deterministic lexical rerank feature breakdown for one candidate (score in [0,1]). With poolIdf null, rare_term_coverage contributes 0 so the scorer stays well-defined for an empty/single-candidate pool. */
 export function computeRerankFeatures(
   query: Readonly<RecallQueryProbes>,
   text: RerankCandidateText,
@@ -283,17 +244,7 @@ function buildWeightedGistBreakdown(
   });
 }
 
-/**
- * Self-contained token-diversity damp for the gist path. Returns 1 when the
- * gist's distinct-token ratio is at or above GIST_MIN_DIVERSITY_RATIO; below
- * that, scales linearly to 0 at ratio 0. The mapping
- * `damp = ratio / GIST_MIN_DIVERSITY_RATIO` keeps the boundary continuous
- * (ratio == threshold -> damp == 1, ratio == 0.1 -> damp == 0.2) so there is
- * no cliff that bench tuning could exploit. Short gists
- * (<= GIST_SHORT_TOKEN_THRESHOLD tokens) yield 1: legitimate emphatic
- * answers ("yes yes yes", "ok ok ok ok") naturally collapse this ratio and
- * the upper EVIDENCE_GIST_WEIGHT cap already bounds their amplification.
- */
+/** Token-diversity damp for the gist path: 1 at/above GIST_MIN_DIVERSITY_RATIO, linear to 0 below (continuous, no exploitable cliff). Short gists (<= GIST_SHORT_TOKEN_THRESHOLD) yield 1. */
 function computeGistDiversityDamp(gistText: string): number {
   const tokens = tokenize(gistText);
   if (tokens.length <= GIST_SHORT_TOKEN_THRESHOLD) {
@@ -308,29 +259,10 @@ function computeGistDiversityDamp(gistText: string): number {
 }
 
 /**
- * Self-contained query-term concentration damp for the gist path. Returns
- * 1 when the gist's distinct-query-token density
- * (distinctQueryTokensPresent / totalTokens — each unique query term that
- * appears in the gist counts once regardless of repetition) is at or below
- * GIST_QUERY_CONCENTRATION_THRESHOLD; above that, ramps linearly to
- * GIST_CONCENTRATION_MIN_DAMP across a window of width
- * GIST_CONCENTRATION_RAMP. Catches the padding-bypass attack the
- * distinct-token damp misses: the attacker pads the query phrase with
- * distinct nonsense tokens so uniqueTokens/totalTokens stays near 1.0,
- * but distinct query terms still dominate the gist.
- *
- * invariant: repeating the same query word does not increase concentration —
- * distinct counting bounds the numerator by querySet size while padding
- * scales the denominator.
- * invariant: short gists (<= GIST_SHORT_TOKEN_THRESHOLD tokens) skip the
- * damp — a one-word answer that literally is the query term is a
- * legitimate gist shape and carries no amplification headroom under the
- * EVIDENCE_GIST_WEIGHT cap.
- * invariant: empty query (no lexical_terms) yields 1 — nothing to
- * concentrate on.
- * see also: GIST_QUERY_CONCENTRATION_THRESHOLD / GIST_CONCENTRATION_RAMP
- * / GIST_CONCENTRATION_MIN_DAMP constants above for the boundary tuning
- * rationale.
+ * Query-term concentration damp for the gist path: 1 at/below GIST_QUERY_CONCENTRATION_THRESHOLD, ramps to GIST_CONCENTRATION_MIN_DAMP over GIST_CONCENTRATION_RAMP above it; catches the distinct-padding bypass the diversity damp misses.
+ * invariant: distinct counting bounds the numerator by querySet size, so repeating a query word cannot raise concentration.
+ * invariant: short gists (<= GIST_SHORT_TOKEN_THRESHOLD) and empty queries yield 1 — no amplification headroom / nothing to concentrate.
+ * see also: GIST_QUERY_CONCENTRATION_THRESHOLD, GIST_CONCENTRATION_RAMP, GIST_CONCENTRATION_MIN_DAMP.
  */
 function computeGistConcentrationDamp(
   gistText: string,
@@ -377,9 +309,7 @@ function computeRerankFeaturesForField(
   const rareTermCoverage = scoreRareTermCoverage(queryTerms, haystackTermSet, poolIdf);
   const proximity = scoreProximity(queryTerms, haystackTokens);
 
-  // Field-aware weighting: full credit when the query matched the distilled
-  // content; damped credit when the only lexical signal is in the raw
-  // evidence excerpt (a separate, lower-trust field).
+  // Field-aware: full credit on a distilled-content match, damped credit when the only signal is the lower-trust raw evidence.
   const hasContentSignal = exactPhrase > 0 || termCoverage > 0;
   const fieldFactor = hasContentSignal
     ? 1

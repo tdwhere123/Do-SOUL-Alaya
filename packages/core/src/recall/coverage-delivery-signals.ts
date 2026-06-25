@@ -1,9 +1,7 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { RecallFusionBreakdown } from "./recall-service-types.js";
 
-// Shared delivery-coverage primitives consumed by evidence-set-optimizer.ts.
-// Kept provider/policy-free so both the default optimizer and its admissibility
-// gate read one copy.
+// Shared delivery-coverage primitives for evidence-set-optimizer.ts; provider/policy-free so the optimizer and its admissibility gate share one copy.
 
 export const COVERAGE_SELECTOR_ENV = "ALAYA_RECALL_COVERAGE_SELECTOR";
 export const COVERAGE_POOL_K_ENV = "ALAYA_RECALL_COVERAGE_POOL_K";
@@ -40,10 +38,7 @@ export function dateBucketOf(entry: Readonly<MemoryEntry>): string | null {
   return typeof created === "string" && created.length >= 10 ? created.slice(0, 10) : null;
 }
 
-// A non-lexical stream hit (semantic / structural / adjacency) is the buried
-// gold coverage promotion exists to rescue, so it bypasses the score gate. A
-// path-suppressed candidate is excluded from the graph/path streams it was
-// suppressed *for*, so the rescue cannot readmit it on its demoted reach.
+// A non-lexical stream hit (semantic/structural/adjacency) is the buried gold the rescue exists for, so it bypasses the score gate; a path-suppressed candidate is excluded from the streams it was suppressed for.
 export function hasPromotableStreamHit(
   fusion: Readonly<RecallFusionBreakdown>,
   suppressed = false

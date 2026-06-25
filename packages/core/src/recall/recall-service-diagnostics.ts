@@ -14,16 +14,12 @@ export type RecallAdmissionPlane =
   | "graph_expansion"
   | "path_expansion"
   | "lexical"
-  // High-precision anchor FTS lane: admitted only when the row contains a
-  // required anchor token. see also: recall-query-plan.ts, coarse-filter-semantic.ts.
+  // High-precision anchor FTS lane: admitted only on a required anchor token. see also: recall-query-plan.ts, coarse-filter-semantic.ts.
   | "lexical_anchor"
   | "synthesis_child"
-  // Coarse-injection candidates surfaced by the embedding workspace neighbor
-  // scan. They have no lexical / structural anchor, so a separate plane name
-  // keeps source-proximity / graph-expansion seed selection honest.
+  // Embedding-workspace-scan injections with no lexical/structural anchor; separate plane name keeps seed selection honest.
   | "semantic_supplement"
-  // see also: collectEntityDerivedSeeds — query-time entity FTS hits that
-  // both seed graph_expansion and admit candidates on their own plane.
+  // see also: collectEntityDerivedSeeds — entity FTS hits that seed graph_expansion and admit on their own plane.
   | "entity_seed";
 
 export type RecallCandidateDropReason =
@@ -67,13 +63,9 @@ export type RecallFusionStream =
   | "existing_score"
   | "embedding_similarity"
   | "graph_expansion"
-  // see also: packages/core/src/recall/fusion-delivery.ts:scoreRecallFusionStream
+  // see also: fusion-delivery.ts scoreRecallFusionStream.
   | "entity_seed"
-  // invariant: path_expansion is the direct multi-session fan-in carrier.
-  // Earned sparse co_recalled PathRelations fan a query that hits a
-  // non-representative cohort member into same-session siblings via the unified
-  // path plane.
-  // see also: packages/core/src/recall/fusion-delivery.ts:scoreRecallFusionStream
+  // invariant: path_expansion is the direct multi-session fan-in carrier — earned sparse co_recalled paths fan a query hitting a non-representative cohort member into same-session siblings. see also: fusion-delivery.ts scoreRecallFusionStream.
   | "path_expansion"
   | "temporal_recency"
   | "workspace_activation";
@@ -117,11 +109,7 @@ export interface RecallCandidateDiagnostic {
   readonly score_factors: Readonly<RecallScoreFactors>;
   readonly source_channels: readonly string[];
   readonly path_expansion_sources: readonly RecallPathExpansionSourceDiagnostic[];
-  // Per-stage delivery rank trajectory through fineAssess (1-based). Lets
-  // diagnostics see WHERE a candidate fell out of the top-k delivery window:
-  // natural fusion ordering vs feature rerank vs lexical priority vs a reserve
-  // displacing it. reserved_by names the stage that pulled THIS candidate into
-  // the window. Optional — provenance only, never feeds ranking.
+  // Per-stage delivery rank trajectory through fineAssess (1-based): shows where a candidate fell out of the top-k window; reserved_by names the stage that pulled it in. Provenance only, never feeds ranking.
   readonly rank_after_fusion?: number;
   readonly rank_after_feature_rerank?: number;
   readonly rank_after_lexical_priority?: number;
@@ -142,51 +130,24 @@ export interface RecallPathExpansionSourceDiagnostic {
   readonly seed_kind: "memory" | "time_concern";
   readonly target_object_id: string;
   readonly source_channel: "path_expansion" | "time_concern";
-  // Which relation carried the candidate (constitution.relation_kind) and, when
-  // the path is anchored on a specific object facet, which facet_key fired.
-  // Provenance only — lets diagnostics attribute gold delivery to a relation/
-  // facet instead of a flat "path_expansion" stream label.
+  // The relation (constitution.relation_kind) and firing facet_key that carried the candidate. Provenance only — attributes gold delivery to a relation/facet, not a flat stream label.
   readonly relation_kind: string;
   readonly facet_key: string | null;
 }
 
-// invariant: per-recall token economy is measure-only instrumentation.
-// It never feeds back into recall ranking, never gates eligibility, and
-// never becomes part of the protocol payload — it lives entirely inside
-// the in-memory RecallDiagnostics sub-object that the bench harness
-// captures via BenchRecallDiagnosticsSchema.
-// see also:
-//   packages/core/src/recall/diagnostics.ts:buildRecallDiagnostics, computeRecallTokenEconomy
-//   apps/bench-runner/src/harness/recall-diagnostics-schema.ts
-//   apps/bench-runner/src/longmemeval/diagnostics.ts (KPI aggregation)
-//
-// @anchor recall-token-economy-token-units: every "tokens" figure is the
-// chars/4 approximation produced by makeTokenEstimator (see resolveCharsPerToken
-// above). The default 4 chars/token is OpenAI-style English heuristic; CJK
-// content is underestimated by roughly 3-4x because Chinese / Japanese /
-// Korean characters average closer to 1-1.5 chars/token under cl100k/o200k.
-// Release notes citing mean / p95 figures must qualify with this caveat.
+// invariant: per-recall token economy is measure-only — never feeds ranking, gates eligibility, or enters the protocol payload; lives only in the in-memory RecallDiagnostics sub-object.
+// see also: diagnostics.ts buildRecallDiagnostics/computeRecallTokenEconomy, bench-runner recall-diagnostics-schema.ts, longmemeval/diagnostics.ts.
+// @anchor recall-token-economy-token-units: every "tokens" figure is the chars/4 estimate (OpenAI-style English); CJK is underestimated ~3-4x, so mean/p95 figures must carry this caveat.
 export interface RecallTokenEconomy {
-  // Sum of token_estimate over candidates actually delivered to the caller.
-  // Derived from the same chars/token heuristic the caller sees in the
-  // delivered RecallCandidate.token_estimate field, so the figure agrees
-  // with the bench's existing total_token_estimate KPI per recall.
+  // Sum of token_estimate over delivered candidates, same heuristic as RecallCandidate.token_estimate.
   readonly delivered_context_tokens_estimate: number;
-  // Coarse-stage pool size — the number of candidates flowing into
-  // fineAssess, matching candidate_pool_count.
+  // Coarse-stage pool size flowing into fineAssess (matches candidate_pool_count).
   readonly coarse_pool_size: number;
-  // Fine-assess evaluated count — every coarse candidate has its fused
-  // score and feature rerank computed before delivery truncation, so this
-  // equals the input pool length even when the budget drops some rows.
+  // Fine-assess evaluated count; equals the input pool length even when the budget drops rows.
   readonly fine_evaluated: number;
-  // Number of distinct fusion streams that produced at least one non-null
-  // per_stream_rank across all pre-budget candidates. Surfaces "how many
-  // recall channels actually contributed signal" per call.
+  // Distinct fusion streams with a non-null per_stream_rank across pre-budget candidates.
   readonly fusion_streams_with_hits: number;
-  // Embedding provider inference calls attributable to this recall. 0 when
-  // the provider was not requested, the snapshot was a cache hit, or the
-  // provider failed before returning. 1 when the recall pipeline actually
-  // consumed a fresh provider invocation for its query embedding.
+  // Embedding provider inference calls for this recall: 0 when not requested / cache hit / failed, 1 on a fresh invocation.
   readonly embedding_inference_calls: number;
 }
 
@@ -201,12 +162,7 @@ export type RecallGraphExpansionPlaneCountPerEdgeType = Readonly<
   Record<RecallGraphExpansionTrackedEdgeType, number>
 >;
 
-// invariant: multi-seed fan-in is measured per addGraphExpansionCandidates
-// call. When the entity_seed plane contributes 2+ distinct entity-derived
-// seeds, each seed expands independently and the per-seed candidate counts
-// are aggregated here so downstream tuning can read distribution shape
-// without re-deriving from raw graph events.
-// see also: recall-service.ts addGraphExpansionCandidates
+// invariant: multi-seed fan-in measured per addGraphExpansionCandidates call; when entity_seed contributes 2+ seeds each expands independently and per-seed counts aggregate here. see also: recall-service.ts addGraphExpansionCandidates.
 export interface RecallMultiSeedGraphFanInDiagnostics {
   readonly distinct_seeds: number;
   readonly candidates_per_seed_p50: number;
@@ -217,11 +173,7 @@ export interface RecallMultiSeedGraphFanInDiagnostics {
 export interface RecallGraphExpansionDiagnostics {
   readonly graph_expansion_plane_count_per_hop: RecallGraphExpansionPlaneCountPerHop;
   readonly graph_expansion_plane_count_per_edge_type: RecallGraphExpansionPlaneCountPerEdgeType;
-  // Optional only when no entity-derived seeds were fanned in (distinct_seeds
-  // would be 0 in that case). Absence preserves the legacy
-  // RecallGraphExpansionDiagnostics shape so external readers that ignore
-  // the field stay binary-compatible. see also: recall-service.ts
-  // addGraphExpansionCandidates multi-seed fan-in path.
+  // Absent when no entity-derived seeds fanned in; absence preserves the legacy shape for readers that ignore the field. see also: recall-service.ts addGraphExpansionCandidates.
   readonly multi_seed_graph_fan_in?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
 }
 
@@ -260,19 +212,12 @@ export interface RecallDiagnostics {
   readonly embedding_workspace_schema_version?: number;
   readonly graph_expansion_plane_count_per_hop: RecallGraphExpansionPlaneCountPerHop;
   readonly graph_expansion_plane_count_per_edge_type: RecallGraphExpansionPlaneCountPerEdgeType;
-  // Optional. Only present when the entity_seed plane drove 1+ entity-derived
-  // seeds into graph fan-in for this recall. Absence means the recall's
-  // graph_expansion plane was content/structural-seed driven only and has
-  // no per-seed distribution to summarise.
+  // Present only when entity_seed drove 1+ seeds into graph fan-in; absence means content/structural-seed driven only.
   readonly multi_seed_graph_fan_in?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
   readonly fusion_breakdown: readonly Readonly<RecallFusionBreakdown>[];
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
-  // Per-recall structural token instrument. Optional only for legacy callers
-  // and malformed diagnostics; RecallService emits it for both normal and
-  // degraded recall paths so bench token-instrument coverage can stay at
-  // 100% per recall call without inventing synthetic zero samples.
+  // Per-recall token instrument; emitted on both normal and degraded paths to keep bench coverage at 100% without synthetic zero samples.
   readonly token_economy?: Readonly<RecallTokenEconomy>;
-  // Per-phase wall-clock (ms) for offline latency-bottleneck localization.
-  // Optional: only emitted on the instrumented full recall path.
+  // Per-phase wall-clock (ms) for latency localization; only on the instrumented full recall path.
   readonly phase_latency_ms?: Readonly<Record<string, number>>;
 }

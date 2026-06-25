@@ -31,21 +31,7 @@ export const WARM_CASCADE_DECAY = 0.7;
 export const COLD_CASCADE_DECAY = 0.45;
 export const BUDGET_PRESSURE_SOFT_THRESHOLD = 0.5;
 export const BUDGET_PRESSURE_HARD_THRESHOLD = 1;
-/**
- * Additive weight applied to PathPlasticityState.strength inside the
- * fine-assessment score. Plasticity is a recall *supplement*: it can boost a
- * memory's relevance, but the overall score is still clamped to [0, 1] and
- * the base lexical/FTS rank still drives ordering when two candidates have
- * similar plasticity. Mirrors the "embedding is supplement, never oracle"
- * pattern.
- *
- * Sized at 0.15 so a fully-plastic boost (1.0 * 0.15 = 0.15) cannot close a
- * typical adjacent-rank gap from base activation: e.g. 0.55 vs 0.50 yields
- * baseline contributions of ~0.55*0.7=0.385 vs 0.50*0.7=0.35 — a 0.035 gap
- * that a 0.15 boost on the lower side could overcome only by a wide margin.
- * The locking test (`recall-service.test.ts: respects close-tie ordering
- * when only plasticity differs`) pins this property.
- */
+/** Additive weight on PathPlasticityState.strength in fine-assessment: a recall supplement (score clamped to [0,1]; base FTS rank still drives ordering on similar plasticity). Sized 0.15 so a full boost cannot close a typical adjacent-rank gap; pinned by a close-tie ordering test. */
 export const PATH_PLASTICITY_WEIGHT = 0.15;
 
 
@@ -113,15 +99,7 @@ export function normalizeActivationScore(value: number | null): number {
 }
 
 export function normalizeGraphSupport(count: number): number {
-  // invariant: Clamp [count, 0, 3] / 3. The input is the positive-only inbound
-  // weighted sum: negative paths (recall_bias <= 0) are excluded upstream in
-  // graph-explore-service.ts before summing, so this only ever receives a
-  // NON-NEGATIVE count. The Math.max(count, 0) floor is therefore defensive
-  // only (never sees a negative offset to clamp), NOT a negative-offset clamp.
-  // Negative-path suppression is handled separately in the governance-gated
-  // active-suppression channel (recall-service.ts), not here. Lifting the upper
-  // cap needs a co-evaluated bench sweep.
-  // see also: packages/core/src/path-graph/graph-explore-service.ts (countInbound* positive-only filter)
+  // invariant: clamp [count,0,3]/3 over the positive-only inbound weighted sum (negatives filtered upstream); the Math.max(count,0) floor is defensive only. Suppression is handled separately in recall-service.ts. see also: path-graph/graph-explore-service.ts (countInbound* positive-only filter).
   return Math.min(Math.max(count, 0), 3) / 3;
 }
 
@@ -296,11 +274,7 @@ export function createContentPreview(
   manifestation?: ManifestationState,
   _originPlane?: RecallOriginPlane
 ): string {
-  // Manifestation gates whether the agent gets the full body. Both
-  // workspace_local and global candidates use the same gate; the
-  // previous origin_plane discrimination meant workspace_local could
-  // never serve full content even when its activation_score put it in
-  // the full_eligible band; see DynamicsService.assignInitialDynamics.
+  // Manifestation gates the full body; workspace_local and global use the same gate (origin_plane discrimination wrongly starved full_eligible workspace_local). see also: DynamicsService.assignInitialDynamics.
   if (manifestation === "full_eligible") {
     return content;
   }
@@ -334,8 +308,7 @@ export function assertActivationWeightsSumToOne(
   const resolved = resolveActivationWeights(weights);
   const sum = Object.values(resolved).reduce((total, weight) => total + weight, 0);
 
-  // Tolerance avoids rejecting valid decimal compositions due to floating
-  // point representation while still catching real weight drift.
+  // Tolerance accepts float-rounded decimal compositions while still catching real weight drift.
   if (Math.abs(sum - 1) >= 1e-6) {
     throw new CoreError("VALIDATION", `activation_weights_phase4b must sum to 1.0, got ${sum}`);
   }
@@ -354,20 +327,12 @@ export function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// Error class name (or `typeof` for non-Error throws). Feeds the recall warn
-// meta so the fault-aware warn can flag unexpected (programming-bug) failures.
+// Error class name (or typeof for non-Error throws); feeds the recall warn meta to flag unexpected failures.
 export function errorNameOf(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
 }
 
-/**
- * Optional time-window pre-filter applied during recall coarse-filter, before
- * ranking. Lets agents answer queries like "what did I say on May 20" without
- * touching the score function. Both bounds are ISO datetime strings; either
- * may be null/undefined for an open-ended bound. `field` selects whether the
- * window applies to entry creation time or last-used time (defaults to
- * created_at when omitted).
- */
+/** Optional coarse-filter time-window pre-filter (before ranking). Bounds are ISO datetime; either may be null for open-ended. `field` selects created_at (default) or last_used_at. */
 export type RecallTimeFilter = Readonly<{
   readonly since?: string | null;
   readonly until?: string | null;
@@ -375,15 +340,8 @@ export type RecallTimeFilter = Readonly<{
 }>;
 
 /**
- * Single-entry predicate matching {@link filterMemoriesByTimeWindow}. Exposed
- * separately so the global recall path can apply the same window check before
- * adopting cross-workspace candidates without rebuilding an array just to
- * filter it. When `filter` is undefined or has no bounds, every entry passes.
- *
- * Note: lexicographic string comparison is sound only because
- * IsoDatetimeStringSchema uses Zod's default `{ offset: false }` mode (UTC `Z`
- * suffix only). If that schema is ever relaxed, this comparator must move to
- * a parsed comparison.
+ * Single-entry predicate for {@link filterMemoriesByTimeWindow}; the global recall path reuses it per-entry. Undefined/boundless filter passes everything.
+ * invariant: lexicographic string comparison is sound only because IsoDatetimeStringSchema is UTC-Z only (offset:false); relaxing that schema requires a parsed comparison here.
  */
 export function entryMatchesTimeFilter(
   entry: Readonly<MemoryEntry>,

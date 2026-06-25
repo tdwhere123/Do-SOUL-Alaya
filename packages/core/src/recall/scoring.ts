@@ -29,24 +29,11 @@ import type {
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
 const QUERY_EVIDENCE_BASE_WEIGHT_FLOOR = 0.35;
-// invariant: confidence sub-weight is additive (outside sum-to-1
-// activation_weights). MemoryEntry.confidence is propose/accept-updated
-// epistemic certainty; reading it directly here keeps later confidence
-// edits visible to recall ordering without waiting for retention decay
-// or activation rescore. Final score stays clamp01.
+// invariant: confidence sub-weight is additive (outside sum-to-1 activation_weights); read directly so later confidence edits reach recall ordering without a retention/activation rescore. Final score stays clamp01.
 const CONFIDENCE_DIRECT_WEIGHT = 0.08;
-// invariant: prior dampening floor — minimum weight applied to the
-// prior signal when calibrating weak-evidence candidates so that
-// prior-only activation/confidence MUST NOT make weak query evidence
-// look answer-confident. Intentionally a SEPARATE constant from the
-// calibration gate below so each purpose can be tuned independently
-// without silently shifting the other.
+// invariant: prior-dampening floor — minimum weight on the prior signal when calibrating weak evidence, so prior-only activation/confidence cannot make weak query evidence look answer-confident. Separate from the gate below to keep each tunable.
 const WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR = 0.72;
-// invariant: calibration gate threshold — calibration only fires when
-// queryEvidenceCalibrationStrength is BELOW this floor; at-or-above
-// evidence is treated as sufficient and the score shape is preserved.
-// Matches WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR by initial design intent
-// but is intentionally a separate constant to keep each purpose tunable.
+// invariant: calibration gate — calibration fires only below this floor; at/above, evidence is sufficient and the score shape is preserved. Mirrors the dampening floor by design but kept separate to stay independently tunable.
 const WEAK_EVIDENCE_CALIBRATION_GATE = 0.72;
 
 export function computeMaxWeightTransferAmount(params: Readonly<{
@@ -317,8 +304,7 @@ const RECALL_ADMISSION_ATTRIBUTION_ORDER: readonly RecallAdmissionPlane[] = [
   "protected_winner",
   "domain_tag_cluster",
   "session_surface_cohort",
-  // semantic_supplement is the embedding coarse-injection plane; attribute
-  // it only when no anchored plane co-admitted the candidate.
+  // semantic_supplement (embedding coarse-injection): attributed only when no anchored plane co-admitted the candidate.
   "semantic_supplement",
   "activation"
 ];

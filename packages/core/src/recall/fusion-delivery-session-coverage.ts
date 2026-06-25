@@ -18,9 +18,7 @@ type FusedRecallCandidateInput = Readonly<RecallFusionCandidateInput & {
 const SESSION_COVERAGE_BAND_ENV = "ALAYA_RECALL_SESSION_COVERAGE_BAND";
 const DEFAULT_SESSION_COVERAGE_BAND = 0.1;
 
-// Fraction of the head candidate's fused_score within which a lower-ranked,
-// not-yet-represented session may be promoted ahead of it. 0 disables the
-// rerank. Env-tunable so a bench sweep can calibrate against per-gold rank data.
+// Fraction of the head fused_score within which a lower-ranked, not-yet-represented session may be promoted ahead of it; 0 disables. Env-tunable.
 function resolveSessionCoverageBand(): number {
   const raw = process.env[SESSION_COVERAGE_BAND_ENV];
   if (raw === undefined || raw.trim() === "") {
@@ -38,13 +36,7 @@ function sessionCoverageKey(
   return candidate.entry.surface_id ?? candidate.entry.run_id ?? "<no-session>";
 }
 
-// invariant: reorders ONLY inside the top-K delivery window, so the delivered
-// set is unchanged — only its order, which moves the @K-scored slots. A
-// candidate whose session is already represented yields to the next
-// not-yet-represented session candidate whose fused_score is within `band` of
-// it; strong head hits (far outside the band) are never demoted. Gated by the
-// same multi-fact condition as the evidence-set optimizer so single-fact queries
-// stay byte-identical; also a no-op when the window is single-session.
+// invariant: reorders only inside the top-K window — the delivered set is unchanged, only order. An already-represented session yields to the next not-yet-represented session within `band`; strong head hits are never demoted. Gated by the same multi-fact condition as the evidence-set optimizer; no-op on a single-session window.
 export function applySessionCoverageRerank<T extends FusedRecallCandidateInput>(
   ordered: readonly T[],
   supplementaryData: RecallSupplementaryData,
