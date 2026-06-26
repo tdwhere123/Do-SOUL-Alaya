@@ -85,9 +85,24 @@ function selectQuestionWindow(
   questions: LongMemEvalQuestions,
   opts: LongMemEvalMultiturnRunOptions
 ): readonly LongMemEvalQuestion[] {
+  const filtered = filterQuestionsByIdEnv(questions);
   const offset = Math.max(0, opts.offset ?? 0);
-  const sliceEnd = opts.limit !== undefined ? offset + opts.limit : questions.length;
-  return questions.slice(offset, sliceEnd);
+  const sliceEnd = opts.limit !== undefined ? offset + opts.limit : filtered.length;
+  return filtered.slice(offset, sliceEnd);
+}
+
+// ALAYA_BENCH_QUESTION_IDS (comma-separated): seed only these questions — lets a
+// hard-case subset be evaluated without seeding the full dataset. Applied before
+// offset/limit; empty/unset is a no-op.
+function filterQuestionsByIdEnv(
+  questions: LongMemEvalQuestions
+): readonly LongMemEvalQuestion[] {
+  const raw = process.env.ALAYA_BENCH_QUESTION_IDS?.trim();
+  if (raw === undefined || raw.length === 0) {
+    return questions;
+  }
+  const ids = new Set(raw.split(",").map((value) => value.trim()).filter(Boolean));
+  return questions.filter((question) => ids.has(question.question_id));
 }
 
 function createMultiturnSeedRunner(extractionCacheRoot: string) {
