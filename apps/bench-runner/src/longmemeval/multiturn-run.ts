@@ -91,9 +91,7 @@ function selectQuestionWindow(
   return filtered.slice(offset, sliceEnd);
 }
 
-// ALAYA_BENCH_QUESTION_IDS (comma-separated): seed only these questions — lets a
-// hard-case subset be evaluated without seeding the full dataset. Applied before
-// offset/limit; empty/unset is a no-op.
+// ALAYA_BENCH_QUESTION_IDS: seed only these question_ids (applied before offset/limit); unset = no-op.
 function filterQuestionsByIdEnv(
   questions: LongMemEvalQuestions
 ): readonly LongMemEvalQuestion[] {

@@ -31,8 +31,7 @@ import {
 } from "../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
 
-// bench-only: ALAYA_RECALL_EVAL_EMBEDDING=env activates the embedding stream against the
-// snapshot's stored vectors so this fast recall proxy matches the embedding-ON pipeline.
+// bench-only: ALAYA_RECALL_EVAL_EMBEDDING=env turns on the embedding stream vs the snapshot's stored vectors.
 function recallEvalEmbeddingMode(): BenchEmbeddingMode {
   return process.env.ALAYA_RECALL_EVAL_EMBEDDING === "env" ? "env" : "disabled";
 }

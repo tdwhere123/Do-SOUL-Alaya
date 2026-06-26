@@ -53,10 +53,7 @@ export function facetOverlapEnabled(): boolean {
   return raw === "on" || raw === "1" || raw === "true";
 }
 
-// Slice mode (ALAYA_RECALL_FACET_SLICE, needs FACET_OVERLAP on for querySoughtFacets):
-// facet-overlap count is the PRIMARY rank key — candidates matching more query
-// facets sort above the rest, fused score breaks ties within the slice. This is
-// the validated two-stage slice-then-rank, not an additive fusion vote.
+// Slice mode (with FACET_OVERLAP on): facet-overlap count is the primary rank key, fused score breaks ties — slice-then-rank, not an additive vote.
 function facetSliceEnabled(): boolean {
   const raw = process.env.ALAYA_RECALL_FACET_SLICE;
   return raw === "on" || raw === "1" || raw === "true";
@@ -499,8 +496,7 @@ export function compareFusedRecallCandidates(
   right: FusedRecallCandidateInput
 ): number {
   if (facetSliceEnabled()) {
-    // fused_rank already carries the facet slice (overlap-count primary); delivery
-    // follows it so the slice reaches the result, not just the diagnostic rank.
+    // fused_rank already carries the slice; follow it so delivery (not just diagnostics) is sliced.
     const rankDelta = left.fusion.fused_rank - right.fusion.fused_rank;
     if (rankDelta !== 0) {
       return rankDelta;
