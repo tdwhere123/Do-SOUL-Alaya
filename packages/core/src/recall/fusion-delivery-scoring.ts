@@ -53,6 +53,32 @@ export function facetOverlapEnabled(): boolean {
   return raw === "on" || raw === "1" || raw === "true";
 }
 
+// Slice mode (ALAYA_RECALL_FACET_SLICE, needs FACET_OVERLAP on for querySoughtFacets):
+// facet-overlap count is the PRIMARY rank key — candidates matching more query
+// facets sort above the rest, fused score breaks ties within the slice. This is
+// the validated two-stage slice-then-rank, not an additive fusion vote.
+function facetSliceEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_FACET_SLICE;
+  return raw === "on" || raw === "1" || raw === "true";
+}
+
+function facetOverlapCountFor(
+  entry: Readonly<MemoryEntry>,
+  querySoughtFacets: readonly string[] | undefined
+): number {
+  if (querySoughtFacets === undefined || querySoughtFacets.length === 0) {
+    return 0;
+  }
+  const sought = new Set(querySoughtFacets);
+  const matched = new Set<string>();
+  for (const tag of entry.facet_tags ?? []) {
+    if (sought.has(tag.facet)) {
+      matched.add(tag.facet);
+    }
+  }
+  return matched.size;
+}
+
 export function activeFusionStreams(): readonly RecallFusionStream[] {
   return facetOverlapEnabled()
     ? RECALL_FUSION_STREAMS
@@ -77,6 +103,7 @@ type PreliminaryFusionCandidate = Readonly<{
   readonly perStreamRank: RecallFusionStreamRanks;
   readonly contributions: RecallFusionStreamContributions;
   readonly fusedScore: number;
+  readonly facetOverlapCount: number;
 }>;
 
 export function buildRecallFusionDetails(params: Readonly<{
@@ -229,7 +256,10 @@ function buildPreliminaryFusionCandidate(
     effectiveScore: candidate.effectiveScore,
     perStreamRank: Object.freeze(perStreamRank) as RecallFusionStreamRanks,
     contributions: Object.freeze(contributions) as RecallFusionStreamContributions,
-    fusedScore
+    fusedScore,
+    facetOverlapCount: facetSliceEnabled()
+      ? facetOverlapCountFor(candidate.entry, supplementaryData.querySoughtFacets)
+      : 0
   });
 }
 
@@ -282,6 +312,10 @@ function buildFusedRankByCandidateKey(
   prelim: readonly PreliminaryFusionCandidate[]
 ): ReadonlyMap<string, number> {
   const ranked = [...prelim].sort((left, right) => {
+    const facetDelta = right.facetOverlapCount - left.facetOverlapCount;
+    if (facetDelta !== 0) {
+      return facetDelta;
+    }
     const fusionDelta = right.fusedScore - left.fusedScore;
     if (fusionDelta !== 0) {
       return fusionDelta;
@@ -464,6 +498,14 @@ export function compareFusedRecallCandidates(
   left: FusedRecallCandidateInput,
   right: FusedRecallCandidateInput
 ): number {
+  if (facetSliceEnabled()) {
+    // fused_rank already carries the facet slice (overlap-count primary); delivery
+    // follows it so the slice reaches the result, not just the diagnostic rank.
+    const rankDelta = left.fusion.fused_rank - right.fusion.fused_rank;
+    if (rankDelta !== 0) {
+      return rankDelta;
+    }
+  }
   const fusionDelta = right.fusion.fused_score - left.fusion.fused_score;
   if (fusionDelta !== 0) {
     return fusionDelta;
