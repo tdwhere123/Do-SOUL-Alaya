@@ -35,15 +35,29 @@ export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "lexical_fts", "trigram_fts", "synthesis_fts", "evidence_fts",
   "evidence_structural_agreement", "source_proximity", "source_evidence_agreement", "subject_alignment",
   "structural", "existing_score", "embedding_similarity", "graph_expansion",
-  "entity_seed", "path_expansion", "temporal_recency", "workspace_activation"
+  "entity_seed", "path_expansion", "temporal_recency", "workspace_activation",
+  "facet_overlap"
 ];
 
 const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
   lexical_fts: 3, trigram_fts: 1, synthesis_fts: 1, evidence_fts: 3,
   evidence_structural_agreement: 6, source_proximity: 1, source_evidence_agreement: 1, subject_alignment: 1,
   structural: 1, existing_score: 1, embedding_similarity: 1, graph_expansion: 3,
-  entity_seed: 1, path_expansion: 3, temporal_recency: 0, workspace_activation: 0
+  entity_seed: 1, path_expansion: 3, temporal_recency: 0, workspace_activation: 0,
+  facet_overlap: 4
 });
+
+// Opt-in (ALAYA_RECALL_FACET_OVERLAP): scores candidates by query-sought facet coverage. Off → stream excluded so breakdowns stay byte-identical.
+export function facetOverlapEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_FACET_OVERLAP;
+  return raw === "on" || raw === "1" || raw === "true";
+}
+
+export function activeFusionStreams(): readonly RecallFusionStream[] {
+  return facetOverlapEnabled()
+    ? RECALL_FUSION_STREAMS
+    : RECALL_FUSION_STREAMS.filter((stream) => stream !== "facet_overlap");
+}
 
 type RecallFusionCandidateInput = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -74,7 +88,7 @@ export function buildRecallFusionDetails(params: Readonly<{
   const resolved = resolveRrfFusionWeights({
     policy: params.policy,
     queryProbes: params.supplementaryData.queryProbes,
-    streams: RECALL_FUSION_STREAMS,
+    streams: activeFusionStreams(),
     baseWeights: RECALL_FUSION_DEFAULT_WEIGHTS
   });
   const ranksByStream = buildFusionRanksByStream(params.candidates, params.supplementaryData, params.nowIso);
@@ -145,7 +159,7 @@ function buildFusionRanksByStream(
   nowIso: string
 ): ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>> {
   const ranksByStream = new Map<RecallFusionStream, ReadonlyMap<string, number>>();
-  for (const stream of RECALL_FUSION_STREAMS) {
+  for (const stream of activeFusionStreams()) {
     ranksByStream.set(
       stream,
       buildFusionRanksForStream(candidates, stream, supplementaryData, nowIso)
@@ -229,7 +243,7 @@ function accumulateFusionContributions(
   contributions: Record<RecallFusionStream, number>
 ): number {
   let fusedScore = 0;
-  for (const stream of RECALL_FUSION_STREAMS) {
+  for (const stream of activeFusionStreams()) {
     const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
     perStreamRank[stream] = rank;
     if (rank === null) {
@@ -381,7 +395,26 @@ function scoreWorkspaceLocalFusionStream(
       return scoreTemporalEventTime(candidate.entry, nowIso);
     case "workspace_activation":
       return normalizeActivationScore(candidate.entry.activation_score);
+    case "facet_overlap":
+      return scoreFacetOverlap(candidate.entry, supplementaryData.querySoughtFacets);
   }
+}
+
+function scoreFacetOverlap(
+  entry: Readonly<MemoryEntry>,
+  querySoughtFacets: readonly string[] | undefined
+): number {
+  if (querySoughtFacets === undefined || querySoughtFacets.length === 0) {
+    return 0;
+  }
+  const sought = new Set(querySoughtFacets);
+  const matched = new Set<string>();
+  for (const tag of entry.facet_tags ?? []) {
+    if (sought.has(tag.facet)) {
+      matched.add(tag.facet);
+    }
+  }
+  return matched.size;
 }
 
 function scoreEvidenceStructuralAgreement(
@@ -456,9 +489,9 @@ export function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<Reca
 }
 
 function buildEmptyFusionStreamRanks(): Record<RecallFusionStream, number | null> {
-  return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, null])) as Record<RecallFusionStream, number | null>;
+  return Object.fromEntries(activeFusionStreams().map((stream) => [stream, null])) as Record<RecallFusionStream, number | null>;
 }
 
 function buildEmptyFusionStreamContributions(): Record<RecallFusionStream, number> {
-  return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, 0])) as Record<RecallFusionStream, number>;
+  return Object.fromEntries(activeFusionStreams().map((stream) => [stream, 0])) as Record<RecallFusionStream, number>;
 }

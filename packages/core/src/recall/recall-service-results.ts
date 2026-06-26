@@ -70,6 +70,8 @@ export interface RecallSupplementaryData {
   // memoryGovernanceCeiling / clampManifestationByGovernance,
   // recall-candidate-builder.ts buildRecallCandidate.
   readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
+  // Facets the query intends; the facet_overlap fusion stream scores candidates by how many they carry.
+  readonly querySoughtFacets?: readonly string[];
 }
 
 export interface CoarseRecallCandidate {

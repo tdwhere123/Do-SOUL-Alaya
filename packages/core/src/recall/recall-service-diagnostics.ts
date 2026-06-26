@@ -68,7 +68,9 @@ export type RecallFusionStream =
   // invariant: path_expansion is the direct multi-session fan-in carrier — earned sparse co_recalled paths fan a query hitting a non-representative cohort member into same-session siblings. see also: fusion-delivery.ts scoreRecallFusionStream.
   | "path_expansion"
   | "temporal_recency"
-  | "workspace_activation";
+  | "workspace_activation"
+  // Answer-relevance: count of query-sought facets a candidate carries. Flag-gated (ALAYA_RECALL_FACET_OVERLAP); absent from breakdowns when off.
+  | "facet_overlap";
 
 export type RecallFusionStreamRanks = Readonly<Record<RecallFusionStream, number | null>>;
 export type RecallFusionStreamContributions = Readonly<Record<RecallFusionStream, number>>;

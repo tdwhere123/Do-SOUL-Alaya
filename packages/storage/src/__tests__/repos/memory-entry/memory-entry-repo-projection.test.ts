@@ -66,6 +66,45 @@ describe("SqliteMemoryEntryRepo projection fields", () => {
     });
   });
 
+  it("round-trips facet_tags through create and read", async () => {
+    const { repo } = await createRepo();
+    const entry = createMemoryEntry({
+      facet_tags: [
+        { facet: "occupation_work", value: "software engineer" },
+        { facet: "location_place" }
+      ]
+    });
+
+    await repo.create(entry);
+
+    await expect(repo.findById(entry.object_id)).resolves.toMatchObject({
+      facet_tags: [
+        { facet: "occupation_work", value: "software engineer" },
+        { facet: "location_place" }
+      ]
+    });
+  });
+
+  it("updates and clears facet_tags on an existing memory entry", async () => {
+    const { repo } = await createRepo();
+    const entry = createMemoryEntry();
+    await repo.create(entry);
+
+    const updated = await repo.update(entry.object_id, {
+      facet_tags: [{ facet: "preference_like", value: "spicy food" }],
+      updated_at: "2026-03-21T00:00:00.000Z"
+    });
+    expect(updated).toMatchObject({
+      facet_tags: [{ facet: "preference_like", value: "spicy food" }]
+    });
+
+    const cleared = await repo.update(entry.object_id, {
+      facet_tags: null,
+      updated_at: "2026-03-22T00:00:00.000Z"
+    });
+    expect(cleared.facet_tags ?? null).toBeNull();
+  });
+
   it("updates projection fields on an existing memory entry", async () => {
     const { repo } = await createRepo();
     const entry = createMemoryEntry();

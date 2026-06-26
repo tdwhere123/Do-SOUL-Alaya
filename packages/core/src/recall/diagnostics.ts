@@ -10,7 +10,7 @@ import type {
   RecallGraphExpansionDiagnostics,
   RecallTokenEconomy
 } from "./recall-service-types.js";
-import { RECALL_FUSION_STREAMS } from "./fusion-delivery.js";
+import { activeFusionStreams } from "./fusion-delivery.js";
 
 export function buildRecallDiagnostics(params: Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
@@ -145,9 +145,9 @@ export function computeRecallTokenEconomy(params: Readonly<{
   for (const candidate of params.deliveredCandidates) {
     deliveredContextTokensEstimate += candidate.token_estimate;
   }
-  // Distinct fusion streams with a non-null rank across pre-budget candidates; iterates RECALL_FUSION_STREAMS so the count tracks the protocol surface, not an ad-hoc subset.
+  // Distinct fusion streams with a non-null rank across pre-budget candidates; tracks the active stream set so flag-gated streams are not miscounted.
   let fusionStreamsWithHits = 0;
-  for (const stream of RECALL_FUSION_STREAMS) {
+  for (const stream of activeFusionStreams()) {
     const hit = params.preBudgetCandidates.some(
       (candidate) => candidate.per_stream_rank[stream] !== null
     );
