@@ -23,11 +23,22 @@ import {
 import {
   startBenchDaemon,
   type BenchDaemonHandle,
+  type BenchEmbeddingMode,
+  type BenchEmbeddingProviderKind,
   type BenchRecallOptions,
   type BenchTokenMetrics,
   type BenchWorkspaceHandle
 } from "../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
+
+// bench-only: ALAYA_RECALL_EVAL_EMBEDDING=env activates the embedding stream against the
+// snapshot's stored vectors so this fast recall proxy matches the embedding-ON pipeline.
+function recallEvalEmbeddingMode(): BenchEmbeddingMode {
+  return process.env.ALAYA_RECALL_EVAL_EMBEDDING === "env" ? "env" : "disabled";
+}
+function recallEvalEmbeddingProviderKind(): BenchEmbeddingProviderKind {
+  return recallEvalEmbeddingMode() === "env" ? "local_onnx" : "openai";
+}
 import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
   formatBenchRecallWeightOverrides,
@@ -209,7 +220,8 @@ async function executeRecallEvalRun(
   const collected: RecallEvalQuestionResult[] = [];
   const daemon = await startBenchDaemon({
     dataDirRoot: context.dataDirRoot,
-    embeddingMode: "disabled",
+    embeddingMode: recallEvalEmbeddingMode(),
+    embeddingProviderKind: recallEvalEmbeddingProviderKind(),
     recallWeightOverrides: context.recallWeightOverrides
   });
   try {
@@ -443,7 +455,7 @@ function buildRecallEvalDiagnostics(
     isAbstention: isAbstentionQuestionId(input.question.questionId),
     degradationReason: recallResult.degradation_reason ?? null,
     recallResult,
-    embeddingMode: "disabled"
+    embeddingMode: recallEvalEmbeddingMode()
   });
 }
 
