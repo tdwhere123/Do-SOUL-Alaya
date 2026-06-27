@@ -202,12 +202,13 @@ async function assessCandidateStage(
   });
 }
 
-// Opt-in (ALAYA_RECALL_EMBED_POOL_RESCORE): score pooled candidates by cosine(query, stored-vector)
-// so embedding can re-rank a buried-but-pooled gold — the inverse of injection (which excludes pooled
-// ids). HyDE-aware via resolveHydeQueryText. Off -> empty map -> byte-identical.
+// Default-ON (opt-out via ALAYA_RECALL_EMBED_POOL_RESCORE=off): score pooled candidates by
+// cosine(query, stored-vector) so embedding re-ranks a buried-but-pooled gold — the inverse of
+// injection (which excludes pooled ids). No-op when embedding is disabled. HyDE-aware via
+// resolveHydeQueryText. Paired with embedding_similarity default weight 12 (weight 1 is too weak).
 function embedPoolRescoreEnabled(): boolean {
   const raw = process.env.ALAYA_RECALL_EMBED_POOL_RESCORE;
-  return raw === "on" || raw === "1" || raw === "true";
+  return raw !== "off" && raw !== "0" && raw !== "false";
 }
 
 async function collectPoolEmbeddingRescore(

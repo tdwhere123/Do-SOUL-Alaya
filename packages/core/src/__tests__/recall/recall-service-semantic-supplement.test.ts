@@ -143,7 +143,9 @@ it("keeps the lexical baseline when the semantic supplement exhausts no remainin
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-lexical"]);
   });
 
-it("rebuilds budget state after embedding boost without overriding a strong lexical rank", async () => {
+// Embedding default weight is 12 (pool re-rank era): a decisive embedding match (sim 1)
+// now out-ranks a strong-lexical/high-activation candidate with zero embedding similarity.
+it("rebuilds budget state after a decisive embedding boost re-ranks above a strong lexical candidate", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-first-lexical",
@@ -215,8 +217,8 @@ it("rebuilds budget state after embedding boost without overriding a strong lexi
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "memory-first-lexical",
-      "memory-second-semantic"
+      "memory-second-semantic",
+      "memory-first-lexical"
     ]);
     expect(result.candidates[0]?.budget_state).toMatchObject({
       token_estimate: result.candidates[0]?.token_estimate,
