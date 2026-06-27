@@ -17,13 +17,23 @@ import {
   type ResolvedRecallFusionWeights
 } from "./fusion-delivery-adaptive-scoring.js";
 import {
+  bestEvidenceEnabled,
   cappedLexicalFloodSum,
+  combineBestEvidenceFamilies,
+  decorrelateFamily,
   floodFusionEnabled,
   floodGovernanceEnabled,
   isLexicalFamilyFloodStream,
+  resolveBestEvidenceRelevance,
   resolveFloodFusionContribution,
+  streamFamily,
+  synthesisFusionEnabled,
+  synthesisGateFloor,
+  synthesisDecorrLambda,
+  synthesisIntentGated,
   type FloodStreamScores
 } from "./flood-fusion-scoring.js";
+import { classifyRecallIntent } from "./recall-query-plan.js";
 import type {
   CoarseRecallCandidate,
   RecallFusionBreakdown,
@@ -124,7 +134,7 @@ export function buildRecallFusionDetails(params: Readonly<{
     baseWeights: RECALL_FUSION_DEFAULT_WEIGHTS
   });
   const ranksByStream = buildFusionRanksByStream(params.candidates, params.supplementaryData, params.nowIso);
-  const scoresByStream = floodFusionEnabled()
+  const scoresByStream = floodFusionEnabled() || bestEvidenceEnabled()
     ? buildFusionScoresByStream(params.candidates, params.supplementaryData, params.nowIso)
     : null;
   const prelim = buildPreliminaryFusionCandidates(params, resolved, ranksByStream, scoresByStream);
@@ -316,6 +326,16 @@ function accumulateFusionContributions(
   perStreamRank: Record<RecallFusionStream, number | null>,
   contributions: Record<RecallFusionStream, number>
 ): number {
+  if (synthesisFusionEnabled()) {
+    return accumulateSynthesisFusedScore(
+      candidate, supplementaryData, resolved, ranksByStream, candidateKey, perStreamRank, contributions
+    );
+  }
+  if (scoresByStream !== null && bestEvidenceEnabled()) {
+    return accumulateBestEvidenceFusedScore(
+      candidate, supplementaryData, resolved, ranksByStream, scoresByStream, candidateKey, perStreamRank, contributions
+    );
+  }
   const governance = scoresByStream !== null && floodGovernanceEnabled();
   let fusedScore = 0;
   let lexicalFamilySum = 0;
@@ -338,6 +358,85 @@ function accumulateFusionContributions(
     }
   }
   return governance ? fusedScore + cappedLexicalFloodSum(lexicalFamilySum, lexicalFamilyMax) : fusedScore;
+}
+
+// Best-evidence combine: per-stream relevance (reliability·norm), grouped into families (max within),
+// confidence-weighted noisy-OR across families. Lets a minority-strong lens surface without additive weight.
+function accumulateBestEvidenceFusedScore(
+  candidate: RecallFusionCandidateInput,
+  supplementaryData: RecallSupplementaryData,
+  resolved: ResolvedRecallFusionWeights,
+  ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
+  scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores>,
+  candidateKey: string,
+  perStreamRank: Record<RecallFusionStream, number | null>,
+  contributions: Record<RecallFusionStream, number>
+): number {
+  const relevanceByStream = new Map<RecallFusionStream, number>();
+  for (const stream of activeFusionStreams()) {
+    const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
+    perStreamRank[stream] = rank;
+    if (rank === null) {
+      continue;
+    }
+    const streamScores = scoresByStream.get(stream);
+    if (streamScores === undefined) {
+      continue;
+    }
+    const relevance = resolveBestEvidenceRelevance({
+      candidate,
+      supplementaryData,
+      resolved,
+      stream,
+      rawScore: streamScores.scoreByKey.get(candidateKey) ?? 0,
+      streamMax: streamScores.max
+    });
+    contributions[stream] = relevance;
+    if (relevance > 0) {
+      relevanceByStream.set(stream, relevance);
+    }
+  }
+  return combineBestEvidenceFamilies(relevanceByStream);
+}
+
+// Object-axis correction on the RRF cross-section: de-correlate the correlated lexical surface views
+// into one relevance, then (for answer-relation intents) gate that surface relevance by embedding
+// agreement. Non-gated intents return the plain additive RRF sum (byte-identical to the baseline path).
+function accumulateSynthesisFusedScore(
+  candidate: RecallFusionCandidateInput,
+  supplementaryData: RecallSupplementaryData,
+  resolved: ResolvedRecallFusionWeights,
+  ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
+  candidateKey: string,
+  perStreamRank: Record<RecallFusionStream, number | null>,
+  contributions: Record<RecallFusionStream, number>
+): number {
+  const gated = synthesisIntentGated(classifyRecallIntent(supplementaryData.queryProbes));
+  const lexicalContributions: number[] = [];
+  let otherSum = 0;
+  for (const stream of activeFusionStreams()) {
+    const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
+    perStreamRank[stream] = rank;
+    if (rank === null) {
+      continue;
+    }
+    const contribution = resolveFusionContribution(candidate, supplementaryData, resolved, stream, rank);
+    contributions[stream] = contribution;
+    if (streamFamily(stream) === "lexical") {
+      lexicalContributions.push(contribution);
+    } else {
+      otherSum += contribution;
+    }
+  }
+  if (!gated) {
+    return lexicalContributions.reduce((sum, value) => sum + value, 0) + otherSum;
+  }
+  const decorrelatedLexical = decorrelateFamily(lexicalContributions, synthesisDecorrLambda());
+  const embeddingSimilarity = candidate.effectiveFactors.embedding_similarity;
+  const gatedLexical = typeof embeddingSimilarity === "number" && embeddingSimilarity > 0
+    ? decorrelatedLexical * (synthesisGateFloor() + (1 - synthesisGateFloor()) * clamp01(embeddingSimilarity))
+    : decorrelatedLexical;
+  return gatedLexical + otherSum;
 }
 
 function resolveFloodContribution(
