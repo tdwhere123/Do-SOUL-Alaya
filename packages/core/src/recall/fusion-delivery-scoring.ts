@@ -16,6 +16,11 @@ import {
   resolveRrfFusionWeights,
   type ResolvedRecallFusionWeights
 } from "./fusion-delivery-adaptive-scoring.js";
+import {
+  floodFusionEnabled,
+  resolveFloodFusionContribution,
+  type FloodStreamScores
+} from "./flood-fusion-scoring.js";
 import type {
   CoarseRecallCandidate,
   RecallFusionBreakdown,
@@ -116,7 +121,10 @@ export function buildRecallFusionDetails(params: Readonly<{
     baseWeights: RECALL_FUSION_DEFAULT_WEIGHTS
   });
   const ranksByStream = buildFusionRanksByStream(params.candidates, params.supplementaryData, params.nowIso);
-  const prelim = buildPreliminaryFusionCandidates(params, resolved, ranksByStream);
+  const scoresByStream = floodFusionEnabled()
+    ? buildFusionScoresByStream(params.candidates, params.supplementaryData, params.nowIso)
+    : null;
+  const prelim = buildPreliminaryFusionCandidates(params, resolved, ranksByStream, scoresByStream);
   const fusedRankByCandidateKey = buildFusedRankByCandidateKey(prelim);
   return finalizeRecallFusionDetails(prelim, fusedRankByCandidateKey);
 }
@@ -213,16 +221,49 @@ function buildFusionRanksForStream(
   return Object.freeze(new Map(scored.map((candidate, index) => [candidate.candidateKey, index + 1] as const)));
 }
 
+function buildFusionScoresByStream(
+  candidates: readonly RecallFusionCandidateInput[],
+  supplementaryData: RecallSupplementaryData,
+  nowIso: string
+): ReadonlyMap<RecallFusionStream, FloodStreamScores> {
+  const scoresByStream = new Map<RecallFusionStream, FloodStreamScores>();
+  for (const stream of activeFusionStreams()) {
+    scoresByStream.set(stream, buildFusionScoresForStream(candidates, stream, supplementaryData, nowIso));
+  }
+  return scoresByStream;
+}
+
+function buildFusionScoresForStream(
+  candidates: readonly RecallFusionCandidateInput[],
+  stream: RecallFusionStream,
+  supplementaryData: RecallSupplementaryData,
+  nowIso: string
+): FloodStreamScores {
+  const scoreByKey = new Map<string, number>();
+  let max = 0;
+  for (const candidate of candidates) {
+    const score = scoreRecallFusionStream(candidate, stream, supplementaryData, nowIso);
+    if (score > 0) {
+      scoreByKey.set(buildRecallCandidateDedupeKey(candidate), score);
+      if (score > max) {
+        max = score;
+      }
+    }
+  }
+  return Object.freeze({ scoreByKey: Object.freeze(scoreByKey), max });
+}
+
 function buildPreliminaryFusionCandidates(
   params: Readonly<{
     readonly candidates: readonly RecallFusionCandidateInput[];
     readonly supplementaryData: RecallSupplementaryData;
   }>,
   resolved: ResolvedRecallFusionWeights,
-  ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>
+  ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
+  scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores> | null
 ): readonly PreliminaryFusionCandidate[] {
   return params.candidates.map((candidate) =>
-    buildPreliminaryFusionCandidate(candidate, params.supplementaryData, resolved, ranksByStream)
+    buildPreliminaryFusionCandidate(candidate, params.supplementaryData, resolved, ranksByStream, scoresByStream)
   );
 }
 
@@ -230,7 +271,8 @@ function buildPreliminaryFusionCandidate(
   candidate: RecallFusionCandidateInput,
   supplementaryData: RecallSupplementaryData,
   resolved: ResolvedRecallFusionWeights,
-  ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>
+  ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
+  scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores> | null
 ): PreliminaryFusionCandidate {
   const candidateKey = buildRecallCandidateDedupeKey(candidate);
   const perStreamRank = buildEmptyFusionStreamRanks();
@@ -240,6 +282,7 @@ function buildPreliminaryFusionCandidate(
     supplementaryData,
     resolved,
     ranksByStream,
+    scoresByStream,
     candidateKey,
     perStreamRank,
     contributions
@@ -265,6 +308,7 @@ function accumulateFusionContributions(
   supplementaryData: RecallSupplementaryData,
   resolved: ResolvedRecallFusionWeights,
   ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
+  scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores> | null,
   candidateKey: string,
   perStreamRank: Record<RecallFusionStream, number | null>,
   contributions: Record<RecallFusionStream, number>
@@ -276,17 +320,35 @@ function accumulateFusionContributions(
     if (rank === null) {
       continue;
     }
-    const contribution = resolveFusionContribution(
-      candidate,
-      supplementaryData,
-      resolved,
-      stream,
-      rank
-    );
+    const contribution = scoresByStream === null
+      ? resolveFusionContribution(candidate, supplementaryData, resolved, stream, rank)
+      : resolveFloodContribution(candidate, supplementaryData, resolved, scoresByStream, stream, candidateKey);
     contributions[stream] = contribution;
     fusedScore += contribution;
   }
   return fusedScore;
+}
+
+function resolveFloodContribution(
+  candidate: RecallFusionCandidateInput,
+  supplementaryData: RecallSupplementaryData,
+  resolved: ResolvedRecallFusionWeights,
+  scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores>,
+  stream: RecallFusionStream,
+  candidateKey: string
+): number {
+  const streamScores = scoresByStream.get(stream);
+  if (streamScores === undefined) {
+    return 0;
+  }
+  return resolveFloodFusionContribution({
+    candidate,
+    supplementaryData,
+    resolved,
+    stream,
+    rawScore: streamScores.scoreByKey.get(candidateKey) ?? 0,
+    streamMax: streamScores.max
+  });
 }
 
 function resolveFusionContribution(

@@ -14,7 +14,7 @@ export type ResolvedRecallFusionWeights = Readonly<{
   readonly weights: Readonly<Record<RecallFusionStream, number>>;
 }>;
 
-type FusionContributionCandidate = Readonly<{
+export type FusionContributionCandidate = Readonly<{
   readonly entry: Readonly<MemoryEntry>;
   readonly effectiveFactors: Readonly<RecallScoreFactors>;
   readonly structuralScore?: number | null;
@@ -26,6 +26,12 @@ type FusionContributionParams = Readonly<{
   readonly resolved: ResolvedRecallFusionWeights;
   readonly stream: RecallFusionStream;
   readonly rank: number;
+}>;
+
+type LaneReliabilityParams = Readonly<{
+  readonly candidate: FusionContributionCandidate;
+  readonly supplementaryData: RecallSupplementaryData;
+  readonly stream: RecallFusionStream;
 }>;
 
 export function resolveRrfFusionWeights(params: Readonly<{
@@ -57,12 +63,22 @@ export function resolveRrfFusionWeights(params: Readonly<{
 export function resolveFusionContribution(params: FusionContributionParams): number {
   const reliability = scoreLaneReliability(params);
   const k = params.resolved.kByStream[params.stream];
-  let contribution = params.resolved.weights[params.stream] * reliability / (k + params.rank);
-  if (params.stream === "path_expansion" || params.stream === "graph_expansion") {
-    const cos = clamp01(params.supplementaryData.embeddingSimilarityScores?.[params.candidate.entry.object_id] ?? 0.5);
-    contribution *= 1 + EMBEDDING_PATH_MODULATION_GAIN * Math.max(0, 2 * cos - 1);
+  const base = params.resolved.weights[params.stream] * reliability / (k + params.rank);
+  return applyEmbeddingPathModulation(base, params.candidate, params.supplementaryData, params.stream);
+}
+
+// Same embedding cosine modulation the RRF path applies; shared so flood mode does not duplicate it.
+export function applyEmbeddingPathModulation(
+  contribution: number,
+  candidate: FusionContributionCandidate,
+  supplementaryData: RecallSupplementaryData,
+  stream: RecallFusionStream
+): number {
+  if (stream !== "path_expansion" && stream !== "graph_expansion") {
+    return contribution;
   }
-  return contribution;
+  const cos = clamp01(supplementaryData.embeddingSimilarityScores?.[candidate.entry.object_id] ?? 0.5);
+  return contribution * (1 + EMBEDDING_PATH_MODULATION_GAIN * Math.max(0, 2 * cos - 1));
 }
 
 function parseFusionWeightOverrides(value: unknown): Readonly<Record<string, number>> {
@@ -105,7 +121,7 @@ function resolveDefaultRrfK(
   return fallbackK;
 }
 
-function scoreLaneReliability(params: FusionContributionParams): number {
+export function scoreLaneReliability(params: LaneReliabilityParams): number {
   if (!isLexicalFamilyStream(params.stream)) {
     return 1;
   }
