@@ -12,6 +12,30 @@ export function floodFusionEnabled(): boolean {
   return raw === "on" || raw === "1" || raw === "true";
 }
 
+// Opt-in (ALAYA_RECALL_FLOOD_GOVERNANCE, flood only): per-node inflow cap that bounds the
+// correlated lexical family so it can't out-vote orthogonal answer-signals via redundant streams.
+export function floodGovernanceEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_FLOOD_GOVERNANCE;
+  return raw === "on" || raw === "1" || raw === "true";
+}
+
+const LEXICAL_FAMILY_FLOOD_STREAMS: ReadonlySet<RecallFusionStream> = new Set<RecallFusionStream>([
+  "lexical_fts", "trigram_fts", "evidence_fts", "evidence_structural_agreement"
+]);
+
+export function isLexicalFamilyFloodStream(stream: RecallFusionStream): boolean {
+  return LEXICAL_FAMILY_FLOOD_STREAMS.has(stream);
+}
+
+// Governance: 4 redundant lexical streams summing to ~4x on one candidate over-concentrates the top
+// and buries multi-gold. Cap the family's combined inflow at its best single stream x cap; orthogonal
+// answer-signals (embedding/path/temporal/structural) are never bounded. This is the full_gold-priority
+// form (wins multi-fact coverage at an any-gold/single-fact cost — kept flag-gated, default off).
+const LEXICAL_GOVERNANCE_CAP = 1.3;
+export function cappedLexicalFloodSum(sum: number, max: number): number {
+  return Math.min(sum, max * LEXICAL_GOVERNANCE_CAP);
+}
+
 export type FloodStreamScores = Readonly<{
   readonly scoreByKey: ReadonlyMap<string, number>;
   readonly max: number;

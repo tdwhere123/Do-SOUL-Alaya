@@ -17,7 +17,10 @@ import {
   type ResolvedRecallFusionWeights
 } from "./fusion-delivery-adaptive-scoring.js";
 import {
+  cappedLexicalFloodSum,
   floodFusionEnabled,
+  floodGovernanceEnabled,
+  isLexicalFamilyFloodStream,
   resolveFloodFusionContribution,
   type FloodStreamScores
 } from "./flood-fusion-scoring.js";
@@ -313,7 +316,10 @@ function accumulateFusionContributions(
   perStreamRank: Record<RecallFusionStream, number | null>,
   contributions: Record<RecallFusionStream, number>
 ): number {
+  const governance = scoresByStream !== null && floodGovernanceEnabled();
   let fusedScore = 0;
+  let lexicalFamilySum = 0;
+  let lexicalFamilyMax = 0;
   for (const stream of activeFusionStreams()) {
     const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
     perStreamRank[stream] = rank;
@@ -324,9 +330,14 @@ function accumulateFusionContributions(
       ? resolveFusionContribution(candidate, supplementaryData, resolved, stream, rank)
       : resolveFloodContribution(candidate, supplementaryData, resolved, scoresByStream, stream, candidateKey);
     contributions[stream] = contribution;
-    fusedScore += contribution;
+    if (governance && isLexicalFamilyFloodStream(stream)) {
+      lexicalFamilySum += contribution;
+      lexicalFamilyMax = Math.max(lexicalFamilyMax, contribution);
+    } else {
+      fusedScore += contribution;
+    }
   }
-  return fusedScore;
+  return governance ? fusedScore + cappedLexicalFloodSum(lexicalFamilySum, lexicalFamilyMax) : fusedScore;
 }
 
 function resolveFloodContribution(
