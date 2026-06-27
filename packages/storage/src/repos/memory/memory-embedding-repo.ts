@@ -104,16 +104,10 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
   private readonly findByObjectIdStatement: SqliteStatement;
   private readonly listByWorkspaceStatement: SqliteStatement;
   private readonly findCurrentMemoryContentStatement: SqliteStatement;
-  private readonly clearObjectIdFilterStatement: SqliteStatement;
-  private readonly insertObjectIdFilterStatement: SqliteStatement;
   private readonly listByObjectIdFilterStatement: SqliteStatement;
   private readonly guardedUpsertTransaction: (
     parsedRecord: Readonly<MemoryEmbeddingRecord>
   ) => Readonly<MemoryEmbeddingRecord> | null;
-  private readonly listByObjectIdFilterTransaction: (
-    parsedWorkspaceId: string,
-    parsedObjectIds: readonly string[]
-  ) => readonly MemoryEmbeddingRow[];
 
   public constructor(private readonly db: StorageDatabase) {
     const statements = prepareMemoryEmbeddingStatements(db);
@@ -121,11 +115,8 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     this.findByObjectIdStatement = statements.findByObjectIdStatement;
     this.listByWorkspaceStatement = statements.listByWorkspaceStatement;
     this.findCurrentMemoryContentStatement = statements.findCurrentMemoryContentStatement;
-    this.clearObjectIdFilterStatement = statements.clearObjectIdFilterStatement;
-    this.insertObjectIdFilterStatement = statements.insertObjectIdFilterStatement;
     this.listByObjectIdFilterStatement = statements.listByObjectIdFilterStatement;
     this.guardedUpsertTransaction = this.createGuardedUpsertTransaction();
-    this.listByObjectIdFilterTransaction = this.createListByObjectIdFilterTransaction();
   }
 
   private createGuardedUpsertTransaction(): (
@@ -143,18 +134,6 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
 
       this.runUpsert(parsedRecord);
       return this.findRequiredPersistedEmbedding(parsedRecord.object_id);
-    });
-  }
-
-  private createListByObjectIdFilterTransaction(): (
-    parsedWorkspaceId: string,
-    parsedObjectIds: readonly string[]
-  ) => readonly MemoryEmbeddingRow[] {
-    return this.db.connection.transaction((parsedWorkspaceId: string, parsedObjectIds: readonly string[]) => {
-      for (const objectId of parsedObjectIds) {
-        this.insertObjectIdFilterStatement.run(objectId);
-      }
-      return this.listByObjectIdFilterStatement.all(parsedWorkspaceId) as MemoryEmbeddingRow[];
     });
   }
 
@@ -313,11 +292,10 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     }
 
     try {
-      this.clearObjectIdFilterStatement.run();
-      const rows = this.listByObjectIdFilterTransaction(
-        parsedWorkspaceId,
-        parsedObjectIds
-      );
+      const rows = this.listByObjectIdFilterStatement.all(
+        JSON.stringify(parsedObjectIds),
+        parsedWorkspaceId
+      ) as MemoryEmbeddingRow[];
       return Object.freeze(
         rows
           .map((row) => parseMemoryEmbeddingRow(row))
@@ -333,8 +311,6 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
         `Failed to list filtered memory embeddings for workspace ${parsedWorkspaceId}.`,
         error
       );
-    } finally {
-      this.clearObjectIdFilterStatement.run();
     }
   }
 }

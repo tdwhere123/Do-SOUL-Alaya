@@ -1,10 +1,16 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
+import { StorageDatabase, initDatabase } from "../../../sqlite/db.js";
+import { SqliteMemoryEmbeddingRepo } from "../../../repos/memory/memory-embedding-repo.js";
 import {
   createEmbeddingRecord,
   createMemoryEntry,
   createRepoContext,
   getColumnNames,
+  seedWorkspaceFixture,
   trackedDatabases
 } from "./memory-embedding-repo-fixture.js";
 
@@ -344,7 +350,7 @@ describe("Memory embedding storage repo", () => {
   });
 
   it("chunks large metadata lookups below SQLite's bind-parameter ceiling", async () => {
-    const { database, workspaceId, repo } = await createRepoContext();
+    const { workspaceId, repo } = await createRepoContext();
     const existingIds = [
       "11111111-1111-4111-8111-111111111111",
       "22222222-2222-4222-8222-222222222222"
@@ -371,15 +377,44 @@ describe("Memory embedding storage repo", () => {
 
     const metadata = await repo.findMetadataByObjectIds(oversizedLookup);
     const hydrated = await repo.listByObjectIds(workspaceId, oversizedLookup);
-    const filterRowsAfterHydration = database.connection
-      .prepare("SELECT object_id FROM temp.memory_embedding_object_id_filter")
-      .all() as ReadonlyArray<{ readonly object_id: string }>;
 
     expect(metadata.map((record) => record.object_id)).toEqual([...existingIds].sort());
     expect(hydrated.map((record) => record.object_id)).toEqual([...existingIds].sort());
-    expect(filterRowsAfterHydration).toEqual([]);
     for (const record of metadata) {
       expect(record).not.toHaveProperty("embedding");
+    }
+  });
+
+  it("hydrates object ids on a connection that never created the legacy filter temp table", async () => {
+    const dbDirectory = mkdtempSync(join(tmpdir(), "alaya-embedding-repo-"));
+    const dbPath = join(dbDirectory, "alaya.db");
+    const objectId = "11111111-1111-4111-8111-111111111111";
+    const writerDatabase = initDatabase({ filename: dbPath });
+    const reader = new BetterSqlite3(dbPath);
+
+    try {
+      seedWorkspaceFixture(writerDatabase);
+      await new SqliteMemoryEmbeddingRepo(writerDatabase).upsert(
+        createEmbeddingRecord({
+          object_id: objectId,
+          workspace_id: "workspace-1",
+          embedding: new Float32Array([0.1, 0.2, 0.3])
+        })
+      );
+
+      // Second connection to the same file never ran the legacy temp-table DDL:
+      // listByObjectIds must not depend on per-connection temp state.
+      const readerRepo = new SqliteMemoryEmbeddingRepo(new StorageDatabase(`${dbPath}#reader`, reader));
+      const hydrated = await readerRepo.listByObjectIds("workspace-1", [objectId]);
+
+      expect(hydrated.map((record) => record.object_id)).toEqual([objectId]);
+      expect(Array.from(hydrated[0]!.embedding).map((value) => Number(value.toFixed(6)))).toEqual([
+        0.1, 0.2, 0.3
+      ]);
+    } finally {
+      reader.close();
+      writerDatabase.close();
+      rmSync(dbDirectory, { recursive: true, force: true });
     }
   });
 });

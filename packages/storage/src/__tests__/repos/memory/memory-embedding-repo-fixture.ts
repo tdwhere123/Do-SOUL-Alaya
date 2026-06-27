@@ -50,12 +50,27 @@ export async function createRepoContext(): Promise<{
   const database = initDatabase({ filename: ":memory:" });
   trackedDatabases.add(database);
 
-  const workspaceRepo = new SqliteWorkspaceRepo(database);
-  const runRepo = new SqliteRunRepo(database);
   const memoryRepo = new SqliteMemoryEntryRepo(database);
   const { SqliteMemoryEmbeddingRepo } = await import("../../../index.js");
 
-  await workspaceRepo.create({
+  seedWorkspaceFixture(database);
+
+  return {
+    database,
+    workspaceId: "workspace-1",
+    memoryRepo,
+    repo: new SqliteMemoryEmbeddingRepo(database)
+  };
+}
+
+export function seedWorkspaceFixture(
+  database: ReturnType<typeof initDatabase>
+): void {
+  const workspaceRepo = new SqliteWorkspaceRepo(database);
+  const runRepo = new SqliteRunRepo(database);
+  const memoryRepo = new SqliteMemoryEntryRepo(database);
+
+  workspaceRepo.create({
     workspace_id: "workspace-1",
     name: "Embedding Repo Workspace",
     root_path: "/tmp/embedding-repo-workspace",
@@ -64,7 +79,7 @@ export async function createRepoContext(): Promise<{
     default_engine_class: "conversation_engine",
     workspace_state: WorkspaceState.ACTIVE
   });
-  await runRepo.create({
+  runRepo.create({
     run_id: "run-1",
     workspace_id: "workspace-1",
     title: "Embedding Repo Run",
@@ -75,15 +90,8 @@ export async function createRepoContext(): Promise<{
     run_state: RunState.IDLE,
     current_surface_id: null
   });
-  await memoryRepo.create(createMemoryEntry({ object_id: "11111111-1111-4111-8111-111111111111" }));
-  await memoryRepo.create(createMemoryEntry({ object_id: "22222222-2222-4222-8222-222222222222" }));
-
-  return {
-    database,
-    workspaceId: "workspace-1",
-    memoryRepo,
-    repo: new SqliteMemoryEmbeddingRepo(database)
-  };
+  memoryRepo.create(createMemoryEntry({ object_id: "11111111-1111-4111-8111-111111111111" }));
+  memoryRepo.create(createMemoryEntry({ object_id: "22222222-2222-4222-8222-222222222222" }));
 }
 
 export function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
