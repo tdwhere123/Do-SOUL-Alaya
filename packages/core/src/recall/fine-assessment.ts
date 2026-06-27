@@ -121,12 +121,30 @@ function orderFineAssessmentCandidates(
   );
 }
 
+// Diagnostic (ALAYA_RECALL_DELIVER_FUSED_ORDER): deliver in pure fused-score order,
+// skipping the post-fusion re-rank chain — to measure how much that chain reshapes delivery.
+function deliverFusedOrderEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_DELIVER_FUSED_ORDER;
+  return raw === "on" || raw === "1" || raw === "true";
+}
+
 function orderFusedFineAssessmentCandidates(
   scoredCandidates: readonly FineAssessmentCandidate[],
   supplementaryData: RecallSupplementaryData,
   maxEntries: number
 ): FineAssessmentOrdering {
   const rankedCandidates = [...scoredCandidates].sort(compareFusedRecallCandidates);
+  if (deliverFusedOrderEnabled()) {
+    return Object.freeze({
+      rankedCandidates,
+      featureRerankedCandidates: rankedCandidates,
+      prioritizedCandidates: rankedCandidates,
+      coverageSelectedCandidates: rankedCandidates,
+      coverageOrderedCandidates: rankedCandidates,
+      synthesisReservedCandidates: rankedCandidates,
+      deliveryOrderedCandidates: rankedCandidates
+    });
+  }
   const featureRerankedCandidates = applyFeatureRerank(rankedCandidates, supplementaryData);
   const prioritizedCandidates = prioritizeStrongLexicalDeliveryWindowCandidates(
     featureRerankedCandidates,
