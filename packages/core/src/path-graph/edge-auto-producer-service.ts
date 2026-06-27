@@ -313,7 +313,8 @@ export class EdgeAutoProducerService {
         `${decision.triggerSource}: ${decision.reason}`,
         `source_signal=${params.input.sourceSignalId} run=${params.input.runId}`
       ],
-      runId: params.input.runId
+      runId: params.input.runId,
+      contentScore: decision.contentScore
     });
   }
 

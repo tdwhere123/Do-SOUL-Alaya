@@ -137,6 +137,9 @@ export interface EdgeAutoDecision {
   // enum values, or llm_supports for LLM-port verdicts. Routing back
   // through SYSTEM here would collapse KPI K3.2 per-trigger breakdown.
   readonly triggerSource: EdgeProposalTriggerSourceValue;
+  // [0,1] raw token-Jaccard from classifyNeighbor; threaded to content-driven
+  // edge strength. Absent for LLM-port verdicts (no local lexical score).
+  readonly contentScore?: number;
 }
 
 export interface SimilarityFeatures {

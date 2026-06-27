@@ -197,7 +197,8 @@ export function classifyNeighbor(
       edgeType: MemoryGraphEdgeType.SUPERSEDES,
       confidence: confidence(0.55, features, 0.05, 0.85),
       reason: describeDecision("B-3 local supersedes heuristic", features),
-      triggerSource: EdgeProposalTriggerSource.LOCAL_SUPERSEDES
+      triggerSource: EdgeProposalTriggerSource.LOCAL_SUPERSEDES,
+      contentScore: features.tokenJaccard
     };
   }
   // invariant: contradicts is checked AFTER supersedes — a replacement cue is a
@@ -209,7 +210,8 @@ export function classifyNeighbor(
       edgeType: MemoryGraphEdgeType.CONTRADICTS,
       confidence: confidence(0.55, features, 0, 0.8),
       reason: describeDecision("B-3 local contradicts heuristic", features),
-      triggerSource: EdgeProposalTriggerSource.LOCAL_CONTRADICTS
+      triggerSource: EdgeProposalTriggerSource.LOCAL_CONTRADICTS,
+      contentScore: features.tokenJaccard
     };
   }
   if (isDerivesFromCandidate(newMemory, features)) {
@@ -217,7 +219,8 @@ export function classifyNeighbor(
       edgeType: MemoryGraphEdgeType.DERIVES_FROM,
       confidence: confidence(0.55, features, 0, 0.8),
       reason: describeDecision("B-2 local derives_from heuristic", features),
-      triggerSource: EdgeProposalTriggerSource.LOCAL_DERIVES_FROM
+      triggerSource: EdgeProposalTriggerSource.LOCAL_DERIVES_FROM,
+      contentScore: features.tokenJaccard
     };
   }
   if (features.tokenJaccard >= SUPPORTS_TOKEN_JACCARD_MIN) {
@@ -225,7 +228,8 @@ export function classifyNeighbor(
       edgeType: MemoryGraphEdgeType.SUPPORTS,
       confidence: confidence(0.55, features, 0, 0.8),
       reason: describeDecision("B-2 local supports heuristic", features),
-      triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS
+      triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS,
+      contentScore: features.tokenJaccard
     };
   }
   return null;

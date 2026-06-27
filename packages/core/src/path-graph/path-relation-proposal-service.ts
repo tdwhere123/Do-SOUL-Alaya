@@ -167,7 +167,8 @@ export class PathRelationProposalService {
         why: input.why ?? [
           `${input.relationKind} candidate submitted by producer`
         ],
-        runId: input.runId ?? null
+        runId: input.runId ?? null,
+        contentScore: input.contentScore
       });
     } catch (err) {
       // invariant: distinguish a post-commit propagation error from a true mint
