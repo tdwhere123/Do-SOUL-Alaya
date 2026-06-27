@@ -11,6 +11,7 @@ import {
   clampQueryEmbeddingCacheSize,
   clampQueryTimeout,
   cosineSimilarity,
+  isProviderMatchedEmbedding,
   toErrorMessage
 } from "./helpers.js";
 import { QueryEmbeddingEngine } from "./query-embedding-engine.js";
@@ -216,6 +217,56 @@ export class EmbeddingRecallService {
     }
 
     return computeCoherentPairKeys(storedVectors, params.objectIds, params.floor, this.dependencies.provider);
+  }
+
+  // cosine(query, stored-vector) for already-pooled candidates (inverse of injection,
+  // which excludes them). Provider-matched per (kind, model, schema); returns sim>0 only.
+  public async scorePoolCandidates(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string;
+    readonly objectIds: readonly string[];
+  }): Promise<ReadonlyMap<string, number>> {
+    const empty: ReadonlyMap<string, number> = new Map<string, number>();
+    if (params.objectIds.length === 0 || !this.dependencies.provider.isAvailable) {
+      return empty;
+    }
+    let storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
+    try {
+      storedVectors = await this.dependencies.embeddingRepo.listByObjectIds(params.workspaceId, params.objectIds);
+    } catch (error) {
+      this.warn("pool embedding rescoring degraded", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        reason: "local_vector_lookup_failed",
+        error: toErrorMessage(error)
+      });
+      return empty;
+    }
+    if (storedVectors.length === 0) {
+      return empty;
+    }
+    let queryEmbedding: Float32Array | null;
+    try {
+      queryEmbedding = await this.queryEngine.resolveQueryEmbeddingNow(params.queryText);
+    } catch {
+      return empty;
+    }
+    if (queryEmbedding === null) {
+      return empty;
+    }
+    const provider = this.dependencies.provider;
+    const scores = new Map<string, number>();
+    for (const record of storedVectors) {
+      if (!isProviderMatchedEmbedding(record, provider) || record.dimensions !== record.embedding.length) {
+        continue;
+      }
+      const sim = cosineSimilarity(queryEmbedding, record.embedding);
+      if (sim > 0) {
+        scores.set(record.object_id, sim);
+      }
+    }
+    return scores;
   }
 
   public async recordPrecheckDegraded(params: {

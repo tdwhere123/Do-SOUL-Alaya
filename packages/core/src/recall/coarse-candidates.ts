@@ -60,7 +60,8 @@ export interface SourceProximitySeedDraft {
 export function withEmbeddingSimilarityScores(
   supplementaryData: RecallSupplementaryData,
   hintsByObjectId: EmbeddingRecallSupplementResult["similarityHintsByObjectId"],
-  injectedSimilarityScores: Readonly<Record<string, number>>
+  injectedSimilarityScores: Readonly<Record<string, number>>,
+  poolRescoreScores: Readonly<Record<string, number>> = {}
 ): RecallSupplementaryData {
   const merged = new Map<string, number>();
   for (const [objectId, hint] of Object.entries(hintsByObjectId)) {
@@ -70,6 +71,12 @@ export function withEmbeddingSimilarityScores(
     }
   }
   for (const [objectId, rawScore] of Object.entries(injectedSimilarityScores)) {
+    const score = clamp01(rawScore);
+    if (score > 0) {
+      merged.set(objectId, Math.max(merged.get(objectId) ?? 0, score));
+    }
+  }
+  for (const [objectId, rawScore] of Object.entries(poolRescoreScores)) {
     const score = clamp01(rawScore);
     if (score > 0) {
       merged.set(objectId, Math.max(merged.get(objectId) ?? 0, score));

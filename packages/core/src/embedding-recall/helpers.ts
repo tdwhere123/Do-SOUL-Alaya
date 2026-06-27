@@ -114,6 +114,18 @@ export function cosineSimilarity(left: Float32Array, right: Float32Array): numbe
   return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
 }
 
+// cosine space is comparable only within one (provider_kind, model_id, schema_version).
+export function isProviderMatchedEmbedding(
+  record: { readonly provider_kind: string; readonly model_id: string; readonly schema_version: number },
+  provider: { readonly providerKind: string; readonly modelId: string; readonly schemaVersion: number }
+): boolean {
+  return (
+    record.provider_kind === provider.providerKind &&
+    record.model_id === provider.modelId &&
+    record.schema_version === provider.schemaVersion
+  );
+}
+
 export { clamp01 } from "../shared/clamp.js";
 
 export function toErrorMessage(error: unknown): string {
