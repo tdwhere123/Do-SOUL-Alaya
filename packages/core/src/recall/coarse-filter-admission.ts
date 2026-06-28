@@ -18,8 +18,15 @@ export type AddCoarseCandidate = (
   sourceChannel?: string,
   pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
   entityConfidence?: number,
-  reachedViaEarnedCoRecalledFanin?: boolean
+  reachedViaEarnedCoRecalledFanin?: boolean,
+  pathFlowScore?: number
 ) => boolean;
+
+// ALAYA_RECALL_PATH_FLOW: route path_expansion to accumulated flow scoring.
+function pathFlowEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_PATH_FLOW;
+  return raw === "on" || raw === "1" || raw === "true";
+}
 
 export interface CoarseCandidateAdderParams {
   readonly drafts: Map<string, CoarseCandidateDraft>;
@@ -40,7 +47,8 @@ export function createCoarseCandidateAdder(params: CoarseCandidateAdderParams): 
     sourceChannel,
     pathExpansionSource,
     entityConfidence,
-    reachedViaEarnedCoRecalledFanin
+    reachedViaEarnedCoRecalledFanin,
+    pathFlowScore
   ) {
     if (!shouldAdmitCoarseCandidate(params, entry, plane)) {
       return false;
@@ -62,7 +70,14 @@ export function createCoarseCandidateAdder(params: CoarseCandidateAdderParams): 
         reachedViaEarnedCoRecalledFanin
       )
     );
-    updateCoarseCandidateScores(params, entry.object_id, plane, planeScore, evidenceStructuralScore);
+    updateCoarseCandidateScores(
+      params,
+      entry.object_id,
+      plane,
+      planeScore,
+      evidenceStructuralScore,
+      pathFlowScore
+    );
     return !hadPlane;
   };
 }
@@ -133,7 +148,8 @@ function updateCoarseCandidateScores(
   objectId: string,
   plane: RecallAdmissionPlane,
   planeScore: number,
-  evidenceStructuralScore: number
+  evidenceStructuralScore: number,
+  pathFlowScore: number | undefined
 ): void {
   setMaxScore(params.structuralScores, objectId, evidenceStructuralScore);
   if (plane === "graph_expansion") {
@@ -143,11 +159,24 @@ function updateCoarseCandidateScores(
     setMaxScore(params.entitySeedScores, objectId, evidenceStructuralScore);
   }
   if (plane === "path_expansion") {
-    setMaxScore(params.pathExpansionScores, objectId, evidenceStructuralScore);
+    updatePathExpansionScore(params, objectId, evidenceStructuralScore, pathFlowScore);
   }
   if (plane === "source_proximity") {
     setMaxScore(params.sourceProximityScores, objectId, planeScore);
   }
+}
+
+function updatePathExpansionScore(
+  params: CoarseCandidateAdderParams,
+  objectId: string,
+  evidenceStructuralScore: number,
+  pathFlowScore: number | undefined
+): void {
+  if (pathFlowEnabled() && pathFlowScore !== undefined) {
+    addScore(params.pathExpansionScores, objectId, pathFlowScore);
+    return;
+  }
+  setMaxScore(params.pathExpansionScores, objectId, evidenceStructuralScore);
 }
 
 function setMaxScore(
@@ -156,4 +185,12 @@ function setMaxScore(
   score: number
 ): void {
   scores.set(objectId, Math.max(scores.get(objectId) ?? 0, score));
+}
+
+function addScore(
+  scores: Map<string, number>,
+  objectId: string,
+  delta: number
+): void {
+  scores.set(objectId, clamp01((scores.get(objectId) ?? 0) + delta));
 }
