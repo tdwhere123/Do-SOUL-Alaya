@@ -21,6 +21,8 @@ import {
   cappedLexicalFloodSum,
   combineBestEvidenceFamilies,
   decorrelateFamily,
+  embeddingGateEnabled,
+  embeddingGateFloor,
   floodFusionEnabled,
   floodGovernanceEnabled,
   isLexicalFamilyFloodStream,
@@ -145,7 +147,11 @@ export function buildRecallFusionDetails(params: Readonly<{
   const scoresByStream = floodFusionEnabled() || bestEvidenceEnabled()
     ? buildFusionScoresByStream(params.candidates, params.supplementaryData, params.nowIso)
     : null;
-  const prelim = buildPreliminaryFusionCandidates(params, resolved, ranksByStream, scoresByStream);
+  const embeddingPoolMax = params.candidates.reduce(
+    (max, candidate) => Math.max(max, clamp01(candidate.effectiveFactors.embedding_similarity ?? 0)),
+    0
+  );
+  const prelim = buildPreliminaryFusionCandidates(params, resolved, ranksByStream, scoresByStream, embeddingPoolMax);
   const fusedRankByCandidateKey = buildFusedRankByCandidateKey(prelim);
   return finalizeRecallFusionDetails(prelim, fusedRankByCandidateKey);
 }
@@ -281,10 +287,11 @@ function buildPreliminaryFusionCandidates(
   }>,
   resolved: ResolvedRecallFusionWeights,
   ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
-  scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores> | null
+  scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores> | null,
+  embeddingPoolMax: number
 ): readonly PreliminaryFusionCandidate[] {
   return params.candidates.map((candidate) =>
-    buildPreliminaryFusionCandidate(candidate, params.supplementaryData, resolved, ranksByStream, scoresByStream)
+    buildPreliminaryFusionCandidate(candidate, params.supplementaryData, resolved, ranksByStream, scoresByStream, embeddingPoolMax)
   );
 }
 
@@ -293,7 +300,8 @@ function buildPreliminaryFusionCandidate(
   supplementaryData: RecallSupplementaryData,
   resolved: ResolvedRecallFusionWeights,
   ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
-  scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores> | null
+  scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores> | null,
+  embeddingPoolMax: number
 ): PreliminaryFusionCandidate {
   const candidateKey = buildRecallCandidateDedupeKey(candidate);
   const perStreamRank = buildEmptyFusionStreamRanks();
@@ -306,7 +314,8 @@ function buildPreliminaryFusionCandidate(
     scoresByStream,
     candidateKey,
     perStreamRank,
-    contributions
+    contributions,
+    embeddingPoolMax
   );
   return Object.freeze({
     candidateKey,
@@ -332,11 +341,12 @@ function accumulateFusionContributions(
   scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores> | null,
   candidateKey: string,
   perStreamRank: Record<RecallFusionStream, number | null>,
-  contributions: Record<RecallFusionStream, number>
+  contributions: Record<RecallFusionStream, number>,
+  embeddingPoolMax: number
 ): number {
   if (synthesisFusionEnabled()) {
     return accumulateSynthesisFusedScore(
-      candidate, supplementaryData, resolved, ranksByStream, candidateKey, perStreamRank, contributions
+      candidate, supplementaryData, resolved, ranksByStream, candidateKey, perStreamRank, contributions, embeddingPoolMax
     );
   }
   if (scoresByStream !== null && bestEvidenceEnabled()) {
@@ -345,6 +355,7 @@ function accumulateFusionContributions(
     );
   }
   const governance = scoresByStream !== null && floodGovernanceEnabled();
+  const embedGateFloor = embeddingGateEnabled() ? embeddingGateFloor() : null;
   let fusedScore = 0;
   let lexicalFamilySum = 0;
   let lexicalFamilyMax = 0;
@@ -354,9 +365,12 @@ function accumulateFusionContributions(
     if (rank === null) {
       continue;
     }
-    const contribution = scoresByStream === null
+    const rawContribution = scoresByStream === null
       ? resolveFusionContribution(candidate, supplementaryData, resolved, stream, rank)
       : resolveFloodContribution(candidate, supplementaryData, resolved, scoresByStream, stream, candidateKey);
+    const contribution = embedGateFloor !== null && streamFamily(stream) === "lexical"
+      ? gateSurfaceByEmbedding(rawContribution, candidate, embedGateFloor, embeddingPoolMax)
+      : rawContribution;
     contributions[stream] = contribution;
     if (governance && isLexicalFamilyFloodStream(stream)) {
       lexicalFamilySum += contribution;
@@ -416,7 +430,8 @@ function accumulateSynthesisFusedScore(
   ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
   candidateKey: string,
   perStreamRank: Record<RecallFusionStream, number | null>,
-  contributions: Record<RecallFusionStream, number>
+  contributions: Record<RecallFusionStream, number>,
+  embeddingPoolMax: number
 ): number {
   const gated = synthesisIntentGated(classifyRecallIntent(supplementaryData.queryProbes));
   const byFamily = new Map<StreamFamily, number[]>();
@@ -438,12 +453,13 @@ function accumulateSynthesisFusedScore(
       bucket.push(contribution);
     }
   }
-  return gated ? combineSynthesisAxes(byFamily, candidate) : additiveSum;
+  return gated ? combineSynthesisAxes(byFamily, candidate, embeddingPoolMax) : additiveSum;
 }
 
 function combineSynthesisAxes(
   byFamily: ReadonlyMap<StreamFamily, readonly number[]>,
-  candidate: RecallFusionCandidateInput
+  candidate: RecallFusionCandidateInput,
+  embeddingPoolMax: number
 ): number {
   const lambda = synthesisDecorrLambda();
   let surfaceMass = 0;
@@ -451,7 +467,7 @@ function combineSynthesisAxes(
   for (const [family, familyContributions] of byFamily) {
     const decorrelated = decorrelateFamily(familyContributions, lambda);
     if (family === "lexical") {
-      surfaceMass += applySynthesisEmbeddingGate(decorrelated, candidate);
+      surfaceMass += gateSurfaceByEmbedding(decorrelated, candidate, synthesisGateFloor(), embeddingPoolMax);
     } else {
       orthogonalMass += decorrelated;
     }
@@ -462,17 +478,22 @@ function combineSynthesisAxes(
   return governedSurface + orthogonalMass;
 }
 
-// γ + (1−γ)·embRel: suppress surface relevance that words-but-not-meaning topic-neighbors earn. γ=1 → no gate.
-function applySynthesisEmbeddingGate(
+// γ + (1−γ)·embRel: suppress surface relevance that words-but-not-meaning topic-neighbors earn.
+// embRel is pool-relative (cosine / pool-max), NOT raw cosine — raw cosine is only comparable within
+// one model (helpers.ts invariant), so a raw-magnitude gate tracks the model's absolute scale, not
+// semantic standing. γ=1 → no gate. No embedding signal → unchanged (gate acts only where it can discriminate).
+function gateSurfaceByEmbedding(
   surfaceRelevance: number,
-  candidate: RecallFusionCandidateInput
+  candidate: RecallFusionCandidateInput,
+  floor: number,
+  embeddingPoolMax: number
 ): number {
   const embeddingSimilarity = candidate.effectiveFactors.embedding_similarity;
-  if (typeof embeddingSimilarity !== "number" || embeddingSimilarity <= 0) {
+  if (typeof embeddingSimilarity !== "number" || embeddingSimilarity <= 0 || embeddingPoolMax <= 0) {
     return surfaceRelevance;
   }
-  const floor = synthesisGateFloor();
-  return surfaceRelevance * (floor + (1 - floor) * clamp01(embeddingSimilarity));
+  const embRel = clamp01(embeddingSimilarity / embeddingPoolMax);
+  return surfaceRelevance * (floor + (1 - floor) * embRel);
 }
 
 function resolveFloodContribution(

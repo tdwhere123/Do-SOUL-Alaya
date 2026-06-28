@@ -185,6 +185,19 @@ export function synthesisGateFloor(): number {
   return readUnitEnv("ALAYA_RECALL_SYN_GATE_FLOOR", 0.5);
 }
 
+// Opt-in (ALAYA_RECALL_EMBED_GATE): the embedding gate decoupled from the synthesis assembly —
+// gate the lexical surface family by embedding agreement in the additive path, no de-correlation.
+// Recall-win only with a retrieval-grade embedding (gte); an STS model (MiniLM) demotes single_fact gold. Off → byte-identical.
+export function embeddingGateEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_EMBED_GATE;
+  return raw === "on" || raw === "1" || raw === "true";
+}
+
+// γ for the standalone gate; default 0 (full gate) is the gte-seed A/B optimum.
+export function embeddingGateFloor(): number {
+  return readUnitEnv("ALAYA_RECALL_EMBED_GATE_FLOOR", 0);
+}
+
 // max + λ·(sum − max): collapse correlated within-family views to one corroborated relevance.
 export function decorrelateFamily(contributions: readonly number[], lambda: number): number {
   let sum = 0;
