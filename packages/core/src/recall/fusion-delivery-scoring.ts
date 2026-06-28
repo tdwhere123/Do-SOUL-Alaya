@@ -48,7 +48,12 @@ import type {
 import {
   normalizeEvidenceText} from "./query-evidence-scoring.js";
 import { scorePreferenceProfileAlignment } from "./preference-fusion-scoring.js";
-import { scoreTemporalEventTime } from "./temporal-fusion-scoring.js";
+import {
+  parseQueryTimeWindow,
+  scoreTemporalEventTime,
+  scoreTemporalQueryWindow,
+  temporalQueryWindowEnabled
+} from "./temporal-fusion-scoring.js";
 
 const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;
 
@@ -562,6 +567,22 @@ function scoreSynthesisCapsuleFusionStream(
   return stream === "synthesis_fts" ? clamp01(supplementaryData.synthesisFtsRanks[candidate.entry.object_id] ?? 0) : 0;
 }
 
+// Temporal intent reads event-time against the query's asked-about window (object-time facet);
+// every other intent keeps the distance-to-now recency. ALAYA_RECALL_TEMPORAL_WINDOW off → recency.
+function scoreTemporalFusion(
+  candidate: RecallFusionCandidateInput,
+  supplementaryData: RecallSupplementaryData,
+  nowIso: string
+): number {
+  if (temporalQueryWindowEnabled() && classifyRecallIntent(supplementaryData.queryProbes) === "temporal") {
+    const window = parseQueryTimeWindow(supplementaryData.queryProbes);
+    if (window !== null) {
+      return scoreTemporalQueryWindow(candidate.entry, window);
+    }
+  }
+  return scoreTemporalEventTime(candidate.entry, nowIso);
+}
+
 function scoreGlobalFusionStream(
   candidate: RecallFusionCandidateInput,
   stream: RecallFusionStream,
@@ -578,7 +599,7 @@ function scoreGlobalFusionStream(
     case "embedding_similarity":
       return clamp01(candidate.effectiveFactors.embedding_similarity ?? 0);
     case "temporal_recency":
-      return scoreTemporalEventTime(candidate.entry, nowIso);
+      return scoreTemporalFusion(candidate, supplementaryData, nowIso);
     case "workspace_activation":
       return normalizeActivationScore(candidate.entry.activation_score);
     default:
@@ -628,7 +649,7 @@ function scoreWorkspaceLocalFusionStream(
     case "path_expansion":
       return clamp01(supplementaryData.pathExpansionScores[objectId] ?? 0);
     case "temporal_recency":
-      return scoreTemporalEventTime(candidate.entry, nowIso);
+      return scoreTemporalFusion(candidate, supplementaryData, nowIso);
     case "workspace_activation":
       return normalizeActivationScore(candidate.entry.activation_score);
     case "facet_overlap":
