@@ -129,6 +129,12 @@ function deliverFusedOrderEnabled(): boolean {
   return raw === "on" || raw === "1" || raw === "true";
 }
 
+// Opt-in (ALAYA_RECALL_DELIVERY_WINDOW): widen the reorder window past the delivery cap; unset/≤maxEntries → byte-identical.
+function resolveDeliveryReorderWindow(maxEntries: number): number {
+  const raw = Number(process.env.ALAYA_RECALL_DELIVERY_WINDOW);
+  return Number.isFinite(raw) && raw > maxEntries ? Math.floor(raw) : maxEntries;
+}
+
 function orderFusedFineAssessmentCandidates(
   scoredCandidates: readonly FineAssessmentCandidate[],
   supplementaryData: RecallSupplementaryData,
@@ -146,27 +152,30 @@ function orderFusedFineAssessmentCandidates(
       deliveryOrderedCandidates: rankedCandidates
     });
   }
+  // Reorder window decoupled from the delivery cap: the coverage/priority/reserve passes need a window
+  // wide enough to seat complementary golds beside single_fact without trading; delivery is sliced downstream.
+  const window = resolveDeliveryReorderWindow(maxEntries);
   const featureRerankedCandidates = applyFeatureRerank(rankedCandidates, supplementaryData);
   const prioritizedCandidates = prioritizeStrongLexicalDeliveryWindowCandidates(
     featureRerankedCandidates,
     supplementaryData,
-    maxEntries
+    window
   );
   const coverageSelectedCandidates = applyEvidenceSetDelivery(
     prioritizedCandidates,
     supplementaryData,
-    maxEntries
+    window
   );
   const coverageOrderedCandidates = applySessionCoverageRerank(
     coverageSelectedCandidates,
     supplementaryData,
-    maxEntries
+    window
   );
   const synthesisReservedCandidates = coverageOrderedCandidates;
   const deliveryOrderedCandidates = reserveStructuralDeliverySlots(
     synthesisReservedCandidates,
     supplementaryData,
-    maxEntries,
+    window,
     0
   );
   return Object.freeze({
