@@ -594,7 +594,7 @@ function scoreTemporalFusion(
   nowIso: string
 ): number {
   if (temporalQueryWindowEnabled() && classifyRecallIntent(supplementaryData.queryProbes) === "temporal") {
-    const window = parseQueryTimeWindow(supplementaryData.queryProbes);
+    const window = parseQueryTimeWindow(supplementaryData.queryProbes, nowIso);
     if (window !== null) {
       return scoreTemporalQueryWindow(candidate.entry, window);
     }

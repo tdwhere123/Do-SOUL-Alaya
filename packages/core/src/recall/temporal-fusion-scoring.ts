@@ -36,10 +36,13 @@ export interface QueryTimeWindow {
 }
 
 const QUERY_WINDOW_DECAY_DAYS = 90;
+const DAY_MS = 86_400_000;
 
 // Object-time facet: distance to the question's asked-about window, independent of distance-to-now.
+// Absolute terms resolve anchor-free; relative terms resolve only when nowIso supplies the now-anchor.
 export function parseQueryTimeWindow(
-  queryProbes: Readonly<RecallQueryProbes>
+  queryProbes: Readonly<RecallQueryProbes>,
+  nowIso?: string
 ): QueryTimeWindow | null {
   for (const term of queryProbes.date_terms) {
     const window = parseAbsoluteDateWindow(term);
@@ -47,10 +50,19 @@ export function parseQueryTimeWindow(
       return window;
     }
   }
+  const anchorMs = nowIso === undefined ? null : parseOptionalTime(nowIso);
+  if (anchorMs === null) {
+    return null;
+  }
+  for (const term of queryProbes.date_terms) {
+    const window = parseRelativeDateWindow(term, anchorMs);
+    if (window !== null) {
+      return window;
+    }
+  }
   return null;
 }
 
-// Relative phrases (last week / 去年) need a now-anchor and so belong to the evidence axis, not here.
 function parseAbsoluteDateWindow(term: string): QueryTimeWindow | null {
   const isoDay = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(term);
   if (isoDay) {
@@ -77,6 +89,74 @@ function dayWindow(year: number, month: number, day: number): QueryTimeWindow | 
 function monthWindow(year: number, month: number): QueryTimeWindow | null {
   const startMs = Date.UTC(year, month - 1, 1);
   const endMs = Date.UTC(year, month, 1) - 1;
+  return Number.isFinite(startMs) && Number.isFinite(endMs) ? { startMs, endMs } : null;
+}
+
+// Captured relative date_terms only; weeks are Monday-anchored calendar weeks. Unmapped terms → null.
+function parseRelativeDateWindow(term: string, anchorMs: number): QueryTimeWindow | null {
+  switch (term.trim().replace(/\s+/gu, " ").toLowerCase()) {
+    case "today":
+    case "今天":
+      return dayWindowFromMs(anchorMs);
+    case "yesterday":
+    case "昨天":
+      return dayWindowFromMs(anchorMs - DAY_MS);
+    case "tomorrow":
+    case "明天":
+      return dayWindowFromMs(anchorMs + DAY_MS);
+    case "this week":
+      return weekWindow(anchorMs, 0);
+    case "last week":
+    case "上周":
+      return weekWindow(anchorMs, -1);
+    case "next week":
+    case "下周":
+      return weekWindow(anchorMs, 1);
+    case "this month":
+      return monthWindowOffset(anchorMs, 0);
+    case "last month":
+    case "上个月":
+      return monthWindowOffset(anchorMs, -1);
+    case "next month":
+    case "下个月":
+      return monthWindowOffset(anchorMs, 1);
+    case "this year":
+    case "今年":
+      return yearWindow(new Date(anchorMs).getUTCFullYear());
+    case "last year":
+    case "去年":
+      return yearWindow(new Date(anchorMs).getUTCFullYear() - 1);
+    case "next year":
+    case "明年":
+      return yearWindow(new Date(anchorMs).getUTCFullYear() + 1);
+    default:
+      return null;
+  }
+}
+
+function dayWindowFromMs(ms: number): QueryTimeWindow | null {
+  const date = new Date(ms);
+  return dayWindow(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+}
+
+function weekWindow(anchorMs: number, weekOffset: number): QueryTimeWindow {
+  const date = new Date(anchorMs);
+  const dayStartMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+  const startMs = dayStartMs - daysSinceMonday * DAY_MS + weekOffset * 7 * DAY_MS;
+  return { startMs, endMs: startMs + 7 * DAY_MS - 1 };
+}
+
+function monthWindowOffset(anchorMs: number, monthOffset: number): QueryTimeWindow | null {
+  const date = new Date(anchorMs);
+  const startMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + monthOffset, 1);
+  const endMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + monthOffset + 1, 1) - 1;
+  return Number.isFinite(startMs) && Number.isFinite(endMs) ? { startMs, endMs } : null;
+}
+
+function yearWindow(year: number): QueryTimeWindow | null {
+  const startMs = Date.UTC(year, 0, 1);
+  const endMs = Date.UTC(year + 1, 0, 1) - 1;
   return Number.isFinite(startMs) && Number.isFinite(endMs) ? { startMs, endMs } : null;
 }
 

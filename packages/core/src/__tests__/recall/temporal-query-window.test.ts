@@ -58,6 +58,66 @@ describe("parseQueryTimeWindow", () => {
   });
 });
 
+describe("parseQueryTimeWindow anchored relative resolution", () => {
+  // 2023-05-17 is a Wednesday; its Monday-anchored week starts 2023-05-15.
+  const anchor = "2023-05-17T08:30:00.000Z";
+
+  it("leaves relative terms unresolved on the un-anchored path (flag-off parity)", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what did we decide last week"))).toBeNull();
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("上周的结论"))).toBeNull();
+  });
+
+  it("returns null when the anchor is not a parseable timestamp", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("last week"), "not-a-date")).toBeNull();
+  });
+
+  it("resolves last week to the prior Monday-anchored 7-day window", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what did we decide last week"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 4, 8),
+      endMs: Date.UTC(2023, 4, 15) - 1
+    });
+  });
+
+  it("is case-insensitive for relative phrases", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("What did we decide LAST WEEK?"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 4, 8),
+      endMs: Date.UTC(2023, 4, 15) - 1
+    });
+  });
+
+  it("resolves today and yesterday to single-day windows", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what happened today"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 4, 17),
+      endMs: Date.UTC(2023, 4, 17) + 86_400_000 - 1
+    });
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("the yesterday outage"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 4, 16),
+      endMs: Date.UTC(2023, 4, 16) + 86_400_000 - 1
+    });
+  });
+
+  it("resolves CJK 上个月 to the prior calendar month", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("上个月的决定"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 3, 1),
+      endMs: Date.UTC(2023, 4, 1) - 1
+    });
+  });
+
+  it("resolves CJK 去年 to the prior calendar year", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("去年发生了什么"), anchor)).toEqual({
+      startMs: Date.UTC(2022, 0, 1),
+      endMs: Date.UTC(2023, 0, 1) - 1
+    });
+  });
+
+  it("keeps absolute-term precedence over relative terms even when anchored", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("compare 2023-05 to last week"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 4, 1),
+      endMs: Date.UTC(2023, 5, 1) - 1
+    });
+  });
+});
+
 describe("scoreTemporalQueryWindow", () => {
   const mayWindow = { startMs: Date.UTC(2023, 4, 1), endMs: Date.UTC(2023, 5, 1) - 1 };
 
