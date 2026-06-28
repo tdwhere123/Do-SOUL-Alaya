@@ -23,6 +23,7 @@ import {
   decorrelateFamily,
   embeddingGateEnabled,
   embeddingGateFloor,
+  embeddingGateAppliesToIntent,
   floodFusionEnabled,
   floodGovernanceEnabled,
   gateSurfaceByEmbedding,
@@ -401,7 +402,10 @@ function accumulateFusionContributions(
     );
   }
   const governance = scoresByStream !== null && floodGovernanceEnabled();
-  const embedGateFloor = embeddingGateEnabled() ? embeddingGateFloor() : null;
+  const embedGateFloor =
+    embeddingGateEnabled() && embeddingGateAppliesToIntent(classifyRecallIntent(supplementaryData.queryProbes))
+      ? embeddingGateFloor()
+      : null;
   let fusedScore = 0;
   let lexicalFamilySum = 0;
   let lexicalFamilyMax = 0;

@@ -20,7 +20,12 @@ const QUERY = "which database credential rotation and migration tooling do I pre
 const HI = "00000000-0000-4000-8000-0000000000d1";
 const LO = "00000000-0000-4000-8000-0000000000d2";
 
-const GATE_ENV = ["ALAYA_RECALL_EMBED_GATE", "ALAYA_RECALL_EMBED_GATE_FLOOR"] as const;
+const SINGLE_FACT_QUERY = "the staging database credential rotation tooling configuration identifier";
+const GATE_ENV = [
+  "ALAYA_RECALL_EMBED_GATE",
+  "ALAYA_RECALL_EMBED_GATE_FLOOR",
+  "ALAYA_RECALL_EMBED_GATE_INTENTS"
+] as const;
 const databases = new Set<StorageDatabase>();
 
 afterEach(() => {
@@ -58,10 +63,13 @@ function createRealStorage(): SqliteMemoryEntryRepo {
   return new SqliteMemoryEntryRepo(database);
 }
 
-function buildSupplementaryData(embeddingByObject: Readonly<Record<string, number>>): RecallSupplementaryData {
+function buildSupplementaryData(
+  embeddingByObject: Readonly<Record<string, number>>,
+  query: string = QUERY
+): RecallSupplementaryData {
   const ones = { [HI]: 1, [LO]: 1 };
   return {
-    queryProbes: compileRecallQueryProbes(QUERY),
+    queryProbes: compileRecallQueryProbes(query),
     ftsRanks: ones,
     trigramFtsRanks: ones,
     synthesisFtsRanks: ones,
@@ -87,7 +95,8 @@ function buildSupplementaryData(embeddingByObject: Readonly<Record<string, numbe
 }
 
 async function fusedScoresByObject(
-  embeddingByObject: Readonly<Record<string, number>>
+  embeddingByObject: Readonly<Record<string, number>>,
+  query: string = QUERY
 ): Promise<ReadonlyMap<string, number>> {
   const memoryEntryRepo = createRealStorage();
   const content = "Staging release database credential rotation and migration tooling preference note.";
@@ -107,7 +116,7 @@ async function fusedScoresByObject(
   const fusion = buildRecallFusionDetails({
     candidates: [candidate(byId.get(HI)!), candidate(byId.get(LO)!)],
     policy: {} as RecallPolicy,
-    supplementaryData: buildSupplementaryData(embeddingByObject),
+    supplementaryData: buildSupplementaryData(embeddingByObject, query),
     nowIso: "2026-03-20T10:20:30.000Z"
   });
   return new Map([...fusion.values()].map((b) => [b.object_id, b.fused_score]));
@@ -142,5 +151,22 @@ describe("standalone embedding gate (real SQLite)", () => {
     process.env.ALAYA_RECALL_EMBED_GATE_FLOOR = "0";
     const gated = (await fusedScoresByObject({})).get(LO) ?? 0;
     expect(gated).toBeCloseTo(baseline, 12);
+  });
+
+  it("ON exempts single_fact intent (lexical truth is not gated)", async () => {
+    const baseline = (await fusedScoresByObject({ [HI]: 0.9, [LO]: 0.45 }, SINGLE_FACT_QUERY)).get(LO) ?? 0;
+    process.env.ALAYA_RECALL_EMBED_GATE = "1";
+    process.env.ALAYA_RECALL_EMBED_GATE_FLOOR = "0";
+    const gated = (await fusedScoresByObject({ [HI]: 0.9, [LO]: 0.45 }, SINGLE_FACT_QUERY)).get(LO) ?? 0;
+    expect(gated).toBeCloseTo(baseline, 12);
+  });
+
+  it("ON gates single_fact when EMBED_GATE_INTENTS opts it in", async () => {
+    const baseline = (await fusedScoresByObject({ [HI]: 0.9, [LO]: 0.45 }, SINGLE_FACT_QUERY)).get(LO) ?? 0;
+    process.env.ALAYA_RECALL_EMBED_GATE = "1";
+    process.env.ALAYA_RECALL_EMBED_GATE_FLOOR = "0";
+    process.env.ALAYA_RECALL_EMBED_GATE_INTENTS = "single_fact";
+    const gated = (await fusedScoresByObject({ [HI]: 0.9, [LO]: 0.45 }, SINGLE_FACT_QUERY)).get(LO) ?? 0;
+    expect(gated).toBeLessThan(baseline);
   });
 });

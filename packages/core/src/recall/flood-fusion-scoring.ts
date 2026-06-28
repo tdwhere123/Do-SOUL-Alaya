@@ -199,6 +199,18 @@ export function embeddingGateFloor(): number {
   return readUnitEnv("ALAYA_RECALL_EMBED_GATE_FLOOR", 0);
 }
 
+// single_fact is lexical truth; the semantic gate must not demote it. Default exempts it; override via ALAYA_RECALL_EMBED_GATE_INTENTS.
+const DEFAULT_EMBED_GATE_INTENTS: ReadonlySet<RecallQueryIntent> = new Set<RecallQueryIntent>([
+  "multi_fact", "list", "temporal", "preference", "knowledge_update"
+]);
+export function embeddingGateAppliesToIntent(intent: RecallQueryIntent): boolean {
+  const raw = process.env.ALAYA_RECALL_EMBED_GATE_INTENTS;
+  if (raw === undefined || raw.length === 0) {
+    return DEFAULT_EMBED_GATE_INTENTS.has(intent);
+  }
+  return raw.split(",").some((part) => part.trim() === intent);
+}
+
 // max + λ·(sum − max): collapse correlated within-family views to one corroborated relevance.
 export function decorrelateFamily(contributions: readonly number[], lambda: number): number {
   let sum = 0;
