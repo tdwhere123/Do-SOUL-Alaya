@@ -68,13 +68,20 @@ export function resolveFusionContribution(params: FusionContributionParams): num
 }
 
 // Same embedding cosine modulation the RRF path applies; shared so flood mode does not duplicate it.
+// Diagnostic switch (ALAYA_RECALL_PATH_EMB_MODULATION=off) for the raw-cosine path/graph boost.
+// Default (unset) keeps the raw modulation = byte-identical.
+function pathEmbModulationEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_PATH_EMB_MODULATION;
+  return raw !== "off" && raw !== "0" && raw !== "false";
+}
+
 export function applyEmbeddingPathModulation(
   contribution: number,
   candidate: FusionContributionCandidate,
   supplementaryData: RecallSupplementaryData,
   stream: RecallFusionStream
 ): number {
-  if (stream !== "path_expansion" && stream !== "graph_expansion") {
+  if ((stream !== "path_expansion" && stream !== "graph_expansion") || !pathEmbModulationEnabled()) {
     return contribution;
   }
   const cos = clamp01(supplementaryData.embeddingSimilarityScores?.[candidate.entry.object_id] ?? 0.5);
