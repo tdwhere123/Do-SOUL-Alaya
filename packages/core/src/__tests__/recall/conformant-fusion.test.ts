@@ -13,8 +13,13 @@ import {
   WorkspaceKind,
   WorkspaceState
 } from "@do-soul/alaya-protocol";
-import { buildRecallFusionDetails } from "../../recall/fusion-delivery-scoring.js";
-import { applyConformantGovernance, resolveConformantAxisK } from "../../recall/conformant-fusion-scoring.js";
+import { applyPathSuppressionToFusionScores, buildRecallFusionDetails } from "../../recall/fusion-delivery-scoring.js";
+import {
+  applyConformantGovernance,
+  resolveConformantAxisK,
+  resolveConformantCrossAxis,
+  resolveConformantFloodScale
+} from "../../recall/conformant-fusion-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 import { classifyRecallIntent } from "../../recall/recall-query-plan.js";
 import type { RecallFusionBreakdown, RecallSupplementaryData } from "../../recall/recall-service-types.js";
@@ -31,7 +36,7 @@ const CONFORMANT_ENV = [
   "ALAYA_RECALL_CONF_GATE_FLOOR", "ALAYA_RECALL_CONF_GOV_FLOOR", "ALAYA_RECALL_CONF_GOV_RATIO",
   "ALAYA_RECALL_CONF_SCALE", "ALAYA_RECALL_CONF_EVIDENCE_DECAY", "ALAYA_RECALL_SYNTHESIS",
   "ALAYA_RECALL_FACET_OVERLAP", "ALAYA_RECALL_FACET_SLICE", "ALAYA_RECALL_PATH_FLOW",
-  "ALAYA_RECALL_TEMPORAL_WINDOW"
+  "ALAYA_RECALL_TEMPORAL_WINDOW", "ALAYA_RECALL_CONF_XAXIS", "ALAYA_RECALL_CONF_FLOOD_SCALE"
 ] as const;
 
 const databases = new Set<StorageDatabase>();
@@ -195,7 +200,7 @@ describe("conformant four-axis combine (real SQLite)", () => {
     }
   });
 
-  it("orthogonal lift: a path+evidence candidate overtakes a lexical-only winner, causally", async () => {
+  it("rrf orthogonal lift: a path+evidence candidate overtakes a lexical-only winner, causally", async () => {
     const lexicalOnly: CandidateSpec = { id: objectId(1), lexical: 1, evidence: 1, structural: 1 };
     const orthogonal: CandidateSpec = { id: objectId(2), path: 1, sourceProximity: 1 };
 
@@ -204,6 +209,7 @@ describe("conformant four-axis combine (real SQLite)", () => {
       .toBeLessThan(baseline.get(keyOf(orthogonal.id))!.fused_rank);
 
     process.env.ALAYA_RECALL_CONFORMANT = "1";
+    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
     const lifted = await runFusion(GENERIC_QUERY, [lexicalOnly, orthogonal]);
     expect(lifted.get(keyOf(orthogonal.id))!.fused_rank)
       .toBeLessThan(lifted.get(keyOf(lexicalOnly.id))!.fused_rank);
@@ -229,8 +235,9 @@ describe("conformant four-axis combine (real SQLite)", () => {
     expect(raAll).toBeLessThan(2);
   });
 
-  it("per-axis rank differs from any single per-stream rank", async () => {
+  it("rrf per-axis rank differs from any single per-stream rank", async () => {
     process.env.ALAYA_RECALL_CONFORMANT = "1";
+    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
     // A wins lexical_fts; B loses lexical_fts but wins R_O via an orthogonal embedding signal.
     const fusion = await runFusion(GENERIC_QUERY, [
       { id: objectId(1), lexical: 1 },
@@ -262,6 +269,7 @@ describe("conformant four-axis combine (real SQLite)", () => {
       { id: objectId(2), path: 0.3 }
     ];
     process.env.ALAYA_RECALL_CONFORMANT = "1";
+    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
     const atK20 = await runFusion(GENERIC_QUERY, specs);
     const gap20 = atK20.get(keyOf(objectId(1)))!.fused_score / atK20.get(keyOf(objectId(2)))!.fused_score;
     process.env.ALAYA_RECALL_CONF_K = "60";
@@ -333,8 +341,9 @@ describe("conformant four-axis combine (real SQLite)", () => {
     expect(score).toBeGreaterThan(0.27);
   });
 
-  it("normalization edges: single candidate yields a finite S; an empty-pool stream casts no vote", async () => {
+  it("rrf normalization edges: single candidate yields a finite S; an empty-pool stream casts no vote", async () => {
     process.env.ALAYA_RECALL_CONFORMANT = "1";
+    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
     const single = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }]);
     const only = single.get(keyOf(objectId(1)))!;
     expect(Number.isFinite(only.fused_score)).toBe(true);
@@ -343,5 +352,64 @@ describe("conformant four-axis combine (real SQLite)", () => {
     // path/evidence streams are empty ⇒ no vote, no NaN.
     expect(only.per_axis_rank!.path).toBeNull();
     expect(only.per_axis_contribution!.path).toBe(0);
+  });
+
+  // The exact failure rrf+cap had: a magnitude-dominant single-axis candidate crushed below a broad-but-weak one.
+  const DOMINANT: CandidateSpec = { id: objectId(1), lexical: 1, embedding: 1 };
+  const BROAD_WEAK: CandidateSpec = { id: objectId(2), lexical: 0.2, path: 0.3, sourceProximity: 0.3 };
+
+  it("flood (default) ranks a magnitude-dominant single-axis candidate above a broad-but-weak multi-axis one", async () => {
+    expect(resolveConformantCrossAxis()).toBe("flood");
+    process.env.ALAYA_RECALL_CONFORMANT = "1";
+    const fusion = await runFusion(GENERIC_QUERY, [DOMINANT, BROAD_WEAK]);
+    const dominant = fusion.get(keyOf(DOMINANT.id))!;
+    const broad = fusion.get(keyOf(BROAD_WEAK.id))!;
+    expect(dominant.fused_score).toBeGreaterThan(broad.fused_score);
+    expect(dominant.fused_rank).toBeLessThan(broad.fused_rank);
+    // flood casts no per-axis rank.
+    expect(dominant.per_axis_rank!.object).toBeNull();
+  });
+
+  it("flood and rrf disagree on the same pool: flood favours magnitude, rrf+cap favours breadth", async () => {
+    process.env.ALAYA_RECALL_CONFORMANT = "1";
+    process.env.ALAYA_RECALL_CONF_XAXIS = "flood";
+    const flood = await runFusion(GENERIC_QUERY, [DOMINANT, BROAD_WEAK]);
+    expect(flood.get(keyOf(DOMINANT.id))!.fused_rank)
+      .toBeLessThan(flood.get(keyOf(BROAD_WEAK.id))!.fused_rank);
+
+    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
+    const rrf = await runFusion(GENERIC_QUERY, [DOMINANT, BROAD_WEAK]);
+    expect(rrf.get(keyOf(BROAD_WEAK.id))!.fused_rank)
+      .toBeLessThan(rrf.get(keyOf(DOMINANT.id))!.fused_rank);
+  });
+
+  it("flag OFF is unaffected by the cross-axis selector (parity holds, no per_axis keys)", async () => {
+    process.env.ALAYA_RECALL_CONF_XAXIS = "flood";
+    const a = await runFusion(GENERIC_QUERY, [DOMINANT, BROAD_WEAK]);
+    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
+    const b = await runFusion(GENERIC_QUERY, [DOMINANT, BROAD_WEAK]);
+    for (const spec of [DOMINANT, BROAD_WEAK]) {
+      const left = a.get(keyOf(spec.id))!;
+      const right = b.get(keyOf(spec.id))!;
+      expect(right.fused_score).toBeCloseTo(left.fused_score, 12);
+      expect(right.fused_rank).toBe(left.fused_rank);
+      expect(left.per_axis_rank).toBeUndefined();
+      expect(left.per_axis_contribution).toBeUndefined();
+    }
+  });
+
+  it("flood scale keeps a 0.27 path-suppression delta a demote, not an annihilation", async () => {
+    expect(resolveConformantFloodScale()).toBe(1);
+    process.env.ALAYA_RECALL_CONFORMANT = "1";
+    const spec: CandidateSpec = { id: objectId(1), lexical: 1, path: 1, sourceProximity: 1 };
+    const fusion = await runFusion(GENERIC_QUERY, [spec]);
+    const before = fusion.get(keyOf(spec.id))!.fused_score;
+    expect(before).toBeGreaterThan(0.27);
+    const suppressed = applyPathSuppressionToFusionScores(fusion, { [spec.id]: 0.27 });
+    const after = suppressed.get(keyOf(spec.id))!.fused_score;
+    // Clean subtraction (not floored to the 1e-4 residual): demoted but still well above zero.
+    expect(after).toBeCloseTo(before - 0.27, 9);
+    expect(after).toBeGreaterThan(1e-4);
+    expect(after).toBeLessThan(before);
   });
 });

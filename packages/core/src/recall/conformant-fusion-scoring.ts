@@ -99,6 +99,16 @@ export function resolveConformantScale(): number {
   return readFloatEnv("ALAYA_RECALL_CONF_SCALE", 20, 0);
 }
 
+// FLOOD (default): magnitude additive S=scale·Σ W_a·R_a. RRF: today's rank-reciprocal ρ + governance cap (A/B only).
+export function resolveConformantCrossAxis(): "flood" | "rrf" {
+  return process.env.ALAYA_RECALL_CONF_XAXIS === "rrf" ? "rrf" : "flood";
+}
+
+// R_a∈[0,1] ⇒ Σ W_a·R_a ≤ ~2.2; scale 1 keeps S in the additive band the path-suppression absolute deltas expect.
+export function resolveConformantFloodScale(): number {
+  return readFloatEnv("ALAYA_RECALL_CONF_FLOOD_SCALE", 1, 0);
+}
+
 // k=20 (not the per-stream 45-90 / RRF-60): with only 3 votes, top-rank-on-orthogonal must stay decisive.
 export function resolveConformantAxisK(axis: RecallConformantAxis): number {
   const base = readPositiveIntEnv("ALAYA_RECALL_CONF_K", 20);
@@ -234,7 +244,7 @@ interface CollapsedCandidate {
   readonly evidence: number;
 }
 
-// Pool-level three-pass: (1) collapse R_O/R_P/R_E per candidate; (2) rank per axis; (3) cross-axis RRF + cap.
+// Collapse R_O/R_P/R_E per candidate, then combine cross-axis by FLOOD (magnitude, default) or RRF (rank + cap).
 export function buildConformantAxisContext(params: Readonly<{
   readonly candidates: readonly ConformantCandidate[];
   readonly scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores>;
@@ -266,16 +276,44 @@ export function buildConformantAxisContext(params: Readonly<{
     };
   });
 
+  if (resolveConformantCrossAxis() === "flood") {
+    return assembleFloodScores(collapsed);
+  }
+
   const ranksByAxis: Record<RecallConformantAxis, ReadonlyMap<string, number>> = {
     object: buildAxisRanks(collapsed.map((c) => ({ candidateKey: c.candidateKey, entry: c.entry, score: c.object }))),
     path: buildAxisRanks(collapsed.map((c) => ({ candidateKey: c.candidateKey, entry: c.entry, score: c.path }))),
     evidence: buildAxisRanks(collapsed.map((c) => ({ candidateKey: c.candidateKey, entry: c.entry, score: c.evidence })))
   };
 
-  return assembleConformantScores(collapsed, ranksByAxis);
+  return assembleRrfScores(collapsed, ranksByAxis);
 }
 
-function assembleConformantScores(
+const NULL_AXIS_RANK: Readonly<Record<RecallConformantAxis, number | null>> =
+  Object.freeze({ object: null, path: null, evidence: null });
+
+// FLOOD: S = scale·Σ W_a·R_a over the raw collapsed magnitudes; no per-axis rank, no ρ, no cross-axis cap.
+function assembleFloodScores(collapsed: readonly CollapsedCandidate[]): ConformantAxisContext {
+  const weights = resolveConformantWeights();
+  const scale = resolveConformantFloodScale();
+  const scoreByKey = new Map<string, number>();
+  const axisRankByKey = new Map<string, Readonly<Record<RecallConformantAxis, number | null>>>();
+  const raByKey = new Map<string, Readonly<Record<RecallConformantAxis, number>>>();
+  for (const candidate of collapsed) {
+    const sRaw =
+      weights.object * candidate.object + weights.path * candidate.path + weights.evidence * candidate.evidence;
+    scoreByKey.set(candidate.candidateKey, scale * sRaw);
+    axisRankByKey.set(candidate.candidateKey, NULL_AXIS_RANK);
+    raByKey.set(
+      candidate.candidateKey,
+      Object.freeze({ object: candidate.object, path: candidate.path, evidence: candidate.evidence })
+    );
+  }
+  return Object.freeze({ scoreByKey, axisRankByKey, raByKey });
+}
+
+// RRF: per-axis rank-reciprocal ρ=1/(k+rank) with the governance cap; kept for A/B against flood.
+function assembleRrfScores(
   collapsed: readonly CollapsedCandidate[],
   ranksByAxis: Record<RecallConformantAxis, ReadonlyMap<string, number>>
 ): ConformantAxisContext {
