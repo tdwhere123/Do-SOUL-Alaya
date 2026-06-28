@@ -16,7 +16,8 @@ export function buildBenchDiagnosticRecallPolicy(
   conflictAwareness = true
 ): RecallPolicy {
   const maxResults = Math.max(maxResultsInput, 1);
-  const coarseCandidateLimit = Math.min(Math.max(maxResults * 10, maxResults), 1000);
+  const coarseFloor = Number(process.env.ALAYA_RECALL_COARSE_FLOOR) || 0;
+  const coarseCandidateLimit = Math.min(Math.max(maxResults * 10, maxResults, coarseFloor), 1000);
   const keywordCandidateLimit = Math.min(
     Math.max(coarseCandidateLimit, maxResults * 10, 1),
     1000

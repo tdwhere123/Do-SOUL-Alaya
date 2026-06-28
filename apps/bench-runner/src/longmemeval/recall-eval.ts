@@ -204,7 +204,7 @@ async function prepareRecallEvalRun(
     policyShape: options.policyShape ?? "stress",
     simulateReport: options.simulateReport ?? "none",
     recallOptions: {
-      maxResults: 10,
+      maxResults: Number(process.env.ALAYA_RECALL_EVAL_MAX_RESULTS) || 10,
       conflictAwareness: (options.policyShape ?? "stress") === "stress"
     },
     alayaVersion: resolveBenchRunnerVersion(),
