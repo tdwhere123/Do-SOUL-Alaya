@@ -37,7 +37,7 @@ export interface QueryTimeWindow {
 
 const QUERY_WINDOW_DECAY_DAYS = 90;
 
-// Object-time facet: distance to the question's time window, independent of distance-to-now (V4 axis split).
+// Object-time facet: distance to the question's asked-about window, independent of distance-to-now.
 export function parseQueryTimeWindow(
   queryProbes: Readonly<RecallQueryProbes>
 ): QueryTimeWindow | null {

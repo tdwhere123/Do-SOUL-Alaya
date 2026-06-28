@@ -407,10 +407,8 @@ function accumulateBestEvidenceFusedScore(
   return combineBestEvidenceFamilies(relevanceByStream);
 }
 
-// Four-axis layered assembly: group streams by family, de-correlate the correlated views within each
-// family to one relevance, gate the lexical surface family by embedding agreement, sum across families,
-// then bound the surface under governance. λ=1 ∧ γ=1 ∧ governance-off collapses to the additive RRF sum;
-// non-gated intents take that additive path directly (byte-identical to the baseline).
+// Four-axis assembly: per-family de-correlate → embedding-gate the lexical surface → sum across families
+// → governance cap. λ=1∧γ=1∧gov-off ≡ additive sum; non-gated intents take the additive path directly.
 function accumulateSynthesisFusedScore(
   candidate: RecallFusionCandidateInput,
   supplementaryData: RecallSupplementaryData,

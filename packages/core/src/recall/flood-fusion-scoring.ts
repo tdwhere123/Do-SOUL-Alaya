@@ -28,10 +28,8 @@ export function isLexicalFamilyFloodStream(stream: RecallFusionStream): boolean 
   return LEXICAL_FAMILY_FLOOD_STREAMS.has(stream);
 }
 
-// Governance: 4 redundant lexical streams summing to ~4x on one candidate over-concentrates the top
-// and buries multi-gold. Cap the family's combined inflow at its best single stream x cap; orthogonal
-// answer-signals (embedding/path/temporal/structural) are never bounded. This is the full_gold-priority
-// form (wins multi-fact coverage at an any-gold/single-fact cost — kept flag-gated, default off).
+// Cap the correlated lexical family at best-single-stream × cap so redundant streams can't bury
+// multi-gold; orthogonal answer-signals stay unbounded. full_gold-priority, flag-gated off.
 const LEXICAL_GOVERNANCE_CAP = 1.3;
 export function cappedLexicalFloodSum(sum: number, max: number): number {
   return Math.min(sum, max * LEXICAL_GOVERNANCE_CAP);
@@ -51,10 +49,8 @@ type FloodFusionContributionParams = Readonly<{
   readonly streamMax: number;
 }>;
 
-// Opt-in (ALAYA_RECALL_BEST_EVIDENCE, flood only): combine streams as conditional relevance lenses
-// instead of summing votes. Per-family max de-correlates the lexical family (one relevance, not 13
-// votes); cross-family confidence-weighted noisy-OR lets a minority-but-strong lens (embedding on an
-// inference-gap gold) surface without high additive weight. Off -> additive path stays byte-identical.
+// Opt-in (ALAYA_RECALL_BEST_EVIDENCE, flood only): per-family max + cross-family confidence-weighted
+// noisy-OR instead of summing votes — a minority-strong lens surfaces without additive weight. Off → additive.
 export function bestEvidenceEnabled(): boolean {
   const raw = process.env.ALAYA_RECALL_BEST_EVIDENCE;
   return raw === "on" || raw === "1" || raw === "true";
@@ -79,9 +75,7 @@ export function streamFamily(stream: RecallFusionStream): StreamFamily {
   return STREAM_FAMILY[stream];
 }
 
-// Per-family confidence in [0,1]: how much a family's relevance claim is trusted in the noisy-OR.
-// Embedding > lexical encodes "semantic relevance outranks surface relevance for answer-relation".
-// Override via ALAYA_RECALL_BE_CONF_JSON ({family: number}).
+// Per-family noisy-OR trust in [0,1]; embedding > lexical = semantic outranks surface. Override: ALAYA_RECALL_BE_CONF_JSON.
 const DEFAULT_FAMILY_CONFIDENCE: Readonly<Record<StreamFamily, number>> = {
   lexical: 0.55, embedding: 0.7, path: 0.45, temporal: 0.5, structural: 0.35, facet: 0.55, activation: 0.3
 };
@@ -137,11 +131,8 @@ export function combineBestEvidenceFamilies(relevanceByStream: ReadonlyMap<Recal
   return 1 - complement;
 }
 
-// Opt-in (ALAYA_RECALL_SYNTHESIS): object-axis correction before the RRF cross-section. The lexical
-// streams are correlated views of one surface facet, so they de-correlate to a single relevance
-// (max + λ·rest) instead of N additive votes; for answer-relation intents the surface facet is gated
-// by embedding agreement (γ + (1−γ)·embRel) so topic-neighbors that share words but not meaning are
-// suppressed. Scoped to gated intents — every other intent stays byte-identical to additive RRF.
+// Opt-in (ALAYA_RECALL_SYNTHESIS): object-axis correction — de-correlate the correlated lexical surface
+// views (max+λ·rest) and gate them by embedding agreement (γ+(1−γ)·embRel). Gated intents only; others byte-identical.
 export function synthesisFusionEnabled(): boolean {
   const raw = process.env.ALAYA_RECALL_SYNTHESIS;
   return raw === "on" || raw === "1" || raw === "true";
