@@ -75,6 +75,9 @@ export type RecallFusionStream =
 export type RecallFusionStreamRanks = Readonly<Record<RecallFusionStream, number | null>>;
 export type RecallFusionStreamContributions = Readonly<Record<RecallFusionStream, number>>;
 
+// Conformant combine's three summed axes (Governance is a cap operator, not an axis). Diagnostics-only.
+export type RecallConformantAxis = "object" | "path" | "evidence";
+
 export interface RecallFusionBreakdown {
   readonly candidate_key: string;
   readonly object_id: string;
@@ -84,6 +87,9 @@ export interface RecallFusionBreakdown {
   readonly fused_rank: number;
   readonly fused_score: number;
   readonly fused_rank_contribution_per_stream: RecallFusionStreamContributions;
+  // Present only under ALAYA_RECALL_CONFORMANT: per-axis rank and collapsed R_a relevance magnitude.
+  readonly per_axis_rank?: Readonly<Record<RecallConformantAxis, number | null>>;
+  readonly per_axis_contribution?: Readonly<Record<RecallConformantAxis, number>>;
 }
 
 export interface RecallCandidateDiagnostic {

@@ -27,6 +27,7 @@ import {
 import { computeMaxWeightTransferAmount } from "./scoring.js";
 import { anchorMemoryId, uniqueStrings } from "./path-relations.js";
 import { facetOverlapEnabled } from "./fusion-delivery-scoring.js";
+import { conformantFusionEnabled } from "./conformant-fusion-scoring.js";
 import { deriveQuerySoughtFacets } from "./query-facet-router.js";
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
@@ -97,7 +98,9 @@ export async function collectSupplementaryData(
     weightTransferAmount: coldMetrics.weightTransferAmount,
     evidenceGistsByMemoryId: evidenceAndGovernance.evidenceGistsByMemoryId,
     governanceCeilingByMemoryId: evidenceAndGovernance.governanceCeilingByMemoryId,
-    querySoughtFacets: facetOverlapEnabled() ? deriveQuerySoughtFacets(params.queryProbes) : Object.freeze([])
+    querySoughtFacets: facetOverlapEnabled() || conformantFusionEnabled()
+      ? deriveQuerySoughtFacets(params.queryProbes)
+      : Object.freeze([])
   });
 }
 

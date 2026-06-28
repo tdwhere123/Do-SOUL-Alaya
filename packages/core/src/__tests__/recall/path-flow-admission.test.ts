@@ -8,6 +8,7 @@ const OBJ = "00000000-0000-4000-8000-0000000000d4";
 
 afterEach(() => {
   delete process.env.ALAYA_RECALL_PATH_FLOW;
+  delete process.env.ALAYA_RECALL_CONFORMANT;
 });
 
 function makeAdder(): {
@@ -72,5 +73,13 @@ describe("path-axis real flow admission (V3)", () => {
     admitPathExpansion(add, 0.5, 0.4);
     expect(pathExpansionScores.get(OBJ)).toBeCloseTo(0.7, 9);
     expect(structuralScores.get(OBJ)).toBeCloseTo(0.5, 9);
+  });
+
+  it("conformant gate also routes path_expansion to accumulated flow", () => {
+    process.env.ALAYA_RECALL_CONFORMANT = "1";
+    const { add, pathExpansionScores } = makeAdder();
+    admitPathExpansion(add, 0.5, 0.3);
+    admitPathExpansion(add, 0.5, 0.4);
+    expect(pathExpansionScores.get(OBJ)).toBeCloseTo(0.7, 9);
   });
 });

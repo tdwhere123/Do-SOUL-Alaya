@@ -6,6 +6,7 @@ import {
 } from "./fusion-delivery-adaptive-scoring.js";
 import type { RecallQueryIntent } from "./recall-query-plan.js";
 import type { RecallFusionStream, RecallSupplementaryData } from "./recall-service-types.js";
+import { clamp01 } from "../shared/clamp.js";
 
 // Opt-in (ALAYA_RECALL_FLOOD_FUSION): fuse normalized raw magnitudes instead of 1/(k+rank). Off → RRF rank path stays byte-identical.
 export function floodFusionEnabled(): boolean {
@@ -209,6 +210,24 @@ export function decorrelateFamily(contributions: readonly number[], lambda: numb
     }
   }
   return max + lambda * (sum - max);
+}
+
+// γ + (1−γ)·embRel: suppress surface relevance that words-but-not-meaning topic-neighbors earn.
+// embRel is pool-relative (cosine / pool-max), NOT raw cosine — raw cosine is comparable only within
+// one model, so a raw-magnitude gate tracks the model's absolute scale, not semantic standing.
+// γ=1 → no gate; no embedding signal → unchanged (gate acts only where it can discriminate).
+export function gateSurfaceByEmbedding(
+  surfaceRelevance: number,
+  candidate: FusionContributionCandidate,
+  floor: number,
+  embeddingPoolMax: number
+): number {
+  const embeddingSimilarity = candidate.effectiveFactors.embedding_similarity;
+  if (typeof embeddingSimilarity !== "number" || embeddingSimilarity <= 0 || embeddingPoolMax <= 0) {
+    return surfaceRelevance;
+  }
+  const embRel = clamp01(embeddingSimilarity / embeddingPoolMax);
+  return surfaceRelevance * (floor + (1 - floor) * embRel);
 }
 
 // Governance ceiling (ALAYA_RECALL_SYN_GOVERN): bound the correlated surface mass so it cannot
