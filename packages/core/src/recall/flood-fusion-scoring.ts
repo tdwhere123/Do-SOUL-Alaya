@@ -194,7 +194,7 @@ export function synthesisGateFloor(): number {
   return readUnitEnv("ALAYA_RECALL_SYN_GATE_FLOOR", 0.5);
 }
 
-// max + λ·(sum − max): collapse correlated lexical views to one corroborated surface relevance.
+// max + λ·(sum − max): collapse correlated within-family views to one corroborated relevance.
 export function decorrelateFamily(contributions: readonly number[], lambda: number): number {
   let sum = 0;
   let max = 0;
@@ -205,6 +205,38 @@ export function decorrelateFamily(contributions: readonly number[], lambda: numb
     }
   }
   return max + lambda * (sum - max);
+}
+
+// Governance ceiling (ALAYA_RECALL_SYN_GOVERN): bound the correlated surface mass so it cannot
+// out-vote orthogonal answer-signals. Default off so it A/Bs independently of the de-corr/gate.
+export function synthesisGovernanceEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_SYN_GOVERN;
+  return raw === "on" || raw === "1" || raw === "true";
+}
+
+function readFloatEnv(name: string, fallback: number, min: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) {
+    return fallback;
+  }
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(min, value) : fallback;
+}
+
+export function synthesisGovernRatio(): number {
+  return readFloatEnv("ALAYA_RECALL_SYN_GOV_RATIO", 2, 0);
+}
+
+export function synthesisGovernFloor(): number {
+  return readFloatEnv("ALAYA_RECALL_SYN_GOV_FLOOR", 0.5, 0);
+}
+
+// Surface is left intact when no orthogonal answer-signal exists; otherwise capped at floor + ratio·orthogonal.
+export function applySynthesisGovernance(surfaceMass: number, orthogonalMass: number): number {
+  if (orthogonalMass <= 0) {
+    return surfaceMass;
+  }
+  return Math.min(surfaceMass, synthesisGovernFloor() + synthesisGovernRatio() * orthogonalMass);
 }
 
 // weight · reliability · (rawScore / streamMax): faithful magnitude preservation (vs RRF's

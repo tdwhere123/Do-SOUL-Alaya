@@ -30,8 +30,11 @@ import {
   synthesisFusionEnabled,
   synthesisGateFloor,
   synthesisDecorrLambda,
+  synthesisGovernanceEnabled,
+  applySynthesisGovernance,
   synthesisIntentGated,
-  type FloodStreamScores
+  type FloodStreamScores,
+  type StreamFamily
 } from "./flood-fusion-scoring.js";
 import { classifyRecallIntent } from "./recall-query-plan.js";
 import type {
@@ -399,9 +402,10 @@ function accumulateBestEvidenceFusedScore(
   return combineBestEvidenceFamilies(relevanceByStream);
 }
 
-// Object-axis correction on the RRF cross-section: de-correlate the correlated lexical surface views
-// into one relevance, then (for answer-relation intents) gate that surface relevance by embedding
-// agreement. Non-gated intents return the plain additive RRF sum (byte-identical to the baseline path).
+// Four-axis layered assembly: group streams by family, de-correlate the correlated views within each
+// family to one relevance, gate the lexical surface family by embedding agreement, sum across families,
+// then bound the surface under governance. λ=1 ∧ γ=1 ∧ governance-off collapses to the additive RRF sum;
+// non-gated intents take that additive path directly (byte-identical to the baseline).
 function accumulateSynthesisFusedScore(
   candidate: RecallFusionCandidateInput,
   supplementaryData: RecallSupplementaryData,
@@ -412,8 +416,8 @@ function accumulateSynthesisFusedScore(
   contributions: Record<RecallFusionStream, number>
 ): number {
   const gated = synthesisIntentGated(classifyRecallIntent(supplementaryData.queryProbes));
-  const lexicalContributions: number[] = [];
-  let otherSum = 0;
+  const byFamily = new Map<StreamFamily, number[]>();
+  let additiveSum = 0;
   for (const stream of activeFusionStreams()) {
     const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
     perStreamRank[stream] = rank;
@@ -422,21 +426,50 @@ function accumulateSynthesisFusedScore(
     }
     const contribution = resolveFusionContribution(candidate, supplementaryData, resolved, stream, rank);
     contributions[stream] = contribution;
-    if (streamFamily(stream) === "lexical") {
-      lexicalContributions.push(contribution);
+    additiveSum += contribution;
+    const family = streamFamily(stream);
+    const bucket = byFamily.get(family);
+    if (bucket === undefined) {
+      byFamily.set(family, [contribution]);
     } else {
-      otherSum += contribution;
+      bucket.push(contribution);
     }
   }
-  if (!gated) {
-    return lexicalContributions.reduce((sum, value) => sum + value, 0) + otherSum;
+  return gated ? combineSynthesisAxes(byFamily, candidate) : additiveSum;
+}
+
+function combineSynthesisAxes(
+  byFamily: ReadonlyMap<StreamFamily, readonly number[]>,
+  candidate: RecallFusionCandidateInput
+): number {
+  const lambda = synthesisDecorrLambda();
+  let surfaceMass = 0;
+  let orthogonalMass = 0;
+  for (const [family, familyContributions] of byFamily) {
+    const decorrelated = decorrelateFamily(familyContributions, lambda);
+    if (family === "lexical") {
+      surfaceMass += applySynthesisEmbeddingGate(decorrelated, candidate);
+    } else {
+      orthogonalMass += decorrelated;
+    }
   }
-  const decorrelatedLexical = decorrelateFamily(lexicalContributions, synthesisDecorrLambda());
+  const governedSurface = synthesisGovernanceEnabled()
+    ? applySynthesisGovernance(surfaceMass, orthogonalMass)
+    : surfaceMass;
+  return governedSurface + orthogonalMass;
+}
+
+// γ + (1−γ)·embRel: suppress surface relevance that words-but-not-meaning topic-neighbors earn. γ=1 → no gate.
+function applySynthesisEmbeddingGate(
+  surfaceRelevance: number,
+  candidate: RecallFusionCandidateInput
+): number {
   const embeddingSimilarity = candidate.effectiveFactors.embedding_similarity;
-  const gatedLexical = typeof embeddingSimilarity === "number" && embeddingSimilarity > 0
-    ? decorrelatedLexical * (synthesisGateFloor() + (1 - synthesisGateFloor()) * clamp01(embeddingSimilarity))
-    : decorrelatedLexical;
-  return gatedLexical + otherSum;
+  if (typeof embeddingSimilarity !== "number" || embeddingSimilarity <= 0) {
+    return surfaceRelevance;
+  }
+  const floor = synthesisGateFloor();
+  return surfaceRelevance * (floor + (1 - floor) * clamp01(embeddingSimilarity));
 }
 
 function resolveFloodContribution(
