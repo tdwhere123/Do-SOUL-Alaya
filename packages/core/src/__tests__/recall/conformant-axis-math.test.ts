@@ -88,9 +88,9 @@ describe("NOR_ρ operator (noisyOrDecorrelate)", () => {
     expect(noisyOrDecorrelate([], [], 0.5)).toBe(0);
   });
 
-  it("ρ=1 is pure (confidence-weighted) max — the weighted-max anchor's xᵢ alone survives", () => {
+  it("ρ=1 is pure confidence-weighted max", () => {
     expect(noisyOrDecorrelate([0.3, 0.8, 0.5], [1, 1, 1], 1)).toBeCloseTo(0.8, 12);
-    expect(noisyOrDecorrelate([0.8], [0.5], 1)).toBeCloseTo(0.8, 12);
+    expect(noisyOrDecorrelate([0.8], [0.5], 1)).toBeCloseTo(0.4, 12);
     expect(noisyOrDecorrelate([0.95, 0.90], [0.60, 1.00], 1)).toBeCloseTo(0.90, 12);
   });
 

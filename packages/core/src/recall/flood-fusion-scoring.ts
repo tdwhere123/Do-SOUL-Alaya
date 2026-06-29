@@ -225,8 +225,8 @@ export function decorrelateFamily(contributions: readonly number[], lambda: numb
 }
 
 // Bounded noisy-OR de-correlation NOR_ρ: 1 − (1−c₁x₍₁₎)·∏_{i≥2}(1−(1−ρ)cᵢx₍ᵢ₎). The weighted-max
-// anchor (sort by cᵢxᵢ, not raw x) carries full x₁; correlated views enter scaled by (1−ρ). ρ=1 → xᵢ at
-// the weighted-max anchor (anti double-count), ρ=0 → full noisy-OR 1−∏(1−cᵢxᵢ). Always in [0,1];
+// anchor is cᵢxᵢ (not raw x); correlated views enter scaled by (1−ρ). ρ=1 → maxᵢ(cᵢxᵢ)
+// (anti double-count), ρ=0 → full noisy-OR 1−∏(1−cᵢxᵢ). Always in [0,1];
 // appending a 0 is a no-op; empty → 0.
 export function noisyOrDecorrelate(
   values: readonly number[],
@@ -239,16 +239,14 @@ export function noisyOrDecorrelate(
   const weighted = (index: number): number =>
     clamp01(confidences[index] ?? 1) * clamp01(values[index] ?? 0);
   if (clamp01(rho) >= 1) {
-    let bestIndex = 0;
     let bestWeighted = -1;
     for (let index = 0; index < values.length; index++) {
       const term = weighted(index);
       if (term > bestWeighted) {
         bestWeighted = term;
-        bestIndex = index;
       }
     }
-    return clamp01(values[bestIndex] ?? 0);
+    return clamp01(bestWeighted);
   }
   const lambda = 1 - clamp01(rho);
   const order = values.map((_, index) => index).sort((a, b) => weighted(b) - weighted(a));

@@ -152,6 +152,13 @@ async function runLongMemEvalQuestionInWorkspace(
   });
 }
 
+export function isAnswersWithEdgesEnabled(): boolean {
+  return (
+    process.env.ALAYA_RECALL_ANSWERS_WITH === "1" ||
+    process.env.ALAYA_EXP_ANSWERS_WITH === "1"
+  );
+}
+
 async function buildTimedQuestionResult(input: {
   readonly input: LongMemEvalQuestionRunInput;
   readonly workspace: BenchWorkspaceHandle;
@@ -229,9 +236,10 @@ async function runAnswersWithEdgesIfEnabled(
   workspace: Awaited<ReturnType<BenchDaemonHandle["attachWorkspace"]>>,
   members: readonly { readonly memoryId: string; readonly sessionId: string }[]
 ): Promise<void> {
+  // BAR/CAP/XSESSION remain the existing EXP* names while gate names migrate.
   if (
     input.embeddingMode !== "env" ||
-    process.env.ALAYA_EXP_ANSWERS_WITH !== "1"
+    !isAnswersWithEdgesEnabled()
   ) {
     return;
   }

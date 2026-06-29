@@ -1,11 +1,12 @@
 import {
-  ControlPlaneObjectKind,
-  MemoryDimensionSchema,
-  RetentionPolicy,
-  ScopeClassSchema,
   type RecallPolicy,
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
+import {
+  buildRecallPolicy as buildRecallPolicyCore,
+  resolveRecallPolicyFiltersFromSearchRequest,
+  type RecallPolicyBuilderInput
+} from "@do-soul/alaya-core";
 
 export function dedupeDeliveredObjectIdentities(
   objects: readonly { readonly object_id: string; readonly object_kind: string }[]
@@ -34,48 +35,16 @@ export function buildRecallPolicy(
   taskSurfaceId: string,
   policyId: string
 ): RecallPolicy {
-  const maxResults = Math.max(request.max_results, 1);
-  const coarseCandidateLimit = resolveRecallCoarseCandidateLimit(maxResults);
-  const keywordCandidateLimit = resolveRecallKeywordCandidateLimit(maxResults, coarseCandidateLimit);
-
-  return {
-    runtime_id: policyId,
-    object_kind: ControlPlaneObjectKind.RECALL_POLICY,
-    task_surface_ref: taskSurfaceId,
-    expires_at: null,
-    derived_from: null,
-    retention_policy: RetentionPolicy.SESSION_ONLY,
-    coarse_filter: {
-      deterministic_match: {
-        scope_filter: request.scope_class === null ? null : [ScopeClassSchema.parse(request.scope_class)],
-        dimension_filter: request.dimension === null ? null : [MemoryDimensionSchema.parse(request.dimension)],
-        domain_tag_filter: request.domain_tags
-      },
-      precomputed_rank: {
-        max_candidates: coarseCandidateLimit,
-        min_activation_score: null
-      },
-      semantic_supplement: {
-        enabled: true,
-        max_supplement: keywordCandidateLimit,
-        embedding_enabled: true
-      }
-    },
-    fine_assessment: {
-      budgets: {
-        max_total_tokens: 2000,
-        max_entries: maxResults,
-        per_dimension_limits: null
-      },
-      conflict_awareness: true
-    }
+  const filters = resolveRecallPolicyFiltersFromSearchRequest(request);
+  const input: Omit<RecallPolicyBuilderInput, "runtimeId" | "taskSurfaceId"> = {
+    maxResults: request.max_results,
+    filters,
+    maxTotalTokens: 2000,
+    conflictAwareness: true
   };
-}
-
-function resolveRecallCoarseCandidateLimit(maxResults: number): number {
-  return Math.min(Math.max(maxResults * 10, maxResults), 1000);
-}
-
-function resolveRecallKeywordCandidateLimit(maxResults: number, coarseCandidateLimit: number): number {
-  return Math.min(Math.max(coarseCandidateLimit, maxResults * 10, 1), 1000);
+  return buildRecallPolicyCore({
+    runtimeId: policyId,
+    taskSurfaceId,
+    ...input
+  });
 }

@@ -281,7 +281,8 @@ export interface BenchDaemonHandle {
   }>;
   /**
    * @anchor accrueAnswersWithCoRelevance — EXPERIMENT (S2): ingestion-time
-   * answers_with crystallization (ALAYA_EXP_ANSWERS_WITH).
+   * answers_with crystallization (ALAYA_RECALL_ANSWERS_WITH;
+   * ALAYA_EXP_ANSWERS_WITH kept as legacy alias).
    *
    * Mints SPARSE answer-relation edges among the question's seeded memory_entry
    * ids whose pooled HQ content-token sets overlap (>= bar). Unlike coherence
