@@ -46,6 +46,7 @@ interface BackfillCandidateSelection {
 }
 
 const EMPTY_HQS: readonly string[] = Object.freeze([]);
+const EMPTY_HQ_MAP: ReadonlyMap<string, readonly string[]> = new Map();
 
 function emptyBackfillResult(auditEntries: readonly string[]): EmbeddingBackfillHandleResult {
   return Object.freeze({
@@ -279,21 +280,14 @@ export class EmbeddingBackfillHandler {
     }
   }
 
-  // Resolves the text embedded per memory: raw content with no HQ provider
-  // (d2q off, byte-identical to the prior path), content + HQs with one.
-  private async resolveBatchEmbedTexts(
+  private async resolveBatchHqMap(
     batch: readonly EmbeddingBackfillCandidate[]
-  ): Promise<readonly string[]> {
+  ): Promise<ReadonlyMap<string, readonly string[]>> {
     const hqProvider = this.dependencies.hqProvider;
     if (hqProvider === undefined) {
-      return batch.map((entry) => entry.memory.content);
+      return EMPTY_HQ_MAP;
     }
-    const hqByObjectId = await hqProvider.getHqByObjectIds(
-      batch.map((entry) => entry.memory.object_id)
-    );
-    return batch.map((entry) =>
-      resolveEmbedText(entry.memory, hqByObjectId.get(entry.memory.object_id) ?? EMPTY_HQS)
-    );
+    return hqProvider.getHqByObjectIds(batch.map((entry) => entry.memory.object_id));
   }
 
   private async embedBatchWithFallback(
@@ -301,8 +295,23 @@ export class EmbeddingBackfillHandler {
     batch: readonly EmbeddingBackfillCandidate[],
     auditEntries: string[]
   ): Promise<readonly EmbeddedBackfillCandidate[]> {
+    // Resolve HQs once per top-level batch; the split / single-retry paths reuse
+    // this map so a provider failure never re-reads HQs.
+    const hqByObjectId = await this.resolveBatchHqMap(batch);
+    return this.embedBatchWithHqMap(workspaceId, batch, hqByObjectId, auditEntries);
+  }
+
+  // off / no HQ provider → texts are raw content (byte-identical to prior path).
+  private async embedBatchWithHqMap(
+    workspaceId: string,
+    batch: readonly EmbeddingBackfillCandidate[],
+    hqByObjectId: ReadonlyMap<string, readonly string[]>,
+    auditEntries: string[]
+  ): Promise<readonly EmbeddedBackfillCandidate[]> {
+    const texts = batch.map((entry) =>
+      resolveEmbedText(entry.memory, hqByObjectId.get(entry.memory.object_id) ?? EMPTY_HQS)
+    );
     try {
-      const texts = await this.resolveBatchEmbedTexts(batch);
       const embeddings = await this.dependencies.provider.embedTexts(texts, {
         timeoutMs: BACKFILL_TIMEOUT_MS
       });
@@ -321,12 +330,12 @@ export class EmbeddingBackfillHandler {
       );
     } catch (error) {
       const message = toErrorMessage(error);
-      const batchInputChars = batch.reduce((total, entry) => total + entry.memory.content.length, 0);
+      const batchInputChars = texts.reduce((total, text) => total + text.length, 0);
 
       if (batch.length <= 1) {
         const entry = batch[0];
         if (entry !== undefined) {
-          const retryResult = await this.retrySingleItemEmbedding(workspaceId, entry, message);
+          const retryResult = await this.retrySingleItemEmbedding(workspaceId, entry, texts[0]!, message);
           if (retryResult.embedding !== null) {
             return Object.freeze([retryResult.embedding]);
           }
@@ -350,8 +359,8 @@ export class EmbeddingBackfillHandler {
         error: message
       });
       const splitIndex = Math.ceil(batch.length / 2);
-      const left = await this.embedBatchWithFallback(workspaceId, batch.slice(0, splitIndex), auditEntries);
-      const right = await this.embedBatchWithFallback(workspaceId, batch.slice(splitIndex), auditEntries);
+      const left = await this.embedBatchWithHqMap(workspaceId, batch.slice(0, splitIndex), hqByObjectId, auditEntries);
+      const right = await this.embedBatchWithHqMap(workspaceId, batch.slice(splitIndex), hqByObjectId, auditEntries);
       return Object.freeze([...left, ...right]);
     }
   }
@@ -359,6 +368,7 @@ export class EmbeddingBackfillHandler {
   private async retrySingleItemEmbedding(
     workspaceId: string,
     entry: EmbeddingBackfillCandidate,
+    entryText: string,
     firstError: string
   ): Promise<
     Readonly<{
@@ -371,7 +381,7 @@ export class EmbeddingBackfillHandler {
       this.warn("embedding backfill item failed; retrying item", {
         workspace_id: workspaceId,
         object_id: entry.memory.object_id,
-        input_chars: entry.memory.content.length,
+        input_chars: entryText.length,
         attempt,
         max_attempts: BACKFILL_ITEM_RETRY_ATTEMPTS,
         error: lastError
@@ -379,8 +389,7 @@ export class EmbeddingBackfillHandler {
       await sleepBackfillRetry(this.retryDelayMs * (attempt - 1));
 
       try {
-        const texts = await this.resolveBatchEmbedTexts([entry]);
-        const embeddings = await this.dependencies.provider.embedTexts(texts, {
+        const embeddings = await this.dependencies.provider.embedTexts([entryText], {
           timeoutMs: BACKFILL_TIMEOUT_MS
         });
         if (embeddings.length !== 1) {

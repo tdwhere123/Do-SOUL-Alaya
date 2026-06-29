@@ -45,11 +45,7 @@ export interface LocalOnnxEmbeddingClientOptions {
    * Override for the dynamic clock (test seam). Real wall-clock by default.
    */
   readonly now?: () => number;
-  /**
-   * Cosine-space schema version this provider's vectors belong to. Defaults to
-   * 1; the daemon sets it to D2Q_SCHEMA_VERSION when doc2query is on so d2q and
-   * non-d2q vectors never get cosine-compared.
-   */
+  // Cosine-space schema version (default 1); daemon sets D2Q_SCHEMA_VERSION when doc2query is on.
   readonly schemaVersion?: number;
 }
 
