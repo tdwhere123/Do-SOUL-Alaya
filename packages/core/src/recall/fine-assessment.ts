@@ -107,7 +107,7 @@ function orderFineAssessmentCandidates(
   nowIso: string,
   maxEntries: number
 ): FineAssessmentOrdering {
-  // Conformant fused_score is K_SCALE-scaled (resolveConformantScale) so the absolute ≤0.27 suppression deltas stay meaningful.
+  // The conformant fused_score (activation·(1+β·R_E)) stays small-magnitude, so the absolute ≤0.27 path-suppression deltas stay meaningful.
   const fusionByCandidateKey = applyPathSuppressionToFusionScores(
     buildRecallFusionDetails({ candidates: additiveScoredCandidates, policy, supplementaryData, nowIso }),
     supplementaryData.pathSuppressionScores

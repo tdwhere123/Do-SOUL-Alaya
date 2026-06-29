@@ -15,14 +15,19 @@ import {
 } from "@do-soul/alaya-protocol";
 import { applyPathSuppressionToFusionScores, buildRecallFusionDetails } from "../../recall/fusion-delivery-scoring.js";
 import {
-  applyConformantGovernance,
-  resolveConformantAxisK,
-  resolveConformantCrossAxis,
-  resolveConformantFloodScale
+  compareConformantAxisRa,
+  resolveConformantEvidenceBeta,
+  resolveConformantFloodCapPerSource,
+  resolveConformantFloodCapTotal,
+  resolveConformantPathWeight
 } from "../../recall/conformant-fusion-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 import { classifyRecallIntent } from "../../recall/recall-query-plan.js";
-import type { RecallFusionBreakdown, RecallSupplementaryData } from "../../recall/recall-service-types.js";
+import type {
+  PathInflowEdge,
+  RecallFusionBreakdown,
+  RecallSupplementaryData
+} from "../../recall/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 const WS = "workspace-1";
@@ -30,13 +35,11 @@ const RUN = "run-1";
 const NOW = "2026-03-20T10:20:30.000Z";
 
 const CONFORMANT_ENV = [
-  "ALAYA_RECALL_CONFORMANT", "ALAYA_RECALL_CONF_K", "ALAYA_RECALL_CONF_K_OBJECT",
-  "ALAYA_RECALL_CONF_K_PATH", "ALAYA_RECALL_CONF_K_EVIDENCE", "ALAYA_RECALL_CONF_W_OBJECT",
-  "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_W_EVIDENCE", "ALAYA_RECALL_CONF_LAMBDA",
-  "ALAYA_RECALL_CONF_GATE_FLOOR", "ALAYA_RECALL_CONF_GOV_FLOOR", "ALAYA_RECALL_CONF_GOV_RATIO",
-  "ALAYA_RECALL_CONF_SCALE", "ALAYA_RECALL_CONF_EVIDENCE_DECAY", "ALAYA_RECALL_SYNTHESIS",
+  "ALAYA_RECALL_CONFORMANT", "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_EVIDENCE_BETA",
+  "ALAYA_RECALL_CONF_FLOOD_CAP", "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL", "ALAYA_RECALL_CONF_LAMBDA",
+  "ALAYA_RECALL_CONF_GATE_FLOOR", "ALAYA_RECALL_CONF_EVIDENCE_DECAY", "ALAYA_RECALL_SYNTHESIS",
   "ALAYA_RECALL_FACET_OVERLAP", "ALAYA_RECALL_FACET_SLICE", "ALAYA_RECALL_PATH_FLOW",
-  "ALAYA_RECALL_TEMPORAL_WINDOW", "ALAYA_RECALL_CONF_XAXIS", "ALAYA_RECALL_CONF_FLOOD_SCALE"
+  "ALAYA_RECALL_TEMPORAL_WINDOW"
 ] as const;
 
 const databases = new Set<StorageDatabase>();
@@ -94,6 +97,8 @@ interface CandidateSpec {
   readonly effectiveScore?: number;
 }
 
+type InflowMap = Readonly<Record<string, readonly PathInflowEdge[]>>;
+
 function objectId(index: number): string {
   return `00000000-0000-4000-8000-0000000000${index.toString(16).padStart(2, "0")}`;
 }
@@ -118,7 +123,11 @@ async function seedEntries(repo: SqliteMemoryEntryRepo, specs: readonly Candidat
   return new Map(stored.map((entry) => [entry.object_id, entry]));
 }
 
-function buildSupplementaryData(query: string, specs: readonly CandidateSpec[]): RecallSupplementaryData {
+function buildSupplementaryData(
+  query: string,
+  specs: readonly CandidateSpec[],
+  inflow?: InflowMap
+): RecallSupplementaryData {
   const record = (pick: (spec: CandidateSpec) => number | undefined): Record<string, number> => {
     const out: Record<string, number> = {};
     for (const spec of specs) {
@@ -151,14 +160,15 @@ function buildSupplementaryData(query: string, specs: readonly CandidateSpec[]):
     recallsEdgeCount: 0,
     weightTransferAmount: 0,
     evidenceGistsByMemoryId: {},
-    governanceCeilingByMemoryId: {}
+    governanceCeilingByMemoryId: {},
+    ...(inflow !== undefined ? { pathInflowByTarget: inflow } : {})
   };
 }
 
 async function runFusion(
   query: string,
   specs: readonly CandidateSpec[],
-  nowIso: string = NOW
+  options: { readonly nowIso?: string; readonly inflow?: InflowMap } = {}
 ): Promise<ReadonlyMap<string, RecallFusionBreakdown>> {
   const repo = createRealStorage();
   const byId = await seedEntries(repo, specs);
@@ -172,14 +182,14 @@ async function runFusion(
       structuralScore: spec.structural ?? 0
     })),
     policy: {} as RecallPolicy,
-    supplementaryData: buildSupplementaryData(query, specs),
-    nowIso
+    supplementaryData: buildSupplementaryData(query, specs, options.inflow),
+    nowIso: options.nowIso ?? NOW
   });
 }
 
 const GENERIC_QUERY = "how does the staging release rotate database credentials and migration tooling";
 
-describe("conformant four-axis combine (real SQLite)", () => {
+describe("conformant compositional combine (real SQLite)", () => {
   it("flag OFF is byte-identical, deterministic, and emits no per_axis_* keys", async () => {
     const specs: readonly CandidateSpec[] = [
       { id: objectId(1), lexical: 1, evidence: 1, structural: 1 },
@@ -200,96 +210,133 @@ describe("conformant four-axis combine (real SQLite)", () => {
     }
   });
 
-  it("rrf orthogonal lift: a path+evidence candidate overtakes a lexical-only winner, causally", async () => {
-    const lexicalOnly: CandidateSpec = { id: objectId(1), lexical: 1, evidence: 1, structural: 1 };
-    const orthogonal: CandidateSpec = { id: objectId(2), path: 1, sourceProximity: 1 };
-
-    const baseline = await runFusion(GENERIC_QUERY, [lexicalOnly, orthogonal]);
-    expect(baseline.get(keyOf(lexicalOnly.id))!.fused_rank)
-      .toBeLessThan(baseline.get(keyOf(orthogonal.id))!.fused_rank);
-
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
-    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
-    const lifted = await runFusion(GENERIC_QUERY, [lexicalOnly, orthogonal]);
-    expect(lifted.get(keyOf(orthogonal.id))!.fused_rank)
-      .toBeLessThan(lifted.get(keyOf(lexicalOnly.id))!.fused_rank);
-
-    // Causal: removing EITHER orthogonal axis returns the lexical-only winner to the top.
-    const pathOnly = await runFusion(GENERIC_QUERY, [lexicalOnly, { ...orthogonal, sourceProximity: undefined }]);
-    expect(pathOnly.get(keyOf(lexicalOnly.id))!.fused_rank)
-      .toBeLessThan(pathOnly.get(keyOf(orthogonal.id))!.fused_rank);
-    const evidenceOnly = await runFusion(GENERIC_QUERY, [lexicalOnly, { ...orthogonal, path: undefined }]);
-    expect(evidenceOnly.get(keyOf(lexicalOnly.id))!.fused_rank)
-      .toBeLessThan(evidenceOnly.get(keyOf(orthogonal.id))!.fused_rank);
+  it("flag OFF ignores an injected inflow adjacency (flat path untouched)", async () => {
+    const specs: readonly CandidateSpec[] = [
+      { id: objectId(1), lexical: 1 },
+      { id: objectId(2), lexical: 0.2 }
+    ];
+    const without = await runFusion(GENERIC_QUERY, specs);
+    const withInflow = await runFusion(GENERIC_QUERY, specs, {
+      inflow: { [objectId(2)]: [{ seedObjectId: objectId(1), weight: 1 }] }
+    });
+    for (const spec of specs) {
+      expect(withInflow.get(keyOf(spec.id))!.fused_score)
+        .toBeCloseTo(without.get(keyOf(spec.id))!.fused_score, 12);
+    }
   });
 
-  it("collapse no-multicount: 3 correlated lexical hits give pure-max R_O, not an additive sum", async () => {
+  it("object collapse no-multicount: 3 correlated lexical hits give pure-max R_O, not an additive sum", async () => {
     process.env.ALAYA_RECALL_CONFORMANT = "1";
     const all = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, trigram: 1, evidence: 1 }]);
     const one = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }]);
     const raAll = all.get(keyOf(objectId(1)))!.per_axis_contribution!.object;
     const raOne = one.get(keyOf(objectId(1)))!.per_axis_contribution!.object;
     expect(raAll).toBeGreaterThan(0.5);
-    // Pure max (λ=0): three unit hits never exceed a single view; additive would be ~2.5x.
     expect(raAll).toBeLessThanOrEqual(raOne + 1e-9);
     expect(raAll).toBeLessThan(2);
   });
 
-  it("rrf per-axis rank differs from any single per-stream rank", async () => {
+  it("path is compositional: a high-R_O source floods its target; a candidate with no inflow gets ~0 path", async () => {
     process.env.ALAYA_RECALL_CONFORMANT = "1";
-    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
-    // A wins lexical_fts; B loses lexical_fts but wins R_O via an orthogonal embedding signal.
-    const fusion = await runFusion(GENERIC_QUERY, [
-      { id: objectId(1), lexical: 1 },
-      { id: objectId(2), lexical: 0.5, embedding: 0.9 }
-    ]);
-    const a = fusion.get(keyOf(objectId(1)))!;
-    const b = fusion.get(keyOf(objectId(2)))!;
-    expect(a.per_stream_rank.lexical_fts).toBe(1);
-    expect(b.per_stream_rank.lexical_fts).toBe(2);
-    expect(b.per_axis_rank!.object).toBe(1);
-    expect(a.per_axis_rank!.object).toBe(2);
+    const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
+    const target: CandidateSpec = { id: objectId(2) };
+
+    const noInflow = await runFusion(GENERIC_QUERY, [seed, target]);
+    const targetNoInflow = noInflow.get(keyOf(target.id))!;
+    expect(targetNoInflow.per_axis_contribution!.path).toBe(0);
+    expect(targetNoInflow.fused_score).toBe(0);
+
+    const withInflow = await runFusion(GENERIC_QUERY, [seed, target], {
+      inflow: { [target.id]: [{ seedObjectId: seed.id, weight: 0.8 }] }
+    });
+    const targetLifted = withInflow.get(keyOf(target.id))!;
+    expect(targetLifted.per_axis_contribution!.path).toBeGreaterThan(0);
+    expect(targetLifted.fused_score).toBeGreaterThan(targetNoInflow.fused_score);
   });
 
-  it("governance binds the Object vote by default (floor 0 / ratio 1) with no extra flag", () => {
-    // No orthogonal evidence ⇒ object intact (early return).
-    expect(applyConformantGovernance(0.5, 0)).toBeCloseTo(0.5, 12);
-    // With orthogonal evidence ⇒ object vote capped at floor + ratio·orthogonal = orthogonal.
-    expect(applyConformantGovernance(0.5, 0.1)).toBeCloseTo(0.1, 12);
-    expect(applyConformantGovernance(0.05, 0.1)).toBeCloseTo(0.05, 12);
+  it("path flood carries no free vote: inflow from a zero-R_O source lifts nothing", async () => {
+    process.env.ALAYA_RECALL_CONFORMANT = "1";
+    const irrelevantSeed: CandidateSpec = { id: objectId(1) };
+    const target: CandidateSpec = { id: objectId(2) };
+    const fusion = await runFusion(GENERIC_QUERY, [irrelevantSeed, target], {
+      inflow: { [target.id]: [{ seedObjectId: irrelevantSeed.id, weight: 1 }] }
+    });
+    const lifted = fusion.get(keyOf(target.id))!;
+    expect(lifted.per_axis_contribution!.path).toBe(0);
+    expect(lifted.fused_score).toBe(0);
   });
 
-  it("k defaults to 20 (not the per-stream 45-90) and a lower k widens the orthogonal rank gap", async () => {
-    expect(resolveConformantAxisK("object")).toBe(20);
-    expect(resolveConformantAxisK("path")).toBe(20);
-    expect(resolveConformantAxisK("evidence")).toBe(20);
-
-    const specs: readonly CandidateSpec[] = [
-      { id: objectId(1), path: 1 },
-      { id: objectId(2), path: 0.3 }
-    ];
+  it("a broad-but-weak multi-axis candidate no longer out-votes a magnitude-dominant one (no independent axis votes)", async () => {
     process.env.ALAYA_RECALL_CONFORMANT = "1";
-    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
-    const atK20 = await runFusion(GENERIC_QUERY, specs);
-    const gap20 = atK20.get(keyOf(objectId(1)))!.fused_score / atK20.get(keyOf(objectId(2)))!.fused_score;
-    process.env.ALAYA_RECALL_CONF_K = "60";
-    const atK60 = await runFusion(GENERIC_QUERY, specs);
-    const gap60 = atK60.get(keyOf(objectId(1)))!.fused_score / atK60.get(keyOf(objectId(2)))!.fused_score;
-    expect(gap20).toBeGreaterThan(gap60);
+    const dominant: CandidateSpec = { id: objectId(1), lexical: 1, embedding: 1 };
+    // path/sourceProximity present but, absent any inflow adjacency, contribute no free vote.
+    const broadWeak: CandidateSpec = { id: objectId(2), lexical: 0.2, path: 0.3, sourceProximity: 0.3 };
+    const fusion = await runFusion(GENERIC_QUERY, [dominant, broadWeak]);
+    expect(fusion.get(keyOf(dominant.id))!.fused_score)
+      .toBeGreaterThan(fusion.get(keyOf(broadWeak.id))!.fused_score);
+    expect(fusion.get(keyOf(dominant.id))!.fused_rank)
+      .toBeLessThan(fusion.get(keyOf(broadWeak.id))!.fused_rank);
   });
 
-  it("ties break on the R_a magnitude vector before effectiveScore", async () => {
+  it("evidence is a multiplicative boost: g(0)=1 never penalizes, evidence lifts an already-active memory", async () => {
     process.env.ALAYA_RECALL_CONFORMANT = "1";
-    // M is sole on Path, N sole on Evidence; W_P=W_E ⇒ identical S. N carries a higher effectiveScore.
-    const fusion = await runFusion(GENERIC_QUERY, [
-      { id: objectId(1), path: 1, effectiveScore: 0 },
-      { id: objectId(2), sourceProximity: 1, effectiveScore: 1 }
-    ]);
-    const m = fusion.get(keyOf(objectId(1)))!;
-    const n = fusion.get(keyOf(objectId(2)))!;
-    expect(n.fused_score).toBeCloseTo(m.fused_score, 12);
-    // Path precedes Evidence in the R_a vector, so M ranks first despite N's higher effectiveScore.
-    expect(m.fused_rank).toBeLessThan(n.fused_rank);
+    const noEvidence = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }]);
+    const dry = noEvidence.get(keyOf(objectId(1)))!;
+    // g(0)=1: with no flood, S == activation == R_O; a memory with no evidence is not penalized.
+    expect(dry.fused_score).toBeCloseTo(dry.per_axis_contribution!.object, 9);
+
+    const withEvidence = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, sourceProximity: 1 }]);
+    const boosted = withEvidence.get(keyOf(objectId(1)))!;
+    expect(boosted.per_axis_contribution!.evidence).toBeGreaterThan(0);
+    expect(boosted.fused_score).toBeGreaterThan(boosted.per_axis_contribution!.object);
+  });
+
+  it("evidence cannot inject noise: a zero-activation candidate stays 0 regardless of evidence", async () => {
+    process.env.ALAYA_RECALL_CONFORMANT = "1";
+    const fusion = await runFusion(GENERIC_QUERY, [{ id: objectId(1), sourceProximity: 1 }]);
+    const candidate = fusion.get(keyOf(objectId(1)))!;
+    expect(candidate.per_axis_contribution!.object).toBe(0);
+    expect(candidate.per_axis_contribution!.evidence).toBeGreaterThan(0);
+    expect(candidate.fused_score).toBe(0);
+  });
+
+  it("governance caps the per-source flood without compressing the object seed", async () => {
+    process.env.ALAYA_RECALL_CONFORMANT = "1";
+    const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
+    const target: CandidateSpec = { id: objectId(2), lexical: 1 };
+    // weight 10 makes R_O(seed)·weight overshoot any sane per-source cap.
+    const inflow: InflowMap = { [target.id]: [{ seedObjectId: seed.id, weight: 10 }] };
+
+    const wide = await runFusion(GENERIC_QUERY, [seed, target], { inflow });
+    process.env.ALAYA_RECALL_CONF_FLOOD_CAP = "0.1";
+    const capped = await runFusion(GENERIC_QUERY, [seed, target], { inflow });
+
+    const wideTarget = wide.get(keyOf(target.id))!;
+    const cappedTarget = capped.get(keyOf(target.id))!;
+    // The cap bounds the flood term...
+    expect(cappedTarget.per_axis_contribution!.path).toBeLessThan(wideTarget.per_axis_contribution!.path);
+    expect(cappedTarget.per_axis_contribution!.path).toBeCloseTo(0.1, 9);
+    // ...but never touches the object seed.
+    expect(cappedTarget.per_axis_contribution!.object)
+      .toBeCloseTo(wideTarget.per_axis_contribution!.object, 12);
+  });
+
+  it("governance caps the total flood across converging sources", async () => {
+    process.env.ALAYA_RECALL_CONFORMANT = "1";
+    process.env.ALAYA_RECALL_CONF_FLOOD_CAP = "1";
+    process.env.ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL = "1.5";
+    const seedA: CandidateSpec = { id: objectId(1), lexical: 1 };
+    const seedB: CandidateSpec = { id: objectId(2), lexical: 1 };
+    const target: CandidateSpec = { id: objectId(3), lexical: 0.1 };
+    const fusion = await runFusion(GENERIC_QUERY, [seedA, seedB, target], {
+      inflow: {
+        [target.id]: [
+          { seedObjectId: seedA.id, weight: 2 },
+          { seedObjectId: seedB.id, weight: 2 }
+        ]
+      }
+    });
+    expect(fusion.get(keyOf(target.id))!.per_axis_contribution!.path).toBeCloseTo(1.5, 9);
   });
 
   it("temporal split: object-time lifts R_O and the now-distance recency is not consulted", async () => {
@@ -305,9 +352,8 @@ describe("conformant four-axis combine (real SQLite)", () => {
       - fusion.get(keyOf(noEvent.id))!.per_axis_contribution!.object;
     expect(lift).toBeGreaterThan(0.5);
 
-    // now-invariance: distance-to-now would change recency, but conformant never reads it.
-    const farNow = await runFusion(query, [inWindow], "2026-06-28T00:00:00.000Z");
-    const nearNow = await runFusion(query, [inWindow], "2024-03-16T00:00:00.000Z");
+    const farNow = await runFusion(query, [inWindow], { nowIso: "2026-06-28T00:00:00.000Z" });
+    const nearNow = await runFusion(query, [inWindow], { nowIso: "2024-03-16T00:00:00.000Z" });
     expect(nearNow.get(keyOf(inWindow.id))!.fused_score)
       .toBeCloseTo(farNow.get(keyOf(inWindow.id))!.fused_score, 12);
   });
@@ -316,12 +362,10 @@ describe("conformant four-axis combine (real SQLite)", () => {
     const singleFactQuery = "what is the staging database password";
     expect(classifyRecallIntent(compileRecallQueryProbes(singleFactQuery))).toBe("single_fact");
     process.env.ALAYA_RECALL_CONFORMANT = "1";
-    // Gold has strong surface but low embedding; a sibling pins a high embedding pool max.
     const fusion = await runFusion(singleFactQuery, [
       { id: objectId(1), lexical: 1, embedding: 0.1 },
       { id: objectId(2), embedding: 1 }
     ]);
-    // γ→1 means the lexical surface is not damped by the low pool-relative cosine: R_O ≈ full surface.
     expect(fusion.get(keyOf(objectId(1)))!.per_axis_contribution!.object).toBeGreaterThan(0.9);
   });
 
@@ -329,87 +373,41 @@ describe("conformant four-axis combine (real SQLite)", () => {
     process.env.ALAYA_RECALL_CONFORMANT = "1";
     process.env.ALAYA_RECALL_SYNTHESIS = "1";
     const fusion = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, path: 1, sourceProximity: 1 }]);
-    const breakdown = fusion.get(keyOf(objectId(1)))!;
-    expect(breakdown.per_axis_contribution).toBeDefined();
+    expect(fusion.get(keyOf(objectId(1)))!.per_axis_contribution).toBeDefined();
   });
 
-  it("K_SCALE keeps a 0.27 path-suppression delta meaningful (demote, not annihilate)", async () => {
+  it("R_a vector tie-break orders object before path before evidence", () => {
+    // Object dominates: left ranks ahead despite a weaker path/evidence vector.
+    expect(compareConformantAxisRa(
+      { object: 1, path: 0, evidence: 0 },
+      { object: 0.5, path: 1, evidence: 1 }
+    )).toBeLessThan(0);
+    // Equal object, path breaks the tie before evidence.
+    expect(compareConformantAxisRa(
+      { object: 0.5, path: 1, evidence: 0 },
+      { object: 0.5, path: 0.5, evidence: 1 }
+    )).toBeLessThan(0);
+    // Absent vectors (flag-off) never reorder.
+    expect(compareConformantAxisRa(undefined, { object: 1, path: 0, evidence: 0 })).toBe(0);
+  });
+
+  it("path-suppression stays a clean demote, not an annihilation, on the compositional score", async () => {
     process.env.ALAYA_RECALL_CONFORMANT = "1";
-    const fusion = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, path: 1, sourceProximity: 1 }]);
-    const score = fusion.get(keyOf(objectId(1)))!.fused_score;
-    // The scaled score sits well above the 0.27 absolute suppression delta and its 1e-4 residual floor.
-    expect(score).toBeGreaterThan(0.27);
-  });
-
-  it("rrf normalization edges: single candidate yields a finite S; an empty-pool stream casts no vote", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
-    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
-    const single = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }]);
-    const only = single.get(keyOf(objectId(1)))!;
-    expect(Number.isFinite(only.fused_score)).toBe(true);
-    expect(only.fused_score).toBeGreaterThan(0);
-    expect(only.per_axis_rank!.object).toBe(1);
-    // path/evidence streams are empty ⇒ no vote, no NaN.
-    expect(only.per_axis_rank!.path).toBeNull();
-    expect(only.per_axis_contribution!.path).toBe(0);
-  });
-
-  // The exact failure rrf+cap had: a magnitude-dominant single-axis candidate crushed below a broad-but-weak one.
-  const DOMINANT: CandidateSpec = { id: objectId(1), lexical: 1, embedding: 1 };
-  const BROAD_WEAK: CandidateSpec = { id: objectId(2), lexical: 0.2, path: 0.3, sourceProximity: 0.3 };
-
-  it("flood (default) ranks a magnitude-dominant single-axis candidate above a broad-but-weak multi-axis one", async () => {
-    expect(resolveConformantCrossAxis()).toBe("flood");
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
-    const fusion = await runFusion(GENERIC_QUERY, [DOMINANT, BROAD_WEAK]);
-    const dominant = fusion.get(keyOf(DOMINANT.id))!;
-    const broad = fusion.get(keyOf(BROAD_WEAK.id))!;
-    expect(dominant.fused_score).toBeGreaterThan(broad.fused_score);
-    expect(dominant.fused_rank).toBeLessThan(broad.fused_rank);
-    // flood casts no per-axis rank.
-    expect(dominant.per_axis_rank!.object).toBeNull();
-  });
-
-  it("flood and rrf disagree on the same pool: flood favours magnitude, rrf+cap favours breadth", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
-    process.env.ALAYA_RECALL_CONF_XAXIS = "flood";
-    const flood = await runFusion(GENERIC_QUERY, [DOMINANT, BROAD_WEAK]);
-    expect(flood.get(keyOf(DOMINANT.id))!.fused_rank)
-      .toBeLessThan(flood.get(keyOf(BROAD_WEAK.id))!.fused_rank);
-
-    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
-    const rrf = await runFusion(GENERIC_QUERY, [DOMINANT, BROAD_WEAK]);
-    expect(rrf.get(keyOf(BROAD_WEAK.id))!.fused_rank)
-      .toBeLessThan(rrf.get(keyOf(DOMINANT.id))!.fused_rank);
-  });
-
-  it("flag OFF is unaffected by the cross-axis selector (parity holds, no per_axis keys)", async () => {
-    process.env.ALAYA_RECALL_CONF_XAXIS = "flood";
-    const a = await runFusion(GENERIC_QUERY, [DOMINANT, BROAD_WEAK]);
-    process.env.ALAYA_RECALL_CONF_XAXIS = "rrf";
-    const b = await runFusion(GENERIC_QUERY, [DOMINANT, BROAD_WEAK]);
-    for (const spec of [DOMINANT, BROAD_WEAK]) {
-      const left = a.get(keyOf(spec.id))!;
-      const right = b.get(keyOf(spec.id))!;
-      expect(right.fused_score).toBeCloseTo(left.fused_score, 12);
-      expect(right.fused_rank).toBe(left.fused_rank);
-      expect(left.per_axis_rank).toBeUndefined();
-      expect(left.per_axis_contribution).toBeUndefined();
-    }
-  });
-
-  it("flood scale keeps a 0.27 path-suppression delta a demote, not an annihilation", async () => {
-    expect(resolveConformantFloodScale()).toBe(1);
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
-    const spec: CandidateSpec = { id: objectId(1), lexical: 1, path: 1, sourceProximity: 1 };
+    const spec: CandidateSpec = { id: objectId(1), lexical: 1, sourceProximity: 1 };
     const fusion = await runFusion(GENERIC_QUERY, [spec]);
     const before = fusion.get(keyOf(spec.id))!.fused_score;
     expect(before).toBeGreaterThan(0.27);
     const suppressed = applyPathSuppressionToFusionScores(fusion, { [spec.id]: 0.27 });
     const after = suppressed.get(keyOf(spec.id))!.fused_score;
-    // Clean subtraction (not floored to the 1e-4 residual): demoted but still well above zero.
     expect(after).toBeCloseTo(before - 0.27, 9);
     expect(after).toBeGreaterThan(1e-4);
     expect(after).toBeLessThan(before);
+  });
+
+  it("tunables default to bounded compositional values", () => {
+    expect(resolveConformantPathWeight()).toBe(0.6);
+    expect(resolveConformantEvidenceBeta()).toBe(0.5);
+    expect(resolveConformantFloodCapPerSource()).toBe(1);
+    expect(resolveConformantFloodCapTotal()).toBe(3);
   });
 });

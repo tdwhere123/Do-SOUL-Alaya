@@ -5,6 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { clamp01 } from "./recall-service-helpers.js";
 import type {
+  PathInflowEdge,
   RecallGraphExpansionTrackedEdgeType,
   RecallPathExpansionSourceDiagnostic
 } from "./recall-service-types.js";
@@ -81,6 +82,32 @@ export function directionEligiblePathExpansionTargets(
 export interface DirectionEligiblePathExpansionTarget {
   readonly seedId: string;
   readonly targetId: string;
+}
+
+// Compositional inflow adjacency for the conformant flood: target ← {seed, π} over recall-eligible
+// positive edges whose seed AND target are both in the candidate pool. Mirrors path-expansion's
+// admitPathExpansionTargets edge math (scorePathRelationExpansion · direction-eligible targets).
+export function buildPathInflowByTarget(
+  paths: readonly Readonly<PathRelation>[],
+  candidateIds: ReadonlySet<string>
+): Readonly<Record<string, PathInflowEdge[]>> {
+  const inflow: Record<string, PathInflowEdge[]> = {};
+  for (const path of paths) {
+    if (isPathExcludedFromRecall(path)) {
+      continue;
+    }
+    const weight = scorePathRelationExpansion(path);
+    if (weight <= 0) {
+      continue;
+    }
+    for (const target of directionEligiblePathExpansionTargets(path, candidateIds)) {
+      if (!candidateIds.has(target.targetId)) {
+        continue;
+      }
+      (inflow[target.targetId] ??= []).push({ seedObjectId: target.seedId, weight });
+    }
+  }
+  return inflow;
 }
 
 export interface PathGraphNeighbor {

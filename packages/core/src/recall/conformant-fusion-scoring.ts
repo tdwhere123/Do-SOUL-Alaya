@@ -1,5 +1,3 @@
-import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import { compareMemoryEntries } from "./recall-service-helpers.js";
 import {
   decorrelateFamily,
   gateSurfaceByEmbedding,
@@ -12,6 +10,7 @@ import type {
 } from "./fusion-delivery-adaptive-scoring.js";
 import type { RecallQueryIntent } from "./recall-query-plan.js";
 import type {
+  PathInflowEdge,
   RecallConformantAxis,
   RecallFusionStream,
   RecallSupplementaryData
@@ -29,7 +28,6 @@ export const CONFORMANT_AXES: readonly RecallConformantAxis[] = ["object", "path
 const LEXICAL_SURFACE: readonly RecallFusionStream[] = [
   "lexical_fts", "trigram_fts", "synthesis_fts", "evidence_fts", "evidence_structural_agreement"
 ];
-const PATH_STREAMS: readonly RecallFusionStream[] = ["path_expansion", "graph_expansion", "entity_seed"];
 const EVIDENCE_STREAMS: readonly RecallFusionStream[] = ["source_proximity", "source_evidence_agreement"];
 
 const RA_QUANTUM = 1e-9;
@@ -66,15 +64,6 @@ function readFloatEnv(name: string, fallback: number, min: number): number {
   return Number.isFinite(value) ? Math.max(min, value) : fallback;
 }
 
-function readPositiveIntEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined) {
-    return fallback;
-  }
-  const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? Math.max(1, Math.trunc(value)) : fallback;
-}
-
 // λ applied ONLY to the genuinely-correlated subject/structural and source pairs; the lexical/topology
 // clusters always use λ=0 (pure max) so correlated views never multi-count.
 export function resolveConformantLambda(): number {
@@ -85,61 +74,24 @@ export function resolveConformantGateFloor(): number {
   return readUnitEnv("ALAYA_RECALL_CONF_GATE_FLOOR", 0.5);
 }
 
-export function resolveConformantGovFloor(): number {
-  return readFloatEnv("ALAYA_RECALL_CONF_GOV_FLOOR", 0, 0);
+// W_P: path-flood weight in activation = R_O + W_P·flood. Bounded; flood is compositional so this never injects an independent vote.
+export function resolveConformantPathWeight(): number {
+  return readFloatEnv("ALAYA_RECALL_CONF_W_PATH", 0.6, 0);
 }
 
-export function resolveConformantGovRatio(): number {
-  return readFloatEnv("ALAYA_RECALL_CONF_GOV_RATIO", 1, 0);
+// β: evidence multiplicative boost g(R_E)=1+β·R_E, g(0)=1. Evidence supports memory; no evidence never penalizes.
+export function resolveConformantEvidenceBeta(): number {
+  return readFloatEnv("ALAYA_RECALL_CONF_EVIDENCE_BETA", 0.5, 0);
 }
 
-// Lifts top-of-pool S into the additive band so applyPathSuppressionToFusionScores' absolute deltas stay
-// meaningful; order-invariant, so ranking is unaffected.
-export function resolveConformantScale(): number {
-  return readFloatEnv("ALAYA_RECALL_CONF_SCALE", 20, 0);
+// Governance: max effect one learned path may apply in a single flood round.
+export function resolveConformantFloodCapPerSource(): number {
+  return readFloatEnv("ALAYA_RECALL_CONF_FLOOD_CAP", 1, 0);
 }
 
-// FLOOD (default): magnitude additive S=scale·Σ W_a·R_a. RRF: today's rank-reciprocal ρ + governance cap (A/B only).
-export function resolveConformantCrossAxis(): "flood" | "rrf" {
-  return process.env.ALAYA_RECALL_CONF_XAXIS === "rrf" ? "rrf" : "flood";
-}
-
-// R_a∈[0,1] ⇒ Σ W_a·R_a ≤ ~2.2; scale 1 keeps S in the additive band the path-suppression absolute deltas expect.
-export function resolveConformantFloodScale(): number {
-  return readFloatEnv("ALAYA_RECALL_CONF_FLOOD_SCALE", 1, 0);
-}
-
-// k=20 (not the per-stream 45-90 / RRF-60): with only 3 votes, top-rank-on-orthogonal must stay decisive.
-export function resolveConformantAxisK(axis: RecallConformantAxis): number {
-  const base = readPositiveIntEnv("ALAYA_RECALL_CONF_K", 20);
-  const perAxis =
-    axis === "object" ? "ALAYA_RECALL_CONF_K_OBJECT"
-      : axis === "path" ? "ALAYA_RECALL_CONF_K_PATH"
-        : "ALAYA_RECALL_CONF_K_EVIDENCE";
-  return readPositiveIntEnv(perAxis, base);
-}
-
-export interface ConformantAxisWeights {
-  readonly object: number;
-  readonly path: number;
-  readonly evidence: number;
-}
-
-// W_P+W_E=1.2 > W_O=1.0: two corroborating orthogonal axes can overcome a lexical-only Object.
-export function resolveConformantWeights(): ConformantAxisWeights {
-  return {
-    object: readFloatEnv("ALAYA_RECALL_CONF_W_OBJECT", 1.0, 0),
-    path: readFloatEnv("ALAYA_RECALL_CONF_W_PATH", 0.6, 0),
-    evidence: readFloatEnv("ALAYA_RECALL_CONF_W_EVIDENCE", 0.6, 0)
-  };
-}
-
-// Cap the Object vote at floor + ratio·orthogonal; no orthogonal evidence ⇒ no penalty (early return).
-export function applyConformantGovernance(objectVote: number, orthogonalSum: number): number {
-  if (orthogonalSum <= 0) {
-    return objectVote;
-  }
-  return Math.min(objectVote, resolveConformantGovFloor() + resolveConformantGovRatio() * orthogonalSum);
+// Governance: ceiling on a target's total inflow flood across converging sources.
+export function resolveConformantFloodCapTotal(): number {
+  return readFloatEnv("ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL", 3, 0);
 }
 
 function quantize(value: number): number {
@@ -191,11 +143,6 @@ export function collapseObjectRelevance(
   return gatedSurface + embeddingRel + facetRel + subjectStructural + objectTimeRel;
 }
 
-// R_P = pure-max over the three path streams (same topology, never λ-sum).
-export function collapsePathRelevance(inputs: CollapseInputs): number {
-  return decorrelateFamily(PATH_STREAMS.map((stream) => streamRelevance(inputs, stream)), 0);
-}
-
 // R_E = λ·(source_proximity, source_evidence_agreement); evidence-decay added raw only behind the sub-flag.
 export function collapseEvidenceRelevance(inputs: CollapseInputs, nowIso: string, lambda: number): number {
   let relevance = decorrelateFamily(EVIDENCE_STREAMS.map((stream) => streamRelevance(inputs, stream)), lambda);
@@ -203,26 +150,6 @@ export function collapseEvidenceRelevance(inputs: CollapseInputs, nowIso: string
     relevance += scoreTemporalEventTime(inputs.candidate.entry, nowIso);
   }
   return relevance;
-}
-
-interface AxisScored {
-  readonly candidateKey: string;
-  readonly entry: Readonly<MemoryEntry>;
-  readonly score: number;
-}
-
-// Clone of buildFusionRanksForStream over a collapsed R_a: filter R_a>0, sort desc with the deterministic
-// compareMemoryEntries tie-break, 1-based rank. A filtered candidate gets no vote on that axis.
-export function buildAxisRanks(scored: readonly AxisScored[]): ReadonlyMap<string, number> {
-  const ranked = scored
-    .filter((entry) => entry.score > 0)
-    .slice()
-    .sort((left, right) =>
-      right.score === left.score
-        ? compareMemoryEntries(left.entry, right.entry)
-        : right.score - left.score
-    );
-  return new Map(ranked.map((entry, index) => [entry.candidateKey, index + 1] as const));
 }
 
 export interface ConformantCandidate {
@@ -236,15 +163,17 @@ export interface ConformantAxisContext {
   readonly raByKey: ReadonlyMap<string, Readonly<Record<RecallConformantAxis, number>>>;
 }
 
-interface CollapsedCandidate {
+interface SeededCandidate {
   readonly candidateKey: string;
-  readonly entry: Readonly<MemoryEntry>;
+  readonly objectId: string;
   readonly object: number;
-  readonly path: number;
   readonly evidence: number;
 }
 
-// Collapse R_O/R_P/R_E per candidate, then combine cross-axis by FLOOD (magnitude, default) or RRF (rank + cap).
+const NULL_AXIS_RANK: Readonly<Record<RecallConformantAxis, number | null>> =
+  Object.freeze({ object: null, path: null, evidence: null });
+
+// Pass 1: collapse the object SEED (R_O) and evidence support (R_E) for every candidate.
 export function buildConformantAxisContext(params: Readonly<{
   readonly candidates: readonly ConformantCandidate[];
   readonly scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores>;
@@ -257,7 +186,7 @@ export function buildConformantAxisContext(params: Readonly<{
 }>): ConformantAxisContext {
   const lambda = resolveConformantLambda();
   const gateFloor = resolveConformantGateFloor();
-  const collapsed: CollapsedCandidate[] = params.candidates.map(({ candidateKey, candidate }) => {
+  const seeded: SeededCandidate[] = params.candidates.map(({ candidateKey, candidate }) => {
     const inputs: CollapseInputs = {
       candidate,
       candidateKey,
@@ -267,85 +196,61 @@ export function buildConformantAxisContext(params: Readonly<{
     };
     return {
       candidateKey,
-      entry: candidate.entry,
+      objectId: candidate.entry.object_id,
       object: quantize(
         collapseObjectRelevance(inputs, params.embeddingPoolMax, params.queryWindow, params.intent, lambda, gateFloor)
       ),
-      path: quantize(collapsePathRelevance(inputs)),
       evidence: quantize(collapseEvidenceRelevance(inputs, params.nowIso, lambda))
     };
   });
-
-  if (resolveConformantCrossAxis() === "flood") {
-    return assembleFloodScores(collapsed);
-  }
-
-  const ranksByAxis: Record<RecallConformantAxis, ReadonlyMap<string, number>> = {
-    object: buildAxisRanks(collapsed.map((c) => ({ candidateKey: c.candidateKey, entry: c.entry, score: c.object }))),
-    path: buildAxisRanks(collapsed.map((c) => ({ candidateKey: c.candidateKey, entry: c.entry, score: c.path }))),
-    evidence: buildAxisRanks(collapsed.map((c) => ({ candidateKey: c.candidateKey, entry: c.entry, score: c.evidence })))
-  };
-
-  return assembleRrfScores(collapsed, ranksByAxis);
+  return assembleCompositionalScores(seeded, params.supplementaryData.pathInflowByTarget);
 }
 
-const NULL_AXIS_RANK: Readonly<Record<RecallConformantAxis, number | null>> =
-  Object.freeze({ object: null, path: null, evidence: null });
+// Governed flood: Σ_edges min(R_O(seed)·π, capPerSource) capped per inflow edge (one learned path), summed and capped at capTotal. Caps the flood only.
+function governedFlood(
+  inflow: readonly PathInflowEdge[] | undefined,
+  rObjectById: ReadonlyMap<string, number>,
+  capPerSource: number,
+  capTotal: number
+): number {
+  if (inflow === undefined) {
+    return 0;
+  }
+  let sum = 0;
+  for (const edge of inflow) {
+    const seedRelevance = rObjectById.get(edge.seedObjectId);
+    if (seedRelevance === undefined || seedRelevance <= 0) {
+      continue;
+    }
+    sum += Math.min(seedRelevance * edge.weight, capPerSource);
+  }
+  return Math.min(sum, capTotal);
+}
 
-// FLOOD: S = scale·Σ W_a·R_a over the raw collapsed magnitudes; no per-axis rank, no ρ, no cross-axis cap.
-function assembleFloodScores(collapsed: readonly CollapsedCandidate[]): ConformantAxisContext {
-  const weights = resolveConformantWeights();
-  const scale = resolveConformantFloodScale();
+// Pass 2: activation = R_O + W_P·Gov[flood]; S = activation·(1+β·R_E). Path floods compositionally; evidence boosts multiplicatively (g(0)=1).
+function assembleCompositionalScores(
+  seeded: readonly SeededCandidate[],
+  inflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>> | undefined
+): ConformantAxisContext {
+  const pathWeight = resolveConformantPathWeight();
+  const beta = resolveConformantEvidenceBeta();
+  const capPerSource = resolveConformantFloodCapPerSource();
+  const capTotal = resolveConformantFloodCapTotal();
+  const rObjectById = new Map<string, number>();
+  for (const candidate of seeded) {
+    rObjectById.set(candidate.objectId, Math.max(rObjectById.get(candidate.objectId) ?? 0, candidate.object));
+  }
   const scoreByKey = new Map<string, number>();
   const axisRankByKey = new Map<string, Readonly<Record<RecallConformantAxis, number | null>>>();
   const raByKey = new Map<string, Readonly<Record<RecallConformantAxis, number>>>();
-  for (const candidate of collapsed) {
-    const sRaw =
-      weights.object * candidate.object + weights.path * candidate.path + weights.evidence * candidate.evidence;
-    scoreByKey.set(candidate.candidateKey, scale * sRaw);
+  for (const candidate of seeded) {
+    const flood = quantize(governedFlood(inflowByTarget?.[candidate.objectId], rObjectById, capPerSource, capTotal));
+    const activation = candidate.object + pathWeight * flood;
+    scoreByKey.set(candidate.candidateKey, activation * (1 + beta * candidate.evidence));
     axisRankByKey.set(candidate.candidateKey, NULL_AXIS_RANK);
     raByKey.set(
       candidate.candidateKey,
-      Object.freeze({ object: candidate.object, path: candidate.path, evidence: candidate.evidence })
-    );
-  }
-  return Object.freeze({ scoreByKey, axisRankByKey, raByKey });
-}
-
-// RRF: per-axis rank-reciprocal ρ=1/(k+rank) with the governance cap; kept for A/B against flood.
-function assembleRrfScores(
-  collapsed: readonly CollapsedCandidate[],
-  ranksByAxis: Record<RecallConformantAxis, ReadonlyMap<string, number>>
-): ConformantAxisContext {
-  const weights = resolveConformantWeights();
-  const kByAxis: Record<RecallConformantAxis, number> = {
-    object: resolveConformantAxisK("object"),
-    path: resolveConformantAxisK("path"),
-    evidence: resolveConformantAxisK("evidence")
-  };
-  const scale = resolveConformantScale();
-  const scoreByKey = new Map<string, number>();
-  const axisRankByKey = new Map<string, Readonly<Record<RecallConformantAxis, number | null>>>();
-  const raByKey = new Map<string, Readonly<Record<RecallConformantAxis, number>>>();
-
-  for (const candidate of collapsed) {
-    const rankObject = ranksByAxis.object.get(candidate.candidateKey) ?? null;
-    const rankPath = ranksByAxis.path.get(candidate.candidateKey) ?? null;
-    const rankEvidence = ranksByAxis.evidence.get(candidate.candidateKey) ?? null;
-    const rhoObject = rankObject === null ? 0 : 1 / (kByAxis.object + rankObject);
-    const rhoPath = rankPath === null ? 0 : 1 / (kByAxis.path + rankPath);
-    const rhoEvidence = rankEvidence === null ? 0 : 1 / (kByAxis.evidence + rankEvidence);
-    const objectVote = weights.object * rhoObject;
-    const orthogonalSum = weights.path * rhoPath + weights.evidence * rhoEvidence;
-    const sRaw = applyConformantGovernance(objectVote, orthogonalSum) + orthogonalSum;
-    scoreByKey.set(candidate.candidateKey, scale * sRaw);
-    axisRankByKey.set(
-      candidate.candidateKey,
-      Object.freeze({ object: rankObject, path: rankPath, evidence: rankEvidence })
-    );
-    raByKey.set(
-      candidate.candidateKey,
-      Object.freeze({ object: candidate.object, path: candidate.path, evidence: candidate.evidence })
+      Object.freeze({ object: candidate.object, path: flood, evidence: candidate.evidence })
     );
   }
   return Object.freeze({ scoreByKey, axisRankByKey, raByKey });
