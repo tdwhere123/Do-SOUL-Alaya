@@ -93,8 +93,18 @@ function monthWindow(year: number, month: number): QueryTimeWindow | null {
 }
 
 // Captured relative date_terms only; weeks are Monday-anchored calendar weeks. Unmapped terms → null.
+// Seasons + "N units ago" enter date_terms only under the temporal-window flag, so off → these branches stay dead.
 function parseRelativeDateWindow(term: string, anchorMs: number): QueryTimeWindow | null {
-  switch (term.trim().replace(/\s+/gu, " ").toLowerCase()) {
+  const normalized = term.trim().replace(/\s+/gu, " ").toLowerCase();
+  return (
+    parseFixedRelativeWindow(normalized, anchorMs) ??
+    parseAgoWindow(normalized, anchorMs) ??
+    parseSeasonWindow(normalized, anchorMs)
+  );
+}
+
+function parseFixedRelativeWindow(normalized: string, anchorMs: number): QueryTimeWindow | null {
+  switch (normalized) {
     case "today":
     case "今天":
       return dayWindowFromMs(anchorMs);
@@ -132,6 +142,58 @@ function parseRelativeDateWindow(term: string, anchorMs: number): QueryTimeWindo
     default:
       return null;
   }
+}
+
+type AgoUnit = "day" | "week" | "month" | "year";
+
+function parseAgoWindow(normalized: string, anchorMs: number): QueryTimeWindow | null {
+  const match =
+    /^(\d{1,3}) (days?|weeks?|months?|years?) ago$/u.exec(normalized) ??
+    /^(\d{1,3})(天|周|个月|年)前$/u.exec(normalized);
+  if (match === null) {
+    return null;
+  }
+  const unit = agoUnit(match[2]!);
+  if (unit === null) {
+    return null;
+  }
+  const count = Number(match[1]);
+  switch (unit) {
+    case "day":
+      return dayWindowFromMs(anchorMs - count * DAY_MS);
+    case "week":
+      return weekWindow(anchorMs, -count);
+    case "month":
+      return monthWindowOffset(anchorMs, -count);
+    case "year":
+      return yearWindow(new Date(anchorMs).getUTCFullYear() - count);
+  }
+}
+
+function agoUnit(token: string): AgoUnit | null {
+  if (token === "天" || token.startsWith("day")) return "day";
+  if (token === "周" || token.startsWith("week")) return "week";
+  if (token === "个月" || token.startsWith("month")) return "month";
+  if (token === "年" || token.startsWith("year")) return "year";
+  return null;
+}
+
+// Northern-hemisphere seasons keyed by first month; season-year shifts by last/this/next. Mirrors soul/time-concern-projection.
+const SEASON_START_MONTH0: Readonly<Record<string, number>> = {
+  spring: 2, summer: 5, autumn: 8, fall: 8, winter: 11
+};
+
+function parseSeasonWindow(normalized: string, anchorMs: number): QueryTimeWindow | null {
+  const match = /^(last|this|next) (spring|summer|autumn|fall|winter)$/u.exec(normalized);
+  if (match === null) {
+    return null;
+  }
+  const yearOffset = match[1] === "last" ? -1 : match[1] === "next" ? 1 : 0;
+  const seasonYear = new Date(anchorMs).getUTCFullYear() + yearOffset;
+  const startMonth0 = SEASON_START_MONTH0[match[2]!]!;
+  const startMs = Date.UTC(seasonYear, startMonth0, 1);
+  const endMs = Date.UTC(seasonYear, startMonth0 + 3, 1) - 1;
+  return Number.isFinite(startMs) && Number.isFinite(endMs) ? { startMs, endMs } : null;
 }
 
 function dayWindowFromMs(ms: number): QueryTimeWindow | null {

@@ -8,7 +8,12 @@ import {
 import { GardenProviderKind, type GardenCompileContext, type GardenComputeProvider } from "./compute-provider.js";
 import { buildHeuristicPreferenceProfile } from "./local-preference-profile.js";
 import { buildSchemaGroundedRawPayload } from "./schema-grounding.js";
-import { parseStrictCalendarDateToUtcDay } from "./temporal-date.js";
+import {
+  normalizeWindowDigest,
+  resolveTemporalProjection,
+  timeConcernPattern,
+  type TemporalProjection
+} from "./time-concern-projection.js";
 
 interface PatternDefinition {
   readonly pattern: RegExp;
@@ -23,14 +28,6 @@ interface TimeConcernMatch {
   readonly window_digest: string;
   readonly excerpt: string;
   readonly temporal_projection: TemporalProjection | null;
-}
-
-interface TemporalProjection {
-  readonly event_time_start: string;
-  readonly event_time_end: string;
-  readonly time_precision: "day" | "month" | "year" | "range" | "relative" | "unknown";
-  readonly time_source: "explicit" | "session_timestamp" | "relative_resolved";
-  readonly projection_schema_version: 1;
 }
 
 const PATTERNS: readonly PatternDefinition[] = [
@@ -150,9 +147,6 @@ const PATTERNS: readonly PatternDefinition[] = [
     confidence: 0.5
   }
 ] as const;
-
-const TIME_CONCERN_PATTERN =
-  /\b(?:today|yesterday|tomorrow|tonight|last\s+(?:week|month|year)|next\s+(?:week|month|year)|this\s+(?:week|month|year)|\d{4}-\d{2}(?:-\d{2})?)\b|(?:今天|昨天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{4}年\d{1,2}月(?:\d{1,2}日)?|\d{4}-\d{2}(?:-\d{2})?)/giu;
 
 export class LocalHeuristics implements GardenComputeProvider {
   public readonly provider_kind = GardenProviderKind.LOCAL_HEURISTICS;
@@ -355,14 +349,15 @@ function clampFullTurnContent(turnContent: string): string {
 }
 
 function extractTimeConcerns(turnContent: string, anchorIso: string): readonly TimeConcernMatch[] {
+  const pattern = timeConcernPattern();
   const matches: TimeConcernMatch[] = [];
   for (const sentence of splitSentences(turnContent)) {
     if (isQuestion(sentence)) {
       continue;
     }
 
-    TIME_CONCERN_PATTERN.lastIndex = 0;
-    for (const match of sentence.matchAll(TIME_CONCERN_PATTERN)) {
+    pattern.lastIndex = 0;
+    for (const match of sentence.matchAll(pattern)) {
       const matchedText = normalizeMatchedText(match[0]);
       if (matchedText.length === 0) {
         continue;
@@ -376,48 +371,6 @@ function extractTimeConcerns(turnContent: string, anchorIso: string): readonly T
     }
   }
   return matches;
-}
-
-function resolveTemporalProjection(matchedText: string, anchorIso: string): TemporalProjection | null {
-  const anchor = new Date(anchorIso);
-  if (Number.isNaN(anchor.getTime())) {
-    return null;
-  }
-  const normalized = normalizeWindowDigest(matchedText);
-  if (normalized === "yesterday" || normalized === "昨天") {
-    return buildDayProjection(addUtcDays(anchor, -1), "relative_resolved");
-  }
-  if (normalized === "today" || normalized === "今天") {
-    return buildDayProjection(anchor, "relative_resolved");
-  }
-  if (normalized === "tomorrow" || normalized === "明天") {
-    return buildDayProjection(addUtcDays(anchor, 1), "relative_resolved");
-  }
-  const explicitIso = resolveExplicitIsoDate(normalized);
-  return explicitIso === null ? null : buildDayProjection(explicitIso, "explicit");
-}
-
-function buildDayProjection(
-  date: Date,
-  timeSource: TemporalProjection["time_source"]
-): TemporalProjection {
-  const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
-  return {
-    event_time_start: start.toISOString(),
-    event_time_end: end.toISOString(),
-    time_precision: "day",
-    time_source: timeSource,
-    projection_schema_version: 1
-  };
-}
-
-function addUtcDays(anchor: Date, deltaDays: number): Date {
-  return new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate() + deltaDays));
-}
-
-function resolveExplicitIsoDate(normalized: string): Date | null {
-  return parseStrictCalendarDateToUtcDay(normalized);
 }
 
 function formatTemporalProjection(projection: TemporalProjection | null): Record<string, string> {
@@ -442,8 +395,4 @@ function splitSentences(turnContent: string): readonly string[] {
 
 function isQuestion(sentence: string): boolean {
   return /[?？]\s*$/u.test(sentence);
-}
-
-function normalizeWindowDigest(matchedText: string): string {
-  return matchedText.trim().toLowerCase().replace(/\s+/gu, "_");
 }

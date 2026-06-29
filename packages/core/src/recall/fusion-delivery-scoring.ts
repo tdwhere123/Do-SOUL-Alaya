@@ -624,20 +624,20 @@ function scoreSynthesisCapsuleFusionStream(
   return stream === "synthesis_fts" ? clamp01(supplementaryData.synthesisFtsRanks[candidate.entry.object_id] ?? 0) : 0;
 }
 
-// Temporal intent reads event-time against the query's asked-about window (object-time facet);
-// every other intent keeps the distance-to-now recency. ALAYA_RECALL_TEMPORAL_WINDOW off → recency.
-function scoreTemporalFusion(
-  candidate: RecallFusionCandidateInput,
-  supplementaryData: RecallSupplementaryData,
+// Any query carrying a parseable asked-about window reads event-time against it (object-time facet), matching the
+// conformant scorer's intent-free gate; otherwise distance-to-now recency. ALAYA_RECALL_TEMPORAL_WINDOW off → recency.
+export function scoreTemporalFusion(
+  entry: Readonly<MemoryEntry>,
+  queryProbes: Readonly<RecallQueryProbes>,
   nowIso: string
 ): number {
-  if (temporalQueryWindowEnabled() && classifyRecallIntent(supplementaryData.queryProbes) === "temporal") {
-    const window = parseQueryTimeWindow(supplementaryData.queryProbes, nowIso);
+  if (temporalQueryWindowEnabled()) {
+    const window = parseQueryTimeWindow(queryProbes, nowIso);
     if (window !== null) {
-      return scoreTemporalQueryWindow(candidate.entry, window);
+      return scoreTemporalQueryWindow(entry, window);
     }
   }
-  return scoreTemporalEventTime(candidate.entry, nowIso);
+  return scoreTemporalEventTime(entry, nowIso);
 }
 
 function scoreGlobalFusionStream(
@@ -656,7 +656,7 @@ function scoreGlobalFusionStream(
     case "embedding_similarity":
       return clamp01(candidate.effectiveFactors.embedding_similarity ?? 0);
     case "temporal_recency":
-      return scoreTemporalFusion(candidate, supplementaryData, nowIso);
+      return scoreTemporalFusion(candidate.entry, supplementaryData.queryProbes, nowIso);
     case "workspace_activation":
       return normalizeActivationScore(candidate.entry.activation_score);
     default:
@@ -706,7 +706,7 @@ function scoreWorkspaceLocalFusionStream(
     case "path_expansion":
       return clamp01(supplementaryData.pathExpansionScores[objectId] ?? 0);
     case "temporal_recency":
-      return scoreTemporalFusion(candidate, supplementaryData, nowIso);
+      return scoreTemporalFusion(candidate.entry, supplementaryData.queryProbes, nowIso);
     case "workspace_activation":
       return normalizeActivationScore(candidate.entry.activation_score);
     case "facet_overlap":
