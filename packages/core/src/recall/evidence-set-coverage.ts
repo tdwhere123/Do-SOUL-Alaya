@@ -1,20 +1,17 @@
 import type { RecallSupplementaryData } from "./recall-service-types.js";
 import { type DeliveryCandidate, sessionKeyOf } from "./coverage-delivery-signals.js";
+import { flatBaselineEnabled } from "./conformant-fusion-scoring.js";
 
-// S4 delivery-time set-coverage, orthogonal to ranking (rank-then-cover). Ranking already scores the
-// evidence axis via g(R_E); this stage keys purely on set membership/complementarity — flat nudges
-// for a complementary member of an evidence-anchored session and for joining a selected answers_with
-// cluster. The evidence axis is read only as a boolean membership flag (which sessions anchor), never
-// as a magnitude, so R_E is not re-scored on top of its rank contribution. Never touches
-// fused_score/fused_rank. Default-off; on only under ALAYA_RECALL_EVIDENCE_SET_COVERAGE.
-
-export const EVIDENCE_SET_COVERAGE_ENV = "ALAYA_RECALL_EVIDENCE_SET_COVERAGE";
+// S4 delivery-time set-coverage (rank-then-cover): keys on set membership/complementarity, not magnitude
+// — a flat nudge for a complementary member of an evidence-anchored session and for joining a selected
+// answers_with cluster. Evidence is read as a boolean anchor flag (R_E not re-scored), never touches
+// fused_score/fused_rank. Production default; ALAYA_RECALL_FLAT_BASELINE=on reverts to legacy coverage.
 
 // Flat, set-membership nudges, each bounded below one strong facet (0.1) and summed under an overall
 // cap, so coverage rescues a buried complementary gold without flipping a clearly-stronger answer.
 const SESSION_COVERAGE_BONUS = 0.06;
 const MAX_CLUSTER_BONUS = 0.06;
-const MAX_EVIDENCE_SET_BONUS = 0.1;
+export const MAX_EVIDENCE_SET_BONUS = 0.1;
 
 export interface EvidenceSetCoverageState {
   readonly clusterWeightMax: number;
@@ -24,11 +21,9 @@ export interface EvidenceSetCoverageState {
   readonly selectedSeeds: Map<string, number>;
 }
 
+// Default-on; the flat-baseline kill-switch reverts to legacy facet/session coverage.
 export function evidenceSetCoverageEnabled(): boolean {
-  const raw = process.env[EVIDENCE_SET_COVERAGE_ENV];
-  if (raw === undefined) return false;
-  const normalized = raw.trim().toLowerCase();
-  return !(normalized === "" || normalized === "0" || normalized === "false" || normalized === "off");
+  return !flatBaselineEnabled();
 }
 
 // Set-membership flag (boolean, never a magnitude): the candidate carries evidence support via the

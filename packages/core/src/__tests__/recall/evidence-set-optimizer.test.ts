@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
   ScopeClass,
@@ -6,6 +6,11 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { applyEvidenceSetDelivery } from "../../recall/evidence-set-optimizer.js";
+import {
+  createEvidenceSetCoverageState,
+  evidenceSetCoverageBonus,
+  recordEvidenceSetSelection
+} from "../../recall/evidence-set-coverage.js";
 import { RECALL_FUSION_STREAMS } from "../../recall/recall-service.js";
 import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
 import type {
@@ -144,8 +149,12 @@ afterEach(() => {
 });
 
 // force mode (selector="1"/"force") bypasses the multi-fact gate so the legacy
-// coverage behavior is exercised directly on probe-free pools.
+// coverage behavior is exercised directly on probe-free pools. Facet coverage is the
+// flat-baseline fallback, so these legacy-contract tests pin the kill-switch on.
 describe("applyEvidenceSetDelivery force mode", () => {
+  beforeEach(() => {
+    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
+  });
   it("promotes a buried second-session gold (rank 8) into the top 5", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "1");
     const ordered = buildSingleSessionWallPool();
@@ -221,6 +230,9 @@ describe("applyEvidenceSetDelivery force mode", () => {
 });
 
 describe("applyEvidenceSetDelivery default mode (multi-fact gate)", () => {
+  beforeEach(() => {
+    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
+  });
   it("is a no-op (same reference) on a single-fact query", () => {
     const ordered = [
       candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA", content: "the database url is x" }),
@@ -281,6 +293,9 @@ describe("applyEvidenceSetDelivery default mode (multi-fact gate)", () => {
 });
 
 describe("applyEvidenceSetDelivery env matrix", () => {
+  beforeEach(() => {
+    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
+  });
   it("off ⇒ same reference even for a multi-fact query", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "off");
     const ordered = [
@@ -301,6 +316,9 @@ describe("applyEvidenceSetDelivery env matrix", () => {
 });
 
 describe("applyEvidenceSetDelivery regression locks", () => {
+  beforeEach(() => {
+    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
+  });
   it("is a no-op (same reference) for a list-cue query when the pool is single-session", () => {
     const ordered = [
       candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA", content: "database url" }),
@@ -492,20 +510,16 @@ function s4NoEvidencePool(): FusedCandidate[] {
 }
 
 describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
-  it("off ⇒ facet-only selection, byte-identical between flag unset and explicit off (no R_E rescue)", () => {
+  it("flat-baseline kill-switch ⇒ facet-only selection, no R_E rescue", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-    const supp = s4Supplementary({});
-    const unset = applyEvidenceSetDelivery(s4ComplementaryPool("axis"), supp, 10);
-    vi.stubEnv("ALAYA_RECALL_EVIDENCE_SET_COVERAGE", "off");
-    const off = applyEvidenceSetDelivery(s4ComplementaryPool("axis"), supp, 10);
-    expect(ids(off)).toEqual(ids(unset));
+    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
+    const off = applyEvidenceSetDelivery(s4ComplementaryPool("axis"), s4Supplementary({}), 10);
     expect(ids(off).slice(0, 5)).toContain("a4");
     expect(ids(off).slice(0, 5)).not.toContain("bMate");
   });
 
   it("on ⇒ rescues a complementary same-session gold via evidence-anchored session propagation (conformant axis)", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-    vi.stubEnv("ALAYA_RECALL_EVIDENCE_SET_COVERAGE", "on");
     const result = applyEvidenceSetDelivery(s4ComplementaryPool("axis"), s4Supplementary({}), 10);
     expect(result[0]!.entry.object_id).toBe("a1");
     expect(ids(result).slice(0, 5)).toEqual(expect.arrayContaining(["bGold", "bMate"]));
@@ -513,7 +527,6 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
 
   it("on ⇒ flat fallback: source-proximity contribution drives propagation, absent pathInflow no-ops the cluster", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-    vi.stubEnv("ALAYA_RECALL_EVIDENCE_SET_COVERAGE", "on");
     const result = applyEvidenceSetDelivery(s4ComplementaryPool("proximity"), s4Supplementary({}), 10);
     expect(result[0]!.entry.object_id).toBe("a1");
     expect(ids(result).slice(0, 5)).toContain("bMate");
@@ -521,7 +534,6 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
 
   it("on ⇒ flat fallback uses raw sourceProximityScores when no axis nor contribution is present", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-    vi.stubEnv("ALAYA_RECALL_EVIDENCE_SET_COVERAGE", "on");
     const supp = s4Supplementary({ sourceProximityScores: { bGold: 1, bMate: 1 } });
     const result = applyEvidenceSetDelivery(s4NoEvidencePool(), supp, 10);
     expect(result[0]!.entry.object_id).toBe("a1");
@@ -530,7 +542,6 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
 
   it("on ⇒ rescues a complementary gold via the answers_with relationship cluster (shared seed)", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-    vi.stubEnv("ALAYA_RECALL_EVIDENCE_SET_COVERAGE", "on");
     const supp = s4Supplementary({
       pathInflowByTarget: {
         bGold: [{ seedObjectId: "seedX", weight: 0.9 }],
@@ -544,7 +555,6 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
 
   it("on ⇒ keeps a clearly-stronger same-session answer above a weak cross-session candidate (bounded nudge)", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-    vi.stubEnv("ALAYA_RECALL_EVIDENCE_SET_COVERAGE", "on");
     const ordered = [
       s4Candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA", evidenceAxis: 1 }),
       s4Candidate({ objectId: "a2", fusedScore: 0.95, surfaceId: "sA", evidenceAxis: 1 }),
@@ -560,7 +570,6 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
   // must never flood same-session noise past cross-session coverage.
   it("on ⇒ a high-R_E same-session noise candidate is not lifted over a true cross-session complementary gold", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-    vi.stubEnv("ALAYA_RECALL_EVIDENCE_SET_COVERAGE", "on");
     const ordered = [
       s4Candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA", evidenceAxis: 1 }),
       s4Candidate({ objectId: "a2", fusedScore: 0.9, surfaceId: "sA" }),
@@ -582,7 +591,6 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
   // and a zero-magnitude sibling is rescued by membership alone.
   it("on ⇒ session rescue is invariant to a sibling's R_E magnitude (flat membership, not re-scored)", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-    vi.stubEnv("ALAYA_RECALL_EVIDENCE_SET_COVERAGE", "on");
     const poolWith = (bMateAxis: number | undefined): FusedCandidate[] => [
       s4Candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA" }),
       s4Candidate({ objectId: "a2", fusedScore: 0.88, surfaceId: "sA" }),
@@ -604,5 +612,43 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
     expect(ids(low)).toEqual(ids(high));
     expect(ids(none)).toEqual(ids(high));
     expect(ids(high).slice(0, 5)).toEqual(expect.arrayContaining(["bGold", "bMate"]));
+  });
+});
+
+// A facet-diverse but evidence-empty cross-session candidate: facet coverage would promote it, S4
+// evidence-set coverage must not (facet is already counted by R_O). The gate is forced open in both.
+function facetDiverseNoEvidencePool(): FusedCandidate[] {
+  return [
+    candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA" }),
+    candidate({ objectId: "a2", fusedScore: 0.9, surfaceId: "sA" }),
+    candidate({ objectId: "a3", fusedScore: 0.85, surfaceId: "sA" }),
+    candidate({ objectId: "a4", fusedScore: 0.8, surfaceId: "sA" }),
+    candidate({ objectId: "bDiverse", fusedScore: 0.78, surfaceId: "sB" })
+  ];
+}
+
+describe("applyEvidenceSetDelivery S4 convergence locks", () => {
+  it("default ⇒ facet diversity does not drive delivery reorder (no evidence membership)", () => {
+    vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
+    const result = applyEvidenceSetDelivery(facetDiverseNoEvidencePool(), supplementary(), 10);
+    expect(ids(result)).toEqual(["a1", "a2", "a3", "a4", "bDiverse"]);
+  });
+
+  it("flat-baseline ⇒ the same facet-diverse candidate is promoted by facet coverage", () => {
+    vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
+    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
+    const result = applyEvidenceSetDelivery(facetDiverseNoEvidencePool(), supplementary(), 10);
+    expect(ids(result)).toEqual(["a1", "a2", "bDiverse", "a3", "a4"]);
+  });
+
+  it("default ⇒ the per-candidate coverage nudge is capped at 0.1 (session + cluster combined)", () => {
+    const seed = s4Candidate({ objectId: "seed", fusedScore: 1, surfaceId: "sB", evidenceAxis: 1 });
+    const cand = s4Candidate({ objectId: "cand", fusedScore: 0.5, surfaceId: "sB", streamRanks: { source_proximity: 1 } });
+    const supp = s4Supplementary({ pathInflowByTarget: { cand: [{ seedObjectId: "seed", weight: 1 }] } });
+    const state = createEvidenceSetCoverageState([seed, cand], supp);
+    recordEvidenceSetSelection(state, seed, supp);
+    const bonus = evidenceSetCoverageBonus(state, cand, supp);
+    expect(bonus).toBeLessThanOrEqual(0.1);
+    expect(bonus).toBeCloseTo(0.1, 10);
   });
 });

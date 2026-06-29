@@ -22,6 +22,7 @@ import {
   reserveStructuralDeliverySlots
 } from "./fusion-delivery.js";
 import { applyEvidenceSetDelivery } from "./evidence-set-optimizer.js";
+import { flatBaselineEnabled } from "./conformant-fusion-scoring.js";
 import { computeEffectiveScoreDetails } from "./scoring.js";
 import {
   selectFineAssessmentCandidates,
@@ -166,11 +167,10 @@ function orderFusedFineAssessmentCandidates(
     supplementaryData,
     window
   );
-  const coverageOrderedCandidates = applySessionCoverageRerank(
-    coverageSelectedCandidates,
-    supplementaryData,
-    window
-  );
+  // S4 evidence-set coverage owns session complementarity by default; the legacy band rerank survives only under flat-baseline.
+  const coverageOrderedCandidates = flatBaselineEnabled()
+    ? applySessionCoverageRerank(coverageSelectedCandidates, supplementaryData, window)
+    : coverageSelectedCandidates;
   const synthesisReservedCandidates = coverageOrderedCandidates;
   const deliveryOrderedCandidates = reserveStructuralDeliverySlots(
     synthesisReservedCandidates,
