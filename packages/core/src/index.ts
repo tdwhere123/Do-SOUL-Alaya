@@ -26,6 +26,7 @@ export * from "./path-graph/edge-auto-producer-service.js";
 export * from "./embedding-recall/embedding-backfill-handler.js";
 export * from "./path-graph/edge-proposal-service.js";
 export * from "./embedding-recall/embedding-recall-service.js";
+export * from "./embedding-recall/embed-text-resolver.js";
 export * from "./embedding-recall/local-onnx-embedding-client.js";
 export * from "./runs/engine-binding-service.js";
 export * from "./shared/errors.js";

@@ -45,6 +45,12 @@ export interface LocalOnnxEmbeddingClientOptions {
    * Override for the dynamic clock (test seam). Real wall-clock by default.
    */
   readonly now?: () => number;
+  /**
+   * Cosine-space schema version this provider's vectors belong to. Defaults to
+   * 1; the daemon sets it to D2Q_SCHEMA_VERSION when doc2query is on so d2q and
+   * non-d2q vectors never get cosine-compared.
+   */
+  readonly schemaVersion?: number;
 }
 
 const DEFAULT_LOCAL_ONNX_MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
@@ -85,7 +91,7 @@ export const LOCAL_ONNX_UNAVAILABLE_RETRY_BACKOFF_MS = 30_000;
 export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   public readonly providerKind = "local_onnx";
   public readonly modelId: string;
-  public readonly schemaVersion = 1;
+  public readonly schemaVersion: number;
 
   private readonly cacheDir: string | null;
   private readonly pipelineLoader: LocalOnnxPipelineLoader;
@@ -100,6 +106,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
 
   public constructor(options: LocalOnnxEmbeddingClientOptions = {}) {
     this.modelId = options.modelId?.trim() || DEFAULT_LOCAL_ONNX_MODEL_ID;
+    this.schemaVersion = options.schemaVersion ?? 1;
     this.cacheDir = options.cacheDir === undefined
       ? defaultLocalOnnxCacheDir()
       : options.cacheDir;

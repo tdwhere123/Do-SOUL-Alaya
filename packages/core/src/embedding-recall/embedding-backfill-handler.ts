@@ -1,5 +1,6 @@
 import { type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { toErrorMessage } from "../recall/recall-service-helpers.js";
+import { resolveEmbedText } from "./embed-text-resolver.js";
 import { resolveEmbeddingRecallTiers } from "./tier-config.js";
 import {
   BACKFILL_BATCH_CONCURRENCY_ENV,
@@ -43,6 +44,8 @@ interface BackfillCandidateSelection {
   readonly memoriesToEmbed: readonly EmbeddingBackfillCandidate[];
   readonly auditEntries: readonly string[];
 }
+
+const EMPTY_HQS: readonly string[] = Object.freeze([]);
 
 function emptyBackfillResult(auditEntries: readonly string[]): EmbeddingBackfillHandleResult {
   return Object.freeze({
@@ -276,18 +279,33 @@ export class EmbeddingBackfillHandler {
     }
   }
 
+  // Resolves the text embedded per memory: raw content with no HQ provider
+  // (d2q off, byte-identical to the prior path), content + HQs with one.
+  private async resolveBatchEmbedTexts(
+    batch: readonly EmbeddingBackfillCandidate[]
+  ): Promise<readonly string[]> {
+    const hqProvider = this.dependencies.hqProvider;
+    if (hqProvider === undefined) {
+      return batch.map((entry) => entry.memory.content);
+    }
+    const hqByObjectId = await hqProvider.getHqByObjectIds(
+      batch.map((entry) => entry.memory.object_id)
+    );
+    return batch.map((entry) =>
+      resolveEmbedText(entry.memory, hqByObjectId.get(entry.memory.object_id) ?? EMPTY_HQS)
+    );
+  }
+
   private async embedBatchWithFallback(
     workspaceId: string,
     batch: readonly EmbeddingBackfillCandidate[],
     auditEntries: string[]
   ): Promise<readonly EmbeddedBackfillCandidate[]> {
     try {
-      const embeddings = await this.dependencies.provider.embedTexts(
-        batch.map((entry) => entry.memory.content),
-        {
-          timeoutMs: BACKFILL_TIMEOUT_MS
-        }
-      );
+      const texts = await this.resolveBatchEmbedTexts(batch);
+      const embeddings = await this.dependencies.provider.embedTexts(texts, {
+        timeoutMs: BACKFILL_TIMEOUT_MS
+      });
 
       if (embeddings.length !== batch.length) {
         throw new Error(`Expected ${batch.length} embeddings but received ${embeddings.length}.`);
@@ -361,7 +379,8 @@ export class EmbeddingBackfillHandler {
       await sleepBackfillRetry(this.retryDelayMs * (attempt - 1));
 
       try {
-        const embeddings = await this.dependencies.provider.embedTexts([entry.memory.content], {
+        const texts = await this.resolveBatchEmbedTexts([entry]);
+        const embeddings = await this.dependencies.provider.embedTexts(texts, {
           timeoutMs: BACKFILL_TIMEOUT_MS
         });
         if (embeddings.length !== 1) {

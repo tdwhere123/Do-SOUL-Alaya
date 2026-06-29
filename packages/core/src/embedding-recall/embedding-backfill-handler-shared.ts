@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { StorageTier, type MemoryEntry } from "@do-soul/alaya-protocol";
+import type { HqProvider } from "./embed-text-resolver.js";
 import type { EmbeddingProviderPort, EmbeddingVectorRecord } from "./embedding-recall-service.js";
 
 export interface EmbeddingBackfillMemoryRepoPort {
@@ -72,6 +73,8 @@ export interface EmbeddingBackfillHandlerDependencies {
   readonly memoryRepo: EmbeddingBackfillMemoryRepoPort;
   readonly memoryEmbeddingRepo: EmbeddingBackfillRepoPort;
   readonly provider: EmbeddingProviderPort;
+  // Absent = embed raw content (doc2query off, byte-identical to the prior path).
+  readonly hqProvider?: HqProvider;
   readonly now?: () => string;
   readonly retryDelayMs?: number;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;

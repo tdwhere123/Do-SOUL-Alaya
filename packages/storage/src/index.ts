@@ -216,6 +216,11 @@ export {
   type MemoryEmbeddingRepo
 } from "./repos/memory/index.js";
 export {
+  SqliteMemoryHqRepo,
+  type MemoryHqRecord,
+  type MemoryHqRepo
+} from "./repos/memory/index.js";
+export {
   SqliteFileRepo,
   type FileRepo
 } from "./repos/runtime/index.js";

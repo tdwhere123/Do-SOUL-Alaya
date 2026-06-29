@@ -17,6 +17,11 @@ export {
   type MemoryEmbeddingRepo
 } from "./memory-embedding-repo.js";
 export {
+  SqliteMemoryHqRepo,
+  type MemoryHqRecord,
+  type MemoryHqRepo
+} from "./memory-hq-repo.js";
+export {
   SqliteStrongRefRepo,
   type StrongRefRepo
 } from "./strong-ref-repo.js";
