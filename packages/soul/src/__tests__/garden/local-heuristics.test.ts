@@ -304,6 +304,101 @@ describe("LocalHeuristics", () => {
   });
 });
 
+describe("LocalHeuristics widened event-time extraction (ALAYA_RECALL_EVENT_TIME_EXTRACT)", () => {
+  // 2026-03-18 is a Wednesday; its Monday-anchored week starts 2026-03-16.
+  const anchorIso = "2026-03-18T10:20:30.000Z";
+
+  afterEach(() => {
+    delete process.env.ALAYA_RECALL_EVENT_TIME_EXTRACT;
+  });
+
+  async function timeConcernFor(text: string) {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(anchorIso));
+    const signals = await new LocalHeuristics().compile(text, createContext());
+    return signals.find((signal) => signal.domain_tags.includes("time_concern"));
+  }
+
+  it("does not write event time for widened terms while the flag is off", async () => {
+    const signal = await timeConcernFor("We planned the migration last week.");
+    expect(signal!.raw_payload).not.toHaveProperty("temporal_projection");
+    expect(signal!.raw_payload.time_concern).toEqual({
+      window_digest: "last_week",
+      matched_text: "last week"
+    });
+  });
+
+  it.each([
+    ["last week → Monday-anchored week range", "We planned the migration last week.", {
+      event_time_start: "2026-03-09T00:00:00.000Z",
+      event_time_end: "2026-03-15T23:59:59.999Z",
+      time_precision: "range",
+      time_source: "relative_resolved",
+      projection_schema_version: "1"
+    }],
+    ["last month → calendar-month range", "We finalized the plan last month.", {
+      event_time_start: "2026-02-01T00:00:00.000Z",
+      event_time_end: "2026-02-28T23:59:59.999Z",
+      time_precision: "month",
+      time_source: "relative_resolved",
+      projection_schema_version: "1"
+    }],
+    ["last year → calendar-year range", "We shipped it last year.", {
+      event_time_start: "2025-01-01T00:00:00.000Z",
+      event_time_end: "2025-12-31T23:59:59.999Z",
+      time_precision: "year",
+      time_source: "relative_resolved",
+      projection_schema_version: "1"
+    }],
+    ["last summer → prior-year season range", "We launched it last summer.", {
+      event_time_start: "2025-06-01T00:00:00.000Z",
+      event_time_end: "2025-08-31T23:59:59.999Z",
+      time_precision: "range",
+      time_source: "relative_resolved",
+      projection_schema_version: "1"
+    }],
+    ["N days ago → single-day window", "We reviewed it 3 days ago.", {
+      event_time_start: "2026-03-15T00:00:00.000Z",
+      event_time_end: "2026-03-15T23:59:59.999Z",
+      time_precision: "day",
+      time_source: "relative_resolved",
+      projection_schema_version: "1"
+    }],
+    ["N months ago → calendar-month range", "We decided it 2 months ago.", {
+      event_time_start: "2026-01-01T00:00:00.000Z",
+      event_time_end: "2026-01-31T23:59:59.999Z",
+      time_precision: "month",
+      time_source: "relative_resolved",
+      projection_schema_version: "1"
+    }],
+    ["CJK 上个月 → calendar-month range", "上个月我们完成了迁移。", {
+      event_time_start: "2026-02-01T00:00:00.000Z",
+      event_time_end: "2026-02-28T23:59:59.999Z",
+      time_precision: "month",
+      time_source: "relative_resolved",
+      projection_schema_version: "1"
+    }],
+    ["ISO month → explicit calendar-month range", "We shipped the feature in 2026-05.", {
+      event_time_start: "2026-05-01T00:00:00.000Z",
+      event_time_end: "2026-05-31T23:59:59.999Z",
+      time_precision: "month",
+      time_source: "explicit",
+      projection_schema_version: "1"
+    }],
+    ["CJK month → explicit calendar-month range", "我们在2026年5月发布。", {
+      event_time_start: "2026-05-01T00:00:00.000Z",
+      event_time_end: "2026-05-31T23:59:59.999Z",
+      time_precision: "month",
+      time_source: "explicit",
+      projection_schema_version: "1"
+    }]
+  ])("resolves %s when the flag is on", async (_label, text, expected) => {
+    process.env.ALAYA_RECALL_EVENT_TIME_EXTRACT = "on";
+    const signal = await timeConcernFor(text);
+    expect(signal!.raw_payload.temporal_projection).toEqual(expected);
+  });
+});
+
 function createContext(): GardenCompileContext {
   return {
     workspace_id: "ws_1",

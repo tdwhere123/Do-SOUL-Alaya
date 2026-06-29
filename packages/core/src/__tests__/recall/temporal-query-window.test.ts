@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 import {
   parseQueryTimeWindow,
@@ -114,6 +114,66 @@ describe("parseQueryTimeWindow anchored relative resolution", () => {
     expect(parseQueryTimeWindow(compileRecallQueryProbes("compare 2023-05 to last week"), anchor)).toEqual({
       startMs: Date.UTC(2023, 4, 1),
       endMs: Date.UTC(2023, 5, 1) - 1
+    });
+  });
+});
+
+describe("parseQueryTimeWindow widened terms (temporal-window flag on)", () => {
+  // 2023-05-17 is a Wednesday; its Monday-anchored week starts 2023-05-15.
+  const anchor = "2023-05-17T08:30:00.000Z";
+
+  beforeEach(() => {
+    process.env.ALAYA_RECALL_TEMPORAL_WINDOW = "on";
+  });
+  afterEach(() => {
+    delete process.env.ALAYA_RECALL_TEMPORAL_WINDOW;
+  });
+
+  it("does not capture widened terms while the flag is off", () => {
+    delete process.env.ALAYA_RECALL_TEMPORAL_WINDOW;
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what shipped last summer"), anchor)).toBeNull();
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("the outage 2 weeks ago"), anchor)).toBeNull();
+  });
+
+  it("resolves last summer to the prior year's June–August window", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what shipped last summer"), anchor)).toEqual({
+      startMs: Date.UTC(2022, 5, 1),
+      endMs: Date.UTC(2022, 8, 1) - 1
+    });
+  });
+
+  it("resolves this winter across the Dec–Feb year boundary", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what is planned this winter"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 11, 1),
+      endMs: Date.UTC(2024, 2, 1) - 1
+    });
+  });
+
+  it("resolves N days ago to a single-day window", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what did we decide 3 days ago"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 4, 14),
+      endMs: Date.UTC(2023, 4, 14) + 86_400_000 - 1
+    });
+  });
+
+  it("resolves N weeks ago to a Monday-anchored week window", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("the outage 2 weeks ago"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 4, 1),
+      endMs: Date.UTC(2023, 4, 8) - 1
+    });
+  });
+
+  it("resolves N months ago to a calendar-month window", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("the plan 2 months ago"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 2, 1),
+      endMs: Date.UTC(2023, 3, 1) - 1
+    });
+  });
+
+  it("resolves CJK N天前 to a single-day window", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("3天前的决定"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 4, 14),
+      endMs: Date.UTC(2023, 4, 14) + 86_400_000 - 1
     });
   });
 });

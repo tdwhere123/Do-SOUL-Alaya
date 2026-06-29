@@ -1,5 +1,6 @@
 import { MemoryDimension, ScopeClass, type MemoryDimension as MemoryDimensionType, type ScopeClass as ScopeClassType } from "@do-soul/alaya-protocol";
 import { isCjkSegmentationCandidate, segmentCjkRun } from "../shared/cjk-segmentation.js";
+import { temporalQueryWindowEnabled } from "./temporal-fusion-scoring.js";
 
 export type RecallQuerySubjectHint = "self_reference";
 
@@ -161,11 +162,15 @@ function collectDomainHints(normalized: string): readonly string[] {
   return DOMAIN_HINTS.flatMap(([tag, pattern]) => pattern.test(normalized) ? [tag] : []);
 }
 
+const DATE_TERM_PATTERN =
+  /\b\d{4}-\d{2}(?:-\d{2})?\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:today|yesterday|tomorrow|tonight|last\s+(?:week|month|year)|next\s+(?:week|month|year)|this\s+(?:week|month|year))\b|(?:上次|昨天|今天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{4}年\d{1,2}月(?:\d{1,2}日)?)/giu;
+
+// Superset adds seasons and "N units ago"; only enabled with the temporal-window flag, which is what turns them into windows.
+const WIDENED_DATE_TERM_PATTERN =
+  /\b\d{4}-\d{2}(?:-\d{2})?\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:today|yesterday|tomorrow|tonight|last\s+(?:week|month|year)|next\s+(?:week|month|year)|this\s+(?:week|month|year)|(?:last|this|next)\s+(?:spring|summer|autumn|fall|winter)|\d{1,3}\s+(?:days?|weeks?|months?|years?)\s+ago)\b|(?:上次|昨天|今天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{1,3}(?:天|周|个月|年)前|\d{4}年\d{1,2}月(?:\d{1,2}日)?)/giu;
+
 function collectDateTermMatches(normalized: string): readonly string[] {
-  return collectFullMatches(
-    normalized,
-    /\b\d{4}-\d{2}(?:-\d{2})?\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:today|yesterday|tomorrow|tonight|last\s+(?:week|month|year)|next\s+(?:week|month|year)|this\s+(?:week|month|year))\b|(?:上次|昨天|今天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{4}年\d{1,2}月(?:\d{1,2}日)?)/giu
-  );
+  return collectFullMatches(normalized, temporalQueryWindowEnabled() ? WIDENED_DATE_TERM_PATTERN : DATE_TERM_PATTERN);
 }
 
 function normalizeQuery(queryText: string | null): string | null {

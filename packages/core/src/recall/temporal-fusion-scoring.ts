@@ -1,4 +1,8 @@
-import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import {
+  parseRelativeTemporalTerm,
+  resolveRelativeTemporalWindow,
+  type MemoryEntry
+} from "@do-soul/alaya-protocol";
 import { clamp01 } from "./recall-service-helpers.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { classifyRecallIntent } from "./recall-query-plan.js";
@@ -36,7 +40,6 @@ export interface QueryTimeWindow {
 }
 
 const QUERY_WINDOW_DECAY_DAYS = 90;
-const DAY_MS = 86_400_000;
 
 // Object-time facet: distance to the question's asked-about window, independent of distance-to-now.
 // Absolute terms resolve anchor-free; relative terms resolve only when nowIso supplies the now-anchor.
@@ -92,72 +95,14 @@ function monthWindow(year: number, month: number): QueryTimeWindow | null {
   return Number.isFinite(startMs) && Number.isFinite(endMs) ? { startMs, endMs } : null;
 }
 
-// Captured relative date_terms only; weeks are Monday-anchored calendar weeks. Unmapped terms → null.
+// Relative date_terms (incl. seasons + "N units ago") resolve through the shared protocol window math.
 function parseRelativeDateWindow(term: string, anchorMs: number): QueryTimeWindow | null {
-  switch (term.trim().replace(/\s+/gu, " ").toLowerCase()) {
-    case "today":
-    case "今天":
-      return dayWindowFromMs(anchorMs);
-    case "yesterday":
-    case "昨天":
-      return dayWindowFromMs(anchorMs - DAY_MS);
-    case "tomorrow":
-    case "明天":
-      return dayWindowFromMs(anchorMs + DAY_MS);
-    case "this week":
-      return weekWindow(anchorMs, 0);
-    case "last week":
-    case "上周":
-      return weekWindow(anchorMs, -1);
-    case "next week":
-    case "下周":
-      return weekWindow(anchorMs, 1);
-    case "this month":
-      return monthWindowOffset(anchorMs, 0);
-    case "last month":
-    case "上个月":
-      return monthWindowOffset(anchorMs, -1);
-    case "next month":
-    case "下个月":
-      return monthWindowOffset(anchorMs, 1);
-    case "this year":
-    case "今年":
-      return yearWindow(new Date(anchorMs).getUTCFullYear());
-    case "last year":
-    case "去年":
-      return yearWindow(new Date(anchorMs).getUTCFullYear() - 1);
-    case "next year":
-    case "明年":
-      return yearWindow(new Date(anchorMs).getUTCFullYear() + 1);
-    default:
-      return null;
+  const relativeTerm = parseRelativeTemporalTerm(term);
+  if (relativeTerm === null) {
+    return null;
   }
-}
-
-function dayWindowFromMs(ms: number): QueryTimeWindow | null {
-  const date = new Date(ms);
-  return dayWindow(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
-}
-
-function weekWindow(anchorMs: number, weekOffset: number): QueryTimeWindow {
-  const date = new Date(anchorMs);
-  const dayStartMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-  const daysSinceMonday = (date.getUTCDay() + 6) % 7;
-  const startMs = dayStartMs - daysSinceMonday * DAY_MS + weekOffset * 7 * DAY_MS;
-  return { startMs, endMs: startMs + 7 * DAY_MS - 1 };
-}
-
-function monthWindowOffset(anchorMs: number, monthOffset: number): QueryTimeWindow | null {
-  const date = new Date(anchorMs);
-  const startMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + monthOffset, 1);
-  const endMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + monthOffset + 1, 1) - 1;
-  return Number.isFinite(startMs) && Number.isFinite(endMs) ? { startMs, endMs } : null;
-}
-
-function yearWindow(year: number): QueryTimeWindow | null {
-  const startMs = Date.UTC(year, 0, 1);
-  const endMs = Date.UTC(year + 1, 0, 1) - 1;
-  return Number.isFinite(startMs) && Number.isFinite(endMs) ? { startMs, endMs } : null;
+  const window = resolveRelativeTemporalWindow(relativeTerm, anchorMs);
+  return { startMs: window.startMs, endMs: window.endMs };
 }
 
 export function scoreTemporalQueryWindow(
