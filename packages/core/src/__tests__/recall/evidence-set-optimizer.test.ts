@@ -553,4 +553,26 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
     const result = applyEvidenceSetDelivery(ordered, s4Supplementary({}), 10);
     expect(ids(result).slice(0, 2)).toEqual(["a1", "a2"]);
   });
+
+  // Risk-direction lock (same face as the point-wise-evidence any@5 crash): a weak, low-relevance
+  // same-anchored-session candidate at max R_E must NOT have its bounded session bonus lift it over
+  // a genuine cross-session complementary gold. Session propagation may rescue a sibling gold but
+  // must never flood same-session noise past cross-session coverage.
+  it("on ⇒ a high-R_E same-session noise candidate is not lifted over a true cross-session complementary gold", () => {
+    vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
+    vi.stubEnv("ALAYA_RECALL_EVIDENCE_SET_COVERAGE", "on");
+    const ordered = [
+      s4Candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA", evidenceAxis: 1 }),
+      s4Candidate({ objectId: "a2", fusedScore: 0.9, surfaceId: "sA" }),
+      s4Candidate({ objectId: "a3", fusedScore: 0.85, surfaceId: "sA" }),
+      s4Candidate({ objectId: "gold", fusedScore: 0.7, surfaceId: "sB", streamRanks: { source_proximity: 1 } }),
+      s4Candidate({ objectId: "noise", fusedScore: 0.55, surfaceId: "sA", evidenceAxis: 1 }),
+      s4Candidate({ objectId: "a5", fusedScore: 0.5, surfaceId: "sA" })
+    ];
+    const result = applyEvidenceSetDelivery(ordered, s4Supplementary({}), 10);
+    const top5 = ids(result).slice(0, 5);
+    expect(top5).toContain("gold");
+    expect(top5).toContain("noise");
+    expect(top5.indexOf("gold")).toBeLessThan(top5.indexOf("noise"));
+  });
 });
