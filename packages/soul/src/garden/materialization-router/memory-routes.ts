@@ -165,7 +165,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     let memory: MemoryMaterializationCreatedObject;
     try {
       memory = await this.dependencies.memoryService.create(
-        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal))
+        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal), this.dependencies.deriveFacetTags === true)
       );
     } catch (error) {
       try {
@@ -268,7 +268,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     }
     await this.preflightSignalRefFallback(signal);
     state.appendedMemory = await this.dependencies.memoryService.create(
-      buildMemoryInput(signal, [evidenceRef], this.enrichmentIntent(signal))
+      buildMemoryInput(signal, [evidenceRef], this.enrichmentIntent(signal), this.dependencies.deriveFacetTags === true)
     );
     state.createdObjects.push({
       object_kind: state.appendedMemory.object_kind,

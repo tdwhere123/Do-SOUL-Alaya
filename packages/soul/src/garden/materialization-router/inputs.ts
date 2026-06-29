@@ -4,6 +4,7 @@ import {
   ScopeClass,
   SourceKind,
   StorageTier,
+  deriveFacetsFromText,
   type CandidateMemorySignal,
   type ClaimKind,
   type EnforcementLevel as EnforcementLevelValue,
@@ -236,10 +237,12 @@ function buildSignalPhysicalAnchor(
 export function buildMemoryInput(
   signal: CandidateMemorySignal,
   evidenceRefs: readonly string[],
-  enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"]
+  enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"],
+  deriveFacetTags = false
 ): MemoryMaterializationInput {
   const temporalProjection = readMemoryTemporalProjectionPayload(signal.raw_payload);
   const preferenceProfile = readMemoryPreferenceProfilePayload(signal.raw_payload);
+  const content = buildDistilledFact(signal);
   return {
     created_by: signal.source,
     dimension: toMemoryDimension(signal.object_kind),
@@ -250,7 +253,7 @@ export function buildMemoryInput(
     // Raw evidence lives in EvidenceCapsule.gist / .excerpt and is reached
     // via evidence_refs + soul.open_pointer. see buildDistilledFact for
     // caller-provided distilled_fact vs rule-based fallback.
-    content: buildDistilledFact(signal),
+    content,
     domain_tags: signal.domain_tags,
     evidence_refs: evidenceRefs,
     workspace_id: signal.workspace_id,
@@ -259,8 +262,22 @@ export function buildMemoryInput(
     storage_tier: StorageTier.HOT,
     ...temporalProjection,
     ...preferenceProfile,
+    ...buildFacetTagsProjection(content, deriveFacetTags),
     ...(enqueueEnrichment === undefined ? {} : { enqueueEnrichment })
   };
+}
+
+// Off → no facet_tags key (byte-identical to flat write); on → deterministic
+// content-derived tags aligned to the read-side query facets via the same vocabulary.
+function buildFacetTagsProjection(
+  content: string,
+  deriveFacetTags: boolean
+): Partial<Pick<MemoryMaterializationInput, "facet_tags">> {
+  if (!deriveFacetTags) {
+    return {};
+  }
+  const facets = deriveFacetsFromText(content);
+  return facets.length === 0 ? {} : { facet_tags: facets.map((facet) => ({ facet })) };
 }
 
 // invariant: the enrich_pending no-drop intent carried into a memory-creating

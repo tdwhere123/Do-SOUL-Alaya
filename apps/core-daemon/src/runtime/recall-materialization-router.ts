@@ -43,6 +43,7 @@ export function createSignalMaterializationRuntime(input: {
     retainUnroutedHighConfidenceFacts: routerOptions.retainUnroutedHighConfidenceFacts,
     fullTurnEvidenceExcerpt: routerOptions.fullTurnEvidenceExcerpt,
     projectionRoutingEnabled: routerOptions.projectionRoutingEnabled,
+    deriveFacetTags: routerOptions.deriveFacetTags,
     ...(routerOptions.materializationConfidenceFloor === undefined
       ? {}
       : { materializationConfidenceFloor: routerOptions.materializationConfidenceFloor })
@@ -86,12 +87,17 @@ function readMaterializationRouterOptions() {
       process.env.ALAYA_EVIDENCE_FULL_TURN !== "false",
     // Defaults OFF so a merge never flips durable write behavior pre-bench.
     projectionRoutingEnabled: readProjectionRoutingEnabled(),
+    deriveFacetTags: readFacetTagsEnabled(),
     materializationConfidenceFloor: readMaterializationConfidenceFloor()
   };
 }
 
 function readProjectionRoutingEnabled(): boolean {
   return /^(?:1|true|on|yes)$/iu.test(process.env.ALAYA_RECALL_PROJECTIONS ?? "");
+}
+
+function readFacetTagsEnabled(): boolean {
+  return /^(?:1|true|on|yes)$/iu.test(process.env.ALAYA_RECALL_FACET_TAGS ?? "");
 }
 
 function readMaterializationConfidenceFloor(): number | undefined {
