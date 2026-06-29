@@ -4,6 +4,8 @@ export * from "./governance/budget-bankruptcy-service.js";
 export * from "./governance/canonical-alias-service.js";
 export * from "./governance/claim-service.js";
 export * from "./path-graph/coherence-edge-producer-service.js";
+export * from "./path-graph/answers-with-edge-producer-service.js";
+export * from "./path-graph/hq-answer-overlap.js";
 export * from "./governance/constitutional-fragment-service.js";
 export * from "./security/constraint-proxy.js";
 export * from "./conversation/context-lens-assembler.js";

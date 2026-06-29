@@ -184,6 +184,7 @@ export type CreateGardenRuntimeInput = {
   readonly pathPlasticityService?: Pick<PathPlasticityService, "computeAndApplyPlasticity">;
   readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
   readonly coherenceEdgeProducerPort?: BulkEmbeddingCoherencePort;
+  readonly answersWithEdgeProducerPort?: BulkEmbeddingCoherencePort;
   readonly configService?: {
     getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;
     getSoulConfig?(workspaceId: string): Promise<SoulConfig>;

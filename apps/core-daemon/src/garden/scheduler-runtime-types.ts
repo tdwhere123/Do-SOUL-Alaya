@@ -60,6 +60,13 @@ export type CreateGardenSchedulerRuntimeSupportInput = Readonly<{
       readonly objectIds: readonly string[];
     }): Promise<unknown>;
   };
+  readonly answersWithEdgeProducerPort?: {
+    crystallizeForBackfill(input: {
+      readonly workspaceId: string;
+      readonly runId: string | null;
+      readonly objectIds: readonly string[];
+    }): Promise<unknown>;
+  };
   readonly configService?: {
     getSoulConfig?(workspaceId: string): Promise<SoulConfig>;
   };

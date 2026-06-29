@@ -23,6 +23,7 @@ import {
   type SubmitCandidateInput
 } from "./path-relation-proposal-materialization.js";
 export {
+  ANSWERS_WITH_SEED_PROFILE,
   AUTO_BUILD_GOVERNANCE_CEILING,
   COHERES_WITH_SEED_PROFILE,
   CO_RECALLED_SEED_PROFILE,

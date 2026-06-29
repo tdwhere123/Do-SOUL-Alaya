@@ -280,6 +280,30 @@ export interface BenchDaemonHandle {
     readonly minted: number;
   }>;
   /**
+   * @anchor accrueAnswersWithCoRelevance — EXPERIMENT (S2): ingestion-time
+   * answers_with crystallization (ALAYA_EXP_ANSWERS_WITH).
+   *
+   * Mints SPARSE answer-relation edges among the question's seeded memory_entry
+   * ids whose pooled HQ content-token sets overlap (>= bar). Unlike coherence
+   * (object cosine) the signal is answerhood — two memories answering the same
+   * batch of questions — so path_expansion bridges answer-co-relevant gold the
+   * co-occurrence topology cannot. Requires memory_hq pre-filled (S1 import).
+   *
+   * see also: packages/core/src/path-graph/hq-answer-overlap.ts
+   */
+  accrueAnswersWithCoRelevance(
+    members: readonly { readonly memoryId: string; readonly sessionId: string }[],
+    options: {
+      readonly bar: number;
+      readonly capPerNode: number;
+      readonly crossSessionOnly: boolean;
+    }
+  ): Promise<{
+    readonly coRelevantPairs: number;
+    readonly keptPairs: number;
+    readonly minted: number;
+  }>;
+  /**
    * @anchor queryTokenMetrics — event-sourced token-economy reader.
    *
    * Re-reads the bench run's EventLog (the SAME read pattern as
@@ -340,6 +364,7 @@ export interface BenchWorkspaceHandle {
   proposeSynthesis: BenchDaemonHandle["proposeSynthesis"];
   accrueSessionCoRecall: BenchDaemonHandle["accrueSessionCoRecall"];
   accrueCoherenceCoRecall: BenchDaemonHandle["accrueCoherenceCoRecall"];
+  accrueAnswersWithCoRelevance: BenchDaemonHandle["accrueAnswersWithCoRelevance"];
   queryTokenMetrics: BenchDaemonHandle["queryTokenMetrics"];
   queryEdgeProposalKpiRows: BenchDaemonHandle["queryEdgeProposalKpiRows"];
   detach(): Promise<void>;

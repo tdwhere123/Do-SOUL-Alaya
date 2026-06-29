@@ -95,6 +95,7 @@ async function runEmbeddingBackfillTask(
   try {
     const result = await resolveEmbeddingBackfillResult(input, task);
     await runEmbeddingCoherenceFollowUp(input, task, result.objectsAffected);
+    await runEmbeddingAnswersWithFollowUp(input, task, result.objectsAffected);
     await reportEmbeddingBackfillCompletion(input, task, completedAt, true, result.auditEntries, null, result.objectsAffected);
     return Object.freeze({
       success: true,
@@ -157,6 +158,28 @@ async function runEmbeddingCoherenceFollowUp(
     input.warn("coherence crystallization failed after embedding backfill", {
       workspace_id: task.workspace_id,
       error: coherenceError instanceof Error ? coherenceError.message : String(coherenceError)
+    });
+  }
+}
+
+async function runEmbeddingAnswersWithFollowUp(
+  input: CreateGardenSchedulerRuntimeSupportInput,
+  task: Readonly<GardenTaskDescriptor>,
+  objectsAffected: readonly string[]
+): Promise<void> {
+  if (input.answersWithEdgeProducerPort === undefined || objectsAffected.length < 2) {
+    return;
+  }
+  try {
+    await input.answersWithEdgeProducerPort.crystallizeForBackfill({
+      workspaceId: task.workspace_id,
+      runId: null,
+      objectIds: objectsAffected
+    });
+  } catch (answersWithError) {
+    input.warn("answers_with crystallization failed after embedding backfill", {
+      workspace_id: task.workspace_id,
+      error: answersWithError instanceof Error ? answersWithError.message : String(answersWithError)
     });
   }
 }

@@ -31,6 +31,7 @@ interface BenchWorkspaceBindings {
   readonly proposeSynthesis: BenchDaemonHandle["proposeSynthesis"];
   readonly accrueSessionCoRecall: BenchDaemonHandle["accrueSessionCoRecall"];
   readonly accrueCoherenceCoRecall: BenchDaemonHandle["accrueCoherenceCoRecall"];
+  readonly accrueAnswersWithCoRelevance: BenchDaemonHandle["accrueAnswersWithCoRelevance"];
   readonly queryTokenMetrics: (
     workspaceId: string
   ) => Promise<BenchTokenMetrics>;
@@ -187,6 +188,7 @@ function buildBenchWorkspaceHandle(
     proposeSynthesis: bindings.proposeSynthesis,
     accrueSessionCoRecall: bindings.accrueSessionCoRecall,
     accrueCoherenceCoRecall: bindings.accrueCoherenceCoRecall,
+    accrueAnswersWithCoRelevance: bindings.accrueAnswersWithCoRelevance,
     queryTokenMetrics: async () =>
       await bindings.queryTokenMetrics(workspace.workspaceId),
     queryEdgeProposalKpiRows: async () =>

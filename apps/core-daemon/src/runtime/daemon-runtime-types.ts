@@ -9,6 +9,7 @@ import type { McpMemoryToolHandler } from "../mcp-memory/tool-handler.js";
 import type { RecallUtilizationService } from "../services/recall-utilization-service.js";
 import type { TrustStateRecorder } from "../trust/state.js";
 import type {
+  AnswerCoRelevancePairSourcePort,
   EmbeddingRecallService,
   PathRelationProposalService,
   RecallService,
@@ -73,6 +74,9 @@ export interface AlayaDaemonRuntimeServices {
     EmbeddingRecallService,
     "warmQueryEmbeddings" | "coherentPairKeys"
   >;
+  // S2 answers_with: HQ answer-overlap pair source over memory_hq; null when the
+  // store is unavailable. Inert until a flag-gated producer (bench/garden) drives it.
+  readonly answersWithPairSource?: AnswerCoRelevancePairSourcePort;
   readonly graphHealthService: GraphHealthService;
   readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig">;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;

@@ -1,5 +1,7 @@
 import type { AlayaDaemonRuntime } from "./daemon-runtime-types.js";
 import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
+import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
+import { HqAnswerOverlapPairSource } from "@do-soul/alaya-core";
 
 type FinalizeDaemonRuntimeWiringInput = {
   readonly [key: string]: any;
@@ -214,6 +216,11 @@ function createLifecycleControlsInput(input: FinalizeDaemonRuntimeWiringInput) {
   };
 }
 
+function createAnswersWithPairSourceExport(input: FinalizeDaemonRuntimeWiringInput) {
+  const hqRepo = createOptionalMemoryHqRepo(input.database);
+  return hqRepo === null ? {} : { answersWithPairSource: new HqAnswerOverlapPairSource(hqRepo) };
+}
+
 function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
   return {
     environmentStatusService: input.environmentStatusService,
@@ -221,6 +228,7 @@ function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
     ...(input.embeddingRecallService === undefined
       ? {}
       : { embeddingRecallService: input.embeddingRecallService }),
+    ...createAnswersWithPairSourceExport(input),
     graphHealthService: input.graphHealthService,
     configService: input.configService,
     recallService: input.recallService,

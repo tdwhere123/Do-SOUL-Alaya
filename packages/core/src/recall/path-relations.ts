@@ -19,6 +19,12 @@ const PATH_SUPPRESSION_STRENGTH_FLOOR = 0.6;
 // see also: recall-service.ts collectNegativePathSuppressions, path-relations.ts scorePathRelationSuppression, fusion-delivery.ts PATH_SUPPRESSION_RESIDUAL_FLOOR.
 export const PATH_SUPPRESSION_MAX_PER_TARGET = 0.27;
 
+// Additive bonus for the answer-relation edge (S2): at equal strength/governance an
+// answers_with edge outranks a co-occurrence edge (coheres_with/co_recalled). Keyed on
+// relation_kind so it lifts both planes (flat admitPathExpansionTargets + conformant
+// buildPathInflowByTarget) in one place. Modest; bench-tunable.
+const ANSWERS_WITH_EXPANSION_BONUS = 0.1;
+
 export function scorePathRelationExpansion(path: Readonly<PathRelation>): number {
   const governanceBoost =
     path.legitimacy.governance_class === "recall_allowed" ||
@@ -30,11 +36,14 @@ export function scorePathRelationExpansion(path: Readonly<PathRelation>): number
     path.plasticity_state.stability_class === "pinned"
       ? 0.1
       : 0;
+  const answerhoodBoost =
+    path.constitution.relation_kind === "answers_with" ? ANSWERS_WITH_EXPANSION_BONUS : 0;
   return clamp01(
     path.plasticity_state.strength * 0.55 +
       path.effect_vector.recall_bias * 0.25 +
       governanceBoost +
-      stabilityBoost
+      stabilityBoost +
+      answerhoodBoost
   );
 }
 

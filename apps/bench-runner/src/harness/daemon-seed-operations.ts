@@ -9,6 +9,7 @@ import {
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
 import {
+  AnswersWithEdgeProducerService,
   CoherenceEdgeProducerService,
   PATH_RELATION_PROPOSE_THRESHOLD
 } from "@do-soul/alaya-core";
@@ -469,6 +470,38 @@ export async function accrueCoherenceCoRecall(
       sessionId: member.sessionId
     })),
     floor: options.floor,
+    capPerNode: options.capPerNode,
+    crossSessionOnly: options.crossSessionOnly
+  });
+}
+
+// S2 probe: mints answers_with edges from already-seeded memory_hq HQ-overlap.
+// Mirrors accrueCoherenceCoRecall but reads the HQ pair source; never reseeds/re-embeds.
+export async function accrueAnswersWithCoRelevance(
+  input: CreateBenchSeedOpsInput,
+  members: readonly { readonly memoryId: string; readonly sessionId: string }[],
+  options: {
+    readonly bar: number;
+    readonly capPerNode: number;
+    readonly crossSessionOnly: boolean;
+  }
+): Promise<{ readonly coRelevantPairs: number; readonly keptPairs: number; readonly minted: number }> {
+  const pairSource = input.activeRuntime.services.answersWithPairSource;
+  if (pairSource === undefined || members.length < 2) {
+    return { coRelevantPairs: 0, keptPairs: 0, minted: 0 };
+  }
+  return new AnswersWithEdgeProducerService({
+    pairSource,
+    mintPort: input.activeRuntime.services.pathRelationProposalService,
+    warn: (message, meta) => console.error(`[answers-with] ${message}`, meta)
+  }).crystallize({
+    workspaceId: input.activeContext.workspaceId,
+    runId: input.activeContext.runId,
+    objects: members.map((member) => ({
+      objectId: member.memoryId,
+      sessionId: member.sessionId
+    })),
+    bar: options.bar,
     capPerNode: options.capPerNode,
     crossSessionOnly: options.crossSessionOnly
   });
