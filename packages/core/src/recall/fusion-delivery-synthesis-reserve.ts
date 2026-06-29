@@ -167,6 +167,13 @@ export function isStructuralRescueCandidate(
   return structuralRescueRelevanceSignal(candidate, supplementaryData) > 0;
 }
 
+// Default-off: topology-dominant reserve promotes co-occurrence noise into delivery (−3.2 any@10 on answer-relation
+// recall); structurally-connected golds are surfaced by the object-seeded path flood instead. Opt-in to re-enable.
+function structuralReserveEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_STRUCTURAL_RESERVE;
+  return raw === "on" || raw === "1" || raw === "true";
+}
+
 // invariant: structural reserve inserts above the synthesis tail and caps combined reserve slots at maxEntries - 1.
 export function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInput>(
   deliveryOrdered: readonly T[],
@@ -174,7 +181,7 @@ export function reserveStructuralDeliverySlots<T extends FusedRecallCandidateInp
   maxEntries: number,
   reservedTailCount: number
 ): readonly T[] {
-  if (maxEntries <= 1) {
+  if (maxEntries <= 1 || !structuralReserveEnabled()) {
     return deliveryOrdered;
   }
   const naturalWindowSize = Math.min(maxEntries, deliveryOrdered.length);

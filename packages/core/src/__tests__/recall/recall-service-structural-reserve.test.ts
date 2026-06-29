@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, SynthesisStatus, type MemoryEntry, type PathAnchorRef, type SynthesisCapsule } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import type { RecallServicePathExpansionPort } from "../../recall/recall-service-types.js";
@@ -6,6 +6,8 @@ import { createDependencies, createMemoryEntry, createPathRelation, createTaskSu
 
 describe("RecallService", () => {
 describe("structural delivery reserve", () => {
+  beforeEach(() => { process.env.ALAYA_RECALL_STRUCTURAL_RESERVE = "on"; });
+  afterEach(() => { delete process.env.ALAYA_RECALL_STRUCTURAL_RESERVE; });
 // Build the anchor + lexical multi-stream decoys + a structural gold that
     // expands off the anchor via path_expansion. The anchor is the entity seed;
     // each decoy holds a strong path so the gold ranks LOW on the path_expansion

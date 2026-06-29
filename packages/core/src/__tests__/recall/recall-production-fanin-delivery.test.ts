@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ControlPlaneObjectKind,
   FormationKind,
@@ -183,6 +183,8 @@ async function deliverSiblingViaPath(relationKind: string): Promise<{
 }
 
 describe("production-path earned co_recalled fan-in delivery (real RecallService.recall)", () => {
+  beforeEach(() => { process.env.ALAYA_RECALL_STRUCTURAL_RESERVE = "on"; });
+  afterEach(() => { delete process.env.ALAYA_RECALL_STRUCTURAL_RESERVE; });
   it("delivers a zero-relevance gold sibling reached via a real co_recalled PathRelation (earned fan-in reserve exemption, no injected flag)", async () => {
     const { delivered, sourceChannels, deliveredRank, naturalWindowSize, totalDelivered } =
       await deliverSiblingViaPath("co_recalled");
