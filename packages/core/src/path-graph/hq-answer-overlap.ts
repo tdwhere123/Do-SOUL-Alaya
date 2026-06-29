@@ -3,9 +3,9 @@ import type { AnswerCoRelevancePairSourcePort } from "./answers-with-edge-produc
 // Default min shared content-token count for an answers_with edge; bench-tunable.
 export const DEFAULT_ANSWER_OVERLAP_BAR = 3;
 
-// Question-template + high-frequency function words stripped before overlap so two
-// HQ pools do not "co-answer" merely by sharing "what/how/the/is". Only content
-// tokens drive the signal. CJK question markers included defensively.
+// Latin question-template + high-frequency function words stripped before overlap so
+// two HQ pools do not "co-answer" merely by sharing "what/how/the/is". CJK templates
+// live in CJK_STOPWORD_BIGRAMS (different segmentation, different unit).
 const HQ_STOPWORDS: ReadonlySet<string> = new Set([
   "what", "how", "when", "where", "who", "why", "which", "whose", "whom",
   "is", "are", "was", "were", "be", "been", "being", "am",
@@ -17,22 +17,72 @@ const HQ_STOPWORDS: ReadonlySet<string> = new Set([
   "into", "over", "about", "out", "up", "down", "off",
   "it", "its", "they", "them", "their", "you", "your", "yours",
   "he", "she", "his", "her", "we", "our", "us", "i", "my", "me", "mine",
-  "not", "no", "yes",
-  "什么", "如何", "怎么", "怎样", "何时", "哪里", "为什么", "是否"
+  "not", "no", "yes"
 ]);
 
-// Pool a memory's HQ list into one normalized content-token set: lowercase, split
-// on non-alphanumeric (unicode), drop stopwords and single-char tokens.
+// Scripts whose runs carry no word delimiters; segmented by character bigram below.
+// Add a new delimiter-less script here (e.g. Thai) to extend multilingual coverage.
+const CJK_SCRIPT_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const WORD_CHAR_RE = /[\p{L}\p{N}]/u;
+
+// Chinese question-template / function bigrams stripped so two CJK HQ pools do not
+// "co-answer" merely by sharing "什么/如何/是否/时候". Multi-char templates register
+// their core bigrams (什么时候 -> 什么 + 时候).
+const CJK_STOPWORD_BIGRAMS: ReadonlySet<string> = new Set([
+  "什么", "为什", "时候", "如何", "怎么", "怎样", "何时", "为何",
+  "哪里", "哪个", "哪些", "是否", "多少", "几个", "可以", "能否"
+]);
+
+// Pool a memory's HQ list into one normalized content-token set. Latin/other word
+// runs split on punctuation/whitespace (byte-identical to non-CJK pre-N1 behavior);
+// CJK runs lack delimiters so they segment by character bigram (sharper than unigram:
+// single Han chars over-match; one shared bigram ~= one shared Latin word, keeping the
+// overlap bar self-consistent across scripts).
 export function normalizeHqTokens(hqs: readonly string[]): ReadonlySet<string> {
   const tokens = new Set<string>();
   for (const hq of hqs) {
-    for (const raw of hq.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
-      if (raw.length >= 2 && !HQ_STOPWORDS.has(raw)) {
-        tokens.add(raw);
+    let latin = "";
+    let cjk = "";
+    const flushLatin = (): void => {
+      if (latin.length >= 2 && !HQ_STOPWORDS.has(latin)) {
+        tokens.add(latin);
+      }
+      latin = "";
+    };
+    const flushCjk = (): void => {
+      addCjkBigrams(cjk, tokens);
+      cjk = "";
+    };
+    for (const ch of hq.toLowerCase()) {
+      if (CJK_SCRIPT_RE.test(ch)) {
+        flushLatin();
+        cjk += ch;
+      } else if (WORD_CHAR_RE.test(ch)) {
+        flushCjk();
+        latin += ch;
+      } else {
+        flushLatin();
+        flushCjk();
       }
     }
+    flushLatin();
+    flushCjk();
   }
   return tokens;
+}
+
+function addCjkBigrams(run: string, tokens: Set<string>): void {
+  const chars = [...run];
+  if (chars.length === 1) {
+    tokens.add(chars[0]!);
+    return;
+  }
+  for (let i = 0; i + 1 < chars.length; i += 1) {
+    const bigram = chars[i]! + chars[i + 1]!;
+    if (!CJK_STOPWORD_BIGRAMS.has(bigram)) {
+      tokens.add(bigram);
+    }
+  }
 }
 
 function sharedTokenCount(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
