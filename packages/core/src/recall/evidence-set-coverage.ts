@@ -1,24 +1,22 @@
 import type { RecallSupplementaryData } from "./recall-service-types.js";
 import { type DeliveryCandidate, sessionKeyOf } from "./coverage-delivery-signals.js";
 
-// S4 delivery-time set-coverage: the evidence axis (R_E, AUC ~0.95) is a coverage signal, not a
-// point-wise rank term. Here it nudges complementary golds into the delivery window via two bounded
-// utilities layered on facet diversity — never touching fused_score/fused_rank. Default-off so the
-// off path stays byte-identical to facet-only coverage; only on when ALAYA_RECALL_EVIDENCE_SET_COVERAGE set.
+// S4 delivery-time set-coverage, orthogonal to ranking (rank-then-cover). Ranking already scores the
+// evidence axis via g(R_E); this stage keys purely on set membership/complementarity — flat nudges
+// for a complementary member of an evidence-anchored session and for joining a selected answers_with
+// cluster. The evidence axis is read only as a boolean membership flag (which sessions anchor), never
+// as a magnitude, so R_E is not re-scored on top of its rank contribution. Never touches
+// fused_score/fused_rank. Default-off; on only under ALAYA_RECALL_EVIDENCE_SET_COVERAGE.
 
 export const EVIDENCE_SET_COVERAGE_ENV = "ALAYA_RECALL_EVIDENCE_SET_COVERAGE";
 
-// Near-tie nudges, each bounded below one strong facet (0.12) and summed under an overall cap, so
-// coverage rescues a buried complementary gold without flipping a clearly-stronger answer.
-const MAX_SESSION_BONUS = 0.06;
+// Flat, set-membership nudges, each bounded below one strong facet (0.12) and summed under an overall
+// cap, so coverage rescues a buried complementary gold without flipping a clearly-stronger answer.
+const SESSION_COVERAGE_BONUS = 0.06;
 const MAX_CLUSTER_BONUS = 0.06;
 const MAX_EVIDENCE_SET_BONUS = 0.1;
-// A selected candidate anchors its session for R_E propagation only if its evidence magnitude is
-// strong relative to the pool — keeps weak head-session distractors from anchoring.
-const ANCHOR_EVIDENCE_RATIO = 0.5;
 
 export interface EvidenceSetCoverageState {
-  readonly evidenceMax: number;
   readonly clusterWeightMax: number;
   readonly anchorSessions: Set<string>;
   readonly selectedObjectIds: Set<string>;
@@ -33,33 +31,28 @@ export function evidenceSetCoverageEnabled(): boolean {
   return !(normalized === "" || normalized === "0" || normalized === "false" || normalized === "off");
 }
 
-// R_E proxy, one function for both services: conformant reads the evidence axis directly; flat
-// degrades to the source-proximity / source-evidence-agreement contributions, then the raw score.
-export function candidateEvidenceMagnitude(
+// Set-membership flag (boolean, never a magnitude): the candidate carries evidence support via the
+// conformant evidence axis or the flat source-proximity / source-evidence-agreement streams. Used
+// only to decide which sessions anchor; the session bonus is flat, so R_E is never re-scored here.
+function isEvidenceMember(
   candidate: DeliveryCandidate,
   supplementaryData: RecallSupplementaryData
-): number {
+): boolean {
   const axisEvidence = candidate.fusion.per_axis_contribution?.evidence;
   if (axisEvidence !== undefined) {
-    return Math.max(0, axisEvidence);
+    return axisEvidence > 0;
   }
   const contribution = candidate.fusion.fused_rank_contribution_per_stream;
-  const streamSum =
-    Math.max(0, contribution.source_proximity ?? 0) + Math.max(0, contribution.source_evidence_agreement ?? 0);
-  if (streamSum > 0) {
-    return streamSum;
+  if ((contribution.source_proximity ?? 0) > 0 || (contribution.source_evidence_agreement ?? 0) > 0) {
+    return true;
   }
-  return Math.max(0, supplementaryData.sourceProximityScores[candidate.entry.object_id] ?? 0);
+  return (supplementaryData.sourceProximityScores[candidate.entry.object_id] ?? 0) > 0;
 }
 
 export function createEvidenceSetCoverageState<T extends DeliveryCandidate>(
   pool: readonly T[],
   supplementaryData: RecallSupplementaryData
 ): EvidenceSetCoverageState {
-  let evidenceMax = 0;
-  for (const candidate of pool) {
-    evidenceMax = Math.max(evidenceMax, candidateEvidenceMagnitude(candidate, supplementaryData));
-  }
   let clusterWeightMax = 0;
   const inflow = supplementaryData.pathInflowByTarget;
   if (inflow !== undefined) {
@@ -70,7 +63,6 @@ export function createEvidenceSetCoverageState<T extends DeliveryCandidate>(
     }
   }
   return {
-    evidenceMax,
     clusterWeightMax,
     anchorSessions: new Set<string>(),
     selectedObjectIds: new Set<string>(),
@@ -84,11 +76,8 @@ export function recordEvidenceSetSelection(
   supplementaryData: RecallSupplementaryData
 ): void {
   state.selectedObjectIds.add(candidate.entry.object_id);
-  if (state.evidenceMax > 0) {
-    const magnitude = candidateEvidenceMagnitude(candidate, supplementaryData);
-    if (magnitude >= ANCHOR_EVIDENCE_RATIO * state.evidenceMax) {
-      state.anchorSessions.add(sessionKeyOf(candidate.entry));
-    }
+  if (isEvidenceMember(candidate, supplementaryData)) {
+    state.anchorSessions.add(sessionKeyOf(candidate.entry));
   }
   for (const edge of supplementaryData.pathInflowByTarget?.[candidate.entry.object_id] ?? []) {
     if (edge.weight > (state.selectedSeeds.get(edge.seedObjectId) ?? 0)) {
@@ -103,9 +92,8 @@ export function evidenceSetCoverageBonus(
   supplementaryData: RecallSupplementaryData
 ): number {
   let bonus = 0;
-  if (state.evidenceMax > 0 && state.anchorSessions.has(sessionKeyOf(candidate.entry))) {
-    const magnitude = candidateEvidenceMagnitude(candidate, supplementaryData);
-    bonus += Math.min(MAX_SESSION_BONUS, (magnitude / state.evidenceMax) * MAX_SESSION_BONUS);
+  if (state.anchorSessions.has(sessionKeyOf(candidate.entry))) {
+    bonus += SESSION_COVERAGE_BONUS;
   }
   const clusterWeight = bestClusterWeight(state, candidate, supplementaryData);
   if (clusterWeight > 0 && state.clusterWeightMax > 0) {

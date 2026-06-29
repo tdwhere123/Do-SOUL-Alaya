@@ -8,7 +8,7 @@ const OBJ = "00000000-0000-4000-8000-0000000000d4";
 
 afterEach(() => {
   delete process.env.ALAYA_RECALL_PATH_FLOW;
-  delete process.env.ALAYA_RECALL_CONFORMANT;
+  delete process.env.ALAYA_RECALL_FLAT_BASELINE;
 });
 
 function makeAdder(): {
@@ -49,7 +49,8 @@ function admitPathExpansion(
 }
 
 describe("path-axis real flow admission (V3)", () => {
-  it("flag OFF keeps the edge-strength max and ignores the flow value", () => {
+  it("flat-baseline keeps the edge-strength max and ignores the flow value", () => {
+    process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
     const { add, pathExpansionScores } = makeAdder();
     admitPathExpansion(add, 0.5, 0.3);
     admitPathExpansion(add, 0.4, 0.9);
@@ -75,8 +76,7 @@ describe("path-axis real flow admission (V3)", () => {
     expect(structuralScores.get(OBJ)).toBeCloseTo(0.5, 9);
   });
 
-  it("conformant gate also routes path_expansion to accumulated flow", () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
+  it("four-axis default routes path_expansion to accumulated flow", () => {
     const { add, pathExpansionScores } = makeAdder();
     admitPathExpansion(add, 0.5, 0.3);
     admitPathExpansion(add, 0.5, 0.4);

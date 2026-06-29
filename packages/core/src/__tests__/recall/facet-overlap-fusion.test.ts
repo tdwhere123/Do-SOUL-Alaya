@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import { buildRecallFusionDetails } from "../../recall/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
@@ -61,8 +61,14 @@ function buildFusion(supplementary: RecallSupplementaryData) {
   });
 }
 
+// The additive facet_overlap stream lives in the flat path, reachable only under the kill-switch (four-axis folds facet into R_O).
+beforeEach(() => {
+  process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
+});
+
 afterEach(() => {
   delete process.env.ALAYA_RECALL_FACET_OVERLAP;
+  delete process.env.ALAYA_RECALL_FLAT_BASELINE;
 });
 
 describe("facet_overlap fusion stream", () => {

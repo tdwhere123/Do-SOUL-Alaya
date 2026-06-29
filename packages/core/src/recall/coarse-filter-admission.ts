@@ -10,7 +10,7 @@ import {
   uniquePlanes,
   type CoarseCandidateDraft
 } from "./coarse-candidates.js";
-import { conformantFusionEnabled } from "./conformant-fusion-scoring.js";
+import { fourAxisAssemblyEnabled } from "./conformant-fusion-scoring.js";
 
 export type AddCoarseCandidate = (
   entry: Readonly<MemoryEntry>,
@@ -173,7 +173,7 @@ function updatePathExpansionScore(
   evidenceStructuralScore: number,
   pathFlowScore: number | undefined
 ): void {
-  if ((pathFlowEnabled() || conformantFusionEnabled()) && pathFlowScore !== undefined) {
+  if ((pathFlowEnabled() || fourAxisAssemblyEnabled()) && pathFlowScore !== undefined) {
     addScore(params.pathExpansionScores, objectId, pathFlowScore);
     return;
   }

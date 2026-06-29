@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension, StorageTier, type RecallPolicy } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import { compareRecallCandidates } from "../../recall/recall-service-helpers.js";
@@ -6,6 +6,9 @@ import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 import { WS, activeConstraint, candidate, deps, memory, pathRelation, task, withBudgets, withEmbedding } from "./recall-current-behavior-test-fixtures.js";
 
 describe("recall regression suite", () => {
+  // This suite pins the legacy flat-baseline delivery contract (retained under the kill-switch).
+  beforeEach(() => { process.env.ALAYA_RECALL_FLAT_BASELINE = "1"; });
+  afterEach(() => { delete process.env.ALAYA_RECALL_FLAT_BASELINE; });
 it.each([
     ["mixed dimensions", ["gold", "peer-1", "peer-2", "peer-3", "peer-4"]],
     ["warm workspace peers", ["gold", "warm-1", "warm-2", "warm-3", "warm-4"]],

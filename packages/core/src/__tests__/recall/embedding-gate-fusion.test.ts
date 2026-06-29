@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
@@ -24,9 +24,15 @@ const SINGLE_FACT_QUERY = "the staging database credential rotation tooling conf
 const GATE_ENV = [
   "ALAYA_RECALL_EMBED_GATE",
   "ALAYA_RECALL_EMBED_GATE_FLOOR",
-  "ALAYA_RECALL_EMBED_GATE_INTENTS"
+  "ALAYA_RECALL_EMBED_GATE_INTENTS",
+  "ALAYA_RECALL_FLAT_BASELINE"
 ] as const;
 const databases = new Set<StorageDatabase>();
+
+// The embedding gate lives in the flat surface path, reachable only under the kill-switch (four-axis is the default).
+beforeEach(() => {
+  process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
+});
 
 afterEach(() => {
   for (const database of databases) {

@@ -17,7 +17,7 @@ import {
   type PathGovernanceContribution
 } from "../path-graph/path-manifestation-policy.js";
 import { anchorMemoryId, buildPathInflowByTarget } from "./path-relations.js";
-import { conformantFusionEnabled } from "./conformant-fusion-scoring.js";
+import { fourAxisAssemblyEnabled } from "./conformant-fusion-scoring.js";
 
 // invariant: governance_class is a hard ceiling on recall manifestation; absent path expansion is fail-open, path read failure is fail-closed to the safe hint band.
 // The same anchor-keyed PathRelation load also yields the conformant path-flood inflow adjacency (zero extra DB).
@@ -55,7 +55,7 @@ export async function collectGovernancePathDerivations(params: {
   const contributionsByMemoryId = collectGovernanceContributions(paths, candidateIds);
   return Object.freeze({
     governanceCeilingByMemoryId: buildGovernanceCeilingByMemoryId(contributionsByMemoryId),
-    pathInflowByTarget: conformantFusionEnabled()
+    pathInflowByTarget: fourAxisAssemblyEnabled()
       ? Object.freeze(buildPathInflowByTarget(paths, candidateIds))
       : Object.freeze({})
   });

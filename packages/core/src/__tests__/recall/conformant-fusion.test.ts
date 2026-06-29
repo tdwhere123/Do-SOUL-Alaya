@@ -13,9 +13,16 @@ import {
   WorkspaceKind,
   WorkspaceState
 } from "@do-soul/alaya-protocol";
-import { applyPathSuppressionToFusionScores, buildRecallFusionDetails } from "../../recall/fusion-delivery-scoring.js";
+import {
+  applyPathSuppressionToFusionScores,
+  buildRecallFusionDetails,
+  flatBaselineEnabled,
+  fourAxisAssemblyEnabled
+} from "../../recall/fusion-delivery-scoring.js";
 import {
   compareConformantAxisRa,
+  resolveConformantCEmb,
+  resolveConformantCSurf,
   resolveConformantEvidenceBeta,
   resolveConformantFloodCapPerSource,
   resolveConformantFloodCapTotal,
@@ -35,9 +42,11 @@ const RUN = "run-1";
 const NOW = "2026-03-20T10:20:30.000Z";
 
 const CONFORMANT_ENV = [
-  "ALAYA_RECALL_CONFORMANT", "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_EVIDENCE_BETA",
-  "ALAYA_RECALL_CONF_FLOOD_CAP", "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL", "ALAYA_RECALL_CONF_LAMBDA",
-  "ALAYA_RECALL_CONF_GATE_FLOOR", "ALAYA_RECALL_CONF_EVIDENCE_DECAY", "ALAYA_RECALL_SYNTHESIS",
+  "ALAYA_RECALL_FLAT_BASELINE", "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_EVIDENCE_BETA",
+  "ALAYA_RECALL_CONF_FLOOD_CAP", "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL", "ALAYA_RECALL_CONF_RHO_LEX",
+  "ALAYA_RECALL_CONF_RHO_SUB", "ALAYA_RECALL_CONF_RHO_PATH", "ALAYA_RECALL_CONF_RHO_EVIDENCE",
+  "ALAYA_RECALL_CONF_ECHO", "ALAYA_RECALL_CONF_STALE", "ALAYA_RECALL_CONF_C_SURF",
+  "ALAYA_RECALL_CONF_C_EMB", "ALAYA_RECALL_SYNTHESIS",
   "ALAYA_RECALL_FACET_OVERLAP", "ALAYA_RECALL_FACET_SLICE", "ALAYA_RECALL_PATH_FLOW",
   "ALAYA_RECALL_TEMPORAL_WINDOW"
 ] as const;
@@ -190,7 +199,8 @@ async function runFusion(
 const GENERIC_QUERY = "how does the staging release rotate database credentials and migration tooling";
 
 describe("conformant compositional combine (real SQLite)", () => {
-  it("flag OFF is byte-identical, deterministic, and emits no per_axis_* keys", async () => {
+  it("flat-baseline kill-switch is byte-identical, deterministic, and emits no per_axis_* keys", async () => {
+    process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
     const specs: readonly CandidateSpec[] = [
       { id: objectId(1), lexical: 1, evidence: 1, structural: 1 },
       { id: objectId(2), path: 1, sourceProximity: 1 },
@@ -210,7 +220,8 @@ describe("conformant compositional combine (real SQLite)", () => {
     }
   });
 
-  it("flag OFF ignores an injected inflow adjacency (flat path untouched)", async () => {
+  it("flat-baseline kill-switch ignores an injected inflow adjacency (flat path untouched)", async () => {
+    process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
     const specs: readonly CandidateSpec[] = [
       { id: objectId(1), lexical: 1 },
       { id: objectId(2), lexical: 0.2 }
@@ -225,19 +236,18 @@ describe("conformant compositional combine (real SQLite)", () => {
     }
   });
 
-  it("object collapse no-multicount: 3 correlated lexical hits give pure-max R_O, not an additive sum", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
+  it("object collapse no-multicount: correlated lexical views fold by NOR_ρ, bounded, never an additive sum", async () => {
     const all = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, trigram: 1, evidence: 1 }]);
     const one = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }]);
     const raAll = all.get(keyOf(objectId(1)))!.per_axis_contribution!.object;
     const raOne = one.get(keyOf(objectId(1)))!.per_axis_contribution!.object;
     expect(raAll).toBeGreaterThan(0.5);
+    // Redundant correlated views never exceed one clean primary hit, and R_O stays bounded in [0,1].
     expect(raAll).toBeLessThanOrEqual(raOne + 1e-9);
-    expect(raAll).toBeLessThan(2);
+    expect(raAll).toBeLessThanOrEqual(1 + 1e-9);
   });
 
   it("path is compositional: a high-R_O source floods its target; a candidate with no inflow gets ~0 path", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
     const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
     const target: CandidateSpec = { id: objectId(2) };
 
@@ -255,7 +265,6 @@ describe("conformant compositional combine (real SQLite)", () => {
   });
 
   it("path flood carries no free vote: inflow from a zero-R_O source lifts nothing", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
     const irrelevantSeed: CandidateSpec = { id: objectId(1) };
     const target: CandidateSpec = { id: objectId(2) };
     const fusion = await runFusion(GENERIC_QUERY, [irrelevantSeed, target], {
@@ -267,7 +276,6 @@ describe("conformant compositional combine (real SQLite)", () => {
   });
 
   it("a broad-but-weak multi-axis candidate no longer out-votes a magnitude-dominant one (no independent axis votes)", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
     const dominant: CandidateSpec = { id: objectId(1), lexical: 1, embedding: 1 };
     // path/sourceProximity present but, absent any inflow adjacency, contribute no free vote.
     const broadWeak: CandidateSpec = { id: objectId(2), lexical: 0.2, path: 0.3, sourceProximity: 0.3 };
@@ -279,7 +287,6 @@ describe("conformant compositional combine (real SQLite)", () => {
   });
 
   it("evidence is a multiplicative boost: g(0)=1 never penalizes, evidence lifts an already-active memory", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
     const noEvidence = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }]);
     const dry = noEvidence.get(keyOf(objectId(1)))!;
     // g(0)=1: with no flood, S == activation == R_O; a memory with no evidence is not penalized.
@@ -292,7 +299,6 @@ describe("conformant compositional combine (real SQLite)", () => {
   });
 
   it("evidence cannot inject noise: a zero-activation candidate stays 0 regardless of evidence", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
     const fusion = await runFusion(GENERIC_QUERY, [{ id: objectId(1), sourceProximity: 1 }]);
     const candidate = fusion.get(keyOf(objectId(1)))!;
     expect(candidate.per_axis_contribution!.object).toBe(0);
@@ -301,7 +307,6 @@ describe("conformant compositional combine (real SQLite)", () => {
   });
 
   it("governance caps the per-source flood without compressing the object seed", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
     const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
     const target: CandidateSpec = { id: objectId(2), lexical: 1 };
     // weight 10 makes R_O(seed)·weight overshoot any sane per-source cap.
@@ -321,22 +326,24 @@ describe("conformant compositional combine (real SQLite)", () => {
       .toBeCloseTo(wideTarget.per_axis_contribution!.object, 12);
   });
 
-  it("governance caps the total flood across converging sources", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
+  it("path inflow folds by NOR (bounded ≤1) and cap_tot clamps the converging total", async () => {
     process.env.ALAYA_RECALL_CONF_FLOOD_CAP = "1";
-    process.env.ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL = "1.5";
     const seedA: CandidateSpec = { id: objectId(1), lexical: 1 };
     const seedB: CandidateSpec = { id: objectId(2), lexical: 1 };
     const target: CandidateSpec = { id: objectId(3), lexical: 0.1 };
-    const fusion = await runFusion(GENERIC_QUERY, [seedA, seedB, target], {
-      inflow: {
-        [target.id]: [
-          { seedObjectId: seedA.id, weight: 2 },
-          { seedObjectId: seedB.id, weight: 2 }
-        ]
-      }
-    });
-    expect(fusion.get(keyOf(target.id))!.per_axis_contribution!.path).toBeCloseTo(1.5, 9);
+    const inflow: InflowMap = {
+      [target.id]: [
+        { seedObjectId: seedA.id, weight: 2 },
+        { seedObjectId: seedB.id, weight: 2 }
+      ]
+    };
+    // Two saturating sources fold by NOR to ≤1 — never the additive 2.
+    const folded = await runFusion(GENERIC_QUERY, [seedA, seedB, target], { inflow });
+    expect(folded.get(keyOf(target.id))!.per_axis_contribution!.path).toBeCloseTo(1, 9);
+
+    process.env.ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL = "0.5";
+    const clamped = await runFusion(GENERIC_QUERY, [seedA, seedB, target], { inflow });
+    expect(clamped.get(keyOf(target.id))!.per_axis_contribution!.path).toBeCloseTo(0.5, 9);
   });
 
   it("temporal split: object-time lifts R_O and the now-distance recency is not consulted", async () => {
@@ -345,12 +352,13 @@ describe("conformant compositional combine (real SQLite)", () => {
       id: objectId(1), lexical: 0.5, eventStart: "2024-03-15T00:00:00.000Z", eventEnd: "2024-03-15T00:00:00.000Z"
     };
     const noEvent: CandidateSpec = { id: objectId(2), lexical: 0.5 };
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
+    // A stronger lexical sibling keeps the in-window R_lex below saturation so the time facet is observable.
+    const lexAnchor: CandidateSpec = { id: objectId(3), lexical: 1 };
 
-    const fusion = await runFusion(query, [inWindow, noEvent]);
+    const fusion = await runFusion(query, [inWindow, noEvent, lexAnchor]);
     const lift = fusion.get(keyOf(inWindow.id))!.per_axis_contribution!.object
       - fusion.get(keyOf(noEvent.id))!.per_axis_contribution!.object;
-    expect(lift).toBeGreaterThan(0.5);
+    expect(lift).toBeGreaterThan(0);
 
     const farNow = await runFusion(query, [inWindow], { nowIso: "2026-06-28T00:00:00.000Z" });
     const nearNow = await runFusion(query, [inWindow], { nowIso: "2024-03-16T00:00:00.000Z" });
@@ -358,19 +366,32 @@ describe("conformant compositional combine (real SQLite)", () => {
       .toBeCloseTo(farNow.get(keyOf(inWindow.id))!.fused_score, 12);
   });
 
-  it("single_fact intent exempts the lexical surface from the embedding gate (γ→1)", async () => {
+  it("single_fact: c_emb=0 keeps lexical truth dominant — an embedding-only candidate is never lifted", async () => {
     const singleFactQuery = "what is the staging database password";
     expect(classifyRecallIntent(compileRecallQueryProbes(singleFactQuery))).toBe("single_fact");
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
+    // Lexical hit with a weak embedding vs a no-lexical candidate with a strong one; single_fact zeroes the embedding facet.
     const fusion = await runFusion(singleFactQuery, [
       { id: objectId(1), lexical: 1, embedding: 0.1 },
       { id: objectId(2), embedding: 1 }
     ]);
-    expect(fusion.get(keyOf(objectId(1)))!.per_axis_contribution!.object).toBeGreaterThan(0.9);
+    expect(fusion.get(keyOf(objectId(1)))!.per_axis_contribution!.object)
+      .toBeGreaterThan(fusion.get(keyOf(objectId(2)))!.per_axis_contribution!.object);
+    expect(fusion.get(keyOf(objectId(2)))!.per_axis_contribution!.object).toBe(0);
   });
 
-  it("conformant supersedes synthesis when both flags are on", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
+  it("non-single_fact: the embedding co-facet lifts R_O above a surface-only sibling, absence never demotes it", async () => {
+    expect(classifyRecallIntent(compileRecallQueryProbes(GENERIC_QUERY))).not.toBe("single_fact");
+    const fusion = await runFusion(GENERIC_QUERY, [
+      { id: objectId(1), lexical: 1 },
+      { id: objectId(2), lexical: 1, embedding: 1 }
+    ]);
+    const surfaceOnly = fusion.get(keyOf(objectId(1)))!.per_axis_contribution!.object;
+    const withEmbedding = fusion.get(keyOf(objectId(2)))!.per_axis_contribution!.object;
+    expect(surfaceOnly).toBeGreaterThan(0);
+    expect(withEmbedding).toBeGreaterThan(surfaceOnly);
+  });
+
+  it("four-axis default supersedes synthesis even when the synthesis flag is on", async () => {
     process.env.ALAYA_RECALL_SYNTHESIS = "1";
     const fusion = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, path: 1, sourceProximity: 1 }]);
     expect(fusion.get(keyOf(objectId(1)))!.per_axis_contribution).toBeDefined();
@@ -392,7 +413,6 @@ describe("conformant compositional combine (real SQLite)", () => {
   });
 
   it("path-suppression stays a clean demote, not an annihilation, on the compositional score", async () => {
-    process.env.ALAYA_RECALL_CONFORMANT = "1";
     const spec: CandidateSpec = { id: objectId(1), lexical: 1, sourceProximity: 1 };
     const fusion = await runFusion(GENERIC_QUERY, [spec]);
     const before = fusion.get(keyOf(spec.id))!.fused_score;
@@ -404,10 +424,20 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(after).toBeLessThan(before);
   });
 
+  it("four-axis assembly is the production default and the flat-baseline kill-switch flips it", () => {
+    expect(fourAxisAssemblyEnabled()).toBe(true);
+    expect(flatBaselineEnabled()).toBe(false);
+    process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
+    expect(fourAxisAssemblyEnabled()).toBe(false);
+    expect(flatBaselineEnabled()).toBe(true);
+  });
+
   it("tunables default to bounded compositional values", () => {
     expect(resolveConformantPathWeight()).toBe(0.6);
     expect(resolveConformantEvidenceBeta()).toBe(0.5);
     expect(resolveConformantFloodCapPerSource()).toBe(1);
     expect(resolveConformantFloodCapTotal()).toBe(3);
+    expect(resolveConformantCSurf()).toBe(0.9);
+    expect(resolveConformantCEmb()).toBe(0.7);
   });
 });

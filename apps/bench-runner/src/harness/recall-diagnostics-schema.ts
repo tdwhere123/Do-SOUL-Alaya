@@ -17,7 +17,8 @@ const RecallFusionStreamRankSchema = z
     entity_seed: z.number().int().positive().nullable(),
     path_expansion: z.number().int().positive().nullable(),
     temporal_recency: z.number().int().positive().nullable(),
-    workspace_activation: z.number().int().positive().nullable()
+    workspace_activation: z.number().int().positive().nullable(),
+    facet_overlap: z.number().int().positive().nullable()
   })
   .strict()
   .readonly();
@@ -39,7 +40,8 @@ const RecallFusionStreamContributionSchema = z
     entity_seed: z.number().min(0),
     path_expansion: z.number().min(0),
     temporal_recency: z.number().min(0),
-    workspace_activation: z.number().min(0)
+    workspace_activation: z.number().min(0),
+    facet_overlap: z.number().min(0)
   })
   .strict()
   .readonly();

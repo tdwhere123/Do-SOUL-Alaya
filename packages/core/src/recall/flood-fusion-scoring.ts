@@ -224,6 +224,27 @@ export function decorrelateFamily(contributions: readonly number[], lambda: numb
   return max + lambda * (sum - max);
 }
 
+// Bounded noisy-OR de-correlation NOR_ρ: 1 − (1−c₁x₍₁₎)·∏_{i≥2}(1−(1−ρ)cᵢx₍ᵢ₎). The largest value is
+// the anchor; correlated views enter scaled by (1−ρ). ρ=1 → confidence-weighted max (anti double-count),
+// ρ=0 → full noisy-OR 1−∏(1−cᵢxᵢ). Always in [0,1]; appending a 0 is a no-op; empty → 0.
+export function noisyOrDecorrelate(
+  values: readonly number[],
+  confidences: readonly number[],
+  rho: number
+): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  const lambda = 1 - clamp01(rho);
+  const order = values.map((_, index) => index).sort((a, b) => (values[b] ?? 0) - (values[a] ?? 0));
+  let complement = 1;
+  order.forEach((index, position) => {
+    const term = clamp01(confidences[index] ?? 1) * clamp01(values[index] ?? 0);
+    complement *= 1 - (position === 0 ? term : lambda * term);
+  });
+  return clamp01(1 - complement);
+}
+
 // γ + (1−γ)·embRel: suppress surface relevance that words-but-not-meaning topic-neighbors earn.
 // embRel is pool-relative (cosine / pool-max), NOT raw cosine — raw cosine is comparable only within
 // one model, so a raw-magnitude gate tracks the model's absolute scale, not semantic standing.

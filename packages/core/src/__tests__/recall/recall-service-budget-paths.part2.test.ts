@@ -1,9 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type PathAnchorRef, type PathRelation } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
+  // Path-suppression budget arithmetic asserts the flat fusion ordering (retained under the kill-switch).
+  beforeEach(() => { process.env.ALAYA_RECALL_FLAT_BASELINE = "1"; });
+  afterEach(() => { delete process.env.ALAYA_RECALL_FLAT_BASELINE; });
 it("caps stacked recall_allowed negatives so ganging cannot deepen the demotion", async () => {
     // invariant: multiple converging governed negatives compound only up to one
     // reinforced-supersession delta (0.27). see also:

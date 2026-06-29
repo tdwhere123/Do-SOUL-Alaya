@@ -8,8 +8,8 @@ import { createPathRelation } from "./recall-service-test-fixtures.js";
 const SRC = "memory-src";
 const TGT = "memory-tgt";
 
-// Distinctive non-clamped weight (0.8*0.55 + 0.4*0.25 = 0.54) so a weight-source swap to
-// e.g. the suppression scorer (0 on positive paths) cannot coincide with the expected value.
+// Distinctive non-clamped weight (0.8*0.55 + 0.4*0.25 + 0.1 answers_with boost = 0.64) so a
+// weight-source swap to e.g. the suppression scorer (0 on positive paths) cannot coincide.
 function distinctivePath(
   overrides: Parameters<typeof createPathRelation>[0] = {}
 ): ReturnType<typeof createPathRelation> {
@@ -18,6 +18,7 @@ function distinctivePath(
     targetId: TGT,
     strength: 0.8,
     recallBias: 0.4,
+    relationKind: "answers_with",
     governanceClass: "hint_only",
     stabilityClass: "volatile",
     ...overrides
@@ -67,6 +68,16 @@ describe("buildPathInflowByTarget (conformant flood adjacency)", () => {
     expect(buildPathInflowByTarget([path], new Set([SRC, TGT]))).toEqual({});
   });
 
+  it("P2: excludes a co-occurrence relation (co_recalled) — only answer edges carry π", () => {
+    const path = distinctivePath({ directionBias: "source_to_target", relationKind: "co_recalled" });
+    expect(buildPathInflowByTarget([path], new Set([SRC, TGT]))).toEqual({});
+  });
+
+  it("P2: excludes a co-occurrence relation (coheres_with)", () => {
+    const path = distinctivePath({ directionBias: "source_to_target", relationKind: "coheres_with" });
+    expect(buildPathInflowByTarget([path], new Set([SRC, TGT]))).toEqual({});
+  });
+
   it("excludes a self-loop (source === target)", () => {
     const path = distinctivePath({ sourceId: SRC, targetId: SRC, directionBias: "bidirectional_asymmetric" });
     expect(buildPathInflowByTarget([path], new Set([SRC]))).toEqual({});
@@ -75,7 +86,7 @@ describe("buildPathInflowByTarget (conformant flood adjacency)", () => {
   it("sources edge weight from scorePathRelationExpansion (guards a scorer swap)", () => {
     const path = distinctivePath({ directionBias: "source_to_target" });
     const expectedWeight = scorePathRelationExpansion(path);
-    expect(expectedWeight).toBeCloseTo(0.54, 10);
+    expect(expectedWeight).toBeCloseTo(0.64, 10);
     expect(expectedWeight).toBeGreaterThan(0);
     const edges = buildPathInflowByTarget([path], new Set([SRC, TGT]))[TGT] ?? [];
     expect(edges).toHaveLength(1);

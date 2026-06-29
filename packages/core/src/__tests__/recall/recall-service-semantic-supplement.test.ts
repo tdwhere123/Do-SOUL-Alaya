@@ -1,9 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createMemoryEntry, createPreparedQueryHandle, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
+  // Embedding-supplement delivery asserts the flat fusion ordering (retained under the kill-switch).
+  beforeEach(() => { process.env.ALAYA_RECALL_FLAT_BASELINE = "1"; });
+  afterEach(() => { delete process.env.ALAYA_RECALL_FLAT_BASELINE; });
 it("buildDefaultPolicy keeps the keyword supplement enabled for chat and analyze", () => {
     const { dependencies } = createDependencies([]);
     const service = new RecallService(dependencies);

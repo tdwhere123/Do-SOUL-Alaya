@@ -43,9 +43,12 @@ import {
 import {
   buildConformantAxisContext,
   compareConformantAxisRa,
-  conformantFusionEnabled,
+  flatBaselineEnabled,
+  fourAxisAssemblyEnabled,
   type ConformantAxisContext
 } from "./conformant-fusion-scoring.js";
+
+export { flatBaselineEnabled, fourAxisAssemblyEnabled };
 import { classifyRecallIntent } from "./recall-query-plan.js";
 import type {
   CoarseRecallCandidate,
@@ -114,7 +117,7 @@ function facetOverlapCountFor(
 }
 
 export function activeFusionStreams(): readonly RecallFusionStream[] {
-  return facetOverlapEnabled() || conformantFusionEnabled()
+  return facetOverlapEnabled() || fourAxisAssemblyEnabled()
     ? RECALL_FUSION_STREAMS
     : RECALL_FUSION_STREAMS.filter((stream) => stream !== "facet_overlap");
 }
@@ -156,14 +159,14 @@ export function buildRecallFusionDetails(params: Readonly<{
     baseWeights: RECALL_FUSION_DEFAULT_WEIGHTS
   });
   const ranksByStream = buildFusionRanksByStream(params.candidates, params.supplementaryData, params.nowIso);
-  const scoresByStream = floodFusionEnabled() || bestEvidenceEnabled() || conformantFusionEnabled()
+  const scoresByStream = floodFusionEnabled() || bestEvidenceEnabled() || fourAxisAssemblyEnabled()
     ? buildFusionScoresByStream(params.candidates, params.supplementaryData, params.nowIso)
     : null;
   const embeddingPoolMax = params.candidates.reduce(
     (max, candidate) => Math.max(max, clamp01(candidate.effectiveFactors.embedding_similarity ?? 0)),
     0
   );
-  const axisContext = conformantFusionEnabled() && scoresByStream !== null
+  const axisContext = fourAxisAssemblyEnabled() && scoresByStream !== null
     ? buildConformantAxisContext({
         candidates: params.candidates.map((candidate) => ({
           candidateKey: buildRecallCandidateDedupeKey(candidate),
@@ -174,7 +177,6 @@ export function buildRecallFusionDetails(params: Readonly<{
         supplementaryData: params.supplementaryData,
         embeddingPoolMax,
         queryWindow: parseQueryTimeWindow(params.supplementaryData.queryProbes, params.nowIso),
-        nowIso: params.nowIso,
         intent: classifyRecallIntent(params.supplementaryData.queryProbes)
       })
     : null;
@@ -359,8 +361,8 @@ function buildPreliminaryFusionCandidate(
     perStreamRank: Object.freeze(perStreamRank) as RecallFusionStreamRanks,
     contributions: Object.freeze(contributions) as RecallFusionStreamContributions,
     fusedScore,
-    // Conformant wins over the facet slice when both flags are on (mutually exclusive ordering).
-    facetOverlapCount: facetSliceEnabled() && !conformantFusionEnabled()
+    // Four-axis assembly supersedes the facet slice (mutually exclusive ordering).
+    facetOverlapCount: facetSliceEnabled() && !fourAxisAssemblyEnabled()
       ? facetOverlapCountFor(candidate.entry, supplementaryData.querySoughtFacets)
       : 0,
     ...(axisRank !== undefined ? { axisRank } : {}),
@@ -778,7 +780,7 @@ export function compareFusedRecallCandidates(
   left: FusedRecallCandidateInput,
   right: FusedRecallCandidateInput
 ): number {
-  if (facetSliceEnabled() && !conformantFusionEnabled()) {
+  if (facetSliceEnabled() && !fourAxisAssemblyEnabled()) {
     // fused_rank already carries the slice; follow it so delivery (not just diagnostics) is sliced.
     const rankDelta = left.fusion.fused_rank - right.fusion.fused_rank;
     if (rankDelta !== 0) {

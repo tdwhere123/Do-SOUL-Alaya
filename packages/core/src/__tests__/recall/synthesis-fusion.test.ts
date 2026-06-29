@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
@@ -32,10 +32,16 @@ const SYNTHESIS_ENV = [
   "ALAYA_RECALL_SYN_GATE_INTENTS",
   "ALAYA_RECALL_SYN_GOVERN",
   "ALAYA_RECALL_SYN_GOV_RATIO",
-  "ALAYA_RECALL_SYN_GOV_FLOOR"
+  "ALAYA_RECALL_SYN_GOV_FLOOR",
+  "ALAYA_RECALL_FLAT_BASELINE"
 ] as const;
 
 const databases = new Set<StorageDatabase>();
+
+// Legacy synthesis path is reachable only under the flat-baseline kill-switch (four-axis is the default).
+beforeEach(() => {
+  process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
+});
 
 afterEach(() => {
   for (const database of databases) {

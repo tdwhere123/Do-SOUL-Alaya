@@ -93,8 +93,17 @@ export interface DirectionEligiblePathExpansionTarget {
   readonly targetId: string;
 }
 
+// P2: only the verified answer relation carries π-flood. Co-occurrence kinds (coheres_with /
+// co_recalled / shares_entity / signal_graph_ref) are topic neighbors, not answer relations, so they
+// stay π=0 and cannot demote an in-pool single_fact gold via free inflow votes.
+const ANSWER_FLOOD_RELATION_KINDS: ReadonlySet<string> = new Set(["answers_with"]);
+
+function isAnswerFloodRelationKind(relationKind: string): boolean {
+  return ANSWER_FLOOD_RELATION_KINDS.has(relationKind);
+}
+
 // Compositional inflow adjacency for the conformant flood: target ← {seed, π} over recall-eligible
-// positive edges whose seed AND target are both in the candidate pool. Mirrors path-expansion's
+// answer-relation edges whose seed AND target are both in the candidate pool. Mirrors path-expansion's
 // admitPathExpansionTargets edge math (scorePathRelationExpansion · direction-eligible targets).
 export function buildPathInflowByTarget(
   paths: readonly Readonly<PathRelation>[],
@@ -102,7 +111,7 @@ export function buildPathInflowByTarget(
 ): Readonly<Record<string, PathInflowEdge[]>> {
   const inflow: Record<string, PathInflowEdge[]> = {};
   for (const path of paths) {
-    if (isPathExcludedFromRecall(path)) {
+    if (isPathExcludedFromRecall(path) || !isAnswerFloodRelationKind(path.constitution.relation_kind)) {
       continue;
     }
     const weight = scorePathRelationExpansion(path);

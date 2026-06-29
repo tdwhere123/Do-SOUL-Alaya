@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
@@ -27,12 +27,18 @@ const LEXICAL_ID = "00000000-0000-4000-8000-00000000bbbb";
 
 const databases = new Set<StorageDatabase>();
 
+// Legacy flood path is reachable only under the flat-baseline kill-switch (four-axis is the default).
+beforeEach(() => {
+  process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
+});
+
 afterEach(() => {
   for (const database of databases) {
     database.close();
   }
   databases.clear();
   delete process.env.ALAYA_RECALL_FLOOD_FUSION;
+  delete process.env.ALAYA_RECALL_FLAT_BASELINE;
 });
 
 function createRealStorage(): { readonly database: StorageDatabase; readonly memoryEntryRepo: SqliteMemoryEntryRepo } {

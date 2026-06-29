@@ -1,9 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ProjectMappingState, ScopeClass } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import { createAnchor, createDependencies, createMemoryEntry, createPreparedQueryHandle, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
 it("merges adopted global-source candidates through optional recall ports and excludes non-adopted globals", async () => {
     const memories = [
       createMemoryEntry({
@@ -242,6 +243,8 @@ it("keeps local and global recall candidates with matching ids in separate origi
   });
 
 it("applies embedding hits to the local candidate when a global candidate shares its object id", async () => {
+    // Asserts the flat fusion ordering for the shared-object embedding merge (retained under the kill-switch).
+    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "1");
     const sharedObjectId = "shared-object-id-embedding";
     const memories = [
       createMemoryEntry({

@@ -503,7 +503,7 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
     expect(ids(off).slice(0, 5)).not.toContain("bMate");
   });
 
-  it("on ⇒ rescues a complementary same-session gold via R_E session propagation (conformant axis)", () => {
+  it("on ⇒ rescues a complementary same-session gold via evidence-anchored session propagation (conformant axis)", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
     vi.stubEnv("ALAYA_RECALL_EVIDENCE_SET_COVERAGE", "on");
     const result = applyEvidenceSetDelivery(s4ComplementaryPool("axis"), s4Supplementary({}), 10);
@@ -574,5 +574,35 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
     expect(top5).toContain("gold");
     expect(top5).toContain("noise");
     expect(top5.indexOf("gold")).toBeLessThan(top5.indexOf("noise"));
+  });
+
+  // Dedup against the ranking-stage evidence axis (g(R_E)): the session coverage bonus is keyed on
+  // set membership in an anchored session, NOT on the candidate's own R_E magnitude (already in
+  // rank). Varying bMate's evidence axis (1 / 0.01 / absent) must not change the delivered order,
+  // and a zero-magnitude sibling is rescued by membership alone.
+  it("on ⇒ session rescue is invariant to a sibling's R_E magnitude (flat membership, not re-scored)", () => {
+    vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
+    vi.stubEnv("ALAYA_RECALL_EVIDENCE_SET_COVERAGE", "on");
+    const poolWith = (bMateAxis: number | undefined): FusedCandidate[] => [
+      s4Candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA" }),
+      s4Candidate({ objectId: "a2", fusedScore: 0.88, surfaceId: "sA" }),
+      s4Candidate({ objectId: "a3", fusedScore: 0.85, surfaceId: "sA" }),
+      s4Candidate({ objectId: "bGold", fusedScore: 0.8, surfaceId: "sB", evidenceAxis: 1, streamRanks: { source_proximity: 1 } }),
+      s4Candidate({ objectId: "a4", fusedScore: 0.58, surfaceId: "sA" }),
+      s4Candidate({
+        objectId: "bMate",
+        fusedScore: 0.55,
+        surfaceId: "sB",
+        streamRanks: { source_proximity: 1 },
+        ...(bMateAxis === undefined ? {} : { evidenceAxis: bMateAxis })
+      }),
+      s4Candidate({ objectId: "a5", fusedScore: 0.5, surfaceId: "sA" })
+    ];
+    const high = applyEvidenceSetDelivery(poolWith(1), s4Supplementary({}), 10);
+    const low = applyEvidenceSetDelivery(poolWith(0.01), s4Supplementary({}), 10);
+    const none = applyEvidenceSetDelivery(poolWith(undefined), s4Supplementary({}), 10);
+    expect(ids(low)).toEqual(ids(high));
+    expect(ids(none)).toEqual(ids(high));
+    expect(ids(high).slice(0, 5)).toEqual(expect.arrayContaining(["bGold", "bMate"]));
   });
 });

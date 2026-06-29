@@ -87,7 +87,7 @@ export interface RecallFusionBreakdown {
   readonly fused_rank: number;
   readonly fused_score: number;
   readonly fused_rank_contribution_per_stream: RecallFusionStreamContributions;
-  // Present only under ALAYA_RECALL_CONFORMANT: per-axis rank and collapsed R_a relevance magnitude.
+  // Default four-axis assembly only (absent under ALAYA_RECALL_FLAT_BASELINE): per-axis rank and collapsed R_a magnitude.
   readonly per_axis_rank?: Readonly<Record<RecallConformantAxis, number | null>>;
   readonly per_axis_contribution?: Readonly<Record<RecallConformantAxis, number>>;
 }
