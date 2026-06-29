@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { deriveFacetsFromText } from "../../soul/facet-keywords.js";
-import { FACET_VOCABULARY } from "../../soul/memory-entry.js";
+import { FACET_VOCABULARY } from "@do-soul/alaya-protocol";
+import { deriveFacetsFromText } from "../../recall/facet-keywords.js";
 
 describe("deriveFacetsFromText", () => {
   it("maps occupation keywords to occupation_work", () => {

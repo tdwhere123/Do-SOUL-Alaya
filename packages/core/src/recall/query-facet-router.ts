@@ -1,4 +1,5 @@
-import { FACET_VOCABULARY, deriveFacetsFromText } from "@do-soul/alaya-protocol";
+import { FACET_VOCABULARY } from "@do-soul/alaya-protocol";
+import { deriveFacetsFromText } from "./facet-keywords.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 
 // Bench A/B hook: ALAYA_RECALL_QUERY_FACETS_JSON ({query: facets}) overrides the keyword hints to measure router headroom.

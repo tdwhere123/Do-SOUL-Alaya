@@ -1,4 +1,4 @@
-import { FACET_VOCABULARY } from "./memory-entry.js";
+import { FACET_VOCABULARY } from "@do-soul/alaya-protocol";
 
 // Shared answer-relevance ontology bridge: one keyword table maps free text to
 // FACET_VOCABULARY ids so write-side entry facets and read-side query facets are

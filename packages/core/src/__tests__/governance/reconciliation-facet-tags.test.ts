@@ -9,9 +9,9 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
-  deriveFacetsFromText,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
+import { deriveFacetsFromText } from "../../recall/facet-keywords.js";
 import {
   SqliteMemoryEntryRepo,
   SqliteRunRepo,

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseRelativeTemporalTerm,
   resolveRelativeTemporalWindow
-} from "../../soul/temporal-window.js";
+} from "../../recall/temporal-window.js";
 
 describe("parseRelativeTemporalTerm", () => {
   it("maps fixed phrases (case/whitespace-insensitive, EN + CJK) to canonical offsets", () => {

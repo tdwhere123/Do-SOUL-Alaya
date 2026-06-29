@@ -27,17 +27,18 @@ import {
 
 // Facet tokens are prefixed by axis; the prefix maps to its coverage bonus.
 const FACET_PREFIX_WEIGHT: Readonly<Record<string, number>> = {
-  "L:": 0.12,
-  "S:": 0.1,
-  "O:": 0.09,
-  "E:": 0.06,
-  "C:": 0.05,
-  "D:": 0.03,
-  "M:": 0.02
+  "L:": 0.1,
+  "S:": 0.0833,
+  "O:": 0.075,
+  "E:": 0.05,
+  "C:": 0.0417,
+  "D:": 0.025,
+  "M:": 0.0167
 };
 
 // Near-tie nudge, not an override: total facet bonus never exceeds one strong facet, so it only reorders candidates close in score.
-const MAX_COVERAGE_BONUS = 0.12;
+const MAX_COVERAGE_BONUS = 0.1;
+const MAX_COMBINED_COVERAGE_BONUS = 0.1;
 
 const MULTI_FACT_LIST_CUE = /\b(all|both|each|list|every|multiple|several|compare|across)\b/iu;
 
@@ -288,9 +289,12 @@ function selectBestByCoverageUtility<T extends DeliveryCandidate>(
       continue;
     }
     const base = headScore > 0 ? Math.min(1, candidate.fusion.fused_score / headScore) : 0;
-    let utility = coverageUtility(base, facetSignature(candidate.entry, ctx), covered);
+    const facetUtility = coverageUtility(base, facetSignature(candidate.entry, ctx), covered);
+    const facetBonus = facetUtility - base;
+    let utility = facetUtility;
     if (evidenceState !== null) {
-      utility += evidenceSetCoverageBonus(evidenceState, candidate, ctx.supplementaryData);
+      const evidenceBonus = evidenceSetCoverageBonus(evidenceState, candidate, ctx.supplementaryData);
+      utility = base + Math.min(MAX_COMBINED_COVERAGE_BONUS, facetBonus + evidenceBonus);
     }
     if (utility > bestUtility) {
       bestUtility = utility;

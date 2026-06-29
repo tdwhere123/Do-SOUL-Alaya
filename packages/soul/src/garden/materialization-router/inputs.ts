@@ -4,7 +4,6 @@ import {
   ScopeClass,
   SourceKind,
   StorageTier,
-  deriveFacetsFromText,
   type CandidateMemorySignal,
   type ClaimKind,
   type EnforcementLevel as EnforcementLevelValue,
@@ -19,6 +18,7 @@ import {
   type SourceKind as SourceKindValue,
   type SynthesisType
 } from "@do-soul/alaya-protocol";
+import { deriveFacetsFromText } from "../../shared/facet-keywords.js";
 import {
   type ClaimMaterializationInput,
   type EvidenceMaterializationInput,

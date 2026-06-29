@@ -27,10 +27,9 @@ const LEXICAL_SURFACE: readonly RecallFusionStream[] = [
 // Topic-echo views: down-weighted confidence so a redundant view contributes less than the primary surface.
 const LEXICAL_ECHO_STREAMS: ReadonlySet<RecallFusionStream> = new Set(["trigram_fts", "synthesis_fts"]);
 const SUBJECT_STREAMS: readonly RecallFusionStream[] = ["subject_alignment", "structural"];
-// R_E stream-based support (query-lexical-orthogonal): reliability-weighted session/source propagation.
-// evidence_fts and source_evidence_agreement both derive from evidence_fts (query-lexical), so reusing
-// either would make ∂R_E/∂L≠0 — they stay in R_lex and are intentionally excluded here.
-const EVIDENCE_SUPPORT_STREAMS: readonly RecallFusionStream[] = ["source_proximity"];
+// R_E has no stream-based support: evidence_fts / source_evidence_agreement are query-lexical (∂R_E/∂L≠0),
+// and source_proximity is session propagation (not graph support). R_E uses inbound graph tally only.
+const EVIDENCE_SUPPORT_STREAMS: readonly RecallFusionStream[] = [];
 
 const RA_QUANTUM = 1e-9;
 // decay_ev: evidence-axis own plasticity decay; identity placeholder this round (never reuses temporal).
@@ -198,10 +197,9 @@ function independentSupportCount(inputs: CollapseInputs): number {
   return normalizeGraphSupport(inputs.supplementaryData.graphSupportCounts[inputs.candidate.entry.object_id] ?? 0);
 }
 
-// R_E = decay_ev · NOR_{ρ_ev}({reliability-weighted source support, normalized independent-support count}).
-// Both supports are query-lexical-orthogonal (session propagation + inbound graph tally), so ∂R_E/∂L=0;
-// ρ_ev folds the two so it is live tuning, not an inert single-element no-op. Never reuses evidence_fts
-// (R_lex) or scoreTemporalEventTime (temporal).
+// R_E = decay_ev · independentSupportCount: normalized inbound graph tally only (∂R_E/∂L=0). No stream
+// supports — lexical / evidence_fts views stay in R_lex; ρ_ev is inert until a second orthogonal support
+// is added. Never reuses evidence_fts (R_lex) or scoreTemporalEventTime (temporal).
 export function collapseEvidenceRelevance(inputs: CollapseInputs, rhoEvidence: number): number {
   const support = [
     ...EVIDENCE_SUPPORT_STREAMS.map((stream) => streamRelevance(inputs, stream)),

@@ -2,7 +2,7 @@ import {
   parseRelativeTemporalTerm,
   resolveRelativeTemporalWindow,
   type TemporalWindow
-} from "@do-soul/alaya-protocol";
+} from "../shared/temporal-window.js";
 import { parseStrictCalendarDateToUtcDay } from "./temporal-date.js";
 
 export interface TemporalProjection {

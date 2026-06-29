@@ -98,6 +98,7 @@ interface CandidateSpec {
   readonly evidence?: number;
   readonly path?: number;
   readonly graph?: number;
+  readonly graphSupport?: number;
   readonly entity?: number;
   readonly sourceProximity?: number;
   readonly facetTags?: readonly string[];
@@ -162,7 +163,7 @@ function buildSupplementaryData(
     pathExpansionScores: record((s) => s.path),
     pathSuppressionScores: {},
     embeddingSimilarityScores: record((s) => s.embedding),
-    graphSupportCounts: {},
+    graphSupportCounts: record((s) => s.graphSupport),
     budgetPenaltyFactor: 0,
     plasticityFactors: {},
     graphAndPathColdScore: 0,
@@ -292,14 +293,14 @@ describe("conformant compositional combine (real SQLite)", () => {
     // g(0)=1: with no flood, S == activation == R_O; a memory with no evidence is not penalized.
     expect(dry.fused_score).toBeCloseTo(dry.per_axis_contribution!.object, 9);
 
-    const withEvidence = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, sourceProximity: 1 }]);
+    const withEvidence = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, graphSupport: 3 }]);
     const boosted = withEvidence.get(keyOf(objectId(1)))!;
     expect(boosted.per_axis_contribution!.evidence).toBeGreaterThan(0);
     expect(boosted.fused_score).toBeGreaterThan(boosted.per_axis_contribution!.object);
   });
 
   it("evidence cannot inject noise: a zero-activation candidate stays 0 regardless of evidence", async () => {
-    const fusion = await runFusion(GENERIC_QUERY, [{ id: objectId(1), sourceProximity: 1 }]);
+    const fusion = await runFusion(GENERIC_QUERY, [{ id: objectId(1), graphSupport: 3 }]);
     const candidate = fusion.get(keyOf(objectId(1)))!;
     expect(candidate.per_axis_contribution!.object).toBe(0);
     expect(candidate.per_axis_contribution!.evidence).toBeGreaterThan(0);

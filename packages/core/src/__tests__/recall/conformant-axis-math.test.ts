@@ -52,8 +52,7 @@ function emptyRecords(): RecallSupplementaryData {
   };
 }
 
-// Build CollapseInputs whose per-stream relevance equals the requested value: streamMax=1 so norm=value, and an
-// injected source-proximity makes the candidate independently supported so lexical lane reliability stays 1.
+// Build CollapseInputs whose per-stream relevance equals the requested value (streamMax=1 so norm=value).
 function buildInputs(
   streams: Partial<Record<RecallFusionStream, number>>,
   opts: { readonly embedding?: number; readonly query?: string; readonly supportCount?: number } = {}
@@ -79,7 +78,6 @@ function buildInputs(
     supplementaryData: {
       ...emptyRecords(),
       ...(opts.query !== undefined ? { queryProbes: compileRecallQueryProbes(opts.query) } : {}),
-      sourceProximityScores: { [OID]: 1 },
       ...(opts.supportCount !== undefined ? { graphSupportCounts: { [OID]: opts.supportCount } } : {})
     }
   };
@@ -90,9 +88,10 @@ describe("NOR_ρ operator (noisyOrDecorrelate)", () => {
     expect(noisyOrDecorrelate([], [], 0.5)).toBe(0);
   });
 
-  it("ρ=1 is pure (confidence-weighted) max — the largest value alone survives", () => {
+  it("ρ=1 is pure (confidence-weighted) max — the weighted-max anchor's xᵢ alone survives", () => {
     expect(noisyOrDecorrelate([0.3, 0.8, 0.5], [1, 1, 1], 1)).toBeCloseTo(0.8, 12);
-    expect(noisyOrDecorrelate([0.8], [0.5], 1)).toBeCloseTo(0.4, 12);
+    expect(noisyOrDecorrelate([0.8], [0.5], 1)).toBeCloseTo(0.8, 12);
+    expect(noisyOrDecorrelate([0.95, 0.90], [0.60, 1.00], 1)).toBeCloseTo(0.90, 12);
   });
 
   it("ρ=0 is the full noisy-OR 1−∏(1−cᵢxᵢ)", () => {
@@ -128,30 +127,30 @@ describe("NOR_ρ operator (noisyOrDecorrelate)", () => {
 });
 
 describe("P1 — R_E is query-lexical orthogonal (∂R_E/∂L = 0)", () => {
-  it("R_E depends on session/source support, never on the lexical or evidence_fts streams", () => {
-    const bare = collapseEvidenceRelevance(buildInputs({ source_proximity: 0.7 }), 0.5);
+  it("lexical and source_proximity streams do not affect R_E", () => {
+    const bare = collapseEvidenceRelevance(buildInputs({}, { supportCount: 2 }), 0.5);
     const withLexicalNoise = collapseEvidenceRelevance(
-      buildInputs({ source_proximity: 0.7, lexical_fts: 0.9, evidence_fts: 0.9, trigram_fts: 0.9 }),
+      buildInputs(
+        { source_proximity: 0.9, lexical_fts: 0.9, evidence_fts: 0.9, trigram_fts: 0.9 },
+        { supportCount: 2 }
+      ),
       0.5
     );
-    expect(bare).toBeCloseTo(0.7, 12);
+    expect(bare).toBeCloseTo(2 / 3, 12);
     expect(withLexicalNoise).toBeCloseTo(bare, 12);
   });
 
-  it("R_E still tracks its own support strength", () => {
-    expect(collapseEvidenceRelevance(buildInputs({ source_proximity: 0.3 }), 0.5)).toBeCloseTo(0.3, 12);
+  it("R_E tracks graphSupportCounts only", () => {
+    expect(collapseEvidenceRelevance(buildInputs({}, { supportCount: 1 }), 0.5)).toBeCloseTo(1 / 3, 12);
+    expect(collapseEvidenceRelevance(buildInputs({}, { supportCount: 3 }), 0.5)).toBeCloseTo(1, 12);
+    expect(collapseEvidenceRelevance(buildInputs({}, { supportCount: 0 }), 0.5)).toBeCloseTo(0, 12);
   });
 
-  it("R_E folds the query-orthogonal independent-support count, so ρ_ev is live (2-stream NOR)", () => {
-    // graphSupportCounts is structural (inbound edge tally), never reads the query; count 1 → 1/3 normalized.
-    const base = collapseEvidenceRelevance(buildInputs({ source_proximity: 0.5 }), 0);
-    const corroborated = collapseEvidenceRelevance(buildInputs({ source_proximity: 0.5 }, { supportCount: 1 }), 0);
-    const pureMax = collapseEvidenceRelevance(buildInputs({ source_proximity: 0.5 }, { supportCount: 1 }), 1);
-    expect(base).toBeCloseTo(0.5, 12);
-    // ρ_ev=0 corroborates the two supports (full noisy-OR); ρ_ev=1 keeps the max alone — the knob is live.
-    expect(corroborated).toBeCloseTo(1 - (1 - 0.5) * (1 - 1 / 3), 12);
-    expect(pureMax).toBeCloseTo(0.5, 12);
-    expect(corroborated).toBeGreaterThan(pureMax);
+  it("R_E is independent-support count only — ρ_ev is inert until a second support exists", () => {
+    const base = collapseEvidenceRelevance(buildInputs({}, { supportCount: 1 }), 0);
+    const atRhoOne = collapseEvidenceRelevance(buildInputs({}, { supportCount: 1 }), 1);
+    expect(base).toBeCloseTo(1 / 3, 12);
+    expect(atRhoOne).toBeCloseTo(base, 12);
   });
 });
 

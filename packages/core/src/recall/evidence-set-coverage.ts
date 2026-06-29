@@ -10,7 +10,7 @@ import { type DeliveryCandidate, sessionKeyOf } from "./coverage-delivery-signal
 
 export const EVIDENCE_SET_COVERAGE_ENV = "ALAYA_RECALL_EVIDENCE_SET_COVERAGE";
 
-// Flat, set-membership nudges, each bounded below one strong facet (0.12) and summed under an overall
+// Flat, set-membership nudges, each bounded below one strong facet (0.1) and summed under an overall
 // cap, so coverage rescues a buried complementary gold without flipping a clearly-stronger answer.
 const SESSION_COVERAGE_BONUS = 0.06;
 const MAX_CLUSTER_BONUS = 0.06;

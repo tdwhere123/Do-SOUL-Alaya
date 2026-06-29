@@ -1,8 +1,5 @@
-import {
-  parseRelativeTemporalTerm,
-  resolveRelativeTemporalWindow,
-  type MemoryEntry
-} from "@do-soul/alaya-protocol";
+import { type MemoryEntry } from "@do-soul/alaya-protocol";
+import { parseRelativeTemporalTerm, resolveRelativeTemporalWindow } from "./temporal-window.js";
 import { clamp01 } from "./recall-service-helpers.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { classifyRecallIntent } from "./recall-query-plan.js";
