@@ -15,6 +15,13 @@ import {
   resolveCoverageTargetK,
   sessionKeyOf
 } from "./coverage-delivery-signals.js";
+import {
+  type EvidenceSetCoverageState,
+  createEvidenceSetCoverageState,
+  evidenceSetCoverageBonus,
+  evidenceSetCoverageEnabled,
+  recordEvidenceSetSelection
+} from "./evidence-set-coverage.js";
 
 // Default-on delivery selection: natural ranking buries complementary golds (Any-gold@5 high, Full-gold@5 low). Rewrites the top-K interior (never rank-1, never the reserve tail) with facet coverage as an additive bonus, so a strong same-session answer is never demoted for a weak new-session one. Runs only when the query is plausibly multi-fact AND the pool offers cross-session evidence; all signals are delivery-time, no QueryPlan.
 
@@ -240,15 +247,20 @@ export function applyEvidenceSetDelivery<T extends DeliveryCandidate>(
   const covered = new Set<string>(facetSignature(head.entry, ctx));
   const selected: T[] = [head];
   const selectedSet = new Set<T>([head]);
+  const evidenceState = evidenceSetCoverageEnabled()
+    ? createEvidenceSetCoverageState(pool, supplementaryData)
+    : null;
+  if (evidenceState !== null) recordEvidenceSetSelection(evidenceState, head, supplementaryData);
 
   while (selected.length < targetK) {
-    const best = selectBestByCoverageUtility(pool, selectedSet, covered, ctx, targetK, headScore, minScoreRatio);
+    const best = selectBestByCoverageUtility(pool, selectedSet, covered, ctx, targetK, headScore, minScoreRatio, evidenceState);
     if (best === undefined) {
       break;
     }
     selected.push(best);
     selectedSet.add(best);
     for (const facet of facetSignature(best.entry, ctx)) covered.add(facet);
+    if (evidenceState !== null) recordEvidenceSetSelection(evidenceState, best, supplementaryData);
   }
 
   return appendRemainder(ordered, selected, selectedSet);
@@ -261,7 +273,8 @@ function selectBestByCoverageUtility<T extends DeliveryCandidate>(
   ctx: FacetContext,
   targetK: number,
   headScore: number,
-  minScoreRatio: number
+  minScoreRatio: number,
+  evidenceState: EvidenceSetCoverageState | null
 ): T | undefined {
   let best: T | undefined;
   let bestUtility = Number.NEGATIVE_INFINITY;
@@ -275,7 +288,10 @@ function selectBestByCoverageUtility<T extends DeliveryCandidate>(
       continue;
     }
     const base = headScore > 0 ? Math.min(1, candidate.fusion.fused_score / headScore) : 0;
-    const utility = coverageUtility(base, facetSignature(candidate.entry, ctx), covered);
+    let utility = coverageUtility(base, facetSignature(candidate.entry, ctx), covered);
+    if (evidenceState !== null) {
+      utility += evidenceSetCoverageBonus(evidenceState, candidate, ctx.supplementaryData);
+    }
     if (utility > bestUtility) {
       bestUtility = utility;
       best = candidate;
