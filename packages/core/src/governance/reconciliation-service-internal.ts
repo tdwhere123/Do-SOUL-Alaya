@@ -91,6 +91,8 @@ export interface ReconciliationInput {
   readonly incomingContent: string;
   readonly incomingDomainTags: readonly string[];
   readonly incomingProjectionFields?: ReconciliationMemoryProjectionFields;
+  // content-derived; replaces the survivor's facet_tags on an in-place UPDATE.
+  readonly incomingFacetTags?: MemoryEntry["facet_tags"];
 }
 
 export type ReconciliationMemoryProjectionFields = Pick<
@@ -153,6 +155,7 @@ export interface ReconciliationMemoryUpdatePort {
       readonly content?: string;
       readonly domain_tags?: readonly string[];
       readonly evidence_refs?: readonly string[];
+      readonly facet_tags?: MemoryEntry["facet_tags"];
     } & Partial<ReconciliationMemoryProjectionFields>,
     reason: string
   ): Promise<Readonly<MemoryEntry>>;

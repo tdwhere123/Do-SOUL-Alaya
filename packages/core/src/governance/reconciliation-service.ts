@@ -239,7 +239,8 @@ export class ReconciliationService {
         input.incomingContent.trim(),
         input.incomingDomainTags,
         incomingEvidenceRef,
-        input.incomingProjectionFields
+        input.incomingProjectionFields,
+        input.incomingFacetTags
       );
       if (applied) {
         return decision;
@@ -276,7 +277,8 @@ export class ReconciliationService {
     incomingContent: string,
     incomingDomainTags: readonly string[],
     incomingEvidenceRef: string | undefined,
-    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
+    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined,
+    incomingFacetTags: MemoryEntry["facet_tags"] | undefined
   ): Promise<boolean> {
     const existing = await this.findUpdateTarget(workspaceId, targetObjectId);
     if (existing === null) {
@@ -287,7 +289,8 @@ export class ReconciliationService {
       incomingContent,
       incomingDomainTags,
       incomingEvidenceRef,
-      incomingProjectionFields
+      incomingProjectionFields,
+      incomingFacetTags
     );
 
     try {
@@ -311,11 +314,13 @@ export class ReconciliationService {
     incomingContent: string,
     incomingDomainTags: readonly string[],
     incomingEvidenceRef: string | undefined,
-    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
+    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined,
+    incomingFacetTags: MemoryEntry["facet_tags"] | undefined
   ): {
     readonly content: string;
     readonly domain_tags: readonly string[];
     readonly evidence_refs?: readonly string[];
+    readonly facet_tags?: MemoryEntry["facet_tags"];
   } & Partial<ReconciliationMemoryProjectionFields> {
     const fields = {
       content: incomingContent,
@@ -324,6 +329,7 @@ export class ReconciliationService {
       content: string;
       domain_tags: readonly string[];
       evidence_refs?: readonly string[];
+      facet_tags?: MemoryEntry["facet_tags"];
     } & Partial<ReconciliationMemoryProjectionFields>;
     if (incomingEvidenceRef !== undefined && incomingEvidenceRef.trim().length > 0) {
       fields.evidence_refs = existing.evidence_refs.includes(incomingEvidenceRef)
@@ -331,6 +337,10 @@ export class ReconciliationService {
         : [...existing.evidence_refs, incomingEvidenceRef];
     }
     Object.assign(fields, buildProjectionReplacementFields(incomingProjectionFields));
+    // content-derived: refresh on the same UPDATE that rewrites content; merge/match leave it untouched.
+    if (incomingFacetTags !== undefined) {
+      fields.facet_tags = incomingFacetTags;
+    }
     return fields;
   }
 

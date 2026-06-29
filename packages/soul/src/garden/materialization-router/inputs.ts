@@ -269,7 +269,7 @@ export function buildMemoryInput(
 
 // Off → no facet_tags key (byte-identical to flat write); on → deterministic
 // content-derived tags aligned to the read-side query facets via the same vocabulary.
-function buildFacetTagsProjection(
+export function buildFacetTagsProjection(
   content: string,
   deriveFacetTags: boolean
 ): Partial<Pick<MemoryMaterializationInput, "facet_tags">> {

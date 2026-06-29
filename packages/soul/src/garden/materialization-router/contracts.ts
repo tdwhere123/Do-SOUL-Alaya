@@ -333,6 +333,8 @@ export interface ReconciliationPort {
       readonly incomingContent: string;
       readonly incomingDomainTags: readonly string[];
       readonly incomingProjectionFields?: ReconciliationProjectionFields;
+      // content-derived; refreshes the survivor's facet_tags on an in-place UPDATE.
+      readonly incomingFacetTags?: MemoryMaterializationInput["facet_tags"];
     },
     applyVerdict: (
       verdict: ReconciliationDecisionView
@@ -396,6 +398,6 @@ export interface MaterializationRouterDeps {
   readonly fullTurnEvidenceExcerpt?: boolean;
   // When true, lift a projection-bearing signal_only signal to memory_entry_only; default-off keeps the curated deferral.
   readonly projectionRoutingEnabled?: boolean;
-  // When true, derive deterministic facet_tags from distilled content at write time so the facet_overlap recall stream has entry-side tags to match; default-off leaves facet_tags null.
+  // flag-on: derive facet_tags from content for the facet_overlap stream; off → no facet_tags.
   readonly deriveFacetTags?: boolean;
 }

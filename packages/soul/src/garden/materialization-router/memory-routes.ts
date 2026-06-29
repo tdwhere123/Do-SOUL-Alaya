@@ -12,6 +12,7 @@ import {
   buildDistilledFact,
   buildEnrichmentIntent,
   buildEvidenceInput,
+  buildFacetTagsProjection,
   buildMemoryInput
 } from "./inputs.js";
 import { MaterializationRouterPathSideEffects } from "./path-side-effects.js";
@@ -239,16 +240,22 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     port: ReconciliationPort,
     state: ReconciledMaterializationState
   ) {
+    const incomingContent = buildDistilledFact(signal);
+    const { facet_tags: incomingFacetTags } = buildFacetTagsProjection(
+      incomingContent,
+      this.dependencies.deriveFacetTags === true
+    );
     return await port.runWithDecision(
       {
         workspaceId: signal.workspace_id,
         runId: signal.run_id,
         signalId: signal.signal_id,
-        incomingContent: buildDistilledFact(signal),
+        incomingContent,
         incomingDomainTags: signal.domain_tags,
         incomingProjectionFields: readReconciliationProjectionFields(
           buildMemoryInput(signal, [], this.enrichmentIntent(signal))
-        )
+        ),
+        ...(incomingFacetTags === undefined ? {} : { incomingFacetTags })
       },
       async (verdict) => await this.applyReconciledVerdict(signal, verdict, state)
     );
