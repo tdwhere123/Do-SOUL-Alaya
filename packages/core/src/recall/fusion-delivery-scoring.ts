@@ -45,6 +45,7 @@ import {
   compareConformantAxisRa,
   flatBaselineEnabled,
   fourAxisAssemblyEnabled,
+  resolveConformantPathWeight,
   type ConformantAxisContext
 } from "./conformant-fusion-scoring.js";
 
@@ -383,15 +384,21 @@ function accumulateFusionContributions(
   axisContext: ConformantAxisContext | null
 ): number {
   if (axisContext !== null) {
-    // Conformant supersedes synthesis; per-stream rank/contribution kept for diagnostic continuity.
+    // Compose-on-flat-base: object axis = the proven additive RRF fusion (the noisy-OR R_O ranking
+    // catastrophically regressed — bench 2026-06-29 any@5 86.7→37.8); the path axis composes additively
+    // on top. Evidence/governance axes are deferred (computed for diagnostics, not applied to the score).
+    let fusedScore = 0;
     for (const stream of activeFusionStreams()) {
       const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
       perStreamRank[stream] = rank;
       if (rank !== null) {
-        contributions[stream] = resolveFusionContribution(candidate, supplementaryData, resolved, stream, rank);
+        const contribution = resolveFusionContribution(candidate, supplementaryData, resolved, stream, rank);
+        contributions[stream] = contribution;
+        fusedScore += contribution;
       }
     }
-    return axisContext.scoreByKey.get(candidateKey) ?? 0;
+    const pathFlood = axisContext.raByKey.get(candidateKey)?.path ?? 0;
+    return fusedScore + resolveConformantPathWeight() * pathFlood;
   }
   if (synthesisFusionEnabled()) {
     return accumulateSynthesisFusedScore(

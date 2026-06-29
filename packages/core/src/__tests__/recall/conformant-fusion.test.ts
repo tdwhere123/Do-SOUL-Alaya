@@ -287,24 +287,23 @@ describe("conformant compositional combine (real SQLite)", () => {
       .toBeLessThan(fusion.get(keyOf(broadWeak.id))!.fused_rank);
   });
 
-  it("evidence is a multiplicative boost: g(0)=1 never penalizes, evidence lifts an already-active memory", async () => {
-    const noEvidence = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }]);
-    const dry = noEvidence.get(keyOf(objectId(1)))!;
-    // g(0)=1: with no flood, S == activation == R_O; a memory with no evidence is not penalized.
-    expect(dry.fused_score).toBeCloseTo(dry.per_axis_contribution!.object, 9);
-
-    const withEvidence = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, graphSupport: 3 }]);
-    const boosted = withEvidence.get(keyOf(objectId(1)))!;
+  // compose-on-flat (2026-06-29): the noisy-OR object axis catastrophically regressed ranking (any@5
+  // 86.7→37.8), so the delivered score reverted to the additive RRF base + path flood. The evidence
+  // axis (R_E) is still computed for diagnostics (per_axis_contribution) but DEFERRED from the delivered
+  // score — the multiplicative g(R_E) deferral is unit-tested in conformant-axis-math.test.ts. Here we
+  // only assert the axis is still wired/computed (a graph-support confound also moves the RRF base, so an
+  // integration-level deferral assertion is not clean).
+  it("evidence axis R_E is computed: 0 without graph support, >0 with", async () => {
+    const dry = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }])).get(keyOf(objectId(1)))!;
+    expect(dry.per_axis_contribution!.evidence).toBe(0);
+    const boosted = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, graphSupport: 3 }])).get(keyOf(objectId(1)))!;
     expect(boosted.per_axis_contribution!.evidence).toBeGreaterThan(0);
-    expect(boosted.fused_score).toBeGreaterThan(boosted.per_axis_contribution!.object);
   });
 
-  it("evidence cannot inject noise: a zero-activation candidate stays 0 regardless of evidence", async () => {
-    const fusion = await runFusion(GENERIC_QUERY, [{ id: objectId(1), graphSupport: 3 }]);
-    const candidate = fusion.get(keyOf(objectId(1)))!;
+  it("evidence axis is computed even with a zero object base (R_O=0, R_E>0)", async () => {
+    const candidate = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), graphSupport: 3 }])).get(keyOf(objectId(1)))!;
     expect(candidate.per_axis_contribution!.object).toBe(0);
     expect(candidate.per_axis_contribution!.evidence).toBeGreaterThan(0);
-    expect(candidate.fused_score).toBe(0);
   });
 
   it("governance caps the per-source flood without compressing the object seed", async () => {
@@ -413,16 +412,21 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(compareConformantAxisRa(undefined, { object: 1, path: 0, evidence: 0 })).toBe(0);
   });
 
-  it("path-suppression stays a clean demote, not an annihilation, on the compositional score", async () => {
+  it("path-suppression stays a clean demote, not an annihilation, on the delivered score", async () => {
     const spec: CandidateSpec = { id: objectId(1), lexical: 1, sourceProximity: 1 };
     const fusion = await runFusion(GENERIC_QUERY, [spec]);
     const before = fusion.get(keyOf(spec.id))!.fused_score;
-    expect(before).toBeGreaterThan(0.27);
-    const suppressed = applyPathSuppressionToFusionScores(fusion, { [spec.id]: 0.27 });
-    const after = suppressed.get(keyOf(spec.id))!.fused_score;
-    expect(after).toBeCloseTo(before - 0.27, 9);
-    expect(after).toBeGreaterThan(1e-4);
-    expect(after).toBeLessThan(before);
+    expect(before).toBeGreaterThan(0);
+    // partial suppression demotes proportionally (scale-agnostic: additive RRF base, not the old composite scale).
+    const partial = applyPathSuppressionToFusionScores(fusion, { [spec.id]: before / 2 });
+    const afterPartial = partial.get(keyOf(spec.id))!.fused_score;
+    expect(afterPartial).toBeCloseTo(before / 2, 9);
+    expect(afterPartial).toBeLessThan(before);
+    // an over-large suppression floors, never annihilates.
+    const heavy = applyPathSuppressionToFusionScores(fusion, { [spec.id]: before * 10 });
+    const afterHeavy = heavy.get(keyOf(spec.id))!.fused_score;
+    expect(afterHeavy).toBeGreaterThan(0);
+    expect(afterHeavy).toBeLessThan(before);
   });
 
   it("four-axis assembly is the production default and the flat-baseline kill-switch flips it", () => {
