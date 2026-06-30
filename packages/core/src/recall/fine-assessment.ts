@@ -22,6 +22,7 @@ import {
   reserveStructuralDeliverySlots
 } from "./fusion-delivery.js";
 import { applyEvidenceSetDelivery } from "./evidence-set-optimizer.js";
+import { composeAndOrderByEntity, composeRecallEnabled } from "./activation-assembly.js";
 import { flatBaselineEnabled } from "./conformant-fusion-scoring.js";
 import { computeEffectiveScoreDetails } from "./scoring.js";
 import {
@@ -142,6 +143,24 @@ function orderFusedFineAssessmentCandidates(
   maxEntries: number
 ): FineAssessmentOrdering {
   const rankedCandidates = [...scoredCandidates].sort(compareFusedRecallCandidates);
+  if (composeRecallEnabled()) {
+    // Compose-then-rank (ALAYA_RECALL_COMPOSE): entity-grouped navigator delivery replaces the flat
+    // post-fusion chain. Every stage field shares one reference so the diagnostic no-op checks hold.
+    const deliveryOrderedCandidates = composeAndOrderByEntity(
+      scoredCandidates,
+      supplementaryData,
+      resolveDeliveryReorderWindow(maxEntries)
+    );
+    return Object.freeze({
+      rankedCandidates,
+      featureRerankedCandidates: deliveryOrderedCandidates,
+      prioritizedCandidates: deliveryOrderedCandidates,
+      coverageSelectedCandidates: deliveryOrderedCandidates,
+      coverageOrderedCandidates: deliveryOrderedCandidates,
+      synthesisReservedCandidates: deliveryOrderedCandidates,
+      deliveryOrderedCandidates
+    });
+  }
   if (deliverFusedOrderEnabled()) {
     return Object.freeze({
       rankedCandidates,
