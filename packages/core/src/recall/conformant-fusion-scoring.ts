@@ -1,38 +1,21 @@
+import { noisyOrDecorrelate } from "./flood-fusion-scoring.js";
 import {
-  noisyOrDecorrelate,
-  resolveBestEvidenceRelevance,
-  type FloodStreamScores
-} from "./flood-fusion-scoring.js";
-import type {
-  FusionContributionCandidate,
-  ResolvedRecallFusionWeights
+  resolveFusionContribution as resolveAdaptiveFusionContribution,
+  type FusionContributionCandidate,
+  type ResolvedRecallFusionWeights
 } from "./fusion-delivery-adaptive-scoring.js";
-import type { RecallQueryIntent } from "./recall-query-plan.js";
 import type {
   PathInflowEdge,
   RecallConformantAxis,
   RecallFusionStream,
   RecallSupplementaryData
 } from "./recall-service-types.js";
-import { scoreTemporalQueryWindow, type QueryTimeWindow } from "./temporal-fusion-scoring.js";
 import { normalizeGraphSupport } from "./recall-service-helpers.js";
-import { clamp01 } from "../shared/clamp.js";
 
 export const CONFORMANT_AXES: readonly RecallConformantAxis[] = ["object", "path", "evidence"];
 
-// R_lex surface (L1 object axis): correlated lexical views folded by NOR_ρ, not re-counted additively.
-const LEXICAL_SURFACE: readonly RecallFusionStream[] = [
-  "lexical_fts", "trigram_fts", "synthesis_fts", "evidence_fts", "evidence_structural_agreement"
-];
-// Topic-echo views: down-weighted confidence so a redundant view contributes less than the primary surface.
-const LEXICAL_ECHO_STREAMS: ReadonlySet<RecallFusionStream> = new Set(["trigram_fts", "synthesis_fts"]);
-const SUBJECT_STREAMS: readonly RecallFusionStream[] = ["subject_alignment", "structural"];
-// R_E has no stream-based support: evidence_fts / source_evidence_agreement are query-lexical (∂R_E/∂L≠0),
-// and source_proximity is session propagation (not graph support). R_E uses inbound graph tally only.
-const EVIDENCE_SUPPORT_STREAMS: readonly RecallFusionStream[] = [];
-
 const RA_QUANTUM = 1e-9;
-// decay_ev: evidence-axis own plasticity decay; identity placeholder this round (never reuses temporal).
+// decay_ev: evidence-axis plasticity decay; identity (1) until a second orthogonal support exists.
 const EVIDENCE_DECAY = 1;
 
 function flagEnabled(name: string): boolean {
@@ -48,6 +31,11 @@ export function flatBaselineEnabled(): boolean {
 // Four-axis assembly is the production default; only the flat-baseline kill-switch turns it off.
 export function fourAxisAssemblyEnabled(): boolean {
   return !flatBaselineEnabled();
+}
+
+// ALAYA_RECALL_EVIDENCE_MULT (default off): apply the evidence gain (1+β·R_E) to the delivered score.
+export function evidenceMultEnabled(): boolean {
+  return flagEnabled("ALAYA_RECALL_EVIDENCE_MULT");
 }
 
 function readUnitEnv(name: string, fallback: number): number {
@@ -68,15 +56,6 @@ function readFloatEnv(name: string, fallback: number, min: number): number {
   return Number.isFinite(value) ? Math.max(min, value) : fallback;
 }
 
-// ρ_lex: lexical de-correlation. single_fact is forced to 1 (pure max) at the call site.
-export function resolveConformantRhoLex(): number {
-  return readUnitEnv("ALAYA_RECALL_CONF_RHO_LEX", 0.6);
-}
-
-export function resolveConformantRhoSub(): number {
-  return readUnitEnv("ALAYA_RECALL_CONF_RHO_SUB", 0.5);
-}
-
 export function resolveConformantRhoPath(): number {
   return readUnitEnv("ALAYA_RECALL_CONF_RHO_PATH", 0.5);
 }
@@ -85,34 +64,12 @@ export function resolveConformantRhoEvidence(): number {
   return readUnitEnv("ALAYA_RECALL_CONF_RHO_EVIDENCE", 0.5);
 }
 
-// Topic-echo view confidence cᵢ for trigram/synthesis surfaces in R_lex.
-export function resolveConformantEchoConfidence(): number {
-  return readUnitEnv("ALAYA_RECALL_CONF_ECHO", 0.6);
-}
-
-// c_surf: surface-facet confidence in the cross-facet noisy-OR R_O; surface stays the primary lens (<1 leaves
-// headroom for the embedding co-facet to lift).
-export function resolveConformantCSurf(): number {
-  return readUnitEnv("ALAYA_RECALL_CONF_C_SURF", 0.9);
-}
-
-// c_emb: embedding-facet confidence — a co-equal semantic facet that lifts but never demotes R_O.
-// single_fact forces it to 0 at the call site (lexical is truth; an STS model must not touch it).
-export function resolveConformantCEmb(): number {
-  return readUnitEnv("ALAYA_RECALL_CONF_C_EMB", 0.7);
-}
-
-// δ_stale: ω for a stale durable source under object arbitration (winner=1 / contested-loser=0).
-export function resolveConformantStaleGovernance(): number {
-  return readUnitEnv("ALAYA_RECALL_CONF_STALE", 0.5);
-}
-
-// W_P: path-flood weight in prob-OR activation A=1−(1−R_O)(1−W_P·Φ); bounded so Φ never injects a free vote.
+// W_P: path-flood weight on the additive object base; bounded so Φ never injects a free vote.
 export function resolveConformantPathWeight(): number {
   return readFloatEnv("ALAYA_RECALL_CONF_W_PATH", 0.6, 0);
 }
 
-// β: evidence multiplicative gain g(R_E)=1+β·R_E, g(0)=1. Evidence supports memory; absence never penalizes.
+// β: evidence multiplicative gain (1+β·R_E), g(0)=1. Evidence supports memory; absence never penalizes.
 export function resolveConformantEvidenceBeta(): number {
   return readFloatEnv("ALAYA_RECALL_CONF_EVIDENCE_BETA", 0.5, 0);
 }
@@ -131,81 +88,21 @@ function quantize(value: number): number {
   return Math.round(value / RA_QUANTUM) * RA_QUANTUM;
 }
 
-type CollapseInputs = Readonly<{
+type EvidenceCollapseInputs = Readonly<{
   readonly candidate: FusionContributionCandidate;
-  readonly candidateKey: string;
-  readonly scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores>;
-  readonly resolved: ResolvedRecallFusionWeights;
   readonly supplementaryData: RecallSupplementaryData;
 }>;
 
-function streamRelevance(inputs: CollapseInputs, stream: RecallFusionStream): number {
-  const streamScores = inputs.scoresByStream.get(stream);
-  if (streamScores === undefined) {
-    return 0;
-  }
-  return resolveBestEvidenceRelevance({
-    candidate: inputs.candidate,
-    supplementaryData: inputs.supplementaryData,
-    resolved: inputs.resolved,
-    stream,
-    rawScore: streamScores.scoreByKey.get(inputs.candidateKey) ?? 0,
-    streamMax: streamScores.max
-  });
-}
-
-// R_emb = clamp01(embedding_similarity / embeddingPoolMax): pool-relative semantic relevance, never raw cosine.
-function embeddingRelevance(candidate: FusionContributionCandidate, embeddingPoolMax: number): number {
-  const similarity = candidate.effectiveFactors.embedding_similarity;
-  if (typeof similarity !== "number" || similarity <= 0 || embeddingPoolMax <= 0) {
-    return 0;
-  }
-  return clamp01(similarity / embeddingPoolMax);
-}
-
-// R_O = 1 − (1−c_surf·R_surf)·(1−c_emb·R_emb)·(1−R_facet)·(1−R_time)·(1−R_sub): cross-facet noisy-OR. Embedding is a
-// co-equal semantic facet — present it lifts R_O, absent (R_emb=0) the factor is 1 (identity, never demotes lexical truth).
-// single_fact forces ρ_surf→1 (pure max) and c_emb→0 so co-topical multi-firing / STS false-friends can't out-rank gold.
-export function collapseObjectRelevance(
-  inputs: CollapseInputs,
-  embeddingPoolMax: number,
-  queryWindow: QueryTimeWindow | null,
-  intent: RecallQueryIntent,
-  rhoLex: number,
-  rhoSub: number
-): number {
-  const echo = resolveConformantEchoConfidence();
-  const lexValues = LEXICAL_SURFACE.map((stream) => streamRelevance(inputs, stream));
-  const lexConfidence = LEXICAL_SURFACE.map((stream) => (LEXICAL_ECHO_STREAMS.has(stream) ? echo : 1));
-  const effectiveRhoLex = intent === "single_fact" ? 1 : rhoLex;
-  const rSurf = noisyOrDecorrelate(lexValues, lexConfidence, effectiveRhoLex);
-  const rEmb = embeddingRelevance(inputs.candidate, embeddingPoolMax);
-  const cEmb = intent === "single_fact" ? 0 : resolveConformantCEmb();
-  const facet = streamRelevance(inputs, "facet_overlap");
-  const time = queryWindow === null ? 0 : scoreTemporalQueryWindow(inputs.candidate.entry, queryWindow);
-  const sub = noisyOrDecorrelate(SUBJECT_STREAMS.map((stream) => streamRelevance(inputs, stream)), [1, 1], rhoSub);
-  let complement = (1 - resolveConformantCSurf() * clamp01(rSurf)) * (1 - cEmb * clamp01(rEmb));
-  for (const facetValue of [facet, time, sub]) {
-    complement *= 1 - clamp01(facetValue);
-  }
-  return clamp01(1 - complement);
-}
-
-// Normalized independent-support count: the query-orthogonal inbound graph-support tally (∂/∂L=0),
-// the spec's 归一独立支撑计数 half of R_E support.
-function independentSupportCount(inputs: CollapseInputs): number {
+// Normalized independent-support count: the query-orthogonal inbound graph-support tally (∂/∂L=0).
+function independentSupportCount(inputs: EvidenceCollapseInputs): number {
   return normalizeGraphSupport(inputs.supplementaryData.graphSupportCounts[inputs.candidate.entry.object_id] ?? 0);
 }
 
-// R_E = decay_ev · independentSupportCount: normalized inbound graph tally only (∂R_E/∂L=0). No stream
-// supports — lexical / evidence_fts views stay in R_lex; ρ_ev is inert until a second orthogonal support
-// is added. Never reuses evidence_fts (R_lex) or scoreTemporalEventTime (temporal).
-export function collapseEvidenceRelevance(inputs: CollapseInputs, rhoEvidence: number): number {
-  const support = [
-    ...EVIDENCE_SUPPORT_STREAMS.map((stream) => streamRelevance(inputs, stream)),
-    independentSupportCount(inputs)
-  ];
-  return EVIDENCE_DECAY * noisyOrDecorrelate(support, support.map(() => 1), rhoEvidence);
+// R_E = decay_ev · NOR_ρ(independent inbound graph tally). No stream supports — lexical / evidence_fts
+// views stay in R_lex; ρ_ev is inert until a second orthogonal support is added.
+export function collapseEvidenceRelevance(inputs: EvidenceCollapseInputs, rhoEvidence: number): number {
+  const support = [independentSupportCount(inputs)];
+  return EVIDENCE_DECAY * noisyOrDecorrelate(support, [1], rhoEvidence);
 }
 
 export interface ConformantCandidate {
@@ -214,55 +111,35 @@ export interface ConformantCandidate {
 }
 
 export interface ConformantAxisContext {
-  readonly scoreByKey: ReadonlyMap<string, number>;
   readonly axisRankByKey: ReadonlyMap<string, Readonly<Record<RecallConformantAxis, number | null>>>;
   readonly raByKey: ReadonlyMap<string, Readonly<Record<RecallConformantAxis, number>>>;
-}
-
-export interface SeededCandidate {
-  readonly candidateKey: string;
-  readonly objectId: string;
-  readonly object: number;
-  readonly evidence: number;
 }
 
 const NULL_AXIS_RANK: Readonly<Record<RecallConformantAxis, number | null>> =
   Object.freeze({ object: null, path: null, evidence: null });
 
-// Pass 1: collapse the object SEED (R_O) and evidence support (R_E) for every candidate.
-export function buildConformantAxisContext(params: Readonly<{
-  readonly candidates: readonly ConformantCandidate[];
-  readonly scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores>;
-  readonly resolved: ResolvedRecallFusionWeights;
-  readonly supplementaryData: RecallSupplementaryData;
-  readonly embeddingPoolMax: number;
-  readonly queryWindow: QueryTimeWindow | null;
-  readonly intent: RecallQueryIntent;
-}>): ConformantAxisContext {
-  const rhoLex = resolveConformantRhoLex();
-  const rhoSub = resolveConformantRhoSub();
-  const rhoEvidence = resolveConformantRhoEvidence();
-  const seeded: SeededCandidate[] = params.candidates.map(({ candidateKey, candidate }) => {
-    const inputs: CollapseInputs = {
-      candidate,
-      candidateKey,
-      scoresByStream: params.scoresByStream,
-      resolved: params.resolved,
-      supplementaryData: params.supplementaryData
-    };
-    return {
-      candidateKey,
-      objectId: candidate.entry.object_id,
-      object: quantize(collapseObjectRelevance(inputs, params.embeddingPoolMax, params.queryWindow, params.intent, rhoLex, rhoSub)),
-      evidence: quantize(collapseEvidenceRelevance(inputs, rhoEvidence))
-    };
-  });
-  return assembleCompositionalScores(seeded, params.supplementaryData.pathInflowByTarget);
+// R_O := RRF_base = Σ active-stream RRF contributions — the proven additive object ranking. The flood
+// seeds from this same base (B1: one scale across the delivered base and the path inflow).
+function resolveObjectBase(
+  candidate: FusionContributionCandidate,
+  candidateKey: string,
+  ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
+  resolved: ResolvedRecallFusionWeights,
+  supplementaryData: RecallSupplementaryData
+): number {
+  let base = 0;
+  for (const [stream, rankByKey] of ranksByStream) {
+    const rank = rankByKey.get(candidateKey);
+    if (rank !== undefined) {
+      base += resolveAdaptiveFusionContribution({ candidate, supplementaryData, resolved, stream, rank });
+    }
+  }
+  return base;
 }
 
-// Φ(o) = min(NOR_{ρ_path}({min(R_O(s)·π, cap_src) : e=(s→o), s≠o}), cap_tot). Self-loops and π=0 co-occurrence
-// edges carry no flood; the NOR fold keeps the total bounded in [0,1] before the optional cap_tot clamp.
-function collapsePathInflow(
+// Φ(o) = min(NOR_{ρ_path}({min(R_O(s)·π, cap_src) : e=(s→o), s≠o}), cap_tot). Self-loops and π=0
+// co-occurrence edges carry no flood; the NOR fold keeps the total bounded in [0,1] before the cap_tot clamp.
+export function collapsePathInflow(
   inflow: readonly PathInflowEdge[] | undefined,
   targetObjectId: string,
   rObjectById: ReadonlyMap<string, number>,
@@ -287,39 +164,42 @@ function collapsePathInflow(
   return Math.min(noisyOrDecorrelate(supports, supports.map(() => 1), rhoPath), capTotal);
 }
 
-// Pass 2: A = 1 − (1−R_O)(1−W_P·Φ) (prob-OR); S = ω·A·(1+β·R_E). ω is the object-arbitration scale
-// (identity placeholder until a winner/stale/loser source is wired). raByKey records {R_O, Φ, R_E}.
-export function assembleCompositionalScores(
-  seeded: readonly SeededCandidate[],
-  inflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>> | undefined,
-  governanceByObjectId?: ReadonlyMap<string, number>
-): ConformantAxisContext {
-  const pathWeight = clamp01(resolveConformantPathWeight());
-  const beta = resolveConformantEvidenceBeta();
+// Per-candidate axis magnitudes: object base R_O (RRF_base), path inflow Φ (verified answers_with
+// edges, RRF_base seed), evidence R_E (inbound graph support). raByKey is the R_a tie-break vector.
+export function buildConformantAxisContext(params: Readonly<{
+  readonly candidates: readonly ConformantCandidate[];
+  readonly ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>;
+  readonly resolved: ResolvedRecallFusionWeights;
+  readonly supplementaryData: RecallSupplementaryData;
+}>): ConformantAxisContext {
+  const rhoEvidence = resolveConformantRhoEvidence();
+  const rhoPath = resolveConformantRhoPath();
   const capPerSource = resolveConformantFloodCapPerSource();
   const capTotal = resolveConformantFloodCapTotal();
-  const rhoPath = resolveConformantRhoPath();
+  const seeded = params.candidates.map(({ candidateKey, candidate }) => ({
+    candidateKey,
+    objectId: candidate.entry.object_id,
+    object: resolveObjectBase(candidate, candidateKey, params.ranksByStream, params.resolved, params.supplementaryData),
+    evidence: quantize(collapseEvidenceRelevance({ candidate, supplementaryData: params.supplementaryData }, rhoEvidence))
+  }));
   const rObjectById = new Map<string, number>();
   for (const candidate of seeded) {
     rObjectById.set(candidate.objectId, Math.max(rObjectById.get(candidate.objectId) ?? 0, candidate.object));
   }
-  const scoreByKey = new Map<string, number>();
+  const inflowByTarget = params.supplementaryData.pathInflowByTarget;
   const axisRankByKey = new Map<string, Readonly<Record<RecallConformantAxis, number | null>>>();
   const raByKey = new Map<string, Readonly<Record<RecallConformantAxis, number>>>();
   for (const candidate of seeded) {
     const flood = quantize(
       collapsePathInflow(inflowByTarget?.[candidate.objectId], candidate.objectId, rObjectById, capPerSource, capTotal, rhoPath)
     );
-    const activation = 1 - (1 - candidate.object) * (1 - pathWeight * flood);
-    const omega = clamp01(governanceByObjectId?.get(candidate.objectId) ?? 1);
-    scoreByKey.set(candidate.candidateKey, omega * activation * (1 + beta * candidate.evidence));
     axisRankByKey.set(candidate.candidateKey, NULL_AXIS_RANK);
     raByKey.set(
       candidate.candidateKey,
       Object.freeze({ object: candidate.object, path: flood, evidence: candidate.evidence })
     );
   }
-  return Object.freeze({ scoreByKey, axisRankByKey, raByKey });
+  return Object.freeze({ axisRankByKey, raByKey });
 }
 
 // R_a magnitude vector tie-break (object → path → evidence); 0 when either vector is absent (flag-off).

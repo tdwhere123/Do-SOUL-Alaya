@@ -21,8 +21,6 @@ import {
 } from "../../recall/fusion-delivery-scoring.js";
 import {
   compareConformantAxisRa,
-  resolveConformantCEmb,
-  resolveConformantCSurf,
   resolveConformantEvidenceBeta,
   resolveConformantFloodCapPerSource,
   resolveConformantFloodCapTotal,
@@ -42,11 +40,9 @@ const RUN = "run-1";
 const NOW = "2026-03-20T10:20:30.000Z";
 
 const CONFORMANT_ENV = [
-  "ALAYA_RECALL_FLAT_BASELINE", "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_EVIDENCE_BETA",
-  "ALAYA_RECALL_CONF_FLOOD_CAP", "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL", "ALAYA_RECALL_CONF_RHO_LEX",
-  "ALAYA_RECALL_CONF_RHO_SUB", "ALAYA_RECALL_CONF_RHO_PATH", "ALAYA_RECALL_CONF_RHO_EVIDENCE",
-  "ALAYA_RECALL_CONF_ECHO", "ALAYA_RECALL_CONF_STALE", "ALAYA_RECALL_CONF_C_SURF",
-  "ALAYA_RECALL_CONF_C_EMB", "ALAYA_RECALL_SYNTHESIS",
+  "ALAYA_RECALL_FLAT_BASELINE", "ALAYA_RECALL_EVIDENCE_MULT", "ALAYA_RECALL_CONF_W_PATH",
+  "ALAYA_RECALL_CONF_EVIDENCE_BETA", "ALAYA_RECALL_CONF_FLOOD_CAP", "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL",
+  "ALAYA_RECALL_CONF_RHO_PATH", "ALAYA_RECALL_CONF_RHO_EVIDENCE", "ALAYA_RECALL_SYNTHESIS",
   "ALAYA_RECALL_FACET_OVERLAP", "ALAYA_RECALL_FACET_SLICE", "ALAYA_RECALL_PATH_FLOW",
   "ALAYA_RECALL_TEMPORAL_WINDOW"
 ] as const;
@@ -237,18 +233,16 @@ describe("conformant compositional combine (real SQLite)", () => {
     }
   });
 
-  it("object collapse no-multicount: correlated lexical views fold by NOR_ρ, bounded, never an additive sum", async () => {
+  it("object base is the additive RRF sum: more matching streams raise R_O", async () => {
     const all = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, trigram: 1, evidence: 1 }]);
     const one = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }]);
     const raAll = all.get(keyOf(objectId(1)))!.per_axis_contribution!.object;
     const raOne = one.get(keyOf(objectId(1)))!.per_axis_contribution!.object;
-    expect(raAll).toBeGreaterThan(0.5);
-    // Redundant correlated views never exceed one clean primary hit, and R_O stays bounded in [0,1].
-    expect(raAll).toBeLessThanOrEqual(raOne + 1e-9);
-    expect(raAll).toBeLessThanOrEqual(1 + 1e-9);
+    expect(raOne).toBeGreaterThan(0);
+    expect(raAll).toBeGreaterThan(raOne);
   });
 
-  it("path is compositional: a high-R_O source floods its target; a candidate with no inflow gets ~0 path", async () => {
+  it("path is compositional: a high-base source floods its target; a candidate with no inflow gets ~0 path", async () => {
     const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
     const target: CandidateSpec = { id: objectId(2) };
 
@@ -265,7 +259,7 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(targetLifted.fused_score).toBeGreaterThan(targetNoInflow.fused_score);
   });
 
-  it("path flood carries no free vote: inflow from a zero-R_O source lifts nothing", async () => {
+  it("path flood carries no free vote: inflow from a zero-base source lifts nothing", async () => {
     const irrelevantSeed: CandidateSpec = { id: objectId(1) };
     const target: CandidateSpec = { id: objectId(2) };
     const fusion = await runFusion(GENERIC_QUERY, [irrelevantSeed, target], {
@@ -276,9 +270,8 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(lifted.fused_score).toBe(0);
   });
 
-  it("a broad-but-weak multi-axis candidate no longer out-votes a magnitude-dominant one (no independent axis votes)", async () => {
+  it("a magnitude-dominant candidate outranks a broad-but-individually-weak one under additive RRF", async () => {
     const dominant: CandidateSpec = { id: objectId(1), lexical: 1, embedding: 1 };
-    // path/sourceProximity present but, absent any inflow adjacency, contribute no free vote.
     const broadWeak: CandidateSpec = { id: objectId(2), lexical: 0.2, path: 0.3, sourceProximity: 0.3 };
     const fusion = await runFusion(GENERIC_QUERY, [dominant, broadWeak]);
     expect(fusion.get(keyOf(dominant.id))!.fused_score)
@@ -287,12 +280,8 @@ describe("conformant compositional combine (real SQLite)", () => {
       .toBeLessThan(fusion.get(keyOf(broadWeak.id))!.fused_rank);
   });
 
-  // compose-on-flat (2026-06-29): the noisy-OR object axis catastrophically regressed ranking (any@5
-  // 86.7→37.8), so the delivered score reverted to the additive RRF base + path flood. The evidence
-  // axis (R_E) is still computed for diagnostics (per_axis_contribution) but DEFERRED from the delivered
-  // score — the multiplicative g(R_E) deferral is unit-tested in conformant-axis-math.test.ts. Here we
-  // only assert the axis is still wired/computed (a graph-support confound also moves the RRF base, so an
-  // integration-level deferral assertion is not clean).
+  // R_E is always computed (per_axis_contribution) but only multiplies the delivered score behind
+  // ALAYA_RECALL_EVIDENCE_MULT; here we assert it is wired/computed (graph support also moves the RRF base).
   it("evidence axis R_E is computed: 0 without graph support, >0 with", async () => {
     const dry = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }])).get(keyOf(objectId(1)))!;
     expect(dry.per_axis_contribution!.evidence).toBe(0);
@@ -300,16 +289,15 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(boosted.per_axis_contribution!.evidence).toBeGreaterThan(0);
   });
 
-  it("evidence axis is computed even with a zero object base (R_O=0, R_E>0)", async () => {
+  it("evidence axis is populated for a candidate with no lexical or embedding signal", async () => {
     const candidate = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), graphSupport: 3 }])).get(keyOf(objectId(1)))!;
-    expect(candidate.per_axis_contribution!.object).toBe(0);
     expect(candidate.per_axis_contribution!.evidence).toBeGreaterThan(0);
   });
 
   it("governance caps the per-source flood without compressing the object seed", async () => {
     const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
     const target: CandidateSpec = { id: objectId(2), lexical: 1 };
-    // weight 10 makes R_O(seed)·weight overshoot any sane per-source cap.
+    // weight 10 makes base(seed)·weight overshoot a tight per-source cap.
     const inflow: InflowMap = { [target.id]: [{ seedObjectId: seed.id, weight: 10 }] };
 
     const wide = await runFusion(GENERIC_QUERY, [seed, target], { inflow });
@@ -331,10 +319,11 @@ describe("conformant compositional combine (real SQLite)", () => {
     const seedA: CandidateSpec = { id: objectId(1), lexical: 1 };
     const seedB: CandidateSpec = { id: objectId(2), lexical: 1 };
     const target: CandidateSpec = { id: objectId(3), lexical: 0.1 };
+    // Large weights drive each per-source flood past cap_src=1 so both saturate before the fold.
     const inflow: InflowMap = {
       [target.id]: [
-        { seedObjectId: seedA.id, weight: 2 },
-        { seedObjectId: seedB.id, weight: 2 }
+        { seedObjectId: seedA.id, weight: 100 },
+        { seedObjectId: seedB.id, weight: 100 }
       ]
     };
     // Two saturating sources fold by NOR to ≤1 — never the additive 2.
@@ -346,37 +335,21 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(clamped.get(keyOf(target.id))!.per_axis_contribution!.path).toBeCloseTo(0.5, 9);
   });
 
-  it("temporal split: object-time lifts R_O and the now-distance recency is not consulted", async () => {
-    const query = "what did we decide in 2024-03 about the rollout";
-    const inWindow: CandidateSpec = {
-      id: objectId(1), lexical: 0.5, eventStart: "2024-03-15T00:00:00.000Z", eventEnd: "2024-03-15T00:00:00.000Z"
-    };
-    const noEvent: CandidateSpec = { id: objectId(2), lexical: 0.5 };
-    // A stronger lexical sibling keeps the in-window R_lex below saturation so the time facet is observable.
-    const lexAnchor: CandidateSpec = { id: objectId(3), lexical: 1 };
-
-    const fusion = await runFusion(query, [inWindow, noEvent, lexAnchor]);
-    const lift = fusion.get(keyOf(inWindow.id))!.per_axis_contribution!.object
-      - fusion.get(keyOf(noEvent.id))!.per_axis_contribution!.object;
-    expect(lift).toBeGreaterThan(0);
-
-    const farNow = await runFusion(query, [inWindow], { nowIso: "2026-06-28T00:00:00.000Z" });
-    const nearNow = await runFusion(query, [inWindow], { nowIso: "2024-03-16T00:00:00.000Z" });
-    expect(nearNow.get(keyOf(inWindow.id))!.fused_score)
-      .toBeCloseTo(farNow.get(keyOf(inWindow.id))!.fused_score, 12);
-  });
-
-  it("single_fact: c_emb=0 keeps lexical truth dominant — an embedding-only candidate is never lifted", async () => {
+  // B2 regression lock: single_fact gold (lexical answer + its own embedding) must out-rank a purely
+  // semantic co-topical neighbor in the additive RRF delivery path, even when the neighbor owns the top
+  // embedding similarity. The extra lexical stream keeps gold ahead — the property that holds single_fact ≈96.9.
+  it("single_fact: the lexical gold out-ranks a pure-embedding neighbor (fused_rank lock)", async () => {
     const singleFactQuery = "what is the staging database password";
     expect(classifyRecallIntent(compileRecallQueryProbes(singleFactQuery))).toBe("single_fact");
-    // Lexical hit with a weak embedding vs a no-lexical candidate with a strong one; single_fact zeroes the embedding facet.
     const fusion = await runFusion(singleFactQuery, [
-      { id: objectId(1), lexical: 1, embedding: 0.1 },
+      { id: objectId(1), lexical: 1, embedding: 0.9 },
       { id: objectId(2), embedding: 1 }
     ]);
-    expect(fusion.get(keyOf(objectId(1)))!.per_axis_contribution!.object)
-      .toBeGreaterThan(fusion.get(keyOf(objectId(2)))!.per_axis_contribution!.object);
-    expect(fusion.get(keyOf(objectId(2)))!.per_axis_contribution!.object).toBe(0);
+    const gold = fusion.get(keyOf(objectId(1)))!;
+    const neighbor = fusion.get(keyOf(objectId(2)))!;
+    expect(gold.fused_score).toBeGreaterThan(neighbor.fused_score);
+    expect(gold.fused_rank).toBe(1);
+    expect(gold.fused_rank).toBeLessThan(neighbor.fused_rank);
   });
 
   it("non-single_fact: the embedding co-facet lifts R_O above a surface-only sibling, absence never demotes it", async () => {
@@ -442,7 +415,33 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(resolveConformantEvidenceBeta()).toBe(0.5);
     expect(resolveConformantFloodCapPerSource()).toBe(1);
     expect(resolveConformantFloodCapTotal()).toBe(3);
-    expect(resolveConformantCSurf()).toBe(0.9);
-    expect(resolveConformantCEmb()).toBe(0.7);
+  });
+
+  it("four-axis default delivery equals the flat RRF base when Φ=0 and the evidence multiplier is off", async () => {
+    const specs: readonly CandidateSpec[] = [
+      { id: objectId(1), lexical: 1, evidence: 1, embedding: 0.7 },
+      { id: objectId(2), lexical: 0.4, trigram: 0.6 },
+      { id: objectId(3), embedding: 0.9, structural: 0.5 }
+    ];
+    const fourAxis = await runFusion(GENERIC_QUERY, specs);
+    process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
+    const flat = await runFusion(GENERIC_QUERY, specs);
+    for (const spec of specs) {
+      expect(fourAxis.get(keyOf(spec.id))!.fused_score)
+        .toBeCloseTo(flat.get(keyOf(spec.id))!.fused_score, 12);
+      expect(fourAxis.get(keyOf(spec.id))!.fused_rank)
+        .toBe(flat.get(keyOf(spec.id))!.fused_rank);
+    }
+  });
+
+  it("ALAYA_RECALL_EVIDENCE_MULT scales the delivered score by (1+β·R_E); default off leaves the base", async () => {
+    const spec: CandidateSpec = { id: objectId(1), lexical: 1, graphSupport: 3 };
+    const off = (await runFusion(GENERIC_QUERY, [spec])).get(keyOf(spec.id))!;
+    process.env.ALAYA_RECALL_EVIDENCE_MULT = "1";
+    const on = (await runFusion(GENERIC_QUERY, [spec])).get(keyOf(spec.id))!;
+    const rE = on.per_axis_contribution!.evidence;
+    expect(rE).toBeGreaterThan(0);
+    expect(on.fused_score).toBeCloseTo(off.fused_score * (1 + resolveConformantEvidenceBeta() * rE), 9);
+    expect(on.fused_score).toBeGreaterThan(off.fused_score);
   });
 });

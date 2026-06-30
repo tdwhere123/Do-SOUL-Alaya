@@ -43,8 +43,10 @@ import {
 import {
   buildConformantAxisContext,
   compareConformantAxisRa,
+  evidenceMultEnabled,
   flatBaselineEnabled,
   fourAxisAssemblyEnabled,
+  resolveConformantEvidenceBeta,
   resolveConformantPathWeight,
   type ConformantAxisContext
 } from "./conformant-fusion-scoring.js";
@@ -160,25 +162,22 @@ export function buildRecallFusionDetails(params: Readonly<{
     baseWeights: RECALL_FUSION_DEFAULT_WEIGHTS
   });
   const ranksByStream = buildFusionRanksByStream(params.candidates, params.supplementaryData, params.nowIso);
-  const scoresByStream = floodFusionEnabled() || bestEvidenceEnabled() || fourAxisAssemblyEnabled()
+  const scoresByStream = floodFusionEnabled() || bestEvidenceEnabled()
     ? buildFusionScoresByStream(params.candidates, params.supplementaryData, params.nowIso)
     : null;
   const embeddingPoolMax = params.candidates.reduce(
     (max, candidate) => Math.max(max, clamp01(candidate.effectiveFactors.embedding_similarity ?? 0)),
     0
   );
-  const axisContext = fourAxisAssemblyEnabled() && scoresByStream !== null
+  const axisContext = fourAxisAssemblyEnabled()
     ? buildConformantAxisContext({
         candidates: params.candidates.map((candidate) => ({
           candidateKey: buildRecallCandidateDedupeKey(candidate),
           candidate
         })),
-        scoresByStream,
+        ranksByStream,
         resolved,
-        supplementaryData: params.supplementaryData,
-        embeddingPoolMax,
-        queryWindow: parseQueryTimeWindow(params.supplementaryData.queryProbes, params.nowIso),
-        intent: classifyRecallIntent(params.supplementaryData.queryProbes)
+        supplementaryData: params.supplementaryData
       })
     : null;
   const prelim = buildPreliminaryFusionCandidates(params, resolved, ranksByStream, scoresByStream, embeddingPoolMax, axisContext);
@@ -384,21 +383,20 @@ function accumulateFusionContributions(
   axisContext: ConformantAxisContext | null
 ): number {
   if (axisContext !== null) {
-    // Compose-on-flat-base: object axis = the proven additive RRF fusion (the noisy-OR R_O ranking
-    // catastrophically regressed — bench 2026-06-29 any@5 86.7→37.8); the path axis composes additively
-    // on top. Evidence/governance axes are deferred (computed for diagnostics, not applied to the score).
-    let fusedScore = 0;
+    // Compose-on-flat-base: object axis = the additive RRF base (the noisy-OR R_O ranking regressed
+    // any@5 86.7→37.8); Φ composes additively on top; R_E gain applies only behind ALAYA_RECALL_EVIDENCE_MULT.
     for (const stream of activeFusionStreams()) {
       const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
       perStreamRank[stream] = rank;
       if (rank !== null) {
-        const contribution = resolveFusionContribution(candidate, supplementaryData, resolved, stream, rank);
-        contributions[stream] = contribution;
-        fusedScore += contribution;
+        contributions[stream] = resolveFusionContribution(candidate, supplementaryData, resolved, stream, rank);
       }
     }
-    const pathFlood = axisContext.raByKey.get(candidateKey)?.path ?? 0;
-    return fusedScore + resolveConformantPathWeight() * pathFlood;
+    const ra = axisContext.raByKey.get(candidateKey);
+    const composed = (ra?.object ?? 0) + resolveConformantPathWeight() * (ra?.path ?? 0);
+    return evidenceMultEnabled()
+      ? composed * (1 + resolveConformantEvidenceBeta() * (ra?.evidence ?? 0))
+      : composed;
   }
   if (synthesisFusionEnabled()) {
     return accumulateSynthesisFusedScore(
