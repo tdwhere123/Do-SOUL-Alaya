@@ -3,6 +3,7 @@ import type { MemoryEntry, RecallScoreFactors } from "@do-soul/alaya-protocol";
 import {
   COMPOSE_COVERAGE_LAMBDA,
   COMPOSE_COVERAGE_SATURATION,
+  COMPOSE_EVIDENCE_BETA,
   composeAndOrderByEntity
 } from "../../recall/activation-assembly.js";
 import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
@@ -36,6 +37,7 @@ function fac(opts: {
   readonly entities?: readonly string[] | null;
   readonly surface?: string | null;
   readonly run?: string;
+  readonly supersededBy?: string | null;
 }): FineAssessmentCandidate {
   const breakdown = buildEmptyRecallFusionBreakdown(opts.id);
   return {
@@ -43,7 +45,8 @@ function fac(opts: {
       object_id: opts.id,
       canonical_entities: opts.entities ?? null,
       surface_id: opts.surface ?? null,
-      run_id: opts.run ?? "run-1"
+      run_id: opts.run ?? "run-1",
+      superseded_by: opts.supersededBy ?? null
     }),
     effectiveScore: opts.fused,
     effectiveFactors: scoreFactors(),
@@ -51,7 +54,10 @@ function fac(opts: {
   };
 }
 
-function supp(sourceCohortKeys: Readonly<Record<string, string>> = {}): RecallSupplementaryData {
+function supp(
+  sourceCohortKeys: Readonly<Record<string, string>> = {},
+  graphSupportCounts: Readonly<Record<string, number>> = {}
+): RecallSupplementaryData {
   return {
     queryProbes: compileRecallQueryProbes(null),
     ftsRanks: {},
@@ -66,7 +72,7 @@ function supp(sourceCohortKeys: Readonly<Record<string, string>> = {}): RecallSu
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
-    graphSupportCounts: {},
+    graphSupportCounts,
     budgetPenaltyFactor: 0,
     plasticityFactors: {},
     graphAndPathColdScore: 0,
@@ -196,6 +202,39 @@ describe("composeAndOrderByEntity", () => {
     expect(ids(composeAndOrderByEntity(candidates, supp(), 10))).toEqual(
       ids(composeAndOrderByEntity(candidates, supp(), 10))
     );
+  });
+
+  it("supportByEvidence: bounded R_E gain seats the higher-graph-support group first on a best-score tie", () => {
+    expect(COMPOSE_EVIDENCE_BETA).toBe(0.1);
+    const x = fac({ id: "x", fused: 0.4, entities: ["x"], surface: "s1" });
+    const y = fac({ id: "y", fused: 0.4, entities: ["y"], surface: "s2" });
+    // Equal best fused (0.4); only x carries inbound graph support (count 3 → normalizeGraphSupport 1.0).
+    const supported = supp({}, { x: 3 });
+    expect(ids(composeAndOrderByEntity([y, x], supported, 10))).toEqual(["x", "y"]);
+  });
+
+  it("supportByEvidence is bounded and cannot flip a clearly stronger object-base group", () => {
+    const supported = fac({ id: "weak", fused: 0.4, entities: ["w"], surface: "s1" });
+    const strongerBase = fac({ id: "strong", fused: 0.5, entities: ["z"], surface: "s2" });
+    // weak gets the max R_E gain (×1.1 = 0.44) but still loses to the stronger base (0.5).
+    const out = composeAndOrderByEntity([supported, strongerBase], supp({}, { weak: 3 }), 10);
+    expect(out[0].entry.object_id).toBe("strong");
+  });
+
+  it("arbitrateByGovernance: a member superseded by a co-present winner is demoted below live members", () => {
+    const winner = fac({ id: "winner", fused: 0.9, entities: ["topic"], surface: "s1" });
+    const stale = fac({ id: "stale", fused: 0.8, entities: ["topic"], surface: "s2", supersededBy: "winner" });
+    const other = fac({ id: "other", fused: 0.3, entities: ["misc"], surface: "s3" });
+    // Stale ranks 2nd by fused score, but governance sinks it below every non-superseded member.
+    const out = composeAndOrderByEntity([winner, stale, other], supp(), 10);
+    expect(ids(out)).toEqual(["winner", "other", "stale"]);
+    expect(ids(out).indexOf("stale")).toBe(ids(out).length - 1);
+  });
+
+  it("does not demote a member whose superseded_by winner is absent from the compose input", () => {
+    const a = fac({ id: "a", fused: 0.5, entities: ["e"], surface: "s1", supersededBy: "not-in-pool" });
+    const b = fac({ id: "b", fused: 0.4, entities: ["f"], surface: "s2" });
+    expect(ids(composeAndOrderByEntity([a, b], supp(), 10))).toEqual(["a", "b"]);
   });
 });
 
