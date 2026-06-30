@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_EVIDENCE_ARRAY_MAX,
+  CANONICAL_ENTITIES_MAX,
   BoundedIdSchema,
   BoundedJsonObjectSchema,
   BoundedLabelSchema,
@@ -79,7 +80,7 @@ const EvidenceRefsSchema = z.array(BoundedLabelSchema).max(BOUNDED_EVIDENCE_ARRA
 // Normalized lowercase canonical entities/subjects the signal is about; mirrors MemoryEntry.canonical_entities.
 const CanonicalEntitiesSchema = z
   .array(BoundedLabelSchema)
-  .max(BOUNDED_DEFAULT_ARRAY_MAX)
+  .max(CANONICAL_ENTITIES_MAX)
   .readonly()
   .nullable()
   .optional();
