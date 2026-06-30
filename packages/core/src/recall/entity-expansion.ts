@@ -1,7 +1,9 @@
-// Read-side entity expansion: query-time inverted index + grouping over candidate
-// canonical_entities. Pure helpers consumed by Card D's compose-then-rank assembly;
-// not wired into the live recall path yet. Canonical entity is the only answer-selective
-// grouping key (4.56x lift, design §4.5) — surface tokens disperse, the subject is stable.
+// Read-side entity expansion: grouping over candidate canonical_entities.
+// groupCandidatesByEntity is consumed by Card D's live compose path
+// (activation-assembly); grouping over the FULL scored pool is the within-pool entity
+// expansion. Broader coarse seed→pool expansion is a future card. Canonical entity is the
+// only answer-selective grouping key (4.56x lift, design §4.5) — surface tokens disperse,
+// the subject is stable.
 
 // Generic input: Card D adapts FineAssessmentCandidate via entry.object_id / entry.canonical_entities.
 export interface EntityCandidate {
@@ -20,46 +22,54 @@ function normalizeEntity(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
-function firstEntity(entities: readonly string[] | null | undefined): string | null {
-  if (!entities) return null;
-  for (const raw of entities) {
-    const entity = normalizeEntity(raw);
-    if (entity.length > 0) return entity;
-  }
-  return null;
-}
-
-// canonical entity → objectIds carrying it (per-candidate de-duped, input order preserved).
-export function buildEntityIndex(candidates: readonly EntityCandidate[]): Map<string, string[]> {
-  const index = new Map<string, string[]>();
-  for (const candidate of candidates) {
+// entity → index of its first (strongest) carrier; input is pre-sorted by score.
+function buildAnchorIndex(candidates: readonly EntityCandidate[]): Map<string, number> {
+  const anchor = new Map<string, number>();
+  candidates.forEach((candidate, index) => {
     const entities = candidate.canonicalEntities;
-    if (!entities) continue;
-    const seen = new Set<string>();
+    if (!entities) return;
     for (const raw of entities) {
       const entity = normalizeEntity(raw);
-      if (entity.length === 0 || seen.has(entity)) continue;
-      seen.add(entity);
-      const members = index.get(entity);
-      if (members) members.push(candidate.objectId);
-      else index.set(entity, [candidate.objectId]);
+      if (entity.length === 0 || anchor.has(entity)) continue;
+      anchor.set(entity, index);
     }
-  }
-  return index;
+  });
+  return anchor;
 }
 
-// Group candidates by their first (strongest) canonical entity so each candidate lands in
-// exactly one group — no double-delivery. No-entity candidates become singleton (key=null)
-// groups. Group order follows first-member order (input assumed pre-sorted by object score).
+// Strongest shared entity = lowest anchor index, tie-broken by smallest entity string (order-independent). Null = no entities.
+function primaryEntity(
+  candidate: EntityCandidate,
+  anchorIndex: Map<string, number>
+): string | null {
+  const entities = candidate.canonicalEntities;
+  if (!entities) return null;
+  let best: string | null = null;
+  let bestAnchor = Number.POSITIVE_INFINITY;
+  for (const raw of entities) {
+    const entity = normalizeEntity(raw);
+    if (entity.length === 0) continue;
+    const anchor = anchorIndex.get(entity) ?? Number.POSITIVE_INFINITY;
+    if (anchor < bestAnchor || (anchor === bestAnchor && (best === null || entity < best))) {
+      best = entity;
+      bestAnchor = anchor;
+    }
+  }
+  return best;
+}
+
+// One group per candidate (its strongest shared entity) so shared-entity candidates land together
+// order-independently; no-entity → singleton (key=null). Members past cap are dropped here; the compose tail recovers them.
 export function groupCandidatesByEntity(
   candidates: readonly EntityCandidate[],
   options?: { readonly cap?: number }
 ): EntityGroup[] {
   const cap = options?.cap ?? DEFAULT_ENTITY_GROUP_CAP;
+  const anchorIndex = buildAnchorIndex(candidates);
   const groups: EntityGroup[] = [];
   const groupByKey = new Map<string, EntityGroup>();
   for (const candidate of candidates) {
-    const key = firstEntity(candidate.canonicalEntities);
+    const key = primaryEntity(candidate, anchorIndex);
     if (key === null) {
       groups.push({ key: null, memberObjectIds: [candidate.objectId] });
       continue;
@@ -74,38 +84,4 @@ export function groupCandidatesByEntity(
     groupByKey.set(key, group);
   }
   return groups;
-}
-
-// Same-entity co-members of the seeds drawn from the pool (seeds excluded, total bounded by cap).
-export function expandByEntity(
-  seedObjectIds: readonly string[],
-  candidates: readonly EntityCandidate[],
-  cap: number = DEFAULT_ENTITY_GROUP_CAP
-): string[] {
-  if (seedObjectIds.length === 0 || cap <= 0) return [];
-  const seedSet = new Set(seedObjectIds);
-  const index = buildEntityIndex(candidates);
-  const seedEntities = new Set<string>();
-  for (const candidate of candidates) {
-    if (!seedSet.has(candidate.objectId)) continue;
-    const entities = candidate.canonicalEntities;
-    if (!entities) continue;
-    for (const raw of entities) {
-      const entity = normalizeEntity(raw);
-      if (entity.length > 0) seedEntities.add(entity);
-    }
-  }
-  const expanded: string[] = [];
-  const seen = new Set<string>();
-  for (const entity of seedEntities) {
-    const members = index.get(entity);
-    if (!members) continue;
-    for (const objectId of members) {
-      if (seedSet.has(objectId) || seen.has(objectId)) continue;
-      seen.add(objectId);
-      expanded.push(objectId);
-      if (expanded.length >= cap) return expanded;
-    }
-  }
-  return expanded;
 }

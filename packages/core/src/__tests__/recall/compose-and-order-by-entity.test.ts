@@ -106,6 +106,19 @@ describe("composeAndOrderByEntity", () => {
     expect([...ids(out)].sort()).toEqual(["mem-a", "mem-b", "mem-c", "mem-d"]);
   });
 
+  it("recovers cap-overflow members at the tail in fused order (no drop, full permutation)", () => {
+    // groupCap = max(maxEntries=10, DEFAULT_ENTITY_GROUP_CAP=25) = 25; three members overflow the group.
+    const cap = 25;
+    const sameEntity = Array.from({ length: cap + 3 }, (_, i) =>
+      fac({ id: `x${i}`, fused: 1 - i * 0.01, entities: ["x"], surface: `s${i}` })
+    );
+    const out = composeAndOrderByEntity(sameEntity, supp(), 10);
+    expect(out).toHaveLength(sameEntity.length);
+    expect([...ids(out)].sort()).toEqual([...ids(sameEntity)].sort());
+    // The 3 overflow members sit at the tail, in fused (descending-score) order.
+    expect(ids(out).slice(cap)).toEqual(["x25", "x26", "x27"]);
+  });
+
   it("keeps a strong standalone candidate ahead of a weaker multi-session entity group (single-gold safe)", () => {
     const strong = fac({ id: "gold", fused: 0.9, entities: null, surface: "s0" });
     const group = [

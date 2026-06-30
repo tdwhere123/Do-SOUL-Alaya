@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ENTITY_GROUP_CAP,
-  buildEntityIndex,
-  expandByEntity,
   groupCandidatesByEntity,
   type EntityCandidate,
   type EntityGroup
@@ -11,34 +9,6 @@ import {
 function candidate(objectId: string, canonicalEntities: readonly string[] | null | undefined): EntityCandidate {
   return { objectId, canonicalEntities };
 }
-
-describe("buildEntityIndex", () => {
-  it("maps each canonical entity to its objectIds in input order", () => {
-    const index = buildEntityIndex([
-      candidate("m1", ["postgres", "alice"]),
-      candidate("m2", ["postgres"]),
-      candidate("m3", ["alice"])
-    ]);
-    expect(index.get("postgres")).toEqual(["m1", "m2"]);
-    expect(index.get("alice")).toEqual(["m1", "m3"]);
-  });
-
-  it("lowercase-normalizes and skips empty/whitespace entities", () => {
-    const index = buildEntityIndex([candidate("m1", ["Postgres", "  ", "ALICE"]), candidate("m2", [" postgres "])]);
-    expect([...index.keys()].sort()).toEqual(["alice", "postgres"]);
-    expect(index.get("postgres")).toEqual(["m1", "m2"]);
-  });
-
-  it("de-duplicates an objectId within one candidate when entities collapse after normalization", () => {
-    const index = buildEntityIndex([candidate("m1", ["Postgres", "postgres"])]);
-    expect(index.get("postgres")).toEqual(["m1"]);
-  });
-
-  it("skips null/undefined/empty entity arrays", () => {
-    const index = buildEntityIndex([candidate("m1", null), candidate("m2", undefined), candidate("m3", [])]);
-    expect(index.size).toBe(0);
-  });
-});
 
 describe("groupCandidatesByEntity", () => {
   it("puts same-first-entity candidates in one group", () => {
@@ -53,19 +23,24 @@ describe("groupCandidatesByEntity", () => {
     ]);
   });
 
-  it("places each candidate in exactly one group via the first-entity rule", () => {
+  it("groups candidates that share an entity set regardless of entity order (one group, no double-delivery)", () => {
     const groups = groupCandidatesByEntity([
       candidate("m1", ["postgres", "alice"]),
       candidate("m2", ["alice", "postgres"])
     ]);
-    // m1's first entity = postgres; m2's first entity = alice → distinct groups, no double-delivery.
-    expect(groups).toEqual<EntityGroup[]>([
-      { key: "postgres", memberObjectIds: ["m1"] },
-      { key: "alice", memberObjectIds: ["m2"] }
-    ]);
+    // Both entities anchor at index 0; the lexicographically-smallest "alice" wins for both → one shared group.
+    expect(groups).toEqual<EntityGroup[]>([{ key: "alice", memberObjectIds: ["m1", "m2"] }]);
     const seen = groups.flatMap((g) => g.memberObjectIds);
-    expect(seen).toEqual(["m1", "m2"]);
     expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  it("assigns a multi-entity candidate to its stronger-anchored entity's group", () => {
+    const groups = groupCandidatesByEntity([
+      candidate("m1", ["postgres"]),
+      candidate("m2", ["alice", "postgres"])
+    ]);
+    // postgres anchors at index 0 (m1), alice at index 1; m2 joins postgres (lower anchor).
+    expect(groups).toEqual<EntityGroup[]>([{ key: "postgres", memberObjectIds: ["m1", "m2"] }]);
   });
 
   it("gives no-entity candidates their own singleton group keyed null", () => {
@@ -122,40 +97,5 @@ describe("groupCandidatesByEntity", () => {
     const groups = groupCandidatesByEntity(input);
     expect(groups).toHaveLength(1);
     expect(groups[0].memberObjectIds).toHaveLength(DEFAULT_ENTITY_GROUP_CAP);
-  });
-});
-
-describe("expandByEntity", () => {
-  const pool: EntityCandidate[] = [
-    candidate("seed", ["postgres", "alice"]),
-    candidate("m2", ["postgres"]),
-    candidate("m3", ["alice"]),
-    candidate("m4", ["redis"])
-  ];
-
-  it("returns same-entity co-members of the seeds, excluding the seeds themselves", () => {
-    expect(expandByEntity(["seed"], pool)).toEqual(["m2", "m3"]);
-  });
-
-  it("de-duplicates members shared across multiple seed entities", () => {
-    const shared: EntityCandidate[] = [
-      candidate("seed", ["a", "b"]),
-      candidate("m2", ["a", "b"])
-    ];
-    expect(expandByEntity(["seed"], shared)).toEqual(["m2"]);
-  });
-
-  it("bounds the total expansion by the cap, keeping input order", () => {
-    expect(expandByEntity(["seed"], pool, 1)).toEqual(["m2"]);
-  });
-
-  it("returns empty for empty seeds, non-positive cap, or seeds with no entities", () => {
-    expect(expandByEntity([], pool)).toEqual([]);
-    expect(expandByEntity(["seed"], pool, 0)).toEqual([]);
-    expect(expandByEntity(["m4"], [candidate("m4", null), candidate("m5", ["redis"])])).toEqual([]);
-  });
-
-  it("is deterministic across repeated calls", () => {
-    expect(expandByEntity(["seed"], pool)).toEqual(expandByEntity(["seed"], pool));
   });
 });

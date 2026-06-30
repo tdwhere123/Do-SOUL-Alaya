@@ -88,8 +88,7 @@ export function composeAndOrderByEntity(
     byKey.set(key, seed);
     entityInputs.push({ objectId: key, canonicalEntities: seed.entry.canonical_entities });
   }
-  // Cap each entity's contribution to the delivery window (≥ default) — overflow members rank far past
-  // any budget, so dropping them never starves the delivered top-k.
+  // Cap each entity's contribution to the delivery window (≥ default); overflow is recovered at the tail below.
   const groupCap = Math.max(maxEntries, DEFAULT_ENTITY_GROUP_CAP);
   const units: ComposedActivationUnit[] = groupCandidatesByEntity(entityInputs, { cap: groupCap }).map(
     (group) => {
@@ -113,6 +112,13 @@ export function composeAndOrderByEntity(
       seen.add(key);
       delivered.push(member);
     }
+  }
+  // Recover any cap-overflow / ungrouped seed in fused order so the result is a full permutation.
+  for (const seed of seeds) {
+    const key = buildRecallCandidateDedupeKey(seed);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    delivered.push(seed);
   }
   return delivered;
 }
