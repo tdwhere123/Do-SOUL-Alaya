@@ -81,6 +81,7 @@ function buildMemoryEntryProjectionParams(
     entry.preference_object ?? null,
     entry.preference_category ?? null,
     entry.preference_polarity ?? null,
-    entry.facet_tags == null ? null : JSON.stringify(entry.facet_tags)
+    entry.facet_tags == null ? null : JSON.stringify(entry.facet_tags),
+    entry.canonical_entities == null ? null : JSON.stringify(entry.canonical_entities)
   ];
 }

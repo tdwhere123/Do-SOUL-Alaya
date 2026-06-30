@@ -60,6 +60,7 @@ export const MEMORY_ENTRY_SELECT_COLUMNS = `
         preference_category,
         preference_polarity,
         facet_tags,
+        canonical_entities,
         forget_disposition,
         forget_disposition_ref
 `;
@@ -106,6 +107,7 @@ export interface MemoryEntryRow {
   readonly preference_category: string | null;
   readonly preference_polarity: string | null;
   readonly facet_tags: string | null;
+  readonly canonical_entities: string | null;
   readonly forget_disposition: string | null;
   readonly forget_disposition_ref: string | null;
 }
@@ -155,6 +157,7 @@ export function parseMemoryEntryRow(row: MemoryEntryRow): Readonly<MemoryEntry> 
         ...buildTemporalProjectionFromRow(row),
         ...buildPreferenceProjectionFromRow(row),
         ...buildFacetTagsFromRow(row),
+        ...buildCanonicalEntitiesFromRow(row),
         forget_disposition: row.forget_disposition,
         forget_disposition_ref: row.forget_disposition_ref
       })
@@ -196,6 +199,13 @@ function buildFacetTagsFromRow(row: MemoryEntryRow): Partial<MemoryEntry> {
     return {};
   }
   return { facet_tags: JSON.parse(row.facet_tags) as MemoryEntry["facet_tags"] };
+}
+
+function buildCanonicalEntitiesFromRow(row: MemoryEntryRow): Partial<MemoryEntry> {
+  if (row.canonical_entities === null) {
+    return {};
+  }
+  return { canonical_entities: JSON.parse(row.canonical_entities) as MemoryEntry["canonical_entities"] };
 }
 
 function buildPreferenceProjectionFromRow(row: MemoryEntryRow): Partial<MemoryEntry> {

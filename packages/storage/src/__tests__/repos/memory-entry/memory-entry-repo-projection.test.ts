@@ -105,6 +105,39 @@ describe("SqliteMemoryEntryRepo projection fields", () => {
     expect(cleared.facet_tags ?? null).toBeNull();
   });
 
+  it("round-trips canonical_entities through create and read", async () => {
+    const { repo } = await createRepo();
+    const entry = createMemoryEntry({
+      canonical_entities: ["alice", "postgres"]
+    });
+
+    await repo.create(entry);
+
+    await expect(repo.findById(entry.object_id)).resolves.toMatchObject({
+      canonical_entities: ["alice", "postgres"]
+    });
+  });
+
+  it("updates and clears canonical_entities on an existing memory entry", async () => {
+    const { repo } = await createRepo();
+    const entry = createMemoryEntry();
+    await repo.create(entry);
+
+    const updated = await repo.update(entry.object_id, {
+      canonical_entities: ["redis"],
+      updated_at: "2026-03-21T00:00:00.000Z"
+    });
+    expect(updated).toMatchObject({
+      canonical_entities: ["redis"]
+    });
+
+    const cleared = await repo.update(entry.object_id, {
+      canonical_entities: null,
+      updated_at: "2026-03-22T00:00:00.000Z"
+    });
+    expect(cleared.canonical_entities ?? null).toBeNull();
+  });
+
   it("updates projection fields on an existing memory entry", async () => {
     const { repo } = await createRepo();
     const entry = createMemoryEntry();

@@ -139,6 +139,21 @@ describe("MemoryEntrySchema", () => {
     expect(parsed.preference_polarity).toBe("positive");
   });
 
+  it("round-trips with and without canonical_entities", () => {
+    const withEntities = {
+      ...memoryEntryBase,
+      canonical_entities: ["alice", "postgres"]
+    } as const;
+    const parsed = MemoryEntrySchema.parse(withEntities);
+    expect(parsed.canonical_entities).toEqual(["alice", "postgres"]);
+
+    const withoutEntities = MemoryEntrySchema.parse(memoryEntryBase);
+    expect(withoutEntities.canonical_entities).toBeUndefined();
+
+    const nullEntities = MemoryEntrySchema.parse({ ...memoryEntryBase, canonical_entities: null });
+    expect(nullEntities.canonical_entities).toBeNull();
+  });
+
   it("rejects invalid preference polarity values", () => {
     expect(
       MemoryEntrySchema.safeParse({

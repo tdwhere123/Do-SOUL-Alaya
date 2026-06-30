@@ -214,7 +214,8 @@ const MemoryEntryProjectionMutableFieldsSchema = z.object({
   preference_object: BoundedLabelSchema.nullable().optional(),
   preference_category: BoundedLabelSchema.nullable().optional(),
   preference_polarity: PreferencePolaritySchema.nullable().optional(),
-  facet_tags: z.array(FacetTagSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable().optional()
+  facet_tags: z.array(FacetTagSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable().optional(),
+  canonical_entities: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable().optional()
 }).strict();
 
 export const MemoryEntryMutableFieldsSchema = MemoryEntryMutableFieldsBaseSchema
@@ -272,6 +273,8 @@ export const MemoryEntrySchema = PersistentObjectEnvelopeSchema.unwrap()
     preference_category: BoundedLabelSchema.nullable().optional(),
     preference_polarity: PreferencePolaritySchema.nullable().optional(),
     facet_tags: z.array(FacetTagSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable().optional(),
+    // Normalized lowercase canonical entities/subjects this memory is about (entity-graph recall fuel).
+    canonical_entities: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable().optional(),
     // invariant: optional on the wire (legacy rows + most constructors omit it),
     // but the storage layer always materializes it as null|value. Safety treats
     // undefined and null identically as "no disposition" — non-null/defined is

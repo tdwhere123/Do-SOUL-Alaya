@@ -55,7 +55,8 @@ const PROJECTION_UPDATE_FIELDS = [
   "preference_object",
   "preference_category",
   "preference_polarity",
-  "facet_tags"
+  "facet_tags",
+  "canonical_entities"
 ] as const satisfies readonly (keyof MemoryEntryRepoUpdateFields)[];
 
 export async function updateMemoryEntry(
@@ -156,7 +157,7 @@ function encodeProjectionUpdateValue(
   fieldName: (typeof PROJECTION_UPDATE_FIELDS)[number],
   value: MemoryEntryRepoUpdateFields[(typeof PROJECTION_UPDATE_FIELDS)[number]]
 ): unknown {
-  if (fieldName === "facet_tags") {
+  if (fieldName === "facet_tags" || fieldName === "canonical_entities") {
     return value == null ? null : JSON.stringify(value);
   }
   return value ?? null;

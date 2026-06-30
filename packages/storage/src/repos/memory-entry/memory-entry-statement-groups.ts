@@ -118,9 +118,10 @@ const MEMORY_ENTRY_CREATE_SQL: SqlDefinitionMap<MemoryEntryCreateStatements> = {
         preference_category,
         preference_polarity,
         facet_tags,
+        canonical_entities,
         forget_disposition,
         forget_disposition_ref
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
 };
 
@@ -243,6 +244,7 @@ const MEMORY_ENTRY_UPDATE_SQL: SqlDefinitionMap<MemoryEntryUpdateStatements> = {
         preference_category = CASE WHEN ? THEN ? ELSE preference_category END,
         preference_polarity = CASE WHEN ? THEN ? ELSE preference_polarity END,
         facet_tags = CASE WHEN ? THEN ? ELSE facet_tags END,
+        canonical_entities = CASE WHEN ? THEN ? ELSE canonical_entities END,
         updated_at = ?
       WHERE object_id = ?
     `,
@@ -270,6 +272,7 @@ const MEMORY_ENTRY_UPDATE_SQL: SqlDefinitionMap<MemoryEntryUpdateStatements> = {
         preference_category = CASE WHEN ? THEN ? ELSE preference_category END,
         preference_polarity = CASE WHEN ? THEN ? ELSE preference_polarity END,
         facet_tags = CASE WHEN ? THEN ? ELSE facet_tags END,
+        canonical_entities = CASE WHEN ? THEN ? ELSE canonical_entities END,
         updated_at = ?
       WHERE object_id = ? AND workspace_id = ?
     `
