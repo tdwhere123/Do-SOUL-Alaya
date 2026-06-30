@@ -21,9 +21,14 @@ export interface EvidenceSetCoverageState {
   readonly selectedSeeds: Map<string, number>;
 }
 
-// Default-on; the flat-baseline kill-switch reverts to legacy facet/session coverage.
+// Default-on; the flat-baseline kill-switch reverts to legacy coverage. ALAYA_RECALL_S4_COVERAGE=0
+// independently forces S4 off (the A/C/E ablation arms) without flipping to the legacy flat routing.
 export function evidenceSetCoverageEnabled(): boolean {
-  return !flatBaselineEnabled();
+  if (flatBaselineEnabled()) {
+    return false;
+  }
+  const override = process.env.ALAYA_RECALL_S4_COVERAGE;
+  return override !== "0" && override !== "off" && override !== "false";
 }
 
 // Set-membership flag (boolean, never a magnitude): the candidate carries evidence support via the

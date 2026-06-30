@@ -9,6 +9,7 @@ import { applyEvidenceSetDelivery } from "../../recall/evidence-set-optimizer.js
 import {
   createEvidenceSetCoverageState,
   evidenceSetCoverageBonus,
+  evidenceSetCoverageEnabled,
   recordEvidenceSetSelection
 } from "../../recall/evidence-set-coverage.js";
 import { RECALL_FUSION_STREAMS } from "../../recall/recall-service.js";
@@ -650,5 +651,13 @@ describe("applyEvidenceSetDelivery S4 convergence locks", () => {
     const bonus = evidenceSetCoverageBonus(state, cand, supp);
     expect(bonus).toBeLessThanOrEqual(0.1);
     expect(bonus).toBeCloseTo(0.1, 10);
+  });
+
+  it("ALAYA_RECALL_S4_COVERAGE=0 forces S4 off without flipping to flat baseline (A/C/E ablation)", () => {
+    expect(evidenceSetCoverageEnabled()).toBe(true);
+    vi.stubEnv("ALAYA_RECALL_S4_COVERAGE", "0");
+    expect(evidenceSetCoverageEnabled()).toBe(false);
+    vi.stubEnv("ALAYA_RECALL_S4_COVERAGE", "1");
+    expect(evidenceSetCoverageEnabled()).toBe(true);
   });
 });
