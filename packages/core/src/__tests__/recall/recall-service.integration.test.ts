@@ -3,29 +3,27 @@ import {
   ControlPlaneObjectKind,
   EvidenceHealthState,
   RetentionPolicy,
-  RunMode,
-  RunState,
   StorageTier,
-  WorkspaceKind,
-  WorkspaceState,
   type EventLogEntry,
   type EvidenceCapsule,
   type RecallPolicy,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import {
-  initDatabase,
   SqliteEvidenceCapsuleRepo,
   SqliteMemoryEntryRepo,
-  SqliteRunRepo,
-  SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
+import {
+  REAL_SQLITE_TEST_RUN_ID,
+  REAL_SQLITE_TEST_WORKSPACE_ID,
+  createRecallRealStorage
+} from "../shared/real-sqlite.test-support.js";
 
-const WS = "workspace-1";
-const RUN = "run-1";
+const WS = REAL_SQLITE_TEST_WORKSPACE_ID;
+const RUN = REAL_SQLITE_TEST_RUN_ID;
 
 const databases = new Set<StorageDatabase>();
 
@@ -42,34 +40,9 @@ async function createRealStorage(): Promise<{
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
   readonly evidenceCapsuleRepo: SqliteEvidenceCapsuleRepo;
 }> {
-  const database = initDatabase({ filename: ":memory:" });
-  databases.add(database);
-  const workspaceRepo = new SqliteWorkspaceRepo(database);
-  const runRepo = new SqliteRunRepo(database);
-  const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
-  const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
-
-  await workspaceRepo.create({
-    workspace_id: WS,
-    name: "workspace one",
-    root_path: "/tmp/ws1",
-    workspace_kind: WorkspaceKind.LOCAL_REPO,
-    default_engine_binding: null,
-    workspace_state: WorkspaceState.ACTIVE
+  return createRecallRealStorage((database) => {
+    databases.add(database);
   });
-  await runRepo.create({
-    run_id: RUN,
-    workspace_id: WS,
-    title: "run one",
-    goal: null,
-    run_mode: RunMode.CHAT,
-    engine_binding_id: null,
-    engine_class: null,
-    run_state: RunState.IDLE,
-    current_surface_id: null
-  });
-
-  return { database, memoryEntryRepo, evidenceCapsuleRepo };
 }
 
 // Binds the real SQLite repos directly so lexical/evidence admission runs

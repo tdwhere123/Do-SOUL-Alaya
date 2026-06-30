@@ -15,6 +15,15 @@ import {
   type CandidateMemorySignal,
   type WorkspaceRunEvent
 } from "../../index.js";
+import { CANONICAL_ENTITIES_MAX } from "../../shared/schema-primitives.js";
+import {
+  candidateMemorySignalBase,
+  candidateMemorySignalInputBase,
+  emitCandidateSignalResponseBase,
+  eventLogEntryBase,
+  invalidTimestamp,
+  without
+} from "./schemas.fixtures.js";
 
 type IfEquals<X, Y, A = true, B = false> =
   (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? A : B;
@@ -49,13 +58,11 @@ export type _CandidateMemorySignalReadonlyChecks = [
   AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "created_at">>
 ];
 
-import {
-  candidateMemorySignalBase,
-  candidateMemorySignalInputBase,
-  emitCandidateSignalResponseBase,
-  eventLogEntryBase,
-  invalidTimestamp,
-  without} from "./schemas.fixtures.js";
+const canonicalEntitiesAtLimit = Array.from(
+  { length: CANONICAL_ENTITIES_MAX },
+  (_, index) => `entity-${index + 1}`
+);
+const canonicalEntitiesOverLimit = [...canonicalEntitiesAtLimit, "entity-over-limit"];
 
 describe("WorkspaceRunEventSchema", () => {
   const workspaceRunEventBase = without(without(eventLogEntryBase, "event_type"), "payload_json");
@@ -197,6 +204,24 @@ describe("CandidateMemorySignalSchema", () => {
 
   it("rejects a confidence below zero", () => {
     expect(CandidateMemorySignalSchema.safeParse({ ...candidateMemorySignalBase, confidence: -0.1 }).success).toBe(false);
+  });
+
+  it("accepts canonical_entities at the configured limit", () => {
+    const value = {
+      ...candidateMemorySignalBase,
+      canonical_entities: canonicalEntitiesAtLimit
+    };
+
+    expect(CandidateMemorySignalSchema.parse(value).canonical_entities).toEqual(canonicalEntitiesAtLimit);
+  });
+
+  it("rejects canonical_entities above the configured limit", () => {
+    expect(
+      CandidateMemorySignalSchema.safeParse({
+        ...candidateMemorySignalBase,
+        canonical_entities: canonicalEntitiesOverLimit
+      }).success
+    ).toBe(false);
   });
 });
 
@@ -370,4 +395,3 @@ describe("signal payload parsing", () => {
     ).toThrow();
   });
 });
-

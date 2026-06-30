@@ -13,6 +13,7 @@ import {
   SourceKind,
   StorageTier
 } from "../../index.js";
+import { CANONICAL_ENTITIES_MAX } from "../../shared/schema-primitives.js";
 
 function without<T extends Record<string, unknown>, K extends keyof T>(value: T, key: K): Omit<T, K> {
   const clone = { ...value };
@@ -21,6 +22,11 @@ function without<T extends Record<string, unknown>, K extends keyof T>(value: T,
 }
 
 const validTimestamp = "2026-03-20T00:00:00.000Z";
+const canonicalEntitiesAtLimit = Array.from(
+  { length: CANONICAL_ENTITIES_MAX },
+  (_, index) => `entity-${index + 1}`
+);
+const canonicalEntitiesOverLimit = [...canonicalEntitiesAtLimit, "entity-over-limit"];
 
 const memoryEntryBase = {
   object_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
@@ -152,6 +158,24 @@ describe("MemoryEntrySchema", () => {
 
     const nullEntities = MemoryEntrySchema.parse({ ...memoryEntryBase, canonical_entities: null });
     expect(nullEntities.canonical_entities).toBeNull();
+  });
+
+  it("accepts canonical_entities at the configured limit", () => {
+    const value = {
+      ...memoryEntryBase,
+      canonical_entities: canonicalEntitiesAtLimit
+    };
+
+    expect(MemoryEntrySchema.parse(value).canonical_entities).toEqual(canonicalEntitiesAtLimit);
+  });
+
+  it("rejects canonical_entities above the configured limit", () => {
+    expect(
+      MemoryEntrySchema.safeParse({
+        ...memoryEntryBase,
+        canonical_entities: canonicalEntitiesOverLimit
+      }).success
+    ).toBe(false);
   });
 
   it("rejects invalid preference polarity values", () => {
