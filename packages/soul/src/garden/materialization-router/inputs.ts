@@ -263,8 +263,46 @@ export function buildMemoryInput(
     ...temporalProjection,
     ...preferenceProfile,
     ...buildFacetTagsProjection(content, deriveFacetTags),
+    ...buildCanonicalEntitiesProjection(signal),
     ...(enqueueEnrichment === undefined ? {} : { enqueueEnrichment })
   };
+}
+
+const MAX_CANONICAL_ENTITIES = 3;
+
+// Threads the signal's canonical_entities (answer-selective recall key) onto the
+// materialized memory_entry. Prefers the first-class signal field; falls back to
+// the raw_payload echo so the bench seed path (which round-trips raw_payload, not
+// the first-class field) persists it too. Empty → omit (byte-identical write).
+function buildCanonicalEntitiesProjection(
+  signal: CandidateMemorySignal
+): Partial<Pick<MemoryMaterializationInput, "canonical_entities">> {
+  const firstClass = signal.canonical_entities ?? [];
+  const source = firstClass.length > 0 ? firstClass : readRawCanonicalEntities(signal.raw_payload);
+  const entities = normalizeCanonicalEntities(source);
+  return entities.length === 0 ? {} : { canonical_entities: entities };
+}
+
+function readRawCanonicalEntities(rawPayload: CandidateMemorySignal["raw_payload"]): readonly string[] {
+  const value = rawPayload.canonical_entities;
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function normalizeCanonicalEntities(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized.length === 0 || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    output.push(normalized);
+    if (output.length >= MAX_CANONICAL_ENTITIES) {
+      break;
+    }
+  }
+  return output;
 }
 
 // Off → no facet_tags key (byte-identical to flat write); on → deterministic
