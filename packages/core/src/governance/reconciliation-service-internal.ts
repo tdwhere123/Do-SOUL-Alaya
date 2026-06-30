@@ -92,9 +92,13 @@ export interface ReconciliationInput {
   readonly incomingDomainTags: readonly string[];
   readonly incomingProjectionFields?: ReconciliationMemoryProjectionFields;
   // content-derived; replaces the survivor's facet_tags on an in-place UPDATE.
+  // could later fold into incomingProjectionFields (same UPDATE-replace shape).
   readonly incomingFacetTags?: MemoryEntry["facet_tags"];
 }
 
+// canonical_entities rides this channel too (the durable recall key): replaced
+// on UPDATE, backfilled on NOOP — the same semantics the temporal/preference
+// fields already get from buildProjectionReplacementFields / buildProjectionMergeFields.
 export type ReconciliationMemoryProjectionFields = Pick<
   MemoryEntry,
   | "projection_schema_version"
@@ -109,6 +113,7 @@ export type ReconciliationMemoryProjectionFields = Pick<
   | "preference_object"
   | "preference_category"
   | "preference_polarity"
+  | "canonical_entities"
 >;
 
 // invariant: the per-verdict object-creation callback the router supplies

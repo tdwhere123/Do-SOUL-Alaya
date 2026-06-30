@@ -451,6 +451,8 @@ function readReconciliationProjectionFields(
     preference_predicate: input.preference_predicate,
     preference_object: input.preference_object,
     preference_category: input.preference_category,
-    preference_polarity: input.preference_polarity
+    preference_polarity: input.preference_polarity,
+    // sourced from buildCanonicalEntitiesProjection via buildMemoryInput; refreshes UPDATE / backfills NOOP survivors.
+    canonical_entities: input.canonical_entities
   };
 }

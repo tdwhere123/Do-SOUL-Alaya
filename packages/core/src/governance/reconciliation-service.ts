@@ -121,6 +121,10 @@ function projectionValuesMatch(
   if (expected === null) {
     return actual === null || actual === undefined;
   }
+  // canonical_entities is array-valued; compare by set membership, not reference.
+  if (Array.isArray(expected)) {
+    return Array.isArray(actual) && sameStringSet(actual, expected);
+  }
   return actual === expected;
 }
 
@@ -140,7 +144,8 @@ const PROJECTION_FIELD_KEYS = [
   "preference_predicate",
   "preference_object",
   "preference_category",
-  "preference_polarity"
+  "preference_polarity",
+  "canonical_entities"
 ] as const;
 
 export class ReconciliationService {

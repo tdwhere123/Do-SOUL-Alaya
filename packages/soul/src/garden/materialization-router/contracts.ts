@@ -356,6 +356,7 @@ export type ReconciliationProjectionFields = Pick<
   | "preference_object"
   | "preference_category"
   | "preference_polarity"
+  | "canonical_entities"
 >;
 
 export interface MaterializationRouterDeps {
