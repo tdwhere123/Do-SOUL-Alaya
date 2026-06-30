@@ -199,7 +199,7 @@ export const SoulMemorySearchRequestSchema = z
     }
     if (Date.parse(value.since) > Date.parse(value.until)) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["since"],
         message: "since must be less than or equal to until."
       });

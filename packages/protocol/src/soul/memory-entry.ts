@@ -288,21 +288,21 @@ export const MemoryEntrySchema = PersistentObjectEnvelopeSchema.unwrap()
     const dispositionRef = value.forget_disposition_ref ?? null;
     if (disposition === "compressed" && dispositionRef === null) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["forget_disposition_ref"],
         message: "compressed forget_disposition requires forget_disposition_ref."
       });
     }
     if (disposition === "judged_useless" && dispositionRef !== null) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["forget_disposition_ref"],
         message: "judged_useless forget_disposition must not carry forget_disposition_ref."
       });
     }
     if (disposition === null && dispositionRef !== null) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["forget_disposition_ref"],
         message: "forget_disposition_ref requires forget_disposition."
       });

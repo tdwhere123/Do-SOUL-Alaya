@@ -60,7 +60,7 @@ export const EngineBindingInputSchema = z
   .superRefine((value, context) => {
     if (value.provider_type === EngineProvider.CUSTOM && value.base_url === null) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["base_url"],
         message: "Custom providers require a base_url."
       });

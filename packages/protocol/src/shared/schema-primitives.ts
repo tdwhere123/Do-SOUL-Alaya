@@ -45,7 +45,7 @@ export const BoundedJsonObjectSchema = z
       serialized = JSON.stringify(value);
     } catch {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "JSON object must be serializable."
       });
       return;

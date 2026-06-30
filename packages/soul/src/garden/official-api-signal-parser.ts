@@ -10,7 +10,7 @@ const MAX_OFFICIAL_API_REASON_CHARS = 400;
 const UnknownRecordSchema = z.record(z.string(), z.unknown()).readonly();
 const OfficialApiSignalsEnvelopeSchema = z.object({
   signals: z.array(z.unknown()).readonly()
-}).passthrough().readonly();
+}).loose().readonly();
 
 const RequiredTrimmedStringSchema = z.preprocess(normalizeStringValue, z.string().min(1));
 const OptionalTrimmedStringSchema = z
@@ -169,7 +169,7 @@ const OfficialApiSignalEntrySchema = z.object({
   reason: OptionalTrimmedStringSchema,
   temporal_projection: OfficialApiTemporalProjectionSchema,
   preference_profile: OfficialApiPreferenceProfileSchema
-}).passthrough().readonly();
+}).loose().readonly();
 
 export interface OfficialApiTemporalProjectionDraft {
   readonly event_time_start?: string;

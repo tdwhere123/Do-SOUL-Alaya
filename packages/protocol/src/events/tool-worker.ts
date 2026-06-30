@@ -111,7 +111,7 @@ export const WorkerStateChangedPayloadSchema = z
   .superRefine((payload, context) => {
     if (payload.state !== "suspended" && payload.suspendReason !== undefined) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "suspendReason is only allowed when state is suspended",
         path: ["suspendReason"]
       });
