@@ -247,6 +247,17 @@ describe("createApp", () => {
     });
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      data: {
+        config_version: 1,
+        embedding_enabled: true,
+        model_id: null,
+        provider_url: null,
+        secret_ref: null
+      },
+      requires_daemon_restart: true
+    });
     expect(patchRuntimeEmbeddingConfig).toHaveBeenCalledWith({ embedding_enabled: true });
   });
 
