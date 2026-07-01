@@ -104,6 +104,30 @@ describe("apiFetch", () => {
     });
   });
 
+  it("retains PATCH config envelope fields including requires_daemon_restart", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: { embedding_enabled: true },
+          requires_daemon_restart: true
+        }),
+        { status: 200 }
+      )
+    );
+
+    await expect(
+      apiFetch<{ success: true; data: { embedding_enabled: boolean }; requires_daemon_restart?: boolean }>(
+        "/config/runtime/embedding-supplement",
+        { method: "PATCH", body: { embedding_enabled: true } }
+      )
+    ).resolves.toEqual({
+      success: true,
+      data: { embedding_enabled: true },
+      requires_daemon_restart: true
+    });
+  });
+
   it("throws a friendly schema error instead of surfacing raw ZodError", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ success: true, data: "not-an-object" }), { status: 200 })

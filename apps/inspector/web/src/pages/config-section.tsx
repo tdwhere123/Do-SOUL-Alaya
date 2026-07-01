@@ -116,7 +116,12 @@ function useSaveConfigSection(
     try {
       setSaving(true);
       const result = await patchSectionConfig(props.workspaceId, props.meta.key, current);
-      showToast({ message: `${props.meta.title} patched · daemon restart pending`, type: "success" });
+      showToast({
+        message: result.requires_daemon_restart
+          ? `${props.meta.title} patched · daemon restart pending`
+          : `${props.meta.title} saved`,
+        type: "success"
+      });
       setInitial(current);
       if (result.requires_daemon_restart) props.onRequiresRestart();
     } catch (err) {
