@@ -2,6 +2,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
+import { isZodValidationError } from "@do-soul/alaya-protocol";
 import { bodyLimit } from "hono/body-limit";
 import { createInspectorAuthMiddleware } from "../middleware/auth.js";
 import { registerInspectorBenchSummaryRoutes } from "../routes/bench-summary.js";
@@ -175,7 +176,7 @@ function normalizeOptionalSecret(value: string | undefined): string | undefined 
 }
 
 function isClientInputError(error: unknown): boolean {
-  return error instanceof SyntaxError || (error instanceof Error && error.name === "ZodError");
+  return error instanceof SyntaxError || isZodValidationError(error);
 }
 
 function summarizeInspectorError(

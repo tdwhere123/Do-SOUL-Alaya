@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { z } from "zod";
 import { CoreError } from "@do-soul/alaya-core";
 import { EngineError, EngineErrorKind } from "@do-soul/alaya-protocol";
 import {
@@ -154,6 +155,10 @@ function handleDaemonError(
   if (engineErrorResponse !== null) {
     return engineErrorResponse;
   }
+  const zodErrorResponse = handleZodDaemonError(error, context, logger, requestId);
+  if (zodErrorResponse !== null) {
+    return zodErrorResponse;
+  }
   logger.error("[daemon] unhandled error", summarizeUnhandledError(error, requestId));
   return context.json({ success: false, error: "Internal server error" }, 500);
 }
@@ -228,4 +233,23 @@ function handleEngineDaemonError(
     })
   );
   return context.json({ success: false, error: publicMessage, kind: error.kind }, 502);
+}
+
+function handleZodDaemonError(
+  error: unknown,
+  context: ErrorHandlerContext,
+  logger: ErrorLoggerPort,
+  requestId?: string
+): Response | null {
+  if (!(error instanceof z.ZodError)) {
+    return null;
+  }
+  logger.error(
+    "[daemon] sanitized zod validation error",
+    summarizeHandledError(error, {
+      publicMessage: "Invalid request",
+      request_id: requestId
+    })
+  );
+  return context.json({ success: false, error: "Invalid request" }, 400);
 }

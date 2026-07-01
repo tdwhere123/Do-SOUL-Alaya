@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { EngineError, EngineErrorKind } from "@do-soul/alaya-protocol";
 import { registerErrorHandler } from "../../middleware/error-handler.js";
 
@@ -70,5 +71,33 @@ describe("registerErrorHandler", () => {
     );
     const loggedMeta = logger.error.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(JSON.stringify(loggedMeta)).not.toContain("abcd1234");
+  });
+
+  it("sanitizes Zod validation failures without leaking field paths", async () => {
+    const app = new Hono();
+    const logger = { error: vi.fn() };
+
+    registerErrorHandler(app, logger as never);
+    app.get("/zod", () => {
+      z.object({ workspace_path: z.string() }).parse({ workspace_path: 1 });
+    });
+
+    const response = await app.request("/zod");
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Invalid request"
+    });
+    expect(logger.error).toHaveBeenCalledWith(
+      "[daemon] sanitized zod validation error",
+      expect.objectContaining({
+        name: "ZodError",
+        messageRedacted: true,
+        publicMessage: "Invalid request"
+      })
+    );
+    const loggedMeta = logger.error.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(JSON.stringify(loggedMeta)).not.toContain("workspace_path");
   });
 });

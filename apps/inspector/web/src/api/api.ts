@@ -7,8 +7,13 @@
  * SessionExpired surface.
  */
 
+import {
+  ManifestationBudgetConfigSchema,
+  createConfigRouteResponseSchema,
+  isZodValidationError,
+  unwrapStandardResponseData
+} from "@do-soul/alaya-protocol";
 import { z, type ZodType } from "zod";
-import { ManifestationBudgetConfigSchema } from "@do-soul/alaya-protocol";
 
 let inspectorToken: string | null = null;
 let currentWorkspaceId: string | null = null;
@@ -40,75 +45,48 @@ export interface ApiError extends Error {
   status?: number;
 }
 
-const CONFIG_PATH_SCHEMAS: ReadonlyArray<{
+const CONFIG_PATH_PATTERNS: ReadonlyArray<{
   readonly pattern: RegExp;
-  readonly schema: ZodType;
+  readonly buildSchema: (options: { readonly allowPatchAck: boolean }) => ZodType;
 }> = [
   {
     pattern: /\/config\/[^/]+\/manifestation-budget$/u,
-    schema: createConfigRouteSchema({
-      validateData: (value) => {
-        if (typeof value !== "object" || value === null || Array.isArray(value)) {
-          return false;
-        }
-        const { source, ...config } = value as { readonly source?: unknown };
-        if (source !== undefined && source !== "default" && source !== "stored") {
-          return false;
-        }
-        return ManifestationBudgetConfigSchema.safeParse(config).success;
-      }
-    })
+    buildSchema: ({ allowPatchAck }) =>
+      createConfigRouteResponseSchema(
+        z.custom<Record<string, unknown>>((value) => isConfigObject(value)).superRefine((data, context) => {
+          if (!isConfigObject(data)) {
+            context.addIssue({ code: "custom", message: "Invalid config payload" });
+            return;
+          }
+          const { source, ...config } = data as { readonly source?: unknown };
+          if (source !== undefined && source !== "default" && source !== "stored") {
+            context.addIssue({ code: "custom", message: "Invalid config payload" });
+            return;
+          }
+          if (!ManifestationBudgetConfigSchema.safeParse(config).success) {
+            context.addIssue({ code: "custom", message: "Invalid config payload" });
+          }
+        }),
+        { allowPatchAck }
+      )
   },
-  { pattern: /\/config\//u, schema: createConfigRouteSchema() }
+  {
+    pattern: /\/config\//u,
+    buildSchema: ({ allowPatchAck }) =>
+      createConfigRouteResponseSchema(
+        z.custom<Record<string, unknown>>((value) => isConfigObject(value)),
+        { allowPatchAck }
+      )
+  }
 ];
 
 function isConfigObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function createConfigRouteSchema(options?: {
-  readonly validateData?: (value: unknown) => boolean;
-}): ZodType {
-  const validateData =
-    options?.validateData ??
-    ((value: unknown) => isConfigObject(value));
-  const configObjectSchema = z.custom<Record<string, unknown>>((value) => isConfigObject(value)).superRefine(
-    (data, context) => {
-      if (!validateData(data)) {
-        context.addIssue({ code: "custom", message: "Invalid config payload" });
-      }
-    }
-  );
-  const envelopedSchema = z.object({
-    success: z.literal(true),
-    data: configObjectSchema.optional(),
-    requires_daemon_restart: z.boolean().optional()
-  });
-  const flatSchema = configObjectSchema.refine((value) => !("success" in value), {
-    message: "Invalid config payload"
-  });
-  return z.union([envelopedSchema, flatSchema]);
-}
-
-function unwrapConfigReadPayload(parsed: unknown): unknown {
-  if (
-    typeof parsed === "object" &&
-    parsed !== null &&
-    "success" in parsed &&
-    (parsed as { success: unknown }).success === true &&
-    "data" in parsed
-  ) {
-    const data = (parsed as { data: unknown }).data;
-    if (data !== undefined && isConfigObject(data)) {
-      return data;
-    }
-  }
-  return parsed;
-}
-
 function toApiSchemaError(error: unknown): ApiError {
   const apiError = new Error(
-    error instanceof z.ZodError ? "Invalid API response shape" : error instanceof Error ? error.message : "Invalid API response shape"
+    isZodValidationError(error) ? "Invalid API response shape" : error instanceof Error ? error.message : "Invalid API response shape"
   ) as ApiError;
   apiError.status = 502;
   return apiError;
@@ -137,7 +115,7 @@ export async function apiFetchWithHeaders<T>(
   const url = buildApiUrl(path, params);
   const init = buildRequestInit(rest, method, headers, body);
   const result = await fetchWithRetry(url, init, method);
-  const resolvedSchema = schema ?? resolveConfigResponseSchema(url);
+  const resolvedSchema = schema ?? resolveConfigResponseSchema(url, method);
   let payload: T;
   if (resolvedSchema === undefined) {
     payload = result.payload as T;
@@ -145,7 +123,7 @@ export async function apiFetchWithHeaders<T>(
     try {
       const parsed = resolvedSchema.parse(result.payload);
       const unwrapEnvelope = method.toUpperCase() === "GET" || method.toUpperCase() === "HEAD";
-      payload = (unwrapEnvelope ? unwrapConfigReadPayload(parsed) : parsed) as T;
+      payload = (unwrapEnvelope ? unwrapStandardResponseData(parsed) : parsed) as T;
     } catch (error) {
       throw toApiSchemaError(error);
     }
@@ -238,11 +216,12 @@ async function responsePayload(response: Response): Promise<ApiFetchResult<unkno
   };
 }
 
-function resolveConfigResponseSchema(path: string): ZodType | undefined {
+function resolveConfigResponseSchema(path: string, method: string): ZodType | undefined {
   const apiPath = path.startsWith("http") ? new URL(path).pathname : path.startsWith("/api") ? path : `/api${path}`;
-  for (const entry of CONFIG_PATH_SCHEMAS) {
+  const allowPatchAck = method.toUpperCase() !== "GET" && method.toUpperCase() !== "HEAD";
+  for (const entry of CONFIG_PATH_PATTERNS) {
     if (entry.pattern.test(apiPath)) {
-      return entry.schema;
+      return entry.buildSchema({ allowPatchAck });
     }
   }
   return undefined;

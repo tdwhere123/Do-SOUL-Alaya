@@ -1,8 +1,24 @@
 import { CoreError, type WorkspaceService } from "@do-soul/alaya-core";
-import type { Hono } from "hono";
+import {
+  EnvironmentConfigSchema,
+  ManifestationBudgetConfigSchema,
+  RuntimeEmbeddingConfigSchema,
+  RuntimeGardenComputeConfigSchema,
+  SoulConfigSchema,
+  StrategyConfigSchema,
+  ToolchainStatusSchema,
+  bindStandardConfigPatchResponse,
+  bindStandardResponse
+} from "@do-soul/alaya-protocol";
+import type { Context, Hono } from "hono";
+import { z, type ZodTypeAny } from "zod";
 import { parseJsonBody } from "./shared.js";
 import type { AppConfigService } from "../services/config-service.js";
 import type { EnvironmentStatusService } from "../services/environment-status-service.js";
+
+const ManifestationBudgetReadSchema = ManifestationBudgetConfigSchema.and(
+  z.object({ source: z.enum(["default", "stored"]) }).readonly()
+);
 
 export interface ConfigRouteServices {
   readonly workspaceService: WorkspaceService;
@@ -29,21 +45,22 @@ function registerWorkspaceConfigRoutes(
   services: ConfigRouteServices,
   configService: AppConfigService
 ): void {
-  registerWorkspaceConfigRoute(app, services, configService, "soul");
-  registerWorkspaceConfigRoute(app, services, configService, "strategy");
-  registerWorkspaceConfigRoute(app, services, configService, "environment");
+  registerWorkspaceConfigRoute(app, services, configService, "soul", SoulConfigSchema);
+  registerWorkspaceConfigRoute(app, services, configService, "strategy", StrategyConfigSchema);
+  registerWorkspaceConfigRoute(app, services, configService, "environment", EnvironmentConfigSchema);
 }
 
-function registerWorkspaceConfigRoute(
+function registerWorkspaceConfigRoute<T extends ZodTypeAny>(
   app: Hono,
   services: ConfigRouteServices,
   configService: AppConfigService,
-  section: "soul" | "strategy" | "environment"
+  section: "soul" | "strategy" | "environment",
+  schema: T
 ): void {
   app.get(`/workspaces/:workspaceId/config/${section}`, async (context) => {
     const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
     const config = await readWorkspaceConfig(configService, section, workspaceId);
-    return context.json({ success: true, data: config }, 200);
+    return jsonStandardResponse(context, schema, config);
   });
 
   app.patch(`/workspaces/:workspaceId/config/${section}`, async (context) => {
@@ -54,7 +71,7 @@ function registerWorkspaceConfigRoute(
       workspaceId,
       await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
     );
-    return context.json({ success: true, data: config }, 200);
+    return jsonStandardResponse(context, schema, config);
   });
 }
 
@@ -92,26 +109,26 @@ async function patchWorkspaceConfig(
 function registerRuntimeConfigRoutes(app: Hono, configService: AppConfigService): void {
   app.get("/config/runtime/embedding-supplement", async (context) => {
     const config = await configService.getRuntimeEmbeddingConfig();
-    return context.json({ success: true, data: config }, 200);
+    return jsonStandardResponse(context, RuntimeEmbeddingConfigSchema, config);
   });
 
   app.patch("/config/runtime/embedding-supplement", async (context) => {
     const config = await configService.patchRuntimeEmbeddingConfig(
       await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
     );
-    return context.json({ success: true, data: config, requires_daemon_restart: true }, 200);
+    return jsonConfigPatchResponse(context, RuntimeEmbeddingConfigSchema, config, true);
   });
 
   app.get("/config/runtime/garden-compute", async (context) => {
     const config = await configService.getRuntimeGardenComputeConfig();
-    return context.json({ success: true, data: config }, 200);
+    return jsonStandardResponse(context, RuntimeGardenComputeConfigSchema, config);
   });
 
   app.patch("/config/runtime/garden-compute", async (context) => {
     const config = await configService.patchRuntimeGardenComputeConfig(
       await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
     );
-    return context.json({ success: true, data: config, requires_daemon_restart: false }, 200);
+    return jsonConfigPatchResponse(context, RuntimeGardenComputeConfigSchema, config, false);
   });
 }
 
@@ -123,13 +140,10 @@ function registerManifestationBudgetRoutes(
   app.get("/workspaces/:workspaceId/config/manifestation-budget", async (context) => {
     const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
     const result = await configService.getManifestationBudgetConfig(workspaceId);
-    return context.json({
-      success: true,
-      data: {
-        ...result.config,
-        source: result.source
-      }
-    }, 200);
+    return jsonStandardResponse(context, ManifestationBudgetReadSchema, {
+      ...result.config,
+      source: result.source
+    });
   });
 
   app.patch("/workspaces/:workspaceId/config/manifestation-budget", async (context) => {
@@ -138,7 +152,7 @@ function registerManifestationBudgetRoutes(
       workspaceId,
       await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
     );
-    return context.json({ success: true, data: saved }, 200);
+    return jsonStandardResponse(context, ManifestationBudgetConfigSchema, saved);
   });
 }
 
@@ -150,8 +164,28 @@ function registerEnvironmentStatusRoute(
   app.get("/workspaces/:workspaceId/environment-status", async (context) => {
     await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
     const status = await environmentStatusService.getStatus();
-    return context.json({ success: true, data: status }, 200);
+    return jsonStandardResponse(context, ToolchainStatusSchema, status);
   });
+}
+
+function jsonStandardResponse<T extends ZodTypeAny>(
+  context: Context,
+  schema: T,
+  data: unknown
+): Response {
+  return context.json(bindStandardResponse(schema, data), 200);
+}
+
+function jsonConfigPatchResponse<T extends ZodTypeAny>(
+  context: Context,
+  schema: T,
+  data: unknown,
+  requiresDaemonRestart: boolean
+): Response {
+  return context.json(
+    bindStandardConfigPatchResponse(schema, data, { requiresDaemonRestart }),
+    200
+  );
 }
 
 async function requireWorkspace(workspaceService: WorkspaceService, workspaceId: string): Promise<string> {
