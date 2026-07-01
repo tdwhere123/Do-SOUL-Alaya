@@ -58,7 +58,10 @@ describe("health-inbox route", () => {
     expect(body.data.total_count).toBe(5);
     expect(body.data.groups.length).toBe(5);
     expect(getById).toHaveBeenCalledWith("ws1");
-    expect(findByWorkspace).toHaveBeenCalledWith("ws1", { state: "pending" });
+    expect(findByWorkspace).toHaveBeenCalledWith("ws1", {
+      state: "pending",
+      limit: 200
+    });
   });
 
   it("forwards causeKind + limit query params", async () => {
@@ -90,7 +93,7 @@ describe("health-inbox route", () => {
       "/workspaces/ws1/health-inbox?state=bogus&causeKind=nope"
     );
     expect(response.status).toBe(200);
-    expect(findByWorkspace).toHaveBeenCalledWith("ws1", {});
+    expect(findByWorkspace).toHaveBeenCalledWith("ws1", { limit: 200 });
   });
 
   it("returns 404 when workspace is not found", async () => {

@@ -14,10 +14,12 @@ import {
   SurfaceService,
   TaskSurfaceBuilder,
   ToolSpecService,
-  ZeroDaySecurityLayer
+  ZeroDaySecurityLayer,
+  type RuntimeNotifier
 } from "@do-soul/alaya-core";
 import {
-  SqliteDriftLeaseRepo
+  SqliteDriftLeaseRepo,
+  type StorageDatabase
 } from "@do-soul/alaya-storage";
 import {
   BootstrappingService
@@ -40,10 +42,49 @@ import {
   defaultBootstrappingTemplates,
   defaultCanonicalAliasMap
 } from "./daemon-defaults.js";
+import type { createDaemonRepositories } from "./daemon-repositories.js";
+import type { WarnLogger } from "./daemon-runtime-helpers.js";
+import type { AlayaConfigPaths } from "../cli/config-files.js";
+
+type DaemonRepositories = ReturnType<typeof createDaemonRepositories>;
 
 export type DaemonServiceFoundationInput = {
-  readonly [key: string]: any;
-};
+  readonly database: StorageDatabase;
+  readonly filesDirectory: string;
+  readonly runtimeNotifier: RuntimeNotifier;
+  readonly configPaths: AlayaConfigPaths;
+  readonly warnLogger: WarnLogger;
+} & Pick<
+  DaemonRepositories,
+  | "workspaceRepo"
+  | "runRepo"
+  | "eventLogRepo"
+  | "workspaceEngineConfigRepo"
+  | "pathRelationRepo"
+  | "bootstrappingRecordRepo"
+  | "configRepo"
+  | "trustStateRepo"
+  | "toolSpecRepo"
+  | "strongRefRepo"
+  | "evidenceCapsuleRepo"
+  | "memoryEntryRepo"
+  | "healthJournalRepo"
+  | "greenStatusRepo"
+  | "karmaEventRepo"
+  | "synthesisCapsuleRepo"
+  | "enqueueEnrichPending"
+  | "edgeProposalRepo"
+  | "pathGraphSnapshotRepo"
+  | "proposalRepo"
+  | "slotRepo"
+  | "claimFormRepo"
+  | "conflictMatrixRepo"
+  | "surfaceBindingRepo"
+  | "crossCuttingPermissionRepo"
+  | "surfaceIdentityRepo"
+  | "surfaceAnchorRepo"
+  | "projectMappingAnchorRepo"
+>;
 
 export async function createDaemonServiceFoundation(input: DaemonServiceFoundationInput) {
   const environmentFoundation = await createEnvironmentSecurityFoundation(input);

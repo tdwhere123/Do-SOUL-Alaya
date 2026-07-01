@@ -83,7 +83,7 @@ describe("memory routes (HTTP surface narrowed)", () => {
 
   it("applies authoritative scope/conflict filtering before paginating workspace memory lists", async () => {
     const { app, memoryService } = buildApp();
-    memoryService.findByWorkspaceId.mockResolvedValue([
+    memoryService.findByScopeClass.mockResolvedValue([
       { object_id: "m-project-clear", dimension: "fact", scope_class: "project", contradiction_count: 0 },
       { object_id: "m-project-conflict-1", dimension: "fact", scope_class: "project", contradiction_count: 2 },
       { object_id: "m-project-conflict-2", dimension: "fact", scope_class: "project", contradiction_count: 1 }
@@ -94,11 +94,11 @@ describe("memory routes (HTTP surface narrowed)", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(memoryService.findByWorkspaceId).toHaveBeenCalledWith("ws-1", {
+    expect(memoryService.findByScopeClass).toHaveBeenCalledWith("ws-1", "project", {
       limit: 500,
       offset: 0
     });
-    expect(memoryService.findByScopeClass).not.toHaveBeenCalled();
+    expect(memoryService.findByWorkspaceId).not.toHaveBeenCalled();
     expect(response.headers.get("x-total-count")).toBe("2");
     expect(response.headers.get("x-limit")).toBe("1");
     expect(response.headers.get("x-offset")).toBe("1");

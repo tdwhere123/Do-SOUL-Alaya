@@ -125,8 +125,10 @@ function registerManifestationBudgetRoutes(
     const result = await configService.getManifestationBudgetConfig(workspaceId);
     return context.json({
       success: true,
-      data: result.config,
-      source: result.source
+      data: {
+        ...result.config,
+        source: result.source
+      }
     }, 200);
   });
 
@@ -136,7 +138,7 @@ function registerManifestationBudgetRoutes(
       workspaceId,
       await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
     );
-    return context.json({ success: true, data: saved, requires_daemon_restart: false }, 200);
+    return context.json({ success: true, data: saved }, 200);
   });
 }
 

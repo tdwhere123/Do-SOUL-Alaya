@@ -93,18 +93,14 @@ async function listWorkspaceMemories(
   memoryService: MemoryService,
   input: WorkspaceMemoryListInput
 ): Promise<{ readonly memories: readonly MemoryListRow[]; readonly totalCount: number }> {
-  if (input.scopeClass !== undefined && input.hasConflict !== true) {
+  if (input.scopeClass !== undefined && input.hasConflict !== true && input.dimension === undefined) {
     const memories = await memoryService.findByScopeClass(
       input.workspaceId,
       input.scopeClass,
       input.pagination
     );
-    const filtered =
-      input.dimension === undefined
-        ? memories
-        : memories.filter((memory) => memory.dimension === input.dimension);
-    const totalCount = await countScopedWorkspaceMemories(memoryService, input, filtered);
-    return { memories: filtered, totalCount };
+    const totalCount = await countWorkspaceMemoriesByScopeClass(memoryService, input);
+    return { memories, totalCount };
   }
 
   const needsAuthoritativeFiltering = input.hasConflict === true;
@@ -187,16 +183,12 @@ function matchesWorkspaceMemoryListFilters(
   return true;
 }
 
-async function countScopedWorkspaceMemories(
+async function countWorkspaceMemoriesByScopeClass(
   memoryService: MemoryService,
-  input: WorkspaceMemoryListInput,
-  page: readonly MemoryListRow[]
+  input: WorkspaceMemoryListInput
 ): Promise<number> {
-  if (input.dimension !== undefined) {
-    return page.length;
-  }
   if (input.scopeClass === undefined) {
-    return await memoryService.countByWorkspaceId(input.workspaceId);
+    return 0;
   }
   let totalCount = 0;
   let scanOffset = 0;

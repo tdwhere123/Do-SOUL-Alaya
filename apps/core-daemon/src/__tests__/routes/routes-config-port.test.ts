@@ -242,8 +242,8 @@ describe("routes-config port batch", () => {
     expect(initial.status).toBe(200);
     await expect(initial.json()).resolves.toMatchObject({
       success: true,
-      source: "default",
       data: {
+        source: "default",
         workspace_id: "ws-budget",
         stance_bias_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_stance_bias_cap,
         dialogue_nudge_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_dialogue_nudge_cap,
@@ -266,7 +266,6 @@ describe("routes-config port batch", () => {
     expect(patch.status).toBe(200);
     await expect(patch.json()).resolves.toMatchObject({
       success: true,
-      requires_daemon_restart: false,
       data: {
         workspace_id: "ws-budget",
         stance_bias_cap: 7,
@@ -296,8 +295,8 @@ describe("routes-config port batch", () => {
     const stored = await app.request("/workspaces/ws-budget/config/manifestation-budget");
     await expect(stored.json()).resolves.toMatchObject({
       success: true,
-      source: "stored",
       data: {
+        source: "stored",
         workspace_id: "ws-budget",
         stance_bias_cap: 7,
         escalation_policy: {

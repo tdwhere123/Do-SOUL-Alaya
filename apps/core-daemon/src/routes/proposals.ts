@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { PathRelationProposalPayload } from "@do-soul/alaya-storage";
+import { reportAsyncSideEffectFailure } from "@do-soul/alaya-core";
 import {
   ControlPlaneObjectKind,
   MemoryGovernanceEventType,
@@ -65,14 +66,13 @@ function registerProposalListRoutes(app: Hono, services: ProposalRouteServices):
     const workspaceId = context.req.param("wsId");
     await services.workspaceService.getById(workspaceId);
     const since = context.req.query("since") ?? undefined;
-    const limitRaw = context.req.query("limit");
-    const limit = limitRaw === undefined ? undefined : Number.parseInt(limitRaw, 10);
+    const limit = parsePendingListLimit(context.req.query("limit"));
     // Workspace is bound server-side from the McpMemoryToolCallContext
     // below; the request body no longer carries
     // workspace_id (mirrors soul.explore_graph).
     const args: Record<string, unknown> = {};
     if (since !== undefined) args.since = since;
-    if (limit !== undefined && Number.isFinite(limit)) args.limit = limit;
+    if (limit !== undefined) args.limit = limit;
 
     const result = await services.mcpMemoryToolHandler.call({
       toolName: "soul.list_pending_proposals",
@@ -224,8 +224,37 @@ async function promoteStrictlyGovernedProposal(
   if (missing !== null) return missing;
   const reason = await readPromotionReason(context, memoryId);
   const created = await createStrictlyGovernedProposal(services, { workspaceId, memoryId, reason });
-  for (const event of created.events) await services.runtimeNotifier.notifyEntry(event);
+  await notifyStrictGovernanceProposalEvents(services, created, workspaceId);
   return context.json({ success: true, data: strictGovernanceResponse(created.proposal.proposal_id, memoryId) }, 200);
+}
+
+async function notifyStrictGovernanceProposalEvents(
+  services: ProposalRouteServices,
+  created: Awaited<ReturnType<typeof createStrictlyGovernedProposal>>,
+  workspaceId: string
+): Promise<void> {
+  for (const event of created.events) {
+    try {
+      await services.runtimeNotifier.notifyEntry(event);
+    } catch (error) {
+      await reportAsyncSideEffectFailure(
+        {
+          source: "daemon.proposals.promote_strictly_governed",
+          operation: "runtime_notify",
+          subjectType: "proposal",
+          subjectId: created.proposal.proposal_id,
+          workspaceId,
+          runId: null,
+          causedBy: "inspector",
+          committedEventId: event.event_id,
+          severity: "error",
+          warningCode: "ALAYA_PROPOSAL_NOTIFY_FAILED",
+          warningMessage: "[ProposalRoute] promote-strictly-governed notification failed"
+        },
+        error
+      );
+    }
+  }
 }
 
 async function rejectMissingMemory(
@@ -496,4 +525,18 @@ async function findExistingPendingMatch(
 function canonicalizeChanges(value: Record<string, unknown>): string {
   const sortedKeys = Object.keys(value).sort();
   return JSON.stringify(sortedKeys.map((key) => [key, value[key]]));
+}
+
+const MAX_PENDING_LIST_LIMIT = 500;
+
+function parsePendingListLimit(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || String(parsed) !== trimmed) {
+    return undefined;
+  }
+  return Math.min(parsed, MAX_PENDING_LIST_LIMIT);
 }
