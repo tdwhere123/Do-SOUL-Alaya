@@ -32,7 +32,8 @@ import type { RecallFusionStream, RecallSupplementaryData } from "./recall-servi
 import type { ResolvedRecallFusionWeights } from "./fusion-delivery-adaptive-scoring.js";
 import { resolveFusionContribution as resolveAdaptiveFusionContribution } from "./fusion-delivery-adaptive-scoring.js";
 import type { RecallFusionCandidateInput } from "./fusion-delivery-scoring-candidate.js";
-import { activeFusionStreams } from "./fusion-delivery-scoring.js";
+import { activeFusionStreams } from "./fusion-delivery-streams.js";
+
 export function accumulateFusionContributions(
   candidate: RecallFusionCandidateInput,
   supplementaryData: RecallSupplementaryData,
@@ -46,20 +47,9 @@ export function accumulateFusionContributions(
   axisContext: ConformantAxisContext | null
 ): number {
   if (axisContext !== null) {
-    // Compose-on-flat-base: object axis = the additive RRF base (the noisy-OR R_O ranking regressed
-    // any@5 86.7→37.8); Φ composes additively on top; R_E gain applies only behind ALAYA_RECALL_EVIDENCE_MULT.
-    for (const stream of activeFusionStreams()) {
-      const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
-      perStreamRank[stream] = rank;
-      if (rank !== null) {
-        contributions[stream] = resolveFusionContribution(candidate, supplementaryData, resolved, stream, rank);
-      }
-    }
-    const ra = axisContext.raByKey.get(candidateKey);
-    const composed = (ra?.object ?? 0) + resolveConformantPathWeight() * (ra?.path ?? 0);
-    return evidenceMultEnabled()
-      ? composed * (1 + resolveConformantEvidenceBeta() * (ra?.evidence ?? 0))
-      : composed;
+    return accumulateConformantFusedScore(
+      candidate, supplementaryData, resolved, ranksByStream, candidateKey, perStreamRank, contributions, axisContext
+    );
   }
   if (synthesisFusionEnabled()) {
     return accumulateSynthesisFusedScore(
@@ -71,6 +61,46 @@ export function accumulateFusionContributions(
       candidate, supplementaryData, resolved, ranksByStream, scoresByStream, candidateKey, perStreamRank, contributions
     );
   }
+  return accumulateDefaultFusedScore(
+    candidate, supplementaryData, resolved, ranksByStream, scoresByStream, candidateKey, perStreamRank, contributions, embeddingPoolMax
+  );
+}
+
+function accumulateConformantFusedScore(
+  candidate: RecallFusionCandidateInput,
+  supplementaryData: RecallSupplementaryData,
+  resolved: ResolvedRecallFusionWeights,
+  ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
+  candidateKey: string,
+  perStreamRank: Record<RecallFusionStream, number | null>,
+  contributions: Record<RecallFusionStream, number>,
+  axisContext: ConformantAxisContext
+): number {
+  for (const stream of activeFusionStreams()) {
+    const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
+    perStreamRank[stream] = rank;
+    if (rank !== null) {
+      contributions[stream] = resolveFusionContribution(candidate, supplementaryData, resolved, stream, rank);
+    }
+  }
+  const ra = axisContext.raByKey.get(candidateKey);
+  const composed = (ra?.object ?? 0) + resolveConformantPathWeight() * (ra?.path ?? 0);
+  return evidenceMultEnabled()
+    ? composed * (1 + resolveConformantEvidenceBeta() * (ra?.evidence ?? 0))
+    : composed;
+}
+
+function accumulateDefaultFusedScore(
+  candidate: RecallFusionCandidateInput,
+  supplementaryData: RecallSupplementaryData,
+  resolved: ResolvedRecallFusionWeights,
+  ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
+  scoresByStream: ReadonlyMap<RecallFusionStream, FloodStreamScores> | null,
+  candidateKey: string,
+  perStreamRank: Record<RecallFusionStream, number | null>,
+  contributions: Record<RecallFusionStream, number>,
+  embeddingPoolMax: number
+): number {
   const governance = scoresByStream !== null && floodGovernanceEnabled();
   const embedGateFloor =
     embeddingGateEnabled() && embeddingGateAppliesToIntent(classifyRecallIntent(supplementaryData.queryProbes))

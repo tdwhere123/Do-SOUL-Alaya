@@ -8,7 +8,6 @@ import type {
   RecallSupplementaryData
 } from "./recall-service-types.js";
 import { uniqueStrings } from "./path-relations.js";
-import { sessionRouteEnabled } from "./session-route.js";
 import { rankCoarseCandidateDrafts } from "./coarse-candidates-ranking.js";
 
 export const DYNAMIC_RECALL_SEED_CAP = 50;

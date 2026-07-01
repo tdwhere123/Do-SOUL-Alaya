@@ -144,36 +144,48 @@ function orderFusedFineAssessmentCandidates(
 ): FineAssessmentOrdering {
   const rankedCandidates = [...scoredCandidates].sort(compareFusedRecallCandidates);
   if (composeRecallEnabled()) {
-    // Compose-then-rank (ALAYA_RECALL_COMPOSE): entity-grouped navigator delivery replaces the flat
-    // post-fusion chain. Every stage field shares one reference so the diagnostic no-op checks hold.
-    const deliveryOrderedCandidates = composeAndOrderByEntity(
-      scoredCandidates,
-      supplementaryData,
-      resolveDeliveryReorderWindow(maxEntries)
-    );
-    return Object.freeze({
-      rankedCandidates,
-      featureRerankedCandidates: deliveryOrderedCandidates,
-      prioritizedCandidates: deliveryOrderedCandidates,
-      coverageSelectedCandidates: deliveryOrderedCandidates,
-      coverageOrderedCandidates: deliveryOrderedCandidates,
-      synthesisReservedCandidates: deliveryOrderedCandidates,
-      deliveryOrderedCandidates
-    });
+    return buildComposedFineAssessmentOrdering(rankedCandidates, scoredCandidates, supplementaryData, maxEntries);
   }
   if (deliverFusedOrderEnabled()) {
-    return Object.freeze({
-      rankedCandidates,
-      featureRerankedCandidates: rankedCandidates,
-      prioritizedCandidates: rankedCandidates,
-      coverageSelectedCandidates: rankedCandidates,
-      coverageOrderedCandidates: rankedCandidates,
-      synthesisReservedCandidates: rankedCandidates,
-      deliveryOrderedCandidates: rankedCandidates
-    });
+    return buildSingleStageFineAssessmentOrdering(rankedCandidates, rankedCandidates);
   }
-  // Reorder window decoupled from the delivery cap: the coverage/priority/reserve passes need a window
-  // wide enough to seat complementary golds beside single_fact without trading; delivery is sliced downstream.
+  return buildPostFusionFineAssessmentOrdering(rankedCandidates, supplementaryData, maxEntries);
+}
+
+function buildComposedFineAssessmentOrdering(
+  rankedCandidates: readonly FineAssessmentCandidate[],
+  scoredCandidates: readonly FineAssessmentCandidate[],
+  supplementaryData: RecallSupplementaryData,
+  maxEntries: number
+): FineAssessmentOrdering {
+  const deliveryOrderedCandidates = composeAndOrderByEntity(
+    scoredCandidates,
+    supplementaryData,
+    resolveDeliveryReorderWindow(maxEntries)
+  );
+  return buildSingleStageFineAssessmentOrdering(rankedCandidates, deliveryOrderedCandidates);
+}
+
+function buildSingleStageFineAssessmentOrdering(
+  rankedCandidates: readonly FineAssessmentCandidate[],
+  deliveryOrderedCandidates: readonly FineAssessmentCandidate[]
+): FineAssessmentOrdering {
+  return Object.freeze({
+    rankedCandidates,
+    featureRerankedCandidates: deliveryOrderedCandidates,
+    prioritizedCandidates: deliveryOrderedCandidates,
+    coverageSelectedCandidates: deliveryOrderedCandidates,
+    coverageOrderedCandidates: deliveryOrderedCandidates,
+    synthesisReservedCandidates: deliveryOrderedCandidates,
+    deliveryOrderedCandidates
+  });
+}
+
+function buildPostFusionFineAssessmentOrdering(
+  rankedCandidates: readonly FineAssessmentCandidate[],
+  supplementaryData: RecallSupplementaryData,
+  maxEntries: number
+): FineAssessmentOrdering {
   const window = resolveDeliveryReorderWindow(maxEntries);
   const featureRerankedCandidates = applyFeatureRerank(rankedCandidates, supplementaryData);
   const prioritizedCandidates = prioritizeStrongLexicalDeliveryWindowCandidates(

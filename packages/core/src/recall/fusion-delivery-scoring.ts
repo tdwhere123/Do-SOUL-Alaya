@@ -1,130 +1,31 @@
-import type {
-  MemoryEntry,
-  RecallPolicy,
-  RecallScoreFactors
-} from "@do-soul/alaya-protocol";
-import type { RecallQueryProbes } from "./recall-query-probes.js";
+import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import {
   buildRecallCandidateDedupeKey,
   clamp01,
-  compareMemoryEntries,
-  normalizeActivationScore,
-  normalizeGraphSupport
+  compareMemoryEntries
 } from "./recall-service-helpers.js";
 import {
-  resolveFusionContribution as resolveAdaptiveFusionContribution,
   resolveRrfFusionWeights,
   type ResolvedRecallFusionWeights
 } from "./fusion-delivery-adaptive-scoring.js";
 import {
   bestEvidenceEnabled,
-  cappedLexicalFloodSum,
-  combineBestEvidenceFamilies,
-  decorrelateFamily,
-  embeddingGateEnabled,
-  embeddingGateFloor,
-  embeddingGateAppliesToIntent,
   floodFusionEnabled,
-  floodGovernanceEnabled,
-  gateSurfaceByEmbedding,
-  isLexicalFamilyFloodStream,
-  resolveBestEvidenceRelevance,
-  resolveFloodFusionContribution,
-  streamFamily,
-  synthesisFusionEnabled,
-  synthesisGateFloor,
-  synthesisDecorrLambda,
-  synthesisGovernanceEnabled,
-  applySynthesisGovernance,
-  synthesisIntentGated,
-  type FloodStreamScores,
-  type StreamFamily
+  type FloodStreamScores
 } from "./flood-fusion-scoring.js";
 import {
   buildConformantAxisContext,
   compareConformantAxisRa,
-  evidenceMultEnabled,
   flatBaselineEnabled,
   fourAxisAssemblyEnabled,
-  resolveConformantEvidenceBeta,
-  resolveConformantPathWeight,
   type ConformantAxisContext
 } from "./conformant-fusion-scoring.js";
-
-export { flatBaselineEnabled, fourAxisAssemblyEnabled };
-import { classifyRecallIntent } from "./recall-query-plan.js";
-import type {
-  CoarseRecallCandidate,
-  RecallConformantAxis,
-  RecallFusionBreakdown,
-  RecallFusionStream,
-  RecallFusionStreamContributions,
-  RecallFusionStreamRanks,
-  RecallSupplementaryData
-} from "./recall-service-types.js";
 import {
-  normalizeEvidenceText} from "./query-evidence-scoring.js";
-import { scorePreferenceProfileAlignment } from "./preference-fusion-scoring.js";
-import {
-  parseQueryTimeWindow,
-  scoreTemporalEventTime,
-  scoreTemporalQueryWindow,
-  temporalQueryWindowEnabled
-} from "./temporal-fusion-scoring.js";
-
-const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;
-
-export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
-  "lexical_fts", "trigram_fts", "synthesis_fts", "evidence_fts",
-  "evidence_structural_agreement", "source_proximity", "source_evidence_agreement", "subject_alignment",
-  "structural", "existing_score", "embedding_similarity", "graph_expansion",
-  "entity_seed", "path_expansion", "temporal_recency", "workspace_activation",
-  "facet_overlap"
-];
-
-const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
-  lexical_fts: 3, trigram_fts: 1, synthesis_fts: 1, evidence_fts: 3,
-  evidence_structural_agreement: 6, source_proximity: 1, source_evidence_agreement: 1, subject_alignment: 1,
-  structural: 1, existing_score: 1, embedding_similarity: 12, graph_expansion: 3,
-  entity_seed: 1, path_expansion: 3, temporal_recency: 0, workspace_activation: 0,
-  facet_overlap: 4
-});
-
-// Opt-in (ALAYA_RECALL_FACET_OVERLAP): scores candidates by query-sought facet coverage. Off → stream excluded so breakdowns stay byte-identical.
-export function facetOverlapEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_FACET_OVERLAP;
-  return raw === "on" || raw === "1" || raw === "true";
-}
-
-// Slice mode (with FACET_OVERLAP on): facet-overlap count is the primary rank key, fused score breaks ties — slice-then-rank, not an additive vote.
-function facetSliceEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_FACET_SLICE;
-  return raw === "on" || raw === "1" || raw === "true";
-}
-
-function facetOverlapCountFor(
-  entry: Readonly<MemoryEntry>,
-  querySoughtFacets: readonly string[] | undefined
-): number {
-  if (querySoughtFacets === undefined || querySoughtFacets.length === 0) {
-    return 0;
-  }
-  const sought = new Set(querySoughtFacets);
-  const matched = new Set<string>();
-  for (const tag of entry.facet_tags ?? []) {
-    if (sought.has(tag.facet)) {
-      matched.add(tag.facet);
-    }
-  }
-  return matched.size;
-}
-
-export function activeFusionStreams(): readonly RecallFusionStream[] {
-  return facetOverlapEnabled() || fourAxisAssemblyEnabled()
-    ? RECALL_FUSION_STREAMS
-    : RECALL_FUSION_STREAMS.filter((stream) => stream !== "facet_overlap");
-}
-
+  activeFusionStreams,
+  facetOverlapCountFor,
+  facetSliceEnabled,
+  RECALL_FUSION_DEFAULT_WEIGHTS
+} from "./fusion-delivery-streams.js";
 import type {
   RecallFusionCandidateInput,
   FusedRecallCandidateInput,
@@ -132,6 +33,22 @@ import type {
 } from "./fusion-delivery-scoring-candidate.js";
 import { scoreRecallFusionStream } from "./fusion-delivery-scoring-streams.js";
 import { accumulateFusionContributions } from "./fusion-delivery-scoring-accumulate.js";
+import type {
+  RecallFusionBreakdown,
+  RecallFusionStream,
+  RecallFusionStreamContributions,
+  RecallFusionStreamRanks,
+  RecallSupplementaryData
+} from "./recall-service-types.js";
+
+export { flatBaselineEnabled, fourAxisAssemblyEnabled };
+export {
+  activeFusionStreams,
+  facetOverlapEnabled,
+  RECALL_FUSION_STREAMS
+} from "./fusion-delivery-streams.js";
+
+const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;
 
 export function buildRecallFusionDetails(params: Readonly<{
   readonly candidates: readonly RecallFusionCandidateInput[];
