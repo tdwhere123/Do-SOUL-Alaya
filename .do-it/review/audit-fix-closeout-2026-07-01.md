@@ -28,7 +28,9 @@ rtk pnpm exec vitest run --config vitest.config.mjs \
 
 `routes-files.test.ts`: 10 tests (4 upload + 6 download).
 
-## Deferred (nice-to-have, out of scope)
+## Nice-to-have closed (2026-07-02)
 
-- **fusion-delivery unit tests** — module already split on branch; dedicated unit coverage not added in this pass.
-- **findByIds ad-hoc prepare** — storage read path still uses inline prepare; no refactor in this pass.
+| Item | Resolution |
+|------|------------|
+| fusion-delivery unit tests | `fusion-delivery-lexical-rerank.test.ts`, `fusion-delivery-session-coverage.test.ts`, `fusion-delivery-adaptive-scoring.test.ts` cover split delivery modules. |
+| Dynamic prepared statements | `DynamicPreparedStatementCache` + `dynamic-prepared-statement-cache.test.ts`; `MemoryEntryDynamicReadQueries` routes dynamic SQL through the cache. |
