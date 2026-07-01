@@ -20,6 +20,7 @@ export type GitBindingValidationErrorCode =
   | "path_must_be_absolute"
   | "path_traversal"
   | "path_not_found"
+  | "permission_denied"
   | "not_a_directory"
   | "outside_allowed_roots"
   | "not_a_git_repository";
@@ -93,24 +94,16 @@ export async function validateWorkspaceGitBindingInput(
 
   try {
     resolvedPath = await realpath(repoPath);
-  } catch {
-    return {
-      ok: false,
-      code: "path_not_found",
-      detail: "repo_path could not be resolved."
-    };
+  } catch (error) {
+    return mapFsErrorToValidationResult(error, "repo_path could not be resolved.");
   }
 
   let resolvedStat: Awaited<ReturnType<typeof stat>>;
 
   try {
     resolvedStat = await stat(resolvedPath);
-  } catch {
-    return {
-      ok: false,
-      code: "path_not_found",
-      detail: "repo_path could not be resolved."
-    };
+  } catch (error) {
+    return mapFsErrorToValidationResult(error, "repo_path could not be resolved.");
   }
 
   if (!resolvedStat.isDirectory()) {
@@ -182,8 +175,8 @@ async function resolveAllowedRoots(options: GitBindingValidationOptions): Promis
   for (const candidate of candidateRoots) {
     try {
       resolvedRoots.add(await realpath(candidate));
-    } catch {
-      // Invalid configured roots must not broaden the allowlist.
+    } catch (error) {
+      logGitBindingFsWarning("resolveAllowedRoots", candidate, error);
     }
   }
 
@@ -230,7 +223,8 @@ async function validateGitMarker(
   let resolvedGitMarkerStats: Awaited<ReturnType<typeof stat>>;
   try {
     resolvedGitMarkerStats = await stat(resolvedGitMarkerPath);
-  } catch {
+  } catch (error) {
+    logGitBindingFsWarning("validateGitMarker", resolvedGitMarkerPath, error);
     return {
       ok: false,
       code: "not_a_git_repository",
@@ -269,7 +263,8 @@ async function validateGitMarker(
 async function resolveGitMarkerPath(gitMarkerPath: string): Promise<string | null> {
   try {
     return await realpath(gitMarkerPath);
-  } catch {
+  } catch (error) {
+    logGitBindingFsWarning("resolveGitMarkerPath", gitMarkerPath, error);
     return null;
   }
 }
@@ -281,7 +276,8 @@ async function resolveGitDirTarget(
   let contents: string;
   try {
     contents = await readFile(resolvedGitMarkerPath, "utf8");
-  } catch {
+  } catch (error) {
+    logGitBindingFsWarning("resolveGitDirTarget.readFile", resolvedGitMarkerPath, error);
     return null;
   }
 
@@ -302,18 +298,56 @@ async function resolveGitDirTarget(
   let resolvedGitDirPath: string;
   try {
     resolvedGitDirPath = await realpath(candidatePath);
-  } catch {
+  } catch (error) {
+    logGitBindingFsWarning("resolveGitDirTarget.realpath", candidatePath, error);
     return null;
   }
 
   try {
     const resolvedStats = await stat(resolvedGitDirPath);
     return resolvedStats.isDirectory() ? resolvedGitDirPath : null;
-  } catch {
+  } catch (error) {
+    logGitBindingFsWarning("resolveGitDirTarget.stat", resolvedGitDirPath, error);
     return null;
   }
 }
 
 function isPathWithinAllowedRoots(allowedRoots: readonly string[], candidate: string): boolean {
   return allowedRoots.some((root) => isWithinAllowedRoot(root, candidate));
+}
+
+function mapFsErrorToValidationResult(
+  error: unknown,
+  notFoundDetail: string
+): GitBindingValidationResult {
+  logGitBindingFsWarning("validateWorkspaceGitBindingInput", "repo_path", error);
+  const code = readFsErrorCode(error);
+  if (code === "EACCES" || code === "EPERM") {
+    return {
+      ok: false,
+      code: "permission_denied",
+      detail: "repo_path could not be accessed due to insufficient permissions."
+    };
+  }
+  return {
+    ok: false,
+    code: "path_not_found",
+    detail: notFoundDetail
+  };
+}
+
+function logGitBindingFsWarning(scope: string, target: string, error: unknown): void {
+  const code = readFsErrorCode(error);
+  process.emitWarning(
+    `Workspace git binding ${scope} failed for ${target}${code === undefined ? "" : ` (${code})`}`,
+    { type: "AlayaGitBindingWarning", code: "ALAYA_GIT_BINDING_FS_ERROR" }
+  );
+}
+
+function readFsErrorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return undefined;
+  }
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
 }

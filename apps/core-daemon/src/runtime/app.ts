@@ -264,14 +264,17 @@ function registerProtectedRequestMiddleware(
   requestProtection: RequestProtectionConfig | undefined,
   settings: ResolvedRequestProtectionSettings
 ): void {
-  if (requestProtection === undefined) {
-    return;
-  }
-
   app.use("*", async (context, next) => {
     if (!isProtectedRequest(context.req.method, context.req.path)) {
       await next();
       return;
+    }
+
+    if (requestProtection === undefined) {
+      return context.json(
+        { success: false, error: "Request protection is not configured" },
+        503
+      );
     }
 
     const origin = normalizeOrigin(context.req.header("origin"));

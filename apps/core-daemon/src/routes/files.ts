@@ -195,15 +195,51 @@ function buildFileRecord(
 
 async function downloadFile(context: Context, services: FileRouteServices): Promise<Response> {
   const fileId = context.req.param("id")!.trim();
+  const workspaceId = context.req.query("workspace_id")?.trim();
+  if (workspaceId === undefined || workspaceId.length === 0) {
+    return context.json({ success: false, error: "workspace_id is required" }, 400);
+  }
+  try {
+    await services.workspaceService.getById(workspaceId);
+  } catch {
+    return fileNotFound(context);
+  }
   const record = await services.fileRepo.findById(fileId);
-  if (record === null) return fileNotFound(context);
+  if (record === null || record.workspace_id !== workspaceId) {
+    return fileNotFound(context);
+  }
   const absolutePath = resolveStoredFilePath(services.filesDirectory, record.storage_path);
   if (absolutePath === null) return fileNotFound(context);
   try {
     return await sendStoredFile(context, record, absolutePath);
-  } catch {
+  } catch (error) {
+    return mapFileReadErrorToResponse(context, error);
+  }
+}
+
+function mapFileReadErrorToResponse(context: Context, error: unknown): Response {
+  const classification = classifyFileReadError(error);
+  if (classification === "not_found") {
     return fileNotFound(context);
   }
+  if (classification === "forbidden") {
+    return context.json({ success: false, error: "File access denied" }, 403);
+  }
+  return context.json({ success: false, error: "Failed to read stored file" }, 500);
+}
+
+function classifyFileReadError(error: unknown): "not_found" | "forbidden" | "storage_failure" {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return "storage_failure";
+  }
+  const code = (error as { readonly code?: unknown }).code;
+  if (code === "ENOENT") {
+    return "not_found";
+  }
+  if (code === "EACCES" || code === "EPERM") {
+    return "forbidden";
+  }
+  return "storage_failure";
 }
 
 async function sendStoredFile(context: Context, record: FileRecord, absolutePath: string): Promise<Response> {

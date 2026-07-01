@@ -10,6 +10,8 @@ import { StorageError } from "../../shared/errors.js";
 import {
   CONVERSATION_MESSAGE_EVENT_TYPES,
   DEFAULT_EVENT_LOG_PAGE,
+  enforceEventLogAllHardCap,
+  EVENT_LOG_ALL_QUERY_HARD_MAX,
   parseEventLogEntry,
   parseEventLogEntryRow,
   parseEventLogPage,
@@ -68,12 +70,17 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByEntityAll(entityType: string, entityId: string): Promise<readonly EventLogEntry[]> {
-    try {
-      const rows = this.statements.queryByEntityStatement.all(entityType, entityId) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query full event log by entity.", error);
-    }
+    return await this.queryBoundedAll(
+      () =>
+        this.statements.queryByEntityPagedStatement.all(
+          entityType,
+          entityId,
+          EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
+          0
+        ) as EventLogRow[],
+      "entity",
+      `${entityType}:${entityId}`
+    );
   }
 
   public async queryByEntityPage(
@@ -101,12 +108,16 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByRunAll(runId: string): Promise<readonly EventLogEntry[]> {
-    try {
-      const rows = this.statements.queryByRunStatement.all(runId) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query full event log by run.", error);
-    }
+    return await this.queryBoundedAll(
+      () =>
+        this.statements.queryByRunPagedStatement.all(
+          runId,
+          EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
+          0
+        ) as EventLogRow[],
+      "run",
+      runId
+    );
   }
 
   public async queryByRunPage(runId: string, page: EventLogPageOptions): Promise<readonly EventLogEntry[]> {
@@ -203,12 +214,16 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByWorkspaceAll(workspaceId: string): Promise<readonly EventLogEntry[]> {
-    try {
-      const rows = this.statements.queryByWorkspaceStatement.all(workspaceId) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query full event log by workspace.", error);
-    }
+    return await this.queryBoundedAll(
+      () =>
+        this.statements.queryByWorkspacePagedStatement.all(
+          workspaceId,
+          EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
+          0
+        ) as EventLogRow[],
+      "workspace",
+      workspaceId
+    );
   }
 
   public async queryByWorkspacePage(
@@ -394,6 +409,24 @@ export class SqliteEventLogRepo implements EventLogRepo {
       return row?.event_id ?? null;
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to get latest workspace event ID.", error);
+    }
+  }
+
+  private async queryBoundedAll(
+    loadRows: () => EventLogRow[],
+    scopeKind: "entity" | "run" | "workspace",
+    scopeId: string
+  ): Promise<readonly EventLogEntry[]> {
+    try {
+      const rows = loadRows();
+      return enforceEventLogAllHardCap(rows, scopeKind, scopeId).map((row) =>
+        parseEventLogEntryRow(row)
+      );
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      throw new StorageError("QUERY_FAILED", `Failed to query full event log by ${scopeKind}.`, error);
     }
   }
 

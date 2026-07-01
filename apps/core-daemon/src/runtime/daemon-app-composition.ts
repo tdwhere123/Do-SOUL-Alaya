@@ -384,7 +384,9 @@ function createOptionalRouteServices(input: CreateCoreDaemonAppInput) {
 }
 
 export function shouldEnableE2eEventTriggers(env: NodeJS.ProcessEnv): boolean {
-  return env.NODE_ENV !== "production" && env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS === "1";
+  const nodeEnv = env.NODE_ENV?.trim().toLowerCase();
+  const isTestOrE2e = nodeEnv === "test" || nodeEnv === "e2e";
+  return isTestOrE2e && env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS === "1";
 }
 
 function createE2eEventLogRepo(eventLogRepo: E2eEventLogInputPort): E2eEventLogRepo {
