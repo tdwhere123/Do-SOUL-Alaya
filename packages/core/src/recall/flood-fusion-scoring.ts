@@ -1,4 +1,3 @@
-import { z } from "zod";
 import {
   applyEmbeddingPathModulation,
   scoreLaneReliability,
@@ -80,7 +79,21 @@ const DEFAULT_FAMILY_CONFIDENCE: Readonly<Record<StreamFamily, number>> = {
   lexical: 0.55, embedding: 0.7, path: 0.45, temporal: 0.5, structural: 0.35, facet: 0.55, activation: 0.3
 };
 
-const FamilyConfidenceOverrideSchema = z.record(z.number().min(0).max(1));
+const FamilyConfidenceOverrideSchema = {
+  safeParse(value: unknown): { success: true; data: Readonly<Record<string, number>> } | { success: false } {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return { success: false };
+    }
+    const data: Record<string, number> = {};
+    for (const [family, rawValue] of Object.entries(value)) {
+      if (typeof rawValue !== "number" || rawValue < 0 || rawValue > 1) {
+        return { success: false };
+      }
+      data[family] = rawValue;
+    }
+    return { success: true, data };
+  }
+};
 
 let familyConfidenceCache: Record<StreamFamily, number> | null = null;
 export function familyConfidence(): Readonly<Record<StreamFamily, number>> {

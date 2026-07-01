@@ -1,10 +1,24 @@
-import { z } from "zod";
-
 // HyDE hook: ALAYA_RECALL_QUERY_HYDE_JSON ({normalizedQuery: hypothesisText}) replaces the
 // embedding query text with a hypothetical answer, bridging query->latent-fact for retrieval
 // (e.g. "recommend video-editing resources" -> "The user uses Adobe Premiere Pro"). Absent/empty
 // JSON or no match -> returns the query unchanged (byte-identical). LLM-precomputed for A/B.
-const HydeMapSchema = z.record(z.string(), z.string());
+function parseHydeMap(raw: string): Readonly<Record<string, string>> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "string") {
+        result[key] = value;
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
 
 let hydeCache: Readonly<Record<string, string>> | null = null;
 
@@ -15,8 +29,7 @@ function injectedHyde(): Readonly<Record<string, string>> {
       hydeCache = {};
     } else {
       try {
-        const parsed = HydeMapSchema.safeParse(JSON.parse(raw));
-        hydeCache = parsed.success ? parsed.data : {};
+        hydeCache = parseHydeMap(raw);
       } catch {
         hydeCache = {};
       }

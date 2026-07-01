@@ -7,6 +7,9 @@
  * SessionExpired surface.
  */
 
+import { z, type ZodType } from "zod";
+import { ManifestationBudgetConfigSchema } from "@do-soul/alaya-protocol";
+
 let inspectorToken: string | null = null;
 let currentWorkspaceId: string | null = null;
 let onUnauthorized: (() => void) | null = null;
@@ -30,10 +33,61 @@ export const setUnauthorizedHandler = (handler: (() => void) | null) => {
 export interface ApiRequestOptions extends Omit<RequestInit, "body"> {
   params?: Record<string, string>;
   body?: unknown;
+  schema?: ZodType;
 }
 
 export interface ApiError extends Error {
   status?: number;
+}
+
+const CONFIG_PATH_SCHEMAS: ReadonlyArray<{
+  readonly pattern: RegExp;
+  readonly schema: ZodType;
+}> = [
+  {
+    pattern: /\/config\/[^/]+\/manifestation-budget$/u,
+    schema: createConfigRouteSchema({
+      validateData: (value) => {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) {
+          return false;
+        }
+        const { source, ...config } = value as { readonly source?: unknown };
+        if (source !== undefined && source !== "default" && source !== "stored") {
+          return false;
+        }
+        return ManifestationBudgetConfigSchema.safeParse(config).success;
+      }
+    })
+  },
+  { pattern: /\/config\//u, schema: createConfigRouteSchema() }
+];
+
+function isConfigObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function createConfigRouteSchema(options?: {
+  readonly validateData?: (value: unknown) => boolean;
+}): ZodType {
+  const validateData =
+    options?.validateData ??
+    ((value: unknown) => isConfigObject(value));
+  const configObjectSchema = z.custom<Record<string, unknown>>((value) => isConfigObject(value)).superRefine(
+    (data, context) => {
+      if (!validateData(data)) {
+        context.addIssue({ code: "custom", message: "Invalid config payload" });
+      }
+    }
+  );
+  const envelopedSchema = z.object({
+    success: z.literal(true),
+    data: configObjectSchema.optional(),
+    requires_daemon_restart: z.boolean().optional()
+  });
+  const flatSchema = configObjectSchema.refine((value) => !("success" in value), {
+    message: "Invalid config payload"
+  });
+  return z.union([envelopedSchema, flatSchema]);
 }
 
 export interface ApiFetchResult<T> {
@@ -55,10 +109,14 @@ export async function apiFetchWithHeaders<T>(
   path: string,
   options: ApiRequestOptions = {}
 ): Promise<ApiFetchResult<T>> {
-  const { params, headers, body, method = "GET", ...rest } = options;
+  const { params, headers, body, method = "GET", schema, ...rest } = options;
   const url = buildApiUrl(path, params);
   const init = buildRequestInit(rest, method, headers, body);
-  return await fetchWithRetry<T>(url, init, method);
+  const result = await fetchWithRetry(url, init, method);
+  const resolvedSchema = schema ?? resolveConfigResponseSchema(url);
+  const payload =
+    resolvedSchema === undefined ? (result.payload as T) : (resolvedSchema.parse(result.payload) as T);
+  return { payload, headers: result.headers };
 }
 
 function buildApiUrl(path: string, params: Record<string, string> | undefined): string {
@@ -92,11 +150,11 @@ function buildRequestInit(
   };
 }
 
-async function fetchWithRetry<T>(
+async function fetchWithRetry(
   url: string,
   init: RequestInit,
   method: string
-): Promise<ApiFetchResult<T>> {
+): Promise<ApiFetchResult<unknown>> {
   const canRetry = RETRYABLE_METHODS.has(method.toUpperCase());
   const maxAttempts = canRetry ? 2 : 1;
   let lastError: unknown = null;
@@ -110,7 +168,7 @@ async function fetchWithRetry<T>(
       await sleep(200 * Math.pow(5, attempt - 1));
       continue;
     }
-    return await responsePayload<T>(attemptResult.response);
+    return await responsePayload(attemptResult.response);
   }
 
   throw lastError instanceof Error ? lastError : new Error("apiFetch exhausted retries");
@@ -137,13 +195,23 @@ function shouldRetryResponse(response: Response, attempt: number, maxAttempts: n
   return response.status >= 500 && response.status < 600 && attempt < maxAttempts;
 }
 
-async function responsePayload<T>(response: Response): Promise<ApiFetchResult<T>> {
+async function responsePayload(response: Response): Promise<ApiFetchResult<unknown>> {
   if (response.status === 401) throw unauthorizedError();
   if (!response.ok) throw await apiResponseError(response);
   return {
-    payload: await response.json() as T,
+    payload: await response.json(),
     headers: response.headers
   };
+}
+
+function resolveConfigResponseSchema(path: string): ZodType | undefined {
+  const apiPath = path.startsWith("http") ? new URL(path).pathname : path.startsWith("/api") ? path : `/api${path}`;
+  for (const entry of CONFIG_PATH_SCHEMAS) {
+    if (entry.pattern.test(apiPath)) {
+      return entry.schema;
+    }
+  }
+  return undefined;
 }
 
 function unauthorizedError(): ApiError {

@@ -114,6 +114,9 @@ importers:
 
   apps/inspector/web:
     dependencies:
+      '@do-soul/alaya-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/protocol
       chrono-node:
         specifier: ^2.7.7
         version: 2.9.1
@@ -141,10 +144,10 @@ importers:
       tailwind-merge:
         specifier: ^2.3.0
         version: 2.6.1
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
-      '@do-soul/alaya-protocol':
-        specifier: workspace:*
-        version: link:../../../packages/protocol
       '@testing-library/react':
         specifier: ^16.0.0
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.28))(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)

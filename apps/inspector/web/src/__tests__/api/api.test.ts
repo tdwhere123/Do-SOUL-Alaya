@@ -93,4 +93,12 @@ describe("apiFetch", () => {
       status: 403
     });
   });
+
+  it("validates config route payloads with zod before returning them", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, data: "not-an-object" }), { status: 200 })
+    );
+
+    await expect(apiFetch("/config/:workspaceId/soul")).rejects.toThrow();
+  });
 });
