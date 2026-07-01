@@ -1,5 +1,6 @@
 import type { MemoryService } from "@do-soul/alaya-core";
 import type { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
+import { listWorkspaceMemoriesWithConflict } from "./memories-workspace-conflict-list.js";
 
 type MemoryListRow = Awaited<ReturnType<MemoryService["findByWorkspaceId"]>>[number];
 
@@ -39,59 +40,6 @@ export async function listWorkspaceMemories(
     input.dimension === undefined
       ? await memoryService.countByWorkspaceId(input.workspaceId)
       : await memoryService.countByDimension(input.workspaceId, input.dimension);
-  return { memories, totalCount };
-}
-
-async function listWorkspaceMemoriesWithConflict(
-  memoryService: MemoryService,
-  input: WorkspaceMemoryListInput
-): Promise<{ readonly memories: readonly MemoryListRow[]; readonly totalCount: number }> {
-  if (input.scopeClass !== undefined && input.dimension !== undefined) {
-    const memories = await memoryService.findByScopeClassAndDimensionWithConflict(
-      input.workspaceId,
-      input.scopeClass,
-      input.dimension,
-      input.pagination
-    );
-    const totalCount = await memoryService.countByScopeClassAndDimensionWithConflict(
-      input.workspaceId,
-      input.scopeClass,
-      input.dimension
-    );
-    return { memories, totalCount };
-  }
-
-  if (input.scopeClass !== undefined) {
-    const memories = await memoryService.findByScopeClassWithConflict(
-      input.workspaceId,
-      input.scopeClass,
-      input.pagination
-    );
-    const totalCount = await memoryService.countByScopeClassWithConflict(
-      input.workspaceId,
-      input.scopeClass
-    );
-    return { memories, totalCount };
-  }
-
-  if (input.dimension !== undefined) {
-    const memories = await memoryService.findByDimensionWithConflict(
-      input.workspaceId,
-      input.dimension,
-      input.pagination
-    );
-    const totalCount = await memoryService.countByDimensionWithConflict(
-      input.workspaceId,
-      input.dimension
-    );
-    return { memories, totalCount };
-  }
-
-  const memories = await memoryService.findByWorkspaceIdWithConflict(
-    input.workspaceId,
-    input.pagination
-  );
-  const totalCount = await memoryService.countByWorkspaceIdWithConflict(input.workspaceId);
   return { memories, totalCount };
 }
 
