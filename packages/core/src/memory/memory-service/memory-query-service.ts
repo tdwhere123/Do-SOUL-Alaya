@@ -176,4 +176,94 @@ export class MemoryQueryService {
       this.memoryEntryRepo.findByScopeClass(workspaceId, scopeClass, page)
     );
   }
+
+  public findByWorkspaceIdWithConflict(
+    workspaceId: string,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const find = this.memoryEntryRepo.findByWorkspaceIdWithConflict;
+    if (find === undefined) {
+      throw new Error("findByWorkspaceIdWithConflict is not supported by memory entry repo");
+    }
+    return find.call(this.memoryEntryRepo, workspaceId, page);
+  }
+
+  public async countByWorkspaceIdWithConflict(workspaceId: string): Promise<number> {
+    const count = this.memoryEntryRepo.countByWorkspaceIdWithConflict;
+    if (count === undefined) {
+      throw new Error("countByWorkspaceIdWithConflict is not supported by memory entry repo");
+    }
+    return await count.call(this.memoryEntryRepo, workspaceId);
+  }
+
+  public findByDimensionWithConflict(
+    workspaceId: string,
+    dimension: MemoryEntry["dimension"],
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const find = this.memoryEntryRepo.findByDimensionWithConflict;
+    if (find === undefined) {
+      throw new Error("findByDimensionWithConflict is not supported by memory entry repo");
+    }
+    return find.call(this.memoryEntryRepo, workspaceId, dimension, page);
+  }
+
+  public async countByDimensionWithConflict(
+    workspaceId: string,
+    dimension: MemoryEntry["dimension"]
+  ): Promise<number> {
+    const count = this.memoryEntryRepo.countByDimensionWithConflict;
+    if (count === undefined) {
+      throw new Error("countByDimensionWithConflict is not supported by memory entry repo");
+    }
+    return await count.call(this.memoryEntryRepo, workspaceId, dimension);
+  }
+
+  public findByScopeClassWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const find = this.memoryEntryRepo.findByScopeClassWithConflict;
+    if (find === undefined) {
+      throw new Error("findByScopeClassWithConflict is not supported by memory entry repo");
+    }
+    return find.call(this.memoryEntryRepo, workspaceId, scopeClass, page);
+  }
+
+  public async countByScopeClassWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass
+  ): Promise<number> {
+    const count = this.memoryEntryRepo.countByScopeClassWithConflict;
+    if (count === undefined) {
+      throw new Error("countByScopeClassWithConflict is not supported by memory entry repo");
+    }
+    return await count.call(this.memoryEntryRepo, workspaceId, scopeClass);
+  }
+
+  public findByScopeClassAndDimensionWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryEntry["dimension"],
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const find = this.memoryEntryRepo.findByScopeClassAndDimensionWithConflict;
+    if (find === undefined) {
+      throw new Error("findByScopeClassAndDimensionWithConflict is not supported by memory entry repo");
+    }
+    return find.call(this.memoryEntryRepo, workspaceId, scopeClass, dimension, page);
+  }
+
+  public async countByScopeClassAndDimensionWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryEntry["dimension"]
+  ): Promise<number> {
+    const count = this.memoryEntryRepo.countByScopeClassAndDimensionWithConflict;
+    if (count === undefined) {
+      throw new Error("countByScopeClassAndDimensionWithConflict is not supported by memory entry repo");
+    }
+    return await count.call(this.memoryEntryRepo, workspaceId, scopeClass, dimension);
+  }
 }

@@ -34,6 +34,14 @@ export interface MemoryEntryReadStatements {
   readonly countByDimensionHotStatement: SqliteStatement;
   readonly findByScopeClassHotStatement: SqliteStatement;
   readonly findByScopeClassHotPagedStatement: SqliteStatement;
+  readonly findByWorkspaceHotConflictPagedStatement: SqliteStatement;
+  readonly countByWorkspaceHotConflictStatement: SqliteStatement;
+  readonly findByDimensionHotConflictPagedStatement: SqliteStatement;
+  readonly countByDimensionHotConflictStatement: SqliteStatement;
+  readonly findByScopeClassHotConflictPagedStatement: SqliteStatement;
+  readonly countByScopeClassHotConflictStatement: SqliteStatement;
+  readonly findByScopeClassAndDimensionHotConflictPagedStatement: SqliteStatement;
+  readonly countByScopeClassAndDimensionHotConflictStatement: SqliteStatement;
 }
 
 export interface MemoryEntryUpdateStatements {
@@ -71,6 +79,10 @@ export interface MemoryEntryGarbageCollectionStatements {
 const ACTIVE_MEMORY_FILTER_SQL = `
         AND COALESCE(retention_state, '') != 'tombstoned'
         AND COALESCE(lifecycle_state, '') != 'dormant'
+`;
+
+const CONFLICT_MEMORY_FILTER_SQL = `
+        AND contradiction_count > 0
 `;
 
 const MEMORY_ENTRY_CREATE_SQL: SqlDefinitionMap<MemoryEntryCreateStatements> = {
@@ -216,7 +228,55 @@ ${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
       WHERE workspace_id = ? AND scope_class = ? AND storage_tier = 'hot'
 ${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
       LIMIT ? OFFSET ?
-    `
+    `,
+  findByWorkspaceHotConflictPagedStatement: `
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `,
+  countByWorkspaceHotConflictStatement: `
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}    `,
+  findByDimensionHotConflictPagedStatement: `
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND dimension = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `,
+  countByDimensionHotConflictStatement: `
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND dimension = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}    `,
+  findByScopeClassHotConflictPagedStatement: `
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND scope_class = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `,
+  countByScopeClassHotConflictStatement: `
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND scope_class = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}    `,
+  findByScopeClassAndDimensionHotConflictPagedStatement: `
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND scope_class = ? AND dimension = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `,
+  countByScopeClassAndDimensionHotConflictStatement: `
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND scope_class = ? AND dimension = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}    `
 };
 
 const MEMORY_ENTRY_UPDATE_SQL: SqlDefinitionMap<MemoryEntryUpdateStatements> = {

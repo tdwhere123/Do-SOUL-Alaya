@@ -1,4 +1,5 @@
 import type { EmbeddingProviderPort } from "./embedding-recall-service.js";
+import { withTimeout } from "./local-onnx-embedding-timeout.js";
 import os from "node:os";
 import path from "node:path";
 
@@ -243,62 +244,4 @@ async function defaultLocalOnnxPipelineLoader(
     transformers.env.localModelPath = cacheDir;
   }
   return transformers.pipeline("feature-extraction", modelId, { dtype: "q8" });
-}
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  signal?: AbortSignal
-): Promise<T> {
-  // The ONNX feature-extraction run is not cancellable, so on timeout/abort we
-  // discard the stale result and suppress its late rejection rather than letting
-  // it surface as an unhandledRejection.
-  promise.catch(() => undefined);
-
-  const controller = new AbortController();
-  let onParentAbort: (() => void) | undefined;
-  if (signal !== undefined) {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-    } else {
-      onParentAbort = () => controller.abort(signal.reason);
-      signal.addEventListener("abort", onParentAbort, { once: true });
-    }
-  }
-
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      const onAbort = (): void => {
-        reject(
-          controller.signal.reason instanceof Error
-            ? controller.signal.reason
-            : new Error(`Local ONNX embedding timed out after ${timeoutMs} ms.`)
-        );
-      };
-      if (controller.signal.aborted) {
-        onAbort();
-        return;
-      }
-      controller.signal.addEventListener("abort", onAbort, { once: true });
-      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-        timeoutHandle = setTimeout(
-          () =>
-            controller.abort(
-              new Error(`Local ONNX embedding timed out after ${timeoutMs} ms.`)
-            ),
-          timeoutMs
-        );
-        timeoutHandle.unref?.();
-      }
-      promise.then(resolve, reject);
-    });
-  } finally {
-    if (timeoutHandle !== null) {
-      clearTimeout(timeoutHandle);
-    }
-    if (signal !== undefined && onParentAbort !== undefined) {
-      signal.removeEventListener("abort", onParentAbort);
-    }
-  }
 }

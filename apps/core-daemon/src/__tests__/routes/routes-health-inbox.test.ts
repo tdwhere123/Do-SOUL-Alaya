@@ -82,18 +82,36 @@ describe("health-inbox route", () => {
     });
   });
 
-  it("ignores unknown enum values gracefully", async () => {
+  it("returns 400 for an invalid state query parameter", async () => {
     const findByWorkspace = vi.fn().mockReturnValue([]);
     const getById = vi.fn().mockResolvedValue({ workspace_id: "ws1" });
     const app = buildApp({
       workspaceService: { getById },
       healthIssueGroupRepo: { findByWorkspace }
     });
-    const response = await app.request(
-      "/workspaces/ws1/health-inbox?state=bogus&causeKind=nope"
-    );
-    expect(response.status).toBe(200);
-    expect(findByWorkspace).toHaveBeenCalledWith("ws1", { limit: 200 });
+    const response = await app.request("/workspaces/ws1/health-inbox?state=bogus");
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Invalid state query parameter"
+    });
+    expect(findByWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for an invalid causeKind query parameter", async () => {
+    const findByWorkspace = vi.fn().mockReturnValue([]);
+    const getById = vi.fn().mockResolvedValue({ workspace_id: "ws1" });
+    const app = buildApp({
+      workspaceService: { getById },
+      healthIssueGroupRepo: { findByWorkspace }
+    });
+    const response = await app.request("/workspaces/ws1/health-inbox?causeKind=nope");
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Invalid causeKind query parameter"
+    });
+    expect(findByWorkspace).not.toHaveBeenCalled();
   });
 
   it("returns 404 when workspace is not found", async () => {

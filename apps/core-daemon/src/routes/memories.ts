@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { CoreError, type MemoryService, type RunService, type WorkspaceService } from "@do-soul/alaya-core";
 import { MemoryDimensionSchema, ScopeClassSchema, type ScopeClass } from "@do-soul/alaya-protocol";
+import { listWorkspaceMemories } from "./memories-workspace-list.js";
 import { parseListPagination, writeListPaginationHeaders } from "./shared.js";
 
 export interface MemoryRouteServices {
@@ -8,17 +9,6 @@ export interface MemoryRouteServices {
   readonly runService: RunService;
   readonly memoryService: MemoryService;
 }
-
-type MemoryListRow = Awaited<ReturnType<MemoryService["findByWorkspaceId"]>>[number];
-type WorkspaceMemoryListInput = {
-  readonly workspaceId: string;
-  readonly dimension?: ReturnType<typeof parseDimension>;
-  readonly scopeClass?: ScopeClass;
-  readonly hasConflict?: boolean;
-  readonly pagination: { readonly limit: number; readonly offset: number };
-};
-
-const MEMORY_SCAN_PAGE_LIMIT = 500;
 
 // HTTP route surface intentionally omits GET /memories/:id.
 // Per-memory reads must stay workspace-scoped per invariants §21 and §29:
@@ -87,124 +77,4 @@ function parseOptionalBoolean(value: string | undefined, name: string): boolean 
     return false;
   }
   throw new CoreError("VALIDATION", `${name} must be true or false`);
-}
-
-async function listWorkspaceMemories(
-  memoryService: MemoryService,
-  input: WorkspaceMemoryListInput
-): Promise<{ readonly memories: readonly MemoryListRow[]; readonly totalCount: number }> {
-  if (input.scopeClass !== undefined && input.hasConflict !== true && input.dimension === undefined) {
-    const memories = await memoryService.findByScopeClass(
-      input.workspaceId,
-      input.scopeClass,
-      input.pagination
-    );
-    const totalCount = await countWorkspaceMemoriesByScopeClass(memoryService, input);
-    return { memories, totalCount };
-  }
-
-  const needsAuthoritativeFiltering = input.hasConflict === true;
-
-  if (!needsAuthoritativeFiltering) {
-    const memories =
-      input.dimension === undefined
-        ? await memoryService.findByWorkspaceId(input.workspaceId, input.pagination)
-        : await memoryService.findByDimension(input.workspaceId, input.dimension, input.pagination);
-    const totalCount =
-      input.dimension === undefined
-        ? await memoryService.countByWorkspaceId(input.workspaceId)
-        : await memoryService.countByDimension(input.workspaceId, input.dimension);
-    return { memories, totalCount };
-  }
-
-  const memories: MemoryListRow[] = [];
-  let totalCount = 0;
-  let scanOffset = 0;
-
-  for (;;) {
-    const page = await loadWorkspaceMemoryScanPage(memoryService, input, {
-      limit: MEMORY_SCAN_PAGE_LIMIT,
-      offset: scanOffset
-    });
-
-    if (page.length === 0) {
-      break;
-    }
-
-    for (const memory of page) {
-      if (!matchesWorkspaceMemoryListFilters(memory, input)) {
-        continue;
-      }
-
-      if (totalCount >= input.pagination.offset && memories.length < input.pagination.limit) {
-        memories.push(memory);
-      }
-      totalCount += 1;
-    }
-
-    if (page.length < MEMORY_SCAN_PAGE_LIMIT) {
-      break;
-    }
-    scanOffset += MEMORY_SCAN_PAGE_LIMIT;
-  }
-
-  return {
-    memories,
-    totalCount
-  };
-}
-
-async function loadWorkspaceMemoryScanPage(
-  memoryService: MemoryService,
-  input: WorkspaceMemoryListInput,
-  page: { readonly limit: number; readonly offset: number }
-): Promise<readonly MemoryListRow[]> {
-  if (input.scopeClass !== undefined) {
-    return await memoryService.findByScopeClass(input.workspaceId, input.scopeClass, page);
-  }
-  return input.dimension === undefined
-    ? await memoryService.findByWorkspaceId(input.workspaceId, page)
-    : await memoryService.findByDimension(input.workspaceId, input.dimension, page);
-}
-
-function matchesWorkspaceMemoryListFilters(
-  memory: MemoryListRow,
-  input: WorkspaceMemoryListInput
-): boolean {
-  if (input.dimension !== undefined && memory.dimension !== input.dimension) {
-    return false;
-  }
-  if (input.scopeClass !== undefined && memory.scope_class !== input.scopeClass) {
-    return false;
-  }
-  if (input.hasConflict === true && (memory.contradiction_count ?? 0) === 0) {
-    return false;
-  }
-  return true;
-}
-
-async function countWorkspaceMemoriesByScopeClass(
-  memoryService: MemoryService,
-  input: WorkspaceMemoryListInput
-): Promise<number> {
-  if (input.scopeClass === undefined) {
-    return 0;
-  }
-  let totalCount = 0;
-  let scanOffset = 0;
-  for (;;) {
-    const batch = await memoryService.findByScopeClass(input.workspaceId, input.scopeClass, {
-      limit: MEMORY_SCAN_PAGE_LIMIT,
-      offset: scanOffset
-    });
-    if (batch.length === 0) {
-      break;
-    }
-    totalCount += batch.length;
-    if (batch.length < MEMORY_SCAN_PAGE_LIMIT) {
-      break;
-    }
-    scanOffset += MEMORY_SCAN_PAGE_LIMIT;
-  }
-  return totalCount;
 }

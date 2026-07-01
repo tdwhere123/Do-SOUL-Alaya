@@ -16,6 +16,9 @@ export interface EventLogRepo {
   queryByRunPage?(runId: string, page: EventLogPageOptions): Promise<readonly EventLogEntry[]>;
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
   queryByRunAll(runId: string): Promise<readonly EventLogEntry[]>;
+  queryNarrativeDigestPayloadsByRun(
+    runId: string
+  ): Promise<readonly Readonly<{ readonly payload_json: unknown }>[]>;
   queryByRunAndEntityType(runId: string, entityType: string): Promise<readonly EventLogEntry[]>;
   queryConversationMessageEventsByRun(
     runId: string,

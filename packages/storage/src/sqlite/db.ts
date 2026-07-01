@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
+import { LruCache } from "./lru-cache.js";
 
 export type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 
@@ -10,8 +11,9 @@ export interface InitDatabaseOptions {
   readonly filename?: string;
 }
 
-const databaseCache = new Map<string, StorageDatabase>();
 const MAX_DATABASE_CACHE_ENTRIES = 32;
+
+const databaseCache = new LruCache<string, StorageDatabase>(MAX_DATABASE_CACHE_ENTRIES);
 
 interface MigrationStatements {
   readonly isAppliedStatement: {
@@ -24,12 +26,33 @@ interface MigrationStatements {
 
 export class StorageDatabase {
   public readonly filename: string;
-  public readonly connection: SqliteConnection;
+  public connection: SqliteConnection;
   private closed = false;
 
   public constructor(filename: string, connection: SqliteConnection) {
     this.filename = filename;
     this.connection = connection;
+  }
+
+  public isClosed(): boolean {
+    return this.closed;
+  }
+
+  public reopenIfClosed(): void {
+    if (!this.closed) {
+      return;
+    }
+    const database = openDatabase(this.filename);
+    database.pragma("foreign_keys = ON");
+    database.pragma("journal_mode = WAL");
+    database.pragma("busy_timeout = 5000");
+    database.pragma("synchronous = NORMAL");
+    database.pragma("analysis_limit = 400");
+    this.connection = database;
+    this.closed = false;
+    if (this.filename !== ":memory:") {
+      databaseCache.set(this.filename, this);
+    }
   }
 
   // Refresh query-planner statistics. Without stats SQLite mis-picks a
@@ -277,11 +300,6 @@ function evictDatabaseCacheIfNeeded(incomingFilename: string): void {
     return;
   }
   while (databaseCache.size >= MAX_DATABASE_CACHE_ENTRIES) {
-    const oldestKey = databaseCache.keys().next().value;
-    if (oldestKey === undefined) {
-      return;
-    }
-    databaseCache.get(oldestKey)?.close();
-    databaseCache.delete(oldestKey);
+    databaseCache.deleteOldest()?.close();
   }
 }

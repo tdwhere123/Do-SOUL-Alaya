@@ -89,4 +89,83 @@ describe("inspector workspace isolation", () => {
       `${DAEMON_URL}/workspaces/${BOUND_WORKSPACE}/recall-stats?since=2026-05-01T00%3A00%3A00Z&excludeAgentTargets=inspector`
     ]);
   });
+
+  it("config route rejects mismatched workspace before proxying", async () => {
+    const calls: string[] = [];
+    const app = createBoundApp(async (input) => {
+      calls.push(String(input));
+      return Response.json({ success: true, data: { tone: "neutral" } });
+    });
+
+    const allowed = await authenticatedRequest(app, `/api/config/${BOUND_WORKSPACE}/soul`);
+    const forbidden = await authenticatedRequest(app, `/api/config/${OTHER_WORKSPACE}/soul`);
+
+    expect(allowed.status).toBe(200);
+    expect(forbidden.status).toBe(403);
+    await expect(forbidden.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    expect(calls).toEqual([`${DAEMON_URL}/workspaces/${BOUND_WORKSPACE}/config/soul`]);
+  });
+
+  it("proposals route rejects mismatched workspace before proxying", async () => {
+    const calls: string[] = [];
+    const app = createBoundApp(async (input) => {
+      calls.push(String(input));
+      return Response.json({ success: true, data: [] });
+    });
+
+    const allowed = await authenticatedRequest(app, `/api/proposals/${BOUND_WORKSPACE}/pending`);
+    const forbidden = await authenticatedRequest(app, `/api/proposals/${OTHER_WORKSPACE}/pending`);
+
+    expect(allowed.status).toBe(200);
+    expect(forbidden.status).toBe(403);
+    await expect(forbidden.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    expect(calls).toEqual([`${DAEMON_URL}/workspaces/${BOUND_WORKSPACE}/proposals/pending`]);
+  });
+
+  it("soul-search route rejects mismatched workspace before proxying", async () => {
+    const calls: string[] = [];
+    const app = createBoundApp(async (input) => {
+      calls.push(String(input));
+      return Response.json({ success: true, data: { hits: [] } });
+    });
+
+    const allowed = await authenticatedRequest(app, `/api/soul/search/${BOUND_WORKSPACE}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "memory" })
+    });
+    const forbidden = await authenticatedRequest(app, `/api/soul/search/${OTHER_WORKSPACE}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "memory" })
+    });
+
+    expect(allowed.status).toBe(200);
+    expect(forbidden.status).toBe(403);
+    await expect(forbidden.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    expect(calls).toEqual([
+      `${DAEMON_URL}/workspaces/${BOUND_WORKSPACE}/soul/search`
+    ]);
+  });
+
+  it("health-inbox route rejects mismatched workspace before proxying", async () => {
+    const calls: string[] = [];
+    const app = createBoundApp(async (input) => {
+      calls.push(String(input));
+      return Response.json({ success: true, data: { groups: [], total_count: 0 } });
+    });
+
+    const allowed = await authenticatedRequest(
+      app,
+      `/api/workspaces/${BOUND_WORKSPACE}/health-inbox?state=pending`
+    );
+    const forbidden = await authenticatedRequest(app, `/api/workspaces/${OTHER_WORKSPACE}/health-inbox`);
+
+    expect(allowed.status).toBe(200);
+    expect(forbidden.status).toBe(403);
+    await expect(forbidden.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    expect(calls).toEqual([
+      `${DAEMON_URL}/workspaces/${BOUND_WORKSPACE}/health-inbox?state=pending`
+    ]);
+  });
 });

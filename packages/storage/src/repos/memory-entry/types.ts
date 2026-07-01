@@ -98,6 +98,34 @@ export interface MemoryEntryRepo {
     workspaceId: string,
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByWorkspaceIdWithConflict(
+    workspaceId: string,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByWorkspaceIdWithConflict(workspaceId: string): Promise<number>;
+  findByDimensionWithConflict(
+    workspaceId: string,
+    dimension: MemoryDimension,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByDimensionWithConflict(workspaceId: string, dimension: MemoryDimension): Promise<number>;
+  findByScopeClassWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByScopeClassWithConflict(workspaceId: string, scopeClass: ScopeClass): Promise<number>;
+  findByScopeClassAndDimensionWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryDimension,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByScopeClassAndDimensionWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryDimension
+  ): Promise<number>;
   // invariant: shared-tag narrowing is a superset of every INCOMPATIBLE_WITH candidate.
   findBySharedDomainTags(
     workspaceId: string,

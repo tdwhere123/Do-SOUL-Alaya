@@ -33,6 +33,7 @@ export interface EventLogRunQueryStatements {
   readonly getLatestUserRunMessageByRunStatement: SqliteStatement;
   readonly queryByRunAndEventTypeStatement: SqliteStatement;
   readonly queryGovernanceLeaseEventsByRunStatement: SqliteStatement;
+  readonly queryNarrativeDigestPayloadsByRunStatement: SqliteStatement;
 }
 
 export interface EventLogWorkspaceQueryStatements {
@@ -220,6 +221,13 @@ const EVENT_LOG_RUN_QUERY_SQL: SqlDefinitionMap<EventLogRunQueryStatements> = {
       FROM event_log
       WHERE run_id = ?
         AND event_type IN (?, ?, ?)
+      ORDER BY created_at ASC, rowid ASC
+    `,
+  queryNarrativeDigestPayloadsByRunStatement: `
+      SELECT payload_json
+      FROM event_log
+      WHERE run_id = ?
+        AND json_type(payload_json, '$.digest_id') = 'text'
       ORDER BY created_at ASC, rowid ASC
     `
 };

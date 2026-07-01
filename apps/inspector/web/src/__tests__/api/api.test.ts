@@ -94,11 +94,28 @@ describe("apiFetch", () => {
     });
   });
 
-  it("validates config route payloads with zod before returning them", async () => {
+  it("unwraps success envelopes for GET config routes", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, data: { enabled: true } }), { status: 200 })
+    );
+
+    await expect(apiFetch<{ enabled: boolean }>("/config/:workspaceId/soul")).resolves.toEqual({
+      enabled: true
+    });
+  });
+
+  it("throws a friendly schema error instead of surfacing raw ZodError", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ success: true, data: "not-an-object" }), { status: 200 })
     );
 
-    await expect(apiFetch("/config/:workspaceId/soul")).rejects.toThrow();
+    const rejection = apiFetch("/config/:workspaceId/soul");
+    await expect(rejection).rejects.toMatchObject({
+      message: "Invalid API response shape",
+      status: 502
+    });
+    await expect(rejection).rejects.toSatisfy(
+      (error: unknown) => !(error instanceof Error && error.name === "ZodError")
+    );
   });
 });

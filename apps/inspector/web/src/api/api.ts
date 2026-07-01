@@ -90,6 +90,30 @@ function createConfigRouteSchema(options?: {
   return z.union([envelopedSchema, flatSchema]);
 }
 
+function unwrapConfigReadPayload(parsed: unknown): unknown {
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "success" in parsed &&
+    (parsed as { success: unknown }).success === true &&
+    "data" in parsed
+  ) {
+    const data = (parsed as { data: unknown }).data;
+    if (data !== undefined && isConfigObject(data)) {
+      return data;
+    }
+  }
+  return parsed;
+}
+
+function toApiSchemaError(error: unknown): ApiError {
+  const apiError = new Error(
+    error instanceof z.ZodError ? "Invalid API response shape" : error instanceof Error ? error.message : "Invalid API response shape"
+  ) as ApiError;
+  apiError.status = 502;
+  return apiError;
+}
+
 export interface ApiFetchResult<T> {
   readonly payload: T;
   readonly headers: Headers;
@@ -114,8 +138,18 @@ export async function apiFetchWithHeaders<T>(
   const init = buildRequestInit(rest, method, headers, body);
   const result = await fetchWithRetry(url, init, method);
   const resolvedSchema = schema ?? resolveConfigResponseSchema(url);
-  const payload =
-    resolvedSchema === undefined ? (result.payload as T) : (resolvedSchema.parse(result.payload) as T);
+  let payload: T;
+  if (resolvedSchema === undefined) {
+    payload = result.payload as T;
+  } else {
+    try {
+      const parsed = resolvedSchema.parse(result.payload);
+      const unwrapEnvelope = method.toUpperCase() === "GET" || method.toUpperCase() === "HEAD";
+      payload = (unwrapEnvelope ? unwrapConfigReadPayload(parsed) : parsed) as T;
+    } catch (error) {
+      throw toApiSchemaError(error);
+    }
+  }
   return { payload, headers: result.headers };
 }
 

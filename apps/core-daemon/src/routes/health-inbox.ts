@@ -67,13 +67,19 @@ export function registerHealthInboxRoutes(
 function parseStateQuery(value: string | undefined): HealthIssueResolutionStateValue | null {
   if (value === undefined || value.trim().length === 0) return null;
   const parsed = HealthIssueResolutionStateSchema.safeParse(value.trim());
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) {
+    throw new CoreError("VALIDATION", "Invalid state query parameter");
+  }
+  return parsed.data;
 }
 
 function parseCauseKindQuery(value: string | undefined): HealthIssueCauseKindValue | null {
   if (value === undefined || value.trim().length === 0) return null;
   const parsed = HealthIssueCauseKindSchema.safeParse(value.trim());
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) {
+    throw new CoreError("VALIDATION", "Invalid causeKind query parameter");
+  }
+  return parsed.data;
 }
 
 function parseLimitQuery(value: string | undefined): number {

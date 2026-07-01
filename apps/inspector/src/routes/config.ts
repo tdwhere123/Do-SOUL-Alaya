@@ -31,6 +31,8 @@ function registerEmbeddingSupplementRoutes(app: Hono, options: InspectorProxyOpt
   });
 
   app.patch("/api/config/runtime/embedding-supplement", async (context) => {
+    const forbidden = assertInspectorWorkspace(context, options, options.workspaceId);
+    if (forbidden !== null) return forbidden;
     return await proxyDaemonJson(context, options, {
       method: "PATCH",
       path: "/config/runtime/embedding-supplement",
@@ -50,6 +52,8 @@ function registerGardenComputeRoutes(app: Hono, options: InspectorProxyOptions):
   });
 
   app.patch("/api/config/runtime/garden-compute", async (context) => {
+    const forbidden = assertInspectorWorkspace(context, options, options.workspaceId);
+    if (forbidden !== null) return forbidden;
     return await proxyDaemonJson(context, options, {
       method: "PATCH",
       path: "/config/runtime/garden-compute",

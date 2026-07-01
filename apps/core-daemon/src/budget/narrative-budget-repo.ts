@@ -2,8 +2,9 @@ import { type NarrativeBudgetRepoPort } from "@do-soul/alaya-core";
 import { NarrativeDigestSchema } from "@do-soul/alaya-protocol";
 
 export interface NarrativeDigestEventLogReader {
-  queryByRun(runId: string): Promise<readonly Readonly<{ payload_json: unknown }>[]>;
-  queryByRunAll(runId: string): Promise<readonly Readonly<{ payload_json: unknown }>[]>;
+  queryNarrativeDigestPayloadsByRun(
+    runId: string
+  ): Promise<readonly Readonly<{ payload_json: unknown }>[]>;
 }
 
 interface NarrativeDigestAggregate {
@@ -41,7 +42,8 @@ export function createNarrativeBudgetRepo(
       return await cached;
     }
 
-    const started = deps.eventLogRepo.queryByRunAll(runId)
+    const started = deps.eventLogRepo
+      .queryNarrativeDigestPayloadsByRun(runId)
       .then((entries) => aggregateNarrativeDigests(entries))
       .finally(() => {
         setTimeout(() => {
