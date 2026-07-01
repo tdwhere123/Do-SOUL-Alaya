@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   applyEmbeddingPathModulation,
   scoreLaneReliability,
@@ -7,18 +8,17 @@ import {
 import type { RecallQueryIntent } from "./recall-query-plan.js";
 import type { RecallFusionStream, RecallSupplementaryData } from "./recall-service-types.js";
 import { clamp01 } from "../shared/clamp.js";
+import { readEnvBoolean } from "../shared/read-env-boolean.js";
 
 // Opt-in (ALAYA_RECALL_FLOOD_FUSION): fuse normalized raw magnitudes instead of 1/(k+rank). Off → RRF rank path stays byte-identical.
 export function floodFusionEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_FLOOD_FUSION;
-  return raw === "on" || raw === "1" || raw === "true";
+  return readEnvBoolean("ALAYA_RECALL_FLOOD_FUSION");
 }
 
 // Opt-in (ALAYA_RECALL_FLOOD_GOVERNANCE, flood only): per-node inflow cap that bounds the
 // correlated lexical family so it can't out-vote orthogonal answer-signals via redundant streams.
 export function floodGovernanceEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_FLOOD_GOVERNANCE;
-  return raw === "on" || raw === "1" || raw === "true";
+  return readEnvBoolean("ALAYA_RECALL_FLOOD_GOVERNANCE");
 }
 
 const LEXICAL_FAMILY_FLOOD_STREAMS: ReadonlySet<RecallFusionStream> = new Set<RecallFusionStream>([
@@ -53,8 +53,7 @@ type FloodFusionContributionParams = Readonly<{
 // Opt-in (ALAYA_RECALL_BEST_EVIDENCE, flood only): per-family max + cross-family confidence-weighted
 // noisy-OR instead of summing votes — a minority-strong lens surfaces without additive weight. Off → additive.
 export function bestEvidenceEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_BEST_EVIDENCE;
-  return raw === "on" || raw === "1" || raw === "true";
+  return readEnvBoolean("ALAYA_RECALL_BEST_EVIDENCE");
 }
 
 export type StreamFamily =
@@ -81,6 +80,8 @@ const DEFAULT_FAMILY_CONFIDENCE: Readonly<Record<StreamFamily, number>> = {
   lexical: 0.55, embedding: 0.7, path: 0.45, temporal: 0.5, structural: 0.35, facet: 0.55, activation: 0.3
 };
 
+const FamilyConfidenceOverrideSchema = z.record(z.number().min(0).max(1));
+
 let familyConfidenceCache: Record<StreamFamily, number> | null = null;
 export function familyConfidence(): Readonly<Record<StreamFamily, number>> {
   if (familyConfidenceCache === null) {
@@ -88,10 +89,12 @@ export function familyConfidence(): Readonly<Record<StreamFamily, number>> {
     const raw = process.env.ALAYA_RECALL_BE_CONF_JSON;
     if (raw !== undefined && raw.length > 0) {
       try {
-        const parsed = JSON.parse(raw) as Partial<Record<StreamFamily, number>>;
-        for (const [family, value] of Object.entries(parsed)) {
-          if (typeof value === "number" && family in familyConfidenceCache) {
-            familyConfidenceCache[family as StreamFamily] = Math.max(0, Math.min(1, value));
+        const parsed = FamilyConfidenceOverrideSchema.safeParse(JSON.parse(raw));
+        if (parsed.success) {
+          for (const [family, value] of Object.entries(parsed.data)) {
+            if (family in familyConfidenceCache) {
+              familyConfidenceCache[family as StreamFamily] = value;
+            }
           }
         }
       } catch {
@@ -135,8 +138,7 @@ export function combineBestEvidenceFamilies(relevanceByStream: ReadonlyMap<Recal
 // Opt-in (ALAYA_RECALL_SYNTHESIS): object-axis correction — de-correlate the correlated lexical surface
 // views (max+λ·rest) and gate them by embedding agreement (γ+(1−γ)·embRel). Gated intents only; others byte-identical.
 export function synthesisFusionEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_SYNTHESIS;
-  return raw === "on" || raw === "1" || raw === "true";
+  return readEnvBoolean("ALAYA_RECALL_SYNTHESIS");
 }
 
 const ALL_RECALL_INTENTS: readonly RecallQueryIntent[] = [
@@ -190,8 +192,7 @@ export function synthesisGateFloor(): number {
 // gate the lexical surface family by embedding agreement in the additive path, no de-correlation.
 // Recall-win only with a retrieval-grade embedding (gte); an STS model (MiniLM) demotes single_fact gold. Off → byte-identical.
 export function embeddingGateEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_EMBED_GATE;
-  return raw === "on" || raw === "1" || raw === "true";
+  return readEnvBoolean("ALAYA_RECALL_EMBED_GATE");
 }
 
 // γ for the standalone gate; default 0 (full gate) is the gte-seed A/B optimum.
@@ -279,8 +280,7 @@ export function gateSurfaceByEmbedding(
 // Governance ceiling (ALAYA_RECALL_SYN_GOVERN): bound the correlated surface mass so it cannot
 // out-vote orthogonal answer-signals. Default off so it A/Bs independently of the de-corr/gate.
 export function synthesisGovernanceEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_SYN_GOVERN;
-  return raw === "on" || raw === "1" || raw === "true";
+  return readEnvBoolean("ALAYA_RECALL_SYN_GOVERN");
 }
 
 function readFloatEnv(name: string, fallback: number, min: number): number {

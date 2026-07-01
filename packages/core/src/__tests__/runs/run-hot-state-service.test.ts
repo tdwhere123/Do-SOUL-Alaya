@@ -73,8 +73,7 @@ describe("RunHotStateService", () => {
         getById: vi.fn(async (runId: string) => (runId === run.run_id ? run : null))
       },
       eventLogRepo: {
-        queryByRun: vi.fn(async () => eventLog),
-        queryByRunAll: vi.fn(async () => eventLog)
+        getLatestMessageTimestampByRun: vi.fn(async () => "2026-04-12T00:00:15.000Z")
       }
     });
 
@@ -94,8 +93,7 @@ describe("RunHotStateService", () => {
         getById: vi.fn(async () => null)
       },
       eventLogRepo: {
-        queryByRun: vi.fn(async () => []),
-        queryByRunAll: vi.fn(async () => [])
+        getLatestMessageTimestampByRun: vi.fn(async () => null)
       }
     });
 
@@ -108,8 +106,7 @@ describe("RunHotStateService", () => {
         getById: vi.fn(async () => createRun())
       },
       eventLogRepo: {
-        queryByRun: vi.fn(async () => []),
-        queryByRunAll: vi.fn(async () => [])
+        getLatestMessageTimestampByRun: vi.fn(async () => null)
       }
     });
 
@@ -129,8 +126,7 @@ describe("RunHotStateService", () => {
         getById: vi.fn(async () => null)
       },
       eventLogRepo: {
-        queryByRun: vi.fn(async () => []),
-        queryByRunAll: vi.fn(async () => [])
+        getLatestMessageTimestampByRun: vi.fn(async () => null)
       }
     });
 
@@ -230,8 +226,7 @@ describe("RunHotStateService", () => {
         getById: vi.fn(async () => null)
       },
       eventLogRepo: {
-        queryByRun: vi.fn(async () => []),
-        queryByRunAll: vi.fn(async () => [])
+        getLatestMessageTimestampByRun: vi.fn(async () => null)
       }
     });
 
@@ -258,8 +253,7 @@ describe("RunHotStateService", () => {
         getById: vi.fn(async (runId: string) => createRun({ run_id: runId }))
       },
       eventLogRepo: {
-        queryByRun: vi.fn(async () => []),
-        queryByRunAll: vi.fn(async () => [])
+        getLatestMessageTimestampByRun: vi.fn(async () => null)
       },
       maxSnapshots: 2
     });

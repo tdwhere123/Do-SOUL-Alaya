@@ -93,8 +93,21 @@ async function listWorkspaceMemories(
   memoryService: MemoryService,
   input: WorkspaceMemoryListInput
 ): Promise<{ readonly memories: readonly MemoryListRow[]; readonly totalCount: number }> {
-  const needsAuthoritativeFiltering =
-    input.scopeClass !== undefined || input.hasConflict === true;
+  if (input.scopeClass !== undefined && input.hasConflict !== true) {
+    const memories = await memoryService.findByScopeClass(
+      input.workspaceId,
+      input.scopeClass,
+      input.pagination
+    );
+    const filtered =
+      input.dimension === undefined
+        ? memories
+        : memories.filter((memory) => memory.dimension === input.dimension);
+    const totalCount = await countScopedWorkspaceMemories(memoryService, input, filtered);
+    return { memories: filtered, totalCount };
+  }
+
+  const needsAuthoritativeFiltering = input.hasConflict === true;
 
   if (!needsAuthoritativeFiltering) {
     const memories =
@@ -150,6 +163,9 @@ async function loadWorkspaceMemoryScanPage(
   input: WorkspaceMemoryListInput,
   page: { readonly limit: number; readonly offset: number }
 ): Promise<readonly MemoryListRow[]> {
+  if (input.scopeClass !== undefined) {
+    return await memoryService.findByScopeClass(input.workspaceId, input.scopeClass, page);
+  }
   return input.dimension === undefined
     ? await memoryService.findByWorkspaceId(input.workspaceId, page)
     : await memoryService.findByDimension(input.workspaceId, input.dimension, page);
@@ -169,4 +185,34 @@ function matchesWorkspaceMemoryListFilters(
     return false;
   }
   return true;
+}
+
+async function countScopedWorkspaceMemories(
+  memoryService: MemoryService,
+  input: WorkspaceMemoryListInput,
+  page: readonly MemoryListRow[]
+): Promise<number> {
+  if (input.dimension !== undefined) {
+    return page.length;
+  }
+  if (input.scopeClass === undefined) {
+    return await memoryService.countByWorkspaceId(input.workspaceId);
+  }
+  let totalCount = 0;
+  let scanOffset = 0;
+  for (;;) {
+    const batch = await memoryService.findByScopeClass(input.workspaceId, input.scopeClass, {
+      limit: MEMORY_SCAN_PAGE_LIMIT,
+      offset: scanOffset
+    });
+    if (batch.length === 0) {
+      break;
+    }
+    totalCount += batch.length;
+    if (batch.length < MEMORY_SCAN_PAGE_LIMIT) {
+      break;
+    }
+    scanOffset += MEMORY_SCAN_PAGE_LIMIT;
+  }
+  return totalCount;
 }

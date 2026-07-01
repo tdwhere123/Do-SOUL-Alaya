@@ -314,3 +314,71 @@ it("queryByRunAfterEventId returns all run events when the target ID is missing"
 
   expect(events).toHaveLength(2);
 });
+
+it("queryByRunAndEntityType returns only matching entity events for a run", async () => {
+  const { eventLogRepo } = await createEventLogRepos();
+  await appendRunCreatedEvent(eventLogRepo, {
+    entityId: "run_target",
+    runId: "run_target",
+    title: "target"
+  });
+  await appendAppliedOverride(eventLogRepo, "override-a", "run_target");
+
+  const events = await eventLogRepo.queryByRunAndEntityType("run_target", "session_override");
+
+  expect(events).toHaveLength(1);
+  expect(events[0]?.entity_type).toBe("session_override");
+});
+
+it("getLatestMessageTimestampByRun returns the newest conversation message timestamp", async () => {
+  const { eventLogRepo } = await createEventLogRepos();
+  await appendRunMessageEvent(eventLogRepo, {
+    entityId: "msg-1",
+    runId: "run_target",
+    messageId: "msg-1",
+    content: "hello"
+  });
+  const latest = await appendEngineResponseEvent(eventLogRepo, {
+    entityId: "msg-2",
+    runId: "run_target",
+    messageId: "msg-2",
+    content: "world"
+  });
+
+  await expect(eventLogRepo.getLatestMessageTimestampByRun("run_target")).resolves.toBe(latest.created_at);
+});
+
+it("getLatestUserRunMessageByRun returns the newest user message event", async () => {
+  const { eventLogRepo } = await createEventLogRepos();
+  await appendRunMessageEvent(eventLogRepo, {
+    entityId: "msg-user-1",
+    runId: "run_target",
+    messageId: "msg-user-1",
+    content: "first"
+  });
+  await eventLogRepo.append({
+    event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
+    entity_type: "message",
+    entity_id: "msg-assistant-1",
+    workspace_id: "ws_events",
+    run_id: "run_target",
+    caused_by: "assistant",
+    payload_json: {
+      run_id: "run_target",
+      role: "assistant",
+      content: "reply",
+      message_id: "msg-assistant-1"
+    }
+  });
+  await appendRunMessageEvent(eventLogRepo, {
+    entityId: "msg-user-2",
+    runId: "run_target",
+    messageId: "msg-user-2",
+    content: "second"
+  });
+
+  const latest = await eventLogRepo.getLatestUserRunMessageByRun("run_target");
+
+  expect(latest?.entity_id).toBe("msg-user-2");
+  expect(latest?.payload_json).toMatchObject({ role: "user", message_id: "msg-user-2" });
+});

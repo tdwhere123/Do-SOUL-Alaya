@@ -61,6 +61,8 @@ export interface EventLogRepo {
   getLatestEventId(runId: string): Promise<string | null>;
   getLatestMessageTimestampByRun(runId: string): Promise<string | null>;
   getLatestUserRunMessageByRun(runId: string): Promise<EventLogEntry | null>;
+  queryByRunAndEventType(runId: string, eventType: string): Promise<readonly EventLogEntry[]>;
+  queryGovernanceLeaseEventsByRun(runId: string): Promise<readonly EventLogEntry[]>;
   getLatestWorkspaceEventId(workspaceId: string): Promise<string | null>;
 }
 

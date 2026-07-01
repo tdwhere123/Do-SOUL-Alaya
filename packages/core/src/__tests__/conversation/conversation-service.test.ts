@@ -140,10 +140,9 @@ describe("ConversationService", () => {
         workingProjection: createWorkingProjection()
       }))
     };
-    const queryByRunAll = vi.fn(async () => []);
+    const queryConversationMessageEventsByRun = vi.fn(async () => []);
     const eventLogRepo = {
-      queryByRun: queryByRunAll,
-      queryByRunAll,
+      queryConversationMessageEventsByRun,
       append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
         const saved = {
           event_id: `event-${eventLogEntries.length + 1}`,
@@ -301,7 +300,7 @@ describe("ConversationService", () => {
   });
 
   it("conversation lists stored messages without executing a chat turn", async () => {
-    const queryByRunAll = vi.fn(async () => [
+    const queryConversationMessageEventsByRun = vi.fn(async () => [
         {
           event_id: "event-user",
           event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
@@ -321,8 +320,7 @@ describe("ConversationService", () => {
         }
       ]);
     const eventLogRepo = {
-      queryByRun: queryByRunAll,
-      queryByRunAll,
+      queryConversationMessageEventsByRun,
       append: vi.fn()
     };
     const { service } = createService({ eventLogRepo });

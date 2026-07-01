@@ -31,6 +31,8 @@ export interface EventLogRunQueryStatements {
   readonly getLatestEventIdStatement: SqliteStatement;
   readonly getLatestMessageTimestampByRunStatement: SqliteStatement;
   readonly getLatestUserRunMessageByRunStatement: SqliteStatement;
+  readonly queryByRunAndEventTypeStatement: SqliteStatement;
+  readonly queryGovernanceLeaseEventsByRunStatement: SqliteStatement;
 }
 
 export interface EventLogWorkspaceQueryStatements {
@@ -205,6 +207,20 @@ const EVENT_LOG_RUN_QUERY_SQL: SqlDefinitionMap<EventLogRunQueryStatements> = {
         AND json_extract(payload_json, '$.role') = 'user'
       ORDER BY created_at DESC, rowid DESC
       LIMIT 1
+    `,
+  queryByRunAndEventTypeStatement: `
+      SELECT${EVENT_LOG_SELECT_COLUMNS}
+      FROM event_log
+      WHERE run_id = ?
+        AND event_type = ?
+      ORDER BY created_at ASC, rowid ASC
+    `,
+  queryGovernanceLeaseEventsByRunStatement: `
+      SELECT${EVENT_LOG_SELECT_COLUMNS}
+      FROM event_log
+      WHERE run_id = ?
+        AND event_type IN (?, ?, ?)
+      ORDER BY created_at ASC, rowid ASC
     `
 };
 

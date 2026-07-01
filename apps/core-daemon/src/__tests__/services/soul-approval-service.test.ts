@@ -36,7 +36,7 @@ describe("SoulApprovalService", () => {
       createApprovalRequestedEvent({ approvalId: "approval-1", runId: "run-1" })
     ]);
     const runtimeNotifier = { notifyEntry: vi.fn() };
-    const queryByRunAll = eventLogRepo.queryByRunAll as ReturnType<typeof vi.fn>;
+    const queryByEntity = eventLogRepo.queryByEntity as ReturnType<typeof vi.fn>;
     const service = createSoulApprovalService({
       eventLogRepo,
       runLookup: vi.fn(async () => ({
@@ -58,7 +58,7 @@ describe("SoulApprovalService", () => {
       code: "NOT_FOUND",
       message: "Pending approval not found for run"
     });
-    expect(queryByRunAll).not.toHaveBeenCalled();
+    expect(queryByEntity).not.toHaveBeenCalled();
     expect(eventLogRepo.append).not.toHaveBeenCalled();
     expect(runtimeNotifier.notifyEntry).not.toHaveBeenCalled();
   });
@@ -359,8 +359,10 @@ function createEventLogRepo(
   type EventLogRepoPort = Parameters<typeof createSoulApprovalService>[0]["eventLogRepo"];
   type EventLogEntry = ReturnType<EventLogRepoPort["append"]>;
   return {
-    queryByRunAll: vi.fn<EventLogRepoPort["queryByRunAll"]>(
-      async () => entries as readonly EventLogEntry[]
+    queryByEntity: vi.fn<EventLogRepoPort["queryByEntity"]>(async (entityType, entityId) =>
+      (entries as readonly EventLogEntry[]).filter(
+        (entry) => entry.entity_type === entityType && entry.entity_id === entityId
+      )
     ),
     append: vi.fn<EventLogRepoPort["append"]>(
       (entry: Parameters<EventLogRepoPort["append"]>[0]) =>

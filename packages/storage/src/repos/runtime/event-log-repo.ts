@@ -3,6 +3,7 @@ import {
   GreenGovernanceEventType,
   ObligationTrustNarrativeEventType,
   RevokeReason,
+  WorkspaceRunEventType,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
@@ -413,6 +414,56 @@ export class SqliteEventLogRepo implements EventLogRepo {
       return row?.event_id ?? null;
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to get latest event ID.", error);
+    }
+  }
+
+  public async getLatestMessageTimestampByRun(runId: string): Promise<string | null> {
+    try {
+      const row = this.statements.getLatestMessageTimestampByRunStatement.get(
+        runId,
+        ...CONVERSATION_MESSAGE_EVENT_TYPES
+      ) as { readonly created_at: string } | undefined;
+      return row?.created_at ?? null;
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to get latest message timestamp by run.", error);
+    }
+  }
+
+  public async getLatestUserRunMessageByRun(runId: string): Promise<EventLogEntry | null> {
+    try {
+      const row = this.statements.getLatestUserRunMessageByRunStatement.get(
+        runId,
+        WorkspaceRunEventType.RUN_MESSAGE_APPENDED
+      ) as EventLogRow | undefined;
+      return row === undefined ? null : parseEventLogEntryRow(row);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to get latest user run message.", error);
+    }
+  }
+
+  public async queryByRunAndEventType(
+    runId: string,
+    eventType: string
+  ): Promise<readonly EventLogEntry[]> {
+    try {
+      const rows = this.statements.queryByRunAndEventTypeStatement.all(runId, eventType) as EventLogRow[];
+      return rows.map((row) => parseEventLogEntryRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to query event log by run and event type.", error);
+    }
+  }
+
+  public async queryGovernanceLeaseEventsByRun(runId: string): Promise<readonly EventLogEntry[]> {
+    try {
+      const rows = this.statements.queryGovernanceLeaseEventsByRunStatement.all(
+        runId,
+        GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
+        GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
+        GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED
+      ) as EventLogRow[];
+      return rows.map((row) => parseEventLogEntryRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to query governance lease events by run.", error);
     }
   }
 
