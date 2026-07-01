@@ -1,6 +1,6 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import type { DynamicPreparedStatementCache } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 import {
   MEMORY_ENTRY_SELECT_COLUMNS,
@@ -15,9 +15,8 @@ import {
 
 export class MemoryEntryDynamicReadQueries {
   public constructor(
-    private readonly db: StorageDatabase,
-    private readonly diagnostics: MemoryEntryRepoDiagnosticSink,
-    private readonly ensureActiveConnection: () => void
+    private readonly statementCache: DynamicPreparedStatementCache,
+    private readonly diagnostics: MemoryEntryRepoDiagnosticSink
   ) {}
 
   public async findByIds(
@@ -33,9 +32,8 @@ export class MemoryEntryDynamicReadQueries {
       return [];
     }
 
-    this.ensureActiveConnection();
     const placeholders = parsedObjectIds.map(() => "?").join(", ");
-    const statement = this.db.connection.prepare(`
+    const statement = this.statementCache.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
       WHERE workspace_id = ?
@@ -62,9 +60,8 @@ export class MemoryEntryDynamicReadQueries {
       return Object.freeze([]);
     }
 
-    this.ensureActiveConnection();
     const placeholders = uniqueTags.map(() => "?").join(", ");
-    const statement = this.db.connection.prepare(`
+    const statement = this.statementCache.prepare(`
       SELECT DISTINCT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
       JOIN json_each(memory_entries.domain_tags) AS tag
@@ -98,8 +95,7 @@ export class MemoryEntryDynamicReadQueries {
     }
     const evidenceFilter = buildEvidenceRefsFilter(cappedIds);
     try {
-      this.ensureActiveConnection();
-      const rows = queryEvidenceRefRows(this.db, workspaceId, evidenceFilter);
+      const rows = queryEvidenceRefRows(this.statementCache, workspaceId, evidenceFilter);
       reportEvidenceRefRowCap(workspaceId, cappedIds.length, rows.length, this.diagnostics);
       return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
     } catch (error) {
@@ -143,11 +139,11 @@ function toEvidenceRefLikePattern(id: string): string {
 }
 
 function queryEvidenceRefRows(
-  db: StorageDatabase,
+  statementCache: DynamicPreparedStatementCache,
   workspaceId: string,
   evidenceFilter: Readonly<{ readonly sql: string; readonly values: readonly string[] }>
 ): readonly MemoryEntryRow[] {
-  return db.connection
+  return statementCache
     .prepare(
       `SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
        FROM memory_entries

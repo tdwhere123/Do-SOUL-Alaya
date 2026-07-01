@@ -8,6 +8,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { MEMORY_ENTRY_SELECT_COLUMNS, parseMemoryDimension, parseMemoryEntryRow, parseScopeClass, parseStorageTier, type MemoryEntryRow } from "./row-mapper.js";
 import type { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
+import { DynamicPreparedStatementCache } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import type { MemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
 import { MemoryEntryConflictReadQueries } from "./memory-entry-conflict-read-queries.js";
 import { MemoryEntryDynamicReadQueries } from "./memory-entry-dynamic-read-queries.js";
@@ -28,9 +29,8 @@ export class MemoryEntryReadQueries {
     private readonly statementHolder: RefreshableStatementHolder<MemoryEntryStatements>
   ) {
     this.conflictQueries = new MemoryEntryConflictReadQueries(() => this.statements);
-    this.dynamicQueries = new MemoryEntryDynamicReadQueries(db, diagnostics, () =>
-      this.ensureActiveConnection()
-    );
+    const dynamicStatementCache = new DynamicPreparedStatementCache(db, () => this.ensureActiveConnection());
+    this.dynamicQueries = new MemoryEntryDynamicReadQueries(dynamicStatementCache, diagnostics);
   }
 
   private get statements(): MemoryEntryStatements {
