@@ -9,6 +9,8 @@ coverage/
 .cache/
 .claude/
 .vscode/
+.agent/
+
 
 # Secrets / local env (.env.example stays tracked)
 .env
