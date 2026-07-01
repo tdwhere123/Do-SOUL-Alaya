@@ -132,8 +132,7 @@ function accumulateDefaultFusedScore(
   return governance ? fusedScore + cappedLexicalFloodSum(lexicalFamilySum, lexicalFamilyMax) : fusedScore;
 }
 
-// Best-evidence combine: per-stream relevance (reliability·norm), grouped into families (max within),
-// confidence-weighted noisy-OR across families. Lets a minority-strong lens surface without additive weight.
+// invariant: best-evidence fusion takes max relevance within each family before noisy-OR across families.
 function accumulateBestEvidenceFusedScore(
   candidate: RecallFusionCandidateInput,
   supplementaryData: RecallSupplementaryData,
@@ -171,8 +170,7 @@ function accumulateBestEvidenceFusedScore(
   return combineBestEvidenceFamilies(relevanceByStream);
 }
 
-// Four-axis assembly: per-family de-correlate → embedding-gate the lexical surface → sum across families
-// → governance cap. λ=1∧γ=1∧gov-off ≡ additive sum; non-gated intents take the additive path directly.
+// invariant: synthesis fusion de-correlates per family and keeps non-gated intents additive.
 function accumulateSynthesisFusedScore(
   candidate: RecallFusionCandidateInput,
   supplementaryData: RecallSupplementaryData,

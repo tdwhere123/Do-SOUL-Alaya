@@ -38,8 +38,7 @@ function scoreSynthesisCapsuleFusionStream(
   return stream === "synthesis_fts" ? clamp01(supplementaryData.synthesisFtsRanks[candidate.entry.object_id] ?? 0) : 0;
 }
 
-// Any query carrying a parseable asked-about window reads event-time against it (object-time facet), matching the
-// conformant scorer's intent-free gate; otherwise distance-to-now recency. ALAYA_RECALL_TEMPORAL_WINDOW off → recency.
+// invariant: parseable query windows score event time; otherwise temporal fusion scores recency against now.
 export function scoreTemporalFusion(
   entry: Readonly<MemoryEntry>,
   queryProbes: Readonly<RecallQueryProbes>,

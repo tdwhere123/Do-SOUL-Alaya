@@ -32,7 +32,7 @@ export type PreliminaryFusionCandidate = Readonly<{
   readonly contributions: RecallFusionStreamContributions;
   readonly fusedScore: number;
   readonly facetOverlapCount: number;
-  // Conformant-only: per-axis rank + collapsed R_a magnitude vector (the R_a tie-break key).
+  // invariant: conformant ordering uses axis rank and the collapsed R_a tie-break vector.
   readonly axisRank?: Readonly<Record<RecallConformantAxis, number | null>>;
   readonly axisRa?: Readonly<Record<RecallConformantAxis, number>>;
 }>;

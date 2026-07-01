@@ -26,7 +26,7 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   if (draft.admissionPlanes.includes("object_probe")) {
     return 4;
   }
-  // Routing certainty, not a redundant lexical vote → rank just above lexical.
+  // invariant: session route certainty ranks just above lexical evidence.
   if (sessionRouteEnabled() && draft.admissionPlanes.includes("session_surface_cohort")) {
     return 3.5;
   }
@@ -47,9 +47,8 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   ) {
     return 3;
   }
-  // Semantic-supplement injections lack lexical / structural anchors; rank
-  // them above raw activation-only candidates but below any plane that
-  // carries a real anchor. see also: packages/core/src/recall/supplements.ts:collectEmbeddingCoarseInjection.
+  // invariant: semantic_supplement has no lexical or structural anchor.
+  // see also: packages/core/src/recall/supplements.ts:collectEmbeddingCoarseInjection.
   if (draft.admissionPlanes.includes("semantic_supplement")) {
     return 2;
   }
