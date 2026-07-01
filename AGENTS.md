@@ -67,6 +67,19 @@ rtk pnpm exec alaya tools list       # CLI fallback: list MCP memory tools
 rtk pnpm exec alaya tools call --json # CLI fallback: call a memory tool
 ```
 
+## Cursor Cloud specific instructions
+
+Environment is preconfigured (Node 22, deps installed via the startup update script `pnpm install --frozen-lockfile`). `rtk` is a token-saving optional wrapper — bare `pnpm`/`node` are equivalent; drop the `rtk` prefix here.
+
+- **Build before running anything.** `pnpm build` is required before the `alaya` CLI, MCP server, or Inspector work — they load from `apps/core-daemon/dist`. Build is intentionally excluded from the startup update script (it is heavier/brittle, includes a Vite SPA build); run it yourself after deps refresh.
+- **pnpm version:** the lockfile is v9.0; README says pnpm 9 but pnpm 10 (preinstalled) resolves it fine with `--frozen-lockfile`. Native deps `better-sqlite3` and `esbuild` build on install; the ignored `onnxruntime-node`/`sharp`/`protobufjs` scripts are the optional embeddings feature (disabled by default) and are safe to ignore.
+- **Run/verify:** `pnpm test` (vitest projects), `pnpm typecheck`, `pnpm alaya doctor`. `doctor` reporting `degraded` (exit 75) is normal on a fresh install — Garden is `degraded` with no attached agent, graph health is empty, embeddings are `keyword_only`; runtime/storage/MCP still report ready.
+- **Lint:** there is no root lint script. ESLint lives only in `apps/inspector/web` (`pnpm --dir apps/inspector/web lint`); root hygiene is `pnpm hygiene:unused` (knip).
+- **Do not use `pnpm --dir apps/core-daemon dev`** — its `dev` script points at a missing `scripts/dev-core-daemon.mjs`. The supported run path is the `alaya` CLI / `alaya mcp stdio` (the runtime boots in-process from the CLI/MCP entrypoint).
+- **Stateful one-shot `alaya tools call`** (e.g. `soul.emit_candidate_signal`, `soul.propose_memory_update`) fail with "requires a runId" unless a trusted run id bound to a workspace is supplied (`--workspace`/`--run`). Agents normally drive these tools over MCP attach, not via standalone CLI calls.
+- **Memory Inspector (optional surface):** `pnpm inspector` (alias for `alaya inspect --open`) starts its own managed daemon and serves the SPA on `http://127.0.0.1:5174` with a one-time token in the URL fragment; the daemon API rejects requests lacking that token/origin.
+- **Default DB** is `~/.config/alaya/alaya.db` (HOME-based, outside the repo), created/configured by `alaya install`.
+
 ## Pointers
 
 - `docs/handbook/README.md` — documentation entry point
