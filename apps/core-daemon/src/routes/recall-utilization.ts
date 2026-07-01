@@ -360,8 +360,11 @@ async function emitSingleUsedAnchorTelemetry(input: {
         if (ids !== null && ids.length === 1) {
           usedAnchorObjectId = ids[0] ?? null;
         }
-      } catch {
-        // anchor lookup is best-effort; null on any failure
+      } catch (error) {
+        process.emitWarning(
+          `recall utilization anchor lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+          { type: "AlayaRecallUtilizationWarning", code: "ALAYA_RECALL_UTILIZATION_ANCHOR_LOOKUP_FAILED" }
+        );
       }
     }
     try {
@@ -374,8 +377,11 @@ async function emitSingleUsedAnchorTelemetry(input: {
         occurredAt: report.occurred_at,
         usedAnchorObjectId
       });
-    } catch {
-      // invariant: telemetry emission never breaks the route response.
+    } catch (error) {
+      process.emitWarning(
+        `recall utilization telemetry emit failed: ${error instanceof Error ? error.message : String(error)}`,
+        { type: "AlayaRecallUtilizationWarning", code: "ALAYA_RECALL_UTILIZATION_TELEMETRY_EMIT_FAILED" }
+      );
     }
   }
 }

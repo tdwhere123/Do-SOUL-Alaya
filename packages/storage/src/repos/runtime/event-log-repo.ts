@@ -135,6 +135,21 @@ export class SqliteEventLogRepo implements EventLogRepo {
     }
   }
 
+  public async queryByRunAndEntityType(
+    runId: string,
+    entityType: string
+  ): Promise<readonly EventLogEntry[]> {
+    try {
+      const rows = this.statements.queryByRunAndEntityTypeStatement.all(
+        runId,
+        entityType
+      ) as EventLogRow[];
+      return rows.map((row) => parseEventLogEntryRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to query event log by run and entity type.", error);
+    }
+  }
+
   public async queryConversationMessageEventsByRun(
     runId: string,
     page?: EventLogPageOptions

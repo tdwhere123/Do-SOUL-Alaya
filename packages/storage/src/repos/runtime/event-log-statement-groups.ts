@@ -23,11 +23,14 @@ export interface EventLogEntityQueryStatements {
 export interface EventLogRunQueryStatements {
   readonly queryByRunStatement: SqliteStatement;
   readonly queryByRunPagedStatement: SqliteStatement;
+  readonly queryByRunAndEntityTypeStatement: SqliteStatement;
   readonly queryConversationMessageEventsByRunPagedStatement: SqliteStatement;
   readonly countConversationMessageEventsByRunStatement: SqliteStatement;
   readonly queryByRunCursorStateStatement: SqliteStatement;
   readonly queryByRunAfterEventIdStatement: SqliteStatement;
   readonly getLatestEventIdStatement: SqliteStatement;
+  readonly getLatestMessageTimestampByRunStatement: SqliteStatement;
+  readonly getLatestUserRunMessageByRunStatement: SqliteStatement;
 }
 
 export interface EventLogWorkspaceQueryStatements {
@@ -118,6 +121,12 @@ const EVENT_LOG_RUN_QUERY_SQL: SqlDefinitionMap<EventLogRunQueryStatements> = {
       ORDER BY created_at ASC, rowid ASC
       LIMIT ? OFFSET ?
     `,
+  queryByRunAndEntityTypeStatement: `
+      SELECT${EVENT_LOG_SELECT_COLUMNS}
+      FROM event_log
+      WHERE run_id = ? AND entity_type = ?
+      ORDER BY created_at ASC, rowid ASC
+    `,
   queryConversationMessageEventsByRunPagedStatement: `
       SELECT${EVENT_LOG_SELECT_COLUMNS}
       FROM event_log
@@ -176,6 +185,24 @@ const EVENT_LOG_RUN_QUERY_SQL: SqlDefinitionMap<EventLogRunQueryStatements> = {
       SELECT event_id
       FROM event_log
       WHERE run_id = ?
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `,
+  getLatestMessageTimestampByRunStatement: `
+      SELECT created_at
+      FROM event_log
+      WHERE run_id = ?
+        AND event_type IN (?, ?, ?)
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `,
+  getLatestUserRunMessageByRunStatement: `
+      SELECT${EVENT_LOG_SELECT_COLUMNS}
+      FROM event_log
+      WHERE run_id = ?
+        AND event_type = ?
+        AND json_type(payload_json, '$.role') = 'text'
+        AND json_extract(payload_json, '$.role') = 'user'
       ORDER BY created_at DESC, rowid DESC
       LIMIT 1
     `

@@ -256,11 +256,13 @@ async function withTimeout<T>(
   promise.catch(() => undefined);
 
   const controller = new AbortController();
+  let onParentAbort: (() => void) | undefined;
   if (signal !== undefined) {
     if (signal.aborted) {
       controller.abort(signal.reason);
     } else {
-      signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+      onParentAbort = () => controller.abort(signal.reason);
+      signal.addEventListener("abort", onParentAbort, { once: true });
     }
   }
 
@@ -294,6 +296,9 @@ async function withTimeout<T>(
   } finally {
     if (timeoutHandle !== null) {
       clearTimeout(timeoutHandle);
+    }
+    if (signal !== undefined && onParentAbort !== undefined) {
+      signal.removeEventListener("abort", onParentAbort);
     }
   }
 }

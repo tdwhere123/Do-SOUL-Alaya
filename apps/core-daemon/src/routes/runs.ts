@@ -125,7 +125,7 @@ function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
       await parseJsonBody(context.req.json.bind(context.req))
     );
 
-    return context.json({ success: true, data: response }, 200);
+    return context.json({ success: true, data: response }, 201);
   });
 
   app.post("/runs/:id/messages/stream", async (context) => {

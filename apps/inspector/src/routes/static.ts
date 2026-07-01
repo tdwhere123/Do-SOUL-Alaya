@@ -35,7 +35,7 @@ export function registerInspectorStaticRoutes(app: Hono, options: { readonly sta
     const indexPath = resolveStaticPath(options.staticRoot, "index.html");
     const content = indexPath === null ? null : await readStaticFile(indexPath);
     if (content === null) {
-      return context.json({ error: "frontend_bundle_missing" }, 503);
+      return context.json({ error: "not_found" }, 503);
     }
     return new Response(content, {
       status: 200,

@@ -75,7 +75,7 @@ function summarizeUnhandledError(error: unknown, requestId?: string): {
   };
 }
 
-function statusForCoreError(error: CoreError): 400 | 404 | 409 {
+function statusForCoreError(error: CoreError): 400 | 404 | 409 | 500 {
   switch (error.code) {
     case "VALIDATION":
       return 400;
@@ -85,7 +85,7 @@ function statusForCoreError(error: CoreError): 400 | 404 | 409 {
     case "OBLIGATION_VIOLATION":
       return 409;
     default:
-      return 400;
+      return 500;
   }
 }
 

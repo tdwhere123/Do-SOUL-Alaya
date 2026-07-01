@@ -88,9 +88,17 @@ function pipeInspectorOutput(
   child: InspectorChildProcess,
   stdout: NodeJS.ReadableStream,
   ctx: AlayaCliContext
-): void {
-  stdout.on("data", (chunk) => echoInspectorLines(ctx.stdout, chunk));
-  child.stderr?.on("data", (chunk) => echoInspectorLines(ctx.stderr, chunk));
+): () => void {
+  const onStdout = (chunk: Buffer | string) => echoInspectorLines(ctx.stdout, chunk);
+  const onStderr = (chunk: Buffer | string) => echoInspectorLines(ctx.stderr, chunk);
+  stdout.on("data", onStdout);
+  child.stderr?.on("data", onStderr);
+  const dispose = () => {
+    stdout.off("data", onStdout);
+    child.stderr?.off("data", onStderr);
+  };
+  child.once("exit", dispose);
+  return dispose;
 }
 
 class InspectorReadyWaiter {

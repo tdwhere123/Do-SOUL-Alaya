@@ -45,6 +45,7 @@ type LifecycleState = {
   backgroundStarted: boolean;
   startupBackgroundPass: Promise<void> | null;
   shuttingDown: Promise<void> | null;
+  signalHandlersInstalled: boolean;
 };
 
 export function createDaemonLifecycleControls(input: CreateDaemonLifecycleControlsInput): Readonly<{
@@ -59,7 +60,8 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
     server: null,
     backgroundStarted: false,
     startupBackgroundPass: null,
-    shuttingDown: null
+    shuttingDown: null,
+    signalHandlersInstalled: false
   };
   const startBackgroundServices = createBackgroundServiceStarter(input, state);
   const shutdown = createShutdownHandler(input, state);
@@ -164,8 +166,7 @@ function createHttpServerStarter(
       hostname,
       port
     });
-    installSignalShutdownHandler("SIGTERM", input, shutdown);
-    installSignalShutdownHandler("SIGINT", input, shutdown);
+    installSignalShutdownHandlersOnce(state, input, shutdown);
     logListeningAddress(input, hostname, port);
     return Object.freeze({ hostname, port, close: shutdown });
   };
@@ -201,6 +202,19 @@ function logEphemeralTokenStartup(
     host: options.hostname ?? resolveDaemonHostFromEnv(process.env),
     port: options.port ?? parsePort(process.env.PORT, 3000)
   });
+}
+
+function installSignalShutdownHandlersOnce(
+  state: LifecycleState,
+  input: CreateDaemonLifecycleControlsInput,
+  shutdown: () => Promise<void>
+): void {
+  if (state.signalHandlersInstalled) {
+    return;
+  }
+  state.signalHandlersInstalled = true;
+  installSignalShutdownHandler("SIGTERM", input, shutdown);
+  installSignalShutdownHandler("SIGINT", input, shutdown);
 }
 
 function installSignalShutdownHandler(

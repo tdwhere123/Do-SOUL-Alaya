@@ -11,6 +11,7 @@ export interface InitDatabaseOptions {
 }
 
 const databaseCache = new Map<string, StorageDatabase>();
+const MAX_DATABASE_CACHE_ENTRIES = 32;
 
 interface MigrationStatements {
   readonly isAppliedStatement: {
@@ -99,6 +100,7 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
   const storageDatabase = new StorageDatabase(filename, database);
 
   if (filename !== ":memory:") {
+    evictDatabaseCacheIfNeeded(filename);
     databaseCache.set(filename, storageDatabase);
   }
 
@@ -268,4 +270,18 @@ function resolveMigrationsDirectory(): string {
   }
 
   throw new StorageError("MIGRATION_NOT_FOUND", "Unable to locate SQLite migration files.");
+}
+
+function evictDatabaseCacheIfNeeded(incomingFilename: string): void {
+  if (databaseCache.has(incomingFilename)) {
+    return;
+  }
+  while (databaseCache.size >= MAX_DATABASE_CACHE_ENTRIES) {
+    const oldestKey = databaseCache.keys().next().value;
+    if (oldestKey === undefined) {
+      return;
+    }
+    databaseCache.get(oldestKey)?.close();
+    databaseCache.delete(oldestKey);
+  }
 }

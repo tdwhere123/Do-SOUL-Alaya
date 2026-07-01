@@ -204,12 +204,6 @@ function daemonUnavailableResponse(context: Context, requestId: string | undefin
   return context.json({ error: "daemon_unavailable" }, 503);
 }
 
-const KNOWN_WORKFLOW_ERROR_CODES = new Set([
-  "NOT_FOUND",
-  "VALIDATION",
-  "NEEDS_CONTEXT",
-  "UNKNOWN_TOOL"
-]);
 
 async function tryReadStructuredErrorEnvelope(
   response: Response,
@@ -233,7 +227,7 @@ async function tryReadStructuredErrorEnvelope(
     return null;
   }
   const errorObject = error as { readonly code?: unknown; readonly message?: unknown };
-  if (typeof errorObject.code !== "string" || !KNOWN_WORKFLOW_ERROR_CODES.has(errorObject.code)) {
+  if (typeof errorObject.code !== "string" || errorObject.code.trim().length === 0) {
     return null;
   }
   if (typeof errorObject.message !== "string") {
