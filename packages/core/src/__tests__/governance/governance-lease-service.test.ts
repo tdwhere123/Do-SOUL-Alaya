@@ -306,13 +306,13 @@ describe("GovernanceLeaseService", () => {
 
   it("fails closed instead of reporting not-held when EventLog rehydrate read fails", async () => {
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
-    const queryByRunAndEntityType = vi.fn(async () => {
+    const queryGovernanceLeaseEventsByRun = vi.fn(async () => {
       throw new Error("event log read failed");
     });
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
-      eventLogRepo: createEventLogRepo({ queryByRunAndEntityType }),
+      eventLogRepo: createEventLogRepo({ queryGovernanceLeaseEventsByRun }),
       runLookup: createRunLookup()
     });
 
@@ -321,7 +321,7 @@ describe("GovernanceLeaseService", () => {
       subCode: "CONCURRENT_MODIFICATION"
     });
     await expect(service.isHeld("run-1")).rejects.toMatchObject({ code: "CONFLICT" });
-    expect(queryByRunAndEntityType).toHaveBeenCalledWith("run-1", "governance_lease");
+    expect(queryGovernanceLeaseEventsByRun).toHaveBeenCalledWith("run-1");
     expect(emitWarning).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ code: "ALAYA_GOVERNANCE_LEASE_REHYDRATE_FAILED" })
@@ -334,7 +334,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({
-        queryByRunAndEntityType: vi.fn(async () => [
+        queryGovernanceLeaseEventsByRun: vi.fn(async () => [
           createEventLogEntry({
             event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
             entity_type: "governance_lease",
@@ -383,7 +383,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({
-        queryByRunAndEntityType: vi.fn(async () => await queryDeferred.promise)
+        queryGovernanceLeaseEventsByRun: vi.fn(async () => await queryDeferred.promise)
       }),
       runLookup: createRunLookup()
     });
@@ -404,14 +404,21 @@ describe("GovernanceLeaseService", () => {
 
 function createEventLogRepo(overrides: Partial<{
   append: (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => Promise<EventLogEntry>;
-  queryByRunAndEntityType: (runId: string, entityType: string) => Promise<readonly EventLogEntry[]>;
+  queryGovernanceLeaseEventsByRun: (runId: string) => Promise<readonly EventLogEntry[]>;
   queryByEntity: (entityType: string, entityId: string) => Promise<readonly EventLogEntry[]>;
 }> = {}) {
   const appendedEvents: EventLogEntry[] = [];
-  const queryByRunAndEntityType =
-    overrides.queryByRunAndEntityType ??
-    vi.fn(async (runId: string, entityType: string) =>
-      appendedEvents.filter((entry) => entry.run_id === runId && entry.entity_type === entityType)
+  const governanceLeaseEventTypes = new Set<string>([
+    GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
+    GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
+    GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED
+  ]);
+  const queryGovernanceLeaseEventsByRun =
+    overrides.queryGovernanceLeaseEventsByRun ??
+    vi.fn(async (runId: string) =>
+      appendedEvents.filter(
+        (entry) => entry.run_id === runId && governanceLeaseEventTypes.has(entry.event_type)
+      )
     );
 
   return {
@@ -427,7 +434,7 @@ function createEventLogRepo(overrides: Partial<{
       vi.fn(async (entityType: string, entityId: string) =>
         appendedEvents.filter((entry) => entry.entity_type === entityType && entry.entity_id === entityId)
       ),
-    queryByRunAndEntityType
+    queryGovernanceLeaseEventsByRun
   };
 }
 

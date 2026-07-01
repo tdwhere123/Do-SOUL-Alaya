@@ -43,7 +43,7 @@ const HIGH_SIGNAL_PIERCING_CONDITIONS: readonly Readonly<PiercingCondition>[] = 
 export interface GovernanceLeaseServiceEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
-  queryByRunAndEntityType(runId: string, entityType: string): Promise<readonly EventLogEntry[]>;
+  queryGovernanceLeaseEventsByRun(runId: string): Promise<readonly EventLogEntry[]>;
 }
 
 export interface GovernanceLeaseServiceDependencies {
@@ -405,7 +405,7 @@ async function queryRunEventLog(
   eventLogRepo: GovernanceLeaseServiceEventLogPort,
   runId: string
 ): Promise<readonly EventLogEntry[]> {
-  return await eventLogRepo.queryByRunAndEntityType(runId, "governance_lease");
+  return await eventLogRepo.queryGovernanceLeaseEventsByRun(runId);
 }
 
 function parsePersistedGovernanceLeasePayload<T>(
