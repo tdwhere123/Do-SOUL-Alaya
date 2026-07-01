@@ -42,6 +42,10 @@ export class MemoryEntryReadQueries {
     return this.statementHolder.active();
   }
 
+  private ensureActiveConnection(): void {
+    this.statementHolder.active();
+  }
+
   public async findById(objectId: string): Promise<Readonly<MemoryEntry> | null> {
     try {
       const row = this.statements.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
@@ -62,6 +66,7 @@ export class MemoryEntryReadQueries {
       return [];
     }
 
+    this.ensureActiveConnection();
     const placeholders = parsedObjectIds.map(() => "?").join(", ");
     const statement = this.db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
@@ -476,6 +481,7 @@ export class MemoryEntryReadQueries {
     // more than one tag to a single result. Tier + tombstone + ORDER BY
     // match findByWorkspaceId(hot) so the candidate set is a strict
     // superset of the full-scan candidates with identical iteration order.
+    this.ensureActiveConnection();
     const placeholders = uniqueTags.map(() => "?").join(", ");
     const statement = this.db.connection.prepare(`
       SELECT DISTINCT${MEMORY_ENTRY_SELECT_COLUMNS}
@@ -515,6 +521,7 @@ export class MemoryEntryReadQueries {
     }
     const evidenceFilter = buildEvidenceRefsFilter(cappedIds);
     try {
+      this.ensureActiveConnection();
       const rows = queryEvidenceRefRows(this.db, workspaceId, evidenceFilter);
       reportEvidenceRefRowCap(workspaceId, cappedIds.length, rows.length, this.diagnostics);
       return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
