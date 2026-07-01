@@ -202,16 +202,24 @@ describe("createApp", () => {
   it("registers typed route service bags on the Hono app", async () => {
     const patchRuntimeEmbeddingConfig = vi.fn(
       async (patch: unknown): Promise<Readonly<{
+        config_version: 1;
         embedding_enabled: boolean;
         model_id: string | null;
         provider_url: string | null;
         secret_ref: string | null;
-      }>> => patch as Readonly<{
-        embedding_enabled: boolean;
-        model_id: string | null;
-        provider_url: string | null;
-        secret_ref: string | null;
-      }>
+      }>> => ({
+        config_version: 1,
+        embedding_enabled: false,
+        model_id: null,
+        provider_url: null,
+        secret_ref: null,
+        ...(patch as {
+          embedding_enabled?: boolean;
+          model_id?: string | null;
+          provider_url?: string | null;
+          secret_ref?: string | null;
+        })
+      })
     );
     const app = createProtectedTestApp({
       routes: {
