@@ -3,19 +3,18 @@ import {
   ClaimLifecycleState,
   GovernanceResolutionEventType,
   ScopeClass,
-  WorkspaceKind,
-  WorkspaceState,
   canonicalGovernanceSubject,
   type ClaimForm,
-  type EventLogEntry} from "@do-soul/alaya-protocol";
-import {
-  initDatabase,
-  SqliteClaimFormRepo,
-  SqliteEventLogRepo,
-  SqliteWorkspaceRepo
-} from "@do-soul/alaya-storage";
-import { ClaimService } from "../../governance/claim-service.js";
+  type EventLogEntry
+} from "@do-soul/alaya-protocol";
+import type { StorageDatabase } from "@do-soul/alaya-storage";
+import { ClaimService, type ClaimServiceDependencies } from "../../governance/claim-service.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
+import {
+  REAL_SQLITE_TEST_WORKSPACE_ID,
+  createResolutionServiceRealStorage
+} from "../shared/real-sqlite.test-support.js";
+
 const FIXED_NOW = "2026-05-17T00:00:00.000Z";
 
 // invariant: B5 — proves the atomic-rollback contract on real SQLite,
@@ -28,7 +27,7 @@ const FIXED_NOW = "2026-05-17T00:00:00.000Z";
 // transaction can.
 // see also: packages/core/src/governance/claim-service.ts applyLifecycleTransition
 describe("ResolutionService confirm atomicity (real SQLite)", () => {
-  const databases = new Set<ReturnType<typeof initDatabase>>();
+  const databases = new Set<StorageDatabase>();
 
   afterEach(() => {
     for (const database of databases) {
@@ -38,7 +37,7 @@ describe("ResolutionService confirm atomicity (real SQLite)", () => {
   });
 
   const CLAIM_ID = "590b6f34-7ea5-4f9b-ae74-fe8d4f5af96a";
-  const WS = "workspace-1";
+  const WS = REAL_SQLITE_TEST_WORKSPACE_ID;
 
   function buildDraftClaim(): ClaimForm {
     return {
@@ -64,21 +63,9 @@ describe("ResolutionService confirm atomicity (real SQLite)", () => {
   }
 
   it("rolls back BOTH the audit-event row and the claim_status mutation when the mutate throws", async () => {
-    const database = initDatabase({ filename: ":memory:" });
-    databases.add(database);
-
-    const workspaceRepo = new SqliteWorkspaceRepo(database);
-    await workspaceRepo.create({
-      workspace_id: WS,
-      name: "workspace one",
-      root_path: "/tmp/ws1",
-      workspace_kind: WorkspaceKind.LOCAL_REPO,
-      default_engine_binding: null,
-      workspace_state: WorkspaceState.ACTIVE
+    const { database, eventLogRepo, claimFormRepo } = await createResolutionServiceRealStorage((database) => {
+      databases.add(database);
     });
-
-    const eventLogRepo = new SqliteEventLogRepo(database);
-    const claimFormRepo = new SqliteClaimFormRepo(database);
     claimFormRepo.create(buildDraftClaim());
 
     const eventPublisher = new EventPublisher({
@@ -91,7 +78,7 @@ describe("ResolutionService confirm atomicity (real SQLite)", () => {
     // appendManyWithMutation mutate callback. The append of the
     // lifecycle event and the composed audit event already ran in the
     // open transaction; the throw must roll the whole transaction back.
-    const failingClaimFormRepo = new Proxy(claimFormRepo, {
+    const failingClaimFormRepo: ClaimServiceDependencies["claimFormRepo"] = new Proxy(claimFormRepo, {
       get(target, prop, receiver) {
         if (prop === "updateStatusSync") {
           return () => {
@@ -103,7 +90,7 @@ describe("ResolutionService confirm atomicity (real SQLite)", () => {
     });
 
     const claimService = new ClaimService({
-      claimFormRepo: failingClaimFormRepo as unknown as SqliteClaimFormRepo,
+      claimFormRepo: failingClaimFormRepo,
       eventLogRepo,
       runtimeNotifier: { notifyEntry: vi.fn() },
       eventPublisher,

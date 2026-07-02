@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
   ControlPlaneObjectKind,
-  WorkspaceRunEventType,
   GreenGovernanceEventType,
   RetentionPolicy,
   RunMessageAppendedPayloadSchema,
@@ -19,8 +18,8 @@ const OVERRIDE_REHYDRATE_FAILED_WARNING_CODE = "ALAYA_SESSION_OVERRIDE_REHYDRATE
 export interface SessionOverrideServiceEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
-  queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
-  queryByRunAll(runId: string): Promise<readonly EventLogEntry[]>;
+  queryByRunAndEntityType(runId: string, entityType: string): Promise<readonly EventLogEntry[]>;
+  getLatestUserRunMessageByRun(runId: string): Promise<EventLogEntry | null>;
 }
 
 export interface SessionOverrideServiceDependencies {
@@ -157,20 +156,16 @@ export class SessionOverrideService {
       return trimmed.length === 0 ? null : trimmed;
     }
 
-    const events = await queryRunEventLog(this.dependencies.eventLogRepo, runId);
+    const latestUserMessage = await this.dependencies.eventLogRepo.getLatestUserRunMessageByRun(runId);
 
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const event = events[index];
+    if (latestUserMessage === null) {
+      return null;
+    }
 
-      if (event.event_type !== WorkspaceRunEventType.RUN_MESSAGE_APPENDED) {
-        continue;
-      }
+    const parsed = RunMessageAppendedPayloadSchema.safeParse(latestUserMessage.payload_json);
 
-      const parsed = RunMessageAppendedPayloadSchema.safeParse(event.payload_json);
-
-      if (parsed.success && parsed.data.role === "user") {
-        return parsed.data.message_id;
-      }
+    if (parsed.success && parsed.data.role === "user") {
+      return parsed.data.message_id;
     }
 
     return null;
@@ -344,7 +339,7 @@ async function queryRunEventLog(
   eventLogRepo: SessionOverrideServiceEventLogPort,
   runId: string
 ): Promise<readonly EventLogEntry[]> {
-  return await eventLogRepo.queryByRunAll(runId);
+  return await eventLogRepo.queryByRunAndEntityType(runId, "session_override");
 }
 
 function parsePriority(value: number): number {

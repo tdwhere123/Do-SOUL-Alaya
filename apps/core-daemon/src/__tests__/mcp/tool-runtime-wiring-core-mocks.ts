@@ -67,6 +67,13 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       evictExpired: vi.fn(async () => 0),
       counterSize: vi.fn(async () => 0)
     }),
+    AnswersWithEdgeProducerService: makeClass({
+      crystallize: vi.fn(async () => ({ coRelevantPairs: 0, keptPairs: 0, minted: 0 }))
+    }),
+    HqAnswerOverlapPairSource: makeClass({
+      answerCoRelevantPairKeys: vi.fn(async () => new Set())
+    }),
+    DEFAULT_ANSWER_OVERLAP_BAR: 3,
     PathActivationCandidateProducer: vi.fn().mockImplementation(function PathActivationCandidateProducer() {
       return {
         produce: vi.fn(async () => [])

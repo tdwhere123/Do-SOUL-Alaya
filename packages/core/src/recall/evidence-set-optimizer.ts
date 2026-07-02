@@ -15,22 +15,33 @@ import {
   resolveCoverageTargetK,
   sessionKeyOf
 } from "./coverage-delivery-signals.js";
+import {
+  type EvidenceSetCoverageState,
+  MAX_EVIDENCE_SET_BONUS,
+  createEvidenceSetCoverageState,
+  evidenceSetCoverageBonus,
+  evidenceSetCoverageEnabled,
+  recordEvidenceSetSelection
+} from "./evidence-set-coverage.js";
 
-// Default-on delivery selection: natural ranking buries complementary golds (Any-gold@5 high, Full-gold@5 low). Rewrites the top-K interior (never rank-1, never the reserve tail) with facet coverage as an additive bonus, so a strong same-session answer is never demoted for a weak new-session one. Runs only when the query is plausibly multi-fact AND the pool offers cross-session evidence; all signals are delivery-time, no QueryPlan.
+// Delivery-time set-coverage: natural ranking buries complementary golds (Any-gold@5 high, Full-gold@5 low).
+// Rewrites the top-K interior (never rank-1, never the reserve tail) as a bounded additive nudge — default
+// uses S4 evidence-set coverage; the flat-baseline kill-switch falls back to facet coverage. Runs only when
+// the query is plausibly multi-fact AND the pool offers cross-session evidence; all signals are delivery-time.
 
 // Facet tokens are prefixed by axis; the prefix maps to its coverage bonus.
 const FACET_PREFIX_WEIGHT: Readonly<Record<string, number>> = {
-  "L:": 0.12,
-  "S:": 0.1,
-  "O:": 0.09,
-  "E:": 0.06,
-  "C:": 0.05,
-  "D:": 0.03,
-  "M:": 0.02
+  "L:": 0.1,
+  "S:": 0.0833,
+  "O:": 0.075,
+  "E:": 0.05,
+  "C:": 0.0417,
+  "D:": 0.025,
+  "M:": 0.0167
 };
 
 // Near-tie nudge, not an override: total facet bonus never exceeds one strong facet, so it only reorders candidates close in score.
-const MAX_COVERAGE_BONUS = 0.12;
+const MAX_COVERAGE_BONUS = 0.1;
 
 const MULTI_FACT_LIST_CUE = /\b(all|both|each|list|every|multiple|several|compare|across)\b/iu;
 
@@ -237,21 +248,40 @@ export function applyEvidenceSetDelivery<T extends DeliveryCandidate>(
     queryEvidenceRefs: new Set(probes.evidence_refs)
   };
 
-  const covered = new Set<string>(facetSignature(head.entry, ctx));
+  const evidenceState = evidenceSetCoverageEnabled()
+    ? createEvidenceSetCoverageState(pool, supplementaryData)
+    : null;
+  const covered = new Set<string>();
   const selected: T[] = [head];
   const selectedSet = new Set<T>([head]);
+  recordSelection(head, ctx, covered, evidenceState, supplementaryData);
 
   while (selected.length < targetK) {
-    const best = selectBestByCoverageUtility(pool, selectedSet, covered, ctx, targetK, headScore, minScoreRatio);
+    const best = selectBestByCoverageUtility(pool, selectedSet, covered, ctx, targetK, headScore, minScoreRatio, evidenceState);
     if (best === undefined) {
       break;
     }
     selected.push(best);
     selectedSet.add(best);
-    for (const facet of facetSignature(best.entry, ctx)) covered.add(facet);
+    recordSelection(best, ctx, covered, evidenceState, supplementaryData);
   }
 
   return appendRemainder(ordered, selected, selectedSet);
+}
+
+// Default path records evidence-set membership; the flat-baseline fallback accrues facet coverage instead.
+function recordSelection<T extends DeliveryCandidate>(
+  candidate: T,
+  ctx: FacetContext,
+  covered: Set<string>,
+  evidenceState: EvidenceSetCoverageState | null,
+  supplementaryData: RecallSupplementaryData
+): void {
+  if (evidenceState !== null) {
+    recordEvidenceSetSelection(evidenceState, candidate, supplementaryData);
+    return;
+  }
+  for (const facet of facetSignature(candidate.entry, ctx)) covered.add(facet);
 }
 
 function selectBestByCoverageUtility<T extends DeliveryCandidate>(
@@ -261,7 +291,8 @@ function selectBestByCoverageUtility<T extends DeliveryCandidate>(
   ctx: FacetContext,
   targetK: number,
   headScore: number,
-  minScoreRatio: number
+  minScoreRatio: number,
+  evidenceState: EvidenceSetCoverageState | null
 ): T | undefined {
   let best: T | undefined;
   let bestUtility = Number.NEGATIVE_INFINITY;
@@ -275,7 +306,10 @@ function selectBestByCoverageUtility<T extends DeliveryCandidate>(
       continue;
     }
     const base = headScore > 0 ? Math.min(1, candidate.fusion.fused_score / headScore) : 0;
-    const utility = coverageUtility(base, facetSignature(candidate.entry, ctx), covered);
+    // Default: S4 evidence-set coverage only (facet is double-counted by R_O); flat-baseline falls back to facet.
+    const utility = evidenceState !== null
+      ? base + Math.min(MAX_EVIDENCE_SET_BONUS, evidenceSetCoverageBonus(evidenceState, candidate, ctx.supplementaryData))
+      : coverageUtility(base, facetSignature(candidate.entry, ctx), covered);
     if (utility > bestUtility) {
       bestUtility = utility;
       best = candidate;

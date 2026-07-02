@@ -30,6 +30,7 @@ describe("bench-runner CLI", () => {
   afterEach(() => {
     process.stdout.write = originalStdoutWrite;
     process.stderr.write = originalStderrWrite;
+    delete process.env.ALAYA_RECALL_FLAT_BASELINE;
   });
 
   it("mentions controlled-replay in help output", async () => {
@@ -52,6 +53,7 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toContain("extraction-fill");
     expect(stdoutBuf).toContain("recall-eval --snapshot <db>");
     expect(stdoutBuf).toContain("--concurrency N");
+    expect(stdoutBuf).toMatch(/longmemeval[\s\S]*--concurrency N/);
   });
 
   it("recall-eval without --snapshot exits 2 with an actionable message", async () => {
@@ -84,6 +86,13 @@ describe("bench-runner CLI", () => {
     );
   });
 
+  it("rejects malformed LongMemEval concurrency values instead of falling back", async () => {
+    const exitCode = await runCli(["longmemeval", "--concurrency", "2.5"]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/--concurrency must be a positive integer/);
+  });
+
   it("rejects invalid LongMemEval weight overrides before loading data", async () => {
     const exitCode = await runCli([
       "longmemeval",
@@ -98,6 +107,9 @@ describe("bench-runner CLI", () => {
   it(
     "controlled-replay writes a controlled-replay.json archive under a temp history root",
     async () => {
+      // Path-axis answer edges are not seeded in this fixture, so assert the M0 path-recall
+      // native-health contract under the flat-baseline kill switch.
+      process.env.ALAYA_RECALL_FLAT_BASELINE = "on";
       const historyRoot = await mkdtemp(join(tmpdir(), "alaya-controlled-replay-cli-"));
 
       const exitCode = await runCli(["controlled-replay", "--history-root", historyRoot]);

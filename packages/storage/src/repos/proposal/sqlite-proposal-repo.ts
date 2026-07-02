@@ -9,7 +9,7 @@ import {
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
-import { getEventLogWriter, insertEventLogEntry } from "../shared/event-log-writer.js";
+import { insertEventLogEntry } from "../shared/event-log-writer.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 import {
   acceptPendingMemoryUpdateWithEvents,
@@ -21,19 +21,20 @@ import {
   parseProposalId,
   parseProposalResolutionState,
   parseProposalRow,
-  parseUpdatedAt} from "./mappers.js";
+  parseUpdatedAt
+} from "./mappers.js";
+import { ProposalConnectionHost } from "./proposal-connection-host.js";
 import { ProposalCreateWorkflow } from "./proposal-create-workflow.js";
 import { ProposalReadQueries } from "./proposal-read-queries.js";
-import { prepareProposalStatements } from "./sqlite-proposal-statements.js";
-import {
-  type ProposalRow
-} from "./rows.js";
+import { type ProposalRow } from "./rows.js";
 import {
   type AcceptedMemoryUpdateInput,
   type AcceptedPathRelationGovernanceInput,
   type AcceptedSynthesisCreateInput,
+  type CreateProposalWithEventsIfAbsentResult,
   type CreateProposalWithEventsOptions,
   type FindPendingSummariesOptions,
+  type PendingProposalDedupeKey,
   type PendingProposalSummary,
   type ProposalListPageOptions,
   type ProposalCreateInput,
@@ -54,49 +55,14 @@ interface ParsedPendingResolutionUpdate {
 }
 
 export class SqliteProposalRepo implements ProposalRepo {
-  private readonly findByIdStatement;
-  private readonly updateResolutionStatement;
-  private readonly updateResolutionWithIdentityStatement;
-  private readonly updatePendingResolutionStatement;
-  private readonly updatePendingResolutionWithIdentityStatement;
-  private readonly findMemoryEntryByIdStatement;
-  private readonly updateMemoryEntryStatement;
-  private readonly findRevokableGreenStatusStatement;
-  private readonly revokeGreenStatusStatement;
-  private readonly findPathRelationByAnchorMemoryIdStatement;
-  private readonly createPathRelationStatement;
-  private readonly updatePathRelationLegitimacyStatement;
-  // see also: synthesis-capsule-repo.ts SqliteSynthesisCapsuleRepo.createStatement
-  // — the same INSERT column order, prepared here so the synthesis-create
-  // accept-apply can insert the capsule inside the proposal-resolve transaction.
-  private readonly createSynthesisCapsuleStatement;
-  private readonly eventLogWriter;
+  private readonly connectionHost: ProposalConnectionHost;
   private readonly createWorkflow: ProposalCreateWorkflow;
   private readonly readQueries: ProposalReadQueries;
 
   public constructor(private readonly db: StorageDatabase) {
-    // INSERT also writes the HITL projection columns
-    // (target_object_kind, proposed_change_summary, created_at).
-    // Defaults from migration 058 keep legacy callers compatible if
-    // they pass undefined for those fields.
-    const statements = prepareProposalStatements(db);
-    this.findByIdStatement = statements.findByIdStatement;
-    this.updateResolutionStatement = statements.updateResolutionStatement;
-    this.updateResolutionWithIdentityStatement = statements.updateResolutionWithIdentityStatement;
-    this.updatePendingResolutionStatement = statements.updatePendingResolutionStatement;
-    this.updatePendingResolutionWithIdentityStatement = statements.updatePendingResolutionWithIdentityStatement;
-    this.findMemoryEntryByIdStatement = statements.findMemoryEntryByIdStatement;
-    this.updateMemoryEntryStatement = statements.updateMemoryEntryStatement;
-    this.findRevokableGreenStatusStatement = statements.findRevokableGreenStatusStatement;
-    this.revokeGreenStatusStatement = statements.revokeGreenStatusStatement;
-    this.findPathRelationByAnchorMemoryIdStatement = statements.findPathRelationByAnchorMemoryIdStatement;
-    this.createPathRelationStatement = statements.createPathRelationStatement;
-    this.updatePathRelationLegitimacyStatement = statements.updatePathRelationLegitimacyStatement;
-    this.createSynthesisCapsuleStatement = statements.createSynthesisCapsuleStatement;
-
-    this.eventLogWriter = getEventLogWriter(db.connection);
-    this.createWorkflow = new ProposalCreateWorkflow(db, this.eventLogWriter, statements);
-    this.readQueries = new ProposalReadQueries(db, statements);
+    this.connectionHost = new ProposalConnectionHost(db);
+    this.createWorkflow = new ProposalCreateWorkflow(this.connectionHost);
+    this.readQueries = new ProposalReadQueries(db, this.connectionHost);
   }
 
   public async create(input: ProposalCreateInput): Promise<Readonly<Proposal>> {
@@ -113,6 +79,21 @@ export class SqliteProposalRepo implements ProposalRepo {
   }>> {
     return await this.createWorkflow.createProposalWithEvents(input, events, options);
   }
+
+  public async createProposalWithEventsIfAbsent(
+    input: ProposalCreateInput,
+    events: readonly ProposalCreationEventInput[],
+    dedupeKey: PendingProposalDedupeKey,
+    options: CreateProposalWithEventsOptions = {}
+  ): Promise<CreateProposalWithEventsIfAbsentResult> {
+    return await this.createWorkflow.createProposalWithEventsIfAbsent(
+      input,
+      events,
+      dedupeKey,
+      options
+    );
+  }
+
   public async findById(proposalId: string): Promise<Readonly<Proposal> | null> {
     return await this.readQueries.findById(proposalId);
   }
@@ -191,8 +172,8 @@ export class SqliteProposalRepo implements ProposalRepo {
     try {
       const result =
         parsedReviewerIdentity === undefined
-          ? this.updateResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId)
-          : this.updateResolutionWithIdentityStatement.run(
+          ? this.connectionHost.updateResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId)
+          : this.connectionHost.updateResolutionWithIdentityStatement.run(
               parsedState,
               parsedUpdatedAt,
               parsedReviewerIdentity,
@@ -229,7 +210,11 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
     try {
-      const result = this.updatePendingResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId);
+      const result = this.connectionHost.updatePendingResolutionStatement.run(
+        parsedState,
+        parsedUpdatedAt,
+        parsedProposalId
+      );
 
       if (result.changes === 0) {
         const existing = await this.findById(parsedProposalId);
@@ -356,18 +341,19 @@ export class SqliteProposalRepo implements ProposalRepo {
   private createWorkflowContext(): SqliteProposalWorkflowContext {
     return {
       db: this.db,
-      eventLogWriter: this.eventLogWriter,
-      findByIdStatement: this.findByIdStatement,
-      findMemoryEntryByIdStatement: this.findMemoryEntryByIdStatement,
-      updateMemoryEntryStatement: this.updateMemoryEntryStatement,
-      findRevokableGreenStatusStatement: this.findRevokableGreenStatusStatement,
-      revokeGreenStatusStatement: this.revokeGreenStatusStatement,
-      updatePendingResolutionStatement: this.updatePendingResolutionStatement,
-      updatePendingResolutionWithIdentityStatement: this.updatePendingResolutionWithIdentityStatement,
-      findPathRelationByAnchorMemoryIdStatement: this.findPathRelationByAnchorMemoryIdStatement,
-      createPathRelationStatement: this.createPathRelationStatement,
-      updatePathRelationLegitimacyStatement: this.updatePathRelationLegitimacyStatement,
-      createSynthesisCapsuleStatement: this.createSynthesisCapsuleStatement,
+      transaction: (fn, options) => this.connectionHost.transaction(fn, options),
+      eventLogWriter: this.connectionHost.eventLogWriter,
+      findByIdStatement: this.connectionHost.findByIdStatement,
+      findMemoryEntryByIdStatement: this.connectionHost.findMemoryEntryByIdStatement,
+      updateMemoryEntryStatement: this.connectionHost.updateMemoryEntryStatement,
+      findRevokableGreenStatusStatement: this.connectionHost.findRevokableGreenStatusStatement,
+      revokeGreenStatusStatement: this.connectionHost.revokeGreenStatusStatement,
+      updatePendingResolutionStatement: this.connectionHost.updatePendingResolutionStatement,
+      updatePendingResolutionWithIdentityStatement: this.connectionHost.updatePendingResolutionWithIdentityStatement,
+      findPathRelationByAnchorMemoryIdStatement: this.connectionHost.findPathRelationByAnchorMemoryIdStatement,
+      createPathRelationStatement: this.connectionHost.createPathRelationStatement,
+      updatePathRelationLegitimacyStatement: this.connectionHost.updatePathRelationLegitimacyStatement,
+      createSynthesisCapsuleStatement: this.connectionHost.createSynthesisCapsuleStatement,
       createPendingResolutionFailure: (proposalId) => this.createPendingResolutionFailure(proposalId)
     };
   }
@@ -379,8 +365,10 @@ export class SqliteProposalRepo implements ProposalRepo {
     readonly proposal: Readonly<Proposal>;
     readonly events: readonly EventLogEntry[];
   }> {
-    return this.db.connection.transaction(() => {
-      const storedEvents = events.map((event) => insertEventLogEntry(this.eventLogWriter, event));
+    return this.connectionHost.transaction(() => {
+      const storedEvents = events.map((event) =>
+        insertEventLogEntry(this.connectionHost.eventLogWriter, event)
+      );
       const result = this.runPendingResolutionUpdate(parsed);
 
       if (result.changes === 0) {
@@ -391,14 +379,18 @@ export class SqliteProposalRepo implements ProposalRepo {
         proposal: this.findRequiredProposalAfterPendingUpdate(parsed.proposalId),
         events: storedEvents
       });
-    })();
+    });
   }
 
   private runPendingResolutionUpdate(parsed: ParsedPendingResolutionUpdate): { readonly changes: number } {
     if (parsed.reviewerIdentity === undefined) {
-      return this.updatePendingResolutionStatement.run(parsed.state, parsed.updatedAt, parsed.proposalId);
+      return this.connectionHost.updatePendingResolutionStatement.run(
+        parsed.state,
+        parsed.updatedAt,
+        parsed.proposalId
+      );
     }
-    return this.updatePendingResolutionWithIdentityStatement.run(
+    return this.connectionHost.updatePendingResolutionWithIdentityStatement.run(
       parsed.state,
       parsed.updatedAt,
       parsed.reviewerIdentity,
@@ -407,7 +399,7 @@ export class SqliteProposalRepo implements ProposalRepo {
   }
 
   private findRequiredProposalAfterPendingUpdate(proposalId: string): Readonly<Proposal> {
-    const row = this.findByIdStatement.get(proposalId) as ProposalRow | undefined;
+    const row = this.connectionHost.findByIdStatement.get(proposalId) as ProposalRow | undefined;
     if (row === undefined) {
       throw new StorageError("NOT_FOUND", `Proposal ${proposalId} was not found after update.`);
     }
@@ -415,7 +407,7 @@ export class SqliteProposalRepo implements ProposalRepo {
   }
 
   private createPendingResolutionFailure(proposalId: string): StorageError {
-    const row = this.findByIdStatement.get(proposalId) as ProposalRow | undefined;
+    const row = this.connectionHost.findByIdStatement.get(proposalId) as ProposalRow | undefined;
     if (row === undefined) {
       return new StorageError("NOT_FOUND", `Proposal ${proposalId} was not found.`);
     }

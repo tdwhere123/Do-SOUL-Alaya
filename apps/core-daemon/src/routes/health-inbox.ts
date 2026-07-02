@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import type { WorkspaceService } from "@do-soul/alaya-core";
+import { CoreError, type WorkspaceService } from "@do-soul/alaya-core";
 import {
   HealthIssueCauseKindSchema,
   HealthIssueResolutionStateSchema,
@@ -25,10 +25,11 @@ export interface HealthInboxRouteServices {
         readonly causeKind?: HealthIssueCauseKindValue;
         readonly limit?: number;
       }
-    ): readonly Readonly<HealthIssueGroup>[];
+    ): Promise<readonly Readonly<HealthIssueGroup>[]> | readonly Readonly<HealthIssueGroup>[];
   };
 }
 
+const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
 
 export function registerHealthInboxRoutes(
@@ -43,10 +44,10 @@ export function registerHealthInboxRoutes(
     const causeKind = parseCauseKindQuery(context.req.query("causeKind"));
     const limit = parseLimitQuery(context.req.query("limit"));
 
-    const rows = services.healthIssueGroupRepo.findByWorkspace(workspaceId, {
+    const rows = await loadHealthInboxGroups(services.healthIssueGroupRepo, workspaceId, {
       ...(state === null ? {} : { state }),
       ...(causeKind === null ? {} : { causeKind }),
-      ...(limit === null ? {} : { limit })
+      limit
     });
 
     return context.json(
@@ -66,18 +67,53 @@ export function registerHealthInboxRoutes(
 function parseStateQuery(value: string | undefined): HealthIssueResolutionStateValue | null {
   if (value === undefined || value.trim().length === 0) return null;
   const parsed = HealthIssueResolutionStateSchema.safeParse(value.trim());
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) {
+    throw new CoreError("VALIDATION", "Invalid state query parameter");
+  }
+  return parsed.data;
 }
 
 function parseCauseKindQuery(value: string | undefined): HealthIssueCauseKindValue | null {
   if (value === undefined || value.trim().length === 0) return null;
   const parsed = HealthIssueCauseKindSchema.safeParse(value.trim());
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) {
+    throw new CoreError("VALIDATION", "Invalid causeKind query parameter");
+  }
+  return parsed.data;
 }
 
-function parseLimitQuery(value: string | undefined): number | null {
-  if (value === undefined || value.trim().length === 0) return null;
-  const parsed = Number.parseInt(value.trim(), 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+function parseLimitQuery(value: string | undefined): number {
+  if (value === undefined || value.trim().length === 0) {
+    return DEFAULT_LIMIT;
+  }
+  const trimmed = value.trim();
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || String(parsed) !== trimmed) {
+    throw new CoreError("VALIDATION", `limit must be a positive integer up to ${MAX_LIMIT}`);
+  }
   return Math.min(parsed, MAX_LIMIT);
+}
+
+async function loadHealthInboxGroups(
+  repo: HealthInboxRouteServices["healthIssueGroupRepo"],
+  workspaceId: string,
+  options: {
+    readonly state?: HealthIssueResolutionStateValue;
+    readonly causeKind?: HealthIssueCauseKindValue;
+    readonly limit: number;
+  }
+): Promise<readonly Readonly<HealthIssueGroup>[]> {
+  const result = repo.findByWorkspace(workspaceId, options);
+  if (result instanceof Promise) {
+    return await result;
+  }
+  return await new Promise((resolve, reject) => {
+    setImmediate(() => {
+      try {
+        resolve(result);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
 }

@@ -1,21 +1,25 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { expect, it } from "vitest";
 import {
-GreenGovernanceEventType,
-RevokeReason,
-StreamingEventType,
-WorkspaceRunEventType,
-RunMode} from "@do-soul/alaya-protocol";
+  GreenGovernanceEventType,
+  RevokeReason,
+  RunMode,
+  StreamingEventType,
+  WorkspaceRunEventType
+} from "@do-soul/alaya-protocol";
 import {
-appendAppliedOverride,
-appendEngineResponseEvent,
-appendMalformedAppliedOverride,
-appendNarrativeConsolidationTrigger,
-appendPromotedOverride,
-appendRunCreatedEvent,
-appendRunMessageEvent,
-appendWorkspaceLifecycleEvent,
-createEventLogRepos,
-registerEventLogRepoCleanup
+  appendAppliedOverride,
+  appendEngineResponseEvent,
+  appendMalformedAppliedOverride,
+  appendNarrativeConsolidationTrigger,
+  appendPromotedOverride,
+  appendRunCreatedEvent,
+  appendRunMessageEvent,
+  appendWorkspaceLifecycleEvent,
+  createEventLogRepos,
+  registerEventLogRepoCleanup
 } from "./event-log-repo.test-support.js";
 
 registerEventLogRepoCleanup();
@@ -32,6 +36,31 @@ it("append generates a unique event_id and created_at", async () => {
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
   );
   expect(event.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+});
+
+it("append reopens a closed database before starting a transaction", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-event-log-"));
+
+  try {
+    const { database, eventLogRepo } = await createEventLogRepos({
+      filename: path.join(tempDir, "events.db")
+    });
+    await appendWorkspaceLifecycleEvent(eventLogRepo, {
+      workspaceId: "ws_events",
+      entityId: "workspace-before-reopen"
+    });
+
+    database.close();
+    const event = await appendWorkspaceLifecycleEvent(eventLogRepo, {
+      workspaceId: "ws_events",
+      entityId: "workspace-after-reopen"
+    });
+
+    expect(event.entity_id).toBe("workspace-after-reopen");
+    await expect(eventLogRepo.queryByEntity("workspace", "workspace-after-reopen")).resolves.toHaveLength(1);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 it("queryByRun returns only matching run events", async () => {
@@ -313,4 +342,72 @@ it("queryByRunAfterEventId returns all run events when the target ID is missing"
   const events = await eventLogRepo.queryByRunAfterEventId("run_order", "evt_missing");
 
   expect(events).toHaveLength(2);
+});
+
+it("queryByRunAndEntityType returns only matching entity events for a run", async () => {
+  const { eventLogRepo } = await createEventLogRepos();
+  await appendRunCreatedEvent(eventLogRepo, {
+    entityId: "run_target",
+    runId: "run_target",
+    title: "target"
+  });
+  await appendAppliedOverride(eventLogRepo, "override-a", "run_target");
+
+  const events = await eventLogRepo.queryByRunAndEntityType("run_target", "session_override");
+
+  expect(events).toHaveLength(1);
+  expect(events[0]?.entity_type).toBe("session_override");
+});
+
+it("getLatestMessageTimestampByRun returns the newest conversation message timestamp", async () => {
+  const { eventLogRepo } = await createEventLogRepos();
+  await appendRunMessageEvent(eventLogRepo, {
+    entityId: "msg-1",
+    runId: "run_target",
+    messageId: "msg-1",
+    content: "hello"
+  });
+  const latest = await appendEngineResponseEvent(eventLogRepo, {
+    entityId: "msg-2",
+    runId: "run_target",
+    messageId: "msg-2",
+    content: "world"
+  });
+
+  await expect(eventLogRepo.getLatestMessageTimestampByRun("run_target")).resolves.toBe(latest.created_at);
+});
+
+it("getLatestUserRunMessageByRun returns the newest user message event", async () => {
+  const { eventLogRepo } = await createEventLogRepos();
+  await appendRunMessageEvent(eventLogRepo, {
+    entityId: "msg-user-1",
+    runId: "run_target",
+    messageId: "msg-user-1",
+    content: "first"
+  });
+  await eventLogRepo.append({
+    event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
+    entity_type: "message",
+    entity_id: "msg-assistant-1",
+    workspace_id: "ws_events",
+    run_id: "run_target",
+    caused_by: "assistant",
+    payload_json: {
+      run_id: "run_target",
+      role: "assistant",
+      content: "reply",
+      message_id: "msg-assistant-1"
+    }
+  });
+  await appendRunMessageEvent(eventLogRepo, {
+    entityId: "msg-user-2",
+    runId: "run_target",
+    messageId: "msg-user-2",
+    content: "second"
+  });
+
+  const latest = await eventLogRepo.getLatestUserRunMessageByRun("run_target");
+
+  expect(latest?.entity_id).toBe("msg-user-2");
+  expect(latest?.payload_json).toMatchObject({ role: "user", message_id: "msg-user-2" });
 });

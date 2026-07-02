@@ -1,4 +1,5 @@
 import type { EmbeddingProviderPort } from "./embedding-recall-service.js";
+import { withTimeout } from "./local-onnx-embedding-timeout.js";
 import os from "node:os";
 import path from "node:path";
 
@@ -45,6 +46,8 @@ export interface LocalOnnxEmbeddingClientOptions {
    * Override for the dynamic clock (test seam). Real wall-clock by default.
    */
   readonly now?: () => number;
+  // Cosine-space schema version (default 1); daemon sets D2Q_SCHEMA_VERSION when doc2query is on.
+  readonly schemaVersion?: number;
 }
 
 const DEFAULT_LOCAL_ONNX_MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
@@ -85,7 +88,7 @@ export const LOCAL_ONNX_UNAVAILABLE_RETRY_BACKOFF_MS = 30_000;
 export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   public readonly providerKind = "local_onnx";
   public readonly modelId: string;
-  public readonly schemaVersion = 1;
+  public readonly schemaVersion: number;
 
   private readonly cacheDir: string | null;
   private readonly pipelineLoader: LocalOnnxPipelineLoader;
@@ -100,6 +103,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
 
   public constructor(options: LocalOnnxEmbeddingClientOptions = {}) {
     this.modelId = options.modelId?.trim() || DEFAULT_LOCAL_ONNX_MODEL_ID;
+    this.schemaVersion = options.schemaVersion ?? 1;
     this.cacheDir = options.cacheDir === undefined
       ? defaultLocalOnnxCacheDir()
       : options.cacheDir;
@@ -240,57 +244,4 @@ async function defaultLocalOnnxPipelineLoader(
     transformers.env.localModelPath = cacheDir;
   }
   return transformers.pipeline("feature-extraction", modelId, { dtype: "q8" });
-}
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  signal?: AbortSignal
-): Promise<T> {
-  // The ONNX feature-extraction run is not cancellable, so on timeout/abort we
-  // discard the stale result and suppress its late rejection rather than letting
-  // it surface as an unhandledRejection.
-  promise.catch(() => undefined);
-
-  const controller = new AbortController();
-  if (signal !== undefined) {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-    } else {
-      signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
-    }
-  }
-
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      const onAbort = (): void => {
-        reject(
-          controller.signal.reason instanceof Error
-            ? controller.signal.reason
-            : new Error(`Local ONNX embedding timed out after ${timeoutMs} ms.`)
-        );
-      };
-      if (controller.signal.aborted) {
-        onAbort();
-        return;
-      }
-      controller.signal.addEventListener("abort", onAbort, { once: true });
-      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-        timeoutHandle = setTimeout(
-          () =>
-            controller.abort(
-              new Error(`Local ONNX embedding timed out after ${timeoutMs} ms.`)
-            ),
-          timeoutMs
-        );
-        timeoutHandle.unref?.();
-      }
-      promise.then(resolve, reject);
-    });
-  } finally {
-    if (timeoutHandle !== null) {
-      clearTimeout(timeoutHandle);
-    }
-  }
 }

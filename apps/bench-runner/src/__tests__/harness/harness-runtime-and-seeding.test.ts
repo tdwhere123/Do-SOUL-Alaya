@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   initDatabase,
   SqliteGardenTaskRepo,
+  SqliteMemoryEntryRepo,
   SqliteSignalRepo,
   type GardenTaskEventPublisherPort
 } from "@do-soul/alaya-storage";
@@ -68,6 +69,37 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(signal?.source).toBe(SignalSource.MODEL_TOOL);
       expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
       expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
+    },
+    60_000
+  );
+
+  it(
+    "persists raw_payload canonical_entities onto the materialized memory_entry",
+    async () => {
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-canonical-entities-ws",
+        runId: "harness-canonical-entities-run"
+      });
+      handles.push(daemon);
+
+      // The compile seed path round-trips canonical_entities through raw_payload
+      // (not the first-class signal field); buildMemoryInput must lift + normalize
+      // it onto the persisted memory_entry.
+      const seed = await daemon.proposeMemoryFromSignal({
+        signalKind: "potential_preference",
+        objectKind: "fact",
+        confidence: 0.9,
+        distilledFact: "The operator uses PostgreSQL at Acme.",
+        turnContent: "The operator uses PostgreSQL at Acme.",
+        evidenceRef: "canonical-entities-q0",
+        turnSeedIndex: 1,
+        extractionProvider: "official_api_compile",
+        productionRawPayload: { canonical_entities: ["Alice", "PostgreSQL"] }
+      });
+
+      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+      const memory = await new SqliteMemoryEntryRepo(db).findById(seed.memoryId);
+      expect(memory?.canonical_entities).toEqual(["alice", "postgresql"]);
     },
     60_000
   );

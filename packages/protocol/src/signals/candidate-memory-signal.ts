@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_EVIDENCE_ARRAY_MAX,
+  CANONICAL_ENTITIES_MAX,
   BoundedIdSchema,
   BoundedJsonObjectSchema,
   BoundedLabelSchema,
@@ -76,6 +77,13 @@ export const SignalStateSchema = z.enum(signalStateValues);
 const ConfidenceSchema = z.number().min(0).max(1);
 const DomainTagsSchema = z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly();
 const EvidenceRefsSchema = z.array(BoundedLabelSchema).max(BOUNDED_EVIDENCE_ARRAY_MAX).readonly();
+// Normalized lowercase canonical entities/subjects the signal is about; mirrors MemoryEntry.canonical_entities.
+const CanonicalEntitiesSchema = z
+  .array(BoundedLabelSchema)
+  .max(CANONICAL_ENTITIES_MAX)
+  .readonly()
+  .nullable()
+  .optional();
 export const CandidateMemorySignalMemoryRefKeys = [
   "source_memory_refs",
   "supersedes_refs",
@@ -106,6 +114,7 @@ export const CandidateMemorySignalSchema = z.object({
   domain_tags: DomainTagsSchema,
   confidence: ConfidenceSchema,
   evidence_refs: EvidenceRefsSchema,
+  canonical_entities: CanonicalEntitiesSchema,
   source_memory_refs: MemoryRefsSchema,
   supersedes_refs: MemoryRefsSchema,
   exception_to_refs: MemoryRefsSchema,

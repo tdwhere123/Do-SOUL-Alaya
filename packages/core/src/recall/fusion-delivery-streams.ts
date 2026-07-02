@@ -1,0 +1,52 @@
+import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import { fourAxisAssemblyEnabled } from "./conformant-fusion-scoring.js";
+import type { RecallFusionStream } from "./recall-service-types.js";
+
+export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
+  "lexical_fts", "trigram_fts", "synthesis_fts", "evidence_fts",
+  "evidence_structural_agreement", "source_proximity", "source_evidence_agreement", "subject_alignment",
+  "structural", "existing_score", "embedding_similarity", "graph_expansion",
+  "entity_seed", "path_expansion", "temporal_recency", "workspace_activation",
+  "facet_overlap"
+];
+
+export const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
+  lexical_fts: 3, trigram_fts: 1, synthesis_fts: 1, evidence_fts: 3,
+  evidence_structural_agreement: 6, source_proximity: 1, source_evidence_agreement: 1, subject_alignment: 1,
+  structural: 1, existing_score: 1, embedding_similarity: 12, graph_expansion: 3,
+  entity_seed: 1, path_expansion: 3, temporal_recency: 0, workspace_activation: 0,
+  facet_overlap: 4
+});
+
+export function facetOverlapEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_FACET_OVERLAP;
+  return raw === "on" || raw === "1" || raw === "true";
+}
+
+export function facetSliceEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_FACET_SLICE;
+  return raw === "on" || raw === "1" || raw === "true";
+}
+
+export function activeFusionStreams(): readonly RecallFusionStream[] {
+  return facetOverlapEnabled() || fourAxisAssemblyEnabled()
+    ? RECALL_FUSION_STREAMS
+    : RECALL_FUSION_STREAMS.filter((stream) => stream !== "facet_overlap");
+}
+
+export function facetOverlapCountFor(
+  entry: Readonly<MemoryEntry>,
+  querySoughtFacets: readonly string[] | undefined
+): number {
+  if (querySoughtFacets === undefined || querySoughtFacets.length === 0) {
+    return 0;
+  }
+  const sought = new Set(querySoughtFacets);
+  const matched = new Set<string>();
+  for (const tag of entry.facet_tags ?? []) {
+    if (sought.has(tag.facet)) {
+      matched.add(tag.facet);
+    }
+  }
+  return matched.size;
+}

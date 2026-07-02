@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,11 +24,21 @@ import {
 import {
   startBenchDaemon,
   type BenchDaemonHandle,
+  type BenchEmbeddingMode,
+  type BenchEmbeddingProviderKind,
   type BenchRecallOptions,
   type BenchTokenMetrics,
   type BenchWorkspaceHandle
 } from "../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
+
+// bench-only: ALAYA_RECALL_EVAL_EMBEDDING=env turns on the embedding stream vs the snapshot's stored vectors.
+function recallEvalEmbeddingMode(): BenchEmbeddingMode {
+  return process.env.ALAYA_RECALL_EVAL_EMBEDDING === "env" ? "env" : "disabled";
+}
+function recallEvalEmbeddingProviderKind(): BenchEmbeddingProviderKind {
+  return recallEvalEmbeddingMode() === "env" ? "local_onnx" : "openai";
+}
 import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
   formatBenchRecallWeightOverrides,
@@ -193,7 +204,7 @@ async function prepareRecallEvalRun(
     policyShape: options.policyShape ?? "stress",
     simulateReport: options.simulateReport ?? "none",
     recallOptions: {
-      maxResults: 10,
+      maxResults: Number(process.env.ALAYA_RECALL_EVAL_MAX_RESULTS) || 10,
       conflictAwareness: (options.policyShape ?? "stress") === "stress"
     },
     alayaVersion: resolveBenchRunnerVersion(),
@@ -209,7 +220,8 @@ async function executeRecallEvalRun(
   const collected: RecallEvalQuestionResult[] = [];
   const daemon = await startBenchDaemon({
     dataDirRoot: context.dataDirRoot,
-    embeddingMode: "disabled",
+    embeddingMode: recallEvalEmbeddingMode(),
+    embeddingProviderKind: recallEvalEmbeddingProviderKind(),
     recallWeightOverrides: context.recallWeightOverrides
   });
   try {
@@ -390,6 +402,23 @@ async function runRecallEvalQuestionCycle(
   });
 }
 
+// Probe-only (ALAYA_RECALL_EVAL_POOL_DUMP=path): append per-question fused pool ranks so an offline
+// doc2query probe can join content from the DB and re-rank. No content here (recall-eval sidecar lacks it).
+function writeRecallEvalPoolDump(
+  questionId: string,
+  goldMemoryIds: readonly string[],
+  results: readonly { readonly object_id: string }[]
+): void {
+  const dumpPath = process.env.ALAYA_RECALL_EVAL_POOL_DUMP;
+  if (dumpPath === undefined) return;
+  const goldSet = new Set(goldMemoryIds);
+  appendFileSync(dumpPath, JSON.stringify({
+    questionId,
+    goldIds: [...goldMemoryIds],
+    pool: results.map((p, i) => ({ rank: i + 1, objectId: p.object_id, isGold: goldSet.has(p.object_id) }))
+  }) + "\n");
+}
+
 async function buildRecallEvalQuestionResult(
   input: Parameters<typeof recallEvalOneQuestion>[0],
   workspace: BenchWorkspaceHandle,
@@ -400,6 +429,7 @@ async function buildRecallEvalQuestionResult(
 ): Promise<RecallEvalQuestionResult> {
   const recallResult = recallCycle.scoredRecallResult;
   const results = recallResult.results;
+  writeRecallEvalPoolDump(input.question.questionId, goldMemoryIds, results);
   const scoredHits = resolveLongMemEvalHitVerdict({
     isAbstention: isAbstentionQuestionId(input.question.questionId),
     results,
@@ -443,7 +473,8 @@ function buildRecallEvalDiagnostics(
     isAbstention: isAbstentionQuestionId(input.question.questionId),
     degradationReason: recallResult.degradation_reason ?? null,
     recallResult,
-    embeddingMode: "disabled"
+    embeddingMode: recallEvalEmbeddingMode(),
+    seedDropReasons: input.question.answerSeedDropReasons
   });
 }
 

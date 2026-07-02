@@ -1,16 +1,19 @@
-import { randomUUID } from "node:crypto";
-import {
-  GreenGovernanceEventType,
-  ObligationTrustNarrativeEventType,
-  RevokeReason,
-  type EventLogEntry
-} from "@do-soul/alaya-protocol";
+import { WorkspaceRunEventType, type EventLogEntry } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
+import {
+  appendInCurrentTransaction as appendEventLogInTransaction,
+  wrapAppendError
+} from "./event-log-append.js";
+import {
+  queryBoundedAll as executeBoundedEventLogQuery,
+  wrapBoundedQueryError
+} from "./event-log-bounded-query.js";
 import {
   CONVERSATION_MESSAGE_EVENT_TYPES,
   DEFAULT_EVENT_LOG_PAGE,
-  parseEventLogEntry,
+  EVENT_LOG_ALL_QUERY_HARD_MAX,
   parseEventLogEntryRow,
   parseEventLogPage,
   type CountRow,
@@ -21,17 +24,34 @@ import {
   prepareEventLogStatements,
   type EventLogStatements
 } from "./event-log-statements.js";
+import {
+  executeCountDistinctAppliedSessionOverrideRuns,
+  executeHasNarrativeConsolidationTrigger,
+  executeHasOpenSessionOverrideCorrection,
+  executeHasSecurityHitForTarget,
+  executeHasSessionOverridePromotion,
+  executeQueryGovernanceLeaseEventsByRun,
+  executeQueryNarrativeDigestPayloadsByRun,
+  wrapGovernanceQueryError
+} from "./event-log-governance-queries.js";
 import type { EventLogAppendInput, EventLogPageOptions, EventLogRepo } from "./event-log-types.js";
 
 export type { EventLogAppendInput, EventLogPageOptions, EventLogRepo } from "./event-log-types.js";
 
-type ExistsRow = { readonly found: number };
-
 export class SqliteEventLogRepo implements EventLogRepo {
-  private readonly statements: EventLogStatements;
+  private readonly statementHolder: RefreshableStatementHolder<EventLogStatements>;
 
   public constructor(private readonly db: StorageDatabase) {
-    this.statements = prepareEventLogStatements(db);
+    this.statementHolder = new RefreshableStatementHolder(db, prepareEventLogStatements);
+  }
+
+  private activeStatements(): EventLogStatements {
+    return this.statementHolder.active();
+  }
+
+  private activeConnection(): StorageDatabase["connection"] {
+    this.activeStatements();
+    return this.db.connection;
   }
 
   public append(event: EventLogAppendInput): EventLogEntry {
@@ -39,17 +59,18 @@ export class SqliteEventLogRepo implements EventLogRepo {
     // never violated by callers that hardcode revision: 0 or supply stale MAX+1 values.
     // The SELECT MAX + INSERT pair must be one write transaction even when callers append
     // directly, because multiple CLI/daemon processes can bootstrap against the same DB.
-    if (this.db.connection.inTransaction) {
+    const connection = this.activeConnection();
+    if (connection.inTransaction) {
       return this.appendInCurrentTransaction(event);
     }
 
-    const txn = this.db.connection.transaction(() => this.appendInCurrentTransaction(event));
+    const txn = connection.transaction(() => this.appendInCurrentTransaction(event));
     return txn.immediate();
   }
 
   public deleteById(eventId: string): void {
     try {
-      this.statements.deleteByIdStatement.run(eventId);
+      this.activeStatements().deleteByIdStatement.run(eventId);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to delete event log entry.", error);
     }
@@ -59,7 +80,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     // better-sqlite3 transactions are synchronous; if `fn` returns a Promise the
     // BEGIN/COMMIT pair completes before the awaited work, which is incorrect.
     // Callers that need async work must do it outside the transaction.
-    const txn = this.db.connection.transaction(fn);
+    const txn = this.activeConnection().transaction(fn);
     return txn.immediate();
   }
 
@@ -68,12 +89,17 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByEntityAll(entityType: string, entityId: string): Promise<readonly EventLogEntry[]> {
-    try {
-      const rows = this.statements.queryByEntityStatement.all(entityType, entityId) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query full event log by entity.", error);
-    }
+    return await this.queryBoundedAll(
+      () =>
+        this.activeStatements().queryByEntityPagedStatement.all(
+          entityType,
+          entityId,
+          EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
+          0
+        ) as EventLogRow[],
+      "entity",
+      `${entityType}:${entityId}`
+    );
   }
 
   public async queryByEntityPage(
@@ -84,7 +110,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     const parsedPage = parseEventLogPage(page);
 
     try {
-      const rows = this.statements.queryByEntityPagedStatement.all(
+      const rows = this.activeStatements().queryByEntityPagedStatement.all(
         entityType,
         entityId,
         parsedPage.limit,
@@ -101,11 +127,28 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByRunAll(runId: string): Promise<readonly EventLogEntry[]> {
+    return await this.queryBoundedAll(
+      () =>
+        this.activeStatements().queryByRunPagedStatement.all(
+          runId,
+          EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
+          0
+        ) as EventLogRow[],
+      "run",
+      runId
+    );
+  }
+
+  public async queryNarrativeDigestPayloadsByRun(
+    runId: string
+  ): Promise<readonly Readonly<{ readonly payload_json: unknown }>[]> {
     try {
-      const rows = this.statements.queryByRunStatement.all(runId) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
+      return executeQueryNarrativeDigestPayloadsByRun(this.activeStatements(), runId);
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query full event log by run.", error);
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      wrapGovernanceQueryError("Failed to query narrative digest payloads by run.", error);
     }
   }
 
@@ -113,7 +156,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     const parsedPage = parseEventLogPage(page);
 
     try {
-      const rows = this.statements.queryByRunPagedStatement.all(
+      const rows = this.activeStatements().queryByRunPagedStatement.all(
         runId,
         parsedPage.limit,
         parsedPage.offset
@@ -124,13 +167,28 @@ export class SqliteEventLogRepo implements EventLogRepo {
     }
   }
 
+  public async queryByRunAndEntityType(
+    runId: string,
+    entityType: string
+  ): Promise<readonly EventLogEntry[]> {
+    try {
+      const rows = this.activeStatements().queryByRunAndEntityTypeStatement.all(
+        runId,
+        entityType
+      ) as EventLogRow[];
+      return rows.map((row) => parseEventLogEntryRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to query event log by run and entity type.", error);
+    }
+  }
+
   public async queryConversationMessageEventsByRun(
     runId: string,
     page?: EventLogPageOptions
   ): Promise<readonly EventLogEntry[]> {
     const parsedPage = parseEventLogPage(page ?? DEFAULT_EVENT_LOG_PAGE);
     try {
-      const rows = this.statements.queryConversationMessageEventsByRunPagedStatement.all(
+      const rows = this.activeStatements().queryConversationMessageEventsByRunPagedStatement.all(
         runId,
         ...CONVERSATION_MESSAGE_EVENT_TYPES,
         parsedPage.limit,
@@ -144,7 +202,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
 
   public async countConversationMessageEventsByRun(runId: string): Promise<number> {
     try {
-      const row = this.statements.countConversationMessageEventsByRunStatement.get(
+      const row = this.activeStatements().countConversationMessageEventsByRunStatement.get(
         runId,
         ...CONVERSATION_MESSAGE_EVENT_TYPES
       ) as CountRow | undefined;
@@ -159,14 +217,13 @@ export class SqliteEventLogRepo implements EventLogRepo {
     digestCountBefore: number
   ): Promise<boolean> {
     try {
-      const row = this.statements.hasNarrativeConsolidationTriggerStatement.get(
+      return executeHasNarrativeConsolidationTrigger(
+        this.activeStatements(),
         runId,
-        ObligationTrustNarrativeEventType.NARRATIVE_CONSOLIDATION_TRIGGERED,
         digestCountBefore
-      ) as ExistsRow | undefined;
-      return Number(row?.found ?? 0) > 0;
+      );
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query narrative consolidation trigger.", error);
+      wrapGovernanceQueryError("Failed to query narrative consolidation trigger.", error);
     }
   }
 
@@ -179,7 +236,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     readonly latestEventId: string | null;
   }> {
     try {
-      const row = this.statements.queryByRunCursorStateStatement.get(
+      const row = this.activeStatements().queryByRunCursorStateStatement.get(
         runId,
         lastEventId,
         runId,
@@ -203,12 +260,16 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByWorkspaceAll(workspaceId: string): Promise<readonly EventLogEntry[]> {
-    try {
-      const rows = this.statements.queryByWorkspaceStatement.all(workspaceId) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query full event log by workspace.", error);
-    }
+    return await this.queryBoundedAll(
+      () =>
+        this.activeStatements().queryByWorkspacePagedStatement.all(
+          workspaceId,
+          EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
+          0
+        ) as EventLogRow[],
+      "workspace",
+      workspaceId
+    );
   }
 
   public async queryByWorkspacePage(
@@ -218,7 +279,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     const parsedPage = parseEventLogPage(page);
 
     try {
-      const rows = this.statements.queryByWorkspacePagedStatement.all(
+      const rows = this.activeStatements().queryByWorkspacePagedStatement.all(
         workspaceId,
         parsedPage.limit,
         parsedPage.offset
@@ -238,7 +299,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     try {
       const since = sinceIso ?? null;
       const until = untilIso ?? null;
-      const rows = this.statements.queryByWorkspaceAndTypeStatement.all(
+      const rows = this.activeStatements().queryByWorkspaceAndTypeStatement.all(
         workspaceId,
         eventType,
         since,
@@ -256,13 +317,9 @@ export class SqliteEventLogRepo implements EventLogRepo {
 
   public async hasSessionOverridePromotion(overrideId: string): Promise<boolean> {
     try {
-      const row = this.statements.hasSessionOverridePromotionStatement.get(
-        overrideId,
-        GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED
-      ) as ExistsRow | undefined;
-      return Number(row?.found ?? 0) > 0;
+      return executeHasSessionOverridePromotion(this.activeStatements(), overrideId);
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query session override promotion audit.", error);
+      wrapGovernanceQueryError("Failed to query session override promotion audit.", error);
     }
   }
 
@@ -272,15 +329,9 @@ export class SqliteEventLogRepo implements EventLogRepo {
     readonly correction: string;
   }): Promise<number> {
     try {
-      const row = this.statements.countDistinctAppliedSessionOverrideRunsStatement.get(
-        query.workspaceId,
-        GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
-        normalizeEventLogText(query.targetObject),
-        normalizeEventLogText(query.correction)
-      ) as CountRow | undefined;
-      return row === undefined ? 0 : Number(row.total);
+      return executeCountDistinctAppliedSessionOverrideRuns(this.activeStatements(), query);
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to count recurring session override runs.", error);
+      wrapGovernanceQueryError("Failed to count recurring session override runs.", error);
     }
   }
 
@@ -290,16 +341,9 @@ export class SqliteEventLogRepo implements EventLogRepo {
     readonly nowIso: string;
   }): Promise<boolean> {
     try {
-      const row = this.statements.hasOpenSessionOverrideCorrectionStatement.get(
-        query.workspaceId,
-        GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
-        query.targetObjectId,
-        query.nowIso,
-        GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED
-      ) as ExistsRow | undefined;
-      return Number(row?.found ?? 0) > 0;
+      return executeHasOpenSessionOverrideCorrection(this.activeStatements(), query);
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query open session override correction.", error);
+      wrapGovernanceQueryError("Failed to query open session override correction.", error);
     }
   }
 
@@ -308,17 +352,9 @@ export class SqliteEventLogRepo implements EventLogRepo {
     readonly targetObjectId: string;
   }): Promise<boolean> {
     try {
-      const row = this.statements.hasSecurityHitForTargetStatement.get(
-        query.targetObjectId,
-        RevokeReason.SECURITY_HIT,
-        query.workspaceId,
-        GreenGovernanceEventType.SOUL_GREEN_PIERCED,
-        query.targetObjectId,
-        RevokeReason.SECURITY_HIT
-      ) as ExistsRow | undefined;
-      return Number(row?.found ?? 0) > 0;
+      return executeHasSecurityHitForTarget(this.activeStatements(), query);
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query green security-hit audit.", error);
+      wrapGovernanceQueryError("Failed to query green security-hit audit.", error);
     }
   }
 
@@ -327,7 +363,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     lastEventId: string
   ): Promise<readonly EventLogEntry[]> {
     try {
-      const rows = this.statements.queryByRunAfterEventIdStatement.all(
+      const rows = this.activeStatements().queryByRunAfterEventIdStatement.all(
         runId,
         runId,
         lastEventId,
@@ -345,7 +381,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     lastEventId: string
   ): Promise<readonly EventLogEntry[]> {
     try {
-      const rows = this.statements.queryByWorkspaceAfterEventIdStatement.all(
+      const rows = this.activeStatements().queryByWorkspaceAfterEventIdStatement.all(
         workspaceId,
         workspaceId,
         lastEventId,
@@ -364,7 +400,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
 
   public async queryByType(eventType: string): Promise<readonly EventLogEntry[]> {
     try {
-      const rows = this.statements.queryByTypeStatement.all(
+      const rows = this.activeStatements().queryByTypeStatement.all(
         eventType,
         DEFAULT_EVENT_LOG_PAGE.limit,
         DEFAULT_EVENT_LOG_PAGE.offset
@@ -377,7 +413,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
 
   public async getLatestEventId(runId: string): Promise<string | null> {
     try {
-      const row = this.statements.getLatestEventIdStatement.get(runId) as
+      const row = this.activeStatements().getLatestEventIdStatement.get(runId) as
         | { readonly event_id: string }
         | undefined;
       return row?.event_id ?? null;
@@ -386,9 +422,53 @@ export class SqliteEventLogRepo implements EventLogRepo {
     }
   }
 
+  public async getLatestMessageTimestampByRun(runId: string): Promise<string | null> {
+    try {
+      const row = this.activeStatements().getLatestMessageTimestampByRunStatement.get(
+        runId,
+        ...CONVERSATION_MESSAGE_EVENT_TYPES
+      ) as { readonly created_at: string } | undefined;
+      return row?.created_at ?? null;
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to get latest message timestamp by run.", error);
+    }
+  }
+
+  public async getLatestUserRunMessageByRun(runId: string): Promise<EventLogEntry | null> {
+    try {
+      const row = this.activeStatements().getLatestUserRunMessageByRunStatement.get(
+        runId,
+        WorkspaceRunEventType.RUN_MESSAGE_APPENDED
+      ) as EventLogRow | undefined;
+      return row === undefined ? null : parseEventLogEntryRow(row);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to get latest user run message.", error);
+    }
+  }
+
+  public async queryByRunAndEventType(
+    runId: string,
+    eventType: string
+  ): Promise<readonly EventLogEntry[]> {
+    try {
+      const rows = this.activeStatements().queryByRunAndEventTypeStatement.all(runId, eventType) as EventLogRow[];
+      return rows.map((row) => parseEventLogEntryRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to query event log by run and event type.", error);
+    }
+  }
+
+  public async queryGovernanceLeaseEventsByRun(runId: string): Promise<readonly EventLogEntry[]> {
+    try {
+      return executeQueryGovernanceLeaseEventsByRun(this.activeStatements(), runId);
+    } catch (error) {
+      wrapGovernanceQueryError("Failed to query governance lease events by run.", error);
+    }
+  }
+
   public async getLatestWorkspaceEventId(workspaceId: string): Promise<string | null> {
     try {
-      const row = this.statements.getLatestWorkspaceEventIdStatement.get(workspaceId) as
+      const row = this.activeStatements().getLatestWorkspaceEventIdStatement.get(workspaceId) as
         | { readonly event_id: string }
         | undefined;
       return row?.event_id ?? null;
@@ -397,47 +477,23 @@ export class SqliteEventLogRepo implements EventLogRepo {
     }
   }
 
+  private async queryBoundedAll(
+    loadRows: () => EventLogRow[],
+    scopeKind: "entity" | "run" | "workspace",
+    scopeId: string
+  ): Promise<readonly EventLogEntry[]> {
+    try {
+      return executeBoundedEventLogQuery(loadRows, scopeKind, scopeId);
+    } catch (error) {
+      wrapBoundedQueryError(scopeKind, error);
+    }
+  }
+
   private appendInCurrentTransaction(event: EventLogAppendInput): EventLogEntry {
-    const revision = this.computeNextRevision(event.entity_type, event.entity_id);
-    const entry = parseEventLogEntry({
-      ...event,
-      event_id: randomUUID(),
-      revision,
-      created_at: new Date().toISOString()
-    });
-
     try {
-      this.statements.appendStatement.run(
-        entry.event_id,
-        entry.event_type,
-        entry.entity_type,
-        entry.entity_id,
-        entry.workspace_id,
-        entry.run_id,
-        entry.caused_by,
-        entry.revision,
-        JSON.stringify(entry.payload_json),
-        entry.created_at
-      );
+      return appendEventLogInTransaction(this.activeStatements(), event);
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to append event log entry.", error);
-    }
-
-    return entry;
-  }
-
-  private computeNextRevision(entityType: string, entityId: string): number {
-    try {
-      const row = this.statements.nextRevisionStatement.get(entityType, entityId) as
-        | { readonly max_revision: number | null }
-        | undefined;
-      return (row?.max_revision ?? -1) + 1;
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to compute next event log revision.", error);
+      wrapAppendError(error);
     }
   }
-}
-
-function normalizeEventLogText(value: string): string {
-  return value.trim().toLowerCase();
 }

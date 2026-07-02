@@ -27,6 +27,7 @@ export interface MemoryEntryLifecycleWorkflowHost {
   readonly deleteOrphanedPathRelationsStatement: SqliteRunStatement;
   readonly deleteOrphanedCoUsageCountersStatement: SqliteRunStatement;
   readonly findById: (objectId: string) => Promise<Readonly<MemoryEntry> | null>;
+  transaction<T>(fn: () => T): T;
 }
 
 interface ParsedAutonomousTombstoneRequest {
@@ -43,7 +44,7 @@ export async function autonomousTombstone(
   const onTransition = options?.onTransition;
 
   try {
-    return this.db.connection.transaction(() => {
+    return this.transaction(() => {
       const result = this.autonomousTombstoneStatement.run(
         request.disposition,
         input.dispositionRef,
@@ -61,7 +62,7 @@ export async function autonomousTombstone(
       onTransition?.();
 
       return loadMemoryEntryAfterTransition(this, input.objectId, "autonomous tombstone");
-    })();
+    });
   } catch (error) {
     if (error instanceof StorageError) {
       throw error;
@@ -129,13 +130,13 @@ export async function hardDeleteTombstonedWithDisposition(
       );
     }
 
-    return this.db.connection.transaction(() => {
+    return this.transaction(() => {
       if (requireLiveCapsuleRef) {
         return deleteCompressedTombstone(this, objectId, onDeleted);
       }
 
       return deleteDispositionTombstone(this, objectId, requireJudgedUselessVerdict, onDeleted);
-    })();
+    });
   } catch (error) {
     if (error instanceof StorageError) {
       throw error;
@@ -207,7 +208,7 @@ export async function archiveMemoryEntry(
   const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
   try {
-    return this.db.connection.transaction(() => {
+    return this.transaction(() => {
       onArchived?.();
 
       const result = this.archiveStatement.run(parsedUpdatedAt, objectId);
@@ -223,7 +224,7 @@ export async function archiveMemoryEntry(
       }
 
       return parseMemoryEntryRow(archived);
-    })();
+    });
   } catch (error) {
     if (error instanceof StorageError) {
       throw error;
@@ -244,7 +245,7 @@ export async function transitionMemoryEntryLifecycle(
   const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
   try {
-    return this.db.connection.transaction(() => {
+    return this.transaction(() => {
       onTransition?.();
 
       // invariant (I3): non-tombstone transitions clear the disposition GC marker.
@@ -265,7 +266,7 @@ export async function transitionMemoryEntryLifecycle(
       }
 
       return parseMemoryEntryRow(updated);
-    })();
+    });
   } catch (error) {
     if (error instanceof StorageError) {
       throw error;
@@ -311,14 +312,14 @@ export async function transitionMemoryEntryToDormantIfActive(
 ): Promise<Readonly<MemoryEntry> | null> {
   const parsedUpdatedAt = parseUpdatedAt(updatedAt);
   try {
-    const demoted = this.db.connection.transaction(() => {
+    const demoted = this.transaction(() => {
       const result = this.demoteActiveToDormantStatement.run(parsedUpdatedAt, objectId);
       if (result.changes === 0) {
         return false;
       }
       onTransition?.();
       return true;
-    })();
+    });
     if (!demoted) {
       return null;
     }
@@ -345,7 +346,7 @@ export async function hardDeleteTombstonedMemoryEntry(
   onDeleted?: () => void
 ): Promise<void> {
   try {
-    this.db.connection.transaction(() => {
+    this.transaction(() => {
       onDeleted?.();
 
       const result = this.hardDeleteTombstonedStatement.run(objectId);
@@ -360,7 +361,7 @@ export async function hardDeleteTombstonedMemoryEntry(
       // invariant: ineligible tombstones never strip live path topology.
       this.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
       this.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
-    })();
+    });
   } catch (error) {
     if (error instanceof StorageError) {
       throw error;

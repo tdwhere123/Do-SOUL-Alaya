@@ -15,7 +15,7 @@ export const LocomoTurnSchema = z
     blip_caption: z.string().optional(),
     query: z.string().optional()
   })
-  .passthrough();
+  .loose();
 export type LocomoTurn = z.infer<typeof LocomoTurnSchema>;
 
 const LocomoEvidenceSchema = z
@@ -25,7 +25,7 @@ const LocomoEvidenceSchema = z
     rawEvidence.forEach((rawRef, index) => {
       if (rawRef.trim().length === 0) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           message: "LoCoMo evidence refs must not be blank.",
           path: [index]
         });
@@ -34,7 +34,7 @@ const LocomoEvidenceSchema = z
       const segments = rawRef.split(";").map((part) => part.trim());
       if (segments.some((part) => part.length === 0)) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           message: "LoCoMo evidence refs must not contain empty dia_id segments.",
           path: [index]
         });
@@ -66,7 +66,7 @@ export const LocomoQaSchema = z.object({
 }).superRefine((qa, ctx) => {
   if (qa.category !== 5 && qa.answer.trim().length === 0) {
     ctx.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: "custom",
       message: "LoCoMo categories 1-4 must carry an explicit gold answer.",
       path: ["answer"]
     });
@@ -76,7 +76,7 @@ export const LocomoQaSchema = z.object({
   // if a future fixture drift would silently deflate retrieval denominators.
   if (qa.category !== 3 && qa.evidence.length === 0) {
     ctx.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: "custom",
       message: "LoCoMo categories other than 3 must carry at least one evidence dia_id.",
       path: ["evidence"]
     });

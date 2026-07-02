@@ -35,6 +35,9 @@ export const BoundedContentSchema = BoundedString(65536);
 
 export const BOUNDED_DEFAULT_ARRAY_MAX = 1000;
 export const BOUNDED_EVIDENCE_ARRAY_MAX = 100;
+// canonical_entities is a recall key consumed by entity grouping designed for a tight set (≤3),
+// not a free-form tag list — the field contract, not just a materializer-private cap.
+export const CANONICAL_ENTITIES_MAX = 3;
 export const BOUNDED_JSON_OBJECT_MAX_CHARS = 16384;
 
 export const BoundedJsonObjectSchema = z
@@ -45,7 +48,7 @@ export const BoundedJsonObjectSchema = z
       serialized = JSON.stringify(value);
     } catch {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "JSON object must be serializable."
       });
       return;

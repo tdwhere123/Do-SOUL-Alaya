@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   resolveSecretRef,
-  type AlayaDaemonRuntime,
   type ResolveSecretError
 } from "@do-soul/alaya";
 import type {
@@ -94,6 +93,8 @@ export function applyBenchDaemonEnvironment(input: {
   setEnvValue("HOME", join(input.dataDir, "home"));
   setEnvValue("ALAYA_REVIEWER_IDENTITY", input.reviewerCredentials.identity);
   setEnvValue("ALAYA_REVIEWER_TOKEN", input.reviewerCredentials.token);
+  // Corpus-specific delta vs prod default (off): conversational eval corpora use round-labeled refs
+  // (s3-r2), so robust parsing is needed for source_proximity to engage; both bench arms share it.
   setEnvValue("ALAYA_RECALL_SOURCE_REF_ROBUST", savedEnv.ALAYA_RECALL_SOURCE_REF_ROBUST ?? "true");
 }
 

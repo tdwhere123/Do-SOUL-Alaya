@@ -148,7 +148,7 @@ export class ProposalReadQueries {
       for (let index = 0; index < uniqueTargetObjectIds.length; index += SQLITE_VARIABLE_CHUNK_SIZE) {
         const chunk = uniqueTargetObjectIds.slice(index, index + SQLITE_VARIABLE_CHUNK_SIZE);
         const placeholders = chunk.map(() => "?").join(", ");
-        const row = this.db.connection
+        const row = this.activeConnection()
           .prepare(`
             SELECT COUNT(*) AS total
             FROM proposals
@@ -183,7 +183,7 @@ export class ProposalReadQueries {
     const query = buildPendingSummariesQuery(parsedWorkspaceId, referenceTime, options);
 
     try {
-      const rows = this.db.connection.prepare(query.sql).all(...query.params) as PendingProposalSummaryRow[];
+      const rows = this.activeConnection().prepare(query.sql).all(...query.params) as PendingProposalSummaryRow[];
       return rows.map((row) => parsePendingProposalSummary(row));
     } catch (error) {
       throw new StorageError(
@@ -266,6 +266,11 @@ export class ProposalReadQueries {
       | ProposalReviewerAssignmentRow
       | undefined;
     return row === undefined ? null : parseProposalReviewerAssignmentRow(row);
+  }
+
+  private activeConnection(): StorageDatabase["connection"] {
+    this.db.reopenIfClosed();
+    return this.db.connection;
   }
 }
 

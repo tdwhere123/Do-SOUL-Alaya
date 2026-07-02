@@ -5,7 +5,12 @@ import {
   type ScopeClass
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
-import { StorageError } from "../../shared/errors.js";
+import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
+import {
+  createMemoryEntry,
+  createMemoryEntryWithinTransaction,
+  type MemoryEntryCreateWorkflowHost
+} from "./create-workflow.js";
 import {
   autonomousTombstone,
   archiveMemoryEntry,
@@ -22,9 +27,6 @@ import {
   searchByKeywordWithinObjectIds,
   type MemoryEntrySearchWorkflowHost
 } from "./search-workflows.js";
-import {
-  parseMemoryEntry} from "./row-mapper.js";
-import { buildMemoryEntryCreateParams } from "./create-params.js";
 import { MemoryEntryReadQueries } from "./memory-entry-read-queries.js";
 import { prepareMemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
 import type {
@@ -50,80 +52,98 @@ import {
   type MemoryEntryRepoUpdateFields
 } from "./types.js";
 
-// Implementing the three workflow-host interfaces makes the delegate calls below
-// type-checked at the class boundary: if a host contract grows a member the repo
-// lacks, this declaration stops compiling — which is why the prepared statements
-// the workflows read through `this` are exposed as `public readonly` rather than
-// bridged with an `as unknown as` cast. Consumers still depend on MemoryEntryRepo,
-// which does not surface these statements.
+// invariant: workflow-host contracts are implemented directly so statement
+// getters stay type-checked at the repo boundary instead of cast through unknown.
 export class SqliteMemoryEntryRepo
   implements
     MemoryEntryRepo,
+    MemoryEntryCreateWorkflowHost,
     MemoryEntrySearchWorkflowHost,
     MemoryEntryLifecycleWorkflowHost,
     MemoryEntryUpdateWorkflowHost
 {
-  private readonly createStatement;
-  // Public host-contract members are annotated with the narrow statement aliases
-  // (not the unnameable BetterSqlite3.Statement) so the declaration emit stays
-  // self-contained and each field matches its workflow-host requirement exactly.
-  public readonly findByIdStatement: SqliteGetStatement;
-  public readonly updateStatement: SqliteRunStatement;
-  public readonly updateScopedStatement: SqliteRunStatement;
-  public readonly searchByKeywordStatement: SqliteAllStatement;
+  private readonly statementHolder: RefreshableStatementHolder<
+    ReturnType<typeof prepareMemoryEntryStatements>
+  >;
+  public get createStatement() {
+    return this.statementHolder.active().createStatement;
+  }
+  public get findByIdStatement(): SqliteGetStatement {
+    return this.statementHolder.active().findByIdStatement;
+  }
+  public get updateStatement(): SqliteRunStatement {
+    return this.statementHolder.active().updateStatement;
+  }
+  public get updateScopedStatement(): SqliteRunStatement {
+    return this.statementHolder.active().updateScopedStatement;
+  }
+  public get searchByKeywordStatement(): SqliteAllStatement {
+    return this.statementHolder.active().searchByKeywordStatement;
+  }
   // see also: packages/storage/src/migrations/077-memory-content-fts-dual.sql
-  public readonly searchByKeywordPorterStatement: SqliteAllStatement;
-  public readonly transitionLifecycleStatement: SqliteRunStatement;
+  public get searchByKeywordPorterStatement(): SqliteAllStatement {
+    return this.statementHolder.active().searchByKeywordPorterStatement;
+  }
+  public get transitionLifecycleStatement(): SqliteRunStatement {
+    return this.statementHolder.active().transitionLifecycleStatement;
+  }
   // invariant (I3): a revived / non-tombstone transition clears the terminal
   // forget marker so an active/dormant row never carries a removal disposition.
-  public readonly transitionLifecycleClearForgetStatement: SqliteRunStatement;
+  public get transitionLifecycleClearForgetStatement(): SqliteRunStatement {
+    return this.statementHolder.active().transitionLifecycleClearForgetStatement;
+  }
   // invariant (N1): guarded dormant -> active revival; changes=0 when not dormant.
-  public readonly reviveDormantStatement: SqliteRunStatement;
+  public get reviveDormantStatement(): SqliteRunStatement {
+    return this.statementHolder.active().reviveDormantStatement;
+  }
   // invariant: active -> dormant skips benign changes=0 races and clears forget markers.
-  public readonly demoteActiveToDormantStatement: SqliteRunStatement;
-  public readonly archiveStatement: SqliteRunStatement;
-  public readonly hardDeleteTombstonedStatement: SqliteRunStatement;
-  public readonly autonomousTombstoneStatement: SqliteRunStatement;
-  public readonly hardDeleteTombstonedWithDispositionStatement: SqliteRunStatement;
+  public get demoteActiveToDormantStatement(): SqliteRunStatement {
+    return this.statementHolder.active().demoteActiveToDormantStatement;
+  }
+  public get archiveStatement(): SqliteRunStatement {
+    return this.statementHolder.active().archiveStatement;
+  }
+  public get hardDeleteTombstonedStatement(): SqliteRunStatement {
+    return this.statementHolder.active().hardDeleteTombstonedStatement;
+  }
+  public get autonomousTombstoneStatement(): SqliteRunStatement {
+    return this.statementHolder.active().autonomousTombstoneStatement;
+  }
+  public get hardDeleteTombstonedWithDispositionStatement(): SqliteRunStatement {
+    return this.statementHolder.active().hardDeleteTombstonedWithDispositionStatement;
+  }
   // invariant: compressed delete rechecks capsule liveness atomically with removal.
-  public readonly hardDeleteTombstonedCompressedGuardedStatement: SqliteRunStatement;
+  public get hardDeleteTombstonedCompressedGuardedStatement(): SqliteRunStatement {
+    return this.statementHolder.active().hardDeleteTombstonedCompressedGuardedStatement;
+  }
   // invariant: judged_useless delete replays the local-only verdict at delete time.
-  public readonly hardDeleteTombstonedJudgedUselessGuardedStatement: SqliteRunStatement;
+  public get hardDeleteTombstonedJudgedUselessGuardedStatement(): SqliteRunStatement {
+    return this.statementHolder.active().hardDeleteTombstonedJudgedUselessGuardedStatement;
+  }
   // invariant: hard-delete prunes path topology because endpoints are not FK-backed.
-  public readonly deleteOrphanedPathRelationsStatement: SqliteRunStatement;
-  public readonly deleteOrphanedCoUsageCountersStatement: SqliteRunStatement;
+  public get deleteOrphanedPathRelationsStatement(): SqliteRunStatement {
+    return this.statementHolder.active().deleteOrphanedPathRelationsStatement;
+  }
+  public get deleteOrphanedCoUsageCountersStatement(): SqliteRunStatement {
+    return this.statementHolder.active().deleteOrphanedCoUsageCountersStatement;
+  }
   private readonly readQueries: MemoryEntryReadQueries;
 
   public constructor(
     public readonly db: StorageDatabase,
     private readonly diagnostics: MemoryEntryRepoDiagnosticSink = () => {}
   ) {
-    const statements = prepareMemoryEntryStatements(db);
-    this.createStatement = statements.createStatement;
-    this.findByIdStatement = statements.findByIdStatement;
-    this.updateStatement = statements.updateStatement;
-    this.updateScopedStatement = statements.updateScopedStatement;
-    this.searchByKeywordStatement = statements.searchByKeywordStatement;
-    this.searchByKeywordPorterStatement = statements.searchByKeywordPorterStatement;
-    this.transitionLifecycleStatement = statements.transitionLifecycleStatement;
-    this.transitionLifecycleClearForgetStatement = statements.transitionLifecycleClearForgetStatement;
-    this.reviveDormantStatement = statements.reviveDormantStatement;
-    this.demoteActiveToDormantStatement = statements.demoteActiveToDormantStatement;
-    this.archiveStatement = statements.archiveStatement;
-    this.hardDeleteTombstonedStatement = statements.hardDeleteTombstonedStatement;
-    this.autonomousTombstoneStatement = statements.autonomousTombstoneStatement;
-    this.hardDeleteTombstonedWithDispositionStatement = statements.hardDeleteTombstonedWithDispositionStatement;
-    this.hardDeleteTombstonedCompressedGuardedStatement = statements.hardDeleteTombstonedCompressedGuardedStatement;
-    this.hardDeleteTombstonedJudgedUselessGuardedStatement = statements.hardDeleteTombstonedJudgedUselessGuardedStatement;
-    this.deleteOrphanedPathRelationsStatement = statements.deleteOrphanedPathRelationsStatement;
-    this.deleteOrphanedCoUsageCountersStatement = statements.deleteOrphanedCoUsageCountersStatement;
-    this.readQueries = new MemoryEntryReadQueries(db, this.diagnostics, statements);
+    this.statementHolder = new RefreshableStatementHolder(db, prepareMemoryEntryStatements);
+    this.readQueries = new MemoryEntryReadQueries(db, this.diagnostics, this.statementHolder);
+  }
+
+  public transaction<T>(fn: () => T, options: { readonly immediate?: boolean } = {}): T {
+    const txn = this.activeConnection().transaction(fn);
+    return options.immediate === true ? txn.immediate() : txn();
   }
 
   public async create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>> {
-    const parsedEntry = parseMemoryEntry(entry);
-    this.runCreateStatement(parsedEntry);
-    return parsedEntry;
+    return createMemoryEntry.call(this, entry);
   }
 
   public createWithinTransaction(
@@ -133,30 +153,16 @@ export class SqliteMemoryEntryRepo
       readonly afterCreate?: () => void;
     }
   ): Readonly<MemoryEntry> {
-    const parsedEntry = parseMemoryEntry(entry);
-    const txn = this.db.connection.transaction(() => {
-      callbacks.beforeCreate?.();
-      this.runCreateStatement(parsedEntry);
-      callbacks.afterCreate?.();
-    });
-    txn.immediate();
-    return parsedEntry;
-  }
-
-  private runCreateStatement(parsedEntry: Readonly<MemoryEntry>): void {
-    try {
-      this.createStatement.run(...buildMemoryEntryCreateParams(parsedEntry));
-    } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to create memory entry ${parsedEntry.object_id}.`,
-        error
-      );
-    }
+    return createMemoryEntryWithinTransaction.call(this, entry, callbacks);
   }
 
   public async findById(objectId: string): Promise<Readonly<MemoryEntry> | null> {
     return await this.readQueries.findById(objectId);
+  }
+
+  private activeConnection(): StorageDatabase["connection"] {
+    this.db.reopenIfClosed();
+    return this.db.connection;
   }
 
   public async findByIds(
@@ -232,6 +238,73 @@ export class SqliteMemoryEntryRepo
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     return await this.readQueries.findByScopeClassAll(workspaceId, scopeClass);
+  }
+
+  public async findByWorkspaceIdWithConflict(
+    workspaceId: string,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return await this.readQueries.findByWorkspaceIdWithConflict(workspaceId, page);
+  }
+
+  public async countByWorkspaceIdWithConflict(workspaceId: string): Promise<number> {
+    return await this.readQueries.countByWorkspaceIdWithConflict(workspaceId);
+  }
+
+  public async findByDimensionWithConflict(
+    workspaceId: string,
+    dimension: MemoryDimension,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return await this.readQueries.findByDimensionWithConflict(workspaceId, dimension, page);
+  }
+
+  public async countByDimensionWithConflict(
+    workspaceId: string,
+    dimension: MemoryDimension
+  ): Promise<number> {
+    return await this.readQueries.countByDimensionWithConflict(workspaceId, dimension);
+  }
+
+  public async findByScopeClassWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return await this.readQueries.findByScopeClassWithConflict(workspaceId, scopeClass, page);
+  }
+
+  public async countByScopeClassWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass
+  ): Promise<number> {
+    return await this.readQueries.countByScopeClassWithConflict(workspaceId, scopeClass);
+  }
+
+  public async findByScopeClassAndDimensionWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryDimension,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return await this.readQueries.findByScopeClassAndDimensionWithConflict(
+      workspaceId,
+      scopeClass,
+      dimension,
+      page
+    );
+  }
+
+  public async countByScopeClassAndDimensionWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryDimension
+  ): Promise<number> {
+    return await this.readQueries.countByScopeClassAndDimensionWithConflict(
+      workspaceId,
+      scopeClass,
+      dimension
+    );
   }
 
   public async findBySharedDomainTags(

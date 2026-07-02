@@ -22,6 +22,7 @@ export interface ProposalReadStatements {
   readonly countByWorkspaceIdStatement: SqliteStatement;
   readonly findPendingStatement: SqliteStatement;
   readonly findPendingPagedStatement: SqliteStatement;
+  readonly findPendingByDedupeKeyStatement: SqliteStatement;
   readonly countPendingStatement: SqliteStatement;
   readonly findPendingByRunIdStatement: SqliteStatement;
 }
@@ -120,6 +121,17 @@ const PROPOSAL_READ_SQL: SqlDefinitionMap<ProposalReadStatements> = {
       WHERE workspace_id = ? AND resolution_state = 'pending'
       ORDER BY last_updated_at DESC, proposal_id DESC
       LIMIT ? OFFSET ?
+    `,
+  findPendingByDedupeKeyStatement: `
+      SELECT${PROPOSAL_SELECT_COLUMNS}
+      FROM proposals
+      WHERE workspace_id = ?
+        AND resolution_state = 'pending'
+        AND target_object_kind = ?
+        AND derived_from = ?
+        AND dossier_ref = ?
+      ORDER BY last_updated_at DESC, proposal_id DESC
+      LIMIT 1
     `,
   countPendingStatement: `
       SELECT COUNT(*) AS total

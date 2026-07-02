@@ -1,8 +1,5 @@
 import {
   EngineStatus,
-  WorkspaceRunEventType,
-  StreamingEventType,
-  type EventLogEntry,
   type WorkspaceRunEvent,
   type Run,
   type RunHotState
@@ -13,8 +10,7 @@ export interface RunHotStateRunRepoPort {
 }
 
 export interface RunHotStateEventLogRepoPort {
-  queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
-  queryByRunAll(runId: string): Promise<readonly EventLogEntry[]>;
+  getLatestMessageTimestampByRun(runId: string): Promise<string | null>;
 }
 
 export interface RunHotStateServiceDependencies {
@@ -188,19 +184,5 @@ async function findLastMessageAt(
   runId: string,
   eventLogRepo: RunHotStateEventLogRepoPort
 ): Promise<string | null> {
-  const events = await eventLogRepo.queryByRunAll(runId);
-
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-
-    if (
-      event.event_type === WorkspaceRunEventType.RUN_MESSAGE_APPENDED ||
-      event.event_type === WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED ||
-      event.event_type === StreamingEventType.MESSAGE_COMPLETED
-    ) {
-      return event.created_at;
-    }
-  }
-
-  return null;
+  return await eventLogRepo.getLatestMessageTimestampByRun(runId);
 }

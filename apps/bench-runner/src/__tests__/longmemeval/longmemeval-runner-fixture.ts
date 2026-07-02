@@ -80,7 +80,7 @@ export function buildLongMemEvalArchivePayload(
         signals_dropped: 0,
         parse_dropped: 0,
         compile_overflow_dropped: 0,
-        signals_dropped_by_reason: { candidate_absent: 0, materialization_error: 0 }
+        signals_dropped_by_reason: { candidate_absent: 0, materialization_drop: 0 }
       },
       per_scenario: [
         { id: "q001", version: 1, hit_at_5: false, tier: "cold" },

@@ -1,9 +1,6 @@
 import {
-  isPathRecallEligible,
   type ManifestationState,
   type MemoryEntry,
-  type PathAnchorRef,
-  type PathRelation,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
@@ -15,17 +12,18 @@ import {
   toErrorMessage
 } from "./recall-service-helpers.js";
 import type {
+  EvidenceSupportVector,
+  PathInflowEdge,
   RecallServiceDependencies,
   RecallServiceWarnPort,
   RecallSupplementaryData
 } from "./recall-service-types.js";
-import {
-  GOVERNANCE_CEILING_FAILSAFE_BAND,
-  memoryGovernanceCeiling,
-  type PathGovernanceContribution
-} from "../path-graph/path-manifestation-policy.js";
 import { computeMaxWeightTransferAmount } from "./scoring.js";
-import { anchorMemoryId, uniqueStrings } from "./path-relations.js";
+import { uniqueStrings } from "./path-relations.js";
+import { collectGovernancePathDerivations } from "./supplementary-data-governance-paths.js";
+import { facetOverlapEnabled } from "./fusion-delivery-scoring.js";
+import { fourAxisAssemblyEnabled } from "./conformant-fusion-scoring.js";
+import { deriveQuerySoughtFacets } from "./query-facet-router.js";
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 export const SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY = 16;
@@ -88,13 +86,18 @@ export async function collectSupplementaryData(
     pathSuppressionScores: params.coarsePathSuppressionScores,
     embeddingSimilarityScores: Object.freeze({}),
     graphSupportCounts: Object.freeze(graphSupportCounts),
+    evidenceSupportVectorsByMemoryId: Object.freeze(buildEvidenceSupportVectors(candidates)),
     budgetPenaltyFactor,
     plasticityFactors,
     graphAndPathColdScore: coldMetrics.graphAndPathColdScore,
     recallsEdgeCount: coldMetrics.recallsEdgeCount,
     weightTransferAmount: coldMetrics.weightTransferAmount,
     evidenceGistsByMemoryId: evidenceAndGovernance.evidenceGistsByMemoryId,
-    governanceCeilingByMemoryId: evidenceAndGovernance.governanceCeilingByMemoryId
+    governanceCeilingByMemoryId: evidenceAndGovernance.governanceCeilingByMemoryId,
+    pathInflowByTarget: evidenceAndGovernance.pathInflowByTarget,
+    querySoughtFacets: facetOverlapEnabled() || fourAxisAssemblyEnabled()
+      ? deriveQuerySoughtFacets(params.queryProbes)
+      : Object.freeze([])
   });
 }
 
@@ -104,6 +107,7 @@ async function collectEvidenceAndGovernanceData(
 ): Promise<Readonly<{
   readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
   readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
+  readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
 }>> {
   const evidenceGistsByMemoryId = await collectEvidenceGistsByMemoryId({
     dependencies: params.dependencies,
@@ -113,13 +117,17 @@ async function collectEvidenceAndGovernanceData(
     coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
     coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
   });
-  const governanceCeilingByMemoryId = await collectGovernanceCeilings({
+  const governanceDerivations = await collectGovernancePathDerivations({
     dependencies: params.dependencies,
     warn: params.warn,
     workspaceId: params.workspaceId,
     candidates
   });
-  return Object.freeze({ evidenceGistsByMemoryId, governanceCeilingByMemoryId });
+  return Object.freeze({
+    evidenceGistsByMemoryId,
+    governanceCeilingByMemoryId: governanceDerivations.governanceCeilingByMemoryId,
+    pathInflowByTarget: governanceDerivations.pathInflowByTarget
+  });
 }
 
 async function collectGraphSupportCounts(
@@ -139,6 +147,25 @@ async function collectGraphSupportCounts(
       }
     })
   );
+}
+
+export function buildEvidenceSupportVectors(
+  candidates: readonly Readonly<MemoryEntry>[]
+): Record<string, readonly EvidenceSupportVector[]> {
+  const vectorsByMemoryId: Record<string, readonly EvidenceSupportVector[]> = {};
+  for (const candidate of candidates) {
+    const evidenceRefs = uniqueStrings(candidate.evidence_refs ?? []);
+    if (evidenceRefs.length > 0) {
+      vectorsByMemoryId[candidate.object_id] = Object.freeze(
+        evidenceRefs.map((source_id) => Object.freeze({
+          source_kind: "evidence_ref" as const,
+          source_id,
+          support: normalizeGraphSupport(1)
+        }))
+      );
+    }
+  }
+  return vectorsByMemoryId;
 }
 
 async function collectRecallEdgeCounts(
@@ -378,100 +405,4 @@ async function mapWithConcurrency<T, R>(
   );
 
   return results;
-}
-
-// invariant: governance_class is a hard ceiling on recall manifestation; absent path expansion is fail-open, path read failure is fail-closed to the safe hint band.
-async function collectGovernanceCeilings(params: {
-  readonly dependencies: Pick<RecallServiceDependencies, "pathExpansionPort">;
-  readonly warn: RecallServiceWarnPort;
-  readonly workspaceId: string;
-  readonly candidates: readonly Readonly<MemoryEntry>[];
-}): Promise<Readonly<Record<string, ManifestationState>>> {
-  const pathExpansionPort = params.dependencies.pathExpansionPort;
-  if (pathExpansionPort === undefined || params.candidates.length === 0) {
-    return Object.freeze({});
-  }
-  const candidateIds = new Set(params.candidates.map((candidate) => candidate.object_id));
-  const anchors = buildGovernanceCandidateAnchors(candidateIds);
-  let paths: readonly Readonly<PathRelation>[];
-  try {
-    paths = await pathExpansionPort.findByAnchors(params.workspaceId, anchors);
-  } catch (error) {
-    params.warn("governance ceiling path lookup failed", {
-      workspace_id: params.workspaceId,
-      candidate_count: params.candidates.length,
-      operation: "governance_ceiling_path_lookup",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
-    return buildGovernanceFailsafeCeilings(candidateIds);
-  }
-  const contributionsByMemoryId = collectGovernanceContributions(paths, candidateIds);
-  return buildGovernanceCeilingByMemoryId(contributionsByMemoryId);
-}
-
-function buildGovernanceCandidateAnchors(
-  candidateIds: ReadonlySet<string>
-): readonly PathAnchorRef[] {
-  return [...candidateIds].map((object_id) => ({ kind: "object", object_id }));
-}
-
-function buildGovernanceFailsafeCeilings(
-  candidateIds: ReadonlySet<string>
-): Readonly<Record<string, ManifestationState>> {
-  // fail-closed: cap every candidate to the safe band so a transient read error cannot lift a governed memory to full strength.
-  const failsafeCeilings: Record<string, ManifestationState> = {};
-  for (const object_id of candidateIds) {
-    failsafeCeilings[object_id] = GOVERNANCE_CEILING_FAILSAFE_BAND;
-  }
-  return Object.freeze(failsafeCeilings);
-}
-
-function collectGovernanceContributions(
-  paths: readonly Readonly<PathRelation>[],
-  candidateIds: ReadonlySet<string>
-): ReadonlyMap<string, PathGovernanceContribution[]> {
-  const contributionsByMemoryId = new Map<string, PathGovernanceContribution[]>();
-  for (const path of paths) {
-    const targetMemoryId = resolveGovernedTargetMemoryId(path, candidateIds);
-    if (targetMemoryId === undefined) {
-      continue;
-    }
-    const contribution: PathGovernanceContribution = {
-      governance_class: path.legitimacy.governance_class,
-      evidence_basis: path.legitimacy.evidence_basis
-    };
-    const contributions = contributionsByMemoryId.get(targetMemoryId);
-    if (contributions === undefined) {
-      contributionsByMemoryId.set(targetMemoryId, [contribution]);
-    } else {
-      contributions.push(contribution);
-    }
-  }
-  return contributionsByMemoryId;
-}
-
-function resolveGovernedTargetMemoryId(
-  path: Readonly<PathRelation>,
-  candidateIds: ReadonlySet<string>
-): string | undefined {
-  if (!isPathRecallEligible(path)) {
-    return undefined;
-  }
-  // invariant: the ceiling is inbound — keyed on the path's target memory; source-anchor paths govern their target, not the candidate.
-  const targetMemoryId = anchorMemoryId(path.anchors.target_anchor);
-  if (targetMemoryId === undefined || !candidateIds.has(targetMemoryId)) {
-    return undefined;
-  }
-  return targetMemoryId;
-}
-
-function buildGovernanceCeilingByMemoryId(
-  contributionsByMemoryId: ReadonlyMap<string, readonly PathGovernanceContribution[]>
-): Readonly<Record<string, ManifestationState>> {
-  const ceilingByMemoryId: Record<string, ManifestationState> = {};
-  for (const [memoryId, contributions] of contributionsByMemoryId) {
-    ceilingByMemoryId[memoryId] = memoryGovernanceCeiling(contributions);
-  }
-  return Object.freeze(ceilingByMemoryId);
 }

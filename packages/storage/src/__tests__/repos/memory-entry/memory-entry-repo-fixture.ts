@@ -75,11 +75,11 @@ export function createMemoryCreatedEventInput(
   };
 }
 
-export async function createRepo(): Promise<{
+export async function createRepo(options: { readonly filename?: string } = {}): Promise<{
   readonly database: ReturnType<typeof initDatabase>;
   readonly repo: SqliteMemoryEntryRepo;
 }> {
-  const database = initDatabase({ filename: ":memory:" });
+  const database = initDatabase({ filename: options.filename ?? ":memory:" });
   trackedDatabases.add(database);
 
   const workspaceRepo = new SqliteWorkspaceRepo(database);

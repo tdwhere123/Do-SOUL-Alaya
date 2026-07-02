@@ -209,6 +209,61 @@ export class MemoryService {
     return this.query.findByScopeClassAll(workspaceId, scopeClass);
   }
 
+  public findByWorkspaceIdWithConflict(
+    workspaceId: string,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return this.query.findByWorkspaceIdWithConflict(workspaceId, page);
+  }
+
+  public countByWorkspaceIdWithConflict(workspaceId: string): Promise<number> {
+    return this.query.countByWorkspaceIdWithConflict(workspaceId);
+  }
+
+  public findByDimensionWithConflict(
+    workspaceId: string,
+    dimension: MemoryEntry["dimension"],
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return this.query.findByDimensionWithConflict(workspaceId, dimension, page);
+  }
+
+  public countByDimensionWithConflict(
+    workspaceId: string,
+    dimension: MemoryEntry["dimension"]
+  ): Promise<number> {
+    return this.query.countByDimensionWithConflict(workspaceId, dimension);
+  }
+
+  public findByScopeClassWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return this.query.findByScopeClassWithConflict(workspaceId, scopeClass, page);
+  }
+
+  public countByScopeClassWithConflict(workspaceId: string, scopeClass: ScopeClass): Promise<number> {
+    return this.query.countByScopeClassWithConflict(workspaceId, scopeClass);
+  }
+
+  public findByScopeClassAndDimensionWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryEntry["dimension"],
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return this.query.findByScopeClassAndDimensionWithConflict(workspaceId, scopeClass, dimension, page);
+  }
+
+  public countByScopeClassAndDimensionWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryEntry["dimension"]
+  ): Promise<number> {
+    return this.query.countByScopeClassAndDimensionWithConflict(workspaceId, scopeClass, dimension);
+  }
+
   public validateFactualPolicyBoundary(entry: MemoryEntry, condition: FactualPolicyCondition): boolean {
     const parsedEntry = parseMemoryEntry(entry);
     const parsedCondition = parseFactualPolicyCondition(condition);

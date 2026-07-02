@@ -1,4 +1,5 @@
 import {
+  D2Q_SCHEMA_VERSION,
   EmbeddingBackfillHandler,
   EmbeddingRecallService,
   LocalOnnxEmbeddingClient,
@@ -6,7 +7,8 @@ import {
   defaultLocalOnnxCacheDir,
   type EmbeddingProviderPort,
   type EmbeddingRecallEventLogPort,
-  type EmbeddingRecallServiceDependencies
+  type EmbeddingRecallServiceDependencies,
+  type HqProvider
 } from "@do-soul/alaya-core";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import type { SqliteMemoryEntryRepo, StorageDatabase } from "@do-soul/alaya-storage";
@@ -17,6 +19,7 @@ import {
 import {
   DEFAULT_OPENAI_EMBEDDING_MODEL,
   createOptionalMemoryEmbeddingRepo,
+  createOptionalMemoryHqRepo,
   readConfigEnvValue,
   readNonEmptyEnv
 } from "../runtime/index.js";
@@ -57,6 +60,7 @@ interface EmbeddingRuntimeConfig {
   readonly localEmbeddingModel: string | null;
   readonly embeddingSupplementOptInEnabled: boolean;
   readonly recallPolicyEmbeddingEnabled: boolean;
+  readonly d2qEnabled: boolean;
 }
 
 interface EmbeddingProviderState {
@@ -87,8 +91,14 @@ function readEmbeddingRuntimeConfig(
       (explicitEmbeddingProvider === "local_onnx" && embeddingOptInRaw !== "false"),
     recallPolicyEmbeddingEnabled:
       embeddingOptInRaw === "true" ||
-      (explicitEmbeddingProvider === "local_onnx" && embeddingOptInRaw !== "false")
+      (explicitEmbeddingProvider === "local_onnx" && embeddingOptInRaw !== "false"),
+    d2qEnabled: readD2qEnabled(configEnv)
   };
+}
+
+function readD2qEnabled(configEnv: ReadonlyMap<string, string>): boolean {
+  const raw = readNonEmptyEnv(readConfigEnvValue(configEnv, "ALAYA_RECALL_D2Q"))?.toLowerCase();
+  return raw === "1" || raw === "true";
 }
 
 function readExplicitEmbeddingProvider(
@@ -130,6 +140,7 @@ function createEmbeddingProviderState(
     openAiBaseUrl: config.configuredEmbeddingProviderUrl,
     localCacheDir: config.localEmbeddingCacheDir,
     localModel: config.localEmbeddingModel,
+    localSchemaVersion: isD2qActive(config) ? D2Q_SCHEMA_VERSION : null,
     providerOverride: input.embeddingProviderOverride
   });
   return {
@@ -162,7 +173,7 @@ function createEmbeddingRuntimeServices(
   return {
     embeddingStatusService,
     embeddingRecallService,
-    embeddingBackfillHandler: createEmbeddingBackfillHandler(input, providerState),
+    embeddingBackfillHandler: createEmbeddingBackfillHandler(input, config, providerState),
     defaultPolicyDecorator: createDefaultPolicyDecorator(
       input.configEnv,
       config.recallPolicyEmbeddingEnabled,
@@ -191,17 +202,36 @@ function createEmbeddingRecallService(
 
 function createEmbeddingBackfillHandler(
   input: Parameters<typeof createDaemonEmbeddingRuntime>[0],
+  config: EmbeddingRuntimeConfig,
   providerState: EmbeddingProviderState
 ) {
   if (providerState.memoryEmbeddingRepo === null || providerState.embeddingProvider === null) {
     return undefined;
   }
+  const hqProvider = resolveBackfillHqProvider(input, config);
   return new EmbeddingBackfillHandler({
     memoryRepo: input.memoryEntryRepo,
     memoryEmbeddingRepo: providerState.memoryEmbeddingRepo,
     provider: providerState.embeddingProvider,
+    ...(hqProvider === null ? {} : { hqProvider }),
     warn: input.warn
   });
+}
+
+// d2q is the proven MiniLM doc2query path; gate the HQ source + schema bump on
+// the local provider so an OpenAI deployment never invalidates its vectors.
+function isD2qActive(config: EmbeddingRuntimeConfig): boolean {
+  return config.d2qEnabled && config.embeddingProviderKind === "local_onnx";
+}
+
+function resolveBackfillHqProvider(
+  input: Parameters<typeof createDaemonEmbeddingRuntime>[0],
+  config: EmbeddingRuntimeConfig
+): HqProvider | null {
+  if (!isD2qActive(config)) {
+    return null;
+  }
+  return createOptionalMemoryHqRepo(input.database);
 }
 
 function createDefaultPolicyDecorator(
@@ -320,6 +350,7 @@ function resolveEmbeddingProvider(input: {
   readonly openAiBaseUrl: string | null;
   readonly localCacheDir: string | null;
   readonly localModel: string | null;
+  readonly localSchemaVersion: number | null;
   readonly providerOverride?: EmbeddingProviderPort | null;
 }): EmbeddingProviderPort | null {
   if (!input.storageAvailable || !input.optInEnabled) {
@@ -332,7 +363,8 @@ function resolveEmbeddingProvider(input: {
   if (input.providerKind === "local_onnx") {
     return new LocalOnnxEmbeddingClient({
       cacheDir: input.localCacheDir ?? defaultLocalOnnxCacheDir(),
-      ...(input.localModel === null ? {} : { modelId: input.localModel })
+      ...(input.localModel === null ? {} : { modelId: input.localModel }),
+      ...(input.localSchemaVersion === null ? {} : { schemaVersion: input.localSchemaVersion })
     });
   }
 

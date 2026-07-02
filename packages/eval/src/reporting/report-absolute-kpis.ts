@@ -152,8 +152,9 @@ function pushSeedAndQualityKpis(lines: string[], current: KpiPayload): void {
   }
   if (current.kpi.quality_metrics !== undefined) {
     const metrics = current.kpi.quality_metrics;
+    const taxonomy = metrics.miss_taxonomy_distribution;
     lines.push(
-      `- Quality metrics: non_monotonic=${formatRatio(metrics.non_monotonic_rate)} (${metrics.non_monotonic_count}/${metrics.non_monotonic_denominator}) budget_drop_loss=${metrics.miss_distribution.budget_dropped ?? 0} budget_dropped_entries=${metrics.budget_drop_distribution.max_entries?.count ?? 0} candidate_absent=${metrics.candidate_absent_count} no_gold=${metrics.no_gold_count} evidence_gold=${formatRatio(metrics.evidence_stream_gold_delivery_rate)} path_top10=${formatRatio(metrics.path_stream_top10_rate)}`
+      `- Quality metrics: non_monotonic=${formatRatio(metrics.non_monotonic_rate)} (${metrics.non_monotonic_count}/${metrics.non_monotonic_denominator}) budget_drop_loss=${metrics.miss_distribution.budget_dropped ?? 0} budget_dropped_entries=${metrics.budget_drop_distribution.max_entries?.count ?? 0} candidate_absent=${metrics.candidate_absent_count} no_gold=${metrics.no_gold_count} miss_taxonomy=[candidate_absent=${taxonomy.candidate_absent} materialization_drop=${taxonomy.materialization_drop} budget_drop=${taxonomy.budget_drop} delivery_order_drop=${taxonomy.delivery_order_drop} evaluation_or_gold_issue=${taxonomy.evaluation_or_gold_issue}] evidence_gold=${formatRatio(metrics.evidence_stream_gold_delivery_rate)} path_top10=${formatRatio(metrics.path_stream_top10_rate)}`
     );
     const abstention = metrics.abstention;
     if (abstention !== undefined && abstention.total > 0) {
@@ -178,7 +179,7 @@ function pushExtractionPathSummary(
       `[parse_dropped=${extractionPath.parse_dropped} ` +
       `compile_overflow_dropped=${extractionPath.compile_overflow_dropped} ` +
       `candidate_absent=${extractionPath.signals_dropped_by_reason.candidate_absent} ` +
-      `materialization_error=${extractionPath.signals_dropped_by_reason.materialization_error}])`
+      `materialization_drop=${extractionPath.signals_dropped_by_reason.materialization_drop}])`
   );
   pushNoCredentialsFallbackWarning(lines, extractionPath.path);
   pushExtractionFailureWarning(lines, extractionPath);
@@ -234,7 +235,7 @@ function pushDroppedSignalsWarning(
       `  - ⚠ ${drops.trulyLost} extracted signal(s) were lost before seeding ` +
         `(${drops.parseDropped} dropped by the parser as malformed / over the 64-signal cap, ` +
         `${drops.compileOverflowDropped} dropped by compile() as oversized, ` +
-        `${drops.materializationError} failed materialization, ` +
+        `${drops.materializationDrop} failed materialization, ` +
         `${drops.batchResidual} dropped when a seed-materialization batch failed); ` +
         `a dropped answer-bearing signal inflates the miss rate.`
     );
@@ -245,7 +246,7 @@ export interface SeedDropAttribution {
   readonly declined: number;
   readonly parseDropped: number;
   readonly compileOverflowDropped: number;
-  readonly materializationError: number;
+  readonly materializationDrop: number;
   readonly batchResidual: number;
   readonly trulyLost: number;
 }
@@ -256,25 +257,25 @@ export function attributeSeedDrops(
   extractionPath: NonNullable<KpiPayload["kpi"]["seed_extraction_path"]>
 ): SeedDropAttribution {
   const declined = extractionPath.signals_dropped_by_reason.candidate_absent;
-  const materializationError = extractionPath.signals_dropped_by_reason.materialization_error;
+  const materializationDrop = extractionPath.signals_dropped_by_reason.materialization_drop;
   const batchResidual = Math.max(
     0,
     extractionPath.signals_dropped -
       extractionPath.parse_dropped -
       extractionPath.compile_overflow_dropped -
       declined -
-      materializationError
+      materializationDrop
   );
   return {
     declined,
     parseDropped: extractionPath.parse_dropped,
     compileOverflowDropped: extractionPath.compile_overflow_dropped,
-    materializationError,
+    materializationDrop,
     batchResidual,
     trulyLost:
       extractionPath.parse_dropped +
       extractionPath.compile_overflow_dropped +
-      materializationError +
+      materializationDrop +
       batchResidual
   };
 }

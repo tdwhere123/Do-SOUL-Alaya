@@ -1,5 +1,6 @@
 import { type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { toErrorMessage } from "../recall/recall-service-helpers.js";
+import { resolveEmbedText } from "./embed-text-resolver.js";
 import { resolveEmbeddingRecallTiers } from "./tier-config.js";
 import {
   BACKFILL_BATCH_CONCURRENCY_ENV,
@@ -43,6 +44,9 @@ interface BackfillCandidateSelection {
   readonly memoriesToEmbed: readonly EmbeddingBackfillCandidate[];
   readonly auditEntries: readonly string[];
 }
+
+const EMPTY_HQS: readonly string[] = Object.freeze([]);
+const EMPTY_HQ_MAP: ReadonlyMap<string, readonly string[]> = new Map();
 
 function emptyBackfillResult(auditEntries: readonly string[]): EmbeddingBackfillHandleResult {
   return Object.freeze({
@@ -276,18 +280,41 @@ export class EmbeddingBackfillHandler {
     }
   }
 
+  private async resolveBatchHqMap(
+    batch: readonly EmbeddingBackfillCandidate[]
+  ): Promise<ReadonlyMap<string, readonly string[]>> {
+    const hqProvider = this.dependencies.hqProvider;
+    if (hqProvider === undefined) {
+      return EMPTY_HQ_MAP;
+    }
+    return hqProvider.getHqByObjectIds(batch.map((entry) => entry.memory.object_id));
+  }
+
   private async embedBatchWithFallback(
     workspaceId: string,
     batch: readonly EmbeddingBackfillCandidate[],
     auditEntries: string[]
   ): Promise<readonly EmbeddedBackfillCandidate[]> {
+    // Resolve HQs once per top-level batch; the split / single-retry paths reuse
+    // this map so a provider failure never re-reads HQs.
+    const hqByObjectId = await this.resolveBatchHqMap(batch);
+    return this.embedBatchWithHqMap(workspaceId, batch, hqByObjectId, auditEntries);
+  }
+
+  // off / no HQ provider → texts are raw content (byte-identical to prior path).
+  private async embedBatchWithHqMap(
+    workspaceId: string,
+    batch: readonly EmbeddingBackfillCandidate[],
+    hqByObjectId: ReadonlyMap<string, readonly string[]>,
+    auditEntries: string[]
+  ): Promise<readonly EmbeddedBackfillCandidate[]> {
+    const texts = batch.map((entry) =>
+      resolveEmbedText(entry.memory, hqByObjectId.get(entry.memory.object_id) ?? EMPTY_HQS)
+    );
     try {
-      const embeddings = await this.dependencies.provider.embedTexts(
-        batch.map((entry) => entry.memory.content),
-        {
-          timeoutMs: BACKFILL_TIMEOUT_MS
-        }
-      );
+      const embeddings = await this.dependencies.provider.embedTexts(texts, {
+        timeoutMs: BACKFILL_TIMEOUT_MS
+      });
 
       if (embeddings.length !== batch.length) {
         throw new Error(`Expected ${batch.length} embeddings but received ${embeddings.length}.`);
@@ -303,12 +330,12 @@ export class EmbeddingBackfillHandler {
       );
     } catch (error) {
       const message = toErrorMessage(error);
-      const batchInputChars = batch.reduce((total, entry) => total + entry.memory.content.length, 0);
+      const batchInputChars = texts.reduce((total, text) => total + text.length, 0);
 
       if (batch.length <= 1) {
         const entry = batch[0];
         if (entry !== undefined) {
-          const retryResult = await this.retrySingleItemEmbedding(workspaceId, entry, message);
+          const retryResult = await this.retrySingleItemEmbedding(workspaceId, entry, texts[0]!, message);
           if (retryResult.embedding !== null) {
             return Object.freeze([retryResult.embedding]);
           }
@@ -332,8 +359,8 @@ export class EmbeddingBackfillHandler {
         error: message
       });
       const splitIndex = Math.ceil(batch.length / 2);
-      const left = await this.embedBatchWithFallback(workspaceId, batch.slice(0, splitIndex), auditEntries);
-      const right = await this.embedBatchWithFallback(workspaceId, batch.slice(splitIndex), auditEntries);
+      const left = await this.embedBatchWithHqMap(workspaceId, batch.slice(0, splitIndex), hqByObjectId, auditEntries);
+      const right = await this.embedBatchWithHqMap(workspaceId, batch.slice(splitIndex), hqByObjectId, auditEntries);
       return Object.freeze([...left, ...right]);
     }
   }
@@ -341,6 +368,7 @@ export class EmbeddingBackfillHandler {
   private async retrySingleItemEmbedding(
     workspaceId: string,
     entry: EmbeddingBackfillCandidate,
+    entryText: string,
     firstError: string
   ): Promise<
     Readonly<{
@@ -353,7 +381,7 @@ export class EmbeddingBackfillHandler {
       this.warn("embedding backfill item failed; retrying item", {
         workspace_id: workspaceId,
         object_id: entry.memory.object_id,
-        input_chars: entry.memory.content.length,
+        input_chars: entryText.length,
         attempt,
         max_attempts: BACKFILL_ITEM_RETRY_ATTEMPTS,
         error: lastError
@@ -361,7 +389,7 @@ export class EmbeddingBackfillHandler {
       await sleepBackfillRetry(this.retryDelayMs * (attempt - 1));
 
       try {
-        const embeddings = await this.dependencies.provider.embedTexts([entry.memory.content], {
+        const embeddings = await this.dependencies.provider.embedTexts([entryText], {
           timeoutMs: BACKFILL_TIMEOUT_MS
         });
         if (embeddings.length !== 1) {

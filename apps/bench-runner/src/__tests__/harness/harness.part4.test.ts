@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   initDatabase,
@@ -162,6 +162,8 @@ afterEach(async () => {
 });
 
 describe("BenchDaemon harness — real MCP propose+review chain", () => {
+  beforeEach(() => { process.env.ALAYA_RECALL_STRUCTURAL_RESERVE = "on"; });
+  afterEach(() => { delete process.env.ALAYA_RECALL_STRUCTURAL_RESERVE; });
 
   it(
     "a query hitting a NON-representative co-recall member fans into its sibling via graph_expansion at hop-2",

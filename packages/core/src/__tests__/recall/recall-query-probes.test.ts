@@ -264,3 +264,24 @@ describe("synonym expansion table", () => {
     expect(expanded).not.toContain("want");
   });
 });
+
+describe("collectDateTermMatches temporal-window flag gating", () => {
+  afterEach(() => {
+    delete process.env.ALAYA_RECALL_TEMPORAL_WINDOW;
+  });
+
+  const query = "we shipped it last summer, 3 days ago, after last week";
+
+  it("captures only the base date terms when the flag is off", () => {
+    const probes = compileRecallQueryProbes(query);
+    expect(probes.date_terms).toContain("last week");
+    expect(probes.date_terms).not.toContain("last summer");
+    expect(probes.date_terms).not.toContain("3 days ago");
+  });
+
+  it("captures the widened season and N-ago terms when the flag is on", () => {
+    process.env.ALAYA_RECALL_TEMPORAL_WINDOW = "on";
+    const probes = compileRecallQueryProbes(query);
+    expect(probes.date_terms).toEqual(expect.arrayContaining(["last week", "last summer", "3 days ago"]));
+  });
+});

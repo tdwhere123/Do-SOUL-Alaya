@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
 import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
+import type { LongMemEvalSeedDropReasons } from "./seed-drop-reasons.js";
 
 /**
  * @anchor longmemeval-recall-eval-snapshot
@@ -69,6 +70,8 @@ export interface LongMemEvalSnapshotQuestion {
   readonly workspaceId: string;
   /** Run id the question's workspace was attached with. */
   readonly runId: string;
+  /** Answer-turn seed failures that explain a no-gold question. */
+  readonly answerSeedDropReasons?: LongMemEvalSeedDropReasons;
 }
 
 /**

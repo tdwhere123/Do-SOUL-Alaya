@@ -81,6 +81,7 @@ export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> 
         (opts.simulateReport !== "none" ? ` simulate_report=${opts.simulateReport}` : "") +
         (opts.weightOverridesJson !== undefined ? " weights=cli" : "") +
         (qaOption !== undefined ? " qa=on" : "") +
+        (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
         "...\n"
     );
     const result = await runLongMemEval({
@@ -106,7 +107,8 @@ export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> 
         : { pinnedMetaRoot: opts.pinnedMetaRoot }),
       ...(opts.extractionCacheRoot === undefined
         ? {}
-        : { extractionCacheRoot: opts.extractionCacheRoot })
+        : { extractionCacheRoot: opts.extractionCacheRoot }),
+      ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency })
     });
     const kpi = result.payload.kpi;
     process.stdout.write(

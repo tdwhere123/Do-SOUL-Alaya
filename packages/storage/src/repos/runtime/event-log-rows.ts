@@ -49,6 +49,23 @@ export const DEFAULT_EVENT_LOG_PAGE = Object.freeze({
   offset: 0
 });
 
+/** Hard ceiling for explicit `*All` event-log reads; exceeds throw instead of OOM. */
+export const EVENT_LOG_ALL_QUERY_HARD_MAX = 10_000;
+
+export function enforceEventLogAllHardCap<T>(
+  rows: readonly T[],
+  scopeKind: "entity" | "run" | "workspace",
+  scopeId: string
+): readonly T[] {
+  if (rows.length > EVENT_LOG_ALL_QUERY_HARD_MAX) {
+    throw new StorageError(
+      "QUERY_FAILED",
+      `Event log ${scopeKind} history for ${scopeId} exceeds the hard cap of ${EVENT_LOG_ALL_QUERY_HARD_MAX} events. Use paged queries instead.`
+    );
+  }
+  return rows;
+}
+
 export const CONVERSATION_MESSAGE_EVENT_TYPES = [
   WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
   WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED,

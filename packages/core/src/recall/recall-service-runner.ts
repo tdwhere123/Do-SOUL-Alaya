@@ -8,6 +8,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { type NodeStrategy } from "../conversation/task-surface-builder.js";
 import { withEmbeddingSimilarityScores } from "./coarse-candidates.js";
+import { resolveHydeQueryText } from "./query-hyde.js";
 import { fineAssess } from "./fine-assessment.js";
 import {
   applyManifestationBiasSidecar,
@@ -170,12 +171,15 @@ async function assessCandidateStage(
   const initialAssessment = await runInitialFineAssessment(context, params, prepared, coarse);
   const preparedEmbeddingQuery = await unwrapPreparedEmbeddingQuery(preparedEmbeddingQueryPromise);
   const embeddingSupplement = await collectEmbeddingSupplementStage(context, params, prepared, coarse, initialAssessment, preparedEmbeddingQuery);
+  const poolRescoreScores = await collectPoolEmbeddingRescore(context, params, prepared, coarse);
   const supplementaryData = withEmbeddingSimilarityScores(
     initialAssessment.supplementaryData,
     embeddingSupplement.similarityHintsByObjectId,
-    coarse.embeddingCoarseInjection.similarityScores
+    coarse.embeddingCoarseInjection.similarityScores,
+    poolRescoreScores
   );
-  const finalAssessment = needsEmbeddingReassessment(embeddingSupplement, coarse.embeddingCoarseInjection)
+  const finalAssessment = needsEmbeddingReassessment(embeddingSupplement, coarse.embeddingCoarseInjection) ||
+    Object.keys(poolRescoreScores).length > 0
     ? fineAssess({
         candidates: coarse.combinedCoarseCandidates,
         policy: prepared.policy,
@@ -196,6 +200,44 @@ async function assessCandidateStage(
     providerDegradationReason: provider.degradationReason,
     recallAfterFusion: performance.now()
   });
+}
+
+// Default-ON (opt-out via ALAYA_RECALL_EMBED_POOL_RESCORE=off): score pooled candidates by
+// cosine(query, stored-vector) so embedding re-ranks a buried-but-pooled gold — the inverse of
+// injection (which excludes pooled ids). No-op when embedding is disabled. HyDE-aware via
+// resolveHydeQueryText. Paired with embedding_similarity default weight 12 (weight 1 is too weak).
+function embedPoolRescoreEnabled(): boolean {
+  const raw = process.env.ALAYA_RECALL_EMBED_POOL_RESCORE;
+  return raw !== "off" && raw !== "0" && raw !== "false";
+}
+
+async function collectPoolEmbeddingRescore(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  prepared: PreparedRecallRequest,
+  coarse: CoarseStageResult
+): Promise<Readonly<Record<string, number>>> {
+  const service = context.dependencies.embeddingRecallService;
+  if (
+    !embedPoolRescoreEnabled() ||
+    prepared.queryText === null ||
+    service === undefined ||
+    typeof service.scorePoolCandidates !== "function" ||
+    prepared.policy.coarse_filter.semantic_supplement.embedding_enabled !== true
+  ) {
+    return {};
+  }
+  const objectIds = coarse.combinedCoarseCandidates.map((candidate) => candidate.entry.object_id);
+  if (objectIds.length === 0) {
+    return {};
+  }
+  const scores = await service.scorePoolCandidates({
+    workspaceId: params.workspaceId,
+    runId: params.runId ?? null,
+    queryText: resolveHydeQueryText(prepared.queryText)!,
+    objectIds
+  });
+  return Object.fromEntries(scores);
 }
 
 function startEmbeddingSupplementPreparation(

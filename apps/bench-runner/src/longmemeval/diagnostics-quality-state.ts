@@ -3,11 +3,14 @@ import {
   isAbstentionQuestionId
 } from "./abstention.js";
 import { COHORT_PLANE, isDeliveryBudgetLoss } from "./diagnostics-private.js";
+import { readQuestionMissTaxonomy } from "./diagnostics-miss-taxonomy.js";
 import type {
   DiagnosticRecallResult,
   LongMemEvalGoldDiagnostic,
+  LongMemEvalMissTaxonomyDistribution,
   LongMemEvalQuestionDiagnostic
 } from "./diagnostics-types.js";
+import { createEmptyMissTaxonomyDistribution } from "./diagnostics-miss-taxonomy.js";
 import {
   classifyGoldRankBucket,
   classifyTopDistractor,
@@ -29,6 +32,10 @@ type GoldFacetSeparation = Omit<
 
 export interface QualityMetricsState {
   readonly missDistribution: Record<string, number>;
+  readonly missTaxonomyDistribution: Record<
+    keyof LongMemEvalMissTaxonomyDistribution,
+    number
+  >;
   readonly budgetDropCounts: Map<string, number>;
   readonly planeGoldCounts: Map<string, number>;
   readonly planeHitAt5Counts: Map<string, number>;
@@ -70,6 +77,7 @@ export interface QualityMetricsState {
 export function createQualityMetricsState(): QualityMetricsState {
   return {
     missDistribution: {},
+    missTaxonomyDistribution: createEmptyMissTaxonomyDistribution(),
     budgetDropCounts: new Map(),
     planeGoldCounts: new Map(),
     planeHitAt5Counts: new Map(),
@@ -144,6 +152,10 @@ function recordQuestionBasics(
 ): void {
   state.missDistribution[question.miss_classification] =
     (state.missDistribution[question.miss_classification] ?? 0) + 1;
+  const missTaxonomy = readQuestionMissTaxonomy(question);
+  if (missTaxonomy !== null) {
+    state.missTaxonomyDistribution[missTaxonomy]++;
+  }
   if (question.miss_classification === "candidate_absent") state.candidateAbsentCount++;
   if (question.miss_classification === "no_gold") state.noGoldCount++;
   recordAbstentionQuestion(state, question);

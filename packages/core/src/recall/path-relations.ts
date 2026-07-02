@@ -5,6 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { clamp01 } from "./recall-service-helpers.js";
 import type {
+  PathInflowEdge,
   RecallGraphExpansionTrackedEdgeType,
   RecallPathExpansionSourceDiagnostic
 } from "./recall-service-types.js";
@@ -18,6 +19,12 @@ const PATH_SUPPRESSION_STRENGTH_FLOOR = 0.6;
 // see also: recall-service.ts collectNegativePathSuppressions, path-relations.ts scorePathRelationSuppression, fusion-delivery.ts PATH_SUPPRESSION_RESIDUAL_FLOOR.
 export const PATH_SUPPRESSION_MAX_PER_TARGET = 0.27;
 
+// Additive bonus for the answer-relation edge (S2): at equal strength/governance an
+// answers_with edge outranks a co-occurrence edge (coheres_with/co_recalled). Keyed on
+// relation_kind so it lifts both planes (flat admitPathExpansionTargets + conformant
+// buildPathInflowByTarget) in one place. Modest; bench-tunable.
+const ANSWERS_WITH_EXPANSION_BONUS = 0.1;
+
 export function scorePathRelationExpansion(path: Readonly<PathRelation>): number {
   const governanceBoost =
     path.legitimacy.governance_class === "recall_allowed" ||
@@ -29,11 +36,14 @@ export function scorePathRelationExpansion(path: Readonly<PathRelation>): number
     path.plasticity_state.stability_class === "pinned"
       ? 0.1
       : 0;
+  const answerhoodBoost =
+    path.constitution.relation_kind === "answers_with" ? ANSWERS_WITH_EXPANSION_BONUS : 0;
   return clamp01(
     path.plasticity_state.strength * 0.55 +
       path.effect_vector.recall_bias * 0.25 +
       governanceBoost +
-      stabilityBoost
+      stabilityBoost +
+      answerhoodBoost
   );
 }
 
@@ -81,6 +91,51 @@ export function directionEligiblePathExpansionTargets(
 export interface DirectionEligiblePathExpansionTarget {
   readonly seedId: string;
   readonly targetId: string;
+}
+
+// P2: only the verified answer relation carries π-flood. Co-occurrence kinds (coheres_with /
+// co_recalled / shares_entity / signal_graph_ref) are topic neighbors, not answer relations, so they
+// stay π=0 and cannot demote an in-pool single_fact gold via free inflow votes.
+const ANSWER_FLOOD_RELATION_KINDS: ReadonlySet<string> = new Set(["answers_with"]);
+
+export function answersWithPathFuelEnabled(): boolean {
+  return (
+    process.env.ALAYA_RECALL_ANSWERS_WITH === "1" ||
+    process.env.ALAYA_EXP_ANSWERS_WITH === "1"
+  );
+}
+
+function isAnswerFloodRelationKind(relationKind: string): boolean {
+  return ANSWER_FLOOD_RELATION_KINDS.has(relationKind);
+}
+
+// Compositional inflow adjacency for the conformant flood: target ← {seed, π} over recall-eligible
+// answer-relation edges whose seed AND target are both in the candidate pool. Mirrors path-expansion's
+// admitPathExpansionTargets edge math (scorePathRelationExpansion · direction-eligible targets).
+export function buildPathInflowByTarget(
+  paths: readonly Readonly<PathRelation>[],
+  candidateIds: ReadonlySet<string>
+): Readonly<Record<string, PathInflowEdge[]>> {
+  if (!answersWithPathFuelEnabled()) {
+    return Object.freeze({});
+  }
+  const inflow: Record<string, PathInflowEdge[]> = {};
+  for (const path of paths) {
+    if (isPathExcludedFromRecall(path) || !isAnswerFloodRelationKind(path.constitution.relation_kind)) {
+      continue;
+    }
+    const weight = scorePathRelationExpansion(path);
+    if (weight <= 0) {
+      continue;
+    }
+    for (const target of directionEligiblePathExpansionTargets(path, candidateIds)) {
+      if (!candidateIds.has(target.targetId)) {
+        continue;
+      }
+      (inflow[target.targetId] ??= []).push({ seedObjectId: target.seedId, weight });
+    }
+  }
+  return inflow;
 }
 
 export interface PathGraphNeighbor {

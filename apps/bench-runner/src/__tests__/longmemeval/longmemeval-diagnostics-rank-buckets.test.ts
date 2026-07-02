@@ -92,7 +92,7 @@ describe("per-gold rank buckets and displaced-by attribution", () => {
       degradation_reason: null,
       recall_diagnostics_present: true,
       recall_diagnostics_keys: [],
-      provider_state: "disabled" as const,
+      provider_state: "provider_not_requested" as const,
       provider_degradation_reason: null,
       graph_expansion_plane_count_per_hop: [0, 0] as const,
       graph_expansion_plane_count_per_edge_type: {

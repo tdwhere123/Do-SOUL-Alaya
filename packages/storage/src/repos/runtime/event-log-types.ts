@@ -16,6 +16,10 @@ export interface EventLogRepo {
   queryByRunPage?(runId: string, page: EventLogPageOptions): Promise<readonly EventLogEntry[]>;
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
   queryByRunAll(runId: string): Promise<readonly EventLogEntry[]>;
+  queryNarrativeDigestPayloadsByRun(
+    runId: string
+  ): Promise<readonly Readonly<{ readonly payload_json: unknown }>[]>;
+  queryByRunAndEntityType(runId: string, entityType: string): Promise<readonly EventLogEntry[]>;
   queryConversationMessageEventsByRun(
     runId: string,
     page?: EventLogPageOptions
@@ -58,6 +62,10 @@ export interface EventLogRepo {
   queryByWorkspaceAfterEventId(workspaceId: string, lastEventId: string): Promise<readonly EventLogEntry[]>;
   queryByType(eventType: string): Promise<readonly EventLogEntry[]>;
   getLatestEventId(runId: string): Promise<string | null>;
+  getLatestMessageTimestampByRun(runId: string): Promise<string | null>;
+  getLatestUserRunMessageByRun(runId: string): Promise<EventLogEntry | null>;
+  queryByRunAndEventType(runId: string, eventType: string): Promise<readonly EventLogEntry[]>;
+  queryGovernanceLeaseEventsByRun(runId: string): Promise<readonly EventLogEntry[]>;
   getLatestWorkspaceEventId(workspaceId: string): Promise<string | null>;
 }
 

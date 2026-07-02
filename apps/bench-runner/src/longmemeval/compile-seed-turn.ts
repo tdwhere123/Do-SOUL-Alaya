@@ -78,7 +78,7 @@ async function seedOfficialCompileSignals(
   } catch (error) {
     if (isUnscoredMaterializedSeedError(error)) throw error;
     context.stats.signalsDropped += signalInputs.length;
-    context.stats.signalsDroppedByReason.materialization_error +=
+    context.stats.signalsDroppedByReason.materialization_drop +=
       signalInputs.length;
     process.stderr.write(
       `[longmemeval compile-seed] dropped ${signalInputs.length} signal(s) ` +
@@ -127,6 +127,7 @@ async function seedFallbackSignals(
     } catch (error) {
       if (isUnscoredMaterializedSeedError(error)) throw error;
       context.stats.signalsDropped += 1;
+      context.stats.signalsDroppedByReason.materialization_drop += 1;
       process.stderr.write(
         `[longmemeval compile-seed] dropped one signal during seed: ${stringifyError(error)}\n`
       );

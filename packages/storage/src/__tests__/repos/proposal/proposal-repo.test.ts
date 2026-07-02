@@ -1,6 +1,9 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  MemoryGovernanceEventType} from "@do-soul/alaya-protocol";
+import { MemoryGovernanceEventType } from "@do-soul/alaya-protocol";
 
 import {
   countProposalEvents,
@@ -10,8 +13,11 @@ import {
   createReviewEvents,
   trackedDatabases
 } from "./proposal-repo-fixture.js";
+import { initDatabase, StorageDatabase } from "../../../sqlite/db.js";
+import { SqliteProposalRepo } from "../../../repos/proposal/index.js";
 
 const databases = trackedDatabases;
+const tempDirs: string[] = [];
 
 afterEach(() => {
   for (const database of databases) {
@@ -19,7 +25,31 @@ afterEach(() => {
   }
 
   databases.clear();
+  while (tempDirs.length > 0) {
+    const directory = tempDirs.pop();
+    if (directory !== undefined) {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
 });
+
+function createTempDatabasePath(): string {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-proposal-"));
+  tempDirs.push(directory);
+  return path.join(directory, "alaya.db");
+}
+
+function createIndependentDatabase(filename: string): StorageDatabase {
+  const connection = new BetterSqlite3(filename);
+  connection.pragma("foreign_keys = ON");
+  connection.pragma("journal_mode = WAL");
+  connection.pragma("busy_timeout = 5000");
+  connection.pragma("synchronous = NORMAL");
+  connection.pragma("analysis_limit = 400");
+  const database = new StorageDatabase(filename, connection);
+  databases.add(database);
+  return database;
+}
 
 describe("SqliteProposalRepo", () => {
   it("creates and loads proposal by proposal id", async () => {
@@ -128,6 +158,179 @@ describe("SqliteProposalRepo", () => {
         evidence_refs: ["evidence-1"]
       }
     });
+  });
+
+  it("does not duplicate pending proposals when create-if-absent sees the same dossier key", async () => {
+    const { repo, database } = createRepo();
+    const first = createProposal({
+      runtime_id: "11111111-1111-4111-8111-111111111111",
+      proposal_id: "11111111-1111-4111-8111-111111111111",
+      derived_from: "mem-1",
+      dossier_ref: "inspector.strict_governance_promotion",
+      last_updated_at: "2026-03-21T00:00:00.000Z"
+    });
+    const second = createProposal({
+      runtime_id: "22222222-2222-4222-8222-222222222222",
+      proposal_id: "22222222-2222-4222-8222-222222222222",
+      derived_from: "mem-1",
+      dossier_ref: "inspector.strict_governance_promotion",
+      last_updated_at: "2026-03-21T00:01:00.000Z"
+    });
+    const dedupeKey = {
+      workspace_id: "workspace-1",
+      derived_from: "mem-1",
+      dossier_ref: "inspector.strict_governance_promotion",
+      target_object_kind: "path_relation"
+    };
+
+    const created = await repo.createProposalWithEventsIfAbsent(
+      {
+        proposal: first,
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        target_object_kind: "path_relation"
+      },
+      createCreationEvents(first),
+      dedupeKey
+    );
+    const repeated = await repo.createProposalWithEventsIfAbsent(
+      {
+        proposal: second,
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        target_object_kind: "path_relation"
+      },
+      createCreationEvents(second),
+      dedupeKey
+    );
+
+    expect(created.status).toBe("created");
+    expect(repeated.status).toBe("already_pending");
+    expect(repeated.proposal.proposal_id).toBe(first.proposal_id);
+    await expect(repo.findPending("workspace-1")).resolves.toHaveLength(1);
+    expect(countProposalEvents(database, first.proposal_id)).toBe(1);
+    expect(countProposalEvents(database, second.proposal_id)).toBe(0);
+  });
+
+  it("refreshes proposal statements and event writers after a file-backed close and reopen", async () => {
+    const database = initDatabase({ filename: createTempDatabasePath() });
+    databases.add(database);
+    const repo = new SqliteProposalRepo(database);
+    const first = createProposal({
+      runtime_id: "11111111-aaaa-4aaa-8aaa-111111111111",
+      proposal_id: "11111111-aaaa-4aaa-8aaa-111111111111",
+      derived_from: "mem-1",
+      dossier_ref: "inspector.strict_governance_promotion"
+    });
+    const second = createProposal({
+      runtime_id: "22222222-bbbb-4bbb-8bbb-222222222222",
+      proposal_id: "22222222-bbbb-4bbb-8bbb-222222222222",
+      derived_from: "mem-2",
+      last_updated_at: "2026-03-21T00:01:00.000Z"
+    });
+
+    database.close();
+    const created = await repo.createProposalWithEventsIfAbsent(
+      {
+        proposal: first,
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        target_object_kind: "path_relation"
+      },
+      createCreationEvents(first),
+      {
+        workspace_id: "workspace-1",
+        derived_from: "mem-1",
+        dossier_ref: "inspector.strict_governance_promotion",
+        target_object_kind: "path_relation"
+      }
+    );
+
+    database.close();
+    const stored = await repo.createProposalWithEvents(
+      {
+        proposal: second,
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        target_object_kind: "memory_entry"
+      },
+      createCreationEvents(second)
+    );
+
+    database.close();
+    const resolved = await repo.updatePendingResolutionWithEvents(
+      second.proposal_id,
+      "accepted",
+      "2026-03-21T00:02:00.000Z",
+      createReviewEvents(second)
+    );
+
+    expect(created.status).toBe("created");
+    expect(stored.events).toHaveLength(1);
+    expect(resolved.proposal.resolution_state).toBe("accepted");
+    expect(countProposalEvents(database, first.proposal_id)).toBe(1);
+    expect(countProposalEvents(database, second.proposal_id)).toBe(4);
+  });
+
+  it("dedupes create-if-absent across independent file-backed SQLite connections", async () => {
+    const filename = createTempDatabasePath();
+    const primaryDatabase = initDatabase({ filename });
+    databases.add(primaryDatabase);
+    const secondaryDatabase = createIndependentDatabase(filename);
+    const firstRepo = new SqliteProposalRepo(primaryDatabase);
+    const secondRepo = new SqliteProposalRepo(secondaryDatabase);
+    const first = createProposal({
+      runtime_id: "33333333-cccc-4ccc-8ccc-333333333333",
+      proposal_id: "33333333-cccc-4ccc-8ccc-333333333333",
+      derived_from: "mem-1",
+      dossier_ref: "inspector.strict_governance_promotion"
+    });
+    const second = createProposal({
+      runtime_id: "44444444-dddd-4ddd-8ddd-444444444444",
+      proposal_id: "44444444-dddd-4ddd-8ddd-444444444444",
+      derived_from: "mem-1",
+      dossier_ref: "inspector.strict_governance_promotion",
+      last_updated_at: "2026-03-21T00:01:00.000Z"
+    });
+    const dedupeKey = {
+      workspace_id: "workspace-1",
+      derived_from: "mem-1",
+      dossier_ref: "inspector.strict_governance_promotion",
+      target_object_kind: "path_relation"
+    };
+
+    const results = await Promise.all([
+      firstRepo.createProposalWithEventsIfAbsent(
+        {
+          proposal: first,
+          workspace_id: "workspace-1",
+          run_id: "run-1",
+          target_object_kind: "path_relation"
+        },
+        createCreationEvents(first),
+        dedupeKey
+      ),
+      secondRepo.createProposalWithEventsIfAbsent(
+        {
+          proposal: second,
+          workspace_id: "workspace-1",
+          run_id: "run-1",
+          target_object_kind: "path_relation"
+        },
+        createCreationEvents(second),
+        dedupeKey
+      )
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual([
+      "already_pending",
+      "created"
+    ]);
+    await expect(firstRepo.findPending("workspace-1")).resolves.toHaveLength(1);
+    expect(
+      countProposalEvents(primaryDatabase, first.proposal_id) +
+        countProposalEvents(primaryDatabase, second.proposal_id)
+    ).toBe(1);
   });
 
   it("lists all and pending proposals by workspace", async () => {

@@ -187,12 +187,8 @@ describe("compile() signal-drop count is observable", () => {
   });
 
   it("isolates per-signal materialization drops by reason and keeps healthy batch-mates", async () => {
-    // Regression for the 1963-signal whole-batch drop: when some signals of a
-    // turn fail to materialize a memory_entry (candidate_absent) or throw before
-    // memory_entry creation and are isolated per-signal (materialization_error),
-    // the turn's HEALTHY batch-mates must still seed, and each drop must be
-    // attributed by reason in the stats so candidate-absent / seed-quality is
-    // root-causable from the KPI archive — not just stderr.
+    // Each failed signal is attributed by reason without suppressing healthy
+    // siblings from the same turn.
     const daemon: CompileSeedDaemon = {
       proposeMemoryFromSignal: async () => ({
         memoryId: "memory-fallback",
@@ -202,8 +198,7 @@ describe("compile() signal-drop count is observable", () => {
         truncated: false,
         charsClipped: 0
       }),
-      // Three clean facts arrive; the daemon seeds the first, drops the second
-      // as candidate_absent, drops the third as materialization_error.
+      // The daemon returns one seeded signal plus two independent reason-coded drops.
       proposeMemoriesFromCompileSignals: async () => ({
         seeds: [
           {
@@ -217,7 +212,7 @@ describe("compile() signal-drop count is observable", () => {
         ],
         dropped: [
           { reason: "candidate_absent", detail: "triage=accepted routing=evidence archival" },
-          { reason: "materialization_error", detail: "boom" }
+          { reason: "materialization_drop", detail: "boom" }
         ]
       }),
       proposeSynthesis: async () => ({ synthesisId: null })
@@ -252,7 +247,7 @@ describe("compile() signal-drop count is observable", () => {
     expect(runner.stats.signalsDropped).toBe(2);
     expect(runner.stats.signalsDroppedByReason).toEqual({
       candidate_absent: 1,
-      materialization_error: 1
+      materialization_drop: 1
     });
     // No extraction-stage drops on this clean envelope.
     expect(runner.stats.parseDropped).toBe(0);
@@ -262,7 +257,7 @@ describe("compile() signal-drop count is observable", () => {
     const kpi = toSeedExtractionPathKpi(runner.stats);
     expect(kpi.signals_dropped_by_reason).toEqual({
       candidate_absent: 1,
-      materialization_error: 1
+      materialization_drop: 1
     });
     expect(kpi.signals_dropped).toBe(2);
   });
@@ -305,7 +300,7 @@ describe("compile() signal-drop count is observable", () => {
     expect(runner.stats.signalsDropped).toBe(0);
     expect(runner.stats.signalsDroppedByReason).toEqual({
       candidate_absent: 0,
-      materialization_error: 0
+      materialization_drop: 0
     });
   });
 
@@ -342,7 +337,7 @@ describe("compile() signal-drop count is observable", () => {
     expect(runner.stats.signalsDropped).toBe(0);
     expect(runner.stats.signalsDroppedByReason).toEqual({
       candidate_absent: 0,
-      materialization_error: 0
+      materialization_drop: 0
     });
   });
 });

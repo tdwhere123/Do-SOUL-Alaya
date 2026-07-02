@@ -7,6 +7,14 @@
  * SessionExpired surface.
  */
 
+import {
+  BoundedJsonObjectSchema,
+  ManifestationBudgetConfigRouteDataSchema,
+  createConfigRouteResponseSchema,
+  isZodValidationError,
+  unwrapStandardResponseData
+} from "@do-soul/alaya-protocol";
+
 let inspectorToken: string | null = null;
 let currentWorkspaceId: string | null = null;
 let onUnauthorized: (() => void) | null = null;
@@ -30,10 +38,39 @@ export const setUnauthorizedHandler = (handler: (() => void) | null) => {
 export interface ApiRequestOptions extends Omit<RequestInit, "body"> {
   params?: Record<string, string>;
   body?: unknown;
+  schema?: ApiSchema;
 }
 
 export interface ApiError extends Error {
   status?: number;
+}
+
+const CONFIG_PATH_PATTERNS: ReadonlyArray<{
+  readonly pattern: RegExp;
+  readonly buildSchema: (options: { readonly allowPatchAck: boolean }) => ApiSchema;
+}> = [
+  {
+    pattern: /\/config\/[^/]+\/manifestation-budget$/u,
+    buildSchema: ({ allowPatchAck }) =>
+      createConfigRouteResponseSchema(ManifestationBudgetConfigRouteDataSchema, { allowPatchAck })
+  },
+  {
+    pattern: /\/config\//u,
+    buildSchema: ({ allowPatchAck }) =>
+      createConfigRouteResponseSchema(BoundedJsonObjectSchema, { allowPatchAck })
+  }
+];
+
+interface ApiSchema<T = unknown> {
+  parse(value: unknown): T;
+}
+
+function toApiSchemaError(error: unknown): ApiError {
+  const apiError = new Error(
+    isZodValidationError(error) ? "Invalid API response shape" : error instanceof Error ? error.message : "Invalid API response shape"
+  ) as ApiError;
+  apiError.status = 502;
+  return apiError;
 }
 
 export interface ApiFetchResult<T> {
@@ -55,10 +92,24 @@ export async function apiFetchWithHeaders<T>(
   path: string,
   options: ApiRequestOptions = {}
 ): Promise<ApiFetchResult<T>> {
-  const { params, headers, body, method = "GET", ...rest } = options;
+  const { params, headers, body, method = "GET", schema, ...rest } = options;
   const url = buildApiUrl(path, params);
   const init = buildRequestInit(rest, method, headers, body);
-  return await fetchWithRetry<T>(url, init, method);
+  const result = await fetchWithRetry(url, init, method);
+  const resolvedSchema = schema ?? resolveConfigResponseSchema(url, method);
+  let payload: T;
+  if (resolvedSchema === undefined) {
+    payload = result.payload as T;
+  } else {
+    try {
+      const parsed = resolvedSchema.parse(result.payload);
+      const unwrapEnvelope = method.toUpperCase() === "GET" || method.toUpperCase() === "HEAD";
+      payload = (unwrapEnvelope ? unwrapStandardResponseData(parsed) : parsed) as T;
+    } catch (error) {
+      throw toApiSchemaError(error);
+    }
+  }
+  return { payload, headers: result.headers };
 }
 
 function buildApiUrl(path: string, params: Record<string, string> | undefined): string {
@@ -92,11 +143,11 @@ function buildRequestInit(
   };
 }
 
-async function fetchWithRetry<T>(
+async function fetchWithRetry(
   url: string,
   init: RequestInit,
   method: string
-): Promise<ApiFetchResult<T>> {
+): Promise<ApiFetchResult<unknown>> {
   const canRetry = RETRYABLE_METHODS.has(method.toUpperCase());
   const maxAttempts = canRetry ? 2 : 1;
   let lastError: unknown = null;
@@ -110,7 +161,7 @@ async function fetchWithRetry<T>(
       await sleep(200 * Math.pow(5, attempt - 1));
       continue;
     }
-    return await responsePayload<T>(attemptResult.response);
+    return await responsePayload(attemptResult.response);
   }
 
   throw lastError instanceof Error ? lastError : new Error("apiFetch exhausted retries");
@@ -137,13 +188,24 @@ function shouldRetryResponse(response: Response, attempt: number, maxAttempts: n
   return response.status >= 500 && response.status < 600 && attempt < maxAttempts;
 }
 
-async function responsePayload<T>(response: Response): Promise<ApiFetchResult<T>> {
+async function responsePayload(response: Response): Promise<ApiFetchResult<unknown>> {
   if (response.status === 401) throw unauthorizedError();
   if (!response.ok) throw await apiResponseError(response);
   return {
-    payload: await response.json() as T,
+    payload: await response.json(),
     headers: response.headers
   };
+}
+
+function resolveConfigResponseSchema(path: string, method: string): ApiSchema | undefined {
+  const apiPath = path.startsWith("http") ? new URL(path).pathname : path.startsWith("/api") ? path : `/api${path}`;
+  const allowPatchAck = method.toUpperCase() !== "GET" && method.toUpperCase() !== "HEAD";
+  for (const entry of CONFIG_PATH_PATTERNS) {
+    if (entry.pattern.test(apiPath)) {
+      return entry.buildSchema({ allowPatchAck });
+    }
+  }
+  return undefined;
 }
 
 function unauthorizedError(): ApiError {

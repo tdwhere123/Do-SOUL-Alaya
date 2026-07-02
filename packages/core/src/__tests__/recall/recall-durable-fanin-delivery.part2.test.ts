@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ControlPlaneObjectKind,
   FormationKind,
@@ -144,6 +144,8 @@ async function deliverSibling(params: {
 }
 
 describe("query/evidence-relevance guard on generic structural fan-in rescue", () => {
+  beforeEach(() => { process.env.ALAYA_RECALL_STRUCTURAL_RESERVE = "on"; });
+  afterEach(() => { delete process.env.ALAYA_RECALL_STRUCTURAL_RESERVE; });
   it("refuses an irrelevant GENERIC structural sibling (supports edge, zero relevance, not earned co_recalled)", async () => {
     // No relevance term and no earned-fan-in provenance, so the relevance guard
     // refuses the reserve slot.
@@ -163,6 +165,8 @@ describe("query/evidence-relevance guard on generic structural fan-in rescue", (
 });
 
 describe("structural reserve honors active sign-aware suppression", () => {
+  beforeEach(() => { process.env.ALAYA_RECALL_STRUCTURAL_RESERVE = "on"; });
+  afterEach(() => { delete process.env.ALAYA_RECALL_STRUCTURAL_RESERVE; });
   it("does not rescue an EARNED co_recalled-reached sibling that a high-strength supersedes negative suppresses", async () => {
     // Earned-fan-in sibling, but a supersedes negative floors it upstream of the
     // reserve, so the contradicted sibling must NOT be resurfaced.

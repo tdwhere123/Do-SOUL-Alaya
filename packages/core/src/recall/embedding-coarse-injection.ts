@@ -2,6 +2,7 @@ import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
 import type { EmbeddingWorkspaceNeighborResult } from "../embedding-recall/embedding-recall-service.js";
 import { hashMemoryContent } from "../embedding-recall/helpers.js";
 import { errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
+import { resolveHydeQueryText } from "./query-hyde.js";
 import { recordRecallDegradation } from "./diagnostics.js";
 import type {
   CoarseRecallCandidate,
@@ -86,11 +87,12 @@ async function collectEmbeddingNeighbors(
 ): Promise<Readonly<EmbeddingWorkspaceNeighborResult>> {
   const embeddingRecallService = params.dependencies.embeddingRecallService!;
   const maxNeighbors = Math.max(request.maxSupplement, request.injectionCap);
+  const embedQueryText = resolveHydeQueryText(params.queryText)!;
   if (typeof embeddingRecallService.collectWorkspaceNeighborsWithMetadata === "function") {
     return embeddingRecallService.collectWorkspaceNeighborsWithMetadata({
       workspaceId: params.workspaceId,
       runId: params.runId,
-      queryText: params.queryText!,
+      queryText: embedQueryText,
       excludeObjectIds: request.poolObjectIds,
       maxNeighbors
     });
@@ -99,7 +101,7 @@ async function collectEmbeddingNeighbors(
     hits: await embeddingRecallService.collectWorkspaceNeighbors!({
       workspaceId: params.workspaceId,
       runId: params.runId,
-      queryText: params.queryText!,
+      queryText: embedQueryText,
       excludeObjectIds: request.poolObjectIds,
       maxNeighbors
     }),

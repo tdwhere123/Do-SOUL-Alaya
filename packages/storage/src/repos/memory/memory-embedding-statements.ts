@@ -15,13 +15,10 @@ export interface MemoryEmbeddingStatements {
   readonly findByObjectIdStatement: SqliteStatement;
   readonly listByWorkspaceStatement: SqliteStatement;
   readonly findCurrentMemoryContentStatement: SqliteStatement;
-  readonly clearObjectIdFilterStatement: SqliteStatement;
-  readonly insertObjectIdFilterStatement: SqliteStatement;
   readonly listByObjectIdFilterStatement: SqliteStatement;
 }
 
 export function prepareMemoryEmbeddingStatements(db: StorageDatabase): MemoryEmbeddingStatements {
-  ensureObjectIdFilterTable(db);
   return {
     upsertStatement: db.connection.prepare(UPSERT_MEMORY_EMBEDDING_SQL),
     findByObjectIdStatement: db.connection.prepare(`
@@ -43,30 +40,17 @@ export function prepareMemoryEmbeddingStatements(db: StorageDatabase): MemoryEmb
         AND workspace_id = ?
       LIMIT 1
     `),
-    clearObjectIdFilterStatement: db.connection.prepare(`
-      DELETE FROM temp.memory_embedding_object_id_filter
-    `),
-    insertObjectIdFilterStatement: db.connection.prepare(`
-      INSERT OR IGNORE INTO temp.memory_embedding_object_id_filter (object_id)
-      VALUES (?)
-    `),
+    // json_each(?) binds the id set as one JSON-array param: no per-connection
+    // temp-table state, and it sidesteps the IN-list bind-variable ceiling.
     listByObjectIdFilterStatement: db.connection.prepare(`
       SELECT${MEMORY_EMBEDDING_SELECT_COLUMNS_QUALIFIED}
       FROM memory_embeddings
-      INNER JOIN temp.memory_embedding_object_id_filter filter_ids
-        ON filter_ids.object_id = memory_embeddings.object_id
+      INNER JOIN json_each(?) filter_ids
+        ON filter_ids.value = memory_embeddings.object_id
       WHERE workspace_id = ?
       ORDER BY memory_embeddings.object_id ASC
     `)
   };
-}
-
-function ensureObjectIdFilterTable(db: StorageDatabase): void {
-  db.connection.exec(`
-    CREATE TEMP TABLE IF NOT EXISTS memory_embedding_object_id_filter (
-      object_id TEXT PRIMARY KEY
-    ) WITHOUT ROWID
-  `);
 }
 
 const UPSERT_MEMORY_EMBEDDING_SQL = `

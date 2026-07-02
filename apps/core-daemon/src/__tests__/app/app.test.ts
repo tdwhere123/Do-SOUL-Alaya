@@ -3,12 +3,56 @@ import {
   CORRELATION_ID_HEADER,
   createApp,
   MAX_REQUEST_BODY_BYTES,
-  REQUEST_ID_HEADER
+  REQUEST_ID_HEADER,
+  type CoreDaemonLifecycleState,
+  type CoreDaemonServices
 } from "../../runtime/app.js";
 import { createRequestProtection } from "../../runtime/daemon-runtime-support.js";
 import type { AppConfigService } from "../../services/config-service.js";
 
+const testRequestProtection = {
+  allowedOrigin: "http://localhost",
+  requestToken: "test-token"
+} as const;
+
+function createProtectedTestApp(
+  services: CoreDaemonServices = {},
+  lifecycle?: CoreDaemonLifecycleState
+) {
+  return createApp(
+    {
+      ...services,
+      requestProtection: services.requestProtection ?? testRequestProtection
+    },
+    lifecycle
+  );
+}
+
+function withTestAuthHeaders(headers: Record<string, string> = {}): Record<string, string> {
+  return {
+    "x-request-token": testRequestProtection.requestToken,
+    "x-alaya-desktop": "1",
+    ...headers
+  };
+}
+
 describe("createApp", () => {
+  it("rejects unprotected routes when request protection is not configured", async () => {
+    const app = createApp();
+
+    const response = await app.request("/unknown", {
+      headers: {
+        "x-alaya-desktop": "1"
+      }
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Request protection is not configured"
+    });
+  });
+
   it("requires a timing-safe request token for protected routes", async () => {
     const app = createApp({
       requestProtection: {
@@ -158,18 +202,26 @@ describe("createApp", () => {
   it("registers typed route service bags on the Hono app", async () => {
     const patchRuntimeEmbeddingConfig = vi.fn(
       async (patch: unknown): Promise<Readonly<{
+        config_version: 1;
         embedding_enabled: boolean;
         model_id: string | null;
         provider_url: string | null;
         secret_ref: string | null;
-      }>> => patch as Readonly<{
-        embedding_enabled: boolean;
-        model_id: string | null;
-        provider_url: string | null;
-        secret_ref: string | null;
-      }>
+      }>> => ({
+        config_version: 1,
+        embedding_enabled: false,
+        model_id: null,
+        provider_url: null,
+        secret_ref: null,
+        ...(patch as {
+          embedding_enabled?: boolean;
+          model_id?: string | null;
+          provider_url?: string | null;
+          secret_ref?: string | null;
+        })
+      })
     );
-    const app = createApp({
+    const app = createProtectedTestApp({
       routes: {
         config: {
           workspaceService: { getById: vi.fn() } as any,
@@ -190,17 +242,28 @@ describe("createApp", () => {
 
     const response = await app.request("/config/runtime/embedding-supplement", {
       method: "PATCH",
-      headers: { "content-type": "application/json" },
+      headers: withTestAuthHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ embedding_enabled: true })
     });
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      data: {
+        config_version: 1,
+        embedding_enabled: true,
+        model_id: null,
+        provider_url: null,
+        secret_ref: null
+      },
+      requires_daemon_restart: true
+    });
     expect(patchRuntimeEmbeddingConfig).toHaveBeenCalledWith({ embedding_enabled: true });
   });
 
   it("rejects non-object config patch bodies before dispatching to the config service", async () => {
     const patchManifestationBudgetConfig = vi.fn(async (patch: unknown) => patch);
-    const app = createApp({
+    const app = createProtectedTestApp({
       routes: {
         config: {
           workspaceService: {
@@ -227,7 +290,7 @@ describe("createApp", () => {
 
     const response = await app.request("/workspaces/workspace-1/config/manifestation-budget", {
       method: "PATCH",
-      headers: { "content-type": "application/json" },
+      headers: withTestAuthHeaders({ "content-type": "application/json" }),
       body: JSON.stringify([])
     });
 
@@ -246,7 +309,7 @@ describe("createApp", () => {
       provider_url: null,
       secret_ref: null
     }));
-    const app = createApp({
+    const app = createProtectedTestApp({
       routes: {
         config: {
           workspaceService: { getById: vi.fn() } as any,
@@ -268,7 +331,8 @@ describe("createApp", () => {
       createChunkedJsonRequest(
         "http://localhost/config/runtime/embedding-supplement",
         "PATCH",
-        JSON.stringify({ payload: "x".repeat(MAX_REQUEST_BODY_BYTES) })
+        JSON.stringify({ payload: "x".repeat(MAX_REQUEST_BODY_BYTES) }),
+        withTestAuthHeaders()
       )
     );
 
@@ -283,7 +347,7 @@ describe("createApp", () => {
 
   it("rejects chunked oversized DELETE bodies before route dispatch", async () => {
     const deleteEdge = vi.fn(async () => undefined);
-    const app = createApp({
+    const app = createProtectedTestApp({
       routes: {
         conflictMatrix: {
           workspaceService: { getById: vi.fn() } as any,
@@ -301,7 +365,8 @@ describe("createApp", () => {
       createChunkedJsonRequest(
         "http://localhost/workspaces/ws-1/conflict-matrix-edges/edge-1",
         "DELETE",
-        JSON.stringify({ payload: "x".repeat(MAX_REQUEST_BODY_BYTES) })
+        JSON.stringify({ payload: "x".repeat(MAX_REQUEST_BODY_BYTES) }),
+        withTestAuthHeaders()
       )
     );
 
@@ -315,7 +380,7 @@ describe("createApp", () => {
 
   it("rejects unexpected small DELETE bodies before route dispatch", async () => {
     const deleteEdge = vi.fn(async () => undefined);
-    const app = createApp({
+    const app = createProtectedTestApp({
       routes: {
         conflictMatrix: {
           workspaceService: { getById: vi.fn() } as any,
@@ -333,7 +398,8 @@ describe("createApp", () => {
       createChunkedJsonRequest(
         "http://localhost/workspaces/ws-1/conflict-matrix-edges/edge-1",
         "DELETE",
-        JSON.stringify({ payload: "x" })
+        JSON.stringify({ payload: "x" }),
+        withTestAuthHeaders()
       )
     );
 
@@ -347,7 +413,7 @@ describe("createApp", () => {
 
   it("rejects streaming DELETE bodies without waiting for EOF", async () => {
     const deleteEdge = vi.fn(async () => undefined);
-    const app = createApp({
+    const app = createProtectedTestApp({
       routes: {
         conflictMatrix: {
           workspaceService: { getById: vi.fn() } as any,
@@ -366,7 +432,8 @@ describe("createApp", () => {
         createNeverEndingChunkedJsonRequest(
           "http://localhost/workspaces/ws-1/conflict-matrix-edges/edge-1",
           "DELETE",
-          JSON.stringify({ payload: "x" })
+          JSON.stringify({ payload: "x" }),
+          withTestAuthHeaders()
         )
       )
     );
@@ -381,7 +448,7 @@ describe("createApp", () => {
 
   it("treats an empty attached DELETE stream as no body and dispatches the route", async () => {
     const deleteEdge = vi.fn(async () => undefined);
-    const app = createApp({
+    const app = createProtectedTestApp({
       routes: {
         conflictMatrix: {
           workspaceService: { getById: vi.fn() } as any,
@@ -396,7 +463,11 @@ describe("createApp", () => {
     });
 
     const response = await app.request(
-      createEmptyChunkedJsonRequest("http://localhost/workspaces/ws-1/conflict-matrix-edges/edge-1", "DELETE")
+      createEmptyChunkedJsonRequest(
+        "http://localhost/workspaces/ws-1/conflict-matrix-edges/edge-1",
+        "DELETE",
+        withTestAuthHeaders()
+      )
     );
 
     expect(response.status).toBe(200);

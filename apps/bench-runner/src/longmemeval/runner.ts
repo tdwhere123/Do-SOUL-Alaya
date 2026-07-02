@@ -17,6 +17,10 @@ import type { LongMemEvalVariant } from "./dataset.js";
 import type { QaChatFn } from "./qa-chat.js";
 import { finalizeLongMemEvalRun } from "./runner-archive.js";
 import {
+  runLongMemEvalConcurrent,
+  shouldFanOutLongMemEvalWorkers
+} from "./runner-concurrency.js";
+import {
   prepareLongMemEvalRun,
   executeLongMemEvalRun
 } from "./runner-execution.js";
@@ -85,6 +89,10 @@ export interface LongMemEvalRunOptions {
   // @anchor longmemeval-qa: end-to-end QA scoring (answer-LLM + LLM-judge over
   // delivered recall). Undefined => zero LLM calls and byte-identical kpi/sidecar.
   readonly qa?: LongMemEvalQaRunOption;
+  // @anchor longmemeval-concurrency: process-backed worker count. Each worker
+  // owns one daemon process; values > 1 fan out via child CLI processes and
+  // merge shard archives into historyRoot.
+  readonly concurrency?: number;
 }
 
 export interface LongMemEvalRunResult {
@@ -136,6 +144,9 @@ export interface LongMemEvalRunResult {
 export async function runLongMemEval(
   opts: LongMemEvalRunOptions
 ): Promise<LongMemEvalRunResult> {
+  if (shouldFanOutLongMemEvalWorkers(opts)) {
+    return runLongMemEvalConcurrent(opts);
+  }
   const recallWeightOverrides = resolveBenchRecallWeightOverrides({
     cliJson: opts.weightOverridesJson,
     envJson: process.env[ALAYA_RECALL_WEIGHT_OVERRIDES_ENV]

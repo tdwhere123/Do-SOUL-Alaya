@@ -5,6 +5,7 @@ import {
   buildQaDeliveredCandidates,
   runLongMemEvalQuestion
 } from "../../longmemeval/runner-question.js";
+import { createEmptyLongMemEvalSeedDropReasons } from "../../longmemeval/seed-drop-reasons.js";
 import { buildRecallResult } from "./longmemeval-runner-fixture.js";
 
 afterEach(() => {
@@ -111,7 +112,18 @@ describe("runLongMemEvalQuestion QA delivery", () => {
       daemon,
       question,
       turnIndex: 0,
-      seedRunner: { seedTurn } as never,
+      seedRunner: {
+        seedTurn,
+        stats: {
+          extractionPath: "no_credentials_fallback",
+          cacheHits: 0,
+          llmCalls: 0,
+          offlineFallbacks: 0,
+          factsExtracted: 0,
+          signalsDropped: 0,
+          signalsDroppedByReason: createEmptyLongMemEvalSeedDropReasons()
+        }
+      } as never,
       recallOptions: { maxResults: 10, conflictAwareness: false },
       simulateReport: "none",
       embeddingMode: "disabled",

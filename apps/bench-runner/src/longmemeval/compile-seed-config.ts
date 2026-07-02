@@ -18,10 +18,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // fixture discipline used by the pinned dataset meta. The directory is
 // created lazily on the first credentialled run; it is empty (absent)
 // until then.
-export const EXTRACTION_CACHE_ROOT = resolve(
-  __dirname,
-  "../../../../docs/bench-history/datasets/longmemeval-extraction-cache"
-);
+// ALAYA_BENCH_EXTRACTION_CACHE_ROOT redirects the cache to a gitignored staging dir so a model
+// switch (e.g. deepseek re-seed) does not pollute the git-tracked baseline fixture. Unset → canonical.
+export const EXTRACTION_CACHE_ROOT = process.env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT
+  ? resolve(process.env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT)
+  : resolve(__dirname, "../../../../docs/bench-history/datasets/longmemeval-extraction-cache");
 
 const GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
 const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
@@ -62,7 +63,7 @@ export function toSeedExtractionPathKpi(
     compile_overflow_dropped: stats.compileOverflowDropped,
     signals_dropped_by_reason: {
       candidate_absent: stats.signalsDroppedByReason.candidate_absent,
-      materialization_error: stats.signalsDroppedByReason.materialization_error
+      materialization_drop: stats.signalsDroppedByReason.materialization_drop
     }
   };
 }

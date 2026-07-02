@@ -12,6 +12,7 @@ import {
   buildDistilledFact,
   buildEnrichmentIntent,
   buildEvidenceInput,
+  buildFacetTagsProjection,
   buildMemoryInput
 } from "./inputs.js";
 import { MaterializationRouterPathSideEffects } from "./path-side-effects.js";
@@ -165,7 +166,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     let memory: MemoryMaterializationCreatedObject;
     try {
       memory = await this.dependencies.memoryService.create(
-        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal))
+        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal), this.dependencies.deriveFacetTags === true)
       );
     } catch (error) {
       try {
@@ -239,16 +240,22 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     port: ReconciliationPort,
     state: ReconciledMaterializationState
   ) {
+    const incomingContent = buildDistilledFact(signal);
+    const { facet_tags: incomingFacetTags } = buildFacetTagsProjection(
+      incomingContent,
+      this.dependencies.deriveFacetTags === true
+    );
     return await port.runWithDecision(
       {
         workspaceId: signal.workspace_id,
         runId: signal.run_id,
         signalId: signal.signal_id,
-        incomingContent: buildDistilledFact(signal),
+        incomingContent,
         incomingDomainTags: signal.domain_tags,
         incomingProjectionFields: readReconciliationProjectionFields(
           buildMemoryInput(signal, [], this.enrichmentIntent(signal))
-        )
+        ),
+        ...(incomingFacetTags === undefined ? {} : { incomingFacetTags })
       },
       async (verdict) => await this.applyReconciledVerdict(signal, verdict, state)
     );
@@ -268,7 +275,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     }
     await this.preflightSignalRefFallback(signal);
     state.appendedMemory = await this.dependencies.memoryService.create(
-      buildMemoryInput(signal, [evidenceRef], this.enrichmentIntent(signal))
+      buildMemoryInput(signal, [evidenceRef], this.enrichmentIntent(signal), this.dependencies.deriveFacetTags === true)
     );
     state.createdObjects.push({
       object_kind: state.appendedMemory.object_kind,
@@ -444,6 +451,8 @@ function readReconciliationProjectionFields(
     preference_predicate: input.preference_predicate,
     preference_object: input.preference_object,
     preference_category: input.preference_category,
-    preference_polarity: input.preference_polarity
+    preference_polarity: input.preference_polarity,
+    // sourced from buildCanonicalEntitiesProjection via buildMemoryInput; refreshes UPDATE / backfills NOOP survivors.
+    canonical_entities: input.canonical_entities
   };
 }

@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import { buildRecallFusionDetails } from "../../recall/fusion-delivery-scoring.js";
+import { buildRecallFusionDetails, scoreTemporalFusion } from "../../recall/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 import type { RecallSupplementaryData } from "../../recall/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
-import { scoreTemporalEventTime } from "../../recall/temporal-fusion-scoring.js";
+import {
+  parseQueryTimeWindow,
+  scoreTemporalEventTime,
+  scoreTemporalQueryWindow
+} from "../../recall/temporal-fusion-scoring.js";
+import { classifyRecallIntent } from "../../recall/recall-query-plan.js";
 
 function emptySupplementaryData(query: string): RecallSupplementaryData {
   return {
@@ -312,5 +317,39 @@ describe("buildRecallFusionDetails preference profile lane", () => {
 
     expect(profileContribution).toBeGreaterThan(0);
     expect(plainContribution).toBe(0);
+  });
+});
+
+describe("scoreTemporalFusion window gate (ALAYA_RECALL_TEMPORAL_WINDOW)", () => {
+  afterEach(() => {
+    delete process.env.ALAYA_RECALL_TEMPORAL_WINDOW;
+  });
+
+  // Absolute-date query that classifies as single_fact, not temporal — the old intent gate would block window scoring.
+  const query = "the 2023-05-12 incident";
+  const nowIso = "2026-06-29T00:00:00.000Z";
+  const entry = createMemoryEntry({
+    event_time_start: "2023-05-12T00:00:00.000Z",
+    event_time_end: "2023-05-12T23:59:59.999Z"
+  });
+
+  it("the absolute-date query is not temporal intent yet carries a parseable window", () => {
+    const probes = compileRecallQueryProbes(query);
+    expect(classifyRecallIntent(probes)).not.toBe("temporal");
+    expect(parseQueryTimeWindow(probes, nowIso)).not.toBeNull();
+  });
+
+  it("falls back to distance-to-now recency when the flag is off", () => {
+    const probes = compileRecallQueryProbes(query);
+    expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(scoreTemporalEventTime(entry, nowIso));
+    expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(0);
+  });
+
+  it("scores by the query window for any windowed query when the flag is on", () => {
+    process.env.ALAYA_RECALL_TEMPORAL_WINDOW = "on";
+    const probes = compileRecallQueryProbes(query);
+    const window = parseQueryTimeWindow(probes, nowIso)!;
+    expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(scoreTemporalQueryWindow(entry, window));
+    expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(1);
   });
 });

@@ -18,6 +18,7 @@ import {
   RuntimeGovernanceEventType,
   WorkspaceKind,
   WorkspaceState,
+  type EventLogEntry,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 
@@ -33,13 +34,22 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 
-import { EventPublisher, PathRelationProposalService } from "@do-soul/alaya-core";
+import { EventPublisher, PathRelationProposalService, ProposalService } from "@do-soul/alaya-core";
 
 import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal-workflow.js";
 
 import { registerProposalRoutes } from "../../routes/proposals.js";
 
 const databases = new Set<StorageDatabase>();
+
+function createAuditEventLogAppend() {
+  return vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+    ...event,
+    event_id: "audit-evt-1",
+    created_at: "2026-05-18T00:00:00.000Z",
+    revision: 0
+  }));
+}
 
 function createMemoryEntry(objectId: string, workspaceId: string): MemoryEntry {
   return {
@@ -299,16 +309,18 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       findPending: vi.fn(async () => [])
     };
     const mcpMemoryToolHandler = { call: vi.fn() };
-    const createProposalWithEvents = vi.fn(async (input: { proposal: { proposal_id: string } }) => ({
+    const createProposalWithEventsIfAbsent = vi.fn(async (input: { proposal: { proposal_id: string } }) => ({
       proposal: input.proposal,
-      events: [{ event_id: "evt-1" }]
+      events: [{ event_id: "evt-1" }],
+      status: "created" as const
     }));
     const notifyEntry = vi.fn();
     registerProposalRoutes(app, {
       workspaceService,
       memoryService,
       proposalService,
-      proposalRepo: { createProposalWithEvents },
+      proposalRepo: { createProposalWithEventsIfAbsent },
+      eventLogRepo: { append: createAuditEventLogAppend() },
       runtimeNotifier: { notifyEntry },
       mcpMemoryToolHandler
     } as any);
@@ -334,14 +346,15 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     expect(body.data.requested_governance_class).toBe("strictly_governed");
     expect(body.data.target_object_id).toBe("mem-1");
 
-    expect(createProposalWithEvents).toHaveBeenCalledTimes(1);
-    const callInput = createProposalWithEvents.mock.calls[0][0] as unknown as {
+    expect(createProposalWithEventsIfAbsent).toHaveBeenCalledTimes(1);
+    const callInput = createProposalWithEventsIfAbsent.mock.calls[0][0] as unknown as {
       target_object_kind: string;
       proposed_change_summary: string;
-      proposal: { derived_from: string; resolution_state: string };
+      proposal: { derived_from: string; dossier_ref: string; resolution_state: string };
     };
     expect(callInput.target_object_kind).toBe("path_relation");
     expect(callInput.proposal.derived_from).toBe("mem-1");
+    expect(callInput.proposal.dossier_ref).toBe("inspector.strict_governance_promotion");
     expect(callInput.proposal.resolution_state).toBe("pending");
     expect(callInput.proposed_change_summary).toContain("strictly_governed");
     // The MCP propose path must NOT be used; the path_relation Proposal
@@ -349,5 +362,174 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     // PublicMemoryEntryMutableFields constraint.
     expect(mcpMemoryToolHandler.call).not.toHaveBeenCalled();
     expect(notifyEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it("dedupes a repeated promote-strictly-governed click against an existing pending proposal", async () => {
+    const app = new Hono();
+    const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
+    const memoryService = {
+      findByIdScoped: vi.fn(async () => ({ object_id: "mem-1" }))
+    };
+    const existingProposalId = "11111111-1111-4111-8111-111111111111";
+    const existingProposal = ProposalSchema.parse({
+      runtime_id: existingProposalId,
+      object_kind: ControlPlaneObjectKind.PROPOSAL,
+      task_surface_ref: null,
+      expires_at: null,
+      derived_from: "mem-1",
+      retention_policy: RetentionPolicy.SESSION_ONLY,
+      proposal_id: existingProposalId,
+      dossier_ref: null,
+      recommended_option_id: null,
+      proposal_options: [
+        {
+          option_id: `promote_strictly_governed_${existingProposalId}`,
+          option_kind: ProposalOptionKind.REQUEST_CONFIRMATION,
+          preserves_protected_constraints: true,
+          dropped_candidates: [],
+          unresolved_after_apply: [],
+          requires_confirmation: true
+        }
+      ],
+      resolution_state: ProposalResolutionState.PENDING,
+      last_updated_at: "2026-05-18T00:00:00.000Z"
+    });
+    const proposalService = {
+      findByWorkspaceId: vi.fn(async () => []),
+      findPending: vi.fn(async () => [existingProposal])
+    };
+    const createProposalWithEventsIfAbsent = vi.fn();
+    const notifyEntry = vi.fn();
+    registerProposalRoutes(app, {
+      workspaceService,
+      memoryService,
+      proposalService,
+      proposalRepo: { createProposalWithEventsIfAbsent },
+      eventLogRepo: { append: createAuditEventLogAppend() },
+      runtimeNotifier: { notifyEntry },
+      mcpMemoryToolHandler: { call: vi.fn() }
+    } as any);
+
+    const response = await app.request(
+      "/workspaces/ws-1/soul/memory/mem-1/proposals/promote-strictly-governed",
+      { method: "POST" }
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      data: {
+        proposal_id: existingProposalId,
+        status: "already_pending",
+        target_object_id: "mem-1",
+        target_object_kind: "path_relation",
+        requested_governance_class: "strictly_governed"
+      }
+    });
+    expect(proposalService.findPending).toHaveBeenCalledWith("ws-1");
+    expect(createProposalWithEventsIfAbsent).not.toHaveBeenCalled();
+    expect(notifyEntry).not.toHaveBeenCalled();
+  });
+
+  it("dedupes concurrent promote-strictly-governed clicks in storage", async () => {
+    const database = initDatabase({ filename: ":memory:" });
+    databases.add(database);
+    const proposalRepo = new SqliteProposalRepo(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const notifyEntry = vi.fn();
+    const proposalService = new ProposalService({
+      proposalRepo,
+      eventLogRepo,
+      runtimeNotifier: { notifyEntry }
+    });
+    const app = new Hono();
+    registerProposalRoutes(app, {
+      workspaceService: {
+        getById: vi.fn(async () => ({ workspace_id: "ws-1" }))
+      },
+      memoryService: {
+        findByIdScoped: vi.fn(async () => ({ object_id: "mem-1" }))
+      },
+      proposalService,
+      proposalRepo,
+      eventLogRepo,
+      runtimeNotifier: { notifyEntry },
+      mcpMemoryToolHandler: { call: vi.fn() }
+    } as any);
+
+    const [first, second] = await Promise.all([
+      app.request("/workspaces/ws-1/soul/memory/mem-1/proposals/promote-strictly-governed", {
+        method: "POST"
+      }),
+      app.request("/workspaces/ws-1/soul/memory/mem-1/proposals/promote-strictly-governed", {
+        method: "POST"
+      })
+    ]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const bodies = [await first.json(), await second.json()] as Array<{
+      readonly success: true;
+      readonly data: { readonly proposal_id: string; readonly status: string };
+    }>;
+    expect(bodies.map((body) => body.data.status).sort()).toEqual(["already_pending", "created"]);
+    expect(new Set(bodies.map((body) => body.data.proposal_id)).size).toBe(1);
+    const pending = await proposalRepo.findPending("ws-1");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.dossier_ref).toBe("inspector.strict_governance_promotion");
+    expect(notifyEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it("audits promote-strictly-governed notification failures durably", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const app = new Hono();
+    const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
+    const memoryService = {
+      findByIdScoped: vi.fn(async () => ({ object_id: "mem-1" }))
+    };
+    const proposalService = {
+      findByWorkspaceId: vi.fn(async () => []),
+      findPending: vi.fn(async () => [])
+    };
+    const createProposalWithEventsIfAbsent = vi.fn(async (input: { proposal: { proposal_id: string } }) => ({
+      proposal: input.proposal,
+      events: [{ event_id: "evt-1" }],
+      status: "created" as const
+    }));
+    const append = createAuditEventLogAppend();
+    const notifyEntry = vi.fn(async () => {
+      throw new Error("notifier unavailable");
+    });
+    registerProposalRoutes(app, {
+      workspaceService,
+      memoryService,
+      proposalService,
+      proposalRepo: { createProposalWithEventsIfAbsent },
+      eventLogRepo: { append },
+      runtimeNotifier: { notifyEntry },
+      mcpMemoryToolHandler: { call: vi.fn() }
+    } as any);
+
+    const response = await app.request(
+      "/workspaces/ws-1/soul/memory/mem-1/proposals/promote-strictly-governed",
+      { method: "POST" }
+    );
+
+    expect(response.status).toBe(200);
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED,
+        entity_type: "proposal",
+        workspace_id: "ws-1",
+        caused_by: "inspector",
+        payload_json: expect.objectContaining({
+          source: "daemon.proposals.promote_strictly_governed",
+          operation: "runtime_notify",
+          committed_event_id: "evt-1",
+          error_message: "notifier unavailable"
+        })
+      })
+    );
+    emitWarning.mockRestore();
   });
 });

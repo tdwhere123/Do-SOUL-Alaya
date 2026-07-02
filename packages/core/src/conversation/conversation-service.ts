@@ -4,7 +4,6 @@ import { GardenComputeCoordinator } from "./garden-compute-coordinator.js";
 import { rebuildConversationMessages } from "./message-history.js";
 import {
   RuntimeMode,
-  applyMessagePage,
   buildRecalledContextSection,
   queryConversationMessageEvents,
   queryRunEventLog,
@@ -60,11 +59,6 @@ export class ConversationService {
 
   public async listMessages(runId: string, page?: ConversationListPageOptions): Promise<readonly ConversationMessage[]> {
     const run = await this.requireRun(runId);
-    const pagedReader = this.dependencies.eventLogRepo.queryConversationMessageEventsByRun;
-    if (pagedReader === undefined) {
-      const messages = rebuildConversationMessages(await queryRunEventLog(this.dependencies.eventLogRepo, run.run_id));
-      return applyMessagePage(messages, page);
-    }
     const events = await queryConversationMessageEvents(this.dependencies.eventLogRepo, run.run_id, page);
     return rebuildConversationMessages(events);
   }

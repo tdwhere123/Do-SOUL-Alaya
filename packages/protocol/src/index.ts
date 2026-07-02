@@ -140,8 +140,17 @@ export * from "./runtime/node-template.js";
 export * from "./workers/auditor-ports.js";
 export * from "./shared/read-error-message.js";
 export {
+  BoundedJsonObjectSchema,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema,
   PositiveIntSchema
 } from "./shared/schema-primitives.js";
+export {
+  bindStandardConfigPatchResponse,
+  bindStandardResponse,
+  createConfigRouteResponseSchema,
+  isZodValidationError,
+  unwrapStandardResponseData
+} from "./shared/standard-response.js";
+export { ManifestationBudgetConfigRouteDataSchema } from "./soul/manifestation-budget.js";

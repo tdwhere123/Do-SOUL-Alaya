@@ -2,9 +2,11 @@ import { z } from "zod";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_EVIDENCE_ARRAY_MAX,
+  CANONICAL_ENTITIES_MAX,
   BoundedContentSchema,
   BoundedIdSchema,
   BoundedLabelSchema,
+  BoundedString,
   IsoDatetimeStringSchema,
   NonNegativeIntSchema,
   RatioSchema
@@ -140,6 +142,34 @@ export const ForgetDisposition = {
   JUDGED_USELESS: "judged_useless"
 } as const;
 
+// Answer-relevance facet axis: distinct query-intent buckets a memory can carry.
+export const FACET_VOCABULARY: readonly string[] = Object.freeze([
+  "occupation_work",
+  "education",
+  "location_place",
+  "event_activity",
+  "time_date",
+  "preference_like",
+  "possession_item",
+  "relationship_person",
+  "health",
+  "finance_money",
+  "travel",
+  "food_dining",
+  "hobby_skill",
+  "purchase",
+  "media_entertainment",
+  "life_event",
+  "communication_tool"
+]);
+
+const FacetTagSchema = z
+  .object({
+    facet: BoundedLabelSchema,
+    value: BoundedString(256).optional()
+  })
+  .strict();
+
 export const MemoryDimensionSchema = z.enum(memoryDimensionValues);
 export const SourceKindSchema = z.enum(sourceKindValues);
 export const FormationKindSchema = z.enum(formationKindValues);
@@ -184,7 +214,9 @@ const MemoryEntryProjectionMutableFieldsSchema = z.object({
   preference_predicate: BoundedLabelSchema.nullable().optional(),
   preference_object: BoundedLabelSchema.nullable().optional(),
   preference_category: BoundedLabelSchema.nullable().optional(),
-  preference_polarity: PreferencePolaritySchema.nullable().optional()
+  preference_polarity: PreferencePolaritySchema.nullable().optional(),
+  facet_tags: z.array(FacetTagSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable().optional(),
+  canonical_entities: z.array(BoundedLabelSchema).max(CANONICAL_ENTITIES_MAX).readonly().nullable().optional()
 }).strict();
 
 export const MemoryEntryMutableFieldsSchema = MemoryEntryMutableFieldsBaseSchema
@@ -241,6 +273,9 @@ export const MemoryEntrySchema = PersistentObjectEnvelopeSchema.unwrap()
     preference_object: BoundedLabelSchema.nullable().optional(),
     preference_category: BoundedLabelSchema.nullable().optional(),
     preference_polarity: PreferencePolaritySchema.nullable().optional(),
+    facet_tags: z.array(FacetTagSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable().optional(),
+    // Normalized lowercase canonical entities/subjects this memory is about (entity-graph recall fuel).
+    canonical_entities: z.array(BoundedLabelSchema).max(CANONICAL_ENTITIES_MAX).readonly().nullable().optional(),
     // invariant: optional on the wire (legacy rows + most constructors omit it),
     // but the storage layer always materializes it as null|value. Safety treats
     // undefined and null identically as "no disposition" — non-null/defined is
@@ -254,21 +289,21 @@ export const MemoryEntrySchema = PersistentObjectEnvelopeSchema.unwrap()
     const dispositionRef = value.forget_disposition_ref ?? null;
     if (disposition === "compressed" && dispositionRef === null) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["forget_disposition_ref"],
         message: "compressed forget_disposition requires forget_disposition_ref."
       });
     }
     if (disposition === "judged_useless" && dispositionRef !== null) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["forget_disposition_ref"],
         message: "judged_useless forget_disposition must not carry forget_disposition_ref."
       });
     }
     if (disposition === null && dispositionRef !== null) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["forget_disposition_ref"],
         message: "forget_disposition_ref requires forget_disposition."
       });

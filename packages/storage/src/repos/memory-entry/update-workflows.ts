@@ -54,7 +54,9 @@ const PROJECTION_UPDATE_FIELDS = [
   "preference_predicate",
   "preference_object",
   "preference_category",
-  "preference_polarity"
+  "preference_polarity",
+  "facet_tags",
+  "canonical_entities"
 ] as const satisfies readonly (keyof MemoryEntryRepoUpdateFields)[];
 
 export async function updateMemoryEntry(
@@ -147,8 +149,18 @@ export async function updateScopedMemoryEntry(
 function buildProjectionUpdateParams(fields: MemoryEntryRepoUpdateFields): readonly unknown[] {
   return PROJECTION_UPDATE_FIELDS.flatMap((fieldName) => [
     hasOwn(fields, fieldName) ? 1 : 0,
-    fields[fieldName] ?? null
+    encodeProjectionUpdateValue(fieldName, fields[fieldName])
   ]);
+}
+
+function encodeProjectionUpdateValue(
+  fieldName: (typeof PROJECTION_UPDATE_FIELDS)[number],
+  value: MemoryEntryRepoUpdateFields[(typeof PROJECTION_UPDATE_FIELDS)[number]]
+): unknown {
+  if (fieldName === "facet_tags" || fieldName === "canonical_entities") {
+    return value == null ? null : JSON.stringify(value);
+  }
+  return value ?? null;
 }
 
 function hasOwn<T extends object>(value: T, key: PropertyKey): boolean {

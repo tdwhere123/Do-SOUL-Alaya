@@ -27,6 +27,17 @@ describe("memory routes (HTTP surface narrowed)", () => {
       findByDimension: vi.fn(async () => [{ object_id: "m2" }]),
       countByDimension: vi.fn(async () => 1),
       findByScopeClass: vi.fn(async (): Promise<MemoryRouteFixture[]> => []),
+      findByScopeClassWithConflict: vi.fn(async (): Promise<MemoryRouteFixture[]> => [
+        { object_id: "m-project-conflict-1", dimension: "fact", scope_class: "project", contradiction_count: 2 },
+        { object_id: "m-project-conflict-2", dimension: "fact", scope_class: "project", contradiction_count: 1 }
+      ]),
+      countByScopeClassWithConflict: vi.fn(async () => 2),
+      findByWorkspaceIdWithConflict: vi.fn(async (): Promise<MemoryRouteFixture[]> => []),
+      countByWorkspaceIdWithConflict: vi.fn(async () => 0),
+      findByDimensionWithConflict: vi.fn(async (): Promise<MemoryRouteFixture[]> => []),
+      countByDimensionWithConflict: vi.fn(async () => 0),
+      findByScopeClassAndDimensionWithConflict: vi.fn(async (): Promise<MemoryRouteFixture[]> => []),
+      countByScopeClassAndDimensionWithConflict: vi.fn(async () => 0),
       findByRunId: vi.fn(async () => [{ object_id: "m3" }]),
       countByRunId: vi.fn(async () => 1),
       findById: vi.fn(async () => {
@@ -81,24 +92,25 @@ describe("memory routes (HTTP surface narrowed)", () => {
     expect(memoryService.countByWorkspaceId).toHaveBeenCalledWith("ws-1");
   });
 
-  it("applies authoritative scope/conflict filtering before paginating workspace memory lists", async () => {
+  it("uses SQL-backed conflict filtering for has_conflict workspace memory lists", async () => {
     const { app, memoryService } = buildApp();
-    memoryService.findByWorkspaceId.mockResolvedValue([
-      { object_id: "m-project-clear", dimension: "fact", scope_class: "project", contradiction_count: 0 },
-      { object_id: "m-project-conflict-1", dimension: "fact", scope_class: "project", contradiction_count: 2 },
-      { object_id: "m-project-conflict-2", dimension: "fact", scope_class: "project", contradiction_count: 1 }
-    ]);
+    memoryService.findByScopeClassWithConflict.mockImplementation(async (...args: unknown[]) => {
+      expect(args).toEqual(["ws-1", "project", { limit: 1, offset: 1 }]);
+      return [{ object_id: "m-project-conflict-2", dimension: "fact", scope_class: "project", contradiction_count: 1 }];
+    });
 
     const response = await app.request(
       "/workspaces/ws-1/memories?scope_class=project&has_conflict=true&limit=1&offset=1"
     );
 
     expect(response.status).toBe(200);
-    expect(memoryService.findByWorkspaceId).toHaveBeenCalledWith("ws-1", {
-      limit: 500,
-      offset: 0
+    expect(memoryService.findByScopeClassWithConflict).toHaveBeenCalledWith("ws-1", "project", {
+      limit: 1,
+      offset: 1
     });
+    expect(memoryService.countByScopeClassWithConflict).toHaveBeenCalledWith("ws-1", "project");
     expect(memoryService.findByScopeClass).not.toHaveBeenCalled();
+    expect(memoryService.findByWorkspaceId).not.toHaveBeenCalled();
     expect(response.headers.get("x-total-count")).toBe("2");
     expect(response.headers.get("x-limit")).toBe("1");
     expect(response.headers.get("x-offset")).toBe("1");

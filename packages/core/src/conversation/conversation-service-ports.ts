@@ -41,9 +41,7 @@ export interface ConversationWorkspaceRepoPort {
 }
 
 export interface ConversationEventLogRepoPort {
-  queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
-  queryByRunAll(runId: string): Promise<readonly EventLogEntry[]>;
-  queryConversationMessageEventsByRun?(
+  queryConversationMessageEventsByRun(
     runId: string,
     page?: ConversationListPageOptions
   ): Promise<readonly EventLogEntry[]>;
@@ -274,16 +272,12 @@ export async function queryConversationMessageEvents(
   runId: string,
   page: ConversationListPageOptions | undefined
 ): Promise<readonly EventLogEntry[]> {
-  const pagedReader = repo.queryConversationMessageEventsByRun;
-  if (pagedReader === undefined) {
-    return queryRunEventLog(repo, runId);
-  }
   if (page !== undefined) {
-    return await pagedReader.call(repo, runId, page);
+    return await repo.queryConversationMessageEventsByRun(runId, page);
   }
   const rows: EventLogEntry[] = [];
   for (let offset = 0; ; offset += CONVERSATION_EVENT_SCAN_PAGE_LIMIT) {
-    const pageRows = await pagedReader.call(repo, runId, {
+    const pageRows = await repo.queryConversationMessageEventsByRun(runId, {
       limit: CONVERSATION_EVENT_SCAN_PAGE_LIMIT,
       offset
     });
@@ -298,7 +292,7 @@ export async function queryRunEventLog(
   repo: ConversationEventLogRepoPort,
   runId: string
 ): Promise<readonly EventLogEntry[]> {
-  return repo.queryByRunAll(runId);
+  return queryConversationMessageEvents(repo, runId, undefined);
 }
 
 export function getErrorMessage(error: unknown): string {

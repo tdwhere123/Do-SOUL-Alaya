@@ -9,7 +9,11 @@ import {
   type FileUploadResponse,
   type SupportedMimeType
 } from "@do-soul/alaya-protocol";
-import { resolveStoredFilePath } from "@do-soul/alaya-core";
+import {
+  reportAsyncSideEffectFailure,
+  resolveStoredFilePath,
+  type AsyncSideEffectAuditEventLogPort
+} from "@do-soul/alaya-core";
 import type { FileRepo } from "@do-soul/alaya-storage";
 
 export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
@@ -104,6 +108,7 @@ export interface FileRouteServices {
     getById(runId: string): Promise<{ readonly run_id: string; readonly workspace_id: string }>;
   };
   readonly fileRepo: FileRepo;
+  readonly eventLogRepo: AsyncSideEffectAuditEventLogPort;
   readonly runtimeNotifier: {
     notifyEntry(entry: EventLogEntry): void | Promise<void>;
   };
@@ -130,13 +135,15 @@ async function uploadFile(context: Context, services: FileRouteServices): Promis
   const absolutePath = join(services.filesDirectory, record.storage_path);
   await mkdir(services.filesDirectory, { recursive: true });
   await writeFile(absolutePath, Buffer.from(await upload.file.arrayBuffer()));
+  let stored: Awaited<ReturnType<typeof persistFileRecord>>;
   try {
-    const stored = await persistFileRecord(services, record);
-    return context.json({ success: true, data: toUploadResponse(stored.record) }, 201);
+    stored = await persistFileRecord(services, record);
   } catch (error) {
     await bestEffortDelete(absolutePath);
     throw error;
   }
+  await notifyFileUploadEvent(services, stored.record, stored.event);
+  return context.json({ success: true, data: toUploadResponse(stored.record) }, 201);
 }
 
 async function readUploadRequest(context: Context): Promise<FileUploadRequest | Response> {
@@ -195,15 +202,51 @@ function buildFileRecord(
 
 async function downloadFile(context: Context, services: FileRouteServices): Promise<Response> {
   const fileId = context.req.param("id")!.trim();
+  const workspaceId = context.req.query("workspace_id")?.trim();
+  if (workspaceId === undefined || workspaceId.length === 0) {
+    return context.json({ success: false, error: "workspace_id is required" }, 400);
+  }
+  try {
+    await services.workspaceService.getById(workspaceId);
+  } catch {
+    return fileNotFound(context);
+  }
   const record = await services.fileRepo.findById(fileId);
-  if (record === null) return fileNotFound(context);
+  if (record === null || record.workspace_id !== workspaceId) {
+    return fileNotFound(context);
+  }
   const absolutePath = resolveStoredFilePath(services.filesDirectory, record.storage_path);
   if (absolutePath === null) return fileNotFound(context);
   try {
     return await sendStoredFile(context, record, absolutePath);
-  } catch {
+  } catch (error) {
+    return mapFileReadErrorToResponse(context, error);
+  }
+}
+
+function mapFileReadErrorToResponse(context: Context, error: unknown): Response {
+  const classification = classifyFileReadError(error);
+  if (classification === "not_found") {
     return fileNotFound(context);
   }
+  if (classification === "forbidden") {
+    return context.json({ success: false, error: "File access denied" }, 403);
+  }
+  return context.json({ success: false, error: "Failed to read stored file" }, 500);
+}
+
+function classifyFileReadError(error: unknown): "not_found" | "forbidden" | "storage_failure" {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return "storage_failure";
+  }
+  const code = (error as { readonly code?: unknown }).code;
+  if (code === "ENOENT") {
+    return "not_found";
+  }
+  if (code === "EACCES" || code === "EPERM") {
+    return "forbidden";
+  }
+  return "storage_failure";
 }
 
 async function sendStoredFile(context: Context, record: FileRecord, absolutePath: string): Promise<Response> {
@@ -287,12 +330,39 @@ async function persistFileRecord(
     }
   });
 
-  await services.runtimeNotifier.notifyEntry(created.event);
-
   return {
     record: created.record,
     event: created.event
   };
+}
+
+async function notifyFileUploadEvent(
+  services: FileRouteServices,
+  record: Readonly<FileRecord>,
+  event: EventLogEntry
+): Promise<void> {
+  try {
+    await services.runtimeNotifier.notifyEntry(event);
+  } catch (error) {
+    await reportAsyncSideEffectFailure(
+      {
+        source: "daemon.files.upload",
+        operation: "runtime_notify",
+        subjectType: "file",
+        subjectId: record.file_id,
+        workspaceId: record.workspace_id ?? "[unknown]",
+        runId: record.run_id,
+        causedBy: "user_action",
+        committedEventId: event.event_id,
+        severity: "error",
+        warningCode: "ALAYA_FILE_NOTIFY_FAILED",
+        warningMessage: "[FileRoute] file upload notification failed",
+        eventLogRepo: services.eventLogRepo,
+        runtimeNotifier: services.runtimeNotifier
+      },
+      error
+    );
+  }
 }
 
 function normalizeOptionalBodyString(value: UploadBodyValue | UploadBodyValue[] | undefined): string | null {

@@ -13,6 +13,7 @@ import {
   type SoulReportContextUsageResponse
 } from "@do-soul/alaya-protocol";
 import {
+  accrueAnswersWithCoRelevance,
   accrueCoherenceCoRecall,
   accrueSessionCoRecall,
   proposeMemoriesFromCompileSignals,
@@ -106,6 +107,7 @@ export function createBenchDaemonOps(
   | "proposeSynthesis"
   | "accrueSessionCoRecall"
   | "accrueCoherenceCoRecall"
+  | "accrueAnswersWithCoRelevance"
   | "shutdown"
 > {
   const seedOps = createBenchSeedOperations(input);
@@ -271,6 +273,7 @@ function createBenchSeedOperations(
   | "proposeSynthesis"
   | "accrueSessionCoRecall"
   | "accrueCoherenceCoRecall"
+  | "accrueAnswersWithCoRelevance"
 > {
   const seedInput = {
     activeRuntime: input.activeRuntime,
@@ -296,7 +299,9 @@ function createBenchSeedOperations(
     accrueSessionCoRecall: async (memberMemoryIds) =>
       await accrueSessionCoRecall(seedInput, memberMemoryIds),
     accrueCoherenceCoRecall: async (members, options) =>
-      await accrueCoherenceCoRecall(seedInput, members, options)
+      await accrueCoherenceCoRecall(seedInput, members, options),
+    accrueAnswersWithCoRelevance: async (members, options) =>
+      await accrueAnswersWithCoRelevance(seedInput, members, options)
   };
 }
 

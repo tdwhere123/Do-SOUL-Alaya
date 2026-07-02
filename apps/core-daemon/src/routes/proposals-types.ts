@@ -1,10 +1,19 @@
-import type { MemoryService, ProposalService, WorkspaceService } from "@do-soul/alaya-core";
-import type { PathRelationProposalPayload } from "@do-soul/alaya-storage";
+import type {
+  AsyncSideEffectAuditEventLogPort,
+  MemoryService,
+  ProposalService,
+  WorkspaceService
+} from "@do-soul/alaya-core";
+import type {
+  CreateProposalWithEventsIfAbsentResult,
+  PathRelationProposalPayload,
+  PendingProposalDedupeKey
+} from "@do-soul/alaya-storage";
 import type { EventLogEntry, Proposal } from "@do-soul/alaya-protocol";
 import type { McpMemoryToolHandler } from "../mcp-memory/tool-handler.js";
 
 export type PromoteStrictlyGovernedProposalRepoPort = {
-  createProposalWithEvents(
+  createProposalWithEventsIfAbsent(
     input: {
       readonly proposal: Proposal;
       readonly workspace_id: string;
@@ -14,11 +23,9 @@ export type PromoteStrictlyGovernedProposalRepoPort = {
       readonly proposed_path_relation?: PathRelationProposalPayload | null;
       readonly created_at?: string;
     },
-    events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>
-  ): Promise<Readonly<{
-    readonly proposal: Readonly<Proposal>;
-    readonly events: readonly EventLogEntry[];
-  }>>;
+    events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
+    dedupeKey: PendingProposalDedupeKey
+  ): Promise<CreateProposalWithEventsIfAbsentResult>;
 };
 
 export type PromoteStrictlyGovernedRuntimeNotifier = {
@@ -30,6 +37,7 @@ export interface ProposalRouteServices {
   readonly memoryService: Pick<MemoryService, "findByIdScoped">;
   readonly proposalService: ProposalService;
   readonly proposalRepo: PromoteStrictlyGovernedProposalRepoPort;
+  readonly eventLogRepo: AsyncSideEffectAuditEventLogPort;
   readonly runtimeNotifier: PromoteStrictlyGovernedRuntimeNotifier;
   // invariant: the Inspector loopback uses these workspace-scoped HTTP
   // wrappers around the same MCP handler that attached agents call. The

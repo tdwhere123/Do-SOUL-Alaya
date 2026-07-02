@@ -49,20 +49,20 @@ const STATUS_REJECTED = "rejected";
 
 // Minimal structural schemas. Only the fields the aggregator reads are
 // pinned; extra fields on the protocol-side payload are ignored by the
-// passthrough so future protocol additions stay forward-compatible.
+// loose schema so future protocol additions stay forward-compatible.
 const CreatedPayloadSchema = z
   .object({
     proposal_id: z.string().min(1),
     trigger_source: z.string().min(1)
   })
-  .passthrough();
+  .loose();
 
 const ReviewedPayloadSchema = z
   .object({
     proposal_id: z.string().min(1),
     status: z.string().min(1)
   })
-  .passthrough();
+  .loose();
 
 /** Minimal structural EventLog row the aggregator reads. */
 export interface EdgeProposalKpiEventRow {

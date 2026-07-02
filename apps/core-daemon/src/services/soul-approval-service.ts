@@ -21,7 +21,7 @@ export interface SoulApprovalResolution {
 }
 
 interface SoulApprovalServiceDependencies {
-  readonly eventLogRepo: Pick<EventLogRepo, "append" | "queryByRunAll">;
+  readonly eventLogRepo: Pick<EventLogRepo, "append" | "queryByEntity">;
   readonly runLookup: (runId: string) => Promise<{
     readonly run_id: string;
     readonly workspace_id: string;
@@ -55,8 +55,8 @@ async function resolveSoulApproval(
   if (run.workspace_id !== input.workspaceId) {
     throw new CoreError("NOT_FOUND", "Pending approval not found for run");
   }
-  const runEvents = await dependencies.eventLogRepo.queryByRunAll(run.run_id);
-  const approvalState = getApprovalState(runEvents, input.approvalId);
+  const approvalEvents = await dependencies.eventLogRepo.queryByEntity("approval", input.approvalId);
+  const approvalState = getApprovalState(approvalEvents, input.approvalId);
   const resolvedAt = now();
   const entry = await dependencies.eventLogRepo.append({
     event_type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED,
@@ -90,12 +90,12 @@ async function resolveSoulApproval(
   };
 }
 
-function getApprovalState(runEvents: readonly EventLogEntry[], approvalId: string): {
+function getApprovalState(approvalEvents: readonly EventLogEntry[], approvalId: string): {
   readonly approvalRequest: SoulApprovalRequestedPayload;
 } {
   let approvalRequest: SoulApprovalRequestedPayload | null = null;
 
-  for (const event of runEvents) {
+  for (const event of approvalEvents) {
     if (event.entity_type !== "approval" || event.entity_id !== approvalId) {
       continue;
     }

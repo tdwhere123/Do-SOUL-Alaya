@@ -336,6 +336,8 @@ describe("RecallService coverage-stage diagnostics", () => {
 
   it("marks the coverage selector applied and promotes a buried second-session rank when enabled", async () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "1");
+    // The buried-rank promotion asserts the flat fusion ordering (retained under the kill-switch).
+    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "1");
     const { dependencies } = createDependencies(buildTwoSessionMemories());
     const service = new RecallService(dependencies);
     const result = await service.recall({

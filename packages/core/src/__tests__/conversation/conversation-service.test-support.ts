@@ -18,8 +18,7 @@ export function createService(
       getById: vi.fn(async (workspaceId: string) => (workspaceId === workspace.workspace_id ? workspace : null))
     },
     eventLogRepo: {
-      queryByRun: vi.fn(async () => []),
-      queryByRunAll: vi.fn(async () => []),
+      queryConversationMessageEventsByRun: vi.fn(async () => []),
       append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
         event_id: "event-1",
         created_at: "2026-04-29T00:00:00.000Z",

@@ -15,23 +15,26 @@ export interface EventLogMutationStatements {
 }
 
 export interface EventLogEntityQueryStatements {
-  readonly queryByEntityStatement: SqliteStatement;
   readonly queryByEntityPagedStatement: SqliteStatement;
   readonly queryByTypeStatement: SqliteStatement;
 }
 
 export interface EventLogRunQueryStatements {
-  readonly queryByRunStatement: SqliteStatement;
   readonly queryByRunPagedStatement: SqliteStatement;
+  readonly queryByRunAndEntityTypeStatement: SqliteStatement;
   readonly queryConversationMessageEventsByRunPagedStatement: SqliteStatement;
   readonly countConversationMessageEventsByRunStatement: SqliteStatement;
   readonly queryByRunCursorStateStatement: SqliteStatement;
   readonly queryByRunAfterEventIdStatement: SqliteStatement;
   readonly getLatestEventIdStatement: SqliteStatement;
+  readonly getLatestMessageTimestampByRunStatement: SqliteStatement;
+  readonly getLatestUserRunMessageByRunStatement: SqliteStatement;
+  readonly queryByRunAndEventTypeStatement: SqliteStatement;
+  readonly queryGovernanceLeaseEventsByRunStatement: SqliteStatement;
+  readonly queryNarrativeDigestPayloadsByRunStatement: SqliteStatement;
 }
 
 export interface EventLogWorkspaceQueryStatements {
-  readonly queryByWorkspaceStatement: SqliteStatement;
   readonly queryByWorkspacePagedStatement: SqliteStatement;
   readonly queryByWorkspaceAndTypeStatement: SqliteStatement;
   readonly queryByWorkspaceAfterEventIdStatement: SqliteStatement;
@@ -82,12 +85,6 @@ const EVENT_LOG_MUTATION_SQL: SqlDefinitionMap<EventLogMutationStatements> = {
 };
 
 const EVENT_LOG_ENTITY_QUERY_SQL: SqlDefinitionMap<EventLogEntityQueryStatements> = {
-  queryByEntityStatement: `
-      SELECT${EVENT_LOG_SELECT_COLUMNS}
-      FROM event_log
-      WHERE entity_type = ? AND entity_id = ?
-      ORDER BY created_at ASC, rowid ASC
-    `,
   queryByEntityPagedStatement: `
       SELECT${EVENT_LOG_SELECT_COLUMNS}
       FROM event_log
@@ -105,18 +102,18 @@ const EVENT_LOG_ENTITY_QUERY_SQL: SqlDefinitionMap<EventLogEntityQueryStatements
 };
 
 const EVENT_LOG_RUN_QUERY_SQL: SqlDefinitionMap<EventLogRunQueryStatements> = {
-  queryByRunStatement: `
-      SELECT${EVENT_LOG_SELECT_COLUMNS}
-      FROM event_log
-      WHERE run_id = ?
-      ORDER BY created_at ASC, rowid ASC
-    `,
   queryByRunPagedStatement: `
       SELECT${EVENT_LOG_SELECT_COLUMNS}
       FROM event_log
       WHERE run_id = ?
       ORDER BY created_at ASC, rowid ASC
       LIMIT ? OFFSET ?
+    `,
+  queryByRunAndEntityTypeStatement: `
+      SELECT${EVENT_LOG_SELECT_COLUMNS}
+      FROM event_log
+      WHERE run_id = ? AND entity_type = ?
+      ORDER BY created_at ASC, rowid ASC
     `,
   queryConversationMessageEventsByRunPagedStatement: `
       SELECT${EVENT_LOG_SELECT_COLUMNS}
@@ -178,16 +175,49 @@ const EVENT_LOG_RUN_QUERY_SQL: SqlDefinitionMap<EventLogRunQueryStatements> = {
       WHERE run_id = ?
       ORDER BY created_at DESC, rowid DESC
       LIMIT 1
+    `,
+  getLatestMessageTimestampByRunStatement: `
+      SELECT created_at
+      FROM event_log
+      WHERE run_id = ?
+        AND event_type IN (?, ?, ?)
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `,
+  getLatestUserRunMessageByRunStatement: `
+      SELECT${EVENT_LOG_SELECT_COLUMNS}
+      FROM event_log
+      WHERE run_id = ?
+        AND event_type = ?
+        AND json_type(payload_json, '$.role') = 'text'
+        AND json_extract(payload_json, '$.role') = 'user'
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `,
+  queryByRunAndEventTypeStatement: `
+      SELECT${EVENT_LOG_SELECT_COLUMNS}
+      FROM event_log
+      WHERE run_id = ?
+        AND event_type = ?
+      ORDER BY created_at ASC, rowid ASC
+    `,
+  queryGovernanceLeaseEventsByRunStatement: `
+      SELECT${EVENT_LOG_SELECT_COLUMNS}
+      FROM event_log
+      WHERE run_id = ?
+        AND event_type IN (?, ?, ?)
+      ORDER BY created_at ASC, rowid ASC
+    `,
+  queryNarrativeDigestPayloadsByRunStatement: `
+      SELECT payload_json
+      FROM event_log
+      WHERE run_id = ?
+        AND json_type(payload_json, '$.digest_id') = 'text'
+      ORDER BY created_at ASC, rowid ASC
     `
 };
 
 const EVENT_LOG_WORKSPACE_QUERY_SQL: SqlDefinitionMap<EventLogWorkspaceQueryStatements> = {
-  queryByWorkspaceStatement: `
-      SELECT${EVENT_LOG_SELECT_COLUMNS}
-      FROM event_log
-      WHERE workspace_id = ?
-      ORDER BY created_at ASC, rowid ASC
-    `,
   queryByWorkspacePagedStatement: `
       SELECT${EVENT_LOG_SELECT_COLUMNS}
       FROM event_log

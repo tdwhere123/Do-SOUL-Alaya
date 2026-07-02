@@ -104,6 +104,7 @@ function createGardenSchedulerRuntime(
 ): ReturnType<typeof createGardenSchedulerRuntimeSupport> {
   return createGardenSchedulerRuntimeSupport({
     coherenceEdgeProducerPort: input.coherenceEdgeProducerPort,
+    answersWithEdgeProducerPort: input.answersWithEdgeProducerPort,
     configService: input.configService,
     consolidationExecutor: core.consolidationExecutor,
     embeddingBackfillHandler: input.embeddingBackfillHandler,

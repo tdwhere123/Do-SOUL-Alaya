@@ -1,18 +1,10 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
-import {
-  PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
-  PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
-} from "../path/path-relation-repo.js";
 import { MEMORY_ENTRY_SELECT_COLUMNS } from "./row-mapper.js";
-import type {
-  SqliteAllStatement,
-  SqliteGetStatement,
-  SqliteRunStatement
-} from "./statement-types.js";
-
-type SqliteStatement = SqliteRunStatement & SqliteGetStatement & SqliteAllStatement;
-type SqlDefinitionMap<T extends object> = { readonly [K in keyof T]: string };
-type StatementMap<T extends object> = { -readonly [K in keyof T]: SqliteStatement };
+import {
+  prepareStatementGroup,
+  type SqlDefinitionMap,
+  type SqliteStatement
+} from "./statement-group-utils.js";
 
 export interface MemoryEntryCreateStatements {
   readonly createStatement: SqliteStatement;
@@ -34,6 +26,14 @@ export interface MemoryEntryReadStatements {
   readonly countByDimensionHotStatement: SqliteStatement;
   readonly findByScopeClassHotStatement: SqliteStatement;
   readonly findByScopeClassHotPagedStatement: SqliteStatement;
+  readonly findByWorkspaceHotConflictPagedStatement: SqliteStatement;
+  readonly countByWorkspaceHotConflictStatement: SqliteStatement;
+  readonly findByDimensionHotConflictPagedStatement: SqliteStatement;
+  readonly countByDimensionHotConflictStatement: SqliteStatement;
+  readonly findByScopeClassHotConflictPagedStatement: SqliteStatement;
+  readonly countByScopeClassHotConflictStatement: SqliteStatement;
+  readonly findByScopeClassAndDimensionHotConflictPagedStatement: SqliteStatement;
+  readonly countByScopeClassAndDimensionHotConflictStatement: SqliteStatement;
 }
 
 export interface MemoryEntryUpdateStatements {
@@ -59,18 +59,13 @@ export interface MemoryEntryLifecycleStatements {
   readonly autonomousTombstoneStatement: SqliteStatement;
 }
 
-export interface MemoryEntryGarbageCollectionStatements {
-  readonly findTombstonedWithDispositionStatement: SqliteStatement;
-  readonly hardDeleteTombstonedWithDispositionStatement: SqliteStatement;
-  readonly hardDeleteTombstonedCompressedGuardedStatement: SqliteStatement;
-  readonly hardDeleteTombstonedJudgedUselessGuardedStatement: SqliteStatement;
-  readonly deleteOrphanedPathRelationsStatement: SqliteStatement;
-  readonly deleteOrphanedCoUsageCountersStatement: SqliteStatement;
-}
-
 const ACTIVE_MEMORY_FILTER_SQL = `
         AND COALESCE(retention_state, '') != 'tombstoned'
         AND COALESCE(lifecycle_state, '') != 'dormant'
+`;
+
+const CONFLICT_MEMORY_FILTER_SQL = `
+        AND contradiction_count > 0
 `;
 
 const MEMORY_ENTRY_CREATE_SQL: SqlDefinitionMap<MemoryEntryCreateStatements> = {
@@ -117,9 +112,11 @@ const MEMORY_ENTRY_CREATE_SQL: SqlDefinitionMap<MemoryEntryCreateStatements> = {
         preference_object,
         preference_category,
         preference_polarity,
+        facet_tags,
+        canonical_entities,
         forget_disposition,
         forget_disposition_ref
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
 };
 
@@ -214,7 +211,55 @@ ${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
       WHERE workspace_id = ? AND scope_class = ? AND storage_tier = 'hot'
 ${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
       LIMIT ? OFFSET ?
-    `
+    `,
+  findByWorkspaceHotConflictPagedStatement: `
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `,
+  countByWorkspaceHotConflictStatement: `
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}    `,
+  findByDimensionHotConflictPagedStatement: `
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND dimension = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `,
+  countByDimensionHotConflictStatement: `
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND dimension = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}    `,
+  findByScopeClassHotConflictPagedStatement: `
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND scope_class = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `,
+  countByScopeClassHotConflictStatement: `
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND scope_class = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}    `,
+  findByScopeClassAndDimensionHotConflictPagedStatement: `
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND scope_class = ? AND dimension = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `,
+  countByScopeClassAndDimensionHotConflictStatement: `
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND scope_class = ? AND dimension = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}    `
 };
 
 const MEMORY_ENTRY_UPDATE_SQL: SqlDefinitionMap<MemoryEntryUpdateStatements> = {
@@ -241,6 +286,8 @@ const MEMORY_ENTRY_UPDATE_SQL: SqlDefinitionMap<MemoryEntryUpdateStatements> = {
         preference_object = CASE WHEN ? THEN ? ELSE preference_object END,
         preference_category = CASE WHEN ? THEN ? ELSE preference_category END,
         preference_polarity = CASE WHEN ? THEN ? ELSE preference_polarity END,
+        facet_tags = CASE WHEN ? THEN ? ELSE facet_tags END,
+        canonical_entities = CASE WHEN ? THEN ? ELSE canonical_entities END,
         updated_at = ?
       WHERE object_id = ?
     `,
@@ -267,6 +314,8 @@ const MEMORY_ENTRY_UPDATE_SQL: SqlDefinitionMap<MemoryEntryUpdateStatements> = {
         preference_object = CASE WHEN ? THEN ? ELSE preference_object END,
         preference_category = CASE WHEN ? THEN ? ELSE preference_category END,
         preference_polarity = CASE WHEN ? THEN ? ELSE preference_polarity END,
+        facet_tags = CASE WHEN ? THEN ? ELSE facet_tags END,
+        canonical_entities = CASE WHEN ? THEN ? ELSE canonical_entities END,
         updated_at = ?
       WHERE object_id = ? AND workspace_id = ?
     `
@@ -393,64 +442,6 @@ const MEMORY_ENTRY_LIFECYCLE_SQL: SqlDefinitionMap<MemoryEntryLifecycleStatement
     `
 };
 
-const MEMORY_ENTRY_GC_SQL: SqlDefinitionMap<MemoryEntryGarbageCollectionStatements> = {
-  findTombstonedWithDispositionStatement: `
-      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
-      FROM memory_entries
-      WHERE workspace_id = ?
-        AND retention_state = 'tombstoned'
-        AND forget_disposition IS NOT NULL
-        AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
-      ORDER BY updated_at ASC, object_id ASC
-    `,
-  hardDeleteTombstonedWithDispositionStatement: `
-      DELETE FROM memory_entries
-      WHERE object_id = ?
-        AND retention_state = 'tombstoned'
-        AND forget_disposition IS NOT NULL
-        AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
-    `,
-  hardDeleteTombstonedCompressedGuardedStatement: `
-      DELETE FROM memory_entries
-      WHERE object_id = ?
-        AND retention_state = 'tombstoned'
-        AND forget_disposition = 'compressed'
-        AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
-        AND COALESCE(decay_profile, '') NOT IN ('pinned', 'hazard')
-        AND COALESCE(retention_state, '') NOT IN ('canon', 'consolidated')
-        AND EXISTS (
-          SELECT 1
-          FROM synthesis_capsules AS capsule,
-               json_each(capsule.source_memory_refs) AS member
-          WHERE capsule.object_id = memory_entries.forget_disposition_ref
-            AND COALESCE(capsule.lifecycle_state, '') != 'tombstone'
-            AND COALESCE(capsule.synthesis_status, '') != 'archived'
-            AND member.value = memory_entries.object_id
-        )
-    `,
-  hardDeleteTombstonedJudgedUselessGuardedStatement: `
-      DELETE FROM memory_entries
-      WHERE object_id = ?
-        AND retention_state = 'tombstoned'
-        AND forget_disposition = 'judged_useless'
-        AND forget_disposition_ref IS NULL
-        AND json_array_length(COALESCE(evidence_refs, '[]')) = 0
-        AND COALESCE(reinforcement_count, 0) = 0
-        AND COALESCE(decay_profile, '') NOT IN ('pinned', 'hazard')
-        AND COALESCE(retention_state, '') NOT IN ('canon', 'consolidated')
-        AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
-    `,
-  deleteOrphanedPathRelationsStatement: `
-      DELETE FROM path_relations
-      WHERE ${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} = ?
-         OR ${PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL} = ?
-    `,
-  deleteOrphanedCoUsageCountersStatement: `
-      DELETE FROM path_relation_co_usage_counters
-      WHERE low_memory_id = ? OR high_memory_id = ?
-    `
-};
-
 export function prepareMemoryEntryCreateStatements(
   db: StorageDatabase
 ): MemoryEntryCreateStatements {
@@ -477,21 +468,4 @@ export function prepareMemoryEntryLifecycleStatements(
   db: StorageDatabase
 ): MemoryEntryLifecycleStatements {
   return prepareStatementGroup(db, MEMORY_ENTRY_LIFECYCLE_SQL);
-}
-
-export function prepareMemoryEntryGarbageCollectionStatements(
-  db: StorageDatabase
-): MemoryEntryGarbageCollectionStatements {
-  return prepareStatementGroup(db, MEMORY_ENTRY_GC_SQL);
-}
-
-function prepareStatementGroup<T extends object>(
-  db: StorageDatabase,
-  sqlByName: SqlDefinitionMap<T>
-): T {
-  const statements = {} as StatementMap<T>;
-  for (const key of Object.keys(sqlByName) as Array<keyof T>) {
-    statements[key] = db.connection.prepare(sqlByName[key]);
-  }
-  return statements as T;
 }

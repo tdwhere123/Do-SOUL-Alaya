@@ -80,7 +80,9 @@ export {
   SqliteProposalRepo,
   type AcceptedMemoryUpdateInput,
   type AcceptedPathRelationGovernanceInput,
+  type CreateProposalWithEventsIfAbsentResult,
   type PathRelationProposalPayload,
+  type PendingProposalDedupeKey,
   type ProposalCreateInput,
   type ProposalResolutionEventInput,
   type ProposalRepo
@@ -214,6 +216,11 @@ export {
   type MemoryEmbeddingRecord,
   type MemoryEmbeddingMetadata,
   type MemoryEmbeddingRepo
+} from "./repos/memory/index.js";
+export {
+  SqliteMemoryHqRepo,
+  type MemoryHqRecord,
+  type MemoryHqRepo
 } from "./repos/memory/index.js";
 export {
   SqliteFileRepo,

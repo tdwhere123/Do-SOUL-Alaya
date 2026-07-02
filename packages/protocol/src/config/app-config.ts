@@ -40,7 +40,7 @@ export const EnvironmentVariablesSchema = z
     for (const key of Object.keys(value)) {
       if (key.trim().length === 0) {
         context.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: [key],
           message: "Environment variable names must not be blank."
         });
@@ -154,7 +154,7 @@ const RuntimeSecretRefSchema = z
     }
 
     context.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: "custom",
       message: 'secret_ref must use "env:NAME", "file:/path", or "keychain:service:account".'
     });
   });

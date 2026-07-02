@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { buildRecallPolicy as buildRecallPolicyCore } from "@do-soul/alaya-core";
 import {
-  ControlPlaneObjectKind,
-  RetentionPolicy,
   type MemorySearchResult,
   type RecallBudgetState,
   type RecallCandidate,
@@ -16,11 +15,6 @@ export function buildBenchDiagnosticRecallPolicy(
   conflictAwareness = true
 ): RecallPolicy {
   const maxResults = Math.max(maxResultsInput, 1);
-  const coarseCandidateLimit = Math.min(Math.max(maxResults * 10, maxResults), 1000);
-  const keywordCandidateLimit = Math.min(
-    Math.max(coarseCandidateLimit, maxResults * 10, 1),
-    1000
-  );
   // Diagnostic-only delivery token budget. Default 2000 = production口径; a wide
   // override lets a probe deliver the full ranked pool so gold-rank can tell
   // in-pool-ranked-low from absent-from-pool. No fusion-weight change.
@@ -46,44 +40,21 @@ export function buildBenchDiagnosticRecallPolicy(
     rawInjectionFloor <= 1
       ? rawInjectionFloor
       : null;
-  return {
-    runtime_id: randomUUID(),
-    object_kind: ControlPlaneObjectKind.RECALL_POLICY,
-    task_surface_ref: taskSurfaceId,
-    expires_at: null,
-    derived_from: null,
-    retention_policy: RetentionPolicy.SESSION_ONLY,
-    coarse_filter: {
-      deterministic_match: {
-        scope_filter: null,
-        dimension_filter: null,
-        domain_tag_filter: null
-      },
-      precomputed_rank: {
-        max_candidates: coarseCandidateLimit,
-        min_activation_score: null
-      },
-      semantic_supplement: {
-        enabled: true,
-        max_supplement: keywordCandidateLimit,
-        embedding_enabled: true,
-        ...(embeddingInjectionCap === null
-          ? {}
-          : { injection_cap: embeddingInjectionCap }),
-        ...(embeddingInjectionFloor === null
-          ? {}
-          : { injection_similarity_floor: embeddingInjectionFloor })
-      }
+  return buildRecallPolicyCore({
+    runtimeId: randomUUID(),
+    taskSurfaceId,
+    maxResults,
+    filters: {
+      scopeFilter: null,
+      dimensionFilter: null,
+      domainTagFilter: null
     },
-    fine_assessment: {
-      budgets: {
-        max_total_tokens: maxTotalTokens,
-        max_entries: maxResults,
-        per_dimension_limits: null
-      },
-      conflict_awareness: conflictAwareness
-    }
-  };
+    conflictAwareness,
+    maxTotalTokens,
+    coarseFloor: Number(process.env.ALAYA_RECALL_COARSE_FLOOR) || 0,
+    embeddingInjectionCap,
+    embeddingInjectionSimilarityFloor: embeddingInjectionFloor
+  });
 }
 
 export function buildBenchMemorySearchResult(

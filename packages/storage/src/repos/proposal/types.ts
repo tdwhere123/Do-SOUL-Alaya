@@ -34,6 +34,19 @@ export interface ProposalCreateInput {
   readonly source_delivery_ids?: readonly string[] | null;
 }
 
+export interface PendingProposalDedupeKey {
+  readonly workspace_id: string;
+  readonly derived_from: string;
+  readonly dossier_ref: string;
+  readonly target_object_kind: string;
+}
+
+export type CreateProposalWithEventsIfAbsentResult = Readonly<{
+  readonly proposal: Readonly<Proposal>;
+  readonly events: readonly EventLogEntry[];
+  readonly status: "created" | "already_pending";
+}>;
+
 export interface PathRelationProposalPayload {
   readonly target_anchor: PathRelation["anchors"]["target_anchor"];
   readonly constitution: PathRelation["constitution"];
@@ -171,6 +184,12 @@ export interface ProposalRepo {
     readonly proposal: Readonly<Proposal>;
     readonly events: readonly EventLogEntry[];
   }>>;
+  createProposalWithEventsIfAbsent(
+    input: ProposalCreateInput,
+    events: readonly ProposalCreationEventInput[],
+    dedupeKey: PendingProposalDedupeKey,
+    options?: CreateProposalWithEventsOptions
+  ): Promise<CreateProposalWithEventsIfAbsentResult>;
   findById(proposalId: string): Promise<Readonly<Proposal> | null>;
   findScopedById(proposalId: string): Promise<Readonly<ScopedProposal> | null>;
   findByWorkspaceId(

@@ -81,6 +81,8 @@ type CreateCoreDaemonAppInput = Readonly<{
   conversationService: RouteField<"runs", "conversationService">;
   runHotStateService: RouteField<"runs", "runHotStateService">;
   eventLogRepo: RouteField<"runs", "eventLogRepo"> &
+    RouteField<"files", "eventLogRepo"> &
+    RouteField<"proposals", "eventLogRepo"> &
     RouteField<"recallUtilization", "eventLogRepo"> &
     E2eEventLogInputPort;
   governanceLeaseService: RouteField<"runs", "governanceLeaseService"> &
@@ -304,6 +306,7 @@ function createGovernanceRouteServices(input: CreateCoreDaemonAppInput) {
       memoryService: input.memoryService,
       proposalService: input.proposalService,
       proposalRepo: input.proposalRepo,
+      eventLogRepo: input.eventLogRepo,
       runtimeNotifier: input.runtimeNotifier,
       mcpMemoryToolHandler: input.mcpMemoryToolHandler
     },
@@ -315,6 +318,7 @@ function createGovernanceRouteServices(input: CreateCoreDaemonAppInput) {
       workspaceService: input.workspaceService,
       runService: input.runService,
       fileRepo: input.fileRepo,
+      eventLogRepo: input.eventLogRepo,
       runtimeNotifier: input.runtimeNotifier,
       filesDirectory: input.filesDirectory
     },
@@ -384,7 +388,9 @@ function createOptionalRouteServices(input: CreateCoreDaemonAppInput) {
 }
 
 export function shouldEnableE2eEventTriggers(env: NodeJS.ProcessEnv): boolean {
-  return env.NODE_ENV !== "production" && env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS === "1";
+  const nodeEnv = env.NODE_ENV?.trim().toLowerCase();
+  const isTestOrE2e = nodeEnv === "test" || nodeEnv === "e2e";
+  return isTestOrE2e && env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS === "1";
 }
 
 function createE2eEventLogRepo(eventLogRepo: E2eEventLogInputPort): E2eEventLogRepo {

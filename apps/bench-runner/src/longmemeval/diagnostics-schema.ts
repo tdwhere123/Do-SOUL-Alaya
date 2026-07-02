@@ -32,6 +32,21 @@ const DeliveryStageActionSchema = z.enum([
   "displaced"
 ]);
 
+export const LongMemEvalMissTaxonomySchema = z.enum([
+  "candidate_absent",
+  "materialization_drop",
+  "budget_drop",
+  "delivery_order_drop",
+  "evaluation_or_gold_issue"
+]);
+
+const LongMemEvalSeedDropReasonsSchema = z
+  .object({
+    candidate_absent: z.number().int().nonnegative(),
+    materialization_drop: z.number().int().nonnegative()
+  })
+  .readonly();
+
 const GraphExpansionPlaneCountPerHopSchema = z
   .tuple([
     z.number().int().nonnegative(),
@@ -100,6 +115,7 @@ export const LongMemEvalGoldDiagnosticSchema = z
     plane_first_admitted: z.string().nullable(),
     plane_winning_admission: z.string().nullable(),
     source_planes: z.array(z.string()).readonly(),
+    miss_taxonomy: LongMemEvalMissTaxonomySchema.nullable().default(null),
     lexical_rank: z.number().nullable(),
     structural_score: z.number().nullable(),
     score_factors: DiagnosticScoreFactorsSchema.nullable(),
@@ -148,6 +164,8 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     hit_at_5: z.boolean(),
     hit_at_10: z.boolean(),
     miss_classification: LongMemEvalMissClassificationSchema,
+    miss_taxonomy: LongMemEvalMissTaxonomySchema.nullable().default(null),
+    seed_drop_reasons: LongMemEvalSeedDropReasonsSchema.optional(),
     degradation_reason: z.string().nullable(),
     recall_diagnostics_present: z.boolean(),
     recall_diagnostics_keys: z.array(z.string()).readonly(),

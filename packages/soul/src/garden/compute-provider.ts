@@ -124,6 +124,7 @@ export const OFFICIAL_API_SYSTEM_PROMPT = [
   'When a synthesis signal cites existing evidence or memories by ID, include "evidence_refs" and "source_memory_refs" arrays.',
   'When a signal has an event or valid-time fact, include optional "temporal_projection" with "projection_schema_version":1, ISO "event_time_start"/"event_time_end", ISO "valid_from"/"valid_to", "time_precision", and "time_source".',
   'When a signal is a durable preference, include optional "preference_profile" with "projection_schema_version":1, "subject", "predicate", "object", "category", and "polarity".',
+  'Include "canonical_entities": an array of at most 3 lowercase canonical names for the entities or subjects the distilled_fact is about, resolving pronouns and aliases so the SAME real-world entity always yields the SAME string across turns.',
   "Resolve every pronoun, relative date, and reference in distilled_fact to its absolute form using the turn text.",
   "Preserve every concrete detail (names, numbers, dates, places) that appears in the turn.",
   "Do not invent facts and do not summarize away detail; split compound statements into separate signals.",
@@ -140,6 +141,9 @@ function buildOfficialApiRawPayload(
     ...(draft.distilled_fact === undefined ? {} : { distilled_fact: draft.distilled_fact }),
     ...(draft.temporal_projection === undefined ? {} : { temporal_projection: draft.temporal_projection }),
     ...(draft.preference_profile === undefined ? {} : { preference_profile: draft.preference_profile }),
+    ...(draft.canonical_entities === undefined || draft.canonical_entities.length === 0
+      ? {}
+      : { canonical_entities: draft.canonical_entities }),
     provider_kind: providerKind,
     extraction_reason: draft.reason ?? "official_api",
     turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, draft.matched_text),
@@ -249,6 +253,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         domain_tags: [],
         confidence,
         evidence_refs: draft.evidence_refs,
+        ...(draft.canonical_entities === undefined ? {} : { canonical_entities: draft.canonical_entities }),
         source_memory_refs: draft.source_memory_refs,
         raw_payload: buildSchemaGroundedRawPayload({
           signalKind: draft.signal_kind,

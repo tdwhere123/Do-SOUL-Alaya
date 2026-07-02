@@ -140,7 +140,7 @@ describe("inspector routes", () => {
     });
     const missingResponse = await missingApp.request("/");
     expect(missingResponse.status).toBe(503);
-    expect(await missingResponse.json()).toEqual({ error: "frontend_bundle_missing" });
+    expect(await missingResponse.json()).toEqual({ error: "not_found" });
   });
 
   // Inspector forwards proposal review calls to the daemon's

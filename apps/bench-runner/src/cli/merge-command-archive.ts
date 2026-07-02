@@ -51,6 +51,7 @@ export interface WrittenMergedLongMemEvalArchive {
   readonly merged: KpiPayload;
   readonly slug: string;
   readonly kpiPath: string;
+  readonly diagnosticsPath: string | null;
 }
 
 export async function writeMergedLongMemEvalArchive(input: {
@@ -82,7 +83,12 @@ export async function writeMergedLongMemEvalArchive(input: {
   const entry = await writeEntry(layout, "public", slug, prepared.merged, archive.report, archive.findings, {
     sidecars: archive.sidecars
   });
-  return { merged: prepared.merged, slug, kpiPath: entry.kpiPath };
+  return {
+    merged: prepared.merged,
+    slug,
+    kpiPath: entry.kpiPath,
+    diagnosticsPath: entry.sidecarPaths[LONGMEMEVAL_DIAGNOSTICS_FILENAME] ?? null
+  };
 }
 
 async function readShardDiagnostics(

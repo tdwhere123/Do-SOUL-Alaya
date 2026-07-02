@@ -123,20 +123,16 @@ export interface CompileSeedExtractionStats {
    */
   signalsDropped: number;
   /**
-   * Per-reason breakdown of signals lost AT THE MATERIALIZATION SEAM (the
-   * proposeMemoriesFromCompileSignals path), so a candidate-absent seed-quality
-   * miss is root-causable from the archive instead of only stderr:
-   *   - candidate_absent: received + triaged but the router produced no
-   *     memory_entry (evidence_only / deferred) — an expected sub-threshold
-   *     outcome, the signal-quality hole the bench must surface.
-   *   - materialization_error: the signal THREW before materializing a
-   *     memory_entry. Isolated per-signal so one bad pre-materialization signal
-   *     never drops its batch-mates — the fix for the 1963-signal whole-batch
-   *     swallow.
-   * A post-materialization accept/review failure is not a drop; it aborts the
-   * bench so a recallable memory cannot be omitted from the seed sidecar.
-   * These are a SUBSET of signalsDropped (the parse / compile-overflow drops
-   * happen earlier, before this seam, and are NOT counted here).
+   * Per-reason breakdown of losses inside proposeMemoriesFromCompileSignals:
+   *   - candidate_absent: the router accepts and triages a signal but produces
+   *     no memory_entry (for example evidence_only / deferred).
+   *   - materialization_drop: the signal throws before materializing a
+   *     memory_entry.
+   * Healthy siblings from the same turn continue independently. A
+   * post-materialization accept/review failure is not a drop; it aborts the
+   * bench so a recallable memory cannot disappear from the seed sidecar.
+   * These counts are a subset of signalsDropped; parse and compile-overflow
+   * drops happen earlier and are excluded here.
    */
   signalsDroppedByReason: Record<CompileSeedDropReason, number>;
   /**
@@ -202,7 +198,7 @@ export interface SeedExtractionPathKpi {
    * Materialization-seam drops by reason (a SUBSET of signals_dropped) so the
    * archive discloses WHY a seeded fact never became a durable memory_entry:
    *   - candidate_absent: routed to evidence_only / deferred (no memory_entry).
-   *   - materialization_error: the signal threw before memory_entry creation
+   *   - materialization_drop: the signal threw before memory_entry creation
    *     and was isolated per-signal.
    * Post-materialization accept/review failures fail the bench closed instead
    * of entering this ledger.
@@ -211,7 +207,7 @@ export interface SeedExtractionPathKpi {
    */
   readonly signals_dropped_by_reason: {
     readonly candidate_absent: number;
-    readonly materialization_error: number;
+    readonly materialization_drop: number;
   };
 }
 
@@ -224,7 +220,7 @@ export interface CompileSeedDaemon {
    * source = garden_compile. Used for the credentialled compile path.
    *
    * Returns the materialized seeds AND a per-signal pre-memory-entry drop
-   * ledger (candidate_absent / materialization_error). Per-signal failure
+   * ledger (candidate_absent / materialization_drop). Per-signal failure
    * isolation lives in the daemon implementation — one bad pre-materialization
    * signal never drops its batch-mates. Post-materialization accept failures
    * throw and abort scoring.

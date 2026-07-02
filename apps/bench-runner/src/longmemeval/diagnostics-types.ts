@@ -1,21 +1,20 @@
 import {
+  BenchEmbeddingProviderStateSchema,
   DiagnosticActiveConstraintResultSchema,
   DiagnosticRecallResultSchema,
   LongMemEvalGoldDiagnosticSchema,
+  LongMemEvalMissTaxonomySchema,
   LongMemEvalQuestionDiagnosticSchema
 } from "./diagnostics-schema.js";
 import type { BenchCommitResolution } from "../shared/version.js";
 import type { z } from "zod";
 
-export type BenchEmbeddingProviderState =
-  | "provider_returned"
-  | "provider_pending"
-  | "provider_failed"
-  | "provider_not_requested"
-  | "unknown";
-
 // @anchor diagnostics-schema: the persisted shape of these records is owned
 // by diagnostics-schema.ts; these aliases keep one source of truth.
+export type BenchEmbeddingProviderState = z.infer<
+  typeof BenchEmbeddingProviderStateSchema
+>;
+
 export type DiagnosticRecallResult = z.infer<typeof DiagnosticRecallResultSchema>;
 
 export type DiagnosticActiveConstraintResult = z.infer<
@@ -44,6 +43,16 @@ export type LongMemEvalGoldDiagnostic = z.infer<
 export type LongMemEvalQuestionDiagnostic = z.infer<
   typeof LongMemEvalQuestionDiagnosticSchema
 >;
+
+export type LongMemEvalMissTaxonomy = z.infer<
+  typeof LongMemEvalMissTaxonomySchema
+>;
+
+export type LongMemEvalMissTaxonomySummary = Readonly<
+  Record<LongMemEvalMissTaxonomy, number>
+>;
+
+export type LongMemEvalMissTaxonomyDistribution = LongMemEvalMissTaxonomySummary;
 
 export interface ProviderStateSummary {
   readonly total: number;
@@ -141,6 +150,7 @@ export interface LongMemEvalRecallEvidenceSummary {
     readonly first_admitted: Readonly<Record<string, number>>;
     readonly winning_admission: Readonly<Record<string, number>>;
   }>;
+  readonly miss_taxonomy_distribution: LongMemEvalMissTaxonomyDistribution;
   readonly gold_source_channel_counts: Readonly<Record<string, number>>;
   readonly gold_source_plane_counts: Readonly<Record<string, number>>;
 }
@@ -170,7 +180,7 @@ export interface LongMemEvalDiagnosticsSidecar {
     readonly compile_overflow_dropped: number;
     readonly signals_dropped_by_reason: {
       readonly candidate_absent: number;
-      readonly materialization_error: number;
+      readonly materialization_drop: number;
     };
   };
   readonly report_usage?: LongMemEvalReportUsageSummary;
@@ -179,6 +189,7 @@ export interface LongMemEvalDiagnosticsSidecar {
   readonly scored_recall_evidence?: LongMemEvalRecallEvidenceSummary;
   readonly embedding_vector_cache?: LongMemEvalEmbeddingVectorCacheSummary;
   readonly query_embedding_cache?: LongMemEvalQueryEmbeddingCacheSummary;
+  readonly miss_taxonomy_summary?: LongMemEvalMissTaxonomySummary;
   readonly provider_state_summary: ProviderStateSummary;
   readonly questions: readonly LongMemEvalQuestionDiagnostic[];
 }
@@ -208,6 +219,7 @@ export interface LongMemEvalCompactDiagnosticsSidecar {
   readonly scored_recall_evidence?: LongMemEvalRecallEvidenceSummary;
   readonly embedding_vector_cache?: LongMemEvalEmbeddingVectorCacheSummary;
   readonly query_embedding_cache?: LongMemEvalQueryEmbeddingCacheSummary;
+  readonly miss_taxonomy_summary?: LongMemEvalMissTaxonomySummary;
 }
 
 export interface NarrowRecallDiagnostics {

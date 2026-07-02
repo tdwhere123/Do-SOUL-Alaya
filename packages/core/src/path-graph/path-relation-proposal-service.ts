@@ -23,6 +23,7 @@ import {
   type SubmitCandidateInput
 } from "./path-relation-proposal-materialization.js";
 export {
+  ANSWERS_WITH_SEED_PROFILE,
   AUTO_BUILD_GOVERNANCE_CEILING,
   COHERES_WITH_SEED_PROFILE,
   CO_RECALLED_SEED_PROFILE,
@@ -167,7 +168,8 @@ export class PathRelationProposalService {
         why: input.why ?? [
           `${input.relationKind} candidate submitted by producer`
         ],
-        runId: input.runId ?? null
+        runId: input.runId ?? null,
+        contentScore: input.contentScore
       });
     } catch (err) {
       // invariant: distinguish a post-commit propagation error from a true mint

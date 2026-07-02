@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { WorkspaceRunEventType, GreenGovernanceEventType, type EventLogEntry } from "@do-soul/alaya-protocol";
+import { WorkspaceRunEventType, GreenGovernanceEventType, RunMessageAppendedPayloadSchema, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { SessionOverrideService } from "../../governance/session-override-service.js";
 import type { TestMock } from "../shared/mock-types.js";
 
@@ -187,12 +187,12 @@ describe("SessionOverrideService", () => {
   it("clearRun invalidates one run cache and lets deleted EventLog truth win", async () => {
     const appendedEvents: EventLogEntry[] = [];
     const deletedRuns = new Set<string>();
-    const queryByRunAll = vi.fn(async (runId: string) => {
+    const queryByRunAndEntityType = vi.fn(async (runId: string) => {
       if (deletedRuns.has(runId)) {
         return [];
       }
 
-      return appendedEvents.filter((entry) => entry.run_id === runId);
+      return appendedEvents.filter((entry) => entry.run_id === runId && entry.entity_type === "session_override");
     });
     const eventLogRepo = {
       append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
@@ -201,8 +201,8 @@ describe("SessionOverrideService", () => {
         return entry;
       }),
       queryByEntity: vi.fn(async () => []),
-      queryByRun: queryByRunAll,
-      queryByRunAll
+      queryByRunAndEntityType,
+      getLatestUserRunMessageByRun: vi.fn(async () => null)
     };
     const service = new SessionOverrideService({
       now: () => "2026-03-24T00:00:00.000Z",
@@ -226,11 +226,11 @@ describe("SessionOverrideService", () => {
 
     service.clearRun("run-1");
     deletedRuns.add("run-1");
-    const queryCountBeforeLookup = queryByRunAll.mock.calls.length;
+    const queryCountBeforeLookup = queryByRunAndEntityType.mock.calls.length;
 
     await expect(service.getActiveFor("run-1")).resolves.toEqual([]);
-    expect(queryByRunAll).toHaveBeenCalledTimes(queryCountBeforeLookup + 1);
-    expect(queryByRunAll).toHaveBeenLastCalledWith("run-1");
+    expect(queryByRunAndEntityType).toHaveBeenCalledTimes(queryCountBeforeLookup + 1);
+    expect(queryByRunAndEntityType).toHaveBeenLastCalledWith("run-1", "session_override");
     await expect(service.getActiveFor("run-2")).resolves.toHaveLength(1);
   });
 
@@ -270,7 +270,7 @@ describe("SessionOverrideService", () => {
 
   it("rehydrates legacy applied events that predate derived_from persistence", async () => {
     const eventLogRepo = createEventLogRepo({
-      queryByRunAll: vi.fn(async () => [
+      queryByRunAndEntityType: vi.fn(async () => [
         createEventLogEntry({
           event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
           entity_type: "session_override",
@@ -308,13 +308,13 @@ describe("SessionOverrideService", () => {
 
   it("fails closed instead of dropping overrides when EventLog rehydrate read fails", async () => {
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
-    const queryByRunAll = vi.fn(async () => {
+    const queryByRunAndEntityType = vi.fn(async () => {
       throw new Error("event log read failed");
     });
     const service = new SessionOverrideService({
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
-      eventLogRepo: createEventLogRepo({ queryByRunAll }),
+      eventLogRepo: createEventLogRepo({ queryByRunAndEntityType }),
       runLookup: createRunLookup()
     });
 
@@ -322,7 +322,7 @@ describe("SessionOverrideService", () => {
       code: "CONFLICT",
       subCode: "CONCURRENT_MODIFICATION"
     });
-    expect(queryByRunAll).toHaveBeenCalledWith("run-1");
+    expect(queryByRunAndEntityType).toHaveBeenCalledWith("run-1", "session_override");
     expect(emitWarning).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ code: "ALAYA_SESSION_OVERRIDE_REHYDRATE_FAILED" })
@@ -336,7 +336,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
       eventLogRepo: createEventLogRepo({
-        queryByRunAll: vi.fn(async () => await queryDeferred.promise)
+        queryByRunAndEntityType: vi.fn(async () => await queryDeferred.promise)
       }),
       runLookup: createRunLookup()
     });
@@ -385,7 +385,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({
-        queryByRunAll: vi.fn(async () => [
+        getLatestUserRunMessageByRun: vi.fn(async () =>
           createEventLogEntry({
             event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
             entity_type: "message",
@@ -400,7 +400,7 @@ describe("SessionOverrideService", () => {
               message_id: "msg_user_1"
             }
           })
-        ])
+        )
       }),
       runLookup: createRunLookup()
     });
@@ -437,13 +437,15 @@ describe("SessionOverrideService", () => {
 
 function createEventLogRepo(overrides: Partial<{
   append: TestMock;
-  queryByRun: TestMock;
-  queryByRunAll: TestMock;
+  queryByRunAndEntityType: TestMock;
+  getLatestUserRunMessageByRun: TestMock;
 }> = {}) {
   const appendedEvents: EventLogEntry[] = [];
-  const queryByRunAll =
-    overrides.queryByRunAll ??
-    vi.fn(async (runId: string) => appendedEvents.filter((entry) => entry.run_id === runId));
+  const queryByRunAndEntityType =
+    overrides.queryByRunAndEntityType ??
+    vi.fn(async (runId: string, entityType: string) =>
+      appendedEvents.filter((entry) => entry.run_id === runId && entry.entity_type === entityType)
+    );
 
   return {
     append:
@@ -454,8 +456,22 @@ function createEventLogRepo(overrides: Partial<{
         return entry;
       }),
     queryByEntity: vi.fn(async () => []),
-    queryByRun: overrides.queryByRun ?? queryByRunAll,
-    queryByRunAll
+    queryByRunAndEntityType,
+    getLatestUserRunMessageByRun:
+      overrides.getLatestUserRunMessageByRun ??
+      vi.fn(async (runId: string) => {
+        for (let index = appendedEvents.length - 1; index >= 0; index -= 1) {
+          const event = appendedEvents[index];
+          if (event.run_id !== runId || event.event_type !== WorkspaceRunEventType.RUN_MESSAGE_APPENDED) {
+            continue;
+          }
+          const parsed = RunMessageAppendedPayloadSchema.safeParse(event.payload_json);
+          if (parsed.success && parsed.data.role === "user") {
+            return event;
+          }
+        }
+        return null;
+      })
   };
 }
 

@@ -267,6 +267,15 @@ export interface RecallServiceEmbeddingRecallPort {
     readonly excludeObjectIds: readonly string[];
     readonly maxNeighbors: number;
   }): Promise<Readonly<EmbeddingWorkspaceNeighborResult>>;
+  // Re-rank path: cosine(query, stored-vector) for candidates ALREADY in the pool —
+  // the inverse of injection (which excludes pooled ids). Lets embedding lift a
+  // buried-but-pooled gold above its lexical topic-neighbor.
+  scorePoolCandidates?(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string;
+    readonly objectIds: readonly string[];
+  }): Promise<ReadonlyMap<string, number>>;
 }
 
 export interface RecallServiceDependencies {

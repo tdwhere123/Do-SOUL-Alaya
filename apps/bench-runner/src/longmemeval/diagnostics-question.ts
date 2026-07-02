@@ -1,3 +1,7 @@
+import {
+  classifyGoldMissTaxonomy,
+  classifyQuestionMissTaxonomy
+} from "./diagnostics-miss-taxonomy.js";
 import type {
   DiagnosticActiveConstraintResult,
   DiagnosticRecallResult,
@@ -7,6 +11,10 @@ import type {
   NarrowRecallDiagnostics,
   ProviderStateSummary
 } from "./diagnostics-types.js";
+import {
+  hasLongMemEvalSeedDropReasons,
+  type LongMemEvalSeedDropReasons
+} from "./seed-drop-reasons.js";
 import {
   buildObjectIdentityKey,
   createEmptyGraphExpansionPlaneCountPerEdgeType,
@@ -35,6 +43,7 @@ export function buildQuestionDiagnostic(input: {
   readonly recallResult: unknown;
   readonly embeddingMode: "disabled" | "env";
   readonly roundIndex?: number;
+  readonly seedDropReasons?: LongMemEvalSeedDropReasons;
 }): LongMemEvalQuestionDiagnostic {
   const diagnostics = readRecallDiagnostics(input.recallResult, input.embeddingMode);
   const deliveredResults = normalizeDeliveredResults(
@@ -74,6 +83,17 @@ export function buildQuestionDiagnostic(input: {
       diagnostics !== null,
       input.isAbstention === true
     ),
+    miss_taxonomy: classifyQuestionMissTaxonomy({
+      hitAt5: input.hitAt5,
+      goldMemoryIds: input.goldMemoryIds,
+      gold,
+      diagnosticsAvailable: diagnostics !== null,
+      isAbstention: input.isAbstention === true,
+      seedDropReasons: input.seedDropReasons
+    }),
+    ...(hasLongMemEvalSeedDropReasons(input.seedDropReasons)
+      ? { seed_drop_reasons: input.seedDropReasons }
+      : {}),
     degradation_reason: input.degradationReason,
     recall_diagnostics_present: diagnostics !== null,
     recall_diagnostics_keys: diagnostics?.keys ?? [],
@@ -108,6 +128,7 @@ function buildGoldDiagnostics(input: {
     const candidate = diagnostics?.candidatesByObjectIdentity.get(
       buildObjectIdentityKey("memory_entry", objectId)
     );
+    const anyObjectCandidate = diagnostics?.candidatesByObjectId.get(objectId);
     const candidateStatus =
       deliveredRank !== null
         ? "delivered"
@@ -134,6 +155,12 @@ function buildGoldDiagnostics(input: {
       plane_first_admitted: candidate?.planeFirstAdmitted ?? null,
       plane_winning_admission: candidate?.planeWinningAdmission ?? null,
       source_planes: candidate?.sourcePlanes ?? [],
+      miss_taxonomy: classifyGoldMissTaxonomy({
+        deliveredRank,
+        candidate,
+        anyObjectCandidate,
+        diagnosticsAvailable: diagnostics !== null
+      }),
       lexical_rank: candidate?.lexicalRank ?? null,
       structural_score: candidate?.structuralScore ?? null,
       score_factors: candidate?.scoreFactors ?? null,

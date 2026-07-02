@@ -124,6 +124,7 @@ async function runLongMemEvalQuestionInWorkspace(
     input.daemon.runEdgePlanePassIfConfigured()
   );
   await runCoherenceEdgesIfEnabled(input, workspace, seedState.coherenceMembers);
+  await runAnswersWithEdgesIfEnabled(input, workspace, seedState.coherenceMembers);
   const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(
     seedState.sidecar,
     seedState.answerSessionSet
@@ -149,6 +150,13 @@ async function runLongMemEvalQuestionInWorkspace(
     embeddingWarmup,
     queryEmbeddingWarmup
   });
+}
+
+export function isAnswersWithEdgesEnabled(): boolean {
+  return (
+    process.env.ALAYA_RECALL_ANSWERS_WITH === "1" ||
+    process.env.ALAYA_EXP_ANSWERS_WITH === "1"
+  );
 }
 
 async function buildTimedQuestionResult(input: {
@@ -219,6 +227,30 @@ async function runCoherenceEdgesIfEnabled(
   console.error(
     `[coherence-edges] q=${input.question.question_id} ` +
       `coherent=${summary.coherentPairs} kept=${summary.keptPairs} ` +
+      `minted=${summary.minted}`
+  );
+}
+
+async function runAnswersWithEdgesIfEnabled(
+  input: LongMemEvalQuestionRunInput,
+  workspace: Awaited<ReturnType<BenchDaemonHandle["attachWorkspace"]>>,
+  members: readonly { readonly memoryId: string; readonly sessionId: string }[]
+): Promise<void> {
+  // BAR/CAP/XSESSION remain the existing EXP* names while gate names migrate.
+  if (
+    input.embeddingMode !== "env" ||
+    !isAnswersWithEdgesEnabled()
+  ) {
+    return;
+  }
+  const summary = await workspace.accrueAnswersWithCoRelevance(members, {
+    bar: Number(process.env.ALAYA_EXP_ANSWERS_WITH_BAR ?? "3"),
+    capPerNode: Number(process.env.ALAYA_EXP_ANSWERS_WITH_CAP ?? "3"),
+    crossSessionOnly: process.env.ALAYA_EXP_ANSWERS_WITH_XSESSION !== "0"
+  });
+  console.error(
+    `[answers-with-edges] q=${input.question.question_id} ` +
+      `co_relevant=${summary.coRelevantPairs} kept=${summary.keptPairs} ` +
       `minted=${summary.minted}`
   );
 }

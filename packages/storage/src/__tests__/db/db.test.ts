@@ -75,6 +75,45 @@ describe("initDatabase PRAGMA hardening", () => {
   });
 });
 
+describe("StorageDatabase reopen cache handling", () => {
+  const directories: string[] = [];
+  const databases: ReturnType<typeof initDatabase>[] = [];
+
+  afterEach(() => {
+    while (databases.length > 0) {
+      databases.pop()?.close();
+    }
+    while (directories.length > 0) {
+      const directory = directories.pop();
+      if (directory !== undefined) {
+        cleanupTempDirectory(directory);
+      }
+    }
+  });
+
+  it("closes a cache-evicted database when reopening into a full file-backed cache", () => {
+    const closedContext = createTempDatabasePath();
+    directories.push(closedContext.directory);
+    const closedDatabase = initDatabase({ filename: closedContext.filename });
+    databases.push(closedDatabase);
+    closedDatabase.close();
+
+    const cachedDatabases = Array.from({ length: 32 }, () => {
+      const context = createTempDatabasePath();
+      directories.push(context.directory);
+      const database = initDatabase({ filename: context.filename });
+      databases.push(database);
+      return database;
+    });
+    const oldestCachedDatabase = cachedDatabases[0];
+
+    closedDatabase.reopenIfClosed();
+
+    expect(closedDatabase.isClosed()).toBe(false);
+    expect(oldestCachedDatabase.isClosed()).toBe(true);
+  });
+});
+
 describe("initDatabase forward-version guard", () => {
   let context: TempContext;
 
@@ -182,6 +221,139 @@ describe("initDatabase migration runner", () => {
         knownMaxVersion: migrationFiles.at(-1)?.version ?? 0,
         schemaOk: true
       });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("repairs duplicate pending strict-governance proposals before adding the dedupe index", () => {
+    const migrationFiles = readMigrationInventory().files;
+    const seedFiles = migrationFiles.filter((file) => file.version < 100);
+    expect(seedFiles.length).toBeGreaterThan(0);
+    const seed = new BetterSqlite3(context.filename);
+    try {
+      seed.pragma("foreign_keys = ON");
+      seed.exec(`
+        CREATE TABLE schema_version (
+          version INTEGER PRIMARY KEY,
+          applied_at TEXT NOT NULL
+        )
+      `);
+      const markApplied = seed.prepare(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)"
+      );
+      for (const file of seedFiles) {
+        seed.transaction(() => {
+          seed.exec(file.sql);
+          markApplied.run(file.version, `2026-06-14T00:00:${String(file.version).padStart(2, "0")}.000Z`);
+        })();
+      }
+
+      const insertProposal = seed.prepare(`
+        INSERT INTO proposals (
+          runtime_id,
+          object_kind,
+          proposal_id,
+          derived_from,
+          retention_policy,
+          dossier_ref,
+          recommended_option_id,
+          proposal_options,
+          resolution_state,
+          last_updated_at,
+          workspace_id,
+          run_id,
+          target_object_kind,
+          proposed_change_summary,
+          created_at
+        ) VALUES (?, 'proposal', ?, ?, 'session_only', ?, 'option-1', '[]', ?, ?, ?, 'run-1', ?, '', ?)
+      `);
+      insertProposal.run(
+        "runtime-oldest",
+        "proposal-oldest",
+        "memory-1",
+        "inspector.strict_governance_promotion",
+        "pending",
+        "2026-03-21T00:00:00.000Z",
+        "workspace-1",
+        "path_relation",
+        "2026-03-21T00:00:00.000Z"
+      );
+      insertProposal.run(
+        "runtime-duplicate",
+        "proposal-duplicate",
+        "memory-1",
+        "inspector.strict_governance_promotion",
+        "pending",
+        "2026-03-21T00:01:00.000Z",
+        "workspace-1",
+        "path_relation",
+        "2026-03-21T00:01:00.000Z"
+      );
+      insertProposal.run(
+        "runtime-other-memory",
+        "proposal-other-memory",
+        "memory-2",
+        "inspector.strict_governance_promotion",
+        "pending",
+        "2026-03-21T00:02:00.000Z",
+        "workspace-1",
+        "path_relation",
+        "2026-03-21T00:02:00.000Z"
+      );
+    } finally {
+      seed.close();
+    }
+
+    const database = initDatabase({ filename: context.filename });
+    try {
+      const rows = database.connection.prepare(`
+        SELECT proposal_id, resolution_state, reviewer_identity
+        FROM proposals
+        WHERE workspace_id = 'workspace-1'
+          AND dossier_ref = 'inspector.strict_governance_promotion'
+          AND target_object_kind = 'path_relation'
+        ORDER BY proposal_id ASC
+      `).all() as ReadonlyArray<{
+        readonly proposal_id: string;
+        readonly resolution_state: string;
+        readonly reviewer_identity: string | null;
+      }>;
+      const pendingCount = database.connection.prepare(`
+        SELECT COUNT(*) AS count
+        FROM proposals
+        WHERE workspace_id = 'workspace-1'
+          AND derived_from = 'memory-1'
+          AND dossier_ref = 'inspector.strict_governance_promotion'
+          AND target_object_kind = 'path_relation'
+          AND resolution_state = 'pending'
+      `).get() as { readonly count: number };
+      const indexRow = database.connection.prepare(`
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'index'
+          AND name = 'idx_proposals_pending_strict_governance_unique'
+      `).get() as { readonly name: string } | undefined;
+
+      expect(rows).toEqual([
+        {
+          proposal_id: "proposal-duplicate",
+          resolution_state: "rejected",
+          reviewer_identity: "migration.strict_governance_dedupe"
+        },
+        {
+          proposal_id: "proposal-oldest",
+          resolution_state: "pending",
+          reviewer_identity: null
+        },
+        {
+          proposal_id: "proposal-other-memory",
+          resolution_state: "pending",
+          reviewer_identity: null
+        }
+      ]);
+      expect(pendingCount.count).toBe(1);
+      expect(indexRow?.name).toBe("idx_proposals_pending_strict_governance_unique");
     } finally {
       database.close();
     }

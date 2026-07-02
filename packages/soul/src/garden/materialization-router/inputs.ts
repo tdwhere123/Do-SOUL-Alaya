@@ -1,23 +1,13 @@
 import {
   EvidenceHealthState,
-  MemoryDimension,
-  ScopeClass,
-  SourceKind,
   StorageTier,
   type CandidateMemorySignal,
-  type ClaimKind,
   type EnforcementLevel as EnforcementLevelValue,
   type EvidenceCapsule,
   type EvidenceHealthState as EvidenceHealthStateValue,
-  type EvidenceKind as EvidenceKindValue,
-  type FormationKind,
-  type MemoryDimension as MemoryDimensionValue,
-  type OriginTier,
-  type PrecedenceBasis as PrecedenceBasisValue,
-  type ScopeClass as ScopeClassValue,
-  type SourceKind as SourceKindValue,
-  type SynthesisType
+  type EvidenceKind as EvidenceKindValue
 } from "@do-soul/alaya-protocol";
+import { deriveFacetsFromText } from "../../shared/facet-keywords.js";
 import {
   type ClaimMaterializationInput,
   type EvidenceMaterializationInput,
@@ -27,6 +17,16 @@ import {
 } from "./contracts.js";
 import { SIGNAL_REF_SEED_SPECS } from "./signal-ref-seeds.js";
 import { appendSummarySuffix, buildDistilledFact, buildSignalSummary, buildTopicKey } from "./distilled-fact.js";
+import {
+  pickPrecedenceBasis,
+  toClaimKind,
+  toFormationKind,
+  toMemoryDimension,
+  toOriginTier,
+  toScopeClass,
+  toSourceKind,
+  toSynthesisType
+} from "./input-conversions.js";
 import { readMemoryTemporalProjectionPayload } from "./temporal-projection.js";
 import { readMemoryPreferenceProfilePayload } from "./preference-projection.js";
 
@@ -236,10 +236,12 @@ function buildSignalPhysicalAnchor(
 export function buildMemoryInput(
   signal: CandidateMemorySignal,
   evidenceRefs: readonly string[],
-  enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"]
+  enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"],
+  deriveFacetTags = false
 ): MemoryMaterializationInput {
   const temporalProjection = readMemoryTemporalProjectionPayload(signal.raw_payload);
   const preferenceProfile = readMemoryPreferenceProfilePayload(signal.raw_payload);
+  const content = buildDistilledFact(signal);
   return {
     created_by: signal.source,
     dimension: toMemoryDimension(signal.object_kind),
@@ -250,7 +252,7 @@ export function buildMemoryInput(
     // Raw evidence lives in EvidenceCapsule.gist / .excerpt and is reached
     // via evidence_refs + soul.open_pointer. see buildDistilledFact for
     // caller-provided distilled_fact vs rule-based fallback.
-    content: buildDistilledFact(signal),
+    content,
     domain_tags: signal.domain_tags,
     evidence_refs: evidenceRefs,
     workspace_id: signal.workspace_id,
@@ -259,8 +261,60 @@ export function buildMemoryInput(
     storage_tier: StorageTier.HOT,
     ...temporalProjection,
     ...preferenceProfile,
+    ...buildFacetTagsProjection(content, deriveFacetTags),
+    ...buildCanonicalEntitiesProjection(signal),
     ...(enqueueEnrichment === undefined ? {} : { enqueueEnrichment })
   };
+}
+
+const MAX_CANONICAL_ENTITIES = 3;
+
+// Threads the signal's canonical_entities (answer-selective recall key) onto the
+// materialized memory_entry. Prefers the first-class signal field; falls back to
+// the raw_payload echo so the bench seed path (which round-trips raw_payload, not
+// the first-class field) persists it too. Empty → omit (byte-identical write).
+function buildCanonicalEntitiesProjection(
+  signal: CandidateMemorySignal
+): Partial<Pick<MemoryMaterializationInput, "canonical_entities">> {
+  const firstClass = signal.canonical_entities ?? [];
+  const source = firstClass.length > 0 ? firstClass : readRawCanonicalEntities(signal.raw_payload);
+  const entities = normalizeCanonicalEntities(source);
+  return entities.length === 0 ? {} : { canonical_entities: entities };
+}
+
+function readRawCanonicalEntities(rawPayload: CandidateMemorySignal["raw_payload"]): readonly string[] {
+  const value = rawPayload.canonical_entities;
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function normalizeCanonicalEntities(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized.length === 0 || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    output.push(normalized);
+    if (output.length >= MAX_CANONICAL_ENTITIES) {
+      break;
+    }
+  }
+  return output;
+}
+
+// Off → no facet_tags key (byte-identical to flat write); on → deterministic
+// content-derived tags aligned to the read-side query facets via the same vocabulary.
+export function buildFacetTagsProjection(
+  content: string,
+  deriveFacetTags: boolean
+): Partial<Pick<MemoryMaterializationInput, "facet_tags">> {
+  if (!deriveFacetTags) {
+    return {};
+  }
+  const facets = deriveFacetsFromText(content);
+  return facets.length === 0 ? {} : { facet_tags: facets.map((facet) => ({ facet })) };
 }
 
 // invariant: the enrich_pending no-drop intent carried into a memory-creating
@@ -300,37 +354,6 @@ export function buildClaimInput(
   };
 }
 
-// invariant: producer-side rule mirrors the canonical helper
-// `derivePrecedenceBasis` in packages/core/src/governance/claim-service.ts. Priority
-// (highest wins): user_override > authority > recency > evidence_strength.
-// Garden cannot import from packages/core (invariant §6), so the rule is
-// duplicated here with the cross-file anchor below; both producers stay
-// in lockstep through identical truth-table tests.
-// see also: packages/core/src/governance/claim-service.ts derivePrecedenceBasis
-function pickPrecedenceBasis(
-  signal: CandidateMemorySignal,
-  enforcementLevel: EnforcementLevelValue
-): PrecedenceBasisValue {
-  if (signal.source === "user_seed" || hasUserOverrideMarker(signal)) {
-    return "user_override";
-  }
-  if (enforcementLevel === "strict") {
-    return "authority";
-  }
-  if (hasSupersedeIntent(signal)) {
-    return "recency";
-  }
-  return "evidence_strength";
-}
-
-function hasUserOverrideMarker(signal: CandidateMemorySignal): boolean {
-  return signal.raw_payload.user_override === true;
-}
-
-function hasSupersedeIntent(signal: CandidateMemorySignal): boolean {
-  return signal.supersedes_refs.some((ref) => ref.trim().length > 0);
-}
-
 export function buildSynthesisInput(
   signal: CandidateMemorySignal,
   evidenceRefs: readonly string[]
@@ -363,108 +386,4 @@ function uniqueNonEmptyStrings(values: readonly string[]): readonly string[] {
     output.push(normalized);
   }
   return output;
-}
-
-function toScopeClass(scopeHint: string | null): ScopeClassValue {
-  switch (scopeHint) {
-    case ScopeClass.GLOBAL_CORE:
-      return ScopeClass.GLOBAL_CORE;
-    case ScopeClass.GLOBAL_DOMAIN:
-      return ScopeClass.GLOBAL_DOMAIN;
-    case ScopeClass.PROJECT:
-    default:
-      return ScopeClass.PROJECT;
-  }
-}
-
-function toMemoryDimension(objectKind: string): MemoryDimensionValue {
-  switch (objectKind) {
-    case MemoryDimension.PREFERENCE:
-      return MemoryDimension.PREFERENCE;
-    case MemoryDimension.CONSTRAINT:
-      return MemoryDimension.CONSTRAINT;
-    case MemoryDimension.DECISION:
-      return MemoryDimension.DECISION;
-    case MemoryDimension.PROCEDURE:
-      return MemoryDimension.PROCEDURE;
-    case MemoryDimension.HAZARD:
-      return MemoryDimension.HAZARD;
-    case MemoryDimension.GLOSSARY:
-      return MemoryDimension.GLOSSARY;
-    case MemoryDimension.EPISODE:
-      return MemoryDimension.EPISODE;
-    default:
-      return MemoryDimension.FACT;
-  }
-}
-
-function toSourceKind(source: CandidateMemorySignal["source"]): SourceKindValue {
-  switch (source) {
-    case "user_seed":
-      return SourceKind.SEED;
-    case "import":
-      return SourceKind.IMPORT;
-    case "model_tool":
-    case "garden_compile":
-    default:
-      return SourceKind.COMPILER;
-  }
-}
-
-function toFormationKind(signal: CandidateMemorySignal): FormationKind {
-  switch (signal.source) {
-    case "user_seed":
-      return "explicit";
-    case "import":
-      return "imported";
-    case "model_tool":
-      // model_tool signals carrying source_memory_refs build on top of
-      // existing memories (a derivation); plain LLM emissions without
-      // such refs are inferences.
-      return signal.source_memory_refs.length > 0 ? "derived" : "inferred";
-    case "garden_compile":
-    default:
-      return "extracted";
-  }
-}
-
-function toClaimKind(objectKind: string): ClaimKind {
-  switch (objectKind) {
-    case "preference":
-      return "preference";
-    case "decision":
-      return "decision";
-    case "procedure":
-      return "procedure";
-    case "hazard":
-      return "hazard";
-    case "factual_policy":
-      return "factual_policy";
-    case "exception":
-      return "exception";
-    case "glossary":
-      return "glossary";
-    case "episode":
-      return "episode";
-    case "constraint":
-    default:
-      return "constraint";
-  }
-}
-
-function toOriginTier(source: CandidateMemorySignal["source"]): OriginTier {
-  switch (source) {
-    case "user_seed":
-      return "seed";
-    case "import":
-      return "imported";
-    case "model_tool":
-    case "garden_compile":
-    default:
-      return "compiler_extracted";
-  }
-}
-
-function toSynthesisType(): SynthesisType {
-  return "cross_evidence";
 }

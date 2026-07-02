@@ -8,6 +8,10 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { EventPublisherInput } from "../runtime/event-publisher.js";
 import type { AnchorValidationFailure } from "./path-relation-proposal-service-shared.js";
+import {
+  contentDrivenStrength,
+  pathRelContentStrengthEnabled
+} from "./path-content-strength.js";
 
 export interface SubmitCandidateInput {
   readonly workspaceId: string;
@@ -21,6 +25,9 @@ export interface SubmitCandidateInput {
   readonly recallBiasMagnitude?: number;
   readonly why?: readonly string[];
   readonly runId?: string | null;
+  // [0,1] content-classification score from the producer; only consumed when
+  // ALAYA_PATHREL_CONTENT_STRENGTH is on, else the flat constants stand.
+  readonly contentScore?: number;
 }
 
 export interface MaterializePathRelationInput {
@@ -35,6 +42,40 @@ export interface MaterializePathRelationInput {
   readonly supportEventsCount: number;
   readonly why: readonly string[];
   readonly runId: string | null;
+  readonly contentScore?: number;
+}
+
+type DerivedEffect = Readonly<{
+  readonly strength: number;
+  readonly recallBias: number;
+  readonly salience: number;
+}>;
+
+// Off / no score / unbanded kind / non-positive bias → the flat seed constants
+// (byte-identical). On + positive bias + banded kind → strength + recall_bias
+// magnitude (sign preserved) move with the content score; salience tracks too.
+function resolveContentDrivenEffect(params: MaterializePathRelationInput): DerivedEffect {
+  const flat: DerivedEffect = {
+    strength: params.initialStrength,
+    recallBias: params.recallBias,
+    salience: 0.5
+  };
+  if (
+    !pathRelContentStrengthEnabled() ||
+    params.contentScore === undefined ||
+    params.recallBias <= 0
+  ) {
+    return flat;
+  }
+  const derived = contentDrivenStrength(params.relationKind, params.contentScore);
+  if (derived === undefined) {
+    return flat;
+  }
+  return {
+    strength: derived.strength,
+    recallBias: derived.recallBiasMagnitude,
+    salience: derived.strength
+  };
 }
 
 export function buildPathRelation(
@@ -42,6 +83,7 @@ export function buildPathRelation(
   pathId: string,
   occurredAt: string
 ): PathRelation {
+  const derived = resolveContentDrivenEffect(params);
   return PathRelationSchema.parse({
     path_id: pathId,
     workspace_id: params.workspaceId,
@@ -54,14 +96,14 @@ export function buildPathRelation(
       why_this_relation_exists: params.why
     },
     effect_vector: {
-      salience: 0.5,
-      recall_bias: params.recallBias,
+      salience: derived.salience,
+      recall_bias: derived.recallBias,
       verification_bias: 0,
       unfinishedness_bias: 0,
       default_manifestation_preference: "lens_entry"
     },
     plasticity_state: {
-      strength: params.initialStrength,
+      strength: derived.strength,
       direction_bias: "bidirectional_asymmetric",
       stability_class: "stable",
       support_events_count: params.supportEventsCount,

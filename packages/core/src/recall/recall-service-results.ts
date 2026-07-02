@@ -8,6 +8,18 @@ import type {
 
 import type { RecallAdmissionPlane, RecallDiagnostics, RecallPathExpansionSourceDiagnostic } from "./recall-service-diagnostics.js";
 
+// One compositional inflow edge: seed object flooding the target with learned-edge weight π.
+export interface PathInflowEdge {
+  readonly seedObjectId: string;
+  readonly weight: number;
+}
+
+export interface EvidenceSupportVector {
+  readonly source_kind: "evidence_ref";
+  readonly source_id: string;
+  readonly support: number;
+}
+
 export interface RecallResult {
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
@@ -39,6 +51,9 @@ export interface RecallSupplementaryData {
   // produced from the FTS rank of the strongest entity surface that hit.
   readonly entitySeedScores: Readonly<Record<string, number>>;
   readonly pathExpansionScores: Readonly<Record<string, number>>;
+  // Conformant-only: target object_id → inflow edges (seed object_id + learned-edge weight π),
+  // the adjacency the path FLOOD sums over. Absent (flag-off) → no flood.
+  readonly pathInflowByTarget?: Readonly<Record<string, readonly PathInflowEdge[]>>;
   // Active sign-aware suppression deltas keyed by target memory id. A positive
   // value is subtracted from that memory's fused recall score before final
   // ranking, demoting targets that a reinforced negative path (recall_bias < 0)
@@ -48,6 +63,7 @@ export interface RecallSupplementaryData {
   readonly pathSuppressionScores: Readonly<Record<string, number>>;
   readonly embeddingSimilarityScores: Readonly<Record<string, number>>;
   readonly graphSupportCounts: Readonly<Record<string, number>>;
+  readonly evidenceSupportVectorsByMemoryId?: Readonly<Record<string, readonly EvidenceSupportVector[]>>;
   readonly budgetPenaltyFactor: number;
   readonly plasticityFactors: Readonly<Record<string, number>>;
   readonly graphAndPathColdScore: number;
@@ -70,6 +86,8 @@ export interface RecallSupplementaryData {
   // memoryGovernanceCeiling / clampManifestationByGovernance,
   // recall-candidate-builder.ts buildRecallCandidate.
   readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
+  // Facets the query intends; the facet_overlap fusion stream scores candidates by how many they carry.
+  readonly querySoughtFacets?: readonly string[];
 }
 
 export interface CoarseRecallCandidate {

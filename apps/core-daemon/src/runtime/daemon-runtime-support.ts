@@ -33,6 +33,7 @@ import {
   type GlobalMemoryRecallCacheRepo,
   type GlobalMemoryRepo,
   type MemoryEmbeddingRepo,
+  type MemoryHqRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createWarnLogger } from "./daemon-runtime-helpers.js";
@@ -230,6 +231,15 @@ export function resolveEdgeClassifyWiring(
 
 export function createOptionalMemoryEmbeddingRepo(database: StorageDatabase): MemoryEmbeddingRepo | null {
   const RepoCtor = StorageModule.SqliteMemoryEmbeddingRepo;
+  if (typeof RepoCtor !== "function" || !supportsPreparedSqliteConnection(database)) {
+    return null;
+  }
+
+  return new RepoCtor(database);
+}
+
+export function createOptionalMemoryHqRepo(database: StorageDatabase): MemoryHqRepo | null {
+  const RepoCtor = StorageModule.SqliteMemoryHqRepo;
   if (typeof RepoCtor !== "function" || !supportsPreparedSqliteConnection(database)) {
     return null;
   }

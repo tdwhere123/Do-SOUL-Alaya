@@ -93,4 +93,64 @@ describe("apiFetch", () => {
       status: 403
     });
   });
+
+  it("unwraps success envelopes for GET config routes", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, data: { enabled: true } }), { status: 200 })
+    );
+
+    await expect(apiFetch<{ enabled: boolean }>("/config/:workspaceId/soul")).resolves.toEqual({
+      enabled: true
+    });
+  });
+
+  it("retains PATCH config envelope fields including requires_daemon_restart", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: { embedding_enabled: true },
+          requires_daemon_restart: true
+        }),
+        { status: 200 }
+      )
+    );
+
+    await expect(
+      apiFetch<{ success: true; data: { embedding_enabled: boolean }; requires_daemon_restart?: boolean }>(
+        "/config/runtime/embedding-supplement",
+        { method: "PATCH", body: { embedding_enabled: true } }
+      )
+    ).resolves.toEqual({
+      success: true,
+      data: { embedding_enabled: true },
+      requires_daemon_restart: true
+    });
+  });
+
+  it("throws a friendly schema error instead of surfacing raw ZodError", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, data: "not-an-object" }), { status: 200 })
+    );
+
+    const rejection = apiFetch("/config/:workspaceId/soul");
+    await expect(rejection).rejects.toMatchObject({
+      message: "Invalid API response shape",
+      status: 502
+    });
+    await expect(rejection).rejects.toSatisfy(
+      (error: unknown) => !(error instanceof Error && error.name === "ZodError")
+    );
+  });
+
+  it("rejects flat config payloads that carry success=false instead of treating them as valid data", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: false, error: "bad config" }), { status: 200 })
+    );
+
+    await expect(apiFetch("/config/:workspaceId/soul")).rejects.toMatchObject({
+      message: "Invalid API response shape",
+      status: 502
+    });
+  });
 });

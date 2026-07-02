@@ -192,7 +192,7 @@ export interface BenchDaemonHandle {
    * A signal the MaterializationRouter routed to evidence_only / deferred (no
    * memory_entry) is recorded with reason=candidate_absent; a signal that
    * THREW before creating memory_entry is isolated per-signal and recorded with
-   * reason=materialization_error — one bad pre-materialization signal never
+   * reason=materialization_drop — one bad pre-materialization signal never
    * aborts its healthy batch-mates. If accept/review fails after memory_entry
    * creation, the harness fails closed because that memory is recallable but
    * absent from the seed sidecar.
@@ -280,6 +280,24 @@ export interface BenchDaemonHandle {
     readonly minted: number;
   }>;
   /**
+   * Mints sparse answer-relation edges among seeded memory_entry ids whose
+   * pooled HQ content-token sets overlap. Requires memory_hq to be pre-filled.
+   *
+   * see also: packages/core/src/path-graph/hq-answer-overlap.ts
+   */
+  accrueAnswersWithCoRelevance(
+    members: readonly { readonly memoryId: string; readonly sessionId: string }[],
+    options: {
+      readonly bar: number;
+      readonly capPerNode: number;
+      readonly crossSessionOnly: boolean;
+    }
+  ): Promise<{
+    readonly coRelevantPairs: number;
+    readonly keptPairs: number;
+    readonly minted: number;
+  }>;
+  /**
    * @anchor queryTokenMetrics — event-sourced token-economy reader.
    *
    * Re-reads the bench run's EventLog (the SAME read pattern as
@@ -340,6 +358,7 @@ export interface BenchWorkspaceHandle {
   proposeSynthesis: BenchDaemonHandle["proposeSynthesis"];
   accrueSessionCoRecall: BenchDaemonHandle["accrueSessionCoRecall"];
   accrueCoherenceCoRecall: BenchDaemonHandle["accrueCoherenceCoRecall"];
+  accrueAnswersWithCoRelevance: BenchDaemonHandle["accrueAnswersWithCoRelevance"];
   queryTokenMetrics: BenchDaemonHandle["queryTokenMetrics"];
   queryEdgeProposalKpiRows: BenchDaemonHandle["queryEdgeProposalKpiRows"];
   detach(): Promise<void>;

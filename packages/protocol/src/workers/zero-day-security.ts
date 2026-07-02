@@ -29,7 +29,7 @@ export const ZeroDayPolicySchema = z
   .superRefine((policy, ctx) => {
     if (policy.expires_at !== null && Date.parse(policy.expires_at) <= Date.parse(policy.effective_at)) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "Zero-day policy expiry must be later than effective_at",
         path: ["expires_at"]
       });

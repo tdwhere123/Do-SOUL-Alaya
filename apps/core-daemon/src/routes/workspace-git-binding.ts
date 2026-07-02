@@ -1,45 +1,27 @@
-import { readFile, realpath, stat } from "node:fs/promises";
-import path from "node:path";
 import {
   WorkspaceGitBindingSchema,
-  type Workspace,
-  type WorkspaceGitBindingStatus
+  type Workspace
 } from "@do-soul/alaya-protocol";
+import { validateGitMarker } from "./workspace-git-binding-marker.js";
+import {
+  isWithinAllowedRoot,
+  rejectInvalidRepoPathSyntax,
+  resolveAllowedRoots,
+  resolveRepoDirectory
+} from "./workspace-git-binding-path-validation.js";
+import type {
+  GitBindingStatusResult,
+  GitBindingValidationOptions,
+  GitBindingValidationResult
+} from "./workspace-git-binding-types.js";
 
-export interface WorkspaceGitBindingRepo {
-  getById(id: string): Promise<Workspace | null>;
-  updateRepoPath(id: string, repoPath: Workspace["repo_path"]): Promise<Workspace>;
-}
-
-export interface GitBindingValidationOptions {
-  readonly currentWorkingDirectory?: string;
-  readonly repoRootsEnv?: string;
-}
-
-export type GitBindingValidationErrorCode =
-  | "path_must_be_absolute"
-  | "path_traversal"
-  | "path_not_found"
-  | "not_a_directory"
-  | "outside_allowed_roots"
-  | "not_a_git_repository";
-
-export type GitBindingValidationResult =
-  | {
-      readonly ok: true;
-      readonly repo_path: string;
-    }
-  | {
-      readonly ok: false;
-      readonly code: GitBindingValidationErrorCode;
-      readonly detail: string;
-    };
-
-export interface GitBindingStatusResult {
-  readonly repo_path: string | null;
-  readonly status: WorkspaceGitBindingStatus;
-  readonly reason?: string;
-}
+export type {
+  GitBindingStatusResult,
+  GitBindingValidationErrorCode,
+  GitBindingValidationOptions,
+  GitBindingValidationResult,
+  WorkspaceGitBindingRepo
+} from "./workspace-git-binding-types.js";
 
 export function buildWorkspaceGitBindingResponse(
   workspaceId: string,
@@ -73,56 +55,20 @@ export async function validateWorkspaceGitBindingInput(
   repoPath: string,
   options: GitBindingValidationOptions = {}
 ): Promise<GitBindingValidationResult> {
-  if (!path.isAbsolute(repoPath)) {
-    return {
-      ok: false,
-      code: "path_must_be_absolute",
-      detail: "repo_path must be an absolute path."
-    };
+  const syntaxError = rejectInvalidRepoPathSyntax(repoPath);
+  if (syntaxError !== null) {
+    return syntaxError;
   }
 
-  if (containsTraversalSegment(repoPath)) {
-    return {
-      ok: false,
-      code: "path_traversal",
-      detail: "repo_path must not contain traversal segments."
-    };
-  }
-
-  let resolvedPath: string;
-
-  try {
-    resolvedPath = await realpath(repoPath);
-  } catch {
-    return {
-      ok: false,
-      code: "path_not_found",
-      detail: "repo_path could not be resolved."
-    };
-  }
-
-  let resolvedStat: Awaited<ReturnType<typeof stat>>;
-
-  try {
-    resolvedStat = await stat(resolvedPath);
-  } catch {
-    return {
-      ok: false,
-      code: "path_not_found",
-      detail: "repo_path could not be resolved."
-    };
-  }
-
-  if (!resolvedStat.isDirectory()) {
-    return {
-      ok: false,
-      code: "not_a_directory",
-      detail: "repo_path must resolve to a directory."
-    };
+  const resolvedDirectory = await resolveRepoDirectory(repoPath);
+  if (!resolvedDirectory.ok) {
+    return resolvedDirectory;
   }
 
   const allowedRoots = await resolveAllowedRoots(options);
-  const withinAllowedRoot = allowedRoots.some((root) => isWithinAllowedRoot(root, resolvedPath));
+  const withinAllowedRoot = allowedRoots.some((root) =>
+    isWithinAllowedRoot(root, resolvedDirectory.repo_path)
+  );
 
   if (!withinAllowedRoot) {
     return {
@@ -132,14 +78,14 @@ export async function validateWorkspaceGitBindingInput(
     };
   }
 
-  const gitMarkerValidation = await validateGitMarker(resolvedPath, allowedRoots);
+  const gitMarkerValidation = await validateGitMarker(resolvedDirectory.repo_path, allowedRoots);
   if (!gitMarkerValidation.ok) {
     return gitMarkerValidation;
   }
 
   return {
     ok: true,
-    repo_path: resolvedPath
+    repo_path: resolvedDirectory.repo_path
   };
 }
 
@@ -168,152 +114,4 @@ export async function getWorkspaceGitBindingStatus(
     status: "invalid",
     reason: validation.detail
   };
-}
-
-async function resolveAllowedRoots(options: GitBindingValidationOptions): Promise<readonly string[]> {
-  const currentWorkingDirectory = options.currentWorkingDirectory ?? process.cwd();
-  const configuredRoots = (options.repoRootsEnv ?? process.env.ALAYA_REPO_ROOTS ?? "")
-    .split(path.delimiter)
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
-  const candidateRoots = [currentWorkingDirectory, ...configuredRoots];
-  const resolvedRoots = new Set<string>();
-
-  for (const candidate of candidateRoots) {
-    try {
-      resolvedRoots.add(await realpath(candidate));
-    } catch {
-      // Invalid configured roots must not broaden the allowlist.
-    }
-  }
-
-  return Array.from(resolvedRoots);
-}
-
-function containsTraversalSegment(input: string): boolean {
-  const decoded = safeDecodeURIComponent(input);
-  return hasTraversalPattern(input) || hasTraversalPattern(decoded);
-}
-
-function hasTraversalPattern(input: string): boolean {
-  return /(^|[\\/])\.\.([\\/]|$)/.test(input);
-}
-
-function safeDecodeURIComponent(input: string): string {
-  try {
-    return decodeURIComponent(input);
-  } catch {
-    return input;
-  }
-}
-
-function isWithinAllowedRoot(root: string, candidate: string): boolean {
-  const relativePath = path.relative(root, candidate);
-  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
-}
-
-async function validateGitMarker(
-  repoPath: string,
-  allowedRoots: readonly string[]
-): Promise<GitBindingValidationResult | { readonly ok: true }> {
-  const gitMarkerPath = path.join(repoPath, ".git");
-
-  const resolvedGitMarkerPath = await resolveGitMarkerPath(gitMarkerPath);
-  if (resolvedGitMarkerPath === null) {
-    return {
-      ok: false,
-      code: "not_a_git_repository",
-      detail: "repo_path must contain a .git directory or file."
-    };
-  }
-
-  let resolvedGitMarkerStats: Awaited<ReturnType<typeof stat>>;
-  try {
-    resolvedGitMarkerStats = await stat(resolvedGitMarkerPath);
-  } catch {
-    return {
-      ok: false,
-      code: "not_a_git_repository",
-      detail: "repo_path must contain a .git directory or file."
-    };
-  }
-
-  if (resolvedGitMarkerStats.isDirectory()) {
-    return isPathWithinAllowedRoots(allowedRoots, resolvedGitMarkerPath)
-      ? { ok: true }
-      : {
-          ok: false,
-          code: "outside_allowed_roots",
-          detail: ".git directory resolves outside the allowed repository roots."
-        };
-  }
-
-  const gitdirTargetPath = await resolveGitDirTarget(gitMarkerPath, resolvedGitMarkerPath);
-  if (gitdirTargetPath === null) {
-    return {
-      ok: false,
-      code: "not_a_git_repository",
-      detail: "repo_path must contain a .git directory or file."
-    };
-  }
-
-  return isPathWithinAllowedRoots(allowedRoots, gitdirTargetPath)
-    ? { ok: true }
-    : {
-        ok: false,
-        code: "outside_allowed_roots",
-        detail: ".git gitdir resolves outside the allowed repository roots."
-      };
-}
-
-async function resolveGitMarkerPath(gitMarkerPath: string): Promise<string | null> {
-  try {
-    return await realpath(gitMarkerPath);
-  } catch {
-    return null;
-  }
-}
-
-async function resolveGitDirTarget(
-  gitMarkerPath: string,
-  resolvedGitMarkerPath: string
-): Promise<string | null> {
-  let contents: string;
-  try {
-    contents = await readFile(resolvedGitMarkerPath, "utf8");
-  } catch {
-    return null;
-  }
-
-  const parsed = /^gitdir:\s*(.+)\s*$/im.exec(contents);
-  if (parsed?.[1] === undefined) {
-    return null;
-  }
-
-  const rawGitDir = parsed[1].trim();
-  if (rawGitDir.length === 0) {
-    return null;
-  }
-
-  const candidatePath = path.isAbsolute(rawGitDir)
-    ? rawGitDir
-    : path.resolve(path.dirname(gitMarkerPath), rawGitDir);
-
-  let resolvedGitDirPath: string;
-  try {
-    resolvedGitDirPath = await realpath(candidatePath);
-  } catch {
-    return null;
-  }
-
-  try {
-    const resolvedStats = await stat(resolvedGitDirPath);
-    return resolvedStats.isDirectory() ? resolvedGitDirPath : null;
-  } catch {
-    return null;
-  }
-}
-
-function isPathWithinAllowedRoots(allowedRoots: readonly string[], candidate: string): boolean {
-  return allowedRoots.some((root) => isWithinAllowedRoot(root, candidate));
 }

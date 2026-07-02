@@ -6,36 +6,40 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import {
-  DEFAULT_REPO_LIST_PAGE_LIMIT,
-  parseNonEmptyString,
-  parsePageLimit,
-  parsePageOffset
-} from "../shared/validators.js";
 import { MEMORY_ENTRY_SELECT_COLUMNS, parseMemoryDimension, parseMemoryEntryRow, parseScopeClass, parseStorageTier, type MemoryEntryRow } from "./row-mapper.js";
+import type { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
+import { DynamicPreparedStatementCache } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import type { MemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
-import {
-  FIND_BY_EVIDENCE_REFS_INPUT_CAP,
-  FIND_BY_EVIDENCE_REFS_ROW_LIMIT,
-  type MemoryEntryListPageOptions,
-  type MemoryEntryRepoDiagnosticSink
-} from "./types.js";
+import { MemoryEntryConflictReadQueries } from "./memory-entry-conflict-read-queries.js";
+import { MemoryEntryDynamicReadQueries } from "./memory-entry-dynamic-read-queries.js";
+import { DEFAULT_MEMORY_ENTRY_PAGE, parseMemoryEntryPage } from "./memory-entry-read-page.js";
+import type { MemoryEntryListPageOptions, MemoryEntryRepoDiagnosticSink } from "./types.js";
 
 interface CountRow {
   readonly total: number;
 }
 
-const DEFAULT_MEMORY_ENTRY_PAGE = Object.freeze({
-  limit: DEFAULT_REPO_LIST_PAGE_LIMIT,
-  offset: 0
-});
-
 export class MemoryEntryReadQueries {
+  private readonly conflictQueries: MemoryEntryConflictReadQueries;
+  private readonly dynamicQueries: MemoryEntryDynamicReadQueries;
+
   public constructor(
-    private readonly db: StorageDatabase,
+    db: StorageDatabase,
     private readonly diagnostics: MemoryEntryRepoDiagnosticSink,
-    private readonly statements: MemoryEntryStatements
-  ) {}
+    private readonly statementHolder: RefreshableStatementHolder<MemoryEntryStatements>
+  ) {
+    this.conflictQueries = new MemoryEntryConflictReadQueries(() => this.statements);
+    const dynamicStatementCache = new DynamicPreparedStatementCache(db, () => this.ensureActiveConnection());
+    this.dynamicQueries = new MemoryEntryDynamicReadQueries(dynamicStatementCache, diagnostics);
+  }
+
+  private get statements(): MemoryEntryStatements {
+    return this.statementHolder.active();
+  }
+
+  private ensureActiveConnection(): void {
+    this.statementHolder.active();
+  }
 
   public async findById(objectId: string): Promise<Readonly<MemoryEntry> | null> {
     try {
@@ -50,28 +54,7 @@ export class MemoryEntryReadQueries {
     workspaceId: string,
     objectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]> {
-    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
-    const parsedObjectIds = Array.from(new Set(objectIds.map((objectId) => parseNonEmptyString(objectId, "object_id"))));
-
-    if (parsedObjectIds.length === 0) {
-      return [];
-    }
-
-    const placeholders = parsedObjectIds.map(() => "?").join(", ");
-    const statement = this.db.connection.prepare(`
-      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
-      FROM memory_entries
-      WHERE workspace_id = ?
-        AND object_id IN (${placeholders})
-      ORDER BY created_at ASC, object_id ASC
-    `);
-
-    try {
-      const rows = statement.all(parsedWorkspaceId, ...parsedObjectIds) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to load memory entries by ids.", error);
-    }
+    return await this.dynamicQueries.findByIds(workspaceId, objectIds);
   }
 
   public async findByWorkspaceId(
@@ -277,77 +260,86 @@ export class MemoryEntryReadQueries {
     }
   }
 
+  public async findByWorkspaceIdWithConflict(
+    workspaceId: string,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return await this.conflictQueries.findByWorkspaceIdWithConflict(workspaceId, page);
+  }
+
+  public async countByWorkspaceIdWithConflict(workspaceId: string): Promise<number> {
+    return await this.conflictQueries.countByWorkspaceIdWithConflict(workspaceId);
+  }
+
+  public async findByDimensionWithConflict(
+    workspaceId: string,
+    dimension: MemoryDimension,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return await this.conflictQueries.findByDimensionWithConflict(workspaceId, dimension, page);
+  }
+
+  public async countByDimensionWithConflict(
+    workspaceId: string,
+    dimension: MemoryDimension
+  ): Promise<number> {
+    return await this.conflictQueries.countByDimensionWithConflict(workspaceId, dimension);
+  }
+
+  public async findByScopeClassWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return await this.conflictQueries.findByScopeClassWithConflict(workspaceId, scopeClass, page);
+  }
+
+  public async countByScopeClassWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass
+  ): Promise<number> {
+    return await this.conflictQueries.countByScopeClassWithConflict(workspaceId, scopeClass);
+  }
+
+  public async findByScopeClassAndDimensionWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryDimension,
+    page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return await this.conflictQueries.findByScopeClassAndDimensionWithConflict(
+      workspaceId,
+      scopeClass,
+      dimension,
+      page
+    );
+  }
+
+  public async countByScopeClassAndDimensionWithConflict(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryDimension
+  ): Promise<number> {
+    return await this.conflictQueries.countByScopeClassAndDimensionWithConflict(
+      workspaceId,
+      scopeClass,
+      dimension
+    );
+  }
+
   public async findBySharedDomainTags(
     workspaceId: string,
     tags: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]> {
-    const uniqueTags = Array.from(
-      new Set(tags.filter((tag) => typeof tag === "string" && tag.length > 0))
-    );
-    // A new memory with no tags can never reach jaccard(domain_tags) >= the
-    // rule gate, so it has no shared-tag candidates; mirror the full-scan
-    // outcome (zero INCOMPATIBLE_WITH edges) by returning empty.
-    if (uniqueTags.length === 0) {
-      return Object.freeze([]);
-    }
-
-    // json_each expands the domain_tags JSON array per row; a row with an
-    // empty array yields no json_each rows and is therefore excluded
-    // (it cannot pass the >=0.35 gate). DISTINCT collapses rows that share
-    // more than one tag to a single result. Tier + tombstone + ORDER BY
-    // match findByWorkspaceId(hot) so the candidate set is a strict
-    // superset of the full-scan candidates with identical iteration order.
-    const placeholders = uniqueTags.map(() => "?").join(", ");
-    const statement = this.db.connection.prepare(`
-      SELECT DISTINCT${MEMORY_ENTRY_SELECT_COLUMNS}
-      FROM memory_entries
-      JOIN json_each(memory_entries.domain_tags) AS tag
-        ON tag.value IN (${placeholders})
-      WHERE memory_entries.workspace_id = ?
-        AND memory_entries.storage_tier = 'hot'
-        AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-        AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
-      ORDER BY memory_entries.created_at ASC, memory_entries.object_id ASC
-    `);
-
-    try {
-      const rows = statement.all(...uniqueTags, workspaceId) as MemoryEntryRow[];
-      return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
-    } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to find memory entries by shared domain tags in workspace ${workspaceId}.`,
-        error
-      );
-    }
+    return await this.dynamicQueries.findBySharedDomainTags(workspaceId, tags);
   }
 
   public async findByEvidenceRefs(
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]> {
-    const cappedIds = capEvidenceRefLookupIds(
-      workspaceId,
-      evidenceObjectIds,
-      this.diagnostics
-    );
-    if (cappedIds.length === 0) {
-      return Object.freeze([]);
-    }
-    const evidenceFilter = buildEvidenceRefsFilter(cappedIds);
-    try {
-      const rows = queryEvidenceRefRows(this.db, workspaceId, evidenceFilter);
-      reportEvidenceRefRowCap(workspaceId, cappedIds.length, rows.length, this.diagnostics);
-      return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
-    } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to find memory entries by evidence_refs in workspace ${workspaceId}.`,
-        error
-      );
-    }
+    return await this.dynamicQueries.findByEvidenceRefs(workspaceId, evidenceObjectIds);
   }
-
 
   public async findLowActivityActiveMemories(
     workspaceId: string
@@ -411,79 +403,6 @@ export class MemoryEntryReadQueries {
 
 }
 
-function capEvidenceRefLookupIds(
-  workspaceId: string,
-  evidenceObjectIds: readonly string[],
-  diagnostics: MemoryEntryRepoDiagnosticSink
-): readonly string[] {
-  const unique = [...new Set(evidenceObjectIds.filter((id) => typeof id === "string" && id.length > 0))];
-  if (unique.length > FIND_BY_EVIDENCE_REFS_INPUT_CAP) {
-    diagnostics("memory evidence-ref lookup input truncated", {
-      workspace_id: workspaceId,
-      input_count: unique.length,
-      capped_count: FIND_BY_EVIDENCE_REFS_INPUT_CAP
-    });
-  }
-  return unique.slice(0, FIND_BY_EVIDENCE_REFS_INPUT_CAP);
-}
-
-function buildEvidenceRefsFilter(
-  cappedIds: readonly string[]
-): Readonly<{ readonly sql: string; readonly values: readonly string[] }> {
-  const clauses = cappedIds.map(() => `evidence_refs LIKE ? ESCAPE '\\'`);
-  return {
-    sql: clauses.join(" OR "),
-    values: cappedIds.map(toEvidenceRefLikePattern)
-  };
-}
-
-function toEvidenceRefLikePattern(id: string): string {
-  return `%"${id.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}"%`;
-}
-
-function queryEvidenceRefRows(
-  db: StorageDatabase,
-  workspaceId: string,
-  evidenceFilter: Readonly<{ readonly sql: string; readonly values: readonly string[] }>
-): readonly MemoryEntryRow[] {
-  return db.connection
-    .prepare(
-      `SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
-       FROM memory_entries
-       WHERE workspace_id = ?
-         AND COALESCE(retention_state, '') != 'tombstoned'
-         AND COALESCE(lifecycle_state, '') != 'dormant'
-         AND (${evidenceFilter.sql})
-       ORDER BY object_id ASC
-       LIMIT ${FIND_BY_EVIDENCE_REFS_ROW_LIMIT}`
-    )
-    .all(workspaceId, ...evidenceFilter.values) as MemoryEntryRow[];
-}
-
-function reportEvidenceRefRowCap(
-  workspaceId: string,
-  inputCount: number,
-  returnedCount: number,
-  diagnostics: MemoryEntryRepoDiagnosticSink
-): void {
-  if (returnedCount < FIND_BY_EVIDENCE_REFS_ROW_LIMIT) {
-    return;
-  }
-  diagnostics("memory evidence-ref lookup rows hit LIMIT", {
-    workspace_id: workspaceId,
-    input_count: inputCount,
-    row_limit: FIND_BY_EVIDENCE_REFS_ROW_LIMIT,
-    returned_count: returnedCount
-  });
-}
-
 function readCount(row: CountRow | undefined): number {
   return row === undefined ? 0 : Number(row.total);
-}
-
-function parseMemoryEntryPage(page: MemoryEntryListPageOptions): Readonly<MemoryEntryListPageOptions> {
-  return Object.freeze({
-    limit: parsePageLimit(page.limit, "memory entry page limit"),
-    offset: parsePageOffset(page.offset, "memory entry page offset")
-  });
 }

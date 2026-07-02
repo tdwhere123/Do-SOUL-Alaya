@@ -103,6 +103,37 @@ export interface MemoryEntryReadPort {
     workspaceId: string,
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByWorkspaceIdWithConflict?(
+    workspaceId: string,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByWorkspaceIdWithConflict?(workspaceId: string): Promise<number>;
+  findByDimensionWithConflict?(
+    workspaceId: string,
+    dimension: MemoryEntry["dimension"],
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByDimensionWithConflict?(
+    workspaceId: string,
+    dimension: MemoryEntry["dimension"]
+  ): Promise<number>;
+  findByScopeClassWithConflict?(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByScopeClassWithConflict?(workspaceId: string, scopeClass: ScopeClass): Promise<number>;
+  findByScopeClassAndDimensionWithConflict?(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryEntry["dimension"],
+    page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByScopeClassAndDimensionWithConflict?(
+    workspaceId: string,
+    scopeClass: ScopeClass,
+    dimension: MemoryEntry["dimension"]
+  ): Promise<number>;
 }
 
 export interface MemoryEntryWritePort {

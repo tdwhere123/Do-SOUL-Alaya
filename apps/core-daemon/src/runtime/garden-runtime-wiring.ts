@@ -1,7 +1,10 @@
 import { type MemoryEntry, type TransitionCausedBy } from "@do-soul/alaya-protocol";
 import {
+  AnswersWithEdgeProducerService,
   CoherenceEdgeProducerService,
+  DEFAULT_ANSWER_OVERLAP_BAR,
   GardenBacklogTelemetryService,
+  HqAnswerOverlapPairSource,
   rebuildCountersFromEventLog,
   scheduleAuditedAsyncSideEffect
 } from "@do-soul/alaya-core";
@@ -15,7 +18,7 @@ import {
 } from "../garden/forget-disposition-ports.js";
 import { createGardenRuntime } from "../garden/runtime.js";
 import { reconcileBootstrapPathsForAllWorkspaces } from "./daemon-runtime-helpers.js";
-import { recordStartupStep } from "./daemon-runtime-support.js";
+import { createOptionalMemoryHqRepo, recordStartupStep } from "./daemon-runtime-support.js";
 import {
   resolvePersistedGardenLastPassAt
 } from "./garden-compute-support.js";
@@ -28,11 +31,13 @@ export async function createGardenRuntimeWiring(input: GardenRuntimeWiringInput)
   const forgetTombstoneAuthority = createForgetTombstoneAuthority(input);
   const gardenDataPorts = createGardenDataPorts(input);
   const coherenceCrystallizer = createCoherenceCrystallizer(input);
+  const answersWithCrystallizer = createAnswersWithCrystallizer(input);
   const gardenRuntime = createGardenSchedulerRuntime(
     input,
     gardenDataPorts,
     forgetTombstoneAuthority,
-    coherenceCrystallizer
+    coherenceCrystallizer,
+    answersWithCrystallizer
   );
   const gardenTaskRepo = createGardenTaskRepo(input);
   bindGardenTaskQueueRepo(input, gardenTaskRepo);
@@ -103,13 +108,32 @@ function createCoherenceCrystallizer(input: GardenRuntimeWiringInput) {
   });
 }
 
+// S2 answers_with: flag-gated (ALAYA_RECALL_ANSWERS_WITH). Off → undefined → no
+// port → backfill follow-up no-ops → no answers_with edges minted.
+function createAnswersWithCrystallizer(input: GardenRuntimeWiringInput) {
+  if (process.env.ALAYA_RECALL_ANSWERS_WITH !== "1") {
+    return undefined;
+  }
+  const hqRepo = createOptionalMemoryHqRepo(input.database);
+  if (hqRepo === null) {
+    return undefined;
+  }
+  return new AnswersWithEdgeProducerService({
+    pairSource: new HqAnswerOverlapPairSource(hqRepo),
+    mintPort: input.pathRelationProposalService,
+    warn: (message: string, meta: Record<string, unknown>) => console.warn(message, meta)
+  });
+}
+
 function createGardenSchedulerRuntime(
   input: GardenRuntimeWiringInput,
   gardenDataPorts: ReturnType<typeof createGardenDataPorts>,
   forgetTombstoneAuthority: ReturnType<typeof createForgetTombstoneAuthority>,
-  coherenceCrystallizer: ReturnType<typeof createCoherenceCrystallizer>
+  coherenceCrystallizer: ReturnType<typeof createCoherenceCrystallizer>,
+  answersWithCrystallizer: ReturnType<typeof createAnswersWithCrystallizer>
 ) {
   const coherenceEdgeProducerPort = createCoherenceEdgeProducerPort(coherenceCrystallizer);
+  const answersWithEdgeProducerPort = createAnswersWithEdgeProducerPort(answersWithCrystallizer);
   return createGardenRuntime({
     databaseConnection: input.database.connection,
     backlogThresholds: input.gardenBacklogThresholds,
@@ -144,6 +168,7 @@ function createGardenSchedulerRuntime(
     enrichSignalRefReplayPort: createEnrichSignalRefReplayPort(input),
     enrichEdgeProducerPort: input.edgeAutoProducerService,
     ...(coherenceEdgeProducerPort === undefined ? {} : { coherenceEdgeProducerPort }),
+    ...(answersWithEdgeProducerPort === undefined ? {} : { answersWithEdgeProducerPort }),
     ...(input.conflictDetectionService === null
       ? {}
       : { enrichConflictDetectionPort: input.conflictDetectionService }),
@@ -216,6 +241,30 @@ function createCoherenceEdgeProducerPort(
         runId: params.runId,
         objects: params.objectIds.map((objectId) => ({ objectId, sessionId: null })),
         floor: 0.6,
+        capPerNode: 3,
+        crossSessionOnly: false
+      })
+  };
+}
+
+function createAnswersWithEdgeProducerPort(
+  answersWithCrystallizer: ReturnType<typeof createAnswersWithCrystallizer>
+) {
+  if (answersWithCrystallizer === undefined) {
+    return undefined;
+  }
+
+  return {
+    crystallizeForBackfill: (params: {
+      readonly workspaceId: string;
+      readonly runId: string | null;
+      readonly objectIds: readonly string[];
+    }) =>
+      answersWithCrystallizer.crystallize({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        objects: params.objectIds.map((objectId) => ({ objectId, sessionId: null })),
+        bar: DEFAULT_ANSWER_OVERLAP_BAR,
         capPerNode: 3,
         crossSessionOnly: false
       })

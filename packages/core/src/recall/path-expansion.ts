@@ -25,7 +25,7 @@ import {
   uniqueStrings
 } from "./path-relations.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
-import { errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
+import { clamp01, errorNameOf, toErrorMessage } from "./recall-service-helpers.js";
 import { recordRecallDegradation } from "./diagnostics.js";
 import type {
   RecallAdmissionPlane,
@@ -41,7 +41,8 @@ type CoarseCandidateAdder = (
   sourceChannel?: string,
   pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
   entityConfidence?: number,
-  reachedViaEarnedCoRecalledFanin?: boolean
+  reachedViaEarnedCoRecalledFanin?: boolean,
+  pathFlowScore?: number
 ) => boolean;
 
 export async function addPathExpansionCandidates(params: Readonly<{
@@ -78,6 +79,7 @@ export async function addPathExpansionCandidates(params: Readonly<{
     return;
   }
   const seedIds = new Set(seeds.map((seed) => seed.entry.object_id));
+  const seedRelevanceById = buildSeedRelevanceById(seeds);
   const paths = await loadSeededPathExpansionPaths(
     params.workspaceId,
     seeds,
@@ -86,7 +88,14 @@ export async function addPathExpansionCandidates(params: Readonly<{
     "path expansion lookup failed",
     params.degradationReasons
   );
-  added = admitSeededPathExpansionCandidates(params, paths, seedIds, added);
+  added = admitSeededPathExpansionCandidates(params, paths, seedIds, seedRelevanceById, added);
+}
+
+// R_O(s): each seed's own coarse relevance; absent seeds fall back to 1 (pure edge-strength flow).
+function buildSeedRelevanceById(
+  seeds: readonly Readonly<CoarseCandidateDraft>[]
+): ReadonlyMap<string, number> {
+  return new Map(seeds.map((seed) => [seed.entry.object_id, clamp01(seed.structuralScore)]));
 }
 
 export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
@@ -112,8 +121,8 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
   return admitTimeConcernPathExpansionCandidates(params, paths, windowDigests);
 }
 
-// anchor: active sign-aware suppression collector. Reuses path_expansion's seeds and findByAnchors but selects the negative (recall_bias < 0) paths the positive lanes exclude; each demotes its direction-eligible target by a strength-gated delta, accumulated per target. Fail-soft: missing port / lookup failure leaves suppression empty.
-// see also: fusion-delivery.ts applyPathSuppressionToFusionScores, path-relations.ts scorePathRelationSuppression.
+// Collects negative (recall_bias<0) paths the positive lanes exclude; each demotes its direction-eligible
+// target by a strength-gated delta, accumulated per target. Fail-soft on missing port / lookup failure.
 export async function collectNegativePathSuppressions(params: Readonly<{
   readonly workspaceId: string;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
@@ -176,6 +185,7 @@ function admitSeededPathExpansionCandidates(
   params: Parameters<typeof addPathExpansionCandidates>[0],
   paths: readonly Readonly<PathRelation>[],
   seedIds: ReadonlySet<string>,
+  seedRelevanceById: ReadonlyMap<string, number>,
   initialAdded: number
 ): number {
   let added = initialAdded;
@@ -183,7 +193,7 @@ function admitSeededPathExpansionCandidates(
     if (added >= params.dynamicRecallPlaneCap || isPathExcludedFromRecall(path)) {
       continue;
     }
-    added = admitPathExpansionTargets(params, path, seedIds, added);
+    added = admitPathExpansionTargets(params, path, seedIds, seedRelevanceById, added);
   }
   return added;
 }
@@ -192,24 +202,28 @@ function admitPathExpansionTargets(
   params: Pick<Parameters<typeof addPathExpansionCandidates>[0], "byId" | "addCandidate" | "dynamicRecallPlaneCap">,
   path: Readonly<PathRelation>,
   seedIds: ReadonlySet<string>,
+  seedRelevanceById: ReadonlyMap<string, number>,
   initialAdded: number
 ): number {
   let added = initialAdded;
   const reachedViaEarnedCoRecalledFanin =
     path.constitution.relation_kind === EARNED_CO_RECALLED_FANIN_RELATION_KIND;
+  const edgeStrength = scorePathRelationExpansion(path);
   for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
     const entry = params.byId.get(target.targetId);
     if (entry === undefined) {
       continue;
     }
+    const pathFlow = (seedRelevanceById.get(target.seedId) ?? 1) * edgeStrength;
     params.addCandidate(
       entry,
       "path_expansion",
-      scorePathRelationExpansion(path),
+      edgeStrength,
       "path_expansion",
       buildMemoryPathExpansionSource(path, target.seedId, target.targetId),
       undefined,
-      reachedViaEarnedCoRecalledFanin
+      reachedViaEarnedCoRecalledFanin,
+      pathFlow
     );
     added += 1;
     if (added >= params.dynamicRecallPlaneCap) {

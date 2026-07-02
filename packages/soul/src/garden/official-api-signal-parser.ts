@@ -10,7 +10,7 @@ const MAX_OFFICIAL_API_REASON_CHARS = 400;
 const UnknownRecordSchema = z.record(z.string(), z.unknown()).readonly();
 const OfficialApiSignalsEnvelopeSchema = z.object({
   signals: z.array(z.unknown()).readonly()
-}).passthrough().readonly();
+}).loose().readonly();
 
 const RequiredTrimmedStringSchema = z.preprocess(normalizeStringValue, z.string().min(1));
 const OptionalTrimmedStringSchema = z
@@ -38,6 +38,29 @@ const StringArraySchema = z
       }
       seen.add(value);
       output.push(value);
+    }
+    return Object.freeze(output);
+  });
+const MAX_CANONICAL_ENTITIES = 3;
+// canonical_entities is the answer-selective key: normalize to lowercase, dedupe, cap 3.
+const CanonicalEntitiesArraySchema = z
+  .preprocess((value) => (Array.isArray(value) ? value : []), z.array(OptionalTrimmedStringSchema))
+  .transform((values) => {
+    const seen = new Set<string>();
+    const output: string[] = [];
+    for (const value of values) {
+      if (value === null) {
+        continue;
+      }
+      const normalized = value.toLowerCase();
+      if (seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      output.push(normalized);
+      if (output.length >= MAX_CANONICAL_ENTITIES) {
+        break;
+      }
     }
     return Object.freeze(output);
   });
@@ -141,11 +164,12 @@ const OfficialApiSignalEntrySchema = z.object({
   matched_text: RequiredTrimmedStringSchema,
   evidence_refs: StringArraySchema,
   source_memory_refs: StringArraySchema,
+  canonical_entities: CanonicalEntitiesArraySchema,
   distilled_fact: OptionalTrimmedStringSchema,
   reason: OptionalTrimmedStringSchema,
   temporal_projection: OfficialApiTemporalProjectionSchema,
   preference_profile: OfficialApiPreferenceProfileSchema
-}).passthrough().readonly();
+}).loose().readonly();
 
 export interface OfficialApiTemporalProjectionDraft {
   readonly event_time_start?: string;
@@ -177,6 +201,7 @@ export interface OfficialApiSignalDraft {
   readonly matched_text: string;
   readonly evidence_refs: readonly string[];
   readonly source_memory_refs: readonly string[];
+  readonly canonical_entities?: readonly string[];
   readonly distilled_fact?: string;
   readonly reason?: string;
   readonly temporal_projection?: OfficialApiTemporalProjectionDraft;
@@ -361,6 +386,7 @@ function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft
     matched_text: clampedMatchedText,
     evidence_refs: record.evidence_refs,
     source_memory_refs: record.source_memory_refs,
+    ...(record.canonical_entities.length === 0 ? {} : { canonical_entities: record.canonical_entities }),
     ...(clampedDistilledFact === null ? {} : { distilled_fact: clampedDistilledFact }),
     ...(clampedReason === null ? {} : { reason: clampedReason }),
     ...(record.temporal_projection === null ? {} : { temporal_projection: record.temporal_projection }),

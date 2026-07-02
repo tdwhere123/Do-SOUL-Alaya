@@ -73,6 +73,18 @@ export const COHERES_WITH_SEED_PROFILE: PathSeedProfile = Object.freeze({
   evidenceBasis: Object.freeze(["embedding_cosine_coherence"]) as readonly string[]
 });
 
+// Answer-relation edge (HQ answer-overlap): banded above coheres_with — recall_allowed
+// (the auto-build ceiling) and a stronger born strength, since "answers the same questions"
+// is a sharper relevance signal than embedding co-occurrence.
+export const ANSWERS_WITH_SEED_PROFILE: PathSeedProfile = Object.freeze({
+  relationKind: "answers_with",
+  initialStrength: 0.5,
+  governanceClass: "recall_allowed",
+  recallBiasSign: 1,
+  recallBiasMagnitude: 0.5,
+  evidenceBasis: Object.freeze(["hq_answer_overlap"]) as readonly string[]
+});
+
 export const EXCEPTION_TO_SEED_PROFILE: PathSeedProfile = Object.freeze({
   relationKind: "exception_to",
   initialStrength: 0.9,

@@ -10,9 +10,12 @@ import {
   EMPTY_SUPPLEMENT_RESULT,
   clampQueryEmbeddingCacheSize,
   clampQueryTimeout,
-  cosineSimilarity,
   toErrorMessage
 } from "./helpers.js";
+import {
+  computeCoherentPairKeys,
+  scoreEmbeddingPoolCandidates
+} from "./pool-scoring.js";
 import { QueryEmbeddingEngine } from "./query-embedding-engine.js";
 import { EmbeddingSupplementBuilder } from "./supplement-builder.js";
 import type {
@@ -216,6 +219,23 @@ export class EmbeddingRecallService {
     }
 
     return computeCoherentPairKeys(storedVectors, params.objectIds, params.floor, this.dependencies.provider);
+  }
+
+  // cosine(query, stored-vector) for already-pooled candidates (inverse of injection,
+  // which excludes them). Provider-matched per (kind, model, schema); returns sim>0 only.
+  public async scorePoolCandidates(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string;
+    readonly objectIds: readonly string[];
+  }): Promise<ReadonlyMap<string, number>> {
+    return await scoreEmbeddingPoolCandidates({
+      ...params,
+      embeddingRepo: this.dependencies.embeddingRepo,
+      provider: this.dependencies.provider,
+      queryEngine: this.queryEngine,
+      warn: this.warn
+    });
   }
 
   public async recordPrecheckDegraded(params: {
@@ -452,46 +472,4 @@ export class EmbeddingRecallService {
       return null;
     }
   }
-}
-
-// invariant: cosine space is valid only within one (provider_kind, model_id,
-// schema_version); self-inconsistent records (dimensions !== embedding length)
-// are dropped — cosineSimilarity's length guard returns 0 for any residual.
-function computeCoherentPairKeys(
-  storedVectors: readonly Readonly<EmbeddingVectorRecord>[],
-  objectIds: readonly string[],
-  floor: number,
-  provider: EmbeddingRecallServiceDependencies["provider"]
-): ReadonlySet<string> {
-  const vectorsByObjectId = new Map<string, Float32Array>();
-  for (const record of storedVectors) {
-    if (
-      record.provider_kind === provider.providerKind &&
-      record.model_id === provider.modelId &&
-      record.schema_version === provider.schemaVersion &&
-      record.dimensions === record.embedding.length
-    ) {
-      vectorsByObjectId.set(record.object_id, record.embedding);
-    }
-  }
-
-  const coherent = new Set<string>();
-  for (let i = 0; i < objectIds.length; i += 1) {
-    const vecA = vectorsByObjectId.get(objectIds[i]!);
-    if (vecA === undefined) {
-      continue;
-    }
-    for (let j = i + 1; j < objectIds.length; j += 1) {
-      const vecB = vectorsByObjectId.get(objectIds[j]!);
-      if (vecB === undefined) {
-        continue;
-      }
-      if (cosineSimilarity(vecA, vecB) >= floor) {
-        const [low, high] = objectIds[i]! < objectIds[j]! ? [objectIds[i]!, objectIds[j]!] : [objectIds[j]!, objectIds[i]!];
-        coherent.add(`${low}|${high}`);
-      }
-    }
-  }
-
-  return coherent;
 }

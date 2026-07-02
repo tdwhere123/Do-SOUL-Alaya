@@ -4,13 +4,17 @@ import { BenchRecallDiagnosticsSchema } from "../../harness/recall-diagnostics-s
 
 import {
   LongMemEvalGoldDiagnosticSchema,
+  LongMemEvalMissTaxonomySchema,
   LongMemEvalQuestionDiagnosticSchema
 } from "../../longmemeval/diagnostics-schema.js";
 
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
+  renderCompactDiagnosticsSidecar,
+  renderDiagnosticsSidecar,
   summarizeLongMemEvalRecallEvidence,
+  summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
 } from "../../longmemeval/diagnostics.js";
 
@@ -256,6 +260,183 @@ describe("LongMemEval recall diagnostics", () => {
     });
   });
 
+  it("classifies question misses into the durable diagnostics taxonomy", () => {
+    expect(LongMemEvalMissTaxonomySchema.options).toEqual([
+      "candidate_absent",
+      "materialization_drop",
+      "budget_drop",
+      "delivery_order_drop",
+      "evaluation_or_gold_issue"
+    ]);
+    const materializationDrop = buildQuestionDiagnostic({
+      questionId: "q-materialization-drop",
+      goldMemoryIds: ["gold-a"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidates: [
+            {
+              object_id: "gold-a",
+              object_kind: "synthesis_capsule",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:synthesis_capsule:gold-a"
+            }
+          ]
+        }
+      }
+    });
+    const budgetDrop = buildQuestionDiagnostic({
+      questionId: "q-budget-drop",
+      goldMemoryIds: ["gold-b"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidates: [
+            {
+              object_id: "gold-b",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:gold-b",
+              pre_budget_rank: 4,
+              final_rank: null,
+              dropped_reason: "max_entries"
+            }
+          ]
+        }
+      }
+    });
+    const deliveryOrderDrop = buildQuestionDiagnostic({
+      questionId: "q-delivery-order-drop",
+      goldMemoryIds: ["gold-c"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [{ object_id: "gold-c", rank: 8, relevance_score: 0.3 }],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidates: [
+            {
+              object_id: "gold-c",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:gold-c",
+              final_rank: 8,
+              fused_rank: 4
+            }
+          ]
+        }
+      }
+    });
+    const candidateAbsent = buildQuestionDiagnostic({
+      questionId: "q-candidate-absent",
+      goldMemoryIds: ["gold-d"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: { candidates: [] } }
+    });
+    const noGold = buildQuestionDiagnostic({
+      questionId: "q-no-gold",
+      goldMemoryIds: [],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: { candidates: [] } }
+    });
+    const noGoldMaterializationDrop = buildQuestionDiagnostic({
+      questionId: "q-no-gold-materialization-drop",
+      goldMemoryIds: [],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      seedDropReasons: {
+        candidate_absent: 0,
+        materialization_drop: 1
+      },
+      recallResult: { diagnostics: { candidates: [] } }
+    });
+    const noGoldCandidateAbsent = buildQuestionDiagnostic({
+      questionId: "q-no-gold-candidate-absent",
+      goldMemoryIds: [],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      seedDropReasons: {
+        candidate_absent: 2,
+        materialization_drop: 0
+      },
+      recallResult: { diagnostics: { candidates: [] } }
+    });
+
+    expect(materializationDrop.miss_taxonomy).toBe("materialization_drop");
+    expect(materializationDrop.gold[0]?.miss_taxonomy).toBe("materialization_drop");
+    expect(budgetDrop.miss_taxonomy).toBe("budget_drop");
+    expect(deliveryOrderDrop.miss_taxonomy).toBe("delivery_order_drop");
+    expect(candidateAbsent.miss_taxonomy).toBe("candidate_absent");
+    expect(noGold.miss_taxonomy).toBe("evaluation_or_gold_issue");
+    expect(noGoldMaterializationDrop.miss_taxonomy).toBe("materialization_drop");
+    expect(noGoldCandidateAbsent.miss_taxonomy).toBe("candidate_absent");
+
+    const summary = summarizeLongMemEvalRecallEvidence([
+      materializationDrop,
+      budgetDrop,
+      deliveryOrderDrop,
+      candidateAbsent,
+      noGold,
+      noGoldMaterializationDrop,
+      noGoldCandidateAbsent
+    ]);
+    expect(summary.miss_taxonomy_distribution).toEqual({
+      candidate_absent: 2,
+      materialization_drop: 2,
+      budget_drop: 1,
+      delivery_order_drop: 1,
+      evaluation_or_gold_issue: 1
+    });
+    expect(
+      buildLongMemEvalQualityMetrics([
+        materializationDrop,
+        budgetDrop,
+        deliveryOrderDrop,
+        candidateAbsent,
+        noGold,
+        noGoldMaterializationDrop,
+        noGoldCandidateAbsent
+      ]).miss_taxonomy_distribution
+    ).toEqual(summary.miss_taxonomy_distribution);
+  });
+
   it("defaults omitted legacy graph expansion counters without weakening the strict sidecar schema", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-legacy",
@@ -301,6 +482,37 @@ describe("LongMemEval recall diagnostics", () => {
       LongMemEvalQuestionDiagnosticSchema.parse({
         ...row,
         graph_expansion_plane_count_per_hop: ["bad", 0]
+      })
+    ).toThrow();
+  });
+
+  it("defaults omitted legacy miss taxonomy fields while keeping invalid values strict", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-legacy-taxonomy",
+      goldMemoryIds: ["gold-a"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: { candidates: [] } }
+    });
+    const legacyRow = {
+      ...row,
+      gold: row.gold.map(({ miss_taxonomy: _missTaxonomy, ...gold }) => gold)
+    };
+    const { miss_taxonomy: _rowMissTaxonomy, ...legacyQuestion } = legacyRow;
+
+    expect(LongMemEvalQuestionDiagnosticSchema.parse(legacyQuestion).miss_taxonomy).toBeNull();
+    expect(
+      LongMemEvalQuestionDiagnosticSchema.parse(legacyQuestion).gold[0]?.miss_taxonomy
+    ).toBeNull();
+    expect(() =>
+      LongMemEvalQuestionDiagnosticSchema.parse({
+        ...row,
+        miss_taxonomy: "under_ranked"
       })
     ).toThrow();
   });
