@@ -1,13 +1,39 @@
 import type { EventLogEntry, Proposal } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { insertEventLogEntry } from "../shared/event-log-writer.js";
 import { parseNonEmptyString } from "../shared/validators.js";
-import { parseNullableTimestamp, parseProposal, parseProposalReviewerAssignment, parseRunId, parseWorkspaceId, serializeProposedChanges, serializeSourceDeliveryIds } from "./mappers.js";
+import {
+  parseNullableTimestamp,
+  parseProposal,
+  parseProposalReviewerAssignment,
+  parseProposalRow,
+  parseRunId,
+  parseWorkspaceId,
+  serializeProposedChanges,
+  serializeSourceDeliveryIds
+} from "./mappers.js";
 import { serializeProposedPathRelation } from "./path-relations.js";
+import type { ProposalRow } from "./rows.js";
 import type { ProposalStatements } from "./sqlite-proposal-statements.js";
-import type { CreateProposalWithEventsOptions, ProposalCreateInput, ProposalCreationEventInput, ProposalReviewerAssignment } from "./types.js";
+import type {
+  CreateProposalWithEventsIfAbsentResult,
+  CreateProposalWithEventsOptions,
+  PendingProposalDedupeKey,
+  ProposalCreateInput,
+  ProposalCreationEventInput,
+  ProposalReviewerAssignment
+} from "./types.js";
+
+type ProposalEventLogWriter = Parameters<typeof insertEventLogEntry>[0];
+
+export interface ProposalCreateWorkflowHost extends Pick<
+  ProposalStatements,
+  "createStatement" | "findPendingByDedupeKeyStatement" | "assignReviewerStatement"
+> {
+  readonly eventLogWriter: ProposalEventLogWriter;
+  transaction<T>(fn: () => T, options?: { readonly immediate?: boolean }): T;
+}
 
 interface ParsedProposalCreateRequest {
   readonly proposal: Readonly<Proposal>;
@@ -22,18 +48,21 @@ interface ParsedProposalCreateRequest {
   readonly sourceDeliveryIds: string | null;
 }
 
+interface ParsedPendingProposalDedupeKey {
+  readonly workspaceId: string;
+  readonly derivedFrom: string;
+  readonly dossierRef: string;
+  readonly targetObjectKind: string;
+}
+
 export class ProposalCreateWorkflow {
-  public constructor(
-    private readonly db: StorageDatabase,
-    private readonly eventLogWriter: Parameters<typeof insertEventLogEntry>[0],
-    private readonly statements: ProposalStatements
-  ) {}
+  public constructor(private readonly host: ProposalCreateWorkflowHost) {}
 
   public async create(input: ProposalCreateInput): Promise<Readonly<Proposal>> {
     const request = parseProposalCreateRequest(input);
 
     try {
-      insertProposal(this.statements, request);
+      insertProposal(this.host, request);
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -60,9 +89,9 @@ export class ProposalCreateWorkflow {
         : parseProposalReviewerAssignment(options.reviewerAssignment);
 
     try {
-      return this.db.connection.transaction(() => {
-        const storedEvents = events.map((event) => insertEventLogEntry(this.eventLogWriter, event));
-        insertProposal(this.statements, request);
+      return this.host.transaction(() => {
+        const storedEvents = events.map((event) => insertEventLogEntry(this.host.eventLogWriter, event));
+        insertProposal(this.host, request);
         if (reviewerAssignment !== undefined) {
           this.insertReviewerAssignment(reviewerAssignment);
         }
@@ -71,8 +100,58 @@ export class ProposalCreateWorkflow {
           proposal: request.proposal,
           events: storedEvents
         });
-      })();
+      });
     } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to create proposal ${request.proposal.proposal_id} with creation events.`,
+        error
+      );
+    }
+  }
+
+  public async createProposalWithEventsIfAbsent(
+    input: ProposalCreateInput,
+    events: readonly ProposalCreationEventInput[],
+    dedupeKey: PendingProposalDedupeKey,
+    options: CreateProposalWithEventsOptions = {}
+  ): Promise<CreateProposalWithEventsIfAbsentResult> {
+    const request = parseProposalCreateRequest(input);
+    const parsedDedupeKey = parsePendingProposalDedupeKey(dedupeKey);
+    const reviewerAssignment =
+      options.reviewerAssignment === undefined
+        ? undefined
+        : parseProposalReviewerAssignment(options.reviewerAssignment);
+
+    try {
+      return this.host.transaction(() => {
+        const existing = findPendingProposalByDedupeKey(this.host, parsedDedupeKey);
+        if (existing !== null) {
+          return deepFreeze({ proposal: existing, events: [], status: "already_pending" as const });
+        }
+
+        const storedEvents = events.map((event) => insertEventLogEntry(this.host.eventLogWriter, event));
+        insertProposal(this.host, request);
+        if (reviewerAssignment !== undefined) {
+          this.insertReviewerAssignment(reviewerAssignment);
+        }
+
+        return deepFreeze({
+          proposal: request.proposal,
+          events: storedEvents,
+          status: "created" as const
+        });
+      }, { immediate: true });
+    } catch (error) {
+      const existing = findPendingProposalByDedupeKey(this.host, parsedDedupeKey);
+      if (isUniqueConstraintError(error) && existing !== null) {
+        return deepFreeze({ proposal: existing, events: [], status: "already_pending" as const });
+      }
+
       if (error instanceof StorageError) {
         throw error;
       }
@@ -87,7 +166,7 @@ export class ProposalCreateWorkflow {
 
 
   private insertReviewerAssignment(assignment: ProposalReviewerAssignment): void {
-    this.statements.assignReviewerStatement.run(
+    this.host.assignReviewerStatement.run(
       assignment.proposal_id,
       assignment.reviewer_identity,
       assignment.assigned_at,
@@ -95,6 +174,30 @@ export class ProposalCreateWorkflow {
       assignment.escalation_after_ms
     );
   }
+}
+
+function parsePendingProposalDedupeKey(
+  key: PendingProposalDedupeKey
+): ParsedPendingProposalDedupeKey {
+  return {
+    workspaceId: parseWorkspaceId(key.workspace_id),
+    derivedFrom: parseNonEmptyString(key.derived_from, "derived_from"),
+    dossierRef: parseNonEmptyString(key.dossier_ref, "dossier_ref"),
+    targetObjectKind: parseNonEmptyString(key.target_object_kind, "target_object_kind")
+  };
+}
+
+function findPendingProposalByDedupeKey(
+  statements: Pick<ProposalStatements, "findPendingByDedupeKeyStatement">,
+  key: ParsedPendingProposalDedupeKey
+): Readonly<Proposal> | null {
+  const row = statements.findPendingByDedupeKeyStatement.get(
+    key.workspaceId,
+    key.targetObjectKind,
+    key.derivedFrom,
+    key.dossierRef
+  ) as ProposalRow | undefined;
+  return row === undefined ? null : parseProposalRow(row);
 }
 
 function parseProposalCreateRequest(input: ProposalCreateInput): ParsedProposalCreateRequest {
@@ -114,7 +217,7 @@ function parseProposalCreateRequest(input: ProposalCreateInput): ParsedProposalC
 }
 
 function insertProposal(
-  statements: ProposalStatements,
+  statements: Pick<ProposalStatements, "createStatement">,
   request: ParsedProposalCreateRequest
 ): void {
   const proposal = request.proposal;
@@ -141,4 +244,20 @@ function insertProposal(
     request.targetBaselineUpdatedAt,
     request.sourceDeliveryIds
   );
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
+    const codeValue = (current as { readonly code?: unknown }).code;
+    const messageValue = (current as { readonly message?: unknown }).message;
+    if (typeof codeValue === "string" && codeValue.startsWith("SQLITE_CONSTRAINT")) {
+      return true;
+    }
+    if (typeof messageValue === "string" && messageValue.includes("UNIQUE constraint failed")) {
+      return true;
+    }
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return false;
 }

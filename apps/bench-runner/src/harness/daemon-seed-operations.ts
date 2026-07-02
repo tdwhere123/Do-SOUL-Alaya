@@ -8,13 +8,7 @@ import {
   type SoulProposeMemoryUpdateResponse,
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
-import {
-  AnswersWithEdgeProducerService,
-  CoherenceEdgeProducerService,
-  PATH_RELATION_PROPOSE_THRESHOLD
-} from "@do-soul/alaya-core";
 import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
-import { planSessionCoRecallWarmup } from "./co-recall-warmup.js";
 import {
   createUnscoredMaterializedSeedError,
   isUnscoredMaterializedSeedError
@@ -36,6 +30,12 @@ import type {
 } from "./daemon-types.js";
 import type { CreateBenchSeedOpsInput } from "./daemon-seed-ops-types.js";
 import type { SeedObjectKind } from "./seed-rotation.js";
+
+export {
+  accrueAnswersWithCoRelevance,
+  accrueCoherenceCoRecall,
+  accrueSessionCoRecall
+} from "./daemon-edge-accrual.js";
 
 type AcceptedSeedMemory = { readonly proposalId: string };
 type MaterializedAcceptedSeed = {
@@ -414,95 +414,4 @@ export async function proposeSynthesis(
     run_id: input.activeContext.runId
   });
   return { synthesisId: synthesis.object_id };
-}
-
-export async function accrueSessionCoRecall(
-  input: CreateBenchSeedOpsInput,
-  memberMemoryIds: readonly string[]
-): Promise<{ readonly pairsObserved: number; readonly minted: number; readonly belowThreshold: number }> {
-  const plan = planSessionCoRecallWarmup(
-    memberMemoryIds,
-    PATH_RELATION_PROPOSE_THRESHOLD
-  );
-  if (plan === null) {
-    return { pairsObserved: 0, minted: 0, belowThreshold: 0 };
-  }
-  const service = input.activeRuntime.services.pathRelationProposalService;
-  const beforeCounter = await service.counterSize();
-  for (let replay = 0; replay < plan.replayCount; replay += 1) {
-    for (const pair of plan.pairs) {
-      await service.onCoUsage(
-        [pair.lowMemoryId, pair.highMemoryId],
-        input.activeContext.workspaceId
-      );
-    }
-  }
-  const residualPending = Math.max(0, (await service.counterSize()) - beforeCounter);
-  return {
-    pairsObserved: plan.pairs.length,
-    minted: Math.max(0, plan.pairs.length - residualPending),
-    belowThreshold: residualPending
-  };
-}
-
-export async function accrueCoherenceCoRecall(
-  input: CreateBenchSeedOpsInput,
-  members: readonly { readonly memoryId: string; readonly sessionId: string }[],
-  options: {
-    readonly floor: number;
-    readonly capPerNode: number;
-    readonly crossSessionOnly: boolean;
-  }
-): Promise<{ readonly coherentPairs: number; readonly keptPairs: number; readonly minted: number }> {
-  const embeddingRecallService = input.activeRuntime.services.embeddingRecallService;
-  if (embeddingRecallService === undefined || members.length < 2) {
-    return { coherentPairs: 0, keptPairs: 0, minted: 0 };
-  }
-  return new CoherenceEdgeProducerService({
-    pairSource: embeddingRecallService,
-    mintPort: input.activeRuntime.services.pathRelationProposalService,
-    warn: (message, meta) => console.error(`[coherence] ${message}`, meta)
-  }).crystallize({
-    workspaceId: input.activeContext.workspaceId,
-    runId: input.activeContext.runId,
-    objects: members.map((member) => ({
-      objectId: member.memoryId,
-      sessionId: member.sessionId
-    })),
-    floor: options.floor,
-    capPerNode: options.capPerNode,
-    crossSessionOnly: options.crossSessionOnly
-  });
-}
-
-// S2 probe: mints answers_with edges from already-seeded memory_hq HQ-overlap.
-// Mirrors accrueCoherenceCoRecall but reads the HQ pair source; never reseeds/re-embeds.
-export async function accrueAnswersWithCoRelevance(
-  input: CreateBenchSeedOpsInput,
-  members: readonly { readonly memoryId: string; readonly sessionId: string }[],
-  options: {
-    readonly bar: number;
-    readonly capPerNode: number;
-    readonly crossSessionOnly: boolean;
-  }
-): Promise<{ readonly coRelevantPairs: number; readonly keptPairs: number; readonly minted: number }> {
-  const pairSource = input.activeRuntime.services.answersWithPairSource;
-  if (pairSource === undefined || members.length < 2) {
-    return { coRelevantPairs: 0, keptPairs: 0, minted: 0 };
-  }
-  return new AnswersWithEdgeProducerService({
-    pairSource,
-    mintPort: input.activeRuntime.services.pathRelationProposalService,
-    warn: (message, meta) => console.error(`[answers-with] ${message}`, meta)
-  }).crystallize({
-    workspaceId: input.activeContext.workspaceId,
-    runId: input.activeContext.runId,
-    objects: members.map((member) => ({
-      objectId: member.memoryId,
-      sessionId: member.sessionId
-    })),
-    bar: options.bar,
-    capPerNode: options.capPerNode,
-    crossSessionOnly: options.crossSessionOnly
-  });
 }

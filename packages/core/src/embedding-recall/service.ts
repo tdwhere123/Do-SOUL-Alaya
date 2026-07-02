@@ -10,10 +10,12 @@ import {
   EMPTY_SUPPLEMENT_RESULT,
   clampQueryEmbeddingCacheSize,
   clampQueryTimeout,
-  cosineSimilarity,
-  isProviderMatchedEmbedding,
   toErrorMessage
 } from "./helpers.js";
+import {
+  computeCoherentPairKeys,
+  scoreEmbeddingPoolCandidates
+} from "./pool-scoring.js";
 import { QueryEmbeddingEngine } from "./query-embedding-engine.js";
 import { EmbeddingSupplementBuilder } from "./supplement-builder.js";
 import type {
@@ -227,46 +229,13 @@ export class EmbeddingRecallService {
     readonly queryText: string;
     readonly objectIds: readonly string[];
   }): Promise<ReadonlyMap<string, number>> {
-    const empty: ReadonlyMap<string, number> = new Map<string, number>();
-    if (params.objectIds.length === 0 || !this.dependencies.provider.isAvailable) {
-      return empty;
-    }
-    let storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
-    try {
-      storedVectors = await this.dependencies.embeddingRepo.listByObjectIds(params.workspaceId, params.objectIds);
-    } catch (error) {
-      this.warn("pool embedding rescoring degraded", {
-        workspace_id: params.workspaceId,
-        run_id: params.runId,
-        reason: "local_vector_lookup_failed",
-        error: toErrorMessage(error)
-      });
-      return empty;
-    }
-    if (storedVectors.length === 0) {
-      return empty;
-    }
-    let queryEmbedding: Float32Array | null;
-    try {
-      queryEmbedding = await this.queryEngine.resolveQueryEmbeddingNow(params.queryText);
-    } catch {
-      return empty;
-    }
-    if (queryEmbedding === null) {
-      return empty;
-    }
-    const provider = this.dependencies.provider;
-    const scores = new Map<string, number>();
-    for (const record of storedVectors) {
-      if (!isProviderMatchedEmbedding(record, provider) || record.dimensions !== record.embedding.length) {
-        continue;
-      }
-      const sim = cosineSimilarity(queryEmbedding, record.embedding);
-      if (sim > 0) {
-        scores.set(record.object_id, sim);
-      }
-    }
-    return scores;
+    return await scoreEmbeddingPoolCandidates({
+      ...params,
+      embeddingRepo: this.dependencies.embeddingRepo,
+      provider: this.dependencies.provider,
+      queryEngine: this.queryEngine,
+      warn: this.warn
+    });
   }
 
   public async recordPrecheckDegraded(params: {
@@ -503,46 +472,4 @@ export class EmbeddingRecallService {
       return null;
     }
   }
-}
-
-// invariant: cosine space is valid only within one (provider_kind, model_id,
-// schema_version); self-inconsistent records (dimensions !== embedding length)
-// are dropped — cosineSimilarity's length guard returns 0 for any residual.
-function computeCoherentPairKeys(
-  storedVectors: readonly Readonly<EmbeddingVectorRecord>[],
-  objectIds: readonly string[],
-  floor: number,
-  provider: EmbeddingRecallServiceDependencies["provider"]
-): ReadonlySet<string> {
-  const vectorsByObjectId = new Map<string, Float32Array>();
-  for (const record of storedVectors) {
-    if (
-      record.provider_kind === provider.providerKind &&
-      record.model_id === provider.modelId &&
-      record.schema_version === provider.schemaVersion &&
-      record.dimensions === record.embedding.length
-    ) {
-      vectorsByObjectId.set(record.object_id, record.embedding);
-    }
-  }
-
-  const coherent = new Set<string>();
-  for (let i = 0; i < objectIds.length; i += 1) {
-    const vecA = vectorsByObjectId.get(objectIds[i]!);
-    if (vecA === undefined) {
-      continue;
-    }
-    for (let j = i + 1; j < objectIds.length; j += 1) {
-      const vecB = vectorsByObjectId.get(objectIds[j]!);
-      if (vecB === undefined) {
-        continue;
-      }
-      if (cosineSimilarity(vecA, vecB) >= floor) {
-        const [low, high] = objectIds[i]! < objectIds[j]! ? [objectIds[i]!, objectIds[j]!] : [objectIds[j]!, objectIds[i]!];
-        coherent.add(`${low}|${high}`);
-      }
-    }
-  }
-
-  return coherent;
 }

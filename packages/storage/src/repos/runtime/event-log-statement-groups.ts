@@ -15,13 +15,11 @@ export interface EventLogMutationStatements {
 }
 
 export interface EventLogEntityQueryStatements {
-  readonly queryByEntityStatement: SqliteStatement;
   readonly queryByEntityPagedStatement: SqliteStatement;
   readonly queryByTypeStatement: SqliteStatement;
 }
 
 export interface EventLogRunQueryStatements {
-  readonly queryByRunStatement: SqliteStatement;
   readonly queryByRunPagedStatement: SqliteStatement;
   readonly queryByRunAndEntityTypeStatement: SqliteStatement;
   readonly queryConversationMessageEventsByRunPagedStatement: SqliteStatement;
@@ -37,7 +35,6 @@ export interface EventLogRunQueryStatements {
 }
 
 export interface EventLogWorkspaceQueryStatements {
-  readonly queryByWorkspaceStatement: SqliteStatement;
   readonly queryByWorkspacePagedStatement: SqliteStatement;
   readonly queryByWorkspaceAndTypeStatement: SqliteStatement;
   readonly queryByWorkspaceAfterEventIdStatement: SqliteStatement;
@@ -88,12 +85,6 @@ const EVENT_LOG_MUTATION_SQL: SqlDefinitionMap<EventLogMutationStatements> = {
 };
 
 const EVENT_LOG_ENTITY_QUERY_SQL: SqlDefinitionMap<EventLogEntityQueryStatements> = {
-  queryByEntityStatement: `
-      SELECT${EVENT_LOG_SELECT_COLUMNS}
-      FROM event_log
-      WHERE entity_type = ? AND entity_id = ?
-      ORDER BY created_at ASC, rowid ASC
-    `,
   queryByEntityPagedStatement: `
       SELECT${EVENT_LOG_SELECT_COLUMNS}
       FROM event_log
@@ -111,12 +102,6 @@ const EVENT_LOG_ENTITY_QUERY_SQL: SqlDefinitionMap<EventLogEntityQueryStatements
 };
 
 const EVENT_LOG_RUN_QUERY_SQL: SqlDefinitionMap<EventLogRunQueryStatements> = {
-  queryByRunStatement: `
-      SELECT${EVENT_LOG_SELECT_COLUMNS}
-      FROM event_log
-      WHERE run_id = ?
-      ORDER BY created_at ASC, rowid ASC
-    `,
   queryByRunPagedStatement: `
       SELECT${EVENT_LOG_SELECT_COLUMNS}
       FROM event_log
@@ -233,12 +218,6 @@ const EVENT_LOG_RUN_QUERY_SQL: SqlDefinitionMap<EventLogRunQueryStatements> = {
 };
 
 const EVENT_LOG_WORKSPACE_QUERY_SQL: SqlDefinitionMap<EventLogWorkspaceQueryStatements> = {
-  queryByWorkspaceStatement: `
-      SELECT${EVENT_LOG_SELECT_COLUMNS}
-      FROM event_log
-      WHERE workspace_id = ?
-      ORDER BY created_at ASC, rowid ASC
-    `,
   queryByWorkspacePagedStatement: `
       SELECT${EVENT_LOG_SELECT_COLUMNS}
       FROM event_log

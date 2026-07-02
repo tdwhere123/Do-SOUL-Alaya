@@ -1,6 +1,6 @@
 # Audit-fix closeout — 2026-07-01
 
-Branch: `recall/conformant-audit-fix`  
+Branch: `recall/conformant-audit-fix`
 Worktree: `.worktrees/recall-conformant-audit-fix`
 
 ## Backlog items closed

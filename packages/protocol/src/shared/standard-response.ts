@@ -27,33 +27,6 @@ export const ConfigPatchAckResponseSchema = z
   })
   .readonly();
 
-export type StandardResponse<T> = {
-  readonly success: true;
-  readonly data: T;
-};
-
-export type StandardConfigPatchResponse<T> = StandardResponse<T> & {
-  readonly requires_daemon_restart?: boolean;
-};
-
-export function createStandardResponse<T>(data: T): StandardResponse<T> {
-  return { success: true, data };
-}
-
-export function createStandardConfigPatchResponse<T>(
-  data: T,
-  options?: { readonly requiresDaemonRestart?: boolean }
-): StandardConfigPatchResponse<T> {
-  if (options?.requiresDaemonRestart === undefined) {
-    return createStandardResponse(data);
-  }
-  return {
-    success: true,
-    data,
-    requires_daemon_restart: options.requiresDaemonRestart
-  };
-}
-
 export function isStandardSuccessEnvelope(
   value: unknown
 ): value is { readonly success: true; readonly data: unknown } {
@@ -96,22 +69,6 @@ export function bindStandardConfigPatchResponse<T extends ZodTypeAny>(
       ? {}
       : { requires_daemon_restart: options.requiresDaemonRestart })
   });
-}
-
-export function createFlatOrEnvelopedReadSchema<T extends ZodTypeAny>(dataSchema: T) {
-  const flatSchema = dataSchema.refine(
-    (value) =>
-      !(
-        typeof value === "object" &&
-        value !== null &&
-        !Array.isArray(value) &&
-        "success" in value
-      ),
-    { message: "Invalid config payload" }
-  );
-  return z
-    .union([StandardResponseSchema(dataSchema), flatSchema])
-    .transform((parsed) => unwrapStandardResponseData(parsed));
 }
 
 export function createConfigRouteResponseSchema<T extends ZodTypeAny>(

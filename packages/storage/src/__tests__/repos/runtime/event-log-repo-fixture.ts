@@ -11,13 +11,13 @@ import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
 export const trackedDatabases = new Set<ReturnType<typeof initDatabase>>();
 
-export async function createEventLogRepos(): Promise<{
+export async function createEventLogRepos(options: { readonly filename?: string } = {}): Promise<{
   database: ReturnType<typeof initDatabase>;
   workspaceRepo: SqliteWorkspaceRepo;
   runRepo: SqliteRunRepo;
   eventLogRepo: SqliteEventLogRepo;
 }> {
-  const database = initDatabase({ filename: ":memory:" });
+  const database = initDatabase({ filename: options.filename ?? ":memory:" });
   trackedDatabases.add(database);
   const workspaceRepo = new SqliteWorkspaceRepo(database);
   const runRepo = new SqliteRunRepo(database);

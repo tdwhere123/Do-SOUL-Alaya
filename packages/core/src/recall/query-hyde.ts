@@ -1,7 +1,6 @@
-// HyDE hook: ALAYA_RECALL_QUERY_HYDE_JSON ({normalizedQuery: hypothesisText}) replaces the
-// embedding query text with a hypothetical answer, bridging query->latent-fact for retrieval
-// (e.g. "recommend video-editing resources" -> "The user uses Adobe Premiere Pro"). Absent/empty
-// JSON or no match -> returns the query unchanged (byte-identical). LLM-precomputed for A/B.
+// invariant: ALAYA_RECALL_QUERY_HYDE_JSON maps normalized query text to
+// precomputed hypothetical-answer text; absent, invalid, or missing entries
+// preserve the original query text.
 function parseHydeMap(raw: string): Readonly<Record<string, string>> {
   try {
     const parsed = JSON.parse(raw) as unknown;

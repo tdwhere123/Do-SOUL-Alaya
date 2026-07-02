@@ -1,13 +1,15 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import {
-  prepareMemoryEntryCreateStatements,
   prepareMemoryEntryGarbageCollectionStatements,
+  type MemoryEntryGarbageCollectionStatements
+} from "./memory-entry-garbage-collection-statements.js";
+import {
+  prepareMemoryEntryCreateStatements,
   prepareMemoryEntryLifecycleStatements,
   prepareMemoryEntryReadStatements,
   prepareMemoryEntrySearchStatements,
   prepareMemoryEntryUpdateStatements,
   type MemoryEntryCreateStatements,
-  type MemoryEntryGarbageCollectionStatements,
   type MemoryEntryLifecycleStatements,
   type MemoryEntryReadStatements,
   type MemoryEntrySearchStatements,

@@ -99,8 +99,8 @@ describe("bench-runner CLI", () => {
   it(
     "controlled-replay writes a controlled-replay.json archive under a temp history root",
     async () => {
-      // Path axis inert until the answer-edge producer lands; assert the M0 path-recall native-health
-      // contract under the flat-baseline kill-switch (afterEach clears it). See plan recall-any5-90 §4.
+      // Path-axis answer edges are not seeded in this fixture, so assert the M0 path-recall
+      // native-health contract under the flat-baseline kill switch.
       process.env.ALAYA_RECALL_FLAT_BASELINE = "on";
       const historyRoot = await mkdtemp(join(tmpdir(), "alaya-controlled-replay-cli-"));
 

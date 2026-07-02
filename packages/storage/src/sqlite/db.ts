@@ -28,6 +28,7 @@ export class StorageDatabase {
   public readonly filename: string;
   public connection: SqliteConnection;
   private closed = false;
+  private connectionVersion = 0;
 
   public constructor(filename: string, connection: SqliteConnection) {
     this.filename = filename;
@@ -36,6 +37,10 @@ export class StorageDatabase {
 
   public isClosed(): boolean {
     return this.closed;
+  }
+
+  public getConnectionVersion(): number {
+    return this.connectionVersion;
   }
 
   public reopenIfClosed(): void {
@@ -49,8 +54,10 @@ export class StorageDatabase {
     database.pragma("synchronous = NORMAL");
     database.pragma("analysis_limit = 400");
     this.connection = database;
+    this.connectionVersion += 1;
     this.closed = false;
     if (this.filename !== ":memory:") {
+      evictDatabaseCacheIfNeeded(this.filename);
       databaseCache.set(this.filename, this);
     }
   }

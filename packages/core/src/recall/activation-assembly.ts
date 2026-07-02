@@ -16,7 +16,7 @@ function flagEnabled(name: string): boolean {
   return raw === "on" || raw === "1" || raw === "true";
 }
 
-// Master switch (default off → legacy flat path stays byte-identical).
+// invariant: unset ALAYA_RECALL_COMPOSE preserves the flat candidate ordering path.
 export function composeRecallEnabled(): boolean {
   return flagEnabled("ALAYA_RECALL_COMPOSE");
 }
@@ -34,8 +34,8 @@ export interface ComposedActivationCandidate {
 export const COMPOSE_COVERAGE_LAMBDA = 0.05;
 export const COMPOSE_COVERAGE_SATURATION = 4;
 
-// Bounded evidence gain g(R_E)=1+β·R_E (g(0)=1) on the group score; β small so evidence never dominates
-// the object base. Net effect is measured by bench (Card E) and β can be tuned to 0.
+// Bounded evidence gain g(R_E)=1+β·R_E (g(0)=1) on the group score; β stays small so
+// evidence cannot dominate the object base.
 export const COMPOSE_EVIDENCE_BETA = 0.1;
 
 function groupSessionKey(

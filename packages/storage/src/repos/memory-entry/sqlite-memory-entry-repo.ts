@@ -6,7 +6,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
-import { StorageError } from "../../shared/errors.js";
+import {
+  createMemoryEntry,
+  createMemoryEntryWithinTransaction,
+  type MemoryEntryCreateWorkflowHost
+} from "./create-workflow.js";
 import {
   autonomousTombstone,
   archiveMemoryEntry,
@@ -23,9 +27,6 @@ import {
   searchByKeywordWithinObjectIds,
   type MemoryEntrySearchWorkflowHost
 } from "./search-workflows.js";
-import {
-  parseMemoryEntry} from "./row-mapper.js";
-import { buildMemoryEntryCreateParams } from "./create-params.js";
 import { MemoryEntryReadQueries } from "./memory-entry-read-queries.js";
 import { prepareMemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
 import type {
@@ -51,15 +52,12 @@ import {
   type MemoryEntryRepoUpdateFields
 } from "./types.js";
 
-// Implementing the three workflow-host interfaces makes the delegate calls below
-// type-checked at the class boundary: if a host contract grows a member the repo
-// lacks, this declaration stops compiling — which is why the prepared statements
-// the workflows read through `this` are exposed as public getters rather than
-// bridged with an `as unknown as` cast. Consumers still depend on MemoryEntryRepo,
-// which does not surface these statements.
+// invariant: workflow-host contracts are implemented directly so statement
+// getters stay type-checked at the repo boundary instead of cast through unknown.
 export class SqliteMemoryEntryRepo
   implements
     MemoryEntryRepo,
+    MemoryEntryCreateWorkflowHost,
     MemoryEntrySearchWorkflowHost,
     MemoryEntryLifecycleWorkflowHost,
     MemoryEntryUpdateWorkflowHost
@@ -139,10 +137,13 @@ export class SqliteMemoryEntryRepo
     this.readQueries = new MemoryEntryReadQueries(db, this.diagnostics, this.statementHolder);
   }
 
+  public transaction<T>(fn: () => T, options: { readonly immediate?: boolean } = {}): T {
+    const txn = this.activeConnection().transaction(fn);
+    return options.immediate === true ? txn.immediate() : txn();
+  }
+
   public async create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>> {
-    const parsedEntry = parseMemoryEntry(entry);
-    this.runCreateStatement(parsedEntry);
-    return parsedEntry;
+    return createMemoryEntry.call(this, entry);
   }
 
   public createWithinTransaction(
@@ -152,30 +153,16 @@ export class SqliteMemoryEntryRepo
       readonly afterCreate?: () => void;
     }
   ): Readonly<MemoryEntry> {
-    const parsedEntry = parseMemoryEntry(entry);
-    const txn = this.db.connection.transaction(() => {
-      callbacks.beforeCreate?.();
-      this.runCreateStatement(parsedEntry);
-      callbacks.afterCreate?.();
-    });
-    txn.immediate();
-    return parsedEntry;
-  }
-
-  private runCreateStatement(parsedEntry: Readonly<MemoryEntry>): void {
-    try {
-      this.createStatement.run(...buildMemoryEntryCreateParams(parsedEntry));
-    } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to create memory entry ${parsedEntry.object_id}.`,
-        error
-      );
-    }
+    return createMemoryEntryWithinTransaction.call(this, entry, callbacks);
   }
 
   public async findById(objectId: string): Promise<Readonly<MemoryEntry> | null> {
     return await this.readQueries.findById(objectId);
+  }
+
+  private activeConnection(): StorageDatabase["connection"] {
+    this.db.reopenIfClosed();
+    return this.db.connection;
   }
 
   public async findByIds(

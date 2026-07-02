@@ -5,9 +5,6 @@ import {
   bindStandardResponse,
   ConfigPatchAckResponseSchema,
   createConfigRouteResponseSchema,
-  createFlatOrEnvelopedReadSchema,
-  createStandardConfigPatchResponse,
-  createStandardResponse,
   isZodValidationError,
   StandardConfigPatchResponseSchema,
   StandardResponseSchema,
@@ -56,19 +53,15 @@ describe("unwrapStandardResponseData", () => {
     expect(unwrapStandardResponseData({ enabled: true })).toEqual({ enabled: true });
   });
 
-  it("round-trips through createStandardResponse helpers", () => {
-    const envelope = createStandardResponse({ enabled: true });
+  it("round-trips through producer bind helpers", () => {
+    const envelope = bindStandardResponse(SampleSchema, { enabled: true });
     expect(unwrapStandardResponseData(envelope)).toEqual({ enabled: true });
-    const patch = createStandardConfigPatchResponse({ enabled: true }, { requiresDaemonRestart: true });
+    const patch = bindStandardConfigPatchResponse(
+      SampleSchema,
+      { enabled: true },
+      { requiresDaemonRestart: true }
+    );
     expect(patch.requires_daemon_restart).toBe(true);
-  });
-});
-
-describe("createFlatOrEnvelopedReadSchema", () => {
-  it("accepts enveloped and flat config reads", () => {
-    const schema = createFlatOrEnvelopedReadSchema(SampleSchema);
-    expect(schema.parse({ success: true, data: { enabled: true } })).toEqual({ enabled: true });
-    expect(schema.parse({ enabled: false })).toEqual({ enabled: false });
   });
 });
 

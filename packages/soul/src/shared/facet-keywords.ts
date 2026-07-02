@@ -1,8 +1,8 @@
 import { FACET_VOCABULARY } from "@do-soul/alaya-protocol";
 
-// Shared answer-relevance ontology bridge: one keyword table maps free text to
-// FACET_VOCABULARY ids so write-side entry facets and read-side query facets are
-// drawn from the same vocabulary and can overlap deterministically.
+// invariant: this keyword table mirrors packages/core/src/recall/facet-keywords.ts.
+// Both sides emit FACET_VOCABULARY ids so write-side entry facets and read-side
+// query facets can overlap deterministically without a core<->soul dependency.
 const FACET_KEYWORD_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
   ["occupation_work", /\b(job|work|career|profession|occupation|employer|company|工作|职业|公司)\b/iu],
   ["education", /\b(school|college|university|degree|study|studied|major|学校|大学|学位|专业)\b/iu],

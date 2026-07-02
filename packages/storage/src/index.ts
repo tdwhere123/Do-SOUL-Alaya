@@ -80,7 +80,9 @@ export {
   SqliteProposalRepo,
   type AcceptedMemoryUpdateInput,
   type AcceptedPathRelationGovernanceInput,
+  type CreateProposalWithEventsIfAbsentResult,
   type PathRelationProposalPayload,
+  type PendingProposalDedupeKey,
   type ProposalCreateInput,
   type ProposalResolutionEventInput,
   type ProposalRepo

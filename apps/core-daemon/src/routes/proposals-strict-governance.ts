@@ -17,6 +17,9 @@ import {
 import type { ProposalRouteServices } from "./proposals-types.js";
 import { readJsonObject } from "./proposals-request-helpers.js";
 
+const STRICT_GOVERNANCE_OPTION_PREFIX = "promote_strictly_governed_";
+const STRICT_GOVERNANCE_DOSSIER_REF = "inspector.strict_governance_promotion";
+
 export async function promoteStrictlyGovernedProposal(
   context: Context,
   services: ProposalRouteServices
@@ -26,10 +29,44 @@ export async function promoteStrictlyGovernedProposal(
   await services.workspaceService.getById(workspaceId);
   const missing = await rejectMissingMemory(context, services, memoryId, workspaceId);
   if (missing !== null) return missing;
+  const existing = await findExistingStrictlyGovernedProposal(services, { workspaceId, memoryId });
+  if (existing !== null) {
+    return context.json(
+      { success: true, data: strictGovernanceResponse(existing, memoryId, "already_pending") },
+      200
+    );
+  }
   const reason = await readPromotionReason(context, memoryId);
   const created = await createStrictlyGovernedProposal(services, { workspaceId, memoryId, reason });
-  await notifyStrictGovernanceProposalEvents(services, created, workspaceId);
-  return context.json({ success: true, data: strictGovernanceResponse(created.proposal.proposal_id, memoryId) }, 200);
+  if (created.status === "created") {
+    await notifyStrictGovernanceProposalEvents(services, created, workspaceId);
+  }
+  return context.json(
+    { success: true, data: strictGovernanceResponse(created.proposal.proposal_id, memoryId, created.status) },
+    200
+  );
+}
+
+async function findExistingStrictlyGovernedProposal(
+  services: ProposalRouteServices,
+  input: { readonly workspaceId: string; readonly memoryId: string }
+): Promise<string | null> {
+  const pending = await services.proposalService.findPending(input.workspaceId);
+  for (const proposal of pending) {
+    if (proposal.derived_from !== input.memoryId) continue;
+    if (proposal.resolution_state !== ProposalResolutionState.PENDING) continue;
+    if (proposal.proposal_options.some(isStrictGovernanceProposalOption)) {
+      return proposal.proposal_id;
+    }
+  }
+  return null;
+}
+
+function isStrictGovernanceProposalOption(option: Proposal["proposal_options"][number]): boolean {
+  return (
+    option.option_kind === ProposalOptionKind.REQUEST_CONFIRMATION &&
+    option.option_id.startsWith(STRICT_GOVERNANCE_OPTION_PREFIX)
+  );
 }
 
 async function notifyStrictGovernanceProposalEvents(
@@ -53,7 +90,9 @@ async function notifyStrictGovernanceProposalEvents(
           committedEventId: event.event_id,
           severity: "error",
           warningCode: "ALAYA_PROPOSAL_NOTIFY_FAILED",
-          warningMessage: "[ProposalRoute] promote-strictly-governed notification failed"
+          warningMessage: "[ProposalRoute] promote-strictly-governed notification failed",
+          eventLogRepo: services.eventLogRepo,
+          runtimeNotifier: services.runtimeNotifier
         },
         error
       );
@@ -91,7 +130,7 @@ async function createStrictlyGovernedProposal(
   const timestamp = new Date().toISOString();
   const proposal = buildStrictlyGovernedProposal(input.memoryId, proposalId, timestamp);
   const summary = `${input.reason} Target PathRelation legitimacy.governance_class = ${PathGovernanceClass.STRICTLY_GOVERNED}.`;
-  return await services.proposalRepo.createProposalWithEvents(
+  return await services.proposalRepo.createProposalWithEventsIfAbsent(
     {
       proposal,
       workspace_id: input.workspaceId,
@@ -101,7 +140,13 @@ async function createStrictlyGovernedProposal(
       proposed_path_relation: buildStrictlyGovernedPathRelationProposal(input.memoryId),
       created_at: timestamp
     },
-    [buildProposalCreatedEvent(proposal, input.workspaceId)]
+    [buildProposalCreatedEvent(proposal, input.workspaceId)],
+    {
+      workspace_id: input.workspaceId,
+      derived_from: input.memoryId,
+      dossier_ref: STRICT_GOVERNANCE_DOSSIER_REF,
+      target_object_kind: "path_relation"
+    }
   );
 }
 
@@ -114,7 +159,7 @@ function buildStrictlyGovernedProposal(memoryId: string, proposalId: string, tim
     derived_from: memoryId,
     retention_policy: RetentionPolicy.SESSION_ONLY,
     proposal_id: proposalId,
-    dossier_ref: null,
+    dossier_ref: STRICT_GOVERNANCE_DOSSIER_REF,
     recommended_option_id: null,
     proposal_options: [buildStrictlyGovernedProposalOption(proposalId)],
     resolution_state: ProposalResolutionState.PENDING,
@@ -124,7 +169,7 @@ function buildStrictlyGovernedProposal(memoryId: string, proposalId: string, tim
 
 function buildStrictlyGovernedProposalOption(proposalId: string) {
   return {
-    option_id: `promote_strictly_governed_${proposalId}`,
+    option_id: `${STRICT_GOVERNANCE_OPTION_PREFIX}${proposalId}`,
     option_kind: ProposalOptionKind.REQUEST_CONFIRMATION,
     preserves_protected_constraints: true,
     dropped_candidates: [], unresolved_after_apply: [],
@@ -149,10 +194,10 @@ function buildProposalCreatedEvent(
   };
 }
 
-function strictGovernanceResponse(proposalId: string, memoryId: string) {
+function strictGovernanceResponse(proposalId: string, memoryId: string, status: "created" | "already_pending") {
   return {
     proposal_id: proposalId,
-    status: "created",
+    status,
     target_object_id: memoryId,
     target_object_kind: "path_relation",
     requested_governance_class: PathGovernanceClass.STRICTLY_GOVERNED

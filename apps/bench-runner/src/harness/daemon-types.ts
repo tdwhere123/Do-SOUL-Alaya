@@ -280,15 +280,8 @@ export interface BenchDaemonHandle {
     readonly minted: number;
   }>;
   /**
-   * @anchor accrueAnswersWithCoRelevance — EXPERIMENT (S2): ingestion-time
-   * answers_with crystallization (ALAYA_RECALL_ANSWERS_WITH;
-   * ALAYA_EXP_ANSWERS_WITH kept as legacy alias).
-   *
-   * Mints SPARSE answer-relation edges among the question's seeded memory_entry
-   * ids whose pooled HQ content-token sets overlap (>= bar). Unlike coherence
-   * (object cosine) the signal is answerhood — two memories answering the same
-   * batch of questions — so path_expansion bridges answer-co-relevant gold the
-   * co-occurrence topology cannot. Requires memory_hq pre-filled (S1 import).
+   * Mints sparse answer-relation edges among seeded memory_entry ids whose
+   * pooled HQ content-token sets overlap. Requires memory_hq to be pre-filled.
    *
    * see also: packages/core/src/path-graph/hq-answer-overlap.ts
    */

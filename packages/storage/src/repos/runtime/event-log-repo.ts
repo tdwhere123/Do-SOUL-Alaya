@@ -49,16 +49,22 @@ export class SqliteEventLogRepo implements EventLogRepo {
     return this.statementHolder.active();
   }
 
+  private activeConnection(): StorageDatabase["connection"] {
+    this.activeStatements();
+    return this.db.connection;
+  }
+
   public append(event: EventLogAppendInput): EventLogEntry {
     // Always auto-compute revision so the unique index on (entity_type, entity_id, revision) is
     // never violated by callers that hardcode revision: 0 or supply stale MAX+1 values.
     // The SELECT MAX + INSERT pair must be one write transaction even when callers append
     // directly, because multiple CLI/daemon processes can bootstrap against the same DB.
-    if (this.db.connection.inTransaction) {
+    const connection = this.activeConnection();
+    if (connection.inTransaction) {
       return this.appendInCurrentTransaction(event);
     }
 
-    const txn = this.db.connection.transaction(() => this.appendInCurrentTransaction(event));
+    const txn = connection.transaction(() => this.appendInCurrentTransaction(event));
     return txn.immediate();
   }
 
@@ -74,7 +80,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     // better-sqlite3 transactions are synchronous; if `fn` returns a Promise the
     // BEGIN/COMMIT pair completes before the awaited work, which is incorrect.
     // Callers that need async work must do it outside the transaction.
-    const txn = this.db.connection.transaction(fn);
+    const txn = this.activeConnection().transaction(fn);
     return txn.immediate();
   }
 

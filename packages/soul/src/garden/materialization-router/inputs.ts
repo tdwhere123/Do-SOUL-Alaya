@@ -1,22 +1,11 @@
 import {
   EvidenceHealthState,
-  MemoryDimension,
-  ScopeClass,
-  SourceKind,
   StorageTier,
   type CandidateMemorySignal,
-  type ClaimKind,
   type EnforcementLevel as EnforcementLevelValue,
   type EvidenceCapsule,
   type EvidenceHealthState as EvidenceHealthStateValue,
-  type EvidenceKind as EvidenceKindValue,
-  type FormationKind,
-  type MemoryDimension as MemoryDimensionValue,
-  type OriginTier,
-  type PrecedenceBasis as PrecedenceBasisValue,
-  type ScopeClass as ScopeClassValue,
-  type SourceKind as SourceKindValue,
-  type SynthesisType
+  type EvidenceKind as EvidenceKindValue
 } from "@do-soul/alaya-protocol";
 import { deriveFacetsFromText } from "../../shared/facet-keywords.js";
 import {
@@ -28,6 +17,16 @@ import {
 } from "./contracts.js";
 import { SIGNAL_REF_SEED_SPECS } from "./signal-ref-seeds.js";
 import { appendSummarySuffix, buildDistilledFact, buildSignalSummary, buildTopicKey } from "./distilled-fact.js";
+import {
+  pickPrecedenceBasis,
+  toClaimKind,
+  toFormationKind,
+  toMemoryDimension,
+  toOriginTier,
+  toScopeClass,
+  toSourceKind,
+  toSynthesisType
+} from "./input-conversions.js";
 import { readMemoryTemporalProjectionPayload } from "./temporal-projection.js";
 import { readMemoryPreferenceProfilePayload } from "./preference-projection.js";
 
@@ -355,37 +354,6 @@ export function buildClaimInput(
   };
 }
 
-// invariant: producer-side rule mirrors the canonical helper
-// `derivePrecedenceBasis` in packages/core/src/governance/claim-service.ts. Priority
-// (highest wins): user_override > authority > recency > evidence_strength.
-// Garden cannot import from packages/core (invariant §6), so the rule is
-// duplicated here with the cross-file anchor below; both producers stay
-// in lockstep through identical truth-table tests.
-// see also: packages/core/src/governance/claim-service.ts derivePrecedenceBasis
-function pickPrecedenceBasis(
-  signal: CandidateMemorySignal,
-  enforcementLevel: EnforcementLevelValue
-): PrecedenceBasisValue {
-  if (signal.source === "user_seed" || hasUserOverrideMarker(signal)) {
-    return "user_override";
-  }
-  if (enforcementLevel === "strict") {
-    return "authority";
-  }
-  if (hasSupersedeIntent(signal)) {
-    return "recency";
-  }
-  return "evidence_strength";
-}
-
-function hasUserOverrideMarker(signal: CandidateMemorySignal): boolean {
-  return signal.raw_payload.user_override === true;
-}
-
-function hasSupersedeIntent(signal: CandidateMemorySignal): boolean {
-  return signal.supersedes_refs.some((ref) => ref.trim().length > 0);
-}
-
 export function buildSynthesisInput(
   signal: CandidateMemorySignal,
   evidenceRefs: readonly string[]
@@ -418,108 +386,4 @@ function uniqueNonEmptyStrings(values: readonly string[]): readonly string[] {
     output.push(normalized);
   }
   return output;
-}
-
-function toScopeClass(scopeHint: string | null): ScopeClassValue {
-  switch (scopeHint) {
-    case ScopeClass.GLOBAL_CORE:
-      return ScopeClass.GLOBAL_CORE;
-    case ScopeClass.GLOBAL_DOMAIN:
-      return ScopeClass.GLOBAL_DOMAIN;
-    case ScopeClass.PROJECT:
-    default:
-      return ScopeClass.PROJECT;
-  }
-}
-
-function toMemoryDimension(objectKind: string): MemoryDimensionValue {
-  switch (objectKind) {
-    case MemoryDimension.PREFERENCE:
-      return MemoryDimension.PREFERENCE;
-    case MemoryDimension.CONSTRAINT:
-      return MemoryDimension.CONSTRAINT;
-    case MemoryDimension.DECISION:
-      return MemoryDimension.DECISION;
-    case MemoryDimension.PROCEDURE:
-      return MemoryDimension.PROCEDURE;
-    case MemoryDimension.HAZARD:
-      return MemoryDimension.HAZARD;
-    case MemoryDimension.GLOSSARY:
-      return MemoryDimension.GLOSSARY;
-    case MemoryDimension.EPISODE:
-      return MemoryDimension.EPISODE;
-    default:
-      return MemoryDimension.FACT;
-  }
-}
-
-function toSourceKind(source: CandidateMemorySignal["source"]): SourceKindValue {
-  switch (source) {
-    case "user_seed":
-      return SourceKind.SEED;
-    case "import":
-      return SourceKind.IMPORT;
-    case "model_tool":
-    case "garden_compile":
-    default:
-      return SourceKind.COMPILER;
-  }
-}
-
-function toFormationKind(signal: CandidateMemorySignal): FormationKind {
-  switch (signal.source) {
-    case "user_seed":
-      return "explicit";
-    case "import":
-      return "imported";
-    case "model_tool":
-      // model_tool signals carrying source_memory_refs build on top of
-      // existing memories (a derivation); plain LLM emissions without
-      // such refs are inferences.
-      return signal.source_memory_refs.length > 0 ? "derived" : "inferred";
-    case "garden_compile":
-    default:
-      return "extracted";
-  }
-}
-
-function toClaimKind(objectKind: string): ClaimKind {
-  switch (objectKind) {
-    case "preference":
-      return "preference";
-    case "decision":
-      return "decision";
-    case "procedure":
-      return "procedure";
-    case "hazard":
-      return "hazard";
-    case "factual_policy":
-      return "factual_policy";
-    case "exception":
-      return "exception";
-    case "glossary":
-      return "glossary";
-    case "episode":
-      return "episode";
-    case "constraint":
-    default:
-      return "constraint";
-  }
-}
-
-function toOriginTier(source: CandidateMemorySignal["source"]): OriginTier {
-  switch (source) {
-    case "user_seed":
-      return "seed";
-    case "import":
-      return "imported";
-    case "model_tool":
-    case "garden_compile":
-    default:
-      return "compiler_extracted";
-  }
-}
-
-function toSynthesisType(): SynthesisType {
-  return "cross_evidence";
 }

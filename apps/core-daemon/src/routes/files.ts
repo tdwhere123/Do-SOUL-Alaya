@@ -9,7 +9,11 @@ import {
   type FileUploadResponse,
   type SupportedMimeType
 } from "@do-soul/alaya-protocol";
-import { resolveStoredFilePath } from "@do-soul/alaya-core";
+import {
+  reportAsyncSideEffectFailure,
+  resolveStoredFilePath,
+  type AsyncSideEffectAuditEventLogPort
+} from "@do-soul/alaya-core";
 import type { FileRepo } from "@do-soul/alaya-storage";
 
 export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
@@ -104,6 +108,7 @@ export interface FileRouteServices {
     getById(runId: string): Promise<{ readonly run_id: string; readonly workspace_id: string }>;
   };
   readonly fileRepo: FileRepo;
+  readonly eventLogRepo: AsyncSideEffectAuditEventLogPort;
   readonly runtimeNotifier: {
     notifyEntry(entry: EventLogEntry): void | Promise<void>;
   };
@@ -130,13 +135,15 @@ async function uploadFile(context: Context, services: FileRouteServices): Promis
   const absolutePath = join(services.filesDirectory, record.storage_path);
   await mkdir(services.filesDirectory, { recursive: true });
   await writeFile(absolutePath, Buffer.from(await upload.file.arrayBuffer()));
+  let stored: Awaited<ReturnType<typeof persistFileRecord>>;
   try {
-    const stored = await persistFileRecord(services, record);
-    return context.json({ success: true, data: toUploadResponse(stored.record) }, 201);
+    stored = await persistFileRecord(services, record);
   } catch (error) {
     await bestEffortDelete(absolutePath);
     throw error;
   }
+  await notifyFileUploadEvent(services, stored.record, stored.event);
+  return context.json({ success: true, data: toUploadResponse(stored.record) }, 201);
 }
 
 async function readUploadRequest(context: Context): Promise<FileUploadRequest | Response> {
@@ -323,12 +330,39 @@ async function persistFileRecord(
     }
   });
 
-  await services.runtimeNotifier.notifyEntry(created.event);
-
   return {
     record: created.record,
     event: created.event
   };
+}
+
+async function notifyFileUploadEvent(
+  services: FileRouteServices,
+  record: Readonly<FileRecord>,
+  event: EventLogEntry
+): Promise<void> {
+  try {
+    await services.runtimeNotifier.notifyEntry(event);
+  } catch (error) {
+    await reportAsyncSideEffectFailure(
+      {
+        source: "daemon.files.upload",
+        operation: "runtime_notify",
+        subjectType: "file",
+        subjectId: record.file_id,
+        workspaceId: record.workspace_id ?? "[unknown]",
+        runId: record.run_id,
+        causedBy: "user_action",
+        committedEventId: event.event_id,
+        severity: "error",
+        warningCode: "ALAYA_FILE_NOTIFY_FAILED",
+        warningMessage: "[FileRoute] file upload notification failed",
+        eventLogRepo: services.eventLogRepo,
+        runtimeNotifier: services.runtimeNotifier
+      },
+      error
+    );
+  }
 }
 
 function normalizeOptionalBodyString(value: UploadBodyValue | UploadBodyValue[] | undefined): string | null {

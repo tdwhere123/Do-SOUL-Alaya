@@ -145,4 +145,10 @@ export {
   NonNegativeIntSchema,
   PositiveIntSchema
 } from "./shared/schema-primitives.js";
-export * from "./shared/standard-response.js";
+export {
+  bindStandardConfigPatchResponse,
+  bindStandardResponse,
+  createConfigRouteResponseSchema,
+  isZodValidationError,
+  unwrapStandardResponseData
+} from "./shared/standard-response.js";

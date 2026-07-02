@@ -1,21 +1,25 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { expect, it } from "vitest";
 import {
-GreenGovernanceEventType,
-RevokeReason,
-StreamingEventType,
-WorkspaceRunEventType,
-RunMode} from "@do-soul/alaya-protocol";
+  GreenGovernanceEventType,
+  RevokeReason,
+  RunMode,
+  StreamingEventType,
+  WorkspaceRunEventType
+} from "@do-soul/alaya-protocol";
 import {
-appendAppliedOverride,
-appendEngineResponseEvent,
-appendMalformedAppliedOverride,
-appendNarrativeConsolidationTrigger,
-appendPromotedOverride,
-appendRunCreatedEvent,
-appendRunMessageEvent,
-appendWorkspaceLifecycleEvent,
-createEventLogRepos,
-registerEventLogRepoCleanup
+  appendAppliedOverride,
+  appendEngineResponseEvent,
+  appendMalformedAppliedOverride,
+  appendNarrativeConsolidationTrigger,
+  appendPromotedOverride,
+  appendRunCreatedEvent,
+  appendRunMessageEvent,
+  appendWorkspaceLifecycleEvent,
+  createEventLogRepos,
+  registerEventLogRepoCleanup
 } from "./event-log-repo.test-support.js";
 
 registerEventLogRepoCleanup();
@@ -32,6 +36,31 @@ it("append generates a unique event_id and created_at", async () => {
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
   );
   expect(event.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+});
+
+it("append reopens a closed database before starting a transaction", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-event-log-"));
+
+  try {
+    const { database, eventLogRepo } = await createEventLogRepos({
+      filename: path.join(tempDir, "events.db")
+    });
+    await appendWorkspaceLifecycleEvent(eventLogRepo, {
+      workspaceId: "ws_events",
+      entityId: "workspace-before-reopen"
+    });
+
+    database.close();
+    const event = await appendWorkspaceLifecycleEvent(eventLogRepo, {
+      workspaceId: "ws_events",
+      entityId: "workspace-after-reopen"
+    });
+
+    expect(event.entity_id).toBe("workspace-after-reopen");
+    await expect(eventLogRepo.queryByEntity("workspace", "workspace-after-reopen")).resolves.toHaveLength(1);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 it("queryByRun returns only matching run events", async () => {

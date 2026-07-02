@@ -1,11 +1,9 @@
-// Read-side entity expansion: grouping over candidate canonical_entities.
-// groupCandidatesByEntity is consumed by Card D's live compose path
-// (activation-assembly); grouping over the FULL scored pool is the within-pool entity
-// expansion. Broader coarse seed→pool expansion is a future card. Canonical entity is the
-// only answer-selective grouping key (4.56x lift, design §4.5) — surface tokens disperse,
-// the subject is stable.
+// Read-side entity expansion groups the full scored candidate pool by canonical_entities.
+// Coarse seed-to-pool expansion belongs upstream; this helper only performs within-pool
+// grouping. Canonical entity is the answer-selective grouping key because surface tokens
+// disperse while the subject remains stable.
 
-// Generic input: Card D adapts FineAssessmentCandidate via entry.object_id / entry.canonical_entities.
+// Generic input: callers adapt their candidate shape through objectId/canonicalEntities.
 export interface EntityCandidate {
   readonly objectId: string;
   readonly canonicalEntities: readonly string[] | null | undefined;

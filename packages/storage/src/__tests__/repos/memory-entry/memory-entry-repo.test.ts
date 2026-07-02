@@ -63,6 +63,22 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(enrichRepo.countPending(entry.workspace_id)).toBe(1);
   });
 
+  it("createWithinTransaction reopens a closed file database before starting the transaction", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-memory-entry-"));
+    const { repo, database } = await createRepo({
+      filename: path.join(tempDir, "memory-entry.db")
+    });
+    const entry = createMemoryEntry();
+
+    database.close();
+    const returned = repo.createWithinTransaction(entry, {});
+
+    expect(returned).toEqual(entry);
+    expect(database.isClosed()).toBe(false);
+    await expect(repo.findById(entry.object_id)).resolves.toEqual(entry);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
   it("createWithinTransaction rolls back the EventLog row and memory row when the co-write throws", async () => {
     // invariant pinned: a created memory ALWAYS carries its enrich_pending
     // marker and audit row, or NONE land. A throw in the co-write rolls the
@@ -511,6 +527,27 @@ describe("SqliteMemoryEntryRepo", () => {
     const rows = await repo.findByIds(entry.workspace_id, [entry.object_id]);
 
     expect(rows).toEqual([entry]);
+    expect(database.isClosed()).toBe(false);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("transitionLifecycle reopens a closed file database before starting the transaction", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-memory-entry-"));
+    const { repo, database } = await createRepo({
+      filename: path.join(tempDir, "memory-entry.db")
+    });
+    const entry = createMemoryEntry();
+    await repo.create(entry);
+
+    database.close();
+    const transitioned = await repo.transitionLifecycle(
+      entry.object_id,
+      "dormant",
+      "2026-03-22T00:00:00.000Z"
+    );
+
+    expect(transitioned.lifecycle_state).toBe("dormant");
+    expect(transitioned.updated_at).toBe("2026-03-22T00:00:00.000Z");
     expect(database.isClosed()).toBe(false);
     fs.rmSync(tempDir, { recursive: true, force: true });
   });

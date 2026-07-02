@@ -46,6 +46,7 @@ interface SqliteStatement {
 
 export interface SqliteProposalWorkflowContext {
   readonly db: StorageDatabase;
+  transaction<T>(fn: () => T, options?: { readonly immediate?: boolean }): T;
   readonly eventLogWriter: Parameters<typeof insertEventLogEntry>[0];
   readonly findByIdStatement: SqliteStatement;
   readonly findMemoryEntryByIdStatement: SqliteStatement;
@@ -83,9 +84,9 @@ export async function acceptPendingMemoryUpdateWithEvents(
   const parsedMemoryUpdate = parseAcceptedMemoryUpdateInput(memoryUpdate);
 
   try {
-    return ctx.db.connection.transaction(() =>
+    return ctx.transaction(() =>
       acceptMemoryUpdateTransaction(ctx, request, events, parsedMemoryUpdate)
-    )();
+    );
   } catch (error) {
     throw wrapWorkflowError(
       error,
@@ -112,14 +113,14 @@ export async function acceptPendingPathRelationGovernanceWithEvents(
   );
 
   try {
-    return ctx.db.connection.transaction(() =>
+    return ctx.transaction(() =>
       acceptPathRelationGovernanceTransaction(
         ctx,
         request,
         events,
         parsedPathRelationGovernance
       )
-    )();
+    );
   } catch (error) {
     throw wrapWorkflowError(
       error,
@@ -144,9 +145,9 @@ export async function acceptPendingSynthesisCreateWithEvents(
   const parsedSynthesisCreate = parseAcceptedSynthesisCreateInput(synthesisCreate);
 
   try {
-    return ctx.db.connection.transaction(() =>
+    return ctx.transaction(() =>
       acceptSynthesisCreateTransaction(ctx, request, events, parsedSynthesisCreate)
-    )();
+    );
   } catch (error) {
     throw wrapWorkflowError(
       error,

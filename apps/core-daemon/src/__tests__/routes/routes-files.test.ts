@@ -1,8 +1,18 @@
 import { Hono } from "hono";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreError } from "@do-soul/alaya-core";
-import type { EventLogEntry, FileRecord } from "@do-soul/alaya-protocol";
+import {
+  initDatabase,
+  SqliteEventLogRepo,
+  SqliteFileRepo
+} from "@do-soul/alaya-storage";
+import {
+  FileApprovalEventType,
+  RuntimeGovernanceEventType,
+  type EventLogEntry,
+  type FileRecord
+} from "@do-soul/alaya-protocol";
 import { registerFileRoutes } from "../../routes/files.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -11,13 +21,32 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     ...actual,
     readFile: vi.fn(),
     writeFile: vi.fn(),
+    unlink: vi.fn(),
     mkdir: vi.fn()
   };
 });
 
 const mockedReadFile = vi.mocked(readFile);
 const mockedWriteFile = vi.mocked(writeFile);
+const mockedUnlink = vi.mocked(unlink);
 const mockedMkdir = vi.mocked(mkdir);
+const databases = new Set<ReturnType<typeof initDatabase>>();
+
+afterEach(() => {
+  for (const database of databases) {
+    database.close();
+  }
+  databases.clear();
+});
+
+function createAuditEventLogAppend() {
+  return vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+    ...event,
+    event_id: "audit-evt-1",
+    created_at: "2026-05-10T00:00:00.000Z",
+    revision: 0
+  }));
+}
 
 function makeRecord(overrides: Partial<FileRecord> = {}): FileRecord {
   return {
@@ -45,6 +74,9 @@ function buildApp(record: FileRecord | null) {
     fileRepo: {
       findById: vi.fn(async () => record)
     } as never,
+    eventLogRepo: {
+      append: createAuditEventLogAppend()
+    },
     runtimeNotifier: {
       notifyEntry: vi.fn()
     },
@@ -53,8 +85,9 @@ function buildApp(record: FileRecord | null) {
   return app;
 }
 
-function buildUploadApp(createWithEvent = vi.fn()) {
+function buildUploadApp(createWithEvent = vi.fn(), notifyEntry = vi.fn(), append = createAuditEventLogAppend()) {
   const app = new Hono();
+  app.onError((error, context) => context.json({ success: false, error: error.message }, 500));
   registerFileRoutes(app, {
     workspaceService: {
       getById: vi.fn(async (workspaceId: string) => ({ workspace_id: workspaceId }))
@@ -66,8 +99,11 @@ function buildUploadApp(createWithEvent = vi.fn()) {
       findById: vi.fn(),
       createWithEvent
     } as never,
+    eventLogRepo: {
+      append
+    },
     runtimeNotifier: {
-      notifyEntry: vi.fn()
+      notifyEntry
     },
     filesDirectory: "/data/files"
   });
@@ -85,8 +121,10 @@ function uploadFormData(fields: Record<string, string | File>): FormData {
 describe("files upload route", () => {
   beforeEach(() => {
     mockedWriteFile.mockReset();
+    mockedUnlink.mockReset();
     mockedMkdir.mockReset();
     mockedWriteFile.mockResolvedValue(undefined);
+    mockedUnlink.mockResolvedValue(undefined);
     mockedMkdir.mockResolvedValue(undefined);
   });
 
@@ -138,11 +176,12 @@ describe("files upload route", () => {
   });
 
   it("returns 201 with upload payload when workspace_id is provided", async () => {
+    const notifyEntry = vi.fn();
     const createWithEvent = vi.fn(async (record: FileRecord) => ({
       record,
       event: { event_id: "evt-1" } as EventLogEntry
     }));
-    const app = buildUploadApp(createWithEvent);
+    const app = buildUploadApp(createWithEvent, notifyEntry);
     const response = await app.request("/files", {
       method: "POST",
       body: uploadFormData({
@@ -171,6 +210,144 @@ describe("files upload route", () => {
       workspace_id: "ws-1",
       run_id: null
     });
+    const [recordArg, eventArg] = createWithEvent.mock.calls[0] as [
+      FileRecord,
+      Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+    ];
+    expect(eventArg).toMatchObject({
+      event_type: FileApprovalEventType.FILE_UPLOADED,
+      entity_type: "file",
+      entity_id: recordArg.file_id,
+      workspace_id: "ws-1",
+      run_id: null,
+      caused_by: "user_action",
+      payload_json: {
+        file_id: recordArg.file_id,
+        filename: "notes.txt",
+        mime_type: "text/plain",
+        size_bytes: 5,
+        workspace_id: "ws-1",
+        run_id: null
+      }
+    });
+    expect(notifyEntry).toHaveBeenCalledWith({ event_id: "evt-1" });
+    expect(mockedUnlink).not.toHaveBeenCalled();
+  });
+
+  it("deletes the written file when durable persistence fails", async () => {
+    const createWithEvent = vi.fn(async () => {
+      throw new Error("database write failed");
+    });
+    const app = buildUploadApp(createWithEvent);
+    const response = await app.request("/files", {
+      method: "POST",
+      body: uploadFormData({
+        file: new File(["hello"], "notes.txt", { type: "text/plain" }),
+        workspace_id: "ws-1"
+      })
+    });
+
+    expect(response.status).toBe(500);
+    expect(mockedWriteFile).toHaveBeenCalledOnce();
+    expect(createWithEvent).toHaveBeenCalledOnce();
+    expect(mockedUnlink).toHaveBeenCalledWith(mockedWriteFile.mock.calls[0]?.[0]);
+  });
+
+  it("keeps the written file when post-commit notification fails", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const append = createAuditEventLogAppend();
+    const notifyEntry = vi.fn(async () => {
+      throw new Error("notifier unavailable");
+    });
+    const createWithEvent = vi.fn(async (record: FileRecord) => ({
+      record,
+      event: { event_id: "evt-1" } as EventLogEntry
+    }));
+    const app = buildUploadApp(createWithEvent, notifyEntry, append);
+
+    const response = await app.request("/files", {
+      method: "POST",
+      body: uploadFormData({
+        file: new File(["hello"], "notes.txt", { type: "text/plain" }),
+        workspace_id: "ws-1"
+      })
+    });
+
+    expect(response.status).toBe(201);
+    expect(mockedWriteFile).toHaveBeenCalledOnce();
+    expect(createWithEvent).toHaveBeenCalledOnce();
+    expect(notifyEntry).toHaveBeenCalledWith({ event_id: "evt-1" });
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED,
+        entity_type: "file",
+        entity_id: expect.any(String),
+        workspace_id: "ws-1",
+        caused_by: "user_action",
+        payload_json: expect.objectContaining({
+          source: "daemon.files.upload",
+          operation: "runtime_notify",
+          committed_event_id: "evt-1",
+          error_message: "notifier unavailable"
+        })
+      })
+    );
+    expect(mockedUnlink).not.toHaveBeenCalled();
+    emitWarning.mockRestore();
+  });
+
+  it("persists notifier failures through the real SQLite event log", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const database = initDatabase({ filename: ":memory:" });
+    databases.add(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const app = new Hono();
+    registerFileRoutes(app, {
+      workspaceService: {
+        getById: vi.fn(async (workspaceId: string) => ({ workspace_id: workspaceId }))
+      },
+      runService: {
+        getById: vi.fn(async (runId: string) => ({ run_id: runId, workspace_id: "ws-1" }))
+      },
+      fileRepo: new SqliteFileRepo(database),
+      eventLogRepo,
+      runtimeNotifier: {
+        notifyEntry: vi.fn(async () => {
+          throw new Error("notifier unavailable");
+        })
+      },
+      filesDirectory: "/data/files"
+    });
+
+    const response = await app.request("/files", {
+      method: "POST",
+      body: uploadFormData({
+        file: new File(["hello"], "notes.txt", { type: "text/plain" }),
+        workspace_id: "ws-1"
+      })
+    });
+    const body = await response.json() as {
+      readonly data: { readonly file_id: string };
+    };
+    const events = await eventLogRepo.queryByEntity("file", body.data.file_id);
+    const failureEvent = events.find(
+      (event) => event.event_type === RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED
+    );
+
+    expect(response.status).toBe(201);
+    expect(failureEvent).toMatchObject({
+      event_type: RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED,
+      entity_type: "file",
+      entity_id: body.data.file_id,
+      workspace_id: "ws-1",
+      caused_by: "user_action",
+      payload_json: expect.objectContaining({
+        source: "daemon.files.upload",
+        operation: "runtime_notify",
+        error_message: "notifier unavailable"
+      })
+    });
+    emitWarning.mockRestore();
   });
 });
 
@@ -199,6 +376,7 @@ describe("files download route", () => {
       },
       runService: { getById: vi.fn() },
       fileRepo: { findById: vi.fn(async () => makeRecord()) } as never,
+      eventLogRepo: { append: createAuditEventLogAppend() },
       runtimeNotifier: { notifyEntry: vi.fn() },
       filesDirectory: "/data/files"
     });

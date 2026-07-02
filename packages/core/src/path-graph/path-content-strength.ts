@@ -1,12 +1,11 @@
-// Card 4: content-driven path edge strength. Off → edge creation writes the flat
-// seed-profile constants byte-identical; on → the edge's strength/recall_bias
-// magnitude is derived from the content-classification score already computed at
-// creation time, banded by relation_kind so answer-relational provenance edges
-// (derives_from) outrank purely-lexical coherence edges (coheres_with).
+// invariant: when ALAYA_PATHREL_CONTENT_STRENGTH is disabled, edge creation
+// writes the fixed seed-profile constants; when enabled, relation_kind bands map
+// the content-classification score to strength and recall_bias magnitude.
 
 import { clamp01 } from "../shared/clamp.js";
 
-// Opt-in (ALAYA_PATHREL_CONTENT_STRENGTH): mirror floodFusionEnabled's env parse.
+// invariant: only an explicit truthy ALAYA_PATHREL_CONTENT_STRENGTH enables
+// content-driven path strength.
 export function pathRelContentStrengthEnabled(): boolean {
   const raw = process.env.ALAYA_PATHREL_CONTENT_STRENGTH;
   return raw === "on" || raw === "1" || raw === "true";
